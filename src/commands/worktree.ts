@@ -1,0 +1,209 @@
+import { Command } from 'commander';
+import chalk from 'chalk';
+import { WorktreeManager } from '../lib/worktree.js';
+
+export function registerWorktreeCommands(program: Command): void {
+  const worktree = program
+    .command('worktree')
+    .description('Git worktree management with state tracking');
+
+  /**
+   * create command
+   */
+  worktree
+    .command('create')
+    .description('Create new worktree for issue')
+    .requiredOption('--iid <iid>', 'Issue IID', parseInt)
+    .requiredOption('--branch <branch>', 'Base branch to branch from')
+    .option('--base-dir <path>', 'Base directory for worktrees', '/tmp/afk-worktrees')
+    .action(async (options) => {
+      try {
+        const manager = new WorktreeManager();
+        const wt = await manager.create(options.iid, options.branch, options.baseDir);
+
+        console.log(chalk.green('✓ Worktree created'));
+        console.log(chalk.gray(`  Issue: #${wt.iid}`));
+        console.log(chalk.gray(`  Path: ${wt.path}`));
+        console.log(chalk.gray(`  Branch: ${wt.branch}`));
+        console.log();
+        console.log(chalk.dim(`cd ${wt.path}`));
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * get command
+   */
+  worktree
+    .command('get')
+    .description('Get worktree info by IID')
+    .argument('<iid>', 'Issue IID', parseInt)
+    .option('--json', 'Output as JSON')
+    .action(async (iid: number, options) => {
+      try {
+        const manager = new WorktreeManager();
+        const wt = await manager.get(iid);
+
+        if (!wt) {
+          console.log(chalk.yellow(`Worktree for issue #${iid} not found`));
+          process.exit(1);
+        }
+
+        if (options.json) {
+          console.log(JSON.stringify(wt, null, 2));
+        } else {
+          console.log(chalk.bold(`Worktree for issue #${wt.iid}`));
+          console.log(chalk.gray(`  Path: ${wt.path}`));
+          console.log(chalk.gray(`  Branch: ${wt.branch}`));
+          console.log(chalk.gray(`  Status: ${wt.status}`));
+          console.log(chalk.gray(`  Created: ${wt.createdAt.toISOString()}`));
+          if (wt.sessionId) {
+            console.log(chalk.gray(`  Session: ${wt.sessionId}`));
+          }
+        }
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * list command
+   */
+  worktree
+    .command('list')
+    .description('List all worktrees')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const manager = new WorktreeManager();
+        const worktrees = await manager.list();
+
+        if (options.json) {
+          console.log(JSON.stringify(worktrees, null, 2));
+        } else {
+          console.log(chalk.bold(`Found ${worktrees.length} worktrees:`));
+          console.log();
+
+          worktrees.forEach(wt => {
+            const statusColor = wt.status === 'active' ? chalk.green :
+                                wt.status === 'completed' ? chalk.blue :
+                                chalk.red;
+            console.log(`  ${chalk.cyan(`#${wt.iid}`)} ${statusColor(`[${wt.status}]`)}`);
+            console.log(chalk.gray(`    ${wt.path}`));
+            console.log(chalk.gray(`    ${wt.branch}`));
+            console.log();
+          });
+        }
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * cleanup command
+   */
+  worktree
+    .command('cleanup')
+    .description('Remove worktree')
+    .argument('<iid>', 'Issue IID', parseInt)
+    .option('--force', 'Force cleanup even with uncommitted changes')
+    .action(async (iid: number, options) => {
+      try {
+        const manager = new WorktreeManager();
+        await manager.cleanup(iid, options.force);
+
+        console.log(chalk.green(`✓ Worktree for issue #${iid} removed`));
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * list-orphaned command
+   */
+  worktree
+    .command('list-orphaned')
+    .description('List orphaned worktrees (no matching tmux session)')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const manager = new WorktreeManager();
+        const orphaned = await manager.listOrphaned();
+
+        if (options.json) {
+          console.log(JSON.stringify(orphaned, null, 2));
+        } else {
+          if (orphaned.length === 0) {
+            console.log(chalk.green('✓ No orphaned worktrees found'));
+          } else {
+            console.log(chalk.yellow(`Found ${orphaned.length} orphaned worktrees:`));
+            console.log();
+
+            orphaned.forEach(wt => {
+              console.log(`  ${chalk.cyan(`#${wt.iid}`)} ${chalk.gray(wt.path)}`);
+              console.log(chalk.gray(`    Branch: ${wt.branch}`));
+              console.log(chalk.gray(`    Session: ${wt.sessionId || 'none'}`));
+              console.log();
+            });
+
+            console.log(chalk.dim('Run `afk worktree prune` to clean up'));
+          }
+        }
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * prune command
+   */
+  worktree
+    .command('prune')
+    .description('Remove all orphaned worktrees')
+    .option('--dry-run', 'Show what would be removed without actually removing')
+    .action(async (options) => {
+      try {
+        const manager = new WorktreeManager();
+        const count = await manager.prune(options.dryRun);
+
+        if (options.dryRun) {
+          console.log(chalk.yellow(`Would remove ${count} orphaned worktrees`));
+        } else {
+          console.log(chalk.green(`✓ Removed ${count} orphaned worktrees`));
+        }
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * update-status command
+   */
+  worktree
+    .command('update-status')
+    .description('Update worktree status')
+    .argument('<iid>', 'Issue IID', parseInt)
+    .argument('<status>', 'New status (active, completed, failed)')
+    .action(async (iid: number, status: string) => {
+      try {
+        if (!['active', 'completed', 'failed'].includes(status)) {
+          throw new Error('Status must be: active, completed, or failed');
+        }
+
+        const manager = new WorktreeManager();
+        await manager.updateStatus(iid, status as 'active' | 'completed' | 'failed');
+
+        console.log(chalk.green(`✓ Updated worktree #${iid} status to: ${status}`));
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+}

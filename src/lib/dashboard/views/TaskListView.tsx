@@ -25,21 +25,17 @@ export function TaskListView({ tasks, selected, scrollOffset, viewportHeight }: 
         return (
           <Box
             key={task.iid}
-            minHeight={4}
+            width="100%"
             overflow="hidden"
-            flexDirection="column"
+            flexDirection="row"
             borderStyle={isSelected ? 'round' : undefined}
             borderColor={isSelected ? 'white' : undefined}
             paddingX={1}
           >
-            <Box>
-              <Text color="white">{bullet} </Text>
-              <Text color={color} bold> #{task.iid} </Text>
-              <Text color={color}>{task.title || task.branch}</Text>
-            </Box>
-            <Box paddingLeft={2}>
-              <Text dimColor>  ─ {task.session || '–'} · {task.progress || '0%'} · {task.startedAt ? formatTime(task.startedAt) : '–'}</Text>
-            </Box>
+            <Text color="white">{bullet} </Text>
+            <Text color={color} bold> #{task.iid} </Text>
+            <Text color={color}>{task.title || task.branch}</Text>
+            <Text dimColor>  ─ {task.session || '–'} · {task.progress || '0%'} · {task.startedAt ? formatTime(task.startedAt) : '–'}</Text>
           </Box>
         );
       }}

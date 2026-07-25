@@ -24,16 +24,23 @@ export function ListView<T>({
   }
 
   const visible = items.slice(scrollOffset, scrollOffset + viewportHeight);
+  // Flex column lets the selection border stretch to full width. Each item
+  // grows (flexGrow=1) so visible items distribute evenly across the column
+  // height, eliminating the trailing whitespace when items.length < viewport.
   return (
-    <>
+    <Box flexDirection="column" flexGrow={1} alignItems="stretch">
       {visible.map((item, i) => {
         const index = scrollOffset + i;
+        const node = render(item, index, index === selected);
+        // Wrap rendering in a Box with flexGrow=1 so the slot stretches to
+        // fill its share of the column. We justifyContent=center so compact
+        // single-line content stays vertically centered in its tall slot.
         return (
-          <React.Fragment key={getKey(item, index)}>
-            {render(item, index, index === selected)}
-          </React.Fragment>
+          <Box key={getKey(item, index)} flexGrow={1} flexShrink={0} justifyContent="flex-start">
+            {node}
+          </Box>
         );
       })}
-    </>
+    </Box>
   );
 }

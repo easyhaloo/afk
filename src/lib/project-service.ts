@@ -30,30 +30,34 @@ export class ProjectService {
     }
   }
 
-  async listProjects(): Promise<Project[]> {
+  async listProjects(page = 1, perPage = 20): Promise<{ projects: Project[]; hasMore: boolean }> {
     if (!this.client) {
-      return [];
+      return { projects: [], hasMore: false };
     }
 
     try {
-      const projects = await this.client.Projects.all({
+      const items = await this.client.Projects.all({
         membership: true,
-        perPage: 50,
-      });
+        page,
+        perPage,
+      }) as any[];
 
-      return (projects as any[]).map(project => ({
-        id: project.id as number,
-        name: project.name as string,
-        path_with_namespace: project.path_with_namespace as string,
-        description: (project.description || '') as string,
-        default_branch: project.default_branch as string,
-        namespace: { name: project.namespace?.name || '' },
-        last_activity_at: project.last_activity_at as string,
-        web_url: project.web_url as string,
-      }));
+      return {
+        projects: items.map(project => ({
+          id: project.id as number,
+          name: project.name as string,
+          path_with_namespace: project.path_with_namespace as string,
+          description: (project.description || '') as string,
+          default_branch: project.default_branch as string,
+          namespace: { name: project.namespace?.name || '' },
+          last_activity_at: project.last_activity_at as string,
+          web_url: project.web_url as string,
+        })),
+        hasMore: items.length === perPage,
+      };
     } catch (error) {
       console.error('Failed to list projects:', error);
-      return [];
+      return { projects: [], hasMore: false };
     }
   }
 

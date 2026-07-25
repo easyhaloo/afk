@@ -24,19 +24,17 @@ export function CompletedListView({ tasks, selected, scrollOffset, viewportHeigh
         return (
           <Box
             key={task.iid}
-            minHeight={3}
+            width="100%"
             overflow="hidden"
-            flexDirection="column"
+            flexDirection="row"
             borderStyle={isSelected ? 'round' : undefined}
             borderColor={isSelected ? 'white' : undefined}
             paddingX={1}
           >
-            <Box>
-              <Text color="white">✔ </Text>
-              <Text color={color} bold> #{task.iid} </Text>
-              <Text color={color}>{task.title || task.branch}</Text>
-              <Text dimColor>  ─ 100% · {task.startedAt ? formatTime(task.startedAt) : '–'}</Text>
-            </Box>
+            <Text color="white">✔ </Text>
+            <Text color={color} bold> #{task.iid} </Text>
+            <Text color={color}>{task.title || task.branch}</Text>
+            <Text dimColor>  ─ 100% · {task.startedAt ? formatTime(task.startedAt) : '–'}</Text>
           </Box>
         );
       }}

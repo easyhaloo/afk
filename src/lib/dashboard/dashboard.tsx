@@ -39,8 +39,10 @@ export const Dashboard: React.FC = () => {
   const {
     tasks, completedTasks, issues, projects, sessions,
     projectBranches, projectTags, projectCommits,
+    issueHasMore, projectHasMore,
     loadProjectDetail,
     reloadTasks, removeSession, addTaskFromIssue,
+    fetchMoreIssues, fetchMoreProjects,
   } = useData(currentView, null);
 
   // UI state
@@ -67,10 +69,10 @@ export const Dashboard: React.FC = () => {
   };
   const getItem = () => getItems()[selectedIndex];
 
-  const itemHeight = currentView === 'completed' ? 3 : 4;
+  const itemHeight = 1; // Each item is rendered as a single compact line.
   const items = getItems();
   const maxIndex = Math.max(0, items.length - 1);
-  const itemsPerScreen = Math.floor(CONTENT_H / itemHeight);
+  const itemsPerScreen = Math.floor((CONTENT_H - 2) / itemHeight);
 
   let desiredScrollOffset = scrollOffset;
   if (selectedIndex < scrollOffset) {
@@ -260,7 +262,14 @@ export const Dashboard: React.FC = () => {
     if (input === '3') switchView('completed');
     if (input === '4') switchView('projects');
 
-    if (key.downArrow) navigateDown(items.length);
+    if (key.downArrow) {
+      navigateDown(items.length);
+      // Auto-load next page when selection reaches near the end of loaded items.
+      if (selectedIndex >= items.length - 3) {
+        if (currentView === 'issues' && issueHasMore) fetchMoreIssues();
+        else if (currentView === 'projects' && projectHasMore) fetchMoreProjects();
+      }
+    }
     if (key.upArrow) navigateUp();
     if (input === 'g') navigateTop();
     if (key.shift && input === 'G') navigateBottom(items.length);
@@ -337,11 +346,22 @@ export const Dashboard: React.FC = () => {
           <Box paddingX={2} paddingY={0}>
             <Text color="white"><Text bold>{viewTitle}</Text><Text>  </Text><Text color="gray">──</Text></Text>
           </Box>
-          <Box height={CONTENT_H - 2} flexShrink={0} flexDirection="column" paddingX={2} paddingY={0}>
+          <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2} paddingY={0}>
             {currentView === 'tasks' && <TaskListView tasks={tasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportH} />}
             {currentView === 'issues' && <IssueListView issues={issues} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportH} multiSelectMode={multiSelectMode} selectedIssues={selectedIssues} />}
             {currentView === 'completed' && <CompletedListView tasks={completedTasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportH} />}
             {currentView === 'projects' && <ProjectListView projects={projects} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportH} />}
+            {/* Floating loading/more indicator — overlays the list, does not consume layout space. */}
+            {currentView === 'issues' && issueHasMore && (
+              <Box position="absolute" right={2} bottom={0}>
+                <Text dimColor>↓ loading more…</Text>
+              </Box>
+            )}
+            {currentView === 'projects' && projectHasMore && (
+              <Box position="absolute" right={2} bottom={0}>
+                <Text dimColor>↓ more available</Text>
+              </Box>
+            )}
           </Box>
           <BreathingSeparator width={W} breathPhase={separatorPhase + 50} isTop={false} />
           <Footer />

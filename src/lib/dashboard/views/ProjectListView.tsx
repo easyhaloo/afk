@@ -24,21 +24,17 @@ export function ProjectListView({ projects, selected, scrollOffset, viewportHeig
         return (
           <Box
             key={project.id}
-            minHeight={3}
+            width="100%"
             overflow="hidden"
-            flexDirection="column"
+            flexDirection="row"
             borderStyle={isSelected ? 'round' : undefined}
             borderColor={isSelected ? 'white' : undefined}
             paddingX={1}
           >
-            <Box>
-              <Text color={color}>{isSelected ? '◉' : '▸'} </Text>
-              <Text color={color} bold> #{project.id} </Text>
-              <Text color={color}>{project.name}</Text>
-            </Box>
-            <Box paddingLeft={2}>
-              <Text dimColor>  ─ {project.description ? truncate(project.description, 50) : '…'}</Text>
-            </Box>
+            <Text color={color}>{isSelected ? '◉' : '▸'} </Text>
+            <Text color={color} bold> #{project.id} </Text>
+            <Text color={color}>{project.name}</Text>
+            <Text dimColor>  ─ {project.description ? truncate(project.description, 50) : '…'}</Text>
           </Box>
         );
       }}

@@ -31,23 +31,19 @@ export function IssueListView({
         return (
           <Box
             key={issue.iid}
-            minHeight={4}
+            width="100%"
             overflow="hidden"
-            flexDirection="column"
+            flexDirection="row"
             borderStyle={isCurrent ? 'round' : undefined}
             borderColor={isCurrent ? 'white' : undefined}
             paddingX={1}
             backgroundColor={isSelected ? 'gray' : undefined}
           >
-            <Box>
-              <Text color={color}>{checkbox} </Text>
-              <Text color={color} bold> #{issue.iid} </Text>
-              <Text color={color}>{issue.title}</Text>
-            </Box>
-            <Box paddingLeft={2}>
-              <Text dimColor>  ─ {issue.labels.length > 0 ? issue.labels.join(', ') : '–'}</Text>
-              <Text dimColor> · {issue.description ? truncate(issue.description, 40) : '…'}</Text>
-            </Box>
+            <Text color={color}>{checkbox} </Text>
+            <Text color={color} bold> #{issue.iid} </Text>
+            <Text color={color}>{issue.title}</Text>
+            <Text dimColor>  ─ {issue.labels.length > 0 ? issue.labels.join(', ') : '–'}</Text>
+            <Text dimColor> · {issue.description ? truncate(issue.description, 40) : '…'}</Text>
           </Box>
         );
       }}

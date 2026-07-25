@@ -32,34 +32,38 @@ export class IssueService {
     }
   }
 
-  async listIssues(projectId?: string | number): Promise<Issue[]> {
+  async listIssues(projectId?: string | number, page = 1, perPage = 20): Promise<{ issues: Issue[]; hasMore: boolean }> {
     if (!this.client) {
-      return [];
+      return { issues: [], hasMore: false };
     }
 
     const targetProjectId = projectId || this.projectId;
     if (!targetProjectId) {
-      return [];
+      return { issues: [], hasMore: false };
     }
 
     try {
-      const issues = await this.client.Issues.all({
+      const items = await this.client.Issues.all({
         projectId: targetProjectId as string | number,
         state: 'opened',
-        perPage: 50,
-      });
+        page,
+        perPage,
+      }) as any[];
 
-      return (issues as any[]).map(issue => ({
-        iid: issue.iid as number,
-        title: issue.title as string,
-        description: (issue.description || '') as string,
-        labels: (issue.labels || []) as string[],
-        state: issue.state as string,
-        web_url: issue.web_url as string,
-      }));
+      return {
+        issues: items.map(issue => ({
+          iid: issue.iid as number,
+          title: issue.title as string,
+          description: (issue.description || '') as string,
+          labels: (issue.labels || []) as string[],
+          state: issue.state as string,
+          web_url: issue.web_url as string,
+        })),
+        hasMore: items.length === perPage,
+      };
     } catch (error) {
       console.error('Failed to list issues:', error);
-      return [];
+      return { issues: [], hasMore: false };
     }
   }
 

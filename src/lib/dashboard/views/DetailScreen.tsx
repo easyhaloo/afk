@@ -44,9 +44,12 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
   if (view === 'projects') {
     const projUrl = (item as Project).web_url || '';
     clickableRows.push({ idx: 0, url: projUrl, label: 'project' });
-    commits.slice(0, 5).forEach((c, i) => clickableRows.push({ idx: 2 + i, url: `${projUrl}/-/commit/${c.id}`, label: `commit ${c.id}` }));
-    branches.slice(0, 4).forEach((b, i) => clickableRows.push({ idx: 8 + i, url: `${projUrl}/-/tree/${b.name}`, label: `branch ${b.name}` }));
-    tags.slice(0, 4).forEach((t, i) => clickableRows.push({ idx: 13 + i, url: `${projUrl}/-/tags/${t.name}`, label: `tag ${t.name}` }));
+    // commits render at body rows 3..7 (offset: -1 from "row = 2+i" in code)
+    commits.slice(0, 5).forEach((c, i) => clickableRows.push({ idx: 3 + i, url: `${projUrl}/-/commit/${c.id}`, label: `commit ${c.id}` }));
+    // branches render at body rows 9..12 (offset: -1 from "row = 8+i" in code)
+    branches.slice(0, 4).forEach((b, i) => clickableRows.push({ idx: 9 + i, url: `${projUrl}/-/tree/${b.name}`, label: `branch ${b.name}` }));
+    // tags render at body rows 14..17
+    tags.slice(0, 4).forEach((t, i) => clickableRows.push({ idx: 14 + i, url: `${projUrl}/-/tags/${t.name}`, label: `tag ${t.name}` }));
   }
 
   // Keyboard navigation
@@ -152,12 +155,12 @@ function ProjectDetail({ item, branches, tags, commits, innerW, isHovered }: {
         <Text color="white" bold>recent</Text>
       </Box>
 
-      {/* Rows 2–6: commits */}
+      {/* Rows 3–7: commits */}
       {commits.length === 0 ? (
         <Text dimColor>  loading…</Text>
       ) : (
         commits.slice(0, 5).map((c, i) => {
-          const row = 2 + i;
+          const row = 3 + i;
           return (
             <Box key={i} flexWrap="wrap">
               <Text color={isHovered(row) ? 'cyan' : 'white'} underline={isHovered(row)}>{'  '}{c.id}</Text>
@@ -175,12 +178,12 @@ function ProjectDetail({ item, branches, tags, commits, innerW, isHovered }: {
         <Text dimColor> ({branches.length})</Text>
       </Box>
 
-      {/* Rows 8–11: branches */}
+      {/* Rows 9–12: branches */}
       {branches.length === 0 ? (
         <Text dimColor>  loading…</Text>
       ) : (
         branches.slice(0, 4).map((b, i) => {
-          const row = 8 + i;
+          const row = 9 + i;
           return (
             <Box key={i} flexWrap="wrap">
               <Text color={isHovered(row) ? 'cyan' : (b.protected ? 'cyan' : 'gray')} underline={isHovered(row)}>
@@ -202,7 +205,7 @@ function ProjectDetail({ item, branches, tags, commits, innerW, isHovered }: {
             <Text dimColor> ({tags.length})</Text>
           </Box>
           {tags.slice(0, 4).map((t, i) => {
-            const row = 13 + i;
+            const row = 14 + i;
             const msg = t.message ? truncate(t.message, maxDesc - 6) : '';
             return (
               <Box key={i} flexDirection="column">

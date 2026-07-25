@@ -928,7 +928,7 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
             paddingX={1}
           >
             <Box>
-              <Text color="white">▸ </Text>
+              <Text color={textColor}>{isSelected ? '◉' : '▸'} </Text>
               <Text color={textColor} bold> #{project.id} </Text>
               <Text color={textColor}>{project.name}</Text>
             </Box>

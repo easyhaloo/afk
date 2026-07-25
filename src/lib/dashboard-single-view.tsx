@@ -809,64 +809,76 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // Render
+  // Render - Q Style Cartoon Design
   return (
     <Box flexDirection="column" height={terminalHeight}>
       {detailView === 'list' ? (
         <>
-          {/* Top bar - Fixed height - Q style: soft gray with cute pink accent */}
-          <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={2} backgroundColor="gray" justifyContent="space-between">
-            <Text color="white" bold>
-              <Text color="magenta">♥</Text> AFK Dashboard
-              {/* Loading pulse indicator - cute style */}
-              <Text color={loadingPulse < 5 ? 'white' : 'magenta'}> ●</Text>
+          {/* Top bar - Q Style: cute header with decorations */}
+          <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={2} backgroundColor="black" justifyContent="space-between">
+            <Text color="white">
+              <Text color="magenta">☆</Text>
+              <Text bold> AFK Dashboard </Text>
+              <Text color="cyan">｡‿｡</Text>
+              <Text color={loadingPulse < 5 ? 'white' : 'magenta'}> ◠‿◠</Text>
             </Text>
             <Text color="white">
               {currentView === 'tasks' && (
                 <>
-                  <Text color="green">{figures.circleFilled}</Text>
-                  <Text> 运行中任务 </Text>
-                  <Text color="white">{tasks.length}</Text>
+                  <Text color="green">{figures.bullet}</Text>
+                  <Text> [任务] </Text>
+                  <Text color="cyan">{tasks.length}</Text>
                 </>
               )}
               {currentView === 'issues' && (
                 <>
-                  <Text color="magenta">{figures.square}</Text>
-                  <Text> 待办 Issues </Text>
-                  <Text color="white">{issues.length}</Text>
+                  <Text color="magenta">{figures.bullet}</Text>
+                  <Text> [Issues] </Text>
+                  <Text color="cyan">{issues.length}</Text>
                   {multiSelectMode && (
-                    <>
-                      <Text dimColor> {figures.dot} </Text>
-                      <Text color="magenta">已选 {selectedIssues.size}</Text>
-                    </>
+                    <><Text dimColor> ⊙ </Text><Text color="magenta">{selectedIssues.size}选</Text></>
                   )}
                 </>
               )}
               {currentView === 'completed' && (
                 <>
                   <Text color="green">{figures.tick}</Text>
-                  <Text> 已完成 </Text>
-                  <Text color="white">{completedTasks.length}</Text>
+                  <Text> [完成] </Text>
+                  <Text color="cyan">{completedTasks.length}</Text>
                 </>
               )}
               {currentView === 'projects' && (
                 <>
                   <Text color="cyan">{figures.star}</Text>
-                  <Text> GitLab 项目 </Text>
-                  <Text color="white">{projects.length}</Text>
+                  <Text> [项目] </Text>
+                  <Text color="cyan">{projects.length}</Text>
                 </>
               )}
             </Text>
           </Box>
 
+          {/* Decorative separator */}
+          <Box flexShrink={0}>
+            <Text color="white">╭──────────────────────────────────────╮</Text>
+          </Box>
+
+          {/* Section header - cute view title */}
+          <Box paddingX={2} paddingY={0}>
+            <Text color="white">
+              <Text color="cyan">◆ </Text>
+              <Text bold>{getViewTitle()}</Text>
+              <Text color="gray"> ═══</Text>
+            </Text>
+          </Box>
+
           {/* Main list - Fixed height with internal scrolling */}
-          <Box height={CONTENT_HEIGHT} flexShrink={0} flexDirection="column" paddingX={2} paddingY={1}>
+          <Box height={CONTENT_HEIGHT - 2} flexShrink={0} flexDirection="column" paddingX={2} paddingY={0}>
             {currentView === 'tasks' && (
               <TaskListView
                 tasks={tasks}
                 selected={selectedIndex}
                 scrollOffset={scrollOffset}
-                viewportHeight={Math.floor(CONTENT_HEIGHT / 4)}
+                viewportHeight={Math.floor((CONTENT_HEIGHT - 2) / 4)}
               />
             )}
             {currentView === 'issues' && (
@@ -876,7 +888,7 @@ export const Dashboard: React.FC = () => {
                 multiSelectMode={multiSelectMode}
                 selectedIssues={selectedIssues}
                 scrollOffset={scrollOffset}
-                viewportHeight={Math.floor(CONTENT_HEIGHT / 4)}
+                viewportHeight={Math.floor((CONTENT_HEIGHT - 2) / 4)}
               />
             )}
             {currentView === 'completed' && (
@@ -884,7 +896,7 @@ export const Dashboard: React.FC = () => {
                 tasks={completedTasks}
                 selected={selectedIndex}
                 scrollOffset={scrollOffset}
-                viewportHeight={Math.floor(CONTENT_HEIGHT / 3)}
+                viewportHeight={Math.floor((CONTENT_HEIGHT - 2) / 3)}
               />
             )}
             {currentView === 'projects' && (
@@ -892,83 +904,52 @@ export const Dashboard: React.FC = () => {
                 projects={projects}
                 selected={selectedIndex}
                 scrollOffset={scrollOffset}
-                viewportHeight={Math.floor(CONTENT_HEIGHT / 4)}
+                viewportHeight={Math.floor((CONTENT_HEIGHT - 2) / 4)}
               />
             )}
           </Box>
 
-          {/* Bottom bar - Fixed height - Q style: lighter gray */}
-          <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="white" justifyContent="center">
+          {/* Bottom separator */}
+          <Box flexShrink={0}>
+            <Text color="white">╰──────────────────────────────────────╯</Text>
+          </Box>
+
+          {/* Bottom bar - Q style cute footer */}
+          <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
             <Text>
               <Text color="cyan">↑↓</Text>
-              <Text dimColor>:</Text>
-              <Text>导航  </Text>
-              <Text color="cyan">1-4</Text>
-              <Text dimColor>:</Text>
-              <Text>切换视图  </Text>
-              <Text dimColor>│  </Text>
+              <Text color="gray">导航</Text>
+              <Text color="white"> · </Text>
+              <Text color="magenta">1-4</Text>
+              <Text color="gray">视图</Text>
+              <Text color="white"> · </Text>
               {currentView === 'tasks' && (
                 <>
-                  <Text color="yellow">a</Text>
-                  <Text dimColor>:</Text>
-                  <Text>附加会话  </Text>
-                  <Text color="yellow">K</Text>
-                  <Text dimColor>:</Text>
-                  <Text>终止任务  </Text>
-                  <Text dimColor>│  </Text>
+                  <Text color="yellow">a</Text><Text color="gray">附</Text><Text color="white"> · </Text>
+                  <Text color="yellow">K</Text><Text color="gray">杀</Text><Text color="white"> · </Text>
                 </>
               )}
               {currentView === 'issues' && !multiSelectMode && (
                 <>
-                  <Text color="yellow">s</Text>
-                  <Text dimColor>:</Text>
-                  <Text>开始任务  </Text>
-                  <Text color="yellow">o</Text>
-                  <Text dimColor>:</Text>
-                  <Text>打开浏览器  </Text>
-                  <Text color="yellow">m</Text>
-                  <Text dimColor>:</Text>
-                  <Text>多选模式  </Text>
-                  <Text dimColor>│  </Text>
+                  <Text color="yellow">s</Text><Text color="gray">开</Text><Text color="white"> · </Text>
+                  <Text color="yellow">o</Text><Text color="gray">看</Text><Text color="white"> · </Text>
+                  <Text color="yellow">m</Text><Text color="gray">多选</Text><Text color="white"> · </Text>
                 </>
               )}
               {currentView === 'issues' && multiSelectMode && (
                 <>
-                  <Text color="yellow">Space</Text>
-                  <Text dimColor>:</Text>
-                  <Text>选择  </Text>
-                  <Text color="yellow">B</Text>
-                  <Text dimColor>:</Text>
-                  <Text>批量开始  </Text>
-                  <Text color="yellow">c</Text>
-                  <Text dimColor>:</Text>
-                  <Text>清空选择  </Text>
-                  <Text color="yellow">m</Text>
-                  <Text dimColor>:</Text>
-                  <Text>退出多选  </Text>
-                  <Text dimColor>│  </Text>
+                  <Text color="yellow">空格</Text><Text color="gray">选</Text><Text color="white"> · </Text>
+                  <Text color="yellow">B</Text><Text color="gray">批</Text><Text color="white"> · </Text>
                 </>
               )}
               {currentView === 'projects' && (
                 <>
-                  <Text color="yellow">Enter</Text>
-                  <Text dimColor>:</Text>
-                  <Text>进入项目  </Text>
-                  <Text color="yellow">o</Text>
-                  <Text dimColor>:</Text>
-                  <Text>打开浏览器  </Text>
-                  <Text dimColor>│  </Text>
+                  <Text color="yellow">Enter</Text><Text color="gray">进</Text><Text color="white"> · </Text>
                 </>
               )}
-              <Text color="green">Enter</Text>
-              <Text dimColor>:</Text>
-              <Text>查看详情  </Text>
-              <Text color="green">r</Text>
-              <Text dimColor>:</Text>
-              <Text>刷新数据  </Text>
-              <Text color="green">q</Text>
-              <Text dimColor>:</Text>
-              <Text>退出</Text>
+              <Text color="green">Enter</Text><Text color="gray">详情</Text><Text color="white"> · </Text>
+              <Text color="green">r</Text><Text color="gray">刷新</Text><Text color="white"> · </Text>
+              <Text color="red">q</Text><Text color="gray">退</Text>
             </Text>
           </Box>
 
@@ -976,14 +957,15 @@ export const Dashboard: React.FC = () => {
           {notification && (
             <Box
               position="absolute"
-              top={notifAnimation === 'slide-in' ? 0 : 2}
-              right={notifAnimation === 'slide-in' ? -45 : 2}
-              width={40}
-              borderStyle="single"
-              borderColor={notification.type === 'error' ? 'red' : notification.type === 'success' ? 'green' : 'yellow'}
+              top={notifAnimation === 'slide-in' ? 1 : 3}
+              right={notifAnimation === 'slide-in' ? -40 : 3}
+              width={35}
+              borderStyle="round"
+              borderColor={notification.type === 'error' ? 'red' : notification.type === 'success' ? 'green' : 'cyan'}
               paddingX={1}
               backgroundColor="black"
             >
+              <Text color="cyan">✧ </Text>
               <Text dimColor={notifAnimation === 'slide-out'}>{notification.message}</Text>
             </Box>
           )}
@@ -1024,7 +1006,7 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffs
   if (tasks.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text dimColor>暂无运行中的任务</Text>
+        <Text color="gray">　　　(´･ω･`) 　暂无运行中的任务　(´･ω･`)　　　</Text>
       </Box>
     );
   }
@@ -1038,9 +1020,10 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffs
       {visibleTasks.map((task, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        // Breathing border: alternate between yellow and a brighter yellow
-        const borderBrightness = isSelected ? (breathPhase < 10 ? 'yellow' : 'brightYellow') : undefined;
-        const borderColor = isSelected ? borderBrightness : undefined;
+        // Q Style: breathing border with cute colors
+        const borderColor = isSelected ? (breathPhase < 10 ? 'magenta' : 'cyan') : undefined;
+        const bullet = isSelected ? '◉' : (task.status === 'active' ? '●' : '○');
+        const statusColor = isSelected ? 'magenta' : (task.status === 'active' ? 'green' : 'cyan');
 
         return (
           <Box
@@ -1048,19 +1031,17 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffs
             height={4}
             flexShrink={0}
             flexDirection="column"
-            borderStyle={isSelected ? 'single' : undefined}
+            borderStyle={isSelected ? 'round' : undefined}
             borderColor={borderColor}
             paddingX={1}
           >
             <Box>
-              <Text color={task.status === 'active' ? 'green' : 'cyan'}>
-                {task.status === 'active' ? '●' : '○'} #{task.iid}
-              </Text>
-              <Text bold={isSelected} color={isSelected ? 'magenta' : undefined}> {task.title || task.branch}</Text>
-              <Text dimColor>  {task.session || '-'}  {task.progress || '0%'}  {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
+              <Text color={statusColor}>{bullet} </Text>
+              <Text color={isSelected ? 'magenta' : 'white'} bold> #{task.iid} </Text>
+              <Text color={isSelected ? 'magenta' : 'gray'} bold={isSelected}>{task.title || task.branch}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text dimColor>{task.branch || ' '}</Text>
+              <Text color="gray">　♡ {task.session || '-'} │ ◈ {task.progress || '0%'} │ ⌚ {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
             </Box>
           </Box>
         );
@@ -1099,7 +1080,7 @@ const IssueListView: React.FC<IssueListViewProps> = ({
   if (issues.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text dimColor>暂无待办 Issues，按 r 刷新</Text>
+        <Text color="gray">　　　(´∀`)･ﾟ 暂无Issues哦 　 (´∀`)･ﾟ　　　</Text>
       </Box>
     );
   }
@@ -1114,10 +1095,9 @@ const IssueListView: React.FC<IssueListViewProps> = ({
         const index = startIndex + visibleIndex;
         const isSelected = selectedIssues.has(issue.iid);
         const isCurrent = index === selected;
-        const checkbox = multiSelectMode ? (isSelected ? '☑' : '☐') : '□';
-        // Breathing border
-        const borderBrightness = isCurrent ? (breathPhase < 10 ? 'yellow' : 'brightYellow') : undefined;
-        const borderColor = isCurrent ? borderBrightness : undefined;
+        // Q Style cute checkbox
+        const checkbox = multiSelectMode ? (isSelected ? '☑' : '☒') : '○';
+        const borderColor = isCurrent ? (breathPhase < 10 ? 'magenta' : 'cyan') : undefined;
 
         return (
           <Box
@@ -1125,20 +1105,23 @@ const IssueListView: React.FC<IssueListViewProps> = ({
             height={4}
             flexShrink={0}
             flexDirection="column"
-            borderStyle={isCurrent ? 'single' : undefined}
+            borderStyle={isCurrent ? 'round' : undefined}
             borderColor={borderColor}
             paddingX={1}
             backgroundColor={isSelected ? 'gray' : undefined}
           >
             <Box>
-              <Text>{checkbox} #{issue.iid}  </Text>
-              <Text bold={isCurrent} color={isCurrent ? 'magenta' : undefined}>{issue.title}</Text>
-              {issue.labels.length > 0 && (
-                <Text color="cyan">  {issue.labels.map(l => `@${l}`).join(' ')}</Text>
-              )}
+              <Text color={isCurrent ? 'magenta' : 'cyan'}>{checkbox} </Text>
+              <Text color={isCurrent ? 'magenta' : 'white'} bold> #{issue.iid} </Text>
+              <Text color={isCurrent ? 'magenta' : 'gray'} bold={isCurrent}>{issue.title}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text dimColor>{issue.description ? truncate(issue.description, 80) : ' '}</Text>
+              {issue.labels.length > 0 ? (
+                <Text color="gray">　★ {issue.labels.map(l => `◇${l}`).join(' ')}</Text>
+              ) : (
+                <Text color="gray">　★ - </Text>
+              )}
+              <Text color="dim">│ {issue.description ? truncate(issue.description, 40) : '...'}</Text>
             </Box>
           </Box>
         );
@@ -1168,7 +1151,7 @@ const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, 
   if (tasks.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text dimColor>暂无已完成的任务</Text>
+        <Text color="gray">　(๑˘̩˘̩˘̩˘̩)　暂无完成的任务哦～　(๑˘̩˘̩˘̩˘̩)</Text>
       </Box>
     );
   }
@@ -1182,9 +1165,8 @@ const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, 
       {visibleTasks.map((task, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        // Breathing border
-        const borderBrightness = isSelected ? (breathPhase < 10 ? 'yellow' : 'brightYellow') : undefined;
-        const borderColor = isSelected ? borderBrightness : undefined;
+        // Q Style: cute completed items
+        const borderColor = isSelected ? (breathPhase < 10 ? 'green' : 'cyan') : undefined;
 
         return (
           <Box
@@ -1192,14 +1174,14 @@ const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, 
             height={3}
             flexShrink={0}
             flexDirection="column"
-            borderStyle={isSelected ? 'single' : undefined}
+            borderStyle={isSelected ? 'round' : undefined}
             borderColor={borderColor}
             paddingX={1}
           >
             <Box>
               <Text color="green">✓ #{task.iid}  </Text>
-              <Text bold={isSelected} color={isSelected ? 'magenta' : undefined}>{task.title || task.branch}</Text>
-              <Text dimColor>  100%  {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
+              <Text color={isSelected ? 'magenta' : 'gray'} bold={isSelected}>{task.title || task.branch}</Text>
+              <Text color="gray">  100%  {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
             </Box>
           </Box>
         );
@@ -1229,7 +1211,7 @@ const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, s
   if (projects.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text dimColor>暂无项目数据，按 r 刷新</Text>
+        <Text color="gray">　ヽ(ˇ∀ˇ )ゞ 暂无项目数据 　 ヽ(ˇ∀ˇ )ゞ</Text>
       </Box>
     );
   }
@@ -1243,9 +1225,8 @@ const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, s
       {visibleProjects.map((project, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        // Breathing border
-        const borderBrightness = isSelected ? (breathPhase < 10 ? 'cyan' : 'brightCyan') : undefined;
-        const borderColor = isSelected ? borderBrightness : undefined;
+        // Q Style border
+        const borderColor = isSelected ? (breathPhase < 10 ? 'cyan' : 'magenta') : undefined;
 
         return (
           <Box
@@ -1253,17 +1234,20 @@ const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, s
             height={4}
             flexShrink={0}
             flexDirection="column"
-            borderStyle={isSelected ? 'single' : undefined}
+            borderStyle={isSelected ? 'round' : undefined}
             borderColor={borderColor}
             paddingX={1}
           >
             <Box>
-              <Text color="cyan">#{project.id}  </Text>
-              <Text bold={isSelected} color={isSelected ? 'magenta' : undefined}>{project.name}</Text>
-              <Text dimColor>  {project.path_with_namespace}</Text>
+              <Text color="cyan">★ </Text>
+              <Text color={isSelected ? 'magenta' : 'white'} bold> #{project.id} </Text>
+              <Text color={isSelected ? 'magenta' : 'gray'} bold={isSelected}>{project.name}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text dimColor>{project.description ? truncate(project.description, 80) : ' '}</Text>
+              <Text color="gray">　♡ {project.path_with_namespace}</Text>
+            </Box>
+            <Box paddingLeft={2}>
+              <Text color="dim">{project.description ? truncate(project.description, 60) : '...'}</Text>
             </Box>
           </Box>
         );
@@ -1282,7 +1266,7 @@ interface DetailScreenProps {
 }
 
 const DetailScreen: React.FC<DetailScreenProps> = ({ item, view, height }) => {
-  if (!item) return <Box><Text>No item selected</Text></Box>;
+  if (!item) return <Box><Text color="gray">No item selected (´･ω･`)</Text></Box>;
 
   const HEADER_HEIGHT = 1;
   const FOOTER_HEIGHT = 1;
@@ -1301,57 +1285,68 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ item, view, height }) => {
 
   return (
     <Box flexDirection="column" height={height}>
-      {/* Top bar - Fixed height */}
-      <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="blue">
-        <Text color="white" bold>
-          {` ${getTitle()} · ${getSubtitle()} `}
+      {/* Top bar - Q Style cute header */}
+      <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
+        <Text color="magenta">
+          <Text bold>☆ </Text>
+          <Text color="white" bold>{getTitle()}</Text>
+          <Text color="gray"> │ </Text>
+          <Text color="cyan">{getSubtitle()}</Text>
+          <Text bold> ☆</Text>
         </Text>
       </Box>
 
-      {/* Detail content - Fixed height */}
+      {/* Detail content - Q Style */}
       <Box height={CONTENT_HEIGHT} flexShrink={0} flexDirection="column" paddingX={2} paddingY={1}>
+      <Text color="gray">╭────────────────────────────────────────╮</Text>
 
       {view === 'tasks' && (
-        <Box flexDirection="column">
-          <Text>状态:     <Text color="green">{(item as Task).status}</Text></Text>
-          <Text>分支:     {(item as Task).branch || '-'}</Text>
-          <Text>会话:     {(item as Task).session || '-'}</Text>
-          <Text>进度:     {(item as Task).progress || '0%'}</Text>
-          <Text>开始:     {(item as Task).startedAt ? (item as Task).startedAt?.toString() : '-'}</Text>
-          <Text>工作树:   {(item as Task).worktree || '-'}</Text>
+        <Box flexDirection="column" paddingX={1}>
+          <Text color="white">　◇ <Text color="cyan">状态:</Text>　<Text color="green">{(item as Task).status}</Text></Text>
+          <Text color="white">　◇ <Text color="cyan">分支:</Text>　{(item as Task).branch || '-'}</Text>
+          <Text color="white">　◇ <Text color="cyan">会话:</Text>　{(item as Task).session || '-'}</Text>
+          <Text color="white">　◇ <Text color="cyan">进度:</Text>　{(item as Task).progress || '0%'}</Text>
+          <Text color="white">　◇ <Text color="cyan">开始:</Text>　{(item as Task).startedAt ? (item as Task).startedAt?.toString() : '-'}</Text>
+          <Text color="white">　◇ <Text color="cyan">工作树:</Text>　{(item as Task).worktree || '-'}</Text>
         </Box>
       )}
 
       {view === 'issues' && (
-        <Box flexDirection="column">
-          <Text>标签:     {(item as Issue).labels.map(l => `@${l}`).join(' ') || '-'}</Text>
-          <Text>状态:     {(item as Issue).state}</Text>
-          <Text>URL:      <Text dimColor>{(item as Issue).web_url}</Text></Text>
+        <Box flexDirection="column" paddingX={1}>
+          <Text color="white">　◇ <Text color="cyan">标签:</Text>　{(item as Issue).labels.map(l => `@${l}`).join(' ') || '-'}</Text>
+          <Text color="white">　◇ <Text color="cyan">状态:</Text>　{(item as Issue).state}</Text>
+          <Text color="white">　◇ <Text color="cyan">URL:</Text>　<Text dimColor>{(item as Issue).web_url}</Text></Text>
           <Box marginTop={1}>
-            <Text bold>描述:</Text>
+            <Text color="magenta">　★ 描述:</Text>
           </Box>
-          <Text>{(item as Issue).description || '无描述'}</Text>
+          <Text color="gray">　　{(item as Issue).description || '无描述'}</Text>
         </Box>
       )}
 
       {view === 'projects' && (
-        <Box flexDirection="column">
-          <Text>路径:     {(item as Project).path_with_namespace}</Text>
-          <Text>分支:     {(item as Project).default_branch}</Text>
-          <Text>命名空间: {(item as Project).namespace.name}</Text>
-          <Text>更新:     {(item as Project).last_activity_at}</Text>
-          <Text>URL:      <Text dimColor>{(item as Project).web_url}</Text></Text>
+        <Box flexDirection="column" paddingX={1}>
+          <Text color="white">　◇ <Text color="cyan">路径:</Text>　{(item as Project).path_with_namespace}</Text>
+          <Text color="white">　◇ <Text color="cyan">分支:</Text>　{(item as Project).default_branch}</Text>
+          <Text color="white">　◇ <Text color="cyan">命名空间:</Text>　{(item as Project).namespace.name}</Text>
+          <Text color="white">　◇ <Text color="cyan">更新:</Text>　{(item as Project).last_activity_at}</Text>
+          <Text color="white">　◇ <Text color="cyan">URL:</Text>　<Text dimColor>{(item as Project).web_url}</Text></Text>
           <Box marginTop={1}>
-            <Text bold>描述:</Text>
+            <Text color="magenta">　★ 描述:</Text>
           </Box>
-          <Text>{(item as Project).description || '无描述'}</Text>
+          <Text color="gray">　　{(item as Project).description || '无描述'}</Text>
         </Box>
       )}
+
+      <Text color="gray">╰────────────────────────────────────────╯</Text>
       </Box>
 
-      {/* Bottom bar - Fixed height */}
-      <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="gray">
-        <Text>{` ESC/q:返回列表 `}</Text>
+      {/* Bottom bar - Q Style */}
+      <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
+        <Text>
+          <Text color="cyan">ESC/q: </Text>
+          <Text color="gray">返回列表 </Text>
+          <Text color="magenta">(◕‿◕)</Text>
+        </Text>
       </Box>
     </Box>
   );
@@ -1365,60 +1360,53 @@ const HelpDialog: React.FC = () => {
     <Box
       position="absolute"
       top={3}
-      left={10}
-      right={10}
+      left={8}
+      right={8}
       bottom={3}
-      borderStyle="double"
-      borderColor="cyan"
+      borderStyle="round"
+      borderColor="magenta"
       backgroundColor="black"
       flexDirection="column"
       padding={1}
     >
       <Box marginBottom={1}>
-        <Text bold color="cyan">快捷键帮助</Text>
+        <Text bold color="magenta">☆ 快捷键帮助 ☆</Text>
       </Box>
 
-      <Text bold>视图切换:</Text>
-      <Text>  1 - 运行中任务</Text>
-      <Text>  2 - 待办 Issues</Text>
-      <Text>  3 - 已完成</Text>
+      <Text color="cyan">视图切换:</Text>
+      <Text color="white">　1 - 运行中任务　　2 - 待办 Issues</Text>
+      <Text color="white">　3 - 已完成　　　　4 - GitLab项目</Text>
 
       <Box marginTop={1}>
-        <Text bold>导航:</Text>
+        <Text color="cyan">导航:</Text>
       </Box>
-      <Text>  ↓   - 向下</Text>
-      <Text>  ↑   - 向上</Text>
-      <Text>  g   - 顶部</Text>
-      <Text>  G   - 底部</Text>
+      <Text color="white">　↑↓ - 上/下移动　　g/G - 首/末</Text>
 
       <Box marginTop={1}>
-        <Text bold>操作:</Text>
+        <Text color="cyan">操作:</Text>
       </Box>
-      <Text>  Enter - 查看详情</Text>
-      <Text>  Esc   - 关闭弹层</Text>
-      <Text>  r     - 刷新数据</Text>
+      <Text color="white">　Enter - 查看详情　ESC/q - 返回</Text>
+      <Text color="white">　r - 刷新数据　　? - 帮助</Text>
 
       <Box marginTop={1}>
-        <Text bold>任务视图:</Text>
+        <Text color="cyan">任务视图:</Text>
       </Box>
-      <Text>  a - 附加会话</Text>
-      <Text>  k - 终止会话</Text>
+      <Text color="yellow">　a - 附加会话　　k - 终止会话</Text>
 
       <Box marginTop={1}>
-        <Text bold>Issues 视图:</Text>
+        <Text color="cyan">Issues 视图:</Text>
       </Box>
-      <Text>  s - 从 Issue 开始工作</Text>
-      <Text>  o - 在浏览器打开</Text>
-      <Text>  m - 多选模式</Text>
+      <Text color="yellow">　s - 从Issue开始工作</Text>
+      <Text color="yellow">　o - 在浏览器打开　m - 多选模式</Text>
 
       <Box marginTop={1}>
-        <Text bold>项目视图:</Text>
+        <Text color="cyan">项目视图:</Text>
       </Box>
-      <Text>  Enter - 进入项目 Issues</Text>
-      <Text>  o - 在浏览器打开</Text>
+      <Text color="yellow">　Enter - 进入项目Issues</Text>
+      <Text color="yellow">　o - 在浏览器打开</Text>
 
-      <Box marginTop={1}>
-        <Text dimColor>按 ? 关闭帮助</Text>
+      <Box marginTop={1} justifyContent="center">
+        <Text color="gray">按 ? 或 ESC 关闭帮助 (◕‿◕)</Text>
       </Box>
     </Box>
   );

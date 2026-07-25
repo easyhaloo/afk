@@ -97,11 +97,11 @@ export const Dashboard: React.FC = () => {
   const [notifAnimation, setNotifAnimation] = useState<'hidden' | 'slide-in' | 'visible' | 'slide-out'>('hidden');
   const [separatorPhase, setSeparatorPhase] = useState(0);
 
-  // Separator pulse animation (slow, irregular)
+  // Separator pulse animation (slow, elegant breathing - 500ms per breath)
   useEffect(() => {
     const interval = setInterval(() => {
       setSeparatorPhase(p => (p + 1) % 100);
-    }, 200);
+    }, 500);
     return () => clearInterval(interval);
   }, []);
 
@@ -642,7 +642,7 @@ export const Dashboard: React.FC = () => {
 
           {/* Hand-drawn style separator */}
           <Box flexShrink={0}>
-            <Text color="gray">{generateSeparator(terminalWidth, separatorPhase).top}</Text>
+            <BreathingSeparator width={terminalWidth} breathPhase={separatorPhase} isTop={true} />
           </Box>
 
           {/* Section header */}
@@ -695,7 +695,7 @@ export const Dashboard: React.FC = () => {
 
           {/* Bottom separator */}
           <Box flexShrink={0}>
-            <Text color="gray">{generateSeparator(terminalWidth, separatorPhase + 50).bottom}</Text>
+            <BreathingSeparator width={terminalWidth} breathPhase={separatorPhase + 50} isTop={false} />
           </Box>
 
           {/* Bottom bar - Hand-drawn style footer */}
@@ -1102,59 +1102,64 @@ const HelpDialog: React.FC = () => {
 
 /* ============ Helpers ============ */
 
-// Generate hand-drawn brush stroke wave separator
-function generateSeparator(width: number, phase: number): { top: string; bottom: string } {
-  const tilde = '~';
-  const dash = '-';
+// Breathing separator component - elegant color breathing animation
+const BreathingSeparator: React.FC<{ width: number; breathPhase: number; isTop?: boolean }> = ({ width, breathPhase, isTop = true }) => {
+  // Calculate breathing intensity (0-1)
+  // Use sine wave for smooth breathing
+  const breathIntensity = (Math.sin(breathPhase * Math.PI / 50) + 1) / 2;
 
-  let line = '';
-  let i = 0;
+  // Map intensity to gray value (0=bright white, 100=dim gray)
+  const grayValue = Math.round(128 - breathIntensity * 100);
 
-  while (i < width - 2) {
-    // Create wave segments with varying thickness
-    const waveType = (i + phase * 7) % 10;
-
-    if (waveType < 3) {
-      // Thin wave: single ~
-      line += tilde;
-      i++;
-    } else if (waveType < 5) {
-      // Medium wave: ~~~
-      line += tilde + tilde + tilde;
-      i += 3;
-    } else if (waveType < 7) {
-      // Thick brush stroke: ~~~~~
-      line += tilde.repeat(4 + (phase % 3));
-      i += 4 + (phase % 3);
-    } else if (waveType < 8) {
-      // Dash accent: ---
-      line += dash + dash;
-      i += 2;
-    } else if (waveType < 9) {
-      // Mixed wave: ~-~- or -~-
-      const mixed = (i + phase) % 3;
-      if (mixed === 0) {
-        line += tilde + dash + tilde;
-      } else if (mixed === 1) {
-        line += dash + tilde + dash;
+  // Generate wave pattern (fixed, not changing)
+  const generateWavePattern = (w: number): string => {
+    let pattern = '';
+    for (let i = 0; i < w - 2; i++) {
+      const waveType = i % 10;
+      if (waveType < 4) {
+        pattern += '~';
+      } else if (waveType < 6) {
+        pattern += '~~';
+        i++;
+      } else if (waveType < 8) {
+        pattern += '~~~';
+        i += 2;
       } else {
-        line += tilde + tilde + dash;
+        pattern += '-';
       }
-      i += 3;
-    } else {
-      // Sparse with gaps
-      line += tilde + ' ';
+    }
+    return pattern.substring(0, w - 2);
+  };
+
+  const pattern = generateWavePattern(width);
+  const startChar = isTop ? '.' : '`';
+  const endChar = isTop ? '.' : "'";
+
+  return (
+    <Text color={`${grayValue}`}>
+      {startChar}{pattern}{endChar}
+    </Text>
+  );
+};
+
+// Generate static wave pattern for reference (not animated)
+function generateWavePattern(width: number): string {
+  let pattern = '';
+  for (let i = 0; i < width - 2; i++) {
+    const waveType = i % 10;
+    if (waveType < 4) {
+      pattern += '~';
+    } else if (waveType < 6) {
+      pattern += '~~';
+      i++;
+    } else if (waveType < 8) {
+      pattern += '~~~';
       i += 2;
+    } else {
+      pattern += '-';
     }
   }
-
-  // Trim to exact width
-  line = line.substring(0, width - 2);
-
-  return {
-    top: '.' + line + '.',
-    bottom: '`' + line.replace(/~/g, '"').replace(/--/g, '""') + "'",
-  };
+  return pattern.substring(0, width - 2);
 }
 
 function formatTime(date: Date): string {

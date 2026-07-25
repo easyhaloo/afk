@@ -61,20 +61,9 @@ export const Dashboard: React.FC = () => {
   const [notification, setNotification] = useState<Notification | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
-  // Stable callback refs to avoid re-renders
-  const getItemsRef = useCallback(() => {
-    switch (currentView) {
-      case 'tasks': return tasks;
-      case 'issues': return issues;
-      case 'completed': return completedTasks;
-      case 'projects': return projects;
-      default: return [];
-    }
-  }, [currentView, tasks, issues, completedTasks, projects]);
-
   // Compute derived state synchronously to avoid useEffect delay
   const itemHeight = currentView === 'completed' ? 3 : 4;
-  const items = getItemsRef();
+  const items = getCurrentList();
   const maxIndex = Math.max(0, items.length - 1);
   const itemsPerScreen = Math.floor(CONTENT_HEIGHT / itemHeight);
 
@@ -83,7 +72,7 @@ export const Dashboard: React.FC = () => {
   if (selectedIndex < scrollOffset) {
     desiredScrollOffset = selectedIndex;
   } else if (selectedIndex >= scrollOffset + itemsPerScreen) {
-    desiredScrollOffset = Math.min(selectedIndex - itemsPerScreen + 1, Math.max(0, maxIndex - itemsPerScreen + 1));
+    desiredScrollOffset = Math.min(selectedIndex - itemsPerScreen + 1, maxIndex);
   }
   if (desiredScrollOffset !== scrollOffset) {
     setScrollOffset(desiredScrollOffset);
@@ -278,7 +267,6 @@ export const Dashboard: React.FC = () => {
   };
 
   const getCurrentItem = () => getCurrentList()[selectedIndex];
-  const getCurrentItems = () => getCurrentList();
 
   const handleAttachSession = async () => {
     if (currentView !== 'tasks') return;

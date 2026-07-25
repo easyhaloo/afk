@@ -1,5 +1,6 @@
 import { Gitlab } from '@gitbeaker/node';
 import { Project } from '../types/dashboard';
+import { getGlabToken } from './glab-config';
 
 export type { Project };
 
@@ -10,10 +11,21 @@ export class ProjectService {
     const gitlabUrl = process.env.GITLAB_URL;
     const gitlabToken = process.env.GITLAB_TOKEN;
 
-    if (gitlabToken) {
+    // Fallback to glab config
+    let finalUrl = gitlabUrl;
+    let finalToken = gitlabToken;
+    if (!finalToken) {
+      const glab = getGlabToken(finalUrl);
+      if (glab) {
+        finalUrl = finalUrl || (glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`);
+        finalToken = glab.token;
+      }
+    }
+
+    if (finalToken) {
       this.client = new Gitlab({
-        host: gitlabUrl,
-        token: gitlabToken,
+        host: finalUrl,
+        token: finalToken,
       });
     }
   }

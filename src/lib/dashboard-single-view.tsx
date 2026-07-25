@@ -95,6 +95,15 @@ export const Dashboard: React.FC = () => {
 
   // Animation states
   const [notifAnimation, setNotifAnimation] = useState<'hidden' | 'slide-in' | 'visible' | 'slide-out'>('hidden');
+  const [separatorPhase, setSeparatorPhase] = useState(0);
+
+  // Separator pulse animation (slow, irregular)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSeparatorPhase(p => (p + 1) % 100);
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
 
   // Load data on mount
   useEffect(() => {
@@ -633,7 +642,7 @@ export const Dashboard: React.FC = () => {
 
           {/* Hand-drawn style separator */}
           <Box flexShrink={0}>
-            <Text color="gray">.-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~-.</Text>
+            <Text color="gray">{generateSeparator(terminalWidth, separatorPhase).top}</Text>
           </Box>
 
           {/* Section header */}
@@ -686,7 +695,7 @@ export const Dashboard: React.FC = () => {
 
           {/* Bottom separator */}
           <Box flexShrink={0}>
-            <Text color="gray">`~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'</Text>
+            <Text color="gray">{generateSeparator(terminalWidth, separatorPhase + 50).bottom}</Text>
           </Box>
 
           {/* Bottom bar - Hand-drawn style footer */}
@@ -1092,6 +1101,45 @@ const HelpDialog: React.FC = () => {
 };
 
 /* ============ Helpers ============ */
+
+// Generate irregular pulse separator line based on terminal width
+function generateSeparator(width: number, phase: number): { top: string; bottom: string } {
+  // Irregular pulse pattern: . - ~ = * o . - ~ = * o
+  const patterns = ['.-~-', '~-~-', '-~=~', '~=*-', '=*o-', '*o~-', 'o.-~', '.-*='];
+  const dotChar = '.';
+  const dashChar = '-';
+  const tildeChar = '~';
+  const eqChar = '=';
+  const starChar = '*';
+  const circleChar = 'o';
+
+  const allChars = [dotChar, dashChar, tildeChar, eqChar, starChar, circleChar];
+
+  // Generate irregular middle part
+  let middle = '';
+  for (let i = 0; i < width - 2; i++) {
+    // Use phase to create different patterns over time
+    const patternIndex = (i + phase) % patterns.length;
+    const charIndex = (i * 3 + phase * 7) % allChars.length;
+    const usePattern = ((i + phase * 3) % 5) < 2;
+
+    if (usePattern) {
+      middle += patterns[patternIndex][(i + phase) % patterns[patternIndex].length];
+    } else {
+      middle += allChars[charIndex];
+    }
+  }
+
+  // Ensure we don't exceed width
+  if (middle.length > width - 2) {
+    middle = middle.substring(0, width - 2);
+  }
+
+  return {
+    top: dotChar + middle + dotChar,
+    bottom: circleChar + middle.split('').map(c => c === dotChar ? circleChar : c === circleChar ? dotChar : c).join('') + circleChar,
+  };
+}
 
 function formatTime(date: Date): string {
   const now = new Date();

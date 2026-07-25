@@ -61,6 +61,34 @@ export const Dashboard: React.FC = () => {
   const [notification, setNotification] = useState<Notification | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
+  // Stable callback refs to avoid re-renders
+  const getItemsRef = useCallback(() => {
+    switch (currentView) {
+      case 'tasks': return tasks;
+      case 'issues': return issues;
+      case 'completed': return completedTasks;
+      case 'projects': return projects;
+      default: return [];
+    }
+  }, [currentView, tasks, issues, completedTasks, projects]);
+
+  // Compute derived state synchronously to avoid useEffect delay
+  const itemHeight = currentView === 'completed' ? 3 : 4;
+  const items = getItemsRef();
+  const maxIndex = Math.max(0, items.length - 1);
+  const itemsPerScreen = Math.floor(CONTENT_HEIGHT / itemHeight);
+
+  // Calculate desired scroll offset based on selected index
+  let desiredScrollOffset = scrollOffset;
+  if (selectedIndex < scrollOffset) {
+    desiredScrollOffset = selectedIndex;
+  } else if (selectedIndex >= scrollOffset + itemsPerScreen) {
+    desiredScrollOffset = Math.min(selectedIndex - itemsPerScreen + 1, Math.max(0, maxIndex - itemsPerScreen + 1));
+  }
+  if (desiredScrollOffset !== scrollOffset) {
+    setScrollOffset(desiredScrollOffset);
+  }
+
   // Multi-select mode (for Issues view)
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedIssues, setSelectedIssues] = useState<Set<number>>(new Set());
@@ -123,20 +151,6 @@ export const Dashboard: React.FC = () => {
     };
     loadAsync();
   }, [currentView, currentProject]);
-
-  // Update scroll offset
-  useEffect(() => {
-    const items = getCurrentItems();
-    const maxItems = Math.max(0, items.length - 1);
-    const itemHeight = currentView === 'completed' ? 3 : 4;
-    const itemsPerScreen = Math.floor(CONTENT_HEIGHT / itemHeight);
-
-    if (selectedIndex < scrollOffset) {
-      setScrollOffset(selectedIndex);
-    } else if (selectedIndex >= scrollOffset + itemsPerScreen) {
-      setScrollOffset(Math.min(selectedIndex - itemsPerScreen + 1, maxItems));
-    }
-  }, [selectedIndex, CONTENT_HEIGHT, currentView]);
 
   const refreshCurrentView = useCallback(async (silent = false) => {
     try {

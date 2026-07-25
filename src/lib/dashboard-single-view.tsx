@@ -1102,48 +1102,49 @@ const HelpDialog: React.FC = () => {
 
 /* ============ Helpers ============ */
 
-// Generate irregular pulse separator using block characters
+// Generate irregular tilde pulse separator
 function generateSeparator(width: number, phase: number): { top: string; bottom: string } {
-  // Block characters for hand-drawn irregular pulse effect
-  const thinBlocks = ['▔', '▄', '▀', '█', '▓', '▒'];  // Top-heavy, bottom-heavy, full, dense patterns
-  const thickBlocks = ['█', '█▓', '█▒', '▓█', '▒█', '██'];  // Various thickness combinations
+  const tilde = '~';
+  const dash = '-';
+  const dot = '.';
+  const space = ' ';
 
-  let topLine = '';
-  let bottomLine = '';
+  let line = '';
 
   for (let i = 0; i < width - 2; i++) {
-    // Create irregular pattern based on phase and position
+    // Create irregular pulse based on phase
     const seed = (i * 7 + phase * 13) % 100;
-    const isThick = seed > 40;
-    const isAccent = seed > 80;
+    const wavePhase = (i + phase * 2) % 8;
 
-    if (isAccent) {
-      // Occasional thick pulse
-      const blockIdx = (seed + phase) % thickBlocks.length;
-      topLine += thickBlocks[blockIdx];
-      bottomLine += thickBlocks[(blockIdx + 3) % thickBlocks.length];
-    } else if (isThick) {
-      // Medium sections
-      const blockIdx = (seed + phase * 3) % thinBlocks.length;
-      topLine += thinBlocks[blockIdx];
-      bottomLine += thinBlocks[(blockIdx + 2) % thinBlocks.length];
+    if (seed > 85) {
+      // Thick pulse burst: ~~~
+      const multiCount = 2 + (seed % 3);
+      for (let j = 0; j < multiCount && i + j < width - 2; j++) {
+        line += tilde;
+        i++;
+      }
+      i--; // compensate for loop increment
+    } else if (seed > 60) {
+      // Dash segment: ---
+      line += dash;
+    } else if (seed > 40) {
+      // Normal tilde wave
+      line += wavePhase < 4 ? tilde : (wavePhase < 6 ? dash : tilde);
+    } else if (seed > 20) {
+      // Thin/dotted section
+      line += (seed % 3 === 0) ? dot : tilde;
     } else {
-      // Thin sections with occasional gaps
-      const blockIdx = (seed * 3 + phase * 7) % thinBlocks.length;
-      topLine += thinBlocks[blockIdx];
-      bottomLine += thinBlocks[(blockIdx + 4) % thinBlocks.length];
+      // Sparse section with spaces
+      line += (i % 4 === 0) ? tilde : space;
     }
   }
 
-  // Ensure exact width (trim if needed)
-  if (topLine.length > width - 2) {
-    topLine = topLine.substring(0, width - 2);
-    bottomLine = bottomLine.substring(0, width - 2);
-  }
+  // Ensure exact width
+  line = line.substring(0, width - 2);
 
   return {
-    top: '▄' + topLine + '▄',
-    bottom: '▀' + bottomLine + '▀',
+    top: dot + line + dot,
+    bottom: '`' + line.replace(/~/g, '"').replace(/-/g, '^') + "'",
   };
 }
 

@@ -1,7 +1,73 @@
+import { Gitlab } from '@gitbeaker/node';
 import { Issue } from '../types/dashboard';
 
 export class IssueService {
-  async listIssues(_projectId?: string | number): Promise<Issue[]> {
-    return [];
+  private client: InstanceType<typeof Gitlab> | null = null;
+  private projectId: string | number | null = null;
+
+  constructor(url?: string, token?: string, projectId?: string | number) {
+    const gitlabUrl = url || process.env.GITLAB_URL;
+    const gitlabToken = token || process.env.GITLAB_TOKEN;
+    const gitlabProjectId = projectId || process.env.GITLAB_PROJECT_ID;
+
+    if (gitlabToken && gitlabProjectId) {
+      this.client = new Gitlab({
+        host: gitlabUrl,
+        token: gitlabToken,
+      });
+      this.projectId = gitlabProjectId;
+    }
+  }
+
+  async listIssues(projectId?: string | number): Promise<Issue[]> {
+    if (!this.client) {
+      return [];
+    }
+
+    const targetProjectId = projectId || this.projectId;
+    if (!targetProjectId) {
+      return [];
+    }
+
+    try {
+      const issues = await this.client.Issues.all({
+        projectId: targetProjectId as string | number,
+        state: 'opened',
+        perPage: 50,
+      });
+
+      return (issues as any[]).map(issue => ({
+        iid: issue.iid as number,
+        title: issue.title as string,
+        description: (issue.description || '') as string,
+        labels: (issue.labels || []) as string[],
+        state: issue.state as string,
+        web_url: issue.web_url as string,
+      }));
+    } catch (error) {
+      console.error('Failed to list issues:', error);
+      return [];
+    }
+  }
+
+  async getIssue(projectId: string | number, iid: number): Promise<Issue | null> {
+    if (!this.client) {
+      return null;
+    }
+
+    try {
+      const issue = await this.client.Issues.show(projectId, iid);
+      return {
+        iid: issue.iid,
+        title: issue.title,
+        description: issue.description || '',
+        labels: issue.labels as string[],
+        state: issue.state,
+        web_url: issue.web_url,
+      };
+    } catch (error) {
+      console.error('Failed to get issue:', error);
+      return null;
+    }
   }
 }

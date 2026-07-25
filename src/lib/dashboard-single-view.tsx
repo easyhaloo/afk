@@ -814,26 +814,26 @@ export const Dashboard: React.FC = () => {
     <Box flexDirection="column" height={terminalHeight}>
       {detailView === 'list' ? (
         <>
-          {/* Top bar - Fixed height */}
-          <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={2} backgroundColor="blue" justifyContent="space-between">
+          {/* Top bar - Fixed height - Q style: soft gray with cute pink accent */}
+          <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={2} backgroundColor="gray" justifyContent="space-between">
             <Text color="white" bold>
-              {figures.pointer} AFK Dashboard
-              {/* Loading pulse indicator */}
-              <Text color={loadingPulse < 5 ? 'white' : 'cyan'}> ●</Text>
+              <Text color="magenta">♥</Text> AFK Dashboard
+              {/* Loading pulse indicator - cute style */}
+              <Text color={loadingPulse < 5 ? 'white' : 'magenta'}> ●</Text>
             </Text>
             <Text color="white">
               {currentView === 'tasks' && (
                 <>
-                  <Text color="yellow">{figures.circleFilled}</Text>
+                  <Text color="green">{figures.circleFilled}</Text>
                   <Text> 运行中任务 </Text>
-                  <Text color="cyan">{tasks.length}</Text>
+                  <Text color="white">{tasks.length}</Text>
                 </>
               )}
               {currentView === 'issues' && (
                 <>
-                  <Text color="yellow">{figures.square}</Text>
+                  <Text color="magenta">{figures.square}</Text>
                   <Text> 待办 Issues </Text>
-                  <Text color="cyan">{issues.length}</Text>
+                  <Text color="white">{issues.length}</Text>
                   {multiSelectMode && (
                     <>
                       <Text dimColor> {figures.dot} </Text>
@@ -846,14 +846,14 @@ export const Dashboard: React.FC = () => {
                 <>
                   <Text color="green">{figures.tick}</Text>
                   <Text> 已完成 </Text>
-                  <Text color="cyan">{completedTasks.length}</Text>
+                  <Text color="white">{completedTasks.length}</Text>
                 </>
               )}
               {currentView === 'projects' && (
                 <>
                   <Text color="cyan">{figures.star}</Text>
                   <Text> GitLab 项目 </Text>
-                  <Text color="cyan">{projects.length}</Text>
+                  <Text color="white">{projects.length}</Text>
                 </>
               )}
             </Text>
@@ -897,8 +897,8 @@ export const Dashboard: React.FC = () => {
             )}
           </Box>
 
-          {/* Bottom bar - Fixed height */}
-          <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="gray">
+          {/* Bottom bar - Fixed height - Q style: lighter gray */}
+          <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="white" justifyContent="center">
             <Text>
               <Text color="cyan">↑↓</Text>
               <Text dimColor>:</Text>
@@ -1053,10 +1053,10 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffs
             paddingX={1}
           >
             <Box>
-              <Text color={task.status === 'active' ? 'green' : 'yellow'}>
+              <Text color={task.status === 'active' ? 'green' : 'cyan'}>
                 {task.status === 'active' ? '●' : '○'} #{task.iid}
               </Text>
-              <Text bold={isSelected}> {task.title || task.branch}</Text>
+              <Text bold={isSelected} color={isSelected ? 'magenta' : undefined}> {task.title || task.branch}</Text>
               <Text dimColor>  {task.session || '-'}  {task.progress || '0%'}  {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
             </Box>
             <Box paddingLeft={2}>
@@ -1128,13 +1128,13 @@ const IssueListView: React.FC<IssueListViewProps> = ({
             borderStyle={isCurrent ? 'single' : undefined}
             borderColor={borderColor}
             paddingX={1}
-            backgroundColor={isSelected ? 'blue' : undefined}
+            backgroundColor={isSelected ? 'gray' : undefined}
           >
             <Box>
               <Text>{checkbox} #{issue.iid}  </Text>
-              <Text bold={isCurrent}>{issue.title}</Text>
+              <Text bold={isCurrent} color={isCurrent ? 'magenta' : undefined}>{issue.title}</Text>
               {issue.labels.length > 0 && (
-                <Text color="magenta">  {issue.labels.map(l => `@${l}`).join(' ')}</Text>
+                <Text color="cyan">  {issue.labels.map(l => `@${l}`).join(' ')}</Text>
               )}
             </Box>
             <Box paddingLeft={2}>
@@ -1197,8 +1197,8 @@ const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, 
             paddingX={1}
           >
             <Box>
-              <Text color="dim">✓ #{task.iid}  </Text>
-              <Text bold={isSelected}>{task.title || task.branch}</Text>
+              <Text color="green">✓ #{task.iid}  </Text>
+              <Text bold={isSelected} color={isSelected ? 'magenta' : undefined}>{task.title || task.branch}</Text>
               <Text dimColor>  100%  {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
             </Box>
           </Box>
@@ -1259,11 +1259,11 @@ const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, s
           >
             <Box>
               <Text color="cyan">#{project.id}  </Text>
-              <Text bold={isSelected}>{project.name}</Text>
+              <Text bold={isSelected} color={isSelected ? 'magenta' : undefined}>{project.name}</Text>
               <Text dimColor>  {project.path_with_namespace}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text color="gray">{project.description ? truncate(project.description, 80) : ' '}</Text>
+              <Text dimColor>{project.description ? truncate(project.description, 80) : ' '}</Text>
             </Box>
           </Box>
         );

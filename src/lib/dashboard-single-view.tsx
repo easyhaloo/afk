@@ -66,9 +66,7 @@ export const Dashboard: React.FC = () => {
   const [selectedIssues, setSelectedIssues] = useState<Set<number>>(new Set());
 
   // Animation states
-  const [breathPhase, setBreathPhase] = useState(0);
   const [notifAnimation, setNotifAnimation] = useState<'hidden' | 'slide-in' | 'visible' | 'slide-out'>('hidden');
-  const [loadingPulse, setLoadingPulse] = useState(0);
 
   // Load data on mount
   useEffect(() => {
@@ -87,22 +85,6 @@ export const Dashboard: React.FC = () => {
     setScrollOffset(0);
     setDetailView('list');
   }, [currentView]);
-
-  // Breathing border animation
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setBreathPhase(p => (p + 1) % 20);
-    }, 100);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Loading pulse
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLoadingPulse(p => (p + 1) % 10);
-    }, 80);
-    return () => clearInterval(interval);
-  }, []);
 
   // Auto-refresh when view changes
   useEffect(() => {
@@ -768,13 +750,6 @@ export const Dashboard: React.FC = () => {
 /* ============ List View Components ============ */
 
 const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: number; viewportHeight: number}> = ({ tasks, selected, scrollOffset, viewportHeight }) => {
-  const [breathPhase, setBreathPhase] = React.useState(0);
-
-  React.useEffect(() => {
-    const interval = setInterval(() => setBreathPhase(p => (p + 1) % 20), 100);
-    return () => clearInterval(interval);
-  }, []);
-
   if (tasks.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
@@ -791,7 +766,6 @@ const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: num
       {visibleTasks.map((task, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        const borderColor = isSelected ? (breathPhase < 10 ? 'white' : 'gray') : undefined;
         const bullet = isSelected ? '(*)' : (task.status === 'active' ? '(.)' : '(-)');
         const textColor = isSelected ? 'white' : 'gray';
 
@@ -802,7 +776,7 @@ const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: num
             flexShrink={0}
             flexDirection="column"
             borderStyle={isSelected ? 'round' : undefined}
-            borderColor={borderColor}
+            borderColor={isSelected ? 'white' : undefined}
             paddingX={1}
           >
             <Box>
@@ -821,13 +795,6 @@ const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: num
 };
 
 const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMode?: boolean; selectedIssues?: Set<number>; scrollOffset: number; viewportHeight: number}> = ({ issues, selected, multiSelectMode = false, selectedIssues = new Set(), scrollOffset, viewportHeight }) => {
-  const [breathPhase, setBreathPhase] = React.useState(0);
-
-  React.useEffect(() => {
-    const interval = setInterval(() => setBreathPhase(p => (p + 1) % 20), 100);
-    return () => clearInterval(interval);
-  }, []);
-
   if (issues.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
@@ -846,7 +813,6 @@ const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMod
         const isSelected = selectedIssues.has(issue.iid);
         const isCurrent = index === selected;
         const checkbox = multiSelectMode ? (isSelected ? '[x]' : '[ ]') : '( )';
-        const borderColor = isCurrent ? (breathPhase < 10 ? 'white' : 'gray') : undefined;
         const textColor = isCurrent ? 'white' : 'gray';
 
         return (
@@ -856,7 +822,7 @@ const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMod
             flexShrink={0}
             flexDirection="column"
             borderStyle={isCurrent ? 'round' : undefined}
-            borderColor={borderColor}
+            borderColor={isCurrent ? 'white' : undefined}
             paddingX={1}
             backgroundColor={isSelected ? 'gray' : undefined}
           >
@@ -877,13 +843,6 @@ const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMod
 };
 
 const CompletedListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: number; viewportHeight: number}> = ({ tasks, selected, scrollOffset, viewportHeight }) => {
-  const [breathPhase, setBreathPhase] = React.useState(0);
-
-  React.useEffect(() => {
-    const interval = setInterval(() => setBreathPhase(p => (p + 1) % 20), 100);
-    return () => clearInterval(interval);
-  }, []);
-
   if (tasks.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
@@ -900,7 +859,6 @@ const CompletedListView: React.FC<{tasks: Task[]; selected: number; scrollOffset
       {visibleTasks.map((task, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        const borderColor = isSelected ? (breathPhase < 10 ? 'white' : 'gray') : undefined;
         const textColor = isSelected ? 'white' : 'gray';
 
         return (
@@ -910,7 +868,7 @@ const CompletedListView: React.FC<{tasks: Task[]; selected: number; scrollOffset
             flexShrink={0}
             flexDirection="column"
             borderStyle={isSelected ? 'round' : undefined}
-            borderColor={borderColor}
+            borderColor={isSelected ? 'white' : undefined}
             paddingX={1}
           >
             <Box>
@@ -927,13 +885,6 @@ const CompletedListView: React.FC<{tasks: Task[]; selected: number; scrollOffset
 };
 
 const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOffset: number; viewportHeight: number}> = ({ projects, selected, scrollOffset, viewportHeight }) => {
-  const [breathPhase, setBreathPhase] = React.useState(0);
-
-  React.useEffect(() => {
-    const interval = setInterval(() => setBreathPhase(p => (p + 1) % 20), 100);
-    return () => clearInterval(interval);
-  }, []);
-
   if (projects.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
@@ -950,7 +901,6 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
       {visibleProjects.map((project, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        const borderColor = isSelected ? (breathPhase < 10 ? 'white' : 'gray') : undefined;
         const textColor = isSelected ? 'white' : 'gray';
 
         return (
@@ -960,7 +910,7 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
             flexShrink={0}
             flexDirection="column"
             borderStyle={isSelected ? 'round' : undefined}
-            borderColor={borderColor}
+            borderColor={isSelected ? 'white' : undefined}
             paddingX={1}
           >
             <Box>

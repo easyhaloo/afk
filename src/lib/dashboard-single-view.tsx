@@ -1102,42 +1102,48 @@ const HelpDialog: React.FC = () => {
 
 /* ============ Helpers ============ */
 
-// Generate irregular pulse separator line based on terminal width
+// Generate irregular pulse separator using block characters
 function generateSeparator(width: number, phase: number): { top: string; bottom: string } {
-  // Irregular pulse pattern: . - ~ = * o . - ~ = * o
-  const patterns = ['.-~-', '~-~-', '-~=~', '~=*-', '=*o-', '*o~-', 'o.-~', '.-*='];
-  const dotChar = '.';
-  const dashChar = '-';
-  const tildeChar = '~';
-  const eqChar = '=';
-  const starChar = '*';
-  const circleChar = 'o';
+  // Block characters for hand-drawn irregular pulse effect
+  const thinBlocks = ['▔', '▄', '▀', '█', '▓', '▒'];  // Top-heavy, bottom-heavy, full, dense patterns
+  const thickBlocks = ['█', '█▓', '█▒', '▓█', '▒█', '██'];  // Various thickness combinations
 
-  const allChars = [dotChar, dashChar, tildeChar, eqChar, starChar, circleChar];
+  let topLine = '';
+  let bottomLine = '';
 
-  // Generate irregular middle part
-  let middle = '';
   for (let i = 0; i < width - 2; i++) {
-    // Use phase to create different patterns over time
-    const patternIndex = (i + phase) % patterns.length;
-    const charIndex = (i * 3 + phase * 7) % allChars.length;
-    const usePattern = ((i + phase * 3) % 5) < 2;
+    // Create irregular pattern based on phase and position
+    const seed = (i * 7 + phase * 13) % 100;
+    const isThick = seed > 40;
+    const isAccent = seed > 80;
 
-    if (usePattern) {
-      middle += patterns[patternIndex][(i + phase) % patterns[patternIndex].length];
+    if (isAccent) {
+      // Occasional thick pulse
+      const blockIdx = (seed + phase) % thickBlocks.length;
+      topLine += thickBlocks[blockIdx];
+      bottomLine += thickBlocks[(blockIdx + 3) % thickBlocks.length];
+    } else if (isThick) {
+      // Medium sections
+      const blockIdx = (seed + phase * 3) % thinBlocks.length;
+      topLine += thinBlocks[blockIdx];
+      bottomLine += thinBlocks[(blockIdx + 2) % thinBlocks.length];
     } else {
-      middle += allChars[charIndex];
+      // Thin sections with occasional gaps
+      const blockIdx = (seed * 3 + phase * 7) % thinBlocks.length;
+      topLine += thinBlocks[blockIdx];
+      bottomLine += thinBlocks[(blockIdx + 4) % thinBlocks.length];
     }
   }
 
-  // Ensure we don't exceed width
-  if (middle.length > width - 2) {
-    middle = middle.substring(0, width - 2);
+  // Ensure exact width (trim if needed)
+  if (topLine.length > width - 2) {
+    topLine = topLine.substring(0, width - 2);
+    bottomLine = bottomLine.substring(0, width - 2);
   }
 
   return {
-    top: dotChar + middle + dotChar,
-    bottom: circleChar + middle.split('').map(c => c === dotChar ? circleChar : c === circleChar ? dotChar : c).join('') + circleChar,
+    top: '▄' + topLine + '▄',
+    bottom: '▀' + bottomLine + '▀',
   };
 }
 

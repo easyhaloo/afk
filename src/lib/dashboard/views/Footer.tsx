@@ -12,7 +12,7 @@ export function Footer() {
       alignItems="center"
     >
       <Text>
-        <Text color="gray">ESC</Text>
+        <Text color="gray">b</Text>
         <Text color="white"> back │ </Text>
         <Text color="gray">?</Text>
         <Text color="white"> help │ </Text>

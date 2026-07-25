@@ -49,7 +49,7 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
       </Box>
 
       <Box height={FTR} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
-        <Text color="gray">ESC │ ℹ  ( o_o )</Text>
+        <Text color="gray">b │ q exit │ ℹ  ( o_o )</Text>
       </Box>
     </Box>
   );

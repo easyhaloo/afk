@@ -235,6 +235,12 @@ export const Dashboard: React.FC = () => {
     if (input === '?') { setShowHelp(h => !h); return; }
     if (input === 'D' || input === 'd') { setDebugMode(d => { const n = !d; addDebugLog(`[DEBUG ${n ? 'ON' : 'OFF'}]`); return n; }); return; }
 
+    if (input === 'b') {
+      if (showHelp) { setShowHelp(false); return; }
+      if (detailView === 'detail') { setDetailView('list'); return; }
+      if (canGoBack()) { popView(); return; }
+    }
+
     if (key.escape || input === 'q') {
       if (showHelp) { setShowHelp(false); return; }
       if (detailView === 'detail') { setDetailView('list'); return; }

@@ -12,9 +12,8 @@ import { Task, TmuxSession, Issue } from '../types/dashboard';
 import { TaskService } from './task-service';
 import { SessionService } from './session-service';
 import { IssueService } from './issue-service';
-import { ProjectService } from './project-service';
+import { ProjectService, Project } from './project-service';
 import { getConfig } from './config-manager';
-import { Project } from '../core/gitlab/types';
 import open from 'open';
 
 type View = 'tasks' | 'issues' | 'completed' | 'projects';

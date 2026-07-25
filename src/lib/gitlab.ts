@@ -57,9 +57,11 @@ export class GitLabClient {
     labels?: string[];
     state?: 'opened' | 'closed' | 'all';
     perPage?: number;
+    projectId?: string | number;
   } = {}): Promise<Issue[]> {
+    const targetProjectId = options.projectId || this.projectId;
     const issues = await this.client.Issues.all({
-      projectId: this.projectId,
+      projectId: targetProjectId,
       labels: options.labels?.join(','),
       state: options.state || 'opened',
       perPage: options.perPage || 20,

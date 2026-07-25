@@ -6,6 +6,8 @@ export interface TmuxSession {
   name: string;
   window: string;
   dir: string;
+  status?: string;
+  created?: string;
 }
 
 export interface TmuxCaptureOptions {
@@ -56,6 +58,23 @@ export class TmuxClient {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * List all tmux sessions
+   */
+  async listSessions(): Promise<TmuxSession[]> {
+    try {
+      const output = await this.exec(['list-sessions', '-F', '#{session_name}:#{window_name}:#{session_dir}:#{session_status}:#{session_created}']);
+      if (!output) return [];
+
+      return output.split('\n').filter(Boolean).map(line => {
+        const [name, window, dir, status, created] = line.split(':');
+        return { name, window, dir, status, created };
+      });
+    } catch {
+      return [];
     }
   }
 

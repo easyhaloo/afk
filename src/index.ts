@@ -6,6 +6,7 @@ import { registerTmuxCommands } from './commands/tmux.js';
 import { registerWorktreeCommands } from './commands/worktree.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
 import { registerSchedulerCommands } from './commands/scheduler.js';
+import { registerDashboardCommands } from './commands/dashboard.js';
 
 const program = new Command();
 
@@ -21,6 +22,7 @@ registerTmuxCommands(program);
 registerWorktreeCommands(program);
 registerWorkflowCommands(program);
 registerSchedulerCommands(program);
+registerDashboardCommands(program);
 
 // Parse CLI arguments
 program.parse();

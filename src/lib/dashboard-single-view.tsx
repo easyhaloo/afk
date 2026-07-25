@@ -1102,49 +1102,58 @@ const HelpDialog: React.FC = () => {
 
 /* ============ Helpers ============ */
 
-// Generate irregular tilde pulse separator
+// Generate hand-drawn brush stroke wave separator
 function generateSeparator(width: number, phase: number): { top: string; bottom: string } {
   const tilde = '~';
   const dash = '-';
-  const dot = '.';
-  const space = ' ';
 
   let line = '';
+  let i = 0;
 
-  for (let i = 0; i < width - 2; i++) {
-    // Create irregular pulse based on phase
-    const seed = (i * 7 + phase * 13) % 100;
-    const wavePhase = (i + phase * 2) % 8;
+  while (i < width - 2) {
+    // Create wave segments with varying thickness
+    const waveType = (i + phase * 7) % 10;
 
-    if (seed > 85) {
-      // Thick pulse burst: ~~~
-      const multiCount = 2 + (seed % 3);
-      for (let j = 0; j < multiCount && i + j < width - 2; j++) {
-        line += tilde;
-        i++;
+    if (waveType < 3) {
+      // Thin wave: single ~
+      line += tilde;
+      i++;
+    } else if (waveType < 5) {
+      // Medium wave: ~~~
+      line += tilde + tilde + tilde;
+      i += 3;
+    } else if (waveType < 7) {
+      // Thick brush stroke: ~~~~~
+      line += tilde.repeat(4 + (phase % 3));
+      i += 4 + (phase % 3);
+    } else if (waveType < 8) {
+      // Dash accent: ---
+      line += dash + dash;
+      i += 2;
+    } else if (waveType < 9) {
+      // Mixed wave: ~-~- or -~-
+      const mixed = (i + phase) % 3;
+      if (mixed === 0) {
+        line += tilde + dash + tilde;
+      } else if (mixed === 1) {
+        line += dash + tilde + dash;
+      } else {
+        line += tilde + tilde + dash;
       }
-      i--; // compensate for loop increment
-    } else if (seed > 60) {
-      // Dash segment: ---
-      line += dash;
-    } else if (seed > 40) {
-      // Normal tilde wave
-      line += wavePhase < 4 ? tilde : (wavePhase < 6 ? dash : tilde);
-    } else if (seed > 20) {
-      // Thin/dotted section
-      line += (seed % 3 === 0) ? dot : tilde;
+      i += 3;
     } else {
-      // Sparse section with spaces
-      line += (i % 4 === 0) ? tilde : space;
+      // Sparse with gaps
+      line += tilde + ' ';
+      i += 2;
     }
   }
 
-  // Ensure exact width
+  // Trim to exact width
   line = line.substring(0, width - 2);
 
   return {
-    top: dot + line + dot,
-    bottom: '`' + line.replace(/~/g, '"').replace(/-/g, '^') + "'",
+    top: '.' + line + '.',
+    bottom: '`' + line.replace(/~/g, '"').replace(/--/g, '""') + "'",
   };
 }
 

@@ -61,9 +61,21 @@ export const Dashboard: React.FC = () => {
   const [notification, setNotification] = useState<Notification | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
+  // Derived list helpers (must be before first use at line 66)
+  const getItems = () => {
+    switch (currentView) {
+      case 'tasks': return tasks;
+      case 'issues': return issues;
+      case 'completed': return completedTasks;
+      case 'projects': return projects;
+      default: return [];
+    }
+  };
+  const getItem = () => getItems()[selectedIndex];
+
   // Compute derived state synchronously to avoid useEffect delay
   const itemHeight = currentView === 'completed' ? 3 : 4;
-  const items = getCurrentList();
+  const items = getItems();
   const maxIndex = Math.max(0, items.length - 1);
   const itemsPerScreen = Math.floor(CONTENT_HEIGHT / itemHeight);
 
@@ -150,7 +162,7 @@ export const Dashboard: React.FC = () => {
     loadAsync();
   }, [currentView, currentProject]);
 
-  const refreshCurrentView = useCallback(async (silent = false) => {
+  const refresh = useCallback(async (silent = false) => {
     try {
       if (!silent) showNotificationMessage('refreshing...', 'info');
 
@@ -242,7 +254,7 @@ export const Dashboard: React.FC = () => {
   };
 
   const navigateDown = () => {
-    const maxIndex = getCurrentList().length - 1;
+    const maxIndex = getItems().length - 1;
     setSelectedIndex(Math.min(selectedIndex + 1, maxIndex));
   };
 
@@ -253,24 +265,12 @@ export const Dashboard: React.FC = () => {
   const navigateTop = () => setSelectedIndex(0);
 
   const navigateBottom = () => {
-    setSelectedIndex(Math.max(0, getCurrentList().length - 1));
+    setSelectedIndex(Math.max(0, getItems().length - 1));
   };
-
-  const getCurrentList = () => {
-    switch (currentView) {
-      case 'tasks': return tasks;
-      case 'issues': return issues;
-      case 'completed': return completedTasks;
-      case 'projects': return projects;
-      default: return [];
-    }
-  };
-
-  const getCurrentItem = () => getCurrentList()[selectedIndex];
 
   const handleAttachSession = async () => {
     if (currentView !== 'tasks') return;
-    const task = getCurrentItem() as Task;
+    const task = getItem() as Task;
     if (!task?.session) {
       showNotificationMessage('no session', 'warning');
       return;
@@ -318,7 +318,7 @@ export const Dashboard: React.FC = () => {
 
   const handleEnterProject = async () => {
     if (currentView !== 'projects') return;
-    const project = getCurrentItem() as Project;
+    const project = getItem() as Project;
     if (!project) return;
 
     try {
@@ -345,7 +345,7 @@ export const Dashboard: React.FC = () => {
 
   const handleKillSession = async () => {
     if (currentView !== 'tasks') return;
-    const task = getCurrentItem() as Task;
+    const task = getItem() as Task;
     if (!task?.session) {
       showNotificationMessage('no session', 'warning');
       return;
@@ -362,7 +362,7 @@ export const Dashboard: React.FC = () => {
 
   const handleStartFromIssue = async () => {
     if (currentView !== 'issues') return;
-    const issue = getCurrentItem() as Issue;
+    const issue = getItem() as Issue;
     if (!issue) return;
 
     try {
@@ -393,7 +393,7 @@ export const Dashboard: React.FC = () => {
 
   const handleOpenInBrowser = async () => {
     if (currentView === 'issues') {
-      const issue = getCurrentItem() as Issue;
+      const issue = getItem() as Issue;
       if (issue?.web_url) {
         try {
           await open(issue.web_url);
@@ -403,7 +403,7 @@ export const Dashboard: React.FC = () => {
         }
       }
     } else if (currentView === 'projects') {
-      const project = getCurrentItem() as Project;
+      const project = getItem() as Project;
       if (project?.web_url) {
         try {
           await open(project.web_url);
@@ -427,7 +427,7 @@ export const Dashboard: React.FC = () => {
 
   const toggleIssueSelection = () => {
     if (currentView !== 'issues' || !multiSelectMode) return;
-    const issue = getCurrentItem() as Issue;
+    const issue = getItem() as Issue;
     if (!issue) return;
 
     const newSelected = new Set(selectedIssues);
@@ -531,7 +531,7 @@ export const Dashboard: React.FC = () => {
       return;
     }
 
-    if (input === 'r') refreshCurrentView();
+    if (input === 'r') refresh();
 
     if (currentView === 'tasks') {
       if (input === 'a') handleAttachSession();
@@ -589,22 +589,20 @@ export const Dashboard: React.FC = () => {
           {/* Top bar - Hand-drawn style header */}
           <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={2} backgroundColor="black" justifyContent="space-between">
             <Text color="white">
-              <Text>*</Text>
-              <Text bold> AFK Dashboard </Text>
-              <Text color="gray">(^_^)</Text>
+              <Text bold>▸ AFK Dashboard</Text>
             </Text>
             <Text color="white">
               {currentView === 'tasks' && (
                 <>
-                  <Text>[*] </Text>
-                  <Text>tasks </Text>
+                  <Text>●</Text>
+                  <Text> tasks </Text>
                   <Text>{tasks.length}</Text>
                 </>
               )}
               {currentView === 'issues' && (
                 <>
-                  <Text>[~] </Text>
-                  <Text>issues </Text>
+                  <Text>○</Text>
+                  <Text> issues </Text>
                   <Text>{issues.length}</Text>
                   {multiSelectMode && (
                     <><Text dimColor> (</Text><Text>{selectedIssues.size}</Text><Text dimColor>)</Text></>
@@ -613,15 +611,15 @@ export const Dashboard: React.FC = () => {
               )}
               {currentView === 'completed' && (
                 <>
-                  <Text>[v] </Text>
-                  <Text>done </Text>
+                  <Text>✔</Text>
+                  <Text> done </Text>
                   <Text>{completedTasks.length}</Text>
                 </>
               )}
               {currentView === 'projects' && (
                 <>
-                  <Text>[^] </Text>
-                  <Text>projects </Text>
+                  <Text>▸</Text>
+                  <Text> projects </Text>
                   <Text>{projects.length}</Text>
                 </>
               )}
@@ -636,10 +634,9 @@ export const Dashboard: React.FC = () => {
           {/* Section header */}
           <Box paddingX={2} paddingY={0}>
             <Text color="white">
-              <Text>(</Text>
               <Text bold>{getViewTitle()}</Text>
-              <Text>) </Text>
-              <Text color="gray">~-~-</Text>
+              <Text>  </Text>
+              <Text color="gray">──</Text>
             </Text>
           </Box>
 
@@ -686,44 +683,50 @@ export const Dashboard: React.FC = () => {
             <BreathingSeparator width={terminalWidth} breathPhase={separatorPhase + 50} isTop={false} />
           </Box>
 
-          {/* Bottom bar - Hand-drawn style footer */}
+          {/* Bottom bar - Clean footer */}
           <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
             <Text>
-              <Text color="white">~</Text>
-              <Text color="gray">up/dn</Text>
-              <Text color="white">~</Text>
-              <Text color="gray"> | </Text>
-              <Text color="white">1-4</Text>
-              <Text color="gray">view</Text>
-              <Text color="white"> | </Text>
+              <Text color="gray">↑↓</Text>
+              <Text color="white"> │ </Text>
+              <Text color="gray">1-4</Text>
+              <Text color="white"> │ </Text>
               {currentView === 'tasks' && (
                 <>
-                  <Text color="white">a</Text><Text color="gray">attach</Text><Text color="white"> | </Text>
-                  <Text color="white">K</Text><Text color="gray">kill</Text><Text color="white"> | </Text>
+                  <Text color="gray">a</Text><Text color="white">attach</Text>
+                  <Text color="white"> │ </Text>
+                  <Text color="gray">K</Text><Text color="white">kill</Text>
+                  <Text color="white"> │ </Text>
                 </>
               )}
               {currentView === 'issues' && !multiSelectMode && (
                 <>
-                  <Text color="white">s</Text><Text color="gray">start</Text><Text color="white"> | </Text>
-                  <Text color="white">o</Text><Text color="gray">open</Text><Text color="white"> | </Text>
-                  <Text color="white">m</Text><Text color="gray">multi</Text><Text color="white"> | </Text>
+                  <Text color="gray">s</Text><Text color="white">start</Text>
+                  <Text color="white"> │ </Text>
+                  <Text color="gray">o</Text><Text color="white">open</Text>
+                  <Text color="white"> │ </Text>
+                  <Text color="gray">m</Text><Text color="white">multi</Text>
+                  <Text color="white"> │ </Text>
                 </>
               )}
               {currentView === 'issues' && multiSelectMode && (
                 <>
-                  <Text color="white">Space</Text><Text color="gray">select</Text><Text color="white"> | </Text>
-                  <Text color="white">B</Text><Text color="gray">batch</Text><Text color="white"> | </Text>
+                  <Text color="gray">Space</Text><Text color="white">select</Text>
+                  <Text color="white"> │ </Text>
+                  <Text color="gray">B</Text><Text color="white">batch</Text>
+                  <Text color="white"> │ </Text>
                 </>
               )}
               {currentView === 'projects' && (
                 <>
-                  <Text color="white">Enter</Text><Text color="gray">enter</Text><Text color="white"> | </Text>
+                  <Text color="gray">↵</Text><Text color="white">enter</Text>
+                  <Text color="white"> │ </Text>
                 </>
               )}
-              <Text color="white">Enter</Text><Text color="gray">detail</Text><Text color="white"> | </Text>
-              <Text color="white">r</Text><Text color="gray">refresh</Text><Text color="white"> | </Text>
-              <Text color="white">q</Text><Text color="gray">quit</Text>
-              <Text color="white">~</Text>
+              <Text color="gray">↵</Text><Text color="white">detail</Text>
+              <Text color="white"> │ </Text>
+              <Text color="gray">r</Text><Text color="white">refresh</Text>
+              <Text color="white"> │ </Text>
+              <Text color="gray">q</Text><Text color="white">quit</Text>
             </Text>
           </Box>
 
@@ -749,7 +752,7 @@ export const Dashboard: React.FC = () => {
         </>
       ) : (
         <DetailScreen
-          item={getCurrentItem()}
+          item={getItem()}
           view={currentView}
           height={terminalHeight}
         />
@@ -764,7 +767,7 @@ const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: num
   if (tasks.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text color="gray">    ( o_o )  no running tasks  ( o_o )</Text>
+        <Text color="gray">  ℹ  no running tasks</Text>
       </Box>
     );
   }
@@ -777,7 +780,7 @@ const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: num
       {visibleTasks.map((task, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        const bullet = isSelected ? '(*)' : (task.status === 'active' ? '(.)' : '(-)');
+        const bullet = isSelected ? '◉' : (task.status === 'active' ? '●' : '○');
         const textColor = isSelected ? 'white' : 'gray';
 
         return (
@@ -796,7 +799,7 @@ const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: num
               <Text color={textColor}>{task.title || task.branch}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text dimColor>    ~ {task.session || '-'} | {task.progress || '0%'} | {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
+              <Text dimColor>  ─ {task.session || '–'} · {task.progress || '0%'} · {task.startedAt ? formatTime(task.startedAt) : '–'}</Text>
             </Box>
           </Box>
         );
@@ -809,7 +812,7 @@ const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMod
   if (issues.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text color="gray">    ( o_o )  no issues  ( o_o )</Text>
+        <Text color="gray">  ℹ  no issues</Text>
       </Box>
     );
   }
@@ -823,7 +826,7 @@ const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMod
         const index = startIndex + visibleIndex;
         const isSelected = selectedIssues.has(issue.iid);
         const isCurrent = index === selected;
-        const checkbox = multiSelectMode ? (isSelected ? '[x]' : '[ ]') : '( )';
+        const checkbox = multiSelectMode ? (isSelected ? '☒' : '☐') : '○';
         const textColor = isCurrent ? 'white' : 'gray';
 
         return (
@@ -843,8 +846,8 @@ const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMod
               <Text color={textColor}>{issue.title}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text dimColor>    # {issue.labels.length > 0 ? issue.labels.join(', ') : '-'}</Text>
-              <Text dimColor> - {issue.description ? truncate(issue.description, 40) : '...'}</Text>
+              <Text dimColor>  ─ {issue.labels.length > 0 ? issue.labels.join(', ') : '–'}</Text>
+              <Text dimColor> · {issue.description ? truncate(issue.description, 40) : '…'}</Text>
             </Box>
           </Box>
         );
@@ -857,7 +860,7 @@ const CompletedListView: React.FC<{tasks: Task[]; selected: number; scrollOffset
   if (tasks.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text color="gray">    ( o_o )  no completed tasks  ( o_o )</Text>
+        <Text color="gray">  ℹ  no completed tasks</Text>
       </Box>
     );
   }
@@ -883,10 +886,10 @@ const CompletedListView: React.FC<{tasks: Task[]; selected: number; scrollOffset
             paddingX={1}
           >
             <Box>
-              <Text color="white">[v] </Text>
+              <Text color="white">✔ </Text>
               <Text color={textColor} bold> #{task.iid} </Text>
               <Text color={textColor}>{task.title || task.branch}</Text>
-              <Text dimColor>  100%  {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
+              <Text dimColor>  ─ 100% · {task.startedAt ? formatTime(task.startedAt) : '–'}</Text>
             </Box>
           </Box>
         );
@@ -899,7 +902,7 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
   if (projects.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text color="gray">    ( o_o )  no projects  ( o_o )</Text>
+        <Text color="gray">  ℹ  no projects</Text>
       </Box>
     );
   }
@@ -925,15 +928,15 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
             paddingX={1}
           >
             <Box>
-              <Text color="white">[^] </Text>
+              <Text color="white">▸ </Text>
               <Text color={textColor} bold> #{project.id} </Text>
               <Text color={textColor}>{project.name}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text dimColor>    ~ {project.path_with_namespace}</Text>
+              <Text dimColor>  ─ {project.path_with_namespace}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text dimColor>    ~ {project.description ? truncate(project.description, 60) : '...'}</Text>
+              <Text dimColor>  ─ {project.description ? truncate(project.description, 60) : '…'}</Text>
             </Box>
           </Box>
         );
@@ -945,7 +948,7 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
 /* ============ Detail & Help Components ============ */
 
 const DetailScreen: React.FC<{item: Task | Issue | Project | undefined; view: View; height: number}> = ({ item, view, height }) => {
-  if (!item) return <Box><Text color="gray">( o_o ) no item selected</Text></Box>;
+  if (!item) return <Box><Text color="gray">ℹ  no item selected</Text></Box>;
 
   const HEADER_HEIGHT = 1;
   const FOOTER_HEIGHT = 1;
@@ -977,26 +980,26 @@ const DetailScreen: React.FC<{item: Task | Issue | Project | undefined; view: Vi
 
       {/* Content */}
       <Box height={CONTENT_HEIGHT} flexShrink={0} flexDirection="column" paddingX={2} paddingY={1}>
-        <Text color="gray">.-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~-.</Text>
+        <Text color="gray">┌────────────────────────────────────────────┐</Text>
 
         {view === 'tasks' && (
           <Box flexDirection="column" paddingX={1}>
-            <Text color="white">  - status: {(item as Task).status}</Text>
-            <Text color="white">  - branch: {(item as Task).branch || '-'}</Text>
-            <Text color="white">  - session: {(item as Task).session || '-'}</Text>
-            <Text color="white">  - progress: {(item as Task).progress || '0%'}</Text>
-            <Text color="white">  - started: {(item as Task).startedAt ? (item as Task).startedAt?.toString() : '-'}</Text>
-            <Text color="white">  - worktree: {(item as Task).worktree || '-'}</Text>
+            <Text color="white">  ─ status: {(item as Task).status}</Text>
+            <Text color="white">  ─ branch: {(item as Task).branch || '–'}</Text>
+            <Text color="white">  ─ session: {(item as Task).session || '–'}</Text>
+            <Text color="white">  ─ progress: {(item as Task).progress || '0%'}</Text>
+            <Text color="white">  ─ started: {(item as Task).startedAt ? (item as Task).startedAt?.toString() : '–'}</Text>
+            <Text color="white">  ─ worktree: {(item as Task).worktree || '–'}</Text>
           </Box>
         )}
 
         {view === 'issues' && (
           <Box flexDirection="column" paddingX={1}>
-            <Text color="white">  - labels: {(item as Issue).labels.join(', ') || '-'}</Text>
-            <Text color="white">  - state: {(item as Issue).state}</Text>
-            <Text color="white">  - url: {(item as Issue).web_url}</Text>
+            <Text color="white">  ─ labels: {(item as Issue).labels.join(', ') || '–'}</Text>
+            <Text color="white">  ─ state: {(item as Issue).state}</Text>
+            <Text color="white">  ─ url: {(item as Issue).web_url}</Text>
             <Box marginTop={1}>
-              <Text color="gray">  - description:</Text>
+              <Text color="gray">  ─ description:</Text>
             </Box>
             <Text color="gray">    {(item as Issue).description || 'no description'}</Text>
           </Box>
@@ -1004,25 +1007,24 @@ const DetailScreen: React.FC<{item: Task | Issue | Project | undefined; view: Vi
 
         {view === 'projects' && (
           <Box flexDirection="column" paddingX={1}>
-            <Text color="white">  - path: {(item as Project).path_with_namespace}</Text>
-            <Text color="white">  - branch: {(item as Project).default_branch}</Text>
-            <Text color="white">  - namespace: {(item as Project).namespace.name}</Text>
-            <Text color="white">  - updated: {(item as Project).last_activity_at}</Text>
+            <Text color="white">  ─ path: {(item as Project).path_with_namespace}</Text>
+            <Text color="white">  ─ branch: {(item as Project).default_branch}</Text>
+            <Text color="white">  ─ namespace: {(item as Project).namespace.name}</Text>
+            <Text color="white">  ─ updated: {(item as Project).last_activity_at}</Text>
             <Box marginTop={1}>
-              <Text color="gray">  - description:</Text>
+              <Text color="gray">  ─ description:</Text>
             </Box>
             <Text color="gray">    {(item as Project).description || 'no description'}</Text>
           </Box>
         )}
 
-        <Text color="gray">`~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'</Text>
+        <Text color="gray">└────────────────────────────────────────────┘</Text>
       </Box>
 
       {/* Bottom bar */}
       <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
         <Text>
-          <Text color="gray">ESC/q: back </Text>
-          <Text>( o_o )</Text>
+          <Text color="gray">ESC/q: back</Text>
         </Text>
       </Box>
     </Box>
@@ -1082,7 +1084,7 @@ const HelpDialog: React.FC = () => {
       <Text color="white">  o - open</Text>
 
       <Box marginTop={1} justifyContent="center">
-        <Text color="gray">? or ESC to close ( o_o )</Text>
+        <Text color="gray">? or ESC to close</Text>
       </Box>
     </Box>
   );
@@ -1099,56 +1101,31 @@ const BreathingSeparator: React.FC<{ width: number; breathPhase: number; isTop?:
   // Map intensity to gray value (0=bright white, 100=dim gray)
   const grayValue = Math.round(128 - breathIntensity * 100);
 
-  // Generate wave pattern (fixed, not changing)
-  const generateWavePattern = (w: number): string => {
+  // Generate clean box-drawing line pattern
+  const generateLinePattern = (w: number): string => {
     let pattern = '';
     for (let i = 0; i < w - 2; i++) {
-      const waveType = i % 10;
-      if (waveType < 4) {
-        pattern += '~';
-      } else if (waveType < 6) {
-        pattern += '~~';
+      const styleType = i % 10;
+      if (styleType < 6) {
+        pattern += '─';
+      } else if (styleType < 8) {
+        pattern += '──';
         i++;
-      } else if (waveType < 8) {
-        pattern += '~~~';
-        i += 2;
       } else {
-        pattern += '-';
+        pattern += '─';
       }
     }
     return pattern.substring(0, w - 2);
   };
 
-  const pattern = generateWavePattern(width);
-  const startChar = isTop ? '.' : '`';
-  const endChar = isTop ? '.' : "'";
+  const pattern = generateLinePattern(width);
 
   return (
     <Text color={`${grayValue}`}>
-      {startChar}{pattern}{endChar}
+      {pattern}
     </Text>
   );
 };
-
-// Generate static wave pattern for reference (not animated)
-function generateWavePattern(width: number): string {
-  let pattern = '';
-  for (let i = 0; i < width - 2; i++) {
-    const waveType = i % 10;
-    if (waveType < 4) {
-      pattern += '~';
-    } else if (waveType < 6) {
-      pattern += '~~';
-      i++;
-    } else if (waveType < 8) {
-      pattern += '~~~';
-      i += 2;
-    } else {
-      pattern += '-';
-    }
-  }
-  return pattern.substring(0, width - 2);
-}
 
 function formatTime(date: Date): string {
   const now = new Date();
@@ -1164,5 +1141,5 @@ function formatTime(date: Date): string {
 
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
-  return text.substring(0, maxLength - 3) + '...';
+  return text.substring(0, maxLength - 1) + '…';
 }

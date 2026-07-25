@@ -7,7 +7,7 @@
     "afk": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/fix-esm-extensions.mjs",
     "dev": "tsc --watch",
     "test": "vitest",
     "prepublishOnly": "npm run build"

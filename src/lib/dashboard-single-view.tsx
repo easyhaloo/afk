@@ -1109,8 +1109,8 @@ const BreathingSeparator: React.FC<{ width: number; breathPhase: number; isTop?:
       if (styleType < 6) {
         pattern += '─';
       } else if (styleType < 8) {
-        pattern += '──';
-        i++;
+        pattern += '─';
+        pattern += '─';
       } else {
         pattern += '─';
       }

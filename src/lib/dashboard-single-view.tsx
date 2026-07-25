@@ -781,9 +781,8 @@ export const Dashboard: React.FC = () => {
           {notification && (
             <Box
               position="absolute"
-              top={notifAnimation === 'slide-in' ? 1 : 3}
-              right={notifAnimation === 'slide-in' ? -40 : 3}
-              width={35}
+              bottom={1}
+              right={3}
               borderStyle="round"
               borderColor="white"
               paddingX={1}

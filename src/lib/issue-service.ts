@@ -23,11 +23,13 @@ export class IssueService {
       }
     }
 
-    if (finalToken && gitlabProjectId) {
+    if (finalToken) {
       this.client = new Gitlab({
         host: finalUrl,
         token: finalToken,
       });
+    }
+    if (gitlabProjectId) {
       this.projectId = gitlabProjectId;
     }
   }
@@ -38,17 +40,15 @@ export class IssueService {
     }
 
     const targetProjectId = projectId || this.projectId;
-    if (!targetProjectId) {
-      return { issues: [], hasMore: false };
-    }
 
     try {
-      const items = await this.client.Issues.all({
-        projectId: targetProjectId as string | number,
-        state: 'opened',
-        page,
-        perPage,
-      }) as any[];
+      const params: Record<string, unknown> = { state: 'opened', page, perPage };
+      // When no projectId is specified anywhere, omit the filter so GitLab
+      // returns issues across all accessible projects. This makes the issue
+      // view usable even when GITLAB_PROJECT_ID is not configured.
+      if (targetProjectId) params.projectId = targetProjectId;
+
+      const items = await this.client.Issues.all(params) as any[];
 
       return {
         issues: items.map(issue => ({

@@ -23,7 +23,7 @@ export function IssueListView({
       scrollOffset={scrollOffset}
       viewportHeight={viewportHeight}
       emptyMessage="ℹ  no issues"
-      getKey={(issue) => issue.iid}
+      getKey={(issue) => `${issue.iid}-${issue.web_url}`}
       render={(issue, index, isCurrent) => {
         const isSelected = selectedIssues.has(issue.iid);
         const checkbox = multiSelectMode ? (isSelected ? '☒' : '☐') : '○';

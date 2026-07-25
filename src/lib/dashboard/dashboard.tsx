@@ -27,6 +27,11 @@ export const Dashboard: React.FC = () => {
   const H = process.stdout.rows || 24;
   const CONTENT_H = H - 2;
 
+  // When the user enters issue view from a project (key `i` in detail) we
+  // scope the fetch to that project; otherwise it's null and the service
+  // falls back to all accessible projects.
+  const [issueProject, setIssueProject] = useState<Project | null>(null);
+
   const {
     currentView, setCurrentView,
     selectedIndex, setSelectedIndex,
@@ -43,7 +48,7 @@ export const Dashboard: React.FC = () => {
     loadProjectDetail,
     reloadTasks, removeSession, addTaskFromIssue,
     fetchMoreIssues, fetchMoreProjects,
-  } = useData(currentView, null);
+  } = useData(currentView, issueProject);
 
   // UI state
   const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -240,7 +245,7 @@ export const Dashboard: React.FC = () => {
     if (input === 'b') {
       if (showHelp) { setShowHelp(false); return; }
       if (detailView === 'detail') { setDetailView('list'); return; }
-      if (canGoBack()) { popView(); return; }
+      if (canGoBack()) { popView(); setIssueProject(null); return; }
     }
 
     if (key.escape || input === 'q') {
@@ -251,16 +256,21 @@ export const Dashboard: React.FC = () => {
 
     if (detailView === 'detail' && input === 'i') {
       const project = getItem() as Project;
-      if (project) { setCurrentView('issues'); setDetailView('list'); }
+      if (project) {
+        setIssueProject(project);
+        setCurrentView('issues');
+        setDetailView('list');
+        setSelectedIndex(0);
+      }
       return;
     }
 
     if (showHelp || detailView === 'detail') return;
 
-    if (input === '1') switchView('tasks');
-    if (input === '2') switchView('issues');
-    if (input === '3') switchView('completed');
-    if (input === '4') switchView('projects');
+    if (input === '1') { setIssueProject(null); switchView('tasks'); }
+    if (input === '2') { setIssueProject(null); switchView('issues'); }
+    if (input === '3') { setIssueProject(null); switchView('completed'); }
+    if (input === '4') { setIssueProject(null); switchView('projects'); }
 
     if (key.downArrow) {
       navigateDown(items.length);

@@ -62,7 +62,20 @@ export function useData(currentView: View, currentProject: Project | null) {
           if (isProjectChanged) {
             setIssues(data.issues);
           } else {
-            setIssues(prev => [...prev, ...data.issues]);
+            // Dedupe by web_url — across pages, GitLab occasionally returns
+            // the same record twice, which would otherwise crash React's
+            // reconciliation on duplicate keys.
+            setIssues(prev => {
+              const seen = new Set(prev.map(i => i.web_url));
+              const merged = [...prev];
+              for (const issue of data.issues) {
+                if (!seen.has(issue.web_url)) {
+                  merged.push(issue);
+                  seen.add(issue.web_url);
+                }
+              }
+              return merged;
+            });
           }
           setIssueHasMore(data.hasMore);
           if (!isProjectChanged) setIssuePage(p => p + 1);
@@ -126,13 +139,23 @@ export function useData(currentView: View, currentProject: Project | null) {
     setLoading(true);
     try {
       const data = await fetchIssues(currentProject?.id, issuePage, 50);
-      setIssues(prev => [...prev, ...data.issues]);
+      setIssues(prev => {
+        const seen = new Set(prev.map(i => i.web_url));
+        const merged = [...prev];
+        for (const issue of data.issues) {
+          if (!seen.has(issue.web_url)) {
+            merged.push(issue);
+            seen.add(issue.web_url);
+          }
+        }
+        return merged;
+      });
       setIssueHasMore(data.hasMore);
       setIssuePage(p => p + 1);
     } finally {
       setLoading(false);
     }
-  }, [loading, issueHasMore, issuePage, currentProject]);
+  }, [loading, issueHasMore, issuePage, currentProject, issueProjectKey]);
 
   const fetchMoreProjects = useCallback(async () => {
     if (loading || !projectHasMore) return;

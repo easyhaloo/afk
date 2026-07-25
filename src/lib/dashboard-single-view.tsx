@@ -1,6 +1,7 @@
 /**
  * AFK Dashboard - Single View Mode
  * Full-screen single view with quick switching
+ * Hand-drawn Style Q Design (B&W only)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -66,10 +67,8 @@ export const Dashboard: React.FC = () => {
   const [selectedIssues, setSelectedIssues] = useState<Set<number>>(new Set());
 
   // Animation states
-  const [viewTransition, setViewTransition] = useState<'idle' | 'entering' | 'visible'>('visible');
   const [breathPhase, setBreathPhase] = useState(0);
   const [notifAnimation, setNotifAnimation] = useState<'hidden' | 'slide-in' | 'visible' | 'slide-out'>('hidden');
-  const [itemAppearIndex, setItemAppearIndex] = useState(-1);
   const [loadingPulse, setLoadingPulse] = useState(0);
 
   // Load data on mount
@@ -88,19 +87,9 @@ export const Dashboard: React.FC = () => {
     setSelectedIndex(0);
     setScrollOffset(0);
     setDetailView('list');
-    // Trigger view transition animation
-    setViewTransition('entering');
-    setItemAppearIndex(-1);
-    const t = setTimeout(() => setViewTransition('visible'), 50);
-    // Stagger list items appearance
-    const items = getCurrentList();
-    items.forEach((_, i) => {
-      setTimeout(() => setItemAppearIndex(i), 80 + i * 30);
-    });
-    return () => clearTimeout(t);
   }, [currentView]);
 
-  // Breathing border animation for selected item
+  // Breathing border animation
   useEffect(() => {
     const interval = setInterval(() => {
       setBreathPhase(p => (p + 1) % 20);
@@ -108,45 +97,7 @@ export const Dashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Loading pulse animation
-  useEffect(() => {
-    const loadAsync = async () => {
-      try {
-        switch (currentView) {
-          case 'tasks':
-          case 'completed': {
-            const tasksData = await taskService.listTasks();
-            const activeTasks = tasksData.filter(t => t.status === 'active' || t.status === 'pending');
-            const completed = tasksData.filter(t => t.status === 'completed');
-            setTasks(activeTasks);
-            setCompletedTasks(completed);
-            break;
-          }
-          case 'issues': {
-            if (currentProject) {
-              const projectIssuesData = await issueService.listIssues(currentProject.id);
-              setIssues(projectIssuesData);
-              setProjectIssues(projectIssuesData);
-            } else {
-              const issuesData = await issueService.listIssues();
-              setIssues(issuesData);
-            }
-            break;
-          }
-          case 'projects': {
-            const projectsData = await projectService.listProjects();
-            setProjects(projectsData);
-            break;
-          }
-        }
-      } catch (error) {
-        // Silently fail on auto-refresh
-      }
-    };
-    loadAsync();
-  }, [currentView, currentProject]);
-
-  // Loading pulse when fetching
+  // Loading pulse
   useEffect(() => {
     const interval = setInterval(() => {
       setLoadingPulse(p => (p + 1) % 10);
@@ -154,10 +105,8 @@ export const Dashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Auto-refresh when view changes - only trigger load, don't manage loading state here
+  // Auto-refresh when view changes
   useEffect(() => {
-    // Silent load on view change - the view renders immediately with current data
-    // Data refresh happens in background
     const loadAsync = async () => {
       try {
         switch (currentView) {
@@ -188,25 +137,19 @@ export const Dashboard: React.FC = () => {
           }
         }
       } catch (error) {
-        // Silently fail on auto-refresh
+        // Silently fail
       }
     };
     loadAsync();
   }, [currentView, currentProject]);
 
-  /**
-   * Update scroll offset to keep selected item visible
-   */
+  // Update scroll offset
   useEffect(() => {
     const items = getCurrentItems();
     const maxItems = Math.max(0, items.length - 1);
-
-    // Calculate how many items fit in viewport based on fixed item heights
-    // Projects/Tasks/Issues: 4 lines each, Completed: 3 lines each
     const itemHeight = currentView === 'completed' ? 3 : 4;
     const itemsPerScreen = Math.floor(CONTENT_HEIGHT / itemHeight);
 
-    // Keep selected item in view
     if (selectedIndex < scrollOffset) {
       setScrollOffset(selectedIndex);
     } else if (selectedIndex >= scrollOffset + itemsPerScreen) {
@@ -214,13 +157,9 @@ export const Dashboard: React.FC = () => {
     }
   }, [selectedIndex, CONTENT_HEIGHT, currentView]);
 
-  /**
-   * Refresh current view data (unified refresh)
-   * @param silent - if true, don't show notification
-   */
   const refreshCurrentView = useCallback(async (silent = false) => {
     try {
-      if (!silent) showNotificationMessage('正在刷新...', 'info');
+      if (!silent) showNotificationMessage('refreshing...', 'info');
 
       switch (currentView) {
         case 'tasks':
@@ -234,12 +173,10 @@ export const Dashboard: React.FC = () => {
         }
         case 'issues': {
           if (currentProject) {
-            // Refresh project issues
             const projectIssuesData = await issueService.listIssues(currentProject.id);
             setIssues(projectIssuesData);
             setProjectIssues(projectIssuesData);
           } else {
-            // Refresh global issues
             const issuesData = await issueService.listIssues();
             setIssues(issuesData);
           }
@@ -252,15 +189,12 @@ export const Dashboard: React.FC = () => {
         }
       }
 
-      if (!silent) showNotificationMessage('刷新完成', 'success');
+      if (!silent) showNotificationMessage('done', 'success');
     } catch (error) {
-      showNotificationMessage(`刷新失败: ${error}`, 'error');
+      showNotificationMessage(`error: ${error}`, 'error');
     }
   }, [currentView, currentProject]);
 
-  /**
-   * Load all data (tasks and sessions)
-   */
   const loadData = useCallback(async () => {
     try {
       const [tasksData, sessionsData] = await Promise.all([
@@ -268,7 +202,6 @@ export const Dashboard: React.FC = () => {
         sessionService.listSessions(),
       ]);
 
-      // Filter active tasks
       const activeTasks = tasksData.filter(t => t.status === 'active' || t.status === 'pending');
       const completed = tasksData.filter(t => t.status === 'completed');
 
@@ -276,17 +209,13 @@ export const Dashboard: React.FC = () => {
       setCompletedTasks(completed);
       setSessions(sessionsData);
     } catch (error) {
-      showNotificationMessage('Failed to load data', 'error');
+      showNotificationMessage('load failed', 'error');
     }
   }, []);
 
-  /**
-   * Show notification with slide animation
-   */
   const showNotificationMessage = (message: string, type: NotificationType) => {
     setNotifAnimation('slide-in');
     setNotification({ message, type });
-    // Slide in then slide out
     setTimeout(() => setNotifAnimation('visible'), 150);
     setTimeout(() => {
       setNotifAnimation('slide-out');
@@ -295,21 +224,13 @@ export const Dashboard: React.FC = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  /**
-   * Push view to stack (browser-like navigation - go deeper)
-   */
   const pushView = (view: View) => {
-    // Save current view to stack before switching
     setViewStack([...viewStack, currentView]);
     setCurrentView(view);
   };
 
-  /**
-   * Pop view from stack (browser-like navigation - go back)
-   */
   const popView = () => {
     if (viewStack.length === 0) return false;
-
     const previousView = viewStack[viewStack.length - 1];
     setViewStack(viewStack.slice(0, -1));
     setCurrentView(previousView);
@@ -318,26 +239,15 @@ export const Dashboard: React.FC = () => {
     return true;
   };
 
-  /**
-   * Check if can go back
-   */
   const canGoBack = () => viewStack.length > 0;
 
-  /**
-   * Switch view - just switch, data loads automatically via useEffect
-   */
   const switchView = (view: View) => {
-    // Only push to stack if view is actually changing
     if (view !== currentView) {
       setViewStack([...viewStack, currentView]);
     }
     setCurrentView(view);
-    // Data loading is handled by useEffect watching currentView
   };
 
-  /**
-   * Navigation handlers
-   */
   const navigateDown = () => {
     const maxIndex = getCurrentList().length - 1;
     setSelectedIndex(Math.min(selectedIndex + 1, maxIndex));
@@ -347,122 +257,81 @@ export const Dashboard: React.FC = () => {
     setSelectedIndex(Math.max(selectedIndex - 1, 0));
   };
 
-  const navigateTop = () => {
-    setSelectedIndex(0);
-  };
+  const navigateTop = () => setSelectedIndex(0);
 
   const navigateBottom = () => {
     setSelectedIndex(Math.max(0, getCurrentList().length - 1));
   };
 
-  /**
-   * Get current list based on view
-   */
   const getCurrentList = () => {
     switch (currentView) {
-      case 'tasks':
-        return tasks;
-      case 'issues':
-        return issues;
-      case 'completed':
-        return completedTasks;
-      case 'projects':
-        return projects;
-      default:
-        return [];
+      case 'tasks': return tasks;
+      case 'issues': return issues;
+      case 'completed': return completedTasks;
+      case 'projects': return projects;
+      default: return [];
     }
   };
 
-  /**
-   * Get current selected item
-   */
-  const getCurrentItem = () => {
-    const list = getCurrentList();
-    return list[selectedIndex];
-  };
+  const getCurrentItem = () => getCurrentList()[selectedIndex];
+  const getCurrentItems = () => getCurrentList();
 
-  /**
-   * Get current items list
-   */
-  const getCurrentItems = () => {
-    return getCurrentList();
-  };
-
-  /**
-   * Handle attach session (tasks view)
-   */
   const handleAttachSession = async () => {
     if (currentView !== 'tasks') return;
-
     const task = getCurrentItem() as Task;
     if (!task?.session) {
-      showNotificationMessage('该任务没有关联会话', 'warning');
+      showNotificationMessage('no session', 'warning');
       return;
     }
 
     try {
-      // Check if session exists using node-tmux SDK
       const tmuxInstance = await createTmux();
       if (!tmuxInstance) {
-        showNotificationMessage('tmux 不可用', 'error');
+        showNotificationMessage('tmux unavailable', 'error');
         return;
       }
-
       const sessionExists = await tmuxInstance.hasSession(task.session);
       if (!sessionExists) {
-        showNotificationMessage(`会话 ${task.session} 不存在`, 'error');
+        showNotificationMessage(`session ${task.session} not found`, 'error');
         return;
       }
 
-      // Exit Ink and attach to tmux session using native command
       exit();
-
       const { spawnSync, spawn } = require('child_process');
 
-      // Attach to the tmux session
       const result = spawnSync('tmux', ['attach-session', '-t', task.session], {
         stdio: 'inherit',
       });
 
-      // After detaching from tmux, show message and return to dashboard
       if (result.status === 0) {
-        console.log('\n' + figures.tick + ' 已从会话 \x1b[36m' + task.session + '\x1b[0m 退出');
-        console.log('正在返回 Dashboard...\n');
-
-        // Small delay for user to see the message
+        console.log('\n' + figures.tick + ' detached from \x1b[37m' + task.session + '\x1b[0m');
+        console.log('returning to Dashboard...\n');
         await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Restart the dashboard
         const dashboardProcess = spawn(process.argv[0], process.argv.slice(1), {
           stdio: 'inherit',
         });
-
         dashboardProcess.on('exit', (code: number) => {
           process.exit(code || 0);
         });
       } else {
-        console.error('\n' + figures.cross + ' 附加会话失败');
+        console.error('\n' + figures.cross + ' attach failed');
         process.exit(1);
       }
     } catch (error) {
-      showNotificationMessage('附加会话失败', 'error');
+      showNotificationMessage('attach failed', 'error');
       console.error(error);
       process.exit(1);
     }
   };
 
-  /**
-   * Handle enter project to view its issues (projects view)
-   */
   const handleEnterProject = async () => {
     if (currentView !== 'projects') return;
-
     const project = getCurrentItem() as Project;
     if (!project) return;
 
     try {
       setCurrentProject(project);
-      showNotificationMessage(`正在加载 ${project.name} (ID: ${project.id}) 的 Issues...`, 'info');
+      showNotificationMessage(`loading ${project.name} issues...`, 'info');
 
       const projectIssuesData = await issueService.listIssues(project.id);
       setProjectIssues(projectIssuesData);
@@ -470,100 +339,75 @@ export const Dashboard: React.FC = () => {
       setSelectedIndex(0);
       setScrollOffset(0);
 
-      // Push to navigation stack and switch to issues view
       pushView('issues');
 
       if (projectIssuesData.length > 0) {
-        showNotificationMessage(`已加载 ${project.name}: ${projectIssuesData.length} 个 Issues`, 'success');
+        showNotificationMessage(`loaded ${project.name}: ${projectIssuesData.length} issues`, 'success');
       } else {
-        showNotificationMessage(`项目 ${project.name} 没有 open issues`, 'info');
+        showNotificationMessage(`no open issues in ${project.name}`, 'info');
       }
     } catch (error) {
-      showNotificationMessage(`加载失败: ${error}`, 'error');
+      showNotificationMessage(`load failed: ${error}`, 'error');
     }
   };
 
-  /**
-   * Handle kill session (tasks view)
-   */
   const handleKillSession = async () => {
     if (currentView !== 'tasks') return;
-
     const task = getCurrentItem() as Task;
     if (!task?.session) {
-      showNotificationMessage('该任务没有关联会话', 'warning');
+      showNotificationMessage('no session', 'warning');
       return;
     }
 
     try {
-      // Kill the session directly
       await sessionService.killSession(task.session);
-
-      // Reload data from tmux
       await loadData();
-
-      showNotificationMessage(`✓ 已终止会话: ${task.session}`, 'success');
+      showNotificationMessage(`killed: ${task.session}`, 'success');
     } catch (error) {
-      showNotificationMessage(`终止会话失败: ${error}`, 'error');
+      showNotificationMessage(`kill failed: ${error}`, 'error');
     }
   };
 
-  /**
-   * Handle start from issue (issues view)
-   */
   const handleStartFromIssue = async () => {
     if (currentView !== 'issues') return;
-
     const issue = getCurrentItem() as Issue;
     if (!issue) return;
 
     try {
-      showNotificationMessage(`从 Issue #${issue.iid} 创建任务...`, 'info');
+      showNotificationMessage(`creating task from #${issue.iid}...`, 'info');
 
-      // Create branch name from issue title
       const branchName = `issue-${issue.iid}-${issue.title
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .substring(0, 30)}`;
 
-      // Create tmux session name
       const sessionName = `issue-${issue.iid}`;
 
-      // Create task from issue
       const newTask = await taskService.createTaskFromIssue(issue, {
         branch: branchName,
         session: sessionName,
         worktree: branchName,
       });
 
-      // Reload tasks
       await loadData();
-
-      // Switch to tasks view
       setCurrentView('tasks');
       setSelectedIndex(0);
 
-      showNotificationMessage(
-        `✓ 已创建任务 #${newTask.iid}: ${newTask.title}`,
-        'success'
-      );
+      showNotificationMessage(`created task #${newTask.iid}: ${newTask.title}`, 'success');
     } catch (error) {
-      showNotificationMessage('创建任务失败', 'error');
+      showNotificationMessage('create failed', 'error');
     }
   };
 
-  /**
-   * Handle open in browser (issues view)
-   */
   const handleOpenInBrowser = async () => {
     if (currentView === 'issues') {
       const issue = getCurrentItem() as Issue;
       if (issue?.web_url) {
         try {
           await open(issue.web_url);
-          showNotificationMessage(`已在浏览器打开 Issue #${issue.iid}`, 'success');
+          showNotificationMessage(`opened #${issue.iid}`, 'success');
         } catch (error) {
-          showNotificationMessage('打开浏览器失败', 'error');
+          showNotificationMessage('open failed', 'error');
         }
       }
     } else if (currentView === 'projects') {
@@ -571,34 +415,26 @@ export const Dashboard: React.FC = () => {
       if (project?.web_url) {
         try {
           await open(project.web_url);
-          showNotificationMessage(`已在浏览器打开项目 ${project.name}`, 'success');
+          showNotificationMessage(`opened ${project.name}`, 'success');
         } catch (error) {
-          showNotificationMessage('打开浏览器失败', 'error');
+          showNotificationMessage('open failed', 'error');
         }
       }
     }
   };
 
-  /**
-   * Toggle multi-select mode (issues view)
-   */
   const toggleMultiSelectMode = () => {
     if (currentView !== 'issues') return;
-
     setMultiSelectMode(!multiSelectMode);
     setSelectedIssues(new Set());
     showNotificationMessage(
-      multiSelectMode ? '退出多选模式' : '进入多选模式 (Space 选择)',
+      multiSelectMode ? 'exit multi-select' : 'enter multi-select (Space to select)',
       'info'
     );
   };
 
-  /**
-   * Toggle issue selection (issues view)
-   */
   const toggleIssueSelection = () => {
     if (currentView !== 'issues' || !multiSelectMode) return;
-
     const issue = getCurrentItem() as Issue;
     if (!issue) return;
 
@@ -611,17 +447,14 @@ export const Dashboard: React.FC = () => {
     setSelectedIssues(newSelected);
   };
 
-  /**
-   * Batch start from selected issues
-   */
   const handleBatchStart = async () => {
     if (currentView !== 'issues' || selectedIssues.size === 0) {
-      showNotificationMessage('没有选中的 Issues', 'warning');
+      showNotificationMessage('no issues selected', 'warning');
       return;
     }
 
     try {
-      showNotificationMessage(`正在创建 ${selectedIssues.size} 个任务...`, 'info');
+      showNotificationMessage(`creating ${selectedIssues.size} tasks...`, 'info');
 
       let successCount = 0;
       for (const issueIid of selectedIssues) {
@@ -642,45 +475,29 @@ export const Dashboard: React.FC = () => {
         successCount++;
       }
 
-      // Reload tasks
       await loadData();
-
-      // Clear selection and exit multi-select mode
       setSelectedIssues(new Set());
       setMultiSelectMode(false);
-
-      // Switch to tasks view
       setCurrentView('tasks');
       setSelectedIndex(0);
 
-      showNotificationMessage(
-        `✓ 已创建 ${successCount} 个任务`,
-        'success'
-      );
+      showNotificationMessage(`created ${successCount} tasks`, 'success');
     } catch (error) {
-      showNotificationMessage('批量创建任务失败', 'error');
+      showNotificationMessage('batch create failed', 'error');
     }
   };
 
-  /**
-   * Clear all selections
-   */
   const clearSelections = () => {
     setSelectedIssues(new Set());
-    showNotificationMessage('已清空选择', 'info');
+    showNotificationMessage('cleared', 'info');
   };
 
-  /**
-   * Keyboard input handler
-   */
   useInput((input, key) => {
-    // Help
     if (input === '?') {
       setShowHelp(!showHelp);
       return;
     }
 
-    // Close help/detail with ESC or 'q'
     if (key.escape || input === 'q') {
       if (showHelp) {
         setShowHelp(false);
@@ -696,22 +513,18 @@ export const Dashboard: React.FC = () => {
       }
     }
 
-    // Don't handle other keys when help is open or in detail view
     if (showHelp || detailView === 'detail') return;
 
-    // View switching
     if (input === '1') switchView('tasks');
     if (input === '2') switchView('issues');
     if (input === '3') switchView('completed');
     if (input === '4') switchView('projects');
 
-    // Navigation - ONLY use arrow keys, remove j/k to avoid terminal scroll conflict
     if (key.downArrow) navigateDown();
     if (key.upArrow) navigateUp();
     if (input === 'g') navigateTop();
     if (key.shift && input === 'G') navigateBottom();
 
-    // Detail - open full screen detail view
     if (key.return) {
       if (currentView === 'projects') {
         handleEnterProject();
@@ -721,29 +534,24 @@ export const Dashboard: React.FC = () => {
       return;
     }
 
-    // Back to previous view (Escape) - browser-like navigation
     if (key.escape && canGoBack()) {
       popView();
       return;
     }
 
-    // Refresh current view
     if (input === 'r') refreshCurrentView();
 
-    // View-specific actions
     if (currentView === 'tasks') {
       if (input === 'a') handleAttachSession();
       if (input === 'k' || input === 'K') handleKillSession();
     }
 
     if (currentView === 'issues') {
-      // Multi-select mode toggle
       if (input === 'm') {
         toggleMultiSelectMode();
         return;
       }
 
-      // In multi-select mode
       if (multiSelectMode) {
         if (input === ' ') toggleIssueSelection();
         if (input === 'B') handleBatchStart();
@@ -753,7 +561,6 @@ export const Dashboard: React.FC = () => {
           setSelectedIssues(new Set());
         }
       } else {
-        // Normal mode
         if (input === 's') handleStartFromIssue();
         if (input === 'o') handleOpenInBrowser();
       }
@@ -764,114 +571,87 @@ export const Dashboard: React.FC = () => {
     }
   });
 
-  /**
-   * Get view title
-   */
   const getViewTitle = () => {
     switch (currentView) {
       case 'tasks':
-        return `运行中任务 · ${tasks.length} active`;
+        return `tasks running: ${tasks.length}`;
       case 'issues':
         if (multiSelectMode) {
-          return `待办 Issues · ${issues.length} opened · 已选 ${selectedIssues.size}`;
+          return `issues todo: ${issues.length} | selected: ${selectedIssues.size}`;
         }
-        return `待办 Issues · ${issues.length} opened`;
+        return `issues todo: ${issues.length}`;
       case 'completed':
-        return `已完成 · ${completedTasks.length} completed`;
+        return `completed: ${completedTasks.length}`;
       case 'projects':
-        return `GitLab 项目 · ${projects.length} projects`;
+        return `gitlab projects: ${projects.length}`;
       default:
         return '';
     }
   };
 
-  /**
-   * Get bottom bar shortcuts
-   */
-  const getBottomBarShortcuts = () => {
-    const navigation = '↑↓:导航  1-4:切换视图';
-    const common = 'Enter:查看详情  r:刷新数据  q:退出';
-
-    switch (currentView) {
-      case 'tasks':
-        return `${navigation}  │  a:附加会话  K:终止任务  │  ${common}`;
-      case 'issues':
-        if (multiSelectMode) {
-          return `${navigation}  │  Space:选择  B:批量开始  c:清空选择  m:退出多选  │  ${common}`;
-        }
-        return `${navigation}  │  s:开始任务  o:打开浏览器  m:多选模式  │  ${common}`;
-      case 'completed':
-        return `${navigation}  │  ${common}`;
-      case 'projects':
-        return `${navigation}  │  Enter:进入  o:打开浏览器  │  ${common}`;
-      default:
-        return common;
-    }
-  };
-
-  // Render - Q Style Cartoon Design
+  // Render - Hand-drawn Style Q Design (B&W only)
   return (
     <Box flexDirection="column" height={terminalHeight}>
       {detailView === 'list' ? (
         <>
-          {/* Top bar - Q Style: cute header with decorations */}
+          {/* Top bar - Hand-drawn style header */}
           <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={2} backgroundColor="black" justifyContent="space-between">
             <Text color="white">
-              <Text color="magenta">☆</Text>
+              <Text>*</Text>
               <Text bold> AFK Dashboard </Text>
-              <Text color="cyan">｡‿｡</Text>
-              <Text color={loadingPulse < 5 ? 'white' : 'magenta'}> ◠‿◠</Text>
+              <Text color="gray">(^_^)</Text>
             </Text>
             <Text color="white">
               {currentView === 'tasks' && (
                 <>
-                  <Text color="green">{figures.bullet}</Text>
-                  <Text> [任务] </Text>
-                  <Text color="cyan">{tasks.length}</Text>
+                  <Text>[*] </Text>
+                  <Text>tasks </Text>
+                  <Text>{tasks.length}</Text>
                 </>
               )}
               {currentView === 'issues' && (
                 <>
-                  <Text color="magenta">{figures.bullet}</Text>
-                  <Text> [Issues] </Text>
-                  <Text color="cyan">{issues.length}</Text>
+                  <Text>[~] </Text>
+                  <Text>issues </Text>
+                  <Text>{issues.length}</Text>
                   {multiSelectMode && (
-                    <><Text dimColor> ⊙ </Text><Text color="magenta">{selectedIssues.size}选</Text></>
+                    <><Text dimColor> (</Text><Text>{selectedIssues.size}</Text><Text dimColor>)</Text></>
                   )}
                 </>
               )}
               {currentView === 'completed' && (
                 <>
-                  <Text color="green">{figures.tick}</Text>
-                  <Text> [完成] </Text>
-                  <Text color="cyan">{completedTasks.length}</Text>
+                  <Text>[v] </Text>
+                  <Text>done </Text>
+                  <Text>{completedTasks.length}</Text>
                 </>
               )}
               {currentView === 'projects' && (
                 <>
-                  <Text color="cyan">{figures.star}</Text>
-                  <Text> [项目] </Text>
-                  <Text color="cyan">{projects.length}</Text>
+                  <Text>[^] </Text>
+                  <Text>projects </Text>
+                  <Text>{projects.length}</Text>
                 </>
               )}
             </Text>
           </Box>
 
-          {/* Decorative separator */}
+          {/* Hand-drawn style separator */}
           <Box flexShrink={0}>
-            <Text color="white">╭──────────────────────────────────────╮</Text>
+            <Text color="gray">.-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~-.</Text>
           </Box>
 
-          {/* Section header - cute view title */}
+          {/* Section header */}
           <Box paddingX={2} paddingY={0}>
             <Text color="white">
-              <Text color="cyan">◆ </Text>
+              <Text>(</Text>
               <Text bold>{getViewTitle()}</Text>
-              <Text color="gray"> ═══</Text>
+              <Text>) </Text>
+              <Text color="gray">~-~-</Text>
             </Text>
           </Box>
 
-          {/* Main list - Fixed height with internal scrolling */}
+          {/* Main list */}
           <Box height={CONTENT_HEIGHT - 2} flexShrink={0} flexDirection="column" paddingX={2} paddingY={0}>
             {currentView === 'tasks' && (
               <TaskListView
@@ -911,49 +691,51 @@ export const Dashboard: React.FC = () => {
 
           {/* Bottom separator */}
           <Box flexShrink={0}>
-            <Text color="white">╰──────────────────────────────────────╯</Text>
+            <Text color="gray">`~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'</Text>
           </Box>
 
-          {/* Bottom bar - Q style cute footer */}
+          {/* Bottom bar - Hand-drawn style footer */}
           <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
             <Text>
-              <Text color="cyan">↑↓</Text>
-              <Text color="gray">导航</Text>
-              <Text color="white"> · </Text>
-              <Text color="magenta">1-4</Text>
-              <Text color="gray">视图</Text>
-              <Text color="white"> · </Text>
+              <Text color="white">~</Text>
+              <Text color="gray">up/dn</Text>
+              <Text color="white">~</Text>
+              <Text color="gray"> | </Text>
+              <Text color="white">1-4</Text>
+              <Text color="gray">view</Text>
+              <Text color="white"> | </Text>
               {currentView === 'tasks' && (
                 <>
-                  <Text color="yellow">a</Text><Text color="gray">附</Text><Text color="white"> · </Text>
-                  <Text color="yellow">K</Text><Text color="gray">杀</Text><Text color="white"> · </Text>
+                  <Text color="white">a</Text><Text color="gray">attach</Text><Text color="white"> | </Text>
+                  <Text color="white">K</Text><Text color="gray">kill</Text><Text color="white"> | </Text>
                 </>
               )}
               {currentView === 'issues' && !multiSelectMode && (
                 <>
-                  <Text color="yellow">s</Text><Text color="gray">开</Text><Text color="white"> · </Text>
-                  <Text color="yellow">o</Text><Text color="gray">看</Text><Text color="white"> · </Text>
-                  <Text color="yellow">m</Text><Text color="gray">多选</Text><Text color="white"> · </Text>
+                  <Text color="white">s</Text><Text color="gray">start</Text><Text color="white"> | </Text>
+                  <Text color="white">o</Text><Text color="gray">open</Text><Text color="white"> | </Text>
+                  <Text color="white">m</Text><Text color="gray">multi</Text><Text color="white"> | </Text>
                 </>
               )}
               {currentView === 'issues' && multiSelectMode && (
                 <>
-                  <Text color="yellow">空格</Text><Text color="gray">选</Text><Text color="white"> · </Text>
-                  <Text color="yellow">B</Text><Text color="gray">批</Text><Text color="white"> · </Text>
+                  <Text color="white">Space</Text><Text color="gray">select</Text><Text color="white"> | </Text>
+                  <Text color="white">B</Text><Text color="gray">batch</Text><Text color="white"> | </Text>
                 </>
               )}
               {currentView === 'projects' && (
                 <>
-                  <Text color="yellow">Enter</Text><Text color="gray">进</Text><Text color="white"> · </Text>
+                  <Text color="white">Enter</Text><Text color="gray">enter</Text><Text color="white"> | </Text>
                 </>
               )}
-              <Text color="green">Enter</Text><Text color="gray">详情</Text><Text color="white"> · </Text>
-              <Text color="green">r</Text><Text color="gray">刷新</Text><Text color="white"> · </Text>
-              <Text color="red">q</Text><Text color="gray">退</Text>
+              <Text color="white">Enter</Text><Text color="gray">detail</Text><Text color="white"> | </Text>
+              <Text color="white">r</Text><Text color="gray">refresh</Text><Text color="white"> | </Text>
+              <Text color="white">q</Text><Text color="gray">quit</Text>
+              <Text color="white">~</Text>
             </Text>
           </Box>
 
-          {/* Notification with slide animation */}
+          {/* Notification */}
           {notification && (
             <Box
               position="absolute"
@@ -961,11 +743,11 @@ export const Dashboard: React.FC = () => {
               right={notifAnimation === 'slide-in' ? -40 : 3}
               width={35}
               borderStyle="round"
-              borderColor={notification.type === 'error' ? 'red' : notification.type === 'success' ? 'green' : 'cyan'}
+              borderColor="white"
               paddingX={1}
               backgroundColor="black"
             >
-              <Text color="cyan">✧ </Text>
+              <Text color="white">* </Text>
               <Text dimColor={notifAnimation === 'slide-out'}>{notification.message}</Text>
             </Box>
           )}
@@ -974,7 +756,6 @@ export const Dashboard: React.FC = () => {
           {showHelp && <HelpDialog />}
         </>
       ) : (
-        /* Full screen detail view */
         <DetailScreen
           item={getCurrentItem()}
           view={currentView}
@@ -985,17 +766,9 @@ export const Dashboard: React.FC = () => {
   );
 };
 
-/**
- * Task List View Component
- */
-interface TaskListViewProps {
-  tasks: Task[];
-  selected: number;
-  scrollOffset: number;
-  viewportHeight: number;
-}
+/* ============ List View Components ============ */
 
-const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffset, viewportHeight }) => {
+const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: number; viewportHeight: number}> = ({ tasks, selected, scrollOffset, viewportHeight }) => {
   const [breathPhase, setBreathPhase] = React.useState(0);
 
   React.useEffect(() => {
@@ -1006,12 +779,11 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffs
   if (tasks.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text color="gray">　　　(´･ω･`) 　暂无运行中的任务　(´･ω･`)　　　</Text>
+        <Text color="gray">    ( o_o )  no running tasks  ( o_o )</Text>
       </Box>
     );
   }
 
-  // Calculate visible range
   const visibleTasks = tasks.slice(scrollOffset, scrollOffset + viewportHeight);
   const startIndex = scrollOffset;
 
@@ -1020,10 +792,9 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffs
       {visibleTasks.map((task, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        // Q Style: breathing border with cute colors
-        const borderColor = isSelected ? (breathPhase < 10 ? 'magenta' : 'cyan') : undefined;
-        const bullet = isSelected ? '◉' : (task.status === 'active' ? '●' : '○');
-        const statusColor = isSelected ? 'magenta' : (task.status === 'active' ? 'green' : 'cyan');
+        const borderColor = isSelected ? (breathPhase < 10 ? 'white' : 'gray') : undefined;
+        const bullet = isSelected ? '(*)' : (task.status === 'active' ? '(.)' : '(-)');
+        const textColor = isSelected ? 'white' : 'gray';
 
         return (
           <Box
@@ -1036,12 +807,12 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffs
             paddingX={1}
           >
             <Box>
-              <Text color={statusColor}>{bullet} </Text>
-              <Text color={isSelected ? 'magenta' : 'white'} bold> #{task.iid} </Text>
-              <Text color={isSelected ? 'magenta' : 'gray'} bold={isSelected}>{task.title || task.branch}</Text>
+              <Text color="white">{bullet} </Text>
+              <Text color={textColor} bold> #{task.iid} </Text>
+              <Text color={textColor}>{task.title || task.branch}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text color="gray">　♡ {task.session || '-'} │ ◈ {task.progress || '0%'} │ ⌚ {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
+              <Text dimColor>    ~ {task.session || '-'} | {task.progress || '0%'} | {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
             </Box>
           </Box>
         );
@@ -1050,26 +821,7 @@ const TaskListView: React.FC<TaskListViewProps> = ({ tasks, selected, scrollOffs
   );
 };
 
-/**
- * Issue List View Component
- */
-interface IssueListViewProps {
-  issues: Issue[];
-  selected: number;
-  multiSelectMode?: boolean;
-  selectedIssues?: Set<number>;
-  scrollOffset: number;
-  viewportHeight: number;
-}
-
-const IssueListView: React.FC<IssueListViewProps> = ({
-  issues,
-  selected,
-  multiSelectMode = false,
-  selectedIssues = new Set(),
-  scrollOffset,
-  viewportHeight
-}) => {
+const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMode?: boolean; selectedIssues?: Set<number>; scrollOffset: number; viewportHeight: number}> = ({ issues, selected, multiSelectMode = false, selectedIssues = new Set(), scrollOffset, viewportHeight }) => {
   const [breathPhase, setBreathPhase] = React.useState(0);
 
   React.useEffect(() => {
@@ -1080,12 +832,11 @@ const IssueListView: React.FC<IssueListViewProps> = ({
   if (issues.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text color="gray">　　　(´∀`)･ﾟ 暂无Issues哦 　 (´∀`)･ﾟ　　　</Text>
+        <Text color="gray">    ( o_o )  no issues  ( o_o )</Text>
       </Box>
     );
   }
 
-  // Calculate visible range
   const visibleIssues = issues.slice(scrollOffset, scrollOffset + viewportHeight);
   const startIndex = scrollOffset;
 
@@ -1095,9 +846,9 @@ const IssueListView: React.FC<IssueListViewProps> = ({
         const index = startIndex + visibleIndex;
         const isSelected = selectedIssues.has(issue.iid);
         const isCurrent = index === selected;
-        // Q Style cute checkbox
-        const checkbox = multiSelectMode ? (isSelected ? '☑' : '☒') : '○';
-        const borderColor = isCurrent ? (breathPhase < 10 ? 'magenta' : 'cyan') : undefined;
+        const checkbox = multiSelectMode ? (isSelected ? '[x]' : '[ ]') : '( )';
+        const borderColor = isCurrent ? (breathPhase < 10 ? 'white' : 'gray') : undefined;
+        const textColor = isCurrent ? 'white' : 'gray';
 
         return (
           <Box
@@ -1111,17 +862,13 @@ const IssueListView: React.FC<IssueListViewProps> = ({
             backgroundColor={isSelected ? 'gray' : undefined}
           >
             <Box>
-              <Text color={isCurrent ? 'magenta' : 'cyan'}>{checkbox} </Text>
-              <Text color={isCurrent ? 'magenta' : 'white'} bold> #{issue.iid} </Text>
-              <Text color={isCurrent ? 'magenta' : 'gray'} bold={isCurrent}>{issue.title}</Text>
+              <Text color={textColor}>{checkbox} </Text>
+              <Text color={textColor} bold> #{issue.iid} </Text>
+              <Text color={textColor}>{issue.title}</Text>
             </Box>
             <Box paddingLeft={2}>
-              {issue.labels.length > 0 ? (
-                <Text color="gray">　★ {issue.labels.map(l => `◇${l}`).join(' ')}</Text>
-              ) : (
-                <Text color="gray">　★ - </Text>
-              )}
-              <Text color="dim">│ {issue.description ? truncate(issue.description, 40) : '...'}</Text>
+              <Text dimColor>    # {issue.labels.length > 0 ? issue.labels.join(', ') : '-'}</Text>
+              <Text dimColor> - {issue.description ? truncate(issue.description, 40) : '...'}</Text>
             </Box>
           </Box>
         );
@@ -1130,17 +877,7 @@ const IssueListView: React.FC<IssueListViewProps> = ({
   );
 };
 
-/**
- * Completed List View Component
- */
-interface CompletedListViewProps {
-  tasks: Task[];
-  selected: number;
-  scrollOffset: number;
-  viewportHeight: number;
-}
-
-const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, scrollOffset, viewportHeight }) => {
+const CompletedListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: number; viewportHeight: number}> = ({ tasks, selected, scrollOffset, viewportHeight }) => {
   const [breathPhase, setBreathPhase] = React.useState(0);
 
   React.useEffect(() => {
@@ -1151,12 +888,11 @@ const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, 
   if (tasks.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text color="gray">　(๑˘̩˘̩˘̩˘̩)　暂无完成的任务哦～　(๑˘̩˘̩˘̩˘̩)</Text>
+        <Text color="gray">    ( o_o )  no completed tasks  ( o_o )</Text>
       </Box>
     );
   }
 
-  // Calculate visible range
   const visibleTasks = tasks.slice(scrollOffset, scrollOffset + viewportHeight);
   const startIndex = scrollOffset;
 
@@ -1165,8 +901,8 @@ const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, 
       {visibleTasks.map((task, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        // Q Style: cute completed items
-        const borderColor = isSelected ? (breathPhase < 10 ? 'green' : 'cyan') : undefined;
+        const borderColor = isSelected ? (breathPhase < 10 ? 'white' : 'gray') : undefined;
+        const textColor = isSelected ? 'white' : 'gray';
 
         return (
           <Box
@@ -1179,9 +915,10 @@ const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, 
             paddingX={1}
           >
             <Box>
-              <Text color="green">✓ #{task.iid}  </Text>
-              <Text color={isSelected ? 'magenta' : 'gray'} bold={isSelected}>{task.title || task.branch}</Text>
-              <Text color="gray">  100%  {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
+              <Text color="white">[v] </Text>
+              <Text color={textColor} bold> #{task.iid} </Text>
+              <Text color={textColor}>{task.title || task.branch}</Text>
+              <Text dimColor>  100%  {task.startedAt ? formatTime(task.startedAt) : '-'}</Text>
             </Box>
           </Box>
         );
@@ -1190,17 +927,7 @@ const CompletedListView: React.FC<CompletedListViewProps> = ({ tasks, selected, 
   );
 };
 
-/**
- * Project List View Component
- */
-interface ProjectListViewProps {
-  projects: Project[];
-  selected: number;
-  scrollOffset: number;
-  viewportHeight: number;
-}
-
-const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, scrollOffset, viewportHeight }) => {
+const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOffset: number; viewportHeight: number}> = ({ projects, selected, scrollOffset, viewportHeight }) => {
   const [breathPhase, setBreathPhase] = React.useState(0);
 
   React.useEffect(() => {
@@ -1211,12 +938,11 @@ const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, s
   if (projects.length === 0) {
     return (
       <Box justifyContent="center" alignItems="center" height="100%">
-        <Text color="gray">　ヽ(ˇ∀ˇ )ゞ 暂无项目数据 　 ヽ(ˇ∀ˇ )ゞ</Text>
+        <Text color="gray">    ( o_o )  no projects  ( o_o )</Text>
       </Box>
     );
   }
 
-  // Calculate visible range
   const visibleProjects = projects.slice(scrollOffset, scrollOffset + viewportHeight);
   const startIndex = scrollOffset;
 
@@ -1225,8 +951,8 @@ const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, s
       {visibleProjects.map((project, visibleIndex) => {
         const index = startIndex + visibleIndex;
         const isSelected = index === selected;
-        // Q Style border
-        const borderColor = isSelected ? (breathPhase < 10 ? 'cyan' : 'magenta') : undefined;
+        const borderColor = isSelected ? (breathPhase < 10 ? 'white' : 'gray') : undefined;
+        const textColor = isSelected ? 'white' : 'gray';
 
         return (
           <Box
@@ -1239,15 +965,15 @@ const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, s
             paddingX={1}
           >
             <Box>
-              <Text color="cyan">★ </Text>
-              <Text color={isSelected ? 'magenta' : 'white'} bold> #{project.id} </Text>
-              <Text color={isSelected ? 'magenta' : 'gray'} bold={isSelected}>{project.name}</Text>
+              <Text color="white">[^] </Text>
+              <Text color={textColor} bold> #{project.id} </Text>
+              <Text color={textColor}>{project.name}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text color="gray">　♡ {project.path_with_namespace}</Text>
+              <Text dimColor>    ~ {project.path_with_namespace}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text color="dim">{project.description ? truncate(project.description, 60) : '...'}</Text>
+              <Text dimColor>    ~ {project.description ? truncate(project.description, 60) : '...'}</Text>
             </Box>
           </Box>
         );
@@ -1256,26 +982,19 @@ const ProjectListView: React.FC<ProjectListViewProps> = ({ projects, selected, s
   );
 };
 
-/**
- * Detail Screen Component (Full screen, not modal)
- */
-interface DetailScreenProps {
-  item: Task | Issue | Project | undefined;
-  view: View;
-  height: number;
-}
+/* ============ Detail & Help Components ============ */
 
-const DetailScreen: React.FC<DetailScreenProps> = ({ item, view, height }) => {
-  if (!item) return <Box><Text color="gray">No item selected (´･ω･`)</Text></Box>;
+const DetailScreen: React.FC<{item: Task | Issue | Project | undefined; view: View; height: number}> = ({ item, view, height }) => {
+  if (!item) return <Box><Text color="gray">( o_o ) no item selected</Text></Box>;
 
   const HEADER_HEIGHT = 1;
   const FOOTER_HEIGHT = 1;
   const CONTENT_HEIGHT = height - HEADER_HEIGHT - FOOTER_HEIGHT;
 
   const getTitle = () => {
-    if (view === 'issues') return `Issue #${(item as Issue).iid}`;
-    if (view === 'projects') return `Project #${(item as Project).id}`;
-    return `Task #${(item as Task).iid}`;
+    if (view === 'issues') return `issue #${(item as Issue).iid}`;
+    if (view === 'projects') return `project #${(item as Project).id}`;
+    return `task #${(item as Task).iid}`;
   };
 
   const getSubtitle = () => {
@@ -1285,76 +1004,71 @@ const DetailScreen: React.FC<DetailScreenProps> = ({ item, view, height }) => {
 
   return (
     <Box flexDirection="column" height={height}>
-      {/* Top bar - Q Style cute header */}
+      {/* Top bar */}
       <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
-        <Text color="magenta">
-          <Text bold>☆ </Text>
-          <Text color="white" bold>{getTitle()}</Text>
-          <Text color="gray"> │ </Text>
-          <Text color="cyan">{getSubtitle()}</Text>
-          <Text bold> ☆</Text>
+        <Text color="white">
+          <Text bold>* </Text>
+          <Text>{getTitle()}</Text>
+          <Text color="gray"> | </Text>
+          <Text>{getSubtitle()}</Text>
+          <Text> *</Text>
         </Text>
       </Box>
 
-      {/* Detail content - Q Style */}
+      {/* Content */}
       <Box height={CONTENT_HEIGHT} flexShrink={0} flexDirection="column" paddingX={2} paddingY={1}>
-      <Text color="gray">╭────────────────────────────────────────╮</Text>
+        <Text color="gray">.-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~-.</Text>
 
-      {view === 'tasks' && (
-        <Box flexDirection="column" paddingX={1}>
-          <Text color="white">　◇ <Text color="cyan">状态:</Text>　<Text color="green">{(item as Task).status}</Text></Text>
-          <Text color="white">　◇ <Text color="cyan">分支:</Text>　{(item as Task).branch || '-'}</Text>
-          <Text color="white">　◇ <Text color="cyan">会话:</Text>　{(item as Task).session || '-'}</Text>
-          <Text color="white">　◇ <Text color="cyan">进度:</Text>　{(item as Task).progress || '0%'}</Text>
-          <Text color="white">　◇ <Text color="cyan">开始:</Text>　{(item as Task).startedAt ? (item as Task).startedAt?.toString() : '-'}</Text>
-          <Text color="white">　◇ <Text color="cyan">工作树:</Text>　{(item as Task).worktree || '-'}</Text>
-        </Box>
-      )}
-
-      {view === 'issues' && (
-        <Box flexDirection="column" paddingX={1}>
-          <Text color="white">　◇ <Text color="cyan">标签:</Text>　{(item as Issue).labels.map(l => `@${l}`).join(' ') || '-'}</Text>
-          <Text color="white">　◇ <Text color="cyan">状态:</Text>　{(item as Issue).state}</Text>
-          <Text color="white">　◇ <Text color="cyan">URL:</Text>　<Text dimColor>{(item as Issue).web_url}</Text></Text>
-          <Box marginTop={1}>
-            <Text color="magenta">　★ 描述:</Text>
+        {view === 'tasks' && (
+          <Box flexDirection="column" paddingX={1}>
+            <Text color="white">  - status: {(item as Task).status}</Text>
+            <Text color="white">  - branch: {(item as Task).branch || '-'}</Text>
+            <Text color="white">  - session: {(item as Task).session || '-'}</Text>
+            <Text color="white">  - progress: {(item as Task).progress || '0%'}</Text>
+            <Text color="white">  - started: {(item as Task).startedAt ? (item as Task).startedAt?.toString() : '-'}</Text>
+            <Text color="white">  - worktree: {(item as Task).worktree || '-'}</Text>
           </Box>
-          <Text color="gray">　　{(item as Issue).description || '无描述'}</Text>
-        </Box>
-      )}
+        )}
 
-      {view === 'projects' && (
-        <Box flexDirection="column" paddingX={1}>
-          <Text color="white">　◇ <Text color="cyan">路径:</Text>　{(item as Project).path_with_namespace}</Text>
-          <Text color="white">　◇ <Text color="cyan">分支:</Text>　{(item as Project).default_branch}</Text>
-          <Text color="white">　◇ <Text color="cyan">命名空间:</Text>　{(item as Project).namespace.name}</Text>
-          <Text color="white">　◇ <Text color="cyan">更新:</Text>　{(item as Project).last_activity_at}</Text>
-          <Text color="white">　◇ <Text color="cyan">URL:</Text>　<Text dimColor>{(item as Project).web_url}</Text></Text>
-          <Box marginTop={1}>
-            <Text color="magenta">　★ 描述:</Text>
+        {view === 'issues' && (
+          <Box flexDirection="column" paddingX={1}>
+            <Text color="white">  - labels: {(item as Issue).labels.join(', ') || '-'}</Text>
+            <Text color="white">  - state: {(item as Issue).state}</Text>
+            <Text color="white">  - url: {(item as Issue).web_url}</Text>
+            <Box marginTop={1}>
+              <Text color="gray">  - description:</Text>
+            </Box>
+            <Text color="gray">    {(item as Issue).description || 'no description'}</Text>
           </Box>
-          <Text color="gray">　　{(item as Project).description || '无描述'}</Text>
-        </Box>
-      )}
+        )}
 
-      <Text color="gray">╰────────────────────────────────────────╯</Text>
+        {view === 'projects' && (
+          <Box flexDirection="column" paddingX={1}>
+            <Text color="white">  - path: {(item as Project).path_with_namespace}</Text>
+            <Text color="white">  - branch: {(item as Project).default_branch}</Text>
+            <Text color="white">  - namespace: {(item as Project).namespace.name}</Text>
+            <Text color="white">  - updated: {(item as Project).last_activity_at}</Text>
+            <Box marginTop={1}>
+              <Text color="gray">  - description:</Text>
+            </Box>
+            <Text color="gray">    {(item as Project).description || 'no description'}</Text>
+          </Box>
+        )}
+
+        <Text color="gray">`~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~'</Text>
       </Box>
 
-      {/* Bottom bar - Q Style */}
+      {/* Bottom bar */}
       <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
         <Text>
-          <Text color="cyan">ESC/q: </Text>
-          <Text color="gray">返回列表 </Text>
-          <Text color="magenta">(◕‿◕)</Text>
+          <Text color="gray">ESC/q: back </Text>
+          <Text>( o_o )</Text>
         </Text>
       </Box>
     </Box>
   );
 };
 
-/**
- * Help Dialog Component
- */
 const HelpDialog: React.FC = () => {
   return (
     <Box
@@ -1364,57 +1078,58 @@ const HelpDialog: React.FC = () => {
       right={8}
       bottom={3}
       borderStyle="round"
-      borderColor="magenta"
+      borderColor="white"
       backgroundColor="black"
       flexDirection="column"
       padding={1}
     >
       <Box marginBottom={1}>
-        <Text bold color="magenta">☆ 快捷键帮助 ☆</Text>
+        <Text bold color="white">* Help *</Text>
       </Box>
 
-      <Text color="cyan">视图切换:</Text>
-      <Text color="white">　1 - 运行中任务　　2 - 待办 Issues</Text>
-      <Text color="white">　3 - 已完成　　　　4 - GitLab项目</Text>
-
-      <Box marginTop={1}>
-        <Text color="cyan">导航:</Text>
-      </Box>
-      <Text color="white">　↑↓ - 上/下移动　　g/G - 首/末</Text>
+      <Text color="gray">view switch:</Text>
+      <Text color="white">  1 - tasks     2 - issues</Text>
+      <Text color="white">  3 - done     4 - projects</Text>
 
       <Box marginTop={1}>
-        <Text color="cyan">操作:</Text>
+        <Text color="gray">navigate:</Text>
       </Box>
-      <Text color="white">　Enter - 查看详情　ESC/q - 返回</Text>
-      <Text color="white">　r - 刷新数据　　? - 帮助</Text>
+      <Text color="white">  up/down - move</Text>
+      <Text color="white">  g/G - top/bottom</Text>
 
       <Box marginTop={1}>
-        <Text color="cyan">任务视图:</Text>
+        <Text color="gray">actions:</Text>
       </Box>
-      <Text color="yellow">　a - 附加会话　　k - 终止会话</Text>
+      <Text color="white">  Enter - detail</Text>
+      <Text color="white">  r - refresh</Text>
+      <Text color="white">  q - quit</Text>
 
       <Box marginTop={1}>
-        <Text color="cyan">Issues 视图:</Text>
+        <Text color="gray">tasks:</Text>
       </Box>
-      <Text color="yellow">　s - 从Issue开始工作</Text>
-      <Text color="yellow">　o - 在浏览器打开　m - 多选模式</Text>
+      <Text color="white">  a - attach   k - kill</Text>
 
       <Box marginTop={1}>
-        <Text color="cyan">项目视图:</Text>
+        <Text color="gray">issues:</Text>
       </Box>
-      <Text color="yellow">　Enter - 进入项目Issues</Text>
-      <Text color="yellow">　o - 在浏览器打开</Text>
+      <Text color="white">  s - start    o - open</Text>
+      <Text color="white">  m - multi select</Text>
+
+      <Box marginTop={1}>
+        <Text color="gray">projects:</Text>
+      </Box>
+      <Text color="white">  Enter - enter issues</Text>
+      <Text color="white">  o - open</Text>
 
       <Box marginTop={1} justifyContent="center">
-        <Text color="gray">按 ? 或 ESC 关闭帮助 (◕‿◕)</Text>
+        <Text color="gray">? or ESC to close ( o_o )</Text>
       </Box>
     </Box>
   );
 };
 
-/**
- * Helper functions
- */
+/* ============ Helpers ============ */
+
 function formatTime(date: Date): string {
   const now = new Date();
   const diff = now.getTime() - date.getTime();

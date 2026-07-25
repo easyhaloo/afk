@@ -4,7 +4,7 @@
  * Hand-drawn Style Q Design (B&W only)
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import figures from 'figures';
 import { tmux as createTmux } from 'node-tmux';
@@ -58,8 +58,25 @@ export const Dashboard: React.FC = () => {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [scrollOffset, setScrollOffset] = useState(0);
   const [detailView, setDetailView] = useState<DetailView>('list');
+  const isDetailMode = detailView === 'detail';
   const [notification, setNotification] = useState<Notification | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+
+  // Debug mode
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const prevSelectedRef = useRef<number | null>(null);
+  const addDebugLog = (msg: string) => setDebugLog(prev => [...prev.slice(-20), `${new Date().toLocaleTimeString()} ${msg}`]);
+
+  // Helper to serialize item for debug
+  const serializeItem = (item: any): string => {
+    if (!item) return 'none';
+    if (item.name !== undefined) return JSON.stringify({ id: item.id, name: item.name });
+    if (item.title !== undefined) return JSON.stringify({ id: item.iid, title: item.title });
+    return JSON.stringify({ id: item.id });
+  };
+
+  // Derived list helpers (must be before first use at line 66)
 
   // Derived list helpers (must be before first use at line 66)
   const getItems = () => {
@@ -94,6 +111,11 @@ export const Dashboard: React.FC = () => {
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedIssues, setSelectedIssues] = useState<Set<number>>(new Set());
 
+  // Project detail data
+  const [projectBranches, setProjectBranches] = useState<any[]>([]);
+  const [projectTags, setProjectTags] = useState<any[]>([]);
+  const [projectCommits, setProjectCommits] = useState<any[]>([]);
+
   // Animation states
   const [notifAnimation, setNotifAnimation] = useState<'hidden' | 'slide-in' | 'visible' | 'slide-out'>('hidden');
   const [separatorPhase, setSeparatorPhase] = useState(0);
@@ -122,7 +144,41 @@ export const Dashboard: React.FC = () => {
     setSelectedIndex(0);
     setScrollOffset(0);
     setDetailView('list');
+    addDebugLog(`[VIEW ENTER] view=${currentView} items=${getItems().length}`);
   }, [currentView]);
+
+  // Log selection changes (use ref to skip StrictMode double-invoke)
+  useEffect(() => {
+    if (prevSelectedRef.current !== null && prevSelectedRef.current !== selectedIndex) {
+      const prevItems = getItems();
+      const prevItem = prevItems[prevSelectedRef.current];
+      addDebugLog(`[LEAVE] view=${currentView} idx=${prevSelectedRef.current} item=${serializeItem(prevItem)}`);
+    }
+    if (prevSelectedRef.current !== selectedIndex) {
+      const item = getItem();
+      addDebugLog(`[ENTER] view=${currentView} idx=${selectedIndex} item=${serializeItem(item)}`);
+    }
+    prevSelectedRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  // Fetch project detail data when entering project detail
+  useEffect(() => {
+    if (detailView === 'detail' && currentView === 'projects') {
+      const project = getItem() as Project;
+      if (project?.id) {
+        Promise.all([
+          projectService.getBranches(project.id),
+          projectService.getTags(project.id),
+          projectService.getRecentCommits(project.id),
+        ]).then(([branches, tags, commits]) => {
+          setProjectBranches(branches);
+          setProjectTags(tags);
+          setProjectCommits(commits);
+          addDebugLog(`[PROJECT LOAD] id=${project.id} branches=${branches.length} tags=${tags.length} commits=${commits.length}`);
+        });
+      }
+    }
+  }, [detailView, currentView]);
 
   // Auto-refresh when view changes
   useEffect(() => {
@@ -490,6 +546,15 @@ export const Dashboard: React.FC = () => {
       return;
     }
 
+    if (input === 'D' || input === 'd') {
+      setDebugMode(d => {
+        const next = !d;
+        addDebugLog(`[DEBUG ${next ? 'ON' : 'OFF'}]`);
+        return next;
+      });
+      return;
+    }
+
     if (key.escape || input === 'q') {
       if (showHelp) {
         setShowHelp(false);
@@ -503,6 +568,16 @@ export const Dashboard: React.FC = () => {
         exit();
         return;
       }
+    }
+
+    // In detail view: i key jumps to project's issues
+    if (detailView === 'detail' && input === 'i') {
+      const project = getItem() as Project;
+      if (project) {
+        setCurrentProject(project);
+        switchView('issues');
+      }
+      return;
     }
 
     if (showHelp || detailView === 'detail') return;
@@ -519,7 +594,10 @@ export const Dashboard: React.FC = () => {
 
     if (key.return) {
       if (currentView === 'projects') {
-        handleEnterProject();
+        // Set current project and show detail
+        const project = getItem() as Project;
+        if (project) setCurrentProject(project);
+        setDetailView('detail');
       } else {
         setDetailView('detail');
       }
@@ -684,49 +762,18 @@ export const Dashboard: React.FC = () => {
           </Box>
 
           {/* Bottom bar - Clean footer */}
-          <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
+          <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center" alignItems="center">
             <Text>
+              <Text color="gray">ESC</Text>
+              <Text color="white"> back │ </Text>
+              <Text color="gray">?</Text>
+              <Text color="white"> help │ </Text>
               <Text color="gray">↑↓</Text>
               <Text color="white"> │ </Text>
-              <Text color="gray">1-4</Text>
+              <Text color="gray">o</Text>
+              <Text color="white"> open │ </Text>
+              <Text color="gray">r</Text>
               <Text color="white"> │ </Text>
-              {currentView === 'tasks' && (
-                <>
-                  <Text color="gray">a</Text><Text color="white">attach</Text>
-                  <Text color="white"> │ </Text>
-                  <Text color="gray">K</Text><Text color="white">kill</Text>
-                  <Text color="white"> │ </Text>
-                </>
-              )}
-              {currentView === 'issues' && !multiSelectMode && (
-                <>
-                  <Text color="gray">s</Text><Text color="white">start</Text>
-                  <Text color="white"> │ </Text>
-                  <Text color="gray">o</Text><Text color="white">open</Text>
-                  <Text color="white"> │ </Text>
-                  <Text color="gray">m</Text><Text color="white">multi</Text>
-                  <Text color="white"> │ </Text>
-                </>
-              )}
-              {currentView === 'issues' && multiSelectMode && (
-                <>
-                  <Text color="gray">Space</Text><Text color="white">select</Text>
-                  <Text color="white"> │ </Text>
-                  <Text color="gray">B</Text><Text color="white">batch</Text>
-                  <Text color="white"> │ </Text>
-                </>
-              )}
-              {currentView === 'projects' && (
-                <>
-                  <Text color="gray">↵</Text><Text color="white">enter</Text>
-                  <Text color="white"> │ </Text>
-                </>
-              )}
-              <Text color="gray">↵</Text><Text color="white">detail</Text>
-              <Text color="white"> │ </Text>
-              <Text color="gray">r</Text><Text color="white">refresh</Text>
-              <Text color="white"> │ </Text>
-              <Text color="gray">q</Text><Text color="white">quit</Text>
             </Text>
           </Box>
 
@@ -749,12 +796,40 @@ export const Dashboard: React.FC = () => {
 
           {/* Help dialog */}
           {showHelp && <HelpDialog />}
+
+          {/* Debug log panel */}
+          {debugMode && (
+            <Box
+              position="absolute"
+              bottom={1}
+              left={0}
+              right={0}
+              height={8}
+              backgroundColor="black"
+              flexDirection="column"
+              paddingX={1}
+              borderStyle="round"
+              borderColor="cyan"
+            >
+              <Box flexShrink={0} paddingY={0}>
+                <Text color="cyan" bold>▼ DEBUG LOG (D to close)</Text>
+              </Box>
+              <Box flexDirection="column" overflow="hidden">
+                {debugLog.map((line, i) => (
+                  <Text key={i} color="cyan" dimColor={i < debugLog.length - 3}>{line}</Text>
+                ))}
+              </Box>
+            </Box>
+          )}
         </>
       ) : (
         <DetailScreen
           item={getItem()}
           view={currentView}
           height={terminalHeight}
+          branches={projectBranches}
+          tags={projectTags}
+          commits={projectCommits}
         />
       )}
     </Box>
@@ -786,8 +861,8 @@ const TaskListView: React.FC<{tasks: Task[]; selected: number; scrollOffset: num
         return (
           <Box
             key={task.iid}
-            height={4}
-            flexShrink={0}
+            minHeight={4}
+            overflow="hidden"
             flexDirection="column"
             borderStyle={isSelected ? 'round' : undefined}
             borderColor={isSelected ? 'white' : undefined}
@@ -832,8 +907,8 @@ const IssueListView: React.FC<{issues: Issue[]; selected: number; multiSelectMod
         return (
           <Box
             key={issue.iid}
-            height={4}
-            flexShrink={0}
+            minHeight={4}
+            overflow="hidden"
             flexDirection="column"
             borderStyle={isCurrent ? 'round' : undefined}
             borderColor={isCurrent ? 'white' : undefined}
@@ -878,8 +953,8 @@ const CompletedListView: React.FC<{tasks: Task[]; selected: number; scrollOffset
         return (
           <Box
             key={task.iid}
-            height={3}
-            flexShrink={0}
+            minHeight={3}
+            overflow="hidden"
             flexDirection="column"
             borderStyle={isSelected ? 'round' : undefined}
             borderColor={isSelected ? 'white' : undefined}
@@ -920,8 +995,8 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
         return (
           <Box
             key={project.id}
-            height={4}
-            flexShrink={0}
+            minHeight={3}
+            overflow="hidden"
             flexDirection="column"
             borderStyle={isSelected ? 'round' : undefined}
             borderColor={isSelected ? 'white' : undefined}
@@ -933,10 +1008,7 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
               <Text color={textColor}>{project.name}</Text>
             </Box>
             <Box paddingLeft={2}>
-              <Text dimColor>  ─ {project.path_with_namespace}</Text>
-            </Box>
-            <Box paddingLeft={2}>
-              <Text dimColor>  ─ {project.description ? truncate(project.description, 60) : '…'}</Text>
+              <Text dimColor>  ─ {project.description ? truncate(project.description, 50) : '…'}</Text>
             </Box>
           </Box>
         );
@@ -947,7 +1019,14 @@ const ProjectListView: React.FC<{projects: Project[]; selected: number; scrollOf
 
 /* ============ Detail & Help Components ============ */
 
-const DetailScreen: React.FC<{item: Task | Issue | Project | undefined; view: View; height: number}> = ({ item, view, height }) => {
+const DetailScreen: React.FC<{
+  item: Task | Issue | Project | undefined;
+  view: View;
+  height: number;
+  branches?: any[];
+  tags?: any[];
+  commits?: any[];
+}> = ({ item, view, height, branches = [], tags = [], commits = [] }) => {
   if (!item) return <Box><Text color="gray">ℹ  no item selected</Text></Box>;
 
   const HEADER_HEIGHT = 1;
@@ -965,16 +1044,30 @@ const DetailScreen: React.FC<{item: Task | Issue | Project | undefined; view: Vi
     return (item as any).title || (item as Task).branch;
   };
 
+  const fmtDate = (d: string | undefined) => {
+    if (!d) return '–';
+    const date = new Date(d);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffH = Math.floor(diffMin / 60);
+    const diffD = Math.floor(diffH / 24);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m`;
+    if (diffH < 24) return `${diffH}h`;
+    if (diffD < 30) return `${diffD}d`;
+    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  };
+
   return (
     <Box flexDirection="column" height={height}>
       {/* Top bar */}
       <Box height={HEADER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
         <Text color="white">
-          <Text bold>* </Text>
+          <Text bold>▸ </Text>
           <Text>{getTitle()}</Text>
-          <Text color="gray"> | </Text>
+          <Text color="gray"> │ </Text>
           <Text>{getSubtitle()}</Text>
-          <Text> *</Text>
         </Text>
       </Box>
 
@@ -1006,15 +1099,76 @@ const DetailScreen: React.FC<{item: Task | Issue | Project | undefined; view: Vi
         )}
 
         {view === 'projects' && (
-          <Box flexDirection="column" paddingX={1}>
-            <Text color="white">  ─ path: {(item as Project).path_with_namespace}</Text>
-            <Text color="white">  ─ branch: {(item as Project).default_branch}</Text>
-            <Text color="white">  ─ namespace: {(item as Project).namespace.name}</Text>
-            <Text color="white">  ─ updated: {(item as Project).last_activity_at}</Text>
+          <Box flexDirection="column" paddingX={1} overflow="hidden">
+            {/* Header */}
+            <Text color="white">  {(item as Project).path_with_namespace}</Text>
+            {(item as Project).description && (
+              <Text dimColor>  {(item as Project).description}</Text>
+            )}
+
+            {/* Recent commits */}
             <Box marginTop={1}>
-              <Text color="gray">  ─ description:</Text>
+              <Text color="white" bold>recent</Text>
             </Box>
-            <Text color="gray">    {(item as Project).description || 'no description'}</Text>
+            {commits.length === 0 ? (
+              <Text dimColor>  loading…</Text>
+            ) : (
+              commits.slice(0, 5).map((c, i) => (
+                <Box key={i} flexWrap="wrap">
+                  <Text color="white">  {c.id}</Text>
+                  <Text color="gray"> · {c.author}</Text>
+                  <Text color="gray"> · {c.title?.substring(0, 24)}</Text>
+                  <Text dimColor> · {fmtDate(c.committed_date)}</Text>
+                </Box>
+              ))
+            )}
+
+            {/* Branches */}
+            <Box marginTop={1}>
+              <Text color="white" bold>branches</Text>
+              <Text dimColor> ({branches.length})</Text>
+            </Box>
+            {branches.length === 0 ? (
+              <Text dimColor>  loading…</Text>
+            ) : (
+              branches.slice(0, 4).map((b, i) => (
+                <Box key={i} flexWrap="wrap">
+                  <Text color={b.protected ? 'cyan' : 'gray'}>
+                    {b.protected ? '  ★' : '  ○'} {b.name}
+                  </Text>
+                  <Text dimColor> · {b.commit}</Text>
+                  <Text dimColor> · {b.author || '—'}</Text>
+                  <Text dimColor> · {fmtDate(b.committed_date)}</Text>
+                </Box>
+              ))
+            )}
+
+            {/* Tags */}
+            {tags.length > 0 && (
+              <>
+                <Box marginTop={1}>
+                  <Text color="white" bold>tags</Text>
+                  <Text dimColor> ({tags.length})</Text>
+                </Box>
+                {tags.map((t, i) => {
+                  const msg = t.message ? (t.message.length > 36 ? t.message.substring(0, 36) + '…' : t.message) : '';
+                  return (
+                    <Box key={i} flexDirection="column">
+                      <Box flexWrap="wrap">
+                        <Text color="gray">  </Text>
+                        <Text color="white">{t.name}</Text>
+                        <Text dimColor> · {t.commit}</Text>
+                        {t.commit_author ? <Text dimColor> · {t.commit_author}</Text> : null}
+                        <Text dimColor> · {fmtDate(t.commit_date)}</Text>
+                      </Box>
+                      {msg ? (
+                        <Text dimColor>      {msg}</Text>
+                      ) : null}
+                    </Box>
+                  );
+                })}
+              </>
+            )}
           </Box>
         )}
 
@@ -1024,7 +1178,16 @@ const DetailScreen: React.FC<{item: Task | Issue | Project | undefined; view: Vi
       {/* Bottom bar */}
       <Box height={FOOTER_HEIGHT} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
         <Text>
-          <Text color="gray">ESC/q: back</Text>
+          <Text color="gray">ESC</Text>
+          <Text color="white"> back │ </Text>
+          <Text color="gray">?</Text>
+          <Text color="white"> help │ </Text>
+          <Text color="gray">↑↓</Text>
+          <Text color="white"> navigate │ </Text>
+          <Text color="gray">o</Text>
+          <Text color="white"> open │ </Text>
+          <Text color="gray">r</Text>
+          <Text color="white"> refresh</Text>
         </Text>
       </Box>
     </Box>
@@ -1063,8 +1226,8 @@ const HelpDialog: React.FC = () => {
         <Text color="gray">actions:</Text>
       </Box>
       <Text color="white">  Enter - detail</Text>
-      <Text color="white">  r - refresh</Text>
-      <Text color="white">  q - quit</Text>
+      <Text color="white">  r - refresh    D - debug</Text>
+      <Text color="white">  q/ESC - quit/back</Text>
 
       <Box marginTop={1}>
         <Text color="gray">tasks:</Text>
@@ -1076,12 +1239,21 @@ const HelpDialog: React.FC = () => {
       </Box>
       <Text color="white">  s - start    o - open</Text>
       <Text color="white">  m - multi select</Text>
+      <Text color="white">  space - select    B - batch</Text>
+      <Text color="white">  c - clear    ESC - exit multi</Text>
 
       <Box marginTop={1}>
         <Text color="gray">projects:</Text>
       </Box>
-      <Text color="white">  Enter - enter issues</Text>
+      <Text color="white">  Enter - detail    i - issues</Text>
       <Text color="white">  o - open</Text>
+
+      <Box marginTop={1}>
+        <Text color="gray">detail:</Text>
+      </Box>
+      <Text color="white">  i - jump to issues</Text>
+      <Text color="white">  o - open project</Text>
+      <Text color="white">  ESC - back</Text>
 
       <Box marginTop={1} justifyContent="center">
         <Text color="gray">? or ESC to close</Text>

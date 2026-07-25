@@ -56,4 +56,52 @@ export class ProjectService {
       return [];
     }
   }
+
+  async getBranches(projectId: number): Promise<any[]> {
+    if (!this.client) return [];
+    try {
+      const branches = await this.client.Branches.all(projectId as string | number);
+      return (branches as any[]).map(b => ({
+        name: b.name,
+        commit: b.commit?.id?.substring(0, 8) || '',
+        commit_title: b.commit?.title || '',
+        author: b.commit?.author_name || '',
+        committed_date: b.commit?.committed_date || '',
+        protected: b.protected || false,
+      }));
+    } catch (error) {
+      return [];
+    }
+  }
+
+  async getTags(projectId: number): Promise<any[]> {
+    if (!this.client) return [];
+    try {
+      const tags = await this.client.Tags.all(projectId as string | number, { perPage: 10 });
+      return (tags as any[]).map(t => ({
+        name: t.name,
+        commit: t.commit?.id?.substring(0, 8) || '',
+        commit_author: t.commit?.author_name || '',
+        commit_date: t.commit?.committed_date || '',
+        message: t.message || '',
+      }));
+    } catch (error) {
+      return [];
+    }
+  }
+
+  async getRecentCommits(projectId: number, perPage = 5): Promise<any[]> {
+    if (!this.client) return [];
+    try {
+      const commits = await this.client.Commits.all(projectId as string | number, { perPage });
+      return (commits as any[]).map(c => ({
+        id: c.id?.substring(0, 8) || '',
+        title: c.title || '',
+        author: c.author_name || '',
+        committed_date: c.committed_date || '',
+      }));
+    } catch (error) {
+      return [];
+    }
+  }
 }

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { WorktreeManager } from '../lib/worktree.js';
+import { getWorktreeConfig } from '../lib/config-manager.js';
 
 export function registerWorktreeCommands(program: Command): void {
   const worktree = program
@@ -18,8 +19,9 @@ export function registerWorktreeCommands(program: Command): void {
     .option('--base-dir <path>', 'Base directory for worktrees', '/tmp/afk-worktrees')
     .action(async (options) => {
       try {
+        const cfg = getWorktreeConfig();
         const manager = new WorktreeManager();
-        const wt = await manager.create(options.iid, options.branch, options.baseDir);
+        const wt = await manager.create(options.iid, options.branch, options.baseDir ?? cfg.baseDir);
 
         console.log(chalk.green('✓ Worktree created'));
         console.log(chalk.gray(`  Issue: #${wt.iid}`));
@@ -88,10 +90,14 @@ export function registerWorktreeCommands(program: Command): void {
           console.log();
 
           worktrees.forEach(wt => {
-            const statusColor = wt.status === 'active' ? chalk.green :
-                                wt.status === 'completed' ? chalk.blue :
-                                chalk.red;
-            console.log(`  ${chalk.cyan(`#${wt.iid}`)} ${statusColor(`[${wt.status}]`)}`);
+            const displayStatus = wt.markerStatus || wt.status;
+            const statusColor =
+              displayStatus === 'crashed' ? chalk.red :
+              displayStatus === 'success' ? chalk.blue :
+              displayStatus === 'active' ? chalk.green :
+              displayStatus === 'completed' ? chalk.blueBright :
+              chalk.red;
+            console.log(`  ${chalk.cyan(`#${wt.iid}`)} ${statusColor(`[${displayStatus}]`)}`);
             console.log(chalk.gray(`    ${wt.path}`));
             console.log(chalk.gray(`    ${wt.branch}`));
             console.log();
@@ -153,6 +159,47 @@ export function registerWorktreeCommands(program: Command): void {
 
             console.log(chalk.dim('Run `afk worktree prune` to clean up'));
           }
+        }
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * clean command
+   */
+  worktree
+    .command('clean')
+    .description('Clean worktrees by status marker and/or age')
+    .option('--crashed', 'Clean CRASHED worktrees')
+    .option('--success', 'Clean SUCCESS worktrees')
+    .option('--stale', 'Clean STALE worktrees (inactive >7 days, no active session)')
+    .option('--all', 'Clean ALL worktrees including ACTIVE (dangerous)')
+    .option('--days <n>', 'Only clean worktrees older than N days', parseInt)
+    .option('--dry-run', 'Show what would be removed without actually removing')
+    .option('--force', 'Skip confirmation prompt')
+    .action(async (options) => {
+      try {
+        const manager = new WorktreeManager();
+
+        // Determine marker status filter
+        let markerStatus: 'crashed' | 'success' | 'all' | undefined;
+        if (options.crashed) markerStatus = 'crashed';
+        else if (options.success) markerStatus = 'success';
+        else if (options.all) markerStatus = 'all';
+
+        const { deleted, skipped } = await manager.clean({
+          markerStatus,
+          stale: options.stale,
+          olderThanDays: options.days,
+          dryRun: options.dryRun,
+        });
+
+        if (options.dryRun) {
+          console.log(chalk.yellow(`Would remove ${deleted} worktree(s) (skipped: ${skipped})`));
+        } else {
+          console.log(chalk.green(`✓ Removed ${deleted} worktree(s) (skipped: ${skipped})`));
         }
       } catch (error) {
         console.error(chalk.red('Error:'), (error as Error).message);

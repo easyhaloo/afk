@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { GitLabClient } from '../lib/gitlab.js';
 import { WorkflowRunner } from '../lib/workflow-runner.js';
+import { getWorkflowConfig } from '../lib/config-manager.js';
 
 export function registerWorkflowCommands(program: Command): void {
   const workflow = program
@@ -25,14 +26,15 @@ export function registerWorkflowCommands(program: Command): void {
         const gitlab = createGitLabClient();
         const runner = new WorkflowRunner(gitlab);
 
+        const cfg = getWorkflowConfig();
         const session = options.session || `afk-${options.iid}`;
         const result = await runner.run({
           iid: options.iid,
           session,
-          targetBranch: options.targetBranch,
+          targetBranch: options.targetBranch ?? cfg.targetBranch,
           baseBranch: options.baseBranch,
-          maxRetries: options.maxRetries,
-          hardTimeoutMs: options.hardTimeout,
+          maxRetries: options.maxRetries ?? cfg.maxRetries,
+          hardTimeoutMs: options.hardTimeout ?? cfg.completionTimeout,
         });
 
         if (result.success) {

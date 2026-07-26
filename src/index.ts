@@ -7,6 +7,7 @@ import { registerWorktreeCommands } from './commands/worktree.js';
 import { registerWorkflowCommands } from './commands/workflow.js';
 import { registerSchedulerCommands } from './commands/scheduler.js';
 import { registerDashboardCommands } from './commands/dashboard.js';
+import { registerDbCommands } from './commands/db.js';
 
 const program = new Command();
 
@@ -23,6 +24,7 @@ registerWorktreeCommands(program);
 registerWorkflowCommands(program);
 registerSchedulerCommands(program);
 registerDashboardCommands(program);
+registerDbCommands(program);
 
 // Parse CLI arguments
 program.parse();

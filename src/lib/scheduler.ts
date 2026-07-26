@@ -216,10 +216,9 @@ export class Scheduler {
     let skipped = 0;
 
     for (const issue of issues) {
-      // Check if already in queue
-      const jobs = await this.queue.getJobs(['waiting', 'active', 'delayed']);
-      const exists = jobs.some(j => j.data.iid === issue.iid);
-      if (exists) continue;
+      // O(1) per-issue lookup
+      const job = await this.queue.getJob(`issue-${issue.iid}`);
+      if (job) continue;
 
       // Check preconditions
       const check = await checkIssuePreconditions(this.gitlab, issue.iid);

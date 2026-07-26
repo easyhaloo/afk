@@ -2,6 +2,16 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { GitLabClient } from '../lib/gitlab.js';
 import { Scheduler } from '../lib/scheduler.js';
+import { getSchedulerConfig, getWorkflowConfig } from '../lib/config-manager.js';
+
+// Merge CLI options with config defaults (called per-action, reads cached config)
+function redisOpts(options: { [key: string]: any }) {
+  const cfg = getSchedulerConfig();
+  return {
+    redisHost: (options.redisHost as string) ?? cfg.redisHost,
+    redisPort: options.redisPort ? parseInt(options.redisPort) : cfg.redisPort,
+  };
+}
 
 export function registerSchedulerCommands(program: Command): void {
   const scheduler = program
@@ -14,10 +24,10 @@ export function registerSchedulerCommands(program: Command): void {
   scheduler
     .command('start')
     .description('Start scheduler worker')
-    .option('--max-concurrent <n>', 'Max concurrent tasks', '3')
-    .option('--redis-host <host>', 'Redis host', 'localhost')
-    .option('--redis-port <port>', 'Redis port', '6379')
-    .option('--poll-interval <seconds>', 'GitLab polling interval (0 to disable)', '60')
+    .option('--max-concurrent <n>', 'Max concurrent tasks')
+    .option('--redis-host <host>', 'Redis host')
+    .option('--redis-port <port>', 'Redis port')
+    .option('--poll-interval <seconds>', 'GitLab polling interval (0 to disable)')
     .action(async (options) => {
       try {
         // PID lock
@@ -38,18 +48,18 @@ export function registerSchedulerCommands(program: Command): void {
         }
         await fs.writeFile(lockFile, String(process.pid), 'utf-8');
 
+        const cfg = getSchedulerConfig();
         const gitlab = createGitLabClient();
         const sched = new Scheduler(gitlab, {
-          maxConcurrent: parseInt(options.maxConcurrent),
-          redisHost: options.redisHost,
-          redisPort: parseInt(options.redisPort),
+          maxConcurrent: options.maxConcurrent ? parseInt(options.maxConcurrent) : cfg.maxConcurrent,
+          ...redisOpts(options),
         });
 
         // Start scheduler
         await sched.start();
 
         // Optional: poll GitLab periodically
-        const pollInterval = parseInt(options.pollInterval);
+        const pollInterval = options.pollInterval ? parseInt(options.pollInterval) : cfg.pollInterval;
         if (pollInterval > 0) {
           console.log(chalk.gray(`   Polling GitLab every ${pollInterval}s...`));
 
@@ -91,14 +101,13 @@ export function registerSchedulerCommands(program: Command): void {
   scheduler
     .command('status')
     .description('Check scheduler status')
-    .option('--redis-host <host>', 'Redis host', 'localhost')
-    .option('--redis-port <port>', 'Redis port', '6379')
+    .option('--redis-host <host>', 'Redis host')
+    .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
         const gitlab = createGitLabClient();
         const sched = new Scheduler(gitlab, {
-          redisHost: options.redisHost,
-          redisPort: parseInt(options.redisPort),
+          ...redisOpts(options),
         });
 
         const status = await sched.getStatus();
@@ -136,21 +145,20 @@ export function registerSchedulerCommands(program: Command): void {
     .description('Manually enqueue task for issue')
     .requiredOption('--iid <iid>', 'Issue IID', parseInt)
     .option('--priority <n>', 'Priority (1-10)', '5')
-    .option('--branch <branch>', 'Base branch', 'main')
-    .option('--redis-host <host>', 'Redis host', 'localhost')
-    .option('--redis-port <port>', 'Redis port', '6379')
+    .option('--branch <branch>', 'Base branch')
+    .option('--redis-host <host>', 'Redis host')
+    .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
         const gitlab = createGitLabClient();
         const sched = new Scheduler(gitlab, {
-          redisHost: options.redisHost,
-          redisPort: parseInt(options.redisPort),
+          ...redisOpts(options),
         });
 
         const jobId = await sched.enqueue(
           options.iid,
           parseInt(options.priority),
-          options.branch
+          options.branch ?? getWorkflowConfig().targetBranch
         );
 
         console.log(chalk.green(`✅ Task enqueued (job ID: ${jobId})`));
@@ -169,14 +177,13 @@ export function registerSchedulerCommands(program: Command): void {
     .command('pause')
     .description('Pause task for issue')
     .requiredOption('--iid <iid>', 'Issue IID', parseInt)
-    .option('--redis-host <host>', 'Redis host', 'localhost')
-    .option('--redis-port <port>', 'Redis port', '6379')
+    .option('--redis-host <host>', 'Redis host')
+    .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
         const gitlab = createGitLabClient();
         const sched = new Scheduler(gitlab, {
-          redisHost: options.redisHost,
-          redisPort: parseInt(options.redisPort),
+          ...redisOpts(options),
         });
 
         await sched.pauseTask(options.iid);
@@ -196,14 +203,13 @@ export function registerSchedulerCommands(program: Command): void {
     .command('resume')
     .description('Resume paused task')
     .requiredOption('--iid <iid>', 'Issue IID', parseInt)
-    .option('--redis-host <host>', 'Redis host', 'localhost')
-    .option('--redis-port <port>', 'Redis port', '6379')
+    .option('--redis-host <host>', 'Redis host')
+    .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
         const gitlab = createGitLabClient();
         const sched = new Scheduler(gitlab, {
-          redisHost: options.redisHost,
-          redisPort: parseInt(options.redisPort),
+          ...redisOpts(options),
         });
 
         await sched.resumeTask(options.iid);
@@ -222,14 +228,13 @@ export function registerSchedulerCommands(program: Command): void {
   scheduler
     .command('poll')
     .description('Manually poll GitLab for ready issues')
-    .option('--redis-host <host>', 'Redis host', 'localhost')
-    .option('--redis-port <port>', 'Redis port', '6379')
+    .option('--redis-host <host>', 'Redis host')
+    .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
         const gitlab = createGitLabClient();
         const sched = new Scheduler(gitlab, {
-          redisHost: options.redisHost,
-          redisPort: parseInt(options.redisPort),
+          ...redisOpts(options),
         });
 
         const enqueued = await sched.pollGitLab();

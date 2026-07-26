@@ -45,7 +45,7 @@ export function registerEscalateCommands(program: Command): void {
       console.log('Filing GitLab issue...');
 
       // Detect project from git remote
-      const projectPath = detectGitLabProject();
+      const projectPath = await detectGitLabProject();
       if (!projectPath) {
         console.error('ERROR: could not detect project from git remote. Set GITLAB_PROJECT_ID.');
         process.exit(1);

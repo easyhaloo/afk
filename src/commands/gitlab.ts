@@ -18,7 +18,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (iid: string, options) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         const issue = await client.getIssue(parseInt(iid));
 
         if (options.json) {
@@ -48,7 +48,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         const issues = await client.listIssues({
           labels: options.label,
           state: options.state,
@@ -82,7 +82,7 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<label>', 'Label to add')
     .action(async (iid: string, label: string) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         await client.addLabel(parseInt(iid), label);
         console.log(chalk.green(`✓ Added label "${label}" to issue #${iid}`));
       } catch (error) {
@@ -101,7 +101,7 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<label>', 'Label to remove')
     .action(async (iid: string, label: string) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         await client.removeLabel(parseInt(iid), label);
         console.log(chalk.green(`✓ Removed label "${label}" from issue #${iid}`));
       } catch (error) {
@@ -120,7 +120,7 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<message>', 'Comment message')
     .action(async (iid: string, message: string) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         await client.addComment(parseInt(iid), message);
         console.log(chalk.green(`✓ Added comment to issue #${iid}`));
       } catch (error) {
@@ -140,7 +140,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--label <labels>', 'Comma-separated labels')
     .action(async (title: string, options) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         const iid = await client.createIssue({
           title,
           description: options.description,
@@ -163,7 +163,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--add-label <labels>', 'Comma-separated labels to add')
     .action(async (iid: string, options) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         if (options.addLabel) {
           const labels = options.addLabel.split(',').map((l: string) => l.trim());
           await client.addLabelsToIssue(parseInt(iid), labels);
@@ -187,7 +187,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (iid: string, options) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         const issue = await client.getIssue(parseInt(iid));
         const ac = client.parseAC(issue.description);
 
@@ -222,7 +222,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--remove <labels>', 'Comma-separated labels to remove')
     .action(async (iid: string, options) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         const add = options.add ? options.add.split(',').map((l: string) => l.trim()) : [];
         const remove = options.remove ? options.remove.split(',').map((l: string) => l.trim()) : [];
         await client.updateLabelsBatch(parseInt(iid), add, remove);
@@ -246,7 +246,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--resolvable', 'Mark comment as resolvable')
     .action(async (mriid: string, message: string, options) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         await client.addMRComment(parseInt(mriid), message, { resolvable: options.resolvable });
         console.log(chalk.green(`✓ Added comment to MR !${mriid}`));
       } catch (error) {
@@ -266,7 +266,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--is-blocked-by', 'Reverse: source is blocked by target instead of blocks')
     .action(async (sourceIid: string, targetIid: string, options) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         const linkType = options.isBlockedBy ? 'is_blocked_by' : 'blocks';
         await client.linkIssues(
           parseInt(sourceIid),
@@ -289,7 +289,7 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<mriid>', 'Merge Request IID')
     .action(async (mriid: string) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         const status = await client.getMRPipelineStatus(parseInt(mriid));
         console.log(status);
       } catch (error) {
@@ -307,7 +307,7 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<worktree>', 'Path to worktree')
     .action(async (worktree: string) => {
       try {
-        const client = createClient();
+        const client = await createClient();
         const markdown = await client.uploadArtifacts(worktree);
         if (markdown) {
           console.log(markdown);
@@ -324,7 +324,7 @@ export function registerGitLabCommands(program: Command): void {
 /**
  * Create GitLab client from environment variables
  */
-function createClient(): GitLabClient {
+async function createClient(): Promise<GitLabClient> {
   const envUrl = process.env.GITLAB_URL;
   let token = process.env.GITLAB_TOKEN;
   let projectId = process.env.GITLAB_PROJECT_ID;
@@ -344,7 +344,7 @@ function createClient(): GitLabClient {
   }
 
   if (!projectId) {
-    const detected = detectGitLabProject();
+    const detected = await detectGitLabProject();
     if (detected) projectId = detected;
   }
 

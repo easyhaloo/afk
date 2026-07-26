@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Issue } from '../../../types/dashboard';
 import { ListView } from './ListView';
+import { truncate } from '../utils';
 
 interface Props {
   issues: Issue[];
@@ -49,8 +50,4 @@ export function IssueListView({
       }}
     />
   );
-}
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : text.slice(0, max - 3) + '…';
 }

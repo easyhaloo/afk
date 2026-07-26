@@ -1,6 +1,6 @@
 import { Gitlab } from '@gitbeaker/node';
 import { Project } from '../types/dashboard';
-import { getGlabToken } from './glab-config';
+import { applyGlabConfig } from './glab-config';
 
 export type { Project };
 
@@ -8,25 +8,9 @@ export class ProjectService {
   private client: InstanceType<typeof Gitlab> | null = null;
 
   constructor() {
-    const gitlabUrl = process.env.GITLAB_URL;
-    const gitlabToken = process.env.GITLAB_TOKEN;
-
-    // Fallback to glab config
-    let finalUrl = gitlabUrl;
-    let finalToken = gitlabToken;
-    if (!finalToken) {
-      const glab = getGlabToken(finalUrl);
-      if (glab) {
-        finalUrl = finalUrl || (glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`);
-        finalToken = glab.token;
-      }
-    }
-
-    if (finalToken) {
-      this.client = new Gitlab({
-        host: finalUrl,
-        token: finalToken,
-      });
+    const cfg = applyGlabConfig();
+    if (cfg) {
+      this.client = new Gitlab({ host: cfg.host, token: cfg.token });
     }
   }
 

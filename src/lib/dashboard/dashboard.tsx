@@ -74,17 +74,17 @@ export const Dashboard: React.FC = () => {
   };
   const getItem = () => getItems()[selectedIndex];
 
-  const itemHeight = 1; // Each item is rendered as a single compact line.
+  const ROWS_PER_ITEM = 1; // Each item is rendered as a single compact line.
   const items = getItems();
   const maxIndex = Math.max(0, items.length - 1);
-  const itemsPerScreen = Math.floor((CONTENT_H - 2) / itemHeight);
+  const viewportHeight = Math.floor((CONTENT_H - 2) / ROWS_PER_ITEM);
 
-  let desiredScrollOffset = scrollOffset;
-  if (selectedIndex < scrollOffset) {
-    desiredScrollOffset = selectedIndex;
-  } else if (selectedIndex >= scrollOffset + itemsPerScreen) {
-    desiredScrollOffset = Math.min(selectedIndex - itemsPerScreen + 1, maxIndex);
-  }
+  const desiredScrollOffset =
+    selectedIndex < scrollOffset
+      ? selectedIndex
+      : selectedIndex >= scrollOffset + viewportHeight
+        ? Math.min(selectedIndex - viewportHeight + 1, maxIndex)
+        : scrollOffset;
   if (desiredScrollOffset !== scrollOffset) {
     setScrollOffset(desiredScrollOffset);
   }
@@ -211,11 +211,12 @@ export const Dashboard: React.FC = () => {
     notify('done', 'success');
   }, []);
 
-  // Animations
+  // Animations — paused while in detail mode to avoid wasted re-renders.
   useEffect(() => {
+    if (isDetailMode) return;
     const t = setInterval(() => setSeparatorPhase(p => (p + 1) % 100), 500);
     return () => clearInterval(t);
-  }, []);
+  }, [isDetailMode]);
 
   // Debug logging
   useEffect(() => {
@@ -284,11 +285,7 @@ export const Dashboard: React.FC = () => {
     if (input === 'g') navigateTop();
     if (key.shift && input === 'G') navigateBottom(items.length);
 
-    if (key.return) {
-      if (currentView === 'projects') setDetailView('detail');
-      else setDetailView('detail');
-      return;
-    }
+    if (key.return) { setDetailView('detail'); return; }
 
     if (key.escape && canGoBack()) { popView(); return; }
 
@@ -327,8 +324,6 @@ export const Dashboard: React.FC = () => {
     return `gitlab projects: ${projects.length}`;
   })();
 
-  const viewportH = Math.floor((CONTENT_H - 2) / itemHeight);
-
   return (
     <Box flexDirection="column" height={H}>
       {isDetailMode ? (
@@ -357,17 +352,15 @@ export const Dashboard: React.FC = () => {
             <Text color="white"><Text bold>{viewTitle}</Text><Text>  </Text><Text color="gray">──</Text></Text>
           </Box>
           <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2} paddingY={0}>
-            {currentView === 'tasks' && <TaskListView tasks={tasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportH} />}
-            {currentView === 'issues' && <IssueListView issues={issues} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportH} multiSelectMode={multiSelectMode} selectedIssues={selectedIssues} />}
-            {currentView === 'completed' && <CompletedListView tasks={completedTasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportH} />}
-            {currentView === 'projects' && <ProjectListView projects={projects} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportH} />}
+            {currentView === 'tasks' && <TaskListView tasks={tasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
+            {currentView === 'issues' && <IssueListView issues={issues} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} multiSelectMode={multiSelectMode} selectedIssues={selectedIssues} />}
+            {currentView === 'completed' && <CompletedListView tasks={completedTasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
+            {currentView === 'projects' && <ProjectListView projects={projects} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
             {/* Floating loading/more indicator — overlays the list, does not consume layout space. */}
-            {currentView === 'issues' && issueHasMore && (
-              <Box position="absolute" right={2} bottom={0}>
-                <Text dimColor>↓ loading more…</Text>
-              </Box>
-            )}
-            {currentView === 'projects' && projectHasMore && (
+            {(
+              (currentView === 'issues' && issueHasMore) ||
+              (currentView === 'projects' && projectHasMore)
+            ) && (
               <Box position="absolute" right={2} bottom={0}>
                 <Text dimColor>↓ more available</Text>
               </Box>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Project } from '../../../types/dashboard';
 import { ListView } from './ListView';
+import { truncate } from '../utils';
 
 interface Props {
   projects: Project[];
@@ -40,8 +41,4 @@ export function ProjectListView({ projects, selected, scrollOffset, viewportHeig
       }}
     />
   );
-}
-
-function truncate(text: string, max: number): string {
-  return text.length <= max ? text : text.slice(0, max - 3) + '…';
 }

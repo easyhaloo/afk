@@ -21,14 +21,6 @@ export async function fetchSessions(): Promise<TmuxSession[]> {
   return sessionService.listSessions();
 }
 
-export async function fetchIssues(projectId?: string | number, page = 1, perPage = 20) {
-  return issueService.listIssues(projectId, page, perPage);
-}
-
-export async function fetchProjects(page = 1, perPage = 20) {
-  return projectService.listProjects(page, perPage);
-}
-
 export async function fetchProjectDetail(projectId: number) {
   const [branches, tags, commits] = await Promise.all([
     projectService.getBranches(projectId),
@@ -49,3 +41,6 @@ export async function createTaskFromIssue(issue: Issue, options: {
 }): Promise<Task> {
   return taskService.createTaskFromIssue(issue, options);
 }
+
+// IssueService / ProjectService are used directly by useData for paginated calls.
+export { issueService, projectService };

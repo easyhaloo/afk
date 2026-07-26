@@ -1,37 +1,18 @@
 import { Gitlab } from '@gitbeaker/node';
 import { Issue } from '../types/dashboard';
-import { getGlabToken } from './glab-config';
+import { applyGlabConfig } from './glab-config';
 
 export class IssueService {
   private client: InstanceType<typeof Gitlab> | null = null;
   private projectId: string | number | null = null;
 
-  constructor(url?: string, token?: string, projectId?: string | number) {
-    // Priority: env vars > glab config
-    const gitlabUrl = url || process.env.GITLAB_URL;
-    const gitlabToken = token || process.env.GITLAB_TOKEN;
-    const gitlabProjectId = projectId || process.env.GITLAB_PROJECT_ID;
-
-    // Fallback to glab config
-    let finalUrl = gitlabUrl;
-    let finalToken = gitlabToken;
-    if (!finalToken) {
-      const glab = getGlabToken(finalUrl);
-      if (glab) {
-        finalUrl = finalUrl || (glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`);
-        finalToken = glab.token;
-      }
+  constructor(_url?: string, token?: string, projectId?: string | number) {
+    const cfg = token ? { host: process.env.GITLAB_URL || '', token } : applyGlabConfig();
+    if (cfg) {
+      this.client = new Gitlab({ host: cfg.host, token: cfg.token });
     }
-
-    if (finalToken) {
-      this.client = new Gitlab({
-        host: finalUrl,
-        token: finalToken,
-      });
-    }
-    if (gitlabProjectId) {
-      this.projectId = gitlabProjectId;
-    }
+    const pid = projectId || process.env.GITLAB_PROJECT_ID;
+    if (pid) this.projectId = pid;
   }
 
   async listIssues(projectId?: string | number, page = 1, perPage = 20): Promise<{ issues: Issue[]; hasMore: boolean }> {

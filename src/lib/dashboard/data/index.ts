@@ -1,3 +1,3 @@
 export { useData } from './useData';
-export { fetchTasks, fetchSessions, fetchIssues, fetchProjects,
+export { fetchTasks, fetchSessions,
          fetchProjectDetail, killSession, createTaskFromIssue } from './fetcher';

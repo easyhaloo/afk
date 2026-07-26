@@ -4,12 +4,26 @@ import type { View } from '../types';
 import {
   fetchTasks,
   fetchSessions,
-  fetchIssues,
-  fetchProjects,
   fetchProjectDetail,
   killSession,
   createTaskFromIssue,
+  issueService,
+  projectService,
 } from './fetcher';
+
+const PER_PAGE = 50;
+
+const mergeIssues = (prev: Issue[], next: Issue[]): Issue[] => {
+  const seen = new Set(prev.map(i => i.web_url));
+  const merged = [...prev];
+  for (const issue of next) {
+    if (!seen.has(issue.web_url)) {
+      merged.push(issue);
+      seen.add(issue.web_url);
+    }
+  }
+  return merged;
+};
 
 export function useData(currentView: View, currentProject: Project | null) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -17,7 +31,6 @@ export function useData(currentView: View, currentProject: Project | null) {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<TmuxSession[]>([]);
-  const [projectIssues, setProjectIssues] = useState<Issue[]>([]);
   const [projectBranches, setProjectBranches] = useState<any[]>([]);
   const [projectTags, setProjectTags] = useState<any[]>([]);
   const [projectCommits, setProjectCommits] = useState<any[]>([]);
@@ -58,24 +71,11 @@ export function useData(currentView: View, currentProject: Project | null) {
       (async () => {
         setLoading(true);
         try {
-          const data = await fetchIssues(currentProject?.id, pageToLoad, 50);
+          const data = await issueService.listIssues(currentProject?.id, pageToLoad, PER_PAGE);
           if (isProjectChanged) {
             setIssues(data.issues);
           } else {
-            // Dedupe by web_url — across pages, GitLab occasionally returns
-            // the same record twice, which would otherwise crash React's
-            // reconciliation on duplicate keys.
-            setIssues(prev => {
-              const seen = new Set(prev.map(i => i.web_url));
-              const merged = [...prev];
-              for (const issue of data.issues) {
-                if (!seen.has(issue.web_url)) {
-                  merged.push(issue);
-                  seen.add(issue.web_url);
-                }
-              }
-              return merged;
-            });
+            setIssues(prev => mergeIssues(prev, data.issues));
           }
           setIssueHasMore(data.hasMore);
           if (!isProjectChanged) setIssuePage(p => p + 1);
@@ -90,7 +90,7 @@ export function useData(currentView: View, currentProject: Project | null) {
         (async () => {
           setLoading(true);
           try {
-            const data = await fetchProjects(1, 50);
+            const data = await projectService.listProjects(1, PER_PAGE);
             setProjects(data.projects);
             setProjectHasMore(data.hasMore);
             setProjectPage(2);
@@ -138,18 +138,8 @@ export function useData(currentView: View, currentProject: Project | null) {
     if (loading || !issueHasMore) return;
     setLoading(true);
     try {
-      const data = await fetchIssues(currentProject?.id, issuePage, 50);
-      setIssues(prev => {
-        const seen = new Set(prev.map(i => i.web_url));
-        const merged = [...prev];
-        for (const issue of data.issues) {
-          if (!seen.has(issue.web_url)) {
-            merged.push(issue);
-            seen.add(issue.web_url);
-          }
-        }
-        return merged;
-      });
+      const data = await issueService.listIssues(currentProject?.id, issuePage, PER_PAGE);
+      setIssues(prev => mergeIssues(prev, data.issues));
       setIssueHasMore(data.hasMore);
       setIssuePage(p => p + 1);
     } finally {
@@ -161,7 +151,7 @@ export function useData(currentView: View, currentProject: Project | null) {
     if (loading || !projectHasMore) return;
     setLoading(true);
     try {
-      const data = await fetchProjects(projectPage, 50);
+      const data = await projectService.listProjects(projectPage, PER_PAGE);
       setProjects(prev => [...prev, ...data.projects]);
       setProjectHasMore(data.hasMore);
       setProjectPage(p => p + 1);
@@ -171,7 +161,7 @@ export function useData(currentView: View, currentProject: Project | null) {
   }, [loading, projectHasMore, projectPage]);
 
   return {
-    tasks, completedTasks, issues, projects, sessions, projectIssues,
+    tasks, completedTasks, issues, projects, sessions,
     projectBranches, projectTags, projectCommits, loading,
     issueHasMore, projectHasMore,
     loadProjectDetail,

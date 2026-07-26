@@ -130,6 +130,27 @@ function parseGlabYaml(content: string): GlabConfig {
 }
 
 /**
+ * Resolve GitLab host/token for service constructors: prefers env vars,
+ * falls back to the best glab CLI config. Returns a fully-resolved
+ * `{ host, token }` ready to feed into `new Gitlab({...})`.
+ */
+export function applyGlabConfig(): { host: string; token: string } | null {
+  let url = process.env.GITLAB_URL;
+  let token = process.env.GITLAB_TOKEN;
+
+  if (!token) {
+    const glab = getGlabToken(url);
+    if (glab) {
+      url = url || (glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`);
+      token = glab.token;
+    }
+  }
+
+  if (!token) return null;
+  return { host: url || '', token };
+}
+
+/**
  * Get the best GitLab token from glab config
  * Priority: specified host > default host > first available
  */

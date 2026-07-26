@@ -38,6 +38,14 @@ export interface SchedulerConfig {
   redisHost: string;
   redisPort: number;
   pollInterval: number;
+  /** Labels required for an issue to be scheduled */
+  requiredLabels: string[];
+  /** Labels that exclude an issue from scheduling */
+  excludeLabels: string[];
+  /** Notify on wave completion */
+  waveNotify: boolean;
+  /** Update PRD dashboard on each scan */
+  updateDashboard: boolean;
 }
 
 // ─── Worktree ─────────────────────────────────────────────────────────────────
@@ -98,6 +106,10 @@ const DEFAULT_SCHEDULER: SchedulerConfig = {
   redisHost: 'localhost',
   redisPort: 6379,
   pollInterval: 60,
+  requiredLabels: ['mode::afk', 'stage::ready-for-issues'],
+  excludeLabels: ['stage::afk-in-progress', 'stage::qa', 'stage::done', 'mode::hitl'],
+  waveNotify: true,
+  updateDashboard: true,
 };
 
 const DEFAULT_WORKTREE: WorktreeConfig = {
@@ -153,10 +165,14 @@ function loadWorkflowConfig(): WorkflowConfig {
 
 function loadSchedulerConfig(): SchedulerConfig {
   return {
-    maxConcurrent: parseIntEnv('AFK_MAX_CONCURRENT', DEFAULT_SCHEDULER.maxConcurrent),
+    maxConcurrent: parseIntEnv('AFK_SCHEDULER_MAX_CONCURRENT', DEFAULT_SCHEDULER.maxConcurrent),
     redisHost: process.env.REDIS_HOST || DEFAULT_SCHEDULER.redisHost,
     redisPort: parseIntEnv('REDIS_PORT', DEFAULT_SCHEDULER.redisPort),
-    pollInterval: parseIntEnv('AFK_POLL_INTERVAL', DEFAULT_SCHEDULER.pollInterval),
+    pollInterval: parseIntEnv('AFK_SCHEDULER_POLL_INTERVAL', DEFAULT_SCHEDULER.pollInterval),
+    requiredLabels: (process.env.AFK_SCHEDULER_REQUIRED_LABELS || DEFAULT_SCHEDULER.requiredLabels.join(',')).split(',').filter(Boolean),
+    excludeLabels: (process.env.AFK_SCHEDULER_EXCLUDE_LABELS || DEFAULT_SCHEDULER.excludeLabels.join(',')).split(',').filter(Boolean),
+    waveNotify: (process.env.AFK_SCHEDULER_WAVE_NOTIFY ?? String(DEFAULT_SCHEDULER.waveNotify)).toLowerCase() !== 'false',
+    updateDashboard: (process.env.AFK_SCHEDULER_UPDATE_DASHBOARD ?? String(DEFAULT_SCHEDULER.updateDashboard)).toLowerCase() !== 'false',
   };
 }
 

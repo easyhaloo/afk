@@ -204,8 +204,9 @@ export class Scheduler {
   /**
    * Poll GitLab for ready issues and enqueue them
    * @param labels - GitLab label filter (default: ['stage::ready-for-implement'])
+   * @param excludeLabels - Labels that exclude an issue from scheduling
    */
-  async pollGitLab(labels: string[] = ['stage::ready-for-implement']): Promise<number> {
+  async pollGitLab(labels: string[] = ['stage::ready-for-implement'], excludeLabels: string[] = []): Promise<number> {
     console.log('🔍 Polling GitLab for ready issues...');
 
     const issues = await this.gitlab.listIssues({
@@ -217,6 +218,12 @@ export class Scheduler {
     let skipped = 0;
 
     for (const issue of issues) {
+      // Skip issues with exclude labels
+      if (excludeLabels.length > 0 && issue.labels.some(l => excludeLabels.includes(l))) {
+        skipped++;
+        continue;
+      }
+
       // O(1) per-issue lookup
       const job = await this.queue.getJob(`issue-${issue.iid}`);
       if (job) continue;

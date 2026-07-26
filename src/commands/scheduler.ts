@@ -238,12 +238,13 @@ export function registerSchedulerCommands(program: Command): void {
           ...redisOpts(options),
         });
 
-        // Support multiple --label flags
+        // Support multiple --label flags; default to config requiredLabels
+        const cfg = getSchedulerConfig();
         const labels: string[] = options.label
           ? Array.isArray(options.label) ? options.label : [options.label]
-          : ['stage::ready-for-implement'];
+          : cfg.requiredLabels;
 
-        const enqueued = await sched.pollGitLab(labels);
+        const enqueued = await sched.pollGitLab(labels, cfg.excludeLabels);
         console.log(chalk.green(`✅ Polling complete (${enqueued} tasks enqueued)`));
 
         await sched.stop();

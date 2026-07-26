@@ -48,6 +48,7 @@ export const Dashboard: React.FC = () => {
     loadProjectDetail,
     reloadTasks, removeSession, addTaskFromIssue,
     fetchMoreIssues, fetchMoreProjects,
+    invalidateDetailCache,
   } = useData(currentView, issueProject);
 
   // UI state
@@ -207,9 +208,10 @@ export const Dashboard: React.FC = () => {
 
   const handleRefresh = useCallback(async () => {
     notify('refreshing...', 'info');
+    invalidateDetailCache();
     await reloadTasks();
     notify('done', 'success');
-  }, []);
+  }, [invalidateDetailCache, reloadTasks]);
 
   // Animations — paused while in detail mode to avoid wasted re-renders.
   useEffect(() => {

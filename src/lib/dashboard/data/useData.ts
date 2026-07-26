@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Task, Issue, Project, TmuxSession } from '../../../types/dashboard';
 import type { View } from '../types';
 import {
@@ -12,6 +12,8 @@ import {
 } from './fetcher';
 
 const PER_PAGE = 50;
+/** How long to keep a project-detail response cached before refetching. */
+const DETAIL_TTL_MS = 60_000;
 
 const mergeIssues = (prev: Issue[], next: Issue[]): Issue[] => {
   const seen = new Set(prev.map(i => i.web_url));
@@ -102,12 +104,34 @@ export function useData(currentView: View, currentProject: Project | null) {
     }
   }, [currentView, currentProject]);
 
-  // Project detail
+  // Project detail — backed by a TTL + in-flight cache so re-entering the
+  // detail screen for a project we already viewed within DETAIL_TTL_MS is
+  // instant and issues zero GitLab API calls.
+  const detailCacheRef = useRef<Map<number, { at: number; data: Awaited<ReturnType<typeof fetchProjectDetail>> }>>(new Map());
+  const detailInFlightRef = useRef<Map<number, Promise<Awaited<ReturnType<typeof fetchProjectDetail>>>>>(new Map());
+
   const loadProjectDetail = useCallback(async (project: Project) => {
-    const detail = await fetchProjectDetail(project.id);
-    setProjectBranches(detail.branches);
-    setProjectTags(detail.tags);
-    setProjectCommits(detail.commits);
+    const cached = detailCacheRef.current.get(project.id);
+    if (cached && Date.now() - cached.at < DETAIL_TTL_MS) {
+      setProjectBranches(cached.data.branches);
+      setProjectTags(cached.data.tags);
+      setProjectCommits(cached.data.commits);
+      return;
+    }
+    let p = detailInFlightRef.current.get(project.id);
+    if (!p) {
+      p = fetchProjectDetail(project.id);
+      detailInFlightRef.current.set(project.id, p);
+    }
+    try {
+      const detail = await p;
+      detailCacheRef.current.set(project.id, { at: Date.now(), data: detail });
+      setProjectBranches(detail.branches);
+      setProjectTags(detail.tags);
+      setProjectCommits(detail.commits);
+    } finally {
+      detailInFlightRef.current.delete(project.id);
+    }
   }, []);
 
   const reloadTasks = useCallback(async () => {
@@ -124,8 +148,7 @@ export function useData(currentView: View, currentProject: Project | null) {
 
   const removeSession = useCallback(async (name: string) => {
     await killSession(name);
-    await reloadSessions();
-    await reloadTasks();
+    await Promise.all([reloadSessions(), reloadTasks()]);
   }, [reloadSessions, reloadTasks]);
 
   const addTaskFromIssue = useCallback(async (issue: Issue, options: { branch: string; session: string; worktree: string }): Promise<Task> => {
@@ -133,6 +156,14 @@ export function useData(currentView: View, currentProject: Project | null) {
     await reloadTasks();
     return task;
   }, [reloadTasks]);
+
+  /** Drop all cached project-detail responses — used by full refresh. */
+  const invalidateDetailCache = useCallback(() => {
+    detailCacheRef.current.clear();
+    setProjectBranches([]);
+    setProjectTags([]);
+    setProjectCommits([]);
+  }, []);
 
   const fetchMoreIssues = useCallback(async () => {
     if (loading || !issueHasMore) return;
@@ -167,5 +198,6 @@ export function useData(currentView: View, currentProject: Project | null) {
     loadProjectDetail,
     reloadTasks, reloadSessions, removeSession, addTaskFromIssue,
     fetchMoreIssues, fetchMoreProjects,
+    invalidateDetailCache,
   };
 }

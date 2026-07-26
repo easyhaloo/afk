@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { GitLabClient } from '../lib/gitlab.js';
+import { getGlabToken } from '../lib/glab-config.js';
 
 export function registerGitLabCommands(program: Command): void {
   const gitlab = program
@@ -324,12 +325,22 @@ export function registerGitLabCommands(program: Command): void {
  * Create GitLab client from environment variables
  */
 function createClient(): GitLabClient {
-  const url = process.env.GITLAB_URL || 'https://gitlab.com';
-  const token = process.env.GITLAB_TOKEN;
+  const envUrl = process.env.GITLAB_URL;
+  let token = process.env.GITLAB_TOKEN;
   const projectId = process.env.GITLAB_PROJECT_ID;
 
+  let url = envUrl || 'https://gitlab.com';
+
   if (!token) {
-    throw new Error('GITLAB_TOKEN environment variable is required');
+    const glab = getGlabToken(envUrl);
+    if (glab) {
+      url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
+      token = glab.token;
+    }
+  }
+
+  if (!token) {
+    throw new Error('GITLAB_TOKEN environment variable is required (or authenticate glab: glab auth login)');
   }
 
   if (!projectId) {

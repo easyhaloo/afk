@@ -8,6 +8,9 @@ import { registerWorkflowCommands } from './commands/workflow.js';
 import { registerSchedulerCommands } from './commands/scheduler.js';
 import { registerDashboardCommands } from './commands/dashboard.js';
 import { registerDbCommands } from './commands/db.js';
+import { registerDebugCommands } from './commands/debug.js';
+import { registerEscalateCommands } from './commands/escalate.js';
+import { registerForkCommands } from './commands/fork.js';
 
 const program = new Command();
 
@@ -25,6 +28,9 @@ registerWorkflowCommands(program);
 registerSchedulerCommands(program);
 registerDashboardCommands(program);
 registerDbCommands(program);
+registerDebugCommands(program);
+registerEscalateCommands(program);
+registerForkCommands(program);
 
 // Parse CLI arguments
 program.parse();

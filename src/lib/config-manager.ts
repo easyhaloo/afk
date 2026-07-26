@@ -13,6 +13,8 @@ export interface GitLabConfig {
 export interface WorkflowConfig {
   /** Max time to wait for /goal completion (ms) */
   completionTimeout: number;
+  /** Seconds between /goal completion checks */
+  completionPoll: number;
   /** Max idle time before probing agent (ms) */
   idleTimeout: number;
   /** Time to wait for AC check after goal done (ms) */
@@ -23,6 +25,8 @@ export interface WorkflowConfig {
   maxRetries: number;
   /** Default target branch when no base::prd-N label exists */
   targetBranch: string;
+  /** Fallback MR target branch for afk-qa/prototype */
+  trackerTargetBranch: string;
   /** Token budget per /goal run */
   goalBudget: number;
 }
@@ -42,6 +46,30 @@ export interface WorktreeConfig {
   baseDir: string;
 }
 
+// ─── Fork ─────────────────────────────────────────────────────────────────────
+
+export interface ForkConfig {
+  /** Path to middleware-fork-stack checkout (bin/fork) */
+  stackDir: string;
+  /** Comma-separated services to fork (auto-detected if empty) */
+  services: string;
+}
+
+// ─── QA ───────────────────────────────────────────────────────────────────────
+
+export interface QAConfig {
+  /** Max time for full AC verification run (seconds) */
+  timeout: number;
+  /** Max time for single AC check (seconds) */
+  singleCheckTimeout: number;
+  /** Max retries for flaky checks */
+  maxRetries: number;
+  /** Auto-merge after all AC pass */
+  autoMerge: boolean;
+  /** Delete source branch after merge */
+  deleteSourceBranch: boolean;
+}
+
 // ─── Full Config ──────────────────────────────────────────────────────────────
 
 export interface Config {
@@ -55,11 +83,13 @@ export interface Config {
 
 const DEFAULT_WORKFLOW: WorkflowConfig = {
   completionTimeout: 7200 * 1000,
+  completionPoll: 5,
   idleTimeout: 1800 * 1000,
   acCheckTimeout: 180 * 1000,
   contextThreshold: 220_000,
   maxRetries: 2,
   targetBranch: 'main',
+  trackerTargetBranch: 'main',
   goalBudget: 10_000_000,
 };
 
@@ -72,6 +102,19 @@ const DEFAULT_SCHEDULER: SchedulerConfig = {
 
 const DEFAULT_WORKTREE: WorktreeConfig = {
   baseDir: '/tmp/afk-worktrees',
+};
+
+const DEFAULT_FORK: ForkConfig = {
+  stackDir: '',
+  services: '',
+};
+
+const DEFAULT_QA: QAConfig = {
+  timeout: 900,
+  singleCheckTimeout: 120,
+  maxRetries: 1,
+  autoMerge: true,
+  deleteSourceBranch: true,
 };
 
 function loadGitLabConfig(): GitLabConfig {
@@ -97,11 +140,13 @@ function loadGitLabConfig(): GitLabConfig {
 function loadWorkflowConfig(): WorkflowConfig {
   return {
     completionTimeout: parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW.completionTimeout),
+    completionPoll: parseIntEnv('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll),
     idleTimeout: parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW.idleTimeout),
     acCheckTimeout: parseEnvMs('AFK_AC_CHECK_TIMEOUT', DEFAULT_WORKFLOW.acCheckTimeout),
     contextThreshold: parseIntEnv('AFK_CONTEXT_THRESHOLD', DEFAULT_WORKFLOW.contextThreshold),
     maxRetries: parseIntEnv('AFK_MAX_RETRIES', DEFAULT_WORKFLOW.maxRetries),
     targetBranch: process.env.AFK_TARGET_BRANCH || DEFAULT_WORKFLOW.targetBranch,
+    trackerTargetBranch: process.env.AFK_TRACKER_TARGET_BRANCH || DEFAULT_WORKFLOW.trackerTargetBranch,
     goalBudget: parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget),
   };
 }
@@ -118,6 +163,23 @@ function loadSchedulerConfig(): SchedulerConfig {
 function loadWorktreeConfig(): WorktreeConfig {
   return {
     baseDir: process.env.AFK_WORKTREE_DIR || DEFAULT_WORKTREE.baseDir,
+  };
+}
+
+function loadForkConfig(): ForkConfig {
+  return {
+    stackDir: process.env.AFK_FORK_STACK_DIR || DEFAULT_FORK.stackDir,
+    services: process.env.AFK_DB_FORK_SERVICES || DEFAULT_FORK.services,
+  };
+}
+
+function loadQAConfig(): QAConfig {
+  return {
+    timeout: parseIntEnv('AFK_QA_TIMEOUT', DEFAULT_QA.timeout),
+    singleCheckTimeout: parseIntEnv('AFK_QA_SINGLE_CHECK_TIMEOUT', DEFAULT_QA.singleCheckTimeout),
+    maxRetries: parseIntEnv('AFK_QA_MAX_RETRIES', DEFAULT_QA.maxRetries),
+    autoMerge: (process.env.AFK_QA_AUTO_MERGE ?? String(DEFAULT_QA.autoMerge)).toLowerCase() !== 'false',
+    deleteSourceBranch: (process.env.AFK_QA_DELETE_SOURCE_BRANCH ?? String(DEFAULT_QA.deleteSourceBranch)).toLowerCase() !== 'false',
   };
 }
 
@@ -141,6 +203,8 @@ let _gitlab: GitLabConfig | null = null;
 let _workflow: WorkflowConfig | null = null;
 let _scheduler: SchedulerConfig | null = null;
 let _worktree: WorktreeConfig | null = null;
+let _fork: ForkConfig | null = null;
+let _qa: QAConfig | null = null;
 
 export function getGitLabConfig(): GitLabConfig {
   return _gitlab ??= loadGitLabConfig();
@@ -156,6 +220,14 @@ export function getSchedulerConfig(): SchedulerConfig {
 
 export function getWorktreeConfig(): WorktreeConfig {
   return _worktree ??= loadWorktreeConfig();
+}
+
+export function getForkConfig(): ForkConfig {
+  return _fork ??= loadForkConfig();
+}
+
+export function getQAConfig(): QAConfig {
+  return _qa ??= loadQAConfig();
 }
 
 export function getConfig(): Config {

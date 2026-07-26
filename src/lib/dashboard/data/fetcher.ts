@@ -42,5 +42,9 @@ export async function createTaskFromIssue(issue: Issue, options: {
   return taskService.createTaskFromIssue(issue, options);
 }
 
+export async function launchTask(iid: number, sessionName: string): Promise<void> {
+  return taskService.launch(iid, sessionName);
+}
+
 // IssueService / ProjectService are used directly by useData for paginated calls.
 export { issueService, projectService };

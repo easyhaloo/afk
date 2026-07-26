@@ -46,7 +46,7 @@ export const Dashboard: React.FC = () => {
     projectBranches, projectTags, projectCommits,
     issueHasMore, projectHasMore,
     loadProjectDetail,
-    reloadTasks, removeSession, addTaskFromIssue,
+    reloadTasks, removeSession, addTaskFromIssue, launchFromIssue, launchExistingTask,
     fetchMoreIssues, fetchMoreProjects,
     invalidateDetailCache,
   } = useData(currentView, issueProject);
@@ -147,6 +147,29 @@ export const Dashboard: React.FC = () => {
       notify(`created task #${newTask.iid}: ${newTask.title}`, 'success');
     } catch { notify('create failed', 'error'); }
   }, [currentView]);
+
+  const handleLaunch = useCallback(async () => {
+    if (currentView === 'issues') {
+      const issue = getItem() as Issue;
+      if (!issue) return;
+      notify(`launching #${issue.iid}...`, 'info');
+      const branch = `issue-${issue.iid}-${issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)}`;
+      try {
+        await launchFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch });
+        await reloadTasks();
+        setCurrentView('tasks');
+        setSelectedIndex(0);
+        notify(`launched: issue-${issue.iid}`, 'success');
+      } catch { notify('launch failed', 'error'); }
+    } else if (currentView === 'tasks') {
+      const task = getItem() as Task;
+      if (!task?.session) { notify('no session', 'warning'); return; }
+      try {
+        await launchExistingTask(task.iid, task.session);
+        notify(`launched: ${task.session}`, 'success');
+      } catch { notify('launch failed', 'error'); }
+    }
+  }, [currentView, launchFromIssue, launchExistingTask]);
 
   const handleOpenInBrowser = useCallback(async () => {
     const item = getItem();
@@ -296,6 +319,7 @@ export const Dashboard: React.FC = () => {
     if (currentView === 'tasks') {
       if (input === 'a') handleAttachSession();
       if (input === 'k' || input === 'K') handleKillSession();
+      if (input === 'l') handleLaunch();
     }
 
     if (currentView === 'issues') {
@@ -308,6 +332,7 @@ export const Dashboard: React.FC = () => {
       } else {
         if (input === 's') handleStartFromIssue();
         if (input === 'o') handleOpenInBrowser();
+        if (input === 'l') handleLaunch();
       }
     }
 
@@ -351,7 +376,7 @@ export const Dashboard: React.FC = () => {
           />
           <BreathingSeparator width={W} breathPhase={separatorPhase} isTop />
           <Box paddingX={2} paddingY={0}>
-            <Text color="white"><Text bold>{viewTitle}</Text><Text>  </Text><Text color="gray">──</Text></Text>
+            <Text color="white"><Text bold>{viewTitle}</Text></Text>
           </Box>
           <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2} paddingY={0}>
             {currentView === 'tasks' && <TaskListView tasks={tasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}

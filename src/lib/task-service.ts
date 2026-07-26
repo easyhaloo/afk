@@ -31,8 +31,6 @@ export class TaskService {
   }
 
   async createTaskFromIssue(issue: any, options: any): Promise<Task> {
-    // This would create a new tmux session for the issue
-    // For now, return a task object
     return {
       iid: issue.iid,
       title: issue.title,
@@ -41,5 +39,26 @@ export class TaskService {
       status: 'pending',
       progress: '0%',
     };
+  }
+
+  /**
+   * Launch autonomous implementation via afk workflow launch.
+   * Runs in background using setsid — does NOT block.
+   * The tmux session is created and the claude agent is started inside it.
+   */
+  async launch(iid: number, sessionName: string): Promise<void> {
+    const { spawn } = await import('child_process');
+    // Use setsid to fully detach — dashboard process exits immediately.
+    spawn('setsid', [
+      'node',
+      require.resolve('../index.js'),  // afk CLI entry
+      'workflow', 'launch',
+      '--iid', String(iid),
+      '--session', sessionName,
+    ], {
+      stdio: 'ignore',
+      detached: true,
+      cwd: process.cwd(),
+    }).unref();
   }
 }

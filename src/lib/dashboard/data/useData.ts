@@ -7,6 +7,7 @@ import {
   fetchProjectDetail,
   killSession,
   createTaskFromIssue,
+  launchTask,
   issueService,
   projectService,
 } from './fetcher';
@@ -213,6 +214,18 @@ export function useData(currentView: View, currentProject: Project | null) {
     return task;
   }, [reloadTasks]);
 
+  /** Create a task from an issue AND launch autonomous implementation in background. */
+  const launchFromIssue = useCallback(async (issue: Issue, options: { branch: string; session: string; worktree: string }): Promise<void> => {
+    const task = await addTaskFromIssue(issue, options);
+    if (!task.session) return;
+    await launchTask(issue.iid, task.session);
+  }, [addTaskFromIssue]);
+
+  /** Launch autonomous implementation for an existing task (by session name). */
+  const launchExistingTask = useCallback(async (iid: number, session: string): Promise<void> => {
+    await launchTask(iid, session);
+  }, []);
+
   /** Drop all cached project-detail responses — used by full refresh. */
   const invalidateDetailCache = useCallback(() => {
     detailCacheRef.current.clear();
@@ -269,7 +282,7 @@ export function useData(currentView: View, currentProject: Project | null) {
     projectBranches, projectTags, projectCommits, loading,
     issueHasMore, projectHasMore,
     loadProjectDetail,
-    reloadTasks, reloadSessions, removeSession, addTaskFromIssue,
+    reloadTasks, reloadSessions, removeSession, addTaskFromIssue, launchFromIssue, launchExistingTask,
     fetchMoreIssues, fetchMoreProjects,
     invalidateDetailCache,
   };

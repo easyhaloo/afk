@@ -23,7 +23,7 @@ export function registerForkCommands(program: Command): void {
 
       if (!cfg.stackDir) {
         console.log('[SKIP] AFK_FORK_STACK_DIR is not set — DB forking disabled');
-        process.exit(1);
+        return;
       }
 
       try {

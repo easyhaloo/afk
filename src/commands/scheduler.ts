@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { GitLabClient } from '../lib/gitlab.js';
 import { Scheduler } from '../lib/scheduler.js';
-import { getSchedulerConfig, getWorkflowConfig } from '../lib/config-manager.js';
+import { getSchedulerConfig } from '../lib/config-manager.js';
 
 // Merge CLI options with config defaults (called per-action, reads cached config)
 function redisOpts(options: { [key: string]: any }) {
@@ -158,7 +158,7 @@ export function registerSchedulerCommands(program: Command): void {
         const jobId = await sched.enqueue(
           options.iid,
           parseInt(options.priority),
-          options.branch ?? getWorkflowConfig().targetBranch
+          options.branch ?? (process.env.AFK_TARGET_BRANCH || 'main')
         );
 
         console.log(chalk.green(`✅ Task enqueued (job ID: ${jobId})`));

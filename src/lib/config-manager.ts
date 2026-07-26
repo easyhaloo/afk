@@ -89,15 +89,6 @@ export interface QAConfig {
   deleteSourceBranch: boolean;
 }
 
-// ─── Full Config ──────────────────────────────────────────────────────────────
-
-export interface Config {
-  gitlab: GitLabConfig;
-  workflow: WorkflowConfig;
-  scheduler: SchedulerConfig;
-  worktree: WorktreeConfig;
-}
-
 // ─── Loader ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKFLOW: WorkflowConfig = {
@@ -171,7 +162,7 @@ function loadWorkflowConfig(): WorkflowConfig {
     agentDefault: process.env.AFK_AGENT_DEFAULT || DEFAULT_WORKFLOW.agentDefault,
     tmuxSession: process.env.AFK_TMUX_SESSION || DEFAULT_WORKFLOW.tmuxSession,
     completionTimeout: parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW.completionTimeout),
-    completionPoll: parseIntEnv('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll),
+    completionPoll: parseSeconds('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll),
     idleTimeout: parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW.idleTimeout),
     acCheckTimeout: parseEnvMs('AFK_AC_CHECK_TIMEOUT', DEFAULT_WORKFLOW.acCheckTimeout),
     contextThreshold: parseIntEnv('AFK_CONTEXT_THRESHOLD', DEFAULT_WORKFLOW.contextThreshold),
@@ -227,9 +218,14 @@ function loadQAConfig(): QAConfig {
 function parseEnvMs(key: string, fallback: number): number {
   const val = process.env[key];
   if (!val) return fallback;
-  const ms = parseInt(val, 10);
-  // if value is in seconds (no unit), convert
-  return ms < 1000 ? ms * 1000 : ms;
+  return parseInt(val, 10) || fallback;
+}
+
+function parseSeconds(key: string, fallback: number): number {
+  const val = process.env[key];
+  if (!val) return fallback;
+  const n = parseInt(val, 10);
+  return (n || fallback) * 1000;
 }
 
 function parseIntEnv(key: string, fallback: number): number {
@@ -274,13 +270,4 @@ export function getForkConfig(): ForkConfig {
 
 export function getQAConfig(): QAConfig {
   return _qa ??= loadQAConfig();
-}
-
-export function getConfig(): Config {
-  return {
-    gitlab: getGitLabConfig(),
-    workflow: getWorkflowConfig(),
-    scheduler: getSchedulerConfig(),
-    worktree: getWorktreeConfig(),
-  };
 }

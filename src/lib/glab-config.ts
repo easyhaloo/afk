@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { load } from 'js-yaml';
 
 export interface GlabHostConfig {
   api_host: string;

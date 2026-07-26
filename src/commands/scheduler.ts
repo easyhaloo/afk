@@ -230,6 +230,7 @@ export function registerSchedulerCommands(program: Command): void {
     .description('Manually poll GitLab for ready issues')
     .option('--redis-host <host>', 'Redis host')
     .option('--redis-port <port>', 'Redis port')
+    .option('--label <label>', 'GitLab label to filter (can be repeated)', undefined)
     .action(async (options) => {
       try {
         const gitlab = createGitLabClient();
@@ -237,7 +238,12 @@ export function registerSchedulerCommands(program: Command): void {
           ...redisOpts(options),
         });
 
-        const enqueued = await sched.pollGitLab();
+        // Support multiple --label flags
+        const labels: string[] = options.label
+          ? Array.isArray(options.label) ? options.label : [options.label]
+          : ['stage::ready-for-implement'];
+
+        const enqueued = await sched.pollGitLab(labels);
         console.log(chalk.green(`✅ Polling complete (${enqueued} tasks enqueued)`));
 
         await sched.stop();

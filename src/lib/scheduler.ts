@@ -203,12 +203,13 @@ export class Scheduler {
 
   /**
    * Poll GitLab for ready issues and enqueue them
+   * @param labels - GitLab label filter (default: ['stage::ready-for-implement'])
    */
-  async pollGitLab(): Promise<number> {
+  async pollGitLab(labels: string[] = ['stage::ready-for-implement']): Promise<number> {
     console.log('🔍 Polling GitLab for ready issues...');
 
     const issues = await this.gitlab.listIssues({
-      labels: ['stage::ready-for-implement'],
+      labels,
       state: 'opened',
     });
 

@@ -257,4 +257,70 @@ export class GitLabClient {
     const { simpleGit } = await import('simple-git');
     return simpleGit(worktreePath).revparse('HEAD');
   }
+
+  /**
+   * Update labels: add and/or remove in one call
+   */
+  async updateLabelsBatch(iid: number, add: string[], remove: string[]): Promise<void> {
+    await this.client.Issues.edit(this.projectId, iid, {
+      add_labels: add.join(','),
+      remove_labels: remove.join(','),
+    });
+  }
+
+  /**
+   * Add comment to MR
+   */
+  async addMRComment(mrIid: number, body: string, opts: { resolvable?: boolean } = {}): Promise<void> {
+    await this.client.MergeRequestNotes.create(this.projectId, mrIid, body, {
+      resolvable: opts.resolvable ?? false,
+    });
+  }
+
+  /**
+   * Get MR head pipeline status
+   */
+  async getMRPipelineStatus(mrIid: number): Promise<string> {
+    const mr = await this.client.MergeRequests.show(this.projectId, mrIid) as any;
+    return mr.head_pipeline?.status ?? 'unknown';
+  }
+
+  /**
+   * Upload files from .afk/artifacts.txt and return markdown list of URLs
+   */
+  async uploadArtifacts(worktreePath: string): Promise<string> {
+    const marker = `${worktreePath}/.afk/artifacts.txt`;
+    const { promises: fs } = await import('fs');
+
+    let artifactUrls = '';
+    try {
+      const content = await fs.readFile(marker, 'utf-8');
+      const paths = content.split('\n').map(p => p.trim()).filter(Boolean);
+
+      for (const filepath of paths) {
+        try {
+          const filename = filepath.split('/').pop()!;
+          const fileContent = await fs.readFile(filepath);
+          const upload = await (this.client as any).Projects.upload(
+            this.projectId,
+            fileContent,
+            { metadata: { filename } }
+          ) as any;
+          const url = upload.full_path ?? upload.url ?? '';
+          if (url) {
+            artifactUrls += `\n- ![${filename}](${url})`;
+          }
+        } catch {
+          // best-effort: skip failed uploads
+        }
+      }
+    } catch {
+      // no artifacts file — no-op
+    }
+
+    if (artifactUrls) {
+      return `## Verification Evidence${artifactUrls}\n`;
+    }
+    return '';
+  }
 }

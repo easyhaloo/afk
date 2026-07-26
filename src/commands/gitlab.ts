@@ -161,6 +161,90 @@ export function registerGitLabCommands(program: Command): void {
         process.exit(1);
       }
     });
+
+  /**
+   * update-labels command — add and/or remove labels in one call
+   */
+  gitlab
+    .command('update-labels')
+    .description('Add and/or remove labels from an issue')
+    .argument('<iid>', 'Issue IID')
+    .option('--add <labels>', 'Comma-separated labels to add')
+    .option('--remove <labels>', 'Comma-separated labels to remove')
+    .action(async (iid: string, options) => {
+      try {
+        const client = createClient();
+        const add = options.add ? options.add.split(',').map((l: string) => l.trim()) : [];
+        const remove = options.remove ? options.remove.split(',').map((l: string) => l.trim()) : [];
+        await client.updateLabelsBatch(parseInt(iid), add, remove);
+        console.log(chalk.green(`✓ Updated labels on issue #${iid}`));
+        if (add.length) console.log(chalk.gray(`  + ${add.join(', ')}`));
+        if (remove.length) console.log(chalk.gray(`  - ${remove.join(', ')}`));
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * add-mr-comment command
+   */
+  gitlab
+    .command('add-mr-comment')
+    .description('Add comment to merge request')
+    .argument('<mriid>', 'Merge Request IID')
+    .argument('<message>', 'Comment message')
+    .option('--resolvable', 'Mark comment as resolvable')
+    .action(async (mriid: string, message: string, options) => {
+      try {
+        const client = createClient();
+        await client.addMRComment(parseInt(mriid), message, { resolvable: options.resolvable });
+        console.log(chalk.green(`✓ Added comment to MR !${mriid}`));
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * pipeline-status command
+   */
+  gitlab
+    .command('pipeline-status')
+    .description('Get head pipeline status for a merge request')
+    .argument('<mriid>', 'Merge Request IID')
+    .action(async (mriid: string) => {
+      try {
+        const client = createClient();
+        const status = await client.getMRPipelineStatus(parseInt(mriid));
+        console.log(status);
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * upload-artifacts command
+   */
+  gitlab
+    .command('upload-artifacts')
+    .description('Upload files listed in .afk/artifacts.txt from a worktree')
+    .argument('<worktree>', 'Path to worktree')
+    .action(async (worktree: string) => {
+      try {
+        const client = createClient();
+        const markdown = await client.uploadArtifacts(worktree);
+        if (markdown) {
+          console.log(markdown);
+        } else {
+          console.log(chalk.gray('No artifacts to upload (or .afk/artifacts.txt not found)'));
+        }
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
 }
 
 /**

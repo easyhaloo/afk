@@ -112,6 +112,33 @@ export class GitLabClient {
   }
 
   /**
+   * Create a new issue
+   */
+  async createIssue(options: {
+    title: string;
+    description?: string;
+    labels?: string[];
+  }): Promise<number> {
+    const issue = await this.client.Issues.create(this.projectId, {
+      title: options.title,
+      description: options.description || '',
+      labels: options.labels?.join(',') || '',
+    }) as any;
+    return issue.iid;
+  }
+
+  /**
+   * Update issue labels (add labels)
+   */
+  async addLabelsToIssue(iid: number, labels: string[]): Promise<void> {
+    const issue = await this.getIssue(iid);
+    const newLabels = [...new Set([...issue.labels, ...labels])];
+    await this.client.Issues.edit(this.projectId, iid, {
+      labels: newLabels.join(','),
+    });
+  }
+
+  /**
    * Parse AC (Acceptance Criteria) from issue description
    */
   parseAC(description: string): AC | null {

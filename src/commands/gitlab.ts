@@ -129,6 +129,54 @@ export function registerGitLabCommands(program: Command): void {
     });
 
   /**
+   * issue-create command
+   */
+  gitlab
+    .command('issue-create')
+    .description('Create a new GitLab issue')
+    .argument('<title>', 'Issue title')
+    .option('--description <text>', 'Issue description')
+    .option('--label <labels>', 'Comma-separated labels')
+    .action(async (title: string, options) => {
+      try {
+        const client = createClient();
+        const iid = await client.createIssue({
+          title,
+          description: options.description,
+          labels: options.label ? options.label.split(',').map((l: string) => l.trim()) : [],
+        });
+        console.log(chalk.green(`✓ Created issue #${iid}: ${title}`));
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
+   * issue-update command
+   */
+  gitlab
+    .command('issue-update')
+    .description('Update issue labels (add)')
+    .argument('<iid>', 'Issue IID')
+    .option('--add-label <labels>', 'Comma-separated labels to add')
+    .action(async (iid: string, options) => {
+      try {
+        const client = createClient();
+        if (options.addLabel) {
+          const labels = options.addLabel.split(',').map((l: string) => l.trim());
+          await client.addLabelsToIssue(parseInt(iid), labels);
+          console.log(chalk.green(`✓ Added labels to issue #${iid}: ${options.addLabel}`));
+        } else {
+          console.log(chalk.yellow('No labels to add. Use --add-label.'));
+        }
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
    * parse-ac command
    */
   gitlab

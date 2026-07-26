@@ -11,6 +11,10 @@ export interface GitLabConfig {
 // ─── Workflow ─────────────────────────────────────────────────────────────────
 
 export interface WorkflowConfig {
+  /** Agent CLI to use when issue lacks agent::* label */
+  agentDefault: string;
+  /** Tmux session name for AFK windows */
+  tmuxSession: string;
   /** Max time to wait for /goal completion (ms) */
   completionTimeout: number;
   /** Seconds between /goal completion checks */
@@ -54,6 +58,13 @@ export interface WorktreeConfig {
   baseDir: string;
 }
 
+// ─── Pipeline ─────────────────────────────────────────────────────────────────
+
+export interface PipelineConfig {
+  /** Days to retain scheduler logs before pruning */
+  logRetentionDays: number;
+}
+
 // ─── Fork ─────────────────────────────────────────────────────────────────────
 
 export interface ForkConfig {
@@ -90,6 +101,8 @@ export interface Config {
 // ─── Loader ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKFLOW: WorkflowConfig = {
+  agentDefault: 'claude',
+  tmuxSession: 'afk',
   completionTimeout: 7200 * 1000,
   completionPoll: 5,
   idleTimeout: 1800 * 1000,
@@ -114,6 +127,10 @@ const DEFAULT_SCHEDULER: SchedulerConfig = {
 
 const DEFAULT_WORKTREE: WorktreeConfig = {
   baseDir: '/tmp/afk-worktrees',
+};
+
+const DEFAULT_PIPELINE: PipelineConfig = {
+  logRetentionDays: 7,
 };
 
 const DEFAULT_FORK: ForkConfig = {
@@ -151,6 +168,8 @@ function loadGitLabConfig(): GitLabConfig {
 
 function loadWorkflowConfig(): WorkflowConfig {
   return {
+    agentDefault: process.env.AFK_AGENT_DEFAULT || DEFAULT_WORKFLOW.agentDefault,
+    tmuxSession: process.env.AFK_TMUX_SESSION || DEFAULT_WORKFLOW.tmuxSession,
     completionTimeout: parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW.completionTimeout),
     completionPoll: parseIntEnv('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll),
     idleTimeout: parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW.idleTimeout),
@@ -160,6 +179,12 @@ function loadWorkflowConfig(): WorkflowConfig {
     targetBranch: process.env.AFK_TARGET_BRANCH || DEFAULT_WORKFLOW.targetBranch,
     trackerTargetBranch: process.env.AFK_TRACKER_TARGET_BRANCH || DEFAULT_WORKFLOW.trackerTargetBranch,
     goalBudget: parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget),
+  };
+}
+
+function loadPipelineConfig(): PipelineConfig {
+  return {
+    logRetentionDays: parseIntEnv('AFK_LOG_RETENTION_DAYS', DEFAULT_PIPELINE.logRetentionDays),
   };
 }
 
@@ -219,6 +244,7 @@ let _gitlab: GitLabConfig | null = null;
 let _workflow: WorkflowConfig | null = null;
 let _scheduler: SchedulerConfig | null = null;
 let _worktree: WorktreeConfig | null = null;
+let _pipeline: PipelineConfig | null = null;
 let _fork: ForkConfig | null = null;
 let _qa: QAConfig | null = null;
 
@@ -236,6 +262,10 @@ export function getSchedulerConfig(): SchedulerConfig {
 
 export function getWorktreeConfig(): WorktreeConfig {
   return _worktree ??= loadWorktreeConfig();
+}
+
+export function getPipelineConfig(): PipelineConfig {
+  return _pipeline ??= loadPipelineConfig();
 }
 
 export function getForkConfig(): ForkConfig {

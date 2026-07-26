@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { load } from 'js-yaml';
 
 export interface GlabHostConfig {
   api_host: string;
@@ -18,32 +19,29 @@ let cachedGlabConfig: GlabConfig | null = null;
 
 /**
  * Read glab CLI configuration
- * Supports both macOS (~/Library/Application Support) and Linux (~/.config)
+ * Supports macOS (~/Library/Application Support) and Linux (~/.config)
+ *
+ * glab config uses YAML 1.1 !!null tags which js-yaml cannot parse,
+ * so we use a simple line-based scanner instead.
  */
 export function readGlabConfig(): GlabConfig | null {
   if (cachedGlabConfig) {
     return cachedGlabConfig;
   }
 
-  // Try different paths for glab config
   const possiblePaths = [
-    // macOS
     path.join(os.homedir(), 'Library', 'Application Support', 'glab-cli', 'config.yml'),
-    // Linux
     path.join(os.homedir(), '.config', 'glab-cli', 'config.yml'),
-    // Flatpak
     path.join(os.homedir(), '.var', 'app', 'com.gitlab嗓音', 'config', 'glab-cli', 'config.yml'),
   ];
 
   for (const configPath of possiblePaths) {
-    try {
-      if (fs.existsSync(configPath)) {
-        const content = fs.readFileSync(configPath, 'utf-8');
-        cachedGlabConfig = parseGlabYaml(content);
-        return cachedGlabConfig;
-      }
-    } catch {
-      // Continue to next path
+    if (!fs.existsSync(configPath)) continue;
+    const content = fs.readFileSync(configPath, 'utf-8');
+    const config = parseGlabConfig(content);
+    if (config) {
+      cachedGlabConfig = config;
+      return cachedGlabConfig;
     }
   }
 
@@ -51,82 +49,83 @@ export function readGlabConfig(): GlabConfig | null {
 }
 
 /**
- * Simple YAML parser for glab config (only handles the subset we need)
+ * Line-based glab config parser (YAML 1.1 compatible).
+ *
+ * glab config structure:
+ *   host: gitlab.com
+ *   hosts:
+ *       hostname:
+ *           token: xxx
+ *           api_host: hostname
+ *           api_protocol: https
+ *           user: username
+ *       another-host:
+ *           ...
+ *
+ * Ignores lines with YAML 1.1 explicit tags (!<tag:yaml.org,2002:null>).
  */
-function parseGlabYaml(content: string): GlabConfig {
-  const config: GlabConfig = {
-    host: 'gitlab.com',
-    hosts: {},
-  };
+function parseGlabConfig(content: string): GlabConfig | null {
+  const config: GlabConfig = { host: 'gitlab.com', hosts: {} };
+  let inHosts = false;       // inside [hosts] section
+  let lastHost = '';         // last hostname: line seen at indent >= 2
+  let lastKey = '';           // last key: value key at indent >= 4
 
-  const lines = content.split('\n');
-  let currentHost: string | null = null;
-  let inHosts = false;
-
-  for (const line of lines) {
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine;
     const trimmed = line.trim();
 
-    // Skip comments and empty lines
-    if (trimmed.startsWith('#') || trimmed === '') {
+    // Skip blank/comment/YAML-1.1-tag lines
+    if (trimmed === '' || trimmed.startsWith('#') || trimmed.includes('!!null')) {
+      lastKey = '';
       continue;
     }
 
-    // Top-level host setting
-    if (trimmed.startsWith('host:')) {
-      config.host = trimmed.substring(5).trim();
+    const indent = line.search(/\S/);
+    if (indent < 0) { lastKey = ''; continue; }
+
+    // Top-level: indent 0
+    if (indent === 0) {
+      inHosts = trimmed === 'hosts:';
+      if (trimmed.startsWith('host:')) {
+        const v = trimmed.substring(5).trim();
+        if (v) config.host = v;
+      }
+      if (inHosts) { lastHost = ''; lastKey = ''; }
       continue;
     }
 
-    // Check if we're entering hosts section
-    if (trimmed === 'hosts:') {
-      inHosts = true;
-      continue;
-    }
-
-    // Indent level check - hosts section ends when we dedent
-    if (inHosts && trimmed.startsWith(' ') && !trimmed.startsWith('  ')) {
-      inHosts = false;
-      currentHost = null;
-    }
-
-    // Host entry
-    if (inHosts && trimmed.match(/^[a-zA-Z0-9_.-]+:$/)) {
-      currentHost = trimmed.replace(':', '');
-      if (!config.hosts[currentHost]) {
-        config.hosts[currentHost] = {
-          api_host: currentHost,
-          api_protocol: 'https',
-        };
+    // hostname: at indent >= 2 inside hosts: block
+    if (inHosts && indent >= 2 && trimmed.endsWith(':') && !trimmed.includes(' ')) {
+      const h = trimmed.replace(/:$/, '').trim();
+      if (h) {
+        config.hosts[h] = { api_host: h, api_protocol: 'https' };
+        lastHost = h;
+        lastKey = '';
       }
       continue;
     }
 
-    // Host properties
-    if (currentHost && trimmed.startsWith('token:')) {
-      const token = trimmed.substring(6).trim();
-      if (token && token !== 'null') {
-        config.hosts[currentHost].token = token;
+    // key: value at indent >= 4 — assign to lastHost
+    if (indent >= 4 && lastHost) {
+      const colonIdx = trimmed.indexOf(':');
+      if (colonIdx > 0) {
+        const key = trimmed.substring(0, colonIdx).trim();
+        const val = trimmed.substring(colonIdx + 1).trim();
+        if (val && val !== 'null') {
+          if (key === 'token') config.hosts[lastHost].token = val;
+          else if (key === 'api_host') config.hosts[lastHost].api_host = val;
+          else if (key === 'api_protocol') config.hosts[lastHost].api_protocol = val;
+          else if (key === 'user') config.hosts[lastHost].user = val;
+        }
+        lastKey = key;
       }
       continue;
     }
 
-    if (currentHost && trimmed.startsWith('api_host:')) {
-      config.hosts[currentHost].api_host = trimmed.substring(9).trim();
-      continue;
-    }
-
-    if (currentHost && trimmed.startsWith('api_protocol:')) {
-      config.hosts[currentHost].api_protocol = trimmed.substring(13).trim();
-      continue;
-    }
-
-    if (currentHost && trimmed.startsWith('user:')) {
-      config.hosts[currentHost].user = trimmed.substring(5).trim();
-      continue;
-    }
+    lastKey = '';
   }
 
-  return config;
+  return Object.keys(config.hosts).length > 0 ? config : null;
 }
 
 /**

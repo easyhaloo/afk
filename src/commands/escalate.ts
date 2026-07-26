@@ -1,5 +1,7 @@
 import { Command } from 'commander';
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
+import { detectGitLabProject } from '../lib/gitlab.js';
+import { getGlabToken } from '../lib/glab-config.js';
 
 export function registerEscalateCommands(program: Command): void {
   const escalate = program
@@ -43,25 +45,32 @@ export function registerEscalateCommands(program: Command): void {
       console.log('Filing GitLab issue...');
 
       // Detect project from git remote
-      const remoteUrl = spawnSync('git', ['remote', 'get-url', 'origin'], {
-        encoding: 'utf-8', shell: false,
-      }).stdout.trim();
+      const projectPath = detectGitLabProject();
+      if (!projectPath) {
+        console.error('ERROR: could not detect project from git remote. Set GITLAB_PROJECT_ID.');
+        process.exit(1);
+      }
 
-      const projectPath = remoteUrl
-        .replace(/^git@[^:]+:/, '')
-        .replace(/^https?:\/\/[^/]+\//, '')
-        .replace(/\.git$/, '')
-        .trim();
-
-      const projectId = encodeURIComponent(projectPath);
+      // Resolve token: env > glab config
+      const envUrl = process.env.GITLAB_URL;
+      let token = process.env.GITLAB_TOKEN;
+      let url = envUrl || 'https://gitlab.com';
+      if (!token) {
+        const glab = getGlabToken(envUrl);
+        if (glab) {
+          url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
+          token = glab.token;
+        }
+      }
+      if (!token) {
+        console.error('ERROR: GITLAB_TOKEN not set and glab not authenticated.');
+        process.exit(1);
+      }
 
       const { Gitlab } = await import('@gitbeaker/node');
-      const gitlab = new Gitlab({
-        host: process.env.GITLAB_URL || 'https://gitlab.com',
-        token: process.env.GITLAB_TOKEN!,
-      });
+      const gitlab = new Gitlab({ host: url, token });
 
-      const issue = await gitlab.Issues.create(projectId, {
+      const issue = await gitlab.Issues.create(projectPath, {
         title,
         description: body,
         labels: labels.join(','),
@@ -72,7 +81,6 @@ export function registerEscalateCommands(program: Command): void {
 
       // Optionally launch afk workflow
       if (options.launch) {
-        const { spawn } = await import('child_process');
         console.log('Launching afk workflow in background...');
         const proc = spawn('afk', ['workflow', 'run', '--iid', String(iid)], {
           detached: true,

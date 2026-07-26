@@ -1,4 +1,42 @@
 import { Gitlab } from '@gitbeaker/node';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * Detect GitLab project path from .git/config remote URL (synchronous).
+ * Reads the git config file directly — no subprocess, no SDK async.
+ */
+export function detectGitLabProject(cwd?: string): string | null {
+  try {
+    const gitDir = cwd
+      ? path.join(cwd, '.git')
+      : path.join(process.cwd(), '.git');
+
+    // Also support git worktree .git file (points to .git dir)
+    const gitStat = fs.statSync(gitDir);
+    const actualGitDir = gitStat.isFile()
+      ? fs.readFileSync(gitDir, 'utf-8').trim().replace(/^git directory: /, '')
+      : gitDir;
+
+    const configPath = path.join(actualGitDir, 'config');
+    const config = fs.readFileSync(configPath, 'utf-8');
+
+    // Find [remote "origin"] section and read its url
+    const remoteMatch = config.match(/\[remote "origin"\][\s\S]*?^\s*url\s*=\s*(.+)$/m);
+    if (!remoteMatch) return null;
+
+    const url = remoteMatch[1].trim();
+    const project = url
+      .replace(/^git@[^:]+:/, '')
+      .replace(/^https?:\/\/[^/]+\//, '')
+      .replace(/\.git$/, '')
+      .trim();
+
+    return project || null;
+  } catch {
+    return null;
+  }
+}
 
 export interface GitLabConfig {
   url: string;

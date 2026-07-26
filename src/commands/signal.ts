@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { execSync } from 'child_process';
+import { simpleGit } from 'simple-git';
 import { getCurrentTimestamp } from '../lib/schemas.js';
 import { writeSignal, readSignal, clearSignal, waitForSignal } from '../lib/io.js';
 
@@ -20,7 +20,7 @@ export function registerSignalCommands(program: Command): void {
     .option('--dir <path>', 'Working directory', process.cwd())
     .action(async (options) => {
       try {
-        const sha = options.sha || getGitSha();
+        const sha = options.sha || await getGitSha();
 
         await writeSignal({
           type: 'goal_complete',
@@ -192,9 +192,11 @@ export function registerSignalCommands(program: Command): void {
 /**
  * Helper: Get current git SHA
  */
-function getGitSha(): string | undefined {
+async function getGitSha(): Promise<string | undefined> {
   try {
-    return execSync('git rev-parse HEAD', { encoding: 'utf-8' }).trim();
+    const git = simpleGit();
+    const sha = await git.revparse(['HEAD']);
+    return sha.trim() || undefined;
   } catch {
     return undefined;
   }

@@ -90,7 +90,7 @@ export class WorkflowOrchestrator {
 
       if (signal) {
         console.log('\n✅ Goal completed!');
-        console.log(`   Summary: ${signal.summary}`);
+        console.log(`   Summary: ${(signal as any).summary ?? ''}`);
         if (signal.type === 'goal_complete' && signal.sha) {
           console.log(`   SHA: ${signal.sha}`);
         }

@@ -124,7 +124,7 @@ export function registerSignalCommands(program: Command): void {
         } else {
           console.log(chalk.bold(`Type: ${signalData.type}`));
           console.log(chalk.gray(`Timestamp: ${signalData.timestamp}`));
-          console.log(chalk.gray(`Summary: ${signalData.summary}`));
+          console.log(chalk.gray(`Summary: ${(signalData as any).summary ?? ''}`));
 
           if (signalData.type === 'goal_complete' && signalData.sha) {
             console.log(chalk.gray(`SHA: ${signalData.sha}`));

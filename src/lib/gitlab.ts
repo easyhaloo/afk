@@ -140,4 +140,121 @@ export class GitLabClient {
       items,
     };
   }
+
+  /**
+   * Get current retry count from issue labels (retry-count::N)
+   */
+  async getRetryCount(iid: number): Promise<number> {
+    const issue = await this.getIssue(iid);
+    const label = issue.labels.find(l => /^retry-count::\d+$/.test(l));
+    if (!label) return 0;
+    return parseInt(label.split('::')[1], 10);
+  }
+
+  /**
+   * Increment retry count label on issue
+   */
+  async incrementRetryCount(iid: number): Promise<number> {
+    const current = await this.getRetryCount(iid);
+    const newCount = current + 1;
+    const labels = (await this.getIssue(iid)).labels;
+    // Remove old retry-count label if exists
+    const withoutOld = labels.filter(l => !/^retry-count::/.test(l));
+    await this.updateLabels(iid, [...withoutOld, `retry-count::${newCount}`]);
+    return newCount;
+  }
+
+  /**
+   * Detect target branch using 4-tier priority:
+   * 1. explicit override (caller provides)
+   * 2. base::prd-N label on issue → prd/N
+   * 3. AFK_TARGET_BRANCH env var
+   * 4. 'main'
+   */
+  async detectTargetBranch(iid: number, explicit?: string): Promise<string> {
+    if (explicit) return explicit;
+
+    const issue = await this.getIssue(iid);
+    const prdLabel = issue.labels.find(l => /^base::prd-\d+$/.test(l));
+    if (prdLabel) {
+      return `prd/${prdLabel.replace('base::prd-', '')}`;
+    }
+
+    return process.env.AFK_TARGET_BRANCH || 'main';
+  }
+
+  /**
+   * Post a structured launch event comment to the issue
+   */
+  async createLaunchComment(iid: number, info: {
+    worktreePath: string;
+    targetBranch: string;
+    session: string;
+    traceId: string;
+    goalLines: number;
+    goalPreview: string;
+  }): Promise<void> {
+    const body = [
+      '<!-- afk-event: launch -->',
+      '**🚀 AFK Session Started**',
+      '',
+      `- **Worktree:** \`${info.worktreePath}\``,
+      `- **Target branch:** \`${info.targetBranch}\``,
+      `- **Session:** \`${info.session}\``,
+      `- **Trace:** \`${info.traceId}\``,
+      '',
+      `<details>`,
+      `<summary>Goal (${info.goalLines} lines)</summary>`,
+      '',
+      '```',
+      info.goalPreview,
+      '```',
+      '</details>',
+      '',
+      `**Attach:** \`tmux attach -t ${info.session}\``,
+    ].join('\n');
+    await this.addComment(iid, body);
+  }
+
+  /**
+   * Update or create a progress comment on the issue
+   */
+  async updateProgressComment(iid: number, info: {
+    worktreePath: string;
+    sha: string;
+    shortMsg: string;
+    acDone: number;
+    acTotal: number;
+    next: string;
+  }): Promise<void> {
+    const marker = `<!-- AFK-PROGRESS-${iid} -->`;
+    const body = [
+      `${marker}`,
+      `**AFK Progress** | commit:\`${info.sha}\` | ${info.shortMsg} | AC: ${info.acDone}/${info.acTotal}`,
+      '',
+      `> Next: ${info.next}`,
+    ].join('\n');
+
+    // Check if comment already exists
+    const projEnc = String(this.projectId).replace('/', '%2F');
+    try {
+      const notes = await this.client.IssueNotes.all(this.projectId, iid, { perPage: 100 }) as any[];
+      const existing = notes.find((n: any) => n.body.includes(marker));
+      if (existing) {
+        await this.client.IssueNotes.edit(this.projectId, iid, existing.id, body);
+      } else {
+        await this.addComment(iid, body);
+      }
+    } catch {
+      await this.addComment(iid, body);
+    }
+  }
+
+  /**
+   * Get the current git SHA from a worktree
+   */
+  async getWorktreeSHA(worktreePath: string): Promise<string> {
+    const { simpleGit } = await import('simple-git');
+    return simpleGit(worktreePath).revparse('HEAD');
+  }
 }

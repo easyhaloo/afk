@@ -20,6 +20,24 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--poll-interval <seconds>', 'GitLab polling interval (0 to disable)', '60')
     .action(async (options) => {
       try {
+        // PID lock
+        const lockDir = process.env.AFK_LOCK_DIR || '/tmp/afk-locks';
+        const { promises: fs } = await import('fs');
+        await fs.mkdir(lockDir, { recursive: true });
+        const lockFile = `${lockDir}/scheduler-${process.env.GITLAB_PROJECT_ID || 'default'}.lock`;
+        try {
+          const { constants } = await import('fs');
+          await fs.open(lockFile, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o644);
+        } catch (err: any) {
+          if (err.code === 'EEXIST') {
+            const oldPid = await fs.readFile(lockFile, 'utf-8').catch(() => '');
+            console.error(chalk.red(`❌ Scheduler already running (PID: ${oldPid.trim()}). Remove stale lock: rm ${lockFile}`));
+            process.exit(1);
+          }
+          throw err;
+        }
+        await fs.writeFile(lockFile, String(process.pid), 'utf-8');
+
         const gitlab = createGitLabClient();
         const sched = new Scheduler(gitlab, {
           maxConcurrent: parseInt(options.maxConcurrent),
@@ -51,12 +69,14 @@ export function registerSchedulerCommands(program: Command): void {
         process.on('SIGINT', async () => {
           console.log('\n\nReceived SIGINT, shutting down...');
           await sched.stop();
+          await fs.unlink(lockFile).catch(() => {});
           process.exit(0);
         });
 
         process.on('SIGTERM', async () => {
           console.log('\n\nReceived SIGTERM, shutting down...');
           await sched.stop();
+          await fs.unlink(lockFile).catch(() => {});
           process.exit(0);
         });
       } catch (error) {

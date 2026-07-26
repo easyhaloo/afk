@@ -227,6 +227,98 @@ export class TmuxClient {
   }
 
   /**
+   * Wait for ANY of several signal types to appear (first one wins)
+   */
+  async waitForAnySignal(
+    session: string,
+    window: string,
+    signalTypes: Signal['type'][],
+    worktreeDir: string,
+    timeout: number = 7200000
+  ): Promise<Signal | null> {
+    const start = Date.now();
+
+    while (Date.now() - start < timeout) {
+      const signal = await readSignal(worktreeDir);
+      if (signal && signalTypes.includes(signal.type)) {
+        return signal;
+      }
+      await this.sleep(2000);
+    }
+
+    return null;
+  }
+
+  /**
+   * Wait for tmux session to exit and return its exit code.
+   * Uses a detached wait process via tmux wait-for.
+   */
+  async waitSessionExit(session: string, timeout: number = 7200000): Promise<number> {
+    return new Promise((resolve, reject) => {
+      // Use tmux wait-for to detect session death
+      // Start a background process that monitors the session
+      const proc = spawn('bash', ['-c', `
+        while tmux has-session -t "${session}" 2>/dev/null; do
+          sleep 2
+        done
+        echo "SESSION_EXITED"
+      `], { stdio: 'pipe' });
+
+      let stdout = '';
+      proc.stdout?.on('data', (data) => { stdout += data.toString(); });
+
+      const timer = setTimeout(() => {
+        proc.kill();
+        reject(new Error(`waitSessionExit timeout after ${timeout}ms`));
+      }, timeout);
+
+      proc.on('close', (code) => {
+        clearTimeout(timer);
+        if (stdout.includes('SESSION_EXITED')) {
+          resolve(code ?? 0);
+        } else {
+          resolve(code ?? 0);
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
+  /**
+   * Get context token count from pane content.
+   * Parses patterns like "10.2k tokens" or "156,000 tokens".
+   */
+  async getContextTokens(session: string, window: string): Promise<number> {
+    const content = await this.capturePane(session, window, { lines: 5, history: 50 });
+    const match = content.match(/([0-9]+(?:\.[0-9]+)?)\s*k\s*tokens|([0-9,]+)\s*tokens/);
+    if (!match) return 0;
+    const num = parseFloat((match[1] || match[2]).replace(',', ''));
+    if (match[1] !== undefined) return Math.round(num * 1000);
+    return num;
+  }
+
+  /**
+   * Send /resume with AC check prompt to agent
+   */
+  async sendResumeWithAC(session: string, window: string, acItems: string[]): Promise<void> {
+    await this.sendKeys(session, window, '/resume');
+    await this.sleep(300);
+    await this.sendKeys(session, window, '请运行以下验收条件（AC）检查，完成后创建信号文件：');
+    await this.sendKeys(session, window, 'cat > .afk-signal.json <<EOF');
+    await this.sendKeys(session, window, `{"type":"ac_result","result":"PASS或FAIL","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","summary":"<检查总结>"}`);
+    await this.sendKeys(session, window, 'EOF');
+    await this.sendKeys(session, window, '（或直接回复：AC_RESULT: PASS 或 AC_RESULT: FAIL）');
+    for (const item of acItems) {
+      await this.sendKeys(session, window, item);
+      await this.sleep(100);
+    }
+  }
+
+  /**
    * Execute tmux command
    */
   private async exec(args: string[]): Promise<string> {

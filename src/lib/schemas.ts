@@ -38,12 +38,46 @@ export const HandoffReadySignalSchema = z.object({
 export type HandoffReadySignal = z.infer<typeof HandoffReadySignalSchema>;
 
 /**
+ * Signal emitted when hard timeout watchdog fires
+ */
+export const TimeoutSignalSchema = z.object({
+  type: z.literal('timeout'),
+  timestamp: z.string().datetime(),
+});
+
+export type TimeoutSignal = z.infer<typeof TimeoutSignalSchema>;
+
+/**
+ * Signal emitted when agent detects itself idle
+ */
+export const IdleSignalSchema = z.object({
+  type: z.literal('idle'),
+  timestamp: z.string().datetime(),
+});
+
+export type IdleSignal = z.infer<typeof IdleSignalSchema>;
+
+/**
+ * Signal emitted when context tokens exceed threshold
+ */
+export const ContextHighSignalSchema = z.object({
+  type: z.literal('context_high'),
+  timestamp: z.string().datetime(),
+  tokens: z.number().int().nonnegative(),
+});
+
+export type ContextHighSignal = z.infer<typeof ContextHighSignalSchema>;
+
+/**
  * Union of all signal types
  */
 export const SignalSchema = z.discriminatedUnion('type', [
   GoalCompleteSignalSchema,
   ACResultSignalSchema,
   HandoffReadySignalSchema,
+  TimeoutSignalSchema,
+  IdleSignalSchema,
+  ContextHighSignalSchema,
 ]);
 
 export type Signal = z.infer<typeof SignalSchema>;

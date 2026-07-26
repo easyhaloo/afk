@@ -1,7 +1,8 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { GitLabClient } from './gitlab.js';
-import { WorkflowOrchestrator } from './workflow.js';
+import { WorkflowRunner } from './workflow-runner.js';
+import { checkIssuePreconditions } from './preconditions.js';
 
 export interface TaskData {
   iid: number;
@@ -212,21 +213,29 @@ export class Scheduler {
     });
 
     let enqueued = 0;
+    let skipped = 0;
 
     for (const issue of issues) {
       // Check if already in queue
       const jobs = await this.queue.getJobs(['waiting', 'active', 'delayed']);
       const exists = jobs.some(j => j.data.iid === issue.iid);
+      if (exists) continue;
 
-      if (!exists) {
-        // Calculate priority based on labels
-        const priority = this.calculatePriority(issue.labels);
-        await this.enqueue(issue.iid, priority);
-        enqueued++;
+      // Check preconditions
+      const check = await checkIssuePreconditions(this.gitlab, issue.iid);
+      if (!check.ok) {
+        console.log(`   #${issue.iid}: skipped (${check.reason})`);
+        skipped++;
+        continue;
       }
+
+      // Calculate priority based on labels
+      const priority = this.calculatePriority(issue.labels);
+      await this.enqueue(issue.iid, priority);
+      enqueued++;
     }
 
-    console.log(`   Found ${issues.length} ready issues, enqueued ${enqueued} new tasks`);
+    console.log(`   Found ${issues.length} ready issues: ${enqueued} enqueued, ${skipped} skipped`);
     return enqueued;
   }
 
@@ -240,51 +249,26 @@ export class Scheduler {
     console.log(`Processing issue #${iid}`);
     console.log(`${'='.repeat(60)}\n`);
 
-    const orchestrator = new WorkflowOrchestrator(this.gitlab);
+    const runner = new WorkflowRunner(this.gitlab);
 
     try {
-      // Run workflow
-      const result = await orchestrator.launch({
+      // Run full signal-driven workflow
+      const result = await runner.run({
         iid,
+        session: `afk-${iid}`,
+        targetBranch: baseBranch,
         baseBranch,
-        timeout: 7200000, // 2 hours
       });
 
       if (!result.success) {
-        throw new Error('Workflow timeout');
+        throw new Error('Workflow did not complete');
       }
 
-      // Run AC checks
-      const sessionName = `afk-${iid}`;
-      const { WorktreeManager } = await import('./worktree.js');
-      const manager = new WorktreeManager();
-      const worktree = await manager.get(iid);
+      // Update labels
+      await this.gitlab.removeLabel(iid, 'stage::ready-for-implement');
+      await this.gitlab.removeLabel(iid, 'stage::afk-in-progress');
+      await this.gitlab.addLabel(iid, 'stage::qa');
 
-      if (!worktree) {
-        throw new Error('Worktree not found after workflow');
-      }
-
-      const acResult = await orchestrator.runAC({
-        iid,
-        session: sessionName,
-        worktreeDir: worktree.path,
-      });
-
-      if (acResult.result === 'PASS') {
-        // Create MR
-        await orchestrator.createMR({
-          iid,
-          worktreeDir: worktree.path,
-        });
-
-        // Update labels
-        await this.gitlab.removeLabel(iid, 'stage::ready-for-implement');
-        await this.gitlab.addLabel(iid, 'stage::review');
-      } else {
-        // AC failed, mark for manual intervention
-        await this.gitlab.addLabel(iid, 'mode::hitl');
-        throw new Error('AC checks failed');
-      }
     } catch (error) {
       // Update job data with retry count
       job.data.retries++;

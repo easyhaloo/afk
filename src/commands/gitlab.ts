@@ -207,6 +207,31 @@ export function registerGitLabCommands(program: Command): void {
     });
 
   /**
+   * link-issues command
+   */
+  gitlab
+    .command('link-issues')
+    .description('Link two issues with a blocks / is_blocked_by relationship')
+    .argument('<source-iid>', 'Source issue IID (the blocker)')
+    .argument('<target-iid>', 'Target issue IID (the blocked issue)')
+    .option('--is-blocked-by', 'Reverse: source is blocked by target instead of blocks')
+    .action(async (sourceIid: string, targetIid: string, options) => {
+      try {
+        const client = createClient();
+        const linkType = options.isBlockedBy ? 'is_blocked_by' : 'blocks';
+        await client.linkIssues(
+          parseInt(sourceIid),
+          parseInt(targetIid),
+          linkType
+        );
+        console.log(chalk.green(`✓ Linked #${sourceIid} ${linkType} #${targetIid}`));
+      } catch (error) {
+        console.error(chalk.red('Error:'), (error as Error).message);
+        process.exit(1);
+      }
+    });
+
+  /**
    * pipeline-status command
    */
   gitlab

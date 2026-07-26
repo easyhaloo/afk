@@ -323,4 +323,25 @@ export class GitLabClient {
     }
     return '';
   }
+
+  /**
+   * Link two issues with a blocks / is_blocked_by relationship.
+   * @param sourceIid - The issue that will block (or be blocked by) targetIid
+   * @param targetIid - The issue that will be blocked (or block) sourceIid
+   * @param linkType - 'blocks' means source blocks target; 'is_blocked_by' means source is blocked by target
+   */
+  async linkIssues(
+    sourceIid: number,
+    targetIid: number,
+    linkType: 'blocks' | 'is_blocked_by' = 'blocks'
+  ): Promise<void> {
+    // GitLab API: link(projectId, issueIid, targetProjectId, targetIssueIId, options)
+    await this.client.Issues.link(
+      this.projectId,
+      sourceIid,
+      this.projectId,
+      targetIid,
+      { link_type: linkType }
+    );
+  }
 }

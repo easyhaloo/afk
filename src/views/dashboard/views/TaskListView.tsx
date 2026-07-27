@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Task } from '../../../types/dashboard';
 import { ListView } from './ListView';
-import { formatRelativeTime } from '../../../lib/dashboard/utils';
+import { formatRelativeTime } from '../utils';
 
 interface Props {
   tasks: Task[];

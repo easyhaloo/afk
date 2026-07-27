@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { exec } from 'child_process';
 import { Task, Issue, Project } from '../../../types/dashboard';
-import type { View } from '../../../lib/dashboard/types';
+import type { View } from '../types';
 
 interface Props {
   item: Task | Issue | Project | undefined;

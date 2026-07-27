@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Project } from '../../../types/dashboard';
 import { ListView } from './ListView';
-import { truncate } from '../../../lib/dashboard/utils';
+import { truncate } from '../utils';
 
 interface Props {
   projects: Project[];

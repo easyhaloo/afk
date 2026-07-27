@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { View } from '../../../lib/dashboard/types';
+import type { View } from '../types';
 
 interface Props {
   view: View;

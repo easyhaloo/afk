@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "afk",
+  "description": "AFK CLI skill suite — requirements interview, implementation, research, pipeline, and hand-off workflows.",
+  "owner": {
+    "name": "easyhaloo",
+    "url": "https://github.com/easyhaloo"
+  },
+  "plugins": [
+    {
+      "name": "afk",
+      "description": "Full-stack CLI workflow skills: grill-me interviews, implementation, research, QA, pipeline, and PRD publishing.",
+      "source": "./",
+      "category": "developer-tools"
+    }
+  ]
+}

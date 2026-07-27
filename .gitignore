@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Dependencies
 node_modules/
 npm-debug.log*
@@ -39,3 +40,6 @@ coverage/
 
 # Redis dump
 dump.rdb
+=======
+.DS_Store
+>>>>>>> afk/main

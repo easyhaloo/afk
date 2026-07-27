@@ -10,3 +10,4 @@ export { Header } from './Header';
 export { Footer } from './Footer';
 export { Notification } from './Notification';
 export { ListView } from './ListView';
+export { BoardView } from '../board/index.js';

@@ -11,6 +11,7 @@ import {
   IssueListView,
   CompletedListView,
   ProjectListView,
+  BoardView,
   DetailScreen,
   HelpDialog,
   BreathingSeparator,
@@ -72,6 +73,7 @@ export const Dashboard: React.FC = () => {
     if (currentView === 'tasks') return tasks;
     if (currentView === 'issues') return issues;
     if (currentView === 'completed') return completedTasks;
+    if (currentView === 'board') return issues; // Board view uses issues
     return projects;
   };
   itemsRef.current = getItems();
@@ -310,6 +312,7 @@ export const Dashboard: React.FC = () => {
     if (input === '2') { setIssueProject(null); switchView('issues'); }
     if (input === '3') { setIssueProject(null); switchView('completed'); }
     if (input === '4') { setIssueProject(null); switchView('projects'); }
+    if (input === '5') { setIssueProject(null); switchView('board'); }
 
     if (key.downArrow) {
       navigateDown(items.length);
@@ -361,6 +364,7 @@ export const Dashboard: React.FC = () => {
       ? `issues todo: ${issues.length} | selected: ${selectedIssues.size}`
       : `issues todo: ${issues.length}`;
     if (currentView === 'completed') return `completed: ${completedTasks.length}`;
+    if (currentView === 'board') return `board view: ${issues.length} issues`;
     return `gitlab projects: ${projects.length}`;
   })();
 
@@ -396,6 +400,7 @@ export const Dashboard: React.FC = () => {
             {currentView === 'issues' && <IssueListView issues={issues} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} multiSelectMode={multiSelectMode} selectedIssues={selectedIssues} />}
             {currentView === 'completed' && <CompletedListView tasks={completedTasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
             {currentView === 'projects' && <ProjectListView projects={projects} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
+            {currentView === 'board' && <BoardView issues={issues} selectedIndex={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
             {/* Floating loading/more indicator — overlays the list, does not consume layout space. */}
             {(
               (currentView === 'issues' && issueHasMore) ||

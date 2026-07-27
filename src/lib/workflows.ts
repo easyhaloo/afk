@@ -64,8 +64,8 @@ export class WorkflowRunner {
       completionTimeoutMs = 7200000,
     } = options;
 
-    // Auto-detect platform if not provided
-    const platform = options.platform || await detectPlatform();
+    // Auto-detect platform only if not provided and will be used
+    const platform = options.platform;
 
     // ── Step 1: Fetch issue + AC ────────────────────────────────────────────
     const issue = await this.gitlab.getIssue(iid);

@@ -1,6 +1,23 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { GitHubClient } from '../lib/core/github/client.js';
+import { detectGitHubRepo } from '../lib/core/tracker/detect.js';
+import { execSync } from 'child_process';
+
+/**
+ * Parse comma-separated string into trimmed array
+ */
+function parseLabels(input: string): string[] {
+  return input.split(',').map(l => l.trim());
+}
+
+/**
+ * Handle command error and exit
+ */
+function handleError(error: unknown): never {
+  console.error(chalk.red('Error:'), (error as Error).message);
+  process.exit(1);
+}
 
 export function registerGitHubCommands(program: Command): void {
   const github = program
@@ -31,8 +48,7 @@ export function registerGitHubCommands(program: Command): void {
           console.log(chalk.dim(issue.description));
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleError(error);
       }
     });
 
@@ -48,9 +64,10 @@ export function registerGitHubCommands(program: Command): void {
     .action(async (options) => {
       try {
         const client = await createClient();
+        const state = options.state === 'open' ? 'opened' : options.state;
         const issues = await client.listIssues({
           labels: options.label,
-          state: options.state === 'open' ? 'opened' : options.state,
+          state,
         });
 
         if (options.json) {
@@ -66,8 +83,7 @@ export function registerGitHubCommands(program: Command): void {
           });
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleError(error);
       }
     });
 
@@ -86,12 +102,11 @@ export function registerGitHubCommands(program: Command): void {
         const issueNumber = await client.createIssue({
           title,
           description: options.description,
-          labels: options.label ? options.label.split(',').map((l: string) => l.trim()) : [],
+          labels: options.label ? parseLabels(options.label) : [],
         });
         console.log(chalk.green(`✓ Created issue #${issueNumber}: ${title}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleError(error);
       }
     });
 
@@ -109,8 +124,7 @@ export function registerGitHubCommands(program: Command): void {
         await client.addComment(parseInt(number), message);
         console.log(chalk.green(`✓ Added comment to issue #${number}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleError(error);
       }
     });
 
@@ -128,61 +142,47 @@ export function registerGitHubCommands(program: Command): void {
         const client = await createClient();
         const issueNum = parseInt(number);
 
-        if (options.add) {
-          const labels = options.add.split(',').map((l: string) => l.trim());
-          for (const label of labels) {
-            await client.addLabel(issueNum, label);
-          }
+        const labelsToAdd = options.add ? parseLabels(options.add) : [];
+        const labelsToRemove = options.remove ? parseLabels(options.remove) : [];
+
+        // Add labels in parallel
+        if (labelsToAdd.length > 0) {
+          await Promise.all(labelsToAdd.map(label => client.addLabel(issueNum, label)));
         }
 
-        if (options.remove) {
-          const labels = options.remove.split(',').map((l: string) => l.trim());
-          for (const label of labels) {
-            await client.removeLabel(issueNum, label);
-          }
+        // Remove labels in parallel
+        if (labelsToRemove.length > 0) {
+          await Promise.all(labelsToRemove.map(label => client.removeLabel(issueNum, label)));
         }
 
         console.log(chalk.green(`✓ Updated labels on issue #${number}`));
         if (options.add) console.log(chalk.gray(`  + ${options.add}`));
         if (options.remove) console.log(chalk.gray(`  - ${options.remove}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleError(error);
       }
     });
 }
 
 async function createClient(): Promise<GitHubClient> {
+  // Get token from env or gh CLI
   let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-
-  // Try gh CLI if no env token
   if (!token) {
     try {
-      const { execSync } = await import('child_process');
       token = execSync('gh auth token', { encoding: 'utf-8' }).trim();
     } catch {
       throw new Error('GITHUB_TOKEN or GH_TOKEN environment variable is required (or authenticate gh: gh auth login)');
     }
   }
 
+  // Get repo from env or git remote
   let repo = process.env.GITHUB_REPOSITORY;
-
   if (!repo) {
-    // Try to detect from git remote
-    try {
-      const { execSync } = await import('child_process');
-      const remote = execSync('git remote get-url origin', { encoding: 'utf-8' }).trim();
-      const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+)/);
-      if (match) {
-        repo = match[1].replace('.git', '');
-      }
-    } catch {
-      // ignore
+    const detected = await detectGitHubRepo();
+    if (!detected) {
+      throw new Error('Could not detect GitHub repository. Set GITHUB_REPOSITORY=owner/repo or run from a GitHub repository.');
     }
-  }
-
-  if (!repo) {
-    throw new Error('Could not detect GitHub repository. Set GITHUB_REPOSITORY=owner/repo or run from a GitHub repository.');
+    repo = detected;
   }
 
   return new GitHubClient({ repo, auth: token });

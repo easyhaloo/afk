@@ -17,7 +17,7 @@ export interface StatsProvider {
 }
 
 export interface StatsAPI {
-  register(p: StatsProvider): void;
+  register(p: StatsProvider, id: string): void;
   unregister(id: string): void;
   getAll(): Record<string, number | string>;
 }

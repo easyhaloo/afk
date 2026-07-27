@@ -55,31 +55,3 @@ export const PORTS = {
   /** MinIO console port */
   MINIO_CONSOLE: 9001,
 } as const;
-
-/**
- * Retry configuration
- */
-export const RETRY = {
-  /** Maximum number of retry attempts */
-  MAX_ATTEMPTS: 3,
-
-  /** Initial backoff delay in milliseconds */
-  BACKOFF_MS: 1000,
-} as const;
-
-/**
- * Time conversion constants
- */
-export const TIME = {
-  /** Milliseconds per second */
-  MS_PER_SECOND: 1000,
-
-  /** Milliseconds per minute */
-  MS_PER_MINUTE: 60 * 1000,
-
-  /** Milliseconds per hour */
-  MS_PER_HOUR: 60 * 60 * 1000,
-
-  /** Milliseconds per day */
-  MS_PER_DAY: 24 * 60 * 60 * 1000,
-} as const;

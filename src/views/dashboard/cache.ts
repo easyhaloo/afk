@@ -111,8 +111,3 @@ export function clearDetailCache(): void {
   mem.detail = {};
   flush();
 }
-
-export function clearAllCache(): void {
-  mem = empty();
-  flush();
-}

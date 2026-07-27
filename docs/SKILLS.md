@@ -113,24 +113,3 @@ references/
     └── bugfix.md          # Bug 修复任务
 ```
 
-## Skills 概览
-
-8 个核心 skills 及其精简结构：
-
-| Skill | 优化前 | 优化后 | 减少 |
-|-------|-------|-------|-----|
-| afk-debug | 122 | 30 | 75% |
-| afk-do | 95 | 48 | 49% |
-| afk-implement | 149 | 58 | 61% |
-| afk-research | 109 | 37 | 66% |
-| afk-qa | 128 | 44 | 66% |
-| afk-prototype | 116 | 35 | 70% |
-| afk-grill-me | 96 | 38 | 60% |
-| afk-hand-off | 90 | 34 | 62% |
-
-**关键改进：**
-- 移除冗余说明
-- 统一结构格式
-- 保留 "Use when" 触发条件
-- 保留 References 方法论引用
-- 更新为跨平台命令

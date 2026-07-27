@@ -22,61 +22,38 @@ afk --version
 
 ## CLI Commands
 
-### Issue Management
 ```bash
-afk issue get <id>                    # Get issue details
-afk issue list                        # List issues
-afk issue create "Title" -d "Body"    # Create issue
-afk issue update-labels <id> -a bug   # Add label
-```
+# Issue Management
+afk issue get <id>
+afk issue list
+afk issue create "Title" -d "Body"
 
-### MR/PR Management
-```bash
-afk mr get <id>                       # Get MR/PR details
-afk mr list                           # List MRs/PRs
-afk mr create "Title" --draft         # Create draft MR/PR
-afk mr merge <id>                     # Merge MR/PR
-afk mr approve <id>                   # Approve MR/PR
-afk mr close <id>                     # Close MR/PR
-```
+# MR/PR Operations
+afk mr get <id>
+afk mr list
+afk mr create "Title" --draft
+afk mr merge <id>
+afk mr approve <id>
 
-### Dashboard & Workflows
-```bash
+# Workflows & Automation
 afk dashboard                         # Interactive TUI
-afk workflow run --iid <id>           # Launch issue → MR pipeline
-afk scheduler poll                    # Poll and launch unblocked issues
+afk workflow run --iid <id>           # Issue → MR pipeline
+afk scheduler poll                    # Launch unblocked issues
 ```
+
+See `afk --help` or [MR Commands](docs/MR_COMMANDS.md) for full reference.
 
 ## Skills (Claude Code)
 
-| Skill | Description |
-|-------|-------------|
-| `/afk-do` | Execute coding tasks with TDD/spike/research modes |
-| `/afk-implement` | Autonomous issue implementation (background) |
-| `/afk-research` | Technical investigation with structured findings |
-| `/afk-grill-me` | Requirements interview (ambiguous → falsifiable) |
-| `/afk-hand-off` | Session state handoff for zero-context-loss resume |
-| `/afk-qa` | Quality assurance workflow with AC verification |
-| `/afk-prototype` | Spike workflow for feasibility exploration |
-| `/afk-scheduler` | Dependency-aware parallel issue execution |
+| Skill | Purpose |
+|-------|---------|
+| `/afk-do` | Task execution (TDD/spike/research) |
+| `/afk-implement` | Autonomous issue implementation |
+| `/afk-research` | Technical investigation |
+| `/afk-grill-me` | Requirements interview |
+| `/afk-hand-off` | Session state handoff |
 
-See [docs/SKILLS_OPTIMIZATION.md](docs/SKILLS_OPTIMIZATION.md) for details.
-
-## Project Structure
-
-```
-afk/
-├── src/
-│   ├── commands/        # CLI commands
-│   ├── lib/
-│   │   └── core/
-│   │       ├── tracker/ # Cross-platform abstraction
-│   │       ├── gitlab/  # GitLab client
-│   │       └── github/  # GitHub client
-│   └── views/           # TUI components (Ink React)
-├── dist/                # Compiled output
-└── docs/                # Documentation
-```
+See [Skills Documentation](docs/SKILLS_OPTIMIZATION.md) for full list and usage patterns.
 
 ## Development
 
@@ -86,11 +63,12 @@ npm run build    # Build TypeScript
 npm test         # Run tests
 ```
 
+See [MR Commands](docs/MR_COMMANDS.md) for cross-platform abstraction details.
+
 ## Documentation
 
 - [MR Commands](docs/MR_COMMANDS.md) — Cross-platform MR/PR operations
 - [Skills Optimization](docs/SKILLS_OPTIMIZATION.md) — Skills structure and usage
-- [Architecture](docs/ARCHITECTURE.md) — System design (if exists)
 
 ## License
 

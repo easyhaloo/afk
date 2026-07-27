@@ -1,8 +1,8 @@
-# MR/PR Unified Commands Implementation
+# MR/PR Commands Implementation
 
 ## Summary
 
-完成了 MR/PR 统一命令的实现，并更新了相关 skills 使用新命令。
+完成了 MR/PR 跨平台命令的实现，并更新了相关 skills 使用新命令。
 
 ## 实现内容
 
@@ -112,7 +112,7 @@ async mergeMR(id: number, options: MergeMROptions = {}): Promise<void> {
 }
 ```
 
-### 3. ✅ 统一命令实现
+### 3. ✅ 跨平台命令实现
 
 在 `src/commands/tracker.ts` 中添加 `afk mr` 命令组：
 
@@ -195,12 +195,15 @@ $ npm run build
 
 ## 特性对比
 
-| 功能 | GitLab | GitHub | 统一命令 |
+| 功能 | GitLab | GitHub | afk 命令 |
 |------|--------|--------|---------|
 | 创建 | `glab mr create` | `gh pr create` | `afk mr create` |
 | 列出 | `glab mr list` | `gh pr list` | `afk mr list` |
 | 查看 | `glab mr view` | `gh pr view` | `afk mr get` |
 | 合并 | `glab mr merge` | `gh pr merge` | `afk mr merge` |
+| 批准 | `glab mr approve` | `gh pr review --approve` | `afk mr approve` |
+| 关闭 | `glab mr close` | `gh pr close` | `afk mr close` |
+| 重开 | `glab mr reopen` | `gh pr reopen` | `afk mr reopen` |
 | 草稿 | `--draft` | `--draft` | `--draft` ✅ |
 | 标签 | `--label` | `--label` | `--label` ✅ |
 | Squash | `--squash` | `--squash` | `--squash` ✅ |
@@ -219,12 +222,12 @@ $ npm run build
 - 合并后需单独调用 `git.deleteRef()` 删除分支
 - 分支删除是 best-effort（可能失败但不影响合并）
 
-## 统一抽象完成度
+## 跨平台抽象完成度
 
 | 命令组 | 状态 | 命令数 |
 |--------|------|--------|
 | `afk issue` | ✅ 完成 | 6 (get, list, create, update-labels, comment, link) |
-| `afk mr` | ✅ 完成 | 4 (get, list, create, merge) |
+| `afk mr` | ✅ 完成 | 7 (get, list, create, merge, approve, close, reopen) |
 
 ## Skills 更新状态
 
@@ -247,12 +250,13 @@ b6f663d feat: add unified MR/PR commands and update skills
 
 ## 下一步
 
-所有计划的统一抽象层任务已完成：
+所有计划的跨平台抽象层任务已完成：
 1. ✅ 实现 `afk mr` 命令组
 2. ✅ 扩展 TrackerProvider 接口
 3. ✅ 更新 afk-qa 和 afk-prototype skills
+4. ✅ 添加 approve, close, reopen 操作
 
 **可选后续工作：**
-- 修复 GitLabClient 类型冲突（合并两个实现）
-- 添加更多 MR 操作（approve, close, reopen）
+- 添加更多 MR 操作（assign, unassign, request-review）
 - 实现 MR 状态检查和 CI 集成
+- 添加 MR 模板支持

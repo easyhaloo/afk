@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
+import figures from 'figures';
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -33,14 +34,14 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
     edgeChar +
     '░'.repeat(Math.max(0, barWidth - filledWidth - (edgeChar ? 1 : 0)));
 
-  // Enhanced messages with more stages
+  // Enhanced messages with professional icons from figures library
   const messages = [
-    { text: 'Initializing workspace...', icon: '⚙' },
-    { text: 'Loading configuration...', icon: '📝' },
-    { text: 'Connecting to GitHub...', icon: '🔗' },
-    { text: 'Connecting to GitLab...', icon: '🔗' },
-    { text: 'Preparing dashboard...', icon: '📊' },
-    { text: 'Ready to work!', icon: '✨' },
+    { text: 'Initializing workspace...', icon: figures.play },
+    { text: 'Loading configuration...', icon: figures.info },
+    { text: 'Connecting to GitHub...', icon: figures.arrowRight },
+    { text: 'Connecting to GitLab...', icon: figures.arrowRight },
+    { text: 'Preparing dashboard...', icon: figures.hamburger },
+    { text: 'Ready to work!', icon: figures.tick },
   ];
 
   const messageIndex = Math.min(
@@ -116,7 +117,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
         </Box>
       )}
 
-      {/* Loading indicator with animated spinner and icon */}
+      {/* Loading indicator with animated spinner and professional icon */}
       <Box
         flexDirection="column"
         alignItems="center"
@@ -128,9 +129,9 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
             {spinnerFrames[spinnerIndex]}
           </Text>
           <Text> </Text>
-          <Text dimColor={opacity < 0.7}>{currentMessage.text}</Text>
+          <Text color="cyanBright" dimColor={opacity < 0.7}>{currentMessage.icon}</Text>
           <Text> </Text>
-          <Text dimColor={opacity < 0.7}>{currentMessage.icon}</Text>
+          <Text dimColor={opacity < 0.7}>{currentMessage.text}</Text>
         </Box>
 
         {/* Smooth progress bar with wave effect */}

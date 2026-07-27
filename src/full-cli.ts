@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import { registerSignalCommands } from './commands/signal';
 import { registerGitLabCommands } from './commands/gitlab';
 import { registerGitHubCommands } from './commands/github';
+import { registerTrackerCommands } from './commands/tracker';
 import { registerTmuxCommands } from './commands/tmux';
 import { registerWorktreeCommands } from './commands/worktree';
 import { registerWorkflowCommands } from './commands/workflow';
@@ -20,6 +21,7 @@ export function runFullCLI() {
   const program = new Command();
   program.name('afk').version('0.1.0');
   registerSignalCommands(program);
+  registerTrackerCommands(program);
   registerGitLabCommands(program);
   registerGitHubCommands(program);
   registerTmuxCommands(program);

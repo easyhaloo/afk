@@ -1,9 +1,10 @@
-import { GitLabClient } from './core/gitlab/client';
+import { GitLabClient } from './core/gitlab/index';
 import { GitHubClient } from './core/github/client';
-import { detectGitLabProject } from './core/tracker/detect';
+import { detectGitLabProject, detectProject } from './core/tracker/detect';
 import { detectGitHubRepo } from './core/tracker/detect';
 import { getGlabToken } from './core/gitlab/glab-config';
 import { execSync } from 'child_process';
+import type { TrackerProvider } from './core/tracker/types';
 
 /**
  * Create GitLab client with automatic token and project detection
@@ -75,4 +76,51 @@ export async function createGitHubClient(): Promise<GitHubClient> {
   }
 
   return new GitHubClient({ repo, auth: token });
+}
+
+/**
+ * Create tracker client with automatic platform detection
+ *
+ * Detects platform from git remote and returns appropriate client.
+ * This is the unified entry point for platform-agnostic commands.
+ */
+export async function createTrackerClient(): Promise<TrackerProvider> {
+  const { platform } = await detectProject();
+
+  if (platform === 'github') {
+    return await createGitHubClient();
+  } else {
+    // For GitLab, use the index version which implements TrackerProvider
+    const { GitLabClient: TrackerGitLabClient } = await import('./core/gitlab/index');
+
+    const envUrl = process.env.GITLAB_URL;
+    let token = process.env.GITLAB_TOKEN;
+    let projectId = process.env.GITLAB_PROJECT_ID;
+    let url = envUrl || 'https://gitlab.com';
+
+    // Try glab CLI if no env token
+    if (!token) {
+      const glab = getGlabToken(envUrl);
+      if (glab) {
+        url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
+        token = glab.token;
+      }
+    }
+
+    if (!token) {
+      throw new Error('GITLAB_TOKEN environment variable is required (or authenticate glab: glab auth login)');
+    }
+
+    // Try git remote detection if no env project ID
+    if (!projectId) {
+      const detected = await detectGitLabProject();
+      if (detected) projectId = detected;
+    }
+
+    if (!projectId) {
+      throw new Error('GITLAB_PROJECT_ID environment variable is required (or run from a git project with a remote)');
+    }
+
+    return new TrackerGitLabClient({ url, token, projectId });
+  }
 }

@@ -17,10 +17,11 @@ export function Header({
   selectedIssuesCount, multiSelectMode,
 }: Props) {
   const icon = view === 'tasks' ? '●' : view === 'issues' ? '○'
-    : view === 'completed' ? '✔' : '▸';
+    : view === 'completed' ? '✔' : view === 'board' ? '▦' : '▸';
   const count = view === 'tasks' ? tasksCount
     : view === 'issues' ? issuesCount
     : view === 'completed' ? completedCount
+    : view === 'board' ? issuesCount
     : projectsCount;
 
   return (

@@ -1,4 +1,4 @@
-export type View = 'tasks' | 'issues' | 'completed' | 'projects';
+export type View = 'tasks' | 'issues' | 'completed' | 'projects' | 'board';
 export type DetailView = 'list' | 'detail';
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';

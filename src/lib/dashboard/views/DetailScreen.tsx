@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import open from 'open';
+import { exec } from 'child_process';
 import { Task, Issue, Project } from '../../../types/dashboard';
 import type { View } from '../types';
 
@@ -54,8 +54,19 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
 
   // Keyboard navigation
   useInput((input, key) => {
-    if (key.return && hoverIdx >= 0 && hoverIdx < clickableRows.length) {
-      open(clickableRows[hoverIdx].url).catch(() => {});
+    if (key.return) {
+      if (hoverIdx >= 0 && hoverIdx < clickableRows.length) {
+        const url = clickableRows[hoverIdx].url;
+        const cmd = process.platform === 'darwin'
+          ? `open "${url}"`
+          : process.platform === 'win32'
+            ? `start "" "${url}"`
+            : `xdg-open "${url}"`;
+        exec(cmd, (err) => {
+          if (err) process.stderr.write(`[open] err: ${err.message}\n`);
+        });
+      }
+      return;
     }
     if (key.downArrow || key.rightArrow) {
       setHoverIdx(i => Math.min(i + 1, clickableRows.length - 1));

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import figures from 'figures';
 import { tmux as createTmux } from 'node-tmux';
-import open from 'open';
+import { exec } from 'child_process';
 import { Task, Issue, Project } from '../../types/dashboard';
 import { useNavigation } from './navigation/index.js';
 import { useData } from './data/index.js';
@@ -63,6 +63,7 @@ export const Dashboard: React.FC = () => {
   const [debugMode, setDebugMode] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const prevSelectedRef = useRef<number | null>(null);
+  const itemsRef = useRef<(Task | Issue | Project)[]>([]);
   const addDebugLog = (msg: string) =>
     setDebugLog(prev => [...prev.slice(-20), `${new Date().toLocaleTimeString()} ${msg}`]);
 
@@ -73,6 +74,7 @@ export const Dashboard: React.FC = () => {
     if (currentView === 'completed') return completedTasks;
     return projects;
   };
+  itemsRef.current = getItems();
   const getItem = () => getItems()[selectedIndex];
 
   const ROWS_PER_ITEM = 1; // Each item is rendered as a single compact line.
@@ -172,15 +174,21 @@ export const Dashboard: React.FC = () => {
   }, [currentView, launchFromIssue, launchExistingTask]);
 
   const handleOpenInBrowser = useCallback(async () => {
-    const item = getItem();
-    if (currentView === 'issues' && (item as Issue)?.web_url) {
-      try { await open((item as Issue).web_url); notify(`opened #${(item as Issue).iid}`, 'success'); }
-      catch { notify('open failed', 'error'); }
-    } else if (currentView === 'projects' && (item as Project)?.web_url) {
-      try { await open((item as Project).web_url as string); notify(`opened ${(item as Project).name}`, 'success'); }
-      catch { notify('open failed', 'error'); }
-    }
-  }, [currentView]);
+    const item = itemsRef.current[selectedIndex];
+    const url = currentView === 'issues'
+      ? (item as Issue)?.web_url
+      : (item as Project)?.web_url as string;
+    if (!url) return;
+    const cmd = process.platform === 'darwin'
+      ? `open "${url}"`
+      : process.platform === 'win32'
+        ? `start "" "${url}"`
+        : `xdg-open "${url}"`;
+    exec(cmd, (err) => {
+      if (err) notify('open failed', 'error');
+      else notify(`opened ${currentView === 'issues' ? `#${(item as Issue).iid}` : (item as Project).name}`, 'success');
+    });
+  }, [currentView, selectedIndex]);
 
   const toggleMultiSelectMode = useCallback(() => {
     if (currentView !== 'issues') return;
@@ -268,30 +276,35 @@ export const Dashboard: React.FC = () => {
     if (input === '?') { setShowHelp(h => !h); return; }
     if (input === 'D' || input === 'd') { setDebugMode(d => { const n = !d; addDebugLog(`[DEBUG ${n ? 'ON' : 'OFF'}]`); return n; }); return; }
 
-    if (input === 'b') {
-      if (showHelp) { setShowHelp(false); return; }
-      if (detailView === 'detail') { setDetailView('list'); return; }
-      if (canGoBack()) { popView(); setIssueProject(null); return; }
-    }
-
     if (key.escape || input === 'q') {
       if (showHelp) { setShowHelp(false); return; }
-      if (detailView === 'detail') { setDetailView('list'); return; }
       if (input === 'q') { exit(); return; }
+      if (detailView === 'detail') { exit(); return; }
+      if (canGoBack()) { popView(); setIssueProject(null); return; }
+      return;
     }
 
-    if (detailView === 'detail' && input === 'i') {
-      const project = getItem() as Project;
-      if (project) {
-        setIssueProject(project);
-        setCurrentView('issues');
-        setDetailView('list');
-        setSelectedIndex(0);
+    if (detailView === 'detail') {
+      if (input === 'o') { handleOpenInBrowser(); return; }
+      if (input === 'D' || input === 'd') { setDebugMode(d => { const n = !d; addDebugLog(`[DEBUG ${n ? 'ON' : 'OFF'}]`); return n; }); return; }
+      if (input === 'b') { setDetailView('list'); return; }
+      if (input === 'i') {
+        const project = getItem() as Project;
+        if (project) {
+          setIssueProject(project);
+          setCurrentView('issues');
+          setDetailView('list');
+          setSelectedIndex(0);
+        }
+        return;
       }
       return;
     }
 
-    if (showHelp || detailView === 'detail') return;
+    if (input === 'b') {
+      if (showHelp) { setShowHelp(false); return; }
+      if (canGoBack()) { popView(); setIssueProject(null); return; }
+    }
 
     if (input === '1') { setIssueProject(null); switchView('tasks'); }
     if (input === '2') { setIssueProject(null); switchView('issues'); }

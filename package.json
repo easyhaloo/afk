@@ -1,7 +1,7 @@
 {
   "name": "afk",
   "version": "0.1.0",
-  "description": "Unified CLI for AFK (Automated Feature Kitchen) workflow",
+  "description": "Away From Keyboard — autonomous development workflow CLI + Skills system",
   "type": "module",
   "bin": {
     "afk": "./dist/index.js"

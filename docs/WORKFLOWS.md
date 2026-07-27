@@ -7,11 +7,11 @@ AFK 实现三种主要工作流模式：
 2. **调度器工作流**：后台依赖感知执行
 3. **Skills 工作流**：TDD 方法论集成
 
-## Issue → Implementation → MR Pipeline
+## Issue → 实现 → MR 流水线
 
-End-to-end workflow from issue discovery to merge request.
+从 issue 发现到合并请求的端到端工作流。
 
-### Manual Execution
+### 手动执行
 
 ```bash
 # 1. Discover ready issues
@@ -33,7 +33,7 @@ afk workflow create-mr --iid 123 --worktree /tmp/afk-worktrees/issue-123
 afk worktree cleanup --iid 123
 ```
 
-### Automated Execution (Scheduler)
+### 自动执行（调度器）
 
 ```bash
 # Start scheduler daemon
@@ -46,81 +46,81 @@ afk scheduler start --max-concurrent 3 --poll-interval 60
 # 4. Monitors completion and creates MRs
 ```
 
-### Workflow Stages
+### 工作流阶段
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   Issue Discovery                    │
-│  • Poll GitLab/GitHub API                           │
-│  • Filter by label: stage::ready-for-implement      │
+│                   Issue 发现                         │
+│  • 轮询 GitLab/GitHub API                           │
+│  • 按标签过滤: stage::ready-for-implement           │
 └────────────────────┬────────────────────────────────┘
                      │
                      ↓
 ┌─────────────────────────────────────────────────────┐
-│              Precondition Validation                 │
-│  ✓ AC section exists (## Acceptance Criteria)      │
-│  ✓ Base label exists (base::prd-<N> or direct)     │
-│  ✓ No open blockers (no blocks-<iid> labels)       │
+│                  前置条件验证                        │
+│  ✓ AC 章节存在 (## Acceptance Criteria)           │
+│  ✓ Base 标签存在 (base::prd-<N> 或 direct)        │
+│  ✓ 无未解决阻塞 (无 blocks-<iid> 标签)             │
 └────────────────────┬────────────────────────────────┘
                      │
                      ↓
 ┌─────────────────────────────────────────────────────┐
-│                 Worktree Creation                    │
-│  • Create isolated git worktree                     │
-│  • Branch: afk-issue-<iid>                          │
-│  • Location: /tmp/afk-worktrees/issue-<iid>         │
+│                 Worktree 创建                        │
+│  • 创建隔离的 git worktree                          │
+│  • 分支: afk-issue-<iid>                           │
+│  • 位置: /tmp/afk-worktrees/issue-<iid>            │
 └────────────────────┬────────────────────────────────┘
                      │
                      ↓
 ┌─────────────────────────────────────────────────────┐
-│              Tmux Session Management                 │
-│  • Create session: afk-issue-<iid>                  │
-│  • Start Claude Code session in worktree            │
-│  • Send goal via /goal command                      │
+│              Tmux 会话管理                           │
+│  • 创建会话: afk-issue-<iid>                        │
+│  • 在 worktree 中启动 Claude Code 会话              │
+│  • 通过 /goal 命令发送目标                          │
 └────────────────────┬────────────────────────────────┘
                      │
                      ↓
 ┌─────────────────────────────────────────────────────┐
-│              Implementation Phase                    │
-│  • Claude executes via /afk-implement skill         │
-│  • Follows TDD methodology                          │
-│  • Writes .afk-signal.json on completion            │
+│                  实现阶段                            │
+│  • Claude 通过 /afk-implement skill 执行            │
+│  • 遵循 TDD 方法论                                  │
+│  • 完成时写入 .afk-signal.json                      │
 └────────────────────┬────────────────────────────────┘
                      │
                      ↓
 ┌─────────────────────────────────────────────────────┐
-│                Signal Detection                      │
-│  • Poll .afk-signal.json every 5s                   │
-│  • Types: goal_complete, goal_failed, blocked       │
-│  • Timeout: configurable (default 2h)               │
+│                  Signal 检测                         │
+│  • 每 5s 轮询 .afk-signal.json                      │
+│  • 类型: goal_complete, goal_failed, blocked       │
+│  • 超时: 可配置（默认 2h）                          │
 └────────────────────┬────────────────────────────────┘
                      │
               ┌──────┴──────┐
               ↓             ↓
     ┌─────────────┐   ┌─────────────┐
-    │  Success    │   │   Failure   │
+    │    成功     │   │    失败     │
     └──────┬──────┘   └──────┬──────┘
            │                 │
            ↓                 ↓
 ┌─────────────────┐   ┌─────────────────┐
-│ AC Validation   │   │  Label: failed  │
+│   AC 验证       │   │ 标签: failed    │
 └────────┬────────┘   └─────────────────┘
          │
          ↓
 ┌─────────────────────────────────────────────────────┐
-│              MR/PR Creation                          │
-│  • Push branch: afk-issue-<iid>                     │
-│  • Create MR/PR with description from issue         │
-│  • Link to issue: Closes #<iid>                     │
-│  • Add labels from issue                            │
+│              MR/PR 创建                              │
+│  • 推送分支: afk-issue-<iid>                        │
+│  • 用 issue 描述创建 MR/PR                          │
+│  • 关联 issue: Closes #<iid>                        │
+│  • 添加来自 issue 的标签                            │
 └────────────────────┬────────────────────────────────┘
                      │
                      ↓
 ┌─────────────────────────────────────────────────────┐
-│                Cleanup Phase                         │
-│  • Update issue labels: stage::in-review            │
-│  • Keep worktree for review                         │
-│  • Archive tmux session logs                        │
+│                  清理阶段                            │
+│  • 更新 issue 标签: stage::in-review                │
+│  • 保留 worktree 用于审查                           │
+│  • 归档 tmux 会话日志                               │
 └─────────────────────────────────────────────────────┘
 ```
 

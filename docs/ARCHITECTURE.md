@@ -299,6 +299,103 @@ export interface TrackedMR {
 }
 ```
 
+## CLI 命令映射
+
+AFK 提供统一的命令接口，自动适配 GitLab 和 GitHub：
+
+### Issue 操作
+
+| 操作 | AFK 命令 | GitLab | GitHub |
+|------|---------|--------|--------|
+| 查看详情 | `afk issue get <id>` | `glab issue view <iid>` | `gh issue view <number>` |
+| 列出 issues | `afk issue list` | `glab issue list` | `gh issue list` |
+| 创建 issue | `afk issue create "title"` | `glab issue create` | `gh issue create` |
+| 更新标签 | `afk issue update-labels <id> label1,label2` | `glab issue update --labels` | `gh issue edit --add-label` |
+| 添加评论 | `afk issue comment <id> "text"` | `glab issue note` | `gh issue comment` |
+| 关联 issues | `afk issue link <id1> <id2>` | `glab issue link` | API 调用 |
+
+### MR/PR 操作
+
+| 操作 | AFK 命令 | GitLab | GitHub |
+|------|---------|--------|--------|
+| 查看详情 | `afk mr get <id>` | `glab mr view <iid>` | `gh pr view <number>` |
+| 列出 MRs/PRs | `afk mr list` | `glab mr list` | `gh pr list` |
+| 创建 MR/PR | `afk mr create "title"` | `glab mr create` | `gh pr create` |
+| 合并 | `afk mr merge <id>` | `glab mr merge <iid>` | `gh pr merge <number>` |
+| 批准 | `afk mr approve <id>` | `glab mr approve <iid>` | `gh pr review --approve <number>` |
+| 关闭 | `afk mr close <id>` | `glab mr close <iid>` | `gh pr close <number>` |
+| 重新打开 | `afk mr reopen <id>` | `glab mr reopen <iid>` | `gh pr reopen <number>` |
+
+### 命令选项对比
+
+**创建 MR/PR：**
+```bash
+# AFK（统一）
+afk mr create "feat: add login" \
+  --source feat/login \
+  --target main \
+  --draft \
+  --label "feature,priority::high"
+
+# GitLab
+glab mr create \
+  --source-branch feat/login \
+  --target-branch main \
+  --draft \
+  --label "feature,priority::high"
+
+# GitHub
+gh pr create \
+  --head feat/login \
+  --base main \
+  --draft \
+  --label "feature" \
+  --label "priority::high"
+```
+
+**合并选项：**
+```bash
+# AFK（统一）
+afk mr merge 123 \
+  --delete-source-branch \
+  --squash \
+  --message "Custom merge message"
+
+# GitLab
+glab mr merge 123 \
+  --remove-source-branch \
+  --squash \
+  --squash-message "Custom merge message"
+
+# GitHub
+gh pr merge 123 \
+  --squash \
+  --delete-branch \
+  --body "Custom merge message"
+```
+
+### 平台差异处理
+
+**ID 语义：**
+- **GitLab**: 使用 `iid`（项目内 ID，从 1 开始）
+- **GitHub**: 使用 `number`（仓库内 ID，从 1 开始）
+- **AFK**: 统一使用 `id`，自动映射到对应平台的 ID 类型
+
+**标签操作：**
+- **GitLab**: 单次 API 调用设置所有标签（逗号分隔）
+- **GitHub**: 需要单独调用 `issues.addLabels()` 为 PR 添加标签
+- **AFK**: 自动处理平台差异，统一为 `--label "label1,label2"` 格式
+
+**分支删除：**
+- **GitLab**: MR 创建时可设置 `removeSourceBranch: true`，合并时自动删除
+- **GitHub**: 需要合并后单独调用 `git.deleteRef()` 删除分支
+- **AFK**: `--delete-source-branch` 选项在两个平台都有效
+
+**草稿状态：**
+- **GitLab**: MR 创建时设置 `--draft` 标志
+- **GitHub**: PR 创建时设置 `--draft` 标志
+- **AFK**: 统一使用 `--draft` 选项
+
 ## 优势
 
 1. **单一命令集**：用户只需学习一套命令，适用任何平台

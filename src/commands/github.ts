@@ -146,4 +146,29 @@ export function registerGitHubCommands(program: Command): void {
         handleCommandError(error);
       }
     });
+
+  /**
+   * link-issues command
+   */
+  github
+    .command('link-issues')
+    .description('Link two issues by adding a reference comment')
+    .argument('<source>', 'Source issue number')
+    .argument('<target>', 'Target issue number')
+    .option('--type <type>', 'Link type (blocks, blocked_by, related_to)', 'related_to')
+    .action(async (source: string, target: string, options) => {
+      try {
+        const client = await createGitHubClient();
+        const sourceNum = parseInt(source);
+        const targetNum = parseInt(target);
+        const linkType = options.type === 'blocks' ? 'blocks' :
+                        options.type === 'blocked_by' ? 'blocked_by' :
+                        'related_to';
+
+        await client.linkIssues(sourceNum, targetNum, linkType);
+        console.log(chalk.green(`✓ Linked issue #${source} to #${target} (${linkType})`));
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
 }

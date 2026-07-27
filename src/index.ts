@@ -1,36 +1,52 @@
 #!/usr/bin/env node
+/**
+ * Thin CLI dispatcher — lazy-loads only the command that is invoked.
+ */
 import { Command } from 'commander';
-import { registerSignalCommands } from './commands/signal.js';
-import { registerGitLabCommands } from './commands/gitlab.js';
-import { registerTmuxCommands } from './commands/tmux.js';
-import { registerWorktreeCommands } from './commands/worktree.js';
-import { registerWorkflowCommands } from './commands/workflow.js';
-import { registerSchedulerCommands } from './commands/scheduler.js';
-import { registerDashboardCommands } from './commands/dashboard.js';
-import { registerDbCommands } from './commands/db.js';
-import { registerDebugCommands } from './commands/debug.js';
-import { registerEscalateCommands } from './commands/escalate.js';
-import { registerForkCommands } from './commands/fork.js';
 
-const program = new Command();
+const cmd = process.argv[2];
+const extraArgs = process.argv.slice(3);
 
-program
-  .name('afk')
-  .description('Unified CLI for AFK (Automated Feature Kitchen) workflow')
-  .version('0.1.0');
+type RegisterFn = (p: Command) => void;
 
-// Register command modules
-registerSignalCommands(program);
-registerGitLabCommands(program);
-registerTmuxCommands(program);
-registerWorktreeCommands(program);
-registerWorkflowCommands(program);
-registerSchedulerCommands(program);
-registerDashboardCommands(program);
-registerDbCommands(program);
-registerDebugCommands(program);
-registerEscalateCommands(program);
-registerForkCommands(program);
+const COMMANDS: [string[], () => Promise<{ [k: string]: RegisterFn }>][] = [
+  [['dashboard', 'ui'], () => import('./commands/dashboard.js')],
+  [['signal'], () => import('./commands/signal.js')],
+  [['gitlab'], () => import('./commands/gitlab.js')],
+  [['tmux'], () => import('./commands/tmux.js')],
+  [['worktree'], () => import('./commands/worktree.js')],
+  [['workflow'], () => import('./commands/workflow.js')],
+  [['scheduler'], () => import('./commands/scheduler.js')],
+  [['db'], () => import('./commands/db.js')],
+  [['debug'], () => import('./commands/debug.js')],
+  [['escalate'], () => import('./commands/escalate.js')],
+  [['fork'], () => import('./commands/fork.js')],
+];
 
-// Parse CLI arguments
-program.parse();
+async function main() {
+  if (cmd === '--version' || cmd === '-V') {
+    console.log('0.1.0');
+    return;
+  }
+
+  for (const [names, loader] of COMMANDS) {
+    if (names.includes(cmd)) {
+      const mod = await loader();
+      const register = Object.values(mod)[0] as RegisterFn;
+      const program = new Command();
+      program.name('afk').version('0.1.0');
+      register(program);
+      program.parse(['afk', cmd, ...extraArgs]);
+      return;
+    }
+  }
+
+  // Unknown command → load full CLI for help or error
+  const { runFullCLI } = await import('./full-cli.js');
+  runFullCLI();
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});

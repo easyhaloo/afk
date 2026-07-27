@@ -26,10 +26,10 @@ export function registerGitLabCommands(program: Command): void {
         if (options.json) {
           console.log(JSON.stringify(issue, null, 2));
         } else {
-          console.log(chalk.bold(`#${issue.iid}: ${issue.title}`));
+          console.log(chalk.bold(`#${issue.id}: ${issue.title}`));
           console.log(chalk.gray(`State: ${issue.state}`));
           console.log(chalk.gray(`Labels: ${issue.labels.join(', ')}`));
-          console.log(chalk.gray(`URL: ${issue.web_url}`));
+          console.log(chalk.gray(`URL: ${issue.url}`));
           console.log();
           console.log(chalk.dim(issue.description));
         }
@@ -65,7 +65,7 @@ export function registerGitLabCommands(program: Command): void {
             const labels = issue.labels.length > 0
               ? chalk.gray(`[${issue.labels.join(', ')}]`)
               : '';
-            console.log(`  ${chalk.cyan(`#${issue.iid}`)} ${issue.title} ${labels}`);
+            console.log(`  ${chalk.cyan(`#${issue.id}`)} ${issue.title} ${labels}`);
           });
         }
       } catch (error) {

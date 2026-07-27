@@ -146,6 +146,7 @@ export class GitLabClient implements TrackerProvider {
       targetBranch: mr.target_branch,
       url: mr.web_url,
       projectId: String(this.projectId),
+      pipeline: mr.head_pipeline ? { status: mr.head_pipeline.status } : undefined,
     };
   }
 
@@ -257,5 +258,113 @@ export class GitLabClient implements TrackerProvider {
       return `## Verification Evidence${artifactUrls}\n`;
     }
     return '';
+  }
+
+  // Legacy methods from old client.ts (used by scheduler, workflows, preconditions)
+
+  async getRetryCountFromIssue(iid: number): Promise<number> {
+    const issue = await this.getIssue(iid);
+    return this.getRetryCount(issue);
+  }
+
+  async incrementRetryCount(iid: number): Promise<number> {
+    const issue = await this.getIssue(iid);
+    const current = this.getRetryCount(issue);
+    const newCount = current + 1;
+    const withoutOld = issue.labels.filter(l => !/^retry-count::/.test(l));
+    await this.updateIssue(iid, { labels: [...withoutOld, `retry-count::${newCount}`] });
+    return newCount;
+  }
+
+  async updateLabels(iid: number, labels: string[]): Promise<void> {
+    await this.updateIssue(iid, { labels });
+  }
+
+  async addLabelsToIssue(iid: number, labels: string[]): Promise<void> {
+    const issue = await this.getIssue(iid);
+    const newLabels = [...new Set([...issue.labels, ...labels])];
+    await this.updateIssue(iid, { labels: newLabels });
+  }
+
+  async updateLabelsBatch(iid: number, add: string[], remove: string[]): Promise<void> {
+    await this.client.Issues.edit(this.projectId, iid, {
+      add_labels: add.join(','),
+      remove_labels: remove.join(','),
+    });
+  }
+
+  async createLaunchComment(iid: number, info: {
+    worktreePath: string;
+    targetBranch: string;
+    session: string;
+    traceId: string;
+    goalLines: number;
+    goalPreview: string;
+  }): Promise<void> {
+    const body = [
+      '<!-- afk-event: launch -->',
+      '**🚀 AFK Session Started**',
+      '',
+      `- **Worktree:** \`${info.worktreePath}\``,
+      `- **Target branch:** \`${info.targetBranch}\``,
+      `- **Session:** \`${info.session}\``,
+      `- **Trace:** \`${info.traceId}\``,
+      '',
+      `<details>`,
+      `<summary>Goal (${info.goalLines} lines)</summary>`,
+      '',
+      '```',
+      info.goalPreview,
+      '```',
+      '</details>',
+      '',
+      `**Attach:** \`tmux attach -t ${info.session}\``,
+    ].join('\n');
+    await this.addComment(iid, body);
+  }
+
+  async updateProgressComment(iid: number, info: {
+    worktreePath: string;
+    sha: string;
+    shortMsg: string;
+    acDone: number;
+    acTotal: number;
+    next: string;
+  }): Promise<void> {
+    const marker = `<!-- AFK-PROGRESS-${iid} -->`;
+    const body = [
+      `${marker}`,
+      `**AFK Progress** | commit:\`${info.sha}\` | ${info.shortMsg} | AC: ${info.acDone}/${info.acTotal}`,
+      '',
+      `> Next: ${info.next}`,
+    ].join('\n');
+
+    try {
+      const notes = await this.client.IssueNotes.all(this.projectId, iid, { perPage: 100 }) as any[];
+      const existing = notes.find((n: any) => n.body.includes(marker));
+      if (existing) {
+        await this.client.IssueNotes.edit(this.projectId, iid, existing.id, body);
+      } else {
+        await this.addComment(iid, body);
+      }
+    } catch {
+      await this.addComment(iid, body);
+    }
+  }
+
+  async getWorktreeSHA(worktreePath: string): Promise<string> {
+    const git = simpleGit(worktreePath);
+    return git.revparse('HEAD');
+  }
+
+  async addMRComment(mrIid: number, body: string, opts: { resolvable?: boolean } = {}): Promise<void> {
+    await this.client.MergeRequestNotes.create(this.projectId, mrIid, body, {
+      resolvable: opts.resolvable ?? false,
+    });
+  }
+
+  async getMRPipelineStatus(mrIid: number): Promise<string> {
+    const mr = await this.client.MergeRequests.show(this.projectId, mrIid) as any;
+    return mr.head_pipeline?.status ?? 'unknown';
   }
 }

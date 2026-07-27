@@ -1,3 +1,3 @@
-// Re-export from core/
-// Keep old client for backward compatibility (afk-specific methods)
-export * from './core/gitlab/client';
+// Re-export unified GitLabClient from core/gitlab/index
+// Merged TrackerProvider implementation with legacy methods
+export * from './core/gitlab/index';

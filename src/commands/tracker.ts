@@ -325,4 +325,73 @@ export function registerTrackerCommands(program: Command): void {
         handleCommandError(error);
       }
     });
+
+  /**
+   * approve command
+   */
+  mr
+    .command('approve')
+    .description('Approve an MR/PR')
+    .argument('<id>', 'MR/PR ID')
+    .option('--sha <commit>', 'Approve specific commit SHA (GitLab only)')
+    .action(async (id: string, options) => {
+      try {
+        const client = await createTrackerClient();
+        const mrId = parseInt(id);
+
+        await client.approveMR(mrId, {
+          sha: options.sha,
+        });
+
+        console.log(chalk.green(`✓ Approved MR/PR #${id}`));
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * close command
+   */
+  mr
+    .command('close')
+    .description('Close an MR/PR without merging')
+    .argument('<id>', 'MR/PR ID')
+    .option('-m, --message <text>', 'Optional comment when closing')
+    .action(async (id: string, options) => {
+      try {
+        const client = await createTrackerClient();
+        const mrId = parseInt(id);
+
+        await client.closeMR(mrId, {
+          comment: options.message,
+        });
+
+        console.log(chalk.green(`✓ Closed MR/PR #${id}`));
+        if (options.message) {
+          console.log(chalk.gray('  Comment added'));
+        }
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * reopen command
+   */
+  mr
+    .command('reopen')
+    .description('Reopen a closed MR/PR')
+    .argument('<id>', 'MR/PR ID')
+    .action(async (id: string) => {
+      try {
+        const client = await createTrackerClient();
+        const mrId = parseInt(id);
+
+        await client.reopenMR(mrId);
+
+        console.log(chalk.green(`✓ Reopened MR/PR #${id}`));
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
 }

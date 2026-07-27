@@ -10,6 +10,8 @@ import type {
   ListMROptions,
   CreateMROptions,
   MergeMROptions,
+  ApproveMROptions,
+  CloseMROptions,
   AcceptanceCriteria,
   LinkType,
 } from '../tracker/types';
@@ -190,6 +192,27 @@ export class GitLabClient implements TrackerProvider {
       shouldRemoveSourceBranch: options.deleteSourceBranch ?? true,
       squash: options.squash ?? false,
       mergeCommitMessage: options.mergeCommitMessage,
+    });
+  }
+
+  async approveMR(id: number, options: ApproveMROptions = {}): Promise<void> {
+    await this.client.MergeRequestApprovals.approve(this.projectId, id, {
+      sha: options.sha,
+    });
+  }
+
+  async closeMR(id: number, options: CloseMROptions = {}): Promise<void> {
+    await this.client.MergeRequests.edit(this.projectId, id, {
+      state_event: 'close',
+    });
+    if (options.comment) {
+      await this.addMRComment(id, options.comment);
+    }
+  }
+
+  async reopenMR(id: number): Promise<void> {
+    await this.client.MergeRequests.edit(this.projectId, id, {
+      state_event: 'reopen',
     });
   }
 

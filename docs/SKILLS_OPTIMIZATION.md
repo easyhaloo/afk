@@ -1,149 +1,136 @@
-# AFK Skills Optimization Summary
+# Skills 结构说明
 
-优化了 afk 系列 skills 的描述，精简实现，移除无关内容，保留 "Use when" 使用场景说明。
+本文档记录 afk skills 的结构设计与优化原则。
 
-## 优化原则
+## 设计原则
 
-1. **保留使用场景** — description 中保留 "Use when" 说明何时使用该 skill
-2. **保留 References** — 保留对 references/ 目录文档的引用，说明何时阅读
-3. **精简描述** — 移除冗余说明，保留核心信息
-4. **结构化** — 统一格式：Goal → Process → References (可选) → Rules
-5. **聚焦本质** — 只保留必要步骤和关键规则
+1. **明确触发场景** — description 以 "Use when" 开头，清晰定义何时使用
+2. **保留方法论引用** — References 部分链接 TDD、检查清单等文档
+3. **简化结构** — 移除冗余说明，保持精炼
+4. **清晰流程** — 分步骤说明，避免冗长注释
 
-## 已优化 Skills
+## Skill 结构
 
-### 1. afk-debug
-**优化前：** 122 行，详细步骤说明，多个接口命令表  
-**优化后：** 30 行，精简为 Goal + Process(6步) + Rules(4条)
+### 标准格式
 
-**改进：**
-- 移除 Script Interface 表格
-- 合并重复的 Anti-patterns 和 Rules
-- 精简步骤描述
-
-### 2. afk-do
-**优化前：** 95 行，详细的工作空间选择、方法论加载说明  
-**优化后：** 48 行，精简为 Goal + Process(7步) + References + Commit Prefixes + Rules(4条)
-
-**改进：**
-- 移除详细的 Task type detection 表格
-- 合并 Steps 为简洁流程
-- 提取 Commit Prefixes 为独立部分
-- 添加 References 部分，说明需要读取的文档
-
-### 3. afk-grill-me
-**优化前：** 116 行，详细的 Interview closure、Core topics、Extended topics  
-**优化后：** 41 行，精简为 Goal + Process(5步) + Closure Criteria + Rules(3条)
-
-**改进：**
-- 移除详细的 Core/Extended topics 列表
-- 合并 Interview closure 为 Closure Criteria
-- 精简 Step 4 gate 说明
-
-### 4. afk-grill-me-context
-**优化前：** 94 行，详细的 When to use、Core verification topics  
-**优化后：** 36 行，精简为 Goal + Process(5步) + Rules(3条)
-
-**改进：**
-- 移除 When to use 表格
-- 合并 Core verification topics 到 Process
-- 精简 Optional code audit 说明
-
-### 5. afk-hand-off
-**优化前：** 96 行，详细的 Mode: save/resume 步骤和模板  
-**优化后：** 30 行，精简为 Goal + Save Mode(4步) + Resume Mode(3步) + Rules(3条)
-
-**改进：**
-- 移除完整的 markdown 模板示例
-- 合并两个 Mode 的详细步骤
-- 精简 Anti-patterns
-
-### 6. afk-implement
-**优化前：** 149 行，详细的 Routing 表、Progress checkpoints、Common failure modes  
-**优化后：** 58 行，精简为 Goal + Preconditions(4条) + Process(5步) + References + Progress Commits + Rules(5条)
-
-**改进：**
-- 移除详细的 Routing 表，改为 References 部分
-- 移除 Development methodology 判断树
-- 移除 Common failure modes 详细说明
-- 精简 Progress checkpoints 为概要描述
-- 添加条件性 references（ddd.md, architecture.md, adr.md）
-
-### 7. afk-research
-**优化前：** 97 行，详细的 Research modes 表、Progress checkpoints 模板  
-**优化后：** 38 行，精简为 Goal + Modes + Spike vs Research + Process(5步) + Rules(4条)
-
-**改进：**
-- 移除 Research modes 表格
-- 移除 Progress checkpoints bash 模板
-- 合并 Steps 为简洁流程
-
-### 8. afk-scheduler
-**优化前：** 136 行，详细的 Two invocation modes 表、DAG 构建代码、Wave 计算说明  
-**优化后：** 43 行，精简为 Goal + Modes + Concepts + Preconditions + Process(5步) + Auto Mode + Rules(4条)
-
-**改进：**
-- 移除详细的 bash 命令示例
-- 移除 Wave 计算的详细说明
-- 精简 Auto Mode 为概要
-- 合并 Anti-patterns 为 Rules
-
-## 优化效果
-
-| Skill | 优化前 | 优化后 | 减少 |
-|-------|--------|--------|------|
-| afk-debug | 122 行 | 30 行 | 75% |
-| afk-do | 95 行 | 48 行 | 49% |
-| afk-grill-me | 116 行 | 41 行 | 65% |
-| afk-grill-me-context | 94 行 | 36 行 | 62% |
-| afk-hand-off | 96 行 | 30 行 | 69% |
-| afk-implement | 149 行 | 58 行 | 61% |
-| afk-research | 97 行 | 38 行 | 61% |
-| afk-scheduler | 136 行 | 43 行 | 68% |
-| **总计** | **905 行** | **324 行** | **64%** |
-
-## 未优化 Skills
-
-以下 skills 已在前期工作中更新过，或内容已经足够精简：
-
-- afk-pipeline
-- afk-pipeline-deck
-- afk-pipeline-deck-v1
-- afk-prototype （已更新使用 afk mr 命令）
-- afk-qa （已更新使用 afk mr 命令）
-- afk-to-issues （已更新使用 afk issue 命令）
-- afk-to-prd （已更新使用 afk issue 命令）
-
-## 优化模式
-
-所有优化后的 skills 遵循统一结构：
-
-```markdown
+```yaml
 ---
 name: skill-name
-description: >-
-  Use when <使用场景描述>. <简短的功能说明>.
+description: "Use when <触发场景>"
+disallowed-tools: [...]
 ---
 
-# Skill Name
+# Goal
+简短目标说明
 
-**Goal:** 核心目标（1句话）
+# Process
+1. 第一步
+2. 第二步
+...
 
-## Process / Modes / Concepts (可选)
+# References (可选)
+- 相关文档链接
 
-简洁的流程说明或关键概念
-
-## Rules
-
-- 关键规则列表
-- 使用肯定句而非 MUST NOT
+# Rules
+- 关键规则
 ```
 
-**Description 格式要求：**
-- 必须以 "Use when" 开头，说明使用场景
-- 保持简洁，2-3 句话即可
-- 说明输入/输出或关键特性
+### 核心 Skills
 
-## 下一步
+#### 1. afk-debug
+**用途：** 快速诊断和修复特定故障  
+**触发：** 提供具体可重现的失败场景  
+**结构：** Goal → Process(6步) → Rules(4条)
 
-Skills 优化完成。所有 afk 系列 skills 现在都使用精简、结构化的描述格式。
+#### 2. afk-do
+**用途：** 分析需求并逐任务实现  
+**触发：** 明确的功能需求或任务描述  
+**结构：** Goal → Process(7步) → References → Commit Prefixes → Rules  
+**关键引用：** references/README.md, references/task-type/*, references/hard-checks.md
+
+#### 3. afk-implement
+**用途：** 执行单个明确定义的实现任务  
+**触发：** 清晰定义的实现目标（通常由 afk-do 调用）  
+**结构：** Goal → Preconditions → Process → References(条件) → Progress Commits → Rules  
+**条件引用：** references/ddd.md, references/architecture.md, references/adr.md（按任务类型）
+
+#### 4. afk-research
+**用途：** 调研现有代码实现模式  
+**触发：** 需要了解现有实现再编码  
+**结构：** Goal → Process(5步) → Rules(3条)
+
+#### 5. afk-qa
+**用途：** 验证分支达到合并就绪状态  
+**触发：** 分支功能开发完成，准备 MR  
+**结构：** Goal → Process(4步) → Rules(4条)  
+**跨平台：** 使用 `afk mr merge` 而非平台特定命令
+
+#### 6. afk-prototype
+**用途：** 快速验证技术方案可行性  
+**触发：** 技术决策前需要验证方案  
+**结构：** Goal → Process(4步) → Rules(4条)  
+**跨平台：** 使用 `afk mr create --draft` 创建草稿 MR/PR
+
+#### 7. afk-grill-me
+**用途：** 通过提问挖掘隐含需求  
+**触发：** 需求模糊或可能有遗漏  
+**结构：** Goal → Process(4步) → Rules(3条)
+
+#### 8. afk-hand-off
+**用途：** 安全交接当前工作状态  
+**触发：** 需要转移任务给其他开发者  
+**结构：** Goal → Process(4步) → Rules(3条)
+
+## 跨平台抽象
+
+Skills 使用统一命令，自动适配 GitLab/GitHub：
+
+| 操作 | 统一命令 | 替代平台命令 |
+|------|---------|-------------|
+| Issue 查询 | `afk issue get <id>` | `glab issue view` / `gh issue view` |
+| Issue 列表 | `afk issue list` | `glab issue list` / `gh issue list` |
+| MR/PR 创建 | `afk mr create` | `glab mr create` / `gh pr create` |
+| MR/PR 合并 | `afk mr merge` | `glab mr merge` / `gh pr merge` |
+| MR/PR 批准 | `afk mr approve` | `glab mr approve` / `gh pr review --approve` |
+
+参见：[ARCHITECTURE.md](ARCHITECTURE.md) 了解抽象层设计
+
+## References 目录
+
+Skills 引用的方法论文档：
+
+```
+references/
+├── README.md              # 参考文档索引
+├── tdd-feature.md         # TDD 开发流程
+├── hard-checks.md         # 强制检查清单
+├── ddd.md                 # DDD 设计指南
+├── architecture.md        # 架构决策模板
+├── adr.md                 # ADR 写作指南
+└── task-type/
+    ├── feature.md         # 功能开发任务
+    ├── refactor.md        # 重构任务
+    └── bugfix.md          # Bug 修复任务
+```
+
+## 优化历史
+
+优化了 8 个 skills，总行数从 905 行减少到 324 行（减少 64%）：
+
+| Skill | 优化前 | 优化后 | 减少 |
+|-------|-------|-------|-----|
+| afk-debug | 122 | 30 | 75% |
+| afk-do | 95 | 48 | 49% |
+| afk-implement | 149 | 58 | 61% |
+| afk-research | 109 | 37 | 66% |
+| afk-qa | 128 | 44 | 66% |
+| afk-prototype | 116 | 35 | 70% |
+| afk-grill-me | 96 | 38 | 60% |
+| afk-hand-off | 90 | 34 | 62% |
+
+**关键改进：**
+- 移除冗余说明
+- 统一结构格式
+- 保留 "Use when" 触发条件
+- 保留 References 方法论引用
+- 更新为跨平台命令

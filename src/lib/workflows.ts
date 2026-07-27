@@ -1,5 +1,7 @@
 import { spawn } from 'child_process';
 import { GitLabClient } from './gitlab.js';
+import { detectPlatform } from './core/tracker/detect.js';
+import type { Platform } from './core/tracker/types.js';
 import { TmuxClient } from './tmux.js';
 import { WorktreeManager } from './worktree.js';
 import { writeSignal, readSignal } from './io.js';
@@ -14,6 +16,7 @@ export interface RunnerOptions {
   maxRetries?: number;
   hardTimeoutMs?: number;
   completionTimeoutMs?: number;
+  platform?: Platform;
 }
 
 interface LaunchResult {
@@ -60,6 +63,9 @@ export class WorkflowRunner {
       hardTimeoutMs = 7200000,
       completionTimeoutMs = 7200000,
     } = options;
+
+    // Auto-detect platform if not provided
+    const platform = options.platform || await detectPlatform();
 
     // ── Step 1: Fetch issue + AC ────────────────────────────────────────────
     const issue = await this.gitlab.getIssue(iid);
@@ -161,10 +167,29 @@ export class WorkflowRunner {
     // AC passed → create MR
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
 
+    // Query MR/PR status and pipeline
+    try {
+      const mrId = this.extractMRIdFromUrl(mrUrl);
+      if (mrId) {
+        const mr = await this.gitlab.getMR(mrId);
+        console.log(`✓ MR status: ${mr.state}, pipeline: ${mr.pipeline?.status || 'N/A'}`);
+      }
+    } catch (err) {
+      console.warn('Failed to query MR/PR status:', err);
+    }
+
     await this.gitlab.addLabel(iid, 'stage::qa');
     await this.gitlab.removeLabel(iid, 'stage::afk-in-progress');
 
     return { success: true, url: mrUrl };
+  }
+
+  /**
+   * Extract MR/PR numeric ID from URL
+   */
+  private extractMRIdFromUrl(url: string): number | null {
+    const match = url.match(/\/(merge_requests|pull)\/(\d+)/);
+    return match ? parseInt(match[2], 10) : null;
   }
 
   /**

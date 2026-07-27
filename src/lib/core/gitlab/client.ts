@@ -309,6 +309,30 @@ export class GitLabClient {
   }
 
   /**
+   * Get MR by ID
+   */
+  async getMR(id: number): Promise<{
+    id: number;
+    title: string;
+    state: 'opened' | 'merged' | 'closed';
+    sourceBranch: string;
+    targetBranch: string;
+    url: string;
+    pipeline?: { status: string };
+  }> {
+    const mr = await this.client.MergeRequests.show(this.projectId, id) as any;
+    return {
+      id: mr.iid,
+      title: mr.title,
+      state: mr.state as 'opened' | 'merged' | 'closed',
+      sourceBranch: mr.source_branch,
+      targetBranch: mr.target_branch,
+      url: mr.web_url,
+      pipeline: mr.head_pipeline ? { status: mr.head_pipeline.status } : undefined,
+    };
+  }
+
+  /**
    * Get MR head pipeline status
    */
   async getMRPipelineStatus(mrIid: number): Promise<string> {

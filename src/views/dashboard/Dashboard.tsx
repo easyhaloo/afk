@@ -20,10 +20,12 @@ import {
   Footer,
   Notification,
 } from './views/index';
+import { SplashScreen } from './components/SplashScreen.js';
 import type { View, Notification as NotificationType } from './types';
 
 export const Dashboard: React.FC = () => {
   const { exit } = useApp();
+  const [showSplash, setShowSplash] = useState(true);
   const W = process.stdout.columns || 80;
   const H = process.stdout.rows || 24;
   const CONTENT_H = H - 2;
@@ -368,7 +370,9 @@ export const Dashboard: React.FC = () => {
     return `gitlab projects: ${projects.length}`;
   })();
 
-  return (
+  return showSplash ? (
+    <SplashScreen onComplete={() => setShowSplash(false)} duration={2500} />
+  ) : (
     <Box flexDirection="column" height={H}>
       {isDetailMode ? (
         <DetailScreen

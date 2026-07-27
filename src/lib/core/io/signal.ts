@@ -1,9 +1,11 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { Signal, SignalSchema } from '../../schemas';
+import type { Signal } from '../../schemas.js';
+import { SignalSchema } from '../../schemas.js';
 
-export { Signal, SignalSchema } from '../../schemas';
-export { getCurrentTimestamp } from '../../schemas';
+export type { Signal } from '../../schemas.js';
+export { SignalSchema } from '../../schemas.js';
+export { getCurrentTimestamp } from '../../schemas.js';
 
 export const SIGNAL_FILE = '.afk-signal.json';
 

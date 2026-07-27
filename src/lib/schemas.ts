@@ -58,12 +58,17 @@ export const IdleSignalSchema = z.object({
 export type IdleSignal = z.infer<typeof IdleSignalSchema>;
 
 /**
- * Signal emitted when context tokens exceed threshold
+ * Signal emitted when agent suspects context is high.
+ *
+ * NOTE: Agent only acts as a trigger. The WorkflowRunner verifies
+ * objectively via `getContextTokens()` (parses Claude pane output)
+ * and ignores this signal if tokens are below `CONTEXT_HIGH_THRESHOLD`.
+ * This avoids the "optimistic reporter" anti-pattern where the
+ * evaluated party judges itself.
  */
 export const ContextHighSignalSchema = z.object({
   type: z.literal('context_high'),
   timestamp: z.string().datetime(),
-  tokens: z.number().int().nonnegative(),
 });
 
 export type ContextHighSignal = z.infer<typeof ContextHighSignalSchema>;

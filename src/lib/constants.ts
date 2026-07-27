@@ -31,6 +31,18 @@ export const TIMEOUTS = {
 } as const;
 
 /**
+ * Context monitoring thresholds (tokens)
+ */
+export const CONTEXT = {
+  /**
+   * Threshold to trigger handoff flow when agent reports context_high.
+   * Below this, the signal is ignored (agent probably being cautious).
+   * Set to ~50% of Claude's 200K context window as a conservative cutoff.
+   */
+  HIGH_THRESHOLD: 100_000,
+} as const;
+
+/**
  * Port numbers for services
  */
 export const PORTS = {

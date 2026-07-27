@@ -6,8 +6,8 @@ import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
 import { writeSignal, readSignal } from './io';
 import { getCurrentTimestamp } from './schemas';
-import type { Signal, TimeoutSignal, ContextHighSignal } from './schemas';
-import { TIMEOUTS } from './constants';
+import type { Signal, TimeoutSignal } from './schemas';
+import { TIMEOUTS, CONTEXT } from './constants';
 
 export interface RunnerOptions {
   iid: number;
@@ -34,6 +34,8 @@ interface LaunchResult {
  *   - On goal complete:  write goal_complete signal, exit(0)
  *   - On AC fail:        write ac_result {result:'FAIL'}, exit(41)
  *   - On context high:   write context_high signal, exit(43)
+ *                        (Runner verifies pane tokens ≥ CONTEXT.HIGH_THRESHOLD
+ *                         before acting — signal alone is just a trigger)
  *   - On idle:           write idle signal, exit(44)
  *
  * Watchdog: detached setsid process kills session after hardTimeoutMs → exit(42)
@@ -125,10 +127,10 @@ export class WorkflowRunner {
       case 'timeout':
         return this.handleTimeout(iid, wt.path, session, hardTimeoutMs);
 
-      case 'context_high': {
-        const ctxSignal = signal as ContextHighSignal;
-        return this.handleHandoff(iid, wt.path, session, ctxSignal.tokens);
-      }
+      case 'context_high':
+        // Verify objectively: ignore signal if pane-reported tokens are below threshold.
+        // The agent only acts as a trigger; the Runner judges.
+        return this.verifyAndHandoff(iid, wt.path, session);
 
       default:
         console.warn(`⚠️  Unexpected signal type: ${(signal as Signal).type}`);
@@ -254,6 +256,35 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     await this.worktree.updateStatus(iid, 'failed');
 
     return { success: false };
+  }
+
+  /**
+   * Verify context_high signal objectively before triggering handoff.
+   * Returns early if pane-reported tokens are below threshold.
+   */
+  private async verifyAndHandoff(
+    iid: number,
+    worktreePath: string,
+    session: string
+  ): Promise<{ success: boolean }> {
+    const tokens = await this.tmux.getContextTokens(session, 'main');
+
+    if (tokens === 0) {
+      console.warn(`⚠️  context_high signal received but could not read pane tokens; treating as below threshold`);
+      return { success: false };
+    }
+
+    if (tokens < CONTEXT.HIGH_THRESHOLD) {
+      console.log(
+        `ℹ️  context_high signal ignored: ${tokens} tokens < ${CONTEXT.HIGH_THRESHOLD} threshold`
+      );
+      return { success: false };
+    }
+
+    console.log(
+      `✓ context_high verified: ${tokens} tokens ≥ ${CONTEXT.HIGH_THRESHOLD}; triggering handoff`
+    );
+    return this.handleHandoff(iid, worktreePath, session, tokens);
   }
 
   /**

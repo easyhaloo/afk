@@ -4,7 +4,7 @@ import { detectPlatform } from './core/tracker/detect';
 import type { Platform } from './core/tracker/types';
 import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
-import { writeSignal, readSignal } from './io';
+import { writeSignal, readSignal, getTokenUsage, configureStatusline } from './io';
 import { getCurrentTimestamp } from './schemas';
 import type { Signal, TimeoutSignal } from './schemas';
 import { TIMEOUTS, CONTEXT } from './constants';
@@ -81,6 +81,9 @@ export class WorkflowRunner {
     // ── Step 2: Create worktree ─────────────────────────────────────────────
     const wt = await this.worktree.create(iid, baseBranch);
     await this.worktree.updateStatus(iid, 'active');
+    // Configure statusline so token counts are written to .afk/claude-status.json
+    // for objective context_high verification.
+    await configureStatusline(wt.path);
 
     // ── Step 3: Launch tmux session + inject /goal ──────────────────────────
     await this.tmux.createSession(session, wt.path, 'claude');
@@ -267,24 +270,24 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     worktreePath: string,
     session: string
   ): Promise<{ success: boolean }> {
-    const tokens = await this.tmux.getContextTokens(session, 'main');
+    const usage = await getTokenUsage(worktreePath);
 
-    if (tokens === 0) {
-      console.warn(`⚠️  context_high signal received but could not read pane tokens; treating as below threshold`);
+    if (usage.total === 0) {
+      console.warn(`⚠️  context_high signal received but no token data in .afk/claude-status.json; treating as below threshold`);
       return { success: false };
     }
 
-    if (tokens < CONTEXT.HIGH_THRESHOLD) {
+    if (usage.total < CONTEXT.HIGH_THRESHOLD) {
       console.log(
-        `ℹ️  context_high signal ignored: ${tokens} tokens < ${CONTEXT.HIGH_THRESHOLD} threshold`
+        `ℹ️  context_high signal ignored: ${usage.total} tokens < ${CONTEXT.HIGH_THRESHOLD} threshold`
       );
       return { success: false };
     }
 
     console.log(
-      `✓ context_high verified: ${tokens} tokens ≥ ${CONTEXT.HIGH_THRESHOLD}; triggering handoff`
+      `✓ context_high verified: ${usage.total} tokens (in:${usage.input} out:${usage.output} cache_r:${usage.cacheRead}) ≥ ${CONTEXT.HIGH_THRESHOLD}; triggering handoff`
     );
-    return this.handleHandoff(iid, worktreePath, session, tokens);
+    return this.handleHandoff(iid, worktreePath, session, usage.total);
   }
 
   /**

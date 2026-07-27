@@ -199,17 +199,6 @@ export class TmuxClient {
   }
 
   /**
-   * Get context token count from pane content
-   */
-  async getContextTokens(session: string, window: string): Promise<number> {
-    const content = await this.capturePane(session, window, { lines: 5, history: 50 });
-    const match = content.match(/([0-9]+(?:\.[0-9]+)?)\s*k\s*tokens|([0-9,]+)\s*tokens/);
-    if (!match) return 0;
-    const num = parseFloat((match[1] || match[2]).replace(',', ''));
-    return match[1] !== undefined ? Math.round(num * 1000) : num;
-  }
-
-  /**
    * Send /resume with AC check
    */
   async sendResumeWithAC(session: string, window: string, acItems: string[]): Promise<void> {

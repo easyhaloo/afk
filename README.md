@@ -1,75 +1,106 @@
 # AFK
 
-**AFK = Away From Keyboard** — CLI + Skills for autonomous development workflows
+**AFK = Away From Keyboard** — 自主开发工作流的 CLI + Skills 系统
 
-Cross-platform issue tracking automation (GitLab/GitHub) powered by Claude AI agents and TypeScript.
+基于 Claude AI agents 和 TypeScript 的跨平台 issue 跟踪自动化（GitLab/GitHub）。
 
-## Features
+## 特性
 
-- **Cross-platform** — Unified CLI for GitLab and GitHub (issues, MRs/PRs)
-- **Skills Suite** — 15+ Claude Code skills for development workflows
-- **TUI Dashboard** — Interactive dashboard for issue tracking
-- **Background Automation** — tmux-based workflow scheduler
+- **跨平台** — GitLab 和 GitHub 统一 CLI（issues, MRs/PRs）
+- **Skills 套件** — 8 个核心 Claude Code skills，涵盖完整开发流程
+- **TUI 仪表板** — 交互式 issue 跟踪仪表板
+- **后台自动化** — 基于 tmux 的工作流调度器
+- **TDD 集成** — 内置测试驱动开发方法论
 
-## Quick Start
+## 快速开始
 
 ```bash
 git clone https://github.com/easyhaloo/afk.git
 cd afk
-./install.sh
+npm install && npm run build
+npm link
 afk --version
 ```
 
-## CLI Commands
+详细步骤和配置见 [快速开始指南](docs/GETTING-STARTED.md)
+
+## CLI 命令
 
 ```bash
-# Issue Management
+# Issue 管理
 afk issue get <id>
-afk issue list
-afk issue create "Title" -d "Body"
+afk issue list --label "stage::ready-for-implement"
+afk issue create "Title" --label "feature"
 
-# MR/PR Operations
-afk mr get <id>
-afk mr list
-afk mr create "Title" --draft
-afk mr merge <id>
+# MR/PR 操作
+afk mr create "feat: add login" --source feat/login --target main
+afk mr merge <id> --delete-source-branch
 afk mr approve <id>
 
-# Workflows & Automation
-afk dashboard                         # Interactive TUI
-afk workflow run --iid <id>           # Issue → MR pipeline
-afk scheduler poll                    # Launch unblocked issues
+# 工作流 & 自动化
+afk dashboard                         # 交互式 TUI
+afk workflow launch --iid <id>        # Issue → MR 流水线
+afk scheduler start --max-concurrent 3 # 后台调度器
 ```
 
-See `afk --help` or [MR Commands](docs/MR_COMMANDS.md) for full reference.
+完整命令参考：`afk --help`
 
-## Skills (Claude Code)
+## Skills（Claude Code）
 
-| Skill | Purpose |
-|-------|---------|
-| `/afk-do` | Task execution (TDD/spike/research) |
-| `/afk-implement` | Autonomous issue implementation |
-| `/afk-research` | Technical investigation |
-| `/afk-grill-me` | Requirements interview |
-| `/afk-hand-off` | Session state handoff |
+| Skill | 用途 | 触发场景 |
+|-------|------|---------|
+| `/afk-grill-me` | 需求澄清 | 需求模糊或可能有遗漏 |
+| `/afk-do` | 任务编排 | 明确的功能需求或任务描述 |
+| `/afk-research` | 技术调研 | 需要了解现有实现再编码 |
+| `/afk-prototype` | 方案验证 | 技术决策前需要验证方案 |
+| `/afk-implement` | TDD 实现 | 清晰定义的实现目标 |
+| `/afk-qa` | 独立验证 | MR/PR 准备合并前验证 |
+| `/afk-debug` | 快速修复 | 具体可重现的失败场景 |
+| `/afk-hand-off` | 工作交接 | 需要转移任务给其他开发者 |
 
-See [Skills Documentation](docs/SKILLS_OPTIMIZATION.md) for full list and usage patterns.
+详见 [Skills 深度说明](docs/SKILLS.md)
 
-## Development
+## 架构
+
+AFK 使用 **TrackerProvider** 接口抽象 GitLab 和 GitHub 差异：
+
+```typescript
+interface TrackerProvider {
+  getIssue(id: number): Promise<TrackedIssue>;
+  createMR(options: CreateMROptions): Promise<number>;
+  mergeMR(id: number, options?: MergeMROptions): Promise<void>;
+  // ... 更多操作
+}
+```
+
+平台自动检测，无需切换命令。详见 [架构设计](docs/ARCHITECTURE.md)
+
+## 工作流
+
+三种核心工作流模式：
+
+1. **Issue → 实现 → MR 流水线** — 从 issue 发现到合并请求
+2. **调度器工作流** — 后台依赖感知执行
+3. **Skills 工作流** — TDD 方法论集成
+
+详见 [工作流程文档](docs/WORKFLOWS.md)
+
+## 开发
 
 ```bash
 npm install
-npm run build    # Build TypeScript
-npm test         # Run tests
+npm run build    # 构建 TypeScript
+npm test         # 运行测试
+npm link         # 全局安装
 ```
 
-See [MR Commands](docs/MR_COMMANDS.md) for cross-platform abstraction details.
+## 文档
 
-## Documentation
+- **[快速开始](docs/GETTING-STARTED.md)** — 5分钟上手 AFK
+- **[架构设计](docs/ARCHITECTURE.md)** — 跨平台抽象层 + CLI 命令映射
+- **[工作流程](docs/WORKFLOWS.md)** — Issue → MR 流水线、调度器、Skills 集成
+- **[Skills 说明](docs/SKILLS.md)** — 8个核心 skills 的设计与使用
 
-- [MR Commands](docs/MR_COMMANDS.md) — Cross-platform MR/PR operations
-- [Skills Optimization](docs/SKILLS_OPTIMIZATION.md) — Skills structure and usage
-
-## License
+## 许可证
 
 MIT

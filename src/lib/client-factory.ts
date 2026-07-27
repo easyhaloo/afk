@@ -3,7 +3,6 @@ import { GitHubClient } from './core/github/client';
 import { detectGitLabProject, detectProject } from './core/tracker/detect';
 import { detectGitHubRepo } from './core/tracker/detect';
 import { getGlabToken } from './core/gitlab/glab-config';
-import { execSync } from 'child_process';
 import type { TrackerProvider } from './core/tracker/types';
 
 /**
@@ -11,7 +10,7 @@ import type { TrackerProvider } from './core/tracker/types';
  *
  * Detection order:
  * 1. Environment variables (GITLAB_TOKEN, GITLAB_PROJECT_ID, GITLAB_URL)
- * 2. glab CLI authentication
+ * 2. glab CLI authentication (read from config.yml)
  * 3. Git remote detection for project ID
  */
 export async function createGitLabClient(): Promise<GitLabClient> {
@@ -20,7 +19,7 @@ export async function createGitLabClient(): Promise<GitLabClient> {
   let projectId = process.env.GITLAB_PROJECT_ID;
   let url = envUrl || 'https://gitlab.com';
 
-  // Try glab CLI if no env token
+  // Try glab CLI config if no env token
   if (!token) {
     const glab = getGlabToken(envUrl);
     if (glab) {
@@ -47,32 +46,22 @@ export async function createGitLabClient(): Promise<GitLabClient> {
 }
 
 /**
- * Create GitHub client with automatic token and repo detection
+ * Create GitHub client with token and repo detection.
  *
- * Detection order:
- * 1. Environment variables (GITHUB_TOKEN/GH_TOKEN, GITHUB_REPOSITORY)
- * 2. gh CLI authentication
- * 3. Git remote detection for repository
+ * Token must come from GITHUB_TOKEN or GH_TOKEN env var. We deliberately
+ * do NOT shell out to `gh auth token` — that's CLI parsing across gh
+ * versions. Users authenticated via `gh auth login` should run
+ * `gh auth token` once and `export GITHUB_TOKEN=...`.
  */
 export async function createGitHubClient(): Promise<GitHubClient> {
-  // Get token from env or gh CLI
-  let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (!token) {
-    try {
-      const raw = execSync('gh auth token', {
-        encoding: 'utf-8',
-        timeout: 5_000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }).trim();
-      // gh v2.40+ may prefix with "github.com token:" — extract token portion.
-      const match = raw.match(/(?:token:\s*)?(\S+)/);
-      token = match ? match[1] : raw;
-    } catch {
-      throw new Error('GITHUB_TOKEN or GH_TOKEN environment variable is required (or authenticate gh: gh auth login)');
-    }
+    throw new Error(
+      'GITHUB_TOKEN (or GH_TOKEN) environment variable is required.\n' +
+      'If you authenticated via `gh auth login`, run: gh auth token | read TOK && export GITHUB_TOKEN=$TOK'
+    );
   }
 
-  // Get repo from env or git remote
   let repo = process.env.GITHUB_REPOSITORY;
   if (!repo) {
     const detected = await detectGitHubRepo();

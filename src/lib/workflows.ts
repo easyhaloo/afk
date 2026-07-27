@@ -87,8 +87,8 @@ export class WorkflowRunner {
 
     // ── Step 3: Launch tmux session + inject /goal ──────────────────────────
     await this.tmux.createSession(session, wt.path, 'claude');
-    await this.tmux.waitForPrompt(session, 'main', 30000);
-    await this.tmux.sendGoal(session, 'main', goalText);
+    await this.tmux.waitForPrompt(wt.path, 30000);
+    await this.tmux.sendGoal(wt.path, session, 'main', goalText);
 
     // ── Step 4: Launch watchdog (detached, no blocking) ────────────────────
     this.startWatchdog(session, hardTimeoutMs, iid, wt.path);

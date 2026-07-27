@@ -42,45 +42,15 @@ export function registerTmuxCommands(program: Command): void {
     .requiredOption('-s, --session <name>', 'Session name')
     .option('-w, --window <name>', 'Window name', 'main')
     .requiredOption('-t, --text <text>', 'Goal text')
+    .requiredOption('-d, --worktree <path>', 'Worktree path (used for prompt-ready detection)')
     .action(async (options) => {
       try {
         const client = new TmuxClient();
 
         console.log(chalk.blue(`Sending /goal to ${options.session}:${options.window}...`));
-        await client.sendGoal(options.session, options.window, options.text);
+        await client.sendGoal(options.worktree, options.session, options.window, options.text);
 
         console.log(chalk.green('✓ Goal sent successfully'));
-      } catch (error) {
-        handleCommandError(error);
-      }
-    });
-
-  /**
-   * wait-for-prompt command
-   */
-  tmux
-    .command('wait-for-prompt')
-    .description('Wait for Claude prompt (❯) to appear')
-    .requiredOption('-s, --session <name>', 'Session name')
-    .option('-w, --window <name>', 'Window name', 'main')
-    .option('--timeout <ms>', 'Timeout in milliseconds', '30000')
-    .action(async (options) => {
-      try {
-        const client = new TmuxClient();
-
-        console.log(chalk.blue(`Waiting for prompt in ${options.session}:${options.window}...`));
-        const success = await client.waitForPrompt(
-          options.session,
-          options.window,
-          parseInt(options.timeout)
-        );
-
-        if (success) {
-          console.log(chalk.green('✓ Prompt detected'));
-        } else {
-          console.log(chalk.yellow('⚠ Timeout waiting for prompt'));
-          process.exit(1);
-        }
       } catch (error) {
         handleCommandError(error);
       }

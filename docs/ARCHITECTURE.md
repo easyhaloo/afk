@@ -17,32 +17,38 @@ AFK (Away From Keyboard) 的核心问题是：**让 AI agent 在隔离环境中�
 
 ## 核心架构
 
-### 模块关系
+### 模块依赖图
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    CLI 入口 (commander)                       │
-│    afk issue/mr | afk implement | afk scheduler              │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────┐
-│              createTrackerClient() 工厂函数                   │
-│         detectProject() → GitLab | GitHub client              │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-                             ↓
-┌─────────────────────────────────────────────────────────────┐
-│                    WorkflowRunner                             │
-│   编排: Worktree → Tmux Session → 信号轮询 → MR 创建         │
-└─────────┬───────────────────────────────────────────────────┘
-          │
-    ┌─────┼─────┬──────────┬──────────┐
-    ↓     ↓     ↓          ↓          ↓
-┌──────┐┌────┐┌──────┐┌─────────┐┌──────────┐
-│Tracker││Git ││Tmux  ││Signal I/O││Scheduler │
-│Provider││Worktree││Client││         ││(BullMQ)  │
-└──────┘└────┘└──────┘└─────────┘└──────────┘
+```mermaid
+graph TD
+    CLI[CLI 入口<br/>commander] --> Factory[createTrackerClient<br/>工厂函数]
+    Factory --> Detect[detectProject<br/>平台检测]
+
+    Factory --> GL[GitLabClient]
+    Factory --> GH[GitHubClient]
+
+    CLI --> Runner[WorkflowRunner<br/>工作流编排]
+    GL --> Runner
+    GH --> Runner
+
+    Runner --> WT[WorktreeManager<br/>git worktree]
+    Runner --> TMUX[TmuxClient<br/>会话管理]
+    Runner --> SIG[Signal I/O<br/>信号读写]
+
+    Sched[Scheduler<br/>BullMQ] --> Runner
+    Sched --> Queue[(Redis Queue)]
+
+    Agent[AI Agent<br/>claude] -.tmux session.-> TMUX
+    Agent -.write signal.-> SIG
+    SIG -.polling.-> Runner
+
+    classDef ext fill:#e1f5ff,stroke:#0066cc
+    classDef core fill:#fff4e1,stroke:#cc6600
+    classDef io fill:#f0e1ff,stroke:#6600cc
+
+    class CLI,Agent ext
+    class Runner,Factory,GL,GH,Sched core
+    class WT,TMUX,SIG,Queue io
 ```
 
 ### 模块职责
@@ -110,19 +116,29 @@ AC 失败的常见原因：
 
 ## 跨平台抽象层
 
-### 设计原则
+### 分层架构
 
-**"平台差异在接口实现层，业务逻辑层无感"**。
+```mermaid
+graph TD
+    Biz[业务代码<br/>WorkflowRunner / Commands]
+    IF[TrackerProvider<br/>接口契约]
+    GL[GitLabClient<br/>@gitbeaker/node]
+    GH[GitHubClient<br/>@octokit/rest]
 
+    Biz -->|只依赖| IF
+    IF -.实现.-> GL
+    IF -.实现.-> GH
+
+    GL --> GL_API[GitLab REST API]
+    GH --> GH_API[GitHub REST API]
+
+    classDef biz fill:#e1f5ff
+    classDef impl fill:#fff4e1
+    class IF biz
+    class GL,GH impl
 ```
-业务代码
-    ↓ 只依赖 TrackerProvider 接口
-createTrackerClient()
-    ↓ 根据 detectProject() 选择实现
-GitLabClient | GitHubClient
-    ↓ 各自封装原生 API
-@gitbeaker/node | @octokit/rest
-```
+
+**核心原则：差异封装在 client 内部，接口保持语义一致。**
 
 ### 平台差异处理
 
@@ -133,14 +149,27 @@ GitLabClient | GitHubClient
 | 合并时删分支 | `removeSourceBranch` 参数 | 单独 `git.deleteRef` | 封装在 `mergeMR()` 中 |
 | Issue 关联 | 原生 `Issues.link()` | 只能通过评论引用 | GitHubClient 降级为评论 |
 
-**设计原则：差异封装在 client 内部，接口保持语义一致。**
+### 平台检测流程
 
-### 平台自动检测优先级
+```mermaid
+flowchart TD
+    Start[启动] --> Env{TRACKER_PLATFORM<br/>环境变量?}
+    Env -->|设置| ReturnEnv[返回指定平台]
+    Env -->|未设置| Remote[解析 git remote URL]
+    Remote --> RemoteCheck{URL 域名?}
+    RemoteCheck -->|github.com| GH[GitHub]
+    RemoteCheck -->|gitlab.com| GL[GitLab]
+    RemoteCheck -->|其他| Config[检查配置文件]
+    Config --> ConfigCheck{找到?}
+    ConfigCheck -->|.github/workflows| GH
+    ConfigCheck -->|.gitlab-ci.yml| GL
+    ConfigCheck -->|都没有| Default[默认 GitLab]
 
-1. 环境变量 `TRACKER_PLATFORM`（最高优先级）
-2. git remote URL 解析
-3. 配置文件检测（`.gitlab-ci.yml` / `.github/workflows/`）
-4. 默认 GitLab
+    classDef detected fill:#d4edda,stroke:#28a745
+    class GH,GL detected
+```
+
+**检测优先级：** 环境变量 > git remote > 配置文件 > 默认 GitLab
 
 ---
 
@@ -158,16 +187,32 @@ GitLabClient | GitHubClient
 
 ### 信号生命周期
 
-```
-Agent 执行中
-    ↓
-写信号文件（原子写入）
-    ↓
-WorkflowRunner 轮询（2s 间隔）
-    ↓
-匹配预期信号类型
-    ↓ yes                        ↓ no
-    进入处理分支            继续轮询/超时
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant FS as .afk-signal.json
+    participant R as WorkflowRunner
+    participant H as Handler
+
+    loop 执行循环
+        A->>A: 工作进展
+        A->>FS: 写信号 (原子写入)
+        Note over FS: tmp + rename
+
+        R->>FS: 轮询 (2s 间隔)
+        alt 信号匹配预期类型
+            FS-->>R: 返回信号
+            R->>H: 分发到对应 handler
+        else 类型不匹配
+            FS-->>R: null
+            R->>R: 继续轮询
+        end
+    end
+
+    opt 超时
+        R->>R: 等待超过 completionTimeoutMs
+        R->>H: 触发 timeout handler
+    end
 ```
 
 ### 为什么 Zod 校验？
@@ -183,23 +228,98 @@ Zod 在边界处快速失败，比让 `undefined.sha` 这种错误传播到深�
 
 ## WorkflowRunner 流程
 
-### 核心流程
+### 核心状态机
 
+```mermaid
+stateDiagram-v2
+    [*] --> Init: run(iid)
+
+    Init: 初始化<br/>getIssue / parseAC
+    Worktree: 创建 Worktree
+    TmuxLaunch: 启动 Tmux Session
+    Watchdog: 启动 Watchdog
+    Comment: 发布启动评论
+    Polling: 等待信号
+
+    Init --> Worktree
+    Worktree --> TmuxLaunch
+    TmuxLaunch --> Watchdog
+    Watchdog --> Comment
+    Comment --> Polling
+
+    Polling --> AutoWrapup: goal_complete
+    Polling --> Timeout: timeout
+    Polling --> Handoff: context_high
+
+    AutoWrapup: autoWrapup<br/>AC 验收 + MR
+    Timeout: handleTimeout<br/>日志 + 标签
+    Handoff: handleHandoff<br/>上下文切换
+
+    AutoWrapup --> RetryCheck: ac_result FAIL
+    AutoWrapup --> Success: ac_result PASS
+    RetryCheck --> HITL: retry > max
+    RetryCheck --> [*]: 重试新 session
+
+    Success --> [*]: MR 创建完成
+    Timeout --> [*]: 升级或重试
+    Handoff --> Polling: handoff_ready
+    HITL --> [*]: 人工介入
 ```
-getIssue → parseAC → createWorktree → launchTmuxSession
-                                              ↓
-                                    startWatchdog (后台)
-                                              ↓
-                              publishLaunchComment
-                                              ↓
-                              waitForSignal (轮询)
-                                              ↓
-                        ┌─────────────────────┼─────────────────┐
-                        ↓                     ↓                  ↓
-                   goal_complete          timeout           context_high
-                        ↓                     ↓                  ↓
-                   autoWrapup           handleTimeout       handleHandoff
-                   (AC + MR)            (log + label)        (snapshot)
+
+### 时序图：完整生命周期
+
+```mermaid
+sequenceDiagram
+    participant U as 用户/CLI
+    participant W as WorkflowRunner
+    participant T as TrackerProvider
+    participant G as Git/Worktree
+    participant M as TmuxClient
+    participant A as AI Agent
+    participant Wd as Watchdog
+
+    U->>W: afk implement <iid>
+    W->>T: getIssue(iid)
+    T-->>W: TrackedIssue
+    W->>W: parseAC(description)
+
+    W->>G: createWorktree(iid, baseBranch)
+    G-->>W: Worktree
+
+    par 并行启动
+        W->>M: createSession(name, wt.path, 'claude')
+        M->>A: spawn claude process
+        W->>Wd: setsid sleep ${hardTimeoutMs}
+        Note over Wd: 独立进程，父进程崩溃也能触发
+    end
+
+    M->>W: waitForPrompt()
+    W->>M: sendGoal(goalText)
+    M->>A: 发送 /goal + AC
+
+    A->>A: 实现功能 + 提交 commits
+
+    loop 信号轮询 (每 2s)
+        W->>A: read .afk-signal.json
+        alt goal_complete
+            A-->>W: { type: 'goal_complete', sha: '...' }
+            W->>G: pushBranch()
+            W->>A: sendResumeWithAC()
+            A->>A: 逐条检查 AC
+            A-->>W: { type: 'ac_result', result: 'PASS' }
+            W->>T: createMR(iid, branch, target)
+            T-->>W: MR URL
+            W->>T: addLabel('stage::qa')
+        else timeout (5min)
+            W->>A: 检查 pane 内容
+            Note over W: 软超时，继续等待
+        end
+    end
+
+    opt 硬超时 (60min)
+        Wd->>M: kill-session
+        W->>T: addLabel('mode::timeout')
+    end
 ```
 
 ### autoWrapup 的关键设计
@@ -214,13 +334,22 @@ LLM 倾向于"乐观报告"。把结果解析权交给系统，是把评估责�
 
 ### 重试机制
 
-```
-AC FAIL → incrementRetryCount → 检查 retryCount > maxRetries
-                                    ↓ yes                    ↓ no
-                              addLabel('mode::hitl')     杀掉旧 session
-                              addComment('escalating')        ↓
-                                  ↓                    新 session 重新跑
-                              return { success: false }   (可见历史 commits)
+```mermaid
+flowchart TD
+    AC[AC FAIL] --> Inc[incrementRetryCount]
+    Inc --> Check{retryCount ><br/>maxRetries?}
+    Check -->|是| HITL[addLabel 'mode::hitl'<br/>addComment 'escalating']
+    Check -->|否| Kill[killSession<br/>旧 session]
+    Kill --> New[创建新 session<br/>retry-N]
+    New --> Run[重新跑 WorkflowRunner]
+    Run --> AC
+
+    HITL --> End[返回 success: false]
+
+    classDef fail fill:#f8d7da,stroke:#dc3545
+    classDef success fill:#d4edda,stroke:#28a745
+    class AC,Inc fail
+    class End success
 ```
 
 **关键：每个 retry 都是新 session**，不是同一个 session 继续跑。这避免了上下文污染，也符合 Claude Code 的会话独立性。
@@ -237,6 +366,47 @@ AC FAIL → incrementRetryCount → 检查 retryCount > maxRetries
 - **优先级调度**：`priority::high` 优先于 `priority::low`
 - **失败重试**：BullMQ 内置指数退避
 
+### 调度流程
+
+```mermaid
+sequenceDiagram
+    participant S as Scheduler
+    participant GL as GitLab API
+    participant Q as BullMQ Queue
+    participant W as Worker
+    participant R as WorkflowRunner
+
+    loop 定时轮询
+        S->>GL: listIssues(label: ready-for-implement)
+        GL-->>S: [issue1, issue2, ...]
+
+        loop 每个 Issue
+            S->>S: checkIssuePreconditions()
+            S->>Q: getJob('issue-N')
+            alt 已入队
+                Q-->>S: job exists
+                S->>S: skip
+            else 未入队
+                S->>S: calculatePriority(labels)
+                S->>Q: enqueue(issue, priority)
+                Q-->>S: jobId
+            end
+        end
+    end
+
+    Q->>W: 派发 job
+    W->>R: runner.run({ iid, ... })
+    R-->>W: { success: true, url }
+
+    alt 成功
+        W->>GL: removeLabel('ready-for-implement')
+        W->>GL: addLabel('stage::qa')
+    else 失败
+        W->>Q: 抛出错误
+        Note over Q: 触发指数退避重试
+    end
+```
+
 ### 优先级映射
 
 | 标签 | 优先级 |
@@ -246,22 +416,6 @@ AC FAIL → incrementRetryCount → 检查 retryCount > maxRetries
 | `priority::low` | 1 |
 | （无） | 5 |
 
-### 任务生命周期
-
-```
-pollGitLab()
-    ↓ 找到 ready issue
-checkIssuePreconditions()
-    ↓ 通过
-enqueue()
-    ↓ BullMQ 持久化
-Worker.processTask()
-    ↓ WorkflowRunner.run()
-    ↓ success
-removeLabel('ready-for-implement')
-addLabel('stage::qa')
-```
-
 **去重机制：** `queue.getJob('issue-123')` 检查是否已入队，避免重复提交。
 
 ---
@@ -270,12 +424,22 @@ addLabel('stage::qa')
 
 ### Lazy-Loader 设计
 
-```typescript
-// 注册时不加载模块
-trackerCommand.command('get').action(async (id) => {
-  // 执行时才动态 import
-  const { registerTrackerCommands } = await import('./commands/tracker.js');
-});
+```mermaid
+graph LR
+    A[CLI 启动<br/>~50ms] --> B[命令注册<br/>仅注册元数据]
+    B --> C{用户执行<br/>哪个命令?}
+    C -->|afk issue get| D[动态 import<br/>tracker.ts]
+    C -->|afk scheduler| E[动态 import<br/>scheduler.ts]
+    C -->|afk implement| F[动态 import<br/>implement.ts]
+
+    D --> G[加载依赖<br/>@gitbeaker]
+    E --> H[加载依赖<br/>bullmq + ioredis]
+    F --> I[加载依赖<br/>workflow runner]
+
+    classDef fast fill:#d4edda
+    classDef lazy fill:#fff4e1
+    class A,B,C fast
+    class D,E,F,G,H,I lazy
 ```
 
 **为什么？** 加载所有命令的依赖会拖慢 `afk --help` 这种轻量命令的响应。Lazy-loader 把启动时间从 ~500ms 降到 ~50ms。
@@ -310,10 +474,16 @@ trackerCommand.command('get').action(async (id) => {
 
 ### 添加新平台（以 Bitbucket 为例）
 
-1. 实现 `TrackerProvider` 接口
-2. 在 `detectProject()` 中添加 URL 识别
-3. 在 `createTrackerClient()` 工厂中注册新分支
-4. 实现平台特定的差异封装
+```mermaid
+graph LR
+    A[实现 TrackerProvider 接口] --> B[在 detectProject 添加 URL 识别]
+    B --> C[在 createTrackerClient 注册分支]
+    C --> D[封装平台特定差异]
+    D --> E[无需修改业务逻辑]
+
+    classDef new fill:#d4edda
+    class A,B,C,D,E new
+```
 
 **无需修改**：WorkflowRunner、业务命令、Scheduler
 

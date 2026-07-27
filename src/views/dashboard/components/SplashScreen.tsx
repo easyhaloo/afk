@@ -25,10 +25,10 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
   ];
 
   const messages = [
-    'Initializing afk...',
+    'Initializing workspace...',
     'Loading configuration...',
     'Connecting to services...',
-    'Ready!',
+    'Ready to work!',
   ];
 
   useInput((input, key) => {
@@ -63,31 +63,31 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
 
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" height="100%">
-      <Box marginBottom={2}>
-        <Text bold color="cyan">
-          ╔═══════════════════════════╗
-        </Text>
+      <Box flexDirection="column" alignItems="center" marginBottom={2}>
+        <Text bold color="cyan">╔═══════════════════════════════════════╗</Text>
+        <Text bold color="cyan">║                                       ║</Text>
+        <Text bold color="cyan">║    <Text color="cyanBright">█████╗ ███████╗██╗  ██╗</Text>     ║</Text>
+        <Text bold color="cyan">║   <Text color="cyanBright">██╔══██╗██╔════╝██║ ██╔╝</Text>     ║</Text>
+        <Text bold color="cyan">║   <Text color="cyanBright">███████║█████╗  █████╔╝</Text>      ║</Text>
+        <Text bold color="cyan">║   <Text color="cyanBright">██╔══██║██╔══╝  ██╔═██╗</Text>      ║</Text>
+        <Text bold color="cyan">║   <Text color="cyanBright">██║  ██║██║     ██║  ██╗</Text>     ║</Text>
+        <Text bold color="cyan">║   <Text color="cyanBright">╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝</Text>     ║</Text>
+        <Text bold color="cyan">║                                       ║</Text>
+        <Text bold color="cyan">║   <Text dimColor color="gray">Away From Keyboard</Text>            ║</Text>
+        <Text bold color="cyan">║                                       ║</Text>
+        <Text bold color="cyan">╚═══════════════════════════════════════╝</Text>
       </Box>
-      <Box marginBottom={1}>
-        <Text bold color="cyan">
-          ║         AFK  CLI         ║
-        </Text>
-      </Box>
-      <Box marginBottom={2}>
-        <Text bold color="cyan">
-          ╚═══════════════════════════╝
-        </Text>
-      </Box>
+
       <Box marginBottom={1}>
         <Text>{frames[frame]}</Text>
       </Box>
+
       <Box marginBottom={2}>
         <Text dimColor>{messages[messageIndex]}</Text>
       </Box>
+
       <Box>
-        <Text dimColor color="gray">
-          Press ESC to skip
-        </Text>
+        <Text dimColor color="gray">Press ESC to skip</Text>
       </Box>
     </Box>
   );

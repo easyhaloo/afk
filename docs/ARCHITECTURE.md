@@ -21,26 +21,38 @@ AFK (Away From Keyboard) 的核心问题是：**让 AI agent 在隔离环境中�
 
 ```mermaid
 graph TD
-    CLI[CLI 入口<br/>commander] --> Factory[createTrackerClient<br/>工厂函数]
-    Factory --> Detect[detectProject<br/>平台检测]
+    CLI["CLI 入口 (commander)"]
+    Factory["createTrackerClient 工厂函数"]
+    Detect["detectProject 平台检测"]
+    GL["GitLabClient"]
+    GH["GitHubClient"]
+    Runner["WorkflowRunner 工作流编排"]
+    WT["WorktreeManager (git worktree)"]
+    TMUX["TmuxClient 会话管理"]
+    SIG["Signal I/O 信号读写"]
+    Sched["Scheduler (BullMQ)"]
+    Queue[("Redis Queue")]
+    Agent["AI Agent (claude)"]
 
-    Factory --> GL[GitLabClient]
-    Factory --> GH[GitHubClient]
+    CLI --> Factory
+    Factory --> Detect
+    Factory --> GL
+    Factory --> GH
 
-    CLI --> Runner[WorkflowRunner<br/>工作流编排]
+    CLI --> Runner
     GL --> Runner
     GH --> Runner
 
-    Runner --> WT[WorktreeManager<br/>git worktree]
-    Runner --> TMUX[TmuxClient<br/>会话管理]
-    Runner --> SIG[Signal I/O<br/>信号读写]
+    Runner --> WT
+    Runner --> TMUX
+    Runner --> SIG
 
-    Sched[Scheduler<br/>BullMQ] --> Runner
-    Sched --> Queue[(Redis Queue)]
+    Sched --> Runner
+    Sched --> Queue
 
-    Agent[AI Agent<br/>claude] -.tmux session.-> TMUX
-    Agent -.write signal.-> SIG
-    SIG -.polling.-> Runner
+    Agent -. tmux session .-> TMUX
+    Agent -. write signal .-> SIG
+    SIG -. polling .-> Runner
 
     classDef ext fill:#e1f5ff,stroke:#0066cc
     classDef core fill:#fff4e1,stroke:#cc6600
@@ -120,17 +132,19 @@ AC 失败的常见原因：
 
 ```mermaid
 graph TD
-    Biz[业务代码<br/>WorkflowRunner / Commands]
-    IF[TrackerProvider<br/>接口契约]
-    GL[GitLabClient<br/>@gitbeaker/node]
-    GH[GitHubClient<br/>@octokit/rest]
+    Biz["业务代码 (WorkflowRunner / Commands)"]
+    IF["TrackerProvider 接口契约"]
+    GL["GitLabClient (@gitbeaker/node)"]
+    GH["GitHubClient (@octokit/rest)"]
+    GL_API["GitLab REST API"]
+    GH_API["GitHub REST API"]
 
     Biz -->|只依赖| IF
     IF -.实现.-> GL
     IF -.实现.-> GH
 
-    GL --> GL_API[GitLab REST API]
-    GH --> GH_API[GitHub REST API]
+    GL --> GL_API
+    GH --> GH_API
 
     classDef biz fill:#e1f5ff
     classDef impl fill:#fff4e1
@@ -153,7 +167,7 @@ graph TD
 
 ```mermaid
 flowchart TD
-    Start[启动] --> Env{TRACKER_PLATFORM<br/>环境变量?}
+    Start([启动]) --> Env{"TRACKER_PLATFORM 环境变量?"}
     Env -->|设置| ReturnEnv[返回指定平台]
     Env -->|未设置| Remote[解析 git remote URL]
     Remote --> RemoteCheck{URL 域名?}
@@ -234,7 +248,7 @@ Zod 在边界处快速失败，比让 `undefined.sha` 这种错误传播到深�
 stateDiagram-v2
     [*] --> Init: run(iid)
 
-    Init: 初始化<br/>getIssue / parseAC
+    Init: 初始化 - getIssue / parseAC
     Worktree: 创建 Worktree
     TmuxLaunch: 启动 Tmux Session
     Watchdog: 启动 Watchdog
@@ -251,9 +265,9 @@ stateDiagram-v2
     Polling --> Timeout: timeout
     Polling --> Handoff: context_high
 
-    AutoWrapup: autoWrapup<br/>AC 验收 + MR
-    Timeout: handleTimeout<br/>日志 + 标签
-    Handoff: handleHandoff<br/>上下文切换
+    AutoWrapup: autoWrapup - AC 验收 + MR
+    Timeout: handleTimeout - 日志 + 标签
+    Handoff: handleHandoff - 上下文切换
 
     AutoWrapup --> RetryCheck: ac_result FAIL
     AutoWrapup --> Success: ac_result PASS
@@ -278,7 +292,7 @@ sequenceDiagram
     participant A as AI Agent
     participant Wd as Watchdog
 
-    U->>W: afk implement <iid>
+    U->>W: afk implement iid
     W->>T: getIssue(iid)
     T-->>W: TrackedIssue
     W->>W: parseAC(description)
@@ -287,9 +301,9 @@ sequenceDiagram
     G-->>W: Worktree
 
     par 并行启动
-        W->>M: createSession(name, wt.path, 'claude')
+        W->>M: createSession(name, wt.path, claude)
         M->>A: spawn claude process
-        W->>Wd: setsid sleep ${hardTimeoutMs}
+        W->>Wd: setsid sleep hardTimeoutMs
         Note over Wd: 独立进程，父进程崩溃也能触发
     end
 
@@ -302,14 +316,14 @@ sequenceDiagram
     loop 信号轮询 (每 2s)
         W->>A: read .afk-signal.json
         alt goal_complete
-            A-->>W: { type: 'goal_complete', sha: '...' }
+            A-->>W: goal_complete signal
             W->>G: pushBranch()
             W->>A: sendResumeWithAC()
             A->>A: 逐条检查 AC
-            A-->>W: { type: 'ac_result', result: 'PASS' }
+            A-->>W: ac_result PASS
             W->>T: createMR(iid, branch, target)
             T-->>W: MR URL
-            W->>T: addLabel('stage::qa')
+            W->>T: addLabel(stage::qa)
         else timeout (5min)
             W->>A: 检查 pane 内容
             Note over W: 软超时，继续等待
@@ -318,7 +332,7 @@ sequenceDiagram
 
     opt 硬超时 (60min)
         Wd->>M: kill-session
-        W->>T: addLabel('mode::timeout')
+        W->>T: addLabel(mode::timeout)
     end
 ```
 
@@ -337,10 +351,10 @@ LLM 倾向于"乐观报告"。把结果解析权交给系统，是把评估责�
 ```mermaid
 flowchart TD
     AC[AC FAIL] --> Inc[incrementRetryCount]
-    Inc --> Check{retryCount ><br/>maxRetries?}
-    Check -->|是| HITL[addLabel 'mode::hitl'<br/>addComment 'escalating']
-    Check -->|否| Kill[killSession<br/>旧 session]
-    Kill --> New[创建新 session<br/>retry-N]
+    Inc --> Check{retryCount > maxRetries?}
+    Check -->|是| HITL["addLabel mode::hitl, addComment escalating"]
+    Check -->|否| Kill[killSession 旧 session]
+    Kill --> New[创建新 session retry-N]
     New --> Run[重新跑 WorkflowRunner]
     Run --> AC
 
@@ -378,11 +392,11 @@ sequenceDiagram
 
     loop 定时轮询
         S->>GL: listIssues(label: ready-for-implement)
-        GL-->>S: [issue1, issue2, ...]
+        GL-->>S: issues list
 
         loop 每个 Issue
-            S->>S: checkIssuePreconditions()
-            S->>Q: getJob('issue-N')
+            S->>S: checkIssuePreconditions
+            S->>Q: getJob(issue-N)
             alt 已入队
                 Q-->>S: job exists
                 S->>S: skip
@@ -395,12 +409,12 @@ sequenceDiagram
     end
 
     Q->>W: 派发 job
-    W->>R: runner.run({ iid, ... })
-    R-->>W: { success: true, url }
+    W->>R: runner.run
+    R-->>W: success result
 
     alt 成功
-        W->>GL: removeLabel('ready-for-implement')
-        W->>GL: addLabel('stage::qa')
+        W->>GL: removeLabel(ready-for-implement)
+        W->>GL: addLabel(stage::qa)
     else 失败
         W->>Q: 抛出错误
         Note over Q: 触发指数退避重试
@@ -426,15 +440,15 @@ sequenceDiagram
 
 ```mermaid
 graph LR
-    A[CLI 启动<br/>~50ms] --> B[命令注册<br/>仅注册元数据]
-    B --> C{用户执行<br/>哪个命令?}
-    C -->|afk issue get| D[动态 import<br/>tracker.ts]
-    C -->|afk scheduler| E[动态 import<br/>scheduler.ts]
-    C -->|afk implement| F[动态 import<br/>implement.ts]
+    A["CLI 启动 ~50ms"] --> B["命令注册: 仅注册元数据"]
+    B --> C{"用户执行哪个命令?"}
+    C -->|afk issue get| D["动态 import tracker.ts"]
+    C -->|afk scheduler| E["动态 import scheduler.ts"]
+    C -->|afk implement| F["动态 import implement.ts"]
 
-    D --> G[加载依赖<br/>@gitbeaker]
-    E --> H[加载依赖<br/>bullmq + ioredis]
-    F --> I[加载依赖<br/>workflow runner]
+    D --> G["加载依赖 @gitbeaker"]
+    E --> H["加载依赖 bullmq + ioredis"]
+    F --> I["加载依赖 workflow runner"]
 
     classDef fast fill:#d4edda
     classDef lazy fill:#fff4e1

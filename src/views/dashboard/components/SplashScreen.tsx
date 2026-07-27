@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import figures from 'figures';
+import * as nf from '@m234/nerd-fonts';
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -34,14 +34,32 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
     edgeChar +
     '░'.repeat(Math.max(0, barWidth - filledWidth - (edgeChar ? 1 : 0)));
 
-  // Enhanced messages with professional icons from figures library
+  // Enhanced messages with Nerd Fonts icons
   const messages = [
-    { text: 'Initializing workspace...', icon: figures.play },
-    { text: 'Loading configuration...', icon: figures.info },
-    { text: 'Connecting to GitHub...', icon: figures.arrowRight },
-    { text: 'Connecting to GitLab...', icon: figures.arrowRight },
-    { text: 'Preparing dashboard...', icon: figures.hamburger },
-    { text: 'Ready to work!', icon: figures.tick },
+    {
+      text: 'Initializing workspace...',
+      icon: nf.icons['nf-fa-rocket'].value //
+    },
+    {
+      text: 'Loading configuration...',
+      icon: nf.icons['nf-fa-cog'].value //
+    },
+    {
+      text: 'Connecting to GitHub...',
+      icon: nf.icons['nf-dev-github_badge'].value //
+    },
+    {
+      text: 'Connecting to GitLab...',
+      icon: nf.icons['nf-dev-gitlab'].value //
+    },
+    {
+      text: 'Preparing dashboard...',
+      icon: nf.icons['nf-md-view_dashboard'].value // 󰕰
+    },
+    {
+      text: 'Ready to work!',
+      icon: nf.icons['nf-fa-check_circle'].value //
+    },
   ];
 
   const messageIndex = Math.min(
@@ -117,7 +135,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
         </Box>
       )}
 
-      {/* Loading indicator with animated spinner and professional icon */}
+      {/* Loading indicator with animated spinner and Nerd Fonts icon */}
       <Box
         flexDirection="column"
         alignItems="center"

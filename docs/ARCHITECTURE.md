@@ -2,7 +2,7 @@
 
 ## 设计目标
 
-AFK (Automated Feature Kitchen) 的核心问题是：**让 AI agent 在隔离环境中自动完成 Issue，并产出可审查的 MR**。
+AFK (Away From Keyboard) 的核心问题是：**让 AI agent 在隔离环境中自动完成 Issue，并产出可审查的 MR**。
 
 围绕这个目标，系统需要解决四个挑战：
 

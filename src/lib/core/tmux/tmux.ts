@@ -114,13 +114,20 @@ export class TmuxClient {
   }
 
   /**
-   * Wait for prompt (❯) to appear
+   * Wait for Claude prompt to appear in pane.
+   *
+   * NOTE: Detection uses multiple known prompt glyphs to tolerate Claude
+   * Code UI variations across themes/locales. The previous single-character
+   * `❯` check broke when themes rendered alternate glyphs (›, ➜, etc).
+   * For more robust detection, observe the worktree's `.afk/claude-status.json`
+   * mtime (refreshed each turn via the statusline tee).
    */
   async waitForPrompt(session: string, window: string, timeout: number = 30000): Promise<boolean> {
+    const PROMPT_GLYPHS = ['❯', '›', '➜', '▶'];
     const start = Date.now();
     while (Date.now() - start < timeout) {
       const content = await this.capturePane(session, window, { lines: 5, history: 5 });
-      if (content.includes('❯')) return true;
+      if (PROMPT_GLYPHS.some(g => content.includes(g))) return true;
       await this.sleep(1000);
     }
     return false;

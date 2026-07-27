@@ -59,7 +59,14 @@ export async function createGitHubClient(): Promise<GitHubClient> {
   let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
   if (!token) {
     try {
-      token = execSync('gh auth token', { encoding: 'utf-8' }).trim();
+      const raw = execSync('gh auth token', {
+        encoding: 'utf-8',
+        timeout: 5_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+      // gh v2.40+ may prefix with "github.com token:" — extract token portion.
+      const match = raw.match(/(?:token:\s*)?(\S+)/);
+      token = match ? match[1] : raw;
     } catch {
       throw new Error('GITHUB_TOKEN or GH_TOKEN environment variable is required (or authenticate gh: gh auth login)');
     }

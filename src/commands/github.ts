@@ -1,23 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { GitHubClient } from '../lib/core/github/client.js';
-import { detectGitHubRepo } from '../lib/core/tracker/detect.js';
-import { execSync } from 'child_process';
-
-/**
- * Parse comma-separated string into trimmed array
- */
-function parseLabels(input: string): string[] {
-  return input.split(',').map(l => l.trim());
-}
-
-/**
- * Handle command error and exit
- */
-function handleError(error: unknown): never {
-  console.error(chalk.red('Error:'), (error as Error).message);
-  process.exit(1);
-}
+import { createGitHubClient } from '../lib/client-factory';
+import { handleCommandError, parseCommaSeparated } from '../lib/cli-utils';
 
 export function registerGitHubCommands(program: Command): void {
   const github = program
@@ -34,7 +18,7 @@ export function registerGitHubCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (number: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitHubClient();
         const issue = await client.getIssue(parseInt(number));
 
         if (options.json) {
@@ -48,7 +32,7 @@ export function registerGitHubCommands(program: Command): void {
           console.log(chalk.dim(issue.description));
         }
       } catch (error) {
-        handleError(error);
+        handleCommandError(error);
       }
     });
 
@@ -63,7 +47,7 @@ export function registerGitHubCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const client = await createClient();
+        const client = await createGitHubClient();
         const state = options.state === 'open' ? 'opened' : options.state;
         const issues = await client.listIssues({
           labels: options.label,
@@ -83,7 +67,7 @@ export function registerGitHubCommands(program: Command): void {
           });
         }
       } catch (error) {
-        handleError(error);
+        handleCommandError(error);
       }
     });
 
@@ -98,15 +82,15 @@ export function registerGitHubCommands(program: Command): void {
     .option('--label <labels>', 'Comma-separated labels')
     .action(async (title: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitHubClient();
         const issueNumber = await client.createIssue({
           title,
           description: options.description,
-          labels: options.label ? parseLabels(options.label) : [],
+          labels: options.label ? parseCommaSeparated(options.label) : [],
         });
         console.log(chalk.green(`✓ Created issue #${issueNumber}: ${title}`));
       } catch (error) {
-        handleError(error);
+        handleCommandError(error);
       }
     });
 
@@ -120,11 +104,11 @@ export function registerGitHubCommands(program: Command): void {
     .argument('<message>', 'Comment message')
     .action(async (number: string, message: string) => {
       try {
-        const client = await createClient();
+        const client = await createGitHubClient();
         await client.addComment(parseInt(number), message);
         console.log(chalk.green(`✓ Added comment to issue #${number}`));
       } catch (error) {
-        handleError(error);
+        handleCommandError(error);
       }
     });
 
@@ -139,11 +123,11 @@ export function registerGitHubCommands(program: Command): void {
     .option('--remove <labels>', 'Comma-separated labels to remove')
     .action(async (number: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitHubClient();
         const issueNum = parseInt(number);
 
-        const labelsToAdd = options.add ? parseLabels(options.add) : [];
-        const labelsToRemove = options.remove ? parseLabels(options.remove) : [];
+        const labelsToAdd = options.add ? parseCommaSeparated(options.add) : [];
+        const labelsToRemove = options.remove ? parseCommaSeparated(options.remove) : [];
 
         // Add labels in parallel
         if (labelsToAdd.length > 0) {
@@ -159,31 +143,7 @@ export function registerGitHubCommands(program: Command): void {
         if (options.add) console.log(chalk.gray(`  + ${options.add}`));
         if (options.remove) console.log(chalk.gray(`  - ${options.remove}`));
       } catch (error) {
-        handleError(error);
+        handleCommandError(error);
       }
     });
-}
-
-async function createClient(): Promise<GitHubClient> {
-  // Get token from env or gh CLI
-  let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (!token) {
-    try {
-      token = execSync('gh auth token', { encoding: 'utf-8' }).trim();
-    } catch {
-      throw new Error('GITHUB_TOKEN or GH_TOKEN environment variable is required (or authenticate gh: gh auth login)');
-    }
-  }
-
-  // Get repo from env or git remote
-  let repo = process.env.GITHUB_REPOSITORY;
-  if (!repo) {
-    const detected = await detectGitHubRepo();
-    if (!detected) {
-      throw new Error('Could not detect GitHub repository. Set GITHUB_REPOSITORY=owner/repo or run from a GitHub repository.');
-    }
-    repo = detected;
-  }
-
-  return new GitHubClient({ repo, auth: token });
 }

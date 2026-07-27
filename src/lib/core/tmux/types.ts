@@ -1,4 +1,4 @@
-import { Signal } from '../../schemas.js';
+import { Signal } from '../../schemas';
 
 export interface TmuxSession {
   name: string;

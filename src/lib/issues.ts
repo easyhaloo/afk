@@ -1,6 +1,7 @@
 import { Gitlab } from '@gitbeaker/node';
 import { Issue } from '../types/dashboard';
 import { applyGlabConfig } from './glab-config';
+import { logAndReturn } from './cli-utils';
 
 export class IssueService {
   private client: InstanceType<typeof Gitlab> | null = null;
@@ -43,8 +44,7 @@ export class IssueService {
         hasMore: items.length === perPage,
       };
     } catch (error) {
-      console.error('Failed to list issues:', error);
-      return { issues: [], hasMore: false };
+      return logAndReturn(error, 'Failed to list issues', { issues: [], hasMore: false });
     }
   }
 
@@ -64,8 +64,7 @@ export class IssueService {
         web_url: issue.web_url,
       };
     } catch (error) {
-      console.error('Failed to get issue:', error);
-      return null;
+      return logAndReturn(error, 'Failed to get issue', null);
     }
   }
 }

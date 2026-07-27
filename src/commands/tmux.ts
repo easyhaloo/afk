@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { TmuxClient } from '../lib/tmux.js';
+import { TmuxClient } from '../lib/tmux';
+import { handleCommandError } from '../lib/cli-utils';
 
 export function registerTmuxCommands(program: Command): void {
   const tmux = program
@@ -28,8 +29,7 @@ export function registerTmuxCommands(program: Command): void {
         console.log();
         console.log(chalk.dim(`Attach with: tmux attach -t ${session.name}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -51,8 +51,7 @@ export function registerTmuxCommands(program: Command): void {
 
         console.log(chalk.green('✓ Goal sent successfully'));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -83,8 +82,7 @@ export function registerTmuxCommands(program: Command): void {
           process.exit(1);
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -112,8 +110,7 @@ export function registerTmuxCommands(program: Command): void {
 
         console.log(content);
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -149,8 +146,7 @@ export function registerTmuxCommands(program: Command): void {
           process.exit(1);
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -168,8 +164,7 @@ export function registerTmuxCommands(program: Command): void {
 
         console.log(chalk.green(`✓ Session ${name} killed`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -193,8 +188,7 @@ export function registerTmuxCommands(program: Command): void {
           process.exit(1);
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 }

@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { GitLabClient } from '../lib/gitlab.js';
-import { Scheduler } from '../lib/scheduler.js';
-import { getSchedulerConfig } from '../lib/config-manager.js';
+import { createGitLabClient } from '../lib/client-factory';
+import { Scheduler } from '../lib/scheduler';
+import { getSchedulerConfig } from '../lib/config-manager';
+import { handleCommandError } from '../lib/cli-utils';
 
 // Merge CLI options with config defaults (called per-action, reads cached config)
 function redisOpts(options: { [key: string]: any }) {
@@ -49,7 +50,7 @@ export function registerSchedulerCommands(program: Command): void {
         await fs.writeFile(lockFile, String(process.pid), 'utf-8');
 
         const cfg = getSchedulerConfig();
-        const gitlab = createGitLabClient();
+        const gitlab = await createGitLabClient();
         const sched = new Scheduler(gitlab, {
           maxConcurrent: options.maxConcurrent ? parseInt(options.maxConcurrent) : cfg.maxConcurrent,
           ...redisOpts(options),
@@ -90,8 +91,7 @@ export function registerSchedulerCommands(program: Command): void {
           process.exit(0);
         });
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -105,7 +105,7 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
-        const gitlab = createGitLabClient();
+        const gitlab = await createGitLabClient();
         const sched = new Scheduler(gitlab, {
           ...redisOpts(options),
         });
@@ -132,8 +132,7 @@ export function registerSchedulerCommands(program: Command): void {
         // Close connection
         await sched.stop();
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -150,7 +149,7 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
-        const gitlab = createGitLabClient();
+        const gitlab = await createGitLabClient();
         const sched = new Scheduler(gitlab, {
           ...redisOpts(options),
         });
@@ -165,8 +164,7 @@ export function registerSchedulerCommands(program: Command): void {
 
         await sched.stop();
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -181,7 +179,7 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
-        const gitlab = createGitLabClient();
+        const gitlab = await createGitLabClient();
         const sched = new Scheduler(gitlab, {
           ...redisOpts(options),
         });
@@ -191,8 +189,7 @@ export function registerSchedulerCommands(program: Command): void {
 
         await sched.stop();
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -207,7 +204,7 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
-        const gitlab = createGitLabClient();
+        const gitlab = await createGitLabClient();
         const sched = new Scheduler(gitlab, {
           ...redisOpts(options),
         });
@@ -217,8 +214,7 @@ export function registerSchedulerCommands(program: Command): void {
 
         await sched.stop();
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -233,7 +229,7 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--label <label>', 'GitLab label to filter (can be repeated)', undefined)
     .action(async (options) => {
       try {
-        const gitlab = createGitLabClient();
+        const gitlab = await createGitLabClient();
         const sched = new Scheduler(gitlab, {
           ...redisOpts(options),
         });
@@ -249,27 +245,7 @@ export function registerSchedulerCommands(program: Command): void {
 
         await sched.stop();
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
-}
-
-/**
- * Create GitLab client from environment variables
- */
-function createGitLabClient(): GitLabClient {
-  const url = process.env.GITLAB_URL || 'https://gitlab.com';
-  const token = process.env.GITLAB_TOKEN;
-  const projectId = process.env.GITLAB_PROJECT_ID;
-
-  if (!token) {
-    throw new Error('GITLAB_TOKEN environment variable is required');
-  }
-
-  if (!projectId) {
-    throw new Error('GITLAB_PROJECT_ID environment variable is required');
-  }
-
-  return new GitLabClient({ url, token, projectId });
 }

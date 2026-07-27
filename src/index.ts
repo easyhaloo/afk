@@ -2,7 +2,6 @@
 /**
  * Thin CLI dispatcher — lazy-loads only the command that is invoked.
  */
-import { spawn } from 'child_process';
 import { resolve } from 'path';
 
 const cmd = process.argv[2];
@@ -15,13 +14,9 @@ async function main() {
   }
 
   if (cmd === 'dashboard' || cmd === 'ui') {
-    // Fast path: spawn node with tsx loader to run dashboard entry directly
-    const script = resolve(import.meta.dirname, 'commands', 'dashboard-entry.js');
-    const tsxUrl = `file://${resolve(import.meta.dirname, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs')}`;
-    spawn(process.execPath, ['--import', tsxUrl, script, ...extraArgs], {
-      stdio: 'inherit',
-      detached: false,
-    });
+    // Direct import to preserve stdin TTY for Ink
+    const { startDashboard } = await import('./commands/dashboard-entry.js');
+    await startDashboard();
     return;
   }
 

@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
-import { Signal } from '../../schemas.js';
-import { readSignal } from '../io/signal.js';
+import { Signal } from '../../schemas';
+import { readSignal } from '../io/signal';
+import { TIMEOUTS } from '../../constants';
 
 export interface TmuxSession {
   name: string;
@@ -177,7 +178,7 @@ export class TmuxClient {
     window: string,
     signalTypes: Signal['type'][],
     worktreeDir: string,
-    timeout: number = 7200000
+    timeout: number = TIMEOUTS.TMUX_SESSION_TIMEOUT
   ): Promise<Signal | null> {
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -191,7 +192,7 @@ export class TmuxClient {
   /**
    * Wait for tmux session to exit
    */
-  async waitSessionExit(session: string, timeout: number = 7200000): Promise<number> {
+  async waitSessionExit(session: string, timeout: number = TIMEOUTS.TMUX_SESSION_TIMEOUT): Promise<number> {
     return new Promise((resolve, reject) => {
       const proc = spawn('bash', ['-c', `
         while tmux has-session -t "${session}" 2>/dev/null; do sleep 2; done

@@ -1,4 +1,4 @@
-import type { KeyboardEvent, KeyboardAPI } from './types.js';
+import type { KeyboardEvent, KeyboardAPI } from './types';
 
 /**
  * KeyboardDispatcher — routes keyboard events to the active View or global handlers.

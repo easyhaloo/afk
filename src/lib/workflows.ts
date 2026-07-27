@@ -1,12 +1,13 @@
 import { spawn } from 'child_process';
-import { GitLabClient } from './gitlab.js';
-import { detectPlatform } from './core/tracker/detect.js';
-import type { Platform } from './core/tracker/types.js';
-import { TmuxClient } from './tmux.js';
-import { WorktreeManager } from './worktree.js';
-import { writeSignal, readSignal } from './io.js';
-import { getCurrentTimestamp } from './schemas.js';
-import type { Signal, TimeoutSignal, ContextHighSignal } from './schemas.js';
+import { GitLabClient } from './gitlab';
+import { detectPlatform } from './core/tracker/detect';
+import type { Platform } from './core/tracker/types';
+import { TmuxClient } from './tmux';
+import { WorktreeManager } from './worktree';
+import { writeSignal, readSignal } from './io';
+import { getCurrentTimestamp } from './schemas';
+import type { Signal, TimeoutSignal, ContextHighSignal } from './schemas';
+import { TIMEOUTS } from './constants';
 
 export interface RunnerOptions {
   iid: number;
@@ -60,8 +61,8 @@ export class WorkflowRunner {
       targetBranch,
       baseBranch = 'main',
       maxRetries = 3,
-      hardTimeoutMs = 7200000,
-      completionTimeoutMs = 7200000,
+      hardTimeoutMs = TIMEOUTS.WORKFLOW_HARD_TIMEOUT,
+      completionTimeoutMs = TIMEOUTS.WORKFLOW_COMPLETION_TIMEOUT,
     } = options;
 
     // Auto-detect platform only if not provided and will be used
@@ -157,7 +158,7 @@ export class WorkflowRunner {
     }
 
     // Wait for AC result
-    const acSignal = await this.tmux.waitForSignal(session, 'main', 'ac_result', worktreePath, 180000);
+    const acSignal = await this.tmux.waitForSignal(session, 'main', 'ac_result', worktreePath, TIMEOUTS.AC_SIGNAL_TIMEOUT);
 
     if (!acSignal || acSignal.type !== 'ac_result' || acSignal.result !== 'PASS') {
       // AC failed → retry or escalate
@@ -274,8 +275,8 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     await this.tmux.sendKeys(session, 'main', 'EOF');
     await this.tmux.sendKeys(session, 'main', '（或直接回复：HANDOFF_READY）');
 
-    // Wait for handoff_ready signal (max 60s)
-    const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, 60000);
+    // Wait for handoff_ready signal
+    const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, TIMEOUTS.HANDOFF_TIMEOUT);
 
     const snapshot = await this.tmux.capturePane(session, 'main', { lines: 100, history: 200 });
     const sha = await this.gitlab.getWorktreeSHA(worktreePath);

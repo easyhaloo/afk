@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { spawn } from 'child_process';
-import { detectGitLabProject } from '../lib/gitlab.js';
-import { getGlabToken } from '../lib/glab-config.js';
+import { detectGitLabProject } from '../lib/gitlab';
+import { getGlabToken } from '../lib/glab-config';
 
 export function registerEscalateCommands(program: Command): void {
   const escalate = program

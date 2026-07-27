@@ -1,6 +1,7 @@
 import { Gitlab } from '@gitbeaker/node';
 import { Project } from '../types/dashboard';
 import { applyGlabConfig } from './glab-config';
+import { logAndReturn } from './cli-utils';
 
 export type { Project };
 
@@ -40,8 +41,7 @@ export class ProjectService {
         hasMore: items.length === perPage,
       };
     } catch (error) {
-      console.error('Failed to list projects:', error);
-      return { projects: [], hasMore: false };
+      return logAndReturn(error, 'Failed to list projects', { projects: [], hasMore: false });
     }
   }
 
@@ -58,7 +58,7 @@ export class ProjectService {
         protected: b.protected || false,
       }));
     } catch (error) {
-      return [];
+      return logAndReturn(error, 'Failed to get branches', []);
     }
   }
 
@@ -74,7 +74,7 @@ export class ProjectService {
         message: t.message || '',
       }));
     } catch (error) {
-      return [];
+      return logAndReturn(error, 'Failed to get tags', []);
     }
   }
 
@@ -89,7 +89,7 @@ export class ProjectService {
         committed_date: c.committed_date || '',
       }));
     } catch (error) {
-      return [];
+      return logAndReturn(error, 'Failed to get recent commits', []);
     }
   }
 }

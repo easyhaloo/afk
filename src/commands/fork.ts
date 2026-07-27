@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
-import { getForkConfig } from '../lib/config-manager.js';
+import { getForkConfig } from '../lib/config-manager';
 
 export function registerForkCommands(program: Command): void {
   const fork = program

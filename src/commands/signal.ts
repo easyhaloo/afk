@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
-import { getCurrentTimestamp } from '../lib/schemas.js';
-import { writeSignal, readSignal, clearSignal, waitForSignal } from '../lib/io.js';
+import { getCurrentTimestamp } from '../lib/schemas';
+import { writeSignal, readSignal, clearSignal, waitForSignal } from '../lib/io';
+import { handleCommandError } from '../lib/cli-utils';
 
 export function registerSignalCommands(program: Command): void {
   const signal = program
@@ -33,8 +34,7 @@ export function registerSignalCommands(program: Command): void {
         console.log(chalk.gray(`  Summary: ${options.summary}`));
         if (sha) console.log(chalk.gray(`  SHA: ${sha}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -73,8 +73,7 @@ export function registerSignalCommands(program: Command): void {
           console.log(chalk.gray(`  Tests: ${options.testsPassed || 0}/${options.testsRun} passed`));
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -97,8 +96,7 @@ export function registerSignalCommands(program: Command): void {
         console.log(chalk.green('✓ Handoff ready signal written'));
         console.log(chalk.gray(`  Summary: ${options.summary}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -138,8 +136,7 @@ export function registerSignalCommands(program: Command): void {
           }
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -166,8 +163,7 @@ export function registerSignalCommands(program: Command): void {
         console.log(chalk.green(`✓ Signal received: ${signalData.type}`));
         console.log(JSON.stringify(signalData, null, 2));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -183,8 +179,7 @@ export function registerSignalCommands(program: Command): void {
         await clearSignal(options.dir);
         console.log(chalk.green('✓ Signal file cleared'));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 }

@@ -1,7 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { GitLabClient, detectGitLabProject } from '../lib/gitlab.js';
-import { getGlabToken } from '../lib/glab-config.js';
+import { createGitLabClient } from '../lib/client-factory';
+import { detectGitLabProject } from '../lib/core/tracker/detect';
+import { getGlabToken } from '../lib/core/gitlab/glab-config';
+import { handleCommandError, parseCommaSeparated, formatJson } from '../lib/cli-utils';
 
 export function registerGitLabCommands(program: Command): void {
   const gitlab = program
@@ -18,7 +20,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (iid: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         const issue = await client.getIssue(parseInt(iid));
 
         if (options.json) {
@@ -32,7 +34,7 @@ export function registerGitLabCommands(program: Command): void {
           console.log(chalk.dim(issue.description));
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -48,7 +50,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         const issues = await client.listIssues({
           labels: options.label,
           state: options.state,
@@ -67,7 +69,7 @@ export function registerGitLabCommands(program: Command): void {
           });
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -82,11 +84,11 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<label>', 'Label to add')
     .action(async (iid: string, label: string) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         await client.addLabel(parseInt(iid), label);
         console.log(chalk.green(`✓ Added label "${label}" to issue #${iid}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -101,11 +103,11 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<label>', 'Label to remove')
     .action(async (iid: string, label: string) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         await client.removeLabel(parseInt(iid), label);
         console.log(chalk.green(`✓ Removed label "${label}" from issue #${iid}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -120,11 +122,11 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<message>', 'Comment message')
     .action(async (iid: string, message: string) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         await client.addComment(parseInt(iid), message);
         console.log(chalk.green(`✓ Added comment to issue #${iid}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -140,15 +142,15 @@ export function registerGitLabCommands(program: Command): void {
     .option('--label <labels>', 'Comma-separated labels')
     .action(async (title: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         const iid = await client.createIssue({
           title,
           description: options.description,
-          labels: options.label ? options.label.split(',').map((l: string) => l.trim()) : [],
+          labels: options.label ? parseCommaSeparated(options.label) : [],
         });
         console.log(chalk.green(`✓ Created issue #${iid}: ${title}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -163,16 +165,16 @@ export function registerGitLabCommands(program: Command): void {
     .option('--add-label <labels>', 'Comma-separated labels to add')
     .action(async (iid: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         if (options.addLabel) {
-          const labels = options.addLabel.split(',').map((l: string) => l.trim());
+          const labels = parseCommaSeparated(options.addLabel);
           await client.addLabelsToIssue(parseInt(iid), labels);
           console.log(chalk.green(`✓ Added labels to issue #${iid}: ${options.addLabel}`));
         } else {
           console.log(chalk.yellow('No labels to add. Use --add-label.'));
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -187,7 +189,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--json', 'Output as JSON')
     .action(async (iid: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         const issue = await client.getIssue(parseInt(iid));
         const ac = client.parseAC(issue.description);
 
@@ -206,7 +208,7 @@ export function registerGitLabCommands(program: Command): void {
           });
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -222,15 +224,15 @@ export function registerGitLabCommands(program: Command): void {
     .option('--remove <labels>', 'Comma-separated labels to remove')
     .action(async (iid: string, options) => {
       try {
-        const client = await createClient();
-        const add = options.add ? options.add.split(',').map((l: string) => l.trim()) : [];
-        const remove = options.remove ? options.remove.split(',').map((l: string) => l.trim()) : [];
+        const client = await createGitLabClient();
+        const add = options.add ? parseCommaSeparated(options.add) : [];
+        const remove = options.remove ? parseCommaSeparated(options.remove) : [];
         await client.updateLabelsBatch(parseInt(iid), add, remove);
         console.log(chalk.green(`✓ Updated labels on issue #${iid}`));
         if (add.length) console.log(chalk.gray(`  + ${add.join(', ')}`));
         if (remove.length) console.log(chalk.gray(`  - ${remove.join(', ')}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -246,11 +248,11 @@ export function registerGitLabCommands(program: Command): void {
     .option('--resolvable', 'Mark comment as resolvable')
     .action(async (mriid: string, message: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         await client.addMRComment(parseInt(mriid), message, { resolvable: options.resolvable });
         console.log(chalk.green(`✓ Added comment to MR !${mriid}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -266,7 +268,7 @@ export function registerGitLabCommands(program: Command): void {
     .option('--is-blocked-by', 'Reverse: source is blocked by target instead of blocks')
     .action(async (sourceIid: string, targetIid: string, options) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         const linkType = options.isBlockedBy ? 'is_blocked_by' : 'blocks';
         await client.linkIssues(
           parseInt(sourceIid),
@@ -275,7 +277,7 @@ export function registerGitLabCommands(program: Command): void {
         );
         console.log(chalk.green(`✓ Linked #${sourceIid} ${linkType} #${targetIid}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -289,11 +291,11 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<mriid>', 'Merge Request IID')
     .action(async (mriid: string) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         const status = await client.getMRPipelineStatus(parseInt(mriid));
         console.log(status);
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
@@ -348,7 +350,7 @@ export function registerGitLabCommands(program: Command): void {
     .argument('<worktree>', 'Path to worktree')
     .action(async (worktree: string) => {
       try {
-        const client = await createClient();
+        const client = await createGitLabClient();
         const markdown = await client.uploadArtifacts(worktree);
         if (markdown) {
           console.log(markdown);
@@ -356,42 +358,8 @@ export function registerGitLabCommands(program: Command): void {
           console.log(chalk.gray('No artifacts to upload (or .afk/artifacts.txt not found)'));
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
+        handleCommandError(error);
         process.exit(1);
       }
     });
-}
-
-/**
- * Create GitLab client from environment variables
- */
-async function createClient(): Promise<GitLabClient> {
-  const envUrl = process.env.GITLAB_URL;
-  let token = process.env.GITLAB_TOKEN;
-  let projectId = process.env.GITLAB_PROJECT_ID;
-
-  let url = envUrl || 'https://gitlab.com';
-
-  if (!token) {
-    const glab = getGlabToken(envUrl);
-    if (glab) {
-      url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
-      token = glab.token;
-    }
-  }
-
-  if (!token) {
-    throw new Error('GITLAB_TOKEN environment variable is required (or authenticate glab: glab auth login)');
-  }
-
-  if (!projectId) {
-    const detected = await detectGitLabProject();
-    if (detected) projectId = detected;
-  }
-
-  if (!projectId) {
-    throw new Error('GITLAB_PROJECT_ID environment variable is required (or run from a git project with a remote)');
-  }
-
-  return new GitLabClient({ url, token, projectId });
 }

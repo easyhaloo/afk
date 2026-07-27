@@ -1,2 +1,2 @@
 // Re-export from core/
-export * from './core/io/signal.js';
+export * from './core/io/signal';

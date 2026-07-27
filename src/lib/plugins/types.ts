@@ -1,4 +1,4 @@
-import type { View } from '../ui/core/types.js';
+import type { View } from '../ui/core/types';
 
 export interface Plugin {
   readonly id: string;

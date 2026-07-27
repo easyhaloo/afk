@@ -1,4 +1,5 @@
-import { getGlabToken } from '../gitlab/glab-config.js';
+import { getGlabToken } from '../gitlab/glab-config';
+import { PORTS } from '../../constants';
 
 // ─── GitLab ───────────────────────────────────────────────────────────────────
 
@@ -85,7 +86,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
 const DEFAULT_SCHEDULER: SchedulerConfig = {
   maxConcurrent: 3,
   redisHost: 'localhost',
-  redisPort: 6379,
+  redisPort: PORTS.REDIS_DEFAULT,
   pollInterval: 60,
   requiredLabels: ['mode::afk', 'stage::ready-for-issues'],
   excludeLabels: ['stage::afk-in-progress', 'stage::qa', 'stage::done', 'mode::hitl'],

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { render } from 'ink';
 import React from 'react';
-import { Dashboard } from '../views/dashboard/index.js';
+import { Dashboard } from '../views/dashboard/index';
 
 export function registerDashboardCommands(program: Command) {
   program

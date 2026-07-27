@@ -1,2 +1,2 @@
-export { loadAllPlugins, loadPluginRegistry } from './loader.js';
-export type { Plugin, PluginManifest } from './types.js';
+export { loadAllPlugins, loadPluginRegistry } from './loader';
+export type { Plugin, PluginManifest } from './types';

@@ -1,6 +1,6 @@
 import { Task } from '../types/dashboard';
 import { SessionService } from './sessions';
-import type { Platform } from './core/tracker/types';
+import type { Platform } from './core/tracker/types.js';
 
 export class TaskService {
   private sessionService: SessionService;

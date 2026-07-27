@@ -1,0 +1,277 @@
+import { Octokit } from '@octokit/rest';
+import type {
+  TrackerProvider,
+  TrackedIssue,
+  TrackedMR,
+  ListOptions,
+  CreateIssueOptions,
+  UpdateIssueOptions,
+  ListMROptions,
+  AcceptanceCriteria,
+  LinkType,
+} from '../tracker/types.js';
+
+/**
+ * GitHub authentication options
+ */
+export interface GitHubAuthOptions {
+  auth?: string;        // token or gh CLI auth
+  repo: string;         // owner/repo
+}
+
+/**
+ * GitHub client implementing TrackerProvider
+ */
+export class GitHubClient implements TrackerProvider {
+  readonly platform: 'github' = 'github';
+  readonly projectId: string;
+  private client: Octokit;
+
+  constructor(options: GitHubAuthOptions) {
+    this.projectId = options.repo;
+    this.client = new Octokit({
+      auth: options.auth,
+    });
+  }
+
+  /**
+   * Get authentication token
+   * Priority: constructor auth > GITHUB_TOKEN env > gh CLI
+   */
+  private async getAuth(): Promise<string | undefined> {
+    const envToken = process.env.GITHUB_TOKEN;
+    if (envToken) return envToken;
+
+    // Try to get token from gh CLI
+    try {
+      const { execSync } = await import('child_process');
+      const token = execSync('gh auth token', { encoding: 'utf-8' }).trim();
+      return token;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Ensure authenticated client
+   */
+  private async ensureClient(): Promise<Octokit> {
+    const auth = await this.getAuth();
+    if (auth) {
+      this.client = new Octokit({ auth });
+    }
+    return this.client;
+  }
+
+  private getOwnerRepo(): { owner: string; repo: string } {
+    const [owner, repo] = this.projectId.split('/');
+    if (!owner || !repo) throw new Error(`Invalid repo format: ${this.projectId}`);
+    return { owner, repo };
+  }
+
+  // ============ Issues ============
+
+  async getIssue(id: number): Promise<TrackedIssue> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await oct.issues.get({ owner, repo, issue_number: id });
+    return {
+      id: data.number,
+      platform: 'github',
+      title: data.title,
+      description: data.body || '',
+      labels: data.labels.map(l => (typeof l === 'string' ? l : (l.name || ''))),
+      state: data.state === 'open' ? 'opened' : 'closed',
+      url: data.html_url,
+      projectId: this.projectId,
+    };
+  }
+
+  async listIssues(options: ListOptions = {}): Promise<TrackedIssue[]> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    const state = options.state === 'opened' ? 'open' : options.state || 'open';
+    const { data } = await oct.issues.list({
+      owner,
+      repo,
+      state,
+      labels: options.labels?.join(','),
+      per_page: options.perPage || 20,
+    });
+    return data
+      .filter(issue => !('pull_request' in issue)) // filter out PRs
+      .map(issue => ({
+        id: issue.number,
+        platform: 'github' as const,
+        title: issue.title,
+        description: issue.body || '',
+        labels: issue.labels.map(l => (typeof l === 'string' ? l : (l.name || ''))),
+        state: issue.state === 'open' ? 'opened' : 'closed',
+        url: issue.html_url,
+        projectId: this.projectId,
+      }));
+  }
+
+  async createIssue(options: CreateIssueOptions): Promise<number> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await oct.issues.create({
+      owner,
+      repo,
+      title: options.title,
+      body: options.description,
+      labels: options.labels,
+    });
+    return data.number;
+  }
+
+  async updateIssue(id: number, updates: UpdateIssueOptions): Promise<void> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    await oct.issues.update({
+      owner,
+      repo,
+      issue_number: id,
+      title: updates.title,
+      body: updates.description,
+      state: updates.state,
+      labels: updates.labels,
+    });
+  }
+
+  async addLabel(id: number, label: string): Promise<void> {
+    const issue = await this.getIssue(id);
+    const newLabels = [...new Set([...issue.labels, label])];
+    await this.updateIssueLabels(id, newLabels);
+  }
+
+  async removeLabel(id: number, label: string): Promise<void> {
+    const issue = await this.getIssue(id);
+    const newLabels = issue.labels.filter(l => l !== label);
+    await this.updateIssueLabels(id, newLabels);
+  }
+
+  private async updateIssueLabels(id: number, labels: string[]): Promise<void> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    await oct.issues.update({
+      owner,
+      repo,
+      issue_number: id,
+      labels,
+    });
+  }
+
+  async addComment(id: number, body: string): Promise<void> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    await oct.issues.createComment({
+      owner,
+      repo,
+      issue_number: id,
+      body,
+    });
+  }
+
+  async linkIssues(sourceId: number, targetId: number, type: LinkType): Promise<void> {
+    // GitHub cross-repo links only — this implementation is for same-repo
+    // For cross-repo, would need to use the Cross-Reference API
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+
+    // Add a comment linking the issues
+    const linkType = type === 'blocks' ? 'blocks' : 'is blocked by';
+    await this.addComment(
+      sourceId,
+      `This issue ${linkType} #${targetId}`
+    );
+  }
+
+  // ============ Pull Requests ============
+
+  async getMR(id: number): Promise<TrackedMR> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await oct.pulls.get({
+      owner,
+      repo,
+      pull_number: id,
+    });
+    const state = data.merged ? 'merged' : data.state === 'open' ? 'opened' : 'closed';
+    return {
+      id: data.number,
+      platform: 'github',
+      title: data.title,
+      state,
+      sourceBranch: data.head.ref,
+      targetBranch: data.base.ref,
+      url: data.html_url,
+      projectId: this.projectId,
+    };
+  }
+
+  async listMRs(options: ListMROptions = {}): Promise<TrackedMR[]> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    const state = options.state === 'opened' ? 'open' : options.state || 'open';
+    const { data } = await oct.pulls.list({
+      owner,
+      repo,
+      state,
+      per_page: options.perPage || 20,
+    });
+    return data.map(pr => {
+      // merged property exists on individual PR get but may not on list
+      const merged = (pr as any).merged;
+      const prState = merged ? 'merged' : pr.state === 'open' ? 'opened' : 'closed';
+      return {
+        id: pr.number,
+        platform: 'github' as const,
+        title: pr.title,
+        state: prState,
+        sourceBranch: pr.head.ref,
+        targetBranch: pr.base.ref,
+        url: pr.html_url,
+        projectId: this.projectId,
+      };
+    });
+  }
+
+  // ============ Utility ============
+
+  parseAC(description: string): AcceptanceCriteria | null {
+    const acMatch = description.match(
+      /##\s*(?:AC|Acceptance Criteria)\s*\n([\s\S]*?)(?=\n##|$)/i
+    );
+    if (!acMatch) return null;
+
+    const acText = acMatch[1].trim();
+    const items: string[] = [];
+    const itemRegex = /^[-*]\s+\[\s*\]\s+(.+)$/gm;
+    let match;
+    while ((match = itemRegex.exec(acText)) !== null) {
+      items.push(match[1].trim());
+    }
+
+    return { text: acText, items };
+  }
+
+  getRetryCount(issue: TrackedIssue): number {
+    const label = issue.labels.find(l => /^retry-count::\d+$/.test(l));
+    if (!label) return 0;
+    return parseInt(label.split('::')[1], 10);
+  }
+
+  async detectTargetBranch(issueId: number, explicit?: string): Promise<string> {
+    if (explicit) return explicit;
+    const issue = await this.getIssue(issueId);
+    const prdLabel = issue.labels.find(l => /^base::prd-\d+$/.test(l));
+    if (prdLabel) return `prd/${prdLabel.replace('base::prd-', '')}`;
+    return process.env.AFK_TARGET_BRANCH || 'main';
+  }
+
+  async uploadArtifacts(worktreePath: string): Promise<string> {
+    // TODO: implement GitHub release asset upload
+    return '';
+  }
+}

@@ -1,12 +1,12 @@
 # AFK Skills Optimization Summary
 
-优化了 afk 系列 skills 的描述，精简实现，移除无关内容。
+优化了 afk 系列 skills 的描述，精简实现，移除无关内容，保留 "Use when" 使用场景说明。
 
 ## 优化原则
 
-1. **精简描述** — 移除冗余说明，保留核心信息
-2. **结构化** — 统一格式：Goal → Process → Rules
-3. **去除"统一"术语** — 避免使用 "unified" 等抽象词汇
+1. **保留使用场景** — description 中保留 "Use when" 说明何时使用该 skill
+2. **精简描述** — 移除冗余说明，保留核心信息
+3. **结构化** — 统一格式：Goal → Process → Rules
 4. **聚焦本质** — 只保留必要步骤和关键规则
 
 ## 已优化 Skills
@@ -119,7 +119,7 @@
 ---
 name: skill-name
 description: >-
-  简短描述（1-2句话）
+  Use when <使用场景描述>. <简短的功能说明>.
 ---
 
 # Skill Name
@@ -135,6 +135,11 @@ description: >-
 - 关键规则列表
 - 使用肯定句而非 MUST NOT
 ```
+
+**Description 格式要求：**
+- 必须以 "Use when" 开头，说明使用场景
+- 保持简洁，2-3 句话即可
+- 说明输入/输出或关键特性
 
 ## 下一步
 

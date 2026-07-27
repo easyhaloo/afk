@@ -299,6 +299,47 @@ export function registerGitLabCommands(program: Command): void {
     });
 
   /**
+   * open command
+   */
+  gitlab
+    .command('open <type> <iid>')
+    .description('Open an issue or MR in the browser')
+    .action(async (type: string, iid: string) => {
+      if (type !== 'issue' && type !== 'mr') {
+        console.error('Usage: afk gitlab open <issue|mr> <iid>');
+        process.exit(1);
+      }
+
+      // Resolve base URL and project path from env, glab config, or git remote
+      const envUrl = process.env.GITLAB_URL;
+      let baseUrl = envUrl || 'https://gitlab.com';
+      let projectPath = process.env.GITLAB_PROJECT_ID || '';
+
+      if (!projectPath) {
+        const detected = await detectGitLabProject();
+        if (detected) projectPath = detected;
+      }
+      if (!envUrl) {
+        const glab = getGlabToken();
+        if (glab) {
+          baseUrl = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
+        }
+      }
+
+      const num = parseInt(iid);
+      if (isNaN(num)) { console.error('Invalid IID'); process.exit(1); }
+      if (!projectPath) { console.error('Could not determine project. Set GITLAB_PROJECT_ID or run from git repo.'); process.exit(1); }
+
+      // GitLab web URL format: host/project/-/issues|merge_requests/:iid
+      const suffix = type === 'issue' ? `/-/issues/${num}` : `/-/merge_requests/${num}`;
+      const openUrl = `${baseUrl.replace(/\/$/, '')}/${projectPath}${suffix}`;
+
+      const { default: open } = await import('open');
+      await open(openUrl);
+      console.log(chalk.green(`Opened ${type} #${iid} → ${openUrl}`));
+    });
+
+  /**
    * upload-artifacts command
    */
   gitlab

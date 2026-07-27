@@ -12,36 +12,48 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
   const [skipped, setSkipped] = useState(false);
 
   // Smoother progress with more frames
-  const totalFrames = 25;
+  const totalFrames = 30;
   const progress = Math.min(100, Math.floor((frame / totalFrames) * 100));
 
-  // Animated spinner
+  // Animated spinner with smooth rotation
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   const spinnerIndex = frame % spinnerFrames.length;
 
-  // Progress bar with smooth filling
-  const barWidth = 30;
+  // Progress bar with smooth filling and wave effect
+  const barWidth = 32;
   const filledWidth = Math.floor((progress / 100) * barWidth);
-  const progressBar = '█'.repeat(filledWidth) + '░'.repeat(barWidth - filledWidth);
 
+  // Create wave effect on progress bar edge
+  const waveChars = ['░', '▒', '▓', '█'];
+  const waveIndex = frame % waveChars.length;
+  const edgeChar = filledWidth < barWidth && filledWidth > 0 ? waveChars[waveIndex] : '';
+
+  const progressBar =
+    '█'.repeat(Math.max(0, filledWidth - 1)) +
+    edgeChar +
+    '░'.repeat(Math.max(0, barWidth - filledWidth - (edgeChar ? 1 : 0)));
+
+  // Enhanced messages with more stages
   const messages = [
-    'Initializing workspace...',
-    'Loading configuration...',
-    'Connecting to GitHub...',
-    'Connecting to GitLab...',
-    'Ready to work!',
+    { text: 'Initializing workspace...', icon: '⚙' },
+    { text: 'Loading configuration...', icon: '📝' },
+    { text: 'Connecting to GitHub...', icon: '🔗' },
+    { text: 'Connecting to GitLab...', icon: '🔗' },
+    { text: 'Preparing dashboard...', icon: '📊' },
+    { text: 'Ready to work!', icon: '✨' },
   ];
 
   const messageIndex = Math.min(
     Math.floor((frame / totalFrames) * messages.length),
     messages.length - 1
   );
+  const currentMessage = messages[messageIndex];
 
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === 'c')) {
       setSkipped(true);
       setFadeOut(true);
-      setTimeout(onComplete, 200);
+      setTimeout(onComplete, 300);
     }
   });
 
@@ -54,7 +66,8 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
         if (prev >= totalFrames - 1) {
           clearInterval(timer);
           setFadeOut(true);
-          setTimeout(onComplete, 400);
+          // Longer fade out for smooth transition
+          setTimeout(onComplete, 500);
           return prev;
         }
         return prev + 1;
@@ -64,54 +77,77 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete, duration
     return () => clearInterval(timer);
   }, [duration, onComplete, skipped]);
 
-  // Fade in effect for logo (first 20% of animation)
-  const logoOpacity = Math.min(1, frame / (totalFrames * 0.2));
-  const showLogo = logoOpacity > 0.3;
+  // Smooth fade in effect for logo (first 25% of animation)
+  const logoFadeProgress = Math.min(1, frame / (totalFrames * 0.25));
+  const showLogo = logoFadeProgress > 0.2;
 
-  // Fade out effect
-  const opacity = fadeOut ? 0.3 : 1;
+  // Pulsing effect on logo (subtle)
+  const pulsePhase = Math.sin((frame / totalFrames) * Math.PI * 4) * 0.15 + 0.85;
+
+  // Smooth fade out with easing
+  const fadeOutProgress = fadeOut ? Math.max(0, 1 - (frame / 10)) : 1;
+  const opacity = fadeOutProgress * pulsePhase;
+
+  // Slide up effect for completion
+  const slideOffset = fadeOut ? Math.floor((1 - fadeOutProgress) * 3) : 0;
 
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" height="100%">
-      {/* Logo with fade-in */}
+      {/* Logo with fade-in and subtle pulse */}
       {showLogo && (
-        <Box flexDirection="column" alignItems="center" marginBottom={2}>
-          <Text bold color="cyan" dimColor={opacity < 1}>╔═══════════════════════════════════════╗</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║                                       ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║    <Text color="cyanBright">█████╗ ███████╗██╗  ██╗</Text>     ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║   <Text color="cyanBright">██╔══██╗██╔════╝██║ ██╔╝</Text>     ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║   <Text color="cyanBright">███████║█████╗  █████╔╝</Text>      ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║   <Text color="cyanBright">██╔══██║██╔══╝  ██╔═██╗</Text>      ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║   <Text color="cyanBright">██║  ██║██║     ██║  ██╗</Text>     ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║   <Text color="cyanBright">╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝</Text>     ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║                                       ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║   <Text dimColor color="gray">Away From Keyboard</Text>            ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>║                                       ║</Text>
-          <Text bold color="cyan" dimColor={opacity < 1}>╚═══════════════════════════════════════╝</Text>
+        <Box
+          flexDirection="column"
+          alignItems="center"
+          marginBottom={2}
+          marginTop={slideOffset}
+        >
+          <Text bold color="cyan" dimColor={opacity < 0.7}>╔═══════════════════════════════════════╗</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║                                       ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║    <Text color="cyanBright">█████╗ ███████╗██╗  ██╗</Text>     ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║   <Text color="cyanBright">██╔══██╗██╔════╝██║ ██╔╝</Text>     ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║   <Text color="cyanBright">███████║█████╗  █████╔╝</Text>      ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║   <Text color="cyanBright">██╔══██║██╔══╝  ██╔═██╗</Text>      ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║   <Text color="cyanBright">██║  ██║██║     ██║  ██╗</Text>     ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║   <Text color="cyanBright">╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝</Text>     ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║                                       ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║   <Text dimColor color="gray">Away From Keyboard</Text>            ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>║                                       ║</Text>
+          <Text bold color="cyan" dimColor={opacity < 0.7}>╚═══════════════════════════════════════╝</Text>
         </Box>
       )}
 
-      {/* Loading indicator with spinner */}
-      <Box flexDirection="column" alignItems="center" marginBottom={2}>
+      {/* Loading indicator with animated spinner and icon */}
+      <Box
+        flexDirection="column"
+        alignItems="center"
+        marginBottom={2}
+        marginTop={slideOffset}
+      >
         <Box marginBottom={1}>
-          <Text color="cyan" dimColor={opacity < 1}>
+          <Text color="cyan" dimColor={opacity < 0.7}>
             {spinnerFrames[spinnerIndex]}
           </Text>
           <Text> </Text>
-          <Text dimColor={opacity < 1}>{messages[messageIndex]}</Text>
+          <Text dimColor={opacity < 0.7}>{currentMessage.text}</Text>
+          <Text> </Text>
+          <Text dimColor={opacity < 0.7}>{currentMessage.icon}</Text>
         </Box>
 
-        {/* Smooth progress bar */}
+        {/* Smooth progress bar with wave effect */}
         <Box flexDirection="column" alignItems="center">
-          <Text color="cyan" dimColor={opacity < 1}>{progressBar}</Text>
+          <Box marginBottom={0}>
+            <Text color="cyan" dimColor={opacity < 0.7}>[</Text>
+            <Text color="cyanBright" dimColor={opacity < 0.7}>{progressBar}</Text>
+            <Text color="cyan" dimColor={opacity < 0.7}>]</Text>
+          </Box>
           <Text dimColor color="gray">{progress}%</Text>
         </Box>
       </Box>
 
-      {/* Skip hint */}
-      <Box marginTop={1}>
+      {/* Skip hint with subtle animation */}
+      <Box marginTop={1} marginBottom={slideOffset}>
         <Text dimColor color="gray">
-          Press <Text color="yellow">ESC</Text> to skip
+          Press <Text color="yellow" bold={frame % 20 < 10}>ESC</Text> to skip
         </Text>
       </Box>
     </Box>

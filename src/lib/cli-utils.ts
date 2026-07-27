@@ -79,29 +79,6 @@ export function logAndReturn<T>(error: unknown, context: string, fallback: T): T
 }
 
 /**
- * Log error and rethrow (for operations that must succeed but need logging)
- *
- * @param error - The error to log and rethrow
- * @param context - Context about what failed
- */
-export function logAndRethrow(error: unknown, context: string): never {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(chalk.red('Error:'), `${context}:`, message);
-  throw error;
-}
-
-/**
- * Wrap error with additional context and throw
- *
- * @param error - The original error
- * @param context - Additional context to add
- */
-export function wrapAndThrow(error: unknown, context: string): never {
-  const originalMessage = error instanceof Error ? error.message : String(error);
-  throw new Error(`${context}: ${originalMessage}`);
-}
-
-/**
  * Display success message with checkmark
  */
 export function success(message: string): void {

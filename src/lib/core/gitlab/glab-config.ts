@@ -32,7 +32,7 @@ export function readGlabConfig(): GlabConfig | null {
   const possiblePaths = [
     path.join(os.homedir(), 'Library', 'Application Support', 'glab-cli', 'config.yml'),
     path.join(os.homedir(), '.config', 'glab-cli', 'config.yml'),
-    path.join(os.homedir(), '.var', 'app', 'com.gitlab嗓音', 'config', 'glab-cli', 'config.yml'),
+    path.join(os.homedir(), '.var', 'app', 'com.gitlab.GitLabClient', 'config', 'glab-cli', 'config.yml'),
   ];
 
   for (const configPath of possiblePaths) {

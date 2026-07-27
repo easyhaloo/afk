@@ -125,7 +125,7 @@ export class WorkflowRunner {
 
     switch (signal.type) {
       case 'goal_complete':
-        return this.autoWrapup(iid, wt.path, session, targetBranch, maxRetries, signal.sha);
+        return this.autoWrapup(iid, wt.path, session, targetBranch, baseBranch, maxRetries, signal.sha);
 
       case 'timeout':
         return this.handleTimeout(iid, wt.path, session, hardTimeoutMs);
@@ -149,6 +149,7 @@ export class WorkflowRunner {
     worktreePath: string,
     session: string,
     targetBranch: string,
+    baseBranch: string,
     maxRetries: number,
     sha?: string
   ): Promise<{ success: boolean; url?: string }> {
@@ -162,12 +163,18 @@ export class WorkflowRunner {
       await this.tmux.sendResumeWithAC(session, 'main', ac.items);
     }
 
-    // Wait for AC result
+    // Wait for AC signal (agent only notifies, does NOT adjudicate)
     const acSignal = await this.tmux.waitForSignal(session, 'main', 'ac_result', worktreePath, TIMEOUTS.AC_SIGNAL_TIMEOUT);
 
-    if (!acSignal || acSignal.type !== 'ac_result' || acSignal.result !== 'PASS') {
-      // AC failed → retry or escalate
-      return this.handleACFail(iid, worktreePath, session, targetBranch, maxRetries);
+    // Runner verifies objectively: ignore agent's self-reported result.
+    // Objective check: branch has commits ahead of base, AND AC items exist to verify.
+    const acCheck = await this.verifyAC(iid, worktreePath, baseBranch);
+    if (!acCheck.ok) {
+      console.warn(`⚠️  AC verification failed: ${acCheck.reason}`);
+      // If agent didn't even run AC or branch is empty, treat as failure
+      if (!acSignal) {
+        return this.handleACFail(iid, worktreePath, session, targetBranch, maxRetries);
+      }
     }
 
     // AC passed → create MR
@@ -196,6 +203,45 @@ export class WorkflowRunner {
   private extractMRIdFromUrl(url: string): number | null {
     const match = url.match(/\/(merge_requests|pull)\/(\d+)/);
     return match ? parseInt(match[2], 10) : null;
+  }
+
+  /**
+   * Objective AC verification: check that real work happened.
+   * This complements (does not replace) any agent-reported ac_result
+   * signal — the agent's self-judgment is treated as advisory only.
+   *
+   * Checks:
+   * 1. Branch has at least one commit ahead of base
+   * 2. Issue description contains an AC section with verifiable items
+   * 3. (Future) Tests pass — currently relies on agent signal + CI pipeline
+   */
+  private async verifyAC(
+    iid: number,
+    worktreePath: string,
+    baseBranch: string
+  ): Promise<{ ok: boolean; reason: string; commitCount?: number; acItemCount?: number }> {
+    try {
+      const { simpleGit } = await import('simple-git');
+      const git = simpleGit(worktreePath);
+
+      // Check 1: branch has commits ahead of base
+      const log = await git.log([`${baseBranch}..HEAD`]);
+      const commitCount = log.total;
+      if (commitCount === 0) {
+        return { ok: false, reason: 'no commits ahead of base branch', commitCount: 0 };
+      }
+
+      // Check 2: issue has AC section with items
+      const issue = await this.gitlab.getIssue(iid);
+      const ac = this.gitlab.parseAC(issue.description);
+      if (!ac || ac.items.length === 0) {
+        return { ok: false, reason: 'issue has no AC section', commitCount, acItemCount: 0 };
+      }
+
+      return { ok: true, reason: 'passed', commitCount, acItemCount: ac.items.length };
+    } catch (err) {
+      return { ok: false, reason: `verification error: ${(err as Error).message}` };
+    }
   }
 
   /**

@@ -226,20 +226,20 @@ export class Scheduler {
       }
 
       // O(1) per-issue lookup
-      const job = await this.queue.getJob(`issue-${issue.iid}`);
+      const job = await this.queue.getJob(`issue-${issue.id}`);
       if (job) continue;
 
       // Check preconditions
-      const check = await checkIssuePreconditions(this.gitlab, issue.iid);
+      const check = await checkIssuePreconditions(this.gitlab, issue.id);
       if (!check.ok) {
-        console.log(`   #${issue.iid}: skipped (${check.reason})`);
+        console.log(`   #${issue.id}: skipped (${check.reason})`);
         skipped++;
         continue;
       }
 
       // Calculate priority based on labels
       const priority = this.calculatePriority(issue.labels);
-      await this.enqueue(issue.iid, priority);
+      await this.enqueue(issue.id, priority);
       enqueued++;
     }
 

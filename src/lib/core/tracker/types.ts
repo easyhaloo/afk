@@ -93,6 +93,7 @@ export interface TrackedMR {
   targetBranch: string;
   url: string;
   projectId: string;
+  pipeline?: { status: string };  // GitLab only
 }
 
 /**

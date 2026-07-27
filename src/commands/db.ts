@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { promises as fs, existsSync } from 'fs';
 import { join, basename } from 'path';
-import { ForkManager, detectServices, loadServiceRegistry } from '../lib/fork-manager.js';
+import { ForkManager, detectServices, loadServiceRegistry } from '../lib/forks.js';
 
 const fork = new ForkManager();
 

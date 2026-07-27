@@ -1,7 +1,7 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { GitLabClient } from './gitlab.js';
-import { WorkflowRunner } from './workflow-runner.js';
+import { WorkflowRunner } from './workflows.js';
 import { checkIssuePreconditions } from './preconditions.js';
 
 export interface TaskData {

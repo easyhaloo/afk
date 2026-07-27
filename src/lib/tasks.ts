@@ -1,5 +1,5 @@
 import { Task } from '../types/dashboard';
-import { SessionService } from './session-service';
+import { SessionService } from './sessions';
 
 export class TaskService {
   private sessionService: SessionService;

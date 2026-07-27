@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { GitLabClient } from '../lib/gitlab.js';
-import { WorkflowRunner } from '../lib/workflow-runner.js';
+import { WorkflowRunner } from '../lib/workflows.js';
 import { getWorkflowConfig } from '../lib/config-manager.js';
 
 export function registerWorkflowCommands(program: Command): void {

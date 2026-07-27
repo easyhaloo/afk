@@ -1,8 +1,8 @@
 import { Task, Issue, Project, TmuxSession } from '../../../types/dashboard';
-import { TaskService } from '../../task-service';
-import { SessionService } from '../../session-service';
-import { IssueService } from '../../issue-service';
-import { ProjectService } from '../../project-service';
+import { TaskService } from '../../tasks';
+import { SessionService } from '../../sessions';
+import { IssueService } from '../../issues';
+import { ProjectService } from '../../projects';
 
 const taskService = new TaskService();
 const sessionService = new SessionService();

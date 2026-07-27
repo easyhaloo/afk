@@ -29,7 +29,9 @@ graph TD
     Runner["WorkflowRunner 工作流编排"]
     WT["WorktreeManager (git worktree)"]
     TMUX["TmuxClient 会话管理"]
-    SIG["Signal I/O 信号读写"]
+    SIG["Signal I/O 信号读写 (.afk-signal.json)"]
+    STATUS["Status I/O 状态读取 (.afk/claude-status.json)"]
+    SCONF["Statusline Config 自动注入到 worktree settings"]
     Sched["Scheduler (BullMQ)"]
     Queue[("Redis Queue")]
     Agent["AI Agent (claude)"]
@@ -46,13 +48,17 @@ graph TD
     Runner --> WT
     Runner --> TMUX
     Runner --> SIG
+    Runner --> STATUS
+    Runner --> SCONF
 
     Sched --> Runner
     Sched --> Queue
 
     Agent -. tmux session .-> TMUX
     Agent -. write signal .-> SIG
+    Agent -. stdin JSON per turn .-> STATUS
     SIG -. polling .-> Runner
+    STATUS -. on demand .-> Runner
 
     classDef ext fill:#e1f5ff,stroke:#0066cc
     classDef core fill:#fff4e1,stroke:#cc6600
@@ -60,7 +66,7 @@ graph TD
 
     class CLI,Agent ext
     class Runner,Factory,GL,GH,Sched core
-    class WT,TMUX,SIG,Queue io
+    class WT,TMUX,SIG,STATUS,SCONF,Queue io
 ```
 
 ### 模块职责
@@ -68,10 +74,12 @@ graph TD
 | 模块 | 职责 | 关键设计决策 |
 |------|------|-------------|
 | **TrackerProvider** | 平台无关的 Issue/MR 操作 | 接口契约，多平台实现 |
-| **WorkflowRunner** | 编排完整生命周期 | 信号驱动，非阻塞轮询 |
+| **WorkflowRunner** | 编排完整生命周期 | 信号驱动 + statusline 客观校验 |
 | **WorktreeManager** | 每个 Issue 独立工作区 | 物理隔离，避免分支冲突 |
 | **TmuxClient** | Agent 运行环境 | 独立会话，崩溃不互相影响 |
-| **Signal I/O** | Agent↔Runner 通信 | 文件原子写入，Zod 校验 |
+| **Signal I/O** | Agent↔Runner 控制通信 | 文件原子写入，Zod 校验 |
+| **Status I/O** | 读取 Claude statusline JSON | token 客观数据源 |
+| **Statusline Config** | 自动注入 worktree settings.json | tee stdin JSON 到文件 |
 | **Scheduler** | 多 Issue 并发调度 | BullMQ + 优先级队列 |
 
 ---
@@ -91,6 +99,14 @@ Agent 运行在 tmux session 中，与调度系统是**进程隔离**的。考�
 **关键设计：**
 - 原子写入（tmp + rename），避免读到半截 JSON
 - Zod schema 校验，版本不兼容时快速失败
+
+### 1b. 为什么 context_high 不信任 Agent 自报？
+
+LLM 倾向于"乐观报告"。让 Agent 自己判断"我上下文快满了"会出现：
+- **漏报**：真的快满了但 Agent 觉得"还行" → 截断崩溃
+- **误报**：Agent 谨慎过头 → 不必要的 handoff 浪费 token 和上下文
+
+正确做法：**Agent 仅作触发器，Runner 做客观校验**。Agent 发 `context_high` 信号不带数据，Runner 读取 Claude statusline JSON 中的 token 计数，与 `CONTEXT.HIGH_THRESHOLD`（默认 100K）比较后才决定是否 handoff。
 
 ### 2. 为什么是 Worktree，不是 Docker？
 
@@ -188,14 +204,25 @@ flowchart TD
 
 ## 信号协议
 
-### 信号类型
+### 两种数据通道
+
+系统通过两条通道与 Agent 通信，各有侧重：
+
+| 通道 | 数据 | 写入方 | 读取方 | 用途 |
+|------|------|--------|--------|------|
+| `.afk-signal.json` | 控制事件 | Agent | Runner 轮询 | goal_complete / ac_result / timeout / context_high |
+| `.afk/claude-status.json` | 客观状态 | Claude Code statusline | Runner 按需 | token 计数、模型、上下文窗口 |
+
+**设计原则：控制信号走文件（Agent 主动），状态数据走 statusline（引擎自动推送）**。
+
+### 信号类型（控制通道）
 
 | 信号 | 触发场景 | 系统响应 |
 |------|---------|---------|
 | `goal_complete` | Agent 完成目标 | 进入 AC 验收 |
 | `ac_result` | AC 检查结果 | PASS→创建 MR，FAIL→重试或升级 |
 | `timeout` | 硬超时 | 捕获日志，添加 `mode::timeout` 标签 |
-| `context_high` | 上下文接近上限 | 触发 handoff 流程 |
+| `context_high` | Agent 怀疑上下文过高 | Runner 读取 statusline JSON 校验阈值后决定 |
 | `handoff_ready` | 上下文切换完成 | 关闭旧 session，启动新 session |
 
 ### 信号生命周期
@@ -228,6 +255,49 @@ sequenceDiagram
     end
 ```
 
+### 状态数据流（状态通道）
+
+Claude Code statusline 在每回合自动通过 stdin 推送 JSON payload。AFK 在 worktree 创建时自动配置 statusline 用 tee 命令同时写入文件：
+
+```mermaid
+sequenceDiagram
+    participant CC as Claude Code 引擎
+    participant Tee as tee (statusline 入口)
+    participant SL as ccstatusline 渲染
+    participant JSON as .afk/claude-status.json
+    participant R as WorkflowRunner
+
+    loop 每回合
+        CC->>Tee: stdin JSON (model, tokens, cost...)
+        Tee->>JSON: 写入文件
+        Tee->>SL: 透传给用户渲染
+    end
+
+    Note over R: context_high 信号触发时按需读取
+    R->>JSON: readClaudeStatus(worktreeDir)
+    JSON-->>R: Zod 校验后返回
+    R->>R: extractTokenUsage → 阈值校验
+```
+
+**Status JSON schema (Zod):**
+
+```typescript
+{
+  model: { display_name: string },
+  context_window: {
+    context_window_size: number,           // e.g., 200000
+    current_usage: {
+      input_tokens: number,
+      output_tokens: number,
+      cache_creation_input_tokens: number,
+      cache_read_input_tokens: number,
+    }
+  },
+  session_id: string,
+  // ... 其他字段忽略
+}
+```
+
 ### 为什么 Zod 校验？
 
 信号文件跨进程边界，**格式错误是常态而非异常**：
@@ -236,6 +306,15 @@ sequenceDiagram
 - 网络问题导致写入中断
 
 Zod 在边界处快速失败，比让 `undefined.sha` 这种错误传播到深处再崩溃要好。
+
+### 为什么从 pane 正则改为 statusline JSON？
+
+旧实现用 `tmux capture-pane` + 正则匹配 "Xk tokens" 文本，存在三个问题：
+1. **脆弱**：Claude Code UI 文案变化即失效
+2. **性能差**：每次轮询都 capture pane 大输出
+3. **信息不完整**：拿不到 cache_read/cache_creation
+
+新实现通过 statusline stdin JSON 读取，**数据源是官方 API**，UI 变化不影响，且一次拿到全部细分字段。
 
 ---
 
@@ -507,6 +586,19 @@ graph LR
 3. 添加对应的 handler 方法
 4. 更新 Agent skill 指令
 
+### 利用 statusline 数据做更智能决策
+
+statusline JSON 提供丰富会话元数据（token 用量、缓存命中率、成本、模型等）。除 context_high 外，未来可在这些场景用上：
+
+| 决策 | 所需字段 | 阈值常量 |
+|------|---------|---------|
+| 触发提前 handoff | `cache_read_input_tokens` 占比 | 待定 |
+| 成本告警 | `cost.total_cost_usd` | 待定 |
+| 模型切换判断 | `model.display_name` | 配置驱动 |
+| 缓存策略评估 | `cache_creation_input_tokens` 增长率 | 待定 |
+
+扩展方法：在 `src/lib/core/io/status.ts` 的 `extractTokenUsage()` 添加聚合字段；在 `constants.ts` 添加阈值；WorkflowRunner 中按需读取。
+
 ### 自定义 Workflow 钩子
 
 RunnerOptions 支持 `customValidation` 等钩子，在 AC 检查前后插入自定义逻辑（lint、性能测试、截图验证等）。
@@ -515,13 +607,15 @@ RunnerOptions 支持 `customValidation` 等钩子，在 AC 检查前后插入自
 
 ## 状态文件
 
-| 文件 | 内容 | 生命周期 |
-|------|------|---------|
-| `.afk/worktrees.json` | Worktree 元数据 | 持续更新，清理时归档 |
-| `<worktree>/.afk-signal.json` | 当前信号 | Agent 写入，Runner 消费 |
-| `<worktree>/.afk/CRASHED` | 异常退出标记 | watchdog 写入 |
-| `<worktree>/.afk/SUCCESS` | 成功完成标记 | workflow 结束时写入 |
-| `~/.claude/logs/afk/` | 超时日志、watchdog 记录 | 追加 |
+| 文件 | 内容 | 写入方 | 读取方 |
+|------|------|--------|--------|
+| `.afk/worktrees.json` | Worktree 元数据 | WorktreeManager | WorktreeManager / CLI |
+| `<worktree>/.afk-signal.json` | 控制信号 | Agent | WorkflowRunner 轮询 |
+| `<worktree>/.afk/claude-status.json` | Claude statusline payload | statusline tee | Runner 按需（context_high 校验） |
+| `<worktree>/.afk/CRASHED` | 异常退出标记 | watchdog | WorktreeManager |
+| `<worktree>/.afk/SUCCESS` | 成功完成标记 | workflow 结束 | WorktreeManager |
+| `<worktree>/.claude/settings.json` | 自动注入的 statusline 配置 | configureStatusline | Claude Code |
+| `~/.claude/logs/afk/` | 超时日志、watchdog 记录 | handleTimeout / watchdog | 运维 |
 
 ---
 

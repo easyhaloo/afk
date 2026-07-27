@@ -63,6 +63,20 @@ export interface MergeMROptions {
 }
 
 /**
+ * Approve MR/PR options
+ */
+export interface ApproveMROptions {
+  sha?: string;  // GitLab: approve specific commit SHA
+}
+
+/**
+ * Close MR/PR options
+ */
+export interface CloseMROptions {
+  comment?: string;  // Optional comment when closing
+}
+
+/**
  * Link type for issue relationships
  */
 export type LinkType = 'blocks' | 'is_blocked_by' | 'blocked_by' | 'related_to';
@@ -126,6 +140,9 @@ export interface TrackerProvider {
   listMRs(options?: ListMROptions): Promise<TrackedMR[]>;
   createMR(options: CreateMROptions): Promise<number>;
   mergeMR(id: number, options?: MergeMROptions): Promise<void>;
+  approveMR(id: number, options?: ApproveMROptions): Promise<void>;
+  closeMR(id: number, options?: CloseMROptions): Promise<void>;
+  reopenMR(id: number): Promise<void>;
 
   // Utility
   parseAC(description: string): AcceptanceCriteria | null;

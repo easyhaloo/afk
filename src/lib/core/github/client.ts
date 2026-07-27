@@ -9,6 +9,8 @@ import type {
   ListMROptions,
   CreateMROptions,
   MergeMROptions,
+  ApproveMROptions,
+  CloseMROptions,
   AcceptanceCriteria,
   LinkType,
 } from '../tracker/types';
@@ -288,6 +290,52 @@ export class GitHubClient implements TrackerProvider {
         console.warn(`Failed to delete source branch: ${error}`);
       }
     }
+  }
+
+  async approveMR(id: number, options: ApproveMROptions = {}): Promise<void> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+
+    await oct.pulls.createReview({
+      owner,
+      repo,
+      pull_number: id,
+      event: 'APPROVE',
+      commit_id: options.sha,
+    });
+  }
+
+  async closeMR(id: number, options: CloseMROptions = {}): Promise<void> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+
+    await oct.pulls.update({
+      owner,
+      repo,
+      pull_number: id,
+      state: 'closed',
+    });
+
+    if (options.comment) {
+      await oct.issues.createComment({
+        owner,
+        repo,
+        issue_number: id,
+        body: options.comment,
+      });
+    }
+  }
+
+  async reopenMR(id: number): Promise<void> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+
+    await oct.pulls.update({
+      owner,
+      repo,
+      pull_number: id,
+      state: 'open',
+    });
   }
 
   // ============ Utility ============

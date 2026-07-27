@@ -42,6 +42,27 @@ export interface ListMROptions {
 }
 
 /**
+ * Create MR/PR options
+ */
+export interface CreateMROptions {
+  title: string;
+  description?: string;
+  sourceBranch: string;
+  targetBranch: string;
+  draft?: boolean;
+  labels?: string[];
+}
+
+/**
+ * Merge MR/PR options
+ */
+export interface MergeMROptions {
+  deleteSourceBranch?: boolean;
+  squash?: boolean;
+  mergeCommitMessage?: string;
+}
+
+/**
  * Link type for issue relationships
  */
 export type LinkType = 'blocks' | 'is_blocked_by' | 'blocked_by' | 'related_to';
@@ -102,6 +123,8 @@ export interface TrackerProvider {
   // MR/PR
   getMR(id: number): Promise<TrackedMR>;
   listMRs(options?: ListMROptions): Promise<TrackedMR[]>;
+  createMR(options: CreateMROptions): Promise<number>;
+  mergeMR(id: number, options?: MergeMROptions): Promise<void>;
 
   // Utility
   parseAC(description: string): AcceptanceCriteria | null;

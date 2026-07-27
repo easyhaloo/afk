@@ -7,6 +7,8 @@ import type {
   CreateIssueOptions,
   UpdateIssueOptions,
   ListMROptions,
+  CreateMROptions,
+  MergeMROptions,
   AcceptanceCriteria,
   LinkType,
 } from '../tracker/types';
@@ -232,6 +234,60 @@ export class GitHubClient implements TrackerProvider {
         projectId: this.projectId,
       };
     });
+  }
+
+  async createMR(options: CreateMROptions): Promise<number> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await oct.pulls.create({
+      owner,
+      repo,
+      title: options.title,
+      body: options.description || '',
+      head: options.sourceBranch,
+      base: options.targetBranch,
+      draft: options.draft ?? false,
+    });
+
+    // Add labels if specified
+    if (options.labels && options.labels.length > 0) {
+      await oct.issues.addLabels({
+        owner,
+        repo,
+        issue_number: data.number,
+        labels: options.labels,
+      });
+    }
+
+    return data.number;
+  }
+
+  async mergeMR(id: number, options: MergeMROptions = {}): Promise<void> {
+    const oct = await this.ensureClient();
+    const { owner, repo } = this.getOwnerRepo();
+
+    await oct.pulls.merge({
+      owner,
+      repo,
+      pull_number: id,
+      commit_message: options.mergeCommitMessage,
+      merge_method: options.squash ? 'squash' : 'merge',
+    });
+
+    // Delete source branch if requested
+    if (options.deleteSourceBranch) {
+      try {
+        const pr = await this.getMR(id);
+        await oct.git.deleteRef({
+          owner,
+          repo,
+          ref: `heads/${pr.sourceBranch}`,
+        });
+      } catch (error) {
+        // Branch deletion is best-effort, don't fail the merge
+        console.warn(`Failed to delete source branch: ${error}`);
+      }
+    }
   }
 
   // ============ Utility ============

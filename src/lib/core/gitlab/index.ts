@@ -8,6 +8,8 @@ import type {
   CreateIssueOptions,
   UpdateIssueOptions,
   ListMROptions,
+  CreateMROptions,
+  MergeMROptions,
   AcceptanceCriteria,
   LinkType,
 } from '../tracker/types';
@@ -165,6 +167,29 @@ export class GitLabClient implements TrackerProvider {
       url: mr.web_url as string,
       projectId: String(this.projectId),
     }));
+  }
+
+  async createMR(options: CreateMROptions): Promise<number> {
+    const mr = await this.client.MergeRequests.create(
+      this.projectId,
+      options.sourceBranch,
+      options.targetBranch,
+      options.title,
+      {
+        description: options.description || '',
+        labels: options.labels?.join(','),
+        removeSourceBranch: true,
+      }
+    ) as any;
+    return mr.iid;
+  }
+
+  async mergeMR(id: number, options: MergeMROptions = {}): Promise<void> {
+    await this.client.MergeRequests.accept(this.projectId, id, {
+      shouldRemoveSourceBranch: options.deleteSourceBranch ?? true,
+      squash: options.squash ?? false,
+      mergeCommitMessage: options.mergeCommitMessage,
+    });
   }
 
   parseAC(description: string): AcceptanceCriteria | null {

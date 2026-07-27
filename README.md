@@ -1,6 +1,6 @@
 # AFK
 
-**AFK (Automated Feature Kitchen) — Claude Code skill suite + CLI automation**
+**AFK = Away From Keyboard** — Claude Code skill suite + CLI automation
 
 Unified workflow automation for GitLab issues → merge requests, powered by Claude AI agents and TypeScript.
 

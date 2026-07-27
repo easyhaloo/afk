@@ -11,11 +11,16 @@ const SETTINGS_FILE = 'settings.json';
  * rendering a statusline. This is what lets AFK Runner read authoritative
  * token counts via getTokenUsage().
  *
+ * Also writes an empty placeholder status file up front so the Runner can
+ * detect "session is up" via file presence immediately. The real statusline
+ * tee overwrites this on the first turn.
+ *
  * Idempotent: re-running won't overwrite user customizations that aren't ours.
  */
 export async function configureStatusline(worktreeDir: string): Promise<void> {
   const claudeDir = join(worktreeDir, SETTINGS_DIR);
   const settingsPath = join(claudeDir, SETTINGS_FILE);
+  const statusJsonPath = join(worktreeDir, '.afk', STATUS_FILENAME);
 
   await fs.mkdir(join(worktreeDir, '.afk'), { recursive: true });
   await fs.mkdir(claudeDir, { recursive: true });
@@ -28,7 +33,6 @@ export async function configureStatusline(worktreeDir: string): Promise<void> {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
 
-  const statusJsonPath = join(worktreeDir, '.afk', STATUS_FILENAME);
   // Wrap any user-provided statusline command; if none, just tee JSON to file.
   const existingCommand =
     (existing.statusLine as { command?: string } | undefined)?.command ?? '';
@@ -47,4 +51,17 @@ export async function configureStatusline(worktreeDir: string): Promise<void> {
   };
 
   await fs.writeFile(settingsPath, JSON.stringify(next, null, 2) + '\n', 'utf-8');
+
+  // Write placeholder status so waitForPrompt can detect "ready" before the
+  // first statusline invocation (which happens on the first turn, not at startup).
+  // Real statusline tee will overwrite this with full payload.
+  try {
+    await fs.access(statusJsonPath);
+  } catch {
+    await fs.writeFile(
+      statusJsonPath,
+      JSON.stringify({ placeholder: true, note: 'AFK pre-launch; statusline will overwrite' }, null, 2),
+      'utf-8',
+    );
+  }
 }

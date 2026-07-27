@@ -114,21 +114,28 @@ export class TmuxClient {
   }
 
   /**
-   * Wait for Claude prompt to appear in pane.
+   * Wait for Claude session to be ready for input.
    *
-   * NOTE: Detection uses multiple known prompt glyphs to tolerate Claude
-   * Code UI variations across themes/locales. The previous single-character
-   * `❯` check broke when themes rendered alternate glyphs (›, ➜, etc).
-   * For more robust detection, observe the worktree's `.afk/claude-status.json`
-   * mtime (refreshed each turn via the statusline tee).
+   * Detection is observation-based, NOT regex-on-pane: we wait for the
+   * worktree's `.afk/claude-status.json` to be written by the statusline
+   * tee (configured via `configureStatusline()`). Claude Code's statusline
+   * is invoked on every turn — its first invocation means the TUI is up
+   * and processing input.
+   *
+   * Avoids: pane capture + glyph matching (breaks on theme/font changes).
    */
-  async waitForPrompt(session: string, window: string, timeout: number = 30000): Promise<boolean> {
-    const PROMPT_GLYPHS = ['❯', '›', '➜', '▶'];
+  async waitForPrompt(worktreeDir: string, timeout: number = 30000): Promise<boolean> {
+    const { promises: fs } = await import('fs');
+    const { join } = await import('path');
+    const statusPath = join(worktreeDir, '.afk', 'claude-status.json');
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      const content = await this.capturePane(session, window, { lines: 5, history: 5 });
-      if (PROMPT_GLYPHS.some(g => content.includes(g))) return true;
-      await this.sleep(1000);
+      try {
+        await fs.access(statusPath);
+        return true;
+      } catch {
+        await this.sleep(500);
+      }
     }
     return false;
   }
@@ -136,8 +143,8 @@ export class TmuxClient {
   /**
    * Send /goal command with text
    */
-  async sendGoal(session: string, window: string, goalText: string): Promise<void> {
-    const hasPrompt = await this.waitForPrompt(session, window);
+  async sendGoal(worktreeDir: string, session: string, window: string, goalText: string): Promise<void> {
+    const hasPrompt = await this.waitForPrompt(worktreeDir);
     if (!hasPrompt) throw new Error('Timeout waiting for claude prompt');
     await this.exec(['send-keys', '-t', `${session}:${window}`, '--', '/goal']);
     await this.exec(['send-keys', '-t', `${session}:${window}`, 'Space']);

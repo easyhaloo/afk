@@ -24,7 +24,12 @@ export interface GitHubAuthOptions {
 }
 
 /**
- * GitHub client implementing TrackerProvider
+ * GitHub client implementing TrackerProvider.
+ *
+ * Authentication is the caller's responsibility — pass a token via the
+ * `auth` option (or constructor of createGitHubClient). Octokit is the
+ * SDK; AFK does NOT shell out to `gh auth token` to avoid parsing
+ * CLI stdout across gh versions.
  */
 export class GitHubClient implements TrackerProvider {
   readonly platform: 'github' = 'github';
@@ -32,46 +37,11 @@ export class GitHubClient implements TrackerProvider {
   private client: Octokit;
 
   constructor(options: GitHubAuthOptions) {
+    if (!options.auth) {
+      throw new Error('GitHubClient requires auth token. Set GITHUB_TOKEN env, or pass { auth } to constructor.');
+    }
     this.projectId = options.repo;
-    this.client = new Octokit({
-      auth: options.auth,
-    });
-  }
-
-  /**
-   * Get authentication token
-   * Priority: constructor auth > GITHUB_TOKEN env > GH_TOKEN env > gh CLI
-   */
-  private async getAuth(): Promise<string | undefined> {
-    const envToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-    if (envToken) return envToken;
-
-    // Fall back to gh CLI. Use timeout to avoid hanging on TTY prompts
-    // (gh auth status can prompt for login in interactive mode).
-    try {
-      const { execSync } = await import('child_process');
-      const token = execSync('gh auth token', {
-        encoding: 'utf-8',
-        timeout: 5_000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }).trim();
-      // gh v2.40+ may prefix with "github.com token:" — keep only the token line.
-      const match = token.match(/(?:token:\s*)?(\S+)/);
-      return match ? match[1] : token;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * Ensure authenticated client
-   */
-  private async ensureClient(): Promise<Octokit> {
-    const auth = await this.getAuth();
-    if (auth) {
-      this.client = new Octokit({ auth });
-    }
-    return this.client;
+    this.client = new Octokit({ auth: options.auth });
   }
 
   private getOwnerRepo(): { owner: string; repo: string } {
@@ -83,7 +53,7 @@ export class GitHubClient implements TrackerProvider {
   // ============ Issues ============
 
   async getIssue(id: number): Promise<TrackedIssue> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const { data } = await oct.issues.get({ owner, repo, issue_number: id });
     return {
@@ -99,7 +69,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async listIssues(options: ListOptions = {}): Promise<TrackedIssue[]> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const state = options.state === 'opened' ? 'open' : options.state || 'open';
     const { data } = await oct.issues.list({
@@ -124,7 +94,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async createIssue(options: CreateIssueOptions): Promise<number> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const { data } = await oct.issues.create({
       owner,
@@ -137,7 +107,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async updateIssue(id: number, updates: UpdateIssueOptions): Promise<void> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     await oct.issues.update({
       owner,
@@ -163,7 +133,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   private async updateIssueLabels(id: number, labels: string[]): Promise<void> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     await oct.issues.update({
       owner,
@@ -174,7 +144,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async addComment(id: number, body: string): Promise<void> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     await oct.issues.createComment({
       owner,
@@ -198,7 +168,7 @@ export class GitHubClient implements TrackerProvider {
   // ============ Pull Requests ============
 
   async getMR(id: number): Promise<TrackedMR> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const { data } = await oct.pulls.get({
       owner,
@@ -219,7 +189,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async listMRs(options: ListMROptions = {}): Promise<TrackedMR[]> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const state = options.state === 'opened' ? 'open' : options.state || 'open';
     const { data } = await oct.pulls.list({
@@ -246,7 +216,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async createMR(options: CreateMROptions): Promise<number> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const { data } = await oct.pulls.create({
       owner,
@@ -272,7 +242,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async mergeMR(id: number, options: MergeMROptions = {}): Promise<void> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
 
     await oct.pulls.merge({
@@ -300,7 +270,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async approveMR(id: number, options: ApproveMROptions = {}): Promise<void> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
 
     await oct.pulls.createReview({
@@ -313,7 +283,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async closeMR(id: number, options: CloseMROptions = {}): Promise<void> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
 
     await oct.pulls.update({
@@ -334,7 +304,7 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async reopenMR(id: number): Promise<void> {
-    const oct = await this.ensureClient();
+    const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
 
     await oct.pulls.update({

@@ -22,6 +22,18 @@ AFK CLI skill suite for Claude Code — requirements interview, implementation, 
 
 ## Installation
 
+### Via npx (recommended)
+
 ```bash
+# Install all afk skills globally
+npx skills add easyhaloo/afk --agent claude-code -g -y
+
+# Install a specific skill
+npx skills add easyhaloo/afk --skill afk-grill-me --agent claude-code -g -y
+```
+
+### Via Claude Code marketplace
+
+```
 /marketplace add afk https://github.com/easyhaloo/afk
 ```

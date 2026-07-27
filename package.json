@@ -1,0 +1,13 @@
+{
+  "name": "@afk/skills",
+  "version": "1.0.0",
+  "description": "AFK Claude Code skill suite — requirements interview, implementation, research, pipeline, and hand-off workflows",
+  "keywords": ["claude-code", "claude-code-skill", "afk", "workflow"],
+  "author": "easyhaloo",
+  "license": "MIT",
+  "homepage": "https://github.com/easyhaloo/afk",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/easyhaloo/afk"
+  }
+}

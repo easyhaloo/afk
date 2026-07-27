@@ -10,6 +10,7 @@ import { handleCommandError, parseCommaSeparated } from '../lib/cli-utils';
  * and delegate to appropriate client implementation.
  */
 export function registerTrackerCommands(program: Command): void {
+  // ============ Issue Commands ============
   const issue = program
     .command('issue')
     .description('Issue operations (auto-detects platform)');
@@ -180,6 +181,146 @@ export function registerTrackerCommands(program: Command): void {
 
         await client.linkIssues(sourceId, targetId, linkType);
         console.log(chalk.green(`✓ Linked issue #${source} to #${target} (${linkType})`));
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  // ============ MR/PR Commands ============
+  const mr = program
+    .command('mr')
+    .description('MR/PR operations (auto-detects platform)');
+
+  /**
+   * get command
+   */
+  mr
+    .command('get')
+    .description('Get MR/PR by ID')
+    .argument('<id>', 'MR/PR ID')
+    .option('--json', 'Output as JSON')
+    .action(async (id: string, options) => {
+      try {
+        const client = await createTrackerClient();
+        const mr = await client.getMR(parseInt(id));
+
+        if (options.json) {
+          console.log(JSON.stringify(mr, null, 2));
+        } else {
+          console.log(chalk.bold(`#${mr.id}: ${mr.title}`));
+          console.log(chalk.gray(`Platform: ${mr.platform}`));
+          console.log(chalk.gray(`State: ${mr.state}`));
+          console.log(chalk.gray(`Source: ${mr.sourceBranch} → Target: ${mr.targetBranch}`));
+          console.log(chalk.gray(`URL: ${mr.url}`));
+        }
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * list command
+   */
+  mr
+    .command('list')
+    .description('List MRs/PRs with filters')
+    .option('-s, --state <state>', 'Filter by state (opened, closed, all)', 'opened')
+    .option('--json', 'Output as JSON')
+    .action(async (options) => {
+      try {
+        const client = await createTrackerClient();
+        const mrs = await client.listMRs({
+          state: options.state,
+        });
+
+        if (options.json) {
+          console.log(JSON.stringify(mrs, null, 2));
+        } else {
+          console.log(chalk.bold(`Found ${mrs.length} MRs/PRs:`));
+          console.log();
+          mrs.forEach(mr => {
+            const stateColor = mr.state === 'merged' ? chalk.green :
+                              mr.state === 'opened' ? chalk.yellow :
+                              chalk.gray;
+            console.log(`  ${chalk.cyan(`#${mr.id}`)} ${mr.title} ${stateColor(`[${mr.state}]`)}`);
+            console.log(chalk.dim(`    ${mr.sourceBranch} → ${mr.targetBranch}`));
+          });
+        }
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * create command
+   */
+  mr
+    .command('create')
+    .description('Create a new MR/PR')
+    .argument('<title>', 'MR/PR title')
+    .option('--source <branch>', 'Source branch (default: current branch)')
+    .option('--target <branch>', 'Target branch (default: main)')
+    .option('--description <text>', 'MR/PR description')
+    .option('--draft', 'Create as draft')
+    .option('--label <labels>', 'Comma-separated labels')
+    .option('--json', 'Output as JSON')
+    .action(async (title: string, options) => {
+      try {
+        const client = await createTrackerClient();
+
+        // Get current branch if source not specified
+        let sourceBranch = options.source;
+        if (!sourceBranch) {
+          const { execSync } = await import('child_process');
+          sourceBranch = execSync('git branch --show-current', { encoding: 'utf-8' }).trim();
+        }
+
+        const mrId = await client.createMR({
+          title,
+          sourceBranch,
+          targetBranch: options.target || 'main',
+          description: options.description,
+          draft: options.draft || false,
+          labels: options.label ? parseCommaSeparated(options.label) : [],
+        });
+
+        if (options.json) {
+          console.log(JSON.stringify({ id: mrId, platform: client.platform }, null, 2));
+        } else {
+          const draftLabel = options.draft ? chalk.yellow(' [DRAFT]') : '';
+          console.log(chalk.green(`✓ Created MR/PR #${mrId}${draftLabel}: ${title}`));
+          console.log(chalk.gray(`  ${sourceBranch} → ${options.target || 'main'}`));
+        }
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * merge command
+   */
+  mr
+    .command('merge')
+    .description('Merge an MR/PR')
+    .argument('<id>', 'MR/PR ID')
+    .option('--no-delete-branch', 'Do not delete source branch after merge')
+    .option('--squash', 'Squash commits before merging')
+    .option('--message <text>', 'Custom merge commit message')
+    .action(async (id: string, options) => {
+      try {
+        const client = await createTrackerClient();
+        const mrId = parseInt(id);
+
+        await client.mergeMR(mrId, {
+          deleteSourceBranch: options.deleteBranch !== false,
+          squash: options.squash || false,
+          mergeCommitMessage: options.message,
+        });
+
+        console.log(chalk.green(`✓ Merged MR/PR #${id}`));
+        if (options.deleteBranch !== false) {
+          console.log(chalk.gray('  Source branch deleted'));
+        }
       } catch (error) {
         handleCommandError(error);
       }

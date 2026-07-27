@@ -157,14 +157,6 @@ export class TmuxClient {
     while (Date.now() - start < timeout) {
       const signal = await readSignal(worktreeDir);
       if (signal && signal.type === signalType) return signal;
-      const content = await this.capturePane(session, window, { lines: 50, history: 100 });
-      if (signalType === 'goal_complete' && content.includes('GOAL_COMPLETE')) {
-        return { type: 'goal_complete', timestamp: new Date().toISOString(), summary: '(legacy marker)' };
-      }
-      if (signalType === 'ac_result') {
-        if (content.includes('AC_RESULT: PASS')) return { type: 'ac_result', timestamp: new Date().toISOString(), result: 'PASS', summary: '(legacy marker)' };
-        if (content.includes('AC_RESULT: FAIL')) return { type: 'ac_result', timestamp: new Date().toISOString(), result: 'FAIL', summary: '(legacy marker)' };
-      }
       await this.sleep(2000);
     }
     return null;
@@ -227,7 +219,6 @@ export class TmuxClient {
     await this.sendKeys(session, window, 'cat > .afk-signal.json <<EOF');
     await this.sendKeys(session, window, `{"type":"ac_result","result":"PASS或FAIL","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","summary":"<检查总结>"}`);
     await this.sendKeys(session, window, 'EOF');
-    await this.sendKeys(session, window, '（或直接回复：AC_RESULT: PASS 或 AC_RESULT: FAIL）');
     for (const item of acItems) {
       await this.sendKeys(session, window, item);
       await this.sleep(100);

@@ -91,7 +91,6 @@ Agent 运行在 tmux session 中，与调度系统是**进程隔离**的。考�
 **关键设计：**
 - 原子写入（tmp + rename），避免读到半截 JSON
 - Zod schema 校验，版本不兼容时快速失败
-- 兼容旧版文本标记（`GOAL_COMPLETE`），平滑升级
 
 ### 2. 为什么是 Worktree，不是 Docker？
 

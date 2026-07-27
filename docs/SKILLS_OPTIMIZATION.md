@@ -5,9 +5,10 @@
 ## 优化原则
 
 1. **保留使用场景** — description 中保留 "Use when" 说明何时使用该 skill
-2. **精简描述** — 移除冗余说明，保留核心信息
-3. **结构化** — 统一格式：Goal → Process → Rules
-4. **聚焦本质** — 只保留必要步骤和关键规则
+2. **保留 References** — 保留对 references/ 目录文档的引用，说明何时阅读
+3. **精简描述** — 移除冗余说明，保留核心信息
+4. **结构化** — 统一格式：Goal → Process → References (可选) → Rules
+5. **聚焦本质** — 只保留必要步骤和关键规则
 
 ## 已优化 Skills
 
@@ -22,12 +23,13 @@
 
 ### 2. afk-do
 **优化前：** 95 行，详细的工作空间选择、方法论加载说明  
-**优化后：** 36 行，精简为 Goal + Process(6步) + Commit Prefixes + Rules(4条)
+**优化后：** 48 行，精简为 Goal + Process(7步) + References + Commit Prefixes + Rules(4条)
 
 **改进：**
 - 移除详细的 Task type detection 表格
 - 合并 Steps 为简洁流程
 - 提取 Commit Prefixes 为独立部分
+- 添加 References 部分，说明需要读取的文档
 
 ### 3. afk-grill-me
 **优化前：** 116 行，详细的 Interview closure、Core topics、Extended topics  
@@ -58,13 +60,14 @@
 
 ### 6. afk-implement
 **优化前：** 149 行，详细的 Routing 表、Progress checkpoints、Common failure modes  
-**优化后：** 43 行，精简为 Goal + Preconditions(4条) + Process(5步) + Progress Commits + Rules(5条)
+**优化后：** 58 行，精简为 Goal + Preconditions(4条) + Process(5步) + References + Progress Commits + Rules(5条)
 
 **改进：**
-- 移除 Routing 表（保留在参考文档中）
+- 移除详细的 Routing 表，改为 References 部分
 - 移除 Development methodology 判断树
 - 移除 Common failure modes 详细说明
 - 精简 Progress checkpoints 为概要描述
+- 添加条件性 references（ddd.md, architecture.md, adr.md）
 
 ### 7. afk-research
 **优化前：** 97 行，详细的 Research modes 表、Progress checkpoints 模板  
@@ -90,14 +93,14 @@
 | Skill | 优化前 | 优化后 | 减少 |
 |-------|--------|--------|------|
 | afk-debug | 122 行 | 30 行 | 75% |
-| afk-do | 95 行 | 36 行 | 62% |
+| afk-do | 95 行 | 48 行 | 49% |
 | afk-grill-me | 116 行 | 41 行 | 65% |
 | afk-grill-me-context | 94 行 | 36 行 | 62% |
 | afk-hand-off | 96 行 | 30 行 | 69% |
-| afk-implement | 149 行 | 43 行 | 71% |
+| afk-implement | 149 行 | 58 行 | 61% |
 | afk-research | 97 行 | 38 行 | 61% |
 | afk-scheduler | 136 行 | 43 行 | 68% |
-| **总计** | **905 行** | **297 行** | **67%** |
+| **总计** | **905 行** | **324 行** | **64%** |
 
 ## 未优化 Skills
 

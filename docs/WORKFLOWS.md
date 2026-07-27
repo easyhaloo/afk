@@ -124,52 +124,52 @@ afk scheduler start --max-concurrent 3 --poll-interval 60
 └─────────────────────────────────────────────────────┘
 ```
 
-## Scheduler Workflow
+## 调度器工作流
 
-Dependency-aware background execution system.
+依赖感知的后台执行系统。
 
-### Architecture
+### 架构
 
 ```
 ┌────────────────────────────────────────┐
-│         Scheduler Service              │
-│  • Poll interval: 60s (configurable)   │
-│  • Max concurrent: 3 (configurable)    │
-│  • State: Redis or in-memory           │
+│         调度器服务                      │
+│  • 轮询间隔: 60s (可配置)              │
+│  • 最大并发: 3 (可配置)                │
+│  • 状态: Redis 或内存                  │
 └────────────────┬───────────────────────┘
                  │
                  ↓
 ┌────────────────────────────────────────┐
-│         Dependency Graph               │
-│  • Parse blocks-<iid> labels           │
-│  • Build directed acyclic graph        │
-│  • Topological sort for execution      │
+│         依赖图                          │
+│  • 解析 blocks-<iid> 标签              │
+│  • 构建有向无环图                      │
+│  • 拓扑排序执行                        │
 └────────────────┬───────────────────────┘
                  │
                  ↓
 ┌────────────────────────────────────────┐
-│            Task Queue                  │
-│  Priority-based scheduling:            │
-│  • High: priority::high label          │
-│  • Medium: priority::medium            │
-│  • Low: priority::low or no label      │
+│            任务队列                     │
+│  基于优先级调度:                       │
+│  • 高: priority::high 标签             │
+│  • 中: priority::medium                │
+│  • 低: priority::low 或无标签          │
 └────────────────┬───────────────────────┘
                  │
                  ↓
 ┌────────────────────────────────────────┐
-│          Worker Pool                   │
-│  Slots: [Worker-1] [Worker-2] [...]   │
-│  Each worker:                          │
-│  • Picks task from queue               │
-│  • Launches workflow                   │
-│  • Monitors completion                 │
-│  • Updates dependencies                │
+│          工作池                         │
+│  插槽: [Worker-1] [Worker-2] [...]    │
+│  每个 worker:                          │
+│  • 从队列获取任务                      │
+│  • 启动工作流                          │
+│  • 监控完成                            │
+│  • 更新依赖                            │
 └────────────────────────────────────────┘
 ```
 
-### Dependency Resolution
+### 依赖解析
 
-Issues declare dependencies via labels:
+Issues 通过标签声明依赖：
 
 ```
 Issue #10: base::prd-1, stage::ready-for-implement
@@ -177,22 +177,22 @@ Issue #11: base::prd-1, blocks-10, stage::ready-for-implement
 Issue #12: base::prd-1, blocks-10, blocks-11, stage::ready-for-implement
 ```
 
-Scheduler execution order:
-1. **#10** starts first (no dependencies)
-2. **#11** waits for #10 to complete
-3. **#12** waits for both #10 and #11
+调度器执行顺序：
+1. **#10** 首先开始（无依赖）
+2. **#11** 等待 #10 完成
+3. **#12** 等待 #10 和 #11 都完成
 
-### Concurrency Control
+### 并发控制
 
 ```typescript
-// Pseudocode
+// 伪代码
 class Scheduler {
   maxConcurrent: number = 3;
   activeWorkers: Set<Worker> = new Set();
   
   async processQueue() {
     while (activeWorkers.size < maxConcurrent) {
-      const task = queue.dequeue();  // Get highest priority ready task
+      const task = queue.dequeue();  // 获取最高优先级就绪任务
       if (!task) break;
       
       const worker = new Worker(task);
@@ -200,7 +200,7 @@ class Scheduler {
       
       worker.on('complete', () => {
         activeWorkers.delete(worker);
-        this.notifyDependents(task.id);  // Unlock blocked tasks
+        this.notifyDependents(task.id);  // 解锁被阻塞任务
       });
       
       worker.start();
@@ -209,181 +209,182 @@ class Scheduler {
 }
 ```
 
-### State Machine
+### 状态机
 
 ```
 ┌──────────┐
-│ PENDING  │  Initial state, waiting for dependencies
+│ PENDING  │  初始状态，等待依赖
 └────┬─────┘
-     │ (dependencies satisfied)
+     │ (依赖已满足)
      ↓
 ┌──────────┐
-│  QUEUED  │  Ready to run, in priority queue
+│  QUEUED  │  就绪，在优先级队列中
 └────┬─────┘
-     │ (worker available)
+     │ (worker 可用)
      ↓
 ┌──────────┐
-│ RUNNING  │  Workflow actively executing
+│ RUNNING  │  工作流正在执行
 └────┬─────┘
      │
      ├─→ ┌───────────┐
-     │   │ COMPLETED │  Success, MR created
+     │   │ COMPLETED │  成功，MR 已创建
      │   └───────────┘
      │
      ├─→ ┌───────────┐
-     │   │  FAILED   │  AC check failed or error
+     │   │  FAILED   │  AC 检查失败或错误
      │   └───────────┘
      │
      └─→ ┌───────────┐
-         │  BLOCKED  │  Unresolvable dependency or timeout
+         │  BLOCKED  │  无法解决的依赖或超时
          └───────────┘
 ```
 
-## Skills Workflow
+## Skills 工作流
 
-Integration with Claude Code skills for TDD methodology.
+与 Claude Code skills 集成，实现 TDD 方法论。
 
-### Skill Invocation Chain
+### Skill 调用链
 
 ```
-User request
+用户请求
     ↓
-/afk-do  ────────→  Analysis & task breakdown
+/afk-do  ────────→  分析 & 任务分解
     │                   ↓
-    │              Task list created
+    │              创建任务列表
     │                   ↓
-    └──────────→  /afk-implement (for each task)
+    └──────────→  /afk-implement (针对每个任务)
                        ↓
-                  Implementation:
-                  1. /afk-research (if needed)
-                  2. Write failing test
-                  3. Implement feature
-                  4. Pass test
-                  5. Progress commit
+                  实现阶段:
+                  1. /afk-research (如需要)
+                  2. 编写失败测试
+                  3. 实现功能
+                  4. 通过测试
+                  5. 进度提交
                        ↓
-                  Verification:
-                  1. Run full test suite
-                  2. Check references/hard-checks.md
-                  3. Signal completion
+                  验证阶段:
+                  1. 运行完整测试套件
+                  2. 检查 references/hard-checks.md
+                  3. Signal 完成
 ```
 
-### Skill Communication
+### Skill 通信
 
-Skills communicate via three mechanisms:
+Skills 通过三种机制通信：
 
-1. **Task system** (TaskCreate/TaskUpdate):
+1. **任务系统** (TaskCreate/TaskUpdate):
    ```typescript
    TaskCreate({
-     subject: "Implement user authentication",
-     description: "Add login endpoint with JWT",
+     subject: "实现用户认证",
+     description: "添加带 JWT 的登录端点",
    });
-   // Later: TaskUpdate({ taskId: "1", status: "completed" });
+   // 稍后: TaskUpdate({ taskId: "1", status: "completed" });
    ```
 
-2. **Signal files** (`.afk-signal.json`):
+2. **Signal 文件** (`.afk-signal.json`):
    ```json
    {
      "type": "goal_complete",
      "timestamp": "2026-07-27T10:30:00Z",
      "sha": "abc123def456",
-     "summary": "Implemented authentication, 5 tests passing"
+     "summary": "已实现认证，5 个测试通过"
    }
    ```
 
-3. **Git state** (commits, branches):
-   - Progress commits: `wip: add login endpoint`
-   - Final commit: `feat(auth): implement user authentication`
+3. **Git 状态** (commits, branches):
+   - 进度提交: `wip: add login endpoint`
+   - 最终提交: `feat(auth): implement user authentication`
 
-### TDD Methodology Integration
+### TDD 方法论集成
 
-Skills follow Test-Driven Development flow documented in `references/tdd-feature.md`:
+Skills 遵循 `references/tdd-feature.md` 中记录的测试驱动开发流程：
 
-**Red Phase:**
+**红色阶段：**
 ```bash
-# /afk-implement creates failing test first
+# /afk-implement 首先创建失败测试
 $ afk workflow launch --iid 123
-# Claude writes test
+# Claude 编写测试
 $ npm test
-# ❌ Test fails (expected)
-# Progress commit: "test: add authentication test (failing)"
+# ❌ 测试失败（预期）
+# 进度提交: "test: add authentication test (failing)"
 ```
 
-**Green Phase:**
+**绿色阶段：**
 ```bash
-# Claude implements minimal code to pass
+# Claude 实现最小代码以通过测试
 $ npm test
-# ✅ Test passes
-# Progress commit: "feat(auth): implement login endpoint"
+# ✅ 测试通过
+# 进度提交: "feat(auth): implement login endpoint"
 ```
 
-**Refactor Phase:**
+**重构阶段：**
 ```bash
-# Claude improves code quality
+# Claude 改进代码质量
 $ npm test
-# ✅ Tests still pass
-# Progress commit: "refactor(auth): extract token validation"
+# ✅ 测试仍然通过
+# 进度提交: "refactor(auth): extract token validation"
+```
 ```
 
-**Verification:**
+**验证：**
 ```bash
-# Check references/hard-checks.md requirements
-✓ All tests passing
-✓ No console.log in production code
-✓ Error handling present
-✓ Types complete (no 'any')
-✓ Documentation updated
+# 检查 references/hard-checks.md 要求
+✓ 所有测试通过
+✓ 生产代码中无 console.log
+✓ 存在错误处理
+✓ 类型完整（无 'any'）
+✓ 文档已更新
 
-# Signal completion
+# Signal 完成
 $ cat .afk-signal.json
 {
   "type": "goal_complete",
   "sha": "final-commit-sha",
-  "summary": "Authentication complete: 8 tests passing"
+  "summary": "认证完成：8 个测试通过"
 }
 ```
 
-### Workflow Orchestration in afk-do
+### afk-do 中的工作流编排
 
-`/afk-do` orchestrates the full workflow:
+`/afk-do` 编排完整工作流：
 
-1. **Parse issue** into discrete tasks
-2. **For each task**:
-   - Check if requires research (`/afk-research`)
-   - Invoke `/afk-implement` with specific goal
-   - Wait for signal (success/failure/blocked)
-3. **Aggregate results** and report
-4. **Update issue** labels based on outcome
+1. **解析 issue** 为离散任务
+2. **对于每个任务**:
+   - 检查是否需要调研（`/afk-research`）
+   - 用特定目标调用 `/afk-implement`
+   - 等待 signal（成功/失败/阻塞）
+3. **汇总结果** 并报告
+4. **根据结果更新 issue** 标签
 
-Example task breakdown:
+任务分解示例：
 ```
-Issue #123: "Add user authentication"
+Issue #123: "添加用户认证"
 
-Tasks:
-1. Research: Review existing auth patterns → /afk-research
-2. Implement: Login endpoint → /afk-implement
-3. Implement: Logout endpoint → /afk-implement
-4. Implement: Session middleware → /afk-implement
-5. Verification: Integration tests → /afk-implement
+任务：
+1. 调研: 审查现有认证模式 → /afk-research
+2. 实现: 登录端点 → /afk-implement
+3. 实现: 登出端点 → /afk-implement
+4. 实现: 会话中间件 → /afk-implement
+5. 验证: 集成测试 → /afk-implement
 ```
 
-## Signal Types
+## Signal 类型
 
-Workflows communicate state via typed signals:
+工作流通过类型化 signal 通信状态：
 
 ```typescript
 type SignalType = 
-  | 'goal_complete'   // Success, ready for review
-  | 'goal_failed'     // Tests failing, blockers
-  | 'blocked'         // External dependency needed
-  | 'needs_input'     // Clarification required
-  | 'progress'        // Intermediate update
+  | 'goal_complete'   // 成功，准备审查
+  | 'goal_failed'     // 测试失败，有阻塞
+  | 'blocked'         // 需要外部依赖
+  | 'needs_input'     // 需要澄清
+  | 'progress'        // 中间更新
 
 interface Signal {
   type: SignalType;
   timestamp: string;
   sha?: string;          // Git commit SHA
-  summary: string;       // Human-readable message
-  metadata?: {           // Optional context
+  summary: string;       // 人类可读消息
+  metadata?: {           // 可选上下文
     tests_passed?: number;
     tests_failed?: number;
     blocker_type?: string;
@@ -391,95 +392,95 @@ interface Signal {
 }
 ```
 
-## Error Handling
+## 错误处理
 
-### Workflow Failures
+### 工作流失败
 
 ```
-Failure Type          Action
+失败类型              处理方式
 ─────────────────────────────────────────────────
-Timeout               • Label: stage::timeout
-                      • Keep worktree for inspection
-                      • Log to scheduler
+超时                  • 标签: stage::timeout
+                      • 保留 worktree 供检查
+                      • 记录到 scheduler
 
-Test Failure          • Label: stage::failed
-                      • Signal type: goal_failed
-                      • Preserve test output
+测试失败              • 标签: stage::failed
+                      • Signal 类型: goal_failed
+                      • 保留测试输出
 
-Blocked               • Label: stage::blocked
-                      • Signal type: blocked
-                      • Add comment explaining blocker
+阻塞                  • 标签: stage::blocked
+                      • Signal 类型: blocked
+                      • 添加评论说明阻塞原因
 
-Git Conflict          • Label: stage::conflict
-                      • Keep worktree
-                      • Notify via comment
+Git 冲突              • 标签: stage::conflict
+                      • 保留 worktree
+                      • 通过评论通知
 
-API Rate Limit        • Exponential backoff
-                      • Retry after cooldown
-                      • Log to scheduler
+API 速率限制          • 指数退避
+                      • 冷却后重试
+                      • 记录到 scheduler
 ```
 
-### Recovery Procedures
+### 恢复过程
 
-**Orphaned worktrees:**
+**孤立的 worktrees：**
 ```bash
-# Detect worktrees without active tmux sessions
+# 检测无活动 tmux 会话的 worktrees
 afk worktree list-orphaned
 
-# Cleanup with confirmation
+# 带确认的清理
 afk worktree prune
 ```
 
-**Stale tmux sessions:**
+**过期的 tmux 会话：**
 ```bash
-# List all afk sessions
+# 列出所有 afk 会话
 tmux ls | grep afk-issue
 
-# Kill specific stale session
+# 杀死特定过期会话
 tmux kill-session -t afk-issue-123
 ```
 
-**Stuck scheduler:**
+**卡住的调度器：**
 ```bash
-# Check scheduler status
+# 检查调度器状态
 afk scheduler status
 
-# Pause to prevent new starts
+# 暂停以防止新启动
 afk scheduler pause
 
-# Manually complete stuck tasks
+# 手动完成卡住的任务
 afk scheduler mark-complete --iid 123
 
-# Resume
+# 恢复
 afk scheduler resume
 ```
 
-## Performance Considerations
+## 性能考虑
 
-### Concurrency Tuning
+### 并发调优
 
 ```bash
-# Conservative (limited resources)
+# 保守型（资源有限）
 afk scheduler start --max-concurrent 2 --poll-interval 120
 
-# Balanced (typical server)
+# 均衡型（典型服务器）
 afk scheduler start --max-concurrent 5 --poll-interval 60
 
-# Aggressive (high-end machine)
+# 激进型（高端机器）
 afk scheduler start --max-concurrent 10 --poll-interval 30
 ```
 
-### Resource Usage per Workflow
+### 每个工作流的资源使用
 
-- **CPU**: 1-2 cores (Claude + tests)
-- **Memory**: 500MB-1GB (Node.js process)
-- **Disk**: 50-200MB (worktree + node_modules)
-- **Network**: API calls + git operations
+- **CPU**: 1-2 核（Claude + 测试）
+- **内存**: 500MB-1GB（Node.js 进程）
+- **磁盘**: 50-200MB（worktree + node_modules）
+- **网络**: API 调用 + git 操作
 
-### Optimization Strategies
+### 优化策略
 
-1. **Worktree reuse**: Keep worktrees for related issues
-2. **Dependency caching**: Share node_modules across worktrees
-3. **Parallel AC checks**: Run independent checks concurrently
-4. **Batch API calls**: Reduce GitLab/GitHub API hits
-5. **Smart polling**: Exponential backoff when queue empty
+1. **Worktree 复用** — 为相关 issues 保留 worktrees
+2. **依赖缓存** — 跨 worktrees 共享 node_modules
+3. **并行 AC 检查** — 并发运行独立检查
+4. **批量 API 调用** — 减少 GitLab/GitHub API 请求
+5. **智能轮询** — 队列为空时指数退避

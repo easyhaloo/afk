@@ -44,7 +44,7 @@ export interface ListMROptions {
 /**
  * Link type for issue relationships
  */
-export type LinkType = 'blocks' | 'is_blocked_by';
+export type LinkType = 'blocks' | 'is_blocked_by' | 'blocked_by' | 'related_to';
 
 /**
  * Unified TrackedIssue across platforms

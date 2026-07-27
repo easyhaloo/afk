@@ -174,17 +174,14 @@ export class GitHubClient implements TrackerProvider {
   }
 
   async linkIssues(sourceId: number, targetId: number, type: LinkType): Promise<void> {
-    // GitHub cross-repo links only — this implementation is for same-repo
-    // For cross-repo, would need to use the Cross-Reference API
-    const oct = await this.ensureClient();
-    const { owner, repo } = this.getOwnerRepo();
+    // GitHub doesn't have native issue links like GitLab
+    // Use comments with issue references as workaround
+    const linkMessage =
+      type === 'blocks' ? `Blocks #${targetId}` :
+      type === 'is_blocked_by' || type === 'blocked_by' ? `Blocked by #${targetId}` :
+      `Related to #${targetId}`;
 
-    // Add a comment linking the issues
-    const linkType = type === 'blocks' ? 'blocks' : 'is blocked by';
-    await this.addComment(
-      sourceId,
-      `This issue ${linkType} #${targetId}`
-    );
+    await this.addComment(sourceId, linkMessage);
   }
 
   // ============ Pull Requests ============

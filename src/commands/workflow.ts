@@ -1,8 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { GitLabClient } from '../lib/gitlab.js';
-import { WorkflowRunner } from '../lib/workflows.js';
-import { getWorkflowConfig } from '../lib/config-manager.js';
+import { createGitLabClient } from '../lib/client-factory';
+import { WorkflowRunner } from '../lib/workflows';
+import { getWorkflowConfig } from '../lib/config-manager';
+import { TIMEOUTS } from '../lib/constants';
 
 export function registerWorkflowCommands(program: Command): void {
   const workflow = program
@@ -20,10 +21,10 @@ export function registerWorkflowCommands(program: Command): void {
     .option('--target-branch <branch>', 'Target branch for MR', 'main')
     .option('--base-branch <branch>', 'Base branch for worktree', 'main')
     .option('--max-retries <n>', 'Max retry attempts', parseInt, 3)
-    .option('--hard-timeout <ms>', 'Hard timeout in ms (default: 7200000)', parseInt, 7200000)
+    .option('--hard-timeout <ms>', 'Hard timeout in ms (default: 7200000)', parseInt, TIMEOUTS.WORKFLOW_HARD_TIMEOUT)
     .action(async (options) => {
       try {
-        const gitlab = createGitLabClient();
+        const gitlab = await createGitLabClient();
         const runner = new WorkflowRunner(gitlab);
 
         const cfg = getWorkflowConfig();
@@ -52,23 +53,4 @@ export function registerWorkflowCommands(program: Command): void {
         process.exit(1);
       }
     });
-}
-
-/**
- * Create GitLab client from environment variables
- */
-function createGitLabClient(): GitLabClient {
-  const url = process.env.GITLAB_URL || 'https://gitlab.com';
-  const token = process.env.GITLAB_TOKEN;
-  const projectId = process.env.GITLAB_PROJECT_ID;
-
-  if (!token) {
-    throw new Error('GITLAB_TOKEN environment variable is required');
-  }
-
-  if (!projectId) {
-    throw new Error('GITLAB_PROJECT_ID environment variable is required');
-  }
-
-  return new GitLabClient({ url, token, projectId });
 }

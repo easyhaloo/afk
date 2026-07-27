@@ -2,6 +2,7 @@ import { spawnSync } from 'child_process';
 import { promises as fs, existsSync, accessSync, constants } from 'fs';
 import { join } from 'path';
 import { load } from 'js-yaml';
+import { PORTS } from './constants';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -27,8 +28,8 @@ export interface ForkOptions {
 const DEFAULTS = {
   FORK_TTL_SECONDS: 28800,
   FORK_DEFAULT_PORT_BASE: 100,
-  MINIO_BASE_PORT: 9000,
-  MINIO_CONSOLE_PORT: 9001,
+  MINIO_BASE_PORT: PORTS.MINIO_BASE,
+  MINIO_CONSOLE_PORT: PORTS.MINIO_CONSOLE,
 };
 
 function envInt(key: string, fallback: number): number {

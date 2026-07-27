@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { createTracker } from '../lib/core/tracker/index.js';
-import type { TrackedIssue } from '../lib/core/tracker/types.js';
+import { createTracker } from '../lib/core/tracker/index';
+import type { TrackedIssue } from '../lib/core/tracker/types';
+import { handleCommandError } from '../lib/cli-utils';
 
 interface BoardColumn {
   title: string;
@@ -106,8 +107,7 @@ export function registerBoardCommands(program: Command): void {
 
         console.log(chalk.dim(`Total: ${filtered.length} issues`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 }

@@ -1,1 +1,1 @@
-export { BoardView } from './BoardView.js';
+export { BoardView } from './BoardView';

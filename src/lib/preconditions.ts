@@ -1,4 +1,5 @@
-import { GitLabClient } from './gitlab.js';
+import { GitLabClient } from './gitlab';
+import { logAndReturn } from './cli-utils';
 
 export interface PreconditionResult {
   ok: boolean;
@@ -46,6 +47,6 @@ export async function checkIssuePreconditions(
 
     return { ok: true };
   } catch (error) {
-    return { ok: false, reason: `error: ${(error as Error).message}` };
+    return logAndReturn(error, 'Error checking preconditions', { ok: false, reason: `error: ${(error as Error).message}` });
   }
 }

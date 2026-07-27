@@ -1,7 +1,8 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { WorktreeManager } from '../lib/worktree.js';
-import { getWorktreeConfig } from '../lib/config-manager.js';
+import { WorktreeManager } from '../lib/worktree';
+import { getWorktreeConfig } from '../lib/config-manager';
+import { handleCommandError } from '../lib/cli-utils';
 
 export function registerWorktreeCommands(program: Command): void {
   const worktree = program
@@ -30,8 +31,7 @@ export function registerWorktreeCommands(program: Command): void {
         console.log();
         console.log(chalk.dim(`cd ${wt.path}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -66,8 +66,7 @@ export function registerWorktreeCommands(program: Command): void {
           }
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -104,8 +103,7 @@ export function registerWorktreeCommands(program: Command): void {
           });
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -124,8 +122,7 @@ export function registerWorktreeCommands(program: Command): void {
 
         console.log(chalk.green(`✓ Worktree for issue #${iid} removed`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -161,8 +158,7 @@ export function registerWorktreeCommands(program: Command): void {
           }
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -202,8 +198,7 @@ export function registerWorktreeCommands(program: Command): void {
           console.log(chalk.green(`✓ Removed ${deleted} worktree(s) (skipped: ${skipped})`));
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -225,8 +220,7 @@ export function registerWorktreeCommands(program: Command): void {
           console.log(chalk.green(`✓ Removed ${count} orphaned worktrees`));
         }
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 
@@ -249,8 +243,7 @@ export function registerWorktreeCommands(program: Command): void {
 
         console.log(chalk.green(`✓ Updated worktree #${iid} status to: ${status}`));
       } catch (error) {
-        console.error(chalk.red('Error:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 }

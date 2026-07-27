@@ -1,5 +1,5 @@
 import { simpleGit } from 'simple-git';
-import type { Platform } from './types.js';
+import type { Platform } from './types';
 
 /**
  * Detect platform from git remote URL

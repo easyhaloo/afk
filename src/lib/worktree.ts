@@ -1,2 +1,2 @@
 // Re-export from core/
-export * from './core/git/worktree.js';
+export * from './core/git/worktree';

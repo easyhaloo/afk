@@ -1,2 +1,2 @@
 // Re-export from core/
-export * from './core/gitlab/client.js';
+export * from './core/gitlab/client';

@@ -4,8 +4,8 @@ import figures from 'figures';
 import { tmux as createTmux } from 'node-tmux';
 import { exec } from 'child_process';
 import { Task, Issue, Project } from '../../types/dashboard';
-import { useNavigation } from './navigation/index.js';
-import { useData } from './data/index.js';
+import { useNavigation } from './navigation/index';
+import { useData } from './data/index';
 import {
   TaskListView,
   IssueListView,
@@ -19,7 +19,7 @@ import {
   Header,
   Footer,
   Notification,
-} from './views/index.js';
+} from './views/index';
 import type { View, Notification as NotificationType } from './types';
 
 export const Dashboard: React.FC = () => {

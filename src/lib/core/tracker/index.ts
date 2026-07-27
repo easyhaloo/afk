@@ -1,7 +1,7 @@
-import { detectPlatform, detectGitHubRepo, detectGitLabProject } from './detect.js';
-import { GitHubClient } from '../github/index.js';
-import { GitLabClient } from '../gitlab/index.js';
-import type { TrackerProvider, Platform } from './types.js';
+import { detectPlatform, detectGitHubRepo, detectGitLabProject } from './detect';
+import { GitHubClient } from '../github/index';
+import { GitLabClient } from '../gitlab/index';
+import type { TrackerProvider, Platform } from './types';
 
 export type { TrackerProvider, Platform };
 export type {
@@ -13,9 +13,9 @@ export type {
   ListMROptions,
   AcceptanceCriteria,
   LinkType,
-} from './types.js';
+} from './types';
 
-export { detectPlatform, detectGitHubRepo, detectGitLabProject, detectProject } from './detect.js';
+export { detectPlatform, detectGitHubRepo, detectGitLabProject, detectProject } from './detect';
 
 /**
  * Tracker config

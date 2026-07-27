@@ -2,8 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { load } from 'js-yaml';
-import type { Plugin, PluginManifest } from './types.js';
-import type { View } from '../ui/core/types.js';
+import type { Plugin, PluginManifest } from './types';
+import type { View } from '../ui/core/types';
 
 const PLUGINS_CONFIG = path.join(os.homedir(), '.afk', 'plugins.yml');
 

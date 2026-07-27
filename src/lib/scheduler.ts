@@ -1,8 +1,9 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
-import { GitLabClient } from './gitlab.js';
-import { WorkflowRunner } from './workflows.js';
-import { checkIssuePreconditions } from './preconditions.js';
+import { GitLabClient } from './gitlab';
+import { WorkflowRunner } from './workflows';
+import { checkIssuePreconditions } from './preconditions';
+import { PORTS, TIMEOUTS } from './constants';
 
 export interface TaskData {
   iid: number;
@@ -48,7 +49,7 @@ export class Scheduler {
     const {
       maxConcurrent = 3,
       redisHost = 'localhost',
-      redisPort = 6379,
+      redisPort = PORTS.REDIS_DEFAULT,
       queueName = 'afk-tasks',
     } = options;
 
@@ -140,7 +141,7 @@ export class Scheduler {
         attempts: 3,
         backoff: {
           type: 'exponential',
-          delay: 60000, // 1 minute
+          delay: TIMEOUTS.JOB_RETRY_DELAY,
         },
       }
     );
@@ -179,7 +180,7 @@ export class Scheduler {
     const job = jobs.find(j => j.data.iid === iid);
 
     if (job) {
-      await job.moveToDelayed(Date.now() + 3600000); // Delay 1 hour
+      await job.moveToDelayed(Date.now() + TIMEOUTS.JOB_RESCHEDULE_DELAY);
       console.log(`⏸️  Paused task for issue #${iid}`);
     } else {
       throw new Error(`Task for issue #${iid} not found`);

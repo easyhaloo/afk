@@ -7,7 +7,8 @@
     "afk": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc && node scripts/fix-esm-extensions.mjs",
+    "build": "node scripts/build.mjs && tsc --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit",
     "dev": "tsc --watch",
     "test": "vitest",
     "prepublishOnly": "npm run build"
@@ -41,6 +42,7 @@
     "@types/react": "^19.2.17",
     "esbuild": "^0.21.5",
     "figures": "^6.1.0",
+    "glob": "^13.0.6",
     "tsx": "^4.23.1",
     "typescript": "^5.3.3",
     "vitest": "^1.2.0"

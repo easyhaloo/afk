@@ -10,7 +10,7 @@ import type {
   ListMROptions,
   AcceptanceCriteria,
   LinkType,
-} from '../tracker/types.js';
+} from '../tracker/types';
 
 export interface GitLabConfig {
   url: string;

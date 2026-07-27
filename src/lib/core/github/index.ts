@@ -1,2 +1,2 @@
-export { GitHubClient } from './client.js';
-export type { GitHubAuthOptions } from './client.js';
+export { GitHubClient } from './client';
+export type { GitHubAuthOptions } from './client';

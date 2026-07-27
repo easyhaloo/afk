@@ -1,12 +1,10 @@
 import { spawn } from 'child_process';
 import { GitLabClient } from './gitlab';
-import { detectPlatform } from './core/tracker/detect';
 import type { Platform } from './core/tracker/types';
 import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
-import { writeSignal, readSignal, getTokenUsage, configureStatusline } from './io';
-import { getCurrentTimestamp } from './schemas';
-import type { Signal, TimeoutSignal } from './schemas';
+import { getTokenUsage, configureStatusline } from './io';
+import type { Signal } from './schemas';
 import { TIMEOUTS, CONTEXT } from './constants';
 
 export interface RunnerOptions {
@@ -31,14 +29,16 @@ interface LaunchResult {
  * Pattern: launch → waitForAnySignal → process result
  *
  * Agent responsibilities (via skill instructions):
- *   - On goal complete:  write goal_complete signal, exit(0)
- *   - On AC fail:        write ac_result {result:'FAIL'}, exit(41)
- *   - On context high:   write context_high signal, exit(43)
- *                        (Runner verifies pane tokens ≥ CONTEXT.HIGH_THRESHOLD
- *                         before acting — signal alone is just a trigger)
- *   - On idle:           write idle signal, exit(44)
+ *   - On goal complete: write goal_complete signal (Runner verifies commits exist)
+ *   - On AC done:       write ac_result signal (advisory only — Runner
+ *                        re-verifies via verifyAC(), never trusts result field)
+ *   - On context high:  write context_high signal (Runner verifies
+ *                        statusline JSON tokens ≥ CONTEXT.HIGH_THRESHOLD)
+ *   - On handoff ready: write handoff_ready signal (Runner waits for it
+ *                        then kills session)
  *
- * Watchdog: detached setsid process kills session after hardTimeoutMs → exit(42)
+ * Watchdog: detached setsid process fires after hardTimeoutMs — writes
+ * a timeout signal to .afk-signal.json, then kills the tmux session.
  */
 export class WorkflowRunner {
   private gitlab: GitLabClient;
@@ -91,7 +91,7 @@ export class WorkflowRunner {
     await this.tmux.sendGoal(session, 'main', goalText);
 
     // ── Step 4: Launch watchdog (detached, no blocking) ────────────────────
-    this.startWatchdog(session, hardTimeoutMs, iid);
+    this.startWatchdog(session, hardTimeoutMs, iid, wt.path);
 
     // ── Step 5: Post launch comment ─────────────────────────────────────────
     const goalLines = goalText.split('\n').length;
@@ -429,15 +429,21 @@ ${snapshot}
 
   /**
    * Start hard-timeout watchdog as detached process.
-   * Fires after hardTimeoutMs, kills the tmux session (exit 42).
+   * Fires after hardTimeoutMs: writes timeout signal then kills the tmux session,
+   * so the WorkflowRunner's main loop can pick up the signal via file polling
+   * rather than relying on tmux exit codes.
    */
-  private startWatchdog(session: string, hardTimeoutMs: number, iid: number): void {
-    const selfBin = process.argv[0];
-    const selfArgs = process.argv.slice(1);
-
+  private startWatchdog(session: string, hardTimeoutMs: number, iid: number, worktreePath: string): void {
+    const signalPath = `${worktreePath}/.afk-signal.json`;
     spawn('setsid', [
       'bash', '-c',
-      `sleep ${hardTimeoutMs / 1000} && tmux kill-session -t "${session}" 2>/dev/null || true; ` +
+      `sleep ${hardTimeoutMs / 1000} && ` +
+      // Write a timeout signal atomically so Runner can detect hard timeout.
+      `cat > "${signalPath}.tmp" <<'EOF'
+{"type":"timeout","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+EOF
+mv "${signalPath}.tmp" "${signalPath}" 2>/dev/null; ` +
+      `tmux kill-session -t "${session}" 2>/dev/null || true; ` +
       `echo "WATCHDOG:${iid}:${session}:${hardTimeoutMs}" >> "${this.logDir}/watchdog.log"`,
     ], {
       stdio: 'ignore',

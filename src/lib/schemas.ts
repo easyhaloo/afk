@@ -66,8 +66,9 @@ export type IdleSignal = z.infer<typeof IdleSignalSchema>;
  * Signal emitted when agent suspects context is high.
  *
  * NOTE: Agent only acts as a trigger. The WorkflowRunner verifies
- * objectively via `getContextTokens()` (parses Claude pane output)
- * and ignores this signal if tokens are below `CONTEXT_HIGH_THRESHOLD`.
+ * objectively by reading `<worktree>/.afk/claude-status.json` (written
+ * by Claude Code's statusline) via `getTokenUsage()` and ignoring this
+ * signal if total tokens are below `CONTEXT.HIGH_THRESHOLD`.
  * This avoids the "optimistic reporter" anti-pattern where the
  * evaluated party judges itself.
  */

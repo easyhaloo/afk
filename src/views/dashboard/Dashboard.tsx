@@ -26,6 +26,8 @@ import type { View, Notification as NotificationType } from './types';
 export const Dashboard: React.FC = () => {
   const { exit } = useApp();
   const [showSplash, setShowSplash] = useState(true);
+  const [fadeInMain, setFadeInMain] = useState(false);
+  const [mainOpacity, setMainOpacity] = useState(0);
   const W = process.stdout.columns || 80;
   const H = process.stdout.rows || 24;
   const CONTENT_H = H - 2;
@@ -104,6 +106,22 @@ export const Dashboard: React.FC = () => {
     setTimeout(() => { setNotifAnimation('slide-out'); }, 2700);
     setTimeout(() => { setNotifAnimation('hidden'); setNotification(null); }, 3000);
   }, []);
+
+  // Smooth fade-in effect for main dashboard after splash
+  useEffect(() => {
+    if (!showSplash && fadeInMain) {
+      let frame = 0;
+      const totalFrames = 10;
+      const fadeInterval = setInterval(() => {
+        frame++;
+        setMainOpacity(frame / totalFrames);
+        if (frame >= totalFrames) {
+          clearInterval(fadeInterval);
+        }
+      }, 30);
+      return () => clearInterval(fadeInterval);
+    }
+  }, [showSplash, fadeInMain]);
 
   // Handlers
   const handleAttachSession = useCallback(async () => {
@@ -371,7 +389,10 @@ export const Dashboard: React.FC = () => {
   })();
 
   return showSplash ? (
-    <SplashScreen onComplete={() => setShowSplash(false)} duration={2500} />
+    <SplashScreen onComplete={() => {
+      setShowSplash(false);
+      setFadeInMain(true);
+    }} duration={2500} />
   ) : (
     <Box flexDirection="column" height={H}>
       {isDetailMode ? (

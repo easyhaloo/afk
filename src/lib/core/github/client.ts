@@ -40,17 +40,24 @@ export class GitHubClient implements TrackerProvider {
 
   /**
    * Get authentication token
-   * Priority: constructor auth > GITHUB_TOKEN env > gh CLI
+   * Priority: constructor auth > GITHUB_TOKEN env > GH_TOKEN env > gh CLI
    */
   private async getAuth(): Promise<string | undefined> {
-    const envToken = process.env.GITHUB_TOKEN;
+    const envToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
     if (envToken) return envToken;
 
-    // Try to get token from gh CLI
+    // Fall back to gh CLI. Use timeout to avoid hanging on TTY prompts
+    // (gh auth status can prompt for login in interactive mode).
     try {
       const { execSync } = await import('child_process');
-      const token = execSync('gh auth token', { encoding: 'utf-8' }).trim();
-      return token;
+      const token = execSync('gh auth token', {
+        encoding: 'utf-8',
+        timeout: 5_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+      // gh v2.40+ may prefix with "github.com token:" — keep only the token line.
+      const match = token.match(/(?:token:\s*)?(\S+)/);
+      return match ? match[1] : token;
     } catch {
       return undefined;
     }

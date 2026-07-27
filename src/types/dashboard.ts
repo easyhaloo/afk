@@ -7,6 +7,7 @@ export interface Task {
   progress?: string;
   startedAt?: Date;
   worktree?: string;
+  platform?: 'github' | 'gitlab';
 }
 
 export interface TmuxSession {

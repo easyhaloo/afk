@@ -100,13 +100,11 @@ Agent 运行在 tmux session 中，与调度系统是**进程隔离**的。考�
 - 原子写入（tmp + rename），避免读到半截 JSON
 - Zod schema 校验，版本不兼容时快速失败
 
-### 1b. 为什么 context_high 不信任 Agent 自报？
+### 1b. context_high 判定机制
 
-LLM 倾向于"乐观报告"。让 Agent 自己判断"我上下文快满了"会出现：
-- **漏报**：真的快满了但 Agent 觉得"还行" → 截断崩溃
-- **误报**：Agent 谨慎过头 → 不必要的 handoff 浪费 token 和上下文
+**触发与校验分离**：Agent 发 `context_high` 信号不带数据，Runner 读取 Claude statusline JSON 中的 token 计数，与 `CONTEXT.HIGH_THRESHOLD`（默认 100K）比较后才决定是否 handoff。
 
-正确做法：**Agent 仅作触发器，Runner 做客观校验**。Agent 发 `context_high` 信号不带数据，Runner 读取 Claude statusline JSON 中的 token 计数，与 `CONTEXT.HIGH_THRESHOLD`（默认 100K）比较后才决定是否 handoff。
+这避免了"被评估者自评"的偏差——LLM 对自己状态的判断并不可靠，应由系统基于客观数据做决策。
 
 ### 2. 为什么是 Worktree，不是 Docker？
 
@@ -306,15 +304,6 @@ sequenceDiagram
 - 网络问题导致写入中断
 
 Zod 在边界处快速失败，比让 `undefined.sha` 这种错误传播到深处再崩溃要好。
-
-### 为什么从 pane 正则改为 statusline JSON？
-
-旧实现用 `tmux capture-pane` + 正则匹配 "Xk tokens" 文本，存在三个问题：
-1. **脆弱**：Claude Code UI 文案变化即失效
-2. **性能差**：每次轮询都 capture pane 大输出
-3. **信息不完整**：拿不到 cache_read/cache_creation
-
-新实现通过 statusline stdin JSON 读取，**数据源是官方 API**，UI 变化不影响，且一次拿到全部细分字段。
 
 ---
 

@@ -259,11 +259,16 @@ export class Scheduler {
 
     const runner = new WorkflowRunner(this.tracker);
 
+    // Use platform-aware session name so it appears in dashboard TaskService filters
+    const sessionName = this.tracker.platform === 'github'
+      ? `afk-gh-${iid}`
+      : `afk-gl-${iid}`;
+
     try {
       // Run full signal-driven workflow
       const result = await runner.run({
         iid,
-        session: `afk-${iid}`,
+        session: sessionName,
         targetBranch: baseBranch,
         baseBranch,
       });

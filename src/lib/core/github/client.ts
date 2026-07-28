@@ -73,12 +73,12 @@ export class GitHubClient implements TrackerProvider {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const state = options.state === 'opened' ? 'open' : options.state || 'open';
-    const { data } = await oct.issues.list({
+    const { data } = await oct.request('GET /repos/{owner}/{repo}/issues', {
       owner,
       repo,
       state,
       labels: options.labels?.join(','),
-      per_page: options.perPage || 20,
+      per_page: options.perPage || 100,
     });
     return data
       .filter(issue => !('pull_request' in issue)) // filter out PRs

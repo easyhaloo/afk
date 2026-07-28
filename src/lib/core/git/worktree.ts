@@ -43,7 +43,7 @@ export class WorktreeManager {
 
   async create(iid: number, baseBranch: string, baseDir?: string): Promise<Worktree> {
     const branch = `afk-issue-${iid}`;
-    const worktreeDir = baseDir || '/tmp/afk-worktrees';
+    const worktreeDir = baseDir || join(process.cwd(), '.worktrees');
     const path = join(worktreeDir, `issue-${iid}`);
     await fs.mkdir(worktreeDir, { recursive: true });
     await this.git.raw(['worktree', 'add', '-b', branch, path, baseBranch]);

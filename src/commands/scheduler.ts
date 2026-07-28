@@ -348,9 +348,12 @@ export function registerSchedulerCommands(program: Command): void {
               const iid = wave[currentIdx];
               try {
                 console.log(chalk.cyan(`  [${currentIdx + 1}/${wave.length}] Starting #${iid}...`));
+                const sessionName = tracker.platform === 'github'
+                  ? `afk-gh-${iid}`
+                  : `afk-gl-${iid}`;
                 const result = await runner.run({
                   iid,
-                  session: `afk-${iid}`,
+                  session: sessionName,
                   targetBranch: process.env.AFK_TARGET_BRANCH || 'main',
                 });
                 console.log(result.success

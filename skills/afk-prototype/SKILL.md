@@ -5,8 +5,10 @@ description: >-
   before committing to full build. Time-boxed spike to prove feasibility.
   Produces draft MR + findings report.
 disallowed-tools: >-
+  Bash(afk mr merge*)
   Bash(glab mr merge*) Bash(glab issue delete*) Bash(glab mr delete*)
-  Bash(glab repo delete*) Bash(git push -f)
+  Bash(glab repo delete*) Bash(gh issue delete*) Bash(gh repo delete*)
+  Bash(git push -f)
   Bash(git reset --hard*) Bash(git branch -D*)
 ---
 
@@ -46,7 +48,7 @@ intent first via whatever interview process they use.
    Skip edge cases, error-handling polish, tests beyond confirming the approach.
 3. `git push -u origin spike/<slug>` then create a **Draft MR**:
    ```bash
-   glab mr create --target-branch <target_branch> --draft --yes
+   afk mr create --target-branch <target_branch> --draft --yes
    ```
 4. Report: what worked, what surprised you, PRD implications.
 5. Gate: human decides when the spike has answered the open question.

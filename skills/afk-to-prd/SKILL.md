@@ -2,20 +2,21 @@
 name: afk-to-prd
 description: >-
   Use when any structured requirements input is ready to be synthesized
-  into a PRD for publication to GitLab. Produces a structured PRD with
+  into a PRD for publication. Produces a structured PRD with
   problem, users, bounded contexts, user stories, decisions, and risks.
   Does not depend on any other skill — accepts any input that contains
   sufficient alignment (interview notes, design drafts, requirement
   documents, or referenced sibling artifacts).
 disallowed-tools: >-
-  Bash(glab mr merge*) Bash(glab mr delete*) Bash(glab repo delete*)
+  Bash(glab mr merge*) Bash(glab issue delete*) Bash(glab mr delete*)
+  Bash(glab repo delete*) Bash(gh issue delete*) Bash(gh repo delete*)
   Bash(git push -f) Bash(git reset --hard*) Bash(git branch -D*)
 ---
 
 # PRD
 
-**Goal:** synthesize an alignment record into a PRD for publication to
-GitLab. Synthesis, not discovery.
+**Goal:** synthesize an alignment record into a PRD for publication.
+Synthesis, not discovery.
 **Mode:** HITL-gated — drafting is agent-driven; publication requires
 explicit approval.
 **Contract:** sufficient alignment input → approved `PRD.md` + `stage::prd`.
@@ -84,13 +85,13 @@ PRD.
 ### Step 3 — Publish
 
 Existing tracking Epic/Issue → link `PRD.md` via
-`afk gitlab add-comment <iid> "$(cat PRD.md)"`. None exists →
-`afk gitlab issue-create "<title>" --description "$(cat PRD.md)" --label stage::prd`.
+`afk issue comment <iid> "$(cat PRD.md)"`. None exists →
+`afk issue create "<title>" --description "$(cat PRD.md)" --label stage::prd`.
 
 ### Step 4 — Label
 
 New issue already got `stage::prd` via step 3. Existing issue needs:
-`afk gitlab issue-update <iid> --add-label stage::prd`.
+`afk issue update-labels <iid> --add stage::prd`.
 
 ### Step 5 — Gate (HITL)
 

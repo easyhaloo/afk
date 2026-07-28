@@ -10,7 +10,7 @@ AFK (Away From Keyboard) 的核心问题是：**让 AI agent 在隔离环境中�
 |------|------|
 | 平台差异 | TrackerProvider 抽象层，GitLab/GitHub 统一接口 |
 | 并发干扰 | git worktree 物理隔离 + tmux 会话隔离 |
-| 状态同步 | 信号文件 + 双向标签同步 |
+| 状态同步 | 信号文件 + statusline JSON + 双向标签同步 |
 | 失控保护 | watchdog 硬超时 + 重试升级到 HITL |
 
 ---
@@ -26,6 +26,7 @@ graph TD
     Detect["detectProject 平台检测"]
     GL["GitLabClient"]
     GH["GitHubClient"]
+    AC["AC 提取 (tracker/ac.ts)"]
     Runner["WorkflowRunner 工作流编排"]
     WT["WorktreeManager (git worktree)"]
     TMUX["TmuxClient 会话管理"]
@@ -44,6 +45,8 @@ graph TD
     CLI --> Runner
     GL --> Runner
     GH --> Runner
+    GL --> AC
+    GH --> AC
 
     Runner --> WT
     Runner --> TMUX
@@ -66,7 +69,7 @@ graph TD
 
     class CLI,Agent ext
     class Runner,Factory,GL,GH,Sched core
-    class WT,TMUX,SIG,STATUS,SCONF,Queue io
+    class WT,TMUX,SIG,STATUS,SCONF,Queue,AC io
 ```
 
 ### 模块职责
@@ -74,12 +77,13 @@ graph TD
 | 模块 | 职责 | 关键设计决策 |
 |------|------|-------------|
 | **TrackerProvider** | 平台无关的 Issue/MR 操作 | 接口契约，多平台实现 |
-| **WorkflowRunner** | 编排完整生命周期 | 信号驱动 + statusline 客观校验 |
+| **WorkflowRunner** | 编排完整生命周期 | 信号驱动 + statusline 客观校验 + AC 客观验证 |
+| **AC 提取** | 从 issue labels / 旧 markdown 提取 AC | 标签驱动优先，markdown 兼容 |
 | **WorktreeManager** | 每个 Issue 独立工作区 | 物理隔离，避免分支冲突 |
 | **TmuxClient** | Agent 运行环境 | 独立会话，崩溃不互相影响 |
 | **Signal I/O** | Agent↔Runner 控制通信 | 文件原子写入，Zod 校验 |
 | **Status I/O** | 读取 Claude statusline JSON | token 客观数据源 |
-| **Statusline Config** | 自动注入 worktree settings.json | tee stdin JSON 到文件 |
+| **Statusline Config** | 自动注入 worktree settings.json | tee stdin JSON 到文件 + placeholder 启动检测 |
 | **Scheduler** | 多 Issue 并发调度 | BullMQ + 优先级队列 |
 
 ---
@@ -105,6 +109,28 @@ Agent 运行在 tmux session 中，与调度系统是**进程隔离**的。考�
 **触发与校验分离**：Agent 发 `context_high` 信号不带数据，Runner 读取 Claude statusline JSON 中的 token 计数，与 `CONTEXT.HIGH_THRESHOLD`（默认 100K）比较后才决定是否 handoff。
 
 这避免了"被评估者自评"的偏差——LLM 对自己状态的判断并不可靠，应由系统基于客观数据做决策。
+
+### 1c. AC 用 issue label 表达，不用 markdown 正则
+
+GitLab/GitHub API 都不返回结构化 checklist。原先的正则解析 `- [ ]` 极度脆弱——中文标题、缩进、emoji、数字列表等变体均失效。
+
+**改用 label 表达 AC**：每条 AC 是一个 label（`ac::1:: 用户能登录`），平台 API 直接返回结构化数组，可服务端筛选。
+
+旧 markdown 章节保留作为 fallback（best-effort），无需迁移。详见 `src/lib/core/tracker/ac.ts`。
+
+### 1d. 不用 pane capture + 正则做状态判断
+
+Agent 状态检测（prompt 是否就绪、timeout 是否触发、信号是否完成）一律走：
+- **文件信号**（`.afk-signal.json`）
+- **状态文件**（`.afk/claude-status.json`）
+- **结构化 API**（GitLab/GitHub SDK 直接调用）
+
+不用 `tmux capture-pane` + 正则/字符串匹配，因为：
+- Claude Code UI 主题/字体变化会导致字符（❯/›/➜/▶）改变
+- pane 输出依赖颜色码、ANSI 转义
+- 多 pane 边界和宽字符让正则易错
+
+剩余 `capturePane` 调用仅用于**写日志快照**（运维归档）和 CLI `afk tmux capture`（用户主动调用），不用于状态判断。
 
 ### 2. 为什么是 Worktree，不是 Docker？
 
@@ -255,26 +281,32 @@ sequenceDiagram
 
 ### 状态数据流（状态通道）
 
-Claude Code statusline 在每回合自动通过 stdin 推送 JSON payload。AFK 在 worktree 创建时自动配置 statusline 用 tee 命令同时写入文件：
+Claude Code statusline 在每回合自动通过 stdin 推送 JSON payload。AFK 在 worktree 创建时自动配置 statusline 用 tee 命令同时写入文件，并写一个 placeholder 文件以便 Runner 立即检测 prompt-ready：
 
 ```mermaid
 sequenceDiagram
+    participant W as WorkflowRunner
+    participant SCONF as configureStatusline
+    participant JSON as .afk/claude-status.json
     participant CC as Claude Code 引擎
     participant Tee as tee (statusline 入口)
     participant SL as ccstatusline 渲染
-    participant JSON as .afk/claude-status.json
-    participant R as WorkflowRunner
 
+    W->>SCONF: 写 settings.json + placeholder 文件
+    SCONF->>JSON: 写入 placeholder (启动即可检测)
+    W->>JSON: fs.access → 立即返回 true
+
+    Note over CC: Claude TUI 启动，第一回合开始
     loop 每回合
         CC->>Tee: stdin JSON (model, tokens, cost...)
-        Tee->>JSON: 写入文件
+        Tee->>JSON: 写入真实 payload (覆盖 placeholder)
         Tee->>SL: 透传给用户渲染
     end
 
-    Note over R: context_high 信号触发时按需读取
-    R->>JSON: readClaudeStatus(worktreeDir)
-    JSON-->>R: Zod 校验后返回
-    R->>R: extractTokenUsage → 阈值校验
+    Note over W: context_high 信号触发时按需读取
+    W->>JSON: readClaudeStatus(worktreeDir)
+    JSON-->>W: Zod 校验后返回
+    W->>W: extractTokenUsage → 阈值校验
 ```
 
 **Status JSON schema (Zod):**
@@ -316,7 +348,7 @@ stateDiagram-v2
     [*] --> Init: run(iid)
 
     Init: 初始化 - getIssue / parseAC
-    Worktree: 创建 Worktree
+    Worktree: 创建 Worktree + 配置 statusline
     TmuxLaunch: 启动 Tmux Session
     Watchdog: 启动 Watchdog
     Comment: 发布启动评论
@@ -332,12 +364,12 @@ stateDiagram-v2
     Polling --> Timeout: timeout
     Polling --> Handoff: context_high
 
-    AutoWrapup: autoWrapup - AC 验收 + MR
+    AutoWrapup: autoWrapup - 客观校验 + MR
     Timeout: handleTimeout - 日志 + 标签
     Handoff: handleHandoff - 上下文切换
 
-    AutoWrapup --> RetryCheck: ac_result FAIL
-    AutoWrapup --> Success: ac_result PASS
+    AutoWrapup --> RetryCheck: verifyAC FAIL
+    AutoWrapup --> Success: verifyAC PASS
     RetryCheck --> HITL: retry > max
     RetryCheck --> [*]: 重试新 session
 
@@ -362,23 +394,26 @@ sequenceDiagram
     U->>W: afk implement iid
     W->>T: getIssue(iid)
     T-->>W: TrackedIssue
-    W->>W: parseAC(description)
+    W->>T: parseAC(issue) - 优先 labels, fallback markdown
 
     W->>G: createWorktree(iid, baseBranch)
     G-->>W: Worktree
 
+    W->>W: configureStatusline(写 settings.json + placeholder status)
+
     par 并行启动
         W->>M: createSession(name, wt.path, claude)
         M->>A: spawn claude process
-        W->>Wd: setsid sleep hardTimeoutMs
+        W->>Wd: setsid 写 timeout signal + sleep + kill-session
         Note over Wd: 独立进程，父进程崩溃也能触发
     end
 
-    M->>W: waitForPrompt()
+    M->>W: waitForPrompt - 检测 placeholder 文件存在
     W->>M: sendGoal(goalText)
     M->>A: 发送 /goal + AC
 
     A->>A: 实现功能 + 提交 commits
+    Note over A: 第一回合触发 statusline tee, 覆盖 placeholder 为真实 payload
 
     loop 信号轮询 (每 2s)
         W->>A: read .afk-signal.json
@@ -387,37 +422,61 @@ sequenceDiagram
             W->>G: pushBranch()
             W->>A: sendResumeWithAC()
             A->>A: 逐条检查 AC
-            A-->>W: ac_result PASS
-            W->>T: createMR(iid, branch, target)
-            T-->>W: MR URL
-            W->>T: addLabel(stage::qa)
+            W->>W: verifyAC(commit count + AC items)
+            alt verifyAC OK
+                W->>T: createMR(iid, branch, target)
+                T-->>W: MR URL
+                W->>T: addLabel(stage::qa)
+            else verifyAC FAIL
+                W->>W: handleACFail
+            end
         else timeout (5min)
-            W->>A: 检查 pane 内容
             Note over W: 软超时，继续等待
         end
     end
 
     opt 硬超时 (60min)
         Wd->>M: kill-session
-        W->>T: addLabel(mode::timeout)
+        Note over Wd: timeout signal 已写入
     end
 ```
 
 ### autoWrapup 的关键设计
 
-AC 验收不是"问 Agent 你做完了吗"，而是：
-1. 推送分支到 origin
-2. 让 Agent **逐条检查 AC 并产出结构化结果**
-3. **WorkflowRunner 解析结果**，不信任 Agent 的自我评价
+**AC 验收不依赖 Agent 自评**。Runner 做客观校验：
 
-**为什么不让 Agent 自我评估？**
-LLM 倾向于"乐观报告"。把结果解析权交给系统，是把评估责任从"被评估者"移到"评估者"。
+1. 推送分支到 origin
+2. `verifyAC()` 客观校验：
+   - 分支相对 baseBranch 有 commit（不是空仓库）
+   - issue 有 AC 条目（labels 或 markdown）
+3. Agent 发 `ac_result` 信号作为**提示**，不是门控
+4. **Runner 自己做裁决**，把评估责任从"被评估者"移到"评估者"
+
+**为什么不信任 Agent 的 PASS/FAIL？**
+LLM 倾向于"乐观报告"。即使 Agent 写 `result: 'PASS'`，空仓库或无 AC 的 issue 仍会被 `verifyAC` 拦下。
+
+### AC 数据来源
+
+AC 支持两种格式，优先 labels：
+
+```yaml
+# 推荐: ac::1::... labels（结构化）
+labels:
+  - ac::1:: 用户能登录
+  - ac::2:: 看到欢迎页
+
+# 兼容: ## AC markdown section（best-effort 解析）
+description: |
+  ## AC
+  - [ ] 用户能登录
+  - [ ] 看到欢迎页
+```
 
 ### 重试机制
 
 ```mermaid
 flowchart TD
-    AC[AC FAIL] --> Inc[incrementRetryCount]
+    AC["verifyAC FAIL"] --> Inc[incrementRetryCount]
     Inc --> Check{retryCount > maxRetries?}
     Check -->|是| HITL["addLabel mode::hitl, addComment escalating"]
     Check -->|否| Kill[killSession 旧 session]
@@ -575,6 +634,14 @@ graph LR
 3. 添加对应的 handler 方法
 4. 更新 Agent skill 指令
 
+### 自定义 AC 来源
+
+AC 提取逻辑集中在 `src/lib/core/tracker/ac.ts`。要添加新来源（如 YAML 块、外部 AC 服务）：
+
+1. 在 `extractAC()` 中按优先级添加新的提取函数
+2. 返回 `{ items, source: 'your-source' }`
+3. 调用方无需改动
+
 ### 利用 statusline 数据做更智能决策
 
 statusline JSON 提供丰富会话元数据（token 用量、缓存命中率、成本、模型等）。除 context_high 外，未来可在这些场景用上：
@@ -600,7 +667,7 @@ RunnerOptions 支持 `customValidation` 等钩子，在 AC 检查前后插入自
 |------|------|--------|--------|
 | `.afk/worktrees.json` | Worktree 元数据 | WorktreeManager | WorktreeManager / CLI |
 | `<worktree>/.afk-signal.json` | 控制信号 | Agent | WorkflowRunner 轮询 |
-| `<worktree>/.afk/claude-status.json` | Claude statusline payload | statusline tee | Runner 按需（context_high 校验） |
+| `<worktree>/.afk/claude-status.json` | Claude statusline payload | statusline tee（首回合覆盖 placeholder） | Runner 按需（context_high 校验、prompt-ready 检测） |
 | `<worktree>/.afk/CRASHED` | 异常退出标记 | watchdog | WorktreeManager |
 | `<worktree>/.afk/SUCCESS` | 成功完成标记 | workflow 结束 | WorktreeManager |
 | `<worktree>/.claude/settings.json` | 自动注入的 statusline 配置 | configureStatusline | Claude Code |
@@ -616,7 +683,9 @@ RunnerOptions 支持 `customValidation` 等钩子，在 AC 检查前后插入自
 
 ### Q: AC 一直失败
 
-检查 Issue 描述中的 AC 是否清晰、机器可验证。模糊的 AC（如"代码质量好"）会导致 agent 反复猜测。
+两种情况：
+1. **AC 解析失败**：检查 issue 是否含 `ac::1::...` label 或 `## AC` markdown 章节
+2. **verifyAC 失败**：分支相对 baseBranch 必须有 commit；空仓库会被拦下
 
 ### Q: Worktree 占用空间
 

@@ -110,6 +110,8 @@ export interface TrackedMR {
   pipeline?: { status: string };  // GitLab only
 }
 
+import type { ACItem } from './ac';
+
 /**
  * Acceptance Criteria.
  *
@@ -118,7 +120,7 @@ export interface TrackedMR {
  * from the structured label path or the legacy markdown parser.
  */
 export interface AcceptanceCriteria {
-  items: string[];
+  items: ACItem[];
   source: 'labels' | 'legacy' | 'none';
 }
 

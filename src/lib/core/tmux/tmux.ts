@@ -213,17 +213,31 @@ export class TmuxClient {
   }
 
   /**
-   * Send /resume with AC check
+   * Send /resume with AC check.
+   *
+   * Receives structured AC items; sends both human-readable AC text and
+   * (when present) the machine-checkable command so the agent can run it
+   * and capture evidence rather than self-reporting.
    */
-  async sendResumeWithAC(session: string, window: string, acItems: string[]): Promise<void> {
+  async sendResumeWithAC(
+    session: string,
+    window: string,
+    acItems: Array<{ index: number; text: string; evidenceType?: string; checkCommand?: string }>,
+  ): Promise<void> {
     await this.sendKeys(session, window, '/resume');
     await this.sleep(300);
-    await this.sendKeys(session, window, '请运行以下验收条件（AC）检查，完成后创建信号文件：');
+    await this.sendKeys(session, window, '请运行以下验收条件（AC）检查。每条 AC 都附有可执行命令，运行命令并把输出写入证据：');
     await this.sendKeys(session, window, 'cat > .afk-signal.json <<EOF');
-    await this.sendKeys(session, window, `{"type":"ac_result","result":"PASS或FAIL","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","summary":"<检查总结>"}`);
+    await this.sendKeys(session, window, `{"type":"ac_result","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","summary":"<检查总结>"}`);
     await this.sendKeys(session, window, 'EOF');
     for (const item of acItems) {
-      await this.sendKeys(session, window, item);
+      const header = item.evidenceType && item.evidenceType !== 'none'
+        ? `AC ${item.index} [${item.evidenceType}]: ${item.text}`
+        : `AC ${item.index}: ${item.text}`;
+      await this.sendKeys(session, window, header);
+      if (item.checkCommand) {
+        await this.sendKeys(session, window, `  $ ${item.checkCommand}`);
+      }
       await this.sleep(100);
     }
   }

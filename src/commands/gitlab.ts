@@ -204,8 +204,11 @@ export function registerGitLabCommands(program: Command): void {
         } else {
           console.log(chalk.bold(`Acceptance Criteria ${sourceHint}:`));
           console.log();
-          ac.items.forEach((item, i) => {
-            console.log(`  ${i + 1}. ${item}`);
+          ac.items.forEach((item) => {
+            const evidence = item.evidenceType !== 'none'
+              ? `  [${item.evidenceType}] ${item.checkCommand}`
+              : '';
+            console.log(`  ${item.index}. ${item.text}${evidence}`);
           });
         }
       } catch (error) {

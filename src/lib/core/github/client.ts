@@ -84,8 +84,16 @@ export class GitHubClient implements TrackerProvider {
       labels: options.labels?.join(','),
       per_page: options.perPage || 100,
     });
+    // GitHub's `labels` query param is OR semantics (any label matches).
+    // Enforce AND client-side so callers can require multiple labels.
+    const required = options.labels ?? [];
     return data
       .filter(issue => !('pull_request' in issue)) // filter out PRs
+      .filter(issue => {
+        if (required.length === 0) return true;
+        const names = issue.labels.map(l => (typeof l === 'string' ? l : (l.name || '')));
+        return required.every(r => names.includes(r));
+      })
       .map(issue => ({
         id: issue.number,
         platform: 'github' as const,

@@ -252,6 +252,54 @@ export function registerSchedulerCommands(program: Command): void {
     });
 
   /**
+   * dlq command — list failed jobs (dead letter queue)
+   */
+  scheduler
+    .command('dlq')
+    .description('List failed jobs with iid, failure count, and last error')
+    .option('--redis-host <host>', 'Redis host')
+    .option('--redis-port <port>', 'Redis port')
+    .action(async (options) => {
+      try {
+        const tracker = await createTrackerClient();
+        const sched = new Scheduler(tracker, {
+          ...redisOpts(options),
+        });
+
+        const failedJobs = await sched.getFailedJobs();
+
+        if (failedJobs.length === 0) {
+          console.log(chalk.gray('  No failed jobs in queue.'));
+          await sched.stop();
+          return;
+        }
+
+        console.log(chalk.bold(`\n📋 Failed Jobs (${failedJobs.length}):\n`));
+        console.log(
+          chalk.gray('  IID   ') +
+          chalk.gray('Fails  ') +
+          chalk.gray('Last Error')
+        );
+        console.log(chalk.gray('  ' + '─'.repeat(70)));
+
+        for (const job of failedJobs) {
+          const err = job.failedReason ?? 'unknown';
+          const truncated = err.length > 60 ? err.slice(0, 60) + '…' : err;
+          console.log(
+            `  ${chalk.red(String(job.iid).padEnd(6))}` +
+            `${chalk.yellow(String(job.attemptsMade).padEnd(6))}` +
+            chalk.dim(truncated)
+          );
+        }
+        console.log();
+
+        await sched.stop();
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
    * run command — wave-based parallel execution with worktree isolation
    */
   scheduler
@@ -316,8 +364,9 @@ export function registerSchedulerCommands(program: Command): void {
             if ((inDegree.get(id) ?? 0) === 0) wave.push(id);
           }
           if (wave.length === 0) {
-            console.warn(chalk.yellow(`⚠️  Cycle detected, remaining issues will run in final wave`));
-            waves.push([...allIds]);
+            const cyclicIds = [...allIds];
+            console.warn(chalk.yellow(`⚠️  Cycle detected in DAG — involved issues: ${cyclicIds.join(', ')}`));
+            waves.push(cyclicIds);
             break;
           }
           waves.push(wave);

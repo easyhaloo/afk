@@ -151,6 +151,18 @@ export class Scheduler {
   }
 
   /**
+   * Get failed jobs (dead letter queue)
+   */
+  async getFailedJobs(): Promise<Array<{ iid: number; attemptsMade: number; failedReason: string | null }>> {
+    const jobs = await this.queue.getJobs(['failed']);
+    return jobs.map(job => ({
+      iid: job.data.iid,
+      attemptsMade: job.attemptsMade,
+      failedReason: job.failedReason,
+    }));
+  }
+
+  /**
    * Get scheduler status
    */
   async getStatus(): Promise<SchedulerStatus> {

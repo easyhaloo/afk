@@ -80,7 +80,7 @@ export class WorkflowRunner {
       );
     }
 
-    const goalText = ac.items.map((item, idx) => `${idx + 1}. ${item}`).join('\n');
+    const goalText = ac.items.map((item) => `${item.index}. ${item.text}`).join('\n');
     const traceId = `trace-${Date.now()}-${iid}`;
 
     // ── Step 2: Create worktree ─────────────────────────────────────────────

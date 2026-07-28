@@ -39,8 +39,9 @@ export function parseACLabel(label: string): { index: number; text: string } | n
 /**
  * Extract AC items from issue labels.
  * Returns items sorted by index. Empty array if no AC labels.
+ * Label-based AC has no evidence fields (evidenceType='none').
  */
-export function extractACFromLabels(labels: readonly string[]): string[] {
+export function extractACFromLabels(labels: readonly string[]): ACItem[] {
   const items = new Map<number, string>();
   for (const label of labels) {
     const parsed = parseACLabel(label);
@@ -48,26 +49,70 @@ export function extractACFromLabels(labels: readonly string[]): string[] {
   }
   return Array.from(items.entries())
     .sort(([a], [b]) => a - b)
-    .map(([, text]) => text);
+    .map(([index, text]): ACItem => ({
+      index,
+      text,
+      evidenceType: 'none',
+      checkCommand: '',
+    }));
+}
+
+/** Controlled evidence types per docs/ISSUE-TEMPLATE.md */
+export const EVIDENCE_TYPES = ['test', 'curl', 'log', 'manual', 'none'] as const;
+export type EvidenceType = typeof EVIDENCE_TYPES[number];
+
+/**
+ * Parsed AC item. `text` is the human-readable condition; `evidenceType`
+ * and `checkCommand` enable machine verification.
+ */
+export interface ACItem {
+  index: number;
+  text: string;
+  evidenceType: EvidenceType;
+  checkCommand: string;
 }
 
 /**
- * Extract AC items from issue description markdown (legacy path).
- * Best-effort parsing of `## AC` / `## Acceptance Criteria` sections
- * with `- [ ] item` lists. Returns null if no AC section found.
+ * Extract AC items from issue description markdown.
+ *
+ * Supports both:
+ *   - Authoritative 3-field format: `- [ ] <text> -- <type> -- <command>`
+ *     (see docs/ISSUE-TEMPLATE.md)
+ *   - Legacy simple format: `- [ ] <text>` (best-effort; evidenceType=none,
+ *     checkCommand=empty)
+ *
+ * Returns null if no AC section found.
  */
-export function parseACLegacy(description: string): string[] | null {
+export function parseACLegacy(description: string): ACItem[] | null {
   const acMatch = description.match(
-    /##\s*(?:AC|Acceptance Criteria)\s*\n([\s\S]*?)(?=\n##\s|\n#\s|$)/i
+    /##\s*(?:AC|Acceptance Criteria)(?:\s*\([^)]+\))?\s*\n([\s\S]*?)(?=\n##\s|\n#\s|$)/i
   );
   if (!acMatch) return null;
 
   const acText = acMatch[1].trim();
-  const items: string[] = [];
-  const itemRegex = /^[-*]\s+\[\s*\]\s+(.+)$/gm;
+  const items: ACItem[] = [];
+  const itemRegex = /^[-*]\s+\[\s\]\s+(.+)$/gm;
   let match: RegExpExecArray | null;
+  let idx = 1;
   while ((match = itemRegex.exec(acText)) !== null) {
-    items.push(match[1].trim());
+    const raw = match[1].trim();
+    const parts = raw.split(/\s+--\s+/);
+    if (parts.length === 3 && (EVIDENCE_TYPES as readonly string[]).includes(parts[1])) {
+      items.push({
+        index: idx++,
+        text: parts[0],
+        evidenceType: parts[1] as EvidenceType,
+        checkCommand: parts[2],
+      });
+    } else {
+      // Legacy: just text, no evidence fields
+      items.push({
+        index: idx++,
+        text: raw,
+        evidenceType: 'none',
+        checkCommand: '',
+      });
+    }
   }
   return items.length > 0 ? items : null;
 }
@@ -77,7 +122,7 @@ export function parseACLegacy(description: string): string[] | null {
  * Returns { items, source } so callers can tell which path produced the result.
  */
 export function extractAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): {
-  items: string[];
+  items: ACItem[];
   source: 'labels' | 'legacy' | 'none';
 } {
   const labelItems = extractACFromLabels(issue.labels);

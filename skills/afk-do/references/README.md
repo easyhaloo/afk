@@ -1,5 +1,9 @@
 # Methodology Reference
 
+> **Sync note:** this directory mirrors `afk-implement/references/` —
+> both skills use the same methodology (TDD feature/refactor/hotfix/spike).
+> When updating methodology, update both directories in the same commit.
+
 Every AFK run starts by identifying the task type, then loading the
 corresponding reference document. Read this file first to pick the right
 mode.

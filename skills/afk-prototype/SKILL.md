@@ -15,12 +15,19 @@ disallowed-tools: >-
 **Goal:** prove the riskiest part end-to-end, thin but through every
 touched layer — not a complete feature.
 **Mode:** HITL-led — human steers in-session; agent executes each step.
-**Contract:** approved `CONTEXT.md` → draft MR (spike, unmerged) + findings.
+**Contract:** aligned requirements (any format) → draft MR (spike, unmerged) + findings.
 
 ## Preconditions
 
-An approved `CONTEXT.md` exists. Missing: STOP — requirements must be
-aligned before this phase runs.
+The caller has a **technical question to validate** with a defined
+target outcome. Required inputs (any format):
+
+- The question being answered (e.g. "does X work with Y?")
+- The success criterion (e.g. "Y accepts X and returns Z")
+- Target branch for the spike MR
+
+If requirements aren't aligned yet, STOP — the caller should clarify
+intent first via whatever interview process they use.
 
 ## Time-boxing & disposal
 

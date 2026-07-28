@@ -43,7 +43,7 @@ Wave 3 (after wave 2): #5   — blocked by #4
 
 1. `glab` is authenticated.
 2. At least one open issue with `mode::afk` and `stage::ready-for-issues`.
-3. `afk-implement` is available.
+3. The `afk scheduler poll` command is available (ships with this skill).
 
 ## Auto Mode (`/afk-scheduler auto`)
 

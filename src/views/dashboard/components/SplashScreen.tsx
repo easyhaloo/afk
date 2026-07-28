@@ -119,7 +119,10 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
             <Text key={phase.key} dimColor={opacity < 0.7} color={phase.done ? 'green' : phase.error ? 'red' : undefined}>
               {phase.done
                 ? (phase.error ? '✗' : '✓')
-                : ' '} {phase.label}
+                : phase.icon} {phase.label}
+              {phase.detail && (
+                <Text dimColor> — {phase.detail}</Text>
+              )}
               {phase.error && <Text color="red"> — {phase.error}</Text>}
             </Text>
           ))}

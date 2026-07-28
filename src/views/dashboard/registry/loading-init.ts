@@ -6,7 +6,6 @@
  */
 import { LoadingPhaseRegistry } from './loading';
 import { fetchTasks, fetchSessions } from '../data/fetcher';
-import { getGitLabConfig } from '../../../lib/core/config/manager';
 
 export function registerAllLoadingPhases(): void {
   const registry = LoadingPhaseRegistry.getInstance();
@@ -15,13 +14,15 @@ export function registerAllLoadingPhases(): void {
     key: 'config',
     label: 'Loading configuration...',
     icon: '⚙',
-    fetch: async () => {
-      // Configuration is lazy-loaded on first access.
-      // Touch the config to load it during splash.
+    fetch: async (setDetail) => {
+      const { getGitLabConfig } = await import('../../../lib/core/config/manager');
       try {
-        getGitLabConfig();
+        const config = getGitLabConfig();
+        setDetail('config', `${config.url || 'default'}`);
+        return `${config.url || 'default'}`;
       } catch {
-        // Config may fail if not configured yet — that's ok
+        setDetail('config', 'using defaults');
+        return 'using defaults';
       }
     },
   });
@@ -30,10 +31,11 @@ export function registerAllLoadingPhases(): void {
     key: 'detect',
     label: 'Detecting platform...',
     icon: '🔍',
-    fetch: async () => {
-      // Platform detection from git remote
-      const { detectPlatform } = await import('../../../lib/core/tracker/detect');
-      await detectPlatform();
+    fetch: async (setDetail) => {
+      const { detectPlatform, detectProject } = await import('../../../lib/core/tracker/detect');
+      const { platform, projectId } = await detectProject();
+      setDetail('detect', `${platform}: ${projectId}`);
+      return `${platform}: ${projectId}`;
     },
   });
 
@@ -41,12 +43,12 @@ export function registerAllLoadingPhases(): void {
     key: 'connect',
     label: 'Connecting to tracker...',
     icon: '🔗',
-    fetch: async () => {
-      // Create tracker client and verify connectivity
+    fetch: async (setDetail) => {
       const { createTrackerClient } = await import('../../../lib/client-factory');
       const tracker = await createTrackerClient();
-      // Verify by listing projects (lightweight call)
-      await tracker.listProjects({ perPage: 1 });
+      const projects = await tracker.listProjects({ perPage: 1 });
+      setDetail('connect', tracker.platform);
+      return tracker.platform;
     },
   });
 
@@ -54,8 +56,10 @@ export function registerAllLoadingPhases(): void {
     key: 'tasks',
     label: 'Loading tasks...',
     icon: '●',
-    fetch: async () => {
-      await fetchTasks();
+    fetch: async (setDetail) => {
+      const { active, completed } = await fetchTasks();
+      setDetail('tasks', `${active.length} active, ${completed.length} done`);
+      return `${active.length} active, ${completed.length} done`;
     },
   });
 
@@ -63,8 +67,10 @@ export function registerAllLoadingPhases(): void {
     key: 'sessions',
     label: 'Loading sessions...',
     icon: '○',
-    fetch: async () => {
-      await fetchSessions();
+    fetch: async (setDetail) => {
+      const sessions = await fetchSessions();
+      setDetail('sessions', `${sessions.length} sessions`);
+      return `${sessions.length} sessions`;
     },
   });
 

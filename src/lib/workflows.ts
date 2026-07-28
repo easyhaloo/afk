@@ -66,8 +66,29 @@ export class WorkflowRunner {
       completionTimeoutMs = TIMEOUTS.WORKFLOW_COMPLETION_TIMEOUT,
     } = options;
 
-    // Auto-detect platform only if not provided and will be used
-    const platform = options.platform;
+    let succeeded = false;
+    try {
+      const result = await this.runBody(options, {
+        iid, session, targetBranch, baseBranch,
+        maxRetries, hardTimeoutMs, completionTimeoutMs,
+      });
+      succeeded = result.success;
+      return result;
+    } finally {
+      // Cleanup: force=true on failure (worktree may be dirty), force=false on success
+      await this.worktree.cleanup(iid, !succeeded);
+    }
+  }
+
+  private async runBody(
+    options: RunnerOptions,
+    ctx: {
+      iid: number; session: string; targetBranch: string;
+      baseBranch: string; maxRetries: number;
+      hardTimeoutMs: number; completionTimeoutMs: number;
+    }
+  ): Promise<{ success: boolean; url?: string }> {
+    const { iid, session, targetBranch, baseBranch, maxRetries, hardTimeoutMs, completionTimeoutMs } = ctx;
 
     // ── Step 1: Fetch issue + AC ────────────────────────────────────────────
     const issue = await this.tracker.getIssue(iid);
@@ -85,8 +106,6 @@ export class WorkflowRunner {
     // ── Step 2: Create worktree ─────────────────────────────────────────────
     const wt = await this.worktree.create(iid, baseBranch);
     await this.worktree.updateStatus(iid, 'active');
-    // Configure statusline so token counts are written to .afk/claude-status.json
-    // for objective context_high verification.
     await configureStatusline(wt.path);
 
     // ── Step 3: Launch tmux session + inject /goal ──────────────────────────
@@ -144,8 +163,6 @@ export class WorkflowRunner {
         return this.handleTimeout(iid, wt.path, session, hardTimeoutMs);
 
       case 'context_high':
-        // Verify objectively: ignore signal if pane-reported tokens are below threshold.
-        // The agent only acts as a trigger; the Runner judges.
         return this.verifyAndHandoff(iid, wt.path, session);
 
       default:

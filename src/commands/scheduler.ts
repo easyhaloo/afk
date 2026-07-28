@@ -1,7 +1,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { cpus } from 'os';
 import { createTrackerClient } from '../lib/client-factory';
 import { Scheduler } from '../lib/scheduler';
+import { WorkflowRunner } from '../lib/workflows';
 import { getSchedulerConfig } from '../lib/config-manager';
 import { handleCommandError } from '../lib/cli-utils';
 
@@ -244,6 +246,132 @@ export function registerSchedulerCommands(program: Command): void {
         console.log(chalk.green(`✅ Polling complete (${enqueued} tasks enqueued)`));
 
         await sched.stop();
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * run command — wave-based parallel execution with worktree isolation
+   */
+  scheduler
+    .command('run')
+    .description('Scan ready issues, build DAG, execute wave-by-wave with worktree isolation')
+    .option('--concurrency <n>', 'Max parallel jobs per wave (default: CPU cores - 1)', parseInt)
+    .option('--redis-host <host>', 'Redis host')
+    .option('--redis-port <port>', 'Redis port')
+    .action(async (options) => {
+      try {
+        const tracker = await createTrackerClient();
+        const cfg = getSchedulerConfig();
+        const concurrency = options.concurrency ?? (cpus().length - 1);
+
+        console.log(chalk.bold('\n🔍 Scanning for ready issues...\n'));
+
+        // Fetch all ready issues (mode::afk + stage::ready-for-issues)
+        const issues = await tracker.listIssues({
+          labels: cfg.requiredLabels,
+          state: 'opened',
+        });
+
+        if (issues.length === 0) {
+          console.log(chalk.gray('  No ready issues found.'));
+          return;
+        }
+
+        console.log(chalk.gray(`  Found ${issues.length} ready issues`));
+
+        // Build DAG from blocks-<iid> labels
+        // label "blocks-X" on issue A means A blocks issue X (X depends on A)
+        type IssueId = number;
+        const blocksForward = new Map<IssueId, IssueId[]>();
+        const inDegree = new Map<IssueId, number>();
+        const allIds = new Set<IssueId>();
+
+        for (const issue of issues) {
+          allIds.add(issue.id);
+          inDegree.set(issue.id, 0);
+        }
+
+        for (const issue of issues) {
+          for (const label of issue.labels) {
+            const match = label.match(/^blocks-(\d+)$/);
+            if (match) {
+              const blocked = parseInt(match[1], 10);
+              if (allIds.has(blocked)) {
+                const existing = blocksForward.get(issue.id) ?? [];
+                existing.push(blocked);
+                blocksForward.set(issue.id, existing);
+                inDegree.set(blocked, (inDegree.get(blocked) ?? 0) + 1);
+              }
+            }
+          }
+        }
+
+        // Kahn's algorithm — group into waves
+        const waves: IssueId[][] = [];
+        while (allIds.size > 0) {
+          const wave: IssueId[] = [];
+          for (const id of allIds) {
+            if ((inDegree.get(id) ?? 0) === 0) wave.push(id);
+          }
+          if (wave.length === 0) {
+            console.warn(chalk.yellow(`⚠️  Cycle detected, remaining issues will run in final wave`));
+            waves.push([...allIds]);
+            break;
+          }
+          waves.push(wave);
+          for (const id of wave) {
+            allIds.delete(id);
+            for (const blocked of blocksForward.get(id) ?? []) {
+              if (allIds.has(blocked)) {
+                inDegree.set(blocked, (inDegree.get(blocked) ?? 0) - 1);
+              }
+            }
+          }
+        }
+
+        console.log(chalk.gray(`  Built ${waves.length} wave(s) from blocks- labels\n`));
+
+        // Execute wave by wave
+        let totalProcessed = 0;
+        for (let w = 0; w < waves.length; w++) {
+          const wave = waves[w];
+          console.log(chalk.bold(`\n📦 Wave ${w + 1}/${waves.length} (${wave.length} issues, concurrency: ${concurrency})\n`));
+
+          let idx = 0;
+
+          const processNext = async () => {
+            const runner = new WorkflowRunner(tracker);
+            while (idx < wave.length) {
+              const currentIdx = idx++;
+              const iid = wave[currentIdx];
+              try {
+                console.log(chalk.cyan(`  [${currentIdx + 1}/${wave.length}] Starting #${iid}...`));
+                const result = await runner.run({
+                  iid,
+                  session: `afk-${iid}`,
+                  targetBranch: process.env.AFK_TARGET_BRANCH || 'main',
+                });
+                console.log(result.success
+                  ? chalk.green(`  ✅ #${iid} completed`)
+                  : chalk.yellow(`  ⚠️  #${iid} did not complete successfully`));
+                totalProcessed++;
+              } catch (err) {
+                console.error(chalk.red(`  ❌ #${iid} failed: ${(err as Error).message}`));
+                totalProcessed++;
+              }
+            }
+          };
+
+          const workers: Promise<void>[] = [];
+          for (let w = 0; w < Math.min(concurrency, wave.length); w++) {
+            workers.push(processNext());
+          }
+          await Promise.all(workers);
+        }
+
+        console.log(chalk.green(`\n✅ Scheduler run complete (${totalProcessed} issues processed)\n`));
       } catch (error) {
         handleCommandError(error);
       }

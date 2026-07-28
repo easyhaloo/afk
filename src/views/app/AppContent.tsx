@@ -311,7 +311,7 @@ export function AppContent({
   })();
 
   if (showSplash) {
-    return <SplashScreen onComplete={() => { setShowSplash(false); setFadeInMain(true); }} duration={2500} />;
+    return <SplashScreen onComplete={() => { setShowSplash(false); setFadeInMain(true); }} phases={[]} />;
   }
 
   return (

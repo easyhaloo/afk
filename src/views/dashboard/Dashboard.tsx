@@ -434,7 +434,7 @@ export const Dashboard: React.FC = () => {
     <SplashScreen onComplete={() => {
       setShowSplash(false);
       setFadeInMain(true);
-    }} duration={2500} />
+    }} phases={[]} />
   ) : (
     <Box flexDirection="column" height={H}>
       {isDetailMode ? (

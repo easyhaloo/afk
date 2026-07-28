@@ -3,6 +3,8 @@ name: afk-to-issues
 description: >-
   Decompose requirements into GitLab issues with machine-checkable AC.
   PRD Mode (full fidelity) or Direct Mode (any requirement context).
+  Reads codebase to infer how each Observable Behavior should be
+  verified (test runner, HTTP endpoint, log location, file path).
 disallowed-tools: >-
   Bash(glab mr merge*) Bash(glab issue delete*) Bash(glab mr delete*)
   Bash(glab repo delete*) Bash(git push -f) Bash(git reset --hard*)
@@ -32,55 +34,53 @@ disallowed-tools: >-
 
 | Mode | Input | Path |
 |------|-------|------|
-| PRD Mode | `PRD.md` + `## Bounded Contexts` | Full fidelity |
-| Direct Mode | Any requirement context | Always available — MUST NOT skip |
+| PRD Mode | `PRD.md` User Stories → Observable Behavior list | Full fidelity |
+| Direct Mode | Any requirement context (free text / notes / chat) | Always available — MUST NOT skip |
 
-## Bounded Context Inference (Direct Mode)
+## Verification Inference
 
-1. Identify distinct domain areas and independently-changeable concerns
-2. Group related changes under one context; unclear → use `core`, `api`, `ui`
-3. Single-issue contexts may merge into adjacent ones
+For each Observable Behavior (or each requirement clause in Direct Mode),
+read the codebase to infer:
 
-## Slicing Rules (both strategies)
+1. **What proves the behavior** — locate:
+   - Which test runner owns this layer (jest / vitest / mocha / pytest)
+   - Which HTTP route handles this request
+   - Which log line format this worker emits
+   - Which file path / module name holds this state
+2. **What `evidence_type` fits** — controlled vocabulary in
+   `references/issue-template.md`: `test` | `curl` | `log` | `manual` | `none`
+3. **What `check_command` exits 0 on PASS** — concrete shell snippet
+
+Allowed tools: Read, Grep, Bash (read-only: ls, cat, grep, jq, find,
+`glab issue list`, `glab mr list`). No mutating commands, no push, no delete.
+
+If the codebase gives no signal for a behavior, default to `manual`
+and flag it in the issue body as "needs automated check".
+
+## Slicing Rules
 
 - **Too big:** AC > ~5 lines, or touches > ~3 modules → split
 - **Too small:** no user-observable behavior → fold into caller or mark tech-debt
 - **Cycle check:** trace `blocked_by` graph; redraw boundaries if cyclic
 - **Direct Mode:** ask user to narrow if requirement too large
 
-## Issue Template
-
-The authoritative template is **`references/issue-template.md`** — read it
-before drafting any issue. Highlights:
-
-- AC items use the 3-field `--` format: `<text> -- <evidence_type> -- <check_command>`
-- `evidence_type` ∈ {test, curl, log, manual, none}
-- `check_command` must be a shell command that exits 0 on PASS
-- See references doc for full schema, examples, anti-patterns
-
 ## Steps
 
-1. **Path:** PRD + `## Bounded Contexts` → PRD Mode; else → Direct Mode
-2. **Gather:** Read PRD or requirement context; read `references/issue-template.md` for AC format
-3. **Infer & slice:** Analyze requirement → auto-select best-fit strategy → slice. Only ask user to choose if both Vertical and Horizontal are equally viable.
-4. **Quality gate:** every AC has `-- <type> -- <command>` and the command is runnable
-5. **Create:**
-   - PRD Mode: `base::prd-<iid>`
-   - Direct Mode: `base::direct`
-   - Both: `stage::ready-for-issues,<mode>`
-   - DAG via `afk gitlab link-issues <source-iid> <target-iid>`
-6. **HITL gate:** show issue list + DAG; get approval before creating any
+1. **Read inputs:** PRD or requirement context; read `references/issue-template.md` for AC schema
+2. **Infer & slice:** read codebase → pick evidence_type per behavior → choose Vertical/Horizontal → slice
+3. **Quality gate:** every AC has `-- <type> -- <command>`, command is runnable, evidence_type in vocabulary
+4. **Create + HITL gate:** label with `stage::ready-for-issues,<mode>` + base, wire DAG via `afk gitlab link-issues`, get approval before creating any
 
 ## References
 
 | File | Read when |
 |------|-----------|
 | `references/issue-template.md` | Always — defines the AC schema you emit |
-| `references/ddd-slicing.md` | When slicing along bounded contexts |
 
 ## Anti-patterns
 
 - AC without `-- <evidence_type> -- <check_command>` suffix
+- `evidence_type` chosen without reading codebase (guessing is forbidden)
 - `evidence_type` outside the controlled vocabulary
 - `check_command` that doesn't exist or has no exit-code contract
 - `mode::afk` for cross-context or mid-flight product decisions

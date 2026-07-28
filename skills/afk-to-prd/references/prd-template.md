@@ -3,8 +3,8 @@
 > The authoritative structure for AFK PRDs.
 > Audience: LLM agents synthesizing PRDs, NOT human readers.
 >
-> Optimize for: stable token structure, parseable fields, AC that any
-> downstream consumer can directly lift into its own format.
+> Optimize for: stable token structure, parseable fields, behavior that
+> downstream issue creators can directly slice into machine-checkable AC.
 
 ## When to Use
 
@@ -41,10 +41,9 @@ Each story maps to one bounded context and produces one issue downstream.
 - **I want** <capability>
 - **So that** <outcome>
 
-**Acceptance Criteria** (3-field format — same as issue template):
-
-- [ ] <text> -- <evidence_type> -- <check_command>
-- [ ] <text> -- <evidence_type> -- <check_command>
+**Observable Behavior:**
+- <user-visible behavior that can be observed from outside the system>
+- <boundary condition, edge case, error path>
 
 **Out of Scope** (this story):
 - <item>
@@ -107,37 +106,33 @@ Each story block:
 - **I want** <capability>
 - **So that** <outcome>
 
-**Acceptance Criteria** (3-field format):
-- [ ] <text> -- <evidence_type> -- <check_command>
+**Observable Behavior:**
+- <user-visible behavior observable from outside the system>
+- <boundary condition>
 
 **Out of Scope** (this story):
 - <item>
 ```
 
-### Acceptance Criteria — 3-field format
+### Observable Behavior — what to write
 
-Use the **3-field `--` format** so any downstream consumer (issue
-creator, MR reviewer, autonomous implementer) can parse without
-guessing. Field semantics:
+Each behavior must be:
+- **User-observable** — visible from outside the system (HTTP response, UI state, log line, file content, CLI output). Not "code is clean" or "module structure is right".
+- **Bounded** — single concrete outcome, not "and also...".
+- **Falsifiable** — someone can point at shipped behavior and say yes/no.
 
-| Field | Controlled vocabulary |
-|-------|----------------------|
-| `evidence_type` | `test` \| `curl` \| `log` \| `manual` \| `none` |
-| `check_command` | shell command, exit 0 = PASS |
-
-Any consumer that needs to slice story AC into its own structure
-should lift these fields directly with no rewriting.
+Do not write test commands or evidence types here — those belong to the
+issue template, generated downstream by reading the codebase.
 
 ## Story Granularity
 
-- **Too coarse:** story has > 5 AC items or touches > 3 contexts → split
-- **Too fine:** story has 0 AC items or no user-observable behavior → fold
-- **Default:** one context per story, 2-4 AC items per story
+- **Too coarse:** story has > 4 Observable Behaviors or touches > 1 bounded context → split
+- **Too fine:** story has 0 Observable Behaviors or no user-observable behavior → fold
+- **Default:** one context per story, 2-4 Observable Behaviors per story
 
 ## Anti-Patterns
 
-- AC items without `-- <type> -- <command>` (downstream can't parse)
-- `evidence_type` outside the controlled vocabulary
+- Observable Behaviors that are implementation details ("uses Redis", "calls `validateToken()`")
 - Stories that mix multiple bounded contexts (slicing target unclear)
 - Key Decisions that are actually open risks (undecided masquerading as decided)
 - Open Risks that are actually decided (decided masquerading as open)

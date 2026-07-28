@@ -1,7 +1,8 @@
 import { spawn } from 'child_process';
 import { Signal } from '../../schemas';
-import { readSignal } from '../io/signal';
+import { readSignal, readSignalSync } from '../io/signal';
 import { TIMEOUTS } from '../../constants';
+import { ControlModeConnection } from './control-mode';
 
 export interface TmuxSession {
   name: string;
@@ -17,9 +18,36 @@ export interface TmuxCaptureOptions {
 }
 
 /**
- * Tmux client wrapper for session management
+ * Tmux client wrapper for session management.
+ *
+ * Uses Control Mode (`tmux -CC`) for interactive operations (sendKeys, waitForSignal)
+ * to receive real-time events, and plain `exec()` for one-shot commands.
  */
 export class TmuxClient {
+  private controlMode: ControlModeConnection | null = null;
+  private currentSession: string | null = null;
+
+  /**
+   * Open a Control Mode connection to a session.
+   * Subsequent sendKeys will use this connection for event-driven output.
+   */
+  async openSession(session: string): Promise<void> {
+    this.closeSession();
+    this.controlMode = new ControlModeConnection({ session, pauseAfter: 1 });
+    this.currentSession = session;
+  }
+
+  /**
+   * Close the Control Mode connection.
+   */
+  closeSession(): void {
+    if (this.controlMode) {
+      this.controlMode.close();
+      this.controlMode = null;
+      this.currentSession = null;
+    }
+  }
+
   /**
    * Check if tmux is available
    */
@@ -137,14 +165,23 @@ export class TmuxClient {
   }
 
   /**
-   * Send keys to session
+   * Send keys to session.
+   * Uses Control Mode connection if open, otherwise falls back to exec.
+   * Auto-opens Control Mode on first use if not already connected.
    */
   async sendKeys(session: string, window: string, keys: string | string[]): Promise<void> {
     const target = `${session}:${window}`;
     const keyArray = Array.isArray(keys) ? keys : [keys];
+
+    // Auto-open Control Mode if not connected
+    if (!this.controlMode || this.currentSession !== session) {
+      await this.openSession(session);
+    }
+
+    // Use Control Mode for batched command sending
     for (const key of keyArray) {
-      await this.exec(['send-keys', '-t', target, '--', key]);
-      await this.exec(['send-keys', '-t', target, 'C-m']);
+      this.controlMode!.sendRawCommand(`send-keys -t ${target} -- ${key}`);
+      this.controlMode!.sendRawCommand('send-keys -t ' + target + ' C-m');
       await this.sleep(100);
     }
   }
@@ -227,7 +264,8 @@ export class TmuxClient {
   }
 
   /**
-   * Wait for signal file to appear
+   * Wait for signal file to appear.
+   * Uses Control Mode output events when connected, falls back to polling.
    */
   async waitForSignal(
     session: string,
@@ -236,6 +274,28 @@ export class TmuxClient {
     worktreeDir: string,
     timeout: number = 300000
   ): Promise<Signal | null> {
+    // Try Control Mode first if connected to this session
+    if (this.controlMode && this.currentSession === session) {
+      return new Promise<Signal | null>((resolve) => {
+        const outputHandler = (_pane: string, text: string) => {
+          // When we see the signal file written, resolve
+          const signal = readSignalSync(worktreeDir);
+          if (signal && signal.type === signalType) {
+            this.controlMode!.offOutput(outputHandler);
+            resolve(signal);
+          }
+        };
+        this.controlMode!.onOutput(outputHandler);
+
+        // Timeout fallback
+        const timer = setTimeout(() => {
+          this.controlMode!.offOutput(outputHandler);
+          resolve(null);
+        }, timeout);
+      });
+    }
+
+    // Fallback: filesystem polling
     const start = Date.now();
     while (Date.now() - start < timeout) {
       const signal = await readSignal(worktreeDir);

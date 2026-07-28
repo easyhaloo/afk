@@ -84,7 +84,8 @@ export class WorkflowRunner {
       succeeded = result.success;
       return result;
     } finally {
-      // Cleanup: force=true on failure (worktree may be dirty), force=false on success
+      // Cleanup: close Control Mode connection and worktree
+      await this.tmux.closeSession();
       await this.worktree.cleanup(iid, !succeeded);
     }
   }

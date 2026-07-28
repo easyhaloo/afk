@@ -1,4 +1,4 @@
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import { join } from 'path';
 import type { Signal } from '../../schemas.js';
 import { SignalSchema } from '../../schemas.js';
@@ -45,6 +45,20 @@ export async function readSignal(dir: string = process.cwd()): Promise<Signal | 
       return null;
     }
     throw error;
+  }
+}
+
+/**
+ * Synchronous read of signal file (used by Control Mode event handler).
+ */
+export function readSignalSync(dir: string = process.cwd()): Signal | null {
+  const signalPath = join(dir, SIGNAL_FILE);
+  try {
+    const content = readFileSync(signalPath, 'utf-8');
+    if (!content.trim()) return null;
+    return SignalSchema.parse(JSON.parse(content));
+  } catch {
+    return null;
   }
 }
 

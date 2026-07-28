@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Direct entry point for afk ui — renders Dashboard without Commander overhead.
+ * Direct entry point for afk ui — renders App without Commander overhead.
  * Run via: node dist/commands/dashboard-entry.js
  */
 import { render } from 'ink';
 import React from 'react';
-import { Dashboard } from '../views/dashboard/index.js';
+import { DashboardEntry } from '../views/app/index.js';
 
 export async function startDashboard() {
   if (!process.stdin.isTTY) {
@@ -16,7 +16,7 @@ export async function startDashboard() {
 
   process.stdout.write('\x1b[?1049h');
 
-  const { waitUntilExit } = render(React.createElement(Dashboard), {
+  const { waitUntilExit } = render(React.createElement(DashboardEntry), {
     exitOnCtrlC: true,
     patchConsole: false,
   });

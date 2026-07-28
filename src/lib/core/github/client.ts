@@ -13,6 +13,10 @@ import type {
   CloseMROptions,
   AcceptanceCriteria,
   LinkType,
+  Project,
+  Branch,
+  Tag,
+  Commit,
 } from '../tracker/types';
 import { extractAC } from '../tracker/ac';
 
@@ -314,6 +318,67 @@ export class GitHubClient implements TrackerProvider {
       pull_number: id,
       state: 'open',
     });
+  }
+
+  // ============ Projects ============
+
+  async listProjects(options: { page?: number; perPage?: number } = {}): Promise<Project[]> {
+    // GitHub doesn't have a concept of "projects" like GitLab
+    // Return the current repo as a single project
+    const oct = this.client;
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await oct.repos.get({ owner, repo });
+    return [{
+      id: data.id,
+      name: data.name,
+      path_with_namespace: data.full_name,
+      description: data.description || undefined,
+      default_branch: data.default_branch,
+      namespace: { name: data.owner.login },
+      last_activity_at: data.pushed_at || undefined,
+      web_url: data.html_url,
+    }];
+  }
+
+  async getBranches(projectId: number): Promise<Branch[]> {
+    const oct = this.client;
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await oct.repos.listBranches({ owner, repo, per_page: 100 });
+    return data.map(branch => {
+      // GitHub's list-branches commit object only has sha and url
+      // Cast to any to access the full commit object if available
+      const commit = branch.commit as any;
+      return {
+        name: branch.name,
+        commit: branch.commit.sha.substring(0, 8),
+        commit_title: '',
+        author: commit.author?.login || '',
+        committed_date: commit.commit?.author?.date || '',
+        protected: branch.protected,
+      };
+    });
+  }
+
+  async getTags(projectId: number): Promise<Tag[]> {
+    const oct = this.client;
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await oct.repos.listTags({ owner, repo, per_page: 20 });
+    return data.map(tag => ({
+      name: tag.name,
+      commit: tag.commit.sha.substring(0, 8),
+    }));
+  }
+
+  async getRecentCommits(projectId: number, perPage: number = 5): Promise<Commit[]> {
+    const oct = this.client;
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await oct.repos.listCommits({ owner, repo, per_page: perPage });
+    return data.map(commit => ({
+      id: commit.sha.substring(0, 8),
+      title: commit.commit.message.split('\n')[0],
+      author: commit.commit.author?.name || '',
+      committed_date: commit.commit.author?.date || '',
+    }));
   }
 
   // ============ Utility ============

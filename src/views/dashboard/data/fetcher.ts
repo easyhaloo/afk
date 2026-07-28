@@ -1,15 +1,11 @@
-import { Task, Issue, Project, TmuxSession } from '../../../types/dashboard';
+import { Task, Issue, TmuxSession } from '../../../types/dashboard';
 import { TaskService } from '../../../lib/tasks';
 import { TmuxClient } from '../../../lib/core/tmux/tmux';
-import { IssueService } from '../../../lib/issues';
-import { ProjectService } from '../../../lib/projects';
 import { createTrackerClient } from '../../../lib/client-factory';
-import type { TrackedIssue } from '../../../lib/core/tracker/types';
+import type { TrackedIssue, Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
 
 const taskService = new TaskService();
 const tmux = new TmuxClient();
-const issueService = new IssueService();
-const projectService = new ProjectService();
 
 /**
  * Convert TrackedIssue (platform-agnostic) to Issue (dashboard format).
@@ -39,7 +35,6 @@ export async function fetchSessions(): Promise<TmuxSession[]> {
 
 /**
  * Fetch issues using platform-agnostic TrackerProvider.
- * Falls back to IssueService (GitLab-only) if TrackerProvider is unavailable.
  */
 export async function fetchIssues(options: {
   projectId?: string | number;
@@ -48,33 +43,30 @@ export async function fetchIssues(options: {
   labels?: string[];
   state?: string;
 } = {}): Promise<{ issues: Issue[]; hasMore: boolean }> {
-  try {
-    const tracker = await createTrackerClient();
-    const issues = await tracker.listIssues({
-      labels: options.labels,
-      state: options.state as 'opened' | 'closed' | 'all' || 'opened',
-      perPage: options.perPage,
-    });
-    return {
-      issues: issues.map(toIssue),
-      hasMore: issues.length === (options.perPage || 20),
-    };
-  } catch {
-    // Fallback to IssueService (GitLab)
-    const result = await issueService.listIssues(
-      options.projectId,
-      options.page || 1,
-      options.perPage || 20,
-    );
-    return result;
-  }
+  const tracker = await createTrackerClient();
+  const issues = await tracker.listIssues({
+    labels: options.labels,
+    state: options.state as 'opened' | 'closed' | 'all' || 'opened',
+    perPage: options.perPage,
+  });
+  return {
+    issues: issues.map(toIssue),
+    hasMore: issues.length === (options.perPage || 20),
+  };
 }
 
-export async function fetchProjectDetail(projectId: number) {
+export async function fetchProjects(options: { page?: number; perPage?: number } = {}): Promise<{ projects: Project[]; hasMore: boolean }> {
+  const tracker = await createTrackerClient();
+  const projects = await tracker.listProjects({ page: options.page, perPage: options.perPage || 50 });
+  return { projects, hasMore: projects.length === (options.perPage || 50) };
+}
+
+export async function fetchProjectDetail(projectId: number): Promise<{ branches: Branch[]; tags: Tag[]; commits: Commit[] }> {
+  const tracker = await createTrackerClient();
   const [branches, tags, commits] = await Promise.all([
-    projectService.getBranches(projectId),
-    projectService.getTags(projectId),
-    projectService.getRecentCommits(projectId),
+    tracker.getBranches(projectId),
+    tracker.getTags(projectId),
+    tracker.getRecentCommits(projectId, 5),
   ]);
   return { branches, tags, commits };
 }
@@ -94,6 +86,3 @@ export async function createTaskFromIssue(issue: Issue, options: {
 export async function launchTask(iid: number, sessionName: string): Promise<void> {
   return taskService.launch(iid, sessionName);
 }
-
-// IssueService / ProjectService are used directly by useData for paginated calls.
-export { issueService, projectService };

@@ -14,6 +14,10 @@ import type {
   CloseMROptions,
   AcceptanceCriteria,
   LinkType,
+  Project,
+  Branch,
+  Tag,
+  Commit,
 } from '../tracker/types';
 import { extractAC } from '../tracker/ac';
 
@@ -377,5 +381,58 @@ export class GitLabClient implements TrackerProvider {
   async getMRPipelineStatus(mrIid: number): Promise<string> {
     const mr = await this.client.MergeRequests.show(this.projectId, mrIid) as any;
     return mr.head_pipeline?.status ?? 'unknown';
+  }
+
+  // ============ Projects ============
+
+  async listProjects(options: { page?: number; perPage?: number } = {}): Promise<Project[]> {
+    const items = await this.client.Projects.all({
+      membership: true,
+      page: options.page || 1,
+      perPage: options.perPage || 20,
+    }) as any[];
+    return items.map(project => ({
+      id: project.id,
+      name: project.name,
+      path_with_namespace: project.path_with_namespace,
+      description: project.description || undefined,
+      default_branch: project.default_branch,
+      namespace: { name: project.namespace?.name || '' },
+      last_activity_at: project.last_activity_at,
+      web_url: project.web_url,
+    }));
+  }
+
+  async getBranches(projectId: number): Promise<Branch[]> {
+    const branches = await this.client.Branches.all(projectId as string | number) as any[];
+    return branches.map(b => ({
+      name: b.name,
+      commit: b.commit?.id?.substring(0, 8) || '',
+      commit_title: b.commit?.title || '',
+      author: b.commit?.author_name || '',
+      committed_date: b.commit?.committed_date || '',
+      protected: b.protected || false,
+    }));
+  }
+
+  async getTags(projectId: number): Promise<Tag[]> {
+    const tags = await this.client.Tags.all(projectId as string | number, { perPage: 10 }) as any[];
+    return tags.map(t => ({
+      name: t.name,
+      commit: t.commit?.id?.substring(0, 8) || '',
+      commit_author: t.commit?.author_name || '',
+      commit_date: t.commit?.committed_date || '',
+      message: t.message || '',
+    }));
+  }
+
+  async getRecentCommits(projectId: number, perPage: number = 5): Promise<Commit[]> {
+    const commits = await this.client.Commits.all(projectId as string | number, { perPage }) as any[];
+    return commits.map(c => ({
+      id: c.id?.substring(0, 8) || '',
+      title: c.title || '',
+      author: c.author_name || '',
+      committed_date: c.committed_date || '',
+    }));
   }
 }

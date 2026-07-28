@@ -1,13 +1,29 @@
 import { Task, Issue, Project, TmuxSession } from '../../../types/dashboard';
 import { TaskService } from '../../../lib/tasks';
-import { SessionService } from '../../../lib/sessions';
+import { TmuxClient } from '../../../lib/core/tmux/tmux';
 import { IssueService } from '../../../lib/issues';
 import { ProjectService } from '../../../lib/projects';
+import { createTrackerClient } from '../../../lib/client-factory';
+import type { TrackedIssue } from '../../../lib/core/tracker/types';
 
 const taskService = new TaskService();
-const sessionService = new SessionService();
+const tmux = new TmuxClient();
 const issueService = new IssueService();
 const projectService = new ProjectService();
+
+/**
+ * Convert TrackedIssue (platform-agnostic) to Issue (dashboard format).
+ */
+function toIssue(t: TrackedIssue): Issue {
+  return {
+    iid: t.id,
+    title: t.title,
+    description: t.description,
+    labels: t.labels,
+    state: t.state,
+    web_url: t.url,
+  };
+}
 
 export async function fetchTasks(): Promise<{ active: Task[]; completed: Task[] }> {
   const data = await taskService.listTasks();
@@ -18,7 +34,40 @@ export async function fetchTasks(): Promise<{ active: Task[]; completed: Task[] 
 }
 
 export async function fetchSessions(): Promise<TmuxSession[]> {
-  return sessionService.listSessions();
+  return tmux.listSessions();
+}
+
+/**
+ * Fetch issues using platform-agnostic TrackerProvider.
+ * Falls back to IssueService (GitLab-only) if TrackerProvider is unavailable.
+ */
+export async function fetchIssues(options: {
+  projectId?: string | number;
+  page?: number;
+  perPage?: number;
+  labels?: string[];
+  state?: string;
+} = {}): Promise<{ issues: Issue[]; hasMore: boolean }> {
+  try {
+    const tracker = await createTrackerClient();
+    const issues = await tracker.listIssues({
+      labels: options.labels,
+      state: options.state as 'opened' | 'closed' | 'all' || 'opened',
+      perPage: options.perPage,
+    });
+    return {
+      issues: issues.map(toIssue),
+      hasMore: issues.length === (options.perPage || 20),
+    };
+  } catch {
+    // Fallback to IssueService (GitLab)
+    const result = await issueService.listIssues(
+      options.projectId,
+      options.page || 1,
+      options.perPage || 20,
+    );
+    return result;
+  }
 }
 
 export async function fetchProjectDetail(projectId: number) {
@@ -31,7 +80,7 @@ export async function fetchProjectDetail(projectId: number) {
 }
 
 export async function killSession(sessionName: string): Promise<void> {
-  return sessionService.killSession(sessionName);
+  return tmux.killSession(sessionName);
 }
 
 export async function createTaskFromIssue(issue: Issue, options: {

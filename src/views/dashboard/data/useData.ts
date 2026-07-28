@@ -5,6 +5,7 @@ import {
   fetchTasks,
   fetchSessions,
   fetchProjectDetail,
+  fetchIssues,
   killSession,
   createTaskFromIssue,
   launchTask,
@@ -94,7 +95,7 @@ export function useData(currentView: View, currentProject: Project | null) {
       (async () => {
         setLoading(true);
         try {
-          const data = await issueService.listIssues(currentProject?.id, pageToLoad, PER_PAGE);
+          const data = await fetchIssues({ projectId: currentProject?.id, page: pageToLoad, perPage: PER_PAGE });
           const nextIssues = (isProjectChanged || isFirstPageLoad) ? data.issues : mergeIssues(issues, data.issues);
           setIssues(nextIssues);
           setIssueHasMore(data.hasMore);
@@ -239,7 +240,7 @@ export function useData(currentView: View, currentProject: Project | null) {
     if (loading || !issueHasMore) return;
     setLoading(true);
     try {
-      const data = await issueService.listIssues(currentProject?.id, issuePage, PER_PAGE);
+      const data = await fetchIssues({ projectId: currentProject?.id, page: issuePage, perPage: PER_PAGE });
       let mergedItems: Issue[] = [];
       setIssues(prev => {
         mergedItems = mergeIssues(prev, data.issues);

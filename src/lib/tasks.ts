@@ -1,14 +1,14 @@
 import { Task } from '../types/dashboard';
-import { SessionService } from './sessions';
+import { TmuxClient } from './core/tmux/tmux';
 import { WorktreeManager } from './worktree';
 import type { Platform } from './core/tracker/types.js';
 
 export class TaskService {
-  private sessionService: SessionService;
+  private tmux: TmuxClient;
   private worktreeManager: WorktreeManager;
 
   constructor() {
-    this.sessionService = new SessionService();
+    this.tmux = new TmuxClient();
     this.worktreeManager = new WorktreeManager();
   }
 
@@ -64,7 +64,7 @@ export class TaskService {
   }
 
   async listTasks(): Promise<Task[]> {
-    const sessions = await this.sessionService.listSessions();
+    const sessions = await this.tmux.listSessions();
     const worktrees = await this.worktreeManager.list();
     const worktreeMap = new Map(worktrees.map(wt => [wt.iid, wt]));
 

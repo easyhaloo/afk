@@ -2,15 +2,15 @@
 
 > The authoritative structure for AFK PRDs.
 > Audience: LLM agents synthesizing PRDs, NOT human readers.
-> Downstream consumer: `afk-to-issues` slices PRD into issues.
 >
-> Optimize for: stable token structure, parseable fields, AC that
-> downstream can directly lift into issue template without rewrite.
+> Optimize for: stable token structure, parseable fields, AC that any
+> downstream consumer can directly lift into its own format.
 
 ## When to Use
 
-When synthesizing approved `CONTEXT.md` (from `afk-grill-me`) plus
-optional spike findings into a PRD for publication.
+When synthesizing any alignment record into a PRD for publication. The
+input format is the caller's choice — accept whatever was produced
+upstream.
 
 ## Structure
 
@@ -114,18 +114,19 @@ Each story block:
 - <item>
 ```
 
-### Acceptance Criteria — same schema as issue template
+### Acceptance Criteria — 3-field format
 
-Use the **identical 3-field `--` format** documented at the downstream
-consumer. Field semantics:
+Use the **3-field `--` format** so any downstream consumer (issue
+creator, MR reviewer, autonomous implementer) can parse without
+guessing. Field semantics:
 
 | Field | Controlled vocabulary |
 |-------|----------------------|
 | `evidence_type` | `test` \| `curl` \| `log` \| `manual` \| `none` |
 | `check_command` | shell command, exit 0 = PASS |
 
-The downstream `afk-to-issues` slices each story's AC list directly
-into the issue's AC field — keep format identical, no rewriting.
+Any consumer that needs to slice story AC into its own structure
+should lift these fields directly with no rewriting.
 
 ## Story Granularity
 

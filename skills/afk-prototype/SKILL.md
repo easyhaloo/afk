@@ -1,59 +1,50 @@
 ---
 name: afk-prototype
 description: >-
-  Use when requirements are confirmed but technical risk needs validation
-  before committing to full build. Time-boxed spike to prove feasibility.
-  Produces draft MR + findings report.
+  Generate product prototypes or technical spikes.
+  - product: HTML pages from vague requirements → iterate until confirmed
+  - spike: prove technical feasibility → draft MR + findings
 disallowed-tools: >-
-  Bash(afk mr merge*)
   Bash(glab mr merge*) Bash(glab issue delete*) Bash(glab mr delete*)
-  Bash(glab repo delete*) Bash(gh issue delete*) Bash(gh repo delete*)
-  Bash(git push -f)
+  Bash(glab repo delete*) Bash(gh pr merge*) Bash(gh issue delete*)
+  Bash(gh pr delete*) Bash(gh repo delete*) Bash(git push -f)
   Bash(git reset --hard*) Bash(git branch -D*)
 ---
 
-# Prototype / tracer bullet
+# Prototype
 
-**Goal:** prove the riskiest part end-to-end, thin but through every
-touched layer — not a complete feature.
-**Mode:** HITL-led — human steers in-session; agent executes each step.
-**Contract:** aligned requirements (any format) → draft MR (spike, unmerged) + findings.
+## product — want to see before building
 
-## Preconditions
+**When:** requirements are still vague; visual confirmation before docs/code.
 
-The caller has a **technical question to validate** with a defined
-target outcome. Required inputs (any format):
+**Output:** `docs/prototype/<slug>/` containing:
+- `index.html` (+ optional `page-*.html`)
+- `README.md`
 
-- The question being answered (e.g. "does X work with Y?")
-- The success criterion (e.g. "Y accepts X and returns Z")
-- Target branch for the spike MR
+**Steps:**
 
-If requirements aren't aligned yet, STOP — the caller should clarify
-intent first via whatever interview process they use.
+1. Ask: single page or multi-page flow? Style reference?
+2. Generate HTML (plain / React+Tailwind / Vue — match the ask)
+3. `open` the file or `npx serve` dir → browser auto-opens
+4. Human reviews → feedback → revise → re-open
+5. Repeat until confirmed, then capture screenshot(s)
 
-## Time-boxing & disposal
+---
 
-- **Default budget:** one working session (a few hours).
-- **Stop signal:** the instant the riskiest unknown has a concrete answer
-  (works / doesn't work / needs X), stop building.
-- **Disposal stance:** default to deleting the spike branch once findings
-  are captured. Keep only if the PRD needs to cite specific lines.
-- **Duplicate-effort check:** before branching, check for existing
-  `spike/*` branches or draft MRs touching the same area.
+## spike — prove technical risk
 
-## Steps
+**When:** requirements confirmed, tech approach unknown.
+
+**Precondition:** approved `CONTEXT.md` exists.
+
+**Output:** draft MR/PR + findings.
+
+**Steps:**
 
 1. `git checkout -b spike/<slug>`
-2. Build the smallest slice exercising the full path end to end.
-   Skip edge cases, error-handling polish, tests beyond confirming the approach.
-3. `git push -u origin spike/<slug>` then create a **Draft MR**:
-   ```bash
-   afk mr create --target-branch <target_branch> --draft --yes
-   ```
-4. Report: what worked, what surprised you, PRD implications.
-5. Gate: human decides when the spike has answered the open question.
+2. Build smallest end-to-end slice (no polish)
+3. `afk mr create "Spike: <desc>" --draft`
+4. Report findings: works / doesn't / needs X
+5. Gate: human decides when answered
 
-## Anti-patterns
-
-- MUST NOT let spike code become the real implementation.
-- MUST NOT skip this phase for real technical risk to save time.
+**Disposal:** delete branch after findings captured.

@@ -40,6 +40,7 @@ export function HelpDialog() {
         <Text color="gray">tasks:</Text>
       </Box>
       <Text color="white">  a - attach   K - kill</Text>
+      <Text color="white">  (detail: a to attach)</Text>
 
       <Box marginTop={1}>
         <Text color="gray">issues:</Text>

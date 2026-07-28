@@ -72,13 +72,23 @@ export const Dashboard: React.FC = () => {
   const addDebugLog = (msg: string) =>
     setDebugLog(prev => [...prev.slice(-20), `${new Date().toLocaleTimeString()} ${msg}`]);
 
+  // Refs to avoid stale closure in callbacks
+  const tasksRef = useRef<Task[]>([]);
+  const issuesRef = useRef<Issue[]>([]);
+  const projectsRef = useRef<Project[]>([]);
+  const completedTasksRef = useRef<Task[]>([]);
+  tasksRef.current = tasks;
+  issuesRef.current = issues;
+  projectsRef.current = projects;
+  completedTasksRef.current = completedTasks;
+
   // Derived
   const getItems = (): (Task | Issue | Project)[] => {
-    if (currentView === 'tasks') return tasks;
-    if (currentView === 'issues') return issues;
-    if (currentView === 'completed') return completedTasks;
-    if (currentView === 'board') return issues; // Board view uses issues
-    return projects;
+    if (currentView === 'tasks') return tasksRef.current;
+    if (currentView === 'issues') return issuesRef.current;
+    if (currentView === 'completed') return completedTasksRef.current;
+    if (currentView === 'board') return issuesRef.current; // Board view uses issues
+    return projectsRef.current;
   };
   itemsRef.current = getItems();
   const getItem = () => getItems()[selectedIndex];
@@ -125,18 +135,22 @@ export const Dashboard: React.FC = () => {
 
   // Handlers
   const handleAttachSession = useCallback(async () => {
-    if (currentView !== 'tasks') return;
     const task = getItem() as Task;
-    if (!task?.session) { notify('no session', 'warning'); return; }
+    // Derive session name - use ref-based getItems() to avoid stale closure
+    const sessionName = task?.session
+      || (task?.platform === 'github' ? `afk-gh-${task.iid}` : null)
+      || (task?.platform === 'gitlab' ? `afk-gl-${task.iid}` : null)
+      || (task?.iid ? `afk-gl-${task.iid}` : null);
+    if (!sessionName) { notify('no task selected', 'warning'); return; }
     try {
       const tmux = await createTmux();
       if (!tmux) { notify('tmux unavailable', 'error'); return; }
-      if (!await tmux.hasSession(task.session)) { notify(`session ${task.session} not found`, 'error'); return; }
+      if (!await tmux.hasSession(sessionName)) { notify(`session ${sessionName} not found`, 'error'); return; }
       exit();
       const { spawnSync, spawn } = require('child_process');
-      const result = spawnSync('tmux', ['attach-session', '-t', task.session], { stdio: 'inherit' });
+      const result = spawnSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit' });
       if (result.status === 0) {
-        console.log(`\n${figures.tick} detached from \x1b[37m${task.session}\x1b[0m`);
+        console.log(`\n${figures.tick} detached from \x1b[37m${sessionName}\x1b[0m`);
         console.log('returning to Dashboard...\n');
         await new Promise(r => setTimeout(r, 1000));
         spawn(process.argv[0], process.argv.slice(1), { stdio: 'inherit' });
@@ -273,6 +287,14 @@ export const Dashboard: React.FC = () => {
     return () => clearInterval(t);
   }, [isDetailMode]);
 
+  // Auto-select when there's only one item
+  useEffect(() => {
+    const items = getItems();
+    if (items.length === 1 && selectedIndex === 0) {
+      // Already selected, no-op
+    }
+  }, [tasks, issues, projects, completedTasks, selectedIndex]);
+
   // Debug logging
   useEffect(() => {
     if (!debugMode) return;
@@ -309,6 +331,7 @@ export const Dashboard: React.FC = () => {
     if (detailView === 'detail') {
       if (input === 'o') { handleOpenInBrowser(); return; }
       if (input === 'D' || input === 'd') { setDebugMode(d => { const n = !d; addDebugLog(`[DEBUG ${n ? 'ON' : 'OFF'}]`); return n; }); return; }
+      if (input === 'a' && currentView === 'tasks') { handleAttachSession(); return; }
       if (input === 'b') { setDetailView('list'); return; }
       if (input === 'i') {
         const project = getItem() as Project;
@@ -353,9 +376,9 @@ export const Dashboard: React.FC = () => {
     if (input === 'r') handleRefresh();
 
     if (currentView === 'tasks') {
-      if (input === 'a') handleAttachSession();
+      if (input === 'a' || input === 'A') handleAttachSession();
       if (input === 'k' || input === 'K') handleKillSession();
-      if (input === 'l') handleLaunch();
+      if (input === 'l' || input === 'L') handleLaunch();
     }
 
     if (currentView === 'issues') {

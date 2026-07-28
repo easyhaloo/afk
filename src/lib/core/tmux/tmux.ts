@@ -33,10 +33,12 @@ export class TmuxClient {
   }
 
   /**
-   * Create new tmux session
+   * Create new tmux session, replacing any existing session with the same name.
    */
-  async createSession(name: string, dir: string, command: string = 'claude'): Promise<TmuxSession> {
+  async createSession(name: string, dir: string, command: string = 'claude --dangerously-skip-permissions'): Promise<TmuxSession> {
     const window = 'main';
+    // Kill any existing session first to avoid "duplicate session" errors.
+    await this.killSession(name).catch(() => { /* ignore if not exists */ });
     await this.exec([
       'new-session',
       '-d',
@@ -45,6 +47,9 @@ export class TmuxClient {
       '-c', dir,
       command,
     ]);
+    // Bypass the workspace trust dialog by auto-confirming.
+    await this.sleep(2000);
+    await this.exec(['send-keys', '-t', `${name}:${window}`, '--', 'Enter']);
     return { name, window, dir };
   }
 
@@ -141,7 +146,7 @@ export class TmuxClient {
   }
 
   /**
-   * Send /goal command with text
+   * Send /goal command with text, followed by instructions to write goal_complete signal.
    */
   async sendGoal(worktreeDir: string, session: string, window: string, goalText: string): Promise<void> {
     const hasPrompt = await this.waitForPrompt(worktreeDir);
@@ -155,6 +160,17 @@ export class TmuxClient {
       await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
       await this.sleep(100);
     }
+    // Tell agent to write goal_complete signal when done.
+    await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
+    await this.sleep(200);
+    const timestamp = new Date().toISOString();
+    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', '完成后请创建完成信号：cat > .afk-signal.json <<EOF']);
+    await this.sleep(100);
+    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `{"type":"goal_complete","timestamp":"${timestamp}","summary":"<完成总结>"}`]);
+    await this.sleep(100);
+    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', 'EOF']);
+    await this.sleep(100);
+    await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
   }
 
   /**
@@ -227,9 +243,10 @@ export class TmuxClient {
     await this.sendKeys(session, window, '/resume');
     await this.sleep(300);
     await this.sendKeys(session, window, '请运行以下验收条件（AC）检查。每条 AC 都附有可执行命令，运行命令并把输出写入证据：');
-    await this.sendKeys(session, window, 'cat > .afk-signal.json <<EOF');
-    await this.sendKeys(session, window, `{"type":"ac_result","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","summary":"<检查总结>"}`);
-    await this.sendKeys(session, window, 'EOF');
+    const timestamp = new Date().toISOString();
+    await this.sendKeys(session, window, `cat > .afk-signal.json <<EOF`);
+    await this.sendKeys(session, window, `{"type":"ac_result","timestamp":"${timestamp}","summary":"<检查总结>"}`);
+    await this.sendKeys(session, window, `EOF`);
     for (const item of acItems) {
       const header = item.evidenceType && item.evidenceType !== 'none'
         ? `AC ${item.index} [${item.evidenceType}]: ${item.text}`

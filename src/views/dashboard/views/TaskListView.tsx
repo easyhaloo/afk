@@ -11,6 +11,14 @@ interface Props {
   viewportHeight: number;
 }
 
+function WorktreePath({ path }: { path?: string }) {
+  if (!path) return null;
+  const short = path.replace(process.env.HOME || '', '~');
+  return (
+    <Text dimColor> · wt:{short}</Text>
+  );
+}
+
 export function TaskListView({ tasks, selected, scrollOffset, viewportHeight }: Props) {
   return (
     <ListView
@@ -29,14 +37,15 @@ export function TaskListView({ tasks, selected, scrollOffset, viewportHeight }: 
             width="100%"
             overflow="hidden"
             flexDirection="row"
-            borderStyle={isSelected ? 'round' : undefined}
-            borderColor={isSelected ? 'white' : undefined}
             paddingX={1}
           >
-            <Text color="white">{bullet} </Text>
-            <Text color={color} bold> #{task.iid} </Text>
-            <Text color={color}>{task.title || task.branch}</Text>
-            <Text dimColor>  ─ {task.session || '–'} · {task.progress || '0%'} · {task.startedAt ? formatRelativeTime(task.startedAt) : '–'}</Text>
+            <Text color={isSelected ? 'white' : color}>{bullet} </Text>
+            <Text color={isSelected ? 'white' : color} bold> #{task.iid} </Text>
+            <Text color={isSelected ? 'white' : color}>{task.title || task.branch}</Text>
+            <Text dimColor> · {task.session || '–'}</Text>
+            <WorktreePath path={task.worktree} />
+            <Text dimColor> · {task.progress || '0%'}</Text>
+            <Text dimColor> · {task.startedAt ? formatRelativeTime(task.startedAt) : '–'}</Text>
           </Box>
         );
       }}

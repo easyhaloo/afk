@@ -91,7 +91,9 @@ export function parseACLegacy(description: string): ACItem[] | null {
 
   const acText = acMatch[1].trim();
   const items: ACItem[] = [];
-  const itemRegex = /^[-*]\s+\[\s\]\s+(.+)$/gm;
+  // Match AC items that may have indented continuation lines (e.g. _verify: blocks).
+  // Stop at the next - [ ] item, blank line, or end of string.
+  const itemRegex = /^[-*]\s+\[\s\]\s+[\s\S]*?(?=\n\s*\n[-*]\s+\[\s\]|\n\s*$/gm;
   let match: RegExpExecArray | null;
   let idx = 1;
   while ((match = itemRegex.exec(acText)) !== null) {

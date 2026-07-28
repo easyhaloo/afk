@@ -1,19 +1,37 @@
 import { Task } from '../types/dashboard';
 import { SessionService } from './sessions';
+import { WorktreeManager } from './worktree';
 import type { Platform } from './core/tracker/types.js';
 
 export class TaskService {
   private sessionService: SessionService;
+  private worktreeManager: WorktreeManager;
 
   constructor() {
     this.sessionService = new SessionService();
+    this.worktreeManager = new WorktreeManager();
   }
 
   /**
    * Decode session name to extract platform, project, and issue ID
-   * Format: afk-gh-{repo}-{id} or afk-gl-{project}-{id}
+   * Formats:
+   *   afk-gh-{iid}           — scheduler simplified (GitHub)
+   *   afk-gl-{iid}           — scheduler simplified (GitLab)
+   *   afk-gh-{owner-repo}-{id} — full format (GitHub)
+   *   afk-gl-{project}-{id}  — full format (GitLab)
    */
   decodeSession(sessionName: string): { platform: Platform; projectId: string; issueId: number } | null {
+    // Simplified format: afk-gh-{iid} or afk-gl-{iid}
+    const simpleMatch = sessionName.match(/^afk-(gh|gl)-(\d+)$/);
+    if (simpleMatch) {
+      return {
+        platform: simpleMatch[1] as Platform,
+        projectId: 'unknown',
+        issueId: parseInt(simpleMatch[2], 10),
+      };
+    }
+
+    // Full format: afk-gh-{owner-repo}-{id} or afk-gl-{project}-{id}
     const ghMatch = sessionName.match(/^afk-gh-([^-]+-[^-]+)-(\d+)$/);
     if (ghMatch) {
       return {
@@ -47,6 +65,8 @@ export class TaskService {
 
   async listTasks(): Promise<Task[]> {
     const sessions = await this.sessionService.listSessions();
+    const worktrees = await this.worktreeManager.list();
+    const worktreeMap = new Map(worktrees.map(wt => [wt.iid, wt]));
 
     // Derive tasks from tmux sessions
     // Sessions starting with "afk-gh-" or "afk-gl-" are task sessions
@@ -55,29 +75,33 @@ export class TaskService {
       .map(s => {
         const decoded = this.decodeSession(s.name);
         if (decoded) {
+          const worktree = worktreeMap.get(decoded.issueId);
           return {
             iid: decoded.issueId,
             title: `Issue #${decoded.issueId}`,
-            branch: decoded.projectId,
+            branch: worktree?.branch || decoded.projectId,
             session: s.name,
             status: 'active' as const,
             progress: '0%',
             startedAt: s.created ? new Date(parseInt(s.created) * 1000) : undefined,
             platform: decoded.platform,
+            worktree: worktree?.path,
           };
         }
 
         // Legacy format (issue-* / task-*)
         const parts = s.name.split('-');
         const iid = parseInt(parts[1]) || 0;
+        const worktree = worktreeMap.get(iid);
         return {
           iid,
           title: `Issue #${iid}`,
-          branch: parts.slice(2).join('-') || 'main',
+          branch: worktree?.branch || parts.slice(2).join('-') || 'main',
           session: s.name,
           status: 'active' as const,
           progress: '0%',
           startedAt: s.created ? new Date(parseInt(s.created) * 1000) : undefined,
+          worktree: worktree?.path,
         };
       });
   }
@@ -101,6 +125,7 @@ export class TaskService {
    */
   async launch(iid: number, sessionName: string, platform?: Platform): Promise<void> {
     const { spawn } = await import('child_process');
+    const { platform: osPlatform } = await import('os');
     const args = [
       'node',
       require.resolve('../index.js'),
@@ -111,11 +136,13 @@ export class TaskService {
     if (platform) {
       args.push('--platform', platform);
     }
-    // Use setsid to fully detach — dashboard process exits immediately.
-    spawn('setsid', args, {
-      stdio: 'ignore',
-      detached: true,
-      cwd: process.cwd(),
-    }).unref();
+    // Use setsid on Linux to fully detach; on macOS the detached: true + stdio: ignore
+    // is sufficient (launchd adopts the process).
+    const o = { stdio: 'ignore' as const, detached: true as const, cwd: process.cwd() };
+    if (osPlatform() === 'darwin') {
+      spawn('node', args, o).unref();
+    } else {
+      spawn('setsid', ['node', ...args], o).unref();
+    }
   }
 }

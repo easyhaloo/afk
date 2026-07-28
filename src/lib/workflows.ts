@@ -1,4 +1,13 @@
 import { spawn } from 'child_process';
+import type { SpawnOptions } from 'child_process';
+
+/**
+ * Detached spawn that works on both Linux and macOS.
+ * `detached: true` + `stdio: 'ignore'` detaches from TTY on both platforms.
+ */
+function spawnDetached(file: string, args: string[], opts: SpawnOptions): void {
+  spawn(file, args, { ...opts, stdio: 'ignore', detached: true } as SpawnOptions).unref();
+}
 import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
@@ -109,7 +118,7 @@ export class WorkflowRunner {
     await configureStatusline(wt.path);
 
     // ── Step 3: Launch tmux session + inject /goal ──────────────────────────
-    await this.tmux.createSession(session, wt.path, 'claude');
+    await this.tmux.createSession(session, wt.path);
     await this.tmux.waitForPrompt(wt.path, 30000);
     await this.tmux.sendGoal(wt.path, session, 'main', goalText);
 
@@ -488,20 +497,14 @@ ${snapshot}
    */
   private startWatchdog(session: string, hardTimeoutMs: number, iid: number, worktreePath: string): void {
     const signalPath = `${worktreePath}/.afk-signal.json`;
-    spawn('setsid', [
-      'bash', '-c',
+    const shellCmd =
       `sleep ${hardTimeoutMs / 1000} && ` +
-      // Write a timeout signal atomically so Runner can detect hard timeout.
-      `cat > "${signalPath}.tmp" <<'EOF'
-{"type":"timeout","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
-EOF
-mv "${signalPath}.tmp" "${signalPath}" 2>/dev/null; ` +
+      `cat > "${signalPath}.tmp" <<'EOF'\n` +
+      `{"type":"timeout","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}\n` +
+      `EOF\n` +
+      `mv "${signalPath}.tmp" "${signalPath}" 2>/dev/null; ` +
       `tmux kill-session -t "${session}" 2>/dev/null || true; ` +
-      `echo "WATCHDOG:${iid}:${session}:${hardTimeoutMs}" >> "${this.logDir}/watchdog.log"`,
-    ], {
-      stdio: 'ignore',
-      detached: true,
-      cwd: process.cwd(),
-    }).unref();
+      `echo "WATCHDOG:${iid}:${session}:${hardTimeoutMs}" >> "${this.logDir}/watchdog.log"`;
+    spawnDetached('bash', ['-c', shellCmd], { cwd: process.cwd() });
   }
 }

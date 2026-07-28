@@ -36,7 +36,7 @@ export function ListView<T>({
         // fill its share of the column. We justifyContent=center so compact
         // single-line content stays vertically centered in its tall slot.
         return (
-          <Box key={getKey(item, index)} flexGrow={1} flexShrink={0} justifyContent="flex-start">
+          <Box key={getKey(item, index)} flexShrink={0}>
             {node}
           </Box>
         );

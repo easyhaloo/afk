@@ -27,6 +27,23 @@ export async function lazyLoad(cmd: string, extraArgs: string[]) {
       const program = new Command();
       program.name('afk').version('0.1.0');
       register(program);
+
+      // For subcommand trees (e.g. "scheduler run"), use the matched
+      // subcommand to parse the remaining process.argv. Commander 12 has a
+      // known issue routing multi-level subcommands when program.parse()
+      // is called with a synthetic argv, so we use the subcommand's own
+      // parse() with the real argv instead.
+      const matched = program.commands.find(c => c.name() === cmd);
+      if (matched && matched.commands.length > 0 && extraArgs.length > 0) {
+        const sub = matched.commands.find(c => c.name() === extraArgs[0]);
+        if (sub) {
+          // Strip the first 2 elements (node + script) from process.argv
+          // so the subcommand parses from the correct position.
+          const argv = process.argv.slice(2);
+          sub.parse(argv);
+          return;
+        }
+      }
       program.parse(['afk', cmd, ...extraArgs]);
       return;
     }

@@ -111,14 +111,30 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
 }
 
 function TaskDetail({ item }: { item: Task }) {
+  const fmtDate = (d: Date) => {
+    const diff = Date.now() - d.getTime();
+    const m = Math.floor(diff / 60000);
+    const h = Math.floor(m / 60);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m}m ago`;
+    if (h < 24) return `${h}h ago`;
+    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+  };
+
+  const shortWt = item.worktree?.replace(process.env.HOME || '', '~') || '–';
+  const session = item.session || (item.platform === 'github' ? `afk-gh-${item.iid}` : `afk-gl-${item.iid}`);
+
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text color="white">  ─ status: {item.status}</Text>
-      <Text color="white">  ─ branch: {item.branch || '–'}</Text>
-      <Text color="white">  ─ session: {item.session || '–'}</Text>
-      <Text color="white">  ─ progress: {item.progress || '0%'}</Text>
-      <Text color="white">  ─ started: {item.startedAt ? item.startedAt.toString() : '–'}</Text>
-      <Text color="white">  ─ worktree: {item.worktree || '–'}</Text>
+      <Text color="white">  ◉ status · {item.status}</Text>
+      <Text color="white">  ◉ branch · {item.branch || '–'}</Text>
+      <Text color="white">  ◉ session · {session}</Text>
+      <Text color="white">  ◉ progress · {item.progress || '0%'}</Text>
+      <Text color="white">  ◉ started · {item.startedAt ? fmtDate(item.startedAt) : '–'}</Text>
+      <Text color="white">  ◉ worktree · {shortWt}</Text>
+      <Box marginTop={1}>
+        <Text dimColor>  → tmux attach -t {session}</Text>
+      </Box>
     </Box>
   );
 }

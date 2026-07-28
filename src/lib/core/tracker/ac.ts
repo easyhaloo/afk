@@ -58,7 +58,7 @@ export function extractACFromLabels(labels: readonly string[]): ACItem[] {
 }
 
 /** Controlled evidence types per docs/ISSUE-TEMPLATE.md */
-export const EVIDENCE_TYPES = ['test', 'curl', 'log', 'manual', 'none'] as const;
+export const EVIDENCE_TYPES = ['test', 'curl', 'log', 'manual', 'bash', 'none'] as const;
 export type EvidenceType = typeof EVIDENCE_TYPES[number];
 
 /**
@@ -90,30 +90,21 @@ export function parseACLegacy(description: string): ACItem[] | null {
   if (!acMatch) return null;
 
   const acText = acMatch[1].trim();
+  // Split by lookahead of '- [ ]' or '* [ ]' at line start (each item starts with checkbox).
+  const itemTexts = acText.split(/(?=^[-*]\s+\[)/m).filter(Boolean);
   const items: ACItem[] = [];
-  // Match AC items that may have indented continuation lines (e.g. _verify: blocks).
-  // Stop at the next - [ ] item, blank line, or end of string.
-  const itemRegex = /^[-*]\s+\[\s\]\s+[\s\S]*?(?=\n\s*\n[-*]\s+\[\s\]|\n\s*$/gm;
-  let match: RegExpExecArray | null;
   let idx = 1;
-  while ((match = itemRegex.exec(acText)) !== null) {
-    const raw = match[1].trim();
-    const parts = raw.split(/\s+--\s+/);
-    if (parts.length === 3 && (EVIDENCE_TYPES as readonly string[]).includes(parts[1])) {
-      items.push({
-        index: idx++,
-        text: parts[0],
-        evidenceType: parts[1] as EvidenceType,
-        checkCommand: parts[2],
-      });
+  for (const block of itemTexts) {
+    const firstLine = block.split('\n')[0];
+    const checkboxMatch = firstLine.match(/^[-*]\s+\[\s\]\s+(.+)$/);
+    if (!checkboxMatch) continue;
+    const text = checkboxMatch[1].trim();
+    const verifyLines = block.split('\n').slice(1).map(l => l.trim()).filter(l => l.startsWith('_verify:'));
+    const checkCommand = verifyLines.map(l => l.replace(/^_verify:\s*/, '')).join('; ');
+    if (checkCommand) {
+      items.push({ index: idx++, text, evidenceType: 'bash', checkCommand });
     } else {
-      // Legacy: just text, no evidence fields
-      items.push({
-        index: idx++,
-        text: raw,
-        evidenceType: 'none',
-        checkCommand: '',
-      });
+      items.push({ index: idx++, text, evidenceType: 'none', checkCommand: '' });
     }
   }
   return items.length > 0 ? items : null;

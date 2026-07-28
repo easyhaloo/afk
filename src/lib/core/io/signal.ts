@@ -30,10 +30,18 @@ export async function readSignal(dir: string = process.cwd()): Promise<Signal | 
 
   try {
     const content = await fs.readFile(signalPath, 'utf-8');
+    if (!content.trim()) return null;
     const data = JSON.parse(content);
     return SignalSchema.parse(data);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    // Tolerate transient parse errors: the agent writes the signal file
+    // non-atomically (heredoc / Write tool truncates then writes), so a poll
+    // can catch an empty or partial file mid-write. Return null so the
+    // polling loop retries instead of crashing the workflow.
+    if (error instanceof SyntaxError) {
       return null;
     }
     throw error;

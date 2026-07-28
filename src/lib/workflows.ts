@@ -440,7 +440,8 @@ ${snapshot}
   }
 
   /**
-   * Create MR via glab CLI with JSON output for reliable parsing.
+   * Create MR/PR via the tracker provider (GitHub: octokit PRs, GitLab: API).
+   * Returns the MR/PR web URL for logging.
    */
   private async createMR(iid: number, worktreePath: string, targetBranch: string): Promise<string> {
     const { simpleGit } = await import('simple-git');
@@ -448,45 +449,16 @@ ${snapshot}
     const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
     const issue = await this.tracker.getIssue(iid);
 
-    return new Promise((resolve, reject) => {
-      const proc = spawn('glab', [
-        'mr', 'create',
-        '--source-branch', branch,
-        '--target-branch', targetBranch,
-        '--title', `Draft: Resolve #${iid}`,
-        '--description', `Closes #${iid}\n\n${issue.title}`,
-        '--yes', '--draft',
-        '--output', 'json',
-      ], { cwd: worktreePath, stdio: 'pipe' });
-
-      let stdout = '', stderr = '';
-      proc.stdout?.on('data', d => stdout += d);
-      proc.stderr?.on('data', d => stderr += d);
-      proc.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(`glab mr create failed: ${stderr || stdout}`));
-          return;
-        }
-        try {
-          const parsed = JSON.parse(stdout);
-          const url = parsed.web_url ?? parsed.url;
-          if (typeof url === 'string' && url.length > 0) {
-            resolve(url);
-          } else {
-            reject(new Error(`glab mr create succeeded but no URL in JSON: ${stdout}`));
-          }
-        } catch {
-          // Fallback for older glab versions without --output json support:
-          // regex-extract first https URL from stdout.
-          const urlMatch = stdout.match(/(https:\/\/[^\s]+)/);
-          if (urlMatch) {
-            resolve(urlMatch[1]);
-          } else {
-            reject(new Error(`glab mr create produced unparseable output: ${stdout}`));
-          }
-        }
-      });
+    const mrId = await this.tracker.createMR({
+      title: `Draft: Resolve #${iid}`,
+      description: `Closes #${iid}\n\n${issue.title}`,
+      sourceBranch: branch,
+      targetBranch,
+      draft: true,
     });
+
+    const mr = await this.tracker.getMR(mrId);
+    return mr.url;
   }
 
   /**

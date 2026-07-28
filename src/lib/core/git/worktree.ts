@@ -46,7 +46,22 @@ export class WorktreeManager {
     const worktreeDir = baseDir || join(process.cwd(), '.worktrees');
     const path = join(worktreeDir, `issue-${iid}`);
     await fs.mkdir(worktreeDir, { recursive: true });
-    await this.git.raw(['worktree', 'add', '-b', branch, path, baseBranch]);
+
+    try {
+      await this.git.raw(['worktree', 'add', '-b', branch, path, baseBranch]);
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (msg.includes('already exists') || msg.includes('的工作区')) {
+        // Stale branch + worktree from a failed retry. Remove worktree first
+        // (branch can't be deleted while worktree uses it), then delete branch.
+        try { await this.git.raw(['worktree', 'remove', path, '--force']); } catch { /* ignore */ }
+        try { await this.git.raw(['branch', '-D', branch]); } catch { /* ignore */ }
+        await this.git.raw(['worktree', 'add', '-b', branch, path, baseBranch]);
+      } else {
+        throw err;
+      }
+    }
+
     const worktree: Worktree = { iid, path, branch, createdAt: new Date(), status: 'active' };
     await this.saveWorktree(worktree);
     return worktree;
@@ -94,14 +109,18 @@ export class WorktreeManager {
     const { markerStatus, olderThanDays, stale = false, dryRun = false } = options;
     const worktrees = await this.list();
 
-    const activeIids = markerStatus === 'all'
-      ? new Set((await Promise.all(worktrees.map(async wt => (await this.hasActiveSession(wt)) ? wt.iid : null))).filter((iid): iid is number => iid !== null))
-      : new Set<number>();
+    const activeIids = new Set<number>();
+    if (markerStatus === 'all') {
+      for (const wt of worktrees) {
+        if (await this.hasActiveSession(wt)) activeIids.add(wt.iid);
+      }
+    }
 
     const ageMap = new Map<number, number>();
     if (stale || olderThanDays) {
-      const ages = await Promise.all(worktrees.map(async wt => ({ iid: wt.iid, ms: Date.now() - (await this.lastActivityAt(wt)).getTime() })));
-      ages.forEach(({ iid, ms }) => ageMap.set(iid, ms));
+      for (const wt of worktrees) {
+        ageMap.set(wt.iid, Date.now() - (await this.lastActivityAt(wt)).getTime());
+      }
     }
 
     let deleted = 0, skipped = 0;
@@ -128,7 +147,7 @@ export class WorktreeManager {
 
   async cleanup(iid: number, force: boolean = false): Promise<void> {
     const worktree = await this.get(iid);
-    if (!worktree) throw new Error(`Worktree for issue #${iid} not found`);
+    if (!worktree) return; // Already cleaned up.
     if (!force) {
       const gitInWorktree = simpleGit(worktree.path);
       const status = await gitInWorktree.status();
@@ -148,7 +167,7 @@ export class WorktreeManager {
         try {
           const { spawn } = await import('child_process');
           const proc = spawn('tmux', ['has-session', '-t', wt.sessionId], { stdio: 'pipe' });
-          await new Promise((resolve, reject) => { proc.on('close', (code) => { if (code !== 0) orphaned.push(wt); resolve(code); }); proc.on('error', reject); });
+          await new Promise((resolve, reject) => { proc.on('close', (code) => { if (code !== 0) orphaned.push(wt); resolve(code); }); proc.on('error', (err) => { orphaned.push(wt); resolve(err); }); });
         } catch { orphaned.push(wt); }
       }
     }

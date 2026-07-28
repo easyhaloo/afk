@@ -160,11 +160,11 @@ export class TmuxClient {
       await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
       await this.sleep(100);
     }
-    // Tell agent to write goal_complete signal when done.
+    // Tell agent to commit changes, then write goal_complete signal when done.
     await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
     await this.sleep(200);
     const timestamp = new Date().toISOString();
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', '完成后请创建完成信号：cat > .afk-signal.json <<EOF']);
+    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', '完成后请先提交你的更改（git add -A && git commit -m "resolve issue"），然后创建完成信号：cat > .afk-signal.json <<EOF']);
     await this.sleep(100);
     await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `{"type":"goal_complete","timestamp":"${timestamp}","summary":"<完成总结>"}`]);
     await this.sleep(100);

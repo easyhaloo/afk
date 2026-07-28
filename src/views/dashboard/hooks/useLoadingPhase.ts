@@ -7,6 +7,7 @@ export interface LoadingPhase {
   icon: string;
   done: boolean;
   error?: string;
+  detail?: string;  // e.g., "owner/repo", "3 tasks", "2 sessions"
 }
 
 export function useLoadingPhases() {
@@ -19,6 +20,10 @@ export function useLoadingPhases() {
 
   const markError = useCallback((key: string, error: string) => {
     setPhases(prev => prev.map(p => p.key === key ? { ...p, done: true, error } : p));
+  }, []);
+
+  const setDetail = useCallback((key: string, detail: string) => {
+    setPhases(prev => prev.map(p => p.key === key ? { ...p, detail } : p));
   }, []);
 
   useEffect(() => {
@@ -37,7 +42,8 @@ export function useLoadingPhases() {
     (async () => {
       for (const d of descriptors) {
         try {
-          await d.fetch();
+          const result = await d.fetch(setDetail);
+          if (result) setDetail(d.key, result);
           markDone(d.key);
         } catch (err) {
           markError(d.key, String(err));
@@ -45,7 +51,7 @@ export function useLoadingPhases() {
       }
       setTimeout(() => setIsReady(true), 200);
     })();
-  }, [markDone, markError]);
+  }, [markDone, markError, setDetail]);
 
   return { phases, isReady };
 }

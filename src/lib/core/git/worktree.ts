@@ -51,7 +51,7 @@ export class WorktreeManager {
       await this.git.raw(['worktree', 'add', '-b', branch, path, baseBranch]);
     } catch (err: unknown) {
       const msg = String(err);
-      if (msg.includes('already exists') || msg.includes('的工作区')) {
+      if (msg.includes('already exists') || msg.includes('的工作区') || msg.includes('已经存在')) {
         // Stale branch + worktree from a failed retry. Remove worktree first
         // (branch can't be deleted while worktree uses it), then delete branch.
         try { await this.git.raw(['worktree', 'remove', path, '--force']); } catch { /* ignore */ }

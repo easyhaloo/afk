@@ -1,9 +1,22 @@
+import { execSync } from 'child_process';
 import { GitLabClient } from './core/gitlab/index';
 import { GitHubClient } from './core/github/client';
 import { detectGitLabProject, detectProject } from './core/tracker/detect';
 import { detectGitHubRepo } from './core/tracker/detect';
 import { getGlabToken } from './core/gitlab/glab-config';
 import type { TrackerProvider } from './core/tracker/types';
+
+/**
+ * Get GitHub token from gh CLI if available and authenticated
+ */
+function getGhToken(): string | null {
+  try {
+    const token = execSync('gh auth token', { encoding: 'utf8', timeout: 5000 }).trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Internal config resolved from env + glab CLI + git remote
@@ -65,17 +78,17 @@ export async function createGitLabClient(): Promise<GitLabClient> {
 /**
  * Create GitHub client with token and repo detection.
  *
- * Token must come from GITHUB_TOKEN or GH_TOKEN env var. We deliberately
- * do NOT shell out to `gh auth token` — that's CLI parsing across gh
- * versions. Users authenticated via `gh auth login` should run
- * `gh auth token` once and `export GITHUB_TOKEN=...`.
+ * Detection order:
+ * 1. GITHUB_TOKEN or GH_TOKEN env var
+ * 2. gh auth token (if authenticated via gh auth login)
+ * 3. GH_TOKEN env var (lowercase, for GitHub Actions compatibility)
  */
 export async function createGitHubClient(): Promise<GitHubClient> {
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || getGhToken();
   if (!token) {
     throw new Error(
       'GITHUB_TOKEN (or GH_TOKEN) environment variable is required.\n' +
-      'If you authenticated via `gh auth login`, run: gh auth token | read TOK && export GITHUB_TOKEN=$TOK'
+      'Or authenticate with: gh auth login'
     );
   }
 

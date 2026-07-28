@@ -64,6 +64,10 @@ export const Dashboard: React.FC = () => {
   const [notifAnimation, setNotifAnimation] = useState<'hidden' | 'slide-in' | 'visible' | 'slide-out'>('hidden');
   const [separatorPhase, setSeparatorPhase] = useState(0);
 
+  // Search state
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
   // Debug state
   const [debugMode, setDebugMode] = useState(false);
   const [debugLog, setDebugLog] = useState<string[]>([]);
@@ -84,11 +88,23 @@ export const Dashboard: React.FC = () => {
 
   // Derived
   const getItems = (): (Task | Issue | Project)[] => {
-    if (currentView === 'tasks') return tasksRef.current;
-    if (currentView === 'issues') return issuesRef.current;
-    if (currentView === 'completed') return completedTasksRef.current;
-    if (currentView === 'board') return issuesRef.current; // Board view uses issues
-    return projectsRef.current;
+    let raw: (Task | Issue | Project)[] = [];
+    if (currentView === 'tasks') raw = tasksRef.current;
+    else if (currentView === 'issues') raw = issuesRef.current;
+    else if (currentView === 'completed') raw = completedTasksRef.current;
+    else if (currentView === 'board') raw = issuesRef.current;
+    else raw = projectsRef.current;
+
+    if (!searchQuery.trim()) return raw;
+
+    const q = searchQuery.toLowerCase();
+    return raw.filter(item => {
+      if ('title' in item && item.title) return item.title.toLowerCase().includes(q);
+      if ('name' in item && item.name) return item.name.toLowerCase().includes(q);
+      if ('branch' in item && item.branch) return item.branch.toLowerCase().includes(q);
+      if ('labels' in item && item.labels) return item.labels.some(l => l.toLowerCase().includes(q));
+      return false;
+    });
   };
   itemsRef.current = getItems();
   const getItem = () => getItems()[selectedIndex];
@@ -309,6 +325,24 @@ export const Dashboard: React.FC = () => {
     if (input === '?') { setShowHelp(h => !h); return; }
     if (input === 'D' || input === 'd') { setDebugMode(d => { const n = !d; addDebugLog(`[DEBUG ${n ? 'ON' : 'OFF'}]`); return n; }); return; }
 
+    // Search mode
+    if (input === '/') {
+      setIsSearchMode(m => !m);
+      if (isSearchMode) { setSearchQuery(''); setSelectedIndex(0); }
+      return;
+    }
+    if (isSearchMode) {
+      if (key.escape) { setIsSearchMode(false); setSearchQuery(''); return; }
+      if (key.backspace) { setSearchQuery(q => q.slice(0, -1)); return; }
+      if (key.return) { setIsSearchMode(false); return; }
+      if (input.length === 1 && !key.ctrl && !key.meta) {
+        setSearchQuery(q => q + input);
+        setSelectedIndex(0);
+        return;
+      }
+      return;
+    }
+
     if (key.escape || input === 'q') {
       if (showHelp) { setShowHelp(false); return; }
       if (input === 'q') { exit(); return; }
@@ -391,13 +425,14 @@ export const Dashboard: React.FC = () => {
 
   // View title
   const viewTitle = (() => {
-    if (currentView === 'tasks') return `tasks running: ${tasks.length}`;
+    const filtered = searchQuery ? ` (${items.length}/${tasks.length + issues.length + completedTasks.length + projects.length})` : '';
+    if (currentView === 'tasks') return `tasks running: ${items.length}${filtered}`;
     if (currentView === 'issues') return multiSelectMode
-      ? `issues todo: ${issues.length} | selected: ${selectedIssues.size}`
-      : `issues todo: ${issues.length}`;
-    if (currentView === 'completed') return `completed: ${completedTasks.length}`;
-    if (currentView === 'board') return `board view: ${issues.length} issues`;
-    return `gitlab projects: ${projects.length}`;
+      ? `issues todo: ${items.length} | selected: ${selectedIssues.size}`
+      : `issues todo: ${items.length}${filtered}`;
+    if (currentView === 'completed') return `completed: ${items.length}${filtered}`;
+    if (currentView === 'board') return `board view: ${items.length} issues${filtered}`;
+    return `gitlab projects: ${items.length}${filtered}`;
   })();
 
   return showSplash ? (
@@ -431,13 +466,16 @@ export const Dashboard: React.FC = () => {
           <BreathingSeparator width={W} breathPhase={separatorPhase} isTop />
           <Box paddingX={2} paddingY={0}>
             <Text color="white"><Text bold>{viewTitle}</Text></Text>
+            {isSearchMode && (
+              <Text color="cyan"> │ /{searchQuery}_</Text>
+            )}
           </Box>
           <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2} paddingY={0}>
-            {currentView === 'tasks' && <TaskListView tasks={tasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
-            {currentView === 'issues' && <IssueListView issues={issues} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} multiSelectMode={multiSelectMode} selectedIssues={selectedIssues} />}
-            {currentView === 'completed' && <CompletedListView tasks={completedTasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
-            {currentView === 'projects' && <ProjectListView projects={projects} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
-            {currentView === 'board' && <BoardView issues={issues} selectedIndex={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
+            {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
+            {currentView === 'issues' && <IssueListView issues={items as Issue[]} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} multiSelectMode={multiSelectMode} selectedIssues={selectedIssues} />}
+            {currentView === 'completed' && <CompletedListView tasks={items as Task[]} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
+            {currentView === 'projects' && <ProjectListView projects={items as Project[]} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
+            {currentView === 'board' && <BoardView issues={items as Issue[]} selectedIndex={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
             {/* Floating loading/more indicator — overlays the list, does not consume layout space. */}
             {(
               (currentView === 'issues' && issueHasMore) ||

@@ -3,8 +3,8 @@
  */
 import { build } from 'esbuild';
 import { globSync } from 'glob';
-import { readFileSync, writeFileSync } from 'fs';
-import { extname } from 'path';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { extname, resolve, dirname } from 'path';
 
 const entryPoints = globSync('src/**/*.{ts,tsx}', {
   ignore: ['src/**/*.d.ts', 'src/**/*.test.ts', 'src/**/*.spec.ts']
@@ -24,9 +24,15 @@ const fixESMPlugin = {
         let content = readFileSync(file, 'utf8');
         const original = content;
 
-        // Fix relative imports: './foo' -> './foo.js'
+        // Fix relative imports: './foo' -> './foo.js' or './foo/index.js'
         content = content.replace(/from ['"](\.[^'"]+)['"]/g, (match, path) => {
           if (path.startsWith('.') && extname(path) === '') {
+            const dir = dirname(file);
+            const withJs = resolve(dir, path + '.js');
+            const asIndex = resolve(dir, path, 'index.js');
+            // Prefer .js file over directory/index.js to avoid breaking single-file modules
+            if (existsSync(withJs)) return `from '${path}.js'`;
+            if (existsSync(asIndex)) return `from '${path}/index.js'`;
             return `from '${path}.js'`;
           }
           return match;

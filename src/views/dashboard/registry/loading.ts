@@ -9,7 +9,7 @@ export interface LoadingPhaseDescriptor {
   key: string;
   label: string;
   icon?: string;
-  fetch: () => Promise<void>;
+  fetch: (setDetail: (key: string, detail: string) => void) => Promise<string | void>;
 }
 
 class LoadingPhaseRegistry {

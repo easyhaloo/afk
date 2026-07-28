@@ -30,7 +30,8 @@ no background processes.
 
 ## What this skill is NOT
 
-- NOT a hook-based automated system → use `reasoning-watchdog` for that
+- NOT a hook-based automated system — works entirely in-conversation via
+  the agent's own self-monitoring, no background processes
 - NOT for single-step errors → focused on multi-turn accumulation failures
 - NOT a replacement for good task decomposition → supplementary guard rails
 

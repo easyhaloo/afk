@@ -7,8 +7,8 @@ description: >-
   Use when the reasoning-watchdog system is already installed
   (npm run install completed) and you need to check status,
   tune thresholds, or troubleshoot.
-  Do NOT use for session-context-based reasoning monitoring
-  (use reasoning-guard for that).
+  Do NOT use for session-context-based reasoning monitoring — this
+  skill is hook-based, not conversation-based.
 disallowed-tools: >-
   Edit(*) Agent(*) Task*(*)
   Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
@@ -27,9 +27,11 @@ the install/uninstall/status lifecycle.
 
 ## What this skill is NOT
 
-- NOT session-context-based reasoning monitoring → use `reasoning-guard`
-- NOT for manual reasoning checks during conversation → use `reasoning-guard`
-- NOT a fix for single-step reasoning errors → focused on multi-turn
+- NOT session-context-based reasoning monitoring — this skill works via
+  hooks only, with no agent self-monitoring
+- NOT for manual reasoning checks during conversation — the agent does
+  not apply corrections interactively
+- NOT a fix for single-step reasoning errors — focused on multi-turn
   accumulation failures
 
 ## Architecture

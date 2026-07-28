@@ -5,12 +5,9 @@ description: >-
   docs, a prior draft, or code audit results already exist and need
   verification, correction, or expansion through targeted questioning.
   Starts from what is already known, digs into holes. May read code to
-  verify context against the actual codebase. Contrasts with afk-grill-me:
-  afk-grill-me = from-scratch interview (no prior context);
-  afk-grill-me-context = gap-fill on existing context.
-  Produces a revised CONTEXT.md via the same Step 4 gate (Approve /
-  Revise / Drill / Add Open Question). Output goes to /tmp/, never to
-  the repo working tree.
+  verify context against the actual codebase. Produces a revised
+  CONTEXT.md via the same Step 4 gate (Approve / Revise / Drill /
+  Add Open Question). Output goes to /tmp/, never to the repo working tree.
 disallowed-tools: >-
   Edit(*) Agent(*) Task*(*)
   Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
@@ -21,7 +18,8 @@ disallowed-tools: >-
 # Grill-me with Context (Gap-fill)
 
 **Goal:** verify, correct, and deepen existing context through targeted
-questioning. A review and gap-fill, not a from-scratch interview.
+questioning. A review and gap-fill on pre-existing material — for a
+from-scratch interview, the caller needs a different entry point.
 **Mode:** HITL — every round needs explicit human input.
 **Contract:** (existing context + topic) → approved `CONTEXT.md`.
 

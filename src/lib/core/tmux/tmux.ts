@@ -89,6 +89,54 @@ export class TmuxClient {
   }
 
   /**
+   * Create a new window in an existing session with a command
+   */
+  async newWindow(session: string, command: string): Promise<void> {
+    await this.exec(['new-window', '-t', session, '-d', command]);
+  }
+
+  /**
+   * List windows in a session
+   */
+  async listWindows(session: string): Promise<string[]> {
+    try {
+      const output = await this.exec(['list-windows', '-t', session, '-F', '#{window_name}']);
+      if (!output) return [];
+      return output.split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Check if we're running inside a tmux client
+   */
+  isInsideTmux(): boolean {
+    return !!process.env.TMUX;
+  }
+
+  /**
+   * Attach to a tmux session.
+   * - Inside tmux: creates a new window in the target session (avoids duplicate)
+   * - Outside tmux: switches client to the target session
+   * Returns true if session exists and attach was initiated.
+   */
+  async attach(session: string): Promise<boolean> {
+    if (!await this.hasSession(session)) return false;
+    const windows = await this.listWindows(session);
+    if (windows.length === 0) return false;
+
+    if (this.isInsideTmux()) {
+      // Inside tmux: create a new window in the target session (no duplicate attach)
+      await this.newWindow(session, `tmux attach -t ${session}`);
+    } else {
+      // Outside tmux: switch to the session
+      await this.exec(['switch-client', '-t', `${session}:${windows[0]}`]);
+    }
+    return true;
+  }
+
+  /**
    * Send keys to session
    */
   async sendKeys(session: string, window: string, keys: string | string[]): Promise<void> {
@@ -169,7 +217,12 @@ export class TmuxClient {
     await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `{"type":"goal_complete","timestamp":"${timestamp}","summary":"<完成总结>"}`]);
     await this.sleep(100);
     await this.exec(['send-keys', '-t', `${session}:${window}`, '--', 'EOF']);
-    await this.sleep(100);
+    await this.sleep(500);
+    // Submit the composed /goal input. Double-tap C-m: the first Enter can be
+    // lost if the TUI is mid-redraw on a long wrapped line; the second is a
+    // harmless no-op if the first already submitted.
+    await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
+    await this.sleep(300);
     await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
   }
 
@@ -240,13 +293,13 @@ export class TmuxClient {
     window: string,
     acItems: Array<{ index: number; text: string; evidenceType?: string; checkCommand?: string }>,
   ): Promise<void> {
-    await this.sendKeys(session, window, '/resume');
-    await this.sleep(300);
+    // Agent is idle at the prompt after writing goal_complete. Send the AC
+    // check request directly. Do NOT use /resume - in Claude Code it opens a
+    // session-picker UI, which swallows all subsequent input.
     await this.sendKeys(session, window, '请运行以下验收条件（AC）检查。每条 AC 都附有可执行命令，运行命令并把输出写入证据：');
     const timestamp = new Date().toISOString();
-    await this.sendKeys(session, window, `cat > .afk-signal.json <<EOF`);
+    await this.sendKeys(session, window, `完成后创建信号 cat > .afk-signal.json 写入：`);
     await this.sendKeys(session, window, `{"type":"ac_result","timestamp":"${timestamp}","summary":"<检查总结>"}`);
-    await this.sendKeys(session, window, `EOF`);
     for (const item of acItems) {
       const header = item.evidenceType && item.evidenceType !== 'none'
         ? `AC ${item.index} [${item.evidenceType}]: ${item.text}`

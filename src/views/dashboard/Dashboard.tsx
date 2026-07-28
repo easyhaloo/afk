@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import figures from 'figures';
-import { tmux as createTmux } from 'node-tmux';
 import { exec } from 'child_process';
 import { Task, Issue, Project } from '../../types/dashboard';
+import { TmuxClient } from '../../lib/core/tmux/tmux';
 import { useNavigation } from './navigation/index';
 import { useData } from './data/index';
 import {
@@ -143,16 +143,10 @@ export const Dashboard: React.FC = () => {
       || (task?.iid ? `afk-gl-${task.iid}` : null);
     if (!sessionName) { notify('no task selected', 'warning'); return; }
     try {
-      const tmux = await createTmux();
-      if (!tmux) { notify('tmux unavailable', 'error'); return; }
-      if (!await tmux.hasSession(sessionName)) { notify(`session ${sessionName} not found`, 'error'); return; }
-      // Open tmux attach in a new window, dashboard stays running
-      const { spawn } = require('child_process');
-      spawn('tmux', ['new-window', '-n', `attach-${sessionName}`, '-d', 'tmux', 'attach', '-t', sessionName], {
-        stdio: 'ignore',
-        detached: true,
-      }).unref();
-      notify(`tmux attach -t ${sessionName}`, 'info');
+      const tmux = new TmuxClient();
+      const attached = await tmux.attach(sessionName);
+      if (!attached) { notify(`session ${sessionName} not found`, 'error'); return; }
+      notify(`attached: ${sessionName}`, 'success');
     } catch { notify('attach failed', 'error'); }
   }, []);
 

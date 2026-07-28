@@ -18,31 +18,22 @@ disallowed-tools: >-
 **Goal:** Independently pickable tracker issues with verifiable completion conditions.
 **Mode:** HITL-gated — draft first, approve before creating.
 
-## Slice Strategy (auto-infer, user confirms)
+## Input Paths (mode decision)
 
-1. **Analyze** the requirement: count distinct domains, layers, and team ownership lines
-2. **Infer** the best-fit strategy:
-   - One team, end-to-end ownership → **Vertical** (default)
-   - Multiple teams with layer ownership → **Horizontal**
-   - Unclear or both viable → ask user to choose
-3. **Tell** the user which strategy was chosen and why — only ask if both are genuinely viable
+| Mode | Input | Trigger |
+|------|-------|---------|
+| **PRD Mode** | `PRD.md` `## User Stories` with Observable Behavior lists | An approved PRD exists |
+| **Direct Mode** | Any requirement context (free text / notes / chat) | No PRD, or fast path |
 
-| Strategy | Shape | Best when |
-|----------|-------|-----------|
-| **Vertical** | model+API+logic+test in one package | Single team, fast delivery |
-| **Horizontal** | one issue per layer (API, DB, UI) | Layer-owned teams, staged rollout |
-
-## Input Paths
-
-| Mode | Input | Path |
-|------|-------|------|
-| PRD Mode | `PRD.md` User Stories → Observable Behavior list | Full fidelity |
-| Direct Mode | Any requirement context (free text / notes / chat) | Always available — MUST NOT skip |
+Mode is decided **once at the start** and propagates to:
+- issue label `mode::afk` or `mode::hitl`
+- issue base `base::prd-<iid>` (PRD) or `base::direct` (Direct)
+- DAG source attribution
 
 ## Verification Inference
 
-For each Observable Behavior (or each requirement clause in Direct Mode),
-read the codebase to infer:
+For each Observable Behavior (PRD Mode) or each requirement clause
+(Direct Mode), read the codebase to infer:
 
 1. **What proves the behavior** — locate:
    - Which test runner owns this layer (jest / vitest / mocha / pytest)
@@ -59,6 +50,20 @@ Allowed tools: Read, Grep, Bash (read-only: ls, cat, grep, jq, find,
 If the codebase gives no signal for a behavior, default to `manual`
 and flag it in the issue body as "needs automated check".
 
+## Slice Strategy
+
+1. **Analyze** the requirement: count distinct domains, layers, and team ownership lines
+2. **Infer** the best-fit strategy:
+   - One team, end-to-end ownership → **Vertical** (default)
+   - Multiple teams with layer ownership → **Horizontal**
+   - Unclear or both viable → ask user to choose
+3. **Tell** the user which strategy was chosen and why — only ask if both are genuinely viable
+
+| Strategy | Shape | Best when |
+|----------|-------|-----------|
+| **Vertical** | model+API+logic+test in one package | Single team, fast delivery |
+| **Horizontal** | one issue per layer (API, DB, UI) | Layer-owned teams, staged rollout |
+
 ## Slicing Rules
 
 - **Too big:** AC > ~5 lines, or touches > ~3 modules → split
@@ -66,25 +71,43 @@ and flag it in the issue body as "needs automated check".
 - **Cycle check:** trace `blocked_by` graph; redraw boundaries if cyclic
 - **Direct Mode:** ask user to narrow if requirement too large
 
+## Issue Body Composition
+
+Each draft must populate every field defined in
+`references/issue-template.md`:
+
+| Field | Source |
+|-------|--------|
+| `# <Title>` | PRD story title (verb + object) or Direct Mode user-stated title |
+| `## Context` | One-paragraph problem statement lifted from PRD or paraphrased from Direct input |
+| `## Acceptance Criteria` | One per Observable Behavior, in 3-field format from Verification Inference |
+| `## Out of Scope` | Lifted from PRD story's "Out of Scope" section, or inferred from negative examples in Direct Mode |
+| `## Dependencies` | DAG edges from `blocked_by` analysis; literal `none` if standalone |
+
 ## Steps
 
-1. **Read inputs:** PRD or requirement context; read `references/issue-template.md` for AC schema
-2. **Infer & slice:** read codebase → pick evidence_type per behavior → choose Vertical/Horizontal → slice
-3. **Quality gate:** every AC has `-- <type> -- <command>`, command is runnable, evidence_type in vocabulary
-4. **Create + HITL gate:** label with `stage::ready-for-issues,<mode>` + base, wire DAG via `afk issue link`, get approval before creating any
+1. **Pick mode:** PRD exists → PRD Mode; else → Direct Mode. Lock in `mode::afk` / `mode::hitl`.
+2. **Read inputs + read codebase:** for each Observable Behavior (PRD) or requirement clause (Direct), apply Verification Inference to produce `<text> -- <evidence_type> -- <check_command>`.
+3. **Slice:** apply Slice Strategy + Slicing Rules. If strategy is ambiguous, ask user.
+4. **Compose drafts:** for each slice, fill every Issue Body Composition field. Do not leave optional fields blank — write `none` for empty Dependencies, omit Out of Scope if user has none.
+5. **Self-quality-gate:** run every `check_command` in a sandbox (no remote side effects). Any non-zero exit or vocabulary violation → fix the draft before HITL.
+6. **HITL gate:** present all drafts + DAG + label scheme + base label. Wait for explicit approval.
+7. **Create:** on approval, run `afk issue create` per draft, then `afk issue update-labels` for `stage::ready-for-issues,<mode>` and base, then `afk issue link` for DAG edges.
 
 ## References
 
 | File | Read when |
 |------|-----------|
-| `references/issue-template.md` | Always — defines the AC schema you emit |
+| `references/issue-template.md` | Always — defines the AC schema and body fields you emit |
 
 ## Anti-patterns
 
 - AC without `-- <evidence_type> -- <check_command>` suffix
 - `evidence_type` chosen without reading codebase (guessing is forbidden)
 - `evidence_type` outside the controlled vocabulary
-- `check_command` that doesn't exist or has no exit-code contract
+- `check_command` that doesn't exist, has no exit-code contract, or mutates state
+- Skipping Step 5 self-quality-gate — drafts with unverified commands reach HITL
+- Creating issues before Step 6 approval — even one issue
 - `mode::afk` for cross-context or mid-flight product decisions
 - Paste full requirement into issue — summarize + link source
 - Use "no PRD" to skip this workflow entirely

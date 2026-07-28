@@ -33,25 +33,18 @@ export function useLoadingPhases() {
       done: false,
     })));
 
-    // Fetch all phases in parallel
-    Promise.allSettled(
-      descriptors.map(async (d) => {
-        await d.fetch();
-        markDone(d.key);
-      })
-    ).then((results) => {
-      // Mark any failed phases with error
-      results.forEach((result, i) => {
-        if (result.status === 'rejected') {
-          markError(descriptors[i].key, String(result.reason));
+    // Fetch all phases sequentially (config → detect → connect → tasks → sessions → ready)
+    (async () => {
+      for (const d of descriptors) {
+        try {
+          await d.fetch();
+          markDone(d.key);
+        } catch (err) {
+          markError(d.key, String(err));
         }
-      });
-
-      // Mark ready after all complete
-      setTimeout(() => {
-        setIsReady(true);
-      }, 200);
-    });
+      }
+      setTimeout(() => setIsReady(true), 200);
+    })();
   }, [markDone, markError]);
 
   return { phases, isReady };

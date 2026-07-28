@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { ViewRegistry } from '../registry';
-import type { ViewState, ViewContext } from '../types';
+import type { View, ViewState, ViewContext } from '../types';
 import { navigationPolicy, type ActionType } from './policy';
 
 // Default initial view state
@@ -65,7 +65,7 @@ export function useNavigation() {
         ? policy.context(pendingAction.action, prevStateRef.current, pendingAction.result)
         : {};
 
-      setViewStack(prev => [...prev, { view: policy.target, context }]);
+      setViewStack(prev => [...prev, { view: policy.target as View, context }]);
       setSelectedIndex(0);
       setScrollOffset(0);
     }
@@ -76,7 +76,7 @@ export function useNavigation() {
   /**
    * Push a new view onto the stack with optional context
    */
-  const pushView = useCallback((view: string, context: ViewContext = {}): void => {
+  const pushView = useCallback((view: View, context: ViewContext = {}): void => {
     if (!ViewRegistry.getInstance().has(view)) {
       console.warn(`View "${view}" is not registered`);
       return;
@@ -105,7 +105,7 @@ export function useNavigation() {
   /**
    * Navigate to a specific view
    */
-  const switchView = useCallback((view: string, context: ViewContext = {}): void => {
+  const switchView = useCallback((view: View, context: ViewContext = {}): void => {
     if (!ViewRegistry.getInstance().has(view)) {
       console.warn(`View "${view}" is not registered`);
       return;

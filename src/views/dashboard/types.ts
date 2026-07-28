@@ -1,5 +1,6 @@
-// Legacy type alias for backward compatibility
+// View type - union of all registered view names
 export type View = 'tasks' | 'issues' | 'completed' | 'projects' | 'board';
+
 export type DetailView = 'list' | 'detail';
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';
@@ -18,6 +19,6 @@ export interface ViewContext {
 
 // View state - view name + context
 export interface ViewState {
-  view: string;
+  view: View;
   context: ViewContext;
 }

@@ -1,9 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { View } from '../types';
 
 interface Props {
-  view: View;
+  view: string;
   tasksCount: number;
   issuesCount: number;
   completedCount: number;

@@ -55,8 +55,14 @@ what CONTEXT.md already states.
 
 ### Step 2 — Write `PRD.md`
 
-Problem Statement, Users & Jobs, User Stories, Scope / Non-goals,
-Key Decisions (with rationale), Open Risks.
+Use the authoritative template at **`references/prd-template.md`** — read
+it before drafting. Highlights:
+
+- Sections: Problem Statement, Users & Jobs, Bounded Contexts, User Stories,
+  Key Decisions, Open Risks, Non-Goals, Mode.
+- Each User Story's AC uses the **3-field `--` format** identical to the
+  downstream issue template (`<text> -- <type> -- <command>`).
+- Key Decisions = already-decided. Open Risks = undecided. Do not mix.
 
 **ADR trigger:** for each significant technical choice, check whether
 to create an ADR. If irreversible and expensive to change → create an
@@ -85,3 +91,13 @@ issues. One-line summary + link, not full PRD pasted into chat.
   gaps as Open Risks.
 - MUST NOT skip the approval gate — decomposing into issues is the
   expensive step this gate protects.
+- MUST NOT use a different AC schema than the downstream issue template —
+  `afk-to-issues` slices PRD AC directly into issues.
+- MUST NOT put undecided things under Key Decisions, or decided things
+  under Open Risks.
+
+## References
+
+| File | Read when |
+|------|-----------|
+| `references/prd-template.md` | **Always** — defines the PRD schema you emit |

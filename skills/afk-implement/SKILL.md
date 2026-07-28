@@ -21,10 +21,13 @@ MR + `stage::done` (pass) or `mode::hitl` (escalation).
 
 All checks are mandatory. Stop immediately if any fails.
 
-1. **`## Acceptance Criteria (machine-checkable)` section exists.**
-   Missing → issue is not ready, stop.
-2. **AC lines are machine-verifiable.** Every AC must be a command or
-   observable check. If any cannot be verified from command output, stop.
+1. **`## Acceptance Criteria` section exists with the 3-field format.**
+   Each AC line: `- [ ] <text> -- <evidence_type> -- <check_command>`.
+   Missing or malformed → issue is not ready, stop.
+2. **AC lines are machine-verifiable.** Every AC's `check_command` must
+   be a shell command with exit-code contract (0 = PASS). If any AC
+   has `evidence_type: manual`, treat it as a gate requiring human
+   signoff, not autonomous verification.
 3. **No open blockers.** Detection via label `blocks-<iid>` on blocker.
    If any open blocker exists, stop.
 4. **`base::prd-<N>` or `base::direct` label exists.** Missing → issue was not created

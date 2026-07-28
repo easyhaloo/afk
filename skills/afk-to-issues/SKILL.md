@@ -50,41 +50,20 @@ disallowed-tools: >-
 
 ## Issue Template
 
-```markdown
-## Context
-<one-sentence summary of what this covers>
+The authoritative template is **`references/issue-template.md`** — read it
+before drafting any issue. Highlights:
 
-PRD: <link>                                   <!-- PRD-only -->
-Requirement Source: <source>                   <!-- Direct Mode -->
-
-## Bounded Context
-<context name — explicit or inferred>
-
-## Relevant ADRs
-- ADR-NNNN: <title> — <why ADR constrains this>
-(none if no ADR applies)
-
-## Module Mode
-Deep Module  <!-- or Shallow Module (CRUD only) -->
-
-## Acceptance Criteria
-- [ ] <observable outcome>
-  _verify: <cmd: | api: | ui:>_
-- [ ] ...
-
-## Non-goals
-<what this will NOT do>
-
-## Mode
-mode::afk   <!-- or mode::hitl -->
-```
+- AC items use the 3-field `--` format: `<text> -- <evidence_type> -- <check_command>`
+- `evidence_type` ∈ {test, curl, log, manual, none}
+- `check_command` must be a shell command that exits 0 on PASS
+- See references doc for full schema, examples, anti-patterns
 
 ## Steps
 
 1. **Path:** PRD + `## Bounded Contexts` → PRD Mode; else → Direct Mode
-2. **Gather:** Read PRD or requirement context; ask user to narrow if too vague
+2. **Gather:** Read PRD or requirement context; read `references/issue-template.md` for AC format
 3. **Infer & slice:** Analyze requirement → auto-select best-fit strategy → slice. Only ask user to choose if both Vertical and Horizontal are equally viable.
-4. **Quality gate:** every AC needs `_verify:` suffix
+4. **Quality gate:** every AC has `-- <type> -- <command>` and the command is runnable
 5. **Create:**
    - PRD Mode: `base::prd-<iid>`
    - Direct Mode: `base::direct`
@@ -92,9 +71,18 @@ mode::afk   <!-- or mode::hitl -->
    - DAG via `afk gitlab link-issues <source-iid> <target-iid>`
 6. **HITL gate:** show issue list + DAG; get approval before creating any
 
+## References
+
+| File | Read when |
+|------|-----------|
+| `references/issue-template.md` | Always — defines the AC schema you emit |
+| `references/ddd-slicing.md` | When slicing along bounded contexts |
+
 ## Anti-patterns
 
-- AC without `_verify:` suffix
+- AC without `-- <evidence_type> -- <check_command>` suffix
+- `evidence_type` outside the controlled vocabulary
+- `check_command` that doesn't exist or has no exit-code contract
 - `mode::afk` for cross-context or mid-flight product decisions
 - Paste full requirement into issue — summarize + link source
 - Use "no PRD" to skip this workflow entirely

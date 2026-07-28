@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { render } from 'ink';
 import React from 'react';
-import { Dashboard } from '../views/dashboard/index';
+import { DashboardEntry } from '../views/app/index';
 
 export function registerDashboardCommands(program: Command) {
   program
@@ -12,7 +12,7 @@ export function registerDashboardCommands(program: Command) {
       // Enable alternate screen buffer
       process.stdout.write('\x1b[?1049h');
 
-      const { waitUntilExit } = render(React.createElement(Dashboard), {
+      const { waitUntilExit } = render(React.createElement(DashboardEntry), {
         exitOnCtrlC: true,
         patchConsole: false,
       });

@@ -146,20 +146,15 @@ export const Dashboard: React.FC = () => {
       const tmux = await createTmux();
       if (!tmux) { notify('tmux unavailable', 'error'); return; }
       if (!await tmux.hasSession(sessionName)) { notify(`session ${sessionName} not found`, 'error'); return; }
-      exit();
-      const { spawnSync, spawn } = require('child_process');
-      const result = spawnSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit' });
-      if (result.status === 0) {
-        console.log(`\n${figures.tick} detached from \x1b[37m${sessionName}\x1b[0m`);
-        console.log('returning to Dashboard...\n');
-        await new Promise(r => setTimeout(r, 1000));
-        spawn(process.argv[0], process.argv.slice(1), { stdio: 'inherit' });
-      } else {
-        console.error(`\n${figures.cross} attach failed`);
-        process.exit(1);
-      }
-    } catch { notify('attach failed', 'error'); process.exit(1); }
-  }, [currentView]);
+      // Open tmux attach in a new window, dashboard stays running
+      const { spawn } = require('child_process');
+      spawn('tmux', ['new-window', '-n', `attach-${sessionName}`, '-d', 'tmux', 'attach', '-t', sessionName], {
+        stdio: 'ignore',
+        detached: true,
+      }).unref();
+      notify(`tmux attach -t ${sessionName}`, 'info');
+    } catch { notify('attach failed', 'error'); }
+  }, []);
 
   const handleKillSession = useCallback(async () => {
     if (currentView !== 'tasks') return;

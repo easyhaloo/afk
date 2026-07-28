@@ -21,13 +21,10 @@ export async function checkIssuePreconditions(
   try {
     const issue = await gitlab.getIssue(iid);
 
-    // 1. AC section must exist
-    const ac = gitlab.parseAC(issue.description);
-    if (!ac) {
-      return { ok: false, reason: 'missing AC section' };
-    }
+    // 1. AC items must exist (labels or legacy markdown section)
+    const ac = gitlab.parseAC(issue);
     if (ac.items.length === 0) {
-      return { ok: false, reason: 'AC section is empty' };
+      return { ok: false, reason: 'missing AC (add ac::1::... labels or ## AC markdown section)' };
     }
 
     // 2. base:: label must exist

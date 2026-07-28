@@ -15,6 +15,7 @@ import type {
   AcceptanceCriteria,
   LinkType,
 } from '../tracker/types';
+import { extractAC } from '../tracker/ac';
 
 export interface GitLabConfig {
   url: string;
@@ -216,21 +217,8 @@ export class GitLabClient implements TrackerProvider {
     });
   }
 
-  parseAC(description: string): AcceptanceCriteria | null {
-    const acMatch = description.match(
-      /##\s*(?:AC|Acceptance Criteria)\s*\n([\s\S]*?)(?=\n##|$)/i
-    );
-    if (!acMatch) return null;
-
-    const acText = acMatch[1].trim();
-    const items: string[] = [];
-    const itemRegex = /^[-*]\s+\[\s*\]\s+(.+)$/gm;
-    let match;
-    while ((match = itemRegex.exec(acText)) !== null) {
-      items.push(match[1].trim());
-    }
-
-    return { text: acText, items };
+  parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria {
+    return extractAC(issue);
   }
 
   getRetryCount(issue: TrackedIssue): number {

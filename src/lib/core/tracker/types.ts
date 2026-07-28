@@ -111,11 +111,15 @@ export interface TrackedMR {
 }
 
 /**
- * Acceptance Criteria parsed from issue description
+ * Acceptance Criteria.
+ *
+ * `items` is ordered (by AC index when from labels, by source order when
+ * from legacy markdown). `source` tells callers whether the data came
+ * from the structured label path or the legacy markdown parser.
  */
 export interface AcceptanceCriteria {
-  text: string;
   items: string[];
+  source: 'labels' | 'legacy' | 'none';
 }
 
 /**
@@ -145,7 +149,7 @@ export interface TrackerProvider {
   reopenMR(id: number): Promise<void>;
 
   // Utility
-  parseAC(description: string): AcceptanceCriteria | null;
+  parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria;
   getRetryCount(issue: TrackedIssue): number;
   detectTargetBranch(issueId: number, explicit?: string): Promise<string>;
   uploadArtifacts(worktreePath: string): Promise<string>;

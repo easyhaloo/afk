@@ -72,8 +72,13 @@ export class WorkflowRunner {
 
     // ── Step 1: Fetch issue + AC ────────────────────────────────────────────
     const issue = await this.gitlab.getIssue(iid);
-    const ac = this.gitlab.parseAC(issue.description);
-    if (!ac) throw new Error(`Issue #${iid} has no AC section`);
+    const ac = this.gitlab.parseAC(issue);
+    if (ac.items.length === 0) {
+      throw new Error(
+        `Issue #${iid} has no AC. Add AC labels (ac::1::..., ac::2::...) or ` +
+        `a "## AC" markdown section.`
+      );
+    }
 
     const goalText = ac.items.map((item, idx) => `${idx + 1}. ${item}`).join('\n');
     const traceId = `trace-${Date.now()}-${iid}`;
@@ -158,8 +163,8 @@ export class WorkflowRunner {
 
     // Ask agent to run AC checks
     const issue = await this.gitlab.getIssue(iid);
-    const ac = this.gitlab.parseAC(issue.description);
-    if (ac) {
+    const ac = this.gitlab.parseAC(issue);
+    if (ac.items.length > 0) {
       await this.tmux.sendResumeWithAC(session, 'main', ac.items);
     }
 
@@ -233,9 +238,9 @@ export class WorkflowRunner {
 
       // Check 2: issue has AC section with items
       const issue = await this.gitlab.getIssue(iid);
-      const ac = this.gitlab.parseAC(issue.description);
-      if (!ac || ac.items.length === 0) {
-        return { ok: false, reason: 'issue has no AC section', commitCount, acItemCount: 0 };
+      const ac = this.gitlab.parseAC(issue);
+      if (ac.items.length === 0) {
+        return { ok: false, reason: 'issue has no AC', commitCount, acItemCount: 0 };
       }
 
       return { ok: true, reason: 'passed', commitCount, acItemCount: ac.items.length };

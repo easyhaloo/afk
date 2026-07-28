@@ -191,17 +191,18 @@ export function registerGitLabCommands(program: Command): void {
       try {
         const client = await createGitLabClient();
         const issue = await client.getIssue(parseInt(iid));
-        const ac = client.parseAC(issue.description);
+        const ac = client.parseAC(issue);
 
-        if (!ac) {
-          console.log(chalk.yellow('No AC section found in issue description'));
+        if (ac.items.length === 0) {
+          console.log(chalk.yellow('No AC found (add ac::1::... labels or ## AC markdown section)'));
           process.exit(1);
         }
 
+        const sourceHint = ac.source === 'labels' ? '(from labels)' : '(from legacy markdown)';
         if (options.json) {
           console.log(JSON.stringify(ac, null, 2));
         } else {
-          console.log(chalk.bold('Acceptance Criteria:'));
+          console.log(chalk.bold(`Acceptance Criteria ${sourceHint}:`));
           console.log();
           ac.items.forEach((item, i) => {
             console.log(`  ${i + 1}. ${item}`);

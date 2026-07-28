@@ -6,6 +6,7 @@ import { Task, Issue, Project } from '../../types/dashboard';
 import { TmuxClient } from '../../lib/core/tmux/tmux';
 import { useNavigation } from './navigation/index';
 import { useData } from './data/index';
+import { initRegistry } from './registry/init';
 import {
   TaskListView,
   IssueListView,
@@ -21,7 +22,10 @@ import {
   Notification,
 } from './views/index';
 import { SplashScreen } from './components/SplashScreen.js';
-import type { View, Notification as NotificationType } from './types';
+import type { Notification as NotificationType } from './types';
+
+// Initialize view registry at module load
+initRegistry();
 
 export const Dashboard: React.FC = () => {
   const { exit } = useApp();
@@ -32,13 +36,8 @@ export const Dashboard: React.FC = () => {
   const H = process.stdout.rows || 24;
   const CONTENT_H = H - 2;
 
-  // When the user enters issue view from a project (key `i` in detail) we
-  // scope the fetch to that project; otherwise it's null and the service
-  // falls back to all accessible projects.
-  const [issueProject, setIssueProject] = useState<Project | null>(null);
-
   const {
-    currentView, setCurrentView,
+    currentView, currentContext,
     selectedIndex, setSelectedIndex,
     scrollOffset, setScrollOffset,
     detailView, setDetailView, isDetailMode,
@@ -54,7 +53,7 @@ export const Dashboard: React.FC = () => {
     reloadTasks, removeSession, addTaskFromIssue, launchFromIssue, launchExistingTask,
     fetchMoreIssues, fetchMoreProjects,
     invalidateDetailCache,
-  } = useData(currentView, issueProject);
+  } = useData(currentView as any, currentContext.project ?? null);
 
   // UI state
   const [multiSelectMode, setMultiSelectMode] = useState(false);
@@ -185,7 +184,7 @@ export const Dashboard: React.FC = () => {
     try {
       const newTask = await addTaskFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch });
       await reloadTasks();
-      setCurrentView('tasks');
+      pushView('tasks');
       setSelectedIndex(0);
       notify(`created task #${newTask.iid}: ${newTask.title}`, 'success');
     } catch { notify('create failed', 'error'); }
@@ -200,7 +199,7 @@ export const Dashboard: React.FC = () => {
       try {
         await launchFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch });
         await reloadTasks();
-        setCurrentView('tasks');
+        pushView('tasks');
         setSelectedIndex(0);
         notify(`launched: issue-${issue.iid}`, 'success');
       } catch { notify('launch failed', 'error'); }
@@ -268,7 +267,7 @@ export const Dashboard: React.FC = () => {
     await reloadTasks();
     setSelectedIssues(new Set());
     setMultiSelectMode(false);
-    setCurrentView('tasks');
+    pushView('tasks');
     setSelectedIndex(0);
     notify(`created ${ok} tasks`, 'success');
   }, [currentView, selectedIssues, issues]);
@@ -347,7 +346,7 @@ export const Dashboard: React.FC = () => {
       if (showHelp) { setShowHelp(false); return; }
       if (input === 'q') { exit(); return; }
       if (detailView === 'detail') { exit(); return; }
-      if (canGoBack()) { popView(); setIssueProject(null); return; }
+      if (canGoBack()) { popView(); return; }
       return;
     }
 
@@ -359,8 +358,7 @@ export const Dashboard: React.FC = () => {
       if (input === 'i') {
         const project = getItem() as Project;
         if (project) {
-          setIssueProject(project);
-          setCurrentView('issues');
+          pushView('issues', { project });
           setDetailView('list');
           setSelectedIndex(0);
         }
@@ -371,14 +369,14 @@ export const Dashboard: React.FC = () => {
 
     if (input === 'b') {
       if (showHelp) { setShowHelp(false); return; }
-      if (canGoBack()) { popView(); setIssueProject(null); return; }
+      if (canGoBack()) { popView(); return; }
     }
 
-    if (input === '1') { setIssueProject(null); switchView('tasks'); }
-    if (input === '2') { setIssueProject(null); switchView('issues'); }
-    if (input === '3') { setIssueProject(null); switchView('completed'); }
-    if (input === '4') { setIssueProject(null); switchView('projects'); }
-    if (input === '5') { setIssueProject(null); switchView('board'); }
+    if (input === '1') { switchView('tasks'); }
+    if (input === '2') { switchView('issues'); }
+    if (input === '3') { switchView('completed'); }
+    if (input === '4') { switchView('projects'); }
+    if (input === '5') { switchView('board'); }
 
     if (key.downArrow) {
       navigateDown(items.length);
@@ -445,7 +443,7 @@ export const Dashboard: React.FC = () => {
       {isDetailMode ? (
         <DetailScreen
           item={getItem()}
-          view={currentView}
+          view={currentView as any}
           height={H}
           width={W}
           branches={projectBranches}
@@ -455,7 +453,7 @@ export const Dashboard: React.FC = () => {
       ) : (
         <>
           <Header
-            view={currentView}
+            view={currentView as any}
             tasksCount={tasks.length}
             issuesCount={issues.length}
             completedCount={completedTasks.length}

@@ -3,7 +3,7 @@
  * Part of the reactive data flow for automatic navigation
  */
 import { ViewRegistry } from '../registry';
-import type { ViewState } from '../types';
+import type { View, ViewState } from '../types';
 
 export type ActionType =
   | 'issue:create-task'
@@ -14,7 +14,7 @@ export type ActionType =
   | 'navigate:reset';
 
 export interface NavigationPolicyEntry {
-  target: string;
+  target: View | 'back';
   context?: (action: ActionType, prevState: ViewState, result?: any) => ViewState['context'];
 }
 

@@ -1,6 +1,5 @@
 import { spawn } from 'child_process';
-import { GitLabClient } from './gitlab';
-import type { Platform } from './core/tracker/types';
+import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
 import { getTokenUsage, configureStatusline } from './io';
@@ -41,13 +40,13 @@ interface LaunchResult {
  * a timeout signal to .afk-signal.json, then kills the tmux session.
  */
 export class WorkflowRunner {
-  private gitlab: GitLabClient;
+  private tracker: TrackerProvider;
   private tmux: TmuxClient;
   private worktree: WorktreeManager;
   private logDir: string;
 
-  constructor(gitlab: GitLabClient) {
-    this.gitlab = gitlab;
+  constructor(tracker: TrackerProvider) {
+    this.tracker = tracker;
     this.tmux = new TmuxClient();
     this.worktree = new WorktreeManager();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;
@@ -71,8 +70,8 @@ export class WorkflowRunner {
     const platform = options.platform;
 
     // ── Step 1: Fetch issue + AC ────────────────────────────────────────────
-    const issue = await this.gitlab.getIssue(iid);
-    const ac = this.gitlab.parseAC(issue);
+    const issue = await this.tracker.getIssue(iid);
+    const ac = this.tracker.parseAC(issue);
     if (ac.items.length === 0) {
       throw new Error(
         `Issue #${iid} has no AC. Add AC labels (ac::1::..., ac::2::...) or ` +
@@ -101,17 +100,26 @@ export class WorkflowRunner {
     // ── Step 5: Post launch comment ─────────────────────────────────────────
     const goalLines = goalText.split('\n').length;
     const goalPreview = goalText.split('\n').slice(0, 5).join('\n');
-    await this.gitlab.createLaunchComment(iid, {
-      worktreePath: wt.path,
-      targetBranch,
-      session,
-      traceId,
-      goalLines,
-      goalPreview,
-    });
-    await this.gitlab.addLabel(iid, `session::${session}`);
-    await this.gitlab.addLabel(iid, 'stage::afk-in-progress');
-    await this.gitlab.removeLabel(iid, 'stage::ready-for-issues');
+    const launchBody = [
+      '<!-- afk-event: launch -->',
+      '**🚀 AFK Session Started**',
+      '',
+      `- **Worktree:** \`${wt.path}\``,
+      `- **Branch:** \`${targetBranch}\``,
+      `- **Session:** \`${session}\``,
+      `- **Trace:** \`${traceId}\``,
+      '',
+      '**Goal:**',
+      '```',
+      goalPreview + (goalText.split('\n').length > 5 ? '\n...' : ''),
+      '```',
+      '',
+      `> ${goalLines} lines total`,
+    ].join('\n');
+    await this.tracker.addComment(iid, launchBody);
+    await this.tracker.addLabel(iid, `session::${session}`);
+    await this.tracker.addLabel(iid, 'stage::afk-in-progress');
+    await this.tracker.removeLabel(iid, 'stage::ready-for-issues');
 
     // ── Step 6: Wait for signal ─────────────────────────────────────────────
     const signal = await this.tmux.waitForAnySignal(
@@ -162,8 +170,8 @@ export class WorkflowRunner {
     await this.pushBranch(worktreePath);
 
     // Ask agent to run AC checks
-    const issue = await this.gitlab.getIssue(iid);
-    const ac = this.gitlab.parseAC(issue);
+    const issue = await this.tracker.getIssue(iid);
+    const ac = this.tracker.parseAC(issue);
     if (ac.items.length > 0) {
       await this.tmux.sendResumeWithAC(session, 'main', ac.items);
     }
@@ -189,15 +197,15 @@ export class WorkflowRunner {
     try {
       const mrId = this.extractMRIdFromUrl(mrUrl);
       if (mrId) {
-        const mr = await this.gitlab.getMR(mrId);
+        const mr = await this.tracker.getMR(mrId);
         console.log(`✓ MR status: ${mr.state}, pipeline: ${mr.pipeline?.status || 'N/A'}`);
       }
     } catch (err) {
       console.warn('Failed to query MR/PR status:', err);
     }
 
-    await this.gitlab.addLabel(iid, 'stage::qa');
-    await this.gitlab.removeLabel(iid, 'stage::afk-in-progress');
+    await this.tracker.addLabel(iid, 'stage::qa');
+    await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
 
     return { success: true, url: mrUrl };
   }
@@ -237,8 +245,8 @@ export class WorkflowRunner {
       }
 
       // Check 2: issue has AC section with items
-      const issue = await this.gitlab.getIssue(iid);
-      const ac = this.gitlab.parseAC(issue);
+      const issue = await this.tracker.getIssue(iid);
+      const ac = this.tracker.parseAC(issue);
       if (ac.items.length === 0) {
         return { ok: false, reason: 'issue has no AC', commitCount, acItemCount: 0 };
       }
@@ -259,11 +267,16 @@ export class WorkflowRunner {
     targetBranch: string,
     maxRetries: number
   ): Promise<{ success: boolean; url?: string }> {
-    const retryCount = await this.gitlab.incrementRetryCount(iid);
+    const issue = await this.tracker.getIssue(iid);
+    const current = this.tracker.getRetryCount(issue);
+    const newCount = current + 1;
+    const withoutOld = issue.labels.filter(l => !/^retry-count::/.test(l));
+    await this.tracker.updateIssue(iid, { labels: [...withoutOld, `retry-count::${newCount}`] });
+    const retryCount = newCount;
 
     if (retryCount > maxRetries) {
-      await this.gitlab.addLabel(iid, 'mode::hitl');
-      await this.gitlab.addComment(iid, `❌ AC check failed after ${maxRetries} retries. Escalating to human review.`);
+      await this.tracker.addLabel(iid, 'mode::hitl');
+      await this.tracker.addComment(iid, `❌ AC check failed after ${maxRetries} retries. Escalating to human review.`);
       await this.worktree.updateStatus(iid, 'failed');
       return { success: false };
     }
@@ -296,7 +309,7 @@ export class WorkflowRunner {
     await (await import('fs')).promises.mkdir(this.logDir, { recursive: true });
     await (await import('fs')).promises.writeFile(logPath, snapshot, 'utf-8');
 
-    await this.gitlab.addComment(iid, `<!-- afk-event: timeout -->
+    await this.tracker.addComment(iid, `<!-- afk-event: timeout -->
 **⏱️ Hard Timeout**
 
 Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
@@ -305,7 +318,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
 **Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
 
-    await this.gitlab.addLabel(iid, 'mode::timeout');
+    await this.tracker.addLabel(iid, 'mode::timeout');
     await this.tmux.killSession(session);
     await this.worktree.updateStatus(iid, 'failed');
 
@@ -364,11 +377,12 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, TIMEOUTS.HANDOFF_TIMEOUT);
 
     const snapshot = await this.tmux.capturePane(session, 'main', { lines: 100, history: 200 });
-    const sha = await this.gitlab.getWorktreeSHA(worktreePath);
-    const branch = (await import('simple-git')).simpleGit(worktreePath).revparse(['--abbrev-ref', 'HEAD']);
+    const git = (await import('simple-git')).simpleGit(worktreePath);
+    const sha = await git.revparse('HEAD');
+    const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
 
-    await this.gitlab.addLabel(iid, 'handoff::active');
-    await this.gitlab.addComment(iid, `<!-- afk-event: handoff -->
+    await this.tracker.addLabel(iid, 'handoff::active');
+    await this.tracker.addComment(iid, `<!-- afk-event: handoff -->
 **🔄 Context Handoff**
 
 - **Reason:** context_high (~${tokens} tokens)
@@ -406,7 +420,7 @@ ${snapshot}
     const { simpleGit } = await import('simple-git');
     const git = simpleGit(worktreePath);
     const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
-    const issue = await this.gitlab.getIssue(iid);
+    const issue = await this.tracker.getIssue(iid);
 
     return new Promise((resolve, reject) => {
       const proc = spawn('glab', [

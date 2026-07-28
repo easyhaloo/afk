@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { createGitLabClient } from '../lib/client-factory';
+import { createTrackerClient } from '../lib/client-factory';
 import { WorkflowRunner } from '../lib/workflows';
 import { getWorkflowConfig } from '../lib/config-manager';
 import { TIMEOUTS } from '../lib/constants';
@@ -24,8 +24,8 @@ export function registerWorkflowCommands(program: Command): void {
     .option('--hard-timeout <ms>', 'Hard timeout in ms (default: 7200000)', parseInt, TIMEOUTS.WORKFLOW_HARD_TIMEOUT)
     .action(async (options) => {
       try {
-        const gitlab = await createGitLabClient();
-        const runner = new WorkflowRunner(gitlab);
+        const tracker = await createTrackerClient();
+        const runner = new WorkflowRunner(tracker);
 
         const cfg = getWorkflowConfig();
         const session = options.session || `afk-${options.iid}`;

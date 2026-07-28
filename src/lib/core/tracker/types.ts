@@ -150,9 +150,62 @@ export interface TrackerProvider {
   closeMR(id: number, options?: CloseMROptions): Promise<void>;
   reopenMR(id: number): Promise<void>;
 
+  // Projects
+  listProjects(options?: { page?: number; perPage?: number }): Promise<Project[]>;
+  getBranches(projectId: number): Promise<Branch[]>;
+  getTags(projectId: number): Promise<Tag[]>;
+  getRecentCommits(projectId: number, perPage?: number): Promise<Commit[]>;
+
   // Utility
   parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria;
   getRetryCount(issue: TrackedIssue): number;
   detectTargetBranch(issueId: number, explicit?: string): Promise<string>;
   uploadArtifacts(worktreePath: string): Promise<string>;
+}
+
+/**
+ * Unified project representation
+ */
+export interface Project {
+  id: number;
+  name: string;
+  path_with_namespace: string;
+  description?: string;
+  default_branch?: string;
+  namespace: { name: string };
+  last_activity_at?: string;
+  web_url?: string;
+}
+
+/**
+ * Unified branch representation
+ */
+export interface Branch {
+  name: string;
+  commit: string;
+  commit_title?: string;
+  author?: string;
+  committed_date?: string;
+  protected?: boolean;
+}
+
+/**
+ * Unified tag representation
+ */
+export interface Tag {
+  name: string;
+  commit: string;
+  commit_author?: string;
+  commit_date?: string;
+  message?: string;
+}
+
+/**
+ * Unified commit representation
+ */
+export interface Commit {
+  id: string;
+  title: string;
+  author?: string;
+  committed_date?: string;
 }

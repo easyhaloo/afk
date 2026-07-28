@@ -1,16 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Task, Issue, Project, TmuxSession } from '../../../types/dashboard';
+import { Task, Issue, TmuxSession } from '../../../types/dashboard';
 import type { View } from '../types';
+import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
 import {
   fetchTasks,
   fetchSessions,
   fetchProjectDetail,
   fetchIssues,
+  fetchProjects,
   killSession,
   createTaskFromIssue,
   launchTask,
-  issueService,
-  projectService,
 } from './fetcher';
 import {
   readIssuesList, writeIssuesList,
@@ -122,7 +122,7 @@ export function useData(currentView: View, currentProject: Project | null) {
           // Background refresh to validate staleness — fire and forget.
           (async () => {
             try {
-              const data = await projectService.listProjects(1, PER_PAGE);
+              const data = await fetchProjects();
               setProjects(data.projects);
               setProjectHasMore(data.hasMore);
               writeProjectsList(data.projects, data.hasMore);
@@ -133,7 +133,7 @@ export function useData(currentView: View, currentProject: Project | null) {
         (async () => {
           setLoading(true);
           try {
-            const data = await projectService.listProjects(1, PER_PAGE);
+            const data = await fetchProjects();
             setProjects(data.projects);
             setProjectHasMore(data.hasMore);
             setProjectPage(2);
@@ -262,7 +262,7 @@ export function useData(currentView: View, currentProject: Project | null) {
     if (loading || !projectHasMore) return;
     setLoading(true);
     try {
-      const data = await projectService.listProjects(projectPage, PER_PAGE);
+      const data = await fetchProjects({ page: projectPage, perPage: PER_PAGE });
       let mergedItems: Project[] = [];
       setProjects(prev => {
         mergedItems = [...prev, ...data.projects];

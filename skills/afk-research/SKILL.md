@@ -84,9 +84,9 @@ enough to proceed.
 
 ### Step 5 — Write + optional publish
 
-Write `RESEARCH.md` to disk. Optional: post to GitLab labeled
-`stage::research` if `scripts/gitlab.sh` is available and `glab` is
-authenticated.
+Write `RESEARCH.md` to disk. Optional: post as a tracker issue
+labeled `stage::research` via `afk issue create` if the tracker CLI
+is authenticated.
 
 ## Anti-patterns
 

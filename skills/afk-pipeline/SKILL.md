@@ -31,7 +31,7 @@ Pick the row that matches what the user has in hand right now:
 | An idea with technical risk to validate first | `/afk-prototype` |
 | An alignment record (interview, draft, requirements) | `/afk-to-prd` |
 | An approved PRD | `/afk-to-issues` |
-| A GitLab issue to implement | `/afk-implement <iid>` |
+| A tracker issue to implement | `/afk-implement <iid>` |
 | Multiple issues to orchestrate | `/afk-scheduler` |
 | A specific task in *this* session | `/afk-do "<task>"` |
 | An MR to verify | `/afk-qa <mr-url>` |

@@ -80,7 +80,7 @@ incident — stop, escalate, do not continue the run.
 
 6. **Resume AFK**
    ```bash
-   glab issue update {iid} --unlabel mode::hitl
+   afk issue update-labels {id} --remove mode::hitl
    /afk-implement {iid}
    ```
 
@@ -148,7 +148,7 @@ non-compliant on a feature task.
 
 6. **Resume AFK**
    ```bash
-   glab issue update {iid} --unlabel mode::hitl
+   afk issue update-labels {id} --remove mode::hitl
    /afk-implement {iid}
    ```
 
@@ -170,7 +170,7 @@ code was written.
 
 **Evidence that requires file upload:**
 If the evidence is a screenshot, log excerpt, or binary artifact, the file
-must be uploaded to GitLab to appear in the MR comment. To do this:
+must be uploaded to the tracker to appear in the MR comment. To do this:
 1. Write the file path(s) to `.afk/artifacts.txt` (one absolute path per line)
 2. The wrapup script will upload them and embed URLs in the MR description
 3. Reference the uploaded URL in your Progress evidence, e.g.
@@ -231,7 +231,7 @@ written, that AC is not done. Run the code and capture its output.
 
 6. **Resume AFK**
    ```bash
-   glab issue update {iid} --unlabel mode::hitl
+   afk issue update-labels {id} --remove mode::hitl
    /afk-implement {iid}
    ```
 
@@ -291,7 +291,7 @@ missing lines and the `Next:` describes what is needed.
 
 6. **Resume AFK**
    ```bash
-   glab issue update {iid} --unlabel mode::hitl
+   afk issue update-labels {id} --remove mode::hitl
    /afk-implement {iid}
    ```
 
@@ -345,7 +345,7 @@ development environment.
 
 5. **Resume AFK with caution**
    ```bash
-   glab issue update {iid} --unlabel mode::hitl
+   afk issue update-labels {id} --remove mode::hitl
    # Manual review: ensure agent understands worktree scope
    /afk-implement {iid}
    ```
@@ -400,7 +400,7 @@ Use regular push only.
 
 5. **Resume AFK**
    ```bash
-   glab issue update {iid} --unlabel mode::hitl
+   afk issue update-labels {id} --remove mode::hitl
    /afk-implement {iid}
    ```
 
@@ -412,7 +412,7 @@ Storing retry count in the worktree's `.git/config` means it is lost
 if the worktree is removed or recreated. The retry count must survive
 worktree deletion.
 
-**Rule:** Retry state is stored in the GitLab issue label or comment,
+**Rule:** Retry state is stored in the tracker issue label or comment,
 not in any worktree-local file.
 
 #### Recovery Checklist (HITL)
@@ -427,17 +427,17 @@ not in any worktree-local file.
    cd .worktrees/issue-{iid}
    git config --local afk.retry-count
    
-   # Check if stored in GitLab labels (CORRECT)
-   glab issue view {iid} --output json | jq -r '.labels[] | select(test("^retry-count::"))'
+   # Check if stored in tracker labels (CORRECT)
+   afk issue get {id} --json | jq -r '.labels[] | select(test("^retry-count::"))'
    ```
 
-2. **Migrate retry count to GitLab label**
+2. **Migrate retry count to tracker label**
    ```bash
    # Read from worktree config
    local_count=$(git config --local afk.retry-count)
    
-   # Write to GitLab label
-   glab issue update {iid} --label "retry-count::${local_count}"
+   # Write to tracker label
+   afk issue update-labels {id} --add "retry-count::${local_count}"
    
    # Remove from worktree config
    git config --local --unset afk.retry-count
@@ -452,17 +452,17 @@ not in any worktree-local file.
    # Recreate worktree
    git worktree add .worktrees/issue-{iid} afk/issue-{iid}
    
-   # Retry count should still be in GitLab
-   glab issue view {iid} --output json | jq -r '.labels[] | select(test("^retry-count::"))'
+   # Retry count should still be in the tracker
+   afk issue get {id} --json | jq -r '.labels[] | select(test("^retry-count::"))'
    ```
 
 4. **Resume AFK**
    ```bash
-   glab issue update {iid} --unlabel mode::hitl
+   afk issue update-labels {id} --remove mode::hitl
    /afk-implement {iid}
    ```
 
-**Prevention:** All retry state management must use GitLab API (labels or comments), never worktree-local storage.
+**Prevention:** All retry state management must use the tracker API (labels or comments), never worktree-local storage.
 
 ---
 
@@ -471,7 +471,7 @@ not in any worktree-local file.
 When a hard check is violated:
 
 1. Do not continue the run.
-2. Post a GitLab comment describing which HC was violated.
+2. Post a tracker comment describing which HC was violated.
 3. Relabel the issue `mode::hitl`.
 4. Detach from tmux and stop the session.
 

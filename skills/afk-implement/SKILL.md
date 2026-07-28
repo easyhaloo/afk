@@ -1,9 +1,9 @@
 ---
 name: afk-implement
 description: >-
-  Use when a GitLab issue with machine-checkable Acceptance Criteria is
-  ready for autonomous implementation. Runs in background tmux session.
-  Produces an MR against the integration branch.
+  Use when a tracker issue with machine-checkable Acceptance Criteria
+  is ready for autonomous implementation. Runs in background tmux
+  session. Produces an MR against the integration branch.
 disable-model-invocation: true
 disallowed-tools: >-
   Bash(git push origin main) Bash(git push origin master)
@@ -142,7 +142,7 @@ Attach, read the last `Next:` line, decide:
 - MUST NOT hand-write a `while true; do claude -p ...; done` loop.
 - MUST NOT bypass `afk workflow run` and reimplement its steps in bash.
 - MUST NOT push directly to a protected branch — MR only.
-- MUST NOT treat GitLab comments as the sole progress record — WIP
+- MUST NOT treat tracker comments as the sole progress record — WIP
   commit `Next:` trailer is the real handoff document.
 - MUST NOT squash/rewrite WIP commit history before MR.
 - MUST NOT skip Step 3 — TDD methodology is not optional.

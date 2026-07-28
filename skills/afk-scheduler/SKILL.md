@@ -61,12 +61,12 @@ Skip wave plan confirmation — each issue launches immediately.
 ### Step 1 — Build the blocked_by DAG
 
 ```bash
-glab issue list --label "mode::afk" --state opened --output json | \
-  jq '.[] | {iid, title, labels}'
+afk issue list --label mode::afk --state opened --json | \
+  jq '.[] | {id, title, labels}'
 
 # Blockers via label blocks-<iid>
-glab issue list --label "blocks-<iid>" --output json | \
-  jq -r '.[] | select(.state == "opened") | .iid'
+afk issue list --label "blocks-<id>" --json | \
+  jq -r '.[] | select(.state == "opened") | .id'
 ```
 
 Construct DAG: each issue → set of issue IIDs it is blocked by.
@@ -127,7 +127,7 @@ All waves complete. Ready for final human gate:
 - MUST NOT launch an issue whose open blocker is not yet merged.
 - MUST NOT retry failed issues without human decision — escalate to
   `mode::hitl` after two failures.
-- MUST NOT let the loop run without user visibility — post GitLab
+- MUST NOT let the loop run without user visibility — post tracker
   comment on each issue after every state transition.
 - MUST NOT delete remote branches — remote history is the audit trail.
 - MUST NOT confuse "no open blockers" with "no blockers at all" —

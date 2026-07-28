@@ -5,7 +5,9 @@ description: >-
   against its Acceptance Criteria before merge. Verifies AC independently,
   merges if all pass, escalates if not.
 disallowed-tools: >-
-  Bash(glab issue delete*) Bash(glab mr delete*) Bash(glab repo delete*)
+  Bash(glab mr merge*) Bash(glab issue delete*) Bash(glab mr delete*)
+  Bash(glab repo delete*) Bash(gh issue delete*) Bash(gh repo delete*)
+  Bash(afk mr merge*)
   Bash(git reset --hard*) Bash(git branch -D*)
 ---
 
@@ -75,7 +77,7 @@ If binary evidence was generated, write paths to `.afk/artifacts.txt`
 ### Step 4 — Merge to `prd/<N>` (all pass)
 
 1. Approve the MR.
-2. `glab mr merge <mr-iid> --delete-source-branch`
+2. `afk mr merge <mr-id> --delete-source-branch`
 3. Update labels: `stage::done`.
 4. Discard DB fork if any.
 5. **Check if this was the last open MR in the PRD** — if so, post on

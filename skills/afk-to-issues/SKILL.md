@@ -1,19 +1,21 @@
 ---
 name: afk-to-issues
 description: >-
-  Decompose requirements into GitLab issues with machine-checkable AC.
-  PRD Mode (full fidelity) or Direct Mode (any requirement context).
-  Reads codebase to infer how each Observable Behavior should be
-  verified (test runner, HTTP endpoint, log location, file path).
+  Decompose requirements into tracker issues with machine-checkable
+  acceptance criteria. Two entry points: an approved PRD with
+  Observable Behaviors, or any requirement context in Direct Mode.
+  Reads the codebase to choose verification means (test runner,
+  HTTP endpoint, log file, manual check).
 disallowed-tools: >-
+  Bash(afk mr merge*)
   Bash(glab mr merge*) Bash(glab issue delete*) Bash(glab mr delete*)
-  Bash(glab repo delete*) Bash(git push -f) Bash(git reset --hard*)
-  Bash(git branch -D*)
+  Bash(glab repo delete*) Bash(gh issue delete*) Bash(gh repo delete*)
+  Bash(git push -f) Bash(git reset --hard*) Bash(git branch -D*)
 ---
 
 # Requirements -> Issues
 
-**Goal:** Independently pickable GitLab issues with verifiable completion conditions.
+**Goal:** Independently pickable tracker issues with verifiable completion conditions.
 **Mode:** HITL-gated — draft first, approve before creating.
 
 ## Slice Strategy (auto-infer, user confirms)
@@ -52,7 +54,7 @@ read the codebase to infer:
 3. **What `check_command` exits 0 on PASS** — concrete shell snippet
 
 Allowed tools: Read, Grep, Bash (read-only: ls, cat, grep, jq, find,
-`glab issue list`, `glab mr list`). No mutating commands, no push, no delete.
+`afk issue list`, `afk mr list`). No mutating commands, no push, no delete.
 
 If the codebase gives no signal for a behavior, default to `manual`
 and flag it in the issue body as "needs automated check".
@@ -69,7 +71,7 @@ and flag it in the issue body as "needs automated check".
 1. **Read inputs:** PRD or requirement context; read `references/issue-template.md` for AC schema
 2. **Infer & slice:** read codebase → pick evidence_type per behavior → choose Vertical/Horizontal → slice
 3. **Quality gate:** every AC has `-- <type> -- <command>`, command is runnable, evidence_type in vocabulary
-4. **Create + HITL gate:** label with `stage::ready-for-issues,<mode>` + base, wire DAG via `afk gitlab link-issues`, get approval before creating any
+4. **Create + HITL gate:** label with `stage::ready-for-issues,<mode>` + base, wire DAG via `afk issue link`, get approval before creating any
 
 ## References
 

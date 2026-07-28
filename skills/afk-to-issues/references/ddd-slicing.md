@@ -2,7 +2,7 @@
 
 **Purpose**: Slice PRD user stories into issues along bounded context boundaries, not horizontal layers.
 **When**: Every afk-to-issues session — after reading PRD and identifying contexts.
-**Output**: GitLab issues with bounded context annotations and relevant ADR references.
+**Output**: tracker issues with bounded context annotations and relevant ADR references.
 
 ---
 

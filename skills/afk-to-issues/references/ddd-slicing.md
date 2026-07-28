@@ -60,7 +60,7 @@ If issue A publishes an event and issue B consumes it, B MUST be `blocked_by` A.
 - ADR-NNNN: <title>
 
 ## Acceptance Criteria (machine-checkable)
-- [ ] <command or observable check>
+- [ ] <text> -- <evidence_type> -- <check_command>
 ```
 
 ---

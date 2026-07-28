@@ -34,7 +34,7 @@ main  ← only touched at final human gate
 ## Preconditions
 
 - MR in `stage::qa`, targeting `prd/<N>` (not `main`), with linked
-  issue carrying `## Acceptance Criteria (machine-checkable)`.
+  issue carrying `## Acceptance Criteria` using the 3-field `--` format.
 - MR target branch is `prd/<N>` — if targeting `main` directly, STOP.
 
 ## Merge-order gate

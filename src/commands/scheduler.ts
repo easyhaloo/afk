@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { createGitLabClient } from '../lib/client-factory';
+import { createTrackerClient } from '../lib/client-factory';
 import { Scheduler } from '../lib/scheduler';
 import { getSchedulerConfig } from '../lib/config-manager';
 import { handleCommandError } from '../lib/cli-utils';
@@ -28,14 +28,14 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--max-concurrent <n>', 'Max concurrent tasks')
     .option('--redis-host <host>', 'Redis host')
     .option('--redis-port <port>', 'Redis port')
-    .option('--poll-interval <seconds>', 'GitLab polling interval (0 to disable)')
+    .option('--poll-interval <seconds>', 'Tracker polling interval (0 to disable)')
     .action(async (options) => {
       try {
         // PID lock
         const lockDir = process.env.AFK_LOCK_DIR || '/tmp/afk-locks';
         const { promises: fs } = await import('fs');
         await fs.mkdir(lockDir, { recursive: true });
-        const lockFile = `${lockDir}/scheduler-${process.env.GITLAB_PROJECT_ID || 'default'}.lock`;
+        const lockFile = `${lockDir}/scheduler-${process.env.GITHUB_REPOSITORY || process.env.GITLAB_PROJECT_ID || 'default'}.lock`;
         try {
           const { constants } = await import('fs');
           await fs.open(lockFile, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o644);
@@ -50,8 +50,8 @@ export function registerSchedulerCommands(program: Command): void {
         await fs.writeFile(lockFile, String(process.pid), 'utf-8');
 
         const cfg = getSchedulerConfig();
-        const gitlab = await createGitLabClient();
-        const sched = new Scheduler(gitlab, {
+        const tracker = await createTrackerClient();
+        const sched = new Scheduler(tracker, {
           maxConcurrent: options.maxConcurrent ? parseInt(options.maxConcurrent) : cfg.maxConcurrent,
           ...redisOpts(options),
         });
@@ -59,14 +59,14 @@ export function registerSchedulerCommands(program: Command): void {
         // Start scheduler
         await sched.start();
 
-        // Optional: poll GitLab periodically
+        // Optional: poll tracker periodically
         const pollInterval = options.pollInterval ? parseInt(options.pollInterval) : cfg.pollInterval;
         if (pollInterval > 0) {
-          console.log(chalk.gray(`   Polling GitLab every ${pollInterval}s...`));
+          console.log(chalk.gray(`   Polling tracker every ${pollInterval}s...`));
 
           setInterval(async () => {
             try {
-              await sched.pollGitLab();
+              await sched.pollTracker();
             } catch (error) {
               console.error(chalk.red('Poll error:'), (error as Error).message);
             }
@@ -105,8 +105,8 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
-        const gitlab = await createGitLabClient();
-        const sched = new Scheduler(gitlab, {
+        const tracker = await createTrackerClient();
+        const sched = new Scheduler(tracker, {
           ...redisOpts(options),
         });
 
@@ -149,8 +149,8 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
-        const gitlab = await createGitLabClient();
-        const sched = new Scheduler(gitlab, {
+        const tracker = await createTrackerClient();
+        const sched = new Scheduler(tracker, {
           ...redisOpts(options),
         });
 
@@ -179,8 +179,8 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
-        const gitlab = await createGitLabClient();
-        const sched = new Scheduler(gitlab, {
+        const tracker = await createTrackerClient();
+        const sched = new Scheduler(tracker, {
           ...redisOpts(options),
         });
 
@@ -204,8 +204,8 @@ export function registerSchedulerCommands(program: Command): void {
     .option('--redis-port <port>', 'Redis port')
     .action(async (options) => {
       try {
-        const gitlab = await createGitLabClient();
-        const sched = new Scheduler(gitlab, {
+        const tracker = await createTrackerClient();
+        const sched = new Scheduler(tracker, {
           ...redisOpts(options),
         });
 
@@ -223,14 +223,14 @@ export function registerSchedulerCommands(program: Command): void {
    */
   scheduler
     .command('poll')
-    .description('Manually poll GitLab for ready issues')
+    .description('Manually poll tracker for ready issues')
     .option('--redis-host <host>', 'Redis host')
     .option('--redis-port <port>', 'Redis port')
-    .option('--label <label>', 'GitLab label to filter (can be repeated)', undefined)
+    .option('--label <label>', 'Label to filter (can be repeated)', undefined)
     .action(async (options) => {
       try {
-        const gitlab = await createGitLabClient();
-        const sched = new Scheduler(gitlab, {
+        const tracker = await createTrackerClient();
+        const sched = new Scheduler(tracker, {
           ...redisOpts(options),
         });
 
@@ -240,7 +240,7 @@ export function registerSchedulerCommands(program: Command): void {
           ? Array.isArray(options.label) ? options.label : [options.label]
           : cfg.requiredLabels;
 
-        const enqueued = await sched.pollGitLab(labels, cfg.excludeLabels);
+        const enqueued = await sched.pollTracker(labels, cfg.excludeLabels);
         console.log(chalk.green(`✅ Polling complete (${enqueued} tasks enqueued)`));
 
         await sched.stop();

@@ -1,4 +1,4 @@
-import { GitLabClient } from './gitlab';
+import type { TrackerProvider } from './core/tracker/types';
 import { logAndReturn } from './cli-utils';
 
 export interface PreconditionResult {
@@ -15,14 +15,14 @@ export interface PreconditionResult {
  * 3. No open blockers (issues labeled blocks-<iid>)
  */
 export async function checkIssuePreconditions(
-  gitlab: GitLabClient,
+  tracker: TrackerProvider,
   iid: number
 ): Promise<PreconditionResult> {
   try {
-    const issue = await gitlab.getIssue(iid);
+    const issue = await tracker.getIssue(iid);
 
     // 1. AC items must exist (labels or legacy markdown section)
-    const ac = gitlab.parseAC(issue);
+    const ac = tracker.parseAC(issue);
     if (ac.items.length === 0) {
       return { ok: false, reason: 'missing AC (add ac::1::... labels or ## AC markdown section)' };
     }
@@ -34,7 +34,7 @@ export async function checkIssuePreconditions(
     }
 
     // 3. No open blockers
-    const blockers = await gitlab.listIssues({
+    const blockers = await tracker.listIssues({
       labels: [`blocks-${iid}`],
       state: 'opened',
     });

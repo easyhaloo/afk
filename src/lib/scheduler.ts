@@ -1,6 +1,6 @@
 import { Queue, Worker, Job } from 'bullmq';
 import { Redis } from 'ioredis';
-import { GitLabClient } from './gitlab';
+import type { TrackerProvider } from './core/tracker/types';
 import { WorkflowRunner } from './workflows';
 import { checkIssuePreconditions } from './preconditions';
 import { PORTS, TIMEOUTS } from './constants';
@@ -41,11 +41,11 @@ export class Scheduler {
   private queue: Queue<TaskData>;
   private worker: Worker<TaskData> | null = null;
   private redis: Redis;
-  private gitlab: GitLabClient;
+  private tracker: TrackerProvider;
   private maxConcurrent: number;
   private startTime: number = 0;
 
-  constructor(gitlab: GitLabClient, options: SchedulerOptions = {}) {
+  constructor(tracker: TrackerProvider, options: SchedulerOptions = {}) {
     const {
       maxConcurrent = 3,
       redisHost = 'localhost',
@@ -53,7 +53,7 @@ export class Scheduler {
       queueName = 'afk-tasks',
     } = options;
 
-    this.gitlab = gitlab;
+    this.tracker = tracker;
     this.maxConcurrent = maxConcurrent;
 
     // Setup Redis connection
@@ -203,14 +203,14 @@ export class Scheduler {
   }
 
   /**
-   * Poll GitLab for ready issues and enqueue them
-   * @param labels - GitLab label filter (default: ['stage::ready-for-implement'])
+   * Poll tracker for ready issues and enqueue them
+   * @param labels - label filter (default: ['mode::afk', 'stage::ready-for-issues'])
    * @param excludeLabels - Labels that exclude an issue from scheduling
    */
-  async pollGitLab(labels: string[] = ['stage::ready-for-implement'], excludeLabels: string[] = []): Promise<number> {
-    console.log('🔍 Polling GitLab for ready issues...');
+  async pollTracker(labels: string[] = ['mode::afk', 'stage::ready-for-issues'], excludeLabels: string[] = []): Promise<number> {
+    console.log('🔍 Polling tracker for ready issues...');
 
-    const issues = await this.gitlab.listIssues({
+    const issues = await this.tracker.listIssues({
       labels,
       state: 'opened',
     });
@@ -230,7 +230,7 @@ export class Scheduler {
       if (job) continue;
 
       // Check preconditions
-      const check = await checkIssuePreconditions(this.gitlab, issue.id);
+      const check = await checkIssuePreconditions(this.tracker, issue.id);
       if (!check.ok) {
         console.log(`   #${issue.id}: skipped (${check.reason})`);
         skipped++;
@@ -257,7 +257,7 @@ export class Scheduler {
     console.log(`Processing issue #${iid}`);
     console.log(`${'='.repeat(60)}\n`);
 
-    const runner = new WorkflowRunner(this.gitlab);
+    const runner = new WorkflowRunner(this.tracker);
 
     try {
       // Run full signal-driven workflow
@@ -273,9 +273,9 @@ export class Scheduler {
       }
 
       // Update labels
-      await this.gitlab.removeLabel(iid, 'stage::ready-for-implement');
-      await this.gitlab.removeLabel(iid, 'stage::afk-in-progress');
-      await this.gitlab.addLabel(iid, 'stage::qa');
+      await this.tracker.removeLabel(iid, 'stage::ready-for-issues');
+      await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
+      await this.tracker.addLabel(iid, 'stage::qa');
 
     } catch (error) {
       // Update job data with retry count

@@ -41,7 +41,7 @@ export const Dashboard: React.FC = () => {
     selectedIndex, setSelectedIndex,
     scrollOffset, setScrollOffset,
     detailView, setDetailView, isDetailMode,
-    pushView, popView, canGoBack, switchView,
+    dispatch, pushView, popView, canGoBack, switchView,
     navigateDown, navigateUp, navigateTop, navigateBottom,
   } = useNavigation();
 
@@ -184,8 +184,7 @@ export const Dashboard: React.FC = () => {
     try {
       const newTask = await addTaskFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch });
       await reloadTasks();
-      pushView('tasks');
-      setSelectedIndex(0);
+      dispatch('issue:create-task', newTask);
       notify(`created task #${newTask.iid}: ${newTask.title}`, 'success');
     } catch { notify('create failed', 'error'); }
   }, [currentView]);
@@ -199,8 +198,7 @@ export const Dashboard: React.FC = () => {
       try {
         await launchFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch });
         await reloadTasks();
-        pushView('tasks');
-        setSelectedIndex(0);
+        dispatch('issue:launch');
         notify(`launched: issue-${issue.iid}`, 'success');
       } catch { notify('launch failed', 'error'); }
     } else if (currentView === 'tasks') {
@@ -267,8 +265,7 @@ export const Dashboard: React.FC = () => {
     await reloadTasks();
     setSelectedIssues(new Set());
     setMultiSelectMode(false);
-    pushView('tasks');
-    setSelectedIndex(0);
+    dispatch('batch:create');
     notify(`created ${ok} tasks`, 'success');
   }, [currentView, selectedIssues, issues]);
 
@@ -358,7 +355,7 @@ export const Dashboard: React.FC = () => {
       if (input === 'i') {
         const project = getItem() as Project;
         if (project) {
-          pushView('issues', { project });
+          dispatch('project:view-issues');
           setDetailView('list');
           setSelectedIndex(0);
         }

@@ -25,18 +25,26 @@ const fixESMPlugin = {
         const original = content;
 
         // Fix relative imports: './foo' -> './foo.js' or './foo/index.js'
-        content = content.replace(/from ['"](\.[^'"]+)['"]/g, (match, path) => {
-          if (path.startsWith('.') && extname(path) === '') {
+        // Only processes paths that don't already have an extension
+        content = content
+          .replace(/from\s+(['"])(\.[^'"]+)\1/g, (match, quote, path) => {
+            if (extname(path)) return match; // already has extension
             const dir = dirname(file);
             const withJs = resolve(dir, path + '.js');
             const asIndex = resolve(dir, path, 'index.js');
-            // Prefer .js file over directory/index.js to avoid breaking single-file modules
-            if (existsSync(withJs)) return `from '${path}.js'`;
-            if (existsSync(asIndex)) return `from '${path}/index.js'`;
-            return `from '${path}.js'`;
-          }
-          return match;
-        });
+            if (existsSync(withJs)) return `from ${quote}${path}.js${quote}`;
+            if (existsSync(asIndex)) return `from ${quote}${path}/index.js${quote}`;
+            return `from ${quote}${path}.js${quote}`;
+          })
+          .replace(/import\s*\(\s*(['"])(\.[^'"]+)\1\s*\)/g, (match, quote, path) => {
+            if (extname(path)) return match; // already has extension
+            const dir = dirname(file);
+            const withJs = resolve(dir, path + '.js');
+            const asIndex = resolve(dir, path, 'index.js');
+            if (existsSync(withJs)) return `import(${quote}${path}.js${quote})`;
+            if (existsSync(asIndex)) return `import(${quote}${path}/index.js${quote})`;
+            return `import(${quote}${path}.js${quote})`;
+          });
 
         if (content !== original) {
           writeFileSync(file, content);

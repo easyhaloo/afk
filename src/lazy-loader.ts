@@ -17,6 +17,7 @@ const LOADER: [string[], () => Promise<{ [k: string]: RegisterFn }>][] = [
   [['debug'], () => import('./commands/debug.js')],
   [['escalate'], () => import('./commands/escalate.js')],
   [['fork'], () => import('./commands/fork.js')],
+  [['qa'], () => import('./commands/qa.js')],
 ];
 
 export async function lazyLoad(cmd: string, extraArgs: string[]) {

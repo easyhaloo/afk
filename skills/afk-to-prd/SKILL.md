@@ -78,7 +78,7 @@ Use the authoritative template at **`references/prd-template.md`** —
 read it before drafting. Highlights:
 
 - Sections: Problem Statement, Users & Jobs, Bounded Contexts, User
-  Stories, Key Decisions, Open Risks, Non-Goals, Mode.
+  Stories, Key Decisions, Open Risks, Non-Goals.
 - Each User Story's AC uses the **3-field `--` format**: `<text> --
   <evidence_type> -- <check_command>`.
 - `evidence_type` ∈ {test, curl, log, manual, none} — controlled

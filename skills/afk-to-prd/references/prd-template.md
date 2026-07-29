@@ -76,9 +76,6 @@ Each risk is **unresolved** — needs future decision or monitoring.
 - <what this PRD will NOT do>
 - <what this PRD will NOT do>
 
-## Mode
-
-`mode::afk`   <!-- or mode::hitl -->
 ```
 
 ## Field Reference
@@ -93,7 +90,6 @@ Each risk is **unresolved** — needs future decision or monitoring.
 | `## Key Decisions` | yes | bulleted list | Decided things |
 | `## Open Risks` | yes | bulleted list | Undecided things |
 | `## Non-Goals` | yes | bulleted list | Explicit exclusions |
-| `## Mode` | yes | one token | Autonomous or human |
 
 ## User Story Format
 
@@ -136,5 +132,4 @@ issue template, generated downstream by reading the codebase.
 - Stories that mix multiple bounded contexts (slicing target unclear)
 - Key Decisions that are actually open risks (undecided masquerading as decided)
 - Open Risks that are actually decided (decided masquerading as open)
-- Mode other than `mode::afk` or `mode::hitl`
 - "We can fix it later" as a Key Decision rationale

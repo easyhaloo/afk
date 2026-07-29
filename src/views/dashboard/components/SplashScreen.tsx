@@ -17,12 +17,18 @@ interface SplashScreenProps {
 
 const TICK_MS = 16;       // 60fps animation tick
 const LERP_FACTOR = 0.12; // how fast animProgress catches up (0-1, higher = faster)
+const FADE_FRAMES = 50;   // fade-out duration in animation frames (~800ms)
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const edgeChars = ['░', '▒', '▓', '█'];
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
+}
+
+// Ease-out cubic: starts fast, ends slow — gives a natural deceleration
+function easeOut(t: number): number {
+  return 1 - Math.pow(1 - t, 3);
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }) => {
@@ -33,6 +39,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
   const animProgressRef = useRef(0);
   const realProgressRef = useRef(0);
   const frameRef = useRef(0);
+  const fadeStartFrameRef = useRef<number | null>(null); // frame when fadeOut began
 
   const totalPhases = phases.length;
   const doneCount = phases.filter(p => p.done).length;
@@ -44,27 +51,22 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
   // Keep realProgress ref in sync with derived value
   useEffect(() => { realProgressRef.current = realProgress; }, [realProgress]);
 
-  // High-freq animation loop
+  // Always-running 60fps animation loop
   useEffect(() => {
-    let animFrame: ReturnType<typeof setInterval>;
-
     const loop = () => {
       animProgressRef.current = lerp(animProgressRef.current, realProgressRef.current, LERP_FACTOR);
       frameRef.current += 1;
-      // Skip React update during fadeOut — display values are frozen anyway
-      if (!fadeOut) {
-        setDisplay({ progress: animProgressRef.current, frame: frameRef.current });
-      }
+      setDisplay({ progress: animProgressRef.current, frame: frameRef.current });
     };
-
-    animFrame = setInterval(loop, TICK_MS);
-    return () => clearInterval(animFrame);
-  }, [fadeOut]);
+    const id = setInterval(loop, TICK_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // Watch for all phases done
   useEffect(() => {
     if (doneCount === totalPhases && !fadeOut) {
       const timer = setTimeout(() => {
+        fadeStartFrameRef.current = frameRef.current;
         setFadeOut(true);
         setTimeout(onComplete, 500);
       }, 400);
@@ -75,13 +77,21 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === 'c')) {
       setSkipped(true);
+      fadeStartFrameRef.current = frameRef.current;
       setFadeOut(true);
       setTimeout(onComplete, 300);
     }
   });
 
   const { progress, frame } = display;
-  const fadeOutProgress = fadeOut ? Math.max(0, 1 - (frame / 31)) : 1; // ~500ms at 60fps
+
+  // Fade-out progress using live frameRef so animation continues through fade
+  const fadeT = (() => {
+    if (!fadeOut || fadeStartFrameRef.current === null) return 1;
+    const elapsed = frameRef.current - fadeStartFrameRef.current;
+    return Math.min(1, elapsed / FADE_FRAMES);
+  })();
+  const fadeOutProgress = easeOut(fadeT);
   const opacity = fadeOut ? fadeOutProgress : 1;
   const slideOffset = fadeOut ? Math.floor((1 - fadeOutProgress) * 3) : 0;
 

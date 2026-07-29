@@ -26,6 +26,11 @@ disallowed-tools: >-
 | **PRD Mode** | `PRD.md` `## User Stories` with Observable Behavior lists | An approved PRD exists |
 | **Direct Mode** | Any requirement context (free text / notes / chat) | No PRD, or fast path |
 
+## Execution Mode
+
+`mode::afk` = autonomous execution. `mode::hitl` = human input during execution.
+`evidence_type: manual` (verification) is orthogonal to mode. Default: `mode::afk`.
+
 Mode is decided **once at the start** and propagates to:
 - issue label `mode::afk` or `mode::hitl`
 - issue base `base::prd-<iid>` (PRD) or `base::direct` (Direct)
@@ -93,7 +98,7 @@ Each draft must populate every field defined in
 4. **Compose drafts:** for each slice, fill every Issue Body Composition field. Do not leave optional fields blank — write `none` for empty Dependencies, omit Out of Scope if user has none.
 5. **Self-quality-gate:** run every `check_command` in a sandbox (no remote side effects). Any non-zero exit or vocabulary violation → fix the draft before HITL.
 6. **HITL gate:** present all drafts + DAG + label scheme + base label. Wait for explicit approval.
-7. **Create:** on approval, run `afk issue create` per draft, then `afk issue update-labels` for `stage::ready-for-issues,<mode>` and base, then `afk issue link` for DAG edges.
+7. **Create:** on approval, run `afk issue create` with all labels at once (`--label stage::ready-for-issues --label <mode> --label <base>`), then `afk issue link` for DAG edges.
 
 ## References
 

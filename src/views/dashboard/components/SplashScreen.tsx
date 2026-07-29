@@ -1,10 +1,11 @@
 /**
  * SplashScreen - Animated loading screen with real loading phases
  *
- * Uses Ink's useAnimation hook (shared internal timer) instead of manual setInterval
- * for smooth,协调良好的动画循环。
+ * Uses Ink's useAnimation (shared internal timer).
+ * Progress is time-based: each phase has a budget,进度条匀速推进到100%。
+ * No lerp/Snap chasing needed — progress is a pure function of time.
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput, useAnimation } from 'ink';
 import type { LoadingPhase } from '../hooks/useLoadingPhase';
 
@@ -13,59 +14,59 @@ interface SplashScreenProps {
   onComplete: () => void;
 }
 
-const LERP_FACTOR = 0.12; // how fast animProgress catches up (0-1, higher = faster)
-const SNAP_THRESHOLD = 0.5; // snap to target when within this margin (eliminates end jitter)
-const FADE_DURATION_MS = 800; // fade-out duration in milliseconds
+const FADE_DURATION_MS = 800;
+
+// Each phase's time budget in ms (config, detect, connect, tasks, sessions, ready)
+const PHASE_BUDGETS = [400, 300, 800, 600, 500, 400];
+const TOTAL_BUDGET = PHASE_BUDGETS.reduce((a, b) => a + b, 0); // = 3000ms
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const edgeChars = ['░', '▒', '▓', '█'];
 
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}
-
-// Ease-out cubic: starts fast, ends slow — gives a natural deceleration
 function easeOut(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
+/**
+ * Maps wall-clock time to a 0-100 progress value.
+ * Progress is continuous and linear based on phase time budgets,
+ * regardless of how long each phase's fetch actually takes.
+ */
+function getProgressFromTime(time: number, doneCount: number): number {
+  if (doneCount >= PHASE_BUDGETS.length) return 100;
+  if (time >= TOTAL_BUDGET) return 100;
+
+  let elapsed = 0;
+  for (let i = 0; i < PHASE_BUDGETS.length; i++) {
+    const budget = PHASE_BUDGETS[i];
+    if (time < elapsed + budget) {
+      // Inside phase i: interpolate within the phase
+      const phaseT = (time - elapsed) / budget;
+      const prevPhasesMs = PHASE_BUDGETS.slice(0, i).reduce((a, b) => a + b, 0);
+      const prevPct = (prevPhasesMs / TOTAL_BUDGET) * 100;
+      const thisPct = (budget / TOTAL_BUDGET) * 100;
+      return prevPct + phaseT * thisPct;
+    }
+    elapsed += budget;
+  }
+  return 100;
+}
+
 export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }) => {
-  const [display, setDisplay] = useState({ progress: 0 });
   const [fadeOut, setFadeOut] = useState(false);
   const [skipped, setSkipped] = useState(false);
 
-  // useAnimation: shared internal timer — no competition with React renders
   const { frame, time } = useAnimation({ interval: 16 }); // 60fps
-  const animProgressRef = useRef(0);
-  const realProgressRef = useRef(0);
-  const fadeStartTimeRef = useRef<number | null>(null); // wall-clock ms when fadeOut began
+  const fadeStartTimeRef = { current: -1 }; // -1 = not started
 
-  const totalPhases = phases.length;
   const doneCount = phases.filter(p => p.done).length;
-  const realProgress = totalPhases > 0 ? Math.floor((doneCount / totalPhases) * 100) : 0;
-
+  const progress = getProgressFromTime(time, doneCount);
   const visiblePhases = phases.filter(p => p.visible);
   const currentPhase = visiblePhases.find(p => !p.done) || visiblePhases[visiblePhases.length - 1];
 
-  // Keep realProgress ref in sync with derived value
-  useEffect(() => { realProgressRef.current = realProgress; }, [realProgress]);
-
-  // Animation: lerp + snap toward realProgress, driven by useAnimation's frame
-  useEffect(() => {
-    const target = realProgressRef.current;
-    const diff = Math.abs(target - animProgressRef.current);
-    // Snap to target when close enough — eliminates end-of-loading jitter
-    animProgressRef.current = diff < SNAP_THRESHOLD ? target
-      : lerp(animProgressRef.current, target, LERP_FACTOR);
-    // Only update React state during active loading (skip during fade for performance)
-    if (!fadeOut) {
-      setDisplay({ progress: animProgressRef.current });
-    }
-  }, [frame, fadeOut]);
-
   // Watch for all phases done
   useEffect(() => {
-    if (doneCount === totalPhases && !fadeOut) {
+    if (doneCount === phases.length && !fadeOut) {
       const timer = setTimeout(() => {
         fadeStartTimeRef.current = time;
         setFadeOut(true);
@@ -73,7 +74,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
       }, 400);
       return () => clearTimeout(timer);
     }
-  }, [doneCount, totalPhases, fadeOut, onComplete, time]);
+  }, [doneCount, phases.length, fadeOut, onComplete, time]);
 
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === 'c')) {
@@ -84,19 +85,17 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
     }
   });
 
-  // Fade-out progress using wall-clock time (more reliable than frame counting)
-  const fadeT = (() => {
-    if (!fadeOut || fadeStartTimeRef.current === null) return 1;
-    const elapsed = time - fadeStartTimeRef.current;
-    return Math.min(1, elapsed / FADE_DURATION_MS);
-  })();
+  // Fade-out using wall-clock time
+  const fadeT = fadeOut && fadeStartTimeRef.current >= 0
+    ? Math.min(1, (time - fadeStartTimeRef.current) / FADE_DURATION_MS)
+    : 1;
   const fadeOutProgress = easeOut(fadeT);
   const opacity = fadeOut ? fadeOutProgress : 1;
   const slideOffset = fadeOut ? Math.floor((1 - fadeOutProgress) * 3) : 0;
 
   const spinnerIndex = frame % spinnerFrames.length;
   const barWidth = 32;
-  const filledWidth = Math.floor((display.progress / 100) * barWidth);
+  const filledWidth = Math.floor((progress / 100) * barWidth);
   const edgeIndex = frame % edgeChars.length;
   const edgeChar = filledWidth < barWidth && filledWidth > 0 ? edgeChars[edgeIndex] : '';
   const progressBar =
@@ -104,7 +103,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
     edgeChar +
     '░'.repeat(Math.max(0, barWidth - filledWidth - (edgeChar ? 1 : 0)));
 
-  const displayedPct = Math.round(display.progress);
+  const displayedPct = Math.round(progress);
 
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" height="100%">

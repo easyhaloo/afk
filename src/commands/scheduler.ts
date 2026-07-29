@@ -6,6 +6,7 @@ import { Scheduler } from '../lib/scheduler';
 import { WorkflowRunner } from '../lib/workflows';
 import { getSchedulerConfig } from '../lib/config-manager';
 import { handleCommandError } from '../lib/cli-utils';
+import { logger } from '../lib/io';
 
 // Merge CLI options with config defaults (called per-action, reads cached config)
 function redisOpts(options: { [key: string]: any }) {
@@ -365,7 +366,7 @@ export function registerSchedulerCommands(program: Command): void {
           }
           if (wave.length === 0) {
             const cyclicIds = [...allIds];
-            console.warn(chalk.yellow(`⚠️  Cycle detected in DAG — involved issues: ${cyclicIds.join(', ')}`));
+            logger.warn({ cyclicIds }, 'cycle detected in DAG');
             waves.push(cyclicIds);
             break;
           }

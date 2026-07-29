@@ -3,6 +3,8 @@
  * Fallback for: no args, unknown commands.
  */
 import { Command } from 'commander';
+// Logger auto-initializes on import (creates ~/.afk/ dir, suppresses Octokit warnings)
+import './lib/core/io/logger';
 import { registerSignalCommands } from './commands/signal';
 import { registerGitLabCommands } from './commands/gitlab';
 import { registerGitHubCommands } from './commands/github';

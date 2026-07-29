@@ -1,6 +1,7 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import { join } from 'path';
+import { logger } from '../../io';
 
 export type MarkerStatus = 'crashed' | 'success';
 export type WorktreeStatus = 'active' | 'completed' | 'failed';
@@ -177,7 +178,7 @@ export class WorktreeManager {
   async prune(dryRun: boolean = false): Promise<number> {
     const orphaned = await this.listOrphaned();
     if (dryRun) return orphaned.length;
-    for (const wt of orphaned) { try { await this.cleanup(wt.iid, true); } catch (error) { console.error(`Failed: ${wt.iid}`, error); } }
+    for (const wt of orphaned) { try { await this.cleanup(wt.iid, true); } catch (error) { logger.error({ iid: wt.iid, err: String(error) }, 'failed to prune worktree'); } }
     return orphaned.length;
   }
 

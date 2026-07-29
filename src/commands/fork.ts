@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { spawnSync } from 'child_process';
 import { getForkConfig } from '../lib/config-manager';
+import { logger } from '../lib/io';
 
 export function registerForkCommands(program: Command): void {
   const fork = program
@@ -142,7 +143,7 @@ export function registerForkCommands(program: Command): void {
         console.log(chalk.green(`[OK] Discarded fork "${name}"`));
       } else {
         // Best-effort: warn but don't fail
-        console.warn(chalk.yellow(`[WARN] fork discard failed: ${result.stderr || result.stdout}`));
+        logger.warn({ name, err: result.stderr || result.stdout }, 'fork discard failed');
       }
     });
 

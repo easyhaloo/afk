@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AppContent } from './AppContent';
 import { initRegistry } from '../dashboard/registry/init';
 import { Task, Issue, Project, TmuxSession } from '../../types/dashboard';
+import { StateProvider } from './state/StateContext';
 import { TmuxClient } from '../../lib/core/tmux/tmux';
 import { useLoadingPhases } from '../dashboard/hooks/useLoadingPhase';
 import { SplashScreen } from '../dashboard/components/SplashScreen';
@@ -199,27 +200,29 @@ export function DashboardEntry() {
   }
 
   return (
-    <AppContent
-      tasks={tasks}
-      completedTasks={completedTasks}
-      issues={issues}
-      projects={projects}
-      sessions={sessions}
-      projectBranches={projectBranches}
-      projectTags={projectTags}
-      projectCommits={projectCommits}
-      issueHasMore={issueHasMore}
-      projectHasMore={projectHasMore}
-      onLoadProjectDetail={loadProjectDetail}
-      onReloadTasks={reloadTasks}
-      onRemoveSession={removeSession}
-      onAddTaskFromIssue={addTaskFromIssue}
-      onLaunchFromIssue={launchFromIssue}
-      onLaunchExistingTask={launchExistingTask}
-      onFetchMoreIssues={fetchMoreIssues}
-      onFetchMoreProjects={fetchMoreProjects}
-      onInvalidateDetailCache={invalidateDetailCache}
-      onAttachSession={handleAttachSession}
-    />
+    <StateProvider>
+      <AppContent
+        tasks={tasks}
+        completedTasks={completedTasks}
+        issues={issues}
+        projects={projects}
+        sessions={sessions}
+        projectBranches={projectBranches}
+        projectTags={projectTags}
+        projectCommits={projectCommits}
+        issueHasMore={issueHasMore}
+        projectHasMore={projectHasMore}
+        onLoadProjectDetail={loadProjectDetail}
+        onReloadTasks={reloadTasks}
+        onRemoveSession={removeSession}
+        onAddTaskFromIssue={addTaskFromIssue}
+        onLaunchFromIssue={launchFromIssue}
+        onLaunchExistingTask={launchExistingTask}
+        onFetchMoreIssues={fetchMoreIssues}
+        onFetchMoreProjects={fetchMoreProjects}
+        onInvalidateDetailCache={invalidateDetailCache}
+        onAttachSession={handleAttachSession}
+      />
+    </StateProvider>
   );
 }

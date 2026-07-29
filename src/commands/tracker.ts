@@ -86,7 +86,7 @@ export function registerTrackerCommands(program: Command): void {
     .description('Create a new issue')
     .argument('<title>', 'Issue title')
     .option('--description <text>', 'Issue description')
-    .option('--label <labels>', 'Comma-separated labels')
+    .option('--label <labels...>', 'Labels (can be specified multiple times)')
     .option('--json', 'Output as JSON')
     .action(async (title: string, options) => {
       try {
@@ -94,7 +94,7 @@ export function registerTrackerCommands(program: Command): void {
         const issueId = await client.createIssue({
           title,
           description: options.description,
-          labels: options.label ? parseCommaSeparated(options.label) : [],
+          labels: options.label || [],
         });
 
         if (options.json) {
@@ -292,7 +292,7 @@ export function registerTrackerCommands(program: Command): void {
     .option('--target <branch>', 'Target branch (default: main)')
     .option('--description <text>', 'MR/PR description')
     .option('--draft', 'Create as draft')
-    .option('--label <labels>', 'Comma-separated labels')
+    .option('--label <labels...>', 'Labels (can be specified multiple times)')
     .option('--json', 'Output as JSON')
     .action(async (title: string, options) => {
       try {
@@ -311,7 +311,7 @@ export function registerTrackerCommands(program: Command): void {
           targetBranch: options.target || 'main',
           description: options.description,
           draft: options.draft || false,
-          labels: options.label ? parseCommaSeparated(options.label) : [],
+          labels: options.label || [],
         });
 
         if (options.json) {

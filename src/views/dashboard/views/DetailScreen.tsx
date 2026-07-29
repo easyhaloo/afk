@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { exec } from 'child_process';
 import { Task, Issue, Project } from '../../../types/dashboard';
@@ -15,6 +15,8 @@ interface Props {
 
 export function DetailScreen({ item, view, height, width, branches = [], tags = [], commits = [] }: Props) {
   const [hoverIdx, setHoverIdx] = useState(-1);
+  const [descScrollOffset, setDescScrollOffset] = useState(0);
+  const prevItemRef = useRef<number | undefined>(undefined);
 
   if (!item) return <Box><Text color="gray">ℹ  no item selected</Text></Box>;
 
@@ -51,6 +53,23 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
     tags.slice(0, 4).forEach((t, i) => clickableRows.push({ idx: 14 + i, url: `${projUrl}/-/tags/${t.name}`, label: `tag ${t.name}` }));
   }
 
+  // Preserve scroll position when the same item is selected; reset when item changes
+  const currentItemId = 'iid' in item ? item.iid : 'id' in item ? item.id : undefined;
+  useEffect(() => {
+    if (currentItemId !== prevItemRef.current) {
+      setDescScrollOffset(0);
+      prevItemRef.current = currentItemId;
+    }
+  }, [currentItemId]);
+
+  // Calculate description lines for scrolling (issues view)
+  const descriptionLines = view === 'issues' && (item as Issue).description
+    ? (item as Issue).description!.split('\n')
+    : [];
+  const maxDescScroll = Math.max(0, descriptionLines.length - 1);
+  const canScrollDown = descScrollOffset < maxDescScroll;
+  const canScrollUp = descScrollOffset > 0;
+
   // Keyboard navigation
   useInput((input, key) => {
     if (key.return) {
@@ -67,10 +86,30 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
       }
       return;
     }
-    if (key.downArrow || key.rightArrow) {
+    if (key.downArrow || input === 'j' || input === 'J') {
+      // j key scrolls issue detail content down by one line when not at bottom
+      if (view === 'issues' && canScrollDown) {
+        setDescScrollOffset(i => i + 1);
+        return;
+      }
+      if (view !== 'issues') {
+        setHoverIdx(i => Math.min(i + 1, clickableRows.length - 1));
+      }
+    }
+    if (key.upArrow || input === 'k' || input === 'K') {
+      // k key scrolls issue detail content up by one line when not at top
+      if (view === 'issues' && canScrollUp) {
+        setDescScrollOffset(i => i - 1);
+        return;
+      }
+      if (view !== 'issues') {
+        setHoverIdx(i => Math.max(i - 1, 0));
+      }
+    }
+    if (key.rightArrow) {
       setHoverIdx(i => Math.min(i + 1, clickableRows.length - 1));
     }
-    if (key.upArrow || key.leftArrow) {
+    if (key.leftArrow) {
       setHoverIdx(i => Math.max(i - 1, 0));
     }
   });
@@ -87,7 +126,7 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
         <Text color="gray">{top}</Text>
 
         {view === 'tasks' && <TaskDetail item={item as Task} />}
-        {view === 'issues' && <IssueDetail item={item as Issue} hovered={isHovered(0)} />}
+        {view === 'issues' && <IssueDetail item={item as Issue} hovered={isHovered(0)} scrollOffset={descScrollOffset} />}
         {view === 'projects' && (
           <ProjectDetail
             item={item as Project}
@@ -138,14 +177,19 @@ function TaskDetail({ item }: { item: Task }) {
   );
 }
 
-function IssueDetail({ item, hovered }: { item: Issue; hovered: boolean }) {
+function IssueDetail({ item, hovered, scrollOffset }: { item: Issue; hovered: boolean; scrollOffset: number }) {
+  const lines = (item.description || '').split('\n');
+  const visibleLines = lines.slice(scrollOffset);
   return (
     <Box flexDirection="column" paddingX={1}>
       <Text color={hovered ? 'cyan' : 'white'} underline={hovered}>  ─ url: {item.web_url}</Text>
       <Text color="white">  ─ labels: {item.labels.join(', ') || '–'}</Text>
       <Text color="white">  ─ state: {item.state}</Text>
       <Box marginTop={1}><Text color="gray">  ─ description:</Text></Box>
-      <Text color="gray">    {item.description || 'no description'}</Text>
+      {visibleLines.length > 0
+        ? visibleLines.map((line, i) => <Text key={i} color="gray">    {line}</Text>)
+        : <Text color="gray">    no description</Text>
+      }
     </Box>
   );
 }

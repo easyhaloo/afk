@@ -1,5 +1,6 @@
 ---
 name: afk-to-prd
+disable-model-invocation: true
 description: >-
   Use when any structured requirements input is ready to be synthesized
   into a PRD for publication. Produces a structured PRD with

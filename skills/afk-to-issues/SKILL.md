@@ -1,5 +1,6 @@
 ---
 name: afk-to-issues
+disable-model-invocation: true
 description: >-
   Decompose requirements into tracker issues with machine-checkable
   acceptance criteria. Two entry points: an approved PRD with

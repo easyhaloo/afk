@@ -1,13 +1,11 @@
 /**
  * SplashScreen - Animated loading screen with real loading phases
  *
- * Animation strategy:
- * - animProgressRef: updated at 60fps (16ms), smoothly lerps toward real progress
- * - frameRef: always ticking for spinner + edge animation
- * - React state: throttled to 50ms to batch re-renders
+ * Uses Ink's useAnimation hook (shared internal timer) instead of manual setInterval
+ * for smooth,协调良好的动画循环。
  */
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useAnimation } from 'ink';
 import type { LoadingPhase } from '../hooks/useLoadingPhase';
 
 interface SplashScreenProps {
@@ -15,10 +13,9 @@ interface SplashScreenProps {
   onComplete: () => void;
 }
 
-const TICK_MS = 16;       // 60fps animation tick
 const LERP_FACTOR = 0.12; // how fast animProgress catches up (0-1, higher = faster)
 const SNAP_THRESHOLD = 0.5; // snap to target when within this margin (eliminates end jitter)
-const FADE_FRAMES = 50;   // fade-out duration in animation frames (~800ms)
+const FADE_DURATION_MS = 800; // fade-out duration in milliseconds
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const edgeChars = ['░', '▒', '▓', '█'];
@@ -33,14 +30,15 @@ function easeOut(t: number): number {
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }) => {
-  const [display, setDisplay] = useState({ progress: 0, frame: 0 });
+  const [display, setDisplay] = useState({ progress: 0 });
   const [fadeOut, setFadeOut] = useState(false);
   const [skipped, setSkipped] = useState(false);
 
+  // useAnimation: shared internal timer — no competition with React renders
+  const { frame, time } = useAnimation({ interval: 16 }); // 60fps
   const animProgressRef = useRef(0);
   const realProgressRef = useRef(0);
-  const frameRef = useRef(0);
-  const fadeStartFrameRef = useRef<number | null>(null); // frame when fadeOut began
+  const fadeStartTimeRef = useRef<number | null>(null); // wall-clock ms when fadeOut began
 
   const totalPhases = phases.length;
   const doneCount = phases.filter(p => p.done).length;
@@ -52,49 +50,45 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
   // Keep realProgress ref in sync with derived value
   useEffect(() => { realProgressRef.current = realProgress; }, [realProgress]);
 
-  // Always-running 60fps animation loop
+  // Animation: lerp + snap toward realProgress, driven by useAnimation's frame
   useEffect(() => {
-    const loop = () => {
-      const target = realProgressRef.current;
-      const diff = Math.abs(target - animProgressRef.current);
-      // Snap to target when close enough — eliminates end-of-loading jitter
-      animProgressRef.current = diff < SNAP_THRESHOLD ? target
-        : lerp(animProgressRef.current, target, LERP_FACTOR);
-      frameRef.current += 1;
-      setDisplay({ progress: animProgressRef.current, frame: frameRef.current });
-    };
-    const id = setInterval(loop, TICK_MS);
-    return () => clearInterval(id);
-  }, []);
+    const target = realProgressRef.current;
+    const diff = Math.abs(target - animProgressRef.current);
+    // Snap to target when close enough — eliminates end-of-loading jitter
+    animProgressRef.current = diff < SNAP_THRESHOLD ? target
+      : lerp(animProgressRef.current, target, LERP_FACTOR);
+    // Only update React state during active loading (skip during fade for performance)
+    if (!fadeOut) {
+      setDisplay({ progress: animProgressRef.current });
+    }
+  }, [frame, fadeOut]);
 
   // Watch for all phases done
   useEffect(() => {
     if (doneCount === totalPhases && !fadeOut) {
       const timer = setTimeout(() => {
-        fadeStartFrameRef.current = frameRef.current;
+        fadeStartTimeRef.current = time;
         setFadeOut(true);
-        setTimeout(onComplete, 500);
+        setTimeout(onComplete, FADE_DURATION_MS);
       }, 400);
       return () => clearTimeout(timer);
     }
-  }, [doneCount, totalPhases, fadeOut, onComplete]);
+  }, [doneCount, totalPhases, fadeOut, onComplete, time]);
 
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === 'c')) {
       setSkipped(true);
-      fadeStartFrameRef.current = frameRef.current;
+      fadeStartTimeRef.current = time;
       setFadeOut(true);
       setTimeout(onComplete, 300);
     }
   });
 
-  const { progress, frame } = display;
-
-  // Fade-out progress using live frameRef so animation continues through fade
+  // Fade-out progress using wall-clock time (more reliable than frame counting)
   const fadeT = (() => {
-    if (!fadeOut || fadeStartFrameRef.current === null) return 1;
-    const elapsed = frameRef.current - fadeStartFrameRef.current;
-    return Math.min(1, elapsed / FADE_FRAMES);
+    if (!fadeOut || fadeStartTimeRef.current === null) return 1;
+    const elapsed = time - fadeStartTimeRef.current;
+    return Math.min(1, elapsed / FADE_DURATION_MS);
   })();
   const fadeOutProgress = easeOut(fadeT);
   const opacity = fadeOut ? fadeOutProgress : 1;
@@ -102,7 +96,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
 
   const spinnerIndex = frame % spinnerFrames.length;
   const barWidth = 32;
-  const filledWidth = Math.floor((progress / 100) * barWidth);
+  const filledWidth = Math.floor((display.progress / 100) * barWidth);
   const edgeIndex = frame % edgeChars.length;
   const edgeChar = filledWidth < barWidth && filledWidth > 0 ? edgeChars[edgeIndex] : '';
   const progressBar =
@@ -110,7 +104,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
     edgeChar +
     '░'.repeat(Math.max(0, barWidth - filledWidth - (edgeChar ? 1 : 0)));
 
-  const displayedPct = Math.round(progress);
+  const displayedPct = Math.round(display.progress);
 
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" height="100%">

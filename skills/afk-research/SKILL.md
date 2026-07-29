@@ -1,9 +1,9 @@
 ---
 name: afk-research
 description: >-
-  Use when existing code, system, or approach needs to be understood
-  before committing to a plan. Outputs findings doc or spike summary.
-  HITL (guided) or AFK (self-directed) based on scope.
+  Understand how an existing system works, or evaluate feasibility
+  of an approach, before committing to a plan.
+  Outputs findings doc or spike summary.
 disallowed-tools: >-
   Edit(*) Write(*) Agent(*) Task*(*)
   Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
@@ -14,83 +14,52 @@ disallowed-tools: >-
 
 **Goal:** understand how an existing system works, or evaluate feasibility
 of an approach, before committing to a plan.
-**Mode:** HITL (guided exploration) or AFK (self-directed with checkpoints).
-**Contract:** (none) → `RESEARCH.md` + `stage::research`.
 
-## Research modes
+## Dimensions
 
-| Mode | When to use | Checkpoint cadence |
-|------|-------------|-------------------|
-| **HITL** | Unknown scope, high rabbit-hole risk, user guides direction | After every significant finding |
-| **AFK** | Bounded scope, clear success criteria | Per WIP commit |
+Two orthogonal dimensions define every research task:
 
-If the user says "look into X" without a scope limit, default to HITL.
+| | Codebase | Web |
+|--|----------|-----|
+| **Survey** | Confirm a code assumption quickly | Confirm a solution exists quickly |
+| **Investigate** | Deep-trace code to understand patterns | Multi-source cross-validation |
 
-## Spike vs. Research
-
-- **Spike:** prove something works or doesn't. Yes/no with evidence,
-  or minimal working example. Bounded time box (e.g. 2h).
-- **Research:** understand a system or pattern. Structured findings doc
-  covering components, relationships, and open questions.
-
-## Progress checkpoints (AFK mode only)
-
-```bash
-git add -A && git commit -m "$(cat <<'EOF'
-research: <short description>
-
-Findings:
-- <what was learned>
-- <open questions>
-
-Next: <concrete next action>
-EOF
-)"
-```
+Choose one from each axis based on the question.
 
 ## Steps
 
-### Step 1 — Scope the research
+### Step 1 — Classify the question
 
-Bounded question → scope is fixed. Unbounded question → use HITL and
-confirm scope before diving in.
+Ask: "Where is the source of truth for this answer?"
 
-Define:
-- **What we need to know** (questions to answer)
-- **What we do NOT need to know** (boundaries)
-- **Key files / modules / systems to read**
+- **Code** → reference `codebase.md`
+- **External** → reference `web-research.md`
+- **Both** → start with the faster one to confirm, then the deeper one
 
-### Step 2 — Run mode
+### Step 2 — Set depth
 
-**HITL:** after each major component, show brief finding summary and ask:
-"Continue in this direction, or pivot?" Stop when user says questions
-are answered.
+- **Survey**: find the first credible answer, stop
+- **Investigate**: explore multiple paths until confident
 
-**AFK:** read files, run commands, take notes. Commit per checkpoint.
-Show 1-line summary after each WIP commit.
+### Step 3 — Reason first, verify second
 
-### Step 3 — Synthesize
+For each path:
+1. State what you expect to find
+2. Choose information source
+3. Verify or disprove your expectation
+4. Update mental model
 
-Write `RESEARCH.md`:
-- **Context** — why this research was needed
-- **Findings** — what was discovered, with file/function references
-- **Implications** — what this means for downstream
-- **Open questions** — what wasn't answered and still needs a decision
+### Step 4 — Synthesize
 
-### Step 4 — Gate: user reviews findings
+Present findings aligned with expectations.
+Flag disconfirmed expectations — they are often the most valuable result.
 
-Show the full `RESEARCH.md`. User must confirm findings are complete
-enough to proceed.
+When multiple independent paths exist, explore them in parallel using subagents.
 
-### Step 5 — Write + optional publish
-
-Write `RESEARCH.md` to disk. Optional: post as a tracker issue
-labeled `stage::research` via `afk issue create` if the tracker CLI
-is authenticated.
+---
 
 ## Anti-patterns
 
 - MUST NOT make product decisions — only report findings.
 - MUST NOT implement code beyond minimal spike proof-of-concept.
-- MUST NOT rabbit-hole beyond the defined scope without permission.
-- MUST NOT write `RESEARCH.md` to disk before Step 4 confirmation.
+- MUST NOT verify using the same source type as the initial assumption.

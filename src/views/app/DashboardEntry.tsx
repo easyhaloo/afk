@@ -28,6 +28,13 @@ export function DashboardEntry() {
   const { phases, isReady } = useLoadingPhases();
   const [showApp, setShowApp] = useState(false);
 
+  // Once isReady, show app and never go back
+  React.useEffect(() => {
+    if (isReady) {
+      setShowApp(true);
+    }
+  }, [isReady]);
+
   // Loaded data
   const [tasks, setTasks] = useState<Task[]>([]);
   const [completedTasks, setCompletedTasks] = useState<Task[]>([]);
@@ -49,9 +56,6 @@ export function DashboardEntry() {
       setCompletedTasks(tasksData.completed);
       setSessions(sessionsData);
     })();
-    // Show app after a brief moment
-    const t = setTimeout(() => setShowApp(true), 600);
-    return () => clearTimeout(t);
   }, [isReady]);
 
   // Issue/Project pagination

@@ -6,7 +6,6 @@ import { Box, Text, useInput } from 'ink';
 import { useState, createActions } from './hooks';
 import { initRegistry } from '../dashboard/registry/init';
 import { TaskListView, IssueListView, CompletedListView, ProjectListView, BoardView, DetailScreen, HelpDialog, BreathingSeparator, DebugOverlay, Header, Footer, Notification } from '../dashboard/views/index';
-import { SplashScreen } from '../dashboard/components/SplashScreen.js';
 import type { Task, Issue, Project } from '../../types/dashboard';
 
 // Initialize view registry at module load
@@ -47,9 +46,6 @@ export function AppContent({
   const { state, dispatch, currentView, currentContext, isDetailMode } = useState();
   const actions = createActions({ state, dispatch, currentView, currentContext, isDetailMode });
 
-  const [showSplash, setShowSplash] = React.useState(true);
-  const [fadeInMain, setFadeInMain] = React.useState(false);
-
   const W = process.stdout.columns || 80;
   const H = process.stdout.rows || 24;
   const CONTENT_H = H - 2;
@@ -89,18 +85,6 @@ export function AppContent({
   const getItem = () => items[state.selectedIndex];
 
   const viewportHeight = Math.floor((CONTENT_H - 2) / 1);
-
-  // Smooth fade-in
-  useEffect(() => {
-    if (!showSplash && fadeInMain) {
-      let frame = 0;
-      const t = setInterval(() => {
-        frame++;
-        if (frame >= 10) clearInterval(t);
-      }, 30);
-      return () => clearInterval(t);
-    }
-  }, [showSplash, fadeInMain]);
 
   // Auto-load project detail
   useEffect(() => {
@@ -309,10 +293,6 @@ export function AppContent({
     if (currentView === 'board') return `board view: ${items.length} issues${filtered}`;
     return `gitlab projects: ${items.length}${filtered}`;
   })();
-
-  if (showSplash) {
-    return <SplashScreen onComplete={() => { setShowSplash(false); setFadeInMain(true); }} phases={[]} />;
-  }
 
   return (
     <Box flexDirection="column" height={H}>

@@ -348,7 +348,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
 **Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
 
-    await this.tracker.addLabel(iid, 'mode::timeout');
+    await this.tracker.addLabel(iid, 'mode::hitl');
     await this.tmux.killSession(session);
     await this.worktree.updateStatus(iid, 'failed');
 

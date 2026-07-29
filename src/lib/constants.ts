@@ -14,9 +14,6 @@ export const TIMEOUTS = {
   /** Completion timeout for workflow (2 hours) */
   WORKFLOW_COMPLETION_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
 
-  /** Timeout for AC result signal (3 minutes) */
-  AC_SIGNAL_TIMEOUT: 3 * 60 * 1000, // 180000ms
-
   /** Timeout for handoff ready signal (1 minute) */
   HANDOFF_TIMEOUT: 1 * 60 * 1000, // 60000ms
 

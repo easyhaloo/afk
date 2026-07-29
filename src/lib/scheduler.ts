@@ -287,10 +287,8 @@ export class Scheduler {
         throw new Error('Workflow did not complete');
       }
 
-      // Update labels
-      await this.tracker.removeLabel(iid, 'stage::ready-for-issues');
-      await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
-      await this.tracker.addLabel(iid, 'stage::qa');
+      // Labels are managed by WorkflowRunner.runBody()/autoWrapup()
+      logger.info({ iid, url: result.url }, 'workflow completed successfully');
 
     } catch (error) {
       // Update job data with retry count

@@ -34,12 +34,17 @@ interface LaunchResult {
 /**
  * Signal-driven workflow runner.
  *
- * Pattern: launch → waitForAnySignal → process result
+ * Two-phase design:
+ *   Phase 1 (Implement): send /goal "实现 issue #N" → wait goal_complete
+ *   Phase 2 (Verify):   send /goal "验证 issue #N 的 AC" → wait ac_result
+ *   autoWrapup:         push branch → create MR → stage::qa
+ *
+ * Agent is responsible for fetching the issue content and AC via gh/API.
+ * WorkflowRunner only orchestrates: launch → wait signals → wrapup.
  *
  * Agent responsibilities (via skill instructions):
- *   - On goal complete: write goal_complete signal (Runner verifies commits exist)
- *   - On AC done:       write ac_result signal (advisory only — Runner
- *                        re-verifies via verifyAC(), never trusts result field)
+ *   - On goal complete: write goal_complete signal
+ *   - On AC done:       write ac_result signal
  *   - On context high:  write context_high signal (Runner verifies
  *                        statusline JSON tokens ≥ CONTEXT.HIGH_THRESHOLD)
  *   - On handoff ready: write handoff_ready signal (Runner waits for it
@@ -100,124 +105,83 @@ export class WorkflowRunner {
   ): Promise<{ success: boolean; url?: string }> {
     const { iid, session, targetBranch, baseBranch, maxRetries, hardTimeoutMs, completionTimeoutMs } = ctx;
 
-    // ── Step 1: Fetch issue + AC ────────────────────────────────────────────
-    const issue = await this.tracker.getIssue(iid);
-    const ac = this.tracker.parseAC(issue);
-    if (ac.items.length === 0) {
-      throw new Error(
-        `Issue #${iid} has no AC. Add AC labels (ac::1::..., ac::2::...) or ` +
-        `a "## AC" markdown section.`
-      );
-    }
-
-    const goalText = ac.items.map((item) => `${item.index}. ${item.text}`).join('\n');
-    const traceId = `trace-${Date.now()}-${iid}`;
-
-    // ── Step 2: Create worktree ─────────────────────────────────────────────
+    // ── Step 1: Create worktree ─────────────────────────────────────────────
     const wt = await this.worktree.create(iid, baseBranch);
     await this.worktree.updateStatus(iid, 'active');
     await configureStatusline(wt.path);
 
-    // ── Step 3: Launch tmux session + inject /goal ──────────────────────────
+    // ── Step 2: Launch tmux session ─────────────────────────────────────────
     await this.tmux.createSession(session, wt.path);
     await this.tmux.waitForPrompt(wt.path, 30000);
-    await this.tmux.sendGoal(wt.path, session, 'main', goalText);
 
-    // ── Step 4: Launch watchdog (detached, no blocking) ────────────────────
+    // ── Step 3: Launch watchdog (detached, no blocking) ────────────────────
     this.startWatchdog(session, hardTimeoutMs, iid, wt.path);
 
-    // ── Step 5: Post launch comment ─────────────────────────────────────────
-    const goalLines = goalText.split('\n').length;
-    const goalPreview = goalText.split('\n').slice(0, 5).join('\n');
-    const launchBody = [
+    // ── Step 4: Post launch comment ────────────────────────────────────────
+    await this.tracker.addComment(iid, [
       '<!-- afk-event: launch -->',
       '**🚀 AFK Session Started**',
       '',
       `- **Worktree:** \`${wt.path}\``,
       `- **Branch:** \`${targetBranch}\``,
       `- **Session:** \`${session}\``,
-      `- **Trace:** \`${traceId}\``,
-      '',
-      '**Goal:**',
-      '```',
-      goalPreview + (goalText.split('\n').length > 5 ? '\n...' : ''),
-      '```',
-      '',
-      `> ${goalLines} lines total`,
-    ].join('\n');
-    await this.tracker.addComment(iid, launchBody);
+      `- **Issue:** #${iid}`,
+    ].join('\n'));
     await this.tracker.addLabel(iid, `session::${session}`);
     await this.tracker.addLabel(iid, 'stage::afk-in-progress');
     await this.tracker.removeLabel(iid, 'stage::ready-for-issues');
 
-    // ── Step 6: Wait for signal ─────────────────────────────────────────────
-    const signal = await this.tmux.waitForAnySignal(
-      session,
-      'main',
+    // ── Phase 1 — Implement ────────────────────────────────────────────────
+    await this.tmux.sendGoal(wt.path, session, 'main', `实现 issue #${iid} 的功能需求`, 'goal_complete');
+
+    const phase1Signal = await this.tmux.waitForAnySignal(
+      session, 'main',
       ['goal_complete', 'timeout', 'context_high'],
-      wt.path,
-      completionTimeoutMs
+      wt.path, completionTimeoutMs
     );
 
-    // ── Step 7: Process result ──────────────────────────────────────────────
-    if (!signal) {
-      logger.warn({ iid, completionTimeoutMs }, 'no signal received within timeout');
-      return { success: false };
+    if (!phase1Signal || phase1Signal.type === 'timeout') {
+      return this.handleTimeout(iid, wt.path, session, hardTimeoutMs);
+    }
+    if (phase1Signal.type === 'context_high') {
+      return this.verifyAndHandoff(iid, wt.path, session);
     }
 
-    switch (signal.type) {
-      case 'goal_complete':
-        return this.autoWrapup(iid, wt.path, session, targetBranch, baseBranch, maxRetries, signal.sha);
+    // ── Phase 2 — Verify AC ────────────────────────────────────────────────
+    await this.tmux.sendGoal(wt.path, session, 'main', `验证 issue #${iid} 的 AC 全部通过`, 'ac_result');
 
-      case 'timeout':
-        return this.handleTimeout(iid, wt.path, session, hardTimeoutMs);
+    const phase2Signal = await this.tmux.waitForAnySignal(
+      session, 'main',
+      ['ac_result', 'timeout', 'context_high'],
+      wt.path, completionTimeoutMs
+    );
 
-      case 'context_high':
-        return this.verifyAndHandoff(iid, wt.path, session);
-
-      default:
-        logger.warn({ iid, signalType: (signal as Signal).type }, 'unexpected signal type');
-        return { success: false };
+    if (!phase2Signal || phase2Signal.type === 'timeout') {
+      return this.handleTimeout(iid, wt.path, session, hardTimeoutMs);
     }
+    if (phase2Signal.type === 'context_high') {
+      return this.verifyAndHandoff(iid, wt.path, session);
+    }
+
+    // ac_result → autoWrapup
+    return this.autoWrapup(iid, wt.path, session, targetBranch);
   }
 
   /**
-   * autoWrapup: push branch → ask agent to run AC → wait ac_result → MR or retry
+   * autoWrapup: push branch → create MR → stage::qa
+   * AC verification is now done in Phase 2 of runBody, so this is a simple
+   * push-and-MR operation.
    */
   private async autoWrapup(
     iid: number,
     worktreePath: string,
     session: string,
-    targetBranch: string,
-    baseBranch: string,
-    maxRetries: number,
-    sha?: string
+    targetBranch: string
   ): Promise<{ success: boolean; url?: string }> {
     // Push branch
     await this.pushBranch(worktreePath);
 
-    // Ask agent to run AC checks
-    const issue = await this.tracker.getIssue(iid);
-    const ac = this.tracker.parseAC(issue);
-    if (ac.items.length > 0) {
-      await this.tmux.sendResumeWithAC(session, 'main', ac.items);
-    }
-
-    // Wait for AC signal (agent only notifies, does NOT adjudicate)
-    const acSignal = await this.tmux.waitForSignal(session, 'main', 'ac_result', worktreePath, TIMEOUTS.AC_SIGNAL_TIMEOUT);
-
-    // Runner verifies objectively: ignore agent's self-reported result.
-    // Objective check: branch has commits ahead of base, AND AC items exist to verify.
-    const acCheck = await this.verifyAC(iid, worktreePath, baseBranch);
-    if (!acCheck.ok) {
-      logger.warn({ iid, reason: acCheck.reason }, 'AC verification failed');
-      // If agent didn't even run AC or branch is empty, treat as failure
-      if (!acSignal) {
-        return this.handleACFail(iid, worktreePath, session, targetBranch, maxRetries);
-      }
-    }
-
-    // AC passed → create MR
+    // Create MR
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
 
     // Session is no longer needed; kill it to avoid orphaned sessions.
@@ -246,82 +210,6 @@ export class WorkflowRunner {
   private extractMRIdFromUrl(url: string): number | null {
     const match = url.match(/\/(merge_requests|pull)\/(\d+)/);
     return match ? parseInt(match[2], 10) : null;
-  }
-
-  /**
-   * Objective AC verification: check that real work happened.
-   * This complements (does not replace) any agent-reported ac_result
-   * signal — the agent's self-judgment is treated as advisory only.
-   *
-   * Checks:
-   * 1. Branch has at least one commit ahead of base
-   * 2. Issue description contains an AC section with verifiable items
-   * 3. (Future) Tests pass — currently relies on agent signal + CI pipeline
-   */
-  private async verifyAC(
-    iid: number,
-    worktreePath: string,
-    baseBranch: string
-  ): Promise<{ ok: boolean; reason: string; commitCount?: number; acItemCount?: number }> {
-    try {
-      const { simpleGit } = await import('simple-git');
-      const git = simpleGit(worktreePath);
-
-      // Check 1: branch has commits ahead of base
-      const log = await git.log([`${baseBranch}..HEAD`]);
-      const commitCount = log.total;
-      if (commitCount === 0) {
-        return { ok: false, reason: 'no commits ahead of base branch', commitCount: 0 };
-      }
-
-      // Check 2: issue has AC section with items
-      const issue = await this.tracker.getIssue(iid);
-      const ac = this.tracker.parseAC(issue);
-      if (ac.items.length === 0) {
-        return { ok: false, reason: 'issue has no AC', commitCount, acItemCount: 0 };
-      }
-
-      return { ok: true, reason: 'passed', commitCount, acItemCount: ac.items.length };
-    } catch (err) {
-      return { ok: false, reason: `verification error: ${(err as Error).message}` };
-    }
-  }
-
-  /**
-   * Handle AC failure: increment retry count and retry, or escalate to HITL
-   */
-  private async handleACFail(
-    iid: number,
-    worktreePath: string,
-    session: string,
-    targetBranch: string,
-    maxRetries: number
-  ): Promise<{ success: boolean; url?: string }> {
-    const issue = await this.tracker.getIssue(iid);
-    const current = this.tracker.getRetryCount(issue);
-    const newCount = current + 1;
-    const withoutOld = issue.labels.filter(l => !/^retry-count::/.test(l));
-    await this.tracker.updateIssue(iid, { labels: [...withoutOld, `retry-count::${newCount}`] });
-    const retryCount = newCount;
-
-    if (retryCount > maxRetries) {
-      await this.tracker.addLabel(iid, 'mode::hitl');
-      await this.tracker.addComment(iid, `❌ AC check failed after ${maxRetries} retries. Escalating to human review.`);
-      await this.worktree.updateStatus(iid, 'failed');
-      return { success: false };
-    }
-
-    logger.warn({ iid, retryCount, maxRetries }, 'AC failed, retrying');
-    await this.tmux.killSession(session);
-
-    // Re-launch with new session name (agent sees previous commits + Next: trailer)
-    const newSession = `${session}-retry-${retryCount}`;
-    return this.run({
-      iid,
-      session: newSession,
-      targetBranch,
-      maxRetries,
-    });
   }
 
   /**

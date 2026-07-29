@@ -5,7 +5,7 @@
  * Progress is time-based: each phase has a budget,进度条匀速推进到100%。
  * No lerp/Snap chasing needed — progress is a pure function of time.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useAnimation } from 'ink';
 import type { LoadingPhase } from '../hooks/useLoadingPhase';
 
@@ -49,7 +49,9 @@ function getProgressFromTime(time: number, doneCount: number): number {
     }
     elapsed += budget;
   }
-  return 100;
+  // Exactly at a phase boundary: return the accumulated percentage of completed phases
+  const doneMs = PHASE_BUDGETS.slice(0, doneCount).reduce((a, b) => a + b, 0);
+  return (doneMs / TOTAL_BUDGET) * 100;
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }) => {
@@ -57,7 +59,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
   const [skipped, setSkipped] = useState(false);
 
   const { frame, time } = useAnimation({ interval: 16 }); // 60fps
-  const fadeStartTimeRef = { current: -1 }; // -1 = not started
+  const fadeStartTimeRef = useRef<number>(-1); // -1 = not started
 
   const doneCount = phases.filter(p => p.done).length;
   const progress = getProgressFromTime(time, doneCount);

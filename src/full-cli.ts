@@ -18,6 +18,7 @@ import { registerDbCommands } from './commands/db';
 import { registerDebugCommands } from './commands/debug';
 import { registerEscalateCommands } from './commands/escalate';
 import { registerForkCommands } from './commands/fork';
+import { registerQACommands } from './commands/qa';
 
 export function runFullCLI() {
   const program = new Command();
@@ -35,5 +36,6 @@ export function runFullCLI() {
   registerDebugCommands(program);
   registerEscalateCommands(program);
   registerForkCommands(program);
+  registerQACommands(program);
   program.parse();
 }

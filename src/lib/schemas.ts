@@ -15,10 +15,9 @@ export type GoalCompleteSignal = z.infer<typeof GoalCompleteSignalSchema>;
 /**
  * Signal emitted after agent runs AC checks.
  *
- * NOTE: Result fields below are advisory only — the agent is the
- * evaluated party, not the evaluator. WorkflowRunner.verifyAC()
- * performs objective verification (commit count, AC items present)
- * and treats this signal's `result` as a hint, never as a gate.
+ * In the two-phase design, Phase 2 (Verify) sends a /goal to the agent
+ * to verify AC, and the agent writes this signal on completion. The
+ * result fields are advisory — QARunner provides independent verification.
  */
 export const ACResultSignalSchema = z.object({
   type: z.literal('ac_result'),

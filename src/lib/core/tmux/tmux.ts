@@ -231,9 +231,10 @@ export class TmuxClient {
   }
 
   /**
-   * Send /goal command with text, followed by instructions to write goal_complete signal.
+   * Send /goal command with text, followed by instructions to write signal.
+   * @param signalType - The signal type to write on completion (default: 'goal_complete')
    */
-  async sendGoal(worktreeDir: string, session: string, window: string, goalText: string): Promise<void> {
+  async sendGoal(worktreeDir: string, session: string, window: string, goalText: string, signalType: string = 'goal_complete'): Promise<void> {
     const hasPrompt = await this.waitForPrompt(worktreeDir);
     if (!hasPrompt) throw new Error('Timeout waiting for claude prompt');
     await this.exec(['send-keys', '-t', `${session}:${window}`, '--', '/goal']);
@@ -245,13 +246,13 @@ export class TmuxClient {
       await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
       await this.sleep(100);
     }
-    // Tell agent to commit changes, then write goal_complete signal when done.
+    // Tell agent to commit changes, then write signal when done.
     await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
     await this.sleep(200);
     const timestamp = new Date().toISOString();
     await this.exec(['send-keys', '-t', `${session}:${window}`, '--', '完成后请先提交你的更改（git add -A && git commit -m "resolve issue"），然后创建完成信号：cat > .afk-signal.json <<EOF']);
     await this.sleep(100);
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `{"type":"goal_complete","timestamp":"${timestamp}","summary":"<完成总结>"}`]);
+    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `{"type":"${signalType}","timestamp":"${timestamp}","summary":"<完成总结>"}`]);
     await this.sleep(100);
     await this.exec(['send-keys', '-t', `${session}:${window}`, '--', 'EOF']);
     await this.sleep(500);
@@ -339,37 +340,6 @@ export class TmuxClient {
       proc.on('close', (code) => { clearTimeout(timer); resolve(code ?? 0); });
       proc.on('error', (err) => { clearTimeout(timer); reject(err); });
     });
-  }
-
-  /**
-   * Send /resume with AC check.
-   *
-   * Receives structured AC items; sends both human-readable AC text and
-   * (when present) the machine-checkable command so the agent can run it
-   * and capture evidence rather than self-reporting.
-   */
-  async sendResumeWithAC(
-    session: string,
-    window: string,
-    acItems: Array<{ index: number; text: string; evidenceType?: string; checkCommand?: string }>,
-  ): Promise<void> {
-    // Agent is idle at the prompt after writing goal_complete. Send the AC
-    // check request directly. Do NOT use /resume - in Claude Code it opens a
-    // session-picker UI, which swallows all subsequent input.
-    await this.sendKeys(session, window, '请运行以下验收条件（AC）检查。每条 AC 都附有可执行命令，运行命令并把输出写入证据：');
-    const timestamp = new Date().toISOString();
-    await this.sendKeys(session, window, `完成后创建信号 cat > .afk-signal.json 写入：`);
-    await this.sendKeys(session, window, `{"type":"ac_result","timestamp":"${timestamp}","summary":"<检查总结>"}`);
-    for (const item of acItems) {
-      const header = item.evidenceType && item.evidenceType !== 'none'
-        ? `AC ${item.index} [${item.evidenceType}]: ${item.text}`
-        : `AC ${item.index}: ${item.text}`;
-      await this.sendKeys(session, window, header);
-      if (item.checkCommand) {
-        await this.sendKeys(session, window, `  $ ${item.checkCommand}`);
-      }
-      await this.sleep(100);
-    }
   }
 
   private async exec(args: string[]): Promise<string> {

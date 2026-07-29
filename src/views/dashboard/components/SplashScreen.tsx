@@ -1,7 +1,12 @@
 /**
  * SplashScreen - Animated loading screen with real loading phases
+ *
+ * Animation strategy:
+ * - animProgressRef: updated at 60fps (16ms), smoothly lerps toward real progress
+ * - frameRef: always ticking at 80ms for spinner + edge animation
+ * - React state: throttled to 50ms to batch re-renders
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { LoadingPhase } from '../hooks/useLoadingPhase';
 
@@ -10,35 +15,72 @@ interface SplashScreenProps {
   onComplete: () => void;
 }
 
+const TICK_MS = 16;          // 60fps animation tick
+const LERP_FACTOR = 0.12;    // how fast animProgress catches up (0-1, higher = faster)
+const STATE_TICK_MS = 50;   // React re-render throttle
+const SPINNER_TICK_MS = 80; // spinner frame rate
+
+const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const edgeChars = ['░', '▒', '▓', '█'];
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
 export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }) => {
+  const [display, setDisplay] = useState({ progress: 0, frame: 0 }); // throttled state for React
   const [fadeOut, setFadeOut] = useState(false);
   const [skipped, setSkipped] = useState(false);
-  const [frame, setFrame] = useState(0);
 
-  // Only show phases that have been made visible by the loading hook
-  const visiblePhases = phases.filter(p => p.visible);
-  // Use total phases (all registered) as denominator for stable progress
+  // Always-updated refs (no re-render on update)
+  const animProgressRef = useRef(0);
+  const realProgressRef = useRef(0);
+  const frameRef = useRef(0);
+  const fadeOutRef = useRef(false);
+
   const totalPhases = phases.length;
   const doneCount = phases.filter(p => p.done).length;
-  const progress = totalPhases > 0 ? Math.floor((doneCount / totalPhases) * 100) : 0;
+  const realProgress = totalPhases > 0 ? Math.floor((doneCount / totalPhases) * 100) : 0;
 
-  // Current active phase (first non-done among visible phases)
+  const visiblePhases = phases.filter(p => p.visible);
   const currentPhase = visiblePhases.find(p => !p.done) || visiblePhases[visiblePhases.length - 1];
 
-  // Animated spinner
-  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-  const spinnerIndex = frame % spinnerFrames.length;
+  // Keep refs in sync with state
+  useEffect(() => { realProgressRef.current = realProgress; }, [realProgress]);
+  useEffect(() => { fadeOutRef.current = fadeOut; }, [fadeOut]);
 
-  // Progress bar
-  const barWidth = 32;
-  const filledWidth = Math.floor((progress / 100) * barWidth);
-  const edgeChars = ['░', '▒', '▓', '█'];
-  const edgeIndex = frame % edgeChars.length;
-  const edgeChar = filledWidth < barWidth && filledWidth > 0 ? edgeChars[edgeIndex] : '';
-  const progressBar =
-    '█'.repeat(Math.max(0, filledWidth - 1)) +
-    edgeChar +
-    '░'.repeat(Math.max(0, barWidth - filledWidth - (edgeChar ? 1 : 0)));
+  // High-freq animation loop: update animProgress and frame
+  useEffect(() => {
+    let animFrame: ReturnType<typeof setInterval>;
+
+    const loop = () => {
+      // Smooth progress interpolation (exponential moving average)
+      animProgressRef.current = lerp(animProgressRef.current, realProgressRef.current, LERP_FACTOR);
+
+      // Continuous frame counter for spinner + edge animation
+      frameRef.current += 1;
+
+      // Throttled state update to trigger React re-render
+      setDisplay({
+        progress: animProgressRef.current,
+        frame: frameRef.current,
+      });
+    };
+
+    animFrame = setInterval(loop, TICK_MS);
+    return () => clearInterval(animFrame);
+  }, []);
+
+  // Watch for all phases done
+  useEffect(() => {
+    if (doneCount === totalPhases && !fadeOut) {
+      const timer = setTimeout(() => {
+        setFadeOut(true);
+        setTimeout(onComplete, 500);
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [doneCount, totalPhases, fadeOut, onComplete]);
 
   useInput((input, key) => {
     if (key.escape || (key.ctrl && input === 'c')) {
@@ -48,28 +90,22 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
     }
   });
 
-  // Animation frame tick
-  useEffect(() => {
-    if (fadeOut || skipped) return;
-    const timer = setInterval(() => setFrame(f => f + 1), 80);
-    return () => clearInterval(timer);
-  }, [fadeOut, skipped]);
-
-  // Watch for all phases done
-  useEffect(() => {
-    if (doneCount === totalPhases && !fadeOut) {
-      // All done — fade out after short delay
-      const timer = setTimeout(() => {
-        setFadeOut(true);
-        setTimeout(onComplete, 500);
-      }, 400);
-      return () => clearTimeout(timer);
-    }
-  }, [doneCount, totalPhases, fadeOut, onComplete]);
-
-  const fadeOutProgress = fadeOut ? Math.max(0, 1 - (frame / 10)) : 1;
-  const opacity = fadeOutProgress;
+  const { progress, frame } = display;
+  const fadeOutProgress = fadeOut ? Math.max(0, 1 - (frame / 31)) : 1; // ~500ms at 60fps
+  const opacity = fadeOutRef.current ? fadeOutProgress : 1;
   const slideOffset = fadeOut ? Math.floor((1 - fadeOutProgress) * 3) : 0;
+
+  const spinnerIndex = frame % spinnerFrames.length;
+  const barWidth = 32;
+  const filledWidth = Math.floor((progress / 100) * barWidth);
+  const edgeIndex = frame % edgeChars.length;
+  const edgeChar = filledWidth < barWidth && filledWidth > 0 ? edgeChars[edgeIndex] : '';
+  const progressBar =
+    '█'.repeat(Math.max(0, filledWidth - 1)) +
+    edgeChar +
+    '░'.repeat(Math.max(0, barWidth - filledWidth - (edgeChar ? 1 : 0)));
+
+  const displayedPct = Math.round(progress);
 
   return (
     <Box flexDirection="column" alignItems="center" justifyContent="center" height="100%">
@@ -113,12 +149,12 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
             <Text color="cyanBright" dimColor={opacity < 0.7}>{progressBar}</Text>
             <Text color="cyan" dimColor={opacity < 0.7}>]</Text>
           </Box>
-          <Text dimColor color="gray">{progress}%</Text>
+          <Text dimColor color="gray">{displayedPct}%</Text>
         </Box>
 
         {/* Phase list */}
         <Box flexDirection="column" marginTop={1} paddingLeft={4}>
-          {visiblePhases.map((phase, i) => (
+          {visiblePhases.map((phase) => (
             <Text key={phase.key} dimColor={opacity < 0.7} color={phase.done ? 'green' : phase.error ? 'red' : undefined}>
               {phase.done
                 ? (phase.error ? '✗' : '✓')

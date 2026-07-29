@@ -11,7 +11,7 @@ function spawnDetached(file: string, args: string[], opts: SpawnOptions): void {
 import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
-import { getTokenUsage, configureStatusline } from './io';
+import { getTokenUsage, configureStatusline, logger } from './io';
 import type { Signal } from './schemas';
 import { TIMEOUTS, CONTEXT } from './constants';
 
@@ -161,7 +161,7 @@ export class WorkflowRunner {
 
     // ── Step 7: Process result ──────────────────────────────────────────────
     if (!signal) {
-      console.warn(`⚠️  No signal received within ${completionTimeoutMs}ms for #${iid}`);
+      logger.warn({ iid, completionTimeoutMs }, 'no signal received within timeout');
       return { success: false };
     }
 
@@ -176,7 +176,7 @@ export class WorkflowRunner {
         return this.verifyAndHandoff(iid, wt.path, session);
 
       default:
-        console.warn(`⚠️  Unexpected signal type: ${(signal as Signal).type}`);
+        logger.warn({ iid, signalType: (signal as Signal).type }, 'unexpected signal type');
         return { success: false };
     }
   }
@@ -210,7 +210,7 @@ export class WorkflowRunner {
     // Objective check: branch has commits ahead of base, AND AC items exist to verify.
     const acCheck = await this.verifyAC(iid, worktreePath, baseBranch);
     if (!acCheck.ok) {
-      console.warn(`⚠️  AC verification failed: ${acCheck.reason}`);
+      logger.warn({ iid, reason: acCheck.reason }, 'AC verification failed');
       // If agent didn't even run AC or branch is empty, treat as failure
       if (!acSignal) {
         return this.handleACFail(iid, worktreePath, session, targetBranch, maxRetries);
@@ -220,15 +220,18 @@ export class WorkflowRunner {
     // AC passed → create MR
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
 
+    // Session is no longer needed; kill it to avoid orphaned sessions.
+    await this.tmux.killSession(session);
+
     // Query MR/PR status and pipeline
     try {
       const mrId = this.extractMRIdFromUrl(mrUrl);
       if (mrId) {
         const mr = await this.tracker.getMR(mrId);
-        console.log(`✓ MR status: ${mr.state}, pipeline: ${mr.pipeline?.status || 'N/A'}`);
+        logger.info({ iid, mrId, mrState: mr.state, pipeline: mr.pipeline?.status ?? 'N/A' }, 'MR status');
       }
     } catch (err) {
-      console.warn('Failed to query MR/PR status:', err);
+      logger.warn({ iid, err: (err as Error).message }, 'failed to query MR/PR status');
     }
 
     await this.tracker.addLabel(iid, 'stage::qa');
@@ -308,7 +311,7 @@ export class WorkflowRunner {
       return { success: false };
     }
 
-    console.log(`AC failed, retry ${retryCount}/${maxRetries}. Re-launching...`);
+    logger.warn({ iid, retryCount, maxRetries }, 'AC failed, retrying');
     await this.tmux.killSession(session);
 
     // Re-launch with new session name (agent sees previous commits + Next: trailer)
@@ -364,19 +367,21 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     const usage = await getTokenUsage(worktreePath);
 
     if (usage.total === 0) {
-      console.warn(`⚠️  context_high signal received but no token data in .afk/claude-status.json; treating as below threshold`);
+      logger.warn({ iid }, 'context_high signal received but no token data; treating as below threshold');
       return { success: false };
     }
 
     if (usage.total < CONTEXT.HIGH_THRESHOLD) {
-      console.log(
-        `ℹ️  context_high signal ignored: ${usage.total} tokens < ${CONTEXT.HIGH_THRESHOLD} threshold`
+      logger.info(
+        { iid, tokens: usage.total, threshold: CONTEXT.HIGH_THRESHOLD },
+        'context_high signal ignored: below threshold'
       );
       return { success: false };
     }
 
-    console.log(
-      `✓ context_high verified: ${usage.total} tokens (in:${usage.input} out:${usage.output} cache_r:${usage.cacheRead}) ≥ ${CONTEXT.HIGH_THRESHOLD}; triggering handoff`
+    logger.info(
+      { iid, tokens: usage.total, input: usage.input, output: usage.output, cacheRead: usage.cacheRead, threshold: CONTEXT.HIGH_THRESHOLD },
+      'context_high verified; triggering handoff'
     );
     return this.handleHandoff(iid, worktreePath, session, usage.total);
   }

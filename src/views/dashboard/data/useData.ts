@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Task, Issue, TmuxSession } from '../../../types/dashboard';
 import type { View } from '../types';
 import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
+import { fileLogger } from '../../../lib/io';
 import {
   fetchTasks,
   fetchSessions,
@@ -103,7 +104,7 @@ export function useData(currentView: View, currentProject: Project | null) {
             writeIssuesList(projectKey, nextIssues, data.hasMore);
           }
         } catch (error) {
-          console.error('Failed to list issues:', error);
+          fileLogger.error({ err: String(error) }, 'failed to list issues');
         } finally {
           setLoading(false);
         }
@@ -137,7 +138,7 @@ export function useData(currentView: View, currentProject: Project | null) {
             setProjectPage(2);
             writeProjectsList(data.projects, data.hasMore);
           } catch (error) {
-            console.error('Failed to list projects:', error);
+            fileLogger.error({ err: String(error) }, 'failed to list projects');
           } finally {
             setLoading(false);
           }

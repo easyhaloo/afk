@@ -36,6 +36,16 @@ const fixESMPlugin = {
             if (existsSync(asIndex)) return `from ${quote}${path}/index.js${quote}`;
             return `from ${quote}${path}.js${quote}`;
           })
+          // Fix side-effect imports: import './foo' -> import './foo.js'
+          .replace(/import\s+(['"])(\.[^'"]+)\1\s*;/g, (match, quote, path) => {
+            if (extname(path)) return match; // already has extension
+            const dir = dirname(file);
+            const withJs = resolve(dir, path + '.js');
+            const asIndex = resolve(dir, path, 'index.js');
+            if (existsSync(withJs)) return `import ${quote}${path}.js${quote};`;
+            if (existsSync(asIndex)) return `import ${quote}${path}/index.js${quote};`;
+            return `import ${quote}${path}.js${quote};`;
+          })
           .replace(/import\s*\(\s*(['"])(\.[^'"]+)\1\s*\)/g, (match, quote, path) => {
             if (extname(path)) return match; // already has extension
             const dir = dirname(file);

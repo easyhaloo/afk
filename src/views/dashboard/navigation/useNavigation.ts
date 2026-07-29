@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { ViewRegistry } from '../registry';
 import type { View, ViewState, ViewContext } from '../types';
 import { navigationPolicy, type ActionType } from './policy';
+import { fileLogger } from '../../../lib/io';
 
 // Default initial view state
 const DEFAULT_VIEW_STATE: ViewState = { view: 'tasks', context: {} };
@@ -78,7 +79,7 @@ export function useNavigation() {
    */
   const pushView = useCallback((view: View, context: ViewContext = {}): void => {
     if (!ViewRegistry.getInstance().has(view)) {
-      console.warn(`View "${view}" is not registered`);
+      fileLogger.warn({ view }, 'view is not registered');
       return;
     }
     setViewStack(prev => [...prev, { view, context }]);
@@ -107,7 +108,7 @@ export function useNavigation() {
    */
   const switchView = useCallback((view: View, context: ViewContext = {}): void => {
     if (!ViewRegistry.getInstance().has(view)) {
-      console.warn(`View "${view}" is not registered`);
+      fileLogger.warn({ view }, 'view is not registered');
       return;
     }
     if (view !== currentView) {

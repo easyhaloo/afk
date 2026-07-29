@@ -4,6 +4,7 @@ import type { TrackerProvider } from './core/tracker/types';
 import { WorkflowRunner } from './workflows';
 import { checkIssuePreconditions } from './preconditions';
 import { PORTS, TIMEOUTS } from './constants';
+import { logger } from './io';
 
 export interface TaskData {
   iid: number;
@@ -73,7 +74,7 @@ export class Scheduler {
    * Start scheduler worker
    */
   async start(): Promise<void> {
-    console.log(`🚀 Starting scheduler (max concurrent: ${this.maxConcurrent})...`);
+    logger.info({ maxConcurrent: this.maxConcurrent }, 'scheduler starting');
 
     this.startTime = Date.now();
 
@@ -91,26 +92,25 @@ export class Scheduler {
 
     // Worker event handlers
     this.worker.on('completed', (job) => {
-      console.log(`✅ Task ${job.id} completed (issue #${job.data.iid})`);
+      logger.info({ jobId: job.id, iid: job.data.iid }, 'task completed');
     });
 
     this.worker.on('failed', (job, err) => {
-      console.error(`❌ Task ${job?.id} failed (issue #${job?.data.iid}):`, err.message);
+      logger.error({ jobId: job?.id, iid: job?.data?.iid, err: err.message }, 'task failed');
     });
 
     this.worker.on('active', (job) => {
-      console.log(`▶️  Task ${job.id} started (issue #${job.data.iid})`);
+      logger.info({ jobId: job.id, iid: job.data.iid }, 'task started');
     });
 
-    console.log('✅ Scheduler started');
-    console.log('   Listening for tasks...');
+    logger.info('scheduler started, listening for tasks');
   }
 
   /**
    * Stop scheduler
    */
   async stop(): Promise<void> {
-    console.log('🛑 Stopping scheduler...');
+    logger.info('scheduler stopping');
 
     if (this.worker) {
       await this.worker.close();
@@ -120,7 +120,7 @@ export class Scheduler {
     await this.queue.close();
     await this.redis.quit();
 
-    console.log('✅ Scheduler stopped');
+    logger.info('scheduler stopped');
   }
 
   /**
@@ -146,7 +146,7 @@ export class Scheduler {
       }
     );
 
-    console.log(`📥 Enqueued task for issue #${iid} (priority: ${priority})`);
+    logger.info({ iid, priority }, 'task enqueued');
     return job.id || '';
   }
 
@@ -193,7 +193,7 @@ export class Scheduler {
 
     if (job) {
       await job.moveToDelayed(Date.now() + TIMEOUTS.JOB_RESCHEDULE_DELAY);
-      console.log(`⏸️  Paused task for issue #${iid}`);
+      logger.info({ iid }, 'task paused');
     } else {
       throw new Error(`Task for issue #${iid} not found`);
     }
@@ -208,7 +208,7 @@ export class Scheduler {
 
     if (job) {
       await job.promote();
-      console.log(`▶️  Resumed task for issue #${iid}`);
+      logger.info({ iid }, 'task resumed');
     } else {
       throw new Error(`Delayed task for issue #${iid} not found`);
     }
@@ -220,7 +220,7 @@ export class Scheduler {
    * @param excludeLabels - Labels that exclude an issue from scheduling
    */
   async pollTracker(labels: string[] = ['mode::afk', 'stage::ready-for-issues'], excludeLabels: string[] = []): Promise<number> {
-    console.log('🔍 Polling tracker for ready issues...');
+    logger.info({ labels }, 'polling tracker for ready issues');
 
     const issues = await this.tracker.listIssues({
       labels,
@@ -244,7 +244,7 @@ export class Scheduler {
       // Check preconditions
       const check = await checkIssuePreconditions(this.tracker, issue.id);
       if (!check.ok) {
-        console.log(`   #${issue.id}: skipped (${check.reason})`);
+        logger.info({ iid: issue.id, reason: check.reason }, 'issue skipped');
         skipped++;
         continue;
       }
@@ -255,7 +255,7 @@ export class Scheduler {
       enqueued++;
     }
 
-    console.log(`   Found ${issues.length} ready issues: ${enqueued} enqueued, ${skipped} skipped`);
+    logger.info({ found: issues.length, enqueued, skipped }, 'poll complete');
     return enqueued;
   }
 
@@ -265,9 +265,7 @@ export class Scheduler {
   private async processTask(job: Job<TaskData>): Promise<void> {
     const { iid, baseBranch } = job.data;
 
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`Processing issue #${iid}`);
-    console.log(`${'='.repeat(60)}\n`);
+    logger.info({ iid }, 'processing issue');
 
     const runner = new WorkflowRunner(this.tracker);
 

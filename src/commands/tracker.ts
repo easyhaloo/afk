@@ -108,6 +108,36 @@ export function registerTrackerCommands(program: Command): void {
     });
 
   /**
+   * edit command
+   */
+  issue
+    .command('edit')
+    .description('Edit an existing issue')
+    .argument('<id>', 'Issue ID')
+    .option('--title <text>', 'New issue title')
+    .option('--description <text>', 'New issue description')
+    .option('--state <state>', 'New state (open or closed)')
+    .action(async (id: string, options) => {
+      try {
+        const client = await createTrackerClient();
+        const issueId = parseInt(id);
+
+        await client.updateIssue(issueId, {
+          title: options.title,
+          description: options.description,
+          state: options.state,
+        });
+
+        console.log(chalk.green(`✓ Updated issue #${id}`));
+        if (options.title) console.log(chalk.gray(`  title: ${options.title}`));
+        if (options.description) console.log(chalk.gray(`  description updated`));
+        if (options.state) console.log(chalk.gray(`  state: ${options.state}`));
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
    * update-labels command
    */
   issue

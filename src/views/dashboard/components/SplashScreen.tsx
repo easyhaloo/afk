@@ -17,6 +17,7 @@ interface SplashScreenProps {
 
 const TICK_MS = 16;       // 60fps animation tick
 const LERP_FACTOR = 0.12; // how fast animProgress catches up (0-1, higher = faster)
+const SNAP_THRESHOLD = 0.5; // snap to target when within this margin (eliminates end jitter)
 const FADE_FRAMES = 50;   // fade-out duration in animation frames (~800ms)
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -54,7 +55,11 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
   // Always-running 60fps animation loop
   useEffect(() => {
     const loop = () => {
-      animProgressRef.current = lerp(animProgressRef.current, realProgressRef.current, LERP_FACTOR);
+      const target = realProgressRef.current;
+      const diff = Math.abs(target - animProgressRef.current);
+      // Snap to target when close enough — eliminates end-of-loading jitter
+      animProgressRef.current = diff < SNAP_THRESHOLD ? target
+        : lerp(animProgressRef.current, target, LERP_FACTOR);
       frameRef.current += 1;
       setDisplay({ progress: animProgressRef.current, frame: frameRef.current });
     };

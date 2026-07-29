@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { LoadingPhaseRegistry } from '../registry/loading';
 
 export interface LoadingPhase {
@@ -11,12 +11,10 @@ export interface LoadingPhase {
   visible: boolean; // phase is currently shown (for smooth transitions)
 }
 
-const MIN_PHASE_DURATION = 400; // minimum ms each phase stays visible
 
 export function useLoadingPhases() {
   const [phases, setPhases] = useState<LoadingPhase[]>([]);
   const [isReady, setIsReady] = useState(false);
-  const phaseStartTimeRef = useRef<number>(0);
 
   const markDone = useCallback((key: string) => {
     setPhases(prev => prev.map(p => p.key === key ? { ...p, done: true } : p));
@@ -51,8 +49,6 @@ export function useLoadingPhases() {
     (async () => {
       for (let i = 0; i < descriptors.length; i++) {
         const d = descriptors[i];
-        const startTime = Date.now();
-
         // Mark this phase as visible
         markVisible(d.key);
 
@@ -62,13 +58,6 @@ export function useLoadingPhases() {
           markDone(d.key);
         } catch (err) {
           markError(d.key, String(err));
-        }
-
-        // Ensure minimum phase duration for smooth visual rhythm
-        const elapsed = Date.now() - startTime;
-        const remaining = MIN_PHASE_DURATION - elapsed;
-        if (remaining > 0) {
-          await new Promise(resolve => setTimeout(resolve, remaining));
         }
 
         // Pre-display next phase (make it visible but not done yet)

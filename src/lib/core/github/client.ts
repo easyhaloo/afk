@@ -19,6 +19,7 @@ import type {
   Commit,
 } from '../tracker/types';
 import { extractAC } from '../tracker/ac';
+import { logger } from '../../io';
 
 /**
  * GitHub authentication options
@@ -46,7 +47,13 @@ export class GitHubClient implements TrackerProvider {
       throw new Error('GitHubClient requires auth token. Set GITHUB_TOKEN env, or pass { auth } to constructor.');
     }
     this.projectId = options.repo;
-    this.client = new Octokit({ auth: options.auth });
+    this.client = new Octokit({
+      auth: options.auth,
+      userAgent: 'afk v1',
+      mediaType: {
+        format: '2022-11-28',
+      },
+    });
   }
 
   private getOwnerRepo(): { owner: string; repo: string } {
@@ -277,7 +284,7 @@ export class GitHubClient implements TrackerProvider {
         });
       } catch (error) {
         // Branch deletion is best-effort, don't fail the merge
-        console.warn(`Failed to delete source branch: ${error}`);
+        logger.warn({ mrId: id, err: String(error) }, 'failed to delete source branch');
       }
     }
   }

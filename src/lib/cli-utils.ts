@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { logger } from './io';
 
 /**
  * Parse comma-separated string into trimmed array
@@ -74,7 +75,7 @@ export function handleCommandError(error: unknown, context?: string): never {
  */
 export function logAndReturn<T>(error: unknown, context: string, fallback: T): T {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(chalk.yellow('Warning:'), `${context}:`, message);
+  logger.warn({ context, err: message }, 'non-critical operation failed');
   return fallback;
 }
 

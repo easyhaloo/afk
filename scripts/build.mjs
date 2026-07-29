@@ -81,7 +81,7 @@ try {
     outExtension: { '.js': '.js' },
     bundle: false,
     plugins: [fixESMPlugin],
-    logLevel: 'info',
+    logLevel: 'warning',
   });
 
   console.log('✓ Build completed successfully');

@@ -171,20 +171,24 @@ if command -v afk &> /dev/null && [[ "$FORCE" == false ]]; then
     fi
 fi
 
-# Install npm dependencies
+# Install npm dependencies (full, including devDependencies for build)
 print_info "Installing npm dependencies..."
 cd "$SCRIPT_DIR"
-npm install --production --silent
+npm install --silent
 print_success "Dependencies installed"
 
 # Build TypeScript
 print_info "Building TypeScript..."
-npm run build
+npm run build > /dev/null
 if [[ ! -f "$SCRIPT_DIR/dist/index.js" ]]; then
     print_error "Build failed: dist/index.js not found"
     exit 1
 fi
 print_success "Build completed"
+
+# Switch to production-only (removes devDependencies to reduce installation size)
+print_info "Switching to production dependencies..."
+npm install --production --silent
 
 # Create executable wrapper script
 print_info "Creating executable wrapper..."
@@ -239,32 +243,17 @@ fi
 # Show post-install information
 echo ""
 echo "╔═══════════════════════════════════════╗"
-echo "║   Installation Complete! 🚀           ║"
+echo "║       Installation Complete! 🚀       ║"
 echo "╚═══════════════════════════════════════╝"
 echo ""
 print_success "AFK CLI v$AFK_VERSION installed to $WRAPPER_PATH"
 echo ""
 echo "Next steps:"
-echo "  1. Verify installation: afk --version"
-echo "  2. View help: afk --help"
-echo "  3. Configure environment:"
-echo "     export GITLAB_TOKEN=glpat-xxxxxxxxxxxxx"
-echo "     export GITLAB_PROJECT_ID=12345"
-echo "     export GITLAB_BASE_URL=https://gitlab.company.com/api/v4"
-echo "  4. Quick start: afk workflow launch --iid <issue-number>"
+echo "  1. Verify:  afk --version  |  afk --help"
+echo "  2. Configure tokens:"
+echo "       export GITLAB_TOKEN=glpat-xxxxxxxxxxxxx   # https://gitlab.com/-/profile/personal_access_tokens"
+echo "       export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx      # https://github.com/settings/tokens"
+echo "  3. Run:     afk workflow launch --iid <issue-number>"
+echo "              afk --help  # for all commands"
 echo ""
-echo "Documentation:"
-echo "  - Quick Start: $SCRIPT_DIR/docs/QUICK-START.md"
-echo "  - Full Guide: $SCRIPT_DIR/README.md"
-echo ""
-
-# Optional: Add shell completion hint
-if [[ -f "$HOME/.zshrc" ]] || [[ -f "$HOME/.bashrc" ]]; then
-    echo "Tip: Add to your shell config (~/.zshrc or ~/.bashrc):"
-    echo "  alias afk='$WRAPPER_PATH'"
-    echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
-    echo ""
-fi
-
-print_success "Installation complete!"
 exit 0

@@ -4,7 +4,7 @@
  */
 import { resolve } from 'path';
 
-const cmd = process.argv[2];
+const cmd = process.argv[2] ?? 'dashboard';
 const extraArgs = process.argv.slice(3);
 
 async function main() {

@@ -36,7 +36,6 @@ const mergeIssues = (prev: Issue[], next: Issue[]): Issue[] => {
 
 export function useData(currentView: View, currentProject: Project | null) {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [completedTasks, setCompletedTasks] = useState<Task[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<TmuxSession[]>([]);
@@ -60,7 +59,6 @@ export function useData(currentView: View, currentProject: Project | null) {
         fetchSessions(),
       ]);
       setTasks(tasksData.active);
-      setCompletedTasks(tasksData.completed);
       setSessions(sessionsData);
     })();
   }, []);
@@ -195,7 +193,6 @@ export function useData(currentView: View, currentProject: Project | null) {
   const reloadTasks = useCallback(async () => {
     const data = await fetchTasks();
     setTasks(data.active);
-    setCompletedTasks(data.completed);
     return data;
   }, []);
 
@@ -279,7 +276,7 @@ export function useData(currentView: View, currentProject: Project | null) {
   }, [loading, projectHasMore, projectPage]);
 
   return {
-    tasks, completedTasks, issues, projects, sessions,
+    tasks, issues, projects, sessions,
     projectBranches, projectTags, projectCommits, loading,
     issueHasMore, projectHasMore,
     loadProjectDetail,

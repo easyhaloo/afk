@@ -5,7 +5,7 @@ import React, { useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useState, createActions } from './hooks';
 import { initRegistry } from '../dashboard/registry/init';
-import { TaskListView, IssueListView, CompletedListView, ProjectListView, BoardView, DetailScreen, HelpDialog, BreathingSeparator, DebugOverlay, Header, Footer, Notification } from '../dashboard/views/index';
+import { TaskListView, IssueListView, ProjectListView, BoardView, DetailScreen, HelpDialog, BreathingSeparator, DebugOverlay, Header, Footer, Notification } from '../dashboard/views/index';
 import type { Task, Issue, Project } from '../../types/dashboard';
 
 // Initialize view registry at module load
@@ -13,7 +13,6 @@ initRegistry();
 
 interface Props {
   tasks: Task[];
-  completedTasks: Task[];
   issues: Issue[];
   projects: Project[];
   sessions: any[];
@@ -35,7 +34,7 @@ interface Props {
 }
 
 export function AppContent({
-  tasks, completedTasks, issues, projects, sessions,
+  tasks, issues, projects, sessions,
   projectBranches, projectTags, projectCommits,
   issueHasMore, projectHasMore,
   onLoadProjectDetail, onReloadTasks, onRemoveSession,
@@ -54,18 +53,15 @@ export function AppContent({
   const tasksRef = useRef<Task[]>([]);
   const issuesRef = useRef<Issue[]>([]);
   const projectsRef = useRef<Project[]>([]);
-  const completedTasksRef = useRef<Task[]>([]);
   tasksRef.current = tasks;
   issuesRef.current = issues;
   projectsRef.current = projects;
-  completedTasksRef.current = completedTasks;
 
   // Get items based on current view
   const getItems = (): (Task | Issue | Project)[] => {
     let raw: (Task | Issue | Project)[] = [];
     if (currentView === 'tasks') raw = tasksRef.current;
     else if (currentView === 'issues') raw = issuesRef.current;
-    else if (currentView === 'completed') raw = completedTasksRef.current;
     else if (currentView === 'board') raw = issuesRef.current;
     else raw = projectsRef.current;
 
@@ -167,9 +163,8 @@ export function AppContent({
     // View switching
     if (input === '1') actions.switchView('tasks');
     if (input === '2') actions.switchView('issues');
-    if (input === '3') actions.switchView('completed');
-    if (input === '4') actions.switchView('projects');
-    if (input === '5') actions.switchView('board');
+    if (input === '3') actions.switchView('projects');
+    if (input === '4') actions.switchView('board');
 
     // Navigation
     if (key.downArrow) {
@@ -284,12 +279,11 @@ export function AppContent({
 
   // View title
   const viewTitle = (() => {
-    const filtered = state.searchQuery ? ` (${items.length}/${tasks.length + issues.length + completedTasks.length + projects.length})` : '';
+    const filtered = state.searchQuery ? ` (${items.length}/${tasks.length + issues.length + projects.length})` : '';
     if (currentView === 'tasks') return `tasks running: ${items.length}${filtered}`;
     if (currentView === 'issues') return state.multiSelectMode
       ? `issues todo: ${items.length} | selected: ${state.selectedItems.size}`
       : `issues todo: ${items.length}${filtered}`;
-    if (currentView === 'completed') return `completed: ${items.length}${filtered}`;
     if (currentView === 'board') return `board view: ${items.length} issues${filtered}`;
     return `gitlab projects: ${items.length}${filtered}`;
   })();
@@ -312,7 +306,6 @@ export function AppContent({
             view={currentView}
             tasksCount={tasks.length}
             issuesCount={issues.length}
-            completedCount={completedTasks.length}
             projectsCount={projects.length}
             selectedIssuesCount={state.selectedItems.size}
             multiSelectMode={state.multiSelectMode}
@@ -327,7 +320,6 @@ export function AppContent({
           <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2} paddingY={0}>
             {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
             {currentView === 'issues' && <IssueListView issues={items as Issue[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} multiSelectMode={state.multiSelectMode} selectedIssues={state.selectedItems} />}
-            {currentView === 'completed' && <CompletedListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
             {currentView === 'projects' && <ProjectListView projects={items as Project[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
             {currentView === 'board' && <BoardView issues={items as Issue[]} selectedIndex={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
             {(currentView === 'issues' && issueHasMore || currentView === 'projects' && projectHasMore) && (

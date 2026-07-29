@@ -10,7 +10,6 @@ import { initRegistry } from './registry/init';
 import {
   TaskListView,
   IssueListView,
-  CompletedListView,
   ProjectListView,
   BoardView,
   DetailScreen,
@@ -46,7 +45,7 @@ export const Dashboard: React.FC = () => {
   } = useNavigation();
 
   const {
-    tasks, completedTasks, issues, projects, sessions,
+    tasks, issues, projects, sessions,
     projectBranches, projectTags, projectCommits,
     issueHasMore, projectHasMore,
     loadProjectDetail,
@@ -79,18 +78,15 @@ export const Dashboard: React.FC = () => {
   const tasksRef = useRef<Task[]>([]);
   const issuesRef = useRef<Issue[]>([]);
   const projectsRef = useRef<Project[]>([]);
-  const completedTasksRef = useRef<Task[]>([]);
   tasksRef.current = tasks;
   issuesRef.current = issues;
   projectsRef.current = projects;
-  completedTasksRef.current = completedTasks;
 
   // Derived
   const getItems = (): (Task | Issue | Project)[] => {
     let raw: (Task | Issue | Project)[] = [];
     if (currentView === 'tasks') raw = tasksRef.current;
     else if (currentView === 'issues') raw = issuesRef.current;
-    else if (currentView === 'completed') raw = completedTasksRef.current;
     else if (currentView === 'board') raw = issuesRef.current;
     else raw = projectsRef.current;
 
@@ -294,7 +290,7 @@ export const Dashboard: React.FC = () => {
     if (items.length === 1 && selectedIndex === 0) {
       // Already selected, no-op
     }
-  }, [tasks, issues, projects, completedTasks, selectedIndex]);
+  }, [tasks, issues, projects, selectedIndex]);
 
   // Debug logging
   useEffect(() => {
@@ -371,9 +367,8 @@ export const Dashboard: React.FC = () => {
 
     if (input === '1') { switchView('tasks'); }
     if (input === '2') { switchView('issues'); }
-    if (input === '3') { switchView('completed'); }
-    if (input === '4') { switchView('projects'); }
-    if (input === '5') { switchView('board'); }
+    if (input === '3') { switchView('projects'); }
+    if (input === '4') { switchView('board'); }
 
     if (key.downArrow) {
       navigateDown(items.length);
@@ -420,12 +415,11 @@ export const Dashboard: React.FC = () => {
 
   // View title
   const viewTitle = (() => {
-    const filtered = searchQuery ? ` (${items.length}/${tasks.length + issues.length + completedTasks.length + projects.length})` : '';
+    const filtered = searchQuery ? ` (${items.length}/${tasks.length + issues.length + projects.length})` : '';
     if (currentView === 'tasks') return `tasks running: ${items.length}${filtered}`;
     if (currentView === 'issues') return multiSelectMode
       ? `issues todo: ${items.length} | selected: ${selectedIssues.size}`
       : `issues todo: ${items.length}${filtered}`;
-    if (currentView === 'completed') return `completed: ${items.length}${filtered}`;
     if (currentView === 'board') return `board view: ${items.length} issues${filtered}`;
     return `gitlab projects: ${items.length}${filtered}`;
   })();
@@ -453,7 +447,6 @@ export const Dashboard: React.FC = () => {
             view={currentView as any}
             tasksCount={tasks.length}
             issuesCount={issues.length}
-            completedCount={completedTasks.length}
             projectsCount={projects.length}
             selectedIssuesCount={selectedIssues.size}
             multiSelectMode={multiSelectMode}
@@ -468,7 +461,6 @@ export const Dashboard: React.FC = () => {
           <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2} paddingY={0}>
             {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
             {currentView === 'issues' && <IssueListView issues={items as Issue[]} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} multiSelectMode={multiSelectMode} selectedIssues={selectedIssues} />}
-            {currentView === 'completed' && <CompletedListView tasks={items as Task[]} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
             {currentView === 'projects' && <ProjectListView projects={items as Project[]} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
             {currentView === 'board' && <BoardView issues={items as Issue[]} selectedIndex={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} />}
             {/* Floating loading/more indicator — overlays the list, does not consume layout space. */}

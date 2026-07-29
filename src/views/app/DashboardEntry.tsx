@@ -49,7 +49,6 @@ export function DashboardEntry() {
 
   // Loaded data
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [completedTasks, setCompletedTasks] = useState<Task[]>([]);
   const [sessions, setSessions] = useState<TmuxSession[]>([]);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -65,7 +64,6 @@ export function DashboardEntry() {
         fetchSessions(),
       ]);
       setTasks(tasksData.active);
-      setCompletedTasks(tasksData.completed);
       setSessions(sessionsData);
     })();
   }, [isReady]);
@@ -148,14 +146,12 @@ export function DashboardEntry() {
   const reloadTasks = useCallback(async () => {
     const data = await fetchTasks();
     setTasks(data.active);
-    setCompletedTasks(data.completed);
   }, []);
 
   const removeSession = useCallback(async (name: string) => {
     await killSession(name);
     const [tasksData, sessionsData] = await Promise.all([fetchTasks(), fetchSessions()]);
     setTasks(tasksData.active);
-    setCompletedTasks(tasksData.completed);
     setSessions(sessionsData);
   }, []);
 
@@ -220,7 +216,6 @@ export function DashboardEntry() {
       <StateProvider>
       <AppContent
         tasks={tasks}
-        completedTasks={completedTasks}
         issues={issues}
         projects={projects}
         sessions={sessions}

@@ -1,6 +1,5 @@
 export { TaskListView } from './TaskListView';
 export { IssueListView } from './IssueListView';
-export { CompletedListView } from './CompletedListView';
 export { ProjectListView } from './ProjectListView';
 export { DetailScreen } from './DetailScreen';
 export { HelpDialog } from './HelpDialog';

@@ -5,21 +5,19 @@ interface Props {
   view: string;
   tasksCount: number;
   issuesCount: number;
-  completedCount: number;
   projectsCount: number;
   selectedIssuesCount: number;
   multiSelectMode: boolean;
 }
 
 export function Header({
-  view, tasksCount, issuesCount, completedCount, projectsCount,
+  view, tasksCount, issuesCount, projectsCount,
   selectedIssuesCount, multiSelectMode,
 }: Props) {
   const icon = view === 'tasks' ? '●' : view === 'issues' ? '○'
-    : view === 'completed' ? '✔' : view === 'board' ? '▦' : '▸';
+    : view === 'board' ? '▦' : '▸';
   const count = view === 'tasks' ? tasksCount
     : view === 'issues' ? issuesCount
-    : view === 'completed' ? completedCount
     : view === 'board' ? issuesCount
     : projectsCount;
 
@@ -28,7 +26,7 @@ export function Header({
       <Text color="white"><Text bold>▸ AFK Dashboard</Text></Text>
       <Text color="white">
         <Text>{icon}</Text>
-        <Text> {view === 'completed' ? 'done' : view} </Text>
+        <Text> {view} </Text>
         <Text>{count}</Text>
         {view === 'issues' && multiSelectMode && (
           <Text dimColor> ({selectedIssuesCount})</Text>

@@ -24,6 +24,62 @@ afk --version
 
 详细步骤和配置见 [快速开始指南](docs/GETTING-STARTED.md)
 
+## 安装 Claude Code 插件（可选）
+
+AFK 提供完整的 Claude Code skill 套件，可作为插件集成到 Claude Code 中。
+
+### 方式一：在 Claude Code 会话中安装（推荐）
+
+在 Claude Code 交互式会话中直接使用 slash command：
+
+```bash
+/plugin install afk@afk
+```
+
+### 方式二：使用 CLI 安装
+
+```bash
+# 添加 marketplace
+claude plugin marketplace add easyhaloo/afk --scope user
+
+# 安装插件
+claude plugin install afk@afk
+```
+
+### 方式三：settings.json 配置
+
+在 Claude Code 的 `settings.json`（全局或项目级 `.claude/settings.json`）中添加：
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "afk": {
+      "source": {
+        "source": "github",
+        "repo": "easyhaloo/afk"
+      }
+    }
+  }
+}
+```
+
+支持的 `source` 类型：
+- `"github"` — 从 GitHub 仓库加载
+- `"local"` — 从本地文件系统加载
+
+### 方式四：符号链接 skills
+
+将 `skills/` 目录链接到全局 skills 目录（无需插件机制）：
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s /path/to/afk/skills/* ~/.claude/skills/
+```
+
+### 验证安装
+
+在 Claude Code 中运行 `/afk-grill-me` 确认 skills 已加载。
+
 ## CLI 命令
 
 ```bash

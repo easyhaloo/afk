@@ -1,5 +1,6 @@
 ---
 name: afk-qa
+disable-model-invocation: true
 description: >-
   Use when an MR from autonomous build needs independent verification
   against its Acceptance Criteria before merge. Verifies AC independently,

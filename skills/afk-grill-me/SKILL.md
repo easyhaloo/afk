@@ -1,5 +1,6 @@
 ---
 name: afk-grill-me
+disable-model-invocation: true
 description: >-
   Requirements interview skill — use when a feature/epic is ambiguous
   and the team needs shared, falsifiable understanding before building.

@@ -1,5 +1,6 @@
 ---
 name: afk-grill-me-context
+disable-model-invocation: true
 description: >-
   Gap-fill interview skill — use when bounded contexts, architecture
   docs, a prior draft, or code audit results already exist and need

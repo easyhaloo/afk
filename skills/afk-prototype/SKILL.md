@@ -1,5 +1,6 @@
 ---
 name: afk-prototype
+disable-model-invocation: true
 description: >-
   Generate product prototypes or technical spikes.
   - product: HTML pages from vague requirements → iterate until confirmed

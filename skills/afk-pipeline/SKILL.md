@@ -1,5 +1,6 @@
 ---
 name: afk-pipeline
+disable-model-invocation: true
 description: >-
   Use when the user is unsure which phase skill to invoke, or asks for
   the lifecycle overview. Recommends the appropriate skill based on

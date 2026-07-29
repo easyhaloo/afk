@@ -220,6 +220,9 @@ export class WorkflowRunner {
     // AC passed → create MR
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
 
+    // Session is no longer needed; kill it to avoid orphaned sessions.
+    await this.tmux.killSession(session);
+
     // Query MR/PR status and pipeline
     try {
       const mrId = this.extractMRIdFromUrl(mrUrl);

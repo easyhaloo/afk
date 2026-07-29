@@ -4,7 +4,7 @@
  */
 import { resolve } from 'path';
 
-const cmd = process.argv[2] ?? 'dashboard';
+const cmd = process.argv[2];
 const extraArgs = process.argv.slice(3);
 
 async function main() {
@@ -13,10 +13,17 @@ async function main() {
     return;
   }
 
-  if (cmd === 'dashboard') {
-    // Direct import to preserve stdin TTY for Ink
+  // No args: launch TUI directly (preserve stdin TTY for Ink)
+  if (process.argv.length <= 2) {
     const { startDashboard } = await import('./commands/dashboard-entry.js');
     await startDashboard();
+    return;
+  }
+
+  // Explicit "dashboard" or "ui" command: not supported, use "afk" with no args
+  if (cmd === 'dashboard' || cmd === 'ui') {
+    console.error('Error: use "afk" with no arguments to launch the TUI dashboard.');
+    process.exit(1);
     return;
   }
 

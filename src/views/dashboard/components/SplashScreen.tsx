@@ -3,10 +3,10 @@
  *
  * Animation strategy:
  * - animProgressRef: updated at 60fps (16ms), smoothly lerps toward real progress
- * - frameRef: always ticking at 80ms for spinner + edge animation
+ * - frameRef: always ticking for spinner + edge animation
  * - React state: throttled to 50ms to batch re-renders
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { LoadingPhase } from '../hooks/useLoadingPhase';
 
@@ -15,10 +15,8 @@ interface SplashScreenProps {
   onComplete: () => void;
 }
 
-const TICK_MS = 16;          // 60fps animation tick
-const LERP_FACTOR = 0.12;    // how fast animProgress catches up (0-1, higher = faster)
-const STATE_TICK_MS = 50;   // React re-render throttle
-const SPINNER_TICK_MS = 80; // spinner frame rate
+const TICK_MS = 16;       // 60fps animation tick
+const LERP_FACTOR = 0.12; // how fast animProgress catches up (0-1, higher = faster)
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const edgeChars = ['░', '▒', '▓', '█'];
@@ -28,15 +26,13 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }) => {
-  const [display, setDisplay] = useState({ progress: 0, frame: 0 }); // throttled state for React
+  const [display, setDisplay] = useState({ progress: 0, frame: 0 });
   const [fadeOut, setFadeOut] = useState(false);
   const [skipped, setSkipped] = useState(false);
 
-  // Always-updated refs (no re-render on update)
   const animProgressRef = useRef(0);
   const realProgressRef = useRef(0);
   const frameRef = useRef(0);
-  const fadeOutRef = useRef(false);
 
   const totalPhases = phases.length;
   const doneCount = phases.filter(p => p.done).length;
@@ -45,31 +41,25 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
   const visiblePhases = phases.filter(p => p.visible);
   const currentPhase = visiblePhases.find(p => !p.done) || visiblePhases[visiblePhases.length - 1];
 
-  // Keep refs in sync with state
+  // Keep realProgress ref in sync with derived value
   useEffect(() => { realProgressRef.current = realProgress; }, [realProgress]);
-  useEffect(() => { fadeOutRef.current = fadeOut; }, [fadeOut]);
 
-  // High-freq animation loop: update animProgress and frame
+  // High-freq animation loop
   useEffect(() => {
     let animFrame: ReturnType<typeof setInterval>;
 
     const loop = () => {
-      // Smooth progress interpolation (exponential moving average)
       animProgressRef.current = lerp(animProgressRef.current, realProgressRef.current, LERP_FACTOR);
-
-      // Continuous frame counter for spinner + edge animation
       frameRef.current += 1;
-
-      // Throttled state update to trigger React re-render
-      setDisplay({
-        progress: animProgressRef.current,
-        frame: frameRef.current,
-      });
+      // Skip React update during fadeOut — display values are frozen anyway
+      if (!fadeOut) {
+        setDisplay({ progress: animProgressRef.current, frame: frameRef.current });
+      }
     };
 
     animFrame = setInterval(loop, TICK_MS);
     return () => clearInterval(animFrame);
-  }, []);
+  }, [fadeOut]);
 
   // Watch for all phases done
   useEffect(() => {
@@ -92,7 +82,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
 
   const { progress, frame } = display;
   const fadeOutProgress = fadeOut ? Math.max(0, 1 - (frame / 31)) : 1; // ~500ms at 60fps
-  const opacity = fadeOutRef.current ? fadeOutProgress : 1;
+  const opacity = fadeOut ? fadeOutProgress : 1;
   const slideOffset = fadeOut ? Math.floor((1 - fadeOutProgress) * 3) : 0;
 
   const spinnerIndex = frame % spinnerFrames.length;

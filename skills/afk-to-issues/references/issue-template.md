@@ -36,6 +36,7 @@ When creating an issue that the autonomous workflow will process.
 | Field | Required | Format | Purpose |
 |-------|----------|--------|---------|
 | `# <Title>` | yes | one line | Issue name |
+| `## PRD` | yes (PRD Mode) | `#<iid>` or `none` (Direct Mode) | Link to source PRD issue |
 | `## Context` | yes | one paragraph | Why this work |
 | `## Acceptance Criteria` | yes | list (≥1 item) | Machine-verifiable success |
 | `## Out of Scope` | no | list | Prevent scope creep |

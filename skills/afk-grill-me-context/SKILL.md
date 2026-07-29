@@ -73,12 +73,12 @@ Findings are evidence for human verification questions, NOT final answers.
 Show the updated draft `CONTEXT.md` — mark which parts were
 pre-existing and which were added during this session.
 
-### Step 4 — Gate: explicit user confirmation (AskQuestion)
+### Step 4 — Gate: explicit user confirmation
 
-1. **Approve** → write to `/tmp/grill-me-context-*.md`
-2. **Revise specific sections** → return to Step 3
-3. **Drill deeper on a topic** → return to Step 2
-4. **Add an open question** → record gap, then write with the gap labeled
+1. **Approve** → write confirmed context to `/tmp/grill-me-context-*.md`, skill ends
+2. **Revise** → return to Step 3 with specific sections to rework
+3. **Drill deeper** → return to Step 2, identify more gaps
+4. **Add open question** → append unresolved question to context, then write
 
 ### Step 5 — Write to /tmp/ (only after Step 4 confirmation)
 

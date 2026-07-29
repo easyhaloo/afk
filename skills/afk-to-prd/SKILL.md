@@ -51,10 +51,11 @@ mandate to resolve gaps or conflicts — only to make them visible:
 
 ## End State
 
-This skill terminates at Issue creation with `stage::prd` label applied.
-No further agent actions are authorized — no task lists, no branch
-creation, no decomposition, no planning. The caller must explicitly
-invoke another skill or issue a new command for any follow-on work.
+This skill terminates after the caller approves the PRD draft and it is
+published as an issue with `stage::prd` label. No further agent actions
+are authorized — no task lists, no branch creation, no decomposition,
+no planning. The caller must explicitly invoke another skill or issue a
+new command for any follow-on work.
 
 ## Steps
 
@@ -72,7 +73,7 @@ verify bounded contexts and architecture decisions are accurate:
 This code check is verification, not research — it confirms or
 questions what the alignment record already states.
 
-### Step 2 — Write `PRD.md`
+### Step 2 — Draft PRD to `/tmp/`
 
 Use the authoritative template at **`references/prd-template.md`** —
 read it before drafting. Highlights:
@@ -90,25 +91,17 @@ to create an ADR. If irreversible and expensive to change → create an
 ADR in `docs/adr/ADR-NNNN.md` (status: proposed) and reference it in the
 PRD.
 
-### Step 3 — Publish
+Draft to `/tmp/PRD-<slug>.md` — this is a temporary file. Do NOT
+publish until Step 3 approval.
 
-Existing tracking Epic/Issue → link `PRD.md` via
-`afk issue comment <iid> "$(cat PRD.md)"`. None exists →
-`afk issue create "<title>" --description "$(cat PRD.md)" --label stage::prd`.
-
-### Step 4 — Label
-
-New issue already got `stage::prd` via step 3. Existing issue needs:
-`afk issue update-labels <iid> --add stage::prd`.
-
-### Step 5 — Gate (AskQuestion)
+### Step 3 — Gate (AskQuestion)
 
 Use `AskQuestion` with single-select to collect the caller's decision:
 
-- **Approve** → write PRD to `/tmp/PRD-<slug>.md`, update Issue label to `stage::prd` → **END**
-- **Revise PRD** → return to Step 2 with specific feedback
-- **Drill deeper** → return to Step 1 (gap-fill) or Step 2 (re-draft)
-- **Add open question** → record gap in Open Risks, write PRD with gap labeled, then end
+- **Approve** → publish PRD as issue (`afk issue create ... --label stage::prd`), write approved PRD to `/tmp/PRD-<slug>.md` → **END**
+- **Revise** → return to Step 2 with specific feedback
+- **Drill deeper** → return to Step 1 (verify) or Step 2 (re-draft)
+- **Add open question** → record gap in Open Risks, return to Step 3 Gate for re-confirmation
 
 Do NOT proceed to any action until one option is selected.
 

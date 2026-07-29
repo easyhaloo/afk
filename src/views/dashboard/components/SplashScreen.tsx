@@ -17,8 +17,9 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
 
   // Only show phases that have been made visible by the loading hook
   const visiblePhases = phases.filter(p => p.visible);
-  const totalPhases = visiblePhases.length;
-  const doneCount = visiblePhases.filter(p => p.done).length;
+  // Use total phases (all registered) as denominator for stable progress
+  const totalPhases = phases.length;
+  const doneCount = phases.filter(p => p.done).length;
   const progress = totalPhases > 0 ? Math.floor((doneCount / totalPhases) * 100) : 0;
 
   // Current active phase (first non-done among visible phases)

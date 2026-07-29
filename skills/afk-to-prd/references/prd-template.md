@@ -1,11 +1,5 @@
 # PRD Template
 
-> The authoritative structure for AFK PRDs.
-> Audience: LLM agents synthesizing PRDs, NOT human readers.
->
-> Optimize for: stable token structure, parseable fields, behavior that
-> downstream issue creators can directly slice into machine-checkable AC.
-
 ## When to Use
 
 When synthesizing any alignment record into a PRD for publication. The
@@ -55,27 +49,38 @@ Each story maps to one bounded context and produces one issue downstream.
 
 ## Key Decisions
 
-Each decision is **already made** in upstream context or spike.
-Format per decision:
+<!-- 2+ decisions → table for easy comparison -->
+| Decision | Rationale | Reversible | ADR |
+|---|---|---|---|
+| ... | ... | ... | ... |
 
-- **Decision:** <what was decided>
-- **Rationale:** <why>
-- **Reversible:** yes | no
-- **ADR:** ADR-NNNN (or "none — needs ADR" if irreversible and unrecorded)
+<!-- 1 decision with rich content → expanded block -->
+**Decision:** <what was decided>
+
+**Rationale:** <why>
+
+**Reversible:** yes | no
+
+**ADR:** ADR-NNNN (or "none — needs ADR" if irreversible and unrecorded)
 
 ## Open Risks
 
-Each risk is **unresolved** — needs future decision or monitoring.
+<!-- 2+ risks → table -->
+| Risk | Impact | Mitigation |
+|---|---|---|
+| ... | ... | ... |
 
-- **Risk:** <what could go wrong>
-- **Impact:** <high | medium | low>
-- **Mitigation:** <plan or "TBD">
+<!-- 1 risk with rich content → expanded block -->
+**Risk:** <what could go wrong>
+
+**Impact:** <high | medium | low>
+
+**Mitigation:** <plan or "TBD">
 
 ## Non-Goals
 
 - <what this PRD will NOT do>
 - <what this PRD will NOT do>
-
 ```
 
 ## Field Reference
@@ -87,8 +92,8 @@ Each risk is **unresolved** — needs future decision or monitoring.
 | `## Users & Jobs` | yes | bulleted list | Audience |
 | `## Bounded Contexts` | yes | bulleted list | Slicing boundaries |
 | `## User Stories` | yes | ≥1 story block | What gets built |
-| `## Key Decisions` | yes | bulleted list | Decided things |
-| `## Open Risks` | yes | bulleted list | Undecided things |
+| `## Key Decisions` | yes | table or block | Decided things |
+| `## Open Risks` | yes | table or block | Undecided things |
 | `## Non-Goals` | yes | bulleted list | Explicit exclusions |
 
 ## User Story Format

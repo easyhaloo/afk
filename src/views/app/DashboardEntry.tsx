@@ -2,6 +2,7 @@
  * DashboardEntry - Entry point that connects App with data layer
  */
 import React, { useCallback, useEffect, useState } from 'react';
+import { Box } from 'ink';
 import { AppContent } from './AppContent';
 import { initRegistry } from '../dashboard/registry/init';
 import { Task, Issue, Project, TmuxSession } from '../../types/dashboard';
@@ -27,6 +28,17 @@ const PER_PAGE = 50;
 export function DashboardEntry() {
   const { phases, isReady } = useLoadingPhases();
   const [showApp, setShowApp] = useState(false);
+  const [appReady, setAppReady] = useState(false);
+
+  // After splash signals showApp, wait for fade-out then signal appReady
+  useEffect(() => {
+    if (showApp) {
+      // Splash fade-out takes ~500ms, give a bit extra
+      const timer = setTimeout(() => setAppReady(true), 600);
+      return () => clearTimeout(timer);
+    }
+    setAppReady(false);
+  }, [showApp]);
 
   // Once isReady, show app and never go back
   React.useEffect(() => {
@@ -204,7 +216,8 @@ export function DashboardEntry() {
   }
 
   return (
-    <StateProvider>
+    <Box flexDirection="column">
+      <StateProvider>
       <AppContent
         tasks={tasks}
         completedTasks={completedTasks}
@@ -227,6 +240,7 @@ export function DashboardEntry() {
         onInvalidateDetailCache={invalidateDetailCache}
         onAttachSession={handleAttachSession}
       />
-    </StateProvider>
+      </StateProvider>
+    </Box>
   );
 }

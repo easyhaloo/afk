@@ -13,7 +13,7 @@ async function main() {
     return;
   }
 
-  if (cmd === 'dashboard' || cmd === 'ui') {
+  if (cmd === 'dashboard') {
     // Direct import to preserve stdin TTY for Ink
     const { startDashboard } = await import('./commands/dashboard-entry.js');
     await startDashboard();

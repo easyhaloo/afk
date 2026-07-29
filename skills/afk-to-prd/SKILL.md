@@ -49,6 +49,13 @@ mandate to resolve gaps or conflicts — only to make them visible:
   `PRD.md` in place, comment on every affected issue with a link to
   what changed. MUST NOT let issues silently drift out of sync.
 
+## End State
+
+This skill terminates at Issue creation with `stage::prd` label applied.
+No further agent actions are authorized — no task lists, no branch
+creation, no decomposition, no planning. The caller must explicitly
+invoke another skill or issue a new command for any follow-on work.
+
 ## Steps
 
 ### Step 1 — Verify alignment against code (when applicable)
@@ -94,10 +101,16 @@ Existing tracking Epic/Issue → link `PRD.md` via
 New issue already got `stage::prd` via step 3. Existing issue needs:
 `afk issue update-labels <iid> --add stage::prd`.
 
-### Step 5 — Gate (HITL)
+### Step 5 — Gate (AskQuestion)
 
-Explicit user approval required before this PRD is decomposed into
-issues. One-line summary + link, not full PRD pasted into chat.
+Use `AskQuestion` with single-select to collect the caller's decision:
+
+- **Approve** → write PRD to `/tmp/PRD-<slug>.md`, update Issue label to `stage::prd` → **END**
+- **Revise PRD** → return to Step 2 with specific feedback
+- **Drill deeper** → return to Step 1 (gap-fill) or Step 2 (re-draft)
+- **Add open question** → record gap in Open Risks, write PRD with gap labeled, then end
+
+Do NOT proceed to any action until one option is selected.
 
 ## Anti-patterns
 

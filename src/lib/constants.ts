@@ -43,9 +43,6 @@ export const CONTEXT = {
  * Port numbers for services
  */
 export const PORTS = {
-  /** Default Redis port */
-  REDIS_DEFAULT: 6379,
-
   /** MinIO base port */
   MINIO_BASE: 9000,
 

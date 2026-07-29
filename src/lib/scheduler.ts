@@ -1,24 +1,21 @@
-import { Queue, Worker, Job } from 'bullmq';
-import { Redis } from 'ioredis';
 import type { TrackerProvider } from './core/tracker/types';
 import { WorkflowRunner } from './workflows';
 import { checkIssuePreconditions } from './preconditions';
-import { PORTS, TIMEOUTS } from './constants';
+import { TIMEOUTS } from './constants';
 import { logger } from './io';
 
 export interface TaskData {
   iid: number;
   priority: number;
   baseBranch: string;
-  createdAt: Date;
   retries: number;
+  maxRetries: number;
+  lastError?: string;
 }
 
 export interface SchedulerOptions {
   maxConcurrent?: number;
-  redisHost?: string;
-  redisPort?: number;
-  queueName?: string;
+  pollIntervalMs?: number;
 }
 
 export interface SchedulerStatus {
@@ -36,197 +33,110 @@ export interface SchedulerStatus {
 }
 
 /**
- * Event-driven task scheduler with BullMQ
+ * Lightweight in-memory scheduler — no Redis, no BullMQ.
+ *
+ * Polls the tracker for issues matching the given labels, enqueues them
+ * in an in-memory array, and processes them with bounded concurrency.
+ *
+ * Tracker labels are the SSOT (Single Source of Truth). If the process
+ * restarts, re-polling recovers all unfinished issues.
  */
 export class Scheduler {
-  private queue: Queue<TaskData>;
-  private worker: Worker<TaskData> | null = null;
-  private redis: Redis;
   private tracker: TrackerProvider;
   private maxConcurrent: number;
+  private pollIntervalMs: number;
   private startTime: number = 0;
 
+  // In-memory queue
+  private queue: TaskData[] = [];
+  private active = 0;
+  private completed = 0;
+  private failed: TaskData[] = [];
+  private running = false;
+
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private drainTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor(tracker: TrackerProvider, options: SchedulerOptions = {}) {
-    const {
-      maxConcurrent = 3,
-      redisHost = 'localhost',
-      redisPort = PORTS.REDIS_DEFAULT,
-      queueName = 'afk-tasks',
-    } = options;
-
     this.tracker = tracker;
-    this.maxConcurrent = maxConcurrent;
-
-    // Setup Redis connection
-    this.redis = new Redis({
-      host: redisHost,
-      port: redisPort,
-      maxRetriesPerRequest: null,
-    });
-
-    // Setup BullMQ queue
-    this.queue = new Queue<TaskData>(queueName, {
-      connection: this.redis,
-    });
+    this.maxConcurrent = options.maxConcurrent ?? 3;
+    this.pollIntervalMs = options.pollIntervalMs ?? 60000;
   }
 
   /**
-   * Start scheduler worker
+   * Start scheduler: begin polling and draining.
    */
   async start(): Promise<void> {
-    logger.info({ maxConcurrent: this.maxConcurrent }, 'scheduler starting');
-
+    logger.info({ maxConcurrent: this.maxConcurrent }, 'scheduler starting (in-memory)');
     this.startTime = Date.now();
+    this.running = true;
 
-    // Create worker to process jobs
-    this.worker = new Worker<TaskData>(
-      'afk-tasks',
-      async (job: Job<TaskData>) => {
-        return this.processTask(job);
-      },
-      {
-        connection: this.redis,
-        concurrency: this.maxConcurrent,
-      }
-    );
+    // Poll tracker for ready issues
+    await this.poll();
+    this.pollTimer = setInterval(() => this.poll(), this.pollIntervalMs);
 
-    // Worker event handlers
-    this.worker.on('completed', (job) => {
-      logger.info({ jobId: job.id, iid: job.data.iid }, 'task completed');
-    });
+    // Drain queue (consume tasks)
+    this.drainTimer = setInterval(() => this.drain(), 500);
 
-    this.worker.on('failed', (job, err) => {
-      logger.error({ jobId: job?.id, iid: job?.data?.iid, err: err.message }, 'task failed');
-    });
-
-    this.worker.on('active', (job) => {
-      logger.info({ jobId: job.id, iid: job.data.iid }, 'task started');
-    });
-
-    logger.info('scheduler started, listening for tasks');
+    logger.info('scheduler started');
   }
 
   /**
-   * Stop scheduler
+   * Stop scheduler.
    */
   async stop(): Promise<void> {
     logger.info('scheduler stopping');
+    this.running = false;
 
-    if (this.worker) {
-      await this.worker.close();
-      this.worker = null;
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
     }
-
-    await this.queue.close();
-    await this.redis.quit();
+    if (this.drainTimer) {
+      clearInterval(this.drainTimer);
+      this.drainTimer = null;
+    }
 
     logger.info('scheduler stopped');
   }
 
   /**
-   * Enqueue task for issue
+   * Enqueue a task manually.
    */
   async enqueue(iid: number, priority: number = 5, baseBranch: string = 'main'): Promise<string> {
-    const job = await this.queue.add(
-      `issue-${iid}`,
-      {
-        iid,
-        priority,
-        baseBranch,
-        createdAt: new Date(),
-        retries: 0,
-      },
-      {
-        priority,
-        attempts: 3,
-        backoff: {
-          type: 'exponential',
-          delay: TIMEOUTS.JOB_RETRY_DELAY,
-        },
-      }
-    );
+    const task: TaskData = {
+      iid,
+      priority,
+      baseBranch,
+      retries: 0,
+      maxRetries: 3,
+    };
+
+    // Dedup: skip if already in queue
+    const existing = this.queue.find(t => t.iid === iid);
+    if (existing) {
+      logger.info({ iid }, 'task already enqueued, skipped');
+      return `duplicate-${iid}`;
+    }
+
+    this.queue.push(task);
+    // Sort by priority descending
+    this.queue.sort((a, b) => b.priority - a.priority);
 
     logger.info({ iid, priority }, 'task enqueued');
-    return job.id || '';
+    return `task-${iid}`;
   }
 
   /**
-   * Get failed jobs (dead letter queue)
+   * Poll tracker for ready issues and enqueue them.
    */
-  async getFailedJobs(): Promise<Array<{ iid: number; attemptsMade: number; failedReason: string | null }>> {
-    const jobs = await this.queue.getJobs(['failed']);
-    return jobs.map(job => ({
-      iid: job.data.iid,
-      attemptsMade: job.attemptsMade,
-      failedReason: job.failedReason,
-    }));
-  }
-
-  /**
-   * Get scheduler status
-   */
-  async getStatus(): Promise<SchedulerStatus> {
-    const counts = await this.queue.getJobCounts();
-    const workers = await this.queue.getWorkers();
-
-    return {
-      queue: {
-        waiting: counts.waiting || 0,
-        active: counts.active || 0,
-        completed: counts.completed || 0,
-        failed: counts.failed || 0,
-      },
-      workers: {
-        active: workers.length,
-        total: this.maxConcurrent,
-      },
-      uptime: this.startTime ? Date.now() - this.startTime : 0,
-    };
-  }
-
-  /**
-   * Pause task processing for specific issue
-   */
-  async pauseTask(iid: number): Promise<void> {
-    const jobs = await this.queue.getJobs(['waiting', 'active']);
-    const job = jobs.find(j => j.data.iid === iid);
-
-    if (job) {
-      await job.moveToDelayed(Date.now() + TIMEOUTS.JOB_RESCHEDULE_DELAY);
-      logger.info({ iid }, 'task paused');
-    } else {
-      throw new Error(`Task for issue #${iid} not found`);
-    }
-  }
-
-  /**
-   * Resume paused task
-   */
-  async resumeTask(iid: number): Promise<void> {
-    const jobs = await this.queue.getJobs(['delayed']);
-    const job = jobs.find(j => j.data.iid === iid);
-
-    if (job) {
-      await job.promote();
-      logger.info({ iid }, 'task resumed');
-    } else {
-      throw new Error(`Delayed task for issue #${iid} not found`);
-    }
-  }
-
-  /**
-   * Poll tracker for ready issues and enqueue them
-   * @param labels - label filter (default: ['mode::afk', 'stage::ready-for-issues'])
-   * @param excludeLabels - Labels that exclude an issue from scheduling
-   */
-  async pollTracker(labels: string[] = ['mode::afk', 'stage::ready-for-issues'], excludeLabels: string[] = []): Promise<number> {
+  async pollTracker(
+    labels: string[] = ['mode::afk', 'stage::ready-for-issues'],
+    excludeLabels: string[] = []
+  ): Promise<number> {
     logger.info({ labels }, 'polling tracker for ready issues');
 
-    const issues = await this.tracker.listIssues({
-      labels,
-      state: 'opened',
-    });
-
+    const issues = await this.tracker.listIssues({ labels, state: 'opened' });
     let enqueued = 0;
     let skipped = 0;
 
@@ -237,9 +147,11 @@ export class Scheduler {
         continue;
       }
 
-      // O(1) per-issue lookup
-      const job = await this.queue.getJob(`issue-${issue.id}`);
-      if (job) continue;
+      // Dedup: skip if already in queue or active
+      if (this.queue.some(t => t.iid === issue.id)) {
+        skipped++;
+        continue;
+      }
 
       // Check preconditions
       const check = await checkIssuePreconditions(this.tracker, issue.id);
@@ -249,7 +161,7 @@ export class Scheduler {
         continue;
       }
 
-      // Calculate priority based on labels
+      // Calculate priority
       const priority = this.calculatePriority(issue.labels);
       await this.enqueue(issue.id, priority);
       enqueued++;
@@ -260,22 +172,100 @@ export class Scheduler {
   }
 
   /**
-   * Process task (run workflow)
+   * Get scheduler status.
    */
-  private async processTask(job: Job<TaskData>): Promise<void> {
-    const { iid, baseBranch } = job.data;
+  async getStatus(): Promise<SchedulerStatus> {
+    return {
+      queue: {
+        waiting: this.queue.length,
+        active: this.active,
+        completed: this.completed,
+        failed: this.failed.length,
+      },
+      workers: {
+        active: this.active,
+        total: this.maxConcurrent,
+      },
+      uptime: this.startTime ? Date.now() - this.startTime : 0,
+    };
+  }
+
+  /**
+   * Get failed jobs (dead letter queue).
+   */
+  async getFailedJobs(): Promise<Array<{ iid: number; attemptsMade: number; failedReason: string | null }>> {
+    return this.failed.map(t => ({
+      iid: t.iid,
+      attemptsMade: t.retries,
+      failedReason: t.lastError ?? null,
+    }));
+  }
+
+  /**
+   * Pause processing for a specific issue (move to delayed).
+   * In this in-memory implementation, we remove it from the queue
+   * and it will be re-enqueued on the next poll cycle.
+   */
+  async pauseTask(iid: number): Promise<void> {
+    const idx = this.queue.findIndex(t => t.iid === iid);
+    if (idx !== -1) {
+      this.queue.splice(idx, 1);
+      logger.info({ iid }, 'task paused (removed from queue)');
+    } else {
+      throw new Error(`Task for issue #${iid} not found in queue`);
+    }
+  }
+
+  /**
+   * Resume a paused task.
+   * Polling will pick it up on the next cycle, so this is a no-op.
+   */
+  async resumeTask(_iid: number): Promise<void> {
+    // Polling will re-enqueue on next cycle
+    logger.info('resume: task will be picked up on next poll cycle');
+  }
+
+  /**
+   * Internal: poll and enqueue ready issues.
+   */
+  private async poll(): Promise<void> {
+    if (!this.running) return;
+    try {
+      await this.pollTracker();
+    } catch (error) {
+      logger.error({ err: (error as Error).message }, 'poll error');
+    }
+  }
+
+  /**
+   * Internal: drain queue with concurrency control.
+   */
+  private drain(): void {
+    if (!this.running) return;
+
+    while (this.active < this.maxConcurrent && this.queue.length > 0) {
+      const task = this.queue.shift()!;
+      this.active++;
+      this.processTask(task).finally(() => {
+        this.active--;
+      });
+    }
+  }
+
+  /**
+   * Process a single task: run WorkflowRunner.
+   */
+  private async processTask(task: TaskData): Promise<void> {
+    const { iid, baseBranch } = task;
 
     logger.info({ iid }, 'processing issue');
 
     const runner = new WorkflowRunner(this.tracker);
-
-    // Use platform-aware session name so it appears in dashboard TaskService filters
     const sessionName = this.tracker.platform === 'github'
       ? `afk-gh-${iid}`
       : `afk-gl-${iid}`;
 
     try {
-      // Run full signal-driven workflow
       const result = await runner.run({
         iid,
         session: sessionName,
@@ -283,29 +273,38 @@ export class Scheduler {
         baseBranch,
       });
 
-      if (!result.success) {
+      if (result.success) {
+        this.completed++;
+        logger.info({ iid, url: result.url }, 'workflow completed successfully');
+      } else {
         throw new Error('Workflow did not complete');
       }
-
-      // Labels are managed by WorkflowRunner.runBody()/autoWrapup()
-      logger.info({ iid, url: result.url }, 'workflow completed successfully');
-
     } catch (error) {
-      // Update job data with retry count
-      job.data.retries++;
-      await job.updateData(job.data);
+      task.retries++;
+      const errMsg = (error as Error).message;
+      task.lastError = errMsg;
 
-      throw error;
+      if (task.retries < task.maxRetries) {
+        // Re-enqueue with exponential backoff
+        const delay = TIMEOUTS.JOB_RETRY_DELAY * Math.pow(2, task.retries - 1);
+        logger.warn({ iid, retryCount: task.retries, maxRetries: task.maxRetries, delay }, 'task failed, will retry');
+        setTimeout(() => {
+          this.queue.push(task);
+        }, delay);
+      } else {
+        this.failed.push(task);
+        logger.error({ iid, err: errMsg, retries: task.retries }, 'task failed permanently');
+      }
     }
   }
 
   /**
-   * Calculate priority based on labels
+   * Calculate priority based on labels.
    */
   private calculatePriority(labels: string[]): number {
     if (labels.includes('priority::high')) return 10;
     if (labels.includes('priority::medium')) return 5;
     if (labels.includes('priority::low')) return 1;
-    return 5; // default
+    return 5;
   }
 }

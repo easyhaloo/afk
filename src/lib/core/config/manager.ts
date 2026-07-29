@@ -1,5 +1,4 @@
 import { getGlabToken } from '../gitlab/glab-config';
-import { PORTS } from '../../constants';
 
 // ─── GitLab ───────────────────────────────────────────────────────────────────
 
@@ -29,8 +28,6 @@ export interface WorkflowConfig {
 
 export interface SchedulerConfig {
   maxConcurrent: number;
-  redisHost: string;
-  redisPort: number;
   pollInterval: number;
   requiredLabels: string[];
   excludeLabels: string[];
@@ -85,8 +82,6 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
 
 const DEFAULT_SCHEDULER: SchedulerConfig = {
   maxConcurrent: 3,
-  redisHost: 'localhost',
-  redisPort: PORTS.REDIS_DEFAULT,
   pollInterval: 60,
   requiredLabels: ['mode::afk', 'stage::ready-for-issues'],
   excludeLabels: ['stage::afk-in-progress', 'stage::qa', 'stage::done', 'mode::hitl'],
@@ -162,8 +157,6 @@ function loadPipelineConfig(): PipelineConfig {
 function loadSchedulerConfig(): SchedulerConfig {
   return {
     maxConcurrent: parseIntEnv('AFK_SCHEDULER_MAX_CONCURRENT', DEFAULT_SCHEDULER.maxConcurrent),
-    redisHost: process.env.REDIS_HOST || DEFAULT_SCHEDULER.redisHost,
-    redisPort: parseIntEnv('REDIS_PORT', DEFAULT_SCHEDULER.redisPort),
     pollInterval: parseIntEnv('AFK_SCHEDULER_POLL_INTERVAL', DEFAULT_SCHEDULER.pollInterval),
     requiredLabels: (process.env.AFK_SCHEDULER_REQUIRED_LABELS || DEFAULT_SCHEDULER.requiredLabels.join(',')).split(',').filter(Boolean),
     excludeLabels: (process.env.AFK_SCHEDULER_EXCLUDE_LABELS || DEFAULT_SCHEDULER.excludeLabels.join(',')).split(',').filter(Boolean),

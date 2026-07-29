@@ -15,12 +15,14 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
   const [skipped, setSkipped] = useState(false);
   const [frame, setFrame] = useState(0);
 
-  const totalPhases = phases.length;
-  const doneCount = phases.filter(p => p.done).length;
+  // Only show phases that have been made visible by the loading hook
+  const visiblePhases = phases.filter(p => p.visible);
+  const totalPhases = visiblePhases.length;
+  const doneCount = visiblePhases.filter(p => p.done).length;
   const progress = totalPhases > 0 ? Math.floor((doneCount / totalPhases) * 100) : 0;
 
-  // Current active phase (first non-done)
-  const currentPhase = phases.find(p => !p.done) || phases[phases.length - 1];
+  // Current active phase (first non-done among visible phases)
+  const currentPhase = visiblePhases.find(p => !p.done) || visiblePhases[visiblePhases.length - 1];
 
   // Animated spinner
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -115,7 +117,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ phases, onComplete }
 
         {/* Phase list */}
         <Box flexDirection="column" marginTop={1} paddingLeft={4}>
-          {phases.map((phase, i) => (
+          {visiblePhases.map((phase, i) => (
             <Text key={phase.key} dimColor={opacity < 0.7} color={phase.done ? 'green' : phase.error ? 'red' : undefined}>
               {phase.done
                 ? (phase.error ? '✗' : '✓')

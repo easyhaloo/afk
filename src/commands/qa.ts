@@ -8,7 +8,10 @@ import { logger } from '../lib/io';
 export function registerQACommands(program: Command): void {
   const qa = program
     .command('qa')
-    .description('QA verification: verify AC on merged code');
+    .description('QA verification: verify AC on merged code')
+    .action(() => {
+      program.commands.find(c => c.name() === 'qa')?.outputHelp();
+    });
 
   /**
    * qa run — single issue or PRD-level QA

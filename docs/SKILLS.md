@@ -418,6 +418,40 @@ MR/PR 描述包含 `## Merge Order` 列出所有 `blocked_by` issues：
 
 ---
 
+### 9. api-workflow
+
+**作用：** 将自然语言业务场景转换为可执行的 Playwright API 测试文件
+
+**触发场景：**
+- 用户描述多步骤 API 流程（如"登录 → 创建订单 → 验证状态"）
+- 需要 API + 浏览器混合测试
+- 需要验证 webhooks、异步任务、错误处理
+
+**工作流程：**
+1. **解析** — 理解用户场景，识别 API 步骤和数据流
+2. **生成** — 在 `tests/api-workflow/scenarios/` 创建测试文件
+3. **确认** — 展示生成的文件结构
+4. **执行** — 运行 `pnpm playwright test`
+
+**生成结构：**
+```
+tests/api-workflow/
+├── scenarios/           # 业务流测试
+├── fixtures/           # 可复用 fixture
+├── utils/             # 工具函数
+└── playwright.config.ts
+```
+
+**模板复用：**
+- `templates/` — TypeScript 代码模板，可直接使用
+- `references/` — 模式概念描述，让 AI 理解模式含义
+
+**与其他 skills 协作：**
+- **前置** → 任意需要 API 验证的场景
+- **输出** → 可执行的测试文件
+
+---
+
 ## Skills 设计原则总结
 
 ### 1. 单一职责

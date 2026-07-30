@@ -1,4 +1,4 @@
-import { Task, Issue, TmuxSession } from '../../../types/dashboard';
+import { Task, Issue, TmuxSession } from '../../../types/board';
 import { TaskService } from '../../../lib/tasks';
 import { TmuxClient } from '../../../lib/core/tmux/tmux';
 import { createTrackerClient } from '../../../lib/client-factory';
@@ -8,7 +8,7 @@ const taskService = new TaskService();
 const tmux = new TmuxClient();
 
 /**
- * Convert TrackedIssue (platform-agnostic) to Issue (dashboard format).
+ * Convert TrackedIssue (platform-agnostic) to Issue (board format).
  */
 function toIssue(t: TrackedIssue): Issue {
   return {

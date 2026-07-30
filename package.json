@@ -1,7 +1,7 @@
 {
   "name": "afk",
   "version": "0.1.0",
-  "description": "Away From Keyboard — autonomous development workflow CLI + Skills system",
+  "description": "Away From Keyboard \u2014 autonomous development workflow CLI + Skills system",
   "type": "module",
   "bin": {
     "afk": "./dist/index.js"
@@ -23,12 +23,12 @@
     "@gitbeaker/node": "^35.8.0",
     "@m234/nerd-fonts": "^0.5.1",
     "@octokit/rest": "^22.0.1",
-        "chalk": "^5.3.0",
+    "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "conf": "^12.0.0",
     "express": "^4.18.2",
     "ink": "^7.1.1",
-        "js-yaml": "^5.2.2",
+    "js-yaml": "^5.2.2",
     "node-tmux": "^1.0.2",
     "open": "^11.0.0",
     "pino": "^10.3.1",
@@ -50,5 +50,10 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

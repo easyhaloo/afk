@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import figures from 'figures';
 import { exec } from 'child_process';
-import { Task, Issue, Project } from '../../types/dashboard';
+import { Task, Issue, Project } from '../../types/board';
 import { TmuxClient } from '../../lib/core/tmux/tmux';
 import { useNavigation } from './navigation/index';
 import { useData } from './data/index';

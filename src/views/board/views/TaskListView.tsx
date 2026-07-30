@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { Task } from '../../../types/dashboard';
+import { Task } from '../../../types/board';
 import { ListView } from './ListView';
 import { formatRelativeTime } from '../utils';
 

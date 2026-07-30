@@ -1,4 +1,4 @@
-import { Task } from '../types/dashboard';
+import { Task } from '../types/board';
 import { TmuxClient } from './core/tmux/tmux';
 import { WorktreeManager } from './worktree';
 import type { Platform } from './core/tracker/types.js';

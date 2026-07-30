@@ -1,5 +1,5 @@
 /**
- * Lazy-loads command modules for all non-dashboard commands.
+ * Lazy-loads command modules for all non-board commands.
  */
 import { Command } from 'commander';
 

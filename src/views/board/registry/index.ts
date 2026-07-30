@@ -1,5 +1,5 @@
 /**
- * View Registry - Singleton registry for all dashboard views
+ * View Registry - Singleton registry for all board views
  * Uses Registry Pattern for extensible view management
  */
 

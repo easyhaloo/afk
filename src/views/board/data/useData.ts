@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Task, Issue, TmuxSession } from '../../../types/dashboard';
+import { Task, Issue, TmuxSession } from '../../../types/board';
 import type { View } from '../types';
 import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
 import { fileLogger } from '../../../lib/io';

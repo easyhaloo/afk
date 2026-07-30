@@ -1,5 +1,5 @@
 import { Gitlab } from '@gitbeaker/node';
-import { Issue } from '../types/dashboard';
+import { Issue } from '../types/board';
 import { applyGlabConfig } from './glab-config';
 import { logAndReturn } from './cli-utils';
 

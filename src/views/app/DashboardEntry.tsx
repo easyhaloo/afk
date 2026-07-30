@@ -4,21 +4,21 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box } from 'ink';
 import { AppContent } from './AppContent';
-import { initRegistry } from '../dashboard/registry/init';
-import { Task, Issue, Project, TmuxSession } from '../../types/dashboard';
+import { initRegistry } from '../board/registry/init';
+import { Task, Issue, Project, TmuxSession } from '../../types/board';
 import { StateProvider } from './state/StateContext';
 import { TmuxClient } from '../../lib/core/tmux/tmux';
-import { useLoadingPhases } from '../dashboard/hooks/useLoadingPhase';
-import { SplashScreen } from '../dashboard/components/SplashScreen';
+import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
+import { SplashScreen } from '../board/components/SplashScreen';
 import {
   fetchTasks, fetchSessions, fetchIssues, fetchProjects,
   killSession, createTaskFromIssue, launchTask, fetchProjectDetail,
-} from '../dashboard/data/fetcher';
+} from '../board/data/fetcher';
 import {
   readIssuesList, writeIssuesList,
   readProjectsList, writeProjectsList,
   readDetail, writeDetail, clearDetailCache as clearDiskDetailCache,
-} from '../dashboard/cache';
+} from '../board/cache';
 
 // Initialize registry
 initRegistry();

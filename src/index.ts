@@ -29,10 +29,14 @@ async function main() {
 
   // All other commands: lazy-load via dynamic import
   const { lazyLoad } = await import('./lazy-loader.js');
-  lazyLoad(cmd, extraArgs);
+  await lazyLoad(cmd, extraArgs);
 }
 
 main().catch(err => {
+  const code = (err as { code?: string }).code;
+  if (code === 'commander.help' || code === 'commander.helpDisplayed') {
+    return;
+  }
   console.error(err);
   process.exit(1);
 });

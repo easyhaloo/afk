@@ -22,11 +22,13 @@ const LOADER: [string[], () => Promise<{ [k: string]: RegisterFn }>][] = [
 
 export async function lazyLoad(cmd: string, extraArgs: string[]) {
   for (const [names, loader] of LOADER) {
-    if (names.includes(cmd)) {
+    if (!names.includes(cmd)) continue;
+
+    try {
       const mod = await loader();
       const register = Object.values(mod)[0] as RegisterFn;
       const program = new Command();
-      program.name('afk').version('0.1.0');
+      program.name('afk').version('0.1.0').exitOverride();
       register(program);
 
       // For subcommand trees (e.g. "scheduler run"), use the matched
@@ -47,6 +49,12 @@ export async function lazyLoad(cmd: string, extraArgs: string[]) {
       }
       program.parse(['afk', cmd, ...extraArgs]);
       return;
+    } catch (err: unknown) {
+      // With exitOverride(), Commander throws CommanderError instead of calling
+      // process.exit(). Re-throw so index.ts's .catch() handles it; this avoids
+      // calling process.exit() directly which would trigger on-exit-leak-free
+      // handlers before the logger is fully initialized.
+      throw err;
     }
   }
   // Unknown command → full CLI

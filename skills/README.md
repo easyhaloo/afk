@@ -31,6 +31,12 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | [afk-to-issues](./afk-to-issues/) | `/afk-to-issues` | Create tracker issues from findings |
 | [md-to-pdf](./md-to-pdf/) | `/md-to-pdf` | Convert Markdown to PDF |
 
+## Testing Skills
+
+| Skill | Trigger | Description |
+|-------|---------|-------------|
+| [api-workflow](./api-workflow/) | `/api-workflow` | API testing with request chaining and browser hybrid |
+
 ## Debug Skills
 
 | Skill | Trigger | Description |

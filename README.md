@@ -11,7 +11,7 @@
 ## 特性
 
 - **跨平台** — GitLab 和 GitHub 统一 CLI（issues, MRs/PRs）
-- **Skills 套件** — 8 个核心 Claude Code skills，涵盖完整开发流程
+- **Skills 套件** — 9 个核心 Claude Code skills，涵盖完整开发流程
 - **TUI 仪表板** — 交互式 issue 跟踪仪表板
 - **后台自动化** — 基于 tmux 的工作流调度器
 - **TDD 集成** — 内置测试驱动开发方法论
@@ -117,6 +117,7 @@ afk scheduler start --max-concurrent 3 # 后台调度器
 | `/afk-qa` | 独立验证 | MR/PR 准备合并前验证 |
 | `/afk-debug` | 快速修复 | 具体可重现的失败场景 |
 | `/afk-hand-off` | 工作交接 | 需要转移任务给其他开发者 |
+| `/api-workflow` | API 测试 | 多步骤 API 链式调用与浏览器混合测试 |
 
 详见 [Skills 深度说明](docs/SKILLS.md)
 

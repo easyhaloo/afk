@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 
 const CACHE_DIR = path.join(os.homedir(), '.afk');
-const CACHE_FILE = path.join(CACHE_DIR, 'dashboard-cache.json');
+const CACHE_FILE = path.join(CACHE_DIR, 'board-cache.json');
 
 const LIST_TTL_MS = 5 * 60 * 1000;
 const DETAIL_TTL_MS = 60 * 1000;

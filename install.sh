@@ -163,9 +163,9 @@ fi
 if command -v afk &> /dev/null && [[ "$FORCE" == false ]]; then
     EXISTING_PATH=$(command -v afk)
     print_warning "afk is already installed at: $EXISTING_PATH"
-    read -p "Overwrite? (y/N) " -n 1 -r
+    read -p "Overwrite? (Y/n) " -n 1 -r
     echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ "$REPLY" =~ ^[Nn]$ ]]; then
         print_info "Installation cancelled"
         exit 0
     fi

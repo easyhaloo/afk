@@ -1,30 +1,30 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { Task } from '../../../types/dashboard';
+import { Project } from '../../../types/board';
 import { ListView } from './ListView';
-import { formatRelativeTime } from '../utils';
+import { truncate } from '../utils';
 
 interface Props {
-  tasks: Task[];
+  projects: Project[];
   selected: number;
   scrollOffset: number;
   viewportHeight: number;
 }
 
-export function CompletedListView({ tasks, selected, scrollOffset, viewportHeight }: Props) {
+export function ProjectListView({ projects, selected, scrollOffset, viewportHeight }: Props) {
   return (
     <ListView
-      items={tasks}
+      items={projects}
       selected={selected}
       scrollOffset={scrollOffset}
       viewportHeight={viewportHeight}
-      emptyMessage="ℹ  no completed tasks"
-      getKey={(task) => task.iid}
-      render={(task, index, isSelected) => {
+      emptyMessage="ℹ  no projects"
+      getKey={(p) => p.id}
+      render={(project, index, isSelected) => {
         const color = isSelected ? 'white' : 'gray';
         return (
           <Box
-            key={task.iid}
+            key={project.id}
             width="100%"
             overflow="hidden"
             flexDirection="row"
@@ -32,10 +32,10 @@ export function CompletedListView({ tasks, selected, scrollOffset, viewportHeigh
             borderColor={isSelected ? 'white' : undefined}
             paddingX={1}
           >
-            <Text color="white">✔ </Text>
-            <Text color={color} bold> #{task.iid} </Text>
-            <Text color={color}>{task.title || task.branch}</Text>
-            <Text dimColor>  ─ 100% · {task.startedAt ? formatRelativeTime(task.startedAt) : '–'}</Text>
+            <Text color={color}>{isSelected ? '◉' : '▸'} </Text>
+            <Text color={color} bold> #{project.id} </Text>
+            <Text color={color}>{project.name}</Text>
+            <Text dimColor>  ─ {project.description ? truncate(project.description, 50) : '…'}</Text>
           </Box>
         );
       }}

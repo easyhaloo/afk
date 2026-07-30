@@ -4,9 +4,9 @@
 import React, { useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useState, createActions } from './hooks';
-import { initRegistry } from '../dashboard/registry/init';
-import { TaskListView, IssueListView, ProjectListView, BoardView, DetailScreen, HelpDialog, BreathingSeparator, DebugOverlay, Header, Footer, Notification } from '../dashboard/views/index';
-import type { Task, Issue, Project } from '../../types/dashboard';
+import { initRegistry } from '../board/registry/init';
+import { TaskListView, IssueListView, ProjectListView, BoardView, DetailScreen, HelpDialog, BreathingSeparator, DebugOverlay, Header, Footer, Notification } from '../board/views/index';
+import type { Task, Issue, Project } from '../../types/board';
 
 // Initialize view registry at module load
 initRegistry();

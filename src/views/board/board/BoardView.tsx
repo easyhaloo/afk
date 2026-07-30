@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { Issue } from '../../../types/dashboard';
+import { Issue } from '../../../types/board';
 
 /**
  * BoardView - Kanban board view for issues

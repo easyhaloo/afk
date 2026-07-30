@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { Issue } from '../../../types/dashboard';
+import { Issue } from '../../../types/board';
 import { ListView } from './ListView';
 import { truncate } from '../utils';
 

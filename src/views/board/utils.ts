@@ -1,4 +1,4 @@
-/** Shared helpers used across dashboard view components. */
+/** Shared helpers used across board view components. */
 
 export function truncate(text: string | undefined, max: number): string {
   if (!text) return '';

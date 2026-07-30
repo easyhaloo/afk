@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { exec } from 'child_process';
-import { Task, Issue, Project } from '../../../types/dashboard';
+import { Task, Issue, Project } from '../../../types/board';
 
 interface Props {
   item: Task | Issue | Project | undefined;

@@ -6,7 +6,7 @@
 
 ## 架构图
 
-![AFK 架构](https://minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com/ccv2%2F2026-07-30%2FMiniMax-M2.7%2F1810541336101666896%2F075e5208bba9d029ba03627e083b7e9ed19d47c90c258c2c34b4869359b8abd9..jpeg?Expires=1785494336&OSSAccessKeyId=LTAI5tGLnRTkBjLuYPjNcKQ8&Signature=QY649zT91Bf%2B1KRysr%2Bg8p%2BKQ2o%3D)
+![AFK 架构](assets/afk-architecture.jpg)
 
 ## 特性
 

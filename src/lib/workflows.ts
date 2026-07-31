@@ -7,7 +7,7 @@ import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
 import { getTokenUsage, configureStatusline, logger, readSignal, clearSignal, STATUS_FILENAME } from './io';
-import { TIMEOUTS, CONTEXT, MAX_HANDOFFS } from './constants';
+import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
 
 /**
  * Detached spawn that works on both Linux and macOS.
@@ -38,6 +38,8 @@ export interface RunnerOptions {
   maxHandoffs?: number;
   /** Absolute token threshold that triggers context handoff (runner polls statusline). */
   contextHighTokens?: number;
+  /** Max total tokens across all handoff generations before a terminal handoff. */
+  maxTotalTokens?: number;
   platform?: Platform;
 }
 
@@ -98,12 +100,13 @@ export class WorkflowRunner {
       completionTimeoutMs = TIMEOUTS.WORKFLOW_COMPLETION_TIMEOUT,
       maxHandoffs = MAX_HANDOFFS,
       contextHighTokens = CONTEXT.HIGH_THRESHOLD,
+      maxTotalTokens = MAX_TOTAL_TOKENS,
     } = options;
 
     this._watchdog = null;
 
     try {
-      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens });
+      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens });
     } catch (error) {
       logger.error({ iid, error: (error as Error).message }, 'workflow runBody threw unexpectedly');
       await this.cleanupOnFailure(iid, session);
@@ -159,9 +162,9 @@ Session was interrupted before completion.
   private async runBody(ctx: {
     iid: number; session: string; targetBranch: string;
     baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number;
-    maxHandoffs: number; contextHighTokens: number;
+    maxHandoffs: number; contextHighTokens: number; maxTotalTokens: number;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens } = ctx;
 
     // ── Step 1: Create worktree ─────────────────────────────────────────────
     const wt = await this.worktree.create(iid, baseBranch);
@@ -189,8 +192,9 @@ Session was interrupted before completion.
     await this.tracker.addLabel(iid, 'stage::afk-in-progress');
     await this.tracker.removeLabel(iid, 'stage::ready-for-issues');
 
-    // ── Phases: implement then verify; handoff budget is shared across both ──
-    const budget = { used: 0 };
+    // ── Phases: implement then verify; handoff budgets are shared across both ──
+    // used = handoff rounds, tokens = accumulated total across generations.
+    const budget = { used: 0, tokens: 0 };
     const phases = [
       { goalBase: `实现 issue #${iid} 的功能需求`, signalType: 'goal_complete' as const },
       { goalBase: `验证 issue #${iid} 的 AC 全部通过`, signalType: 'ac_result' as const },
@@ -200,7 +204,7 @@ Session was interrupted before completion.
       const completed = await this.runPhase({
         iid, session, wtPath: wt.path,
         hardTimeoutMs, completionTimeoutMs, contextHighTokens,
-        budget, maxHandoffs,
+        budget, maxHandoffs, maxTotalTokens,
         goalBase: phase.goalBase, signalType: phase.signalType,
       });
       if (!completed) return { success: false };
@@ -319,7 +323,8 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     completionTimeoutMs: number;
     contextHighTokens: number;
     maxHandoffs: number;
-    budget: { used: number };
+    maxTotalTokens: number;
+    budget: { used: number; tokens: number };
     goalBase: string;
     signalType: 'goal_complete' | 'ac_result';
   }): Promise<boolean> {
@@ -353,7 +358,13 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
           return false;
         case 'handoff':
           if (p.budget.used >= p.maxHandoffs) {
-            await this.terminalHandoff(p.iid, p.wtPath, p.session, outcome.tokens);
+            await this.terminalHandoff(p.iid, p.wtPath, p.session, outcome.tokens, 'budget');
+            return false;
+          }
+          // Include the current session's usage: a relaunch would immediately
+          // blow the remaining budget, so terminate instead.
+          if (p.budget.tokens + outcome.tokens >= p.maxTotalTokens) {
+            await this.terminalHandoff(p.iid, p.wtPath, p.session, outcome.tokens, 'tokens');
             return false;
           }
           if (await this.performHandoff({
@@ -362,6 +373,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
             gen: p.budget.used + 1, tokens: outcome.tokens,
           })) {
             p.budget.used++;
+            p.budget.tokens += outcome.tokens; // old session's usage is now sunk
             continue;
           }
           return false; // relaunch failed; flipped to manual handoff
@@ -561,6 +573,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     branch: string;
     docPath: string;
     auto: boolean;
+    terminalReason?: 'budget' | 'tokens';
   }): string {
     const lines = [
       '<!-- afk-event: handoff -->',
@@ -571,6 +584,13 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
       `- **Branch:** \`${p.branch}\``,
       `- **Commit:** \`${p.sha}\``,
       `- **Handoff doc:** \`${p.docPath}\``,
+    ];
+    if (p.terminalReason) {
+      lines.push(
+        `- **Terminal:** ${p.terminalReason === 'budget' ? '已达最大交接轮数' : '已达总 token 上限'}`,
+      );
+    }
+    lines.push(
       '',
       '### Summary',
       '',
@@ -583,7 +603,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
       p.snapshot,
       '```',
       '</details>',
-    ];
+    );
     if (!p.auto) {
       lines.push(
         '',
@@ -609,21 +629,22 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
   }
 
   /**
-   * Terminal handoff (handoff budget exhausted): recovery comment +
-   * handoff::active label, session killed. The summary is captured into the
-   * doc; the worktree is retained for manual resume.
+   * Terminal handoff (handoff budget or total-token budget exhausted):
+   * recovery comment + handoff::active label, session killed. The summary is
+   * captured into the doc; the worktree is retained for manual resume.
    */
   private async terminalHandoff(
     iid: number,
     worktreePath: string,
     session: string,
-    tokens: number
+    tokens: number,
+    reason: 'budget' | 'tokens'
   ): Promise<void> {
     this.killWatchdog(); // stale watchdog must not later write a timeout signal into the retained worktree
     const info = await this.requestHandoffSummary(iid, session, worktreePath);
     const docPath = await this.writeHandoffDoc(iid, 'terminal', info);
     await this.tracker.addLabel(iid, 'handoff::active');
-    await this.tracker.addComment(iid, this.handoffComment({ ...info, iid, tokens, gen: 'terminal', docPath, auto: false }));
+    await this.tracker.addComment(iid, this.handoffComment({ ...info, iid, tokens, gen: 'terminal', docPath, auto: false, terminalReason: reason }));
     await this.tmux.killSession(session).catch(() => {});
     await this.tmux.closeSession();
   }

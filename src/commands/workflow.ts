@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { createTrackerClient } from '../lib/client-factory';
 import { WorkflowRunner } from '../lib/workflows';
 import { getWorkflowConfig } from '../lib/config-manager';
-import { TIMEOUTS, CONTEXT, MAX_HANDOFFS } from '../lib/constants';
+import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from '../lib/constants';
 
 export function registerWorkflowCommands(program: Command): void {
   const workflow = program
@@ -24,6 +24,7 @@ export function registerWorkflowCommands(program: Command): void {
     .option('--hard-timeout <ms>', 'Hard timeout in ms (default: 7200000)', parseInt, TIMEOUTS.WORKFLOW_HARD_TIMEOUT)
     .option('--max-handoffs <n>', 'Max automatic context-handoff rounds (default: 3)', parseInt, MAX_HANDOFFS)
     .option('--context-high <tokens>', 'Token threshold that triggers context handoff (default: 100000)', parseInt, CONTEXT.HIGH_THRESHOLD)
+    .option('--max-total-tokens <tokens>', 'Max total tokens across handoff generations (default: 500000)', parseInt, MAX_TOTAL_TOKENS)
     .action(async (options) => {
       try {
         const tracker = await createTrackerClient();
@@ -40,6 +41,7 @@ export function registerWorkflowCommands(program: Command): void {
           hardTimeoutMs: options.hardTimeout ?? cfg.completionTimeout,
           maxHandoffs: options.maxHandoffs,
           contextHighTokens: options.contextHigh,
+          maxTotalTokens: options.maxTotalTokens,
         });
 
         if (result.success) {

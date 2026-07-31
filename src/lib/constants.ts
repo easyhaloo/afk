@@ -47,6 +47,14 @@ export const CONTEXT = {
 export const MAX_HANDOFFS = 3;
 
 /**
+ * Max total tokens a workflow run may consume across all handoff
+ * generations (accumulated at each handoff: the old session's usage is
+ * added to the running total). Reaching it terminates the run with a
+ * terminal handoff. ~5 sessions' worth of HIGH_THRESHOLD.
+ */
+export const MAX_TOTAL_TOKENS = 500_000;
+
+/**
  * Port numbers for services
  */
 export const PORTS = {

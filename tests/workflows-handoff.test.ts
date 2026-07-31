@@ -10,6 +10,7 @@
  *  - auto-relaunch happy path (context_high → handoff → continue → success)
  *  - configurable contextHighTokens threshold
  *  - handoff budget exhaustion → terminal handoff (manual resume)
+ *  - total-token budget exhaustion → terminal handoff (manual resume)
  *  - stale signal cleared on relaunch; placeholder summary falls back to snapshot
  *  - relaunch failure → flips to manual handoff (handoff::active, no crash path)
  *  - killWatchdog kills the detached watchdog process group
@@ -181,6 +182,27 @@ describe('WorkflowRunner auto handoff continuation', () => {
     await expect(fs.access(join(runner.logDir, 'handoff-42-terminal.md'))).resolves.toBeUndefined();
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
     expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'mode::hitl'); // finally skipped via _cleanupType='success'
+  });
+
+  it('total-token budget: accumulated usage across generations terminates', async () => {
+    const wtPath = makeTempDir();
+    const { runner, tracker, tmux } = makeRunner(wtPath);
+    await writeStatus(wtPath, 120_000);
+    tmux.waitForSignal.mockResolvedValue(handoffReady('s'));
+
+    const runPromise = runner.run({ ...RUN_OPTS, maxTotalTokens: 150_000 });
+    await waitFor(() => tmux.createSession.mock.calls.length === 2); // first handoff relaunches (0 + 120k < 150k)
+    await writeStatus(wtPath, 120_000); // new generation fills again (120k + 120k ≥ 150k)
+
+    const result = await runPromise;
+
+    expect(result).toEqual({ success: false });
+    expect(tmux.createSession).toHaveBeenCalledTimes(2); // terminates instead of a third relaunch
+    await expect(fs.access(join(runner.logDir, 'handoff-42-1.md'))).resolves.toBeUndefined();
+    await expect(fs.access(join(runner.logDir, 'handoff-42-terminal.md'))).resolves.toBeUndefined();
+    expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
+    // Terminal comment states the token-budget reason.
+    expect(tracker.addComment).toHaveBeenCalledWith(42, expect.stringContaining('已达总 token 上限'));
   });
 
   it('unrecognized signal file is ignored; only the token threshold triggers handoff', async () => {

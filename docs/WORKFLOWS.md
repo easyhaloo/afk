@@ -395,7 +395,8 @@ interface Signal {
 ### 预算与兜底
 
 - `--max-handoffs <n>`（默认 3）：自动续跑轮次上限，两个 phase（实现/验证）**全局共享**。
-- **预算耗尽** → 终止式交接：`handoff::active` label + 评论（含恢复指引与交接文档路径），人工移除 label 后重新触发 `/afk-implement <iid>` 恢复。
+- `--max-total-tokens <tokens>`（默认 500,000）：整个 run 跨交接代际的累计 token 上限（每次交接时把旧会话的用量累加；终止判断 = 累计 + 当前会话用量 ≥ 上限）。
+- **任一预算耗尽** → 终止式交接：`handoff::active` label + 评论（含终止原因、恢复指引与交接文档路径），人工移除 label 后重新触发 `/afk-implement <iid>` 恢复。
 - **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（保留已发恢复评论），不落入 crash 路径。
 
 ## 错误处理

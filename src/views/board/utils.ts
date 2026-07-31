@@ -16,12 +16,14 @@ export function visualWidth(text: string): number {
 
 /** Truncate text by visual width, adding "…" if cut */
 export function truncateByVisualWidth(text: string, maxWidth: number): string {
+  const ellipsisWidth = visualWidth('…'); // ellipsis is 2 visual width
   if (visualWidth(text) <= maxWidth) return text;
   let width = 0;
   let end = 0;
   for (const char of text) {
     const charWidth = char.charCodeAt(0) > 127 ? 2 : 1;
-    if (width + charWidth > maxWidth - 1) break;
+    // Break if adding this char would make total exceed available space (maxWidth - ellipsisWidth)
+    if (width + charWidth > maxWidth - ellipsisWidth) break;
     width += charWidth;
     end++;
   }

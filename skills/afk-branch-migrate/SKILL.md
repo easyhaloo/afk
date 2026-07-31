@@ -53,7 +53,9 @@ Create rollback checkpoint before proceeding.
 - High/Critical: manual resolution with guidance
 
 ### 6. Verify
-- Code compiles / passes lint
+- **MANDATORY: Run build/compile immediately after applying changes**
+- Do NOT skip or defer compilation — migration is NOT complete until code compiles
+- Run `pnpm build` (or project's equivalent build command)
 - Run relevant tests if available
 - Report: success / partial / failed + rollback option
 

@@ -432,7 +432,7 @@ ${snapshot}
     const signalPath = `${worktreePath}/.afk-signal.json`;
     const shellCmd =
       `sleep ${hardTimeoutMs / 1000} && ` +
-      `cat > "${signalPath}.tmp" <<'EOF'\n` +
+      `cat > "${signalPath}.tmp" <<EOF\n` +
       `{"type":"timeout","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}\n` +
       `EOF\n` +
       `mv "${signalPath}.tmp" "${signalPath}" 2>/dev/null; ` +

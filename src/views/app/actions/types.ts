@@ -26,6 +26,7 @@ export type ActionType =
   | 'notification:hide'
   | 'notification:dismiss'
   | 'selection:set'
+  | 'selection:move'
   | 'selection:down'
   | 'selection:up'
   | 'selection:top'

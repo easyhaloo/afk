@@ -129,6 +129,13 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'selection:set':
       return { ...state, selectedIndex: action.payload?.index ?? 0 };
 
+    case 'selection:move':
+      return {
+        ...state,
+        selectedIndex: action.payload?.index ?? state.selectedIndex,
+        scrollOffset: action.payload?.scrollOffset ?? state.scrollOffset,
+      };
+
     case 'selection:down': {
       const len = action.payload?.length ?? 0;
       return { ...state, selectedIndex: Math.min(state.selectedIndex + 1, len - 1) };

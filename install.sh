@@ -186,10 +186,6 @@ if [[ ! -f "$SCRIPT_DIR/dist/index.js" ]]; then
 fi
 print_success "Build completed"
 
-# Switch to production-only (removes devDependencies to reduce installation size)
-print_info "Switching to production dependencies..."
-npm install --production --silent
-
 # Create executable wrapper script
 print_info "Creating executable wrapper..."
 WRAPPER_PATH="$INSTALL_DIR/afk"

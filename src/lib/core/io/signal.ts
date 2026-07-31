@@ -1,5 +1,6 @@
 import { promises as fs, readFileSync } from 'fs';
 import { join } from 'path';
+import { z } from 'zod';
 import type { Signal } from '../../schemas.js';
 import { SignalSchema } from '../../schemas.js';
 
@@ -39,9 +40,10 @@ export async function readSignal(dir: string = process.cwd()): Promise<Signal | 
     }
     // Tolerate transient parse errors: the agent writes the signal file
     // non-atomically (heredoc / Write tool truncates then writes), so a poll
-    // can catch an empty or partial file mid-write. Return null so the
-    // polling loop retries instead of crashing the workflow.
-    if (error instanceof SyntaxError) {
+    // can catch an empty or partial file mid-write. A schema-invalid payload
+    // (ZodError) is equally a "no signal" — the protocol file is internal,
+    // polling must never crash the workflow over it.
+    if (error instanceof SyntaxError || error instanceof z.ZodError) {
       return null;
     }
     throw error;

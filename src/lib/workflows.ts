@@ -63,8 +63,8 @@ export interface RunnerOptions {
  *
  * Agent writes signals (`.afk-signal.json`): goal_complete / ac_result on
  * completion, timeout by the watchdog, handoff_ready during summary
- * negotiation. An agent-written context_high is ignored — the runner is the
- * sole authority on context overflow (objective token polling).
+ * negotiation. Context overflow is not a signal — the runner is the sole
+ * authority, polling statusline token usage (objective data).
  *
  * Watchdog: detached setsid process fires after hardTimeoutMs — writes
  * a timeout signal to .afk-signal.json, then kills the tmux session.
@@ -388,8 +388,6 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     const start = Date.now();
     while (Date.now() - start < p.completionTimeoutMs) {
       // Signal file first: a completion signal wins over the token threshold.
-      // Other signal types (e.g. an agent-written context_high) are ignored —
-      // the runner is the sole authority on context overflow.
       const signal = await readSignal(p.wtPath);
       if (signal?.type === p.signalType) return { kind: 'done' };
       if (signal?.type === 'timeout') return { kind: 'timeout' };

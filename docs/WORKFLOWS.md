@@ -361,7 +361,6 @@ type SignalType =
   | 'goal_complete'    // Phase 1 完成：实现交付（summary 必填）
   | 'ac_result'        // Phase 2 完成：AC 验证结果
   | 'timeout'          // watchdog 硬超时（分离进程写入）
-  | 'context_high'     // 已弃用：Agent 写入不再处理，检测完全由 Runner 轮询 statusline（见下）
   | 'handoff_ready'    // 交接总结完成（summary 必填）
 
 interface Signal {
@@ -381,7 +380,7 @@ interface Signal {
 
 ### 检测机制
 
-- **Runner 轮询 statusline**：agent 无法可靠感知自己的上下文上限（Claude Code 的 TUI 警告在渲染层不可见、压缩系统消息到达时已太迟），且 agent 手写的 `context_high` 信号已弃用（不再处理）。Runner 是上下文溢出的唯一权威 —— 在等待周期（2s）内检查信号文件与 `<worktree>/.afk/claude-status.json` 的 token 用量（statusline 每个 turn 写入）。
+- **Runner 轮询 statusline**：agent 无法可靠感知自己的上下文上限（Claude Code 的 TUI 警告在渲染层不可见、压缩系统消息到达时已太迟），信号协议中不存在 context_high。Runner 是上下文溢出的唯一权威 —— 在等待周期（2s）内检查信号文件与 `<worktree>/.afk/claude-status.json` 的 token 用量（statusline 每个 turn 写入）。
 - **阈值**：绝对 token 数，默认 `CONTEXT.HIGH_THRESHOLD` = 100,000，可配置 `--context-high <tokens>`。
 - **信号优先**：agent 已写完成信号时不打断（信号文件检查先于 token 检查）。
 
@@ -398,7 +397,6 @@ interface Signal {
 - `--max-handoffs <n>`（默认 3）：自动续跑轮次上限，两个 phase（实现/验证）**全局共享**。
 - **预算耗尽** → 终止式交接：`handoff::active` label + 评论（含恢复指引与交接文档路径），人工移除 label 后重新触发 `/afk-implement <iid>` 恢复。
 - **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（保留已发恢复评论），不落入 crash 路径。
-- Agent 手写 `context_high` 信号不再处理（检测的唯一权威是 Runner 轮询）。
 
 ## 错误处理
 

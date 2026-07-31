@@ -34,7 +34,7 @@ export const CONTEXT = {
   /**
    * Threshold (absolute tokens) at which the runner interrupts the session
    * for a context handoff, polled from the statusline data. Detection is
-   * runner-side only; agent-written context_high signals are ignored.
+   * runner-side only — context overflow is not a signal.
    * ~50% of Claude's 200K context window as a conservative cutoff.
    */
   HIGH_THRESHOLD: 100_000,

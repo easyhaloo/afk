@@ -36,8 +36,7 @@ function makeTempDir(): string {
 }
 
 async function writeSignal(wtPath: string, type: string, extra: Record<string, unknown> = {}): Promise<void> {
-  // goal_complete/ac_result require a non-empty summary in the zod schema;
-  // context_high strips the extra key.
+  // goal_complete/handoff_ready require a non-empty summary in the zod schema.
   await fs.writeFile(
     join(wtPath, '.afk-signal.json'),
     JSON.stringify({ type, timestamp: new Date().toISOString(), summary: 'test summary', ...extra }),
@@ -184,11 +183,11 @@ describe('WorkflowRunner auto handoff continuation', () => {
     expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'mode::hitl'); // finally skipped via _cleanupType='success'
   });
 
-  it('agent-written context_high is ignored; only the token threshold triggers handoff', async () => {
+  it('unrecognized signal file is ignored; only the token threshold triggers handoff', async () => {
     const wtPath = makeTempDir();
     const { runner, tracker, tmux } = makeRunner(wtPath);
     await writeStatus(wtPath, 50_000); // below threshold
-    await writeSignal(wtPath, 'context_high'); // agent-written signal: must be ignored
+    await writeSignal(wtPath, 'context_high'); // schema-unknown type: parsed as no signal, ignored
 
     const runPromise = runner.run(RUN_OPTS);
     await new Promise(r => setTimeout(r, 300)); // let a few polls happen
@@ -208,7 +207,7 @@ describe('WorkflowRunner auto handoff continuation', () => {
     const wtPath = makeTempDir();
     const { runner, tmux } = makeRunner(wtPath);
     await writeStatus(wtPath, 120_000);
-    await writeSignal(wtPath, 'context_high'); // stale from a previous run
+    await writeSignal(wtPath, 'handoff_ready'); // stale from a previous run's negotiation
     tmux.waitForSignal.mockResolvedValue(handoffReady('<总结>')); // agent copied the template verbatim
 
     const runPromise = runner.run(RUN_OPTS);

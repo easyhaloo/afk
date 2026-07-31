@@ -10,8 +10,7 @@
  *  - auto-relaunch happy path (context_high → handoff → continue → success)
  *  - configurable contextHighTokens threshold
  *  - handoff budget exhaustion → terminal handoff (manual resume)
- *  - below-threshold + agent-written context_high → silent stop (compat)
- *  - stale signal cleared on relaunch; null summary falls back to snapshot
+ *  - stale signal cleared on relaunch; placeholder summary falls back to snapshot
  *  - relaunch failure → flips to manual handoff (handoff::active, no crash path)
  *  - killWatchdog kills the detached watchdog process group
  */
@@ -185,21 +184,24 @@ describe('WorkflowRunner auto handoff continuation', () => {
     expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'mode::hitl'); // finally skipped via _cleanupType='success'
   });
 
-  it('below-threshold + agent-written context_high: silent stop (compat path)', async () => {
+  it('agent-written context_high is ignored; only the token threshold triggers handoff', async () => {
     const wtPath = makeTempDir();
     const { runner, tracker, tmux } = makeRunner(wtPath);
-    await writeStatus(wtPath, 50_000);
-    await writeSignal(wtPath, 'context_high'); // agent-written signal
+    await writeStatus(wtPath, 50_000); // below threshold
+    await writeSignal(wtPath, 'context_high'); // agent-written signal: must be ignored
 
-    const result = await runner.run(RUN_OPTS);
+    const runPromise = runner.run(RUN_OPTS);
+    await new Promise(r => setTimeout(r, 300)); // let a few polls happen
+    await writeStatus(wtPath, 120_000); // objective threshold reached
 
-    expect(result).toEqual({ success: false });
-    expect(tmux.createSession).toHaveBeenCalledTimes(1);
-    expect(tmux.sendGoal).toHaveBeenCalledTimes(1);
-    expect(runner.worktree.updateStatus).toHaveBeenCalledWith(42, 'failed');
+    await waitFor(() => tmux.createSession.mock.calls.length === 2);
+    await writeSignal(wtPath, 'goal_complete');
+    await waitFor(() => tmux.sendGoal.mock.calls.length === 3);
+    await writeSignal(wtPath, 'ac_result');
+
+    const result = await runPromise;
+    expect(result.success).toBe(true);
     expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'handoff::active');
-    expect(tracker.addComment).not.toHaveBeenCalledWith(42, expect.stringContaining('afk-event: handoff'));
-    expect(tracker.addComment).not.toHaveBeenCalledWith(42, expect.stringContaining('afk-event: crashed'));
   });
 
   it('stale signal cleared on relaunch; template placeholder summary falls back to snapshot', async () => {

@@ -32,9 +32,10 @@ export const TIMEOUTS = {
  */
 export const CONTEXT = {
   /**
-   * Threshold to trigger handoff flow when agent reports context_high.
-   * Below this, the signal is ignored (agent probably being cautious).
-   * Set to ~50% of Claude's 200K context window as a conservative cutoff.
+   * Threshold (absolute tokens) at which the runner interrupts the session
+   * for a context handoff, polled from the statusline data. Detection is
+   * runner-side only; agent-written context_high signals are ignored.
+   * ~50% of Claude's 200K context window as a conservative cutoff.
    */
   HIGH_THRESHOLD: 100_000,
 } as const;

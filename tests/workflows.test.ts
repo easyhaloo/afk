@@ -7,8 +7,6 @@
  *    tears down the session, returns {success:false}.
  *  - handoff path: handler self-cleans; run() adds no crash comment.
  *  - success path: autoWrapup removes the worktree (force), returns {success:true, url}.
- *  - silent-stop path (below-threshold context_high): no comment, no labels;
- *    worktree kept and marked 'failed'.
  *
  * Strategy: stub runBody to drive each path (or run the real handler), then
  * exercise the real run(). tracker is injected; tmux/worktree are overwritten
@@ -96,22 +94,5 @@ describe('WorkflowRunner cleanup control flow', () => {
     expect(runner.worktree.cleanup).toHaveBeenCalledWith(42, true);
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'stage::qa');
     expect(tracker.addComment).not.toHaveBeenCalled();
-  });
-
-  it('silent-stop path: no comment, no labels, marks worktree failed', async () => {
-    const { runner, tracker } = makeRunner();
-    runner.runBody = async function () {
-      // What runPhase's silent-stop branch does before returning false.
-      await this.teardownSession(42, 'sess');
-      return { success: false };
-    };
-
-    const result = await runner.run(RUN_OPTS);
-
-    expect(result).toEqual({ success: false });
-    expect(tracker.addComment).not.toHaveBeenCalled();
-    expect(tracker.addLabel).not.toHaveBeenCalled();
-    expect(runner.worktree.updateStatus).toHaveBeenCalledWith(42, 'failed');
-    expect(runner.worktree.cleanup).not.toHaveBeenCalled();
   });
 });

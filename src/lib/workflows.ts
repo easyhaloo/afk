@@ -20,12 +20,11 @@ function spawnDetached(file: string, args: string[], opts: SpawnOptions): ChildP
   return child;
 }
 
-/** One phase wait: done / timeout / verified context overflow / silent stop. */
+/** One phase wait: done / timeout / verified context overflow. */
 type PhaseOutcome =
   | { kind: 'done' }
   | { kind: 'timeout' }
-  | { kind: 'handoff'; tokens: number }
-  | { kind: 'silent-stop' };
+  | { kind: 'handoff'; tokens: number };
 
 export interface RunnerOptions {
   iid: number;
@@ -64,8 +63,8 @@ export interface RunnerOptions {
  *
  * Agent writes signals (`.afk-signal.json`): goal_complete / ac_result on
  * completion, timeout by the watchdog, handoff_ready during summary
- * negotiation. A handwritten context_high is still honored (compat) but only
- * when verified against the token threshold.
+ * negotiation. An agent-written context_high is ignored — the runner is the
+ * sole authority on context overflow (objective token polling).
  *
  * Watchdog: detached setsid process fires after hardTimeoutMs — writes
  * a timeout signal to .afk-signal.json, then kills the tmux session.
@@ -352,11 +351,6 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
         case 'timeout':
           await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs);
           return false;
-        case 'silent-stop':
-          // Below-threshold context_high (false alarm / compat): graceful stop,
-          // no GitHub comment or labels.
-          await this.teardownSession(p.iid, p.session);
-          return false;
         case 'handoff':
           if (p.budget.used >= p.maxHandoffs) {
             await this.terminalHandoff(p.iid, p.wtPath, p.session, outcome.tokens);
@@ -394,15 +388,11 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     const start = Date.now();
     while (Date.now() - start < p.completionTimeoutMs) {
       // Signal file first: a completion signal wins over the token threshold.
+      // Other signal types (e.g. an agent-written context_high) are ignored —
+      // the runner is the sole authority on context overflow.
       const signal = await readSignal(p.wtPath);
       if (signal?.type === p.signalType) return { kind: 'done' };
       if (signal?.type === 'timeout') return { kind: 'timeout' };
-      if (signal?.type === 'context_high') {
-        // Agent-written signal (compat): verify against the threshold.
-        const tokens = (await getTokenUsage(p.wtPath)).total;
-        if (tokens === 0 || tokens < p.contextHighTokens) return { kind: 'silent-stop' };
-        return { kind: 'handoff', tokens };
-      }
 
       // Objective poll: statusline token usage reached the threshold.
       const tokens = (await getTokenUsage(p.wtPath)).total;
@@ -470,7 +460,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
   }): Promise<void> {
     await this.tmux.killSession(p.session).catch(() => { /* already dead */ });
     await this.tmux.closeSession();
-    await clearSignal(p.wtPath); // stale context_high/handoff_ready would re-trigger the next wait immediately
+    await clearSignal(p.wtPath); // a stale completion signal would end the next wait immediately
     await fs.rm(join(p.wtPath, '.afk', STATUS_FILENAME), { force: true }); // fresh session must not inherit old token data
     await this.tmux.createSession(p.session, p.wtPath);
     // waitForPrompt returns boolean, does NOT throw.

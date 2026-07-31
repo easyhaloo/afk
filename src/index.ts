@@ -37,6 +37,12 @@ main().catch(err => {
   if (code === 'commander.help' || code === 'commander.helpDisplayed') {
     return;
   }
+  // Invalid option arguments: commander already printed the error message —
+  // don't duplicate it with a stack trace. Preserve its exit code (1).
+  if (code === 'commander.invalidArgument') {
+    process.exitCode = (err as { exitCode?: number }).exitCode ?? 1;
+    return;
+  }
   console.error(err);
   process.exit(1);
 });

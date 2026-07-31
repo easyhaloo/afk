@@ -106,7 +106,7 @@ export function registerQACommands(program: Command): void {
               );
             }
           } catch (error) {
-            logger.error({ err: (error as Error).message }, 'QA poll cycle error');
+            logger.error({ err: error }, 'QA poll cycle error');
           }
         };
 

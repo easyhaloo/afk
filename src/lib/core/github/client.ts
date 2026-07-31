@@ -284,7 +284,7 @@ export class GitHubClient implements TrackerProvider {
         });
       } catch (error) {
         // Branch deletion is best-effort, don't fail the merge
-        logger.warn({ mrId: id, err: String(error) }, 'failed to delete source branch');
+        logger.warn({ mrId: id, err: error }, 'failed to delete source branch');
       }
     }
   }

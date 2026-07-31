@@ -123,7 +123,7 @@ export function useData(currentView: View, currentProject: Project | null) {
             writeIssuesList(projectKey, nextIssues, data.hasMore);
           }
         } catch (error) {
-          fileLogger.error({ err: String(error) }, 'failed to list issues');
+          fileLogger.error({ err: error }, 'failed to list issues');
         } finally {
           setLoading(false);
         }
@@ -161,7 +161,7 @@ export function useData(currentView: View, currentProject: Project | null) {
             setProjectPage(2);
             writeProjectsList(data.projects, data.hasMore);
           } catch (error) {
-            fileLogger.error({ err: String(error) }, 'failed to list projects');
+            fileLogger.error({ err: error }, 'failed to list projects');
           } finally {
             setLoading(false);
           }

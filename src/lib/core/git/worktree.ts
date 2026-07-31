@@ -178,7 +178,7 @@ export class WorktreeManager {
   async prune(dryRun: boolean = false): Promise<number> {
     const orphaned = await this.listOrphaned();
     if (dryRun) return orphaned.length;
-    for (const wt of orphaned) { try { await this.cleanup(wt.iid, true); } catch (error) { logger.error({ iid: wt.iid, err: String(error) }, 'failed to prune worktree'); } }
+    for (const wt of orphaned) { try { await this.cleanup(wt.iid, true); } catch (error) { logger.error({ iid: wt.iid, err: error }, 'failed to prune worktree'); } }
     return orphaned.length;
   }
 

@@ -67,8 +67,13 @@ export class DayRotator extends Writable {
       if (file !== this.current || this.fd === null) this.openFor(file);
       writeSync(this.fd!, chunk);
       callback();
-    } catch (err) {
-      callback(err as Error);
+    } catch {
+      // Swallow write failures (disk full, EMFILE...). Passing the error to
+      // callback() would emit 'error' on the stream — with no listener that
+      // crashes the daemon, and with one it destroys the stream so every
+      // later log line is lost too. Logging I/O failing must never kill the
+      // loop; the next write simply retries.
+      callback();
     }
   }
 
@@ -99,11 +104,17 @@ const isTest = process.env.NODE_ENV === 'test';
 const level = isTest ? 'silent' : (process.env.LOG_LEVEL || 'info');
 const consoleActive = !isTest && Boolean(process.stderr.isTTY);
 
+// Explicit key paths only — @pinojs/redact (pino 10) treats '*token' as a
+// literal key name, not a suffix wildcard (verified against 0.4.0: the
+// pattern redacts nothing). List bare keys for any nesting level.
 const pinoOpts: pino.LoggerOptions = {
   level,
   base: { name: 'afk' },
   redact: {
-    paths: ['*token', '*password', '*secret', '*key'],
+    paths: [
+      'token', 'password', 'secret', 'key',
+      '*.token', '*.password', '*.secret', '*.key',
+    ],
     censor: '[redacted]',
   },
   serializers: { err: pino.stdSerializers.err },

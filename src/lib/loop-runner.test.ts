@@ -205,6 +205,37 @@ describe('LoopRunner', () => {
     await runPromise;
   });
 
+  it('stop() resolves via the timeout branch when a chain never finishes', async () => {
+    const issue = makeIssue(24);
+    tracker = makeTracker([issue]);
+    // Chain that never settles — drain can never complete.
+    workflowRunImpl.mockImplementation(() => new Promise(() => {}));
+
+    const runner = new LoopRunner(tracker, {
+      ...tmpPaths(),
+      maxConcurrent: 3,
+      pollIntervalMs: 50,
+      statusIntervalMs: 10_000,
+      requiredLabels: REQ,
+      excludeLabels: EXC,
+      shutdownTimeoutMs: 100,
+      workflowRunnerFactory: () => ({ run: workflowRunImpl } as unknown as WorkflowRunner),
+      qaRunnerFactory: () => ({ process: qaProcessImpl } as unknown as QARunner),
+    });
+
+    const runPromise = runner.start();
+    await waitFor(() => workflowRunImpl.mock.calls.length > 0, 2_000);
+
+    const started = Date.now();
+    await runner.stop();
+    const elapsed = Date.now() - started;
+
+    // Resolved via the timeout branch (nothing drained), not immediately.
+    expect(elapsed).toBeGreaterThanOrEqual(100);
+    expect(runner.getStatus().implement.ids).toContain(24);
+    await runPromise;
+  });
+
   it('counts QA failure', async () => {
     const issue = makeIssue(24);
     tracker = makeTracker([issue]);
@@ -366,7 +397,10 @@ describe('LoopRunner', () => {
     await waitFor(() => workflowRunImpl.mock.calls.length >= 1, 2_000);
     await new Promise(r => setTimeout(r, 100));
     const calledIids = workflowRunImpl.mock.calls.map((c: any) => c[0].iid);
-    expect(calledIids).toEqual([24]);
+    // Exclude-labelled issues must never run. Issue 24 is the only ready one,
+    // and may run repeatedly: an implement failure releases its inFlight
+    // reservation so it can be picked up again by the next poll.
+    expect(new Set(calledIids)).toEqual(new Set([24]));
 
     await runner.stop();
     await runPromise;

@@ -254,7 +254,7 @@ Session was interrupted before completion.
       await this.tmux.closeSession();
       await this.worktree.cleanup(iid, true);
     } catch (err) {
-      logger.warn({ iid, err: (err as Error).message }, 'failed to remove worktree on success');
+      logger.warn({ iid, err }, 'failed to remove worktree on success');
     }
 
     return { success: true, url: mrUrl };
@@ -297,7 +297,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
       await this.tracker.addLabel(iid, 'mode::hitl');
       await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
     } catch (err) {
-      logger.error({ iid, error: (err as Error).message }, 'failed to update GitHub on timeout');
+      logger.error({ iid, err }, 'failed to update GitHub on timeout');
     }
 
     await this.teardownSession(iid, session);
@@ -337,7 +337,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
         await this.tmux.sendGoal(p.wtPath, p.session, 'main', goalText, p.signalType);
       } catch (err) {
         if (round === 1) throw err; // initial launch failure: unchanged crash path
-        logger.error({ iid: p.iid, err: (err as Error).message, round }, 'continue-goal failed after handoff; flipping to manual handoff');
+        logger.error({ iid: p.iid, err, round }, 'continue-goal failed after handoff; flipping to manual handoff');
         await this.flipToManualHandoff(p.iid, p.session);
         return false;
       }
@@ -443,13 +443,13 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     // the manual-resume marker). Best-effort: a comment failure must not abort.
     await this.tracker
       .addComment(p.iid, this.handoffComment({ ...info, iid: p.iid, tokens: p.tokens, gen: p.gen, docPath }))
-      .catch(err => logger.warn({ iid: p.iid, err: (err as Error).message }, 'failed to post auto-handoff comment'));
+      .catch(err => logger.warn({ iid: p.iid, err }, 'failed to post auto-handoff comment'));
 
     try {
       await this.restartSession(p);
       return true;
     } catch (err) {
-      logger.error({ iid: p.iid, err: (err as Error).message, gen: p.gen }, 'auto-continue relaunch failed; flipping to manual handoff');
+      logger.error({ iid: p.iid, err, gen: p.gen }, 'auto-continue relaunch failed; flipping to manual handoff');
       await this.flipToManualHandoff(p.iid, p.session);
       return false;
     }
@@ -613,7 +613,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
   private async flipToManualHandoff(iid: number, session: string): Promise<void> {
     await this.tracker
       .addLabel(iid, 'handoff::active')
-      .catch(err => logger.warn({ iid, err: (err as Error).message }, 'failed to add handoff::active label'));
+      .catch(err => logger.warn({ iid, err }, 'failed to add handoff::active label'));
     await this.tmux.killSession(session).catch(() => { /* already dead */ });
     await this.tmux.closeSession();
   }

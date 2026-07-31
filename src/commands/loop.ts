@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import chalk from 'chalk';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -54,10 +54,27 @@ const START_OPTIONS = [
 ] as const;
 
 function startAction(options: Record<string, unknown>): Promise<void> {
-  if (options.daemon) {
+  // A daemon child never re-daemonizes: combined short flags (-dn 3) survive
+  // the token filter in startDaemon, and without this guard the child would
+  // see daemon=true and spawn another detached grandchild.
+  if (options.daemon && process.env.AFK_LOOP_CHILD !== '1') {
     return startDaemon(process.argv.slice(2));
   }
   return runForeground(options);
+}
+
+/**
+ * Validating parser for numeric options. Must NOT be parseInt directly:
+ * commander calls parsers as (value, previous), so a bare parseInt would
+ * receive the previous option value as its radix (e.g. `-n 4 -n 5` parses
+ * '5' with radix 4 → NaN). Also rejects non-positive / non-integer values.
+ */
+function parsePositiveInt(value: string, _previous: number | undefined): number {
+  const n = parseInt(value, 10);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new InvalidArgumentError(`expected a positive integer, got '${value}'`);
+  }
+  return n;
 }
 
 export function registerLoopCommands(program: Command): void {
@@ -73,7 +90,7 @@ export function registerLoopCommands(program: Command): void {
   const addOptions = (cmd: Command) => {
     for (const [flags, description] of START_OPTIONS) {
       if (flags.includes('<')) {
-        cmd.option(flags, description, parseInt);
+        cmd.option(flags, description, parsePositiveInt);
       } else {
         cmd.option(flags, description);
       }
@@ -116,7 +133,7 @@ export function registerLoopCommands(program: Command): void {
   loop
     .command('stop')
     .description('Stop the running loop daemon (SIGTERM, then SIGKILL after timeout)')
-    .option('-t, --timeout <seconds>', 'Max wait for graceful shutdown before SIGKILL', parseInt)
+    .option('-t, --timeout <seconds>', 'Max wait for graceful shutdown before SIGKILL', parsePositiveInt)
     .action(async (options) => {
       try {
         await stopDaemon({ timeoutSeconds: options.timeout ?? 30 });

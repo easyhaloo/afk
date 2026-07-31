@@ -90,8 +90,9 @@ const POLL_RETRY_DELAY_MS = 5_000;
  * Each issue flows: poll → implement → qaQueue → qa → done/failed.
  *
  * Tracker labels remain the SSOT: the in-memory `inFlight` set is per-process
- * and is rebuilt on every poll. A process restart simply re-queries the
- * tracker.
+ * and rebuilt on restart. A reservation is held from poll until the chain
+ * finishes (implement failure or QA completion release it — success keeps it
+ * reserved while QA is queued, so poll can't double-start).
  */
 export class LoopRunner {
   private readonly tracker: TrackerProvider;
@@ -107,6 +108,7 @@ export class LoopRunner {
 
   // Dedup + counters
   private inFlight = new Set<number>();
+  private polling = false; // true while a poll() tick is in flight
   private completed = 0;
   private failed = 0;
   private started = 0;
@@ -190,10 +192,19 @@ export class LoopRunner {
     if (this.statusTimer) { clearInterval(this.statusTimer); this.statusTimer = null; }
 
     const drain = this.waitForDrain();
-    const timeout = new Promise<void>(resolve =>
-      setTimeout(resolve, this.opts.shutdownTimeoutMs)
-    );
-    const winner = await Promise.race([drain, timeout]);
+    // Race with a typed timeout. The timer must be cleared after the race:
+    // otherwise a clean drain leaves the event loop alive for
+    // shutdownTimeoutMs (300s default), and a direct stop() caller hangs.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<'timeout'>(resolve => {
+      timer = setTimeout(() => resolve('timeout'), this.opts.shutdownTimeoutMs);
+    });
+    let winner: 'drained' | 'timeout';
+    try {
+      winner = await Promise.race([drain, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
 
     if (winner === 'timeout') {
       logger.warn(
@@ -240,13 +251,13 @@ export class LoopRunner {
 
   // ── Private: pool drains ───────────────────────────────────────────────────
 
-  private async waitForDrain(): Promise<'drained' | 'timeout'> {
+  private async waitForDrain(): Promise<'drained'> {
     // Drained = no implement chains, no active QA, and no QA waiting on the
     // chain (stop() drops queued QA segments, so queue must also be empty).
     const drained = () =>
       this.inImplement.size === 0 && this.inQA === null && this.qaQueue.length === 0;
     if (drained()) return 'drained';
-    return new Promise<'drained' | 'timeout'>(resolve => {
+    return new Promise<'drained'>(resolve => {
       const check = () => {
         if (drained()) resolve('drained');
         else if (!this.running && !this.stopping) resolve('drained');
@@ -263,6 +274,11 @@ export class LoopRunner {
    */
   private async poll(): Promise<void> {
     if (!this.running) return;
+    // Re-entrancy guard: a tick can outlive the interval (slow listIssues +
+    // per-candidate precondition calls), and two overlapping ticks would both
+    // see inFlight miss the same id and double-start the issue.
+    if (this.polling) return;
+    this.polling = true;
     try {
       const issues = await this.tracker.listIssues({
         labels: this.opts.requiredLabels,
@@ -277,16 +293,19 @@ export class LoopRunner {
 
         if (this.inFlight.has(issue.id)) { skipped++; continue; }
         if (this.opts.excludeLabels.some(l => issue.labels.includes(l))) { skipped++; continue; }
-        if (this.inImplement.size >= this.opts.maxConcurrent) { skipped++; continue; }
+        // Cap reached: later issues can't start either — break, don't continue.
+        if (this.inImplement.size >= this.opts.maxConcurrent) { skipped++; break; }
 
+        // Reserve BEFORE any await so overlapping ticks cannot double-start.
+        this.inFlight.add(issue.id);
         const check = await checkIssuePreconditions(this.tracker, issue.id);
         if (!check.ok) {
+          this.inFlight.delete(issue.id);
           logger.info({ iid: issue.id, reason: check.reason }, 'issue skipped by preconditions');
           skipped++;
           continue;
         }
 
-        this.inFlight.add(issue.id);
         this.inImplement.set(issue.id, { iid: issue.id, session: '', startedAt: 0 });
         this.started++;
         enqueued++;
@@ -300,6 +319,8 @@ export class LoopRunner {
       this.emitEvent(`poll error: ${(error as Error).message}`);
       // Brief backoff so we don't hammer a failing API
       await new Promise(r => setTimeout(r, POLL_RETRY_DELAY_MS));
+    } finally {
+      this.polling = false;
     }
   }
 
@@ -336,6 +357,9 @@ export class LoopRunner {
       } else {
         // WorkflowRunner's own cleanupOnFailure already added mode::hitl
         this.failed++;
+        // Release the reservation: a failed issue must be re-pickable once
+        // a human clears mode::hitl (otherwise it's skipped forever).
+        this.inFlight.delete(iid);
         this.lastError.set(iid, 'implement-failed');
         this.emitEvent(`#${iid} implement failed → mode::hitl`);
       }
@@ -345,6 +369,7 @@ export class LoopRunner {
       // alive and mark the issue.
       const msg = (error as Error).message;
       this.failed++;
+      this.inFlight.delete(iid);
       this.lastError.set(iid, `implement-crash: ${msg}`);
       logger.error({ iid, err: error }, 'implement chain crashed');
       this.emitEvent(`#${iid} implement crashed: ${msg}`);

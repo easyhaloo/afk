@@ -1,0 +1,6 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "tee '/Users/shenggangshu/llm/afk/.worktrees/issue-41/.afk/claude-status.json' > /dev/null"
+  }
+}

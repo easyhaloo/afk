@@ -296,7 +296,7 @@ export class LoopRunner {
 
       logger.info({ found: issues.length, enqueued, skipped }, 'poll complete');
     } catch (error) {
-      logger.error({ err: (error as Error).message }, 'poll error');
+      logger.error({ err: error }, 'poll error');
       this.emitEvent(`poll error: ${(error as Error).message}`);
       // Brief backoff so we don't hammer a failing API
       await new Promise(r => setTimeout(r, POLL_RETRY_DELAY_MS));
@@ -317,7 +317,7 @@ export class LoopRunner {
     try {
       baseBranch = await this.tracker.detectTargetBranch(iid);
     } catch (err) {
-      logger.warn({ iid, err: (err as Error).message }, 'detectTargetBranch failed, defaulting to main');
+      logger.warn({ iid, err }, 'detectTargetBranch failed, defaulting to main');
     }
 
     try {
@@ -346,7 +346,7 @@ export class LoopRunner {
       const msg = (error as Error).message;
       this.failed++;
       this.lastError.set(iid, `implement-crash: ${msg}`);
-      logger.error({ iid, err: msg }, 'implement chain crashed');
+      logger.error({ iid, err: error }, 'implement chain crashed');
       this.emitEvent(`#${iid} implement crashed: ${msg}`);
       try {
         await this.tracker.addLabel(iid, 'mode::hitl');
@@ -367,7 +367,7 @@ export class LoopRunner {
       .then(() => this.runQA())
       // runQA never rejects (every path is caught), but keep the chain alive
       // even if a future change breaks that invariant.
-      .catch(err => logger.error({ err: (err as Error).message }, 'qa chain segment crashed'));
+      .catch(err => logger.error({ err }, 'qa chain segment crashed'));
   }
 
   /**
@@ -401,7 +401,7 @@ export class LoopRunner {
         return;
       }
     } catch (err) {
-      logger.warn({ iid, err: (err as Error).message }, 're-check failed, proceeding with QA');
+      logger.warn({ iid, err }, 're-check failed, proceeding with QA');
     }
 
     this.inQA = ctx;
@@ -428,7 +428,7 @@ export class LoopRunner {
       const msg = (error as Error).message;
       this.failed++;
       this.lastError.set(iid, `qa-crash: ${msg}`);
-      logger.error({ iid, err: msg }, 'qa crashed');
+      logger.error({ iid, err: error }, 'qa crashed');
       this.emitEvent(`#${iid} qa crashed: ${msg}`);
       try {
         await this.tracker.addLabel(iid, 'mode::hitl');
@@ -507,7 +507,7 @@ export class LoopRunner {
       // Propagate: a live single-instance conflict or unwritable pid file must
       // abort startup (no pid file means stop/status can't find us).
       logger.warn(
-        { err: (err as Error).message, path: this.opts.pidFilePath },
+        { err, path: this.opts.pidFilePath },
         'failed to write pid file'
       );
       throw err;
@@ -521,7 +521,7 @@ export class LoopRunner {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
         logger.warn(
-          { err: (err as Error).message, path: this.opts.pidFilePath },
+          { err, path: this.opts.pidFilePath },
           'failed to delete pid file'
         );
       }
@@ -546,7 +546,7 @@ export class LoopRunner {
       );
     } catch (err) {
       logger.warn(
-        { err: (err as Error).message, path: this.opts.statusFilePath },
+        { err, path: this.opts.statusFilePath },
         'failed to write status file'
       );
     }

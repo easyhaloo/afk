@@ -233,7 +233,7 @@ export class Scheduler {
     try {
       await this.pollTracker();
     } catch (error) {
-      logger.error({ err: (error as Error).message }, 'poll error');
+      logger.error({ err: error }, 'poll error');
     }
   }
 

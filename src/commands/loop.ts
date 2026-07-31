@@ -174,7 +174,7 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
     try {
       await runner.stop();
     } catch (err) {
-      logger.error({ err: (err as Error).message }, 'error during stop');
+      logger.error({ err }, 'error during stop');
     }
     process.exit(0);
   };

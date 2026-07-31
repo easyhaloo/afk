@@ -101,7 +101,6 @@ function makeRunner(wtPath: string) {
     capturePane: vi.fn().mockResolvedValue('pane snapshot'),
     killSession: vi.fn().mockResolvedValue(undefined),
     closeSession: vi.fn().mockResolvedValue(undefined),
-    interrupt: vi.fn().mockResolvedValue(undefined),
   };
   runner.worktree = {
     create: vi.fn().mockResolvedValue({ path: wtPath, branch: 'afk-issue-42', status: 'active' }),
@@ -203,12 +202,12 @@ describe('WorkflowRunner auto handoff continuation', () => {
     expect(tracker.addComment).not.toHaveBeenCalledWith(42, expect.stringContaining('afk-event: crashed'));
   });
 
-  it('stale signal cleared on relaunch; null summary falls back to snapshot', async () => {
+  it('stale signal cleared on relaunch; template placeholder summary falls back to snapshot', async () => {
     const wtPath = makeTempDir();
     const { runner, tmux } = makeRunner(wtPath);
     await writeStatus(wtPath, 120_000);
     await writeSignal(wtPath, 'context_high'); // stale from a previous run
-    tmux.waitForSignal.mockResolvedValue(null); // agent never replies
+    tmux.waitForSignal.mockResolvedValue(handoffReady('<总结>')); // agent copied the template verbatim
 
     const runPromise = runner.run(RUN_OPTS);
 
@@ -222,9 +221,8 @@ describe('WorkflowRunner auto handoff continuation', () => {
     const result = await runPromise;
 
     expect(result.success).toBe(true);
-    expect(tmux.interrupt).toHaveBeenCalledTimes(1); // C-c fallback fired
     const doc = await fs.readFile(join(runner.logDir, 'handoff-42-1.md'), 'utf-8');
-    expect(doc).toContain('(agent did not provide a summary)');
+    expect(doc).toContain('(agent did not provide a summary)'); // placeholder treated as no summary
     expect(doc).toContain('pane snapshot');
     expect(String(tmux.sendGoal.mock.calls[1][3])).toContain('handoff-42-1.md');
   });

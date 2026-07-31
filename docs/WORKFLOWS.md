@@ -387,7 +387,7 @@ interface Signal {
 ### 交接流程（自动续跑）
 
 1. **请求总结**：打字纯文本交接指令（催促立即简短总结）—— ① `git add -A && git commit`（无改动可跳过）→ ② 3 个简答（已完成/正在做/接下来）→ ③ 写 `handoff_ready` 信号。60s 内无有效 `handoff_ready`（含模板占位符 `<总结>` 视为无总结）则用 pane 快照兜底。
-2. **交接文档**：总结 + 快照 + commit sha 写入 `~/.claude/logs/afk/handoff-<iid>-<gen>.md`（**worktree 外**，避免被 `git add -A` 提交进 MR）。
+2. **交接文档**：总结 + 快照 + commit sha 写入 `<worktree>/.afk/handoff/handoff-<iid>-<gen>.md`（`.afk/` 已在仓库 `.gitignore` 中，不会被 `git add -A` 提交进 MR；文档随 worktree 走，恢复时 agent 可直接读取）。
 3. **恢复评论**：同一内容发 issue 评论（任务中断时的恢复文档）。
 4. **重启**：杀 tmux 会话 → 清理信号文件与旧 statusline 数据 → 重建同名 session → 重启 watchdog（每代会话拥有完整的 hard timeout）。
 5. **继续**：新会话收到「继续实现/验证 issue #N（先阅读交接文档）」指令，循环直到完成信号或再次交接。

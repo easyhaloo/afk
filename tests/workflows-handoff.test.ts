@@ -87,9 +87,6 @@ function makeRunner(wtPath: string) {
   } as any;
 
   const runner = new WorkflowRunner(tracker) as any;
-  const logDir = join(tmpdir(), `afk-handoff-logs-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  tmpDirs.push(logDir);
-  runner.logDir = logDir;
   runner.pollIntervalMs = 10;
   runner.tmux = {
     createSession: vi.fn().mockResolvedValue({ name: 'sess', window: 'main', dir: wtPath }),
@@ -141,7 +138,7 @@ describe('WorkflowRunner auto handoff continuation', () => {
     const typed = tmux.sendKeys.mock.calls.map((c: unknown[]) => String(c[2])).join('\n');
     expect(typed).toContain('git add -A && git commit');
 
-    const doc = await fs.readFile(join(runner.logDir, 'handoff-42-1.md'), 'utf-8');
+    const doc = await fs.readFile(join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), 'utf-8');
     expect(doc).toContain('已完成实现核心逻辑，正在进行测试');
     expect(tracker.addComment).toHaveBeenCalledWith(42, expect.stringContaining('已完成实现核心逻辑，正在进行测试'));
     expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'handoff::active'); // auto mode: no manual-resume marker
@@ -178,8 +175,8 @@ describe('WorkflowRunner auto handoff continuation', () => {
 
     expect(result).toEqual({ success: false });
     expect(tmux.createSession).toHaveBeenCalledTimes(2); // no third relaunch
-    await expect(fs.access(join(runner.logDir, 'handoff-42-1.md'))).resolves.toBeUndefined();
-    await expect(fs.access(join(runner.logDir, 'handoff-42-terminal.md'))).resolves.toBeUndefined();
+    await expect(fs.access(join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'))).resolves.toBeUndefined();
+    await expect(fs.access(join(wtPath, '.afk', 'handoff', 'handoff-42-terminal.md'))).resolves.toBeUndefined();
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
     expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'mode::hitl'); // finally skipped via _cleanupType='success'
   });
@@ -198,8 +195,8 @@ describe('WorkflowRunner auto handoff continuation', () => {
 
     expect(result).toEqual({ success: false });
     expect(tmux.createSession).toHaveBeenCalledTimes(2); // terminates instead of a third relaunch
-    await expect(fs.access(join(runner.logDir, 'handoff-42-1.md'))).resolves.toBeUndefined();
-    await expect(fs.access(join(runner.logDir, 'handoff-42-terminal.md'))).resolves.toBeUndefined();
+    await expect(fs.access(join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'))).resolves.toBeUndefined();
+    await expect(fs.access(join(wtPath, '.afk', 'handoff', 'handoff-42-terminal.md'))).resolves.toBeUndefined();
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
     // Terminal comment states the token-budget reason.
     expect(tracker.addComment).toHaveBeenCalledWith(42, expect.stringContaining('已达总 token 上限'));
@@ -244,7 +241,7 @@ describe('WorkflowRunner auto handoff continuation', () => {
     const result = await runPromise;
 
     expect(result.success).toBe(true);
-    const doc = await fs.readFile(join(runner.logDir, 'handoff-42-1.md'), 'utf-8');
+    const doc = await fs.readFile(join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), 'utf-8');
     expect(doc).toContain('(agent did not provide a summary)'); // placeholder treated as no summary
     expect(doc).toContain('pane snapshot');
     expect(String(tmux.sendGoal.mock.calls[1][3])).toContain('handoff-42-1.md');
@@ -264,7 +261,7 @@ describe('WorkflowRunner auto handoff continuation', () => {
     expect(result).toEqual({ success: false });
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
     expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'mode::hitl');
-    await expect(fs.access(join(runner.logDir, 'handoff-42-1.md'))).resolves.toBeUndefined();
+    await expect(fs.access(join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'))).resolves.toBeUndefined();
   });
 
   it('killWatchdog kills the detached watchdog process group', async () => {

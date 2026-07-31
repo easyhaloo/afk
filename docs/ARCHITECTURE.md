@@ -104,11 +104,11 @@ Agent 运行在 tmux session 中，与调度系统是**进程隔离**的。考�
 - 原子写入（tmp + rename），避免读到半截 JSON
 - Zod schema 校验，版本不兼容时快速失败
 
-### 1b. context_high 判定机制
+### 1b. 上下文溢出检测
 
-**触发与校验分离**：Agent 发 `context_high` 信号不带数据，Runner 读取 Claude statusline JSON 中的 token 计数，与 `CONTEXT.HIGH_THRESHOLD`（默认 100K）比较后才决定是否 handoff。
+**Runner 轮询 statusline，Agent 不参与**：Runner 每轮询周期读取 `<worktree>/.afk/claude-status.json` 的 token 计数（statusline 每个 turn 写入），与 `CONTEXT.HIGH_THRESHOLD`（默认 100K）比较，达到阈值即触发 handoff。信号协议中不存在 context_high。
 
-这避免了"被评估者自评"的偏差——LLM 对自己状态的判断并不可靠，应由系统基于客观数据做决策。
+这避免了"被评估者自评"的偏差——LLM 对自己状态的判断并不可靠（TUI 警告在渲染层不可见），应由系统基于客观数据做决策。
 
 ### 1c. AC 用 issue label 表达，不用 markdown 正则
 
@@ -234,7 +234,7 @@ flowchart TD
 
 | 通道 | 数据 | 写入方 | 读取方 | 用途 |
 |------|------|--------|--------|------|
-| `.afk-signal.json` | 控制事件 | Agent | Runner 轮询 | goal_complete / ac_result / timeout / context_high |
+| `.afk-signal.json` | 控制事件 | Agent | Runner 轮询 | goal_complete / ac_result / timeout / handoff_ready |
 | `.afk/claude-status.json` | 客观状态 | Claude Code statusline | Runner 按需 | token 计数、模型、上下文窗口 |
 
 **设计原则：控制信号走文件（Agent 主动），状态数据走 statusline（引擎自动推送）**。
@@ -246,8 +246,9 @@ flowchart TD
 | `goal_complete` | Agent 完成目标 | 进入 AC 验收 |
 | `ac_result` | AC 检查结果 | PASS→创建 MR，FAIL→重试或升级 |
 | `timeout` | 硬超时 | 捕获日志，添加 `mode::timeout` 标签 |
-| `context_high` | Agent 怀疑上下文过高 | Runner 读取 statusline JSON 校验阈值后决定 |
 | `handoff_ready` | 上下文切换完成 | 关闭旧 session，启动新 session |
+
+上下文溢出不是信号：Runner 轮询 statusline token 计数与 `CONTEXT.HIGH_THRESHOLD` 比较后直接触发 handoff。
 
 ### 信号生命周期
 
@@ -303,7 +304,7 @@ sequenceDiagram
         Tee->>SL: 透传给用户渲染
     end
 
-    Note over W: context_high 信号触发时按需读取
+    Note over W: Runner 每轮询周期读取
     W->>JSON: readClaudeStatus(worktreeDir)
     JSON-->>W: Zod 校验后返回
     W->>W: extractTokenUsage → 阈值校验
@@ -362,7 +363,7 @@ stateDiagram-v2
 
     Polling --> AutoWrapup: goal_complete
     Polling --> Timeout: timeout
-    Polling --> Handoff: context_high
+    Polling --> Handoff: token ≥ 阈值
 
     AutoWrapup: autoWrapup - 客观校验 + MR
     Timeout: handleTimeout - 日志 + 标签
@@ -644,7 +645,7 @@ AC 提取逻辑集中在 `src/lib/core/tracker/ac.ts`。要添加新来源（如
 
 ### 利用 statusline 数据做更智能决策
 
-statusline JSON 提供丰富会话元数据（token 用量、缓存命中率、成本、模型等）。除 context_high 外，未来可在这些场景用上：
+statusline JSON 提供丰富会话元数据（token 用量、缓存命中率、成本、模型等）。除上下文检测外，未来可在这些场景用上：
 
 | 决策 | 所需字段 | 阈值常量 |
 |------|---------|---------|
@@ -667,7 +668,7 @@ RunnerOptions 支持 `customValidation` 等钩子，在 AC 检查前后插入自
 |------|------|--------|--------|
 | `.afk/worktrees.json` | Worktree 元数据 | WorktreeManager | WorktreeManager / CLI |
 | `<worktree>/.afk-signal.json` | 控制信号 | Agent | WorkflowRunner 轮询 |
-| `<worktree>/.afk/claude-status.json` | Claude statusline payload | statusline tee（首回合覆盖 placeholder） | Runner 按需（context_high 校验、prompt-ready 检测） |
+| `<worktree>/.afk/claude-status.json` | Claude statusline payload | statusline tee（首回合覆盖 placeholder） | Runner 轮询（上下文阈值检测、prompt-ready 检测） |
 | `<worktree>/.afk/CRASHED` | 异常退出标记 | watchdog | WorktreeManager |
 | `<worktree>/.afk/SUCCESS` | 成功完成标记 | workflow 结束 | WorktreeManager |
 | `<worktree>/.claude/settings.json` | 自动注入的 statusline 配置 | configureStatusline | Claude Code |

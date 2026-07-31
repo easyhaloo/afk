@@ -1,16 +1,16 @@
 /**
- * Regression tests for WorkflowRunner.run() cleanup control flow.
+ * Regression tests for WorkflowRunner cleanup control flow.
  *
- * Covers the _cleanupType state machine and finally-block cleanup:
- *  - timeout path: posts timeout comment + mode::hitl, returns {success:false}.
- *  - handoff path: handler self-cleans; finally skips cleanupOnFailure.
- *  - success path: removes the worktree (force), returns {success:true, url}.
- *  - below-threshold context_high (context_low): silent - no comment, no mode::hitl;
- *    worktree kept and marked 'failed'.
+ * Each explicit terminal path owns its cleanup (no _cleanupType state
+ * machine, no finally-driven GitHub updates):
+ *  - timeout path: handleTimeout posts the timeout comment + mode::hitl,
+ *    tears down the session, returns {success:false}.
+ *  - handoff path: handler self-cleans; run() adds no crash comment.
+ *  - success path: autoWrapup removes the worktree (force), returns {success:true, url}.
  *
- * Strategy: stub runBody to drive each path, then exercise the real run() finally
- * + cleanupOnFailure. tracker is injected; tmux/worktree are overwritten via the
- * instance. No module mocking.
+ * Strategy: stub runBody to drive each path (or run the real handler), then
+ * exercise the real run(). tracker is injected; tmux/worktree are overwritten
+ * via the instance. No module mocking.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { rm } from 'fs/promises';
@@ -41,7 +41,7 @@ function makeRunner() {
 
 const RUN_OPTS = { iid: 42, session: 'sess', targetBranch: 'main', baseBranch: 'main' };
 
-describe('WorkflowRunner.run() cleanup control flow', () => {
+describe('WorkflowRunner cleanup control flow', () => {
   afterEach(async () => {
     await rm(LOG_DIR, { recursive: true, force: true });
   });
@@ -49,7 +49,8 @@ describe('WorkflowRunner.run() cleanup control flow', () => {
   it('timeout path: posts timeout comment + mode::hitl and returns {success:false}', async () => {
     const { runner, tracker } = makeRunner();
     runner.runBody = async function () {
-      return await this.handleTimeout(42, '/tmp/wt', 'sess', 60000);
+      await this.handleTimeout(42, '/tmp/wt', 'sess', 60000);
+      return { success: false };
     };
 
     const result = await runner.run(RUN_OPTS);
@@ -63,36 +64,10 @@ describe('WorkflowRunner.run() cleanup control flow', () => {
     expect(runner.worktree.cleanup).not.toHaveBeenCalled();
   });
 
-  it('handoff path: skips cleanupOnFailure and returns {success:false}', async () => {
+  it('explicit failure path (handoff): no crash comment from run()', async () => {
     const { runner, tracker } = makeRunner();
     runner.runBody = async function () {
-      this._cleanupType = 'success';
-      return { success: false };
-    };
-
-    const result = await runner.run(RUN_OPTS);
-
-    expect(result).toEqual({ success: false });
-    expect(tracker.addComment).not.toHaveBeenCalled();
-  });
-
-  it('success path: removes worktree (force) and returns {success:true, url}', async () => {
-    const { runner, tracker } = makeRunner();
-    runner.runBody = async function () {
-      return { success: true, url: 'https://example.com/mr/1' };
-    };
-
-    const result = await runner.run(RUN_OPTS);
-
-    expect(result).toEqual({ success: true, url: 'https://example.com/mr/1' });
-    expect(runner.worktree.cleanup).toHaveBeenCalledWith(42, true);
-    expect(tracker.addComment).not.toHaveBeenCalled();
-  });
-
-  it('below-threshold context_high: silent (no comment, no mode::hitl), marks worktree failed', async () => {
-    const { runner, tracker } = makeRunner();
-    runner.runBody = async function () {
-      this._cleanupType = 'context_low';
+      // Handoff handlers clean up after themselves; nothing left for run().
       return { success: false };
     };
 
@@ -101,7 +76,23 @@ describe('WorkflowRunner.run() cleanup control flow', () => {
     expect(result).toEqual({ success: false });
     expect(tracker.addComment).not.toHaveBeenCalled();
     expect(tracker.addLabel).not.toHaveBeenCalled();
-    expect(runner.worktree.updateStatus).toHaveBeenCalledWith(42, 'failed');
-    expect(runner.worktree.cleanup).not.toHaveBeenCalled();
+  });
+
+  it('success path: autoWrapup removes worktree (force) and returns {success:true, url}', async () => {
+    const { runner, tracker } = makeRunner();
+    runner.pushBranch = vi.fn().mockResolvedValue(undefined);
+    runner.createMR = vi.fn().mockResolvedValue('https://example.com/mr/1');
+    runner.runBody = async function () {
+      return await this.autoWrapup(42, '/tmp/wt', 'sess', 'main');
+    };
+
+    const result = await runner.run(RUN_OPTS);
+
+    expect(result).toEqual({ success: true, url: 'https://example.com/mr/1' });
+    expect(runner.tmux.killSession).toHaveBeenCalledWith('sess');
+    expect(runner.tmux.closeSession).toHaveBeenCalled();
+    expect(runner.worktree.cleanup).toHaveBeenCalledWith(42, true);
+    expect(tracker.addLabel).toHaveBeenCalledWith(42, 'stage::qa');
+    expect(tracker.addComment).not.toHaveBeenCalled();
   });
 });

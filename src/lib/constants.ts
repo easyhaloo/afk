@@ -32,12 +32,27 @@ export const TIMEOUTS = {
  */
 export const CONTEXT = {
   /**
-   * Threshold to trigger handoff flow when agent reports context_high.
-   * Below this, the signal is ignored (agent probably being cautious).
-   * Set to ~50% of Claude's 200K context window as a conservative cutoff.
+   * Threshold (absolute tokens) at which the runner interrupts the session
+   * for a context handoff, polled from the statusline data. Detection is
+   * runner-side only — context overflow is not a signal.
+   * ~50% of Claude's 200K context window as a conservative cutoff.
    */
   HIGH_THRESHOLD: 100_000,
 } as const;
+
+/**
+ * Max automatic context-handoff rounds per workflow run before falling back
+ * to the terminal (manual-resume) handoff.
+ */
+export const MAX_HANDOFFS = 3;
+
+/**
+ * Max total tokens a workflow run may consume across all handoff
+ * generations (accumulated at each handoff: the old session's usage is
+ * added to the running total). Reaching it terminates the run with a
+ * terminal handoff. ~5 sessions' worth of HIGH_THRESHOLD.
+ */
+export const MAX_TOTAL_TOKENS = 500_000;
 
 /**
  * Port numbers for services

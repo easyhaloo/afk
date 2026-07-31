@@ -84,7 +84,6 @@ export class WorkflowRunner {
     this._cleanupType = 'none';
     this._lastTimeoutInfo = undefined;
 
-    const worktreePath = `${process.cwd()}/.worktrees/issue-${iid}`;
     let runResult: { success: boolean; url?: string } | undefined;
 
     try {
@@ -98,35 +97,43 @@ export class WorkflowRunner {
       runResult = { success: false };
       throw error;
     } finally {
-      if (this._cleanupType !== 'none') return; // Already cleaned up by handler
-
-      if (!runResult?.success) {
-        await this.cleanupOnFailure(iid, worktreePath, session, hardTimeoutMs);
-      } else {
-        // Success path: keep worktree, just close tmux connection
-        await this.tmux.closeSession();
+      // 'success' => handler (handoff) already cleaned up; skip. Otherwise run cleanup.
+      // Cast to the declared union: runBody may set _cleanupType to 'success' via
+      // handleHandoff, which TS's narrowing from the reset above cannot track.
+      const cleanupType = this._cleanupType as 'none' | 'context_low' | 'success';
+      if (cleanupType !== 'success') {
+        if (!runResult?.success) {
+          await this.cleanupOnFailure(iid, session);
+        } else {
+          // Success: branch pushed + MR created in autoWrapup. Close tmux and remove
+          // the now-redundant worktree (force: stray untracked artifacts may exist).
+          await this.tmux.closeSession();
+          try {
+            await this.worktree.cleanup(iid, true);
+          } catch (err) {
+            logger.warn({ iid, err: (err as Error).message }, 'failed to remove worktree on success');
+          }
+        }
       }
     }
   }
 
   // Track which cleanup handler ran (to avoid double cleanup in finally)
-  private _cleanupType: 'none' | 'timeout' | 'crashed' | 'success' = 'none';
+  private _cleanupType: 'none' | 'context_low' | 'success' = 'none';
 
   /**
    * Cleanup on failure: update GitHub issue first, then clean local resources.
    * This ensures issue status is updated even if process crashes afterward.
+   * Silent (no issue update) for graceful context_low stops.
    */
-  private async cleanupOnFailure(
-    iid: number,
-    worktreePath: string | undefined,
-    session: string,
-    timeoutMs: number
-  ): Promise<void> {
+  private async cleanupOnFailure(iid: number, session: string): Promise<void> {
     try {
-      // Step 1: Update GitHub issue (comment + labels)
-      if (this._lastTimeoutInfo?.iid === iid) {
-        // Timeout case: use the pre-recorded timeout info
-        await this.tracker.addComment(iid, `<!-- afk-event: timeout -->
+      // Step 1: Update GitHub issue (comment + labels).
+      // Skipped for context_low (below-threshold context_high false alarm): graceful stop.
+      if (this._cleanupType !== 'context_low') {
+        if (this._lastTimeoutInfo?.iid === iid) {
+          // Timeout case: use the pre-recorded timeout info
+          await this.tracker.addComment(iid, `<!-- afk-event: timeout -->
 **⏱️ Hard Timeout**
 
 Session exceeded ${Math.round(this._lastTimeoutInfo.timeoutMs / 60000)}min and was force killed.
@@ -134,31 +141,34 @@ Session exceeded ${Math.round(this._lastTimeoutInfo.timeoutMs / 60000)}min and w
 - **Log:** \`${this._lastTimeoutInfo.logPath}\`
 
 **Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
-        this._lastTimeoutInfo = undefined;
-      } else {
-        // Unexpected crash case
-        await this.tracker.addComment(iid, `<!-- afk-event: crashed -->
+          this._lastTimeoutInfo = undefined;
+        } else {
+          // Unexpected crash case
+          await this.tracker.addComment(iid, `<!-- afk-event: crashed -->
 **💥 Workflow Failed**
 
 Session was interrupted before completion.
 
 **Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
+        }
+        await this.tracker.addLabel(iid, 'mode::hitl');
+        await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
       }
-      await this.tracker.addLabel(iid, 'mode::hitl');
-      await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
     } catch (err) {
       logger.error({ iid, error: (err as Error).message }, 'failed to update GitHub on cleanup');
     }
 
-    // Step 2: Cleanup local resources
+    // Step 2: Cleanup local resources (worktree kept on failure for inspection)
     try {
       await this.tmux.killSession(session);
     } catch { /* ignore if session already gone */ }
     try {
       await this.tmux.closeSession();
     } catch { /* ignore */ }
-    if (worktreePath) {
+    try {
       await this.worktree.updateStatus(iid, 'failed');
+    } catch (err) {
+      logger.warn({ iid, err: (err as Error).message }, 'failed to mark worktree as failed');
     }
   }
 
@@ -295,9 +305,10 @@ Session was interrupted before completion.
     await (await import('fs')).promises.mkdir(this.logDir, { recursive: true });
     await (await import('fs')).promises.writeFile(logPath, snapshot, 'utf-8');
 
-    // Store timeout info for cleanupOnFailure to post to GitHub
+    // Store timeout info for cleanupOnFailure to post to GitHub.
+    // Don't set _cleanupType: finally must run cleanupOnFailure (timeout branch)
+    // to post the comment + labels. _lastTimeoutInfo selects the timeout branch.
     this._lastTimeoutInfo = { iid, timeoutMs, logPath };
-    this._cleanupType = 'timeout'; // Mark as cleaned up so finally skips
 
     return { success: false };
   }
@@ -317,6 +328,7 @@ Session was interrupted before completion.
 
     if (usage.total === 0) {
       logger.warn({ iid }, 'context_high signal received but no token data; treating as below threshold');
+      this._cleanupType = 'context_low';
       return { success: false };
     }
 
@@ -325,6 +337,7 @@ Session was interrupted before completion.
         { iid, tokens: usage.total, threshold: CONTEXT.HIGH_THRESHOLD },
         'context_high signal ignored: below threshold'
       );
+      this._cleanupType = 'context_low';
       return { success: false };
     }
 
@@ -427,7 +440,7 @@ ${snapshot}
     const signalPath = `${worktreePath}/.afk-signal.json`;
     const shellCmd =
       `sleep ${hardTimeoutMs / 1000} && ` +
-      `cat > "${signalPath}.tmp" <<'EOF'\n` +
+      `cat > "${signalPath}.tmp" <<EOF\n` +
       `{"type":"timeout","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}\n` +
       `EOF\n` +
       `mv "${signalPath}.tmp" "${signalPath}" 2>/dev/null; ` +

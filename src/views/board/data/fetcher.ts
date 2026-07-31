@@ -80,6 +80,8 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
  * 1. projectId provided: issues for that specific project
  * 2. git remote detected: issues for that platform's project
  * 3. no projectId + no detection: return empty (user should select a project)
+ *
+ * Supports both GitHub and GitLab based on detected platform.
  */
 export async function fetchIssues(options: {
   projectId?: string | number | null;
@@ -88,53 +90,76 @@ export async function fetchIssues(options: {
   labels?: string[];
   state?: string;
 } = {}): Promise<{ issues: Issue[]; hasMore: boolean }> {
-  // Try env token first, then glab CLI config
-  let token = process.env.GITLAB_TOKEN;
-  let url = process.env.GITLAB_URL || 'https://gitlab.com';
+  try {
+    const { detectPlatform } = await import('../../../lib/core/tracker/detect');
+    const platform = await detectPlatform();
 
-  if (!token) {
-    const glab = await import('../../../lib/core/gitlab/glab-config').then(m => m.getGlabToken(url));
-    if (glab) {
-      token = glab.token;
-      url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
+    if (platform === 'github') {
+      const { createGitHubClient } = await import('../../../lib/client-factory');
+      const client = await createGitHubClient();
+      const trackedIssues = await client.listIssues({
+        labels: options.labels,
+        state: options.state as 'opened' | 'closed' | 'all' || 'opened',
+        perPage: options.perPage,
+      });
+      return {
+        issues: trackedIssues.map(toIssue),
+        hasMore: trackedIssues.length === (options.perPage || 20),
+      };
     }
-  }
 
-  if (!token) {
+    // GitLab path
+    let token = process.env.GITLAB_TOKEN;
+    let url = process.env.GITLAB_URL || 'https://gitlab.com';
+
+    if (!token) {
+      const glab = await import('../../../lib/core/gitlab/glab-config').then(m => m.getGlabToken(url));
+      if (glab) {
+        token = glab.token;
+        url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
+      }
+    }
+
+    if (!token) {
+      return { issues: [], hasMore: false };
+    }
+
+    // Resolve projectId
+    let projectId = options.projectId ? String(options.projectId) : null;
+    if (!projectId) {
+      try {
+        projectId = await detectGitLabProject();
+      } catch {
+        projectId = process.env.GITLAB_PROJECT_ID || null;
+      }
+    }
+
+    // If still no projectId, return empty
+    if (!projectId) {
+      return { issues: [], hasMore: false };
+    }
+
+    const client = new (await import('../../../lib/core/gitlab/index')).GitLabClient({
+      url,
+      token,
+      projectId,
+    });
+
+    const issues = await client.listIssues({
+      labels: options.labels,
+      state: options.state as 'opened' | 'closed' | 'all' || 'opened',
+      perPage: options.perPage,
+    });
+
+    return {
+      issues: issues.map(toIssue),
+      hasMore: issues.length === (options.perPage || 20),
+    };
+  } catch (err) {
+    // Platform detection failed or API error
+    console.warn('fetchIssues failed:', err);
     return { issues: [], hasMore: false };
   }
-
-  // Resolve projectId
-  let projectId = options.projectId ? String(options.projectId) : null;
-  if (!projectId) {
-    try {
-      projectId = await detectGitLabProject();
-    } catch {
-      projectId = process.env.GITLAB_PROJECT_ID || null;
-    }
-  }
-
-  // If still no projectId, return empty (user needs to select a project)
-  if (!projectId) {
-    return { issues: [], hasMore: false };
-  }
-
-  const client = new (await import('../../../lib/core/gitlab/index')).GitLabClient({
-    url,
-    token,
-    projectId,
-  });
-
-  const issues = await client.listIssues({
-    labels: options.labels,
-    state: options.state as 'opened' | 'closed' | 'all' || 'opened',
-    perPage: options.perPage,
-  });
-
-  return {
-    issues: issues.map(toIssue),
-    hasMore: issues.length === (options.perPage || 20),
-  };
 }
 
 export async function fetchProjects(options: { page?: number; perPage?: number } = {}): Promise<{ projects: Project[]; hasMore: boolean }> {

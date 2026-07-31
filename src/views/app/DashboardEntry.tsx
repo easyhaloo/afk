@@ -63,12 +63,16 @@ export function DashboardEntry() {
   useEffect(() => {
     if (!isReady) return;
     (async () => {
-      const [tasksData, sessionsData] = await Promise.all([
-        fetchTasks(),
-        fetchSessions(),
-      ]);
-      setTasks(tasksData.active);
-      setSessions(sessionsData);
+      try {
+        const [tasksData, sessionsData] = await Promise.all([
+          fetchTasks(),
+          fetchSessions(),
+        ]);
+        setTasks(tasksData.active);
+        setSessions(sessionsData);
+      } catch (err) {
+        console.warn('data loading failed:', err);
+      }
     })();
   }, [isReady]);
 
@@ -96,11 +100,18 @@ export function DashboardEntry() {
       return;
     }
     (async () => {
-      const data = await fetchIssues({ projectId: issueProject?.id, page: 1, perPage: PER_PAGE });
-      setIssues(data.issues);
-      setIssueHasMore(data.hasMore);
-      setIssuePage(2);
-      if (data.issues.length > 0) writeIssuesList(projectKey, data.issues, data.hasMore);
+      try {
+        const data = await fetchIssues({ projectId: issueProject?.id, page: 1, perPage: PER_PAGE });
+        setIssues(data.issues);
+        setIssueHasMore(data.hasMore);
+        setIssuePage(2);
+        if (data.issues.length > 0) writeIssuesList(projectKey, data.issues, data.hasMore);
+      } catch (err) {
+        // Log but don't crash - fetchIssues can fail if issueProject is not set
+        console.warn('fetchIssues failed:', err);
+        setIssues([]);
+        setIssueHasMore(false);
+      }
     })();
   }, [currentView, issueProject]);
 
@@ -115,11 +126,17 @@ export function DashboardEntry() {
       return;
     }
     (async () => {
-      const data = await fetchProjects({ page: 1, perPage: PER_PAGE });
-      setProjects(data.projects);
-      setProjectHasMore(data.hasMore);
-      setProjectPage(2);
-      writeProjectsList(data.projects, data.hasMore);
+      try {
+        const data = await fetchProjects({ page: 1, perPage: PER_PAGE });
+        setProjects(data.projects);
+        setProjectHasMore(data.hasMore);
+        setProjectPage(2);
+        writeProjectsList(data.projects, data.hasMore);
+      } catch (err) {
+        console.warn('fetchProjects failed:', err);
+        setProjects([]);
+        setProjectHasMore(false);
+      }
     })();
   }, [currentView]);
 

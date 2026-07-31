@@ -1,9 +1,9 @@
 /**
  * App - Main app component with declarative state-driven architecture
  */
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { useState, createActions } from './hooks';
+import { useState as useAppState, createActions } from './hooks';
 import { initRegistry } from '../board/registry/init';
 import { TaskListView, IssueListView, ProjectListView, BoardView, DetailScreen, HelpDialog, BreathingSeparator, DebugOverlay, Header, Footer, Notification } from '../board/views/index';
 import type { Task, Issue, Project } from '../../types/board';
@@ -43,7 +43,7 @@ export function AppContent({
   onFetchMoreIssues, onFetchMoreProjects, onInvalidateDetailCache,
   onAttachSession, onViewChange,
 }: Props) {
-  const { state, dispatch, currentView, currentContext, isDetailMode } = useState();
+  const { state, dispatch, currentView, currentContext, isDetailMode } = useAppState();
   const actions = createActions({ state, dispatch, currentView, currentContext, isDetailMode });
 
   // Notify parent when view changes (for data loading)
@@ -51,8 +51,25 @@ export function AppContent({
     onViewChange?.(currentView);
   }, [currentView, onViewChange]);
 
-  const W = process.stdout.columns || 80;
-  const H = process.stdout.rows || 24;
+  // Window dimensions - update on resize
+  const [dimensions, setDimensions] = useState({ W: process.stdout.columns || 80, H: process.stdout.rows || 24 });
+
+  useEffect(() => {
+    const checkSize = () => {
+      const newW = process.stdout.columns || 80;
+      const newH = process.stdout.rows || 24;
+      setDimensions((prev: { W: number; H: number }) => {
+        if (prev.W !== newW || prev.H !== newH) {
+          return { W: newW, H: newH };
+        }
+        return prev;
+      });
+    };
+    const interval = setInterval(checkSize, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const { W, H } = dimensions;
   const CONTENT_H = H - 2;
 
   // Refs for stable access
@@ -87,6 +104,20 @@ export function AppContent({
   const getItem = () => items[state.selectedIndex];
 
   const viewportHeight = Math.floor((CONTENT_H - 2) / 1);
+  const maxIndex = Math.max(0, items.length - 1);
+
+  // Auto-scroll: keep selected item visible
+  useEffect(() => {
+    const desiredScrollOffset =
+      state.selectedIndex < state.scrollOffset
+        ? state.selectedIndex
+        : state.selectedIndex >= state.scrollOffset + viewportHeight
+          ? Math.min(state.selectedIndex - viewportHeight + 1, maxIndex)
+          : state.scrollOffset;
+    if (desiredScrollOffset !== state.scrollOffset) {
+      dispatch({ type: 'selection:move', payload: { index: state.selectedIndex, scrollOffset: desiredScrollOffset } });
+    }
+  }, [state.selectedIndex, state.scrollOffset, viewportHeight, maxIndex]);
 
   // Auto-load project detail
   useEffect(() => {

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "AFK Workflow",
+    "subtitle": "Signal-driven autonomous workflow",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow"
+  },
+  "lanes": [
+    { "id": "runner", "label": "Runner" },
+    { "id": "session", "label": "Session" }
+  ],
+  "phases": [
+    { "id": "init", "label": "Init", "fromCol": 0, "toCol": 1 },
+    { "id": "run", "label": "Run", "fromCol": 2, "toCol": 5 }
+  ],
+  "mainPath": ["start", "worktree", "tmux", "goal1", "goal2", "done"],
+  "nodes": [
+    { "id": "start", "lane": "runner", "col": 0, "type": "backend", "label": "Start" },
+    { "id": "worktree", "lane": "runner", "col": 1, "type": "database", "label": "Worktree" },
+    { "id": "tmux", "lane": "session", "col": 2, "type": "cloud", "label": "Tmux" },
+    { "id": "goal1", "lane": "session", "col": 3, "type": "backend", "label": "Goal1" },
+    { "id": "goal2", "lane": "session", "col": 4, "type": "backend", "label": "Goal2" },
+    { "id": "done", "lane": "runner", "col": 5, "type": "backend", "label": "Done" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "start", "to": "worktree", "role": "main" },
+    { "id": "e2", "from": "worktree", "to": "tmux", "role": "main" },
+    { "id": "e3", "from": "tmux", "to": "goal1", "role": "main" },
+    { "id": "e4", "from": "goal1", "to": "goal2", "role": "main" },
+    { "id": "e5", "from": "goal2", "to": "done", "role": "main" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Flow", "items": ["Create worktree", "Launch tmux", "Goal1: implement", "Goal2: verify", "Push + MR"] },
+    { "dot": "emerald", "title": "Signals", "items": ["goal_complete", "ac_result"] }
+  ]
+}

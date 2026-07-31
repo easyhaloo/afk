@@ -42,3 +42,4 @@ dump.rdb
 
 # Git worktrees
 .worktrees/
+.playwright-mcp/

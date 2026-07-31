@@ -1,23 +1,8 @@
 import React from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, Stdout } from 'ink-testing-library';
-import { Box, Text } from 'ink';
+import { render } from 'ink-testing-library';
+import { Box } from 'ink';
 import { Notification } from './Notification';
-
-// Mock stdout with explicit dimensions for absolute positioning
-function createMockStdout(columns = 80, rows = 24) {
-  return {
-    columns,
-    rows,
-    frames: [] as string[],
-    _lastFrame: '' as string | undefined,
-    write(frame: string) {
-      this.frames.push(frame);
-      this._lastFrame = frame;
-    },
-    lastFrame: () => this._lastFrame,
-  } as unknown as Stdout;
-}
 
 // ink-testing-library rendering tests
 // Note: position:absolute requires terminal context. We test the component

@@ -52,6 +52,9 @@ export function useData(currentView: View, currentProject: Project | null) {
   const [projectPage, setProjectPage] = useState(1);
   const [projectHasMore, setProjectHasMore] = useState(false);
 
+  // Track previous project for change detection
+  const prevProjectRef = useRef<number | null>(null);
+
   // Mount: load tasks + sessions once
   useEffect(() => {
     (async () => {
@@ -66,40 +69,56 @@ export function useData(currentView: View, currentProject: Project | null) {
 
   // View / project change: load data
   useEffect(() => {
-    const projectKey = currentProject ? String(currentProject.id) : '';
+    fileLogger.info({ currentView, projectsLen: projects.length, currentProjectId: currentProject?.id }, 'useData view effect');
+    const projectKey = currentProject ? String(currentProject.id) : 'all';
 
     if (currentView === 'issues') {
+      const isProjectChanged = prevProjectRef.current !== (currentProject?.id ?? null);
       const isFirstPageLoad = issuePage === 1 && issues.length === 0;
-      const isProjectChanged = projectKey !== issueProjectKey;
+
+      // If project changed, reset pagination and clear issues
       if (isProjectChanged) {
         setIssuePage(1);
         setIssues([]);
+        setIssueHasMore(false);
         setIssueProjectKey(projectKey);
+        prevProjectRef.current = currentProject?.id ?? null;
       }
-      // Try disk cache for the first page of this project's issues regardless
-      // of whether `currentProject` changed — works for both cold boot (first
-      // ever visit) and return-to-scope after navigation.
+
+      // Try disk cache first for initial load
       if (isFirstPageLoad || isProjectChanged) {
         const cached = readIssuesList(projectKey);
         if (cached && cached.items.length > 0) {
           setIssues(cached.items);
           setIssueHasMore(cached.hasMore);
           setIssuePage(2);
-          if (isProjectChanged) return;
-          // First-page cache hit on initial visit — skip network.
-          if (isFirstPageLoad) return;
+          // Background refresh
+          (async () => {
+            try {
+              const data = await fetchIssues({ projectId: currentProject?.id ?? null, page: 1, perPage: PER_PAGE });
+              setIssues(data.issues);
+              setIssueHasMore(data.hasMore);
+              if (data.issues.length > 0) {
+                writeIssuesList(projectKey, data.issues, data.hasMore);
+              }
+            } catch { /* swallow background refresh errors */ }
+          })();
+          return;
         }
       }
-      const pageToLoad = isProjectChanged || isFirstPageLoad ? 1 : issuePage;
+
+      // Fetch from network
+      const pageToLoad = isProjectChanged ? 1 : issuePage;
       (async () => {
         setLoading(true);
         try {
-          const data = await fetchIssues({ projectId: currentProject?.id, page: pageToLoad, perPage: PER_PAGE });
-          const nextIssues = (isProjectChanged || isFirstPageLoad) ? data.issues : mergeIssues(issues, data.issues);
+          const data = await fetchIssues({ projectId: currentProject?.id ?? null, page: pageToLoad, perPage: PER_PAGE });
+          const nextIssues = isProjectChanged ? data.issues : mergeIssues(issues, data.issues);
           setIssues(nextIssues);
           setIssueHasMore(data.hasMore);
           if (!isProjectChanged) setIssuePage(p => p + 1);
-          // Persist the cumulative issue list so the next process start is instant.
+          else setIssuePage(2);
+          // Persist cache
           if (nextIssues.length > 0) {
             writeIssuesList(projectKey, nextIssues, data.hasMore);
           }
@@ -112,13 +131,15 @@ export function useData(currentView: View, currentProject: Project | null) {
     }
 
     if (currentView === 'projects') {
+      fileLogger.info({ projectsLen: projects.length, hasMore: projectHasMore }, 'projects view active');
       if (projects.length === 0) {
         const cached = readProjectsList();
         if (cached && cached.items.length > 0) {
+          fileLogger.info({ cachedLen: cached.items.length }, 'using cached projects');
           setProjects(cached.items);
           setProjectHasMore(cached.hasMore);
           setProjectPage(2);
-          // Background refresh to validate staleness — fire and forget.
+          // Background refresh to validate staleness
           (async () => {
             try {
               const data = await fetchProjects();
@@ -129,10 +150,12 @@ export function useData(currentView: View, currentProject: Project | null) {
           })();
           return;
         }
+        fileLogger.info('no cache, fetching from network');
         (async () => {
           setLoading(true);
           try {
             const data = await fetchProjects();
+            fileLogger.info({ fetchedLen: data.projects.length }, 'fetchProjects result');
             setProjects(data.projects);
             setProjectHasMore(data.hasMore);
             setProjectPage(2);
@@ -147,14 +170,12 @@ export function useData(currentView: View, currentProject: Project | null) {
     }
   }, [currentView, currentProject]);
 
-  // Project detail — backed by a TTL + in-flight cache so re-entering the
-  // detail screen for a project we already viewed within DETAIL_TTL_MS is
-  // instant and issues zero GitLab API calls.
+  // Project detail — backed by a TTL + in-flight cache
   const detailCacheRef = useRef<Map<number, { at: number; data: Awaited<ReturnType<typeof fetchProjectDetail>> }>>(new Map());
   const detailInFlightRef = useRef<Map<number, Promise<Awaited<ReturnType<typeof fetchProjectDetail>>>>>(new Map());
 
   const loadProjectDetail = useCallback(async (project: Project) => {
-    // 1. In-memory cache (fastest, survives re-renders within one process)
+    // 1. In-memory cache
     const memCached = detailCacheRef.current.get(project.id);
     if (memCached && Date.now() - memCached.at < DETAIL_TTL_MS) {
       setProjectBranches(memCached.data.branches);
@@ -162,7 +183,7 @@ export function useData(currentView: View, currentProject: Project | null) {
       setProjectCommits(memCached.data.commits);
       return;
     }
-    // 2. Disk cache (survives process restart)
+    // 2. Disk cache
     const diskCached = readDetail(project.id);
     if (diskCached) {
       setProjectBranches(diskCached.branches);
@@ -173,7 +194,7 @@ export function useData(currentView: View, currentProject: Project | null) {
       }});
       return;
     }
-    // 3. Network — share the promise across concurrent calls.
+    // 3. Network
     let p = detailInFlightRef.current.get(project.id);
     if (!p) {
       p = fetchProjectDetail(project.id);
@@ -213,19 +234,16 @@ export function useData(currentView: View, currentProject: Project | null) {
     return task;
   }, [reloadTasks]);
 
-  /** Create a task from an issue AND launch autonomous implementation in background. */
   const launchFromIssue = useCallback(async (issue: Issue, options: { branch: string; session: string; worktree: string }): Promise<void> => {
     const task = await addTaskFromIssue(issue, options);
     if (!task.session) return;
     await launchTask(issue.iid, task.session);
   }, [addTaskFromIssue]);
 
-  /** Launch autonomous implementation for an existing task (by session name). */
   const launchExistingTask = useCallback(async (iid: number, session: string): Promise<void> => {
     await launchTask(iid, session);
   }, []);
 
-  /** Drop all cached project-detail responses — used by full refresh. */
   const invalidateDetailCache = useCallback(() => {
     detailCacheRef.current.clear();
     clearDiskDetailCache();
@@ -238,7 +256,7 @@ export function useData(currentView: View, currentProject: Project | null) {
     if (loading || !issueHasMore) return;
     setLoading(true);
     try {
-      const data = await fetchIssues({ projectId: currentProject?.id, page: issuePage, perPage: PER_PAGE });
+      const data = await fetchIssues({ projectId: currentProject?.id ?? null, page: issuePage, perPage: PER_PAGE });
       let mergedItems: Issue[] = [];
       setIssues(prev => {
         mergedItems = mergeIssues(prev, data.issues);
@@ -246,10 +264,8 @@ export function useData(currentView: View, currentProject: Project | null) {
       });
       setIssueHasMore(data.hasMore);
       setIssuePage(p => p + 1);
-      // Persist the cumulative list so a later process sees all issues
-      // we've paged through.
       if (mergedItems.length > 0) {
-        writeIssuesList(issueProjectKey, mergedItems, data.hasMore);
+        writeIssuesList(issueProjectKey || 'all', mergedItems, data.hasMore);
       }
     } finally {
       setLoading(false);

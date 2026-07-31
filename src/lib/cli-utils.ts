@@ -74,8 +74,8 @@ export function handleCommandError(error: unknown, context?: string): never {
  * @param fallback - Fallback value to return
  */
 export function logAndReturn<T>(error: unknown, context: string, fallback: T): T {
-  const message = error instanceof Error ? error.message : String(error);
-  logger.warn({ context, err: message }, 'non-critical operation failed');
+  // Pass the error object itself: pino's err serializer records the stack.
+  logger.warn({ context, err: error }, 'non-critical operation failed');
   return fallback;
 }
 

@@ -117,6 +117,16 @@ export class TmuxClient {
   }
 
   /**
+   * Hard-interrupt the running turn: send C-c (cancels generation, returns
+   * to the input prompt). Must use a non-literal send-keys — sendKeys types
+   * with `--` literal mode and appends C-m, so control keys need this path.
+   * When idle, C-c just clears the input box (harmless).
+   */
+  async interrupt(session: string, window: string): Promise<void> {
+    await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-c']);
+  }
+
+  /**
    * Create a new window in an existing session with a command
    */
   async newWindow(session: string, command: string): Promise<void> {

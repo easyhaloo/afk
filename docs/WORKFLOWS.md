@@ -54,26 +54,30 @@ flowchart TD
     B -->|"AC 存在, Base 标签, 无阻塞"| C["Worktree 创建: afk-issue-iid"]
     B -->|失败| Z1["标签: blocked, 跳过"]
 
-    C --> D["Tmux 会话管理: afk-issue-iid, 启动 Claude Code"]
-    D --> E["实现阶段: 调用 /afk-implement, 遵循 TDD 方法论"]
-    E --> F["Signal 检测: 每 5s 轮询, 超时 2h 可配置"]
+    C --> D["Tmux 会话管理: afk-issue-iid, 启动 Claude Code + watchdog"]
+    D --> E["实现阶段: /goal 实现 issue, 遵循 TDD 方法论"]
+    E --> F["Runner 轮询: 信号文件 + statusline token 用量 (每 2s)"]
 
-    F -->|goal_complete| G[AC 验证]
-    F -->|goal_failed| Z2["标签: failed"]
-    F -->|blocked| Z3["标签: blocked, 评论说明"]
+    F -->|goal_complete| G["AC 验证阶段: /goal 验证 AC"]
+    F -->|"token ≥ 阈值"| H["上下文交接: 打断 → 总结 → 杀会话 → 重启 → 注入总结继续"]
+    F -->|timeout| Z2["超时: 评论 + mode::hitl, 保留 worktree"]
 
-    G -->|PASS| H["MR/PR 创建: push 分支, 关联 Closes iid"]
-    G -->|FAIL| Z4[重试或升级 HITL]
+    G -->|ac_result| I["MR/PR 创建: push 分支, 关联 Closes iid"]
+    G -->|"token ≥ 阈值"| H
+    G -->|timeout| Z2
 
-    H --> I["清理阶段: 标签 in-review, 保留 worktree, 归档日志"]
+    H --> E
+    H -.->|"预算耗尽/重启失败"| Z3["终止式交接: handoff::active, 人工恢复"]
+
+    I --> J["清理: stage::qa, 删除 worktree"]
 
     classDef success fill:#d4edda,stroke:#28a745
     classDef fail fill:#f8d7da,stroke:#dc3545
     classDef process fill:#e1f5ff,stroke:#0066cc
 
-    class H,I success
-    class Z1,Z2,Z3,Z4 fail
-    class A,C,D,E,F,G process
+    class I,J success
+    class Z1,Z2,Z3 fail
+    class A,C,D,E,F,G,H process
 ```
 
 ## 调度器工作流
@@ -350,28 +354,51 @@ Issue #123: "添加用户认证"
 
 ## Signal 类型
 
-工作流通过类型化 signal 通信状态：
+工作流通过类型化 signal 通信状态（写入 `<worktree>/.afk-signal.json`，由 agent 或 watchdog 写入，Runner 轮询读取）：
 
 ```typescript
 type SignalType =
-  | 'goal_complete'   // 成功，准备审查
-  | 'goal_failed'     // 测试失败，有阻塞
-  | 'blocked'         // 需要外部依赖
-  | 'needs_input'     // 需要澄清
-  | 'progress'        // 中间更新
+  | 'goal_complete'    // Phase 1 完成：实现交付（summary 必填）
+  | 'ac_result'        // Phase 2 完成：AC 验证结果
+  | 'timeout'          // watchdog 硬超时（分离进程写入）
+  | 'context_high'     // 上下文超长（兼容保留；实际检测由 Runner 轮询 statusline，见下）
+  | 'handoff_ready'    // 交接总结完成（summary 必填）
 
 interface Signal {
   type: SignalType;
   timestamp: string;
-  sha?: string;          // Git commit SHA
-  summary: string;       // 人类可读消息
-  metadata?: {           // 可选上下文
-    tests_passed?: number;
-    tests_failed?: number;
-    blocker_type?: string;
-  };
+  summary?: string;        // goal_complete / handoff_ready 必填
+  sha?: string;            // Git commit SHA
+  result?: 'PASS' | 'FAIL'; // ac_result
+  tests_run?: number;
+  tests_passed?: number;
 }
 ```
+
+## 上下文交接（Context Handoff）
+
+上下文接近上限时，workflow **自动打断当前 Claude 会话，交接上下文并重启会话继续执行**，而不是终止等待人工恢复。
+
+### 检测机制
+
+- **Runner 轮询 statusline**：agent 无法可靠感知自己的上下文上限（Claude Code 的 TUI 警告在渲染层不可见、压缩系统消息到达时已太迟）。Runner 在等待周期（2s）内同时检查信号文件与 `<worktree>/.afk/claude-status.json` 的 token 用量（statusline 每个 turn 写入）。
+- **阈值**：绝对 token 数，默认 `CONTEXT.HIGH_THRESHOLD` = 100,000，可配置 `--context-high <tokens>`。
+- **信号优先**：agent 已写完成信号时不打断（信号文件检查先于 token 检查）。
+
+### 交接流程（自动续跑）
+
+1. **打断**：先协作式打字纯文本交接指令 —— ① `git add -A && git commit`（无改动可跳过）→ ② 3 问总结（已完成/正在做/接下来）→ ③ 写 `handoff_ready` 信号。60s 内无响应则发 C-c 硬打断重试一次；仍无响应则用 pane 快照兜底。
+2. **交接文档**：总结 + 快照 + commit sha 写入 `~/.claude/logs/afk/handoff-<iid>-<gen>.md`（**worktree 外**，避免被 `git add -A` 提交进 MR）。
+3. **恢复评论**：同一内容发 issue 评论（任务中断时的恢复文档）。
+4. **重启**：杀 tmux 会话 → 清理信号文件与旧 statusline 数据 → 重建同名 session → 重启 watchdog（每代会话拥有完整的 hard timeout）。
+5. **继续**：新会话收到「继续实现/验证 issue #N（先阅读交接文档）」指令，循环直到完成信号或再次交接。
+
+### 预算与兜底
+
+- `--max-handoffs <n>`（默认 3）：自动续跑轮次上限，两个 phase（实现/验证）**全局共享**。
+- **预算耗尽** → 终止式交接：`handoff::active` label + 评论（含恢复指引与交接文档路径），人工移除 label 后重新触发 `/afk-implement <iid>` 恢复。
+- **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（保留已发恢复评论），不落入 crash 路径。
+- 低于阈值的 `context_high` 信号（误报）→ 静默停止，不发评论不贴标签（`context_low` 路径）。
 
 ## 错误处理
 

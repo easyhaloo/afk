@@ -40,6 +40,12 @@ export const CONTEXT = {
 } as const;
 
 /**
+ * Max automatic context-handoff rounds per workflow run before falling back
+ * to the terminal (manual-resume) handoff.
+ */
+export const MAX_HANDOFFS = 3;
+
+/**
  * Port numbers for services
  */
 export const PORTS = {

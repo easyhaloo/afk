@@ -1,51 +1,34 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import { Issue } from '../../../types/board';
+import { PreviewPanel } from '../views/PreviewPanel';
 
 /**
- * BoardView - Kanban board view for issues
+ * BoardView - Split-panel board: left 60% issue list + right 40% preview
  *
- * Supports mixed GitLab and GitHub issues in a single board.
- * Issues are grouped by stage labels into columns: Open, In Progress, Blocked, Done.
+ * Replaces the old kanban 4-column layout with a list+preview layout.
+ * Preview shows selected issue's title, description, labels, state.
+ * Preview auto-hides when terminal width < 100 columns.
  */
-
-interface BoardColumn {
-  title: string;
-  issues: Issue[];
-  color: string;
-}
-
 interface BoardViewProps {
   issues: Issue[];
   selectedIndex: number;
   scrollOffset: number;
   viewportHeight: number;
+  width?: number;
 }
 
-/**
- * Group issues by column based on labels
- */
-function groupIssuesByColumn(issues: Issue[]): Record<string, BoardColumn> {
-  const columns: Record<string, BoardColumn> = {
-    open: { title: 'Open', issues: [], color: 'cyan' },
-    'in-progress': { title: 'In Progress', issues: [], color: 'yellow' },
-    blocked: { title: 'Blocked', issues: [], color: 'red' },
-    done: { title: 'Done', issues: [], color: 'green' },
-  };
-
-  for (const issue of issues) {
-    if (issue.labels.includes('stage::afk-in-progress') || issue.labels.includes('in-progress')) {
-      columns['in-progress'].issues.push(issue);
-    } else if (issue.labels.includes('blocked')) {
-      columns.blocked.issues.push(issue);
-    } else if (issue.labels.includes('stage::qa') || issue.labels.includes('done') || issue.state === 'closed') {
-      columns.done.issues.push(issue);
-    } else {
-      columns.open.issues.push(issue);
-    }
+function getIssueStage(issue: Issue): { label: string; color: string } {
+  if (issue.labels.includes('stage::afk-in-progress') || issue.labels.includes('in-progress')) {
+    return { label: 'in-progress', color: 'yellow' };
   }
-
-  return columns;
+  if (issue.labels.includes('blocked')) {
+    return { label: 'blocked', color: 'red' };
+  }
+  if (issue.labels.includes('stage::qa') || issue.labels.includes('done') || issue.state === 'closed') {
+    return { label: 'done', color: 'green' };
+  }
+  return { label: 'open', color: 'cyan' };
 }
 
 export const BoardView: React.FC<BoardViewProps> = ({
@@ -53,50 +36,60 @@ export const BoardView: React.FC<BoardViewProps> = ({
   selectedIndex,
   scrollOffset,
   viewportHeight,
+  width: parentWidth,
 }) => {
-  const columns = groupIssuesByColumn(issues);
-  const columnKeys = ['open', 'in-progress', 'blocked', 'done'];
+  const [W, setW] = useState(parentWidth || process.stdout.columns || 80);
 
-  // Flatten issues for selection indexing
-  const flatIssues: Array<{ issue: Issue; columnKey: string }> = [];
-  for (const key of columnKeys) {
-    for (const issue of columns[key].issues) {
-      flatIssues.push({ issue, columnKey: key });
-    }
-  }
+  useEffect(() => {
+    if (parentWidth) { setW(parentWidth); return; }
+    const id = setInterval(() => {
+      const c = process.stdout.columns || 80;
+      setW(prev => prev !== c ? c : prev);
+    }, 500);
+    return () => clearInterval(id);
+  }, [parentWidth]);
 
-  const selectedItem = flatIssues[selectedIndex];
+  const LIST_W = W >= 100 ? Math.floor(W * 0.6) : W;
+  const selectedIssue = issues[selectedIndex];
 
   return (
-    <Box flexDirection="column" width="100%">
-      <Box flexDirection="row" justifyContent="space-around">
-        {columnKeys.map(key => {
-          const column = columns[key];
+    <Box flexDirection="row" width={W} flexGrow={1}>
+      {/* Left: Issue list */}
+      <Box flexDirection="column" width={LIST_W} flexGrow={1}>
+        <Text bold color="cyan">board · {issues.length} issues</Text>
+        <Text dimColor>{'─'.repeat(Math.min(LIST_W - 2, 50))}</Text>
+        {issues.length === 0 && <Text dimColor italic>no issues</Text>}
+        {issues.slice(scrollOffset, scrollOffset + viewportHeight).map((issue, idx) => {
+          const globalIdx = scrollOffset + idx;
+          const isSelected = globalIdx === selectedIndex;
+          const stage = getIssueStage(issue);
           return (
-            <Box key={key} flexDirection="column" width="25%" paddingX={1}>
-              <Text bold color={column.color}>
-                {column.title} ({column.issues.length})
+            <Box key={issue.iid} flexDirection="row" alignItems="flex-start" overflow="hidden">
+              <Text
+                backgroundColor={isSelected ? 'blue' : undefined}
+                color={isSelected ? 'white' : stage.color}
+                bold={isSelected}
+                width="100%"
+                wrap="truncate"
+              >
+                {isSelected ? '▶ ' : '  '}
+                <Text color={stage.color} dimColor>[{stage.label}]</Text>
+                {' '}{issue.title}
               </Text>
-              <Text color="gray">{'─'.repeat(20)}</Text>
-              {column.issues.slice(scrollOffset, scrollOffset + viewportHeight).map((issue) => {
-                const isSelected = selectedItem?.issue === issue;
-
-                return (
-                  <Box key={issue.iid} marginTop={1}>
-                    <Text
-                      backgroundColor={isSelected ? 'blue' : undefined}
-                      color={isSelected ? 'white' : 'white'}
-                    >
-                      {isSelected ? '▶ ' : '  '}
-                      #{issue.iid} {issue.title.slice(0, 15)}...
-                    </Text>
-                  </Box>
-                );
-              })}
             </Box>
           );
         })}
       </Box>
+
+      {/* Right: Preview */}
+      {W >= 100 && (
+        <Box flexGrow={1} flexDirection="row">
+          <Box flexDirection="column" justifyContent="flex-start" paddingX={0}>
+            <Text dimColor>{'│'}</Text>
+          </Box>
+          <PreviewPanel issue={selectedIssue} width={W} />
+        </Box>
+      )}
     </Box>
   );
 };

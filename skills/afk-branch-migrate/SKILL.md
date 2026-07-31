@@ -55,13 +55,7 @@ Create rollback checkpoint before proceeding.
 ### 6. Verify
 - **MANDATORY: Run build/compile immediately after applying changes**
 - Do NOT skip or defer compilation — migration is NOT complete until code compiles
-- Auto-detect build command by exploring codebase:
-  - Check for `package.json` → use `pnpm build` or `npm run build`
-  - Check for `Cargo.toml` → use `cargo build`
-  - Check for `go.mod` → use `go build`
-  - Check for `Makefile` → use `make`
-  - Check for `CMakeLists.txt` → use `cmake && make`
-  - If ambiguous, ask user which command to run
+- Auto-detect and run the appropriate build command by exploring the codebase
 - Run relevant tests if available
 - Report: success / partial / failed + rollback option
 

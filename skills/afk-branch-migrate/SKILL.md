@@ -1,11 +1,11 @@
 ---
 name: afk-branch-migrate
+disable-model-invocation: true
 description: >-
   Cross-branch code migration — when you need to cherry-pick code from
   one branch to another with large differences. Analyzes commit content,
   classifies core vs incidental changes, assesses conflict risk, and
   guides step-by-step migration with rollback support. Pure Git only.
-disable-model-invocation: false
 ---
 
 # Branch Migrate

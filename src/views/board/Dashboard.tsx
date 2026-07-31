@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import figures from 'figures';
 import { exec } from 'child_process';
+import { join } from 'path';
 import { Task, Issue, Project } from '../../types/board';
 import { TmuxClient } from '../../lib/core/tmux/tmux';
 import { useNavigation } from './navigation/index';
@@ -178,7 +179,7 @@ export const Dashboard: React.FC = () => {
     notify(`creating task from #${issue.iid}...`, 'info');
     const branch = `issue-${issue.iid}-${issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)}`;
     try {
-      const newTask = await addTaskFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch });
+      const newTask = await addTaskFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: join(process.cwd(), '.worktrees', `issue-${issue.iid}`) });
       await reloadTasks();
       dispatch('issue:create-task', newTask);
       notify(`created task #${newTask.iid}: ${newTask.title}`, 'success');
@@ -192,7 +193,7 @@ export const Dashboard: React.FC = () => {
       notify(`launching #${issue.iid}...`, 'info');
       const branch = `issue-${issue.iid}-${issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)}`;
       try {
-        await launchFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch });
+        await launchFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: join(process.cwd(), '.worktrees', `issue-${issue.iid}`) });
         await reloadTasks();
         dispatch('issue:launch');
         notify(`launched: issue-${issue.iid}`, 'success');
@@ -254,7 +255,7 @@ export const Dashboard: React.FC = () => {
       if (!issue) continue;
       const branch = `issue-${issue.iid}-${issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)}`;
       try {
-        await addTaskFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch });
+        await addTaskFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: join(process.cwd(), '.worktrees', `issue-${issue.iid}`) });
         ok++;
       } catch { /* skip */ }
     }

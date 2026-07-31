@@ -80,18 +80,85 @@ export class WorkflowRunner {
       completionTimeoutMs = TIMEOUTS.WORKFLOW_COMPLETION_TIMEOUT,
     } = options;
 
-    let succeeded = false;
+    // Reset cleanup state for this run
+    this._cleanupType = 'none';
+    this._lastTimeoutInfo = undefined;
+
+    const worktreePath = `${process.cwd()}/.worktrees/issue-${iid}`;
+    let runResult: { success: boolean; url?: string } | undefined;
+
     try {
-      const result = await this.runBody(options, {
+      runResult = await this.runBody(options, {
         iid, session, targetBranch, baseBranch,
         maxRetries, hardTimeoutMs, completionTimeoutMs,
       });
-      succeeded = result.success;
-      return result;
+      return runResult;
+    } catch (error) {
+      logger.error({ iid, error: (error as Error).message }, 'workflow runBody threw unexpectedly');
+      runResult = { success: false };
+      throw error;
     } finally {
-      // Cleanup: close Control Mode connection and worktree
+      if (this._cleanupType !== 'none') return; // Already cleaned up by handler
+
+      if (!runResult?.success) {
+        await this.cleanupOnFailure(iid, worktreePath, session, hardTimeoutMs);
+      } else {
+        // Success path: keep worktree, just close tmux connection
+        await this.tmux.closeSession();
+      }
+    }
+  }
+
+  // Track which cleanup handler ran (to avoid double cleanup in finally)
+  private _cleanupType: 'none' | 'timeout' | 'crashed' | 'success' = 'none';
+
+  /**
+   * Cleanup on failure: update GitHub issue first, then clean local resources.
+   * This ensures issue status is updated even if process crashes afterward.
+   */
+  private async cleanupOnFailure(
+    iid: number,
+    worktreePath: string | undefined,
+    session: string,
+    timeoutMs: number
+  ): Promise<void> {
+    try {
+      // Step 1: Update GitHub issue (comment + labels)
+      if (this._lastTimeoutInfo?.iid === iid) {
+        // Timeout case: use the pre-recorded timeout info
+        await this.tracker.addComment(iid, `<!-- afk-event: timeout -->
+**⏱️ Hard Timeout**
+
+Session exceeded ${Math.round(this._lastTimeoutInfo.timeoutMs / 60000)}min and was force killed.
+
+- **Log:** \`${this._lastTimeoutInfo.logPath}\`
+
+**Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
+        this._lastTimeoutInfo = undefined;
+      } else {
+        // Unexpected crash case
+        await this.tracker.addComment(iid, `<!-- afk-event: crashed -->
+**💥 Workflow Failed**
+
+Session was interrupted before completion.
+
+**Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
+      }
+      await this.tracker.addLabel(iid, 'mode::hitl');
+      await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
+    } catch (err) {
+      logger.error({ iid, error: (err as Error).message }, 'failed to update GitHub on cleanup');
+    }
+
+    // Step 2: Cleanup local resources
+    try {
+      await this.tmux.killSession(session);
+    } catch { /* ignore if session already gone */ }
+    try {
       await this.tmux.closeSession();
-      await this.worktree.cleanup(iid, !succeeded);
+    } catch { /* ignore */ }
+    if (worktreePath) {
+      await this.worktree.updateStatus(iid, 'failed');
     }
   }
 
@@ -213,7 +280,8 @@ export class WorkflowRunner {
   }
 
   /**
-   * Handle hard timeout: capture session, log, comment, cleanup
+   * Handle hard timeout: capture session, log to file, return failure result.
+   * GitHub update and local cleanup are handled by run()'s finally block.
    */
   private async handleTimeout(
     iid: number,
@@ -227,21 +295,14 @@ export class WorkflowRunner {
     await (await import('fs')).promises.mkdir(this.logDir, { recursive: true });
     await (await import('fs')).promises.writeFile(logPath, snapshot, 'utf-8');
 
-    await this.tracker.addComment(iid, `<!-- afk-event: timeout -->
-**⏱️ Hard Timeout**
-
-Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
-
-- **Log:** \`${logPath}\`
-
-**Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
-
-    await this.tracker.addLabel(iid, 'mode::hitl');
-    await this.tmux.killSession(session);
-    await this.worktree.updateStatus(iid, 'failed');
+    // Store timeout info for cleanupOnFailure to post to GitHub
+    this._lastTimeoutInfo = { iid, timeoutMs, logPath };
+    this._cleanupType = 'timeout'; // Mark as cleaned up so finally skips
 
     return { success: false };
   }
+
+  private _lastTimeoutInfo?: { iid: number; timeoutMs: number; logPath: string };
 
   /**
    * Verify context_high signal objectively before triggering handoff.
@@ -320,6 +381,7 @@ ${snapshot}
 **To resume:** Remove \`handoff::active\` label and re-trigger \`/afk-implement ${iid}\``);
 
     await this.tmux.killSession(session);
+    this._cleanupType = 'success'; // Mark as cleaned up so finally skips
     return { success: false };
   }
 

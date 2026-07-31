@@ -115,6 +115,7 @@ export class TaskService {
       status: 'pending',
       progress: '0%',
       platform: options.platform,
+      worktree: options.worktree,
     };
   }
 

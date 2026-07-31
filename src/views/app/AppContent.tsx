@@ -31,6 +31,7 @@ interface Props {
   onFetchMoreProjects: () => void;
   onInvalidateDetailCache: () => void;
   onAttachSession?: (task: Task) => void;
+  onViewChange?: (view: string) => void;
 }
 
 export function AppContent({
@@ -40,10 +41,15 @@ export function AppContent({
   onLoadProjectDetail, onReloadTasks, onRemoveSession,
   onAddTaskFromIssue, onLaunchFromIssue, onLaunchExistingTask,
   onFetchMoreIssues, onFetchMoreProjects, onInvalidateDetailCache,
-  onAttachSession,
+  onAttachSession, onViewChange,
 }: Props) {
   const { state, dispatch, currentView, currentContext, isDetailMode } = useState();
   const actions = createActions({ state, dispatch, currentView, currentContext, isDetailMode });
+
+  // Notify parent when view changes (for data loading)
+  React.useEffect(() => {
+    onViewChange?.(currentView);
+  }, [currentView, onViewChange]);
 
   const W = process.stdout.columns || 80;
   const H = process.stdout.rows || 24;
@@ -176,7 +182,11 @@ export function AppContent({
     if (key.shift && input === 'G') actions.selectionBottom(items.length);
 
     // Enter detail
-    if (key.return) { actions.viewDetail(); return; }
+    if (key.return) {
+      if (items.length === 0) return; // Guard: don't enter detail with empty list
+      actions.viewDetail();
+      return;
+    }
 
     // Refresh
     if (input === 'r') {

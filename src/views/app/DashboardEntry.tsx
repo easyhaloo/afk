@@ -33,7 +33,6 @@ export function DashboardEntry() {
   // After splash signals showApp, wait for fade-out then signal appReady
   useEffect(() => {
     if (showApp) {
-      // Splash fade-out takes ~500ms, give a bit extra
       const timer = setTimeout(() => setAppReady(true), 600);
       return () => clearTimeout(timer);
     }
@@ -54,6 +53,11 @@ export function DashboardEntry() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [issueProject, setIssueProject] = useState<Project | null>(null);
   const [currentView, setCurrentView] = useState<string>('tasks');
+
+  // Sync currentView from AppContent back to DashboardEntry for data loading
+  const handleViewChange = useCallback((view: string) => {
+    setCurrentView(view);
+  }, []);
 
   // Load real data once ready
   useEffect(() => {
@@ -80,9 +84,9 @@ export function DashboardEntry() {
   const [projectTags, setProjectTags] = useState<any[]>([]);
   const [projectCommits, setProjectCommits] = useState<any[]>([]);
 
-  // Load issues when view changes
+  // Load issues when view changes (load even if isReady is false - user explicitly switched view)
   useEffect(() => {
-    if (!isReady || currentView !== 'issues') return;
+    if (currentView !== 'issues') return;
     const projectKey = issueProject ? String(issueProject.id) : '';
     const cached = readIssuesList(projectKey);
     if (cached && cached.items.length > 0) {
@@ -98,11 +102,11 @@ export function DashboardEntry() {
       setIssuePage(2);
       if (data.issues.length > 0) writeIssuesList(projectKey, data.issues, data.hasMore);
     })();
-  }, [isReady, currentView, issueProject]);
+  }, [currentView, issueProject]);
 
-  // Load projects when view changes
+  // Load projects when view changes (load even if isReady is false - user explicitly switched view)
   useEffect(() => {
-    if (!isReady || currentView !== 'projects') return;
+    if (currentView !== 'projects') return;
     const cached = readProjectsList();
     if (cached && cached.items.length > 0) {
       setProjects(cached.items);
@@ -117,7 +121,7 @@ export function DashboardEntry() {
       setProjectPage(2);
       writeProjectsList(data.projects, data.hasMore);
     })();
-  }, [isReady, currentView]);
+  }, [currentView]);
 
   const loadProjectDetail = useCallback(async (project: Project) => {
     const memCached = detailCacheRef.current.get(project.id);
@@ -234,6 +238,7 @@ export function DashboardEntry() {
         onFetchMoreProjects={fetchMoreProjects}
         onInvalidateDetailCache={invalidateDetailCache}
         onAttachSession={handleAttachSession}
+        onViewChange={handleViewChange}
       />
       </StateProvider>
     </Box>

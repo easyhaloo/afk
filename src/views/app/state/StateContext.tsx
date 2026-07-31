@@ -113,6 +113,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         viewStack: [...state.viewStack, { view, context: {} }],
+        detailView: 'list',
         selectedIndex: 0,
         scrollOffset: 0,
       };

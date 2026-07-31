@@ -16,7 +16,9 @@ interface Props {
 export function DetailScreen({ item, view, height, width, branches = [], tags = [], commits = [] }: Props) {
   const [hoverIdx, setHoverIdx] = useState(-1);
 
-  if (!item) return <Box><Text color="gray">ℹ  no item selected</Text></Box>;
+  if (!item || !('iid' in item || 'id' in item || 'session' in item)) {
+    return <Box><Text color="gray">ℹ  no item selected</Text></Box>;
+  }
 
   const HDR = 1;
   const FTR = 1;

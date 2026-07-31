@@ -1,0 +1,96 @@
+- generic [active] [ref=e1]:
+  - toolbar "Diagram actions" [ref=e2]:
+    - button "Toggle color theme" [pressed] [ref=e3] [cursor=pointer]:
+      - generic [ref=e4]: ☼
+      - generic [ref=e5]: Light
+    - 'button "Visual style: Flow. Choose visual style" [ref=e7] [cursor=pointer]':
+      - generic [ref=e9]: Flow
+      - generic [ref=e10]: ▾
+    - button "Enter presentation stage" [ref=e11] [cursor=pointer]:
+      - generic [ref=e12]: □
+      - generic [ref=e13]: Present
+    - button "Export diagram" [ref=e15] [cursor=pointer]:
+      - text: Export
+      - generic [ref=e16]: ▾
+  - generic [ref=e17]:
+    - generic [ref=e18]:
+      - generic [ref=e19]:
+        - heading "AFK-CLI Architecture" [level=1] [ref=e21]
+        - text: SIGNAL FLOW
+      - paragraph [ref=e22]: Autonomous development workflow CLI + Skills system
+    - generic [ref=e23]:
+      - img "AFK-CLI Architecture Autonomous development workflow CLI + Skills system" [ref=e24]:
+        - generic [ref=e27]: afk-cli
+        - generic [ref=e29]: TUI Layer
+        - group "Direct relationship explorer":
+          - 'button "Inspect relationship 1 of 9: afk CLI to Lazy Loader, cmd. Press Enter for details."'
+          - 'button "Inspect relationship 2 of 9: Lazy Loader to Commands, connects to. Press Enter for details."'
+          - 'button "Inspect relationship 3 of 9: Commands to TUI Dashboard, render. Press Enter for details."'
+          - 'button "Inspect relationship 4 of 9: Commands to Core Lib, connects to. Press Enter for details."'
+          - 'button "Inspect relationship 5 of 9: Commands to Workflow Runner, connects to. Press Enter for details."'
+          - 'button "Inspect relationship 6 of 9: Core Lib to Workflow Runner, signals. Press Enter for details."'
+          - 'button "Inspect relationship 7 of 9: Plugin Loader to Views, views. Press Enter for details."'
+          - 'button "Inspect relationship 8 of 9: Plugin Loader to Skills, load. Press Enter for details."'
+          - 'button "Inspect relationship 9 of 9: TUI Dashboard to Views, registry. Press Enter for details."'
+        - button "Focus afk CLI, Entry point, afk-cli" [ref=e34] [cursor=pointer]:
+          - generic [ref=e37]: afk CLI
+          - generic [ref=e38]: Entry point
+        - button "Focus Lazy Loader, Dynamic import, afk-cli" [ref=e39] [cursor=pointer]:
+          - generic [ref=e42]: Lazy Loader
+          - generic [ref=e43]: Dynamic import
+        - button "Focus Commands, board, scheduler..., afk-cli" [ref=e44] [cursor=pointer]:
+          - generic [ref=e47]: Commands
+          - generic [ref=e48]: board, scheduler...
+        - button "Focus TUI Dashboard, React + Ink, TUI Layer" [ref=e49] [cursor=pointer]:
+          - generic [ref=e52]: TUI Dashboard
+          - generic [ref=e53]: React + Ink
+        - button "Focus Core Lib, tmux, gitlab, github, afk-cli" [ref=e54] [cursor=pointer]:
+          - generic [ref=e57]: Core Lib
+          - generic [ref=e58]: tmux, gitlab, github
+        - button "Focus Workflow Runner, Signal-driven, afk-cli" [ref=e59] [cursor=pointer]:
+          - generic [ref=e62]: Workflow Runner
+          - generic [ref=e63]: Signal-driven
+        - button "Focus Plugin Loader, ~/.afk/plugins, afk-cli" [ref=e64] [cursor=pointer]:
+          - generic [ref=e67]: Plugin Loader
+          - generic [ref=e68]: ~/.afk/plugins
+        - button "Focus Skills, ~/.claude/skills/, Architecture component" [ref=e69] [cursor=pointer]:
+          - generic [ref=e72]: Skills
+          - generic [ref=e73]: ~/.claude/skills/
+        - button "Focus Views, View registry, afk-cli › TUI Layer" [ref=e74] [cursor=pointer]:
+          - generic [ref=e77]: Views
+          - generic [ref=e78]: View registry
+        - generic [ref=e79]: cmd
+        - generic [ref=e82]: render
+        - generic [ref=e85]: signals
+        - generic [ref=e88]: views
+        - generic [ref=e91]: load
+        - generic [ref=e94]: registry
+        - toolbar "Semantic legend" [ref=e97]:
+          - generic [ref=e98]: Legend
+          - button "Inspect Frontend, 2 nodes" [ref=e99] [cursor=pointer]:
+            - generic [ref=e102]: Frontend
+            - generic: "2"
+          - button "Inspect Backend, 6 nodes" [ref=e103] [cursor=pointer]:
+            - generic [ref=e106]: Backend
+            - generic: "6"
+          - button "Inspect External, 1 node" [ref=e107] [cursor=pointer]:
+            - generic [ref=e110]: External
+            - generic: "1"
+      - status [ref=e111]
+      - toolbar "Diagram view controls" [ref=e112]:
+        - button "Trace a directed route" [ref=e113] [cursor=pointer]: PATH
+        - button "Open semantic radar" [ref=e114] [cursor=pointer]: MAP
+        - button "Open semantic lens" [ref=e115] [cursor=pointer]: LENS
+        - button "Find a node" [ref=e116] [cursor=pointer]: ⌕
+        - button "Open diagram guide" [ref=e117] [cursor=pointer]: "?"
+        - button "Zoom out" [disabled] [ref=e118]: −
+        - button "Zoom in again to reveal tags and annotations. Reset diagram view" [ref=e119] [cursor=pointer]: READ 100%
+        - button "Zoom in" [ref=e120] [cursor=pointer]: +
+    - paragraph [ref=e121]:
+      - text: Architecture diagram • Built with Archify
+      - generic [ref=e122]:
+        - text: •
+        - link "Create yours ↗" [ref=e123] [cursor=pointer]:
+          - /url: https://tt-a1i.github.io/archify/start.html?type=architecture&source=artifact
+        - text: • Hover to trace • R route • Click to focus • +/− zoom • M radar • T theme • E export
+  - status

@@ -98,13 +98,17 @@ export class WorkflowRunner {
       runResult = { success: false };
       throw error;
     } finally {
-      if (this._cleanupType !== 'none') return; // Already cleaned up by handler
-
-      if (!runResult?.success) {
-        await this.cleanupOnFailure(iid, worktreePath, session, hardTimeoutMs);
-      } else {
-        // Success path: keep worktree, just close tmux connection
-        await this.tmux.closeSession();
+      // 'success' => handler (handoff) already cleaned up; skip. Otherwise run cleanup.
+      // Cast to the declared union: runBody may set _cleanupType to 'success' via
+      // handleHandoff, which TS's narrowing from the reset above cannot track.
+      const cleanupType = this._cleanupType as 'none' | 'timeout' | 'crashed' | 'success';
+      if (cleanupType !== 'success') {
+        if (!runResult?.success) {
+          await this.cleanupOnFailure(iid, worktreePath, session, hardTimeoutMs);
+        } else {
+          // Success path: keep worktree, just close tmux connection
+          await this.tmux.closeSession();
+        }
       }
     }
   }
@@ -295,9 +299,10 @@ Session was interrupted before completion.
     await (await import('fs')).promises.mkdir(this.logDir, { recursive: true });
     await (await import('fs')).promises.writeFile(logPath, snapshot, 'utf-8');
 
-    // Store timeout info for cleanupOnFailure to post to GitHub
+    // Store timeout info for cleanupOnFailure to post to GitHub.
+    // Don't set _cleanupType: finally must run cleanupOnFailure (timeout branch)
+    // to post the comment + labels. _lastTimeoutInfo selects the timeout branch.
     this._lastTimeoutInfo = { iid, timeoutMs, logPath };
-    this._cleanupType = 'timeout'; // Mark as cleaned up so finally skips
 
     return { success: false };
   }

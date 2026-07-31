@@ -6,9 +6,7 @@
 
 ## 架构图
 
-![AFK 架构](assets/afk-architecture.gif)
-
-**交互式版本**: [docs/afk-architecture.html](docs/afk-architecture.html)（支持缩放、搜索、主题切换）
+![AFK 架构](assets/afk-architecture.jpg)
 
 ## 特性
 

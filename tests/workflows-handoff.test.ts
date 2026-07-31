@@ -178,7 +178,13 @@ describe('WorkflowRunner auto handoff continuation', () => {
     await expect(fs.access(join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'))).resolves.toBeUndefined();
     await expect(fs.access(join(wtPath, '.afk', 'handoff', 'handoff-42-terminal.md'))).resolves.toBeUndefined();
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
-    expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'mode::hitl'); // finally skipped via _cleanupType='success'
+    expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'mode::hitl');
+    // Terminal comment EMBEDS the full doc (no file-path reference) + reason.
+    const terminalComment = String(tracker.addComment.mock.calls[tracker.addComment.mock.calls.length - 1][1]);
+    expect(terminalComment).toContain('# Handoff #42 (round terminal)');
+    expect(terminalComment).toContain('## Session Snapshot');
+    expect(terminalComment).toContain('已达最大交接轮数');
+    expect(terminalComment).not.toContain('Handoff doc');
   });
 
   it('total-token budget: accumulated usage across generations terminates', async () => {

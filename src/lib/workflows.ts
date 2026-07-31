@@ -437,12 +437,12 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     const info = await this.requestHandoffSummary(p.iid, p.session, p.wtPath);
 
     // Recovery doc in the worktree's .afk/handoff/ (gitignored, travels with the worktree).
-    const docPath = await this.writeHandoffDoc(p.wtPath, p.iid, p.gen, info);
+    const { path: docPath } = await this.writeHandoffDoc(p.wtPath, p.iid, p.gen, info);
 
-    // Recovery comment; no handoff::active label in auto mode (that label is
+    // In-progress record; no handoff::active label in auto mode (that label is
     // the manual-resume marker). Best-effort: a comment failure must not abort.
     await this.tracker
-      .addComment(p.iid, this.handoffComment({ ...info, iid: p.iid, tokens: p.tokens, gen: p.gen, docPath, auto: true }))
+      .addComment(p.iid, this.handoffComment({ ...info, iid: p.iid, tokens: p.tokens, gen: p.gen, docPath }))
       .catch(err => logger.warn({ iid: p.iid, err: (err as Error).message }, 'failed to post auto-handoff comment'));
 
     try {
@@ -543,7 +543,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     iid: number,
     gen: number | 'terminal',
     info: { summary: string | null; snapshot: string; sha: string; branch: string }
-  ): Promise<string> {
+  ): Promise<{ path: string; content: string }> {
     const handoffDir = join(worktreePath, '.afk', 'handoff');
     await fs.mkdir(handoffDir, { recursive: true });
     const docPath = join(handoffDir, `handoff-${iid}-${gen}.md`);
@@ -565,38 +565,29 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
       '',
     ].join('\n');
     await fs.writeFile(docPath, content, 'utf-8');
-    return docPath;
+    return { path: docPath, content };
   }
 
-  /** Issue comment for a handoff round. `auto: true` → no manual-resume footer. */
+  /** Issue comment for an AUTO handoff round (in-progress record; terminal uses the full doc). */
   private handoffComment(p: {
     iid: number;
     tokens: number;
-    gen: number | 'terminal';
+    gen: number;
     summary: string | null;
     snapshot: string;
     sha: string;
     branch: string;
     docPath: string;
-    auto: boolean;
-    terminalReason?: 'budget' | 'tokens';
   }): string {
-    const lines = [
+    return [
       '<!-- afk-event: handoff -->',
       '**🔄 Context Handoff**',
       '',
       `- **Reason:** context_high (~${p.tokens} tokens)`,
-      `- **Round:** ${p.gen}${p.auto ? '（自动继续中）' : ''}`,
+      `- **Round:** ${p.gen}（自动继续中）`,
       `- **Branch:** \`${p.branch}\``,
       `- **Commit:** \`${p.sha}\``,
       `- **Handoff doc:** \`${p.docPath}\``,
-    ];
-    if (p.terminalReason) {
-      lines.push(
-        `- **Terminal:** ${p.terminalReason === 'budget' ? '已达最大交接轮数' : '已达总 token 上限'}`,
-      );
-    }
-    lines.push(
       '',
       '### Summary',
       '',
@@ -609,14 +600,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
       p.snapshot,
       '```',
       '</details>',
-    );
-    if (!p.auto) {
-      lines.push(
-        '',
-        `**To resume:** Remove \`handoff::active\` label and re-trigger \`/afk-implement ${p.iid}\``,
-      );
-    }
-    return lines.join('\n');
+    ].join('\n');
   }
 
   /** Goal text for a resumed round: read the handoff doc(s) before continuing. */
@@ -636,8 +620,10 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
   /**
    * Terminal handoff (handoff budget or total-token budget exhausted):
-   * recovery comment + handoff::active label, session killed. The summary is
-   * captured into the doc; the worktree is retained for manual resume.
+   * handoff::active label + recovery comment, session killed. The recovery
+   * comment EMBEDS the full handoff doc (no file-path reference) — the
+   * resume path reads everything from the issue. The worktree (with the doc
+   * on disk) is retained for manual resume.
    */
   private async terminalHandoff(
     iid: number,
@@ -648,9 +634,17 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
   ): Promise<void> {
     this.killWatchdog(); // stale watchdog must not later write a timeout signal into the retained worktree
     const info = await this.requestHandoffSummary(iid, session, worktreePath);
-    const docPath = await this.writeHandoffDoc(worktreePath, iid, 'terminal', info);
+    const doc = await this.writeHandoffDoc(worktreePath, iid, 'terminal', info);
+    const reasonText = reason === 'budget' ? '已达最大交接轮数' : '已达总 token 上限';
     await this.tracker.addLabel(iid, 'handoff::active');
-    await this.tracker.addComment(iid, this.handoffComment({ ...info, iid, tokens, gen: 'terminal', docPath, auto: false, terminalReason: reason }));
+    await this.tracker.addComment(iid, [
+      '<!-- afk-event: handoff -->',
+      `**🔄 Context Handoff（终止：${reasonText}）**`,
+      '',
+      doc.content,
+      '',
+      `**To resume:** Remove \`handoff::active\` label and re-trigger \`/afk-implement ${iid}\``,
+    ].join('\n'));
     await this.tmux.killSession(session).catch(() => {});
     await this.tmux.closeSession();
   }

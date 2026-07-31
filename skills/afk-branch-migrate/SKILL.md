@@ -156,18 +156,23 @@ git checkout <checkpoint-branch>
 ```
 Present available checkpoints and let user choose.
 
-## Script Interface
+## Git Commands Used
 
-| Command | What it does |
-|---------|--------------|
-| `afk branch-migrate --commit <hash>` | Migrate single commit |
-| `afk branch-migrate --branch <b> --search "<s>"` | Find and select commit |
-| `afk branch-migrate --branch <b> --from <h1> --to <h2>` | Migrate commit range |
-| `afk branch-migrate status` | Show current migration state |
-| `afk branch-migrate rollback` | List checkpoints and rollback |
-| `afk branch-migrate cancel` | Abort ongoing migration |
+This skill uses native git commands only:
 
-State file: `.branch-migrate/state.json`
+| Step | Git Command | Purpose |
+|------|-------------|---------|
+| Identify | `git log <branch> --grep="<search>"` | Search commits by message |
+| Identify | `git log <branch> --oneline <hash1>..<hash2>` | List commits in range |
+| Analyze | `git show <hash> --stat` | Show commit changes summary |
+| Analyze | `git show <hash> --no-stat` | Show full diff |
+| Backup | `git branch backup/migrate-<timestamp>` | Create rollback checkpoint |
+| Apply | `git cherry-pick <hash>` | Apply single commit |
+| Apply | `git show <hash> -- patch \| git apply --3way` | Apply with 3-way merge |
+| Resolve | `git diff --check` | Detect conflict markers |
+| Verify | `git diff --cached` | Show staged changes |
+
+State file: `.branch-migrate/state.json` (optional, for multi-step tracking)
 
 ## Anti-patterns
 
@@ -175,3 +180,4 @@ State file: `.branch-migrate/state.json`
 - MUST NOT call external APIs — all operations are local Git.
 - MUST NOT proceed without a rollback checkpoint before applying changes.
 - MUST NOT skip the confirmation step even if no conflicts exist.
+- MUST NOT use `git push --force` or `git reset --hard` during migration.

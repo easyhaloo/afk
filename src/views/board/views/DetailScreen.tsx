@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { exec } from 'child_process';
 import { Task, Issue, Project } from '../../../types/board';
+import { truncate } from '../utils';
 
 interface Props {
   item: Task | Issue | Project | undefined;
@@ -251,10 +252,4 @@ function ProjectDetail({ item, branches, tags, commits, innerW, isHovered }: {
       )}
     </Box>
   );
-}
-
-function truncate(text: string, max: number): string {
-  if (!text) return '';
-  if (text.length <= max) return text;
-  return text.substring(0, max - 1) + '…';
 }

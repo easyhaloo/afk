@@ -51,6 +51,13 @@ TUI built with React + Ink. Components live in `src/components/` (planned).
 3. Test with `pnpm test` (vitest)
 4. For TUI testing, see [docs/TESTING.md](docs/TESTING.md)
 
+## Skill Development
+
+When modifying or creating skills, always work in the project's `skills/` directory:
+- **Do not** edit skills in `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/`
+- The project's `skills/` directory is the source of truth
+- Changes should be committed and pushed from here
+
 ## Environment
 
 ```bash

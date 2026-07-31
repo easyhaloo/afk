@@ -362,7 +362,7 @@ export function AppContent({
             {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
             {currentView === 'issues' && <IssueListView issues={items as Issue[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} multiSelectMode={state.multiSelectMode} selectedIssues={state.selectedItems} />}
             {currentView === 'projects' && <ProjectListView projects={items as Project[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
-            {currentView === 'board' && <BoardView issues={items as Issue[]} selectedIndex={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
+            {currentView === 'board' && <BoardView issues={items as Issue[]} selectedIndex={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={W} />}
             {(currentView === 'issues' && issueHasMore || currentView === 'projects' && projectHasMore) && (
               <Box position="absolute" right={2} bottom={0}>
                 <Text dimColor>↓ more available</Text>

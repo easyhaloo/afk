@@ -55,7 +55,12 @@ Create rollback checkpoint before proceeding.
 ### 6. Verify
 - **MANDATORY: Run build/compile immediately after applying changes**
 - Do NOT skip or defer compilation — migration is NOT complete until code compiles
-- Run `pnpm build` (or project's equivalent build command)
+- Detect tech stack and run appropriate build command:
+  - **Node.js/TypeScript:** `pnpm build` or `npm run build`
+  - **Rust:** `cargo build`
+  - **Go:** `go build`
+  - **Python:** `python -m py_compile <file>` or `pip install -e .`
+  - **Other:** ask user for the correct build command
 - Run relevant tests if available
 - Report: success / partial / failed + rollback option
 

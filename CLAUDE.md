@@ -12,11 +12,22 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 
 | Command | Purpose |
 |---------|---------|
-| `afk board` | TUI dashboard with view registry |
-| `afk qa` | QA runner for MRs |
+| `afk issue` | Issue operations (auto-detects platform) |
+| `afk mr` | MR/PR operations (auto-detects platform) |
+| `afk gitlab` | GitLab operations (issues, MRs, labels) |
+| `afk github` | GitHub operations (issues, labels) |
+| `afk workflow` | Signal-driven workflow orchestration |
+| `afk loop` | Continuous integration loop |
 | `afk scheduler` | Background task scheduler |
-| `afk signal` | Signal-based task trigger |
-| `afk tracker` | Issue/mr management |
+| `afk qa` | QA verification on merged code |
+| `afk signal` | Structured signal file management |
+| `afk worktree` | Git worktree management with state tracking |
+| `afk tmux` | Tmux session management |
+| `afk isolate` | DB service isolation per worktree |
+| `afk escalate` | File GitLab issue and launch workflow |
+| `afk board` | Interactive TUI dashboard |
+| `afk kanban` | Kanban board of issues |
+| `afk debug` | Debug loop (reproduce → verify) |
 
 ## Architecture
 
@@ -50,6 +61,7 @@ TUI built with React + Ink. Components live in `src/components/` (planned).
 2. Run `pnpm build` to compile to `dist/`
 3. Test with `pnpm test` (vitest)
 4. For TUI testing, see [docs/TESTING.md](docs/TESTING.md)
+5. **Documentation sync**: CLI command changes (signature, flags, behavior) or skill modifications must update the corresponding docs — `README.md`, `CLAUDE.md` command table, skill docs, or related `docs/` files. Keep docs in lockstep with code.
 
 ## Skill Development
 

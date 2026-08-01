@@ -19,6 +19,12 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
 用户请求
     ↓
 /afk-grill-me ────→ 需求澄清 ────→ CONTEXT.md
+    ↑
+/afk-grill-me-context ──→ 基于已有材料的补充追问
+    ↓
+/afk-to-prd ───────────→ 合成 PRD ────→ PRD.md
+    ↓
+/afk-to-issues ────────→ 拆解为 issues ────→ tracker issues
     ↓
 /afk-do ──────────→ 任务分析
     │
@@ -31,6 +37,13 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
     │    完成后触发
     │         ↓
     └──→ /afk-qa ────────→ 验证 & 合并
+
+/afk-pipeline ───────→ 阶段路由（导航到正确 skill）
+/afk-scheduler ──────→ 多 issues 依赖感知调度
+/afk-branch-migrate ─→ 跨分支代码迁移
+/md-to-pdf ──────────→ Markdown 转 PDF
+/reasoning-guard ────→ 会话内推理路径看护
+/reasoning-watchdog ──→ hooks 自动推理监控
 ```
 
 ## 核心 Skills 详解
@@ -452,15 +465,314 @@ tests/api-workflow/
 
 ---
 
+### 10. afk-grill-me-context
+
+**作用：** 基于已有上下文（架构文档、代码审计结果、草稿）进行补充追问，验证和补充现有材料
+
+**触发场景：**
+- 已有 bounded contexts 需要验证
+- 架构文档有假设需要探究
+- 之前的对齐草稿需要补充修正
+- 需要读代码验证上下文是否匹配实际代码库
+
+**工作流程：**
+1. **识别主题** — 读取已提供的上下文，形成已有认知图景
+2. **定向追问** — 基于既有材料问具体问题：边界是否准确？术语冲突？未记录的不变量？跨上下文关系？
+3. **可选代码审计** — 如果上下文模糊，读代码验证准确性
+4. **起草总结** — 展示更新后的 CONTEXT.md，标记新增部分
+5. **用户确认** — 类似 afk-grill-me 的 Step 4 门控（批准/修订/深入/添加开放问题）
+6. **写入 /tmp/** — 只在确认后写入，不写入 repo 工作树
+
+**设计决策：**
+
+**为什么独立于 afk-grill-me？**
+- afk-grill-me 从零开始访谈，afk-grill-me-context 基于已有材料"查漏补缺"
+- 有上下文时使用后者更高效，避免重复提问
+
+**为什么可以读代码？**
+- 代码是最终的真相来源，用于验证文档中的边界是否反映实际架构
+
+**闭包条件：**
+- 每个章节至少 1 个可证伪的答案
+- 2 轮无新信息时草拟文档
+
+**与其他 skills 协作：**
+- **前置** ← 已有的对齐文档、架构图、代码审计结果
+- **输出** → CONTEXT.md → **afk-to-prd** 或 **afk-do**
+
+---
+
+### 11. afk-to-prd
+
+**作用：** 将需求对齐记录合成为可发布的 PRD（产品需求文档）
+
+**触发场景：**
+- 已完成需求访谈/对齐，有足够的对齐记录
+- 需要结构化的 PRD 用于发布和后续分解
+
+**工作流程：**
+1. **验证对齐记录** — 可选读代码验证 bounded contexts 和架构决策
+2. **起草 PRD** — 使用 `references/prd-template.md` 模板，包含：Problem Statement、Users & Jobs、Bounded Contexts、User Stories、Key Decisions、Open Risks、Non-Goals
+3. **门控确认** — 用户批准后才发布
+4. **发布** — 创建 `stage::prd` 标签的 issue
+
+**设计决策：**
+
+**为什么用模板？**
+- 保证 PRD 输出格式一致，每个 AC 使用 3 字段格式：`<text> -- <evidence_type> -- <check_command>`
+- `evidence_type` 受控词汇：test | curl | log | manual | none
+
+**为什么限制合成范围？**
+- 只合成已有信息，不发明用户故事
+- 未解决的开放问题直接放入 Open Risks，不自动解决
+
+**与其他 skills 协作：**
+- **前置** ← **afk-grill-me** 或 **afk-grill-me-context** 的输出
+- **输出** → PRD.md → **afk-to-issues** 拆解为可执行 issues
+
+---
+
+### 12. afk-to-issues
+
+**作用：** 将需求（PRD 或自由文本）拆解为 tracker issues，附带机器可验证的验收标准
+
+**触发场景：**
+- 已批准的 PRD 需要分解为可执行 issues
+- 任何需求上下文需要快速拆解
+
+**工作流程：**
+1. **选择模式** — PRD Mode（有 PRD）或 Direct Mode（自由文本）
+2. **读代码推理验证方式** — 为每个验收标准推断 `evidence_type`（test/curl/log/manual）
+3. **切片** — 按垂直/水平策略将需求切分为独立 issues
+4. **隔离分析** — 判断是否需要 `need::isolate`（数据库变更、中间件配置等）
+5. **草拟** — 填充 issue 模板全部字段
+6. **自检** — 在沙箱中运行每个 `check_command`，确认非零退出
+7. **门控** — 展示所有草稿 + DAG + 标签方案，等待批准
+8. **创建** — 批准后使用 `afk issue create` 创建，使用 `afk issue link` 建立 DAG
+
+**设计决策：**
+
+**为什么区分 PRD Mode 和 Direct Mode？**
+- PRD Mode 有结构化输入，切片更精确
+- Direct Mode 支持快速路径，无需 PRD 即可开始
+
+**为什么需要隔离分析？**
+- 需要中间件（MySQL、Redis 等）的 issue 需要特殊标记，scheduler 才能启动隔离容器
+
+**与其他 skills 协作：**
+- **前置** ← **afk-to-prd** 的输出（PRD Mode）
+- **输出** → tracker issues → **afk-implement** 或 **afk-scheduler**
+
+---
+
+### 13. afk-pipeline
+
+**作用：** 阶段路由 — 当用户不确定用哪个 skill 时，根据当前工作阶段推荐合适的 skill
+
+**触发场景：**
+- 用户不确定应该调用哪个 skill
+- 用户询问生命周期概览
+
+**工作流程：**
+1. **识别用户手头有什么** — 想法？文档？issue？MR？
+2. **匹配路由表** — 根据用户当前状态推荐对应 skill
+3. **展示管道图** — 可选展示完整流程视图
+
+**路由表：**
+
+| 用户有... | 推荐调用 |
+|-----------|---------|
+| 想法/功能，未写任何东西 | `/afk-grill-me` |
+| 已有 bounded context/架构文档/代码审计 | `/afk-grill-me-context` |
+| 有技术风险的想法 | `/afk-prototype` |
+| 对齐记录（访谈/草稿/需求） | `/afk-to-prd` |
+| 已批准的 PRD | `/afk-to-issues` |
+| 需要实现的 tracker issue | `/afk-implement <iid>` |
+| 多个 issue 需要编排 | `/afk-scheduler` |
+| 当前会话的特定任务 | `/afk-do "<task>"` |
+| MR 需要验证 | `/afk-qa <mr-url>` |
+| 可重现的失败 | `/afk-debug` |
+| 会话状态快照/恢复 | `/afk-hand-off` |
+
+**设计决策：**
+
+**为什么不做自动路由？**
+- 用户意图可能模糊，多个匹配时需要人工判断
+- 避免 skill 被错误调用
+
+**与其他 skills 协作：**
+- **引用所有 skills** — 纯路由，不执行任何 skill
+
+---
+
+### 14. afk-branch-migrate
+
+**作用：** 跨分支代码迁移 — 在差异较大的分支间选择性摘取代码
+
+**触发场景：**
+- 需要将某个 commit 的代码从一个分支迁移到另一个分支
+- 两个分支差异大，直接 cherry-pick 可能冲突
+
+**工作流程：**
+1. **识别源** — 通过 commit hash、搜索文本、commit 范围定位源
+2. **分析** — 分类每个变更文件：核心/测试/配置/附带
+3. **风险评估** — 对比目标分支：低/中/高/严重
+4. **确认迁移计划** — 用户选择包含/排除的文件，创建回滚检查点
+5. **应用** — 低/中冲突自动 cherry-pick，高/严重手动解决
+6. **验证** — 编译 + 测试
+7. **回滚** — 列出可用检查点，支持恢复到任意点
+
+**设计决策：**
+
+**为什么需要独立 skill？**
+- 跨分支迁移比普通 cherry-pick 复杂，需要风险评估和手动冲突解决
+- 纯 Git 操作，无外部 API 调用
+
+**与其他 skills 协作：**
+- **独立** — 通常不依赖其他 skills
+
+---
+
+### 15. afk-scheduler
+
+**作用：** 后台调度器 — 基于 `blocked_by` 依赖 DAG，自动按波次启动多个 issues 的实现会话
+
+**触发场景：**
+- 多个 `mode::afk` issues 需要按依赖顺序执行
+- 需要自动调度和监控后台实现会话
+
+**工作流程：**
+1. **构建 DAG** — 扫描所有 `mode::afk` + `stage::ready-for-issues` issues
+2. **计算波次** — 拓扑排序：无阻塞的放入 Wave 1，阻塞解除后放入后续波次
+3. **启动门控** — 手动模式：展示波次计划，确认后启动；自动模式：幂等扫描，立即启动
+4. **执行波次** — 每 60 秒轮询 MR 状态，波次内所有 MR 合并后进入下一波
+5. **完成** — 所有波次完成后通知人工 gate
+
+**设计决策：**
+
+**为什么分波次执行？**
+- 确保依赖关系正确：Wave N+1 只在 Wave N 全部完成后启动
+- 同一波次内的 issues 并行执行，提高效率
+
+**为什么自动模式跳过确认？**
+- 幂等设计，适合 cron 定时执行
+- 只启动未被启动的 issues，不重复
+
+**与其他 skills 协作：**
+- **调用** → `afk workflow run` — 启动每个 issue 的实现会话
+- **输出** → 合并的 MRs → 人工审查
+
+---
+
+### 16. md-to-pdf
+
+**作用：** 将 Markdown 文档（含 Mermaid 图、表格、中英文混排）转换为精美的 A4 PDF
+
+**触发场景：**
+- 用户要求"转 PDF"、"导出 PDF"
+- 需要将含 Mermaid 图的文档分享或打印
+
+**工作流程：**
+1. **检查依赖** — 验证 `pandoc`、`mmdc`、`weasyprint` 已安装
+2. **提取 mermaid 块** — 找到所有 ` ```mermaid ` 代码块
+3. **渲染图表** — 使用 `mmdc` 将每个块转换为 PNG
+4. **替换图片** — 将 mermaid 块替换为 `![](path/to/diagram.png)`
+5. **转 HTML** — 使用 `pandoc` 将 Markdown → HTML
+6. **注入 CSS** — 应用 A4 排版 + 中文字体栈
+7. **生成 PDF** — 使用 `weasyprint` 渲染 HTML → PDF
+
+**技术栈：** pandoc + weasyprint + mermaid-cli
+
+**与其他 skills 协作：**
+- **独立** — 纯文档转换，不依赖其他 skills
+
+---
+
+### 17. reasoning-guard
+
+**作用：** 会话内推理路径看护 — 检测编码 agent 在多轮对话中的推理退化，注入纠正提示
+
+**触发场景：**
+- 同一位置重复编辑且持续报错
+- token 消耗与进度不成比例
+- 代码质量随编辑轮次下降
+- 用户要求"检查推理路径"、"停止循环"
+
+**工作流程：**
+1. **信号检测** — 监控会话中的重复操作、token 燃烧、语义回归
+2. **拦截** — 检测到信号时，在响应前注入纠正框架：
+   - SAFE_RESTORE — git stash 保存状态 + 回滚到稳定基线
+   - FIRST_PRINCIPLES — 假设审计 + 根因分解
+   - CAUSAL_TRACE — git log/diff 追踪到最早失败 commit
+   - ADVERSARIAL — 失败模式枚举 + 反例搜索
+3. **继续** — 完成分析后继续编码
+
+**设计决策：**
+
+**为什么基于会话内检测而非 hooks？**
+- 无需安装、无背景进程，完全在对话中完成
+- 适合临时性推理监控需求
+
+**与其他 skills 协作：**
+- **对立** → **reasoning-watchdog** — 基于 hooks 的自动化版本，适用于需要持久监控的场景
+
+---
+
+### 18. reasoning-watchdog
+
+**作用：** 基于 hooks 的自动推理路径看护 — 安装 PostToolUse/PreToolUse/SessionEnd hooks 到 Claude Code，自动检测并拦截推理退化
+
+**触发场景：**
+- reasoning-watchdog 系统已安装，需要检查状态或调优阈值
+- 需要持久化、自动化的推理监控
+
+**工作流程：**
+1. **安装** — `npm run install` 注册 hooks 到 `~/.claude/settings.json`
+2. **自动检测** — PostToolUse hook 监控重复操作、token 燃烧等信号
+3. **拦截** — PreToolUse hook 注入纠正提示并阻止下一步操作
+4. **清理** — SessionEnd hook 清理会话状态文件
+
+**架构：**
+```
+Claude Code session
+  └── PostToolUse hook → 检测错误信号
+  └── PreToolUse hook  → 注入纠正提示 + 阻止下一步
+  └── SessionEnd hook  → 清理状态文件
+```
+
+**设计决策：**
+
+**为什么使用 hooks 而非会话内监控？**
+- 持久化安装，每次启动自动生效
+- 无需人工干预，适合长期使用
+
+**与 reasoning-guard 的区别：**
+- reasoning-guard：会话内，无背景进程，临时使用
+- reasoning-watchdog：hooks 安装，后台自动运行，持久化
+
+**与其他 skills 协作：**
+- **对立** → **reasoning-guard** — 会话内版本，适用于临时监控
+
+---
+
 ## Skills 设计原则总结
 
 ### 1. 单一职责
 每个 skill 解决一类问题，避免功能重叠：
 - **afk-grill-me** — 澄清需求
+- **afk-grill-me-context** — 有上下文补充追问
 - **afk-research** — 调研理解
 - **afk-prototype** — 验证方案
+- **afk-to-prd** — 合成 PRD
+- **afk-to-issues** — 拆解为 issues
 - **afk-implement** — TDD 实现
 - **afk-qa** — 独立验证
+- **afk-pipeline** — 阶段路由
+- **afk-branch-migrate** — 跨分支迁移
+- **afk-scheduler** — 后台调度
+- **md-to-pdf** — 文档转换
+- **reasoning-guard** — 推理路径看护
+- **reasoning-watchdog** — 自动推理监控
 
 ### 2. 明确触发条件
 `description` 以 "Use when" 开头，Claude 根据场景自动选择：

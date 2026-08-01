@@ -16,7 +16,7 @@ interface LoopConfig {
   moduleTriggers: Record<string, string[]>;
 }
 
-function loadLoopConfig(): LoopConfig {
+export function loadLoopConfig(): LoopConfig {
   const configPath = path.join(process.cwd(), '.afk', 'config.yml');
   const result: LoopConfig = { moduleTriggers: {} };
 
@@ -35,7 +35,8 @@ function loadLoopConfig(): LoopConfig {
       if (trimmed === 'module_triggers:') { inTriggers = true; continue; }
       if (inTriggers) {
         // Each line:   label: [module, ...]
-        const colon = trimmed.indexOf(':');
+        // Use lastIndexOf(':') so labels with :: (e.g. need::isolate) parse correctly
+        const colon = trimmed.lastIndexOf(':');
         if (colon < 0) { inTriggers = false; continue; }
         const label = trimmed.slice(0, colon).trim();
         const value = trimmed.slice(colon + 1).trim();

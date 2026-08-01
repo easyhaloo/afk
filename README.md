@@ -11,7 +11,7 @@
 ## 特性
 
 - **跨平台** — GitLab 和 GitHub 统一 CLI（issues, MRs/PRs）
-- **Skills 套件** — 9 个核心 Claude Code skills，涵盖完整开发流程
+- **Skills 套件** — 18 个 Claude Code skills，涵盖完整开发流程
 - **TUI 仪表板** — 交互式 issue 跟踪仪表板
 - **后台自动化** — 基于 tmux 的工作流调度器
 - **TDD 集成** — 内置测试驱动开发方法论
@@ -91,16 +91,35 @@ ln -s /path/to/afk/skills/* ~/.claude/skills/
 afk issue get <id>
 afk issue list --label "stage::ready-for-implement"
 afk issue create "Title" --label "feature"
+afk issue edit <id> --label "bug"
+afk issue comment <id> "message"
 
 # MR/PR 操作
 afk mr create "feat: add login" --source feat/login --target main
 afk mr merge <id> --delete-source-branch
 afk mr approve <id>
+afk mr close <id>
+afk mr reopen <id>
 
 # 工作流 & 自动化
-afk dashboard                         # 交互式 TUI
-afk workflow launch --iid <id>        # Issue → MR 流水线
+afk board                             # 交互式 TUI 面板
+afk kanban                            # Kanban 看板
+afk workflow run --iid <id>           # Issue → MR 流水线
+afk loop start                        # 持续集成循环
 afk scheduler start --max-concurrent 3 # 后台调度器
+afk qa run                            # QA 验证
+
+# 基础设施
+afk worktree create <iid>             # Git worktree 管理
+afk tmux create-session               # Tmux session 管理
+afk isolate up                        # DB 服务隔离
+
+# 调试 & 上报
+afk debug reproduce <cmd>             # Debug 循环
+afk escalate create "title"           # 上报 GitLab issue
+
+# 信号管理
+afk signal goal-complete              # 工作流信号通信
 ```
 
 完整命令参考：`afk --help`
@@ -110,14 +129,23 @@ afk scheduler start --max-concurrent 3 # 后台调度器
 | Skill | 用途 | 触发场景 |
 |-------|------|---------|
 | `/afk-grill-me` | 需求澄清 | 需求模糊或可能有遗漏 |
+| `/afk-grill-me-context` | 有上下文的补充追问 | 已有草稿/文档需要验证补充 |
+| `/afk-to-prd` | 生成 PRD | 需求对齐后合成 PRD |
+| `/afk-to-issues` | 分解为 issues | PRD 审批后拆解为可执行 issues |
 | `/afk-do` | 任务编排 | 明确的功能需求或任务描述 |
 | `/afk-research` | 技术调研 | 需要了解现有实现再编码 |
 | `/afk-prototype` | 方案验证 | 技术决策前需要验证方案 |
 | `/afk-implement` | TDD 实现 | 清晰定义的实现目标 |
 | `/afk-qa` | 独立验证 | MR/PR 准备合并前验证 |
 | `/afk-debug` | 快速修复 | 具体可重现的失败场景 |
+| `/afk-pipeline` | 阶段路由 | 不确定用哪个 skill 时导航 |
+| `/afk-branch-migrate` | 跨分支迁移 | 在差异大的分支间摘取代码 |
 | `/afk-hand-off` | 工作交接 | 需要转移任务给其他开发者 |
+| `/afk-scheduler` | 后台调度 | 多 issues 依赖感知调度执行 |
 | `/api-workflow` | API 测试 | 多步骤 API 链式调用与浏览器混合测试 |
+| `/md-to-pdf` | Markdown 转 PDF | 导出含 Mermaid 图的文档为 PDF |
+| `/reasoning-guard` | 推理路径看护 | 编码 agent 多轮推理退化 |
+| `/reasoning-watchdog` | 自动推理监控 | 基于 hooks 的推理退化自动拦截 |
 
 详见 [Skills 深度说明](docs/SKILLS.md)
 
@@ -160,7 +188,7 @@ npm link         # 全局安装
 - **[快速开始](docs/GETTING-STARTED.md)** — 5分钟上手 AFK
 - **[架构设计](docs/ARCHITECTURE.md)** — 跨平台抽象层 + CLI 命令映射
 - **[工作流程](docs/WORKFLOWS.md)** — Issue → MR 流水线、调度器、Skills 集成
-- **[Skills 说明](docs/SKILLS.md)** — 8个核心 skills 的设计与使用
+- **[Skills 说明](docs/SKILLS.md)** — 核心 skills 的设计与使用
 
 ## 许可证
 

@@ -108,17 +108,13 @@ afk mr approve 456
 afk issue list --label "stage::ready-for-implement"
 
 # 2. 启动工作流（创建 worktree + tmux session）
-afk workflow launch --iid 123 --base main
+afk workflow run --iid 123 --base-branch main
 
 # 3. 在 tmux session 中，Claude 会自动执行 /afk-implement
 # 监控进度（可选）
 tmux attach -t afk-issue-123
 
-# 4. 等待完成后，创建 MR/PR
-afk workflow create-mr --iid 123
-
-# 5. 清理 worktree
-afk worktree cleanup --iid 123
+# 4. 工作流完成后自动创建 MR/PR 并清理 worktree
 ```
 
 ## 自动化调度

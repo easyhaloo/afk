@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { buildCompletionTree } from '../lib/completion/tree';
@@ -21,21 +21,46 @@ function detectShell(): Shell | undefined {
   return isShell(base) ? base : undefined;
 }
 
-function rcPath(shell: Shell): string {
+function emitScript(shell: Shell): string {
+  const spec = extractSpec(buildCompletionTree());
+  switch (shell) {
+    case 'zsh': return emitZsh(spec);
+    case 'bash': return emitBash(spec);
+    case 'fish': return emitFish(spec);
+  }
+}
+
+/** Where the completion script file is written. fish uses its auto-load dir
+ * (no rc edit); zsh/bash use a file under ~/.afk/completion/ sourced from rc. */
+function completionFilePath(shell: Shell): string {
+  const home = process.env.HOME || homedir();
+  switch (shell) {
+    case 'fish': return join(home, '.config', 'fish', 'completions', 'afk.fish');
+    case 'zsh': return join(home, '.afk', 'completion', 'afk.zsh');
+    case 'bash': return join(home, '.afk', 'completion', 'afk.bash');
+  }
+}
+
+/** rc file to add a source line to, or undefined if the shell auto-loads. */
+function rcFile(shell: Shell): string | undefined {
   const home = process.env.HOME || homedir();
   switch (shell) {
     case 'zsh': return join(home, '.zshrc');
     case 'bash': return join(home, '.bashrc');
-    case 'fish': return join(home, '.config', 'fish', 'config.fish');
+    case 'fish': return undefined;
   }
 }
 
-function sourceLine(shell: Shell): string {
-  return shell === 'fish' ? 'afk completion fish | source' : `eval "$(afk completion ${shell})"`;
+interface InstallResult {
+  file: string;
+  rc: string | undefined;
+  fileCreated: boolean;
+  rcUpdated: boolean;
 }
 
-/** Append an idempotent completion block to the shell rc file. */
-function installCompletion(shell?: string): { rc: string; installed: boolean } {
+/** Write the completion script to its file (always refreshes) and, for
+ * zsh/bash, add an idempotent source block to the rc file. */
+function installCompletion(shell?: string): InstallResult {
   let resolved: Shell;
   if (shell) {
     if (!isShell(shell)) throw new Error(`Unsupported shell '${shell}'. Supported: ${SHELLS.join(', ')}.`);
@@ -45,12 +70,22 @@ function installCompletion(shell?: string): { rc: string; installed: boolean } {
     if (!detected) throw new Error('Could not detect shell from $SHELL. Specify: zsh, bash, or fish.');
     resolved = detected;
   }
-  const rc = rcPath(resolved);
-  const existing = existsSync(rc) ? readFileSync(rc, 'utf8') : '';
-  if (existing.includes(BEGIN)) return { rc, installed: false };
-  mkdirSync(dirname(rc), { recursive: true });
-  appendFileSync(rc, `\n${BEGIN}\n${sourceLine(resolved)}\n${END}\n`);
-  return { rc, installed: true };
+
+  const file = completionFilePath(resolved);
+  mkdirSync(dirname(file), { recursive: true });
+  const fileCreated = !existsSync(file);
+  writeFileSync(file, emitScript(resolved));
+
+  const rc = rcFile(resolved);
+  let rcUpdated = false;
+  if (rc) {
+    const existing = existsSync(rc) ? readFileSync(rc, 'utf8') : '';
+    if (!existing.includes(BEGIN)) {
+      appendFileSync(rc, `\n${BEGIN}\nsource "${file}"\n${END}\n`);
+      rcUpdated = true;
+    }
+  }
+  return { file, rc, fileCreated, rcUpdated };
 }
 
 function printScript(shell: string): void {
@@ -69,22 +104,27 @@ function printScript(shell: string): void {
  *
  * `afk completion <shell>` prints an eval-able completion script with inlined
  * static data. `afk completion <shell> --install` (or `--install` alone to
- * auto-detect from $SHELL) appends an idempotent block to the shell rc file.
- * `afk __complete` is the reserved dynamic-completion callback the scripts
- * invoke for argument-value positions; it returns no candidates until dynamic
- * completion is implemented.
+ * auto-detect from $SHELL) writes the script to a file and wires it into the
+ * shell: fish auto-loads from ~/.config/fish/completions/; zsh/bash source a
+ * file under ~/.afk/completion/ from the rc file (idempotent, no per-startup
+ * afk spawn). `afk __complete` is the reserved dynamic-completion callback.
  */
 export function registerCompletionCommands(program: Command): void {
   program
     .command('completion [shell]')
     .description('Print a shell completion script, or install it with --install.')
-    .option('--install', 'Write an idempotent block to the shell rc file instead of printing.')
+    .option('--install', 'Write the completion script to a file and wire it into the shell rc.')
     .action(function (this: Command, shell: string | undefined, options: { install?: boolean }) {
       if (options.install) {
         try {
-          const { rc, installed } = installCompletion(shell);
-          console.log(installed ? `Installed afk completion into ${rc}` : `afk completion already installed in ${rc}`);
-          if (installed) console.log(`Restart your shell or run: source ${rc}`);
+          const { file, rc, fileCreated, rcUpdated } = installCompletion(shell);
+          console.log(`${fileCreated ? 'Wrote' : 'Refreshed'} completion script: ${file}`);
+          if (rc) {
+            console.log(rcUpdated ? `Added source line to ${rc}` : `${rc} already sources it`);
+            console.log(`Restart your shell or run: source ${file}`);
+          } else {
+            console.log('fish auto-loads from ~/.config/fish/completions/ (no rc edit needed).');
+          }
         } catch (e) {
           this.error((e as Error).message, { exitCode: 1 });
         }

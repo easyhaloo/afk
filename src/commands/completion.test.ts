@@ -64,15 +64,18 @@ describe('completion --install', () => {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it('writes an idempotent block to ~/.zshrc', () => {
+  it('writes the script to ~/.afk/completion/afk.zsh and sources it from ~/.zshrc', () => {
     const r1 = run(['completion', 'zsh', '--install']);
     expect(r1.exitCode).toBeUndefined();
+    const scriptFile = path.join(tmpHome, '.afk', 'completion', 'afk.zsh');
+    expect(fs.readFileSync(scriptFile, 'utf8')).toContain('#compdef afk');
     const zshrc = path.join(tmpHome, '.zshrc');
-    const content = fs.readFileSync(zshrc, 'utf8');
-    expect(content).toContain('>>> afk completion >>>');
-    expect(content).toContain('eval "$(afk completion zsh)"');
+    const rcContent = fs.readFileSync(zshrc, 'utf8');
+    expect(rcContent).toContain('>>> afk completion >>>');
+    expect(rcContent).toContain(`source "${scriptFile}"`);
+    expect(rcContent).not.toContain('eval "$(afk completion'); // no per-startup spawn
 
-    // second run must not duplicate the block
+    // re-run refreshes the file but must not duplicate the rc block
     run(['completion', 'zsh', '--install']);
     const count = (fs.readFileSync(zshrc, 'utf8').match(/>>> afk completion >>>/g) || []).length;
     expect(count).toBe(1);
@@ -81,7 +84,15 @@ describe('completion --install', () => {
   it('auto-detects shell from $SHELL when --install is given without a shell', () => {
     vi.stubEnv('SHELL', '/bin/bash');
     run(['completion', '--install']);
-    expect(fs.readFileSync(path.join(tmpHome, '.bashrc'), 'utf8')).toContain('eval "$(afk completion bash)"');
+    expect(fs.readFileSync(path.join(tmpHome, '.afk', 'completion', 'afk.bash'), 'utf8')).toContain('complete -F _afk afk');
+    expect(fs.readFileSync(path.join(tmpHome, '.bashrc'), 'utf8')).toContain('source "');
+  });
+
+  it('fish writes to the auto-load dir and does not edit any rc file', () => {
+    run(['completion', 'fish', '--install']);
+    expect(fs.readFileSync(path.join(tmpHome, '.config', 'fish', 'completions', 'afk.fish'), 'utf8')).toContain('complete -c afk');
+    // no config.fish should be created/modified
+    expect(fs.existsSync(path.join(tmpHome, '.config', 'fish', 'config.fish'))).toBe(false);
   });
 
   it('errors on unsupported shell with --install', () => {

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { exec } from 'child_process';
 import { Task, Issue, Project } from '../../../types/board';
+import { computeIssueScrollBounds } from './issueScroll';
 
 interface Props {
   item: Task | Issue | Project | undefined;
@@ -64,11 +65,14 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
     }
   }, [currentItemId]);
 
-  // Calculate description lines for scrolling (issues view)
+  // Calculate description lines for scrolling (issues view).
+  // Body chrome + IssueDetail header consume the top of the body; the remainder
+  // is how many description lines fit on screen at once.
   const descriptionLines = view === 'issues' && (item as Issue).description
     ? (item as Issue).description!.split('\n')
     : [];
-  const maxDescScroll = Math.max(0, descriptionLines.length - 1);
+  const { visibleLines: visibleDescLines, maxScroll: maxDescScroll } =
+    computeIssueScrollBounds(BODY, descriptionLines.length);
   const canScrollDown = descScrollOffset < maxDescScroll;
   const canScrollUp = descScrollOffset > 0;
 
@@ -128,7 +132,7 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
         <Text color="gray">{top}</Text>
 
         {view === 'tasks' && <TaskDetail item={item as Task} />}
-        {view === 'issues' && <IssueDetail item={item as Issue} hovered={isHovered(0)} scrollOffset={descScrollOffset} />}
+        {view === 'issues' && <IssueDetail item={item as Issue} hovered={isHovered(0)} scrollOffset={descScrollOffset} visibleLines={visibleDescLines} />}
         {view === 'projects' && (
           <ProjectDetail
             item={item as Project}
@@ -179,17 +183,21 @@ function TaskDetail({ item }: { item: Task }) {
   );
 }
 
-function IssueDetail({ item, hovered, scrollOffset }: { item: Issue; hovered: boolean; scrollOffset: number }) {
+function IssueDetail({ item, hovered, scrollOffset, visibleLines }: {
+  item: Issue; hovered: boolean; scrollOffset: number; visibleLines: number;
+}) {
   const lines = (item.description || '').split('\n');
-  const visibleLines = lines.slice(scrollOffset);
+  // Bound the slice so we only render what fits in the body; without this the
+  // content overflows the fixed-height body and j/k scroll has no visible effect.
+  const window = lines.slice(scrollOffset, scrollOffset + visibleLines);
   return (
     <Box flexDirection="column" paddingX={1}>
       <Text color={hovered ? 'cyan' : 'white'} underline={hovered}>  ─ url: {item.web_url}</Text>
       <Text color="white">  ─ labels: {item.labels.join(', ') || '–'}</Text>
       <Text color="white">  ─ state: {item.state}</Text>
       <Box marginTop={1}><Text color="gray">  ─ description:</Text></Box>
-      {visibleLines.length > 0
-        ? visibleLines.map((line, i) => <Text key={i} color="gray">    {line}</Text>)
+      {window.length > 0
+        ? window.map((line, i) => <Text key={i + scrollOffset} color="gray">    {line}</Text>)
         : <Text color="gray">    no description</Text>
       }
     </Box>

@@ -18,6 +18,7 @@ DEFAULT_INSTALL_DIR="/usr/local/bin"
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
 FORCE=false
 SKIP_DEPS=false
+SKIP_COMPLETION=false
 
 # Print functions
 print_info() {
@@ -55,6 +56,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_DEPS=true
             shift
             ;;
+        --skip-completion)
+            SKIP_COMPLETION=true
+            shift
+            ;;
         -h|--help)
             cat <<EOF
 AFK CLI Installation Script
@@ -66,6 +71,7 @@ Options:
   --prefix DIR    Install to custom directory
   --force         Overwrite existing installation
   --skip-deps     Skip dependency checks
+  --skip-completion  Skip shell tab-completion setup
   -h, --help      Show this help message
 
 Examples:
@@ -236,6 +242,30 @@ else
     print_warning "Help command failed (non-critical)"
 fi
 
+# Set up shell tab completion (per-user; skipped under sudo/root)
+if [[ "$SKIP_COMPLETION" == true ]]; then
+    print_info "Skipping shell completion setup (--skip-completion)"
+elif [[ $EUID -eq 0 ]]; then
+    print_info "Skipping shell completion setup (running as root)"
+    print_info "Run 'afk completion --install' as your user to enable tab completion"
+else
+    SHELL_NAME="$(basename "${SHELL:-}")"
+    case "$SHELL_NAME" in
+        zsh|bash|fish)
+            print_info "Setting up shell completion for $SHELL_NAME..."
+            if afk completion "$SHELL_NAME" --install; then
+                print_success "Tab completion enabled - restart your shell or source your rc file"
+            else
+                print_warning "Completion setup failed - run 'afk completion --install' manually"
+            fi
+            ;;
+        *)
+            print_warning "Auto-completion not supported for '$SHELL_NAME'"
+            print_info "Run 'afk completion --help' for manual setup"
+            ;;
+    esac
+fi
+
 # Show post-install information
 echo ""
 echo "╔═══════════════════════════════════════╗"
@@ -251,5 +281,7 @@ echo "       export GITLAB_TOKEN=glpat-xxxxxxxxxxxxx   # https://gitlab.com/-/pr
 echo "       export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx      # https://github.com/settings/tokens"
 echo "  3. Run:     afk workflow launch --iid <issue-number>"
 echo "              afk --help  # for all commands"
+echo "  4. Completion: restart your shell, then 'afk <TAB>'"
+echo "              (or run: afk completion --install)"
 echo ""
 exit 0

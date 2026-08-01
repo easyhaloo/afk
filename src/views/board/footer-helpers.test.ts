@@ -49,3 +49,42 @@ describe('getGitBranch (AC2: returns null outside git repos)', () => {
     expect(await getGitBranch()).toBeNull();
   });
 });
+
+describe('getShortPath (AC3: $HOME replaced by ~)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.HOME;
+    delete process.env.USERPROFILE;
+  });
+
+  it('replaces $HOME prefix with ~', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/home/alice/projects/afk');
+    process.env.HOME = '/home/alice';
+    expect(getShortPath()).toBe('~/projects/afk');
+  });
+
+  it('replaces $USERPROFILE prefix with ~ on Windows-style envs', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('C:/Users/Bob/code');
+    process.env.USERPROFILE = 'C:/Users/Bob';
+    expect(getShortPath()).toBe('~/code');
+  });
+
+  it('returns cwd unchanged when it does not start with $HOME', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/var/log/something');
+    process.env.HOME = '/home/alice';
+    expect(getShortPath()).toBe('/var/log/something');
+  });
+
+  it('returns cwd unchanged when $HOME is not set', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/home/alice/code');
+    delete process.env.HOME;
+    delete process.env.USERPROFILE;
+    expect(getShortPath()).toBe('/home/alice/code');
+  });
+
+  it('handles $HOME that exactly equals cwd', () => {
+    vi.spyOn(process, 'cwd').mockReturnValue('/home/alice');
+    process.env.HOME = '/home/alice';
+    expect(getShortPath()).toBe('~');
+  });
+});

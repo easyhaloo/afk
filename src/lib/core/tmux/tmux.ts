@@ -237,28 +237,18 @@ export class TmuxClient {
   async sendGoal(worktreeDir: string, session: string, window: string, goalText: string, signalType: string = 'goal_complete'): Promise<void> {
     const hasPrompt = await this.waitForPrompt(worktreeDir);
     if (!hasPrompt) throw new Error('Timeout waiting for claude prompt');
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', '/goal']);
-    await this.exec(['send-keys', '-t', `${session}:${window}`, 'Space']);
-    await this.sleep(300);
-    const lines = goalText.split('\n');
-    for (const line of lines) {
-      await this.exec(['send-keys', '-t', `${session}:${window}`, '--', line]);
-      await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
-      await this.sleep(100);
-    }
-    // Tell agent to commit changes, then write signal when done.
-    await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
-    await this.sleep(200);
-    const timestamp = new Date().toISOString();
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', '完成后请先提交你的更改（git add -A && git commit -m "resolve issue"），然后创建完成信号：cat > .afk-signal.json <<EOF']);
-    await this.sleep(100);
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `{"type":"${signalType}","timestamp":"${timestamp}","summary":"<完成总结>"}`]);
-    await this.sleep(100);
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', 'EOF']);
+
+    // Type /goal command with the goal text. The text is submitted as a single line
+    // (no embedded newlines which would cause premature submission in the TUI).
+    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `/goal ${goalText}`]);
     await this.sleep(500);
-    // Submit the composed /goal input. Double-tap C-m: the first Enter can be
-    // lost if the TUI is mid-redraw on a long wrapped line; the second is a
-    // harmless no-op if the first already submitted.
+
+    // After the agent completes the goal, it writes the signal file.
+    // The goal text already includes instructions to write the signal,
+    // so we don't need to type additional signal instructions here.
+    // The agent will write .afk-signal.json with the appropriate type.
+    // Double-tap C-m to submit: the first Enter can be lost if the TUI is
+    // mid-redraw on a long wrapped line; the second is a harmless no-op.
     await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
     await this.sleep(300);
     await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);

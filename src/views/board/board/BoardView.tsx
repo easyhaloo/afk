@@ -64,12 +64,11 @@ export const BoardView: React.FC<BoardViewProps> = ({
           const isSelected = globalIdx === selectedIndex;
           const stage = getIssueStage(issue);
           return (
-            <Box key={issue.iid} flexDirection="row" alignItems="flex-start" overflow="hidden">
+            <Box key={issue.iid} flexDirection="row" alignItems="flex-start" overflow="hidden" width="100%">
               <Text
                 backgroundColor={isSelected ? 'blue' : undefined}
                 color={isSelected ? 'white' : stage.color}
                 bold={isSelected}
-                width="100%"
                 wrap="truncate"
               >
                 {isSelected ? '▶ ' : '  '}

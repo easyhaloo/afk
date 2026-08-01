@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Issue } from '../../../types/board';
 import { ListView } from './ListView';
-import { renderMarkdown } from '../utils';
+import { renderMarkdown, truncateByVisualWidth, visualWidth } from '../utils';
 
 interface Props {
   issues: Issue[];

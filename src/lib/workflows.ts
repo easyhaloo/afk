@@ -7,6 +7,7 @@ import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
 import { getTokenUsage, configureStatusline, logger, readSignal, clearSignal, STATUS_FILENAME } from './io';
+import { SIGNAL_FILE } from './core/io/signal';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule } from './workflows/lifecycle';
@@ -252,8 +253,8 @@ Session was interrupted before completion.
     // used = handoff rounds, tokens = accumulated total across generations.
     const budget = { used: 0, tokens: 0 };
     const phases = [
-      { goalBase: `实现 issue #${iid} 的功能需求`, signalType: 'goal_complete' as const },
-      { goalBase: `验证 issue #${iid} 的 AC 全部通过`, signalType: 'ac_result' as const },
+      { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。全部完成后在 .afk-signal.json 写入 type 为 goal_complete 的信号。`, signalType: 'goal_complete' as const },
+      { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。全部通过后在 .afk-signal.json 写入 type 为 ac_result 的信号。`, signalType: 'ac_result' as const },
     ];
 
     for (const phase of phases) {
@@ -465,17 +466,41 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     contextHighTokens: number;
   }): Promise<PhaseOutcome> {
     const start = Date.now();
-    while (Date.now() - start < p.completionTimeoutMs) {
-      // Signal file first: a completion signal wins over the token threshold.
-      const signal = await readSignal(p.wtPath);
-      if (signal?.type === p.signalType) return { kind: 'done' };
-      if (signal?.type === 'timeout') return { kind: 'timeout' };
+    const signalPath = join(p.wtPath, SIGNAL_FILE);
+    let lastWarnTime = 0;
 
-      // Objective poll: statusline token usage reached the threshold.
-      const tokens = (await getTokenUsage(p.wtPath)).total;
-      if (tokens >= p.contextHighTokens) {
-        logger.info({ iid: p.iid, tokens, threshold: p.contextHighTokens }, 'context near limit; interrupting for handoff');
-        return { kind: 'handoff', tokens };
+    while (Date.now() - start < p.completionTimeoutMs) {
+      try {
+        // Signal file first: a completion signal wins over the token threshold.
+        const signal = await readSignal(p.wtPath);
+        if (signal?.type === p.signalType) {
+          logger.info({ iid: p.iid, signalType: p.signalType }, 'phase signal detected');
+          return { kind: 'done' };
+        }
+        if (signal?.type === 'timeout') return { kind: 'timeout' };
+
+        // Fallback: if the signal file exists but readSignal returned null,
+        // log a warning (once per 30s to avoid spam) so we can debug.
+        if (!signal) {
+          try {
+            const stat = await fs.stat(signalPath);
+            if (stat.size > 0 && Date.now() - lastWarnTime > 30000) {
+              lastWarnTime = Date.now();
+              logger.warn({ iid: p.iid, signalPath, size: stat.size }, 'signal file exists but readSignal returned null');
+            }
+          } catch { /* file doesn't exist yet, normal */ }
+        }
+
+        // Objective poll: statusline token usage reached the threshold.
+        const tokens = (await getTokenUsage(p.wtPath)).total;
+        if (tokens >= p.contextHighTokens) {
+          logger.info({ iid: p.iid, tokens, threshold: p.contextHighTokens }, 'context near limit; interrupting for handoff');
+          return { kind: 'handoff', tokens };
+        }
+      } catch (err) {
+        // Swallow transient errors in the polling loop so one bad tick
+        // doesn't crash the entire phase.
+        logger.error({ iid: p.iid, err }, 'waitForPhaseSignal tick error (swallowed)');
       }
 
       await this.sleep(this.pollIntervalMs);

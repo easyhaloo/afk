@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { createGitLabClient } from '../lib/client-factory';
 import { detectGitLabProject } from '../lib/core/tracker/detect';
 import { getGlabToken } from '../lib/core/gitlab/glab-config';
-import { handleCommandError, parseCommaSeparated, formatJson } from '../lib/cli-utils';
+import { handleCommandError, parseCommaSeparated, formatJson, success, detail, warning } from '../lib/cli-utils';
 
 export function registerGitLabCommands(program: Command): void {
   const gitlab = program
@@ -24,7 +24,7 @@ export function registerGitLabCommands(program: Command): void {
         const issue = await client.getIssue(parseInt(iid));
 
         if (options.json) {
-          console.log(JSON.stringify(issue, null, 2));
+          formatJson(issue);
         } else {
           console.log(chalk.bold(`#${issue.id}: ${issue.title}`));
           console.log(chalk.gray(`State: ${issue.state}`));
@@ -35,7 +35,6 @@ export function registerGitLabCommands(program: Command): void {
         }
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -57,7 +56,7 @@ export function registerGitLabCommands(program: Command): void {
         });
 
         if (options.json) {
-          console.log(JSON.stringify(issues, null, 2));
+          formatJson(issues);
         } else {
           console.log(chalk.bold(`Found ${issues.length} issues:`));
           console.log();
@@ -70,7 +69,6 @@ export function registerGitLabCommands(program: Command): void {
         }
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -86,10 +84,9 @@ export function registerGitLabCommands(program: Command): void {
       try {
         const client = await createGitLabClient();
         await client.addLabel(parseInt(iid), label);
-        console.log(chalk.green(`✓ Added label "${label}" to issue #${iid}`));
+        success(`Added label "${label}" to issue #${iid}`);
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -105,10 +102,9 @@ export function registerGitLabCommands(program: Command): void {
       try {
         const client = await createGitLabClient();
         await client.removeLabel(parseInt(iid), label);
-        console.log(chalk.green(`✓ Removed label "${label}" from issue #${iid}`));
+        success(`Removed label "${label}" from issue #${iid}`);
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -124,10 +120,9 @@ export function registerGitLabCommands(program: Command): void {
       try {
         const client = await createGitLabClient();
         await client.addComment(parseInt(iid), message);
-        console.log(chalk.green(`✓ Added comment to issue #${iid}`));
+        success(`Added comment to issue #${iid}`);
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -148,10 +143,9 @@ export function registerGitLabCommands(program: Command): void {
           description: options.description,
           labels: options.label ? parseCommaSeparated(options.label) : [],
         });
-        console.log(chalk.green(`✓ Created issue #${iid}: ${title}`));
+        success(`Created issue #${iid}: ${title}`);
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -169,13 +163,12 @@ export function registerGitLabCommands(program: Command): void {
         if (options.addLabel) {
           const labels = parseCommaSeparated(options.addLabel);
           await client.addLabelsToIssue(parseInt(iid), labels);
-          console.log(chalk.green(`✓ Added labels to issue #${iid}: ${options.addLabel}`));
+          success(`Added labels to issue #${iid}: ${options.addLabel}`);
         } else {
-          console.log(chalk.yellow('No labels to add. Use --add-label.'));
+          warning('No labels to add. Use --add-label.');
         }
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -194,13 +187,12 @@ export function registerGitLabCommands(program: Command): void {
         const ac = client.parseAC(issue);
 
         if (ac.items.length === 0) {
-          console.log(chalk.yellow('No AC found (add ac::1::... labels or ## AC markdown section)'));
-          process.exit(1);
+          handleCommandError(new Error('No AC found (add ac::1::... labels or ## AC markdown section)'));
         }
 
         const sourceHint = ac.source === 'labels' ? '(from labels)' : '(from legacy markdown)';
         if (options.json) {
-          console.log(JSON.stringify(ac, null, 2));
+          formatJson(ac);
         } else {
           console.log(chalk.bold(`Acceptance Criteria ${sourceHint}:`));
           console.log();
@@ -213,7 +205,6 @@ export function registerGitLabCommands(program: Command): void {
         }
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -232,12 +223,11 @@ export function registerGitLabCommands(program: Command): void {
         const add = options.add ? parseCommaSeparated(options.add) : [];
         const remove = options.remove ? parseCommaSeparated(options.remove) : [];
         await client.updateLabelsBatch(parseInt(iid), add, remove);
-        console.log(chalk.green(`✓ Updated labels on issue #${iid}`));
-        if (add.length) console.log(chalk.gray(`  + ${add.join(', ')}`));
-        if (remove.length) console.log(chalk.gray(`  - ${remove.join(', ')}`));
+        success(`Updated labels on issue #${iid}`);
+        if (add.length) detail(`+ ${add.join(', ')}`);
+        if (remove.length) detail(`- ${remove.join(', ')}`);
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -254,10 +244,9 @@ export function registerGitLabCommands(program: Command): void {
       try {
         const client = await createGitLabClient();
         await client.addMRComment(parseInt(mriid), message, { resolvable: options.resolvable });
-        console.log(chalk.green(`✓ Added comment to MR !${mriid}`));
+        success(`Added comment to MR !${mriid}`);
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -279,10 +268,9 @@ export function registerGitLabCommands(program: Command): void {
           parseInt(targetIid),
           linkType
         );
-        console.log(chalk.green(`✓ Linked #${sourceIid} ${linkType} #${targetIid}`));
+        success(`Linked #${sourceIid} ${linkType} #${targetIid}`);
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -300,7 +288,6 @@ export function registerGitLabCommands(program: Command): void {
         console.log(status);
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 
@@ -333,8 +320,8 @@ export function registerGitLabCommands(program: Command): void {
       }
 
       const num = parseInt(iid);
-      if (isNaN(num)) { console.error('Invalid IID'); process.exit(1); }
-      if (!projectPath) { console.error('Could not determine project. Set GITLAB_PROJECT_ID or run from git repo.'); process.exit(1); }
+      if (isNaN(num)) { handleCommandError(new Error('Invalid IID')); }
+      if (!projectPath) { handleCommandError(new Error('Could not determine project. Set GITLAB_PROJECT_ID or run from git repo.')); }
 
       // GitLab web URL format: host/project/-/issues|merge_requests/:iid
       const suffix = type === 'issue' ? `/-/issues/${num}` : `/-/merge_requests/${num}`;
@@ -342,7 +329,7 @@ export function registerGitLabCommands(program: Command): void {
 
       const { default: open } = await import('open');
       await open(openUrl);
-      console.log(chalk.green(`Opened ${type} #${iid} → ${openUrl}`));
+      success(`Opened ${type} #${iid} → ${openUrl}`);
     });
 
   /**
@@ -359,11 +346,10 @@ export function registerGitLabCommands(program: Command): void {
         if (markdown) {
           console.log(markdown);
         } else {
-          console.log(chalk.gray('No artifacts to upload (or .afk/artifacts.txt not found)'));
+          warning('No artifacts to upload (or .afk/artifacts.txt not found)');
         }
       } catch (error) {
         handleCommandError(error);
-        process.exit(1);
       }
     });
 }

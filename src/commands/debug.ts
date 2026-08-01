@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { spawnSync } from 'child_process';
+import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
 
 export interface DebugState {
   original_command: string;
@@ -70,8 +71,7 @@ export function registerDebugCommands(program: Command): void {
 
   function requireState(state: DebugState): void {
     if (!state.phase) {
-      console.error('ERROR: no debug session found. Run "afk debug reproduce <cmd>" first.');
-      process.exit(1);
+      handleCommandError(new Error('no debug session found. Run "afk debug reproduce <cmd>" first.'));
     }
   }
 
@@ -98,7 +98,7 @@ export function registerDebugCommands(program: Command): void {
       const prev = await loadState();
       const originalCmd = prev.original_command || cmd;
 
-      console.log(`▶ Executing: ${cmd}`);
+      info(`Executing: ${cmd}`);
       const result = spawnSync(cmd, [], { encoding: 'utf-8', shell: true });
       const output = result.stdout + result.stderr;
       const exitcode = result.status ?? 1;
@@ -125,7 +125,7 @@ export function registerDebugCommands(program: Command): void {
       console.log(output.slice(-50 * 80)); // last 50 lines
 
       if (exitcode === 0 && !output.trim()) {
-        console.log('\n⚠️  Command succeeded with empty output — no error to diagnose.');
+        warning('Command succeeded with empty output — no error to diagnose.');
       }
     });
 
@@ -157,7 +157,7 @@ export function registerDebugCommands(program: Command): void {
       const state = await loadState();
       requireState(state);
 
-      console.log(`▶ Investigating: ${file}${lineStr ? ':' + lineStr : ''}`);
+      info(`Investigating: ${file}${lineStr ? ':' + lineStr : ''}`);
 
       try {
         const stat = await fs.stat(file);
@@ -167,8 +167,7 @@ export function registerDebugCommands(program: Command): void {
         if (lineStr) {
           const line = parseInt(lineStr, 10);
           if (isNaN(line) || line < 1 || line > allLines.length) {
-            console.error(`Invalid line number: ${lineStr}`);
-            process.exit(1);
+            handleCommandError(new Error(`Invalid line number: ${lineStr}`));
           }
           const start = Math.max(1, line - 3);
           const end = Math.min(allLines.length, line + 3);
@@ -180,11 +179,10 @@ export function registerDebugCommands(program: Command): void {
         }
       } catch (err: any) {
         if (err.code === 'ENOENT') {
-          console.error(`File not found: ${file}`);
+          handleCommandError(new Error(`File not found: ${file}`));
         } else {
-          console.error(`Error: ${err.message}`);
+          handleCommandError(err);
         }
-        process.exit(1);
       }
     });
 
@@ -203,7 +201,7 @@ export function registerDebugCommands(program: Command): void {
       state.fix_applied = fix;
       await saveState(state);
 
-      console.log(`✓ Fix proposed: ${fix}`);
+      success(`Fix proposed: ${fix}`);
       console.log('\nAfter applying the fix, run:');
       console.log(`  afk debug verify "${state.original_command}"`);
     });
@@ -220,11 +218,10 @@ export function registerDebugCommands(program: Command): void {
 
       const cmd = cmdParts ? cmdParts.join(' ') : state.original_command;
       if (!cmd) {
-        console.error('ERROR: no command to verify.');
-        process.exit(1);
+        handleCommandError(new Error('no command to verify.'));
       }
 
-      console.log(`▶ Verifying: ${cmd}`);
+      info(`Verifying: ${cmd}`);
       const result = spawnSync(cmd, [], { encoding: 'utf-8', shell: true });
       const output = result.stdout + result.stderr;
       const exitcode = result.status ?? 1;
@@ -239,10 +236,10 @@ export function registerDebugCommands(program: Command): void {
       await logCommand(cmd, output, exitcode);
 
       if (verified) {
-        console.log(`\n✅ VERIFIED — exit ${exitcode}`);
-        if (state.root_cause) console.log(`Root cause: ${state.root_cause}`);
+        success(`VERIFIED — exit ${exitcode}`);
+        if (state.root_cause) detail(`Root cause: ${state.root_cause}`);
       } else {
-        console.log(`\n❌ STILL FAILING — exit ${exitcode}`);
+        fail(`STILL FAILING — exit ${exitcode}`);
         console.log('Output:');
         console.log(output.slice(-30 * 80));
         console.log('\n→ Loop back: afk debug hypothesize');
@@ -258,7 +255,7 @@ export function registerDebugCommands(program: Command): void {
       const state = await loadState();
 
       if (!state.phase) {
-        console.log('No active debug session. Run "afk debug reproduce <cmd>" to start.');
+        warning('No active debug session. Run "afk debug reproduce <cmd>" to start.');
         return;
       }
 
@@ -282,6 +279,6 @@ export function registerDebugCommands(program: Command): void {
     .description('Clear the debug session and start over')
     .action(async () => {
       await fs.rm(debugDir, { recursive: true, force: true });
-      console.log('✓ Debug session reset.');
+      success('Debug session reset.');
     });
 }

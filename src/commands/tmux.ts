@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { TmuxClient } from '../lib/tmux';
-import { handleCommandError } from '../lib/cli-utils';
+import { handleCommandError, success, info, warning, detail, formatJson } from '../lib/cli-utils';
 
 export function registerTmuxCommands(program: Command): void {
   const tmux = program
@@ -22,10 +22,10 @@ export function registerTmuxCommands(program: Command): void {
         const client = new TmuxClient();
         const session = await client.createSession(options.name, options.dir, options.command);
 
-        console.log(chalk.green('✓ Tmux session created'));
-        console.log(chalk.gray(`  Name: ${session.name}`));
-        console.log(chalk.gray(`  Window: ${session.window}`));
-        console.log(chalk.gray(`  Dir: ${session.dir}`));
+        success('Tmux session created');
+        detail(`Name: ${session.name}`);
+        detail(`Window: ${session.window}`);
+        detail(`Dir: ${session.dir}`);
         console.log();
         console.log(chalk.dim(`Attach with: tmux attach -t ${session.name}`));
       } catch (error) {
@@ -47,10 +47,10 @@ export function registerTmuxCommands(program: Command): void {
       try {
         const client = new TmuxClient();
 
-        console.log(chalk.blue(`Sending /goal to ${options.session}:${options.window}...`));
+        info(`Sending /goal to ${options.session}:${options.window}...`);
         await client.sendGoal(options.worktree, options.session, options.window, options.text);
 
-        console.log(chalk.green('✓ Goal sent successfully'));
+        success('Goal sent successfully');
       } catch (error) {
         handleCommandError(error);
       }
@@ -99,7 +99,7 @@ export function registerTmuxCommands(program: Command): void {
       try {
         const client = new TmuxClient();
 
-        console.log(chalk.blue(`Waiting for ${options.type} signal...`));
+        info(`Waiting for ${options.type} signal...`);
         const signal = await client.waitForSignal(
           options.session,
           options.window,
@@ -109,10 +109,10 @@ export function registerTmuxCommands(program: Command): void {
         );
 
         if (signal) {
-          console.log(chalk.green(`✓ Signal received: ${signal.type}`));
-          console.log(JSON.stringify(signal, null, 2));
+          success(`Signal received: ${signal.type}`);
+          formatJson(signal);
         } else {
-          console.log(chalk.yellow('⚠ Timeout waiting for signal'));
+          warning('Timeout waiting for signal');
           process.exit(1);
         }
       } catch (error) {
@@ -132,7 +132,7 @@ export function registerTmuxCommands(program: Command): void {
         const client = new TmuxClient();
         await client.killSession(name);
 
-        console.log(chalk.green(`✓ Session ${name} killed`));
+        success(`Session ${name} killed`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -151,10 +151,10 @@ export function registerTmuxCommands(program: Command): void {
         const exists = await client.hasSession(name);
 
         if (exists) {
-          console.log(chalk.green(`✓ Session ${name} exists`));
+          success(`Session ${name} exists`);
           process.exit(0);
         } else {
-          console.log(chalk.yellow(`Session ${name} not found`));
+          warning(`Session ${name} not found`);
           process.exit(1);
         }
       } catch (error) {

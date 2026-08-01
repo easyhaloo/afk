@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createGitHubClient } from '../lib/client-factory';
-import { handleCommandError, parseCommaSeparated } from '../lib/cli-utils';
+import { handleCommandError, parseCommaSeparated, success, detail, formatJson } from '../lib/cli-utils';
 
 export function registerGitHubCommands(program: Command): void {
   const github = program
@@ -22,7 +22,7 @@ export function registerGitHubCommands(program: Command): void {
         const issue = await client.getIssue(parseInt(number));
 
         if (options.json) {
-          console.log(JSON.stringify(issue, null, 2));
+          formatJson(issue);
         } else {
           console.log(chalk.bold(`#${issue.id}: ${issue.title}`));
           console.log(chalk.gray(`State: ${issue.state}`));
@@ -55,7 +55,7 @@ export function registerGitHubCommands(program: Command): void {
         });
 
         if (options.json) {
-          console.log(JSON.stringify(issues, null, 2));
+          formatJson(issues);
         } else {
           console.log(chalk.bold(`Found ${issues.length} issues:`));
           console.log();
@@ -88,7 +88,7 @@ export function registerGitHubCommands(program: Command): void {
           description: options.description,
           labels: options.label ? parseCommaSeparated(options.label) : [],
         });
-        console.log(chalk.green(`✓ Created issue #${issueNumber}: ${title}`));
+        success(`Created issue #${issueNumber}: ${title}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -106,7 +106,7 @@ export function registerGitHubCommands(program: Command): void {
       try {
         const client = await createGitHubClient();
         await client.addComment(parseInt(number), message);
-        console.log(chalk.green(`✓ Added comment to issue #${number}`));
+        success(`Added comment to issue #${number}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -139,9 +139,9 @@ export function registerGitHubCommands(program: Command): void {
           await Promise.all(labelsToRemove.map(label => client.removeLabel(issueNum, label)));
         }
 
-        console.log(chalk.green(`✓ Updated labels on issue #${number}`));
-        if (options.add) console.log(chalk.gray(`  + ${options.add}`));
-        if (options.remove) console.log(chalk.gray(`  - ${options.remove}`));
+        success(`Updated labels on issue #${number}`);
+        if (options.add) detail(`+ ${options.add}`);
+        if (options.remove) detail(`- ${options.remove}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -166,7 +166,7 @@ export function registerGitHubCommands(program: Command): void {
                         'related_to';
 
         await client.linkIssues(sourceNum, targetNum, linkType);
-        console.log(chalk.green(`✓ Linked issue #${source} to #${target} (${linkType})`));
+        success(`Linked issue #${source} to #${target} (${linkType})`);
       } catch (error) {
         handleCommandError(error);
       }

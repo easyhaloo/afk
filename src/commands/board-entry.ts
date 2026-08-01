@@ -6,12 +6,14 @@
 import { render } from 'ink';
 import React from 'react';
 import { DashboardEntry } from '../views/app/index.js';
+import { handleCommandError } from '../lib/cli-utils.js';
 
 export async function startDashboard() {
   if (!process.stdin.isTTY) {
-    console.error('Error: afk ui requires an interactive terminal (TTY)');
-    console.error('Current stdin is not a TTY. Please run this command in a real terminal.');
-    process.exit(1);
+    handleCommandError(
+      new Error('afk ui requires an interactive terminal (TTY)'),
+      'Current stdin is not a TTY. Please run this command in a real terminal.',
+    );
   }
 
   process.stdout.write('\x1b[?1049h');

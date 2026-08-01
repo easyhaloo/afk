@@ -99,3 +99,17 @@ export function info(message: string): void {
 export function warning(message: string): void {
   console.log(chalk.yellow('⚠'), message);
 }
+
+/**
+ * Display failure message on stderr (keeps piped stdout clean)
+ */
+export function fail(message: string): void {
+  console.error(chalk.red('✗'), message);
+}
+
+/**
+ * Display a dim, indented detail line under a status message
+ */
+export function detail(message: string): void {
+  console.log(chalk.dim('  ' + message));
+}

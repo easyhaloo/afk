@@ -13,10 +13,9 @@ const LOADER: [string[], () => Promise<{ [k: string]: RegisterFn }>][] = [
   [['workflow'], () => import('./commands/workflow.js')],
   [['scheduler'], () => import('./commands/scheduler.js')],
   [['board'], () => import('./commands/board.js')],
-  [['db'], () => import('./commands/db.js')],
-  [['debug'], () => import('./commands/debug.js')],
+    [['debug'], () => import('./commands/debug.js')],
   [['escalate'], () => import('./commands/escalate.js')],
-  [['fork'], () => import('./commands/fork.js')],
+  [['isolate'], () => import('./commands/isolate.js')],
   [['qa'], () => import('./commands/qa.js')],
   [['loop'], () => import('./commands/loop.js')],
 ];

@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
 import { getCurrentTimestamp } from '../lib/schemas';
 import { writeSignal, readSignal, clearSignal, waitForSignal } from '../lib/io';
-import { handleCommandError } from '../lib/cli-utils';
+import { handleCommandError, success, info, warning, detail, formatJson } from '../lib/cli-utils';
 
 export function registerSignalCommands(program: Command): void {
   const signal = program
@@ -30,9 +30,9 @@ export function registerSignalCommands(program: Command): void {
           summary: options.summary,
         }, options.dir);
 
-        console.log(chalk.green('✓ Goal complete signal written'));
-        console.log(chalk.gray(`  Summary: ${options.summary}`));
-        if (sha) console.log(chalk.gray(`  SHA: ${sha}`));
+        success('Goal complete signal written');
+        detail(`Summary: ${options.summary}`);
+        if (sha) detail(`SHA: ${sha}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -64,13 +64,10 @@ export function registerSignalCommands(program: Command): void {
           tests_passed: options.testsPassed,
         }, options.dir);
 
-        const emoji = options.result === 'PASS' ? '✓' : '✗';
-        const color = options.result === 'PASS' ? chalk.green : chalk.red;
-
-        console.log(color(`${emoji} AC result signal written: ${options.result}`));
-        console.log(chalk.gray(`  Summary: ${options.summary}`));
+        success(`AC result signal written: ${options.result}`);
+        detail(`Summary: ${options.summary}`);
         if (options.testsRun) {
-          console.log(chalk.gray(`  Tests: ${options.testsPassed || 0}/${options.testsRun} passed`));
+          detail(`Tests: ${options.testsPassed || 0}/${options.testsRun} passed`);
         }
       } catch (error) {
         handleCommandError(error);
@@ -93,8 +90,8 @@ export function registerSignalCommands(program: Command): void {
           summary: options.summary,
         }, options.dir);
 
-        console.log(chalk.green('✓ Handoff ready signal written'));
-        console.log(chalk.gray(`  Summary: ${options.summary}`));
+        success('Handoff ready signal written');
+        detail(`Summary: ${options.summary}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -113,12 +110,12 @@ export function registerSignalCommands(program: Command): void {
         const signalData = await readSignal(options.dir);
 
         if (!signalData) {
-          console.log(chalk.yellow('No signal file found'));
+          warning('No signal file found');
           process.exit(0);
         }
 
         if (options.json) {
-          console.log(JSON.stringify(signalData, null, 2));
+          formatJson(signalData);
         } else {
           console.log(chalk.bold(`Type: ${signalData.type}`));
           console.log(chalk.gray(`Timestamp: ${signalData.timestamp}`));
@@ -152,7 +149,7 @@ export function registerSignalCommands(program: Command): void {
     .option('--dir <path>', 'Working directory', process.cwd())
     .action(async (options) => {
       try {
-        console.log(chalk.blue(`Waiting for signal: ${options.type}...`));
+        info(`Waiting for signal: ${options.type}...`);
 
         const signalData = await waitForSignal(options.type, {
           timeout: parseInt(options.timeout),
@@ -160,8 +157,8 @@ export function registerSignalCommands(program: Command): void {
           dir: options.dir,
         });
 
-        console.log(chalk.green(`✓ Signal received: ${signalData.type}`));
-        console.log(JSON.stringify(signalData, null, 2));
+        success(`Signal received: ${signalData.type}`);
+        formatJson(signalData);
       } catch (error) {
         handleCommandError(error);
       }
@@ -177,7 +174,7 @@ export function registerSignalCommands(program: Command): void {
     .action(async (options) => {
       try {
         await clearSignal(options.dir);
-        console.log(chalk.green('✓ Signal file cleared'));
+        success('Signal file cleared');
       } catch (error) {
         handleCommandError(error);
       }

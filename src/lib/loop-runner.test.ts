@@ -494,7 +494,126 @@ describe('LoopRunner', () => {
     await runner.stop();
     await runPromise;
   });
-});
+
+  // ── resolveModules tests ──────────────────────────────────────────────────
+
+  it('resolveModules: no moduleTriggers passes base ext', async () => {
+    const issue = makeIssue(24);
+    tracker = makeTracker([issue]);
+    workflowRunImpl.mockResolvedValue({ success: false });
+
+    const runner = new LoopRunner(tracker, {
+      ...tmpPaths(),
+      maxConcurrent: 1,
+      pollIntervalMs: 50,
+      statusIntervalMs: 10_000,
+      requiredLabels: REQ,
+      excludeLabels: EXC,
+      shutdownTimeoutMs: 1_000,
+      ext: ['isolate'],
+      // No moduleTriggers → should pass via `ext: ['isolate']`
+      workflowRunnerFactory: () => ({ run: workflowRunImpl } as unknown as WorkflowRunner),
+      qaRunnerFactory: () => ({ process: qaProcessImpl } as unknown as QARunner),
+    });
+
+    const runPromise = runner.start();
+    await waitFor(() => workflowRunImpl.mock.calls.length > 0, 2_000);
+    expect(workflowRunImpl.mock.calls[0][0].ext).toEqual(['isolate']);
+
+    await runner.stop();
+    await runPromise;
+  });
+
+  it('resolveModules: matching label triggers module', async () => {
+    const issue = makeIssue(24, ['need::isolate']);
+    tracker = makeTracker([issue]);
+    workflowRunImpl.mockResolvedValue({ success: false });
+
+    const runner = new LoopRunner(tracker, {
+      ...tmpPaths(),
+      maxConcurrent: 1,
+      pollIntervalMs: 50,
+      statusIntervalMs: 10_000,
+      requiredLabels: REQ,
+      excludeLabels: EXC,
+      shutdownTimeoutMs: 1_000,
+      ext: [],
+      moduleTriggers: { 'need::isolate': ['isolate'] },
+      workflowRunnerFactory: () => ({ run: workflowRunImpl } as unknown as WorkflowRunner),
+      qaRunnerFactory: () => ({ process: qaProcessImpl } as unknown as QARunner),
+    });
+
+    const runPromise = runner.start();
+    await waitFor(() => workflowRunImpl.mock.calls.length > 0, 2_000);
+    // Should fetch the issue to check labels
+    expect(tracker.getIssue).toHaveBeenCalledWith(24);
+    // Should resolve to ['isolate']
+    expect(workflowRunImpl.mock.calls[0][0].ext).toEqual(['isolate']);
+
+    await runner.stop();
+    await runPromise;
+  });
+
+  it('resolveModules: non-matching label passes base ext', async () => {
+    const issue = makeIssue(24, ['need::other']);
+    tracker = makeTracker([issue]);
+    workflowRunImpl.mockResolvedValue({ success: false });
+
+    const runner = new LoopRunner(tracker, {
+      ...tmpPaths(),
+      maxConcurrent: 1,
+      pollIntervalMs: 50,
+      statusIntervalMs: 10_000,
+      requiredLabels: REQ,
+      excludeLabels: EXC,
+      shutdownTimeoutMs: 1_000,
+      ext: ['mock-server'],
+      moduleTriggers: { 'need::isolate': ['isolate'] },
+      workflowRunnerFactory: () => ({ run: workflowRunImpl } as unknown as WorkflowRunner),
+      qaRunnerFactory: () => ({ process: qaProcessImpl } as unknown as QARunner),
+    });
+
+    const runPromise = runner.start();
+    await waitFor(() => workflowRunImpl.mock.calls.length > 0, 2_000);
+    // Issue has need::other, not need::isolate → only base ext
+    expect(workflowRunImpl.mock.calls[0][0].ext).toEqual(['mock-server']);
+
+    await runner.stop();
+    await runPromise;
+  });
+
+  it('resolveModules: merges base ext with triggered modules', async () => {
+    const issue = makeIssue(24, ['need::isolate', 'need::mock']);
+    tracker = makeTracker([issue]);
+    workflowRunImpl.mockResolvedValue({ success: false });
+
+    const runner = new LoopRunner(tracker, {
+      ...tmpPaths(),
+      maxConcurrent: 1,
+      pollIntervalMs: 50,
+      statusIntervalMs: 10_000,
+      requiredLabels: REQ,
+      excludeLabels: EXC,
+      shutdownTimeoutMs: 1_000,
+      ext: ['base-module'],
+      moduleTriggers: { 'need::isolate': ['isolate'], 'need::mock': ['mock-server'] },
+      workflowRunnerFactory: () => ({ run: workflowRunImpl } as unknown as WorkflowRunner),
+      qaRunnerFactory: () => ({ process: qaProcessImpl } as unknown as QARunner),
+    });
+
+    const runPromise = runner.start();
+    await waitFor(() => workflowRunImpl.mock.calls.length > 0, 2_000);
+    const resolved = workflowRunImpl.mock.calls[0][0].ext;
+    expect(resolved).toContain('base-module');
+    expect(resolved).toContain('isolate');
+    expect(resolved).toContain('mock-server');
+    expect(resolved).toHaveLength(3);
+
+    await runner.stop();
+    await runPromise;
+  });
+
+  });
 
 async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;

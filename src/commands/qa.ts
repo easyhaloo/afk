@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { createTrackerClient } from '../lib/client-factory';
 import { QARunner } from '../lib/qa-runner';
-import { handleCommandError } from '../lib/cli-utils';
+import { handleCommandError, success, info, warning, detail } from '../lib/cli-utils';
 import { logger } from '../lib/io';
 
 export function registerQACommands(program: Command): void {
@@ -24,31 +24,30 @@ export function registerQACommands(program: Command): void {
     .action(async (options) => {
       try {
         if (!options.iid && !options.prdIid) {
-          console.error(chalk.red('❌ Either --iid or --prd-iid is required'));
-          process.exit(1);
+          handleCommandError(new Error('Either --iid or --prd-iid is required'));
         }
 
         const tracker = await createTrackerClient();
         const runner = new QARunner(tracker);
 
         if (options.iid) {
-          console.log(chalk.cyan(`\n🔍 Running QA for issue #${options.iid}...\n`));
+          info(`Running QA for issue #${options.iid}...`);
           const result = await runner.process(options.iid);
 
           if (result.success) {
-            console.log(chalk.green('\n✅ QA passed!'));
+            success('QA passed!');
             if (result.mrUrl) {
-              console.log(chalk.cyan(`   MR: ${result.mrUrl}`));
+              detail(`MR: ${result.mrUrl}`);
             }
             process.exit(0);
           } else {
-            console.log(chalk.yellow('\n⚠️  QA did not pass'));
+            warning('QA did not pass');
             process.exit(1);
           }
         }
 
         if (options.prdIid) {
-          console.log(chalk.cyan(`\n🔍 Running PRD-level QA for PRD #${options.prdIid}...\n`));
+          info(`Running PRD-level QA for PRD #${options.prdIid}...`);
           const result = await runner.processPRD(options.prdIid);
 
           console.log(chalk.bold('\n📊 PRD QA Results:\n'));
@@ -59,10 +58,10 @@ export function registerQACommands(program: Command): void {
           console.log(chalk.gray(`\n  Total: ${result.results.length}`));
 
           if (result.success) {
-            console.log(chalk.green('\n✅ All PRD issues passed QA!'));
+            success('All PRD issues passed QA!');
             process.exit(0);
           } else {
-            console.log(chalk.yellow('\n⚠️  Some PRD issues did not pass QA'));
+            warning('Some PRD issues did not pass QA');
             process.exit(1);
           }
         }
@@ -84,8 +83,8 @@ export function registerQACommands(program: Command): void {
         const runner = new QARunner(tracker);
         const pollInterval = parseInt(options.pollInterval) * 1000;
 
-        console.log(chalk.cyan('\n🔍 QA Worker Started'));
-        console.log(chalk.gray(`   Polling for stage::qa issues every ${options.pollInterval}s\n`));
+        info('QA Worker Started');
+        detail(`Polling for stage::qa issues every ${options.pollInterval}s`);
 
         const poll = async () => {
           try {
@@ -96,14 +95,11 @@ export function registerQACommands(program: Command): void {
 
             for (const issue of issues) {
               logger.info({ iid: issue.id }, 'QA worker picked up issue');
-              console.log(chalk.cyan(`  [QA] Processing #${issue.id}...`));
+              info(`[QA] Processing #${issue.id}...`);
 
               const result = await runner.process(issue.id);
-              console.log(
-                result.success
-                  ? chalk.green(`  [QA] ✅ #${issue.id} passed`)
-                  : chalk.yellow(`  [QA] ⚠️  #${issue.id} failed`)
-              );
+              if (result.success) success(`[QA] #${issue.id} passed`);
+              else warning(`[QA] #${issue.id} failed`);
             }
           } catch (error) {
             logger.error({ err: error }, 'QA poll cycle error');
@@ -119,12 +115,12 @@ export function registerQACommands(program: Command): void {
         console.log(chalk.dim('\nPress Ctrl+C to stop\n'));
 
         process.on('SIGINT', () => {
-          console.log('\n\nQA worker stopped.');
+          info('QA worker stopped.');
           process.exit(0);
         });
 
         process.on('SIGTERM', () => {
-          console.log('\n\nQA worker stopped.');
+          info('QA worker stopped.');
           process.exit(0);
         });
       } catch (error) {

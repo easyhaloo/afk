@@ -8,6 +8,8 @@ import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
 import { getTokenUsage, configureStatusline, logger, readSignal, clearSignal, STATUS_FILENAME } from './io';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
+import { loadModules, parseModuleParams } from './modules/_registry';
+import type { LifecycleModule } from './workflows/lifecycle';
 
 /**
  * Detached spawn that works on both Linux and macOS.
@@ -41,6 +43,10 @@ export interface RunnerOptions {
   /** Max total tokens across all handoff generations before a terminal handoff. */
   maxTotalTokens?: number;
   platform?: Platform;
+  /** Module names to activate (e.g., ['isolate', 'mock-server']) */
+  ext?: string[];
+  /** Module parameters (e.g., ['isolate.auto=true']) */
+  extParams?: string[];
 }
 
 /**
@@ -76,6 +82,8 @@ export class WorkflowRunner {
   private tmux: TmuxClient;
   private worktree: WorktreeManager;
   private logDir: string;
+  private modules: LifecycleModule[] = [];
+  private extParams: Record<string, unknown> = {};
 
   constructor(tracker: TrackerProvider) {
     this.tracker = tracker;
@@ -102,6 +110,10 @@ export class WorkflowRunner {
       contextHighTokens = CONTEXT.HIGH_THRESHOLD,
       maxTotalTokens = MAX_TOTAL_TOKENS,
     } = options;
+
+    // Load lifecycle modules
+    this.modules = await loadModules(options.ext);
+    this.extParams = parseModuleParams(options.extParams);
 
     this._watchdog = null;
 
@@ -139,6 +151,8 @@ Session was interrupted before completion.
     }
 
     await this.teardownSession(iid, session);
+    // Lifecycle cleanup hooks
+    await this.runLifecycleCleanup();
   }
 
   /**
@@ -159,6 +173,32 @@ Session was interrupted before completion.
     }
   }
 
+  /**
+   * Run lifecycle cleanup hooks (after_agent + onCleanup) for all active modules.
+   * Safe to call multiple times — modules are idempotent.
+   */
+  private async runLifecycleCleanup(): Promise<void> {
+    // Run in reverse order (last loaded = first cleaned up)
+    for (const mod of [...this.modules].reverse()) {
+      try {
+        await mod.onAfterAgent?.({
+          iid: 0, worktreePath: '', baseBranch: '', sessionName: '',
+          params: this.extParams,
+        });
+      } catch (err) {
+        logger.warn({ module: mod.name, err }, 'lifecycle after_agent cleanup failed');
+      }
+      try {
+        await mod.onCleanup?.({
+          iid: 0, worktreePath: '', baseBranch: '', sessionName: '',
+          params: this.extParams,
+        });
+      } catch (err) {
+        logger.warn({ module: mod.name, err }, 'lifecycle onCleanup failed');
+      }
+    }
+  }
+
   private async runBody(ctx: {
     iid: number; session: string; targetBranch: string;
     baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number;
@@ -170,6 +210,22 @@ Session was interrupted before completion.
     const wt = await this.worktree.create(iid, baseBranch);
     await this.worktree.updateStatus(iid, 'active');
     await configureStatusline(wt.path);
+
+    // ── Step 1b: Lifecycle before_agent hooks ──────────────────────────────
+    const lifecycleCtx = {
+      iid,
+      worktreePath: wt.path,
+      baseBranch,
+      sessionName: session,
+      params: this.extParams,
+    };
+    for (const mod of this.modules) {
+      try {
+        await mod.onBeforeAgent?.(lifecycleCtx);
+      } catch (err) {
+        logger.warn({ iid, module: mod.name, err }, 'lifecycle before_agent hook failed');
+      }
+    }
 
     // ── Step 2: Launch tmux session ─────────────────────────────────────────
     await this.tmux.createSession(session, wt.path);
@@ -208,6 +264,15 @@ Session was interrupted before completion.
         goalBase: phase.goalBase, signalType: phase.signalType,
       });
       if (!completed) return { success: false };
+    }
+
+    // ── Lifecycle after_agent hooks (before cleanup) ────────────────────────
+    for (const mod of this.modules) {
+      try {
+        await mod.onAfterAgent?.(lifecycleCtx);
+      } catch (err) {
+        logger.warn({ iid, module: mod.name, err }, 'lifecycle after_agent hook failed');
+      }
     }
 
     // ac_result → autoWrapup
@@ -301,6 +366,8 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     }
 
     await this.teardownSession(iid, session);
+    // Lifecycle cleanup hooks
+    await this.runLifecycleCleanup();
   }
 
   /** Armed hard-timeout watchdog (detached process group), if any. */

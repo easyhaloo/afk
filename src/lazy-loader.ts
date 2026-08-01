@@ -18,6 +18,8 @@ const LOADER: [string[], () => Promise<{ [k: string]: RegisterFn }>][] = [
   [['isolate'], () => import('./commands/isolate.js')],
   [['qa'], () => import('./commands/qa.js')],
   [['loop'], () => import('./commands/loop.js')],
+  [['completion'], () => import('./commands/completion.js')],
+  [['__complete'], () => import('./commands/completion.js')],
 ];
 
 export async function lazyLoad(cmd: string, extraArgs: string[]) {

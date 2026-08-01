@@ -15,7 +15,6 @@ import { registerWorkflowCommands } from './commands/workflow';
 import { registerSchedulerCommands } from './commands/scheduler';
 import { registerBoardCommands } from './commands/board';
 import { registerKanbanCommands } from './commands/kanban';
-import { registerDbCommands } from './commands/db';
 import { registerDebugCommands } from './commands/debug';
 import { registerEscalateCommands } from './commands/escalate';
 import { registerForkCommands } from './commands/fork';
@@ -35,8 +34,7 @@ export function runFullCLI() {
   registerSchedulerCommands(program);
   registerBoardCommands(program);
   registerKanbanCommands(program);
-  registerDbCommands(program);
-  registerDebugCommands(program);
+    registerDebugCommands(program);
   registerEscalateCommands(program);
   registerForkCommands(program);
   registerQACommands(program);

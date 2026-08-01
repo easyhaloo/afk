@@ -7,6 +7,11 @@ import { resolve } from 'path';
 const cmd = process.argv[2];
 const extraArgs = process.argv.slice(3);
 
+// NOTE: this dispatcher intentionally uses raw console.log/console.error —
+// importing cli-utils (chalk/pino) here would defeat lazy-loading by pulling
+// the whole logging stack into every command's startup path. User-facing
+// status lines live in commands via the cli-utils helpers; this file only
+// handles the version contract and last-resort errors.
 async function main() {
   if (cmd === '--version' || cmd === '-V') {
     console.log('0.1.0');

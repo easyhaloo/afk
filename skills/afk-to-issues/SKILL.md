@@ -77,6 +77,28 @@ and flag it in the issue body as "needs automated check".
 - **Cycle check:** trace `blocked_by` graph; redraw boundaries if cyclic
 - **Direct Mode:** ask user to narrow if requirement too large
 
+## Forking Analysis
+
+For each slice, determine if it requires **isolated middleware** (MySQL, Redis,
+ES, etc.) by checking for any of these signals in the requirement and inspected
+codebase:
+
+1. **Schema change** — the slice modifies a database table, index, or migration
+   file
+2. **Middleware config change** — the slice adds or modifies docker-compose
+   service definitions, Redis cache keys, ES index mappings, or similar
+   middleware configuration
+3. **New middleware dependency** — the slice introduces a new service dependency
+   that isn't available in the shared/shared development environment
+
+If any signal matches, mark the slice with `needs_fork: true`.
+
+| Signal | Example content |
+|--------|----------------|
+| Schema change | "add column", "migration", "CREATE TABLE", "ALTER TABLE", "new index" |
+| Middleware config | "add Redis cache", "new ES index", "docker-compose" |
+| New dependency | "integrate RabbitMQ", "add S3 bucket", "new message queue" |
+
 ## Issue Body Composition
 
 Each draft must populate every field defined in
@@ -95,10 +117,11 @@ Each draft must populate every field defined in
 1. **Pick mode:** PRD exists → PRD Mode; else → Direct Mode. Lock in `mode::afk` / `mode::hitl`.
 2. **Read inputs + read codebase:** for each Observable Behavior (PRD) or requirement clause (Direct), apply Verification Inference to produce `<text> -- <evidence_type> -- <check_command>`.
 3. **Slice:** apply Slice Strategy + Slicing Rules. If strategy is ambiguous, ask user.
-4. **Compose drafts:** for each slice, fill every Issue Body Composition field. Do not leave optional fields blank — write `none` for empty Dependencies, omit Out of Scope if user has none.
-5. **Self-quality-gate:** run every `check_command` in a sandbox (no remote side effects). Any non-zero exit or vocabulary violation → fix the draft before HITL.
-6. **HITL gate:** present all drafts + DAG + label scheme + base label. Wait for explicit approval.
-7. **Create:** on approval, run `afk issue create` with all labels at once (`--label stage::ready-for-issues --label <mode> --label <base>`), then `afk issue link` for DAG edges.
+4. **Forking Analysis:** for each slice, apply the Forking Analysis to determine `needs_fork: true/false`. Read the codebase to verify whether the slice actually touches middleware-related code (migration files, docker-compose, config files).
+5. **Compose drafts:** for each slice, fill every Issue Body Composition field. Do not leave optional fields blank — write `none` for empty Dependencies, omit Out of Scope if user has none.
+6. **Self-quality-gate:** run every `check_command` in a sandbox (no remote side effects). Any non-zero exit or vocabulary violation → fix the draft before HITL.
+7. **HITL gate:** present all drafts + DAG + label scheme + `need::fork` decisions + base label. Wait for explicit approval.
+8. **Create:** on approval, run `afk issue create` with all labels at once (`--label stage::ready-for-issues --label <mode> --label <base>` + `--label need::fork` if the slice requires Forking), then `afk issue link` for DAG edges.
 
 ## References
 
@@ -112,10 +135,11 @@ Each draft must populate every field defined in
 - `evidence_type` chosen without reading codebase (guessing is forbidden)
 - `evidence_type` outside the controlled vocabulary
 - `check_command` that doesn't exist, has no exit-code contract, or mutates state
-- Skipping Step 5 self-quality-gate — drafts with unverified commands reach HITL
-- Creating issues before Step 6 approval — even one issue
+- Skipping Step 6 self-quality-gate — drafts with unverified commands reach HITL
+- Creating issues before Step 7 approval — even one issue
 - `mode::afk` for cross-context or mid-flight product decisions
 - Paste full requirement into issue — summarize + link source
 - Use "no PRD" to skip this workflow entirely
 - Leave `Requirement Source:` blank (Direct Mode) or `PRD:` placeholder (PRD Mode)
 - `Shallow Module` beyond single-entity CRUD
+- Forgetting to apply `need::fork` on slices that require middleware isolation — the loop won't start fork containers without it

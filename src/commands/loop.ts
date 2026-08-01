@@ -7,8 +7,52 @@ import * as path from 'path';
 import { createTrackerClient } from '../lib/client-factory';
 import { LoopRunner } from '../lib/loop-runner';
 import { getSchedulerConfig } from '../lib/config-manager';
-import { handleCommandError } from '../lib/cli-utils';
+import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
 import { logger, redirectStdioToLog, resolveLogPath } from '../lib/io';
+
+// ── Config: read moduleTriggers from .afk/config.yml ──────────────────────
+
+interface LoopConfig {
+  moduleTriggers: Record<string, string[]>;
+}
+
+function loadLoopConfig(): LoopConfig {
+  const configPath = path.join(process.cwd(), '.afk', 'config.yml');
+  const result: LoopConfig = { moduleTriggers: {} };
+
+  try {
+    if (!fs.existsSync(configPath)) return result;
+
+    const raw = fs.readFileSync(configPath, 'utf-8');
+    const lines = raw.split('\n');
+
+    // Parse: loop.module_triggers
+    //   need::fork: [fork]
+    //   need::mock: [mock-server]
+    let inTriggers = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed === 'module_triggers:') { inTriggers = true; continue; }
+      if (inTriggers) {
+        // Each line:   label: [module, ...]
+        const colon = trimmed.indexOf(':');
+        if (colon < 0) { inTriggers = false; continue; }
+        const label = trimmed.slice(0, colon).trim();
+        const value = trimmed.slice(colon + 1).trim();
+        if (!label) { inTriggers = false; continue; }
+        // Parse value: [fork] or [fork, mock-server]
+        const listMatch = value.match(/^\[([^\]]*)\]$/);
+        if (listMatch) {
+          result.moduleTriggers[label] = listMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn({ err, path: configPath }, 'failed to load loop config');
+  }
+
+  return result;
+}
 
 // ── File locations (single source of truth) ─────────────────────────────────
 
@@ -51,6 +95,8 @@ const START_OPTIONS = [
   ['-i, --status-interval <seconds>', 'Status file write interval'],
   ['-t, --shutdown-timeout <seconds>', 'Max wait for in-flight on SIGTERM'],
   ['-m, --max-iterations <n>', 'Stop after N successful completions (testing)'],
+  ['--ext <modules...>', 'Lifecycle modules to activate (e.g., fork)'],
+  ['--ext-param <params...>', 'Module parameters (e.g., fork.auto=true)'],
 ] as const;
 
 function startAction(options: Record<string, unknown>): Promise<void> {
@@ -153,6 +199,7 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
   if (process.env.AFK_LOOP_CHILD === '1') redirectStdioToLog();
 
   const cfg = getSchedulerConfig();
+  const loopCfg = loadLoopConfig();
 
   const maxConcurrent = (options.maxConcurrent as number | undefined) ?? cfg.maxConcurrent;
   const pollInterval = ((options.pollInterval as number | undefined) ?? cfg.pollInterval) * 1000;
@@ -169,6 +216,9 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
     excludeLabels: cfg.excludeLabels,
     shutdownTimeoutMs: shutdownTimeout,
     maxIterations,
+    ext: options.ext as string[] | undefined,
+    extParams: options.extParam as string[] | undefined,
+    moduleTriggers: loopCfg.moduleTriggers,
   });
 
   console.log(chalk.bold('\n🔁 AFK Loop started\n'));
@@ -182,12 +232,19 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
   if (maxIterations !== undefined) {
     console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
   }
+  const mt = loopCfg.moduleTriggers;
+  if (Object.keys(mt).length > 0) {
+    const triggers = Object.entries(mt)
+      .map(([label, modules]) => `${label}=${modules.join(',')}`)
+      .join('; ');
+    console.log(chalk.gray(`    module-triggers:   ${triggers}`));
+  }
   console.log(chalk.dim('\nPress Ctrl+C to stop (will drain in-flight work)\n'));
 
   // Register signal handlers BEFORE start() so we catch signals during
   // the first poll and during drain.
   const shutdown = async (signal: string) => {
-    console.log(chalk.yellow(`\n\nReceived ${signal}, draining in-flight work...`));
+    warning(`Received ${signal}, draining in-flight work...`);
     try {
       await runner.stop();
     } catch (err) {
@@ -201,7 +258,7 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
 
   await runner.start();
   // start() resolves when --max-iterations is reached
-  console.log(chalk.green('\n✅ Loop finished (max-iterations reached)\n'));
+  success('Loop finished (max-iterations reached)');
   process.exit(0);
 }
 
@@ -216,9 +273,10 @@ async function startDaemon(args: string[]): Promise<void> {
   // 1. Refuse to start if another instance is already running.
   const existing = readPid();
   if (existing !== null && isProcessAlive(existing)) {
-    console.error(chalk.red(`afk loop: already running (pid=${existing})`));
-    console.error(chalk.dim('  use `afk loop stop` to stop it first'));
-    process.exit(1);
+    handleCommandError(
+      new Error(`afk loop: already running (pid=${existing})`),
+      'use `afk loop stop` to stop it first',
+    );
   }
   if (existing !== null) {
     // Stale pid file from a previous crash
@@ -250,17 +308,17 @@ async function startDaemon(args: string[]): Promise<void> {
   const pid = await waitForChildPid(2000);
 
   if (pid !== null) {
-    console.log(chalk.green('✓ afk loop daemonized'));
-    console.log(`  pid:        ${pid}`);
-    console.log(`  log:        ${resolveLogPath()}`);
+    success('afk loop daemonized');
+    detail(`pid:        ${pid}`);
+    detail(`log:        ${resolveLogPath()}`);
     console.log('');
     console.log(chalk.dim('  Useful commands:'));
     console.log(`    ${chalk.cyan('afk loop status')}    ${chalk.gray('# show running state')}`);
     console.log(`    ${chalk.cyan('afk loop stop')}      ${chalk.gray('# gracefully stop')}`);
     console.log(`    ${chalk.cyan('tail -f')} ${resolveLogPath()}  ${chalk.gray('# stream events')}`);
   } else {
-    console.log(chalk.yellow(`afk loop: child spawned (pid=${child.pid}) but no pid file appeared`));
-    console.log(`  check log: ${resolveLogPath()}`);
+    warning(`afk loop: child spawned (pid=${child.pid}) but no pid file appeared`);
+    detail(`check log: ${resolveLogPath()}`);
   }
   process.exit(0);
 }
@@ -280,19 +338,19 @@ async function waitForChildPid(timeoutMs: number): Promise<number | null> {
 function showStatus(): void {
   const pid = readPid();
   if (pid === null) {
-    console.log(chalk.yellow('afk loop: not running (no pid file)'));
-    console.log(chalk.dim(`  expected: ${PID_FILE}`));
+    warning('afk loop: not running (no pid file)');
+    detail(`expected: ${PID_FILE}`);
     return;
   }
   if (!isProcessAlive(pid)) {
-    console.log(chalk.red(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`));
+    fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`);
     try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ }
     return;
   }
-  console.log(chalk.green(`afk loop: running`));
-  console.log(`  pid:        ${pid}`);
-  console.log(`  log:        ${resolveLogPath()}`);
-  console.log(`  status:     ${STATUS_FILE}`);
+  success('afk loop: running');
+  detail(`pid:        ${pid}`);
+  detail(`log:        ${resolveLogPath()}`);
+  detail(`status:     ${STATUS_FILE}`);
   try {
     const raw = fs.readFileSync(STATUS_FILE, 'utf-8');
     const status = JSON.parse(raw) as {
@@ -303,14 +361,14 @@ function showStatus(): void {
       lastUpdateAt: number;
     };
     const uptime = formatDuration(Date.now() - status.startedAt);
-    console.log(`  uptime:     ${uptime}`);
-    console.log(`  implement:  ${status.implement.active} ${JSON.stringify(status.implement.ids)}`);
-    console.log(`  qa:         ${status.qa.active ?? '-'}`);
-    console.log(`  qaQueue:    ${JSON.stringify(status.qa.queue)}`);
-    console.log(`  done:       ${status.totals.completed}`);
-    console.log(`  failed:     ${status.totals.failed}`);
+    detail(`uptime:     ${uptime}`);
+    detail(`implement:  ${status.implement.active} ${JSON.stringify(status.implement.ids)}`);
+    detail(`qa:         ${status.qa.active ?? '-'}`);
+    detail(`qaQueue:    ${JSON.stringify(status.qa.queue)}`);
+    detail(`done:       ${status.totals.completed}`);
+    detail(`failed:     ${status.totals.failed}`);
   } catch {
-    console.log(chalk.dim('  (status file not yet written — wait for first status tick)'));
+    detail('(status file not yet written — wait for first status tick)');
   }
 }
 
@@ -319,31 +377,30 @@ function showStatus(): void {
 async function stopDaemon(opts: { timeoutSeconds: number }): Promise<void> {
   const pid = readPid();
   if (pid === null) {
-    console.log(chalk.yellow('afk loop: not running (no pid file)'));
+    warning('afk loop: not running (no pid file)');
     return;
   }
   if (!isProcessAlive(pid)) {
-    console.log(chalk.red(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`));
+    fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`);
     try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ }
     return;
   }
-  console.log(chalk.cyan(`afk loop: sending SIGTERM to pid=${pid} (waiting up to ${opts.timeoutSeconds}s)...`));
+  info(`afk loop: sending SIGTERM to pid=${pid} (waiting up to ${opts.timeoutSeconds}s)...`);
   try {
     process.kill(pid, 'SIGTERM');
   } catch (err) {
-    console.error(chalk.red(`failed to send signal: ${(err as Error).message}`));
-    process.exit(1);
+    handleCommandError(new Error(`failed to send signal: ${(err as Error).message}`));
   }
   const deadline = Date.now() + opts.timeoutSeconds * 1000;
   while (Date.now() < deadline) {
     if (!isProcessAlive(pid)) {
-      console.log(chalk.green(`afk loop: pid=${pid} exited`));
+      success(`afk loop: pid=${pid} exited`);
       // LoopRunner deletes the pid file in its own stop() — nothing to do here.
       return;
     }
     await new Promise(r => setTimeout(r, 200));
   }
-  console.log(chalk.yellow(`afk loop: pid=${pid} did not exit within ${opts.timeoutSeconds}s, sending SIGKILL`));
+  warning(`afk loop: pid=${pid} did not exit within ${opts.timeoutSeconds}s, sending SIGKILL`);
   try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
 }
 

@@ -1,9 +1,9 @@
 import { Command } from 'commander';
-import chalk from 'chalk';
 import { createTrackerClient } from '../lib/client-factory';
 import { WorkflowRunner } from '../lib/workflows';
 import { getWorkflowConfig } from '../lib/config-manager';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from '../lib/constants';
+import { handleCommandError, success, warning, detail } from '../lib/cli-utils';
 
 export function registerWorkflowCommands(program: Command): void {
   const workflow = program
@@ -25,6 +25,8 @@ export function registerWorkflowCommands(program: Command): void {
     .option('--max-handoffs <n>', 'Max automatic context-handoff rounds (default: 3)', parseInt, MAX_HANDOFFS)
     .option('--context-high <tokens>', 'Token threshold that triggers context handoff (default: 100000)', parseInt, CONTEXT.HIGH_THRESHOLD)
     .option('--max-total-tokens <tokens>', 'Max total tokens across handoff generations (default: 500000)', parseInt, MAX_TOTAL_TOKENS)
+    .option('--ext <modules...>', 'Lifecycle modules to activate (e.g., fork)')
+    .option('--ext-param <params...>', 'Module parameters (e.g., fork.auto=true)')
     .action(async (options) => {
       try {
         const tracker = await createTrackerClient();
@@ -42,21 +44,22 @@ export function registerWorkflowCommands(program: Command): void {
           maxHandoffs: options.maxHandoffs,
           contextHighTokens: options.contextHigh,
           maxTotalTokens: options.maxTotalTokens,
+          ext: options.ext,
+          extParams: options.extParam,
         });
 
         if (result.success) {
-          console.log(chalk.green('\n✅ Workflow completed!'));
+          success('Workflow completed!');
           if (result.url) {
-            console.log(chalk.cyan(`   MR: ${result.url}`));
+            detail(`MR: ${result.url}`);
           }
           process.exit(0);
         } else {
-          console.log(chalk.yellow('\n⚠️  Workflow did not complete successfully'));
+          warning('Workflow did not complete successfully');
           process.exit(1);
         }
       } catch (error) {
-        console.error(chalk.red('\n❌ Workflow failed:'), (error as Error).message);
-        process.exit(1);
+        handleCommandError(error);
       }
     });
 }

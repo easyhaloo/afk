@@ -4,6 +4,7 @@ import { TmuxClient } from '../../../lib/core/tmux/tmux';
 import { createGitLabClient } from '../../../lib/client-factory';
 import { detectGitLabProject } from '../../../lib/core/tracker/detect';
 import type { TrackedIssue, Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
+import { fileLogger } from '../../../lib/io';
 
 const taskService = new TaskService();
 const tmux = new TmuxClient();
@@ -157,7 +158,7 @@ export async function fetchIssues(options: {
     };
   } catch (err) {
     // Platform detection failed or API error
-    console.warn('fetchIssues failed:', err);
+    fileLogger.warn({ err }, 'fetchIssues failed');
     return { issues: [], hasMore: false };
   }
 }
@@ -168,7 +169,7 @@ export async function fetchProjects(options: { page?: number; perPage?: number }
   try {
     return await fetchGitLabProjects(options);
   } catch (error) {
-    console.error('Failed to fetch GitLab projects:', error);
+    fileLogger.error({ err: error }, 'failed to fetch GitLab projects');
     return { projects: [], hasMore: false };
   }
 }

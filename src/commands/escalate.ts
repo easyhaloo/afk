@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { spawn } from 'child_process';
 import { detectGitLabProject } from '../lib/gitlab';
 import { getGlabToken } from '../lib/glab-config';
+import { handleCommandError, success, info, detail } from '../lib/cli-utils';
 
 export function registerEscalateCommands(program: Command): void {
   const escalate = program
@@ -32,8 +33,7 @@ export function registerEscalateCommands(program: Command): void {
         body = await fs.readFile('/dev/stdin', 'utf-8');
       }
       if (!body.trim()) {
-        console.error('ERROR: empty issue body. Provide via stdin or as second arg.');
-        process.exit(1);
+        handleCommandError(new Error('empty issue body. Provide via stdin or as second arg.'));
       }
 
       // Build labels
@@ -42,13 +42,12 @@ export function registerEscalateCommands(program: Command): void {
         labels.push(`base::prd-${options.prdIid}`);
       }
 
-      console.log('Filing GitLab issue...');
+      info('Filing GitLab issue...');
 
       // Detect project from git remote
       const projectPath = await detectGitLabProject();
       if (!projectPath) {
-        console.error('ERROR: could not detect project from git remote. Set GITLAB_PROJECT_ID.');
-        process.exit(1);
+        handleCommandError(new Error('could not detect project from git remote. Set GITLAB_PROJECT_ID.'));
       }
 
       // Resolve token: env > glab config
@@ -63,8 +62,7 @@ export function registerEscalateCommands(program: Command): void {
         }
       }
       if (!token) {
-        console.error('ERROR: GITLAB_TOKEN not set and glab not authenticated.');
-        process.exit(1);
+        handleCommandError(new Error('GITLAB_TOKEN not set and glab not authenticated.'));
       }
 
       const { Gitlab } = await import('@gitbeaker/node');
@@ -77,20 +75,20 @@ export function registerEscalateCommands(program: Command): void {
       }) as any;
 
       const iid = issue.iid;
-      console.log(`Created issue #${iid}: ${title}`);
+      success(`Created issue #${iid}: ${title}`);
 
       // Optionally launch afk workflow
       if (options.launch) {
-        console.log('Launching afk workflow in background...');
+        info('Launching afk workflow in background...');
         const proc = spawn('afk', ['workflow', 'run', '--iid', String(iid)], {
           detached: true,
           stdio: 'ignore',
         });
         proc.unref();
-        console.log(`Launched (pid=${proc.pid}). Monitor with: tmux attach -t afk`);
+        info(`Launched (pid=${proc.pid}). Monitor with: tmux attach -t afk`);
       }
 
-      console.log('\nIssue is now labeled mode::afk + stage::ready-for-issues.');
-      console.log('Scheduler (auto mode) or manual /afk-implement will pick it up.');
+      info('Issue is now labeled mode::afk + stage::ready-for-issues.');
+      detail('Scheduler (auto mode) or manual /afk-implement will pick it up.');
     });
 }

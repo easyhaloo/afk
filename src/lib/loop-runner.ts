@@ -30,6 +30,17 @@ export interface LoopRunnerOptions {
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
   statusFilePath?: string;
+  /** Lifecycle modules to activate (e.g., ['fork']). */
+  ext?: string[];
+  /** Module parameters (e.g., ['fork.auto=true']). */
+  extParams?: string[];
+  /**
+   * Label → modules mapping for dynamic per-issue module activation.
+   * When an issue has a matching label, the corresponding modules are added
+   * to the `ext` list for that issue's workflow run.
+   * E.g. { 'need::fork': ['fork'] }
+   */
+  moduleTriggers?: Record<string, string[]>;
 }
 
 export interface ChainContext {
@@ -58,6 +69,9 @@ interface InternalOptions {
   qaRunnerFactory: (tracker: TrackerProvider) => QARunner;
   pidFilePath: string;
   statusFilePath: string;
+  ext: string[] | undefined;
+  extParams: string[] | undefined;
+  moduleTriggers: Record<string, string[]>;
 }
 
 const DEFAULTS = {
@@ -138,6 +152,9 @@ export class LoopRunner {
       qaRunnerFactory: options.qaRunnerFactory ?? (t => new QARunner(t)),
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
       statusFilePath: options.statusFilePath ?? DEFAULTS.statusFilePath,
+      ext: options.ext,
+      extParams: options.extParams,
+      moduleTriggers: options.moduleTriggers ?? {},
     };
   }
 
@@ -342,12 +359,15 @@ export class LoopRunner {
     }
 
     try {
+      const resolvedExt = await this.resolveModules(iid);
       const runner = this.opts.workflowRunnerFactory(this.tracker);
       const result = await runner.run({
         iid,
         session,
         targetBranch: baseBranch,
         baseBranch,
+        ext: resolvedExt,
+        extParams: this.opts.extParams,
       });
 
       if (result.success) {
@@ -379,6 +399,44 @@ export class LoopRunner {
       } catch { /* best-effort */ }
     } finally {
       this.inImplement.delete(iid);
+    }
+  }
+
+  /**
+   * Resolve activated modules for an issue based on its labels.
+   *
+   * 1. Start with the static `--ext` list (if any)
+   * 2. If `moduleTriggers` is configured, fetch the issue and check its labels
+   * 3. Union the triggered modules with the base list
+   *
+   * On fetch failure, falls back to the static `--ext` list (doesn't break the
+   * loop — the caller handles the error path).
+   */
+  private async resolveModules(iid: number): Promise<string[] | undefined> {
+    const triggers = this.opts.moduleTriggers;
+    const base = this.opts.ext ?? [];
+
+    // No triggers configured → use static list
+    if (!triggers || Object.keys(triggers).length === 0) {
+      return base.length > 0 ? base : undefined;
+    }
+
+    try {
+      const issue = await this.tracker.getIssue(iid);
+      const merged = new Set(base);
+
+      for (const [label, modules] of Object.entries(triggers)) {
+        if (issue.labels.includes(label)) {
+          for (const mod of modules) {
+            merged.add(mod);
+          }
+        }
+      }
+
+      return [...merged];
+    } catch (err) {
+      logger.warn({ iid, err }, 'failed to resolve modules from labels, falling back to static ext');
+      return base.length > 0 ? base : undefined;
     }
   }
 

@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { Command } from 'commander';
 import { registerCompletionCommands } from './completion';
 
@@ -45,5 +48,44 @@ describe('registerCompletionCommands', () => {
   it('__complete returns no candidates (pre-wired, currently empty)', () => {
     const { stdout } = run(['__complete', 'issue', 'get']);
     expect(stdout).toBe('');
+  });
+});
+
+describe('completion --install', () => {
+  let tmpHome: string;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'afk-comp-'));
+    vi.stubEnv('HOME', tmpHome);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it('writes an idempotent block to ~/.zshrc', () => {
+    const r1 = run(['completion', 'zsh', '--install']);
+    expect(r1.exitCode).toBeUndefined();
+    const zshrc = path.join(tmpHome, '.zshrc');
+    const content = fs.readFileSync(zshrc, 'utf8');
+    expect(content).toContain('>>> afk completion >>>');
+    expect(content).toContain('eval "$(afk completion zsh)"');
+
+    // second run must not duplicate the block
+    run(['completion', 'zsh', '--install']);
+    const count = (fs.readFileSync(zshrc, 'utf8').match(/>>> afk completion >>>/g) || []).length;
+    expect(count).toBe(1);
+  });
+
+  it('auto-detects shell from $SHELL when --install is given without a shell', () => {
+    vi.stubEnv('SHELL', '/bin/bash');
+    run(['completion', '--install']);
+    expect(fs.readFileSync(path.join(tmpHome, '.bashrc'), 'utf8')).toContain('eval "$(afk completion bash)"');
+  });
+
+  it('errors on unsupported shell with --install', () => {
+    const { exitCode } = run(['completion', 'powershell', '--install']);
+    expect(exitCode).toBe(1);
   });
 });

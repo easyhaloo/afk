@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { Issue } from '../../../types/board';
 import { ListView } from './ListView';
-import { truncate, visualWidth, truncateByVisualWidth } from '../utils';
+import { renderMarkdown } from '../utils';
 
 interface Props {
   issues: Issue[];
@@ -62,8 +62,8 @@ export function IssueListView({
             <Text color={color}>{checkbox} </Text>
             <Text color={color} bold> #{issue.iid} </Text>
             <Text color={color}>{issue.title}</Text>
-            <Text dimColor>  ─ {displayLabels}</Text>
-            <Text dimColor> · {issue.description ? truncate(issue.description, 40) : '…'}</Text>
+<Text dimColor>  ─ {issue.labels.length > 0 ? issue.labels.join(', ') : '–'}</Text>
+            <Text dimColor> · {renderMarkdown(issue.description, 40)}</Text>
           </Box>
         );
       }}

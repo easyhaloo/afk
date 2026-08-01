@@ -17,7 +17,7 @@ export function registerCompletionCommands(program: Command): void {
   program
     .command('completion <shell>')
     .description('Print a shell completion script. Usage: eval "$(afk completion zsh)"')
-    .action(function (shell: string) {
+    .action(function (this: Command, shell: string) {
       const spec = extractSpec(buildCompletionTree());
       switch (shell) {
         case 'zsh':

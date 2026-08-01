@@ -19,7 +19,7 @@ import type { LifecycleModule, ModuleFactory } from '../workflows/lifecycle';
 //   1. Create src/lib/modules/<name>.ts — default export a ModuleFactory
 //   2. Add a loader entry in the `MODULE_LOADERS` record below
 const MODULE_LOADERS: Record<string, () => Promise<ModuleFactory>> = {
-  fork: () => import('./fork').then(m => m.default),
+  isolate: () => import('./isolate').then(m => m.default),
 };
 
 // In-memory cache of resolved module factories
@@ -39,7 +39,7 @@ async function ensureModule(name: string): Promise<void> {
 
 /**
  * Register a module factory at import time (for static imports).
- * Usage: `defineModule(() => ({ name: 'fork', ... }))`
+ * Usage: `defineModule(() => ({ name: 'isolate', ... }))`
  */
 export function defineModule(factory: ModuleFactory): ModuleFactory {
   const mod = factory();
@@ -104,8 +104,8 @@ export async function loadModules(cliExt?: string[]): Promise<LifecycleModule[]>
 
 /**
  * Parse module params from --ext-param CLI flags.
- * Format: --ext-param fork.auto=true --ext-param fork.ports=3406,6380
- * Result: { fork: { auto: 'true', ports: '3406,6380' } }
+ * Format: --ext-param isolate.auto=true --ext-param isolate.ports=3406,6380
+ * Result: { isolate: { auto: 'true', ports: '3406,6380' } }
  */
 export function parseModuleParams(params: string[] | undefined): Record<string, unknown> {
   if (!params || params.length === 0) return {};
@@ -135,7 +135,7 @@ export function parseModuleParams(params: string[] | undefined): Record<string, 
  * ```yaml
  * workflow:
  *   modules:
- *     - fork
+ *     - isolate
  *     - mock-server
  * ```
  */

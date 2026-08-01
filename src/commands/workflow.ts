@@ -25,8 +25,8 @@ export function registerWorkflowCommands(program: Command): void {
     .option('--max-handoffs <n>', 'Max automatic context-handoff rounds (default: 3)', parseInt, MAX_HANDOFFS)
     .option('--context-high <tokens>', 'Token threshold that triggers context handoff (default: 100000)', parseInt, CONTEXT.HIGH_THRESHOLD)
     .option('--max-total-tokens <tokens>', 'Max total tokens across handoff generations (default: 500000)', parseInt, MAX_TOTAL_TOKENS)
-    .option('--ext <modules...>', 'Lifecycle modules to activate (e.g., fork)')
-    .option('--ext-param <params...>', 'Module parameters (e.g., fork.auto=true)')
+    .option('--ext <modules...>', 'Lifecycle modules to activate (e.g., isolate)')
+    .option('--ext-param <params...>', 'Module parameters (e.g., isolate.auto=true)')
     .action(async (options) => {
       try {
         const tracker = await createTrackerClient();

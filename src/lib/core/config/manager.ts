@@ -47,9 +47,9 @@ export interface PipelineConfig {
   logRetentionDays: number;
 }
 
-// ─── Fork ─────────────────────────────────────────────────────────────────────
+// ─── Isolate ─────────────────────────────────────────────────────────────────
 
-export interface ForkConfig {
+export interface IsolateConfig {
   stackDir: string;
   services: string;
 }
@@ -97,7 +97,7 @@ const DEFAULT_PIPELINE: PipelineConfig = {
   logRetentionDays: 7,
 };
 
-const DEFAULT_FORK: ForkConfig = {
+const DEFAULT_ISOLATE: IsolateConfig = {
   stackDir: '',
   services: '',
 };
@@ -171,10 +171,10 @@ function loadWorktreeConfig(): WorktreeConfig {
   };
 }
 
-function loadForkConfig(): ForkConfig {
+function loadIsolateConfig(): IsolateConfig {
   return {
-    stackDir: process.env.AFK_FORK_STACK_DIR || DEFAULT_FORK.stackDir,
-    services: process.env.AFK_DB_FORK_SERVICES || DEFAULT_FORK.services,
+    stackDir: process.env.AFK_ISOLATE_STACK_DIR || DEFAULT_ISOLATE.stackDir,
+    services: process.env.AFK_ISOLATE_SERVICES || DEFAULT_ISOLATE.services,
   };
 }
 
@@ -214,7 +214,7 @@ let _workflow: WorkflowConfig | null = null;
 let _scheduler: SchedulerConfig | null = null;
 let _worktree: WorktreeConfig | null = null;
 let _pipeline: PipelineConfig | null = null;
-let _fork: ForkConfig | null = null;
+let _isolate: IsolateConfig | null = null;
 let _qa: QAConfig | null = null;
 
 export function getGitLabConfig(): GitLabConfig {
@@ -237,8 +237,8 @@ export function getPipelineConfig(): PipelineConfig {
   return _pipeline ??= loadPipelineConfig();
 }
 
-export function getForkConfig(): ForkConfig {
-  return _fork ??= loadForkConfig();
+export function getIsolateConfig(): IsolateConfig {
+  return _isolate ??= loadIsolateConfig();
 }
 
 export function getQAConfig(): QAConfig {

@@ -27,7 +27,7 @@ function loadLoopConfig(): LoopConfig {
     const lines = raw.split('\n');
 
     // Parse: loop.module_triggers
-    //   need::fork: [fork]
+    //   need::isolate: [isolate]
     //   need::mock: [mock-server]
     let inTriggers = false;
     for (const line of lines) {
@@ -40,7 +40,7 @@ function loadLoopConfig(): LoopConfig {
         const label = trimmed.slice(0, colon).trim();
         const value = trimmed.slice(colon + 1).trim();
         if (!label) { inTriggers = false; continue; }
-        // Parse value: [fork] or [fork, mock-server]
+        // Parse value: [isolate] or [isolate, mock-server]
         const listMatch = value.match(/^\[([^\]]*)\]$/);
         if (listMatch) {
           result.moduleTriggers[label] = listMatch[1].split(',').map(s => s.trim()).filter(Boolean);
@@ -95,8 +95,8 @@ const START_OPTIONS = [
   ['-i, --status-interval <seconds>', 'Status file write interval'],
   ['-t, --shutdown-timeout <seconds>', 'Max wait for in-flight on SIGTERM'],
   ['-m, --max-iterations <n>', 'Stop after N successful completions (testing)'],
-  ['--ext <modules...>', 'Lifecycle modules to activate (e.g., fork)'],
-  ['--ext-param <params...>', 'Module parameters (e.g., fork.auto=true)'],
+  ['--ext <modules...>', 'Lifecycle modules to activate (e.g., isolate)'],
+  ['--ext-param <params...>', 'Module parameters (e.g., isolate.auto=true)'],
 ] as const;
 
 function startAction(options: Record<string, unknown>): Promise<void> {

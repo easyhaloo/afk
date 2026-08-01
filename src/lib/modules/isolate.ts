@@ -1,36 +1,36 @@
 /**
- * Fork module — provides isolated database/redis/es containers per worktree.
+ * Isolate module — provides isolated database/redis/es containers per worktree.
  *
  * Lifecycle:
- *   onBeforeAgent → ForkManager.up() → write .env → write .afk/fork.json
- *   onAfterAgent  → ForkManager.discard() → cleanup
+ *   onBeforeAgent → IsolateManager.up() → write .env → write .afk/isolate.json
+ *   onAfterAgent  → IsolateManager.discard() → cleanup
  *
- * Agent discovers fork connection info by reading `.afk/fork.json` in the
+ * Agent discovers isolate connection info by reading `.afk/isolate.json` in the
  * worktree root. If no docker-compose.yml exists, the module is a no-op.
  */
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { ForkManager, gc as forkGc } from '../forks';
+import { IsolateManager, isolateGc } from '../isolate';
 import { defineModule } from './_registry';
 import type { LifecycleContext } from '../workflows/lifecycle';
 
 export default defineModule(() => ({
-  name: 'fork',
+  name: 'isolate',
 
   async onBeforeAgent(ctx: LifecycleContext): Promise<void> {
-    const fm = new ForkManager(ctx.worktreePath);
-    if (!fm.available()) {
+    const im = new IsolateManager(ctx.worktreePath);
+    if (!im.available()) {
       // No docker-compose.yml — silently skip, project may not need middleware
       return;
     }
 
     try {
-      const info = await fm.up();
-      // Write fork info to .afk/fork.json so the agent can discover it
-      const forkDir = join(ctx.worktreePath, '.afk');
-      await fs.mkdir(forkDir, { recursive: true });
+      const info = await im.up();
+      // Write isolate info to .afk/isolate.json so the agent can discover it
+      const isolateDir = join(ctx.worktreePath, '.afk');
+      await fs.mkdir(isolateDir, { recursive: true });
       await fs.writeFile(
-        join(forkDir, 'fork.json'),
+        join(isolateDir, 'isolate.json'),
         JSON.stringify({
           available: true,
           services: info.services.map(s => ({
@@ -44,11 +44,11 @@ export default defineModule(() => ({
         'utf-8',
       );
     } catch (err) {
-      // Fork failure is non-fatal: agent can still work with shared middleware
-      const forkDir = join(ctx.worktreePath, '.afk');
-      await fs.mkdir(forkDir, { recursive: true });
+      // Isolate failure is non-fatal: agent can still work with shared middleware
+      const isolateDir = join(ctx.worktreePath, '.afk');
+      await fs.mkdir(isolateDir, { recursive: true });
       await fs.writeFile(
-        join(forkDir, 'fork.json'),
+        join(isolateDir, 'isolate.json'),
         JSON.stringify({ available: false, error: (err as Error).message }, null, 2),
         'utf-8',
       );
@@ -57,8 +57,8 @@ export default defineModule(() => ({
 
   async onAfterAgent(ctx: LifecycleContext): Promise<void> {
     try {
-      const fm = new ForkManager(ctx.worktreePath);
-      await fm.discard();
+      const im = new IsolateManager(ctx.worktreePath);
+      await im.discard();
     } catch {
       // Best-effort cleanup
     }
@@ -67,7 +67,7 @@ export default defineModule(() => ({
   async onCleanup(ctx: LifecycleContext): Promise<void> {
     // Periodic GC: clean up stale port assignments
     try {
-      await forkGc();
+      await isolateGc();
     } catch {
       // Best-effort
     }

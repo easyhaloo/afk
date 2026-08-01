@@ -30,15 +30,15 @@ export interface LoopRunnerOptions {
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
   statusFilePath?: string;
-  /** Lifecycle modules to activate (e.g., ['fork']). */
+  /** Lifecycle modules to activate (e.g., ['isolate']). */
   ext?: string[];
-  /** Module parameters (e.g., ['fork.auto=true']). */
+  /** Module parameters (e.g., ['isolate.auto=true']). */
   extParams?: string[];
   /**
    * Label → modules mapping for dynamic per-issue module activation.
    * When an issue has a matching label, the corresponding modules are added
    * to the `ext` list for that issue's workflow run.
-   * E.g. { 'need::fork': ['fork'] }
+   * E.g. { 'need::isolate': ['isolate'] }
    */
   moduleTriggers?: Record<string, string[]>;
 }

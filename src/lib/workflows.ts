@@ -43,9 +43,9 @@ export interface RunnerOptions {
   /** Max total tokens across all handoff generations before a terminal handoff. */
   maxTotalTokens?: number;
   platform?: Platform;
-  /** Module names to activate (e.g., ['fork', 'mock-server']) */
+  /** Module names to activate (e.g., ['isolate', 'mock-server']) */
   ext?: string[];
-  /** Module parameters (e.g., ['fork.auto=true']) */
+  /** Module parameters (e.g., ['isolate.auto=true']) */
   extParams?: string[];
 }
 

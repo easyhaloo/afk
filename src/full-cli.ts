@@ -17,7 +17,7 @@ import { registerBoardCommands } from './commands/board';
 import { registerKanbanCommands } from './commands/kanban';
 import { registerDebugCommands } from './commands/debug';
 import { registerEscalateCommands } from './commands/escalate';
-import { registerForkCommands } from './commands/fork';
+import { registerIsolateCommands } from './commands/isolate';
 import { registerQACommands } from './commands/qa';
 import { registerLoopCommands } from './commands/loop';
 
@@ -36,7 +36,7 @@ export function runFullCLI() {
   registerKanbanCommands(program);
     registerDebugCommands(program);
   registerEscalateCommands(program);
-  registerForkCommands(program);
+  registerIsolateCommands(program);
   registerQACommands(program);
   registerLoopCommands(program);
   program.parse();

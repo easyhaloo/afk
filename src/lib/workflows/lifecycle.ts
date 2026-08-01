@@ -3,9 +3,9 @@
  *
  * Modules are auto-discovered from src/lib/modules/*.ts and run at
  * lifecycle points in the workflow runner. Users activate modules via:
- *   - CLI: afk workflow run --iid 42 --ext fork
+ *   - CLI: afk workflow run --iid 42 --ext isolate
  *   - Config: .afk/config.yml → workflow.modules
- *   - Env:   AFK_MODULES=fork,mock-server
+ *   - Env:   AFK_MODULES=isolate,mock-server
  */
 
 export interface LifecycleContext {

@@ -41,29 +41,6 @@ export interface WorktreeConfig {
   baseDir: string;
 }
 
-// ─── Pipeline ─────────────────────────────────────────────────────────────────
-
-export interface PipelineConfig {
-  logRetentionDays: number;
-}
-
-// ─── Fork ─────────────────────────────────────────────────────────────────────
-
-export interface ForkConfig {
-  stackDir: string;
-  services: string;
-}
-
-// ─── QA ───────────────────────────────────────────────────────────────────────
-
-export interface QAConfig {
-  timeout: number;
-  singleCheckTimeout: number;
-  maxRetries: number;
-  autoMerge: boolean;
-  deleteSourceBranch: boolean;
-}
-
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKFLOW: WorkflowConfig = {
@@ -91,23 +68,6 @@ const DEFAULT_SCHEDULER: SchedulerConfig = {
 
 const DEFAULT_WORKTREE: WorktreeConfig = {
   baseDir: '/tmp/afk-worktrees',
-};
-
-const DEFAULT_PIPELINE: PipelineConfig = {
-  logRetentionDays: 7,
-};
-
-const DEFAULT_FORK: ForkConfig = {
-  stackDir: '',
-  services: '',
-};
-
-const DEFAULT_QA: QAConfig = {
-  timeout: 900,
-  singleCheckTimeout: 120,
-  maxRetries: 1,
-  autoMerge: true,
-  deleteSourceBranch: true,
 };
 
 // ─── Loaders ──────────────────────────────────────────────────────────────────
@@ -148,12 +108,6 @@ function loadWorkflowConfig(): WorkflowConfig {
   };
 }
 
-function loadPipelineConfig(): PipelineConfig {
-  return {
-    logRetentionDays: parseIntEnv('AFK_LOG_RETENTION_DAYS', DEFAULT_PIPELINE.logRetentionDays),
-  };
-}
-
 function loadSchedulerConfig(): SchedulerConfig {
   return {
     maxConcurrent: parseIntEnv('AFK_SCHEDULER_MAX_CONCURRENT', DEFAULT_SCHEDULER.maxConcurrent),
@@ -168,23 +122,6 @@ function loadSchedulerConfig(): SchedulerConfig {
 function loadWorktreeConfig(): WorktreeConfig {
   return {
     baseDir: process.env.AFK_WORKTREE_DIR || DEFAULT_WORKTREE.baseDir,
-  };
-}
-
-function loadForkConfig(): ForkConfig {
-  return {
-    stackDir: process.env.AFK_FORK_STACK_DIR || DEFAULT_FORK.stackDir,
-    services: process.env.AFK_DB_FORK_SERVICES || DEFAULT_FORK.services,
-  };
-}
-
-function loadQAConfig(): QAConfig {
-  return {
-    timeout: parseIntEnv('AFK_QA_TIMEOUT', DEFAULT_QA.timeout),
-    singleCheckTimeout: parseIntEnv('AFK_QA_SINGLE_CHECK_TIMEOUT', DEFAULT_QA.singleCheckTimeout),
-    maxRetries: parseIntEnv('AFK_QA_MAX_RETRIES', DEFAULT_QA.maxRetries),
-    autoMerge: (process.env.AFK_QA_AUTO_MERGE ?? String(DEFAULT_QA.autoMerge)).toLowerCase() !== 'false',
-    deleteSourceBranch: (process.env.AFK_QA_DELETE_SOURCE_BRANCH ?? String(DEFAULT_QA.deleteSourceBranch)).toLowerCase() !== 'false',
   };
 }
 
@@ -213,9 +150,6 @@ let _gitlab: GitLabConfig | null = null;
 let _workflow: WorkflowConfig | null = null;
 let _scheduler: SchedulerConfig | null = null;
 let _worktree: WorktreeConfig | null = null;
-let _pipeline: PipelineConfig | null = null;
-let _fork: ForkConfig | null = null;
-let _qa: QAConfig | null = null;
 
 export function getGitLabConfig(): GitLabConfig {
   return _gitlab ??= loadGitLabConfig();
@@ -231,16 +165,4 @@ export function getSchedulerConfig(): SchedulerConfig {
 
 export function getWorktreeConfig(): WorktreeConfig {
   return _worktree ??= loadWorktreeConfig();
-}
-
-export function getPipelineConfig(): PipelineConfig {
-  return _pipeline ??= loadPipelineConfig();
-}
-
-export function getForkConfig(): ForkConfig {
-  return _fork ??= loadForkConfig();
-}
-
-export function getQAConfig(): QAConfig {
-  return _qa ??= loadQAConfig();
 }

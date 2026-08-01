@@ -4,7 +4,7 @@ import { cpus } from 'os';
 import { createTrackerClient } from '../lib/client-factory';
 import { Scheduler } from '../lib/scheduler';
 import { getSchedulerConfig } from '../lib/config-manager';
-import { handleCommandError } from '../lib/cli-utils';
+import { handleCommandError, success, info, warning, fail } from '../lib/cli-utils';
 import { logger } from '../lib/io';
 
 export function registerSchedulerCommands(program: Command): void {
@@ -33,12 +33,12 @@ export function registerSchedulerCommands(program: Command): void {
         console.log(chalk.dim('\nPress Ctrl+C to stop\n'));
 
         process.on('SIGINT', async () => {
-          console.log('\n\nReceived SIGINT, shutting down...');
+          info('Received SIGINT, shutting down...');
           await sched.stop();
           process.exit(0);
         });
         process.on('SIGTERM', async () => {
-          console.log('\n\nReceived SIGTERM, shutting down...');
+          info('Received SIGTERM, shutting down...');
           await sched.stop();
           process.exit(0);
         });
@@ -100,7 +100,7 @@ export function registerSchedulerCommands(program: Command): void {
           options.branch ?? (process.env.AFK_TARGET_BRANCH || 'main')
         );
 
-        console.log(chalk.green(`✅ Task enqueued (job ID: ${jobId})`));
+        success(`Task enqueued (job ID: ${jobId})`);
         await sched.stop();
       } catch (error) {
         handleCommandError(error);
@@ -120,7 +120,7 @@ export function registerSchedulerCommands(program: Command): void {
         const sched = new Scheduler(tracker);
 
         await sched.pauseTask(options.iid);
-        console.log(chalk.green(`✅ Task for issue #${options.iid} paused`));
+        success(`Task for issue #${options.iid} paused`);
         await sched.stop();
       } catch (error) {
         handleCommandError(error);
@@ -140,7 +140,7 @@ export function registerSchedulerCommands(program: Command): void {
         const sched = new Scheduler(tracker);
 
         await sched.resumeTask(options.iid);
-        console.log(chalk.green(`✅ Task for issue #${options.iid} resumed`));
+        success(`Task for issue #${options.iid} resumed`);
         await sched.stop();
       } catch (error) {
         handleCommandError(error);
@@ -165,7 +165,7 @@ export function registerSchedulerCommands(program: Command): void {
           : cfg.requiredLabels;
 
         const enqueued = await sched.pollTracker(labels, cfg.excludeLabels);
-        console.log(chalk.green(`✅ Polling complete (${enqueued} tasks enqueued)`));
+        success(`Polling complete (${enqueued} tasks enqueued)`);
         await sched.stop();
       } catch (error) {
         handleCommandError(error);
@@ -185,7 +185,7 @@ export function registerSchedulerCommands(program: Command): void {
         const failedJobs = await sched.getFailedJobs();
 
         if (failedJobs.length === 0) {
-          console.log(chalk.gray('  No failed jobs.'));
+          warning('No failed jobs.');
           await sched.stop();
           return;
         }
@@ -223,7 +223,7 @@ export function registerSchedulerCommands(program: Command): void {
         const cfg = getSchedulerConfig();
         const concurrency = options.concurrency ?? (cpus().length - 1);
 
-        console.log(chalk.bold('\n🔍 Scanning for ready issues...\n'));
+        info('Scanning for ready issues...');
 
         const issues = await tracker.listIssues({
           labels: cfg.requiredLabels,
@@ -231,11 +231,11 @@ export function registerSchedulerCommands(program: Command): void {
         });
 
         if (issues.length === 0) {
-          console.log(chalk.gray('  No ready issues found.'));
+          warning('No ready issues found.');
           return;
         }
 
-        console.log(chalk.gray(`  Found ${issues.length} ready issues`));
+        info(`Found ${issues.length} ready issues`);
 
         // Build DAG from blocks-<iid> labels
         const blocksForward = new Map<number, number[]>();
@@ -285,7 +285,7 @@ export function registerSchedulerCommands(program: Command): void {
           }
         }
 
-        console.log(chalk.gray(`  Built ${waves.length} wave(s)\n`));
+        info(`Built ${waves.length} wave(s)`);
 
         let totalProcessed = 0;
         for (let w = 0; w < waves.length; w++) {
@@ -308,12 +308,11 @@ export function registerSchedulerCommands(program: Command): void {
                   session: sessionName,
                   targetBranch: process.env.AFK_TARGET_BRANCH || 'main',
                 });
-                console.log(result.success
-                  ? chalk.green(`  ✅ #${iid} completed`)
-                  : chalk.yellow(`  ⚠️ #${iid} did not complete`));
+                if (result.success) success(`#${iid} completed`);
+                else warning(`#${iid} did not complete`);
                 totalProcessed++;
               } catch (err) {
-                console.error(chalk.red(`  ❌ #${iid} failed: ${(err as Error).message}`));
+                fail(`#${iid} failed: ${(err as Error).message}`);
                 totalProcessed++;
               }
             }
@@ -326,7 +325,7 @@ export function registerSchedulerCommands(program: Command): void {
           await Promise.all(workers);
         }
 
-        console.log(chalk.green(`\n✅ Scheduler run complete (${totalProcessed} issues processed)\n`));
+        success(`Scheduler run complete (${totalProcessed} issues processed)`);
       } catch (error) {
         handleCommandError(error);
       }

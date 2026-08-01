@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { WorktreeManager } from '../lib/worktree';
 import { getWorktreeConfig } from '../lib/config-manager';
-import { handleCommandError } from '../lib/cli-utils';
+import { handleCommandError, success, warning, detail, formatJson } from '../lib/cli-utils';
 
 export function registerWorktreeCommands(program: Command): void {
   const worktree = program
@@ -24,10 +24,10 @@ export function registerWorktreeCommands(program: Command): void {
         const manager = new WorktreeManager();
         const wt = await manager.create(options.iid, options.branch, options.baseDir ?? cfg.baseDir);
 
-        console.log(chalk.green('✓ Worktree created'));
-        console.log(chalk.gray(`  Issue: #${wt.iid}`));
-        console.log(chalk.gray(`  Path: ${wt.path}`));
-        console.log(chalk.gray(`  Branch: ${wt.branch}`));
+        success('Worktree created');
+        detail(`Issue: #${wt.iid}`);
+        detail(`Path: ${wt.path}`);
+        detail(`Branch: ${wt.branch}`);
         console.log();
         console.log(chalk.dim(`cd ${wt.path}`));
       } catch (error) {
@@ -49,12 +49,12 @@ export function registerWorktreeCommands(program: Command): void {
         const wt = await manager.get(iid);
 
         if (!wt) {
-          console.log(chalk.yellow(`Worktree for issue #${iid} not found`));
+          warning(`Worktree for issue #${iid} not found`);
           process.exit(1);
         }
 
         if (options.json) {
-          console.log(JSON.stringify(wt, null, 2));
+          formatJson(wt);
         } else {
           console.log(chalk.bold(`Worktree for issue #${wt.iid}`));
           console.log(chalk.gray(`  Path: ${wt.path}`));
@@ -83,7 +83,7 @@ export function registerWorktreeCommands(program: Command): void {
         const worktrees = await manager.list();
 
         if (options.json) {
-          console.log(JSON.stringify(worktrees, null, 2));
+          formatJson(worktrees);
         } else {
           console.log(chalk.bold(`Found ${worktrees.length} worktrees:`));
           console.log();
@@ -120,7 +120,7 @@ export function registerWorktreeCommands(program: Command): void {
         const manager = new WorktreeManager();
         await manager.cleanup(iid, options.force);
 
-        console.log(chalk.green(`✓ Worktree for issue #${iid} removed`));
+        success(`Worktree for issue #${iid} removed`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -139,12 +139,12 @@ export function registerWorktreeCommands(program: Command): void {
         const orphaned = await manager.listOrphaned();
 
         if (options.json) {
-          console.log(JSON.stringify(orphaned, null, 2));
+          formatJson(orphaned);
         } else {
           if (orphaned.length === 0) {
-            console.log(chalk.green('✓ No orphaned worktrees found'));
+            success('No orphaned worktrees found');
           } else {
-            console.log(chalk.yellow(`Found ${orphaned.length} orphaned worktrees:`));
+            warning(`Found ${orphaned.length} orphaned worktrees:`);
             console.log();
 
             orphaned.forEach(wt => {
@@ -193,9 +193,9 @@ export function registerWorktreeCommands(program: Command): void {
         });
 
         if (options.dryRun) {
-          console.log(chalk.yellow(`Would remove ${deleted} worktree(s) (skipped: ${skipped})`));
+          warning(`Would remove ${deleted} worktree(s) (skipped: ${skipped})`);
         } else {
-          console.log(chalk.green(`✓ Removed ${deleted} worktree(s) (skipped: ${skipped})`));
+          success(`Removed ${deleted} worktree(s) (skipped: ${skipped})`);
         }
       } catch (error) {
         handleCommandError(error);
@@ -215,9 +215,9 @@ export function registerWorktreeCommands(program: Command): void {
         const count = await manager.prune(options.dryRun);
 
         if (options.dryRun) {
-          console.log(chalk.yellow(`Would remove ${count} orphaned worktrees`));
+          warning(`Would remove ${count} orphaned worktrees`);
         } else {
-          console.log(chalk.green(`✓ Removed ${count} orphaned worktrees`));
+          success(`Removed ${count} orphaned worktrees`);
         }
       } catch (error) {
         handleCommandError(error);
@@ -241,7 +241,7 @@ export function registerWorktreeCommands(program: Command): void {
         const manager = new WorktreeManager();
         await manager.updateStatus(iid, status as 'active' | 'completed' | 'failed');
 
-        console.log(chalk.green(`✓ Updated worktree #${iid} status to: ${status}`));
+        success(`Updated worktree #${iid} status to: ${status}`);
       } catch (error) {
         handleCommandError(error);
       }

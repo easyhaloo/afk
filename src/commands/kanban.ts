@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { createTracker } from '../lib/core/tracker/index.js';
 import type { TrackedIssue } from '../lib/core/tracker/types.js';
-import { handleCommandError } from '../lib/cli-utils.js';
+import { handleCommandError, warning, detail } from '../lib/cli-utils.js';
 
 interface BoardColumn {
   title: string;
@@ -84,8 +84,8 @@ export function registerKanbanCommands(program: Command): void {
     .action(async (options) => {
       try {
         const tracker = await createTracker();
-        console.log(chalk.dim(`Platform: ${tracker.platform}`));
-        console.log(chalk.dim(`Project: ${tracker.projectId}`));
+        detail(`Platform: ${tracker.platform}`);
+        detail(`Project: ${tracker.projectId}`);
 
         const listOptions: any = { state: 'all' };
         if (options.label) listOptions.labels = [options.label];
@@ -98,14 +98,14 @@ export function registerKanbanCommands(program: Command): void {
           : issues;
 
         if (filtered.length === 0) {
-          console.log(chalk.yellow('\n⚠️  No issues found'));
+          warning('No issues found');
           return;
         }
 
         const columns = groupIssuesByColumn(filtered);
         renderBoard(columns);
 
-        console.log(chalk.dim(`Total: ${filtered.length} issues`));
+        detail(`Total: ${filtered.length} issues`);
       } catch (error) {
         handleCommandError(error);
       }

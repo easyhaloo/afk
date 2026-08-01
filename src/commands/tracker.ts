@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createTrackerClient } from '../lib/client-factory';
-import { handleCommandError, parseCommaSeparated } from '../lib/cli-utils';
+import { handleCommandError, parseCommaSeparated, success, detail, formatJson } from '../lib/cli-utils';
 
 /**
  * Register unified tracker commands (platform-agnostic)
@@ -29,7 +29,7 @@ export function registerTrackerCommands(program: Command): void {
         const issue = await client.getIssue(parseInt(id));
 
         if (options.json) {
-          console.log(JSON.stringify(issue, null, 2));
+          formatJson(issue);
         } else {
           console.log(chalk.bold(`#${issue.id}: ${issue.title}`));
           console.log(chalk.gray(`Platform: ${issue.platform}`));
@@ -62,7 +62,7 @@ export function registerTrackerCommands(program: Command): void {
         });
 
         if (options.json) {
-          console.log(JSON.stringify(issues, null, 2));
+          formatJson(issues);
         } else {
           console.log(chalk.bold(`Found ${issues.length} issues:`));
           console.log();
@@ -98,9 +98,9 @@ export function registerTrackerCommands(program: Command): void {
         });
 
         if (options.json) {
-          console.log(JSON.stringify({ id: issueId, platform: client.platform }, null, 2));
+          formatJson({ id: issueId, platform: client.platform });
         } else {
-          console.log(chalk.green(`✓ Created issue #${issueId}: ${title}`));
+          success(`Created issue #${issueId}: ${title}`);
         }
       } catch (error) {
         handleCommandError(error);
@@ -128,10 +128,10 @@ export function registerTrackerCommands(program: Command): void {
           state: options.state,
         });
 
-        console.log(chalk.green(`✓ Updated issue #${id}`));
-        if (options.title) console.log(chalk.gray(`  title: ${options.title}`));
-        if (options.description) console.log(chalk.gray(`  description updated`));
-        if (options.state) console.log(chalk.gray(`  state: ${options.state}`));
+        success(`Updated issue #${id}`);
+        if (options.title) detail(`title: ${options.title}`);
+        if (options.description) detail('description updated');
+        if (options.state) detail(`state: ${options.state}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -164,9 +164,9 @@ export function registerTrackerCommands(program: Command): void {
           await Promise.all(labelsToRemove.map(label => client.removeLabel(issueId, label)));
         }
 
-        console.log(chalk.green(`✓ Updated labels on issue #${id}`));
-        if (options.add) console.log(chalk.gray(`  + ${options.add}`));
-        if (options.remove) console.log(chalk.gray(`  - ${options.remove}`));
+        success(`Updated labels on issue #${id}`);
+        if (options.add) detail(`+ ${options.add}`);
+        if (options.remove) detail(`- ${options.remove}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -184,7 +184,7 @@ export function registerTrackerCommands(program: Command): void {
       try {
         const client = await createTrackerClient();
         await client.addComment(parseInt(id), message);
-        console.log(chalk.green(`✓ Added comment to issue #${id}`));
+        success(`Added comment to issue #${id}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -210,7 +210,7 @@ export function registerTrackerCommands(program: Command): void {
                         'related_to';
 
         await client.linkIssues(sourceId, targetId, linkType);
-        console.log(chalk.green(`✓ Linked issue #${source} to #${target} (${linkType})`));
+        success(`Linked issue #${source} to #${target} (${linkType})`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -235,7 +235,7 @@ export function registerTrackerCommands(program: Command): void {
         const mr = await client.getMR(parseInt(id));
 
         if (options.json) {
-          console.log(JSON.stringify(mr, null, 2));
+          formatJson(mr);
         } else {
           console.log(chalk.bold(`#${mr.id}: ${mr.title}`));
           console.log(chalk.gray(`Platform: ${mr.platform}`));
@@ -264,7 +264,7 @@ export function registerTrackerCommands(program: Command): void {
         });
 
         if (options.json) {
-          console.log(JSON.stringify(mrs, null, 2));
+          formatJson(mrs);
         } else {
           console.log(chalk.bold(`Found ${mrs.length} MRs/PRs:`));
           console.log();
@@ -315,11 +315,11 @@ export function registerTrackerCommands(program: Command): void {
         });
 
         if (options.json) {
-          console.log(JSON.stringify({ id: mrId, platform: client.platform }, null, 2));
+          formatJson({ id: mrId, platform: client.platform });
         } else {
           const draftLabel = options.draft ? chalk.yellow(' [DRAFT]') : '';
-          console.log(chalk.green(`✓ Created MR/PR #${mrId}${draftLabel}: ${title}`));
-          console.log(chalk.gray(`  ${sourceBranch} → ${options.target || 'main'}`));
+          success(`Created MR/PR #${mrId}${draftLabel}: ${title}`);
+          detail(`${sourceBranch} → ${options.target || 'main'}`);
         }
       } catch (error) {
         handleCommandError(error);
@@ -347,9 +347,9 @@ export function registerTrackerCommands(program: Command): void {
           mergeCommitMessage: options.message,
         });
 
-        console.log(chalk.green(`✓ Merged MR/PR #${id}`));
+        success(`Merged MR/PR #${id}`);
         if (options.deleteBranch !== false) {
-          console.log(chalk.gray('  Source branch deleted'));
+          detail('Source branch deleted');
         }
       } catch (error) {
         handleCommandError(error);
@@ -373,7 +373,7 @@ export function registerTrackerCommands(program: Command): void {
           sha: options.sha,
         });
 
-        console.log(chalk.green(`✓ Approved MR/PR #${id}`));
+        success(`Approved MR/PR #${id}`);
       } catch (error) {
         handleCommandError(error);
       }
@@ -396,9 +396,9 @@ export function registerTrackerCommands(program: Command): void {
           comment: options.message,
         });
 
-        console.log(chalk.green(`✓ Closed MR/PR #${id}`));
+        success(`Closed MR/PR #${id}`);
         if (options.message) {
-          console.log(chalk.gray('  Comment added'));
+          detail('Comment added');
         }
       } catch (error) {
         handleCommandError(error);
@@ -419,7 +419,7 @@ export function registerTrackerCommands(program: Command): void {
 
         await client.reopenMR(mrId);
 
-        console.log(chalk.green(`✓ Reopened MR/PR #${id}`));
+        success(`Reopened MR/PR #${id}`);
       } catch (error) {
         handleCommandError(error);
       }

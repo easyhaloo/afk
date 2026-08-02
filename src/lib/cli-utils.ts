@@ -62,6 +62,8 @@ export function handleCommandError(error: unknown, context?: string): never {
   const message = (error as Error).message;
   const hint = getRecoveryHint(error);
 
+  logger.error({ err: error, context }, 'command failed');
+
   console.error(chalk.red('Error:'), message);
 
   if (hint) {

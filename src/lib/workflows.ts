@@ -1,27 +1,16 @@
-import { spawn } from 'child_process';
-import type { ChildProcess, SpawnOptions } from 'child_process';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './tmux';
 import { WorktreeManager } from './worktree';
-import { getTokenUsage, configureStatusline, logger, readSignal, clearSignal, STATUS_FILENAME } from './io';
+import { getTokenUsage, configureStatusline, logger, readSignal } from './io';
 import { SIGNAL_FILE } from './core/io/signal';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
 import { loadModules, parseModuleParams } from './modules/_registry';
-import type { LifecycleModule } from './workflows/lifecycle';
-
-/**
- * Detached spawn that works on both Linux and macOS.
- * `detached: true` + `stdio: 'ignore'` detaches from TTY on both platforms.
- * Returns the child so the caller can kill it (whole process group) later.
- */
-function spawnDetached(file: string, args: string[], opts: SpawnOptions): ChildProcess {
-  const child = spawn(file, args, { ...opts, stdio: 'ignore', detached: true } as SpawnOptions);
-  child.unref();
-  return child;
-}
+import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
+import { Watchdog } from './workflows/watchdog';
+import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
 
 /** One phase wait: done / timeout / verified context overflow. */
 type PhaseOutcome =
@@ -51,17 +40,35 @@ export interface RunnerOptions {
 }
 
 /**
+ * Optional collaborator overrides for WorkflowRunner. Tests inject a fake
+ * coordinator (and tmux) to exercise the phase loop's routing without a real
+ * tmux / tracker / filesystem - the same factory pattern LoopRunner uses for
+ * WorkflowRunner itself.
+ */
+export interface RunnerDependencies {
+  coordinatorFactory?: (deps: {
+    tracker: TrackerProvider;
+    tmux: TmuxClient;
+    watchdog: Watchdog;
+  }) => HandoffCoordinator;
+  /** Override the tmux client (tests). Defaults to a new TmuxClient. */
+  tmux?: TmuxClient;
+  /** Override the watchdog (tests). Defaults to a new Watchdog. */
+  watchdog?: Watchdog;
+}
+
+/**
  * Signal-driven workflow runner.
  *
  * Two-phase design:
- *   Phase 1 (Implement): send /goal "实现 issue #N" → wait goal_complete
- *   Phase 2 (Verify):   send /goal "验证 issue #N 的 AC" → wait ac_result
- *   autoWrapup:         push branch → create MR → stage::qa
+ *   Phase 1 (Implement): send /goal "实现 issue #N" -> wait goal_complete
+ *   Phase 2 (Verify):   send /goal "验证 issue #N 的 AC" -> wait ac_result
+ *   autoWrapup:         push branch -> create MR -> stage::qa
  *
- * Each phase is a loop: send goal → poll for the completion signal OR the
+ * Each phase is a loop: send goal -> poll for the completion signal OR the
  * context threshold (statusline token usage). On context_high the session is
  * interrupted, the agent's summary is captured to a doc + issue comment, and
- * the session is relaunched with the summary injected — until the phase
+ * the session is relaunched with the summary injected - until the phase
  * completes or the handoff budget runs out.
  *
  * Context detection is done by the RUNNER, not the agent: the agent cannot
@@ -70,31 +77,39 @@ export interface RunnerOptions {
  * so we poll `<worktree>/.afk/claude-status.json` token usage (written by the
  * statusline tee on every turn) against `contextHighTokens`.
  *
- * Agent writes signals (`.afk-signal.json`): goal_complete / ac_result on
- * completion, timeout by the watchdog, handoff_ready during summary
- * negotiation. Context overflow is not a signal — the runner is the sole
- * authority, polling statusline token usage (objective data).
- *
- * Watchdog: detached setsid process fires after hardTimeoutMs — writes
- * a timeout signal to .afk-signal.json, then kills the tmux session.
+ * The handoff cluster (negotiate summary -> persist doc -> post comment ->
+ * relaunch or terminate) lives behind the {@link HandoffCoordinator} seam;
+ * the runner only decides WHEN to hand off (context_high, budget exhausted)
+ * and routes the outcome. The hard-timeout {@link Watchdog} is a separate
+ * module shared by both.
  */
 export class WorkflowRunner {
   private tracker: TrackerProvider;
   private tmux: TmuxClient;
   private worktree: WorktreeManager;
+  private watchdog: Watchdog;
+  private coordinator: HandoffCoordinator;
   private logDir: string;
   private modules: LifecycleModule[] = [];
   private extParams: Record<string, unknown> = {};
+  private lifecycleCtx: LifecycleContext = { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: {} };
 
-  constructor(tracker: TrackerProvider) {
+  /** Poll interval for waitForPhaseSignal (overridden by tests). */
+  private pollIntervalMs = 2000;
+
+  constructor(tracker: TrackerProvider, deps?: RunnerDependencies) {
     this.tracker = tracker;
-    this.tmux = new TmuxClient();
+    this.tmux = deps?.tmux ?? new TmuxClient();
     this.worktree = new WorktreeManager();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;
+    this.watchdog = deps?.watchdog ?? new Watchdog(this.logDir);
+    this.coordinator = deps?.coordinatorFactory
+      ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog })
+      : new HandoffCoordinator(tracker, this.tmux, this.watchdog);
   }
 
   /**
-   * Full workflow: worktree → tmux session → /goal → wait → autoWrapup.
+   * Full workflow: worktree -> tmux session -> /goal -> wait -> autoWrapup.
    * Every explicit terminal path does its own cleanup; the catch below only
    * covers unexpected exceptions (crash path), and the finally only ever
    * disarms the watchdog.
@@ -116,8 +131,6 @@ export class WorkflowRunner {
     this.modules = await loadModules(options.ext);
     this.extParams = parseModuleParams(options.extParams);
 
-    this._watchdog = null;
-
     try {
       return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens });
     } catch (error) {
@@ -127,7 +140,7 @@ export class WorkflowRunner {
     } finally {
       // Never leave an armed watchdog behind: it would fire later and write a
       // stale timeout signal into the retained worktree.
-      this.killWatchdog();
+      this.watchdog.disarm();
     }
   }
 
@@ -152,8 +165,13 @@ Session was interrupted before completion.
     }
 
     await this.teardownSession(iid, session);
-    // Lifecycle cleanup hooks
-    await this.runLifecycleCleanup();
+    // Lifecycle cleanup hooks (zeroed context - may run before runBody
+    // populates lifecycleCtx; modules must be idempotent).
+    await this.runLifecycleHooks(
+      ['after', 'cleanup'],
+      { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: this.extParams },
+      true,
+    );
   }
 
   /**
@@ -175,27 +193,28 @@ Session was interrupted before completion.
   }
 
   /**
-   * Run lifecycle cleanup hooks (after_agent + onCleanup) for all active modules.
-   * Safe to call multiple times — modules are idempotent.
+   * Run lifecycle hooks for the active modules. `hooks` selects which phase(s)
+   * to fire per module (in order); `reverse` runs modules in reverse order
+   * (the cleanup path). Safe to call multiple times - modules are idempotent.
+   *
+   * Consolidates the previous 3x-duplicated invocation (runLifecycleCleanup
+   * + the inline before/after loops in runBody) behind one helper.
    */
-  private async runLifecycleCleanup(): Promise<void> {
-    // Run in reverse order (last loaded = first cleaned up)
-    for (const mod of [...this.modules].reverse()) {
-      try {
-        await mod.onAfterAgent?.({
-          iid: 0, worktreePath: '', baseBranch: '', sessionName: '',
-          params: this.extParams,
-        });
-      } catch (err) {
-        logger.warn({ module: mod.name, err }, 'lifecycle after_agent cleanup failed');
-      }
-      try {
-        await mod.onCleanup?.({
-          iid: 0, worktreePath: '', baseBranch: '', sessionName: '',
-          params: this.extParams,
-        });
-      } catch (err) {
-        logger.warn({ module: mod.name, err }, 'lifecycle onCleanup failed');
+  private async runLifecycleHooks(
+    hooks: ('before' | 'after' | 'cleanup')[],
+    ctx: LifecycleContext,
+    reverse = false,
+  ): Promise<void> {
+    const modules = reverse ? [...this.modules].reverse() : this.modules;
+    for (const mod of modules) {
+      for (const hook of hooks) {
+        try {
+          if (hook === 'before') await mod.onBeforeAgent?.(ctx);
+          else if (hook === 'after') await mod.onAfterAgent?.(ctx);
+          else await mod.onCleanup?.(ctx);
+        } catch (err) {
+          logger.warn({ iid: ctx.iid, module: mod.name, err }, `lifecycle ${hook} hook failed`);
+        }
       }
     }
   }
@@ -213,27 +232,15 @@ Session was interrupted before completion.
     await configureStatusline(wt.path);
 
     // ── Step 1b: Lifecycle before_agent hooks ──────────────────────────────
-    const lifecycleCtx = {
-      iid,
-      worktreePath: wt.path,
-      baseBranch,
-      sessionName: session,
-      params: this.extParams,
-    };
-    for (const mod of this.modules) {
-      try {
-        await mod.onBeforeAgent?.(lifecycleCtx);
-      } catch (err) {
-        logger.warn({ iid, module: mod.name, err }, 'lifecycle before_agent hook failed');
-      }
-    }
+    this.lifecycleCtx = { iid, worktreePath: wt.path, baseBranch, sessionName: session, params: this.extParams };
+    await this.runLifecycleHooks(['before'], this.lifecycleCtx);
 
     // ── Step 2: Launch tmux session ─────────────────────────────────────────
     await this.tmux.createSession(session, wt.path);
     await this.tmux.waitForPrompt(wt.path, 30000);
 
     // ── Step 3: Launch watchdog (detached, no blocking) ────────────────────
-    this.startWatchdog(session, hardTimeoutMs, iid, wt.path);
+    this.watchdog.arm(session, hardTimeoutMs, iid, wt.path);
 
     // ── Step 4: Post launch comment ────────────────────────────────────────
     await this.tracker.addComment(iid, [
@@ -268,20 +275,14 @@ Session was interrupted before completion.
     }
 
     // ── Lifecycle after_agent hooks (before cleanup) ────────────────────────
-    for (const mod of this.modules) {
-      try {
-        await mod.onAfterAgent?.(lifecycleCtx);
-      } catch (err) {
-        logger.warn({ iid, module: mod.name, err }, 'lifecycle after_agent hook failed');
-      }
-    }
+    await this.runLifecycleHooks(['after'], this.lifecycleCtx);
 
-    // ac_result → autoWrapup
+    // ac_result -> autoWrapup
     return this.autoWrapup(iid, wt.path, session, targetBranch);
   }
 
   /**
-   * autoWrapup: push branch → create MR → stage::qa
+   * autoWrapup: push branch -> create MR -> stage::qa
    * AC verification is now done in Phase 2 of runBody, so this is a simple
    * push-and-MR operation.
    */
@@ -337,7 +338,7 @@ Session was interrupted before completion.
   /**
    * Handle hard timeout: capture session, post the recovery comment + labels,
    * and tear down local resources. The timeout is one of the explicit
-   * terminal paths — it owns its own cleanup.
+   * terminal paths - it owns its own cleanup.
    */
   private async handleTimeout(
     iid: number,
@@ -367,21 +368,22 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     }
 
     await this.teardownSession(iid, session);
-    // Lifecycle cleanup hooks
-    await this.runLifecycleCleanup();
+    // Lifecycle cleanup hooks (zeroed context, same as cleanupOnFailure).
+    await this.runLifecycleHooks(
+      ['after', 'cleanup'],
+      { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: this.extParams },
+      true,
+    );
   }
-
-  /** Armed hard-timeout watchdog (detached process group), if any. */
-  private _watchdog: ChildProcess | null = null;
-
-  /** Poll interval for waitForPhaseSignal (overridden by tests). */
-  private pollIntervalMs = 2000;
 
   /**
    * Run one workflow phase (implement / verify) as a loop: send the goal,
    * wait for the completion signal or context overflow, and on verified
-   * context_high kill + relaunch the session with the handoff summary
-   * injected, until the phase completes or the handoff budget is exhausted.
+   * context_high delegate to the HandoffCoordinator (auto-relaunch or
+   * terminal), until the phase completes or the handoff budget is exhausted.
+   *
+   * The runner owns the phase loop and the budget decisions (WHEN to hand
+   * off); the coordinator owns the handoff execution (HOW).
    */
   private async runPhase(p: {
     iid: number;
@@ -406,7 +408,10 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
       } catch (err) {
         if (round === 1) throw err; // initial launch failure: unchanged crash path
         logger.error({ iid: p.iid, err, round }, 'continue-goal failed after handoff; flipping to manual handoff');
-        await this.flipToManualHandoff(p.iid, p.session);
+        // Goal-send failed on a resumed round: mark for manual resume. This
+        // mirrors the coordinator's internal flip, but the trigger here is a
+        // runner-level failure (sendGoal), not a handoff-relaunch failure.
+        await this.manualFlip(p.iid, p.session);
         return false;
       }
 
@@ -424,27 +429,30 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
         case 'timeout':
           await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs);
           return false;
-        case 'handoff':
+        case 'handoff': {
+          // Budget decisions stay in the runner; execution is delegated.
+          const hctx = {
+            iid: p.iid, session: p.session, wtPath: p.wtPath,
+            hardTimeoutMs: p.hardTimeoutMs,
+            gen: p.budget.used + 1, tokens: outcome.tokens,
+          };
           if (p.budget.used >= p.maxHandoffs) {
-            await this.terminalHandoff(p.iid, p.wtPath, p.session, outcome.tokens, 'budget');
+            await this.coordinator.handoff(hctx, 'terminal', 'budget');
             return false;
           }
           // Include the current session's usage: a relaunch would immediately
           // blow the remaining budget, so terminate instead.
           if (p.budget.tokens + outcome.tokens >= p.maxTotalTokens) {
-            await this.terminalHandoff(p.iid, p.wtPath, p.session, outcome.tokens, 'tokens');
+            await this.coordinator.handoff(hctx, 'terminal', 'tokens');
             return false;
           }
-          if (await this.performHandoff({
-            iid: p.iid, session: p.session, wtPath: p.wtPath,
-            hardTimeoutMs: p.hardTimeoutMs,
-            gen: p.budget.used + 1, tokens: outcome.tokens,
-          })) {
+          if ((await this.coordinator.handoff(hctx, 'auto')) === 'continued') {
             p.budget.used++;
             p.budget.tokens += outcome.tokens; // old session's usage is now sunk
             continue;
           }
-          return false; // relaunch failed; flipped to manual handoff
+          return false; // auto-handoff flipped to manual; phase over
+        }
       }
     }
   }
@@ -455,7 +463,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
    * only), so the runner polls the statusline token data directly.
    *
    * Each wait gets a full completionTimeoutMs budget (re-armed after a
-   * handoff); the watchdog's hardTimeoutMs — also re-armed per generation —
+   * handoff); the watchdog's hardTimeoutMs - also re-armed per generation -
    * is the real ceiling on total phase duration.
    */
   private async waitForPhaseSignal(p: {
@@ -508,236 +516,22 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     return { kind: 'timeout' };
   }
 
-  /**
-   * Negotiate the summary, persist it (doc + issue comment), then relaunch
-   * the session. Returns true when relaunched, false when flipped to the
-   * manual-resume protocol (recovery doc already posted).
-   */
-  private async performHandoff(p: {
-    iid: number;
-    session: string;
-    wtPath: string;
-    hardTimeoutMs: number;
-    gen: number;
-    tokens: number;
-  }): Promise<boolean> {
-    // Stop the hard budget during summary negotiation; the old watchdog's
-    // timeout signal would clobber handoff_ready and kill the session mid-negotiation.
-    this.killWatchdog();
-
-    // Negotiate summary (throws → unchanged crash path).
-    const info = await this.requestHandoffSummary(p.iid, p.session, p.wtPath);
-
-    // Recovery doc in the worktree's .afk/handoff/ (gitignored, travels with the worktree).
-    const { path: docPath } = await this.writeHandoffDoc(p.wtPath, p.iid, p.gen, info);
-
-    // In-progress record; no handoff::active label in auto mode (that label is
-    // the manual-resume marker). Best-effort: a comment failure must not abort.
-    await this.tracker
-      .addComment(p.iid, this.handoffComment({ ...info, iid: p.iid, tokens: p.tokens, gen: p.gen, docPath }))
-      .catch(err => logger.warn({ iid: p.iid, err }, 'failed to post auto-handoff comment'));
-
-    try {
-      await this.restartSession(p);
-      return true;
-    } catch (err) {
-      logger.error({ iid: p.iid, err, gen: p.gen }, 'auto-continue relaunch failed; flipping to manual handoff');
-      await this.flipToManualHandoff(p.iid, p.session);
-      return false;
-    }
-  }
-
-  /**
-   * Kill the session and start a fresh one with a new watchdog. The stale
-   * control-mode connection, signal file, and statusline data must all be
-   * cleared first — a stale connection reuses the session name and breaks
-   * sendKeys, and stale data would make waitForPrompt return instantly and
-   * getTokenUsage read the old session's tokens.
-   */
-  private async restartSession(p: {
-    session: string;
-    wtPath: string;
-    hardTimeoutMs: number;
-    iid: number;
-  }): Promise<void> {
-    await this.tmux.killSession(p.session).catch(() => { /* already dead */ });
-    await this.tmux.closeSession();
-    await clearSignal(p.wtPath); // a stale completion signal would end the next wait immediately
-    await fs.rm(join(p.wtPath, '.afk', STATUS_FILENAME), { force: true }); // fresh session must not inherit old token data
-    await this.tmux.createSession(p.session, p.wtPath);
-    // waitForPrompt returns boolean, does NOT throw.
-    if (!await this.tmux.waitForPrompt(p.wtPath, 30000)) {
-      throw new Error(`relaunch: claude not ready within 30s (${p.wtPath})`);
-    }
-    this.startWatchdog(p.session, p.hardTimeoutMs, p.iid, p.wtPath); // fresh full hardTimeoutMs per generation
-  }
-
-  /**
-   * Negotiate the handoff summary with the agent: type the request once
-   * (plain text, not a slash command — /resume would open the session
-   * picker), wait for handoff_ready, and fall back to the pane snapshot when
-   * no summary arrives in time.
-   */
-  private async requestHandoffSummary(
-    iid: number,
-    session: string,
-    worktreePath: string
-  ): Promise<{ summary: string | null; snapshot: string; sha: string; branch: string }> {
-    await this.typeHandoffRequest(session);
-
-    const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, TIMEOUTS.HANDOFF_TIMEOUT);
-
-    const snapshot = await this.tmux.capturePane(session, 'main', { lines: 100, history: 200 });
-    const { sha, branch } = await this.gitHead(worktreePath);
-    // The template placeholder is indistinguishable from "no summary".
-    const summary = signal?.type === 'handoff_ready' && signal.summary !== '<总结>' ? signal.summary : null;
-    return { summary, snapshot, sha, branch };
-  }
-
-  /** Type the plain-text handoff request (commit first, then 3 short questions, then signal template). */
-  private async typeHandoffRequest(session: string): Promise<void> {
-    const lines = [
-      '上下文接近上限，AFK 需要交接。请立即完成以下操作，保持简短：',
-      '0. 先提交：git add -A && git commit -m "handoff checkpoint"（无改动可跳过）',
-      '1. 已完成的工作（一行）',
-      '2. 正在做什么（一句话）',
-      '3. 接下来做什么（一句话）',
-      '完成后创建信号：cat > .afk-signal.json <<EOF',
-      '{"type":"handoff_ready","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","summary":"<总结>"}',
-      'EOF',
-    ];
-    for (const line of lines) {
-      await this.tmux.sendKeys(session, 'main', line);
-    }
-  }
-
-  /** Current HEAD sha + branch of the worktree (defensive: '(unknown)' when not a repo). */
-  private async gitHead(worktreePath: string): Promise<{ sha: string; branch: string }> {
-    try {
-      const git = simpleGit(worktreePath);
-      const [sha, branch] = await Promise.all([
-        git.revparse('HEAD'),
-        git.revparse(['--abbrev-ref', 'HEAD']),
-      ]);
-      return { sha, branch };
-    } catch {
-      return { sha: '(unknown)', branch: '(unknown)' };
-    }
-  }
-
-  /**
-   * Write the handoff recovery doc into the worktree's `.afk/handoff/`.
-   * Safe from the agent's `git add -A` (`.afk/` is gitignored in the repo),
-   * and it travels with the worktree — a resumed session reads it in place.
-   */
-  private async writeHandoffDoc(
-    worktreePath: string,
-    iid: number,
-    gen: number | 'terminal',
-    info: { summary: string | null; snapshot: string; sha: string; branch: string }
-  ): Promise<{ path: string; content: string }> {
-    const handoffDir = join(worktreePath, '.afk', 'handoff');
-    await fs.mkdir(handoffDir, { recursive: true });
-    const docPath = join(handoffDir, `handoff-${iid}-${gen}.md`);
-    const content = [
-      `# Handoff #${iid} (round ${gen})`,
-      '',
-      `- **Branch:** \`${info.branch}\``,
-      `- **Commit:** \`${info.sha}\``,
-      '',
-      '## Summary',
-      '',
-      info.summary ?? '(agent did not provide a summary)',
-      '',
-      '## Session Snapshot (last 100 lines)',
-      '',
-      '```',
-      info.snapshot,
-      '```',
-      '',
-    ].join('\n');
-    await fs.writeFile(docPath, content, 'utf-8');
-    return { path: docPath, content };
-  }
-
-  /** Issue comment for an AUTO handoff round (in-progress record; terminal uses the full doc). */
-  private handoffComment(p: {
-    iid: number;
-    tokens: number;
-    gen: number;
-    summary: string | null;
-    snapshot: string;
-    sha: string;
-    branch: string;
-    docPath: string;
-  }): string {
-    return [
-      '<!-- afk-event: handoff -->',
-      '**🔄 Context Handoff**',
-      '',
-      `- **Reason:** context_high (~${p.tokens} tokens)`,
-      `- **Round:** ${p.gen}（自动继续中）`,
-      `- **Branch:** \`${p.branch}\``,
-      `- **Commit:** \`${p.sha}\``,
-      `- **Handoff doc:** \`${p.docPath}\``,
-      '',
-      '### Summary',
-      '',
-      p.summary ?? '(agent did not provide a summary)',
-      '',
-      '<details>',
-      '<summary>Session Snapshot (last 100 lines)</summary>',
-      '',
-      '```',
-      p.snapshot,
-      '```',
-      '</details>',
-    ].join('\n');
-  }
-
   /** Goal text for a resumed round: read the handoff doc(s) before continuing. */
   private continueGoalText(goalBase: string, iid: number, wtPath: string, gen: number): string {
-    const docPath = join(wtPath, '.afk', 'handoff', `handoff-${iid}-${gen}.md`);
+    const docPath = handoffDocPath(wtPath, iid, gen);
     return `继续${goalBase}（上下文已交接，请先阅读交接文档 ${docPath}；若存在更早的交接文档（同目录 handoff-${iid}-*.md），请一并阅读以获取完整上下文，再继续）`;
   }
 
-  /** Fall back to the manual-resume protocol: handoff::active label, session killed. */
-  private async flipToManualHandoff(iid: number, session: string): Promise<void> {
+  /**
+   * Mark the issue for manual resume and kill the session. Used when sendGoal
+   * itself fails on a resumed round (a runner-level failure, distinct from the
+   * coordinator's internal relaunch-failure flip).
+   */
+  private async manualFlip(iid: number, session: string): Promise<void> {
     await this.tracker
       .addLabel(iid, 'handoff::active')
       .catch(err => logger.warn({ iid, err }, 'failed to add handoff::active label'));
     await this.tmux.killSession(session).catch(() => { /* already dead */ });
-    await this.tmux.closeSession();
-  }
-
-  /**
-   * Terminal handoff (handoff budget or total-token budget exhausted):
-   * handoff::active label + recovery comment, session killed. The recovery
-   * comment EMBEDS the full handoff doc (no file-path reference) — the
-   * resume path reads everything from the issue. The worktree (with the doc
-   * on disk) is retained for manual resume.
-   */
-  private async terminalHandoff(
-    iid: number,
-    worktreePath: string,
-    session: string,
-    tokens: number,
-    reason: 'budget' | 'tokens'
-  ): Promise<void> {
-    this.killWatchdog(); // stale watchdog must not later write a timeout signal into the retained worktree
-    const info = await this.requestHandoffSummary(iid, session, worktreePath);
-    const doc = await this.writeHandoffDoc(worktreePath, iid, 'terminal', info);
-    const reasonText = reason === 'budget' ? '已达最大交接轮数' : '已达总 token 上限';
-    await this.tracker.addLabel(iid, 'handoff::active');
-    await this.tracker.addComment(iid, [
-      '<!-- afk-event: handoff -->',
-      `**🔄 Context Handoff（终止：${reasonText}）**`,
-      '',
-      doc.content,
-      '',
-      `**To resume:** Remove \`handoff::active\` label and re-trigger \`/afk-implement ${iid}\``,
-    ].join('\n'));
-    await this.tmux.killSession(session).catch(() => {});
     await this.tmux.closeSession();
   }
 
@@ -769,39 +563,6 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
     const mr = await this.tracker.getMR(mrId);
     return mr.url;
-  }
-
-  /**
-   * Start hard-timeout watchdog as detached process.
-   * Fires after hardTimeoutMs: writes timeout signal then kills the tmux session,
-   * so the WorkflowRunner's main loop can pick up the signal via file polling
-   * rather than relying on tmux exit codes.
-   */
-  private startWatchdog(session: string, hardTimeoutMs: number, iid: number, worktreePath: string): void {
-    const signalPath = `${worktreePath}/.afk-signal.json`;
-    const shellCmd =
-      `sleep ${hardTimeoutMs / 1000} && ` +
-      `cat > "${signalPath}.tmp" <<EOF\n` +
-      `{"type":"timeout","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}\n` +
-      `EOF\n` +
-      `mv "${signalPath}.tmp" "${signalPath}" 2>/dev/null; ` +
-      `tmux kill-session -t "${session}" 2>/dev/null || true; ` +
-      `echo "WATCHDOG:${iid}:${session}:${hardTimeoutMs}" >> "${this.logDir}/watchdog.log"`;
-    this._watchdog = spawnDetached('bash', ['-c', shellCmd], { cwd: process.cwd() });
-  }
-
-  /**
-   * Kill the armed watchdog. `detached: true` makes the child a process-group
-   * leader, so the negative pid targets the whole group including the sleep
-   * child — otherwise the sleep would survive and the chain would still fire.
-   */
-  private killWatchdog(): void {
-    if (this._watchdog?.pid) {
-      try {
-        process.kill(-this._watchdog.pid, 'SIGTERM');
-      } catch { /* already exited */ }
-      this._watchdog = null;
-    }
   }
 
   private sleep(ms: number): Promise<void> {

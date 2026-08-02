@@ -1,7 +1,6 @@
 import { Command } from 'commander';
 import { spawn } from 'child_process';
-import { detectGitLabProject } from '../lib/gitlab';
-import { getGlabToken } from '../lib/glab-config';
+import { createGitLabClient } from '../lib/client-factory';
 import { handleCommandError, success, info, detail } from '../lib/cli-utils';
 
 export function registerEscalateCommands(program: Command): void {
@@ -44,51 +43,29 @@ export function registerEscalateCommands(program: Command): void {
 
       info('Filing GitLab issue...');
 
-      // Detect project from git remote
-      const projectPath = await detectGitLabProject();
-      if (!projectPath) {
-        handleCommandError(new Error('could not detect project from git remote. Set GITLAB_PROJECT_ID.'));
-      }
+      try {
+        // Route through the TrackerProvider seam instead of constructing a raw
+        // gitbeaker client: createGitLabClient() resolves env > glab CLI > git
+        // remote, and createIssue() handles the labels array + returns the iid.
+        const tracker = await createGitLabClient();
+        const iid = await tracker.createIssue({ title, description: body, labels });
+        success(`Created issue #${iid}: ${title}`);
 
-      // Resolve token: env > glab config
-      const envUrl = process.env.GITLAB_URL;
-      let token = process.env.GITLAB_TOKEN;
-      let url = envUrl || 'https://gitlab.com';
-      if (!token) {
-        const glab = getGlabToken(envUrl);
-        if (glab) {
-          url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
-          token = glab.token;
+        // Optionally launch afk workflow
+        if (options.launch) {
+          info('Launching afk workflow in background...');
+          const proc = spawn('afk', ['workflow', 'run', '--iid', String(iid)], {
+            detached: true,
+            stdio: 'ignore',
+          });
+          proc.unref();
+          info(`Launched (pid=${proc.pid}). Monitor with: tmux attach -t afk`);
         }
+
+        info('Issue is now labeled mode::afk + stage::ready-for-issues.');
+        detail('Scheduler (auto mode) or manual /afk-implement will pick it up.');
+      } catch (error) {
+        handleCommandError(error);
       }
-      if (!token) {
-        handleCommandError(new Error('GITLAB_TOKEN not set and glab not authenticated.'));
-      }
-
-      const { Gitlab } = await import('@gitbeaker/node');
-      const gitlab = new Gitlab({ host: url, token });
-
-      const issue = await gitlab.Issues.create(projectPath, {
-        title,
-        description: body,
-        labels: labels.join(','),
-      }) as any;
-
-      const iid = issue.iid;
-      success(`Created issue #${iid}: ${title}`);
-
-      // Optionally launch afk workflow
-      if (options.launch) {
-        info('Launching afk workflow in background...');
-        const proc = spawn('afk', ['workflow', 'run', '--iid', String(iid)], {
-          detached: true,
-          stdio: 'ignore',
-        });
-        proc.unref();
-        info(`Launched (pid=${proc.pid}). Monitor with: tmux attach -t afk`);
-      }
-
-      info('Issue is now labeled mode::afk + stage::ready-for-issues.');
-      detail('Scheduler (auto mode) or manual /afk-implement will pick it up.');
     });
 }

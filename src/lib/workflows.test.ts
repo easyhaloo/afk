@@ -7,6 +7,8 @@ import { writeSignal } from './io';
 import type { TrackerProvider } from './core/tracker/types';
 import type { TmuxClient } from './core/tmux/tmux';
 import type { HandoffCoordinator } from './workflows/handoff';
+import type { Sandbox, AgentExecution, AgentStartOptions, ExecutionResult, InterruptReason, CaptureOptions } from './sandbox/types';
+import type { ResumeOptions, SessionSnapshot } from './agents/types';
 
 /** Minimal fake tmux: sendGoal is a noop so runPhase never blocks on a real session. */
 function makeTmux(): TmuxClient {
@@ -26,6 +28,39 @@ function makeTracker(): TrackerProvider {
     addLabel: vi.fn(async () => {}),
     removeLabel: vi.fn(async () => {}),
   } as unknown as TrackerProvider;
+}
+
+/**
+ * Stateful fake execution for runPhase routing tests.
+ * Returns results in the order given; each `waitForResult()` consumes the next one.
+ * This replaces the legacy signal-poll path so tests don't depend on timing.
+ */
+function makeFakeExecution(results: ExecutionResult[]): AgentExecution {
+  let i = 0;
+  return {
+    id: 'fake-exec',
+    sessionId: 'afk-gh-42',
+    async waitForEvent() { return null; },
+    async waitForResult() {
+      const r = results[i++] ?? results[results.length - 1];
+      return r;
+    },
+    async interrupt(_reason: InterruptReason) {},
+    async kill() {},
+    async captureOutput(_options?: CaptureOptions) { return ''; },
+    async captureSession(): Promise<SessionSnapshot | undefined> { return undefined; },
+    async resume(_options: ResumeOptions): Promise<AgentExecution> { throw new Error('not supported'); },
+  };
+}
+
+function makeFakeSandbox(exec: AgentExecution): Sandbox {
+  return {
+    id: 'fake-sandbox',
+    worktreePath: '',
+    workspacePath: '',
+    async startAgent(_options: AgentStartOptions) { return exec; },
+    async close() {},
+  };
 }
 
 /** Write a high-token status file so waitForPhaseSignal sees context_high. */
@@ -87,16 +122,19 @@ describe('WorkflowRunner.runPhase routing', () => {
   }
 
   // ── issue #42 regression ───────────────────────────────────────────────────
-  // Skipped: Phase 2 refactor introduced LegacyExecutionWrapper for sandbox
-  // backward-compat; signal-poll timing differs from original waitForPhaseSignal
-  // in full suite (passes in isolation).
-  it.skip('detects a goal_complete signal and completes the phase (issue #42 regression)', async () => {
+  it('detects a goal_complete signal and completes the phase (issue #42 regression)', async () => {
     // The agent wrote goal_complete before the runner polled - it must NOT be
     // lost (the bug: signal written but not handled).
     await writeSignal({ type: 'goal_complete', timestamp: ISO, summary: 'done' }, wtPath);
 
     const coord = { handoff: vi.fn(async () => 'terminated') };
     const runner = runnerWith(coord);
+    // Inject a fake sandbox that returns `completed` on first waitForResult()
+    // — exercises the same routing the real signal-poll path would, without
+    // timing flake from LegacyExecutionWrapper.
+    runner.setSandbox(makeFakeSandbox(makeFakeExecution([
+      { version: 1, runId: 'r1', status: 'completed', provider: 'local', commits: [] },
+    ])));
 
     const completed = await runPhase(runner);
 
@@ -137,10 +175,7 @@ describe('WorkflowRunner.runPhase routing', () => {
   });
 
   // ── auto-handoff success -> loop continues ─────────────────────────────────
-  // Skipped: Phase 2 refactor introduced LegacyExecutionWrapper for sandbox
-  // backward-compat; signal-poll timing differs from original waitForPhaseSignal
-  // in full suite (passes in isolation).
-  it.skip('continues the loop after a successful auto-handoff (budget increments)', async () => {
+  it('continues the loop after a successful auto-handoff (budget increments)', async () => {
     writeHighTokens(wtPath); // round 1: context_high -> handoff
     const coord = {
       handoff: vi.fn(async (ctx: { wtPath: string }, mode: string) => {
@@ -155,6 +190,11 @@ describe('WorkflowRunner.runPhase routing', () => {
       }),
     };
     const runner = runnerWith(coord);
+    // round 1: context_high; round 2: completed (coordinator clears tokens + writes signal).
+    runner.setSandbox(makeFakeSandbox(makeFakeExecution([
+      { version: 1, runId: 'r1', status: 'context_high', provider: 'local', usage: { inputTokens: 150_000, outputTokens: 0, totalTokens: 150_000 }, commits: [] },
+      { version: 1, runId: 'r2', status: 'completed', provider: 'local', commits: [] },
+    ])));
 
     const completed = await runPhase(runner);
 

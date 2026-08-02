@@ -662,6 +662,23 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
             return false;
           }
 
+          // Phase 4 — save session snapshot to the store chain before handing off.
+          // This allows future native-resume rounds to restore from the snapshot.
+          // Errors are best-effort and do not affect the handoff flow.
+          const chain = this.sessionStoreChainFactory(p.wtPath);
+          const runId = `issue-${p.iid}-gen-${p.budget.used + 1}`;
+          if (this.sandbox) {
+            try {
+              const snapshot = await execution.captureSession();
+              if (snapshot) {
+                await chain.saveFirst({ runId, provider: this.agentProvider.name, snapshot });
+                logger.info({ iid: p.iid, runId, provider: this.agentProvider.name }, 'session snapshot saved to store chain');
+              }
+            } catch (err) {
+              logger.info({ iid: p.iid, runId, err }, 'session snapshot save failed; proceeding with handoff');
+            }
+          }
+
           // Coordinator.restartSession() creates a new tmux session.
           // After it returns, the loop continues and sends the continued goal in the next iteration.
           // This mirrors the original behavior exactly.

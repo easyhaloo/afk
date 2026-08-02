@@ -163,11 +163,25 @@ export interface ResumeOptions {
   snapshot: SessionSnapshot;
 }
 
+/** Minimal worktree info returned by createWorktree — avoids circular dep with core/git/worktree. */
+export interface WorktreeInfo {
+  iid: number;
+  path: string;
+  branch: string;
+}
+
 /** Sandbox provider interface — factory for Sandboxes. */
 export interface SandboxProvider {
   readonly name: SandboxProviderName;
   readonly isolation: IsolationLevel;
   readonly capabilities: ReadonlySet<SandboxCapability>;
+
+  /**
+   * Create a git worktree for the given issue.
+   * Called BEFORE lifecycle modules run; create() is called AFTER.
+   * Container providers that don't use host worktrees may be no-op.
+   */
+  createWorktree(options: { iid: number; baseBranch: string }): Promise<WorktreeInfo>;
 
   /**
    * Create a new sandbox for the given options.

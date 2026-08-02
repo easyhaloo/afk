@@ -4,6 +4,8 @@ import { simpleGit } from 'simple-git';
 import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './core/tmux/tmux';
 import { WorktreeManager } from './core/git/worktree';
+import { LocalSandboxProvider } from './sandbox/local';
+import type { Sandbox, SandboxProvider } from './sandbox/types';
 import { getTokenUsage, configureStatusline, logger, readSignal, SIGNAL_FILE } from './io';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
 import { loadModules, parseModuleParams } from './modules/_registry';
@@ -57,6 +59,8 @@ export interface RunnerDependencies {
   tmux?: TmuxClient;
   /** Override the watchdog (tests). Defaults to a new Watchdog. */
   watchdog?: Watchdog;
+  /** Sandbox provider (tests / future). Defaults to LocalSandboxProvider. */
+  sandboxProvider?: SandboxProvider;
 }
 
 /**
@@ -91,6 +95,8 @@ export class WorkflowRunner {
   private worktree: WorktreeManager;
   private watchdog: Watchdog;
   private coordinator: HandoffCoordinator;
+  private sandboxProvider: SandboxProvider;
+  private sandbox: Sandbox | null = null;
   private logDir: string;
   private modules: LifecycleModule[] = [];
   private extParams: Record<string, unknown> = {};
@@ -109,6 +115,7 @@ export class WorkflowRunner {
     this.coordinator = deps?.coordinatorFactory
       ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog })
       : new HandoffCoordinator(tracker, this.tmux, this.watchdog);
+    this.sandboxProvider = deps?.sandboxProvider ?? new LocalSandboxProvider(this.worktree);
   }
 
   /**

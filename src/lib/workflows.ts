@@ -5,14 +5,116 @@ import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './core/tmux/tmux';
 import { WorktreeManager } from './core/git/worktree';
 import { LocalSandboxProvider } from './sandbox/local';
-import type { Sandbox, SandboxProvider } from './sandbox/types';
-import { getTokenUsage, configureStatusline, logger, readSignal, SIGNAL_FILE } from './io';
+import { ClaudeCodeProvider } from './agents/claude-code';
+import type {
+  Sandbox,
+  SandboxProvider,
+  AgentExecution,
+  ExecutionEvent,
+  ExecutionResult,
+  InterruptReason,
+} from './sandbox/types';
+import type { AgentProvider, SessionSnapshot } from './agents/types';
+import { getTokenUsage, configureStatusline, logger, readSignal, SIGNAL_FILE, clearSignal } from './io';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
 import { Watchdog } from './workflows/watchdog';
 import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
 import type { InitContext } from './workflows/lifecycle';
+
+/**
+ * Legacy polling function — used by LegacyExecutionWrapper when sandbox is not injected.
+ * Shares the same signal+token-threshold polling logic as WorkflowRunner.waitForPhaseSignal.
+ */
+async function pollLegacy(
+  tmux: TmuxClient,
+  wtPath: string,
+  completionTimeoutMs: number,
+  contextHighTokens: number,
+  pollIntervalMs = 2000,
+): Promise<ExecutionResult> {
+  const start = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (Date.now() - start >= completionTimeoutMs) {
+      return { version: 1, runId: `legacy-${Date.now()}`, status: 'timed_out', provider: 'local', commits: [] };
+    }
+    // Check signal file first (same priority as waitForPhaseSignal)
+    try {
+      const signal = await readSignal(wtPath);
+      if (signal) {
+        return {
+          version: 1,
+          runId: `legacy-${Date.now()}`,
+          status: signal.type === 'goal_complete' || signal.type === 'ac_result' ? 'completed' : 'failed',
+          provider: 'local',
+          structuredOutput: signal,
+          commits: [],
+        };
+      }
+    } catch { /* ignore */ }
+    // Then check token threshold
+    try {
+      const rawUsage = await getTokenUsage(wtPath);
+      if (rawUsage.total >= contextHighTokens) {
+        return {
+          version: 1,
+          runId: `legacy-${Date.now()}`,
+          status: 'context_high',
+          provider: 'local',
+          usage: { inputTokens: rawUsage.input, outputTokens: rawUsage.output, totalTokens: rawUsage.total },
+          commits: [],
+        };
+      }
+    } catch { /* ignore */ }
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
+/**
+ * Thin wrapper that adapts the legacy tmux+signal-file polling path to the
+ * AgentExecution interface. Used when sandbox is not injected (tests that mock
+ * runner.tmux directly).
+ */
+class LegacyExecutionWrapper implements AgentExecution {
+  readonly id: string;
+  readonly sessionId?: string;
+
+  constructor(
+    private readonly tmux: TmuxClient,
+    private readonly wtPath: string,
+    session: string,
+  ) {
+    this.id = `legacy-${Date.now()}`;
+    this.sessionId = session;
+  }
+
+  static async create(
+    tmux: TmuxClient,
+    wtPath: string,
+    session: string,
+    goalText: string,
+    signalType: 'goal_complete' | 'ac_result',
+  ): Promise<AgentExecution> {
+    await tmux.sendGoal(wtPath, session, 'main', goalText, signalType);
+    return new LegacyExecutionWrapper(tmux, wtPath, session);
+  }
+
+  waitForEvent(): Promise<ExecutionEvent | null> {
+    return Promise.resolve(null);
+  }
+
+  async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
+    return pollLegacy(this.tmux, this.wtPath, options?.completionTimeoutMs ?? 600_000, options?.contextHighTokens ?? Infinity, 10);
+  }
+
+  interrupt(): Promise<void> { return Promise.resolve(); }
+  kill(): Promise<void> { return Promise.resolve(); }
+  captureOutput(): Promise<string> { return Promise.resolve(''); }
+  captureSession(): Promise<SessionSnapshot | undefined> { return Promise.resolve(undefined); }
+  resume(): Promise<AgentExecution> { throw new Error('LegacyExecutionWrapper does not support resume'); }
+}
 
 /** One phase wait: done / timeout / verified context overflow. */
 type PhaseOutcome =
@@ -61,6 +163,8 @@ export interface RunnerDependencies {
   watchdog?: Watchdog;
   /** Sandbox provider (tests / future). Defaults to LocalSandboxProvider. */
   sandboxProvider?: SandboxProvider;
+  /** Agent provider (tests). Defaults to ClaudeCodeProvider. */
+  agentProvider?: import('./agents/types').AgentProvider;
 }
 
 /**
@@ -96,6 +200,7 @@ export class WorkflowRunner {
   private watchdog: Watchdog;
   private coordinator: HandoffCoordinator;
   private sandboxProvider: SandboxProvider;
+  private agentProvider: AgentProvider;
   private sandbox: Sandbox | null = null;
   private logDir: string;
   private modules: LifecycleModule[] = [];
@@ -116,6 +221,7 @@ export class WorkflowRunner {
       ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog })
       : new HandoffCoordinator(tracker, this.tmux, this.watchdog);
     this.sandboxProvider = deps?.sandboxProvider ?? new LocalSandboxProvider(this.worktree);
+    this.agentProvider = deps?.agentProvider ?? new ClaudeCodeProvider();
   }
 
   /**
@@ -459,57 +565,84 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
         : this.continueGoalText(p.goalBase, p.iid, p.wtPath, round - 1);
 
       logger.info({ iid: p.iid, round, signalType: p.signalType, budgetUsed: p.budget.used }, 'round begin');
-      try {
-        await this.tmux.sendGoal(p.wtPath, p.session, 'main', goalText, p.signalType);
-        logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
-      } catch (err) {
-        if (round === 1) throw err; // initial launch failure: unchanged crash path
-        logger.error({ iid: p.iid, err, round }, 'continue-goal failed after handoff; flipping to manual handoff');
-        // Goal-send failed on a resumed round: mark for manual resume. This
-        // mirrors the coordinator's internal flip, but the trigger here is a
-        // runner-level failure (sendGoal), not a handoff-relaunch failure.
-        await this.manualFlip(p.iid, p.session);
-        return false;
-      }
 
-      const outcome = await this.waitForPhaseSignal({
-        iid: p.iid,
-        wtPath: p.wtPath,
-        signalType: p.signalType,
+      // Use sandbox if available (Phase 2+), otherwise fall back to direct tmux
+      // (tests that only mock runner.tmux get the legacy path)
+      let execution: import('./sandbox/types').AgentExecution;
+      if (this.sandbox) {
+        const command = this.agentProvider.buildCommand({
+          worktreePath: p.wtPath,
+          sessionId: p.session,
+        });
+        execution = await this.sandbox.startAgent({
+          command,
+          generation: p.budget.used + 1,
+          goalText,
+          signalType: p.signalType,
+        });
+      } else {
+        // Legacy path: clear stale signal before sending goal, mirroring what
+        // restartSession() does in the sandbox path. Otherwise pollLegacy() reads
+        // the previous generation's goal_complete immediately.
+        await clearSignal(p.wtPath);
+        await this.tmux.sendGoal(p.wtPath, p.session, 'main', goalText, p.signalType);
+        execution = new LegacyExecutionWrapper(this.tmux, p.wtPath, p.session);
+      }
+      logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
+
+      const result = await execution.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
       });
 
-      switch (outcome.kind) {
-        case 'done':
+      switch (result.status) {
+        case 'completed':
           return true;
-        case 'timeout':
+
+        case 'timed_out':
           await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs);
           return false;
-        case 'handoff': {
-          // Budget decisions stay in the runner; execution is delegated.
+
+        case 'context_high': {
           const hctx = {
-            iid: p.iid, session: p.session, wtPath: p.wtPath,
+            iid: p.iid,
+            session: p.session,
+            wtPath: p.wtPath,
             hardTimeoutMs: p.hardTimeoutMs,
-            gen: p.budget.used + 1, tokens: outcome.tokens,
+            gen: p.budget.used + 1,
+            tokens: result.usage?.totalTokens ?? 0,
           };
+
           if (p.budget.used >= p.maxHandoffs) {
             await this.coordinator.handoff(hctx, 'terminal', 'budget');
             return false;
           }
-          // Include the current session's usage: a relaunch would immediately
-          // blow the remaining budget, so terminate instead.
-          if (p.budget.tokens + outcome.tokens >= p.maxTotalTokens) {
+          if (p.budget.tokens + hctx.tokens >= p.maxTotalTokens) {
             await this.coordinator.handoff(hctx, 'terminal', 'tokens');
             return false;
           }
+
+          // Coordinator.restartSession() creates a new tmux session.
+          // After it returns, the loop continues and sends the continued goal in the next iteration.
+          // This mirrors the original behavior exactly.
           if ((await this.coordinator.handoff(hctx, 'auto')) === 'continued') {
             p.budget.used++;
-            p.budget.tokens += outcome.tokens; // old session's usage is now sunk
+            p.budget.tokens += hctx.tokens;
+            logger.info({ iid: p.iid, round, generation: p.budget.used + 1 }, 'handoff continued; looping to send continued goal');
             continue;
           }
           return false; // auto-handoff flipped to manual; phase over
         }
+
+        default:
+          // 'failed', 'blocked', 'aborted' — treat as failure
+          logger.warn({ iid: p.iid, status: result.status }, 'execution returned non-success status');
+          if (round === 1) {
+            // Initial round failure: unchanged crash path
+            throw new Error(`execution failed: ${result.status}`);
+          }
+          await this.manualFlip(p.iid, p.session);
+          return false;
       }
     }
   }

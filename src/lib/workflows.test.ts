@@ -14,6 +14,7 @@ function makeTmux(): TmuxClient {
     sendGoal: vi.fn(async () => {}),
     killSession: vi.fn(async () => {}),
     closeSession: vi.fn(async () => {}),
+    capturePane: vi.fn(async () => 'fake pane snapshot'),
   } as unknown as TmuxClient;
 }
 

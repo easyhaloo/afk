@@ -57,9 +57,11 @@ function run(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<
  */
 export class JumpProjectResolver implements ProjectResolver {
   async resolve(projectName: string): Promise<string> {
-    // Try full name first, then the trailing segment. Either may be the key
-    // autojump learned; order matches how a user would type it.
-    const candidates = [projectName, projectName.split('/').pop()].filter((v): v is string => !!v);
+    // Try full name first, then the trailing segment. Dedupe: a name with no
+    // `/` would otherwise spawn `zsh` twice with identical args.
+    const candidates = [...new Set(
+      [projectName, projectName.split('/').pop()].filter((v): v is string => !!v),
+    )];
     for (const candidate of candidates) {
       try {
         // `j <name>` jumps (and prints the resolved dir); `&& pwd` captures it.
@@ -76,13 +78,10 @@ export class JumpProjectResolver implements ProjectResolver {
 
   async clone(projectName: string): Promise<string> {
     const target = join(process.env.HOME ?? '/tmp', 'work', sanitize(projectName));
-    // `gh repo clone` creates the dir under <target>/<repo-name>; we pass
-    // <target> so the clone lands at <target>/<repo-name> rather than
-    // ~/work/<repo-name> directly. Use -- to prevent flag injection from name.
+    // `gh repo clone <repo> <dir>` clones INTO <dir> when <dir> doesn't
+    // already exist — git semantics. <dir> is our sanitized target.
     await run('gh', ['repo', 'clone', projectName, target]);
-    // gh clones into <target>/<basename>; resolve back to that path.
-    const cloned = join(target, projectName.split('/').pop()!);
-    return cloned;
+    return target;
   }
 }
 

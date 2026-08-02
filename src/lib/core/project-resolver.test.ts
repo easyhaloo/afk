@@ -70,12 +70,13 @@ describe('JumpProjectResolver', () => {
   });
 
   describe('clone', () => {
-    it('runs `gh repo clone` into ~/work/<sanitized> and returns the cloned path', async () => {
+    it('runs `gh repo clone` into ~/work/<sanitized> and returns that path', async () => {
       (spawn as ReturnType<typeof vi.fn>).mockImplementation(() => mockSpawnOnce(''));
 
       const path = await new JumpProjectResolver().clone('easyhaloo/faker_agent');
 
-      expect(path).toMatch(/work[\\/]easyhaloo-faker_agent[\\/]faker_agent$/);
+      // gh clones INTO the target dir, not target/basename — git semantics.
+      expect(path).toMatch(new RegExp(`/work/easyhaloo-faker_agent$`));
       const [cmd, args] = (spawn as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(cmd).toBe('gh');
       expect(args).toContain('repo');

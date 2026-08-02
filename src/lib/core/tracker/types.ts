@@ -81,6 +81,17 @@ export interface CloseMROptions {
  */
 export type LinkType = 'blocks' | 'is_blocked_by' | 'blocked_by' | 'related_to';
 
+const LINK_TYPES: readonly LinkType[] = ['blocks', 'is_blocked_by', 'blocked_by', 'related_to'];
+
+/**
+ * Coerce a CLI string to a LinkType. Defaults to 'related_to' for unknown
+ * input rather than throwing — matches the prior behavior where the only
+ * check was the 'blocks'/'blocked_by'/'is_blocked_by' branches.
+ */
+export function parseLinkType(s: string | undefined): LinkType {
+  return (s && (LINK_TYPES as readonly string[]).includes(s) ? s : 'related_to') as LinkType;
+}
+
 /**
  * Unified TrackedIssue across platforms
  */

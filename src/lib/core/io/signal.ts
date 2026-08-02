@@ -8,6 +8,18 @@ export type { Signal } from '../../schemas.js';
 export { SignalSchema } from '../../schemas.js';
 export { getCurrentTimestamp } from '../../schemas.js';
 
+/**
+ * @deprecated Phase 8 (EXECUTION-DESIGN.md §12 阶段 8): `.afk-signal.json`
+ * is the LEGACY completion protocol. New agents report via ExecutionResult
+ * (see sandbox/types.ts); old worktrees that already contain the file are
+ * still read for backward compatibility.
+ *
+ * Do NOT instruct new agents to write this file in their prompts — see the
+ * `issue-implementation` builtin template for the correct (signal-free)
+ * prompts. The functions below are kept ONLY so that worktrees started
+ * before Phase 8 can still be resumed / inspected. They will be removed
+ * in a future major version once all in-flight worktrees have completed.
+ */
 export const SIGNAL_FILE = '.afk-signal.json';
 
 /**

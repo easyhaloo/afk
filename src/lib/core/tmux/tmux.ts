@@ -243,10 +243,11 @@ export class TmuxClient {
     await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `/goal ${goalText}`]);
     await this.sleep(500);
 
-    // After the agent completes the goal, it writes the signal file.
-    // The goal text already includes instructions to write the signal,
-    // so we don't need to type additional signal instructions here.
-    // The agent will write .afk-signal.json with the appropriate type.
+    // After the agent completes the goal, it reports completion via
+    // ExecutionResult (Phase 8+). Old agents (pre-Phase-8) wrote the signal
+    // file; that path is kept as a fallback for in-flight worktrees — see
+    // sandbox/legacy-compat.ts.
+    //
     // Double-tap C-m to submit: the first Enter can be lost if the TUI is
     // mid-redraw on a long wrapped line; the second is a harmless no-op.
     await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);

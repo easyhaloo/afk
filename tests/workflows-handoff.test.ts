@@ -1,22 +1,24 @@
 /**
  * Regression tests for WorkflowRunner auto-continue after context handoff.
  *
- * Runs the REAL runBody with mocked tmux/worktree/autoWrapup/startWatchdog
- * and real io functions against real temp dirs: signal files and statusline
- * token payloads are written to disk, and waitForPhaseSignal's polling
- * (pollIntervalMs=10) picks them up like a real run would.
+ * Runs the REAL runBody + runPhase + HandoffCoordinator with mocked
+ * tmux/worktree/watchdog/autoWrapup and real io functions against real temp
+ * dirs: signal files and statusline token payloads are written to disk, and
+ * waitForPhaseSignal's polling (pollIntervalMs=10) picks them up like a real
+ * run would. The fake tmux + watchdog are injected via RunnerDependencies so
+ * the real coordinator shares them.
  *
  * Cases:
- *  - auto-relaunch happy path (context_high → handoff → continue → success)
+ *  - auto-relaunch happy path (context_high -> handoff -> continue -> success)
  *  - configurable contextHighTokens threshold
- *  - handoff budget exhaustion → terminal handoff (manual resume)
- *  - total-token budget exhaustion → terminal handoff (manual resume)
+ *  - handoff budget exhaustion -> terminal handoff (manual resume)
+ *  - total-token budget exhaustion -> terminal handoff (manual resume)
  *  - stale signal cleared on relaunch; placeholder summary falls back to snapshot
- *  - relaunch failure → flips to manual handoff (handoff::active, no crash path)
- *  - killWatchdog kills the detached watchdog process group
+ *  - relaunch failure -> flips to manual handoff (handoff::active, no crash path)
+ *
+ * (Watchdog process-group killing is covered by src/lib/workflows/watchdog.test.ts.)
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { spawn } from 'child_process';
 import { promises as fs, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -86,9 +88,9 @@ function makeRunner(wtPath: string) {
     removeLabel: vi.fn().mockResolvedValue(undefined),
   } as any;
 
-  const runner = new WorkflowRunner(tracker) as any;
-  runner.pollIntervalMs = 10;
-  runner.tmux = {
+  // Fake tmux + watchdog injected via deps so the real HandoffCoordinator
+  // shares them (post-construction poking wouldn't reach the coordinator).
+  const tmux = {
     createSession: vi.fn().mockResolvedValue({ name: 'sess', window: 'main', dir: wtPath }),
     waitForPrompt: vi.fn().mockResolvedValue(true),
     sendGoal: vi.fn().mockResolvedValue(undefined),
@@ -98,23 +100,26 @@ function makeRunner(wtPath: string) {
     killSession: vi.fn().mockResolvedValue(undefined),
     closeSession: vi.fn().mockResolvedValue(undefined),
   };
+  const watchdog = { arm: vi.fn(), disarm: vi.fn() };
+
+  const runner = new WorkflowRunner(tracker, { tmux: tmux as any, watchdog: watchdog as any }) as any;
+  runner.pollIntervalMs = 10;
   runner.worktree = {
     create: vi.fn().mockResolvedValue({ path: wtPath, branch: 'afk-issue-42', status: 'active' }),
     updateStatus: vi.fn().mockResolvedValue(undefined),
     cleanup: vi.fn().mockResolvedValue(undefined),
   };
   runner.autoWrapup = vi.fn().mockResolvedValue({ success: true, url: 'https://example.com/mr/1' });
-  runner.startWatchdog = vi.fn();
-  return { runner, tracker, tmux: runner.tmux };
+  return { runner, tracker, tmux, watchdog };
 }
 
 const RUN_OPTS = { iid: 42, session: 'sess', targetBranch: 'main', baseBranch: 'main' };
 
 describe('WorkflowRunner auto handoff continuation', () => {
-  it('auto-relaunch: context_high → handoff → continue → success', async () => {
+  it('auto-relaunch: context_high -> handoff -> continue -> success', async () => {
     const wtPath = makeTempDir();
-    const { runner, tracker, tmux } = makeRunner(wtPath);
-    await writeStatus(wtPath, 120_000); // ≥ default 100k → polling detection
+    const { runner, tracker, tmux, watchdog } = makeRunner(wtPath);
+    await writeStatus(wtPath, 120_000); // ≥ default 100k -> polling detection
     tmux.waitForSignal.mockResolvedValue(handoffReady('已完成实现核心逻辑，正在进行测试'));
 
     const runPromise = runner.run(RUN_OPTS);
@@ -133,7 +138,7 @@ describe('WorkflowRunner auto handoff continuation', () => {
     expect(continueGoal).toContain('继续实现');
     expect(continueGoal).toContain('handoff-42-1.md');
     expect(tmux.createSession).toHaveBeenCalledTimes(2);
-    expect(runner.startWatchdog).toHaveBeenCalledTimes(2); // initial + per-generation re-arm
+    expect(watchdog.arm).toHaveBeenCalledTimes(2); // initial + per-generation re-arm
 
     const typed = tmux.sendKeys.mock.calls.map((c: unknown[]) => String(c[2])).join('\n');
     expect(typed).toContain('git add -A && git commit');
@@ -268,16 +273,5 @@ describe('WorkflowRunner auto handoff continuation', () => {
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
     expect(tracker.addLabel).not.toHaveBeenCalledWith(42, 'mode::hitl');
     await expect(fs.access(join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'))).resolves.toBeUndefined();
-  });
-
-  it('killWatchdog kills the detached watchdog process group', async () => {
-    const { runner } = makeRunner(makeTempDir());
-    const child = spawn('bash', ['-c', 'sleep 30'], { detached: true, stdio: 'ignore' });
-    child.unref();
-    runner._watchdog = child;
-    await new Promise(r => setTimeout(r, 300)); // let the process spawn
-    runner.killWatchdog();
-    await new Promise(r => setTimeout(r, 300)); // let SIGTERM take effect
-    expect(() => process.kill(child.pid!, 0)).toThrow();
   });
 });

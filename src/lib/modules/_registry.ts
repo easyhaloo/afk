@@ -20,6 +20,7 @@ import type { LifecycleModule, ModuleFactory } from '../workflows/lifecycle';
 //   2. Add a loader entry in the `MODULE_LOADERS` record below
 const MODULE_LOADERS: Record<string, () => Promise<ModuleFactory>> = {
   isolate: () => import('./isolate').then(m => m.default),
+  'project-resolver': () => import('./project-resolver').then(m => m.default),
 };
 
 // In-memory cache of resolved module factories
@@ -91,12 +92,24 @@ export async function resolveModuleNames(cliExt?: string[]): Promise<string[]> {
 }
 
 /**
+ * Modules that always load — infrastructure, not opt-in.
+ * project-resolver chdirs to the target repo before worktree creation; if it
+ * were opt-in, every cross-project dispatch would silently no-op.
+ */
+const CORE_MODULE_NAMES = ['project-resolver'];
+
+/**
  * Load active modules for the lifecycle hooks.
- * Returns instantiated module instances in registration order.
+ * Always-loaded core modules run first, followed by opt-in modules in
+ * registration order.
  */
 export async function loadModules(cliExt?: string[]): Promise<LifecycleModule[]> {
-  const names = await resolveModuleNames(cliExt);
-  return names.map(name => {
+  for (const name of CORE_MODULE_NAMES) {
+    await ensureModule(name);
+  }
+  const optInNames = await resolveModuleNames(cliExt);
+  const allNames = [...CORE_MODULE_NAMES, ...optInNames];
+  return allNames.map(name => {
     const factory = _registry.get(name)!;
     return factory();
   });

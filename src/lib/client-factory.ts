@@ -29,18 +29,21 @@ interface GitLabConfig {
 
 /**
  * Resolve GitLab config from env, glab CLI, or git remote detection.
+ *
+ * projectId resolution order:
+ *   1. Explicit `projectId` argument (from `--project <repo>` flag)
+ *   2. Git remote detection (cwd's repo)
  */
-async function resolveGitLabConfig(): Promise<GitLabConfig> {
+async function resolveGitLabConfig(projectId?: string): Promise<GitLabConfig> {
   const envUrl = process.env.GITLAB_URL;
   let token = process.env.GITLAB_TOKEN;
-  let projectId = process.env.GITLAB_PROJECT_ID;
-  let url = envUrl || 'https://gitlab.com';
+  let resolvedProjectId = projectId;
+  const url = envUrl || 'https://gitlab.com';
 
   // Try glab CLI config if no env token
   if (!token) {
     const glab = getGlabToken(envUrl);
     if (glab) {
-      url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
       token = glab.token;
     }
   }
@@ -49,41 +52,42 @@ async function resolveGitLabConfig(): Promise<GitLabConfig> {
     throw new Error('GITLAB_TOKEN environment variable is required (or authenticate glab: glab auth login)');
   }
 
-  // Try git remote detection if no env project ID
-  if (!projectId) {
+  // Detect project ID from git remote if no explicit arg was provided
+  if (!resolvedProjectId) {
     const detected = await detectGitLabProject();
-    if (detected) projectId = detected;
+    if (!detected) {
+      throw new Error(
+        'Could not determine GitLab project. Pass --project <repo-path> ' +
+        'or run from a git project with a GitLab remote.'
+      );
+    }
+    resolvedProjectId = detected;
   }
 
-  if (!projectId) {
-    throw new Error('GITLAB_PROJECT_ID environment variable is required (or run from a git project with a remote)');
-  }
-
-  return { url, token, projectId };
+  return { url, token, projectId: resolvedProjectId };
 }
 
 /**
- * Create GitLab client with automatic token and project detection
+ * Create GitLab client with automatic token and project detection.
  *
- * Detection order:
- * 1. Environment variables (GITLAB_TOKEN, GITLAB_PROJECT_ID, GITLAB_URL)
- * 2. glab CLI authentication (read from config.yml)
- * 3. Git remote detection for project ID
+ * Detection order for project:
+ *   1. Explicit `projectId` argument (from `--project <repo>` flag)
+ *   2. Git remote detection (cwd's repo)
  */
-export async function createGitLabClient(): Promise<GitLabClient> {
-  const { url, token, projectId } = await resolveGitLabConfig();
-  return new GitLabClient({ url, token, projectId });
+export async function createGitLabClient(projectId?: string): Promise<GitLabClient> {
+  const { url, token, projectId: resolvedProjectId } = await resolveGitLabConfig(projectId);
+  return new GitLabClient({ url, token, projectId: resolvedProjectId });
 }
 
 /**
  * Create GitHub client with token and repo detection.
  *
- * Detection order:
- * 1. GITHUB_TOKEN or GH_TOKEN env var
- * 2. gh auth token (if authenticated via gh auth login)
- * 3. GH_TOKEN env var (lowercase, for GitHub Actions compatibility)
+ * Detection order for repo:
+ *   1. Explicit `repo` argument (from `--project <repo>` flag)
+ *   2. GITHUB_REPOSITORY env var
+ *   3. Git remote detection (cwd's repo)
  */
-export async function createGitHubClient(): Promise<GitHubClient> {
+export async function createGitHubClient(repo?: string): Promise<GitHubClient> {
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || getGhToken();
   if (!token) {
     throw new Error(
@@ -92,33 +96,33 @@ export async function createGitHubClient(): Promise<GitHubClient> {
     );
   }
 
-  let repo = process.env.GITHUB_REPOSITORY;
-  if (!repo) {
+  let resolvedRepo = repo || process.env.GITHUB_REPOSITORY;
+  if (!resolvedRepo) {
     const detected = await detectGitHubRepo();
     if (!detected) {
-      throw new Error('Could not detect GitHub repository. Set GITHUB_REPOSITORY=owner/repo or run from a GitHub repository.');
+      throw new Error(
+        'Could not detect GitHub repository. Pass --project owner/repo ' +
+        'or set GITHUB_REPOSITORY=owner/repo or run from a GitHub repository.'
+      );
     }
-    repo = detected;
+    resolvedRepo = detected;
   }
 
-  return new GitHubClient({ repo, auth: token });
+  return new GitHubClient({ repo: resolvedRepo, auth: token });
 }
 
 /**
- * Create tracker client with automatic platform detection
+ * Create tracker client with automatic platform detection.
  *
  * Detects platform from git remote and returns appropriate client.
  * This is the unified entry point for platform-agnostic commands.
  */
-export async function createTrackerClient(): Promise<TrackerProvider> {
+export async function createTrackerClient(projectId?: string): Promise<TrackerProvider> {
   const { platform } = await detectProject();
 
   if (platform === 'github') {
-    return await createGitHubClient();
+    return await createGitHubClient(projectId);
   } else {
-    // For GitLab, use the index version which implements TrackerProvider
-    const { GitLabClient: TrackerGitLabClient } = await import('./core/gitlab/index');
-    const { url, token, projectId } = await resolveGitLabConfig();
-    return new TrackerGitLabClient({ url, token, projectId });
+    return await createGitLabClient(projectId);
   }
 }

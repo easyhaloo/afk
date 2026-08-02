@@ -1,8 +1,6 @@
 import { Command } from 'commander';
 import { registerSignalCommands } from '../../commands/signal';
 import { registerTrackerCommands } from '../../commands/tracker';
-import { registerGitLabCommands } from '../../commands/gitlab';
-import { registerGitHubCommands } from '../../commands/github';
 import { registerTmuxCommands } from '../../commands/tmux';
 import { registerWorktreeCommands } from '../../commands/worktree';
 import { registerWorkflowCommands } from '../../commands/workflow';
@@ -35,8 +33,6 @@ export function buildCompletionTree(): Command {
   program.name('afk');
   registerSignalCommands(program);
   registerTrackerCommands(program);
-  registerGitLabCommands(program);
-  registerGitHubCommands(program);
   registerTmuxCommands(program);
   registerWorktreeCommands(program);
   registerWorkflowCommands(program);

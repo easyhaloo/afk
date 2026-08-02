@@ -139,7 +139,12 @@ export interface TrackerProvider {
   addLabel(id: number, label: string): Promise<void>;
   removeLabel(id: number, label: string): Promise<void>;
   addComment(id: number, body: string): Promise<void>;
-  linkIssues(sourceId: number, targetId: number, type: LinkType): Promise<void>;
+  /**
+   * Link source issue to target issue. For cross-project links, pass
+   * `targetProjectId` (GitLab path or GitHub owner/repo). Without it, both
+   * ends are assumed to be in `this.projectId` (same-repo link).
+   */
+  linkIssues(sourceId: number, targetId: number, type: LinkType, targetProjectId?: string): Promise<void>;
 
   // MR/PR
   getMR(id: number): Promise<TrackedMR>;

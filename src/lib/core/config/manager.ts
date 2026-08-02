@@ -5,7 +5,6 @@ import { getGlabToken } from '../gitlab/glab-config';
 export interface GitLabConfig {
   url: string;
   token: string;
-  projectId: string | number;
 }
 
 // ─── Workflow ─────────────────────────────────────────────────────────────────
@@ -75,7 +74,6 @@ const DEFAULT_WORKTREE: WorktreeConfig = {
 function loadGitLabConfig(): GitLabConfig {
   let url = process.env.GITLAB_URL;
   let token = process.env.GITLAB_TOKEN;
-  const projectId = process.env.GITLAB_PROJECT_ID;
 
   if (!token) {
     const glab = getGlabToken(url);
@@ -88,7 +86,6 @@ function loadGitLabConfig(): GitLabConfig {
   return {
     url: url || 'https://gitlab.com',
     token: token || '',
-    projectId: projectId || '',
   };
 }
 

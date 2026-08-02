@@ -327,7 +327,7 @@ export class LoopRunner {
         this.started++;
         enqueued++;
         // Fire-and-forget — chain manages its own inImplement membership
-        void this.runChain(issue.id);
+        void this.runChain(issue.id, issue.projectId);
       }
 
       logger.info({ found: issues.length, enqueued, skipped }, 'poll complete');
@@ -345,7 +345,7 @@ export class LoopRunner {
    * Implement chain: WorkflowRunner → on success, push to qaQueue.
    * Errors never crash the loop.
    */
-  private async runChain(iid: number): Promise<void> {
+  private async runChain(iid: number, projectName?: string): Promise<void> {
     const session = this.tracker.platform === 'github' ? `afk-gh-${iid}` : `afk-gl-${iid}`;
     const ctx: ChainContext = { iid, session, startedAt: Date.now() };
     this.inImplement.set(iid, ctx);
@@ -364,6 +364,7 @@ export class LoopRunner {
       const result = await runner.run({
         iid,
         session,
+        projectName,
         targetBranch: baseBranch,
         baseBranch,
         ext: resolvedExt,

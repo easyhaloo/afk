@@ -27,8 +27,8 @@ function getRecoveryHint(error: unknown): string | null {
   if (message.includes('GITHUB_TOKEN')) {
     return 'Set GITHUB_TOKEN or authenticate: gh auth login';
   }
-  if (message.includes('GITLAB_PROJECT_ID')) {
-    return 'Set GITLAB_PROJECT_ID or run from a GitLab repository';
+  if (message.includes('GitLab project') || message.includes('GitLab repository')) {
+    return 'Pass --project <repo-path>, or run from a git repo with a GitLab remote';
   }
   if (message.includes('GITHUB_REPOSITORY')) {
     return 'Set GITHUB_REPOSITORY=owner/repo or run from a GitHub repository';

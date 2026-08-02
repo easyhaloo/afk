@@ -117,11 +117,14 @@ Each draft must populate every field defined in
 1. **Pick mode:** PRD exists → PRD Mode; else → Direct Mode. Lock in `mode::afk` / `mode::hitl`.
 2. **Read inputs + read codebase:** for each Observable Behavior (PRD) or requirement clause (Direct), apply Verification Inference to produce `<text> -- <evidence_type> -- <check_command>`.
 3. **Slice:** apply Slice Strategy + Slicing Rules. If strategy is ambiguous, ask user.
+3b. **Cross-Project Dispatch (if applicable):** if the requirement spans multiple repos, decide per slice which repo it belongs to. Each slice's target repo drives the `--project` flag at execution time.
 4. **Isolate Analysis:** for each slice, apply the Isolate Analysis to determine `needs_isolate: true/false`. Read the codebase to verify whether the slice actually touches middleware-related code (migration files, docker-compose, config files).
 5. **Compose drafts:** for each slice, fill every Issue Body Composition field. Do not leave optional fields blank — write `none` for empty Dependencies, omit Out of Scope if user has none.
 6. **Self-quality-gate:** run every `check_command` in a sandbox (no remote side effects). Any non-zero exit or vocabulary violation → fix the draft before HITL.
 7. **HITL gate:** present all drafts + DAG + label scheme + `need::isolate` decisions + base label. Wait for explicit approval.
 8. **Create:** on approval, run `afk issue create` with all labels at once (`--label stage::ready-for-issues --label <mode> --label <base>` + `--label need::isolate` if the slice requires isolation), then `afk issue link` for DAG edges.
+
+   For cross-project slices, pass `--project <repo-path-or-owner/repo>` to point at the target repo. Use `<project>:<iid>` syntax when linking across repos (e.g. `afk issue link 100 group/repo-a:42 --project group/repo-b`). Loop auto-dispatches via `issue.projectId`; one-shot uses `afk issue run <iid> --project <repo>`.
 
 ## References
 

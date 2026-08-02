@@ -22,6 +22,7 @@ import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
 import { Watchdog } from './workflows/watchdog';
 import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
 import type { InitContext } from './workflows/lifecycle';
+import { defaultSessionStoreChain } from './sessions/chain';
 
 /**
  * Legacy polling function — used by LegacyExecutionWrapper when sandbox is not injected.
@@ -167,6 +168,8 @@ export interface RunnerDependencies {
   sandboxProvider?: SandboxProvider;
   /** Agent provider (tests). Defaults to ClaudeCodeProvider. */
   agentProvider?: import('./agents/types').AgentProvider;
+  /** Session store chain (tests / future). Defaults to defaultSessionStoreChain. */
+  sessionStoreChain?: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
 }
 
 /**
@@ -203,6 +206,8 @@ export class WorkflowRunner {
   private coordinator: HandoffCoordinator;
   private sandboxProvider: SandboxProvider;
   private agentProvider: AgentProvider;
+  /** Session store chain factory — defaults to defaultSessionStoreChain. */
+  private sessionStoreChainFactory: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
   private sandbox: Sandbox | null = null;
   private logDir: string;
   private modules: LifecycleModule[] = [];
@@ -224,6 +229,20 @@ export class WorkflowRunner {
     this.sandbox = sandbox;
   }
 
+  /**
+   * Build a session store chain for the given worktree. The chain is created
+   * lazily per-worktree because the FileSessionStore / HandoffSessionStore
+   * pin the worktree directory at construction time.
+   *
+   * Tests / future hot-path wiring use this to consult native snapshots
+   * before falling back to the handoff Markdown. The phase loop in runPhase
+   * does not yet call this — that's wired separately; the chain is exposed
+   * here so the integration is testable in isolation.
+   */
+  sessionStoreChainFor(worktreePath: string): import('./sessions/types').SessionStoreChain {
+    return this.sessionStoreChainFactory(worktreePath);
+  }
+
   constructor(tracker: TrackerProvider, deps?: RunnerDependencies) {
     this.tracker = tracker;
     this.tmux = deps?.tmux ?? new TmuxClient();
@@ -235,6 +254,8 @@ export class WorkflowRunner {
       : new HandoffCoordinator(tracker, this.tmux, this.watchdog);
     this.sandboxProvider = deps?.sandboxProvider ?? new LocalSandboxProvider(this.worktree);
     this.agentProvider = deps?.agentProvider ?? new ClaudeCodeProvider();
+    // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
+    this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
   }
 
   /**

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { WorktreeManager } from '../lib/worktree';
-import { getWorktreeConfig } from '../lib/config-manager';
+import { WorktreeManager } from '../lib/core/git/worktree';
+import { getWorktreeConfig } from '../lib/core/config/manager';
 import { handleCommandError, success, warning, detail, formatJson } from '../lib/cli-utils';
 
 export function registerWorktreeCommands(program: Command): void {

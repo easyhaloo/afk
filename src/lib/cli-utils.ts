@@ -16,6 +16,15 @@ export function formatJson(data: unknown): void {
 }
 
 /**
+ * Open a URL in the OS-default browser. Centralized so future overrides
+ * (xdg-open, custom handlers) only land in one place.
+ */
+export async function openInBrowser(url: string): Promise<void> {
+  const { default: open } = await import('open');
+  await open(url);
+}
+
+/**
  * Get recovery hint for common errors
  */
 function getRecoveryHint(error: unknown): string | null {
@@ -27,7 +36,7 @@ function getRecoveryHint(error: unknown): string | null {
   if (message.includes('GITHUB_TOKEN')) {
     return 'Set GITHUB_TOKEN or authenticate: gh auth login';
   }
-  if (message.includes('GitLab project') || message.includes('GitLab repository')) {
+  if (message.includes('GitLab project')) {
     return 'Pass --project <repo-path>, or run from a git repo with a GitLab remote';
   }
   if (message.includes('GITHUB_REPOSITORY')) {

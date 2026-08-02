@@ -1,9 +1,7 @@
 import { Command } from 'commander';
-import { createTrackerClient } from '../lib/client-factory';
-import { WorkflowRunner } from '../lib/workflows';
-import { getWorkflowConfig } from '../lib/core/config/manager';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from '../lib/constants';
-import { handleCommandError, success, warning, detail } from '../lib/cli-utils';
+import { handleCommandError } from '../lib/cli-utils';
+import { runWorkflowCli } from '../lib/workflows/run-cmd';
 
 export function registerWorkflowCommands(program: Command): void {
   const workflow = program
@@ -29,35 +27,19 @@ export function registerWorkflowCommands(program: Command): void {
     .option('--ext-param <params...>', 'Module parameters (e.g., isolate.auto=true)')
     .action(async (options) => {
       try {
-        const tracker = await createTrackerClient();
-        const runner = new WorkflowRunner(tracker);
-
-        const cfg = getWorkflowConfig();
-        const session = options.session || `afk-${options.iid}`;
-        const result = await runner.run({
+        await runWorkflowCli({
           iid: options.iid,
-          session,
-          targetBranch: options.targetBranch ?? cfg.targetBranch,
+          session: options.session,
+          targetBranch: options.targetBranch,
           baseBranch: options.baseBranch,
-          maxRetries: options.maxRetries ?? cfg.maxRetries,
-          hardTimeoutMs: options.hardTimeout ?? cfg.completionTimeout,
+          maxRetries: options.maxRetries,
+          hardTimeoutMs: options.hardTimeout,
           maxHandoffs: options.maxHandoffs,
           contextHighTokens: options.contextHigh,
           maxTotalTokens: options.maxTotalTokens,
           ext: options.ext,
           extParams: options.extParam,
         });
-
-        if (result.success) {
-          success('Workflow completed!');
-          if (result.url) {
-            detail(`MR: ${result.url}`);
-          }
-          process.exit(0);
-        } else {
-          warning('Workflow did not complete successfully');
-          process.exit(1);
-        }
       } catch (error) {
         handleCommandError(error);
       }

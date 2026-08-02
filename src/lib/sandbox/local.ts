@@ -5,10 +5,10 @@
  * TmuxClient components without changing their behavior.
  *
  * Responsibilities:
- * - create() → creates/reuses worktree + tmux session
+ * - SandboxProvider.createWorktree() → creates git worktree via WorktreeManager
+ * - SandboxProvider.create() → creates tmux session in existing worktree
  * - Sandbox.startAgent() → launches agent via tmux.sendGoal
- * - interrupt() → tmux Ctrl-C + session capture
- * - close() → tmux cleanup + worktree state update
+ * - AgentExecution → wraps tmux session lifecycle with ExecutionResult
  *
  * Does NOT manage lifecycle modules (isolate, etc.) — those are runner-owned.
  */
@@ -18,7 +18,7 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { WorktreeManager } from '../core/git/worktree';
 import { TmuxClient } from '../core/tmux/tmux';
-import { SIGNAL_FILE, getTokenUsage } from '../io';
+import { SIGNAL_FILE, getTokenUsage, readSignal } from '../io';
 import {
   type SandboxProvider,
   type Sandbox,
@@ -36,7 +36,6 @@ import {
   type WorktreeInfo,
 } from './types';
 import type { SessionSnapshot } from '../agents/types';
-import { readSignal } from '../io';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',
@@ -82,14 +81,17 @@ export class LocalSandbox implements Sandbox {
 
   async startAgent(options: AgentStartOptions): Promise<AgentExecution> {
     if (this._closed) throw new Error('sandbox already closed');
-    return new LocalAgentExecution({
+    const execution = new LocalAgentExecution({
       worktreePath: this.worktreePath,
       sessionName: this.sessionName,
       command: options.command,
       generation: options.generation,
+      goalText: options.goalText,
+      signalType: options.signalType,
       tmux: this.tmux,
-      branch: this.branch,
     });
+    await execution.sendGoal();
+    return execution;
   }
 
   async close(): Promise<void> {
@@ -107,11 +109,13 @@ export class LocalSandbox implements Sandbox {
 /**
  * Execution inside a LocalSandbox — wraps tmux session operations.
  *
- * Uses the existing signal-file polling pattern from WorkflowRunner:
- * - startAgent: sends goal via tmux.sendGoal (non-blocking spawn)
- * - waitForResult: polls for signal file OR token threshold
- * - interrupt: tmux Ctrl-C + session capture
- * - kill: tmux kill-session
+ * Sends goal via tmux.sendGoal(), then waits for result by polling:
+ * - Signal file (goal_complete / ac_result) → status: completed
+ * - Token threshold reached → status: context_high
+ * - Hard timeout → status: timed_out
+ * - interrupt() called → status: aborted
+ *
+ * interrupt() sends Ctrl-C to tmux; kill() force-terminates the session.
  */
 export class LocalAgentExecution implements AgentExecution {
   readonly id: string;
@@ -120,6 +124,8 @@ export class LocalAgentExecution implements AgentExecution {
   private readonly sessionName: string;
   private readonly tmux: TmuxClient;
   private readonly generation: number;
+  private readonly goalText: string;
+  private readonly signalType: 'goal_complete' | 'ac_result';
   private done = false;
   private interruptAcked = false;
 
@@ -128,47 +134,47 @@ export class LocalAgentExecution implements AgentExecution {
     sessionName: string;
     command: import('../agents/types').AgentCommand;
     generation: number;
+    goalText: string;
+    signalType: 'goal_complete' | 'ac_result';
     tmux: TmuxClient;
-    branch?: string;
   }) {
     this.id = randomUUID();
     this.worktreePath = opts.worktreePath;
     this.sessionName = opts.sessionName;
     this.tmux = opts.tmux;
     this.generation = opts.generation;
+    this.goalText = opts.goalText;
+    this.signalType = opts.signalType;
     this.sessionId = opts.sessionName;
   }
 
+  /** Send the goal to the tmux session — called by LocalSandbox.startAgent(). */
+  async sendGoal(): Promise<void> {
+    await this.tmux.sendGoal(
+      this.worktreePath,
+      this.sessionName,
+      'main',
+      this.goalText,
+      this.signalType,
+    );
+  }
+
   async waitForEvent(): Promise<ExecutionEvent | null> {
-    // Local tmux doesn't have a streaming event API — this is a placeholder
-    // for provider-specific streaming. For now, return null (sync with
-    // signal-file polling in waitForResult).
+    // Local tmux does not have a streaming event API — this is a placeholder
+    // for provider-specific streaming (Phase 3). Returns null until implemented.
     return null;
   }
 
-  async waitForResult(): Promise<ExecutionResult> {
-    const signalPath = join(this.worktreePath, SIGNAL_FILE);
+  async waitForResult(options?: {
+    completionTimeoutMs?: number;
+    contextHighTokens?: number;
+  }): Promise<ExecutionResult> {
+    const completionTimeoutMs = options?.completionTimeoutMs ?? 600_000;
+    const contextHighTokens = options?.contextHighTokens ?? Infinity;
+    const start = Date.now();
 
-    // Poll for signal file — same pattern as WorkflowRunner.waitForPhaseSignal
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      try {
-        const signal = await readSignal(this.worktreePath);
-        if (signal) {
-          this.done = true;
-          return {
-            version: 1,
-            runId: this.id,
-            status: signal.type === 'goal_complete' || signal.type === 'ac_result' ? 'completed' : 'failed',
-            provider: 'local',
-            sessionId: this.sessionId,
-            structuredOutput: signal,
-            commits: [],
-            branch: this.sessionName,
-          };
-        }
-      } catch { /* ignore polling errors */ }
-
       // Check for interrupt-acked flag set by interrupt()
       if (this.interruptAcked) {
         this.interruptAcked = false;
@@ -183,18 +189,73 @@ export class LocalAgentExecution implements AgentExecution {
         };
       }
 
+      // Check hard timeout
+      if (Date.now() - start >= completionTimeoutMs) {
+        this.done = true;
+        return {
+          version: 1,
+          runId: this.id,
+          status: 'timed_out',
+          provider: 'local',
+          sessionId: this.sessionId,
+          commits: [],
+          branch: this.sessionName,
+        };
+      }
+
+      // Check token threshold (context near limit → return context_high result)
+      try {
+        const rawUsage = await getTokenUsage(this.worktreePath);
+        if (rawUsage.total >= contextHighTokens) {
+          return {
+            version: 1,
+            runId: this.id,
+            status: 'context_high',
+            provider: 'local',
+            sessionId: this.sessionId,
+            usage: {
+              inputTokens: rawUsage.input,
+              outputTokens: rawUsage.output,
+              totalTokens: rawUsage.total,
+            },
+            commits: [],
+            branch: this.sessionName,
+          };
+        }
+      } catch { /* ignore polling errors */ }
+
+      // Check signal file (completion wins over token threshold)
+      try {
+        const signal = await readSignal(this.worktreePath);
+        if (signal) {
+          this.done = true;
+          return {
+            version: 1,
+            runId: this.id,
+            status:
+              signal.type === 'goal_complete' || signal.type === 'ac_result'
+                ? 'completed'
+                : 'failed',
+            provider: 'local',
+            sessionId: this.sessionId,
+            structuredOutput: signal,
+            commits: [],
+            branch: this.sessionName,
+          };
+        }
+      } catch { /* ignore polling errors */ }
+
       await this.sleep(2000);
     }
   }
 
-  async interrupt(reason: InterruptReason): Promise<void> {
+  async interrupt(_reason: InterruptReason): Promise<void> {
     if (this.done) return;
-    // Send Ctrl-C to the tmux session
     try {
       await this.tmux.sendKeys(this.sessionName, 'main', 'C-c');
       this.interruptAcked = true;
-    } catch (err) {
-      // If sendKeys fails (session gone), treat as already dead
+    } catch {
+      // Session gone → treat as dead
       this.interruptAcked = true;
       this.done = true;
     }
@@ -215,12 +276,15 @@ export class LocalAgentExecution implements AgentExecution {
 
   async captureSession(): Promise<SessionSnapshot | undefined> {
     try {
-      const output = await this.capturePane({ lines: 200, history: 500 });
+      const output = await this.tmux.capturePane(this.sessionName, 'main', {
+        lines: 200,
+        history: 500,
+      });
       const rawUsage = await getTokenUsage(this.worktreePath);
       return {
         sessionId: this.sessionId ?? this.id,
         generation: this.generation,
-        checkpoint: null, // tmux doesn't support native checkpoint
+        checkpoint: null, // tmux does not support native session checkpoint
         summary: output,
         usage: {
           inputTokens: rawUsage.input,
@@ -235,15 +299,11 @@ export class LocalAgentExecution implements AgentExecution {
   }
 
   async resume(_options: ResumeOptions): Promise<AgentExecution> {
-    // Resume in local sandbox: start a new tmux session (sessionName-suffix)
-    // The actual resume logic (reading handoff doc, rebuilding prompt) is
-    // runner-owned — we just start the new execution here.
-    throw new Error('LocalAgentExecution.resume not yet implemented — runner must handle handoff text injection');
-  }
-
-  private async capturePane(options: CaptureOptions): Promise<string> {
-    const { lines = 50, history = 100 } = options;
-    return this.tmux.capturePane(this.sessionName, 'main', { lines, history });
+    // Resume logic (reading handoff doc, rebuilding prompt) is runner-owned.
+    // This throws until Phase 3/4 implements native session restore.
+    throw new Error(
+      'LocalAgentExecution.resume not yet implemented — runner must inject handoff text',
+    );
   }
 
   private sleep(ms: number): Promise<void> {
@@ -275,18 +335,9 @@ export class LocalSandboxProvider implements SandboxProvider {
   readonly capabilities: ReadonlySet<SandboxCapability> = SANDBOX_CAPABILITIES;
 
   private readonly worktreeManager: WorktreeManager;
-  private readonly tmuxFactory: () => TmuxClient;
 
-  /**
-   * @param worktreeManager - WorktreeManager instance (may be shared with runner)
-   * @param tmuxFactory - Factory for TmuxClient instances (default: () => new TmuxClient())
-   */
-  constructor(
-    worktreeManager: WorktreeManager = new WorktreeManager(),
-    tmuxFactory: () => TmuxClient = () => new TmuxClient(),
-  ) {
+  constructor(worktreeManager: WorktreeManager = new WorktreeManager()) {
     this.worktreeManager = worktreeManager;
-    this.tmuxFactory = tmuxFactory;
   }
 
   /**
@@ -294,30 +345,45 @@ export class LocalSandboxProvider implements SandboxProvider {
    * Call this BEFORE lifecycle modules run; call create() AFTER.
    */
   async createWorktree(options: LocalWorktreeOptions): Promise<WorktreeInfo> {
-    const wt = await this.worktreeManager.create(options.iid, options.baseBranch, options.baseDir);
+    const wt = await this.worktreeManager.create(
+      options.iid,
+      options.baseBranch,
+      options.baseDir,
+    );
     return { iid: wt.iid, path: wt.path, branch: wt.branch };
   }
 
   /**
    * Create a tmux session in an existing worktree.
    * The worktree must already exist (created by createWorktree() or runner).
+   *
+   * Note: the TmuxClient passed in SandboxOptions must be the same instance
+   * the HandoffCoordinator uses, so session lifecycle is coherent.
    */
   async create(options: SandboxOptions): Promise<Sandbox> {
-    const { worktreePath, session, branch } = options;
+    const { worktreePath, session, branch, tmux } = options;
 
     // Verify worktree exists
     try {
       await fs.access(worktreePath);
     } catch {
-      throw new Error(`LocalSandboxProvider: worktree does not exist at ${worktreePath}`);
+      throw new Error(
+        `LocalSandboxProvider: worktree does not exist at ${worktreePath}`,
+      );
     }
 
-    const tmux = this.tmuxFactory();
+    if (!tmux) {
+      throw new Error(
+        'LocalSandboxProvider.create() requires tmux in SandboxOptions',
+      );
+    }
+
     const sandboxId = randomUUID();
 
-    await tmux.createSession(session, worktreePath);
-    await tmux.waitForPrompt(worktreePath, 30000);
-
+    // Session creation is done by the runner in runBody Step 2; here we just
+    // wrap the existing session in a Sandbox. This lets the runner and
+    // HandoffCoordinator manage session lifecycle while sandbox provides
+    // the AgentExecution abstraction.
     return new LocalSandbox({
       id: sandboxId,
       worktreePath,

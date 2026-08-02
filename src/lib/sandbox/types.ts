@@ -33,6 +33,11 @@ export interface SandboxOptions {
   interactive?: boolean;
   /** Env vars to inject into the sandbox. */
   env?: Record<string, string>;
+  /**
+   * TmuxClient instance to use. For local provider this must be the same
+   * instance the HandoffCoordinator uses, so session lifecycle is coherent.
+   */
+  tmux?: import('../core/tmux/tmux').TmuxClient;
 }
 
 /** A started sandbox — can create AgentExecutions. */
@@ -60,6 +65,10 @@ export interface AgentStartOptions {
   command: AgentCommand;
   /** Generation index for this execution (1 = first generation). */
   generation: number;
+  /** Goal/prompt text to send to the agent. */
+  goalText: string;
+  /** Signal type to wait for (goal_complete / ac_result). */
+  signalType: 'goal_complete' | 'ac_result';
 }
 
 /** Reason for an interrupt — determines graceful vs. forced termination. */
@@ -90,7 +99,7 @@ export interface AgentExecution {
    * Wait for the final result of this execution.
    * Resolves when the agent completes, errors, or is interrupted.
    */
-  waitForResult(): Promise<ExecutionResult>;
+  waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
 
   /**
    * Gracefully interrupt the agent — send Ctrl-C equivalent.
@@ -136,7 +145,7 @@ export type ExecutionEvent =
 export interface ExecutionResult {
   version: 1;
   runId: string;
-  status: 'completed' | 'blocked' | 'failed' | 'aborted' | 'timed_out';
+  status: 'completed' | 'blocked' | 'failed' | 'aborted' | 'timed_out' | 'context_high';
   provider: string;
   sessionId?: string;
   exitCode?: number;

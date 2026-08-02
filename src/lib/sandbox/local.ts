@@ -378,14 +378,14 @@ export class LocalSandboxProvider implements SandboxProvider {
       );
     }
 
-    const sandboxId = randomUUID();
+    // Create tmux session + wait for prompt inside the sandbox provider so the
+    // runner doesn't have to know about tmux lifecycle details. The same TmuxClient
+    // instance must be passed in (kept here for tests / sandbox abstraction).
+    await tmux.createSession(session, worktreePath);
+    await tmux.waitForPrompt(worktreePath, 30_000);
 
-    // Session creation is done by the runner in runBody Step 2; here we just
-    // wrap the existing session in a Sandbox. This lets the runner and
-    // HandoffCoordinator manage session lifecycle while sandbox provides
-    // the AgentExecution abstraction.
     return new LocalSandbox({
-      id: sandboxId,
+      id: randomUUID(),
       worktreePath,
       sessionName: session,
       branch,

@@ -97,6 +97,8 @@ class LegacyExecutionWrapper implements AgentExecution {
     goalText: string,
     signalType: 'goal_complete' | 'ac_result',
   ): Promise<AgentExecution> {
+    // Clear any stale signal before sending goal, mirroring restartSession() behavior.
+    await clearSignal(wtPath);
     await tmux.sendGoal(wtPath, session, 'main', goalText, signalType);
     return new LegacyExecutionWrapper(tmux, wtPath, session);
   }
@@ -211,6 +213,17 @@ export class WorkflowRunner {
   /** Poll interval for waitForPhaseSignal (overridden by tests). */
   private pollIntervalMs = 2000;
 
+  /**
+   * Inject a sandbox for testing. Production code goes through runBody →
+   * sandboxProvider.create(). This seam exists so tests can wire a fake
+   * sandbox that emits controlled ExecutionResult values without driving the
+   * real LocalSandboxProvider path (which creates tmux + worktree, neither
+   * of which exist in unit tests).
+   */
+  setSandbox(sandbox: Sandbox): void {
+    this.sandbox = sandbox;
+  }
+
   constructor(tracker: TrackerProvider, deps?: RunnerDependencies) {
     this.tracker = tracker;
     this.tmux = deps?.tmux ?? new TmuxClient();
@@ -297,12 +310,16 @@ Session was interrupted before completion.
    * worktree failed. Worktree itself is kept for inspection.
    */
   private async teardownSession(iid: number, session: string): Promise<void> {
-    try {
-      await this.tmux.killSession(session);
-    } catch { /* ignore if session already gone */ }
-    try {
-      await this.tmux.closeSession();
-    } catch { /* ignore */ }
+    if (this.sandbox) {
+      await this.sandbox.close();
+    } else {
+      try {
+        await this.tmux.killSession(session);
+      } catch { /* ignore if session already gone */ }
+      try {
+        await this.tmux.closeSession();
+      } catch { /* ignore */ }
+    }
     try {
       await this.worktree.updateStatus(iid, 'failed');
     } catch (err) {
@@ -380,11 +397,14 @@ Session was interrupted before completion.
     await this.runLifecycleHooks(['before'], this.lifecycleCtx);
     logger.info({ iid, hook: 'before_agent', moduleCount: this.modules.length }, 'lifecycle before_agent hooks complete');
 
-    // ── Step 2: Launch tmux session ─────────────────────────────────────────
-    await this.tmux.createSession(session, wt.path);
-    logger.info({ iid, session, worktree: wt.path }, 'tmux session created');
-    await this.tmux.waitForPrompt(wt.path, 30000);
-    logger.info({ iid, session, timeoutMs: 30000 }, 'tmux prompt ready');
+    // ── Step 2: Create sandbox (local: tmux session + prompt wait) ─────────
+    this.sandbox = await this.sandboxProvider.create({
+      worktreePath: wt.path,
+      session,
+      branch: targetBranch,
+      tmux: this.tmux,
+    });
+    logger.info({ iid, session, worktree: wt.path, sandboxId: this.sandbox.id }, 'sandbox created');
 
     // ── Step 3: Launch watchdog (detached, no blocking) ────────────────────
     this.watchdog.arm(session, hardTimeoutMs, iid, wt.path);
@@ -456,7 +476,11 @@ Session was interrupted before completion.
     logger.info({ iid, mrUrl }, 'MR created');
 
     // Session is no longer needed; kill it to avoid orphaned sessions.
-    await this.tmux.killSession(session);
+    if (this.sandbox) {
+      await this.sandbox.close();
+    } else {
+      await this.tmux.killSession(session);
+    }
     logger.info({ iid, session }, 'tmux session killed');
 
     // Query MR/PR status and pipeline
@@ -475,10 +499,10 @@ Session was interrupted before completion.
     await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
     logger.info({ iid, label: 'stage::afk-in-progress' }, 'tracker label removed');
 
-    // Success path cleanup: drop the control-mode connection and remove the
-    // now-redundant worktree (force: stray untracked artifacts may exist).
+    // Success path cleanup: sandbox already closed its control-mode connection;
+    // remove the now-redundant worktree (force: stray untracked artifacts may exist).
     try {
-      await this.tmux.closeSession();
+      if (!this.sandbox) await this.tmux.closeSession();
       await this.worktree.cleanup(iid, true);
       logger.info({ iid, worktreePath }, 'worktree cleaned up');
     } catch (err) {

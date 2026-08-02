@@ -16,6 +16,7 @@ import type {
 } from './sandbox/types';
 import type { AgentProvider, SessionSnapshot } from './agents/types';
 import { getTokenUsage, configureStatusline, logger, readSignal, SIGNAL_FILE, clearSignal } from './io';
+import { readLegacySignalResult } from './sandbox/legacy-compat';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
@@ -41,20 +42,9 @@ async function pollLegacy(
     if (Date.now() - start >= completionTimeoutMs) {
       return { version: 1, runId: `legacy-${Date.now()}`, status: 'timed_out', provider: 'local', commits: [] };
     }
-    // Check signal file first (same priority as waitForPhaseSignal)
-    try {
-      const signal = await readSignal(wtPath);
-      if (signal) {
-        return {
-          version: 1,
-          runId: `legacy-${Date.now()}`,
-          status: signal.type === 'goal_complete' || signal.type === 'ac_result' ? 'completed' : 'failed',
-          provider: 'local',
-          structuredOutput: signal,
-          commits: [],
-        };
-      }
-    } catch { /* ignore */ }
+    // Check legacy signal file (Phase 8 fallback for pre-Phase-8 worktrees)
+    const legacyResult = await readLegacySignalResult(wtPath, `legacy-${Date.now()}`);
+    if (legacyResult) return legacyResult;
     // Then check token threshold
     try {
       const rawUsage = await getTokenUsage(wtPath);
@@ -451,10 +441,15 @@ Session was interrupted before completion.
 
     // ── Phases: implement then verify; handoff budgets are shared across both ──
     // used = handoff rounds, tokens = accumulated total across generations.
+    //
+    // Phase 8: prompts no longer instruct the agent to write `.afk-signal.json`.
+    // Completion is reported via ExecutionResult (structured output); old
+    // worktrees that still write the signal file are still readable as a
+    // fallback — see core/io/signal.ts.
     const budget = { used: 0, tokens: 0 };
     const phases = [
-      { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。全部完成后在 .afk-signal.json 写入 type 为 goal_complete 的信号。`, signalType: 'goal_complete' as const },
-      { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。全部通过后在 .afk-signal.json 写入 type 为 ac_result 的信号。`, signalType: 'ac_result' as const },
+      { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。`, signalType: 'goal_complete' as const },
+      { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。`, signalType: 'ac_result' as const },
     ];
 
     for (const phase of phases) {
@@ -714,10 +709,10 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
     while (Date.now() - start < p.completionTimeoutMs) {
       try {
-        // Signal file first: a completion signal wins over the token threshold.
+        // Legacy signal file (Phase 8 fallback) — completion wins over token threshold.
         const signal = await readSignal(p.wtPath);
         if (signal?.type === p.signalType) {
-          logger.info({ iid: p.iid, signalType: p.signalType }, 'phase signal detected');
+          logger.info({ iid: p.iid, signalType: p.signalType }, 'phase signal detected (legacy)');
           return { kind: 'done' };
         }
         if (signal?.type === 'timeout') return { kind: 'timeout' };

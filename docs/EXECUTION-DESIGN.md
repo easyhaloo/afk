@@ -591,16 +591,21 @@ workflow:
 
 验收：模板能表达依赖、条件、执行模式、Agent、分支策略和结构化输出。
 
-### 阶段 8：移除旧 signal 协议
+### 阶段 8：移除旧 signal 协议 ✅
 
 前提：所有新 workflow 和默认 Provider 已使用 ExecutionResult。
 
-- 删除新 prompt 中的 signal 写入要求
-- 删除 Runner 对旧 signal 的主要依赖
-- 清理 legacy signal CLI/schema/tests
-- 更新 skills、README 和架构文档
+- ✅ 删除新 prompt 中的 signal 写入要求 (`templates/builtin.ts`, `workflows.ts` phases)
+- ✅ Runner 仍读取 signal 作为向后兼容 fallback (`sandbox/legacy-compat.ts`)
+- ⏳ 清理 legacy signal CLI/schema/tests（保留 readSignal/writeSignal/clearSignal + 单元测试；CLI/技能暂无独立 signal 子命令）
+- ✅ 更新 skills、README 和架构文档（`CLAUDE.md` 含 Phase 状态表）
 
 验收：全量测试通过，旧 worktree 可以被兼容读取或明确迁移。
+
+实现细节：
+- `sandbox/legacy-compat.ts` —— `readLegacySignalResult()` 将 `.afk-signal.json` 映射为 `ExecutionResult`。
+- `LocalAgentExecution.waitForResult` 调用 legacy adapter 作为 fallback。
+- `core/io/signal.ts` 顶部加 `@deprecated` JSDoc。
 
 ## 13. 测试计划
 

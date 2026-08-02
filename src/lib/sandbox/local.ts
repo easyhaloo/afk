@@ -18,7 +18,8 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { WorktreeManager } from '../core/git/worktree';
 import { TmuxClient } from '../core/tmux/tmux';
-import { SIGNAL_FILE, getTokenUsage, readSignal } from '../io';
+import { SIGNAL_FILE, getTokenUsage } from '../io';
+import { readLegacySignalResult } from './legacy-compat';
 import {
   type SandboxProvider,
   type Sandbox,
@@ -224,26 +225,18 @@ export class LocalAgentExecution implements AgentExecution {
         }
       } catch { /* ignore polling errors */ }
 
-      // Check signal file (completion wins over token threshold)
-      try {
-        const signal = await readSignal(this.worktreePath);
-        if (signal) {
-          this.done = true;
-          return {
-            version: 1,
-            runId: this.id,
-            status:
-              signal.type === 'goal_complete' || signal.type === 'ac_result'
-                ? 'completed'
-                : 'failed',
-            provider: 'local',
-            sessionId: this.sessionId,
-            structuredOutput: signal,
-            commits: [],
-            branch: this.sessionName,
-          };
-        }
-      } catch { /* ignore polling errors */ }
+      // Check legacy signal file (Phase 8 fallback for pre-Phase-8 worktrees).
+      // New agents do not write this file — they complete via ExecutionResult.
+      // The adapter lives in sandbox/legacy-compat.ts.
+      const legacyResult = await readLegacySignalResult(this.worktreePath, this.id);
+      if (legacyResult) {
+        this.done = true;
+        return {
+          ...legacyResult,
+          sessionId: this.sessionId,
+          branch: this.sessionName,
+        };
+      }
 
       await this.sleep(2000);
     }

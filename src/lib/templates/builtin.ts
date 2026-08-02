@@ -27,10 +27,11 @@ export function builtinTemplates(): WorkflowTemplate[] {
 
 /**
  * Default template: implement → verify-ac → create-mr → qa.
- * Mirrors the current AFK two-phase flow (Phase 1 implement + Phase 2 verify,
- * then autoWrapup). The 'verify-ac' and 'create-mr' / 'qa' steps are wired as
- * sequential so the existing WorkflowRunner behavior is preserved exactly
- * when this template is selected.
+ *
+ * Prompts intentionally do NOT instruct the agent to write `.afk-signal.json`
+ * (Phase 8: the legacy signal-file protocol is being retired). New agents
+ * complete via structured output channels; old worktrees still write the
+ * file and the runner reads it as a fallback.
  */
 function issueImplementation(): WorkflowTemplate {
   return {

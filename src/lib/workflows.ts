@@ -134,6 +134,7 @@ export class WorkflowRunner {
     this.modules = await loadModules(options.ext);
     this.extParams = parseModuleParams(options.extParams);
     this.originalCwd = process.cwd();
+    logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams }, 'WorkflowRunner initialized');
 
     try {
       return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName });
@@ -216,6 +217,7 @@ Session was interrupted before completion.
           if (hook === 'before') await mod.onBeforeAgent?.(ctx);
           else if (hook === 'after') await mod.onAfterAgent?.(ctx);
           else await mod.onCleanup?.(ctx);
+          logger.info({ iid: ctx.iid, module: mod.name, hook }, 'lifecycle hook succeeded');
         } catch (err) {
           logger.warn({ iid: ctx.iid, module: mod.name, err }, `lifecycle ${hook} hook failed`);
         }
@@ -250,22 +252,30 @@ Session was interrupted before completion.
     // ProjectResolverModule runs here and may chdir to the target repo.
     // Init failures throw — init is infrastructure, not opt-in.
     await this.runInitHooks({ iid, projectName, baseBranch, params: this.extParams, originalCwd: this.originalCwd });
+    logger.info({ iid, projectName, baseBranch, moduleCount: this.modules.length }, 'init hooks complete');
 
     // ── Step 1: Create worktree ─────────────────────────────────────────────
     const wt = await this.worktree.create(iid, baseBranch);
+    logger.info({ iid, worktree: wt.path, branch: wt.branch }, 'worktree created');
     await this.worktree.updateStatus(iid, 'active');
+    logger.info({ iid, status: 'active' }, 'worktree status updated');
     await configureStatusline(wt.path);
+    logger.info({ iid, worktree: wt.path }, 'statusline configured');
 
     // ── Step 1b: Lifecycle before_agent hooks ──────────────────────────────
     this.lifecycleCtx = { iid, worktreePath: wt.path, baseBranch, sessionName: session, params: this.extParams };
     await this.runLifecycleHooks(['before'], this.lifecycleCtx);
+    logger.info({ iid, hook: 'before_agent', moduleCount: this.modules.length }, 'lifecycle before_agent hooks complete');
 
     // ── Step 2: Launch tmux session ─────────────────────────────────────────
     await this.tmux.createSession(session, wt.path);
+    logger.info({ iid, session, worktree: wt.path }, 'tmux session created');
     await this.tmux.waitForPrompt(wt.path, 30000);
+    logger.info({ iid, session, timeoutMs: 30000 }, 'tmux prompt ready');
 
     // ── Step 3: Launch watchdog (detached, no blocking) ────────────────────
     this.watchdog.arm(session, hardTimeoutMs, iid, wt.path);
+    logger.info({ iid, session, hardTimeoutMs }, 'watchdog armed');
 
     // ── Step 4: Post launch comment ────────────────────────────────────────
     await this.tracker.addComment(iid, [
@@ -277,9 +287,13 @@ Session was interrupted before completion.
       `- **Session:** \`${session}\``,
       `- **Issue:** #${iid}`,
     ].join('\n'));
+    logger.info({ iid, event: 'launch' }, 'tracker comment posted');
     await this.tracker.addLabel(iid, `session::${session}`);
+    logger.info({ iid, label: `session::${session}` }, 'tracker label added');
     await this.tracker.addLabel(iid, 'stage::afk-in-progress');
+    logger.info({ iid, label: 'stage::afk-in-progress' }, 'tracker label added');
     await this.tracker.removeLabel(iid, 'stage::ready-for-issues');
+    logger.info({ iid, label: 'stage::ready-for-issues' }, 'tracker label removed');
 
     // ── Phases: implement then verify; handoff budgets are shared across both ──
     // used = handoff rounds, tokens = accumulated total across generations.
@@ -290,17 +304,20 @@ Session was interrupted before completion.
     ];
 
     for (const phase of phases) {
+      logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify' }, 'phase begin');
       const completed = await this.runPhase({
         iid, session, wtPath: wt.path,
         hardTimeoutMs, completionTimeoutMs, contextHighTokens,
         budget, maxHandoffs, maxTotalTokens,
         goalBase: phase.goalBase, signalType: phase.signalType,
       });
+      logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify', completed }, 'phase end');
       if (!completed) return { success: false };
     }
 
     // ── Lifecycle after_agent hooks (before cleanup) ────────────────────────
     await this.runLifecycleHooks(['after'], this.lifecycleCtx);
+    logger.info({ iid, hook: 'after_agent', moduleCount: this.modules.length }, 'lifecycle after_agent hooks complete');
 
     // ac_result -> autoWrapup
     return this.autoWrapup(iid, wt.path, session, targetBranch);
@@ -319,12 +336,15 @@ Session was interrupted before completion.
   ): Promise<{ success: boolean; url?: string }> {
     // Push branch
     await this.pushBranch(worktreePath);
+    logger.info({ iid, worktreePath }, 'branch pushed');
 
     // Create MR
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
+    logger.info({ iid, mrUrl }, 'MR created');
 
     // Session is no longer needed; kill it to avoid orphaned sessions.
     await this.tmux.killSession(session);
+    logger.info({ iid, session }, 'tmux session killed');
 
     // Query MR/PR status and pipeline
     try {
@@ -338,13 +358,16 @@ Session was interrupted before completion.
     }
 
     await this.tracker.addLabel(iid, 'stage::qa');
+    logger.info({ iid, label: 'stage::qa' }, 'tracker label added');
     await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
+    logger.info({ iid, label: 'stage::afk-in-progress' }, 'tracker label removed');
 
     // Success path cleanup: drop the control-mode connection and remove the
     // now-redundant worktree (force: stray untracked artifacts may exist).
     try {
       await this.tmux.closeSession();
       await this.worktree.cleanup(iid, true);
+      logger.info({ iid, worktreePath }, 'worktree cleaned up');
     } catch (err) {
       logger.warn({ iid, err }, 'failed to remove worktree on success');
     }
@@ -428,8 +451,10 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
         ? p.goalBase
         : this.continueGoalText(p.goalBase, p.iid, p.wtPath, round - 1);
 
+      logger.info({ iid: p.iid, round, signalType: p.signalType, budgetUsed: p.budget.used }, 'round begin');
       try {
         await this.tmux.sendGoal(p.wtPath, p.session, 'main', goalText, p.signalType);
+        logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
       } catch (err) {
         if (round === 1) throw err; // initial launch failure: unchanged crash path
         logger.error({ iid: p.iid, err, round }, 'continue-goal failed after handoff; flipping to manual handoff');
@@ -526,6 +551,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
         // Objective poll: statusline token usage reached the threshold.
         const tokens = (await getTokenUsage(p.wtPath)).total;
+        logger.info({ iid: p.iid, tokens, threshold: p.contextHighTokens }, 'poll tick token read');
         if (tokens >= p.contextHighTokens) {
           logger.info({ iid: p.iid, tokens, threshold: p.contextHighTokens }, 'context near limit; interrupting for handoff');
           return { kind: 'handoff', tokens };

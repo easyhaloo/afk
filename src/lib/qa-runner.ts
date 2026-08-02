@@ -46,11 +46,14 @@ export class QARunner {
     try {
       // ── Step 1: Create worktree from PRD baseline ──────────────────────────
       wt = await this.worktree.create(iid, baselineBranch);
+      logger.info({ iid, worktree: wt.path, baselineBranch }, 'QA worktree created');
       await this.worktree.updateStatus(iid, 'active');
       await configureStatusline(wt.path);
+      logger.info({ iid, worktree: wt.path }, 'QA statusline configured');
 
       // ── Step 2: Merge feature branch ───────────────────────────────────────
       const featureBranch = await this.resolveFeatureBranch(iid);
+      logger.info({ iid, featureBranch }, 'QA feature branch resolved');
       if (!featureBranch) {
         await this.tracker.addComment(iid, '<!-- afk-event: qa-failed -->\n**❌ QA Failed**\n\nCould not resolve feature branch.');
         await this.tracker.addLabel(iid, 'mode::hitl');
@@ -61,10 +64,13 @@ export class QARunner {
 
       // ── Step 3: Launch tmux + agent ───────────────────────────────────────
       await this.tmux.createSession(session, wt.path);
+      logger.info({ iid, session, worktree: wt.path }, 'QA tmux session created');
       await this.tmux.waitForPrompt(wt.path, 30000);
+      logger.info({ iid, session, timeoutMs: 30000 }, 'QA tmux prompt ready');
 
       // ── Step 4: Send /goal to verify AC ───────────────────────────────────
       await this.tmux.sendGoal(wt.path, session, 'main', `验证 issue #${iid} 的 AC 在合并后的代码上全部通过`, 'ac_result');
+      logger.info({ iid, session }, 'QA goal sent');
 
       // Log start
       await this.tracker.addComment(iid, [
@@ -75,12 +81,14 @@ export class QARunner {
         `- **Baseline:** \`${baselineBranch}\``,
         `- **Feature:** \`${featureBranch}\``,
       ].join('\n'));
+      logger.info({ iid, event: 'qa-start' }, 'QA start comment posted');
 
       // ── Step 5: Wait for ac_result ────────────────────────────────────────
       const signal = await this.tmux.waitForSignal(
         session, 'main', 'ac_result', wt.path,
         TIMEOUTS.WORKFLOW_COMPLETION_TIMEOUT
       );
+      logger.info({ iid, signalReceived: signal !== null, signalType: signal?.type }, 'QA signal received');
 
       if (!signal) {
         return this.handleTimeout(iid, wt.path, session);
@@ -200,6 +208,7 @@ export class QARunner {
     signal: { type: string; summary?: string; result?: string }
   ): Promise<{ success: boolean; mrUrl?: string }> {
     await this.tmux.killSession(session);
+    logger.info({ iid, session }, 'QA tmux session killed');
 
     // Find the MR for this issue
     const mrs = await this.tracker.listMRs({ state: 'opened' });
@@ -208,16 +217,20 @@ export class QARunner {
     if (!mr) {
       await this.tracker.addComment(iid, '<!-- afk-event: qa-failed -->\n**❌ QA Failed**\n\nMR not found for this issue.');
       await this.tracker.addLabel(iid, 'mode::hitl');
+      logger.warn({ iid }, 'QA failed: MR not found');
       return { success: false };
     }
+    logger.info({ iid, mrId: mr.id, mrUrl: mr.url }, 'QA MR located');
 
     // AC passed → merge MR
     try {
+      logger.info({ iid, mrId: mr.id }, 'attempting MR merge');
       await this.tracker.mergeMR(mr.id, {
         deleteSourceBranch: true,
         squash: true,
         mergeCommitMessage: `Merge QA verified: Resolve #${iid}`,
       });
+      logger.info({ iid, mrId: mr.id }, 'MR merged');
 
       await this.tracker.addComment(iid, [
         '<!-- afk-event: qa-passed -->',
@@ -228,7 +241,9 @@ export class QARunner {
       ].filter(Boolean).join('\n'));
 
       await this.tracker.removeLabel(iid, 'stage::qa');
+      logger.info({ iid, label: 'stage::qa' }, 'tracker label removed');
       await this.tracker.addLabel(iid, 'stage::done');
+      logger.info({ iid, label: 'stage::done' }, 'tracker label added');
 
       logger.info({ iid, mrId: mr.id }, 'QA passed, MR merged');
       return { success: true, mrUrl: mr.url };
@@ -236,6 +251,7 @@ export class QARunner {
     } catch (err) {
       await this.tracker.addComment(iid, `<!-- afk-event: qa-failed -->\n**❌ QA Failed**\n\nMR merge failed: ${(err as Error).message}`);
       await this.tracker.addLabel(iid, 'mode::hitl');
+      logger.error({ iid, mrId: mr.id, err }, 'QA failed: MR merge error');
       return { success: false };
     }
   }

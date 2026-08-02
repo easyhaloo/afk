@@ -5,7 +5,7 @@ description: >-
   of an approach, before committing to a plan.
   Outputs findings doc or spike summary.
 disallowed-tools: >-
-  Edit(*) Write(*) Agent(*) Task*(*)
+  Edit(*) Write(*)
   Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
   Bash(git branch -D*) Bash(docker*) Bash(rm -rf*)
 ---
@@ -53,8 +53,25 @@ For each path:
 
 Present findings aligned with expectations.
 Flag disconfirmed expectations — they are often the most valuable result.
+See **Parallel execution** below for how to fan out across paths.
 
-When multiple independent paths exist, explore them in parallel using subagents.
+---
+
+## Parallel execution
+
+When multiple independent paths exist (e.g., surveying logging, error
+handling, and state tracking in the same codebase), fan out via the
+**Agent** tool — each subagent gets one path and returns a focused summary.
+Read the conclusion, not the file dumps.
+
+For multi-step research with >3 verifiable phases, track progress with
+**TaskCreate / TaskUpdate / TaskList** so the user can see the work shape
+and resume across interruptions. Mark tasks `in_progress` when starting,
+`completed` when verified.
+
+Use **parallel** Agent calls (multiple in one block) for truly independent
+lookups; use **sequential** Agent calls when one path's result narrows
+what the next should investigate.
 
 ---
 

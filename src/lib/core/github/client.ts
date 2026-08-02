@@ -174,13 +174,16 @@ export class GitHubClient implements TrackerProvider {
     });
   }
 
-  async linkIssues(sourceId: number, targetId: number, type: LinkType): Promise<void> {
-    // GitHub doesn't have native issue links like GitLab
-    // Use comments with issue references as workaround
+  async linkIssues(sourceId: number, targetId: number, type: LinkType, targetProjectId?: string): Promise<void> {
+    // GitHub doesn't have native issue links like GitLab.
+    // Cross-repo references use the full `owner/repo#N` form, which GitHub
+    // renders as a real <a> link even across visibility (private refs show
+    // "Title is private" instead of failing).
+    const targetRef = targetProjectId ? `${targetProjectId}#${targetId}` : `#${targetId}`;
     const linkMessage =
-      type === 'blocks' ? `Blocks #${targetId}` :
-      type === 'is_blocked_by' || type === 'blocked_by' ? `Blocked by #${targetId}` :
-      `Related to #${targetId}`;
+      type === 'blocks' ? `Blocks ${targetRef}` :
+      type === 'is_blocked_by' || type === 'blocked_by' ? `Blocked by ${targetRef}` :
+      `Related to ${targetRef}`;
 
     await this.addComment(sourceId, linkMessage);
   }

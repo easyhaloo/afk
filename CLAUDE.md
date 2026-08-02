@@ -12,10 +12,8 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 
 | Command | Purpose |
 |---------|---------|
-| `afk issue` | Issue operations (auto-detects platform) |
+| `afk issue` | Issue operations (auto-detects platform; `--project <repo>` for cross-project) |
 | `afk mr` | MR/PR operations (auto-detects platform) |
-| `afk gitlab` | GitLab operations (issues, MRs, labels) |
-| `afk github` | GitHub operations (issues, labels) |
 | `afk workflow` | Signal-driven workflow orchestration |
 | `afk loop` | Continuous integration loop |
 | `afk scheduler` | Background task scheduler |

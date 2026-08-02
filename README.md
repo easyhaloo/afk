@@ -93,6 +93,8 @@ afk issue list --label "stage::ready-for-implement"
 afk issue create "Title" --label "feature"
 afk issue edit <id> --label "bug"
 afk issue comment <id> "message"
+afk issue link <src> <project>:<iid>     # 跨项目 link
+afk issue run <iid> --project <repo>      # 跨项目一键工作流
 
 # MR/PR 操作
 afk mr create "feat: add login" --source feat/login --target main

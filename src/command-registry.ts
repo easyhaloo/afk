@@ -20,9 +20,9 @@ export interface CommandEntry {
 export const COMMANDS: CommandEntry[] = [
   { names: ['signal'], loader: () => import('./commands/signal.js').then(m => m.registerSignalCommands) },
   // tracker.ts registers flat `issue` + `mr` commands (no `tracker` parent).
+  // The legacy `github` / `gitlab` command groups are gone: all issue/mr
+  // operations go through `afk issue` / `afk mr`.
   { names: ['issue', 'mr'], loader: () => import('./commands/tracker.js').then(m => m.registerTrackerCommands) },
-  { names: ['gitlab'], loader: () => import('./commands/gitlab.js').then(m => m.registerGitLabCommands) },
-  { names: ['github'], loader: () => import('./commands/github.js').then(m => m.registerGitHubCommands) },
   { names: ['tmux'], loader: () => import('./commands/tmux.js').then(m => m.registerTmuxCommands) },
   { names: ['worktree'], loader: () => import('./commands/worktree.js').then(m => m.registerWorktreeCommands) },
   { names: ['workflow'], loader: () => import('./commands/workflow.js').then(m => m.registerWorkflowCommands) },

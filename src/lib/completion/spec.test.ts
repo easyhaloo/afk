@@ -9,7 +9,7 @@ describe('extractSpec', () => {
     const issue = spec.commands.find(c => c.name === 'issue');
     expect(issue).toBeDefined();
     const subNames = issue!.subcommands.map(c => c.name).sort();
-    expect(subNames).toEqual(['comment', 'create', 'edit', 'get', 'link', 'list', 'update-labels']);
+    expect(subNames).toEqual(['comment', 'create', 'edit', 'get', 'link', 'list', 'open', 'run', 'update-labels']);
   });
 
   it('captures positional arguments and option flags on issue get', () => {

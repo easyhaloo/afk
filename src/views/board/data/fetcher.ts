@@ -44,8 +44,8 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
   try {
     projectId = await detectGitLabProject();
   } catch {
-    // No git remote, try env var
-    projectId = process.env.GITLAB_PROJECT_ID || null;
+    // No git remote — caller can pass --project or pick from the projects list
+    projectId = null;
   }
 
   // Try env token first, then glab CLI config
@@ -131,7 +131,7 @@ export async function fetchIssues(options: {
       try {
         projectId = await detectGitLabProject();
       } catch {
-        projectId = process.env.GITLAB_PROJECT_ID || null;
+        projectId = null;
       }
     }
 

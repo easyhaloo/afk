@@ -33,6 +33,7 @@ import {
   type ResumeOptions,
   type SandboxProviderName,
   type IsolationLevel,
+  type WorktreeInfo,
 } from './types';
 import type { SessionSnapshot } from '../agents/types';
 import { readSignal } from '../io';
@@ -251,14 +252,22 @@ export class LocalAgentExecution implements AgentExecution {
 }
 
 /**
+ * Options for LocalSandboxProvider.createWorktree()
+ */
+export interface LocalWorktreeOptions {
+  iid: number;
+  baseBranch: string;
+  baseDir?: string;
+}
+
+/**
  * Local sandbox provider — creates LocalSandbox instances backed by
  * WorktreeManager + TmuxClient.
  *
- * The worktree is NOT created by this provider — create() assumes the
- * worktree already exists (created by the runner's lifecycle hooks or
- * prior LocalSandboxProvider.create() call). This allows the runner to
- * interleave lifecycle modules (e.g., isolate) between worktree creation
- * and agent start.
+ * Worktree lifecycle: runner calls createWorktree() before lifecycle hooks,
+ * then create() to set up tmux after lifecycle hooks run.
+ * This ordering allows modules (e.g., isolate) to run between worktree
+ * creation and tmux session creation.
  */
 export class LocalSandboxProvider implements SandboxProvider {
   readonly name: SandboxProviderName = 'local';
@@ -280,10 +289,23 @@ export class LocalSandboxProvider implements SandboxProvider {
     this.tmuxFactory = tmuxFactory;
   }
 
+  /**
+   * Create a git worktree for the given issue.
+   * Call this BEFORE lifecycle modules run; call create() AFTER.
+   */
+  async createWorktree(options: LocalWorktreeOptions): Promise<WorktreeInfo> {
+    const wt = await this.worktreeManager.create(options.iid, options.baseBranch, options.baseDir);
+    return { iid: wt.iid, path: wt.path, branch: wt.branch };
+  }
+
+  /**
+   * Create a tmux session in an existing worktree.
+   * The worktree must already exist (created by createWorktree() or runner).
+   */
   async create(options: SandboxOptions): Promise<Sandbox> {
     const { worktreePath, session, branch } = options;
 
-    // Verify worktree exists (created by runner's lifecycle or prior create)
+    // Verify worktree exists
     try {
       await fs.access(worktreePath);
     } catch {
@@ -293,8 +315,6 @@ export class LocalSandboxProvider implements SandboxProvider {
     const tmux = this.tmuxFactory();
     const sandboxId = randomUUID();
 
-    // Create tmux session in the existing worktree
-    // The worktree itself is NOT created here — runner owns worktree lifecycle
     await tmux.createSession(session, worktreePath);
     await tmux.waitForPrompt(worktreePath, 30000);
 

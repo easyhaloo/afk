@@ -23,6 +23,7 @@ import { promises as fs, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { WorkflowRunner } from '../src/lib/workflows';
+import { SessionStoreChain, SessionNotFoundError } from '../src/lib/sessions/chain';
 
 const tmpDirs: string[] = [];
 
@@ -81,6 +82,21 @@ const handoffReady = (summary: string) => ({
   summary,
 });
 
+/**
+ * Always-throws session store chain — used to disable the Phase 4
+ * native-resume path and exercise the HandoffCoordinator flow in tests
+ * that verify coordinator-level behavior (handoff doc, labels, etc.).
+ */
+class NoopSessionStoreChain extends SessionStoreChain {
+  constructor() {
+    super([]);
+  }
+
+  override async loadFirst(options: { runId: string }) {
+    throw new SessionNotFoundError(options.runId);
+  }
+}
+
 function makeRunner(wtPath: string) {
   const tracker = {
     addComment: vi.fn().mockResolvedValue(undefined),
@@ -102,7 +118,13 @@ function makeRunner(wtPath: string) {
   };
   const watchdog = { arm: vi.fn(), disarm: vi.fn() };
 
-  const runner = new WorkflowRunner(tracker, { tmux: tmux as any, watchdog: watchdog as any }) as any;
+  // sessionStoreChain override: NoopSessionStoreChain disables Phase 4
+  // native-resume so these tests exercise the coordinator path.
+  const runner = new WorkflowRunner(tracker, {
+    tmux: tmux as any,
+    watchdog: watchdog as any,
+    sessionStoreChain: () => new NoopSessionStoreChain(),
+  }) as any;
   runner.pollIntervalMs = 10;
   runner.worktree = {
     create: vi.fn().mockResolvedValue({ path: wtPath, branch: 'afk-issue-42', status: 'active' }),

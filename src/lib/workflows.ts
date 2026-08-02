@@ -679,6 +679,54 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
             }
           }
 
+          // Phase 4 native resume: try to restore the session from the snapshot
+          // and run the continued goal inside the same (resumed) execution.
+          // This avoids a full tmux restart — the agent picks up where it left off.
+          // If restoreSession() or the resumed execution fails/returns an
+          // unexpected status, fall through to the coordinator path (which does a
+          // clean tmux restart with the handoff doc providing context).
+          if (this.agentProvider.capabilities.has('resume') && this.sandbox) {
+            try {
+              const snapshot = await chain.loadFirst({ runId });
+              if (snapshot) {
+                logger.info({ iid: p.iid, runId, storeName: snapshot.storeName }, 'native resume: snapshot found in store chain');
+                await this.agentProvider.restoreSession!({
+                  snapshot: snapshot.snapshot,
+                  worktreePath: p.wtPath,
+                });
+                const resumed = await this.sandbox.startAgent({
+                  command: this.agentProvider.buildCommand({
+                    worktreePath: p.wtPath,
+                    sessionId: p.session,
+                  }),
+                  generation: p.budget.used + 2,
+                  goalText,
+                  signalType: p.signalType,
+                });
+                p.budget.used++;
+                p.budget.tokens += hctx.tokens;
+                const resumeResult = await resumed.waitForResult({
+                  completionTimeoutMs: p.completionTimeoutMs,
+                  contextHighTokens: p.contextHighTokens,
+                });
+                if (resumeResult.status === 'completed') return true;
+                if (resumeResult.status === 'context_high') {
+                  // Token accounting already done; loop back to re-check budget
+                  // and attempt another native resume with the new snapshot.
+                  execution = resumed;
+                  result = resumeResult;
+                  logger.info({ iid: p.iid, runId }, 'native resume: agent hit context_high again; looping');
+                  continue;
+                }
+                // 'timed_out', 'failed', etc. — fall through to coordinator
+                logger.info({ iid: p.iid, runId, status: resumeResult.status }, 'native resume returned non-continue status; falling through to coordinator');
+                execution = resumed;
+              }
+            } catch (err) {
+              logger.info({ iid: p.iid, runId, err: err instanceof Error ? err.message : err }, 'native resume failed; falling through to coordinator');
+            }
+          }
+
           // Coordinator.restartSession() creates a new tmux session.
           // After it returns, the loop continues and sends the continued goal in the next iteration.
           // This mirrors the original behavior exactly.

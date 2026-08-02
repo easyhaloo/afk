@@ -296,11 +296,13 @@ export class LoopRunner {
     // see inFlight miss the same id and double-start the issue.
     if (this.polling) return;
     this.polling = true;
+    logger.info({ tickIntervalMs: this.opts.pollIntervalMs }, 'poll tick begin');
     try {
       const issues = await this.tracker.listIssues({
         labels: this.opts.requiredLabels,
         state: 'opened',
       });
+      logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;
       let skipped = 0;
@@ -326,6 +328,7 @@ export class LoopRunner {
         this.inImplement.set(issue.id, { iid: issue.id, session: '', startedAt: 0 });
         this.started++;
         enqueued++;
+        logger.info({ iid: issue.id, projectId: issue.projectId, inImplement: this.inImplement.size }, 'issue enqueued for implement');
         // Fire-and-forget — chain manages its own inImplement membership
         void this.runChain(issue.id, issue.projectId);
       }
@@ -350,16 +353,19 @@ export class LoopRunner {
     const ctx: ChainContext = { iid, session, startedAt: Date.now() };
     this.inImplement.set(iid, ctx);
     this.emitEvent(`#${iid} implement started (session=${session})`);
+    logger.info({ iid, session, projectName }, 'implement chain starting');
 
     let baseBranch = 'main';
     try {
       baseBranch = await this.tracker.detectTargetBranch(iid);
+      logger.info({ iid, baseBranch }, 'target branch detected');
     } catch (err) {
       logger.warn({ iid, err }, 'detectTargetBranch failed, defaulting to main');
     }
 
     try {
       const resolvedExt = await this.resolveModules(iid);
+      logger.info({ iid, resolvedExt }, 'modules resolved');
       const runner = this.opts.workflowRunnerFactory(this.tracker);
       const result = await runner.run({
         iid,
@@ -370,11 +376,13 @@ export class LoopRunner {
         ext: resolvedExt,
         extParams: this.opts.extParams,
       });
+      logger.info({ iid, success: result.success, url: result.url }, 'WorkflowRunner.run returned');
 
       if (result.success) {
         const elapsed = formatDuration(Date.now() - ctx.startedAt);
         this.emitEvent(`#${iid} implement → stage::qa (${elapsed})`);
         this.enqueueQA(iid);
+        logger.info({ iid, elapsed, url: result.url }, 'implement succeeded; queued for QA');
       } else {
         // WorkflowRunner's own cleanupOnFailure already added mode::hitl
         this.failed++;
@@ -383,6 +391,7 @@ export class LoopRunner {
         this.inFlight.delete(iid);
         this.lastError.set(iid, 'implement-failed');
         this.emitEvent(`#${iid} implement failed → mode::hitl`);
+        logger.warn({ iid }, 'implement returned unsuccessful');
       }
     } catch (error) {
       // Should be rare: WorkflowRunner catches its own errors, but if it
@@ -400,6 +409,7 @@ export class LoopRunner {
       } catch { /* best-effort */ }
     } finally {
       this.inImplement.delete(iid);
+      logger.info({ iid, remainingInImplement: this.inImplement.size }, 'implement chain finished');
     }
   }
 
@@ -463,6 +473,7 @@ export class LoopRunner {
     const iid = this.qaQueue.shift();
     if (iid === undefined) return;
     if (!this.running) return; // stop() in progress: drop queued QA, exit soon
+    logger.info({ iid, qaQueueRemaining: this.qaQueue.length }, 'qa dequeued');
 
     const ctx: ChainContext = {
       iid,
@@ -490,6 +501,7 @@ export class LoopRunner {
 
     this.inQA = ctx;
     this.emitEvent(`#${iid} qa started`);
+    logger.info({ iid, session: ctx.session }, 'qa chain starting');
 
     try {
       const qa = this.opts.qaRunnerFactory(this.tracker);
@@ -520,10 +532,12 @@ export class LoopRunner {
     } finally {
       this.inQA = null;
       this.inFlight.delete(iid);
+      logger.info({ iid, completed: this.completed, failed: this.failed }, 'qa chain finished');
 
       // Optional self-stop after N successful completions (testing)
       if (this.opts.maxIterations !== undefined && this.completed >= this.opts.maxIterations) {
         this.emitEvent(`max-iterations reached (${this.completed}/${this.opts.maxIterations}), stopping`);
+        logger.info({ iid, completed: this.completed, maxIterations: this.opts.maxIterations }, 'max-iterations reached; stopping');
         // Don't await — let stop() handle drain in its own time
         void this.stop();
       }

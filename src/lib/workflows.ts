@@ -94,7 +94,7 @@ export class WorkflowRunner {
   private logDir: string;
   private modules: LifecycleModule[] = [];
   private extParams: Record<string, unknown> = {};
-  private originalCwd: string = process.cwd();
+  private originalCwd: string = '';
   private lifecycleCtx: LifecycleContext = { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: {} };
 
   /** Poll interval for waitForPhaseSignal (overridden by tests). */

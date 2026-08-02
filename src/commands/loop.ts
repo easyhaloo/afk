@@ -6,7 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { createTrackerClient } from '../lib/client-factory';
 import { LoopRunner } from '../lib/loop-runner';
-import { getSchedulerConfig } from '../lib/config-manager';
+import { getSchedulerConfig } from '../lib/core/config/manager';
 import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
 import { logger, redirectStdioToLog, resolveLogPath } from '../lib/io';
 

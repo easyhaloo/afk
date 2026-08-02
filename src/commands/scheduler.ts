@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { cpus } from 'os';
 import { createTrackerClient } from '../lib/client-factory';
 import { Scheduler } from '../lib/scheduler';
-import { getSchedulerConfig } from '../lib/config-manager';
+import { getSchedulerConfig } from '../lib/core/config/manager';
 import { handleCommandError, success, info, warning, fail } from '../lib/cli-utils';
 import { logger } from '../lib/io';
 

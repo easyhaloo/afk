@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { createTrackerClient } from '../lib/client-factory';
 import { WorkflowRunner } from '../lib/workflows';
-import { getWorkflowConfig } from '../lib/config-manager';
+import { getWorkflowConfig } from '../lib/core/config/manager';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from '../lib/constants';
 import { handleCommandError, success, warning, detail } from '../lib/cli-utils';
 

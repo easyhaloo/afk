@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { WorkflowRunner } from './workflows';
-import { writeSignal } from './core/io/signal';
+import { writeSignal } from './io';
 import type { TrackerProvider } from './core/tracker/types';
 import type { TmuxClient } from './core/tmux/tmux';
 import type { HandoffCoordinator } from './workflows/handoff';

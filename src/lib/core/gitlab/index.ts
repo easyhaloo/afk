@@ -132,11 +132,11 @@ export class GitLabClient implements TrackerProvider {
     await this.client.IssueNotes.create(this.projectId, id, body);
   }
 
-  async linkIssues(sourceId: number, targetId: number, type: LinkType): Promise<void> {
+  async linkIssues(sourceId: number, targetId: number, type: LinkType, targetProjectId?: string): Promise<void> {
     await this.client.Issues.link(
       this.projectId,
       sourceId,
-      this.projectId,
+      targetProjectId ?? this.projectId,
       targetId,
       { link_type: type }
     );

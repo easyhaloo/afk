@@ -41,7 +41,7 @@ export async function createTracker(config?: TrackerConfig): Promise<TrackerProv
     return new GitHubClient({ repo });
   } else {
     const projectId = config?.projectId ?? await detectGitLabProject(config?.cwd);
-    if (!projectId) throw new Error('Could not detect GitLab project. Set GITLAB_PROJECT_ID or run in a git repo with GitLab remote.');
+    if (!projectId) throw new Error('Could not detect GitLab project. Pass --project or run in a git repo with GitLab remote.');
     // Use existing GitLab client with default config
     const url = process.env.GITLAB_URL || 'https://gitlab.com';
     const token = process.env.GITLAB_TOKEN;

@@ -10,6 +10,7 @@ import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
 import { Watchdog } from './workflows/watchdog';
 import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
+import type { InitContext } from './workflows/lifecycle';
 
 /** One phase wait: done / timeout / verified context overflow. */
 type PhaseOutcome =
@@ -32,6 +33,8 @@ export interface RunnerOptions {
   /** Max total tokens across all handoff generations before a terminal handoff. */
   maxTotalTokens?: number;
   platform?: Platform;
+  /** Target project (cross-project dispatch). Drives ProjectResolverModule. */
+  projectName?: string;
   /** Module names to activate (e.g., ['isolate', 'mock-server']) */
   ext?: string[];
   /** Module parameters (e.g., ['isolate.auto=true']) */
@@ -91,6 +94,7 @@ export class WorkflowRunner {
   private logDir: string;
   private modules: LifecycleModule[] = [];
   private extParams: Record<string, unknown> = {};
+  private originalCwd: string = process.cwd();
   private lifecycleCtx: LifecycleContext = { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: {} };
 
   /** Poll interval for waitForPhaseSignal (overridden by tests). */
@@ -129,9 +133,10 @@ export class WorkflowRunner {
     // Load lifecycle modules
     this.modules = await loadModules(options.ext);
     this.extParams = parseModuleParams(options.extParams);
+    this.originalCwd = process.cwd();
 
     try {
-      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens });
+      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName });
     } catch (error) {
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
       await this.cleanupOnFailure(iid, session);
@@ -218,12 +223,33 @@ Session was interrupted before completion.
     }
   }
 
+  /**
+   * Run the onInit hook on every module. Distinct from runLifecycleHooks
+   * because onInit failures throw — init is infrastructure (e.g., chdir to
+   * the target repo), and silently swallowing it would leave every
+   * downstream operation pointed at the wrong directory.
+   */
+  private async runInitHooks(ctx: InitContext): Promise<void> {
+    for (const mod of this.modules) {
+      if (mod.onInit) {
+        logger.info({ iid: ctx.iid, module: mod.name, projectName: ctx.projectName }, 'lifecycle onInit');
+        await mod.onInit(ctx);
+      }
+    }
+  }
+
   private async runBody(ctx: {
     iid: number; session: string; targetBranch: string;
     baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number;
     maxHandoffs: number; contextHighTokens: number; maxTotalTokens: number;
+    projectName?: string;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName } = ctx;
+
+    // ── Step 0: Init hooks (pre-worktree) ─────────────────────────────────
+    // ProjectResolverModule runs here and may chdir to the target repo.
+    // Init failures throw — init is infrastructure, not opt-in.
+    await this.runInitHooks({ iid, projectName, baseBranch, params: this.extParams, originalCwd: this.originalCwd });
 
     // ── Step 1: Create worktree ─────────────────────────────────────────────
     const wt = await this.worktree.create(iid, baseBranch);

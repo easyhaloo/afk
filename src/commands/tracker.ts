@@ -1,7 +1,23 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createTrackerClient } from '../lib/client-factory';
-import { handleCommandError, parseCommaSeparated, success, detail, formatJson } from '../lib/cli-utils';
+import { WorkflowRunner } from '../lib/workflows';
+import { getWorkflowConfig } from '../lib/core/config/manager';
+import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from '../lib/constants';
+import { handleCommandError, parseCommaSeparated, success, warning, detail, formatJson } from '../lib/cli-utils';
+
+/**
+ * Parse `<project>:<iid>` or `<iid>` into { iid, projectId? }.
+ * Same-repo (just `<iid>`) returns undefined projectId; the client uses
+ * its bound this.projectId in that case.
+ */
+function parseIssueRef(ref: string): { iid: number; projectId?: string } {
+  const colon = ref.lastIndexOf(':');
+  if (colon > 0) {
+    return { iid: parseInt(ref.slice(colon + 1), 10), projectId: ref.slice(0, colon) };
+  }
+  return { iid: parseInt(ref, 10) };
+}
 
 /**
  * Register unified tracker commands (platform-agnostic)
@@ -22,10 +38,11 @@ export function registerTrackerCommands(program: Command): void {
     .command('get')
     .description('Get issue by ID')
     .argument('<id>', 'Issue ID')
+    .option('--project <repo>', 'Target repo (cross-project)')
     .option('--json', 'Output as JSON')
     .action(async (id: string, options) => {
       try {
-        const client = await createTrackerClient();
+        const client = await createTrackerClient(options.project);
         const issue = await client.getIssue(parseInt(id));
 
         if (options.json) {
@@ -50,12 +67,13 @@ export function registerTrackerCommands(program: Command): void {
   issue
     .command('list')
     .description('List issues with filters')
+    .option('--project <repo>', 'Target repo (cross-project)')
     .option('-l, --label <labels...>', 'Filter by labels')
     .option('-s, --state <state>', 'Filter by state (opened, closed, all)', 'opened')
     .option('--json', 'Output as JSON')
     .action(async (options) => {
       try {
-        const client = await createTrackerClient();
+        const client = await createTrackerClient(options.project);
         const issues = await client.listIssues({
           labels: options.label,
           state: options.state,
@@ -85,12 +103,13 @@ export function registerTrackerCommands(program: Command): void {
     .command('create')
     .description('Create a new issue')
     .argument('<title>', 'Issue title')
+    .option('--project <repo>', 'Target repo (cross-project)')
     .option('--description <text>', 'Issue description')
     .option('--label <labels...>', 'Labels (can be specified multiple times)')
     .option('--json', 'Output as JSON')
     .action(async (title: string, options) => {
       try {
-        const client = await createTrackerClient();
+        const client = await createTrackerClient(options.project);
         const issueId = await client.createIssue({
           title,
           description: options.description,
@@ -114,12 +133,13 @@ export function registerTrackerCommands(program: Command): void {
     .command('edit')
     .description('Edit an existing issue')
     .argument('<id>', 'Issue ID')
+    .option('--project <repo>', 'Target repo (cross-project)')
     .option('--title <text>', 'New issue title')
     .option('--description <text>', 'New issue description')
     .option('--state <state>', 'New state (open or closed)')
     .action(async (id: string, options) => {
       try {
-        const client = await createTrackerClient();
+        const client = await createTrackerClient(options.project);
         const issueId = parseInt(id);
 
         await client.updateIssue(issueId, {
@@ -144,11 +164,12 @@ export function registerTrackerCommands(program: Command): void {
     .command('update-labels')
     .description('Add and/or remove labels from an issue')
     .argument('<id>', 'Issue ID')
+    .option('--project <repo>', 'Target repo (cross-project)')
     .option('--add <labels>', 'Comma-separated labels to add')
     .option('--remove <labels>', 'Comma-separated labels to remove')
     .action(async (id: string, options) => {
       try {
-        const client = await createTrackerClient();
+        const client = await createTrackerClient(options.project);
         const issueId = parseInt(id);
 
         const labelsToAdd = options.add ? parseCommaSeparated(options.add) : [];
@@ -180,9 +201,10 @@ export function registerTrackerCommands(program: Command): void {
     .description('Add comment to issue')
     .argument('<id>', 'Issue ID')
     .argument('<message>', 'Comment message')
-    .action(async (id: string, message: string) => {
+    .option('--project <repo>', 'Target repo (cross-project)')
+    .action(async (id: string, message: string, options) => {
       try {
-        const client = await createTrackerClient();
+        const client = await createTrackerClient(options.project);
         await client.addComment(parseInt(id), message);
         success(`Added comment to issue #${id}`);
       } catch (error) {
@@ -197,20 +219,99 @@ export function registerTrackerCommands(program: Command): void {
     .command('link')
     .description('Link two issues')
     .argument('<source>', 'Source issue ID')
-    .argument('<target>', 'Target issue ID')
+    .argument('<target>', 'Target issue ID (use <project>:<iid> for cross-project)')
+    .option('--project <repo>', 'Source project (cross-project)')
     .option('--type <type>', 'Link type (blocks, blocked_by, related_to)', 'related_to')
     .action(async (source: string, target: string, options) => {
       try {
-        const client = await createTrackerClient();
+        const client = await createTrackerClient(options.project);
         const sourceId = parseInt(source);
-        const targetId = parseInt(target);
+        const targetRef = parseIssueRef(target);
         const linkType = options.type === 'blocks' ? 'blocks' :
                         options.type === 'blocked_by' ? 'blocked_by' :
                         options.type === 'is_blocked_by' ? 'is_blocked_by' :
                         'related_to';
 
-        await client.linkIssues(sourceId, targetId, linkType);
-        success(`Linked issue #${source} to #${target} (${linkType})`);
+        await client.linkIssues(sourceId, targetRef.iid, linkType, targetRef.projectId);
+        const label = targetRef.projectId ? `${targetRef.projectId}#${targetRef.iid}` : `#${targetRef.iid}`;
+        success(`Linked issue #${source} to ${label} (${linkType})`);
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * open command — open issue in browser
+   */
+  issue
+    .command('open')
+    .description('Open issue in browser')
+    .argument('<id>', 'Issue ID')
+    .option('--project <repo>', 'Target repo (cross-project)')
+    .action(async (id: string, options) => {
+      try {
+        const client = await createTrackerClient(options.project);
+        const issue = await client.getIssue(parseInt(id));
+        const { default: open } = await import('open');
+        await open(issue.url);
+        success(`Opened issue #${id} → ${issue.url}`);
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * run — one-shot workflow on a single issue. Cross-project: pass
+   * --project <repo> to dispatch into another repo (cwd stays as-is
+   * unless --project is given; the runner's ProjectResolverModule will
+   * chdir before worktree creation).
+   */
+  issue
+    .command('run')
+    .description('Run workflow on a single issue (one-shot)')
+    .argument('<iid>', 'Issue IID')
+    .option('--project <repo>', 'Target repo (cross-project dispatch)')
+    .option('--session <name>', 'Session name (default: afk-<iid>)')
+    .option('--target-branch <branch>', 'Target branch for MR', 'main')
+    .option('--base-branch <branch>', 'Base branch for worktree', 'main')
+    .option('--max-retries <n>', 'Max retry attempts', parseInt, 3)
+    .option('--hard-timeout <ms>', 'Hard timeout in ms', parseInt, TIMEOUTS.WORKFLOW_HARD_TIMEOUT)
+    .option('--max-handoffs <n>', 'Max automatic context-handoff rounds', parseInt, MAX_HANDOFFS)
+    .option('--context-high <tokens>', 'Token threshold that triggers context handoff', parseInt, CONTEXT.HIGH_THRESHOLD)
+    .option('--max-total-tokens <tokens>', 'Max total tokens across handoff generations', parseInt, MAX_TOTAL_TOKENS)
+    .option('--ext <modules...>', 'Lifecycle modules to activate (e.g., isolate)')
+    .option('--ext-param <params...>', 'Module parameters (e.g., isolate.auto=true)')
+    .action(async (iid: string, options) => {
+      try {
+        const iidNum = parseInt(iid, 10);
+        const tracker = await createTrackerClient(options.project);
+        const runner = new WorkflowRunner(tracker);
+
+        const cfg = getWorkflowConfig();
+        const session = options.session || `afk-${iidNum}`;
+        const result = await runner.run({
+          iid: iidNum,
+          session,
+          projectName: options.project,
+          targetBranch: options.targetBranch ?? cfg.targetBranch,
+          baseBranch: options.baseBranch,
+          maxRetries: options.maxRetries ?? cfg.maxRetries,
+          hardTimeoutMs: options.hardTimeout ?? cfg.completionTimeout,
+          maxHandoffs: options.maxHandoffs,
+          contextHighTokens: options.contextHigh,
+          maxTotalTokens: options.maxTotalTokens,
+          ext: options.ext,
+          extParams: options.extParam,
+        });
+
+        if (result.success) {
+          success('Workflow completed!');
+          if (result.url) detail(`MR: ${result.url}`);
+          process.exit(0);
+        } else {
+          warning('Workflow did not complete successfully');
+          process.exit(1);
+        }
       } catch (error) {
         handleCommandError(error);
       }
@@ -420,6 +521,25 @@ export function registerTrackerCommands(program: Command): void {
         await client.reopenMR(mrId);
 
         success(`Reopened MR/PR #${id}`);
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
+  /**
+   * open command — open MR/PR in browser
+   */
+  mr
+    .command('open')
+    .description('Open MR/PR in browser')
+    .argument('<id>', 'MR/PR ID')
+    .action(async (id: string) => {
+      try {
+        const client = await createTrackerClient();
+        const mr = await client.getMR(parseInt(id));
+        const { default: open } = await import('open');
+        await open(mr.url);
+        success(`Opened MR/PR #${id} → ${mr.url}`);
       } catch (error) {
         handleCommandError(error);
       }

@@ -34,7 +34,6 @@ afk --help
 ```bash
 # GitLab 配置
 GITLAB_TOKEN=glpat-xxxxxxxxxxxxx
-GITLAB_PROJECT_ID=12345
 GITLAB_BASE_URL=https://gitlab.company.com/api/v4  # 可选，默认 gitlab.com
 
 # 或使用 git config（推荐）
@@ -82,6 +81,23 @@ afk issue create "Add user login" --label "feature"
 # 添加评论
 afk issue comment 123 "Working on this"
 ```
+
+### 跨项目操作
+
+`--project <repo>` flag 让 `afk issue` 命令指向 cwd 以外的项目。同 repo 可省略前缀，跨 repo 时用 `<project>:<iid>` 语法链接：
+
+```bash
+# 在 repo B 目录里操作 repo A 的 issue
+afk issue get 42 --project group/repo-a
+
+# 跨项目 link（从 B 链接到 A 的 #42）
+afk issue link 100 group/repo-a:42 --project group/repo-b
+
+# 一键启动跨项目工作流（ProjectResolverModule 会先 chdir 到目标 repo）
+afk issue run 42 --project group/repo-a
+```
+
+无需配置 `GITLAB_PROJECT_ID` 等环境变量；项目解析走 `git remote > --project > 自动检测` 优先级。
 
 ### MR/PR 操作
 

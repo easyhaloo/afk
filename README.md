@@ -164,7 +164,7 @@ interface TrackerProvider {
 }
 ```
 
-平台自动检测，无需切换命令。详见 [架构设计](docs/ARCHITECTURE.md)
+平台自动检测，无需切换命令。详见 [架构设计](docs/ARCHITECTURE.md) 和 [执行环境设计](docs/EXECUTION-DESIGN.md)
 
 ## 工作流
 

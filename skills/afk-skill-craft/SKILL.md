@@ -53,7 +53,7 @@ Create directories as needed.
 
 ### Step 4 — Draft body
 
-Per body structure in checklist.
+Per body structure in checklist (Goal, Steps, Caveats — no When to use).
 
 **Precondition:** directories identified.
 **Output:** SKILL.md body draft.

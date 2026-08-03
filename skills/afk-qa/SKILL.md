@@ -96,7 +96,7 @@ When all MRs in a PRD are `stage::done`, human reviews `prd/<N>` and
 decides whether to merge to `main`. Always HITL — no automation touches
 `main`.
 
-## Anti-patterns
+## Caveats
 
 - MUST NOT approve on "looks reasonable" — every AC line needs evidence.
 - MUST NOT merge an MR targeting `main` directly.

@@ -61,7 +61,7 @@ High/Critical: manual resolution with guidance.
 ### 7. Rollback
 List available checkpoints, allow restore to any point.
 
-## Anti-patterns
+## Caveats
 - High/Critical conflicts MUST be manually resolved (no auto-merge)
 - No external API calls — local Git only
 - Always create rollback checkpoint before applying

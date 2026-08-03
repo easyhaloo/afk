@@ -56,7 +56,7 @@ Ask: "Is the `Next action` still valid? Has the context changed?"
 Run the `Verify:` command if present. Then continue from where the
 HANDOFF left off.
 
-## Anti-patterns
+## Caveats
 
 - MUST NOT write to the repo working tree — only to `/tmp/`.
 - MUST NOT omit the `Next action` — a hand-off without a concrete next

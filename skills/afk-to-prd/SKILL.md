@@ -107,7 +107,7 @@ Use `AskQuestion` with single-select to collect the caller's decision:
 
 Do NOT proceed to any action until one option is selected.
 
-## Anti-patterns
+## Caveats
 
 - MUST NOT invent user stories absent from the alignment record — flag
   gaps as Open Risks.

@@ -159,7 +159,7 @@ graph TD
 | **AgentProvider** | AI agent abstraction | claude-code, cursor, copilot, codex, opencode, pi |
 | **HandoffCoordinator** | Context overflow management | Negotiate summary → persist doc → post comment → relaunch |
 | **BudgetManager** | Token and handoff budget tracking | Tracks total tokens across handoff generations |
-| **Watchdog** | Hard timeout protection | `setsid`独立进程，即使父进程崩溃也能触发 |
+| **Watchdog** | Hard timeout protection | `setsid` independent process, triggers even if parent crashes |
 | **AC Extraction** | Extract AC from issue labels / legacy markdown | Label-driven first, markdown as fallback |
 | **WorktreeManager** | Independent workspace per Issue | Physical isolation, no branch conflicts |
 | **TmuxClient** | Agent runtime environment | Independent sessions, crashes don't affect each other |
@@ -461,9 +461,9 @@ graph TD
 
 ### Two-Phase Design
 
-**Phase 1 (Implement):** Send `/goal "实现 issue #N"` → wait for `goal_complete` signal or context threshold
+**Phase 1 (Implement):** Send `/goal "Implement issue #N"` → wait for `goal_complete` signal or context threshold
 
-**Phase 2 (Verify):** Send `/goal "验证 issue #N 的 AC"` → wait for `ac_result` signal
+**Phase 2 (Verify):** Send `/goal "Verify issue #N AC"` → wait for `ac_result` signal
 
 **autoWrapup:** Push branch → create MR → add `stage::qa` label
 
@@ -932,13 +932,13 @@ Two scenarios:
 1. **AC parsing fails**: Check if issue has `ac::1::...` label or `## AC` markdown section
 2. **verifyAC fails**: Branch must have commits relative to baseBranch; empty repos are blocked
 
-### Q: Worktree占用空间
+### Q: Worktree disk usage
 
-`afk worktree clean --stale` 清理 7 天未活动的 worktree。
+`afk worktree clean --stale` cleans worktrees inactive for 7+ days.
 
-### Q: 如何调试单个 Issue？
+### Q: How to debug a single Issue?
 
-`afk implement <iid> --dry-run` 跳过实际执行，只打印计划。
+`afk implement <iid> --dry-run` skips execution, only prints the plan.
 
 ---
 

@@ -17,11 +17,44 @@ To achieve this, the system must address four challenges:
 
 ## Core Architecture
 
+### Directory Structure
+
+```
+src/
+├── index.ts              # Thin CLI dispatcher (lazy-loads commands)
+├── command-registry.ts   # Single source of truth for all commands
+├── lazy-loader.ts        # Per-command dynamic import
+├── full-cli.ts           # Fallback: loads all commands for unknown commands
+├── commands/             # Individual command implementations
+│   ├── signal.ts, tracker.ts, tmux.ts, worktree.ts, workflow.ts
+│   ├── scheduler.ts, board.ts, kanban.ts, debug.ts, escalate.ts
+│   ├── isolate.ts, qa.ts, loop.ts, completion.ts
+│   └── board-entry.ts    # TUI entry point (Ink + React)
+├── lib/
+│   ├── core/             # Platform clients, IO, git, config, tmux
+│   │   ├── config/, git/, github/, gitlab/, io/, tmux/, tracker/
+│   ├── agents/           # Agent providers (claude-code, cursor, etc.)
+│   ├── branches/         # Branch strategies
+│   ├── modules/          # Runner workers (loop-runner, qa-runner)
+│   ├── sandbox/          # Docker/Podman sandbox
+│   ├── scheduler.ts      # Scheduler logic (in-memory, no Redis)
+│   ├── sessions/         # Session store
+│   ├── templates/        # Workflow templates
+│   └── workflows/        # Workflow execution
+├── views/                # TUI views (Ink + React)
+│   ├── app/
+│   └── board/            # Dashboard, kanban, navigation, registry
+└── types/
+```
+
 ### Module Dependency Graph
 
 ```mermaid
 graph TD
-    CLI["CLI Entry (commander)"]
+    CLI["CLI Entry (index.ts)"]
+    REG["command-registry.ts"]
+    LZ["lazy-loader.ts"]
+    FULL["full-cli.ts (fallback)"]
     Factory["createTrackerClient Factory"]
     Detect["detectProject Platform Detection"]
     GL["GitLabClient"]
@@ -33,10 +66,13 @@ graph TD
     SIG["Signal I/O (.afk-signal.json)"]
     STATUS["Status I/O (.afk/claude-status.json)"]
     SCONF["Statusline Config Auto-injected into worktree settings"]
-    Sched["Scheduler (BullMQ)"]
-    Queue[("Redis Queue")]
+    Sched["Scheduler (in-memory)"]
+    Queue[("In-Memory Queue")]
     Agent["AI Agent (claude)"]
 
+    CLI --> REG
+    CLI --> LZ
+    LZ -->|unknown cmd| FULL
     CLI --> Factory
     Factory --> Detect
     Factory --> GL
@@ -63,11 +99,11 @@ graph TD
     SIG -. polling .-> Runner
     STATUS -. on demand .-> Runner
 
-    classDef ext fill:#e1f5ff,stroke:#0066cc
+    classDef cli fill:#e1f5ff,stroke:#0066cc
     classDef core fill:#fff4e1,stroke:#cc6600
     classDef io fill:#f0e1ff,stroke:#6600cc
 
-    class CLI,Agent ext
+    class CLI,REG,LZ,FULL,Agent cli
     class Runner,Factory,GL,GH,Sched core
     class WT,TMUX,SIG,STATUS,SCONF,Queue,AC io
 ```
@@ -76,7 +112,10 @@ graph TD
 
 | Module | Responsibility | Key Design Decision |
 |--------|---------------|---------------------|
-| **TrackerProvider** | Platform-agnostic Issue/MR operations | Interface contract, multi-platform implementations |
+| **command-registry.ts** | Single source of truth for all CLI commands | One array feeds both lazy-loader and full-cli |
+| **lazy-loader.ts** | Per-command dynamic import | Fast path: ~50ms cold start |
+| **full-cli.ts** | Load-all fallback for unknown commands | Parallel `Promise.all` load |
+| **index.ts** | Thin CLI dispatcher | No shared logging at import time |
 | **WorkflowRunner** | Orchestrates complete lifecycle | Signal-driven + statusline objective validation + AC objective verification |
 | **AC Extraction** | Extract AC from issue labels / legacy markdown | Label-driven first, markdown as fallback |
 | **WorktreeManager** | Independent workspace per Issue | Physical isolation, no branch conflicts |
@@ -84,7 +123,7 @@ graph TD
 | **Signal I/O** | Agent-Runner control communication | Atomic file writes, Zod validation |
 | **Status I/O** | Read Claude statusline JSON | Token objective data source |
 | **Statusline Config** | Auto-inject worktree settings.json | tee stdin JSON to file + placeholder for startup detection |
-| **Scheduler** | Multi-Issue concurrent scheduling | BullMQ + priority queue |
+| **Scheduler** | Multi-Issue concurrent scheduling | In-memory queue + priority, no Redis dependency |
 
 ---
 
@@ -505,7 +544,7 @@ flowchart TD
 - **Auto-discovery**: Poll GitLab for Issues with `stage::ready-for-implement`
 - **Concurrency control**: Prevent one machine running 10 Agents and blowing up CPU/memory
 - **Priority scheduling**: `priority::high` takes precedence over `priority::low`
-- **Failure retry**: BullMQ built-in exponential backoff
+- **Failure retry**: In-memory queue with exponential backoff
 
 ### Scheduling Flow
 
@@ -513,7 +552,7 @@ flowchart TD
 sequenceDiagram
     participant S as Scheduler
     participant GL as GitLab API
-    participant Q as BullMQ Queue
+    participant Q as In-Memory Queue
     participant W as Worker
     participant R as WorkflowRunner
 
@@ -563,37 +602,94 @@ sequenceDiagram
 
 ## CLI Command System
 
-### Lazy-Loader Design
+### Entry Point (`src/index.ts`)
+
+The CLI entry point is a **thin dispatcher** (~50 lines), intentionally minimal to preserve lazy-loading performance:
+
+```mermaid
+graph TD
+    A["CLI invoked"] --> B{"cmd argument?"}
+    B -->|none| TUI["startDashboard (board-entry)"]
+    B -->|--version| Ver["Print 0.1.0"]
+    B -->|board| Err["Error: use afk with no args"]
+    B -->|other| LL["lazyLoad(cmd, extraArgs)"]
+    TUI --> Ink["Ink TUI (React)"]
+    LL --> LZ["lazy-loader.ts"]
+```
+
+**Design principle:** No shared logging stack at import time. User-facing output lives in commands via `cli-utils` helpers. The entry point only handles version contract and last-resort errors.
+
+### Command Registration (`src/command-registry.ts`)
+
+**Single source of truth.** One `COMMANDS` array feeds both the lazy-loader (fast path) and full-cli (fallback), preventing drift:
+
+```typescript
+export const COMMANDS: CommandEntry[] = [
+  { names: ['signal'], loader: () => import('./commands/signal.js') },
+  { names: ['issue', 'mr'], loader: () => import('./commands/tracker.js') },
+  { names: ['tmux'], loader: () => import('./commands/tmux.js') },
+  { names: ['worktree'], loader: () => import('./commands/worktree.js') },
+  { names: ['workflow'], loader: () => import('./commands/workflow.js') },
+  { names: ['scheduler'], loader: () => import('./commands/scheduler.js') },
+  { names: ['board'], loader: () => import('./commands/board.js') },
+  { names: ['kanban'], loader: () => import('./commands/kanban.js') },
+  { names: ['debug'], loader: () => import('./commands/debug.js') },
+  { names: ['escalate'], loader: () => import('./commands/escalate.js') },
+  { names: ['isolate'], loader: () => import('./commands/isolate.js') },
+  { names: ['qa'], loader: () => import('./commands/qa.js') },
+  { names: ['loop'], loader: () => import('./commands/loop.js') },
+  { names: ['completion', '__complete'], loader: () => import('./commands/completion.js') },
+];
+```
+
+### Lazy-Loader (`src/lazy-loader.ts`)
+
+Per-command dynamic import — the fast path:
 
 ```mermaid
 graph LR
-    A["CLI starts ~50ms"] --> B["Command registration: metadata only"]
-    B --> C{"Which command does user execute?"}
-    C -->|afk issue get| D["Dynamic import tracker.ts"]
-    C -->|afk scheduler| E["Dynamic import scheduler.ts"]
-    C -->|afk implement| F["Dynamic import implement.ts"]
-
-    D --> G["Load dependency @gitbeaker"]
-    E --> H["Load dependency bullmq + ioredis"]
-    F --> I["Load dependency workflow runner"]
-
-    classDef fast fill:#d4edda
-    classDef lazy fill:#fff4e1
-    class A,B,C fast
-    class D,E,F,G,H,I lazy
+    A["CLI starts ~50ms"] --> B["Command dispatch: index.ts"]
+    B --> C{"Command in COMMANDS?"}
+    C -->|yes| D["Dynamic import only that command"]
+    C -->|no| F["full-cli.ts: load all + parse"]
+    D --> E["Parse on matched subcommand"]
+    F --> G["Parse full program"]
 ```
 
-**Why?** Loading all command dependencies slows down lightweight commands like `afk --help`. Lazy-loader reduces startup time from ~500ms to ~50ms.
+**Why?** Loading all command dependencies slows down lightweight commands like `afk --help`. Lazy-loader reduces cold-start from ~500ms to ~50ms.
+
+### Full-CLI Fallback (`src/full-cli.ts`)
+
+For unknown commands, loads all modules in parallel as fallback:
+
+```mermaid
+graph LR
+    A["Unknown command"] --> B["runFullCLI()"]
+    B --> C["Promise.all(COMMANDS.map loader)"]
+    C --> D["Parallel load all modules"]
+    D --> E["program.parse()"]
+```
 
 ### Command Structure
 
-| Command Family | File | Description |
-|----------------|------|-------------|
-| `afk issue <cmd>` | `tracker.ts` | Issue CRUD, auto-detects platform |
-| `afk mr <cmd>` | `tracker.ts` | MR/PR create, merge, review |
-| `afk implement <iid>` | `implement.ts` | Start single workflow |
-| `afk scheduler <cmd>` | `scheduler.ts` | Start/stop/view scheduler |
-| `afk worktree <cmd>` | `worktree.ts` | List/clean worktrees |
+| Command | Register Function | Description |
+|---------|-------------------|-------------|
+| `afk signal` | `registerSignalCommands` | Structured signal file management |
+| `afk issue` / `afk mr` | `registerTrackerCommands` | Issue/MR CRUD, auto-detects platform |
+| `afk tmux` | `registerTmuxCommands` | Tmux session management |
+| `afk worktree` | `registerWorktreeCommands` | Git worktree list/clean |
+| `afk workflow` | `registerWorkflowCommands` | Signal-driven workflow orchestration |
+| `afk scheduler` | `registerSchedulerCommands` | In-memory background scheduler |
+| `afk board` | `registerBoardCommands` | TUI dashboard |
+| `afk kanban` | `registerKanbanCommands` | Kanban board of issues |
+| `afk debug` | `registerDebugCommands` | Debug loop (reproduce → verify) |
+| `afk escalate` | `registerEscalateCommands` | File issue + launch workflow |
+| `afk isolate` | `registerIsolateCommands` | DB service isolation per worktree |
+| `afk qa` | `registerQACommands` | QA verification on merged code |
+| `afk loop` | `registerLoopCommands` | Continuous integration loop |
+| `afk completion` | `registerCompletionCommands` | Shell completion |
+
+**Note:** `github` / `gitlab` legacy command groups are removed. All issue/MR operations go through `afk issue` / `afk mr`.
 
 ---
 
@@ -603,7 +699,7 @@ graph LR
 |-----------|-------------|--------|
 | **TypeScript** | Go/Rust | LLM code generation friendly; mature Node ecosystem |
 | **commander** | yargs/oclif | Lightweight, stable API |
-| **BullMQ** | Custom queue | Redis persistence, built-in retry, visualization dashboard |
+| **In-memory queue** | BullMQ (removed) | Lightweight priority queue, no Redis dependency |
 | **tmux** | Subprocess management | Process isolation + observability (attach to see output) |
 | **git worktree** | Branch switching | Physical isolation, zero switching overhead |
 | **Zod** | io-ts/typebox | Friendly error messages, mature ecosystem |

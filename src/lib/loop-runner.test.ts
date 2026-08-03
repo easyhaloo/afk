@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { LoopRunner } from './loop-runner';
+import { LoopRunner } from './modules/loop-runner';
 import type { TrackerProvider, TrackedIssue } from './core/tracker/types';
 import type { WorkflowRunner } from './workflows';
 import type { QARunner } from './qa-runner';

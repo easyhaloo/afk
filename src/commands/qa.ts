@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { createTrackerClient } from '../lib/client-factory';
-import { QARunner } from '../lib/qa-runner';
+import { QARunner } from '../lib/modules/qa-runner';
 import { handleCommandError, success, info, warning, detail } from '../lib/cli-utils';
 import { logger } from '../lib/io';
 

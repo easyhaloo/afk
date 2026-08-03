@@ -17,11 +17,44 @@ AFK (Away From Keyboard) 的核心问题是：**让 AI agent 在隔离环境中�
 
 ## 核心架构
 
+### 目录结构
+
+```
+src/
+├── index.ts              # 极简 CLI 分发器 (懒加载命令)
+├── command-registry.ts   # 所有 CLI 命令的单一数据源
+├── lazy-loader.ts        # 按命令动态 import
+├── full-cli.ts           # 兜底: 未知命令时加载全部
+├── commands/             # 各命令实现
+│   ├── signal.ts, tracker.ts, tmux.ts, worktree.ts, workflow.ts
+│   ├── scheduler.ts, board.ts, kanban.ts, debug.ts, escalate.ts
+│   ├── isolate.ts, qa.ts, loop.ts, completion.ts
+│   └── board-entry.ts    # TUI 入口 (Ink + React)
+├── lib/
+│   ├── core/             # 平台客户端, IO, git, config, tmux
+│   │   ├── config/, git/, github/, gitlab/, io/, tmux/, tracker/
+│   ├── agents/           # Agent 提供商 (claude-code, cursor 等)
+│   ├── branches/         # 分支策略
+│   ├── modules/          # Runner workers (loop-runner, qa-runner)
+│   ├── sandbox/          # Docker/Podman 沙箱
+│   ├── scheduler.ts      # 调度器逻辑 (内存队列，无 Redis)
+│   ├── sessions/         # Session 存储
+│   ├── templates/        # 工作流模板
+│   └── workflows/        # 工作流执行
+├── views/                # TUI 视图 (Ink + React)
+│   ├── app/
+│   └── board/            # Dashboard, kanban, navigation, registry
+└── types/
+```
+
 ### 模块依赖图
 
 ```mermaid
 graph TD
-    CLI["CLI 入口 (commander)"]
+    CLI["CLI 入口 (index.ts)"]
+    REG["command-registry.ts"]
+    LZ["lazy-loader.ts"]
+    FULL["full-cli.ts (兜底)"]
     Factory["createTrackerClient 工厂函数"]
     Detect["detectProject 平台检测"]
     GL["GitLabClient"]
@@ -30,13 +63,16 @@ graph TD
     Runner["WorkflowRunner 工作流编排"]
     WT["WorktreeManager (git worktree)"]
     TMUX["TmuxClient 会话管理"]
-    SIG["Signal I/O 信号读写 (.afk-signal.json)"]
-    STATUS["Status I/O 状态读取 (.afk/claude-status.json)"]
-    SCONF["Statusline Config 自动注入到 worktree settings"]
-    Sched["Scheduler (BullMQ)"]
-    Queue[("Redis Queue")]
+    SIG["Signal I/O (.afk-signal.json)"]
+    STATUS["Status I/O (.afk/claude-status.json)"]
+    SCONF["Statusline Config 自动注入 worktree settings"]
+    Sched["Scheduler (内存队列)"]
+    Queue[("内存队列")]
     Agent["AI Agent (claude)"]
 
+    CLI --> REG
+    CLI --> LZ
+    LZ -->|未知命令| FULL
     CLI --> Factory
     Factory --> Detect
     Factory --> GL
@@ -63,11 +99,11 @@ graph TD
     SIG -. polling .-> Runner
     STATUS -. on demand .-> Runner
 
-    classDef ext fill:#e1f5ff,stroke:#0066cc
+    classDef cli fill:#e1f5ff,stroke:#0066cc
     classDef core fill:#fff4e1,stroke:#cc6600
     classDef io fill:#f0e1ff,stroke:#6600cc
 
-    class CLI,Agent ext
+    class CLI,REG,LZ,FULL,Agent cli
     class Runner,Factory,GL,GH,Sched core
     class WT,TMUX,SIG,STATUS,SCONF,Queue,AC io
 ```
@@ -76,7 +112,10 @@ graph TD
 
 | 模块 | 职责 | 关键设计决策 |
 |------|------|-------------|
-| **TrackerProvider** | 平台无关的 Issue/MR 操作 | 接口契约，多平台实现 |
+| **command-registry.ts** | 所有 CLI 命令的单一数据源 | 一个数组同时支持懒加载器和 full-cli |
+| **lazy-loader.ts** | 按命令动态 import | 快速路径: ~50ms 冷启动 |
+| **full-cli.ts** | 未知命令时加载全部的兜底 | 并行 `Promise.all` 加载 |
+| **index.ts** | 极简 CLI 分发器 | 导入时不加载共享日志栈 |
 | **WorkflowRunner** | 编排完整生命周期 | 信号驱动 + statusline 客观校验 + AC 客观验证 |
 | **AC 提取** | 从 issue labels / 旧 markdown 提取 AC | 标签驱动优先，markdown 兼容 |
 | **WorktreeManager** | 每个 Issue 独立工作区 | 物理隔离，避免分支冲突 |
@@ -84,7 +123,7 @@ graph TD
 | **Signal I/O** | Agent↔Runner 控制通信 | 文件原子写入，Zod 校验 |
 | **Status I/O** | 读取 Claude statusline JSON | token 客观数据源 |
 | **Statusline Config** | 自动注入 worktree settings.json | tee stdin JSON 到文件 + placeholder 启动检测 |
-| **Scheduler** | 多 Issue 并发调度 | BullMQ + 优先级队列 |
+| **Scheduler** | 多 Issue 并发调度 | 内存队列 + 优先级，无 Redis 依赖 |
 
 ---
 
@@ -505,7 +544,7 @@ flowchart TD
 - **自动发现**：轮询 GitLab 找 `stage::ready-for-implement` 的 Issue
 - **并发控制**：避免一台机器跑 10 个 Agent 把 CPU/内存打爆
 - **优先级调度**：`priority::high` 优先于 `priority::low`
-- **失败重试**：BullMQ 内置指数退避
+- **失败重试**：内存队列 + 指数退避
 
 ### 调度流程
 
@@ -513,7 +552,7 @@ flowchart TD
 sequenceDiagram
     participant S as Scheduler
     participant GL as GitLab API
-    participant Q as BullMQ Queue
+    participant Q as 内存队列
     participant W as Worker
     participant R as WorkflowRunner
 
@@ -563,37 +602,94 @@ sequenceDiagram
 
 ## CLI 命令系统
 
-### Lazy-Loader 设计
+### 入口 (`src/index.ts`)
+
+CLI 入口是一个**极简分发器**（~50 行），刻意保持轻量以维持懒加载性能：
+
+```mermaid
+graph TD
+    A["CLI 启动"] --> B{"是否有 cmd 参数?"}
+    B -->|无参数| TUI["startDashboard (board-entry)"]
+    B -->|--version| Ver["输出 0.1.0"]
+    B -->|board| Err["错误: 使用 afk 无参数启动 TUI"]
+    B -->|其他命令| LL["lazyLoad(cmd, extraArgs)"]
+    TUI --> Ink["Ink TUI (React)"]
+    LL --> LZ["lazy-loader.ts"]
+```
+
+**设计原则：** 导入时不加载共享日志栈。用户输出通过命令内的 `cli-utils` helpers 完成。入口只处理版本契约和兜底错误。
+
+### 命令注册表 (`src/command-registry.ts`)
+
+**单一数据源**。一个 `COMMANDS` 数组同时支持懒加载器（快速路径）和 full-cli（兜底），避免两者不一致：
+
+```typescript
+export const COMMANDS: CommandEntry[] = [
+  { names: ['signal'], loader: () => import('./commands/signal.js') },
+  { names: ['issue', 'mr'], loader: () => import('./commands/tracker.js') },
+  { names: ['tmux'], loader: () => import('./commands/tmux.js') },
+  { names: ['worktree'], loader: () => import('./commands/worktree.js') },
+  { names: ['workflow'], loader: () => import('./commands/workflow.js') },
+  { names: ['scheduler'], loader: () => import('./commands/scheduler.js') },
+  { names: ['board'], loader: () => import('./commands/board.js') },
+  { names: ['kanban'], loader: () => import('./commands/kanban.js') },
+  { names: ['debug'], loader: () => import('./commands/debug.js') },
+  { names: ['escalate'], loader: () => import('./commands/escalate.js') },
+  { names: ['isolate'], loader: () => import('./commands/isolate.js') },
+  { names: ['qa'], loader: () => import('./commands/qa.js') },
+  { names: ['loop'], loader: () => import('./commands/loop.js') },
+  { names: ['completion', '__complete'], loader: () => import('./commands/completion.js') },
+];
+```
+
+### 懒加载器 (`src/lazy-loader.ts`)
+
+按命令动态 import — 快速路径：
 
 ```mermaid
 graph LR
-    A["CLI 启动 ~50ms"] --> B["命令注册: 仅注册元数据"]
-    B --> C{"用户执行哪个命令?"}
-    C -->|afk issue get| D["动态 import tracker.ts"]
-    C -->|afk scheduler| E["动态 import scheduler.ts"]
-    C -->|afk implement| F["动态 import implement.ts"]
-
-    D --> G["加载依赖 @gitbeaker"]
-    E --> H["加载依赖 bullmq + ioredis"]
-    F --> I["加载依赖 workflow runner"]
-
-    classDef fast fill:#d4edda
-    classDef lazy fill:#fff4e1
-    class A,B,C fast
-    class D,E,F,G,H,I lazy
+    A["CLI 启动 ~50ms"] --> B["index.ts 分发"]
+    B --> C{"命令在 COMMANDS 中?"}
+    C -->|是| D["动态 import 仅该命令"]
+    C -->|否| F["full-cli.ts: 加载全部 + parse"]
+    D --> E["在匹配的子命令上 parse"]
+    F --> G["在完整 program 上 parse"]
 ```
 
-**为什么？** 加载所有命令的依赖会拖慢 `afk --help` 这种轻量命令的响应。Lazy-loader 把启动时间从 ~500ms 降到 ~50ms。
+**为什么？** 加载所有命令的依赖会拖慢 `afk --help` 这种轻量命令的响应。懒加载把冷启动从 ~500ms 降到 ~50ms。
+
+### Full-CLI 兜底 (`src/full-cli.ts`)
+
+对于未知命令，并行加载所有模块作为兜底：
+
+```mermaid
+graph LR
+    A["未知命令"] --> B["runFullCLI()"]
+    B --> C["Promise.all(COMMANDS.map loader)"]
+    C --> D["并行加载所有模块"]
+    D --> E["program.parse()"]
+```
 
 ### 命令结构
 
-| 命令族 | 文件 | 说明 |
-|--------|-----|------|
-| `afk issue <cmd>` | `tracker.ts` | Issue CRUD，自动检测平台 |
-| `afk mr <cmd>` | `tracker.ts` | MR/PR 创建、合并、审查 |
-| `afk implement <iid>` | `implement.ts` | 启动单次 workflow |
-| `afk scheduler <cmd>` | `scheduler.ts` | 启动/停止/查看调度器 |
-| `afk worktree <cmd>` | `worktree.ts` | 列出/清理 worktree |
+| 命令 | 注册函数 | 说明 |
+|------|---------|------|
+| `afk signal` | `registerSignalCommands` | 结构化信号文件管理 |
+| `afk issue` / `afk mr` | `registerTrackerCommands` | Issue/MR CRUD，自动检测平台 |
+| `afk tmux` | `registerTmuxCommands` | Tmux 会话管理 |
+| `afk worktree` | `registerWorktreeCommands` | Git worktree 列出/清理 |
+| `afk workflow` | `registerWorkflowCommands` | 信号驱动工作流编排 |
+| `afk scheduler` | `registerSchedulerCommands` | 内存后台调度器 |
+| `afk board` | `registerBoardCommands` | TUI 仪表盘 |
+| `afk kanban` | `registerKanbanCommands` | Issue 看板 |
+| `afk debug` | `registerDebugCommands` | 调试循环 (复现→验证) |
+| `afk escalate` | `registerEscalateCommands` | 提 issue + 启动工作流 |
+| `afk isolate` | `registerIsolateCommands` | 每个 worktree 的 DB 服务隔离 |
+| `afk qa` | `registerQACommands` | 合并代码的 QA 验证 |
+| `afk loop` | `registerLoopCommands` | 持续集成循环 |
+| `afk completion` | `registerCompletionCommands` | Shell 补全 |
+
+**注意：** `github` / `gitlab` 旧命令组已移除。所有 issue/MR 操作走 `afk issue` / `afk mr`。
 
 ---
 
@@ -603,7 +699,7 @@ graph LR
 |------|---------|---------|
 | **TypeScript** | Go/Rust | LLM 代码生成友好；Node 生态成熟 |
 | **commander** | yargs/oclif | 轻量、API 稳定 |
-| **BullMQ** | 自研队列 | Redis 持久化、内置重试、可视化面板 |
+| **内存队列** | BullMQ (已移除) | 轻量级优先级队列，无 Redis 依赖 |
 | **tmux** | 子进程管理 | 进程隔离 + 可观测（attach 看输出） |
 | **git worktree** | 分支切换 | 物理隔离，零切换开销 |
 | **Zod** | io-ts/typebox | 错误信息友好，生态成熟 |

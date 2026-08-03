@@ -4,8 +4,7 @@ import { simpleGit } from 'simple-git';
 import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './core/tmux/tmux';
 import { WorktreeManager } from './core/git/worktree';
-import { LocalSandboxProvider } from './sandbox';
-import { ContainerSandboxProvider, DockerContainerProvider, PodmanContainerProvider } from './sandbox/container';
+import { LocalSandboxProvider, createSandboxProvider } from './sandbox';
 import { ClaudeCodeProvider } from './agents/claude-code';
 import type {
   Sandbox,
@@ -347,14 +346,7 @@ export class WorkflowRunner {
 
   /** Resolve sandbox provider name to a SandboxProvider instance. */
   private sandboxProviderByName(name: SandboxProviderName): SandboxProvider {
-    switch (name) {
-      case 'local':
-        return new LocalSandboxProvider(this.worktree);
-      case 'docker':
-        return new ContainerSandboxProvider({ provider: new DockerContainerProvider() });
-      case 'podman':
-        return new ContainerSandboxProvider({ provider: new PodmanContainerProvider() });
-    }
+    return createSandboxProvider(name, { worktreeManager: this.worktree });
   }
 
   /**

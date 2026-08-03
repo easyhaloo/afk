@@ -25,7 +25,6 @@ When checking or creating skills, use explicit reasoning:
 
 **Never skip the reasoning step.** Blind confirmation produces false
 positives. Trace through each item explicitly.
-- [ ] Domain-specific terms and values preserved (not abstracted away)
 
 ## Constraint Rules
 

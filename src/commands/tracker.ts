@@ -290,7 +290,7 @@ export function registerTrackerCommands(program: Command): void {
           baseBranch: options.baseBranch ?? 'main',
           maxRetries: options.maxRetries ?? cfg.maxRetries,
           hardTimeoutMs: options.hardTimeout ?? cfg.workflowHardTimeout,
-          maxHandoffs: options.maxHandoffs ?? (Math.min(Math.ceil(goalBudget / 1_000_000), 20) || 3),
+          maxHandoffs: options.maxHandoffs ?? Math.min(Math.ceil(goalBudget / 1_000_000), 20),
           contextHighTokens: options.contextHigh ?? cfg.contextThreshold,
           maxTotalTokens: options.maxTotalTokens ?? goalBudget,
           ext: options.ext,

@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { WorkflowRunner } from './workflows';
+import { BudgetManager } from './workflows/budget';
 import { writeSignal } from './io';
 import type { TrackerProvider } from './core/tracker/types';
 import type { TmuxClient } from './core/tmux/tmux';
@@ -112,9 +113,7 @@ describe('WorkflowRunner.runPhase routing', () => {
       hardTimeoutMs: 60_000,
       completionTimeoutMs: 5_000,
       contextHighTokens: 100_000,
-      budget: { used: 0, tokens: 0 },
-      maxHandoffs: 3,
-      maxTotalTokens: 500_000,
+      budget: new BudgetManager(3, 500_000),
       goalBase: '实现 issue #42',
       signalType: 'goal_complete',
       ...over,
@@ -148,7 +147,7 @@ describe('WorkflowRunner.runPhase routing', () => {
     const coord = { handoff: vi.fn(async () => 'terminated') };
     const runner = runnerWith(coord);
 
-    const completed = await runPhase(runner, { budget: { used: 3, tokens: 0 } }); // used >= maxHandoffs
+    const completed = await runPhase(runner, { budget: BudgetManager.forTest(3, 0, 3, 500_000) }); // used >= maxHandoffs
 
     expect(completed).toBe(false);
     expect(coord.handoff).toHaveBeenCalledTimes(1);
@@ -165,7 +164,7 @@ describe('WorkflowRunner.runPhase routing', () => {
 
     // used(1) < maxHandoffs(3), but tokens(400k) + outcome(150k) >= maxTotalTokens(500k).
     const completed = await runPhase(runner, {
-      budget: { used: 1, tokens: 400_000 },
+      budget: BudgetManager.forTest(1, 400_000, 3, 500_000),
     });
 
     expect(completed).toBe(false);

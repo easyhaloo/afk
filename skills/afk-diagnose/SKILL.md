@@ -1,5 +1,5 @@
 ---
-name: afk-debug
+name: afk-diagnose
 description: >-
   Use when a specific, reproducible failure is provided (command, curl,
   or sequence) and root-cause diagnosis + fix verification is needed.
@@ -7,7 +7,7 @@ description: >-
 disable-model-invocation: false
 ---
 
-# Debug
+# Diagnose
 
 **Goal:** Root cause identified → fix applied → original input passes.
 **Mode:** HITL — proposes hypotheses, traces code, suggests fixes;

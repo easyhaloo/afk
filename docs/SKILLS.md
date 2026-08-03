@@ -354,7 +354,7 @@ MR/PR description contains `## Merge Order` listing all `blocked_by` issues:
 
 ---
 
-### 7. afk-debug
+### 7. afk-diagnose
 
 **Purpose:** Quickly diagnose and fix specific, reproducible failures
 
@@ -592,7 +592,7 @@ tests/api-workflow/
 | Multiple issues needing orchestration | `/afk-scheduler` |
 | Specific task in current session | `/afk-do "<task>"` |
 | MR needing verification | `/afk-qa <mr-url>` |
-| Reproducible failure | `/afk-debug` |
+| Reproducible failure | `/afk-diagnose` |
 | Session state snapshot/recovery | `/afk-hand-off` |
 
 **Design Decisions:**

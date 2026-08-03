@@ -354,7 +354,7 @@ MR/PR 描述包含 `## Merge Order` 列出所有 `blocked_by` issues：
 
 ---
 
-### 7. afk-debug
+### 7. afk-diagnose
 
 **作用：** 快速诊断和修复特定、可重现的故障
 
@@ -592,7 +592,7 @@ tests/api-workflow/
 | 多个 issue 需要编排 | `/afk-scheduler` |
 | 当前会话的特定任务 | `/afk-do "<task>"` |
 | MR 需要验证 | `/afk-qa <mr-url>` |
-| 可重现的失败 | `/afk-debug` |
+| 可重现的失败 | `/afk-diagnose` |
 | 会话状态快照/恢复 | `/afk-hand-off` |
 
 **设计决策：**

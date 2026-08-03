@@ -141,7 +141,7 @@ Full command reference: `afk --help`
 | `/afk-prototype` | Validate approach | Need to validate tech approach before committing |
 | `/afk-implement` | TDD implementation | Clear implementation target |
 | `/afk-qa` | Independent verification | MR/PR ready to merge |
-| `/afk-debug` | Quick fix | Specific, reproducible failure |
+| `/afk-diagnose` | Quick fix | Specific, reproducible failure |
 | `/afk-pipeline` | Phase routing | Unsure which skill to use |
 | `/afk-branch-migrate` | Cross-branch migration | Cherry-pick between divergent branches |
 | `/afk-hand-off` | Work handoff | Transfer task to another developer |

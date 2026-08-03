@@ -36,7 +36,7 @@ Pick the row that matches what the user has in hand right now:
 | Multiple issues to orchestrate | `/afk-scheduler` |
 | A specific task in *this* session | `/afk-do "<task>"` |
 | An MR to verify | `/afk-qa <mr-url>` |
-| A reproducible failure to debug | `/afk-debug` |
+| A reproducible failure to diagnose | `/afk-diagnose` |
 | Session state to snapshot or resume | `/afk-hand-off` |
 
 If multiple rows match, ask which to act on — do not pick silently.

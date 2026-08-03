@@ -41,7 +41,7 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
-| [afk-debug](./afk-debug/) | `/afk-debug` | Debugging workflow for complex failures |
+| [afk-diagnose](./afk-diagnose/) | `/afk-diagnose` | Diagnostic workflow for complex failures |
 | [reasoning-watchdog](./reasoning-watchdog/) | `/reasoning-watchdog` | Hook-based reasoning quality monitoring |
 
 ---

@@ -1,6 +1,10 @@
 ---
 name: afk-skill-workflow
-description: Create, diagnose, or refactor a SKILL.md. Use when building new skills, auditing existing ones, or improving skill quality.
+disable-model-invocation: true
+description: >-
+  Create a new SKILL.md, diagnose an existing one for quality issues,
+  or refactor to align with SKILL-GUIDE standards.
+  Trigger: user asks to create, audit, or improve a skill.
 ---
 
 # Skill Workflow
@@ -131,3 +135,4 @@ Run Diagnose mode again. All items pass → refactor complete.
 - MUST NOT create a skill without confirming name with user
 - MUST NOT auto-apply fixes without user confirmation in Diagnose mode
 - MUST NOT move domain knowledge into SKILL.md — keep in `references/`
+- MUST NOT read files outside the target skill directory or network URLs

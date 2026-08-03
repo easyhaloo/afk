@@ -19,154 +19,119 @@ disallowed-tools: >-
 **Goal:** Independently pickable tracker issues with verifiable completion conditions.
 **Mode:** HITL-gated — draft first, approve before creating.
 
-## Input Paths (mode decision)
+## Mode Decision
 
 | Mode | Input | Trigger |
 |------|-------|---------|
 | **PRD Mode** | `PRD.md` `## User Stories` with Observable Behavior lists | An approved PRD exists |
 | **Direct Mode** | Any requirement context (free text / notes / chat) | No PRD, or fast path |
 
-## Execution Mode
-
-`mode::afk` = autonomous execution. `mode::hitl` = human input during execution.
-`evidence_type: manual` (verification) is orthogonal to mode. Default: `mode::afk`.
-
-Mode is decided **once at the start** and propagates to:
-- issue label `mode::afk` or `mode::hitl`
-- issue base `base::prd-<iid>` (PRD) or `base::direct` (Direct)
-- DAG source attribution
+Mode propagates to labels: `mode::afk` (autonomous) or `mode::hitl` (human-in-the-loop).
+Base label: `base::prd-<iid>` (PRD Mode) or `base::direct` (Direct Mode).
 
 ## Verification Inference
 
-For each Observable Behavior (PRD Mode) or each requirement clause
-(Direct Mode), read the codebase to infer:
+For each Observable Behavior (PRD) or requirement clause (Direct), read the
+codebase to infer:
 
-1. **What proves the behavior** — locate:
-   - Which test runner owns this layer (jest / vitest / mocha / pytest)
-   - Which HTTP route handles this request
-   - Which log line format this worker emits
-   - Which file path / module name holds this state
-2. **What `evidence_type` fits** — controlled vocabulary in
-   `references/issue-template.md`: `test` | `curl` | `log` | `manual` | `none`
+1. **What proves the behavior** — locate test runner, HTTP route, log format, or module
+2. **What `evidence_type` fits** — controlled vocabulary: `test` | `curl` | `log` | `manual` | `none`
 3. **What `check_command` exits 0 on PASS** — concrete shell snippet
 
-Allowed tools: Read, Grep, Bash (read-only: ls, cat, grep, jq, find,
-`afk issue list`, `afk mr list`). No mutating commands, no push, no delete.
-
-If the codebase gives no signal for a behavior, default to `manual`
-and flag it in the issue body as "needs automated check".
+If no signal found → default to `manual`, flag as "needs automated check".
+Allowed tools: Read, Grep, Bash (read-only only).
 
 ## Slice Strategy
 
-1. **Analyze** the requirement: count distinct domains, layers, and team ownership lines
-2. **Infer** the best-fit strategy:
-   - One team, end-to-end ownership → **Vertical** (default)
-   - Multiple teams with layer ownership → **Horizontal**
-   - Unclear or both viable → ask user to choose
-3. **Tell** the user which strategy was chosen and why — only ask if both are genuinely viable
+1. Analyze: count distinct domains, layers, team ownership lines
+2. Infer strategy:
+   - One team, end-to-end → **Vertical** (default)
+   - Multiple teams, layer ownership → **Horizontal**
+   - Unclear → ask user
+3. Tell user which strategy and why
 
 | Strategy | Shape | Best when |
 |----------|-------|-----------|
-| **Vertical** | model+API+logic+test in one package | Single team, fast delivery |
-| **Horizontal** | one issue per layer (API, DB, UI) | Layer-owned teams, staged rollout |
+| **Vertical** | model+API+logic+test in one issue | Single team |
+| **Horizontal** | one issue per layer (API, DB, UI) | Layer-owned teams |
 
 ## Slicing Rules
 
 - **Too big:** AC > ~5 lines, or touches > ~3 modules → split
-- **Too small:** no user-observable behavior → fold into caller or mark tech-debt
-- **Cycle check:** trace `blocked_by` graph; redraw boundaries if cyclic
-- **Direct Mode:** ask user to narrow if requirement too large
+- **Too small:** no user-observable behavior → fold or mark tech-debt
+- **Cycle check:** trace `blocked_by` graph; redraw if cyclic
+- **Direct Mode:** ask user to narrow if too large
 
 ## Isolate Analysis
 
-For each slice, determine if it requires **isolated middleware** (MySQL, Redis,
-ES, etc.) by checking for any of these signals in the requirement and inspected
-codebase:
-
-1. **Schema change** — the slice modifies a database table, index, or migration
-   file
-2. **Middleware config change** — the slice adds or modifies docker-compose
-   service definitions, Redis cache keys, ES index mappings, or similar
-   middleware configuration
-3. **New middleware dependency** — the slice introduces a new service dependency
-   that isn't available in the shared development environment
-
-If any signal matches, mark the slice with `needs_isolate: true`.
-
-| Signal | Example content |
-|--------|----------------|
-| Schema change | "add column", "migration", "CREATE TABLE", "ALTER TABLE", "new index" |
-| Middleware config | "add Redis cache", "new ES index", "docker-compose" |
-| New dependency | "integrate RabbitMQ", "add S3 bucket", "new message queue" |
+For each slice, check for: schema change, middleware config change, new middleware dependency.
+If any matches → mark slice `need::isolate: true`.
 
 ## Issue Body Composition
 
-Each draft must populate every field defined in
-`references/issue-template.md`:
-
-| Field | Source |
-|-------|--------|
-| `# <Title>` | PRD story title (verb + object) or Direct Mode user-stated title |
-| `## Context` | One-paragraph problem statement lifted from PRD or paraphrased from Direct input |
-| `## Acceptance Criteria` | One per Observable Behavior, in 3-field format from Verification Inference |
-| `## Out of Scope` | Lifted from PRD story's "Out of Scope" section, or inferred from negative examples in Direct Mode |
-| `## Dependencies` | DAG edges from `blocked_by` analysis; literal `none` if standalone |
+Fields per `references/issue-template.md`:
+- `# <Title>` — PRD story title or Direct Mode title
+- `## Context` — problem statement from PRD or paraphrased
+- `## Acceptance Criteria` — one per Observable Behavior, 3-field format: `<text> -- <evidence_type> -- <check_command>`
+- `## Out of Scope` — from PRD or inferred
+- `## Dependencies` — DAG edges from `blocked_by`; `none` if standalone
 
 ## Steps
 
-1. **Pick mode:** PRD exists → PRD Mode; else → Direct Mode. Lock in mode label.
-   **Precondition:** none.
-   **Output:** mode selected.
+### 1. Pick mode
 
-2. **Read inputs + read codebase:** for each Observable Behavior (PRD) or requirement clause (Direct), apply Verification Inference to produce 3-field AC format.
-   **Precondition:** mode selected.
-   **Output:** AC list with evidence_type and check_command.
+PRD exists → PRD Mode. Else → Direct Mode. Lock in labels:
+- `mode::afk` or `mode::hitl`
+- `base::prd-<iid>` or `base::direct`
 
-3. **Slice:** apply Slice Strategy + Slicing Rules. If ambiguous, ask user.
-   **Precondition:** AC list ready.
-   **Output:** slices defined.
+### 2. Read inputs + read codebase
 
-3b. **Cross-Project Dispatch (if applicable):** if requirement spans multiple repos, decide per slice which repo it belongs to.
-   **Precondition:** slices defined.
-   **Output:** per-slice target repo.
+Apply Verification Inference per Observable Behavior (PRD) or requirement clause (Direct).
+Output: AC list in 3-field format.
 
-4. **Isolate Analysis:** for each slice, determine `needs_isolate: true/false` by checking middleware-related code.
-   **Precondition:** slices defined.
-   **Output:** need::isolate labels.
+### 3. Slice + Cross-Project Dispatch
 
-5. **Compose drafts:** for each slice, fill every Issue Body Composition field. Write `none` for empty Dependencies.
-   **Precondition:** need::isolate labels set.
-   **Output:** draft issues.
+Apply Slice Strategy + Slicing Rules.
+If requirement spans multiple repos: per slice, decide target repo → `--project <repo>` flag.
+If strategy ambiguous → ask user.
 
-6. **Self-quality-gate:** run every `check_command` in a sandbox. Any non-zero exit or vocabulary violation → fix before HITL.
-   **Precondition:** drafts composed.
-   **Output:** verified drafts.
+### 4. Isolate Analysis
 
-7. **HITL gate:** present all drafts + DAG + label scheme + need::isolate decisions + base label. Wait for explicit approval.
-   **Precondition:** drafts verified.
-   **Output:** user approval.
+Apply Isolate Analysis per slice. Set `need::isolate` label if middleware signals found.
 
-8. **Create:** on approval, run `afk issue create` with all labels, then `afk issue link` for DAG edges.
-   **Precondition:** user approval.
-   **Output:** issues created.
+### 5. Compose drafts
+
+Fill every Issue Body Composition field per slice. `none` for empty Dependencies.
+
+### 6. Self-quality-gate
+
+Run every `check_command` in sandbox. Non-zero exit or vocabulary violation → fix draft before proceeding.
+
+### 7. HITL gate
+
+Present all drafts + DAG + label scheme + `need::isolate` decisions.
+Wait for explicit approval. Do not proceed until user confirms.
+
+### 8. Create
+
+On approval:
+```
+afk issue create --label stage::ready-for-issues --label <mode> --label <base> [--label need::isolate]
+afk issue link <iid> <blocked-by-iid>
+```
+For cross-project: `--project <owner/repo>` and `<project>:<iid>` syntax for linking.
 
 ## References
 
-| File | Read when |
-|------|-----------|
-| `references/issue-template.md` | Always — defines the AC schema and body fields you emit |
+Always read `references/issue-template.md` — defines the AC schema and body fields.
 
-## Anti-patterns
+## Caveats
 
 - AC without `-- <evidence_type> -- <check_command>` suffix
-- `evidence_type` chosen without reading codebase (guessing is forbidden)
-- `evidence_type` outside the controlled vocabulary
-- `check_command` that doesn't exist, has no exit-code contract, or mutates state
-- Skipping Step 6 self-quality-gate — drafts with unverified commands reach HITL
-- Creating issues before Step 7 approval — even one issue
+- `evidence_type` chosen without reading codebase (guessing forbidden)
+- `evidence_type` outside controlled vocabulary
+- `check_command` with no exit-code contract or mutating state
+- Skipping Step 6 self-quality-gate
+- Creating issues before Step 7 approval
 - `mode::afk` for cross-context or mid-flight product decisions
-- Paste full requirement into issue — summarize + link source
-- Use "no PRD" to skip this workflow entirely
-- Leave `Requirement Source:` blank (Direct Mode) or `PRD:` placeholder (PRD Mode)
-- `Shallow Module` beyond single-entity CRUD
-- Forgetting to apply `need::isolate` on slices that require middleware isolation — the loop won't start isolated containers without it
+- Forgetting `need::isolate` — loop won't start isolated containers without it

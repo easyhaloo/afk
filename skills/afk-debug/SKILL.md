@@ -16,14 +16,12 @@ human decides the investigation direction.
 
 ## Core Loop
 
-```
-Step 1: Reproduce    → Run the trigger, record the actual error
-Step 2: Hypothesize  → List 3-5 possible causes from code analysis
-Step 3: Investigate → Trace the code path, narrow to root cause
-Step 4: Propose Fix → Show what to change and why; wait for confirmation
-Step 5: Verify       → Re-run the original trigger
-Step 6: Loop / Done  → Pass → record root cause. Fail → loop back to Step 2
-```
+Step 1: Reproduce — run trigger, record error.
+Step 2: Hypothesize — list 3-5 possible causes from code analysis.
+Step 3: Investigate — trace code path, narrow to root cause.
+Step 4: Propose Fix — show what to change and why; wait for confirmation.
+Step 5: Verify — re-run original trigger.
+Step 6: Loop / Done — pass → record root cause. Fail → loop to Step 2.
 
 ## Steps
 
@@ -32,65 +30,56 @@ Step 6: Loop / Done  → Pass → record root cause. Fail → loop back to Step 
 Read `references/hard-checks.md` before starting. Stop immediately if
 any hard check is violated.
 
+**Output:** hard-checks loaded.
+
 ### Step 1 — Reproduce
 
-Run the provided trigger exactly as given. Capture:
-- The exact command or sequence
-- The full output (stdout + stderr)
-- The exit code
-
-Store via:
-```bash
-afk debug reproduce "<command>"
-```
+Run the provided trigger exactly as given. Capture: exact command or
+sequence, full output (stdout + stderr), exit code.
 
 **Rule:** Do not modify the command before running it.
 
+**Output:** captured output and exit code.
+
 ### Step 2 — Hypothesize
 
-List 3-5 possible causes. Format each as:
-
-```
-A. <cause description>
-   Evidence: <file:line or log excerpt that points here>
-B. <cause description>
-   Evidence: <file:line or log excerpt>
-```
+List 3-5 possible causes with evidence (file:line or log excerpt).
 
 **Rule:** Do not write code in this step. Present the list and ask
 which direction to investigate first.
 
+**Output:** hypothesis list.
+
 ### Step 3 — Investigate
 
-Follow the chosen hypothesis:
-1. Read the relevant code files
-2. Trace the call chain from entry point to failure point
-3. Identify the specific line or condition that produces the error
+Follow the chosen hypothesis: read relevant code files, trace call chain
+from entry point to failure point, identify specific line or condition.
 
-State root cause explicitly when confirmed:
-> "Root cause: `<file:line>` — `<why this causes the failure>`"
+State root cause explicitly when confirmed: "Root cause: file:line —
+why this causes the failure".
+
+**Output:** root cause identified or continue investigating.
 
 ### Step 4 — Propose Fix
 
-Describe:
-- **What** will change (file, function, condition)
-- **Why** this fixes the root cause
-- **What the side effects are**, if any
+Describe: what will change (file, function, condition), why this fixes
+the root cause, what the side effects are if any.
 
 Wait for user confirmation. Do not proceed without it.
 
+**Output:** proposed fix.
+
 ### Step 5 — Verify
 
-Apply the fix, then re-run the original trigger:
-```bash
-afk debug verify "<original_trigger>"
-```
+Apply the fix, then re-run the original trigger.
 
 - **Exit 0 + expected output** → verified. Record root cause.
 - **Still failing** → loop back to Step 2 with the new evidence.
 
 **Rule:** If the original trigger still fails, the bug is not fixed —
 "looks right" is not evidence.
+
+**Output:** verified pass/fail.
 
 ### Step 6 — Done / Loop
 
@@ -101,19 +90,11 @@ changed, how it was verified.
 
 ## Script Interface
 
-| Command | What it does |
-|---------|--------------|
-| `afk debug reproduce "<cmd>"` | Execute command, record output + exit code |
-| `afk debug hypothesize` | Display last output, prompt for hypothesis list |
-| `afk debug investigate <file> [n]` | Print file content, optionally at line `n` |
-| `afk debug propose "<desc>"` | Record proposed fix in state |
-| `afk debug verify [cmd]` | Re-run command, update verified field |
-| `afk debug status` | Print full state summary |
-| `afk debug reset` | Clear state and start fresh |
+Use `afk debug` subcommands: reproduce, hypothesize, investigate,
+propose, verify, status, reset. State files: `.debug/state.json`,
+`.debug/commands.log`.
 
-State files: `.debug/state.json`, `.debug/commands.log`.
-
-## Anti-patterns
+## Caveats
 
 - MUST NOT propose a fix before identifying the root cause.
 - MUST NOT skip verification — original trigger must pass.

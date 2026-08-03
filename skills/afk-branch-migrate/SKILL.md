@@ -17,11 +17,9 @@ with full conflict awareness.
 ## Workflow
 
 ### 1. Identify Source
-- `--commit <hash>` — direct commit hash
-- `--branch <branch> --search "<text>"` — search commits on branch
-- `--branch <branch> --from <h1> --to <h2>` — commit range
 
-Show: hash, author, date, message, changed files with line counts.
+Identify the source commit or commit range. Collect: hash, author, date,
+message, changed files with line counts.
 
 ### 2. Analyze
 Classify each changed file:
@@ -49,8 +47,9 @@ User selects which files to include/exclude.
 Create rollback checkpoint before proceeding.
 
 ### 5. Apply
-- Low/Medium conflicts: `git cherry-pick` or `git apply --3way`
-- High/Critical: manual resolution with guidance
+
+Low/Medium conflicts: cherry-pick or three-way apply.
+High/Critical: manual resolution with guidance.
 
 ### 6. Verify
 - **MANDATORY: Run build/compile immediately after applying changes**

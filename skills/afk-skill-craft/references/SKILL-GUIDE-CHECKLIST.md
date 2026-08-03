@@ -16,9 +16,16 @@
 - **LLM-first design**: concise keywords, structured sections, no prose walls
 - **Concise description**: description is the **only trigger carrier** — startup loads it for matching, body loads only after activation. Binary judgment, "does X, not Y". Never duplicate trigger logic in body.
 - **Body minimization**: detail in references/, SKILL.md is the index
-- **Abstraction over explanation**: keyword-driven, trust model priors. **Critical distinction:**
-  - LLM already knows → abstract (e.g., "reverse the array")
-  - Domain-specific terms/values → PRESERVE (e.g., `mode::afk`, `afk issue create --label ...`)
+- **Abstraction over explanation**: keyword-driven, trust model priors.
+
+  **Knowledge determination:** LLM knows (1) training data + (2) current context.
+  ```
+  判定公式:
+    训练数据中有 → 抽象 (LLM 知道)
+    只有 skill 文件中有 → 保留 (LLM 只因上下文而知道)
+  ```
+  - Training data has it → abstract (e.g., `git commit`, `jest`)
+  - Only in skill file → PRESERVE (e.g., `mode::afk`, `afk issue create --label`)
 - **Domain knowledge separation**: specialized knowledge in references/
 - **Fail-closed on unclear state**: stop if precondition not met
 - **No ambiguous language**: no "consider", "maybe", "if appropriate"

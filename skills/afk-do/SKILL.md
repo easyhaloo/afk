@@ -86,9 +86,43 @@ confirm no regression in the affected area.
 Present the result. User accepts → task is complete.
 User wants more → continue in current session.
 
+## Parallel execution
+
+When the plan reveals **independent, non-overlapping modules**, consider
+parallel execution to improve throughput:
+
+### When to parallelize
+
+- Multiple files that touch different concerns (e.g., add API route + add
+  corresponding unit test + update types)
+- Frontend and backend changes that don't depend on each other
+- Multiple independent features in the same PR
+- Research + prototype for the same feature
+
+### How to parallelize
+
+Use **Agent** tool to farm out independent work chunks:
+```
+Agent("Implement the auth middleware for the API route", {label: "auth-middleware"})
+Agent("Write unit tests for the auth middleware", {label: "auth-tests", blockedBy: ["auth-middleware"]})
+Agent("Update the OpenAPI types for the new endpoint", {label: "types-update"})
+```
+
+Use **TaskCreate / TaskUpdate** to track progress:
+- Create one task per parallel work item
+- Set `blockedBy` on dependent tasks
+- Mark `in_progress` when starting, `completed` when done
+
+### When NOT to parallelize
+
+- The modules share state or types — a change in one ripples to another
+- The work requires sequential reasoning (design → implement → verify)
+- The user asked for a specific step-by-step approach
+
 ## Anti-patterns
 
 - MUST NOT skip Step 2 — methodology load is non-negotiable.
 - MUST NOT push directly to protected branches.
 - MUST NOT produce partial work without a clear "next action".
 - MUST NOT leave a worktree hanging after the session ends.
+- MUST NOT parallelize when modules have hidden coupling — serial is safer.

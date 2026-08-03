@@ -88,46 +88,13 @@ User wants more → continue in current session.
 
 ## Parallel execution
 
-When the plan reveals **independent, non-overlapping modules**, consider
-parallel execution to improve throughput:
+Fan out **independent items** to parallel workers when:
+- No shared state or types between modules
+- Frontend / backend split, or feature + tests + types can proceed independently
 
-### When to parallelize
+Dependency patterns: `A → B` (B blocked by A); `A | B | C` (all unblocked).
 
-- Multiple files that touch different concerns (e.g., add API route +
-  corresponding unit test + update types)
-- Frontend and backend changes that don't depend on each other
-- Multiple independent features in the same PR
-- Research + prototype for the same feature
-
-### How to parallelize
-
-Fan out independent work to subagents or parallel execution primitives:
-
-1. **Identify independent items** — list work that has no data/control
-   dependency on each other
-2. **Assign each item to a separate execution context** — workers run
-   concurrently, each with a focused scope
-3. **Track dependencies** — items with ordering constraints get explicit
-   `blockedBy` / "after X" annotations; parallel items have none
-4. **Reassemble results** — merge outputs after all workers complete
-
-```
-# Pattern: independent work items
-Item A ──┐
-Item B ──┼──► [parallel execution] ──► merged result
-Item C ──┘
-
-# Pattern: items with dependencies
-Item A ──► Item B ──► Item C    (sequential chain)
-Item A ──► Item B              (A unblocked, B blocked by A)
-         Item C ──► Item D     (C unblocked, parallel to B)
-```
-
-### When NOT to parallelize
-
-- The modules share state or types — a change in one ripples to another
-- The work requires sequential reasoning (design → implement → verify)
-- The user asked for a specific step-by-step approach
+**Anti-pattern:** hidden coupling — serial when in doubt.
 
 ## Anti-patterns
 

@@ -102,6 +102,36 @@ not "Use a for loop to iterate backwards."
 
 Negative patterns — things a skill should never do.
 
+### LLM-first design
+
+Skill content is consumed by an LLM, not a human. Write for model
+parsing: concise keywords, structured sections, no prose walls.
+The LLM should be able to extract the skill's intent and steps
+without deciphering verbose explanations.
+
+### Concise description
+
+Frontmatter `description` is a lookup key, not a manual. One to two
+sentences: what it does and when to invoke it. The body expands on how.
+
+### Body minimization
+
+Describe the full flow in SKILL.md. If detailed content is needed,
+navigate to `references/`, `templates/`, `assets/`, or `scripts/`.
+SKILL.md is the index; detail lives in linked files.
+
+### Abstraction over explanation
+
+Prefer concise keywords that trigger LLM priors. Write "fan out parallel
+paths" not "launch multiple subagents to concurrently process independent
+tasks." The model fills in the rest. Redundant explanation dilutes signal.
+
+### Domain knowledge separation
+
+If a skill requires specialized knowledge the LLM doesn't have (e.g.,
+finance术语, regulatory rules, proprietary patterns), document it in a
+dedicated reference file. Don't bury domain context in SKILL.md.
+
 ### Fail-closed on unclear state
 
 If a precondition isn't met, stop. Don't guess, assume, or continue.

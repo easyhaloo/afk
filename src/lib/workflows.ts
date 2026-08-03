@@ -19,7 +19,8 @@ import { getTokenUsage, configureStatusline, logger, readSignal } from './io';
 import { getWorkflowConfig } from './core/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
-import { Watchdog, createWatchdog } from './workflows/watchdog';
+import { Watchdog, WatchdogAdapter, createWatchdog$legacy } from './workflows/watchdog';
+import type { WorkflowConfig } from './core/config/manager';
 import { HandoffCoordinator, handoffDocPath, createHandoffCoordinator } from './workflows/handoff';
 import { attemptNativeResume } from './workflows/resume';
 import { BudgetManager } from './workflows/budget';
@@ -100,18 +101,21 @@ export interface RunnerDependencies {
   coordinatorFactory?: (deps: {
     tracker: TrackerProvider;
     tmux: TmuxClient;
-    watchdog: Watchdog;
+    watchdog: WatchdogAdapter;
+    config: WorkflowConfig;
   }) => HandoffCoordinator;
   /** Override the tmux client (tests). Defaults to a new TmuxClient. */
   tmux?: TmuxClient;
   /** Override the watchdog (tests). Defaults to a new Watchdog. */
-  watchdog?: Watchdog;
+  watchdog?: WatchdogAdapter;
   /** Sandbox provider (tests / future). Defaults to LocalSandboxProvider. */
   sandboxProvider?: SandboxProvider;
   /** Agent provider (tests). Defaults to ClaudeCodeProvider. */
   agentProvider?: import('./agents/types').AgentProvider;
   /** Session store chain (tests / future). Defaults to defaultSessionStoreChain. */
   sessionStoreChain?: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
+  /** Workflow config: all timeout and budget values. Defaults to getWorkflowConfig(). */
+  config?: WorkflowConfig;
 }
 
 /**
@@ -159,7 +163,7 @@ export class WorkflowRunner {
   private tracker: TrackerProvider;
   private tmux: TmuxClient;
   private worktree: WorktreeManager;
-  private watchdog: Watchdog;
+  private watchdog: WatchdogAdapter;
   private coordinator: HandoffCoordinator;
   private sandboxProvider: SandboxProvider;
   private agentProvider: AgentProvider;
@@ -177,6 +181,7 @@ export class WorkflowRunner {
   private lifecycleCtx: LifecycleContext = { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: {} };
   /** Branch handles created per step in template execution. Cleaned up in teardownSession. */
   private stepBranchHandles: BranchHandle[] = [];
+  private config: WorkflowConfig;
 
   /**
    * Inject a sandbox for testing. Production code goes through runBody →
@@ -208,10 +213,11 @@ export class WorkflowRunner {
     this.tmux = deps?.tmux ?? createTmuxClient();
     this.worktree = createWorktreeManager();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;
-    this.watchdog = deps?.watchdog ?? createWatchdog(this.logDir);
+    this.watchdog = deps?.watchdog ?? createWatchdog$legacy(this.logDir);
+    this.config = deps?.config ?? getWorkflowConfig();
     this.coordinator = deps?.coordinatorFactory
-      ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog })
-      : createHandoffCoordinator({ tracker, tmux: this.tmux, watchdog: this.watchdog });
+      ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog, config: this.config })
+      : createHandoffCoordinator({ tracker, tmux: this.tmux, watchdog: this.watchdog, config: this.config });
     this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: this.worktree });
     this.agentProvider = deps?.agentProvider ?? createAgentProvider(this.agentProviderName);
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
@@ -230,11 +236,11 @@ export class WorkflowRunner {
       session,
       targetBranch,
       baseBranch = 'main',
-      hardTimeoutMs = getWorkflowConfig().workflowHardTimeout,
-      completionTimeoutMs = getWorkflowConfig().completionTimeout,
-      maxHandoffs = Math.min(Math.ceil(getWorkflowConfig().goalBudget / 1_000_000), 20),
-      contextHighTokens = getWorkflowConfig().contextThreshold,
-      maxTotalTokens = getWorkflowConfig().goalBudget,
+      hardTimeoutMs = this.config.workflowHardTimeout,
+      completionTimeoutMs = this.config.completionTimeout,
+      maxHandoffs = Math.min(Math.ceil(this.config.goalBudget / 1_000_000), 20),
+      contextHighTokens = this.config.contextThreshold,
+      maxTotalTokens = this.config.goalBudget,
     } = options;
 
     // Resolve sandbox provider by name (CLI path).

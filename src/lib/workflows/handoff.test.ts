@@ -5,7 +5,8 @@ import * as fs from 'fs';
 import { HandoffCoordinator } from './handoff';
 import type { TrackerProvider } from '../core/tracker/types';
 import type { TmuxClient } from '../core/tmux/tmux';
-import type { Watchdog } from './watchdog';
+import type { WatchdogAdapter } from './watchdog';
+import type { WorkflowConfig } from '../core/config/manager';
 
 /** Fake tmux: every method is a vi.fn with sane defaults, overridable per-test. */
 function makeTmux(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
@@ -22,7 +23,26 @@ function makeTmux(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
 }
 
 function makeWatchdog() {
-  return { arm: vi.fn(), disarm: vi.fn() } as unknown as Watchdog;
+  return { arm: vi.fn(), disarm: vi.fn(), isArmed: vi.fn(() => false) } as unknown as WatchdogAdapter;
+}
+
+function makeConfig(): WorkflowConfig {
+  return {
+    agentDefault: 'claude',
+    tmuxSession: 'afk',
+    completionTimeout: 7200 * 1000,
+    workflowHardTimeout: 7200 * 1000,
+    completionPoll: 5,
+    idleTimeout: 1800 * 1000,
+    acCheckTimeout: 180 * 1000,
+    contextThreshold: 100_000,
+    promptTimeout: 30_000,
+    handoffTimeout: 60_000,
+    maxRetries: 2,
+    targetBranch: 'main',
+    trackerTargetBranch: 'main',
+    goalBudget: 10_000_000,
+  };
 }
 
 function makeTracker() {
@@ -67,7 +87,7 @@ describe('HandoffCoordinator', () => {
       waitForPrompt: vi.fn(async () => true),
     });
     const watchdog = makeWatchdog();
-    const coord = new HandoffCoordinator(tracker, tmux, watchdog);
+    const coord = new HandoffCoordinator(tracker, tmux, watchdog, makeConfig());
 
     const outcome = await coord.handoff(ctx(), 'auto');
 
@@ -98,7 +118,7 @@ describe('HandoffCoordinator', () => {
       waitForPrompt: vi.fn(async () => false), // relaunch: claude never ready
     });
     const watchdog = makeWatchdog();
-    const coord = new HandoffCoordinator(tracker, tmux, watchdog);
+    const coord = new HandoffCoordinator(tracker, tmux, watchdog, makeConfig());
 
     const outcome = await coord.handoff(ctx(), 'auto');
 
@@ -117,7 +137,7 @@ describe('HandoffCoordinator', () => {
       waitForPrompt: vi.fn(async () => true),
     });
     const watchdog = makeWatchdog();
-    const coord = new HandoffCoordinator(tracker, tmux, watchdog);
+    const coord = new HandoffCoordinator(tracker, tmux, watchdog, makeConfig());
 
     await coord.handoff(ctx(), 'auto');
 
@@ -137,7 +157,7 @@ describe('HandoffCoordinator', () => {
       capturePane: vi.fn(async () => 'final-snapshot'),
     });
     const watchdog = makeWatchdog();
-    const coord = new HandoffCoordinator(tracker, tmux, watchdog);
+    const coord = new HandoffCoordinator(tracker, tmux, watchdog, makeConfig());
 
     const outcome = await coord.handoff(ctx({ gen: 2 }), 'terminal', 'budget');
 
@@ -164,7 +184,7 @@ describe('HandoffCoordinator', () => {
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 's' })),
       capturePane: vi.fn(async () => 'snap'),
     });
-    const coord = new HandoffCoordinator(tracker, tmux, makeWatchdog());
+    const coord = new HandoffCoordinator(tracker, tmux, makeWatchdog(), makeConfig());
 
     await coord.handoff(ctx(), 'terminal', 'tokens');
 

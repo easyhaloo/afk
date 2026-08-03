@@ -3,6 +3,7 @@ import { WorktreeManager } from './core/git';
 import { configureStatusline, logger } from './io';
 import { getWorkflowConfig } from './core/config/manager';
 import type { TrackerProvider } from './core/tracker/types';
+import type { WorkflowConfig } from './core/config/manager';
 
 /**
  * QA Runner — event-driven worker for verifying AC on merged code.
@@ -24,12 +25,14 @@ export class QARunner {
   private tmux: TmuxClient;
   private worktree: WorktreeManager;
   private logDir: string;
+  private config: WorkflowConfig;
 
-  constructor(tracker: TrackerProvider) {
+  constructor(tracker: TrackerProvider, config?: WorkflowConfig) {
     this.tracker = tracker;
     this.tmux = new TmuxClient();
     this.worktree = new WorktreeManager();
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
+    this.config = config ?? getWorkflowConfig();
   }
 
   /**
@@ -86,7 +89,7 @@ export class QARunner {
       // ── Step 5: Wait for ac_result ────────────────────────────────────────
       const signal = await this.tmux.waitForSignal(
         session, 'main', 'ac_result', wt.path,
-        getWorkflowConfig().completionTimeout
+        this.config.completionTimeout
       );
       logger.info({ iid, signalReceived: signal !== null, signalType: signal?.type }, 'QA signal received');
 

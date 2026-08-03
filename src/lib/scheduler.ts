@@ -3,6 +3,7 @@ import { WorkflowRunner } from './workflows';
 import { checkIssuePreconditions } from './preconditions';
 import { TIMEOUTS } from './constants';
 import { logger } from './io';
+import { getWorkflowConfig } from './core/config/manager';
 
 export interface TaskData {
   iid: number;
@@ -260,7 +261,7 @@ export class Scheduler {
 
     logger.info({ iid }, 'processing issue');
 
-    const runner = new WorkflowRunner(this.tracker);
+    const runner = new WorkflowRunner(this.tracker, { config: getWorkflowConfig() });
     const sessionName = this.tracker.platform === 'github'
       ? `afk-gh-${iid}`
       : `afk-gl-${iid}`;

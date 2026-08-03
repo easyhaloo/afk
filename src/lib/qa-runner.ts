@@ -1,5 +1,5 @@
 import { TmuxClient } from './core/tmux/tmux';
-import { WorktreeManager } from './core/git/worktree';
+import { WorktreeManager } from './core/git';
 import { configureStatusline, logger } from './io';
 import { TIMEOUTS } from './constants';
 import type { TrackerProvider } from './core/tracker/types';

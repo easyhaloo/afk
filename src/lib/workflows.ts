@@ -2,10 +2,10 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { TrackerProvider, Platform } from './core/tracker/types';
-import { TmuxClient } from './core/tmux/tmux';
-import { WorktreeManager } from './core/git/worktree';
-import { LocalSandboxProvider, createSandboxProvider } from './sandbox';
-import { ClaudeCodeProvider } from './agents/claude-code';
+import { TmuxClient, createTmuxClient } from './core/tmux';
+import { WorktreeManager, createWorktreeManager } from './core/git';
+import { createSandboxProvider } from './sandbox';
+import { createAgentProvider } from './agents';
 import type {
   Sandbox,
   SandboxProvider,
@@ -16,15 +16,14 @@ import type {
   InterruptReason,
 } from './sandbox/types';
 import type { AgentProvider, AgentProviderName, SessionSnapshot } from './agents/types';
-import { requireAgentProvider } from './agents/registry';
 import type { BranchStrategyConfig } from './branches/types';
 import { getTokenUsage, configureStatusline, logger, readSignal, SIGNAL_FILE, clearSignal } from './io';
 import { readLegacySignalResult } from './sandbox/legacy-compat';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
-import { Watchdog } from './workflows/watchdog';
-import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
+import { Watchdog, createWatchdog } from './workflows/watchdog';
+import { HandoffCoordinator, handoffDocPath, createHandoffCoordinator } from './workflows/handoff';
 import { attemptNativeResume } from './workflows/resume';
 import { BudgetManager } from './workflows/budget';
 import type { InitContext } from './workflows/lifecycle';
@@ -275,15 +274,15 @@ export class WorkflowRunner {
 
   constructor(tracker: TrackerProvider, deps?: RunnerDependencies) {
     this.tracker = tracker;
-    this.tmux = deps?.tmux ?? new TmuxClient();
-    this.worktree = new WorktreeManager();
+    this.tmux = deps?.tmux ?? createTmuxClient();
+    this.worktree = createWorktreeManager();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;
-    this.watchdog = deps?.watchdog ?? new Watchdog(this.logDir);
+    this.watchdog = deps?.watchdog ?? createWatchdog(this.logDir);
     this.coordinator = deps?.coordinatorFactory
       ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog })
-      : new HandoffCoordinator(tracker, this.tmux, this.watchdog);
-    this.sandboxProvider = deps?.sandboxProvider ?? new LocalSandboxProvider(this.worktree);
-    this.agentProvider = deps?.agentProvider ?? new ClaudeCodeProvider();
+      : createHandoffCoordinator({ tracker, tmux: this.tmux, watchdog: this.watchdog });
+    this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: this.worktree });
+    this.agentProvider = deps?.agentProvider ?? createAgentProvider(this.agentProviderName);
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
   }
@@ -313,13 +312,16 @@ export class WorkflowRunner {
 
     // Resolve agent provider by name (CLI path). Agent registry must already have
     // the named provider registered (import side-effect or explicit registration).
+    // Skip if constructor already injected one via deps (tests use this path).
     this.agentProviderName = options.agentProvider ?? 'claude-code';
-    try {
-      this.agentProvider = requireAgentProvider(this.agentProviderName);
-    } catch {
-      // Agent not yet registered (e.g., test environment). Fall back to
-      // ClaudeCodeProvider as the default; deps?.agentProvider already handled above.
-      this.agentProvider = new ClaudeCodeProvider();
+    if (!this.agentProvider) {
+      try {
+        this.agentProvider = createAgentProvider(this.agentProviderName);
+      } catch {
+        // Agent not yet registered (e.g., test environment). Fall back to
+        // claude-code; deps?.agentProvider already handled above.
+        this.agentProvider = createAgentProvider('claude-code');
+      }
     }
 
     // Load lifecycle modules

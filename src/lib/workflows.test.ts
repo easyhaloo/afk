@@ -10,6 +10,16 @@ import type { TmuxClient } from './core/tmux/tmux';
 import type { HandoffCoordinator } from './workflows/handoff';
 import type { Sandbox, AgentExecution, AgentStartOptions, ExecutionResult, InterruptReason, CaptureOptions } from './sandbox/types';
 import type { ResumeOptions, SessionSnapshot } from './agents/types';
+import type { AgentProvider } from './agents/types';
+
+/** Minimal fake agent provider — satisfies the interface without real registry lookup. */
+function makeFakeAgentProvider(): AgentProvider {
+  return {
+    name: 'claude-code' as any,
+    capabilities: new Set(['streaming', 'usage', 'resume', 'interactive']),
+    buildCommand: () => ({ argv: ['echo', 'fake'], env: {} }),
+  };
+}
 
 /** Minimal fake tmux: sendGoal is a noop so runPhase never blocks on a real session. */
 function makeTmux(): TmuxClient {
@@ -96,6 +106,7 @@ describe('WorkflowRunner.runPhase routing', () => {
     const runner = new WorkflowRunner(makeTracker(), {
       tmux: makeTmux(),
       coordinatorFactory: () => fakeCoord as unknown as HandoffCoordinator,
+      agentProvider: makeFakeAgentProvider(),
     });
     // Tighten the poll so the first tick lands immediately.
     (runner as unknown as { pollIntervalMs: number }).pollIntervalMs = 5;

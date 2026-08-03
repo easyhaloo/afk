@@ -16,6 +16,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { rm } from 'fs/promises';
 import { WorkflowRunner } from '../src/lib/workflows';
+import type { AgentProvider } from '../src/lib/agents/types';
 
 // Mock child_process.spawn globally for this file so the default
 // ProjectResolverModule (always loaded by loadModules as a core module)
@@ -54,8 +55,13 @@ function makeRunner() {
     addLabel: vi.fn().mockResolvedValue(undefined),
     removeLabel: vi.fn().mockResolvedValue(undefined),
   } as any;
+  const fakeAgentProvider: AgentProvider = {
+    name: 'claude-code' as any,
+    capabilities: new Set(['streaming', 'usage', 'resume', 'interactive']),
+    buildCommand: () => ({ argv: ['echo', 'fake'], env: {} }),
+  } as any;
 
-  const runner = new WorkflowRunner(tracker) as any;
+  const runner = new WorkflowRunner(tracker, { agentProvider: fakeAgentProvider }) as any;
   runner.tmux = {
     capturePane: vi.fn().mockResolvedValue('pane snapshot'),
     killSession: vi.fn().mockResolvedValue(undefined),

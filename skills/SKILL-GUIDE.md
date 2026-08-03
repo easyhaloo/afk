@@ -52,7 +52,6 @@ metadata:                           # optional, arbitrary kv
 # <Skill Name>
 
 **Goal:** one sentence — input → output contract.
-**Mode:** HITL | AFK | Auto   (or appropriate mode for the skill)
 
 ## When to use
 

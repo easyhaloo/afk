@@ -27,6 +27,7 @@ import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
 import { Watchdog } from './workflows/watchdog';
 import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
 import { attemptNativeResume } from './workflows/resume';
+import { BudgetManager } from './workflows/budget';
 import type { InitContext } from './workflows/lifecycle';
 import { defaultSessionStoreChain } from './sessions/chain';
 import { planFor } from './templates/registry';
@@ -218,9 +219,7 @@ interface StepRunCtx {
   hardTimeoutMs: number;
   completionTimeoutMs: number;
   contextHighTokens: number;
-  maxHandoffs: number;
-  maxTotalTokens: number;
-  budget: { used: number; tokens: number };
+  budget: BudgetManager;
   stepIndex: number;
 }
 
@@ -481,8 +480,6 @@ Session was interrupted before completion.
       hardTimeoutMs: effectiveTimeout,
       completionTimeoutMs: ctx.completionTimeoutMs,
       contextHighTokens: ctx.contextHighTokens,
-      maxHandoffs: ctx.maxHandoffs,
-      maxTotalTokens: ctx.maxTotalTokens,
       budget: ctx.budget,
       goalBase,
       signalType,
@@ -619,7 +616,7 @@ Session was interrupted before completion.
     // Completion is reported via ExecutionResult (structured output); old
     // worktrees that still write the signal file are still readable as a
     // fallback — see core/io/signal.ts.
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(maxHandoffs, maxTotalTokens);
     const stepResults: Record<string, StepResult> = {};
 
     if (template) {
@@ -643,7 +640,7 @@ Session was interrupted before completion.
               iid, session: `${session}-${step.id}-${idx}`, baseSession: session,
               primaryWtPath: wt.path, primaryBranch: targetBranch,
               baseBranch, hardTimeoutMs, completionTimeoutMs,
-              contextHighTokens, maxHandoffs, maxTotalTokens, budget, stepIndex: idx,
+              contextHighTokens, budget, stepIndex: idx,
             }, stepResults),
           ),
         );
@@ -671,7 +668,7 @@ Session was interrupted before completion.
         const completed = await this.runPhase({
           iid, session, wtPath: wt.path,
           hardTimeoutMs, completionTimeoutMs, contextHighTokens,
-          budget, maxHandoffs, maxTotalTokens,
+          budget,
           goalBase: phase.goalBase, signalType: phase.signalType,
         });
         logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify', completed }, 'phase end');
@@ -808,9 +805,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     hardTimeoutMs: number;
     completionTimeoutMs: number;
     contextHighTokens: number;
-    maxHandoffs: number;
-    maxTotalTokens: number;
-    budget: { used: number; tokens: number };
+    budget: BudgetManager;
     goalBase: string;
     signalType: 'goal_complete' | 'ac_result';
   }): Promise<boolean> {
@@ -868,12 +863,8 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
             tokens: result.usage?.totalTokens ?? 0,
           };
 
-          if (p.budget.used >= p.maxHandoffs) {
-            await this.coordinator.handoff(hctx, 'terminal', 'budget');
-            return false;
-          }
-          if (p.budget.tokens + hctx.tokens >= p.maxTotalTokens) {
-            await this.coordinator.handoff(hctx, 'terminal', 'tokens');
+          if (p.budget.isExhausted(hctx.tokens)) {
+            await this.coordinator.handoff(hctx, 'terminal', p.budget.exhaustionReason(hctx.tokens)!);
             return false;
           }
 
@@ -932,8 +923,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
           // After it returns, the loop continues and sends the continued goal in the next iteration.
           // This mirrors the original behavior exactly.
           if ((await this.coordinator.handoff(hctx, 'auto')) === 'continued') {
-            p.budget.used++;
-            p.budget.tokens += hctx.tokens;
+            p.budget.record(hctx.tokens);
             logger.info({ iid: p.iid, round, generation: p.budget.used + 1 }, 'handoff continued; looping to send continued goal');
             continue;
           }

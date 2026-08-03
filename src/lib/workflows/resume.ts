@@ -15,6 +15,7 @@ import type { AgentProvider, SessionSnapshot } from '../agents/types';
 import type { Sandbox } from '../sandbox/types';
 import type { SessionStoreChain } from '../sessions/types';
 import { logger } from '../io';
+import type { BudgetManager } from './budget';
 
 export interface ResumeContext {
   iid: number;
@@ -51,7 +52,7 @@ export type ResumeOutcome =
  */
 export async function attemptNativeResume(
   ctx: ResumeContext,
-  budget: { used: number; tokens: number },
+  budget: BudgetManager,
   agentProvider: AgentProvider,
   sandbox: Sandbox,
   chainFactory: () => SessionStoreChain,
@@ -107,8 +108,7 @@ export async function attemptNativeResume(
   }
 
   // Budget accounting is applied here (once per resume round), not by the caller.
-  budget.used++;
-  budget.tokens += ctx.triggerTokens;
+  budget.record(ctx.triggerTokens);
 
   let resumeResult: import('../sandbox/types').ExecutionResult;
   try {

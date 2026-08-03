@@ -21,6 +21,7 @@ import type { AgentProvider, AgentExecution, ExecutionResult, SessionSnapshot } 
 import type { Sandbox } from '../src/lib/sandbox/types';
 import type { SessionStoreChain } from '../src/lib/sessions/types';
 import { attemptNativeResume } from '../src/lib/workflows/resume';
+import { BudgetManager } from '../src/lib/workflows/budget';
 
 function makeMockAgentProvider(withResume = true): AgentProvider {
   const capabilities = new Set<string>(withResume ? ['resume', 'streaming'] : ['streaming']);
@@ -81,7 +82,7 @@ describe('attemptNativeResume', () => {
     const provider = makeMockAgentProvider(true);
     const { sandbox, execution } = makeMockSandbox();
     const chain = makeMockChain({} as SessionSnapshot);
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(10, 1_000_000);
     const captureSession = vi.fn().mockResolvedValue(undefined);
 
     (execution.waitForResult as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -106,7 +107,7 @@ describe('attemptNativeResume', () => {
     const provider = makeMockAgentProvider(true);
     const { sandbox, execution } = makeMockSandbox();
     const chain = makeMockChain({} as SessionSnapshot);
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(10, 1_000_000);
     const captureSession = vi.fn().mockResolvedValue(undefined);
 
     (execution.waitForResult as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -135,7 +136,7 @@ describe('attemptNativeResume', () => {
     const provider = makeMockAgentProvider(false); // no 'resume' capability
     const { sandbox } = makeMockSandbox();
     const chain = makeMockChain({} as SessionSnapshot);
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(10, 1_000_000);
     const captureSession = vi.fn().mockResolvedValue(undefined);
 
     const result = await attemptNativeResume(
@@ -156,7 +157,7 @@ describe('attemptNativeResume', () => {
     const provider = makeMockAgentProvider(true);
     const { sandbox } = makeMockSandbox();
     const chain = makeMockChain(null); // no snapshot
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(10, 1_000_000);
     const captureSession = vi.fn().mockResolvedValue(undefined);
 
     const result = await attemptNativeResume(
@@ -178,7 +179,7 @@ describe('attemptNativeResume', () => {
     (provider.restoreSession as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('restore failed'));
     const { sandbox } = makeMockSandbox();
     const chain = makeMockChain({} as SessionSnapshot);
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(10, 1_000_000);
     const captureSession = vi.fn().mockResolvedValue(undefined);
 
     const result = await attemptNativeResume(
@@ -199,7 +200,7 @@ describe('attemptNativeResume', () => {
     const { sandbox } = makeMockSandbox();
     (sandbox.startAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('start failed'));
     const chain = makeMockChain({} as SessionSnapshot);
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(10, 1_000_000);
     const captureSession = vi.fn().mockResolvedValue(undefined);
 
     const result = await attemptNativeResume(
@@ -218,7 +219,7 @@ describe('attemptNativeResume', () => {
     const provider = makeMockAgentProvider(true);
     const { sandbox, execution } = makeMockSandbox();
     const chain = makeMockChain({} as SessionSnapshot);
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(10, 1_000_000);
     const captureSession = vi.fn().mockResolvedValue(undefined);
 
     (execution.waitForResult as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('timeout'));
@@ -239,7 +240,7 @@ describe('attemptNativeResume', () => {
     const provider = makeMockAgentProvider(true);
     const { sandbox, execution } = makeMockSandbox();
     const chain = makeMockChain({} as SessionSnapshot);
-    const budget = { used: 0, tokens: 0 };
+    const budget = new BudgetManager(10, 1_000_000);
     const captureSession = vi.fn().mockResolvedValue(undefined);
 
     // First resumed execution: context_high

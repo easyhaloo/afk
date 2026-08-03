@@ -93,7 +93,7 @@ parallel execution to improve throughput:
 
 ### When to parallelize
 
-- Multiple files that touch different concerns (e.g., add API route + add
+- Multiple files that touch different concerns (e.g., add API route +
   corresponding unit test + update types)
 - Frontend and backend changes that don't depend on each other
 - Multiple independent features in the same PR
@@ -101,17 +101,27 @@ parallel execution to improve throughput:
 
 ### How to parallelize
 
-Use **Agent** tool to farm out independent work chunks:
-```
-Agent("Implement the auth middleware for the API route", {label: "auth-middleware"})
-Agent("Write unit tests for the auth middleware", {label: "auth-tests", blockedBy: ["auth-middleware"]})
-Agent("Update the OpenAPI types for the new endpoint", {label: "types-update"})
-```
+Fan out independent work to subagents or parallel execution primitives:
 
-Use **TaskCreate / TaskUpdate** to track progress:
-- Create one task per parallel work item
-- Set `blockedBy` on dependent tasks
-- Mark `in_progress` when starting, `completed` when done
+1. **Identify independent items** — list work that has no data/control
+   dependency on each other
+2. **Assign each item to a separate execution context** — workers run
+   concurrently, each with a focused scope
+3. **Track dependencies** — items with ordering constraints get explicit
+   `blockedBy` / "after X" annotations; parallel items have none
+4. **Reassemble results** — merge outputs after all workers complete
+
+```
+# Pattern: independent work items
+Item A ──┐
+Item B ──┼──► [parallel execution] ──► merged result
+Item C ──┘
+
+# Pattern: items with dependencies
+Item A ──► Item B ──► Item C    (sequential chain)
+Item A ──► Item B              (A unblocked, B blocked by A)
+         Item C ──► Item D     (C unblocked, parallel to B)
+```
 
 ### When NOT to parallelize
 

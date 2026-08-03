@@ -51,6 +51,8 @@ An interview has no natural stopping point unless you impose one:
 Note what feature/epic this interview is for. Read the linked
 epic/issue title if one exists — use it as the interview anchor.
 
+**Output:** topic confirmed.
+
 ### Step 2 — Interview rounds (interactive, HITL)
 
 Use `AskQuestion` with structured `options`. Apply multi-select when
@@ -81,39 +83,37 @@ mutually exclusive. Options must not exceed 4.
 if", "who decides when", "what does failure look like" — until the
 answer space is genuinely exhausted.
 
+**Output:** all core topics covered with specific falsifiable answers.
+
 ### Step 2.5 — Bounded Context Discovery
 
 Keep a running list of domain terms and flag any conflicts — these go
 into `CONTEXT.md`.
 
-- Same term, different meanings across parts of the system → context boundary
-- Different consistency requirements → different aggregates
-- Different teams own different parts → context boundary
+**Output:** domain term list with conflict flags.
 
 ### Step 3 — Draft summary (show only, NOT written)
 
 Show the full draft `CONTEXT.md` — Problem, Users, Success Criteria,
 Non-goals, Constraints, Open Questions. Nothing is written to disk yet.
 
+**Output:** draft CONTEXT.md shown.
+
 ### Step 4 — Gate: explicit user confirmation (AskQuestion)
 
-Offer exactly four outcomes:
+Offer exactly four outcomes: Approve, Revise, Drill deeper, Add open question.
 
-1. **Approve** → write `CONTEXT.md`
-2. **Revise specific sections** → return to Step 3 with updates
-3. **Drill deeper on a topic** → return to Step 2
-4. **Add an open question** → record gap, then write with the gap labeled
+**Output:** user decision.
 
 ### Step 5 — Write to /tmp/ (only after Step 4 confirmation)
 
-Write directly to `/tmp/grill-me-context-<YYYYMMDD-HHMMSS>.md` using
-Bash (`cat > /tmp/... << 'EOF'` or `tee`). **Do not use the Write tool**
-— the Write tool requires reading the file first even for new paths,
-which is incompatible with `/tmp/` generation.
-
+Write to `/tmp/grill-me-context-<YYYYMMDD-HHMMSS>.md` using Bash (cat or tee).
+Do NOT use the Write tool — it requires reading the file first even for new paths.
 Never write to the repo working tree.
 
-## Anti-patterns
+**Output:** CONTEXT.md written to /tmp/.
+
+## Caveats
 
 - MUST NOT assume an unstated answer — ask.
 - MUST NOT write `CONTEXT.md` to the repo working tree — only to `/tmp/`.

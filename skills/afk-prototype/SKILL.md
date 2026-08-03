@@ -16,36 +16,37 @@ disallowed-tools: >-
 
 ## product — want to see before building
 
-**When:** requirements are still vague; visual confirmation before docs/code.
-
-**Output:** `docs/prototype/<slug>/` containing:
-- `index.html` (+ optional `page-*.html`)
-- `README.md`
+**When:** requirements vague; visual confirmation before docs/code.
+**Output:** `docs/prototype/<slug>/` containing index.html and README.md.
 
 **Steps:**
 
 1. Ask: single page or multi-page flow? Style reference?
-2. Generate HTML (plain / React+Tailwind / Vue — match the ask)
-3. `open` the file or `npx serve` dir → browser auto-opens
-4. Human reviews → feedback → revise → re-open
-5. Repeat until confirmed, then capture screenshot(s)
+2. Generate HTML (plain / React+Tailwind / Vue — match the ask).
+3. Open file or serve dir → browser auto-opens.
+4. Human reviews → feedback → revise → re-open.
+5. Repeat until confirmed, then capture screenshots.
 
 ---
 
 ## spike — prove technical risk
 
 **When:** requirements confirmed, tech approach unknown.
-
 **Precondition:** approved `CONTEXT.md` exists.
-
 **Output:** draft MR/PR + findings.
 
 **Steps:**
 
-1. `git checkout -b spike/<slug>`
-2. Build smallest end-to-end slice (no polish)
-3. `afk mr create "Spike: <desc>" --draft`
-4. Report findings: works / doesn't / needs X
-5. Gate: human decides when answered
+1. Create spike branch.
+2. Build smallest end-to-end slice (no polish).
+3. Create draft MR.
+4. Report findings: works / doesn't / needs X.
+5. Gate: human decides when answered.
 
 **Disposal:** delete branch after findings captured.
+
+## Caveats
+
+- MUST NOT proceed without user confirmation at each iteration (product).
+- MUST NOT skip the approved CONTEXT.md precondition (spike).
+- MUST NOT leave spike branch after findings captured.

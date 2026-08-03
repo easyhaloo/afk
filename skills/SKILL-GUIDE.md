@@ -68,6 +68,38 @@ Concrete failure modes — specific, not vague.
 
 ---
 
+## Writing for Efficiency
+
+**Trust model priors.** Don't explain what the model already knows.
+Write "Reverse the array" not "Use a for loop to iterate backwards."
+
+**Fewer steps = fewer failure points.** Every step is a failure opportunity.
+Combine atomic actions into a single step.
+
+**Parallel by default.** If two concerns don't share state, they can run
+concurrently. Explicitly mark sequential dependency only when required.
+
+**Explicit output location.** Always state where output goes — `/tmp/` for
+transient, `skills/my-skill/` for durable. Ambiguity causes errors.
+
+---
+
+## Writing for Error Resistance
+
+**Fail-closed on unclear state.** If a precondition isn't met, stop.
+Don't guess or assume.
+
+**Never skip gates.** Human confirmation points exist for a reason.
+Removing them creates silent failures.
+
+**No ambiguous language.** Avoid "consider", "maybe", "if appropriate",
+"as needed". Either the step is required or it isn't.
+
+**Concrete anti-patterns.** "MUST NOT write to repo" is actionable.
+"Be careful with file writes" is useless.
+
+---
+
 ## Quality Checklist
 
 - [ ] `name` matches directory, lowercase, no consecutive hyphens

@@ -53,10 +53,6 @@ metadata:                           # optional, arbitrary kv
 
 **Goal:** one sentence — input → output contract.
 
-## When to use
-
-Precise trigger conditions. "When X, not when Y."
-
 ## Steps
 
 Numbered, imperative. Each step has a clear precondition and output.

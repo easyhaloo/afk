@@ -13,10 +13,13 @@ export interface WorkflowConfig {
   agentDefault: string;
   tmuxSession: string;
   completionTimeout: number;
+  workflowHardTimeout: number;
   completionPoll: number;
   idleTimeout: number;
   acCheckTimeout: number;
   contextThreshold: number;
+  promptTimeout: number;
+  handoffTimeout: number;
   maxRetries: number;
   targetBranch: string;
   trackerTargetBranch: string;
@@ -46,10 +49,13 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   agentDefault: 'claude',
   tmuxSession: 'afk',
   completionTimeout: 7200 * 1000,
+  workflowHardTimeout: 7200 * 1000,
   completionPoll: 5,
   idleTimeout: 1800 * 1000,
   acCheckTimeout: 180 * 1000,
-  contextThreshold: 220_000,
+  contextThreshold: 100_000,
+  promptTimeout: 30_000,
+  handoffTimeout: 60_000,
   maxRetries: 2,
   targetBranch: 'main',
   trackerTargetBranch: 'main',
@@ -94,10 +100,13 @@ function loadWorkflowConfig(): WorkflowConfig {
     agentDefault: process.env.AFK_AGENT_DEFAULT || DEFAULT_WORKFLOW.agentDefault,
     tmuxSession: process.env.AFK_TMUX_SESSION || DEFAULT_WORKFLOW.tmuxSession,
     completionTimeout: parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW.completionTimeout),
+    workflowHardTimeout: parseEnvMs('AFK_WORKFLOW_HARD_TIMEOUT', DEFAULT_WORKFLOW.workflowHardTimeout),
     completionPoll: parseSeconds('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll),
     idleTimeout: parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW.idleTimeout),
     acCheckTimeout: parseEnvMs('AFK_AC_CHECK_TIMEOUT', DEFAULT_WORKFLOW.acCheckTimeout),
     contextThreshold: parseIntEnv('AFK_CONTEXT_THRESHOLD', DEFAULT_WORKFLOW.contextThreshold),
+    promptTimeout: parseEnvMs('AFK_PROMPT_TIMEOUT', DEFAULT_WORKFLOW.promptTimeout),
+    handoffTimeout: parseEnvMs('AFK_HANDOFF_TIMEOUT', DEFAULT_WORKFLOW.handoffTimeout),
     maxRetries: parseIntEnv('AFK_MAX_RETRIES', DEFAULT_WORKFLOW.maxRetries),
     targetBranch: process.env.AFK_TARGET_BRANCH || DEFAULT_WORKFLOW.targetBranch,
     trackerTargetBranch: process.env.AFK_TRACKER_TARGET_BRANCH || DEFAULT_WORKFLOW.trackerTargetBranch,

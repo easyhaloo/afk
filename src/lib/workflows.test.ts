@@ -3,10 +3,23 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { WorkflowRunner } from './workflows';
+import { BudgetManager } from './workflows/budget';
 import { writeSignal } from './io';
 import type { TrackerProvider } from './core/tracker/types';
 import type { TmuxClient } from './core/tmux/tmux';
 import type { HandoffCoordinator } from './workflows/handoff';
+import type { Sandbox, AgentExecution, AgentStartOptions, ExecutionResult, InterruptReason, CaptureOptions } from './sandbox/types';
+import type { ResumeOptions, SessionSnapshot } from './agents/types';
+import type { AgentProvider } from './agents/types';
+
+/** Minimal fake agent provider — satisfies the interface without real registry lookup. */
+function makeFakeAgentProvider(): AgentProvider {
+  return {
+    name: 'claude-code' as any,
+    capabilities: new Set(['streaming', 'usage', 'resume', 'interactive']),
+    buildCommand: () => ({ argv: ['echo', 'fake'], env: {} }),
+  };
+}
 
 /** Minimal fake tmux: sendGoal is a noop so runPhase never blocks on a real session. */
 function makeTmux(): TmuxClient {
@@ -14,6 +27,7 @@ function makeTmux(): TmuxClient {
     sendGoal: vi.fn(async () => {}),
     killSession: vi.fn(async () => {}),
     closeSession: vi.fn(async () => {}),
+    capturePane: vi.fn(async () => 'fake pane snapshot'),
   } as unknown as TmuxClient;
 }
 
@@ -25,6 +39,39 @@ function makeTracker(): TrackerProvider {
     addLabel: vi.fn(async () => {}),
     removeLabel: vi.fn(async () => {}),
   } as unknown as TrackerProvider;
+}
+
+/**
+ * Stateful fake execution for runPhase routing tests.
+ * Returns results in the order given; each `waitForResult()` consumes the next one.
+ * This replaces the legacy signal-poll path so tests don't depend on timing.
+ */
+function makeFakeExecution(results: ExecutionResult[]): AgentExecution {
+  let i = 0;
+  return {
+    id: 'fake-exec',
+    sessionId: 'afk-gh-42',
+    async waitForEvent() { return null; },
+    async waitForResult() {
+      const r = results[i++] ?? results[results.length - 1];
+      return r;
+    },
+    async interrupt(_reason: InterruptReason) {},
+    async kill() {},
+    async captureOutput(_options?: CaptureOptions) { return ''; },
+    async captureSession(): Promise<SessionSnapshot | undefined> { return undefined; },
+    async resume(_options: ResumeOptions): Promise<AgentExecution> { throw new Error('not supported'); },
+  };
+}
+
+function makeFakeSandbox(exec: AgentExecution): Sandbox {
+  return {
+    id: 'fake-sandbox',
+    worktreePath: '',
+    workspacePath: '',
+    async startAgent(_options: AgentStartOptions) { return exec; },
+    async close() {},
+  };
 }
 
 /** Write a high-token status file so waitForPhaseSignal sees context_high. */
@@ -59,6 +106,7 @@ describe('WorkflowRunner.runPhase routing', () => {
     const runner = new WorkflowRunner(makeTracker(), {
       tmux: makeTmux(),
       coordinatorFactory: () => fakeCoord as unknown as HandoffCoordinator,
+      agentProvider: makeFakeAgentProvider(),
     });
     // Tighten the poll so the first tick lands immediately.
     (runner as unknown as { pollIntervalMs: number }).pollIntervalMs = 5;
@@ -76,9 +124,7 @@ describe('WorkflowRunner.runPhase routing', () => {
       hardTimeoutMs: 60_000,
       completionTimeoutMs: 5_000,
       contextHighTokens: 100_000,
-      budget: { used: 0, tokens: 0 },
-      maxHandoffs: 3,
-      maxTotalTokens: 500_000,
+      budget: new BudgetManager(3, 500_000),
       goalBase: '实现 issue #42',
       signalType: 'goal_complete',
       ...over,
@@ -93,6 +139,12 @@ describe('WorkflowRunner.runPhase routing', () => {
 
     const coord = { handoff: vi.fn(async () => 'terminated') };
     const runner = runnerWith(coord);
+    // Inject a fake sandbox that returns `completed` on first waitForResult()
+    // — exercises the same routing the real signal-poll path would, without
+    // timing flake from LegacyExecutionWrapper.
+    runner.setSandbox(makeFakeSandbox(makeFakeExecution([
+      { version: 1, runId: 'r1', status: 'completed', provider: 'local', commits: [] },
+    ])));
 
     const completed = await runPhase(runner);
 
@@ -105,8 +157,11 @@ describe('WorkflowRunner.runPhase routing', () => {
     writeHighTokens(wtPath); // context_high, no completion signal -> handoff outcome
     const coord = { handoff: vi.fn(async () => 'terminated') };
     const runner = runnerWith(coord);
+    runner.setSandbox(makeFakeSandbox(makeFakeExecution([
+      { version: 1, runId: 'r1', status: 'context_high', provider: 'local', usage: { inputTokens: 150_000, outputTokens: 0, totalTokens: 150_000 }, commits: [] },
+    ])));
 
-    const completed = await runPhase(runner, { budget: { used: 3, tokens: 0 } }); // used >= maxHandoffs
+    const completed = await runPhase(runner, { budget: BudgetManager.forTest(3, 0, 3, 500_000) }); // used >= maxHandoffs
 
     expect(completed).toBe(false);
     expect(coord.handoff).toHaveBeenCalledTimes(1);
@@ -120,10 +175,13 @@ describe('WorkflowRunner.runPhase routing', () => {
     writeHighTokens(wtPath);
     const coord = { handoff: vi.fn(async () => 'terminated') };
     const runner = runnerWith(coord);
+    runner.setSandbox(makeFakeSandbox(makeFakeExecution([
+      { version: 1, runId: 'r1', status: 'context_high', provider: 'local', usage: { inputTokens: 150_000, outputTokens: 0, totalTokens: 150_000 }, commits: [] },
+    ])));
 
     // used(1) < maxHandoffs(3), but tokens(400k) + outcome(150k) >= maxTotalTokens(500k).
     const completed = await runPhase(runner, {
-      budget: { used: 1, tokens: 400_000 },
+      budget: BudgetManager.forTest(1, 400_000, 3, 500_000),
     });
 
     expect(completed).toBe(false);
@@ -148,6 +206,11 @@ describe('WorkflowRunner.runPhase routing', () => {
       }),
     };
     const runner = runnerWith(coord);
+    // round 1: context_high; round 2: completed (coordinator clears tokens + writes signal).
+    runner.setSandbox(makeFakeSandbox(makeFakeExecution([
+      { version: 1, runId: 'r1', status: 'context_high', provider: 'local', usage: { inputTokens: 150_000, outputTokens: 0, totalTokens: 150_000 }, commits: [] },
+      { version: 1, runId: 'r2', status: 'completed', provider: 'local', commits: [] },
+    ])));
 
     const completed = await runPhase(runner);
 

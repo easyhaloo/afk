@@ -1,191 +1,191 @@
-# 快速开始
+# Getting Started
 
-5 分钟上手 AFK CLI。
+Get up and running with AFK CLI in 5 minutes.
 
-## 安装
+## Installation
 
 ```bash
-# 克隆项目
+# Clone the project
 git clone https://github.com/easyhaloo/afk.git
 cd afk
 
-# 安装依赖
+# Install dependencies
 npm install
 
-# 构建
+# Build
 npm run build
 
-# 全局安装
+# Install globally
 npm link
 ```
 
-验证安装：
+Verify the installation:
 ```bash
 afk --version
 afk --help
 ```
 
-## 配置
+## Configuration
 
-### GitLab 项目
+### GitLab Project
 
-创建配置文件 `~/.config/afk/.env`：
+Create a config file at `~/.config/afk/.env`:
 
 ```bash
-# GitLab 配置
+# GitLab configuration
 GITLAB_TOKEN=glpat-xxxxxxxxxxxxx
-GITLAB_BASE_URL=https://gitlab.company.com/api/v4  # 可选，默认 gitlab.com
+GITLAB_BASE_URL=https://gitlab.company.com/api/v4  # Optional, defaults to gitlab.com
 
-# 或使用 git config（推荐）
+# Or use git config (recommended)
 cd /path/to/your/project
 git config afk.platform gitlab
 git config afk.project "mygroup/myproject"
 ```
 
-### GitHub 项目
+### GitHub Project
 
 ```bash
-# GitHub 配置
+# GitHub configuration
 GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
 GITHUB_OWNER=your-org
 GITHUB_REPO=your-repo
 
-# 或使用 git config
+# Or use git config
 cd /path/to/your/project
 git config afk.platform github
 git config afk.owner "your-org"
 git config afk.repo "your-repo"
 ```
 
-### 平台自动检测
+### Platform Auto-Detection
 
-AFK 会自动检测平台：
-1. 检查 `TRACKER_PLATFORM` 环境变量
-2. 分析 git remote URL
-3. 检查项目配置文件（.gitlab-ci.yml 或 .github/workflows/）
+AFK automatically detects the platform:
+1. Checks the `TRACKER_PLATFORM` environment variable
+2. Analyzes the git remote URL
+3. Checks project config files (.gitlab-ci.yml or .github/workflows/)
 
-## 基本使用
+## Basic Usage
 
-### Issue 操作
+### Issue Operations
 
 ```bash
-# 查看 issue 详情
+# View issue details
 afk issue get 123
 
-# 列出 issues
+# List issues
 afk issue list --label "stage::ready-for-implement"
 
-# 创建 issue
+# Create an issue
 afk issue create "Add user login" --label "feature"
 
-# 添加评论
+# Add a comment
 afk issue comment 123 "Working on this"
 ```
 
-### 跨项目操作
+### Cross-Project Operations
 
-`--project <repo>` flag 让 `afk issue` 命令指向 cwd 以外的项目。同 repo 可省略前缀，跨 repo 时用 `<project>:<iid>` 语法链接：
+The `--project <repo>` flag lets `afk issue` commands target projects outside of cwd. For the same repo you can omit the prefix; for cross-repo use the `<project>:<iid>` syntax:
 
 ```bash
-# 在 repo B 目录里操作 repo A 的 issue
+# Operate on repo A's issue from within repo B's directory
 afk issue get 42 --project group/repo-a
 
-# 跨项目 link（从 B 链接到 A 的 #42）
+# Cross-project link (link to A's #42 from B)
 afk issue link 100 group/repo-a:42 --project group/repo-b
 
-# 一键启动跨项目工作流（ProjectResolverModule 会先 chdir 到目标 repo）
+# One-click cross-project workflow (ProjectResolverModule will chdir to target repo first)
 afk issue run 42 --project group/repo-a
 ```
 
-无需配置 `GITLAB_PROJECT_ID` 等环境变量；项目解析走 `git remote > --project > 自动检测` 优先级。
+No need to configure `GITLAB_PROJECT_ID` or other environment variables; project resolution follows the priority: `git remote > --project > auto-detection`.
 
-### MR/PR 操作
+### MR/PR Operations
 
 ```bash
-# 创建 MR/PR
+# Create an MR/PR
 afk mr create "feat: add login" --source feat/login --target main
 
-# 查看 MR/PR
+# View an MR/PR
 afk mr get 456
 
-# 合并 MR/PR
+# Merge an MR/PR
 afk mr merge 456 --delete-source-branch
 
-# 批准 MR/PR
+# Approve an MR/PR
 afk mr approve 456
 ```
 
-### 完整工作流示例
+### Full Workflow Example
 
-从 issue 到合并的完整流程：
+End-to-end flow from issue to merge:
 
 ```bash
-# 1. 发现待实现的 issue
+# 1. Find issues ready for implementation
 afk issue list --label "stage::ready-for-implement"
 
-# 2. 启动工作流（创建 worktree + tmux session）
+# 2. Start a workflow (creates worktree + tmux session)
 afk workflow run --iid 123 --base-branch main
 
-# 3. 在 tmux session 中，Claude 会自动执行 /afk-implement
-# 监控进度（可选）
+# 3. In the tmux session, Claude will automatically run /afk-implement
+# Monitor progress (optional)
 tmux attach -t afk-issue-123
 
-# 4. 工作流完成后自动创建 MR/PR 并清理 worktree
+# 4. Workflow auto-creates MR/PR and cleans up worktree on completion
 ```
 
-## 自动化调度
+## Automated Scheduling
 
-让 AFK 自动处理所有就绪的 issues：
+Let AFK automatically handle all ready issues:
 
 ```bash
-# 启动调度器
+# Start the scheduler
 afk scheduler start --max-concurrent 3 --poll-interval 60
 
-# 调度器会自动：
-# - 每 60 秒轮询新的 ready issues
-# - 最多同时处理 3 个 issues
-# - 验证前置条件（AC、base label、无阻塞）
-# - 创建 worktree 和 tmux session
-# - 监控完成并创建 MR/PR
+# The scheduler will automatically:
+# - Poll for new ready issues every 60 seconds
+# - Process up to 3 issues concurrently
+# - Verify preconditions (AC, base label, no blockers)
+# - Create worktrees and tmux sessions
+# - Monitor completion and create MR/PR
 ```
 
-## 下一步
+## Next Steps
 
-- **架构设计** → [ARCHITECTURE.md](docs/ARCHITECTURE.md) — 了解跨平台抽象层
-- **工作流详解** → [WORKFLOWS.md](docs/WORKFLOWS.md) — 深入理解三种工作流
-- **Skills 系统** → [SKILLS.md](docs/SKILLS.md) — 学习 afk skills 的设计和使用
+- **Architecture Design** → [ARCHITECTURE.md](docs/ARCHITECTURE.md) — Understand the cross-platform abstraction layer
+- **Workflow Details** → [WORKFLOWS.md](docs/WORKFLOWS.md) — Deep dive into the three workflow types
+- **Skills System** → [SKILLS.md](docs/SKILLS.md) — Learn the design and usage of afk skills
 
-## 常见问题
+## Troubleshooting
 
-### 命令找不到
+### Command Not Found
 
 ```bash
-# 重新链接
+# Re-link
 cd /path/to/afk
 npm link
 
-# 或直接运行
+# Or run directly
 node /path/to/afk/dist/index.js --help
 ```
 
-### 平台检测错误
+### Platform Detection Error
 
 ```bash
-# 手动指定平台
-export TRACKER_PLATFORM=gitlab  # 或 github
+# Manually specify the platform
+export TRACKER_PLATFORM=gitlab  # or github
 
-# 或在 git config 中设置
+# Or set in git config
 git config afk.platform gitlab
 ```
 
-### API 权限错误
+### API Permission Error
 
-确保 token 有足够权限：
+Make sure your token has sufficient permissions:
 - **GitLab**: api, read_api, write_repository
 - **GitHub**: repo, workflow
 
-## 需要帮助？
+## Need Help?
 
-- 查看完整文档：`docs/`
-- 查看命令帮助：`afk <command> --help`
-- 提交 Issue：https://github.com/easyhaloo/afk/issues
+- Full documentation: `docs/`
+- Command help: `afk <command> --help`
+- Submit an Issue: https://github.com/easyhaloo/afk/issues

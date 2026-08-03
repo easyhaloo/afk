@@ -1,6 +1,6 @@
 import { Task } from '../types/board';
 import { TmuxClient } from './core/tmux/tmux';
-import { WorktreeManager } from './core/git/worktree';
+import { WorktreeManager } from './core/git';
 import type { Platform } from './core/tracker/types.js';
 
 export class TaskService {

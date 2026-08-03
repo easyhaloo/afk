@@ -24,6 +24,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { WorkflowRunner } from '../src/lib/workflows';
 import { SessionStoreChain, SessionNotFoundError } from '../src/lib/sessions/chain';
+import type { AgentProvider } from '../src/lib/agents/types';
 
 const tmpDirs: string[] = [];
 
@@ -117,12 +118,18 @@ function makeRunner(wtPath: string) {
     closeSession: vi.fn().mockResolvedValue(undefined),
   };
   const watchdog = { arm: vi.fn(), disarm: vi.fn() };
+  const agentProvider: AgentProvider = {
+    name: 'claude-code' as any,
+    capabilities: new Set(['streaming', 'usage', 'resume', 'interactive']),
+    buildCommand: () => ({ argv: ['echo', 'fake'], env: {} }),
+  } as any;
 
   // sessionStoreChain override: NoopSessionStoreChain disables Phase 4
   // native-resume so these tests exercise the coordinator path.
   const runner = new WorkflowRunner(tracker, {
     tmux: tmux as any,
     watchdog: watchdog as any,
+    agentProvider,
     sessionStoreChain: () => new NoopSessionStoreChain(),
   }) as any;
   runner.pollIntervalMs = 10;

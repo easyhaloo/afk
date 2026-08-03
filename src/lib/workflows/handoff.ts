@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { TrackerProvider } from '../core/tracker/types';
-import { TmuxClient } from '../core/tmux/tmux';
+import { TmuxClient } from '../core/tmux';
 import { clearSignal, logger, STATUS_FILENAME } from '../io';
 import { TIMEOUTS } from '../constants';
 import { Watchdog } from './watchdog';
@@ -294,4 +294,16 @@ export class HandoffCoordinator {
     await this.tmux.killSession(session).catch(() => { /* already dead */ });
     await this.tmux.closeSession();
   }
+}
+
+/**
+ * Factory: create a HandoffCoordinator with its required dependencies.
+ * Tests may inject a fake via RunnerDependencies.coordinatorFactory instead.
+ */
+export function createHandoffCoordinator(deps: {
+  tracker: TrackerProvider;
+  tmux: TmuxClient;
+  watchdog: Watchdog;
+}): HandoffCoordinator {
+  return new HandoffCoordinator(deps.tracker, deps.tmux, deps.watchdog);
 }

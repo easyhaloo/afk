@@ -15,7 +15,7 @@ export * from './providers';
 import { LocalSandboxProvider } from './providers/local';
 import { ContainerSandboxProvider, DockerContainerProvider, PodmanContainerProvider } from './providers';
 import type { SandboxProviderName } from './types';
-import type { WorktreeManager } from '../core/git/worktree';
+import type { WorktreeManager } from '../core/git';
 
 /**
  * Factory: resolve a SandboxProviderName to a SandboxProvider instance.

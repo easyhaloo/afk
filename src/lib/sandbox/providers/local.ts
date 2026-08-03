@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { WorktreeManager } from '../../core/git/worktree';
+import { WorktreeManager } from '../../core/git';
 import { TmuxClient } from '../../core/tmux/tmux';
 import { getTokenUsage } from '../../io';
 import { readLegacySignalResult } from '../legacy-compat';

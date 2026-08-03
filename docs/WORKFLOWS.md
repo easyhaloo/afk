@@ -1,17 +1,17 @@
-# AFK 工作流程
+# AFK Workflows
 
-## 概述
+## Overview
 
-AFK 实现三种主要工作流模式：
-1. **Issue → 实现 → MR 流水线**：手动或自动化 issue 处理
-2. **调度器工作流**：后台依赖感知执行
-3. **Skills 工作流**：TDD 方法论集成
+AFK implements three primary workflow patterns:
+1. **Issue → Implementation → MR Pipeline**: Manual or automated issue handling
+2. **Scheduler Workflow**: Background dependency-aware execution
+3. **Skills Workflow**: TDD methodology integration
 
-## Issue → 实现 → MR 流水线
+## Issue → Implementation → MR Pipeline
 
-从 issue 发现到合并请求的端到端工作流。
+End-to-end workflow from issue discovery to merge request.
 
-### 手动执行
+### Manual Execution
 
 ```bash
 # 1. Discover ready issues
@@ -33,7 +33,7 @@ afk workflow create-mr --iid 123 --worktree /tmp/afk-worktrees/issue-123
 afk worktree cleanup --iid 123
 ```
 
-### 自动执行（调度器）
+### Automated Execution (Scheduler)
 
 ```bash
 # Start scheduler daemon
@@ -46,30 +46,30 @@ afk scheduler start --max-concurrent 3 --poll-interval 60
 # 4. Monitors completion and creates MRs
 ```
 
-### 工作流阶段
+### Workflow Phases
 
 ```mermaid
 flowchart TD
-    A["Issue 发现: 轮询 GitLab/GitHub, 按标签过滤"] --> B{"前置条件验证"}
-    B -->|"AC 存在, Base 标签, 无阻塞"| C["Worktree 创建: afk-issue-iid"]
-    B -->|失败| Z1["标签: blocked, 跳过"]
+    A["Issue Discovery: Poll GitLab/GitHub, filter by label"] --> B{"Precondition Validation"}
+    B -->|"AC exists, Base label, No blockers"| C["Worktree Creation: afk-issue-iid"]
+    B -->|Failure| Z1["Label: blocked, skip"]
 
-    C --> D["Tmux 会话管理: afk-issue-iid, 启动 Claude Code + watchdog"]
-    D --> E["实现阶段: /goal 实现 issue, 遵循 TDD 方法论"]
-    E --> F["Runner 轮询: 信号文件 + statusline token 用量 (每 2s)"]
+    C --> D["Tmux Session Management: afk-issue-iid, start Claude Code + watchdog"]
+    D --> E["Implementation Phase: /goal implement issue, follow TDD methodology"]
+    E --> F["Runner Polling: Signal file + statusline token usage (every 2s)"]
 
-    F -->|goal_complete| G["AC 验证阶段: /goal 验证 AC"]
-    F -->|"token ≥ 阈值"| H["上下文交接: 打断 → 总结 → 杀会话 → 重启 → 注入总结继续"]
-    F -->|timeout| Z2["超时: 评论 + mode::hitl, 保留 worktree"]
+    F -->|goal_complete| G["AC Validation Phase: /goal verify AC"]
+    F -->|"token >= threshold"| H["Context Handoff: interrupt -> summarize -> kill session -> restart -> inject summary to continue"]
+    F -->|timeout| Z2["Timeout: comment + mode::hitl, retain worktree"]
 
-    G -->|ac_result| I["MR/PR 创建: push 分支, 关联 Closes iid"]
-    G -->|"token ≥ 阈值"| H
+    G -->|ac_result| I["MR/PR Creation: push branch, link Closes iid"]
+    G -->|"token >= threshold"| H
     G -->|timeout| Z2
 
     H --> E
-    H -.->|"预算耗尽/重启失败"| Z3["终止式交接: handoff::active, 人工恢复"]
+    H -.->|"Budget exhausted / Restart failed"| Z3["Termination Handoff: handoff::active, manual recovery"]
 
-    I --> J["清理: stage::qa, 删除 worktree"]
+    I --> J["Cleanup: stage::qa, delete worktree"]
 
     classDef success fill:#d4edda,stroke:#28a745
     classDef fail fill:#f8d7da,stroke:#dc3545
@@ -80,21 +80,21 @@ flowchart TD
     class A,C,D,E,F,G,H process
 ```
 
-## 调度器工作流
+## Scheduler Workflow
 
-依赖感知的后台执行系统。
+Dependency-aware background execution system.
 
-### 架构
+### Architecture
 
 ```mermaid
 graph TD
-    Sched["调度器服务: 轮询 60s, 最大并发 3, 状态 Redis/内存"] --> Dep["依赖图: 解析 blocks-iid 标签, 构建 DAG, 拓扑排序"]
+    Sched["Scheduler Service: Poll 60s, max concurrent 3, state Redis/memory"] --> Dep["Dependency Graph: Parse blocks-iid labels, build DAG, topological sort"]
 
-    Dep --> Queue["任务队列: 优先级调度 high/medium/low"]
+    Dep --> Queue["Task Queue: Priority scheduling high/medium/low"]
 
-    Queue --> Pool["工作池: Worker-1, Worker-2, ..."]
+    Queue --> Pool["Worker Pool: Worker-1, Worker-2, ..."]
 
-    Pool --> W1["Worker-1: 从队列获取任务, 启动工作流, 监控完成, 更新依赖"]
+    Pool --> W1["Worker-1: Dequeue task, launch workflow, monitor completion, update dependencies"]
     Pool --> W2[Worker-2]
     Pool --> W3[Worker-N]
 
@@ -104,9 +104,9 @@ graph TD
     class Dep data
 ```
 
-### 依赖解析
+### Dependency Resolution
 
-Issues 通过标签声明依赖：
+Issues declare dependencies via labels:
 
 ```
 Issue #10: base::prd-1, stage::ready-for-implement
@@ -116,7 +116,7 @@ Issue #12: base::prd-1, blocks-10, blocks-11, stage::ready-for-implement
 
 ```mermaid
 graph LR
-    N10["Issue #10: 无依赖"] --> N11["Issue #11: blocks-10"]
+    N10["Issue #10: No dependencies"] --> N11["Issue #11: blocks-10"]
     N10 --> N12["Issue #12: blocks-10, blocks-11"]
     N11 --> N12
 
@@ -124,22 +124,22 @@ graph LR
     class N10 root
 ```
 
-调度器执行顺序：
-1. **#10** 首先开始（无依赖）
-2. **#11** 等待 #10 完成
-3. **#12** 等待 #10 和 #11 都完成
+Scheduler execution order:
+1. **#10** starts first (no dependencies)
+2. **#11** waits for #10 to complete
+3. **#12** waits for both #10 and #11 to complete
 
-### 并发控制
+### Concurrency Control
 
 ```typescript
-// 伪代码
+// Pseudocode
 class Scheduler {
   maxConcurrent: number = 3;
   activeWorkers: Set<Worker> = new Set();
 
   async processQueue() {
     while (activeWorkers.size < maxConcurrent) {
-      const task = queue.dequeue();  // 获取最高优先级就绪任务
+      const task = queue.dequeue();  // Get highest priority ready task
       if (!task) break;
 
       const worker = new Worker(task);
@@ -147,7 +147,7 @@ class Scheduler {
 
       worker.on('complete', () => {
         activeWorkers.delete(worker);
-        this.notifyDependents(task.id);  // 解锁被阻塞任务
+        this.notifyDependents(task.id);  // Unblock blocked tasks
       });
 
       worker.start();
@@ -156,73 +156,73 @@ class Scheduler {
 }
 ```
 
-### 任务状态机
+### Task State Machine
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING: 创建任务
-    PENDING: PENDING - 初始状态，等待依赖
-    QUEUED: QUEUED - 就绪，在优先级队列中
-    RUNNING: RUNNING - 工作流正在执行
-    COMPLETED: COMPLETED - 成功，MR 已创建
-    FAILED: FAILED - AC 检查失败或错误
-    BLOCKED: BLOCKED - 无法解决的依赖或超时
+    [*] --> PENDING: Task created
+    PENDING: PENDING - Initial state, waiting for dependencies
+    QUEUED: QUEUED - Ready, in priority queue
+    RUNNING: RUNNING - Workflow executing
+    COMPLETED: COMPLETED - Success, MR created
+    FAILED: FAILED - AC check failed or error
+    BLOCKED: BLOCKED - Unresolvable dependency or timeout
 
-    PENDING --> QUEUED: 依赖已满足
-    QUEUED --> RUNNING: worker 可用
-    RUNNING --> COMPLETED: 成功
-    RUNNING --> FAILED: AC 失败
-    RUNNING --> BLOCKED: 超时/无法解决
+    PENDING --> QUEUED: Dependencies satisfied
+    QUEUED --> RUNNING: Worker available
+    RUNNING --> COMPLETED: Success
+    RUNNING --> FAILED: AC failed
+    RUNNING --> BLOCKED: Timeout/unresolvable
 
     COMPLETED --> [*]
     FAILED --> [*]
     BLOCKED --> [*]
 ```
 
-## Skills 工作流
+## Skills Workflow
 
-与 Claude Code skills 集成，实现 TDD 方法论。
+Integration with Claude Code skills for TDD methodology.
 
-### Skill 调用链
+### Skill Invocation Chain
 
 ```mermaid
 graph TD
-    User[用户请求] --> Do["/afk-do: 分析 & 任务分解"]
-    Do --> Tasks[创建任务列表]
+    User[User Request] --> Do["/afk-do: Analyze & Task Decomposition"]
+    Do --> Tasks[Create Task List]
 
-    Tasks --> Impl1["/afk-implement: 任务1"]
-    Tasks --> Impl2["/afk-implement: 任务2"]
-    Tasks --> Impl3["/afk-implement: 任务N"]
+    Tasks --> Impl1["/afk-implement: Task 1"]
+    Tasks --> Impl2["/afk-implement: Task 2"]
+    Tasks --> Impl3["/afk-implement: Task N"]
 
-    Impl1 --> Research1{需要调研?}
-    Research1 -->|是| Res1[/afk-research/]
-    Research1 -->|否| Red1["红色阶段: 编写失败测试"]
+    Impl1 --> Research1{Need research?}
+    Research1 -->|Yes| Res1[/afk-research/]
+    Research1 -->|No| Red1["Red Phase: Write failing test"]
     Res1 --> Red1
 
-    Red1 --> Green1["绿色阶段: 实现最小代码"]
-    Green1 --> Refactor1["重构阶段: 改进代码质量"]
-    Refactor1 --> Verify1["验证: 完整测试套件, hard-checks.md"]
-    Verify1 --> Signal1[Signal 完成]
+    Red1 --> Green1["Green Phase: Implement minimal code"]
+    Green1 --> Refactor1["Refactor Phase: Improve code quality"]
+    Refactor1 --> Verify1["Verify: Full test suite, hard-checks.md"]
+    Verify1 --> Signal1[Signal complete]
 
-    Impl2 --> Research2{需要调研?}
-    Research2 -->|是| Res2[/afk-research/]
-    Research2 -->|否| Red2[红色阶段]
+    Impl2 --> Research2{Need research?}
+    Research2 -->|Yes| Res2[/afk-research/]
+    Research2 -->|No| Red2[Red Phase]
     Res2 --> Red2
-    Red2 --> Green2[绿色阶段]
-    Green2 --> Refactor2[重构阶段]
-    Refactor2 --> Verify2[验证]
-    Verify2 --> Signal2[Signal 完成]
+    Red2 --> Green2[Green Phase]
+    Green2 --> Refactor2[Refactor Phase]
+    Refactor2 --> Verify2[Verify]
+    Verify2 --> Signal2[Signal complete]
 
-    Impl3 --> Research3{需要调研?}
-    Research3 -->|是| Res3[/afk-research/]
-    Research3 -->|否| Red3[红色阶段]
+    Impl3 --> Research3{Need research?}
+    Research3 -->|Yes| Res3[/afk-research/]
+    Research3 -->|No| Red3[Red Phase]
     Res3 --> Red3
-    Red3 --> Green3[绿色阶段]
-    Green3 --> Refactor3[重构阶段]
-    Refactor3 --> Verify3[验证]
-    Verify3 --> Signal3[Signal 完成]
+    Red3 --> Green3[Green Phase]
+    Green3 --> Refactor3[Refactor Phase]
+    Refactor3 --> Verify3[Verify]
+    Verify3 --> Signal3[Signal complete]
 
-    Signal1 --> Summary["汇总结果: 更新 Issue 标签"]
+    Signal1 --> Summary["Aggregate Results: Update Issue Labels"]
     Signal2 --> Summary
     Signal3 --> Summary
 
@@ -232,206 +232,206 @@ graph TD
     class Red1,Green1,Refactor1,Verify1,Red2,Green2,Refactor2,Verify2,Red3,Green3,Refactor3,Verify3 phase
 ```
 
-### Skill 通信
+### Skill Communication
 
-Skills 通过三种机制通信：
+Skills communicate via three mechanisms:
 
-1. **任务系统** (TaskCreate/TaskUpdate):
+1. **Task System** (TaskCreate/TaskUpdate):
    ```typescript
    TaskCreate({
-     subject: "实现用户认证",
-     description: "添加带 JWT 的登录端点",
+     subject: "Implement user authentication",
+     description: "Add login endpoint with JWT",
    });
-   // 稍后: TaskUpdate({ taskId: "1", status: "completed" });
+   // Later: TaskUpdate({ taskId: "1", status: "completed" });
    ```
 
-2. **Signal 文件** (`.afk-signal.json`):
+2. **Signal Files** (`.afk-signal.json`):
    ```json
    {
      "type": "goal_complete",
      "timestamp": "2026-07-27T10:30:00Z",
      "sha": "abc123def456",
-     "summary": "已实现认证，5 个测试通过"
+     "summary": "Authentication implemented, 5 tests passing"
    }
    ```
 
-3. **Git 状态** (commits, branches):
-   - 进度提交: `wip: add login endpoint`
-   - 最终提交: `feat(auth): implement user authentication`
+3. **Git State** (commits, branches):
+   - Progress commits: `wip: add login endpoint`
+   - Final commits: `feat(auth): implement user authentication`
 
-### TDD 方法论集成
+### TDD Methodology Integration
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Red: /afk-implement 启动
+    [*] --> Red: /afk-implement starts
 
-    Red: 红色阶段 - 编写失败测试 - 提交: test: add ... (failing)
-    Green: 绿色阶段 - 实现最小代码 - npm test 通过 - 提交: feat(...): implement
-    Refactor: 重构阶段 - 改进代码质量 - npm test 仍通过 - 提交: refactor(...): extract
-    Verify: 验证阶段 - 检查 hard-checks.md - Signal: goal_complete
+    Red: Red Phase - Write failing test - Commit: test: add ... (failing)
+    Green: Green Phase - Implement minimal code - npm test passes - Commit: feat(...): implement
+    Refactor: Refactor Phase - Improve code quality - npm test still passes - Commit: refactor(...): extract
+    Verify: Verify Phase - Check hard-checks.md - Signal: goal_complete
 
-    Red --> Green: 测试失败 (预期)
-    Green --> Refactor: 测试通过
-    Refactor --> Verify: 代码质量达标
-    Verify --> [*]: Signal 完成
+    Red --> Green: Test fails (expected)
+    Green --> Refactor: Test passes
+    Refactor --> Verify: Code quality met
+    Verify --> [*]: Signal complete
 
     note right of Red
-      ✓ 所有测试通过
-      ✓ 生产代码中无 console.log
-      ✓ 存在错误处理
-      ✓ 类型完整（无 'any'）
-      ✓ 文档已更新
+      ✓ All tests passing
+      ✓ No console.log in production code
+      ✓ Error handling present
+      ✓ Types complete (no 'any')
+      ✓ Documentation updated
     end note
 ```
 
-**红色阶段：**
+**Red Phase:**
 ```bash
-# /afk-implement 首先创建失败测试
+# /afk-implement first creates failing test
 $ afk workflow launch --iid 123
-# Claude 编写测试
+# Claude writes tests
 $ npm test
-# ❌ 测试失败（预期）
-# 进度提交: "test: add authentication test (failing)"
+# ❌ Tests fail (expected)
+# Progress commit: "test: add authentication test (failing)"
 ```
 
-**绿色阶段：**
+**Green Phase:**
 ```bash
-# Claude 实现最小代码以通过测试
+# Claude implements minimal code to pass tests
 $ npm test
-# ✅ 测试通过
-# 进度提交: "feat(auth): implement login endpoint"
+# ✅ Tests pass
+# Progress commit: "feat(auth): implement login endpoint"
 ```
 
-**重构阶段：**
+**Refactor Phase:**
 ```bash
-# Claude 改进代码质量
+# Claude improves code quality
 $ npm test
-# ✅ 测试仍然通过
-# 进度提交: "refactor(auth): extract token validation"
+# ✅ Tests still pass
+# Progress commit: "refactor(auth): extract token validation"
 ```
 
-**验证：**
+**Verification:**
 ```bash
-# 检查 references/hard-checks.md 要求
-✓ 所有测试通过
-✓ 生产代码中无 console.log
-✓ 存在错误处理
-✓ 类型完整（无 'any'）
-✓ 文档已更新
+# Check references/hard-checks.md requirements
+✓ All tests passing
+✓ No console.log in production code
+✓ Error handling present
+✓ Types complete (no 'any')
+✓ Documentation updated
 
-# Signal 完成
+# Signal complete
 $ cat .afk-signal.json
 {
   "type": "goal_complete",
   "sha": "final-commit-sha",
-  "summary": "认证完成：8 个测试通过"
+  "summary": "Authentication complete: 8 tests passing"
 }
 ```
 
-### afk-do 中的工作流编排
+### Workflow Orchestration in afk-do
 
-`/afk-do` 编排完整工作流：
+`/afk-do` orchestrates the complete workflow:
 
-1. **解析 issue** 为离散任务
-2. **对于每个任务**:
-   - 检查是否需要调研（`/afk-research`）
-   - 用特定目标调用 `/afk-implement`
-   - 等待 signal（成功/失败/阻塞）
-3. **汇总结果** 并报告
-4. **根据结果更新 issue** 标签
+1. **Parse issue** into discrete tasks
+2. **For each task**:
+   - Check if research is needed (`/afk-research`)
+   - Invoke `/afk-implement` with specific goals
+   - Wait for signal (success/failure/blocked)
+3. **Aggregate results** and report
+4. **Update issue** labels based on results
 
-任务分解示例：
+Task decomposition example:
 ```
-Issue #123: "添加用户认证"
+Issue #123: "Add user authentication"
 
-任务：
-1. 调研: 审查现有认证模式 → /afk-research
-2. 实现: 登录端点 → /afk-implement
-3. 实现: 登出端点 → /afk-implement
-4. 实现: 会话中间件 → /afk-implement
-5. 验证: 集成测试 → /afk-implement
+Tasks:
+1. Research: Review existing auth patterns → /afk-research
+2. Implement: Login endpoint → /afk-implement
+3. Implement: Logout endpoint → /afk-implement
+4. Implement: Session middleware → /afk-implement
+5. Verify: Integration tests → /afk-implement
 ```
 
-## Signal 类型
+## Signal Types
 
-工作流通过类型化 signal 通信状态（写入 `<worktree>/.afk-signal.json`，由 agent 或 watchdog 写入，Runner 轮询读取）：
+Workflows communicate state via typed signals (written to `<worktree>/.afk-signal.json`, written by agent or watchdog, polled by Runner):
 
 ```typescript
 type SignalType =
-  | 'goal_complete'    // Phase 1 完成：实现交付（summary 必填）
-  | 'ac_result'        // Phase 2 完成：AC 验证结果
-  | 'timeout'          // watchdog 硬超时（分离进程写入）
-  | 'handoff_ready'    // 交接总结完成（summary 必填）
+  | 'goal_complete'    // Phase 1 complete: implementation delivered (summary required)
+  | 'ac_result'        // Phase 2 complete: AC validation result
+  | 'timeout'          // watchdog hard timeout (written by forked process)
+  | 'handoff_ready'    // Handoff summary complete (summary required)
 
 interface Signal {
   type: SignalType;
   timestamp: string;
-  summary?: string;        // goal_complete / handoff_ready 必填
+  summary?: string;        // required for goal_complete / handoff_ready
   sha?: string;            // Git commit SHA
-  result?: 'PASS' | 'FAIL'; // ac_result
+  result?: 'PASS' | 'FAIL'; // for ac_result
   tests_run?: number;
   tests_passed?: number;
 }
 ```
 
-## 上下文交接（Context Handoff）
+## Context Handoff
 
-上下文接近上限时，workflow **自动打断当前 Claude 会话，交接上下文并重启会话继续执行**，而不是终止等待人工恢复。
+When context approaches its limit, the workflow **automatically interrupts the current Claude session, hands off context, and restarts the session to continue execution** — rather than terminating and waiting for manual recovery.
 
-### 检测机制
+### Detection Mechanism
 
-- **Runner 轮询 statusline**：agent 无法可靠感知自己的上下文上限（Claude Code 的 TUI 警告在渲染层不可见、压缩系统消息到达时已太迟），信号协议中不存在 context_high。Runner 是上下文溢出的唯一权威 —— 在等待周期（2s）内检查信号文件与 `<worktree>/.afk/claude-status.json` 的 token 用量（statusline 每个 turn 写入）。
-- **阈值**：绝对 token 数，默认 `CONTEXT.HIGH_THRESHOLD` = 100,000，可配置 `--context-high <tokens>`。
-- **信号优先**：agent 已写完成信号时不打断（信号文件检查先于 token 检查）。
+- **Runner polls statusline**: The agent cannot reliably perceive its own context limit (Claude Code's TUI warnings are invisible at the rendering layer, and the compression system message arrives too late). There is no context_high in the signal protocol. The Runner is the sole authority for context overflow — checks signal files and `<worktree>/.afk/claude-status.json` token usage during wait cycles (statusline writes every turn).
+- **Threshold**: Absolute token count, default `CONTEXT.HIGH_THRESHOLD` = 100,000, configurable via `--context-high <tokens>`.
+- **Signal priority**: If agent has already written a completion signal, no interruption occurs (signal file check takes precedence over token check).
 
-### 交接流程（自动续跑）
+### Handoff Flow (Auto-Resume)
 
-1. **请求总结**：打字纯文本交接指令（催促立即简短总结）—— ① `git add -A && git commit`（无改动可跳过）→ ② 3 个简答（已完成/正在做/接下来）→ ③ 写 `handoff_ready` 信号。60s 内无有效 `handoff_ready`（含模板占位符 `<总结>` 视为无总结）则用 pane 快照兜底。
-2. **交接文档**：总结 + 快照 + commit sha 写入 `<worktree>/.afk/handoff/handoff-<iid>-<gen>.md`（`.afk/` 已在仓库 `.gitignore` 中，不会被 `git add -A` 提交进 MR；文档随 worktree 走，恢复时 agent 可直接读取）。
-3. **恢复评论**：issue 评论记录交接进度（任务中断时的恢复文档）。终止式交接的评论**嵌入完整交接文档内容**（无文件路径引用），恢复方从评论即可获取全部信息。
-4. **重启**：杀 tmux 会话 → 清理信号文件与旧 statusline 数据 → 重建同名 session → 重启 watchdog（每代会话拥有完整的 hard timeout）。
-5. **继续**：新会话收到「继续实现/验证 issue #N（先阅读交接文档）」指令，循环直到完成信号或再次交接。
+1. **Request summary**: Type plain text handoff instructions (urge immediate brief summary) — ① `git add -A && git commit` (skip if no changes) → ② 3 quick answers (done/doing/next) → ③ write `handoff_ready` signal. If no valid `handoff_ready` within 60s (template placeholder `<summary>` counts as no summary), use pane snapshot as fallback.
+2. **Handoff document**: Summary + snapshot + commit sha written to `<worktree>/.afk/handoff/handoff-<iid>-<gen>.md` (`.afk/` is already in the repo's `.gitignore`, so it won't be committed to the MR via `git add -A`; the document travels with the worktree, and the recovering agent can read it directly on resume).
+3. **Recovery comment**: Issue comment records handoff progress (recovery document at time of task interruption). For termination handoffs, the comment **embeds the complete handoff document content** (no file path reference) — the recovering party gets all information from the comment alone.
+4. **Restart**: Kill tmux session → clear signal files and old statusline data → recreate session with same name → restart watchdog (each generation gets a full hard timeout).
+5. **Continue**: New session receives instructions to "continue implementing/verifying issue #N (read handoff document first)", looping until completion signal or another handoff.
 
-### 预算与兜底
+### Budget and Fallback
 
-- `--max-handoffs <n>`（默认 3）：自动续跑轮次上限，两个 phase（实现/验证）**全局共享**。
-- `--max-total-tokens <tokens>`（默认 500,000）：整个 run 跨交接代际的累计 token 上限（每次交接时把旧会话的用量累加；终止判断 = 累计 + 当前会话用量 ≥ 上限）。
-- **任一预算耗尽** → 终止式交接：`handoff::active` label + 评论（含终止原因、**完整交接文档内容**与恢复指引），人工移除 label 后重新触发 `/afk-implement <iid>` 恢复。
-- **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（保留已发恢复评论），不落入 crash 路径。
+- `--max-handoffs <n>` (default 3): Auto-resume round limit, shared **globally** across both phases (implementation/verification).
+- `--max-total-tokens <tokens>` (default 500,000): Cumulative token limit across the entire run spanning handoff generations (each handoff adds the old session's usage; termination check = cumulative + current session usage >= limit).
+- **Either budget exhausted** → Termination handoff: `handoff::active` label + comment (with termination reason, **complete handoff document content**, and recovery instructions). After manually removing the label, re-trigger `/afk-implement <iid>` to resume.
+- **Restart failure** (e.g., Claude not ready within 30s) → Automatically flip to termination handoff (keep recovery comment sent), avoid crash path.
 
-## 错误处理
+## Error Handling
 
-### 工作流失败
+### Workflow Failures
 
 ```mermaid
 graph TD
-    Fail[工作流失败] --> Type{失败类型}
+    Fail[Workflow Failure] --> Type{Failure Type}
 
-    Type -->|超时| Timeout["标签: stage::timeout, 保留 worktree, 记录到 scheduler"]
-    Type -->|测试失败| TestFail["标签: stage::failed, Signal: goal_failed, 保留测试输出"]
-    Type -->|阻塞| Blocked["标签: stage::blocked, Signal: blocked, 评论说明原因"]
-    Type -->|Git 冲突| Conflict["标签: stage::conflict, 保留 worktree, 评论通知"]
-    Type -->|API 速率限制| RateLimit["指数退避, 冷却后重试, 记录到 scheduler"]
+    Type -->|Timeout| Timeout["Label: stage::timeout, retain worktree, log to scheduler"]
+    Type -->|Test Failure| TestFail["Label: stage::failed, Signal: goal_failed, retain test output"]
+    Type -->|Blocked| Blocked["Label: stage::blocked, Signal: blocked, comment with reason"]
+    Type -->|Git Conflict| Conflict["Label: stage::conflict, retain worktree, comment notification"]
+    Type -->|API Rate Limit| RateLimit["Exponential backoff, retry after cooldown, log to scheduler"]
 
     classDef error fill:#f8d7da,stroke:#dc3545
     class Timeout,TestFail,Blocked,Conflict,RateLimit error
 ```
 
-### 恢复过程
+### Recovery Process
 
 ```mermaid
 flowchart TD
-    Issue[发现问题] --> Type{问题类型}
+    Issue[Issue Detected] --> Type{Problem Type}
 
-    Type -->|孤立 worktrees| Orphan["检测无活动 tmux: afk worktree list-orphaned"]
-    Orphan --> Confirm{用户确认?}
-    Confirm -->|是| Prune[afk worktree prune]
-    Confirm -->|否| Wait[等待手动处理]
+    Type -->|Orphaned worktrees| Orphan["Detect no active tmux: afk worktree list-orphaned"]
+    Orphan --> Confirm{User confirmation?}
+    Confirm -->|Yes| Prune[afk worktree prune]
+    Confirm -->|No| Wait[Wait for manual handling]
 
-    Type -->|过期 tmux| Expired["tmux ls, grep afk-issue"]
+    Type -->|Expired tmux| Expired["tmux ls, grep afk-issue"]
     Expired --> Kill["tmux kill-session -t afk-issue-N"]
 
-    Type -->|卡住调度器| Stuck[afk scheduler status]
+    Type -->|Stuck scheduler| Stuck[afk scheduler status]
     Stuck --> Pause[afk scheduler pause]
     Pause --> Manual["afk scheduler mark-complete"]
     Manual --> Resume[afk scheduler resume]
@@ -442,72 +442,72 @@ flowchart TD
     class Prune,Kill,Manual,Resume,Wait action
 ```
 
-**孤立的 worktrees：**
+**Orphaned worktrees:**
 ```bash
-# 检测无活动 tmux 会话的 worktrees
+# Detect worktrees with no active tmux session
 afk worktree list-orphaned
 
-# 带确认的清理
+# Cleanup with confirmation
 afk worktree prune
 ```
 
-**过期的 tmux 会话：**
+**Expired tmux sessions:**
 ```bash
-# 列出所有 afk 会话
+# List all afk sessions
 tmux ls | grep afk-issue
 
-# 杀死特定过期会话
+# Kill specific expired session
 tmux kill-session -t afk-issue-123
 ```
 
-**卡住的调度器：**
+**Stuck scheduler:**
 ```bash
-# 检查调度器状态
+# Check scheduler status
 afk scheduler status
 
-# 暂停以防止新启动
+# Pause to prevent new launches
 afk scheduler pause
 
-# 手动完成卡住的任务
+# Manually complete stuck task
 afk scheduler mark-complete --iid 123
 
-# 恢复
+# Resume
 afk scheduler resume
 ```
 
-## 性能考虑
+## Performance Considerations
 
-### 并发调优
+### Concurrency Tuning
 
-| 配置 | 最大并发 | 轮询间隔 | 适用场景 |
-|------|---------|---------|---------|
-| 保守型 | 2 | 120s | 资源有限 |
-| 均衡型 | 5 | 60s | 典型服务器 |
-| 激进型 | 10 | 30s | 高端机器 |
+| Configuration | Max Concurrent | Poll Interval | Use Case |
+|---------------|----------------|---------------|----------|
+| Conservative | 2 | 120s | Limited resources |
+| Balanced | 5 | 60s | Typical server |
+| Aggressive | 10 | 30s | High-end machine |
 
-### 每个工作流的资源使用
+### Per-Workflow Resource Usage
 
-- **CPU**: 1-2 核（Claude + 测试）
-- **内存**: 500MB-1GB（Node.js 进程）
-- **磁盘**: 50-200MB（worktree + node_modules）
-- **网络**: API 调用 + git 操作
+- **CPU**: 1-2 cores (Claude + tests)
+- **Memory**: 500MB-1GB (Node.js process)
+- **Disk**: 50-200MB (worktree + node_modules)
+- **Network**: API calls + git operations
 
-### 优化策略
+### Optimization Strategies
 
 ```mermaid
 graph LR
-    Opt[优化策略] --> W1["Worktree 复用: 为相关 issues 保留"]
-    Opt --> W2["依赖缓存: 跨 worktrees 共享 node_modules"]
-    Opt --> W3["并行 AC 检查: 并发独立检查"]
-    Opt --> W4["批量 API 调用: 减少 GitLab/GitHub 请求"]
-    Opt --> W5["智能轮询: 队列空时指数退避"]
+    Opt[Optimization Strategies] --> W1["Worktree Reuse: Retain for related issues"]
+    Opt --> W2["Dependency Cache: Share node_modules across worktrees"]
+    Opt --> W3["Parallel AC Checks: Run independent checks concurrently"]
+    Opt --> W4["Batch API Calls: Reduce GitLab/GitHub requests"]
+    Opt --> W5["Smart Polling: Exponential backoff when queue empty"]
 
     classDef opt fill:#d4edda
     class W1,W2,W3,W4,W5 opt
 ```
 
-1. **Worktree 复用** — 为相关 issues 保留 worktrees
-2. **依赖缓存** — 跨 worktrees 共享 node_modules
-3. **并行 AC 检查** — 并发运行独立检查
-4. **批量 API 调用** — 减少 GitLab/GitHub API 请求
-5. **智能轮询** — 队列为空时指数退避
+1. **Worktree Reuse** — Retain worktrees for related issues
+2. **Dependency Cache** — Share node_modules across worktrees
+3. **Parallel AC Checks** — Run independent checks concurrently
+4. **Batch API Calls** — Reduce GitLab/GitHub API requests
+5. **Smart Polling** — Exponential backoff when queue is empty

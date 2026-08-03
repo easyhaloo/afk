@@ -30,30 +30,31 @@ Choose one from each axis based on the question.
 
 ### Step 1 — Classify the question
 
-Ask: "Where is the source of truth for this answer?"
+Ask: "Where is the source of truth for this answer?" Code → codebase.
+External → web-research. Both → start with faster one, then deeper.
 
-- **Code** → reference `codebase.md`
-- **External** → reference `web-research.md`
-- **Both** → start with the faster one to confirm, then the deeper one
+**Output:** information source classified.
 
 ### Step 2 — Set depth
 
-- **Survey**: find the first credible answer, stop
-- **Investigate**: explore multiple paths until confident
+Survey: find first credible answer, stop. Investigate: explore multiple
+paths until confident.
+
+**Output:** depth set.
 
 ### Step 3 — Reason first, verify second
 
-For each path:
-1. State what you expect to find
-2. Choose information source
-3. Verify or disprove your expectation
-4. Update mental model
+For each path: state expectation, choose source, verify or disprove,
+update mental model.
+
+**Output:** verified findings.
 
 ### Step 4 — Synthesize
 
-Present findings aligned with expectations.
-Flag disconfirmed expectations — they are often the most valuable result.
-See **Parallel execution** below for how to fan out across paths.
+Present findings aligned with expectations. Flag disconfirmed
+expectations — they are often the most valuable result.
+
+**Output:** synthesized findings doc.
 
 ---
 
@@ -65,7 +66,7 @@ task primitives (`in_progress` → `completed`).
 
 ---
 
-## Anti-patterns
+## Caveats
 
 - MUST NOT make product decisions — only report findings.
 - MUST NOT implement code beyond minimal spike proof-of-concept.

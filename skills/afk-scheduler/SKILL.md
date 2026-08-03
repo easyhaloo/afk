@@ -60,69 +60,49 @@ Skip wave plan confirmation — each issue launches immediately.
 
 ### Step 1 — Build the blocked_by DAG
 
-```bash
-afk issue list --label mode::afk --state opened --json | \
-  jq '.[] | {id, title, labels}'
-
-# Blockers via label blocks-<iid>
-afk issue list --label "blocks-<id>" --json | \
-  jq -r '.[] | select(.state == "opened") | .id'
-```
-
 Construct DAG: each issue → set of issue IIDs it is blocked by.
+
+**Precondition:** glab authenticated, open `mode::afk` issues exist.
+**Output:** blocked_by DAG.
 
 ### Step 2 — Compute waves (topological sort by layer)
 
-```
-Wave 1: issues with zero open blockers
-Wave 2: issues whose all blockers are in Wave 1
-Wave 3: issues whose all blockers are in Wave 1+2
-...
-```
-
+Wave 1: zero open blockers. Wave N+1: all blockers in Wave 1..N.
 Cyclic dependencies → STOP and report.
+
+**Precondition:** DAG constructed.
+**Output:** wave plan.
 
 ### Step 3 — Launch gate
 
-**Manual mode:** show wave plan, ask for confirmation before launching.
-
-**Auto mode:** skip to Step 3.5 — idempotent, no confirmation.
+Manual mode: show wave plan, ask confirmation before launching.
+Auto mode: skip to Step 3.5 — idempotent, no confirmation.
 
 ### Step 3.5 — Auto mode: scan and launch
 
 Run `afk scheduler poll`. Each unblocked, unrunning issue launches
-immediately via `afk workflow run`.
+immediately. The poll command handles blocker check, label filtering,
+duplicate detection.
 
-```bash
-afk scheduler poll --label mode::afk --label stage::ready-for-issues
-```
-
-For cron-based auto mode:
-
-```cron
-*/5 * * * * afk scheduler poll --label mode::afk --label stage::ready-for-issues
-```
-
-The `afk scheduler poll` command handles all preconditions (blocker check,
-label filtering, duplicate detection) natively.
+**Precondition:** auto mode selected.
+**Output:** issues launched.
 
 ### Step 4 — Launch Wave N (manual mode)
 
-Runs as autonomous loop. After launching Wave N:
-1. Poll MR status every 60 seconds.
-2. When all MRs in wave show `merged` → increment wave counter, sync
-   base branch, launch next wave.
-3. If any MR in the wave fails QA → STOP, notify human.
+Runs as autonomous loop: poll MR status every 60s, when all merged →
+increment wave counter, sync base branch, launch next wave. If any MR
+fails QA → STOP, notify human.
+
+**Output:** wave N launched.
 
 ### Step 5 — Completion
 
-When all waves complete:
-```
-All waves complete. Ready for final human gate:
-  Merge prd/<N> → main
-```
+When all waves complete: "All waves complete. Ready for final human gate:
+merge prd/<N> → main."
 
-## Anti-patterns
+**Output:** completion signal.
+
+## Caveats
 
 - MUST NOT launch an issue whose open blocker is not yet merged.
 - MUST NOT retry failed issues without human decision — escalate to

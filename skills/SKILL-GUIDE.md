@@ -135,13 +135,13 @@ tasks." The model fills in the rest. Redundant explanation dilutes signal.
 LLM knowledge comes from: (1) training data, (2) current context (loaded skill files).
 
 ```
-判定公式:
-  训练数据中有 → 抽象 (LLM 知道)
-  只有 skill 文件中有 → 保留 (LLM 只因上下文而知道)
+Decision rule:
+  In training data → Abstract (LLM knows it)
+  Only in skill file → PRESERVE (LLM knows it only from context)
 
-问自己: 这个术语在 skill 文件之外还存在吗?
-  - 存在于通用知识/主流工具 → 抽象
-  - 只存在于本项目 skill 文件中 → 保留
+Ask: Does this term exist outside this skill file?
+  - Exists in general knowledge / mainstream tools → Abstract
+  - Only in this project's skill files → PRESERVE
 ```
 
 **Decision table:**

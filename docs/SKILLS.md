@@ -688,7 +688,40 @@ tests/api-workflow/
 
 ---
 
-### 17. reasoning-guard
+### 17. afk-skill-craft
+
+**作用：** 创建新 SKILL.md、诊断现有 skill 质量问题、或重构对齐 SKILL-GUIDE 标准
+
+**触发场景：**
+- 用户要求创建、审计或改进一个 skill
+- 新 skill 开发
+- 现有 skill 需要重构
+
+**工作流程：**
+1. **选择模式** — Create / Diagnose / Refactor
+2. **Create** — 确认名称 → 起草 frontmatter → 识别目录结构 → 起草 body → 验证
+3. **Diagnose** — 读取 SKILL.md → 逐项检查 quality checklist → 检查 constraint rules → 报告问题
+4. **Refactor** — 先诊断 → 按检查结果应用修复 → 再次验证
+
+**设计决策：**
+
+**为什么是元 skill？**
+- Skill 创作本身也是个工作流，值得标准化
+- 统一诊断标准，确保 skill 质量一致
+- 自动修复常见问题
+
+**关键原则：**
+- 抽象 LLM 已知的概念，保留领域特定词汇（`mode::afk` 等）
+- 不做公式化装饰，每个步骤按实际工作流形状描述
+- 使用显式推理链，不要盲目确认
+
+**与其他 skills 协作：**
+- **独立** — 不依赖其他 skills
+- **产出** → 新 skill 或修复后的 skill
+
+---
+
+### 18. reasoning-guard
 
 **作用：** 会话内推理路径看护 — 检测编码 agent 在多轮对话中的推理退化，注入纠正提示
 
@@ -718,7 +751,7 @@ tests/api-workflow/
 
 ---
 
-### 18. reasoning-watchdog
+### 19. reasoning-watchdog
 
 **作用：** 基于 hooks 的自动推理路径看护 — 安装 PostToolUse/PreToolUse/SessionEnd hooks 到 Claude Code，自动检测并拦截推理退化
 
@@ -773,11 +806,12 @@ Claude Code session
 - **md-to-pdf** — 文档转换
 - **reasoning-guard** — 推理路径看护
 - **reasoning-watchdog** — 自动推理监控
+- **afk-skill-craft** — Skill 创建/诊断/重构
 
 ### 2. 明确触发条件
-`description` 以 "Use when" 开头，Claude 根据场景自动选择：
+`description` 是唯一的触发载体，Claude Code 启动时加载用于匹配。Body 在激活后才加载。
 ```yaml
-description: "Use when existing code needs to be understood before committing to a plan"
+description: "Understand how an existing system works, or evaluate feasibility of an approach, before committing to a plan."
 ```
 
 ### 3. 流程可验证

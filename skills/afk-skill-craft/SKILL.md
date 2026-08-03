@@ -88,13 +88,7 @@ Flag violations per constraint rules in checklist.
 
 ### Step 4 — Report
 
-Present findings as actionable issue list:
-```
-1. [FAIL] description exceeds 1024 chars
-2. [WARN] Step 3 lacks precondition
-3. [FAIL] Caveats use vague language
-```
-
+Present findings as actionable issue list with severity tag per item.
 Suggest fixes. Do not auto-fix unless user confirms.
 
 **Output:** issue list to user.

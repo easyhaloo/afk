@@ -11,14 +11,11 @@ import type {
   SandboxProvider,
   SandboxProviderName,
   AgentExecution,
-  ExecutionEvent,
   ExecutionResult,
-  InterruptReason,
 } from './sandbox/types';
 import type { AgentProvider, AgentProviderName, SessionSnapshot } from './agents/types';
 import type { BranchStrategyConfig } from './branches/types';
-import { getTokenUsage, configureStatusline, logger, readSignal, SIGNAL_FILE, clearSignal } from './io';
-import { readLegacySignalResult } from './sandbox/legacy-compat';
+import { getTokenUsage, configureStatusline, logger, readSignal } from './io';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
@@ -36,94 +33,31 @@ import type { ExecutionPlan, ExecutionGroup } from './templates/resolver';
 import type { BranchHandle } from './branches/types';
 
 /**
- * Legacy polling function — used by LegacyExecutionWrapper when sandbox is not injected.
- * Shares the same signal+token-threshold polling logic as WorkflowRunner.waitForPhaseSignal.
+ * Signal-driven workflow runner.
+ *
+ * Two-phase design:
+ *   Phase 1 (Implement): send /goal "实现 issue #N" -> wait goal_complete
+ *   Phase 2 (Verify):   send /goal "验证 issue #N 的 AC" -> wait ac_result
+ *   autoWrapup:         push branch -> create MR -> stage::qa
+ *
+ * Each phase is a loop: send goal -> poll for the completion signal OR the
+ * context threshold (statusline token usage). On context_high the session is
+ * interrupted, the agent's summary is captured to a doc + issue comment, and
+ * the session is relaunched with the summary injected - until the phase
+ * completes or the handoff budget runs out.
+ *
+ * Context detection is done by the RUNNER, not the agent: the agent cannot
+ * reliably sense its own context limit (Claude Code's TUI warnings are
+ * rendering-layer only, and the compaction system message arrives too late),
+ * so we poll `<worktree>/.afk/claude-status.json` token usage (written by the
+ * statusline tee on every turn) against `contextHighTokens`.
+ *
+ * The handoff cluster (negotiate summary -> persist doc -> post comment ->
+ * relaunch or terminate) lives behind the {@link HandoffCoordinator} seam;
+ * the runner only decides WHEN to hand off (context_high, budget exhausted)
+ * and routes the outcome. The hard-timeout {@link Watchdog} is a separate
+ * module shared by both.
  */
-async function pollLegacy(
-  tmux: TmuxClient,
-  wtPath: string,
-  completionTimeoutMs: number,
-  contextHighTokens: number,
-  pollIntervalMs = 2000,
-): Promise<ExecutionResult> {
-  const start = Date.now();
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    if (Date.now() - start >= completionTimeoutMs) {
-      return { version: 1, runId: `legacy-${Date.now()}`, status: 'timed_out', provider: 'local', commits: [] };
-    }
-    // Check legacy signal file (Phase 8 fallback for pre-Phase-8 worktrees)
-    const legacyResult = await readLegacySignalResult(wtPath, `legacy-${Date.now()}`);
-    if (legacyResult) return legacyResult;
-    // Then check token threshold
-    try {
-      const rawUsage = await getTokenUsage(wtPath);
-      if (rawUsage.total >= contextHighTokens) {
-        return {
-          version: 1,
-          runId: `legacy-${Date.now()}`,
-          status: 'context_high',
-          provider: 'local',
-          usage: { inputTokens: rawUsage.input, outputTokens: rawUsage.output, totalTokens: rawUsage.total },
-          commits: [],
-        };
-      }
-    } catch { /* ignore */ }
-    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-  }
-}
-
-/**
- * Thin wrapper that adapts the legacy tmux+signal-file polling path to the
- * AgentExecution interface. Used when sandbox is not injected (tests that mock
- * runner.tmux directly).
- */
-class LegacyExecutionWrapper implements AgentExecution {
-  readonly id: string;
-  readonly sessionId?: string;
-
-  constructor(
-    private readonly tmux: TmuxClient,
-    private readonly wtPath: string,
-    session: string,
-  ) {
-    this.id = `legacy-${Date.now()}`;
-    this.sessionId = session;
-  }
-
-  static async create(
-    tmux: TmuxClient,
-    wtPath: string,
-    session: string,
-    goalText: string,
-    signalType: 'goal_complete' | 'ac_result',
-  ): Promise<AgentExecution> {
-    // Clear any stale signal before sending goal, mirroring restartSession() behavior.
-    await clearSignal(wtPath);
-    await tmux.sendGoal(wtPath, session, 'main', goalText, signalType);
-    return new LegacyExecutionWrapper(tmux, wtPath, session);
-  }
-
-  waitForEvent(): Promise<ExecutionEvent | null> {
-    return Promise.resolve(null);
-  }
-
-  async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
-    return pollLegacy(this.tmux, this.wtPath, options?.completionTimeoutMs ?? 600_000, options?.contextHighTokens ?? Infinity, 10);
-  }
-
-  interrupt(): Promise<void> { return Promise.resolve(); }
-  kill(): Promise<void> { return Promise.resolve(); }
-  captureOutput(): Promise<string> { return Promise.resolve(''); }
-  captureSession(): Promise<SessionSnapshot | undefined> { return Promise.resolve(undefined); }
-  resume(): Promise<AgentExecution> { throw new Error('LegacyExecutionWrapper does not support resume'); }
-}
-
-/** One phase wait: done / timeout / verified context overflow. */
-type PhaseOutcome =
-  | { kind: 'done' }
-  | { kind: 'timeout' }
-  | { kind: 'handoff'; tokens: number };
 
 export interface RunnerOptions {
   iid: number;
@@ -235,7 +169,7 @@ export class WorkflowRunner {
   private sandboxProviderName: SandboxProviderName = 'local';
   /** Resolved agent provider name (set in run()). */
   private agentProviderName: AgentProviderName = 'claude-code';
-  private sandbox: Sandbox | null = null;
+  private sandbox: Sandbox | undefined;
   private logDir: string;
   private modules: LifecycleModule[] = [];
   private extParams: Record<string, unknown> = {};
@@ -243,9 +177,6 @@ export class WorkflowRunner {
   private lifecycleCtx: LifecycleContext = { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: {} };
   /** Branch handles created per step in template execution. Cleaned up in teardownSession. */
   private stepBranchHandles: BranchHandle[] = [];
-
-  /** Poll interval for waitForPhaseSignal (overridden by tests). */
-  private pollIntervalMs = 2000;
 
   /**
    * Inject a sandbox for testing. Production code goes through runBody →
@@ -386,16 +317,7 @@ Session was interrupted before completion.
    * worktree failed. Worktree itself is kept for inspection.
    */
   private async teardownSession(iid: number, session: string): Promise<void> {
-    if (this.sandbox) {
-      await this.sandbox.close();
-    } else {
-      try {
-        await this.tmux.killSession(session);
-      } catch { /* ignore if session already gone */ }
-      try {
-        await this.tmux.closeSession();
-      } catch { /* ignore */ }
-    }
+    await this.sandbox?.close();
     try {
       await this.worktree.updateStatus(iid, 'failed');
     } catch (err) {
@@ -697,13 +619,9 @@ Session was interrupted before completion.
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
     logger.info({ iid, mrUrl }, 'MR created');
 
-    // Session is no longer needed; kill it to avoid orphaned sessions.
-    if (this.sandbox) {
-      await this.sandbox.close();
-    } else {
-      await this.tmux.killSession(session);
-    }
-    logger.info({ iid, session }, 'tmux session killed');
+    // Session is no longer needed; sandbox.close() handles all session teardown.
+    await this.sandbox!.close();
+    logger.info({ iid, session }, 'sandbox closed');
 
     // Query MR/PR status and pipeline
     try {
@@ -724,7 +642,6 @@ Session was interrupted before completion.
     // Success path cleanup: sandbox already closed its control-mode connection;
     // remove the now-redundant worktree (force: stray untracked artifacts may exist).
     try {
-      if (!this.sandbox) await this.tmux.closeSession();
       await this.worktree.cleanup(iid, true);
       logger.info({ iid, worktreePath }, 'worktree cleaned up');
     } catch (err) {
@@ -810,28 +727,16 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
       logger.info({ iid: p.iid, round, signalType: p.signalType, budgetUsed: p.budget.used }, 'round begin');
 
-      // Use sandbox if available (Phase 2+), otherwise fall back to direct tmux
-      // (tests that only mock runner.tmux get the legacy path)
-      let execution: import('./sandbox/types').AgentExecution;
-      if (this.sandbox) {
-        const command = this.agentProvider.buildCommand({
-          worktreePath: p.wtPath,
-          sessionId: p.session,
-        });
-        execution = await this.sandbox.startAgent({
-          command,
-          generation: p.budget.used + 1,
-          goalText,
-          signalType: p.signalType,
-        });
-      } else {
-        // Legacy path: clear stale signal before sending goal, mirroring what
-        // restartSession() does in the sandbox path. Otherwise pollLegacy() reads
-        // the previous generation's goal_complete immediately.
-        await clearSignal(p.wtPath);
-        await this.tmux.sendGoal(p.wtPath, p.session, 'main', goalText, p.signalType);
-        execution = new LegacyExecutionWrapper(this.tmux, p.wtPath, p.session);
-      }
+      const command = this.agentProvider.buildCommand({
+        worktreePath: p.wtPath,
+        sessionId: p.session,
+      });
+      let execution = await this.sandbox!.startAgent({
+        command,
+        generation: p.budget.used + 1,
+        goalText,
+        signalType: p.signalType,
+      });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 
       let result = await execution.waitForResult({
@@ -946,56 +851,6 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
    * handoff); the watchdog's hardTimeoutMs - also re-armed per generation -
    * is the real ceiling on total phase duration.
    */
-  private async waitForPhaseSignal(p: {
-    iid: number;
-    wtPath: string;
-    signalType: 'goal_complete' | 'ac_result';
-    completionTimeoutMs: number;
-    contextHighTokens: number;
-  }): Promise<PhaseOutcome> {
-    const start = Date.now();
-    const signalPath = join(p.wtPath, SIGNAL_FILE);
-    let lastWarnTime = 0;
-
-    while (Date.now() - start < p.completionTimeoutMs) {
-      try {
-        // Legacy signal file (Phase 8 fallback) — completion wins over token threshold.
-        const signal = await readSignal(p.wtPath);
-        if (signal?.type === p.signalType) {
-          logger.info({ iid: p.iid, signalType: p.signalType }, 'phase signal detected (legacy)');
-          return { kind: 'done' };
-        }
-        if (signal?.type === 'timeout') return { kind: 'timeout' };
-
-        // Fallback: if the signal file exists but readSignal returned null,
-        // log a warning (once per 30s to avoid spam) so we can debug.
-        if (!signal) {
-          try {
-            const stat = await fs.stat(signalPath);
-            if (stat.size > 0 && Date.now() - lastWarnTime > 30000) {
-              lastWarnTime = Date.now();
-              logger.warn({ iid: p.iid, signalPath, size: stat.size }, 'signal file exists but readSignal returned null');
-            }
-          } catch { /* file doesn't exist yet, normal */ }
-        }
-
-        // Objective poll: statusline token usage reached the threshold.
-        const tokens = (await getTokenUsage(p.wtPath)).total;
-        logger.info({ iid: p.iid, tokens, threshold: p.contextHighTokens }, 'poll tick token read');
-        if (tokens >= p.contextHighTokens) {
-          logger.info({ iid: p.iid, tokens, threshold: p.contextHighTokens }, 'context near limit; interrupting for handoff');
-          return { kind: 'handoff', tokens };
-        }
-      } catch (err) {
-        // Swallow transient errors in the polling loop so one bad tick
-        // doesn't crash the entire phase.
-        logger.error({ iid: p.iid, err }, 'waitForPhaseSignal tick error (swallowed)');
-      }
-
-      await this.sleep(this.pollIntervalMs);
-    }
-    return { kind: 'timeout' };
-  }
 
   /** Goal text for a resumed round: read the handoff doc(s) before continuing. */
   private continueGoalText(goalBase: string, iid: number, wtPath: string, gen: number): string {
@@ -1046,7 +901,4 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     return mr.url;
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 }

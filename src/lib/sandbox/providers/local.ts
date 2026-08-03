@@ -17,8 +17,7 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { WorktreeManager } from '../../core/git';
 import { TmuxClient } from '../../core/tmux/tmux';
-import { getTokenUsage } from '../../io';
-import { readLegacySignalResult } from '../legacy-compat';
+import { getTokenUsage, readSignal } from '../../io';
 import {
   type SandboxProvider,
   type Sandbox,
@@ -203,7 +202,26 @@ export class LocalAgentExecution implements AgentExecution {
         };
       }
 
-      // Check token threshold (context near limit → return context_high result)
+      // Check for completion signal first (agent writes .afk-signal.json on goal_complete/ac_result).
+      // Completion must take priority over context_high: if goal is done, return immediately.
+      try {
+        const sig = await readSignal(this.worktreePath);
+        if (sig && (sig.type === 'goal_complete' || sig.type === 'ac_result')) {
+          this.done = true;
+          return {
+            version: 1,
+            runId: this.id,
+            status: 'completed',
+            provider: 'local',
+            sessionId: this.sessionId,
+            commits: [],
+            branch: this.sessionName,
+          };
+        }
+      } catch { /* ignore */ }
+
+      // Check token threshold (context near limit → return context_high result).
+      // Only checked after confirming goal is not yet complete.
       try {
         const rawUsage = await getTokenUsage(this.worktreePath);
         if (rawUsage.total >= contextHighTokens) {
@@ -223,19 +241,6 @@ export class LocalAgentExecution implements AgentExecution {
           };
         }
       } catch { /* ignore polling errors */ }
-
-      // Check legacy signal file (Phase 8 fallback for pre-Phase-8 worktrees).
-      // New agents do not write this file — they complete via ExecutionResult.
-      // The adapter lives in sandbox/legacy-compat.ts.
-      const legacyResult = await readLegacySignalResult(this.worktreePath, this.id);
-      if (legacyResult) {
-        this.done = true;
-        return {
-          ...legacyResult,
-          sessionId: this.sessionId,
-          branch: this.sessionName,
-        };
-      }
 
       await this.sleep(2000);
     }

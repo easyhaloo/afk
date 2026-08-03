@@ -15,7 +15,7 @@ import type {
 } from './sandbox/types';
 import type { AgentProvider, AgentProviderName, SessionSnapshot } from './agents/types';
 import type { BranchStrategyConfig } from './branches/types';
-import { getTokenUsage, configureStatusline, logger, readSignal } from './io';
+import { getTokenUsage, configureStatusline, logger } from './io';
 import { getWorkflowConfig } from './core/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
@@ -37,9 +37,9 @@ import type { BranchHandle } from './branches/types';
  * Signal-driven workflow runner.
  *
  * Two-phase design:
- *   Phase 1 (Implement): send /goal "实现 issue #N" -> wait goal_complete
- *   Phase 2 (Verify):   send /goal "验证 issue #N 的 AC" -> wait ac_result
- *   autoWrapup:         push branch -> create MR -> stage::qa
+ *   Phase 1 (Implement): run implement step -> wait goal_complete
+ *   Phase 2 (Verify):   run verify step -> wait ac_result
+ *   autoWrapup:         close sandbox, update labels, cleanup worktree
  *
  * Each phase is a loop: send goal -> poll for the completion signal OR the
  * context threshold (statusline token usage). On context_high the session is
@@ -122,9 +122,9 @@ export interface RunnerDependencies {
  * Signal-driven workflow runner.
  *
  * Two-phase design:
- *   Phase 1 (Implement): send /goal "实现 issue #N" -> wait goal_complete
- *   Phase 2 (Verify):   send /goal "验证 issue #N 的 AC" -> wait ac_result
- *   autoWrapup:         push branch -> create MR -> stage::qa
+ *   Phase 1 (Implement): run implement step -> wait goal_complete
+ *   Phase 2 (Verify):   run verify step -> wait ac_result
+ *   autoWrapup:         close sandbox, update labels, cleanup worktree
  *
  * Each phase is a loop: send goal -> poll for the completion signal OR the
  * context threshold (statusline token usage). On context_high the session is
@@ -225,7 +225,7 @@ export class WorkflowRunner {
   }
 
   /**
-   * Full workflow: worktree -> tmux session -> /goal -> wait -> autoWrapup.
+   * Full workflow: worktree -> tmux session -> /goal -> wait -> cleanup.
    * Every explicit terminal path does its own cleanup; the catch below only
    * covers unexpected exceptions (crash path), and the finally only ever
    * disarms the watchdog.
@@ -362,20 +362,6 @@ Session was interrupted before completion.
     return ROLE_TO_SIGNAL[role] ?? 'goal_complete';
   }
 
-  private async prepareStepWorktree(
-    step: Step,
-    iid: number,
-    baseBranch: string,
-  ): Promise<BranchHandle> {
-    const config: TemplateBranchStrategyConfig = step.branch ?? { type: 'issue', iid };
-    const strategy = strategyForConfig(config);
-    return await strategy.prepareWorktree(simpleGit(), config, {
-      repoPath: this.originalCwd,
-      baseBranch,
-      worktreeBaseDir: join(this.originalCwd, '.worktrees'),
-    });
-  }
-
   private async runStep(
     step: Step,
     ctx: StepRunCtx,
@@ -386,12 +372,20 @@ Session was interrupted before completion.
     const signalType = this.resolveStepSignalType(step.role);
     const effectiveTimeout = step.timeoutMs ?? ctx.hardTimeoutMs;
 
-    // Determine worktree: reuse primary for step 0 in group 0, create new for concurrent or branched steps.
+    // Determine worktree: reuse primary for step 0 in group 0, or when the
+    // step's branch config uses the iid:0 placeholder (should reuse primary).
+    // Create a new worktree only for concurrent/branched steps with a real iid.
     let branchHandle: BranchHandle;
-    if (ctx.stepIndex > 0 || step.branch != null) {
-      branchHandle = await this.prepareStepWorktree(step, ctx.iid, ctx.baseBranch);
+    const branchConfig = step.branch ?? { type: 'issue' as const, iid: ctx.iid };
+    // iid: 0 is a placeholder meaning "use the primary worktree" — do not create a new one.
+    const isPlaceholder = branchConfig.type === 'issue' && branchConfig.iid === 0;
+    if (!isPlaceholder && step.branch != null) {
+      // Non-placeholder explicit branch: create a dedicated worktree (for parallel branches).
+      const config: TemplateBranchStrategyConfig = branchConfig;
+      branchHandle = await this.prepareStepWorktree(config, ctx.iid, ctx.baseBranch);
       this.stepBranchHandles.push(branchHandle);
     } else {
+      // Placeholder (iid:0) or no explicit branch: reuse primary worktree.
       branchHandle = { branch: ctx.primaryBranch, path: ctx.primaryWtPath, isNewBranch: false };
     }
 
@@ -407,25 +401,28 @@ Session was interrupted before completion.
       signalType,
     });
 
-    // Read summary from signal file (Phase 8 legacy fallback).
-    let summary: string | undefined;
-    try {
-      const sig = await readSignal(branchHandle.path);
-      if (sig && (sig.type === 'goal_complete' || sig.type === 'ac_result')) {
-        summary = sig.summary;
-      }
-    } catch { /* ignore */ }
-
     const completedAt = new Date().toISOString();
     return {
       stepId: step.id,
       status: completed ? 'completed' : 'failed',
-      summary,
       branch: branchHandle.branch,
       worktreePath: branchHandle.path,
       startedAt,
       completedAt,
     };
+  }
+
+  private async prepareStepWorktree(
+    config: TemplateBranchStrategyConfig,
+    iid: number,
+    baseBranch: string,
+  ): Promise<BranchHandle> {
+    const strategy = strategyForConfig(config);
+    return await strategy.prepareWorktree(simpleGit(), config, {
+      repoPath: this.originalCwd,
+      baseBranch,
+      worktreeBaseDir: join(this.originalCwd, '.worktrees'),
+    });
   }
 
   /**
@@ -533,11 +530,6 @@ Session was interrupted before completion.
 
     // ── Phases: implement then verify; handoff budgets are shared across both ──
     // used = handoff rounds, tokens = accumulated total across generations.
-    //
-    // Phase 8: prompts no longer instruct the agent to write `.afk-signal.json`.
-    // Completion is reported via ExecutionResult (structured output); old
-    // worktrees that still write the signal file are still readable as a
-    // fallback — see core/io/signal.ts.
     const budget = new BudgetManager(maxHandoffs, maxTotalTokens);
     const stepResults: Record<string, StepResult> = {};
 
@@ -579,7 +571,7 @@ Session was interrupted before completion.
         }
       }
     } else {
-      // ── Legacy path: hardcoded 2-phase behavior ────────────────────────────
+      // ── Legacy path: hardcoded 2-phase behavior (used when no template specified) ──
       const phases = [
         { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。`, signalType: 'goal_complete' as const },
         { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。`, signalType: 'ac_result' as const },
@@ -602,51 +594,28 @@ Session was interrupted before completion.
     await this.runLifecycleHooks(['after'], this.lifecycleCtx);
     logger.info({ iid, hook: 'after_agent', moduleCount: this.modules.length }, 'lifecycle after_agent hooks complete');
 
-    // ac_result -> autoWrapup
     return this.autoWrapup(iid, wt.path, session, targetBranch);
   }
 
   /**
-   * autoWrapup: push branch -> create MR -> stage::qa
-   * AC verification is now done in Phase 2 of runBody, so this is a simple
-   * push-and-MR operation.
+   * Post-success workflow cleanup: push branch, create MR, close sandbox, update labels, clean up worktree.
+   * Called after all steps complete (template or legacy).
    */
-  private async autoWrapup(
-    iid: number,
-    worktreePath: string,
-    session: string,
-    targetBranch: string
-  ): Promise<{ success: boolean; url?: string }> {
-    // Push branch
+  private async autoWrapup(iid: number, worktreePath: string, session: string, targetBranch: string): Promise<{ success: boolean; url?: string }> {
+    // Push branch and create MR
     await this.pushBranch(worktreePath);
     logger.info({ iid, worktreePath }, 'branch pushed');
-
-    // Create MR
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
     logger.info({ iid, mrUrl }, 'MR created');
 
-    // Session is no longer needed; sandbox.close() handles all session teardown.
     await this.sandbox!.close();
     logger.info({ iid, session }, 'sandbox closed');
-
-    // Query MR/PR status and pipeline
-    try {
-      const mrId = this.extractMRIdFromUrl(mrUrl);
-      if (mrId) {
-        const mr = await this.tracker.getMR(mrId);
-        logger.info({ iid, mrId, mrState: mr.state, pipeline: mr.pipeline?.status ?? 'N/A' }, 'MR status');
-      }
-    } catch (err) {
-      logger.warn({ iid, err }, 'failed to query MR/PR status');
-    }
 
     await this.tracker.addLabel(iid, 'stage::qa');
     logger.info({ iid, label: 'stage::qa' }, 'tracker label added');
     await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
     logger.info({ iid, label: 'stage::afk-in-progress' }, 'tracker label removed');
 
-    // Success path cleanup: sandbox already closed its control-mode connection;
-    // remove the now-redundant worktree (force: stray untracked artifacts may exist).
     try {
       await this.worktree.cleanup(iid, true);
       logger.info({ iid, worktreePath }, 'worktree cleaned up');

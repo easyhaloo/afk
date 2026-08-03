@@ -27,11 +27,6 @@ export function builtinTemplates(): WorkflowTemplate[] {
 
 /**
  * Default template: implement → verify-ac → create-mr → qa.
- *
- * Prompts intentionally do NOT instruct the agent to write `.afk-signal.json`
- * (Phase 8: the legacy signal-file protocol is being retired). New agents
- * complete via structured output channels; old worktrees still write the
- * file and the runner reads it as a fallback.
  */
 function issueImplementation(): WorkflowTemplate {
   return {
@@ -88,7 +83,7 @@ function simpleLoop(): WorkflowTemplate {
       {
         id: 'run',
         role: 'agent',
-        prompt: '执行任务并在完成后写入 .afk-signal.json。',
+        prompt: '执行任务直到完成。',
       },
     ],
   };

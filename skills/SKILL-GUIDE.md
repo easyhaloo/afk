@@ -130,18 +130,30 @@ Prefer concise keywords that trigger LLM priors. Write "fan out parallel
 paths" not "launch multiple subagents to concurrently process independent
 tasks." The model fills in the rest. Redundant explanation dilutes signal.
 
-**Critical distinction — what to abstract vs. what to preserve:**
+**Knowledge determination — what the LLM actually knows:**
+
+LLM knowledge comes from: (1) training data, (2) current context (loaded skill files).
+
+```
+判定公式:
+  训练数据中有 → 抽象 (LLM 知道)
+  只有 skill 文件中有 → 保留 (LLM 只因上下文而知道)
+
+问自己: 这个术语在 skill 文件之外还存在吗?
+  - 存在于通用知识/主流工具 → 抽象
+  - 只存在于本项目 skill 文件中 → 保留
+```
+
+**Decision table:**
 
 | Type | Action | Example |
 |------|--------|---------|
-| LLM already knows | Abstract | "Reverse the array" not "use a for loop" |
-| Domain-specific terms | PRESERVE | `mode::afk`, `mode::hitl`, `base::prd-<iid>` |
-| Domain-specific commands | PRESERVE | `afk issue create --label ...` |
-| Domain-specific values | PRESERVE | `stage::ready-for-issues`, controlled vocabulary |
+| Training data has it | Abstract | `git commit`, `jest`, `for loop` |
+| Only in skill file | PRESERVE | `mode::afk`, `base::prd-<iid>`, `afk issue create --label` |
 
-**Never abstract domain vocabulary the LLM doesn't know.** "mode label"
-is ambiguous; `mode::afk` or `mode::hitl` is precise. When in doubt,
-keep the concrete value.
+**Critical:** When in doubt, keep the concrete value. "mode label" is
+ambiguous; `mode::afk` is precise. Over-abstraction causes execution
+errors; over-specification only adds verbosity.
 
 ### Domain knowledge separation
 

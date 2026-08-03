@@ -60,18 +60,17 @@ See **Parallel execution** below for how to fan out across paths.
 ## Parallel execution
 
 When multiple independent paths exist (e.g., surveying logging, error
-handling, and state tracking in the same codebase), fan out via the
-**Agent** tool — each subagent gets one path and returns a focused summary.
-Read the conclusion, not the file dumps.
+handling, and state tracking in the same codebase), fan out to parallel
+workers — each gets one path and returns a focused summary. Read the
+conclusion, not the file dumps.
+
+Use **parallel** execution for independent paths; use **sequential**
+execution when one path's result narrows what the next should investigate.
 
 For multi-step research with >3 verifiable phases, track progress with
-**TaskCreate / TaskUpdate / TaskList** so the user can see the work shape
-and resume across interruptions. Mark tasks `in_progress` when starting,
-`completed` when verified.
-
-Use **parallel** Agent calls (multiple in one block) for truly independent
-lookups; use **sequential** Agent calls when one path's result narrows
-what the next should investigate.
+task primitives so the user can see the work shape and resume across
+interruptions. Mark tasks `in_progress` when starting, `completed` when
+verified.
 
 ---
 

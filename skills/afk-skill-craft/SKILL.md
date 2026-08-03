@@ -66,37 +66,25 @@ Parse frontmatter fields. Read `references/SKILL-GUIDE-CHECKLIST.md`.
 
 ### Step 2 — Run checklist (with reasoning)
 
-For each quality item, **think before marking pass/fail**:
+Read `references/SKILL-GUIDE-CHECKLIST.md`. Apply each quality item
+with explicit reasoning:
 
 1. **Read the item.** What does it require?
 2. **Find evidence.** Where in the SKILL.md is the relevant content?
 3. **Reason.** Does this actually pass? What could be wrong?
 4. **Mark.** Then mark pass/fail — not before reasoning.
 
-Checklist:
-- `name` matches directory, lowercase, no consecutive hyphens
-- `description` ≤ 1024 characters, includes trigger keywords
-- Steps reflect actual workflow shape; no formulaic decoration
-- Caveats are concrete
-- No example code or command snippets
-- `SKILL.md` under 500 lines
-- Single responsibility
-- **Domain-specific terms and values preserved**
-
 ### Step 3 — Check constraint rules (with reasoning)
 
-For each constraint rule, **think before flagging**:
+Read `references/SKILL-GUIDE-CHECKLIST.md` constraint rules section.
+For each rule, **think before flagging**:
 
 1. **Read the rule.** What does it prevent?
 2. **Scan the SKILL.md.** Does any content violate it?
 3. **Self-reflect.** Am I flagging correctly? Could this be a false positive?
-4. **Reason through examples.** If rule says "no example code", trace through every code block and confirm: is this intent description or an example?
+4. **Reason through examples.** If rule says "no example code", trace through every code block and confirm: intent description or an example?
 
-Flag violations only after explicit reasoning:
-- Abstraction applied to domain terms the LLM doesn't know
-- Precondition/Output added as formulaic decoration
-- Example code or commands present
-- Ambiguous language in steps
+Flag violations only after explicit reasoning.
 
 ### Step 4 — Report
 
@@ -114,16 +102,13 @@ Run Diagnose mode.
 
 ### Step 2 — Apply checklist rules (with reasoning)
 
-For each Diagnose finding:
+Per Diagnose findings. Read `references/SKILL-GUIDE-CHECKLIST.md` for
+constraint rules. For each finding:
+
 1. **Understand the issue.** What is the actual problem?
 2. **Trace the cause.** Why did this happen? Is it a false positive?
 3. **Apply the fix.** Does the fix introduce new issues?
 4. **Self-reflect.** Did the fix make it better or worse?
-
-Pay special attention to:
-- Domain-specific terms abstracted away → restore concrete values
-- Formulaic Precondition/Output decoration → remove if workflow is linear
-- Example code blocks → replace with intent descriptions
 
 ### Step 3 — Verify
 

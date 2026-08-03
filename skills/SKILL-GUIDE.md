@@ -55,12 +55,17 @@ metadata:                           # optional, arbitrary kv
 
 ## Steps
 
-Numbered, imperative. Each step has a clear precondition and output.
+Numbered, imperative. Steps reflect actual workflow shape — not every
+step needs explicit Precondition/Output labeling.
 
 ## Caveats
 
 Concrete failure modes — specific, not vague.
 ```
+
+**On steps:** Precondition/Output labeling is appropriate when steps have
+complex dependencies. For linear or obvious flows, a brief imperative
+description suffices. Do not add labels as formulaic decoration.
 
 ---
 
@@ -125,6 +130,19 @@ Prefer concise keywords that trigger LLM priors. Write "fan out parallel
 paths" not "launch multiple subagents to concurrently process independent
 tasks." The model fills in the rest. Redundant explanation dilutes signal.
 
+**Critical distinction — what to abstract vs. what to preserve:**
+
+| Type | Action | Example |
+|------|--------|---------|
+| LLM already knows | Abstract | "Reverse the array" not "use a for loop" |
+| Domain-specific terms | PRESERVE | `mode::afk`, `mode::hitl`, `base::prd-<iid>` |
+| Domain-specific commands | PRESERVE | `afk issue create --label ...` |
+| Domain-specific values | PRESERVE | `stage::ready-for-issues`, controlled vocabulary |
+
+**Never abstract domain vocabulary the LLM doesn't know.** "mode label"
+is ambiguous; `mode::afk` or `mode::hitl` is precise. When in doubt,
+keep the concrete value.
+
 ### Domain knowledge separation
 
 If a skill requires specialized knowledge the LLM doesn't have (e.g.,
@@ -164,11 +182,12 @@ absolute — no out-of-bounds reads under any circumstance.
 
 - [ ] `name` matches directory, lowercase, no consecutive hyphens
 - [ ] `description` ≤ 1024 characters, includes trigger keywords
-- [ ] Each step has clear precondition and output
+- [ ] Steps reflect actual workflow shape; no formulaic decoration
 - [ ] Caveats are concrete (specific failure, not "be careful")
 - [ ] No example code or command snippets
 - [ ] `SKILL.md` under 500 lines
 - [ ] Single responsibility — one skill does one thing
+- [ ] Domain-specific terms and values preserved (not abstracted away)
 
 ---
 

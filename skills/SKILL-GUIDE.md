@@ -154,6 +154,13 @@ directory for durable artifacts. Ambiguity causes file system errors.
 Code and commands date quickly. Describe intent and outcome instead.
 The model knows the syntax; show it what to do, not how to do it.
 
+### Self-contained
+
+A skill must be self-contained. It must not read files outside its own
+directory tree. External knowledge must be inlined or copied into
+`references/` within the skill's own directory. Directory boundary is
+absolute — no out-of-bounds reads under any circumstance.
+
 ---
 
 ## Quality Checklist

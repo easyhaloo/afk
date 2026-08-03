@@ -1,26 +1,26 @@
 # TUI Testing Guide
 
-AFK TUI 基于 React + Ink 构建，采用分层测试策略。
+AFK TUI is built with React + Ink and uses a layered testing strategy.
 
-## 测试分层
+## Test Layers
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  E2E / Integration (node-pty)                   │  ← 完整终端交互、按键模拟
+│  E2E / Integration (node-pty)                   │  ← Full terminal interaction, key simulation
 ├─────────────────────────────────────────────────┤
-│  Component (ink-testing-library + sized Box)    │  ← 组件渲染测试
+│  Component (ink-testing-library + sized Box)    │  ← Component rendering tests
 ├─────────────────────────────────────────────────┤
-│  Unit / Logic (vitest)                          │  ← 纯逻辑、状态机、reducer
+│  Unit / Logic (vitest)                          │  ← Pure logic, state machines, reducers
 └─────────────────────────────────────────────────┘
 ```
 
-## 1. 单元测试（推荐起步）
+## 1. Unit Tests (Recommended Starting Point)
 
-**目标**：纯逻辑、状态机、事件分发器、注册表
+**Goal**: Pure logic, state machines, event dispatchers, registries
 
-**工具**：vitest（已配置）
+**Tool**: vitest (pre-configured)
 
-**模式**：直接实例化类，调用方法，断言结果
+**Pattern**: Instantiate classes directly, call methods, assert results
 
 ```typescript
 // src/lib/ui/core/Keyboard.test.ts
@@ -35,26 +35,26 @@ it('dispatches escape to global handler', () => {
 });
 ```
 
-**适用场景**：
-- `KeyboardDispatcher`、`ViewRegistry` 等核心类
-- reducer / state machine
-- 配置解析、schema 验证
-- Zod schema 解析
+**Use cases**:
+- Core classes like `KeyboardDispatcher`, `ViewRegistry`
+- Reducers / state machines
+- Config parsing, schema validation
+- Zod schema parsing
 
-**运行**：
+**Run**:
 ```bash
 pnpm dlx vitest --run src/lib/ui/core/
 ```
 
 ---
 
-## 2. 组件测试（ink-testing-library）
+## 2. Component Tests (ink-testing-library)
 
-**目标**：验证 TUI 组件文本输出
+**Goal**: Verify TUI component text output
 
-**工具**：`ink-testing-library` + `vitest`
+**Tools**: `ink-testing-library` + `vitest`
 
-**模式**：用 `render()` 渲染组件，通过 `lastFrame()` 检查输出
+**Pattern**: Render components with `render()`, check output via `lastFrame()`
 
 ```typescript
 import { render } from 'ink-testing-library';
@@ -69,17 +69,17 @@ it('renders text content', async () => {
 });
 ```
 
-### `position: absolute` 解决方案
+### `position: absolute` Solution
 
-**问题**：Yoga/Flexbox 计算绝对定位需要父容器尺寸。直接渲染 `position: absolute` 组件会输出空。
+**Problem**: Yoga/Flexbox calculates absolute positioning using parent container dimensions. Rendering `position: absolute` components directly produces empty output.
 
-**解决**：用 `<Box width={80} height={24}>` 包裹组件，为 Yoga 提供终端尺寸上下文。
+**Solution**: Wrap components in `<Box width={80} height={24}>` to give Yoga the terminal size context.
 
 ```typescript
-// ❌ 直接渲染 position:absolute - 输出空
+// ❌ Direct render with position: absolute - empty output
 const { lastFrame } = render(<Notification notification={n} animation="visible" />);
 
-// ✅ 用 sized Box 包裹 - 正常工作
+// ✅ Wrapped in sized Box - works correctly
 const TestContainer = () => (
   <Box width={80} height={24}>
     <Notification notification={n} animation="visible" />
@@ -90,7 +90,7 @@ await new Promise(resolve => setTimeout(resolve, 100));
 expect(lastFrame()).toContain('Test message');
 ```
 
-**完整示例**：
+**Full example**:
 
 ```typescript
 import { render } from 'ink-testing-library';
@@ -125,20 +125,20 @@ describe('Notification rendering', () => {
 });
 ```
 
-**运行**：
+**Run**:
 ```bash
 pnpm dlx vitest --run src/views/
 ```
 
 ---
 
-## 3. E2E 测试（node-pty）
+## 3. E2E Tests (node-pty)
 
-**目标**：真实终端按键交互、完整 TUI 生命周期
+**Goal**: Real terminal key interactions, complete TUI lifecycle
 
-**工具**：`node-pty`
+**Tool**: `node-pty`
 
-**模式**：启动子进程，pty 注入按键，捕获输出
+**Pattern**: Spawn a child process, inject keys via pty, capture output
 
 ```typescript
 // tests/e2e/notification.test.ts
@@ -183,115 +183,116 @@ describeE2E('Notification E2E', () => {
 });
 ```
 
-**运行**：
+**Run**:
 ```bash
 pnpm dlx vitest --run tests/e2e/
 ```
 
 ---
 
-## 测试工具链
+## Test Toolchain
 
-| 工具 | 用途 |
-|------|------|
-| `vitest` | 测试运行器 + 断言库 |
-| `ink-testing-library` | Ink 组件渲染测试 |
-| `node-pty` | PTY 进程控制（E2E） |
+| Tool | Purpose |
+|------|---------|
+| `vitest` | Test runner + assertion library |
+| `ink-testing-library` | Ink component rendering tests |
+| `node-pty` | PTY process control (E2E) |
 
-## 目录结构
+## Directory Structure
 
 ```
 afk/
 ├── src/
 │   ├── lib/ui/core/
-│   │   ├── Keyboard.test.ts      ← 单元测试 (4 tests)
-│   │   └── Registry.test.ts      ← 单元测试 (10 tests)
+│   │   ├── Keyboard.test.ts      ← Unit tests (4 tests)
+│   │   └── Registry.test.ts      ← Unit tests (10 tests)
 │   └── views/board/views/
-│       └── Notification.test.tsx ← 组件测试 (4 rendering + 5 logic)
+│       └── Notification.test.tsx ← Component tests (4 rendering + 5 logic)
 ├── tests/
 │   └── e2e/
-│       └── notification.test.ts  ← E2E 测试 (2 tests)
+│       └── notification.test.ts  ← E2E tests (2 tests)
 ├── scripts/
-│   └── fix-node-pty.sh           ← node-pty macOS 签名修复
+│   └── fix-node-pty.sh           ← node-pty macOS signature fix
 ├── vitest.config.ts
 └── docs/
-    └── TESTING.md
+    ├── TESTING.md
+    └── TESTING_zh.md
 ```
 
-## 运行测试
+## Running Tests
 
 ```bash
-# 运行所有测试
+# Run all tests
 source ~/.nvm/nvm.sh && nvm use lts/iron && pnpm dlx vitest --run
 
-# 监听模式（开发时）
+# Watch mode (development)
 pnpm dlx vitest
 
-# 只跑单元测试
+# Unit tests only
 pnpm dlx vitest --run src/lib/
 
-# 只跑组件测试
+# Component tests only
 pnpm dlx vitest --run src/views/
 
-# 只跑 E2E
+# E2E only
 pnpm dlx vitest --run tests/e2e/
 
-# 覆盖率
+# Coverage
 pnpm dlx vitest --run --coverage
 ```
 
 ---
 
-## node-pty macOS 安装问题
+## node-pty macOS Installation Issues
 
-macOS 可能阻止 `spawn-helper` 执行（`posix_spawnp failed` 或 `permission denied`）。
+macOS may block `spawn-helper` execution (`posix_spawnp failed` or `permission denied`).
 
-**修复脚本**：
+**Fix script**:
 ```bash
 ./scripts/fix-node-pty.sh --force
 ```
 
-**手动修复**：
+**Manual fix**:
 ```bash
-# 重新签名
+# Re-sign
 sudo codesign --force --deep --sign - node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper
 
-# 清除扩展属性
+# Clear extended attributes
 sudo xattr -cr node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper
 
-# 验证
+# Verify
 node -e "const {spawn}=require('node-pty');spawn('node',['--version'],{cols:80,rows:24}).onData(d=>console.log(d)).onExit(()=>process.exit())"
 ```
 
 ---
 
-## TUI 测试要点
+## TUI Testing Tips
 
-### 异步渲染需等待
+### Async Rendering Needs Wait
 
-`ink-testing-library` 的 `render()` 返回同步对象，但 Ink 渲染是异步的：
+`ink-testing-library`'s `render()` returns a synchronous object, but Ink rendering is asynchronous:
 
 ```typescript
 beforeEach(() => vi.useRealTimers());
 
 it('renders text', async () => {
   const { lastFrame } = render(<Text>Hello</Text>);
-  await new Promise(resolve => setTimeout(resolve, 100)); // 等待渲染完成
+  await new Promise(resolve => setTimeout(resolve, 100)); // Wait for render to complete
   expect(lastFrame()).toContain('Hello');
 });
 ```
 
-### 随机输出
+### Random Output
 
-TUI 中常有动态内容（时间戳、随机 ID）。测试时：
+TUI often has dynamic content (timestamps, random IDs). When testing:
 
-- Mock `Date.now()` 或时间相关函数
-- 使用固定 seed 的随机数
-- Golden 文件中用正则匹配动态部分
+- Mock `Date.now()` or time-related functions
+- Use seeded random number generators
+- Use regex to match dynamic parts in golden files
 
-### PTY 尺寸
+### PTY Dimensions
 
-E2E 测试中指定终端尺寸：
+Specify terminal dimensions in E2E tests:
 
 ```typescript
 proc = spawn(process.execPath, [distPath, 'board'], {
@@ -301,9 +302,9 @@ proc = spawn(process.execPath, [distPath, 'board'], {
 
 ---
 
-## 反模式
+## Anti-patterns
 
-- ❌ 在单元测试中渲染完整 Ink 组件而不提供尺寸上下文
-- ❌ 测试外部服务（GitLab API 等），用 MSW 或 mock
-- ❌ 依赖执行顺序的测试（vitest 默认并发）
-- ❌ 不使用 `--update` 就手动改 snapshot 文件
+- ❌ Rendering full Ink components in unit tests without size context
+- ❌ Testing external services (GitLab API, etc.) - use MSW or mocks
+- ❌ Tests that depend on execution order (vitest runs concurrently by default)
+- ❌ Manually editing snapshot files without `--update`

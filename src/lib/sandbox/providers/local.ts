@@ -13,13 +13,12 @@
  * Does NOT manage lifecycle modules (isolate, etc.) — those are runner-owned.
  */
 
-import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { WorktreeManager } from '../core/git/worktree';
-import { TmuxClient } from '../core/tmux/tmux';
-import { SIGNAL_FILE, getTokenUsage } from '../io';
-import { readLegacySignalResult } from './legacy-compat';
+import { WorktreeManager } from '../../core/git/worktree';
+import { TmuxClient } from '../../core/tmux/tmux';
+import { getTokenUsage } from '../../io';
+import { readLegacySignalResult } from '../legacy-compat';
 import {
   type SandboxProvider,
   type Sandbox,
@@ -35,8 +34,8 @@ import {
   type SandboxProviderName,
   type IsolationLevel,
   type WorktreeInfo,
-} from './types';
-import type { SessionSnapshot } from '../agents/types';
+} from '../types';
+import type { SessionSnapshot } from '../../agents/types';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',
@@ -133,7 +132,7 @@ export class LocalAgentExecution implements AgentExecution {
   constructor(opts: {
     worktreePath: string;
     sessionName: string;
-    command: import('../agents/types').AgentCommand;
+    command: import('../../agents/types').AgentCommand;
     generation: number;
     goalText: string;
     signalType: 'goal_complete' | 'ac_result';

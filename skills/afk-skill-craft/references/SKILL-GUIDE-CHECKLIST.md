@@ -9,6 +9,22 @@
 - [ ] No example code or command snippets
 - [ ] `SKILL.md` under 500 lines
 - [ ] Single responsibility — one skill does one thing
+- [ ] Domain-specific terms and values preserved
+
+## Reasoning Chain
+
+When checking or creating skills, use explicit reasoning:
+
+```
+1. Read the requirement. What does it actually require?
+2. Find evidence. Where in the skill is the relevant content?
+3. Reason. Does this pass? What could be wrong?
+4. Mark. Then mark pass/fail — not before.
+5. Self-reflect. Could this be a false positive?
+```
+
+**Never skip the reasoning step.** Blind confirmation produces false
+positives. Trace through each item explicitly.
 - [ ] Domain-specific terms and values preserved (not abstracted away)
 
 ## Constraint Rules

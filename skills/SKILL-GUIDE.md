@@ -68,35 +68,59 @@ Concrete failure modes — specific, not vague.
 
 ---
 
-## Writing for Efficiency
+## Efficiency Patterns
 
-**Trust model priors.** Don't explain what the model already knows.
-Write "Reverse the array" not "Use a for loop to iterate backwards."
+Reusable patterns for writing efficient, high-throughput skills.
 
-**Fewer steps = fewer failure points.** Every step is a failure opportunity.
-Combine atomic actions into a single step.
+### Fan out for parallel paths
 
-**Parallel by default.** If two concerns don't share state, they can run
-concurrently. Explicitly mark sequential dependency only when required.
+When multiple independent research or analysis paths exist, send them to
+parallel workers. Each worker gets one path and returns a focused summary.
 
-**Explicit output location.** Always state where output goes — `/tmp/` for
-transient, `skills/my-skill/` for durable. Ambiguity causes errors.
+- Multiple code areas to survey
+- Multi-source cross-validation
+- Independent features in the same deliverable
+
+### Sequential when results narrow scope
+
+When one step's output determines what the next step should investigate,
+run sequentially. Parallel would waste workers on irrelevant paths.
+
+### Fewer steps, fewer failures
+
+Every step is a failure point. Combine atomic actions into a single step
+when they have no meaningful checkpoint between them.
+
+### Trust model priors
+
+Don't explain what the model already knows. Write "Reverse the array"
+not "Use a for loop to iterate backwards."
 
 ---
 
-## Writing for Error Resistance
+## Constraint Rules
 
-**Fail-closed on unclear state.** If a precondition isn't met, stop.
-Don't guess or assume.
+Negative patterns — things a skill should never do.
 
-**Never skip gates.** Human confirmation points exist for a reason.
-Removing them creates silent failures.
+### Fail-closed on unclear state
 
-**No ambiguous language.** Avoid "consider", "maybe", "if appropriate",
-"as needed". Either the step is required or it isn't.
+If a precondition isn't met, stop. Don't guess, assume, or continue.
+A skill that fails loudly is better than one that fails silently.
 
-**Concrete anti-patterns.** "MUST NOT write to repo" is actionable.
-"Be careful with file writes" is useless.
+### No ambiguous language
+
+Avoid "consider", "maybe", "if appropriate", "as needed". Either the
+step is required or it isn't. Ambiguity causes execution drift.
+
+### Explicit output location
+
+Always state where output goes. `/tmp/` for transient drafts, skill
+directory for durable artifacts. Ambiguity causes file system errors.
+
+### No example code or commands
+
+Code and commands date quickly. Describe intent and outcome instead.
+The model knows the syntax; show it what to do, not how to do it.
 
 ---
 
@@ -123,6 +147,20 @@ Removing them creates silent failures.
 # Good — bounded
 # Extract and summarize content from PDFs.
 ```
+
+---
+
+## Extending This Guide
+
+Add new efficiency patterns under **Efficiency Patterns** with:
+- Pattern name
+- When to apply (trigger conditions)
+- When NOT to apply (anti-patterns)
+
+Add new constraint rules under **Constraint Rules** with:
+- Rule name
+- Concrete failure scenario
+- Why it causes errors
 
 ---
 

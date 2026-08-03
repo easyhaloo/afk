@@ -67,6 +67,8 @@ When modifying or creating skills, always work in the project's `skills/` direct
 - **Do not** edit skills in `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/`
 - The project's `skills/` directory is the source of truth
 - Changes should be committed and pushed from here
+- See `skills/SKILL-GUIDE.md` for skill authoring standards
+- Use `afk-skill-craft` to create, diagnose, or refactor skills
 
 ## Environment
 

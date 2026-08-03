@@ -18,14 +18,8 @@ disallowed-tools: >-
 Acceptance Criteria before merge into `prd/<N>`.
 **Mode:** AFK (verification + merge) — HITL (`prd/<N>` → `main`).
 
-**Architecture:**
-```
-prd/<N>  ← integration branch
-    ↑
-afk/issue-<iid>  (MR: afk/issue-<iid> → prd/<N>)
-    ↑
-main  ← only touched at final human gate
-```
+**Architecture:** `prd/<N>` is integration branch; `afk/issue-<iid>` MR targets
+it; `main` only touched at final human gate.
 
 ## Two merge gates
 

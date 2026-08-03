@@ -11,7 +11,7 @@
 ## 特性
 
 - **跨平台** — GitLab 和 GitHub 统一 CLI（issues, MRs/PRs）
-- **Skills 套件** — 18 个 Claude Code skills，涵盖完整开发流程
+- **Skills 套件** — 19 个 Claude Code skills，涵盖完整开发流程
 - **TUI 仪表板** — 交互式 issue 跟踪仪表板
 - **后台自动化** — 基于 tmux 的工作流调度器
 - **TDD 集成** — 内置测试驱动开发方法论

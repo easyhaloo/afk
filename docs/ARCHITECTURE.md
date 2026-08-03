@@ -26,25 +26,54 @@ src/
 ├── lazy-loader.ts        # Per-command dynamic import
 ├── full-cli.ts           # Fallback: loads all commands for unknown commands
 ├── commands/             # Individual command implementations
-│   ├── signal.ts, tracker.ts, tmux.ts, worktree.ts, workflow.ts
-│   ├── scheduler.ts, board.ts, kanban.ts, debug.ts, escalate.ts
-│   ├── isolate.ts, qa.ts, loop.ts, completion.ts
+│   ├── signal.ts         # Signal file management
+│   ├── tracker.ts        # Issue/MR CRUD (issue, mr commands)
+│   ├── tmux.ts           # Tmux session management
+│   ├── worktree.ts       # Git worktree list/clean
+│   ├── workflow.ts       # Workflow orchestration
+│   ├── scheduler.ts      # Background scheduler CLI wrapper
+│   ├── board.ts          # TUI dashboard
+│   ├── kanban.ts         # Kanban board
+│   ├── debug.ts          # Debug loop (reproduce → verify)
+│   ├── escalate.ts       # File issue + launch workflow
+│   ├── isolate.ts        # DB service isolation per worktree
+│   ├── qa.ts             # QA verification
+│   ├── loop.ts           # Continuous integration loop
+│   ├── completion.ts     # Shell completion
 │   └── board-entry.ts    # TUI entry point (Ink + React)
 ├── lib/
 │   ├── core/             # Platform clients, IO, git, config, tmux
-│   │   ├── config/, git/, github/, gitlab/, io/, tmux/, tracker/
-│   ├── agents/           # Agent providers (claude-code, cursor, etc.)
-│   ├── branches/         # Branch strategies
-│   ├── modules/          # Runner workers (loop-runner, qa-runner)
-│   ├── sandbox/          # Docker/Podman sandbox
-│   ├── scheduler.ts      # Scheduler logic (in-memory, no Redis)
-│   ├── sessions/         # Session store
-│   ├── templates/        # Workflow templates
-│   └── workflows/        # Workflow execution
+│   │   ├── config/       # Workflow configuration
+│   │   ├── git/          # Git operations (WorktreeManager)
+│   │   ├── github/       # GitHub client (@octokit/rest)
+│   │   ├── gitlab/       # GitLab client (@gitbeaker/node)
+│   │   ├── io/           # Signal, status, statusline, logger
+│   │   ├── tmux/         # Tmux client
+│   │   └── tracker/       # Tracker abstraction (types, detect, ac)
+│   ├── agents/           # Agent providers (claude-code, cursor, copilot, etc.)
+│   ├── branches/         # Branch strategies (issue, named, existing, merge-to-head)
+│   ├── modules/          # Lifecycle modules (loop-runner, qa-runner, isolate)
+│   │   ├── _registry.ts  # Module loader
+│   │   ├── loop-runner.ts
+│   │   ├── qa-runner.ts
+│   │   ├── isolate.ts
+│   │   └── project-resolver.ts
+│   ├── sandbox/          # Sandbox providers (local, container)
+│   │   ├── container/    # Docker/Podman sandbox
+│   │   ├── providers/    # Sandbox provider registry
+│   │   ├── types.ts      # Sandbox, ExecutionResult interfaces
+│   │   └── legacy-compat.ts
+│   ├── scheduler.ts      # Scheduler logic (in-memory queue, no Redis)
+│   ├── sessions/         # Session stores (file, handoff, chain)
+│   ├── templates/        # Workflow templates (registry, resolver, builtin)
+│   ├── workflows/        # Workflow execution (lifecycle, handoff, watchdog, budget)
+│   ├── plugins/          # Skill plugin loader
+│   ├── completion/       # Shell completion utilities
+│   └── stats/            # Statistics
 ├── views/                # TUI views (Ink + React)
-│   ├── app/
+│   ├── app/              # Main app views
 │   └── board/            # Dashboard, kanban, navigation, registry
-└── types/
+└── types/                # Shared TypeScript types
 ```
 
 ### Module Dependency Graph
@@ -61,14 +90,18 @@ graph TD
     GH["GitHubClient"]
     AC["AC Extraction (tracker/ac.ts)"]
     Runner["WorkflowRunner Orchestration"]
+    Sandbox["SandboxProvider"]
+    Agent["AgentProvider (claude-code)"]
     WT["WorktreeManager (git worktree)"]
     TMUX["TmuxClient Session Management"]
     SIG["Signal I/O (.afk-signal.json)"]
     STATUS["Status I/O (.afk/claude-status.json)"]
-    SCONF["Statusline Config Auto-injected into worktree settings"]
     Sched["Scheduler (in-memory)"]
-    Queue[("In-Memory Queue")]
-    Agent["AI Agent (claude)"]
+    Modules["Lifecycle Modules (loop-runner, qa-runner)"]
+    Templates["Template Registry"]
+    HC["HandoffCoordinator"]
+    Budget["BudgetManager"]
+    Watchdog["Watchdog"]
 
     CLI --> REG
     CLI --> LZ
@@ -86,12 +119,17 @@ graph TD
 
     Runner --> WT
     Runner --> TMUX
-    Runner --> SIG
-    Runner --> STATUS
-    Runner --> SCONF
+    Runner --> Sandbox
+    Runner --> Agent
+    Runner --> Modules
+    Runner --> Templates
+    Runner --> HC
+    Runner --> Budget
+    Runner --> Watchdog
+    Runner --> Sched
 
-    Sched --> Runner
-    Sched --> Queue
+    Modules --> Runner
+    Templates --> Runner
 
     Agent -. tmux session .-> TMUX
     Agent -. write signal .-> SIG
@@ -104,8 +142,8 @@ graph TD
     classDef io fill:#f0e1ff,stroke:#6600cc
 
     class CLI,REG,LZ,FULL,Agent cli
-    class Runner,Factory,GL,GH,Sched core
-    class WT,TMUX,SIG,STATUS,SCONF,Queue,AC io
+    class Runner,Factory,GL,GH,Sched,Modules,Templates,Watcher core
+    class WT,TMUX,SIG,STATUS,Sandbox,AC,HC,Budget io
 ```
 
 ### Module Responsibilities
@@ -116,14 +154,20 @@ graph TD
 | **lazy-loader.ts** | Per-command dynamic import | Fast path: ~50ms cold start |
 | **full-cli.ts** | Load-all fallback for unknown commands | Parallel `Promise.all` load |
 | **index.ts** | Thin CLI dispatcher | No shared logging at import time |
-| **WorkflowRunner** | Orchestrates complete lifecycle | Signal-driven + statusline objective validation + AC objective verification |
+| **WorkflowRunner** | Orchestrates complete lifecycle | Template-driven + handoff + budget + AC objective verification |
+| **SandboxProvider** | Agent runtime environment abstraction | Local (tmux) or container (Docker/Podman) |
+| **AgentProvider** | AI agent abstraction | claude-code, cursor, copilot, codex, opencode, pi |
+| **HandoffCoordinator** | Context overflow management | Negotiate summary → persist doc → post comment → relaunch |
+| **BudgetManager** | Token and handoff budget tracking | Tracks total tokens across handoff generations |
+| **Watchdog** | Hard timeout protection | `setsid`独立进程，即使父进程崩溃也能触发 |
 | **AC Extraction** | Extract AC from issue labels / legacy markdown | Label-driven first, markdown as fallback |
 | **WorktreeManager** | Independent workspace per Issue | Physical isolation, no branch conflicts |
 | **TmuxClient** | Agent runtime environment | Independent sessions, crashes don't affect each other |
 | **Signal I/O** | Agent-Runner control communication | Atomic file writes, Zod validation |
 | **Status I/O** | Read Claude statusline JSON | Token objective data source |
-| **Statusline Config** | Auto-inject worktree settings.json | tee stdin JSON to file + placeholder for startup detection |
 | **Scheduler** | Multi-Issue concurrent scheduling | In-memory queue + priority, no Redis dependency |
+| **Lifecycle Modules** | Extensible runners | loop-runner (continuous), qa-runner (verification), isolate (DB isolation) |
+| **Template Registry** | Workflow template loading | Built-in templates + custom template support |
 
 ---
 
@@ -155,7 +199,7 @@ Neither GitLab nor GitHub APIs return structured checklists. The original regex 
 
 **Switch to label-expressed AC**: Each AC item is a label (`ac::1:: User can log in`), platform APIs directly return structured arrays, enabling server-side filtering.
 
-Legacy markdown sections are kept as fallback (best-effort), no migration needed. See `src/lib/core/tracker/ac.ts` for details.
+Legacy markdown sections are kept as fallback (best-effort), no migration needed. See `src/lib/core/tracker/ac.ts`.
 
 ### 1d. Why Not Pane Capture + Regex for State Detection?
 
@@ -381,107 +425,77 @@ Zod fails fast at the boundary, better than letting errors like `undefined.sha` 
 
 ## WorkflowRunner Flow
 
-### Core State Machine
+### Core Architecture
+
+The WorkflowRunner uses a **template-driven, multi-phase design**:
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Init: run(iid)
+graph TD
+    Start[run options] --> Init[Initialize tracker, tmux, sandbox]
+    Init --> Resolve[Resolve template & branch strategy]
+    Resolve --> LoadModules[Load lifecycle modules]
+    LoadModules --> Plan[Resolve execution plan from template]
+    Plan --> ExecutePhases
 
-    Init: Initialize - getIssue / parseAC
-    Worktree: Create Worktree + configure statusline
-    TmuxLaunch: Start Tmux Session
-    Watchdog: Start Watchdog
-    Comment: Post launch comment
-    Polling: Wait for signals
+    subgraph ExecutePhases
+        P1[Phase 1: Implement] --> Poll1[Poll signals / context]
+        Poll1 --> Check1{goal_complete?}
+        Check1 -->|yes| P2[Phase 2: Verify]
+        Check1 -->|context_high| HC[HandoffCoordinator]
+        HC --> Resume1[Resume with summary]
+        Resume1 --> P1
+        Poll1 -->|timeout| WD[Watchdog]
+    end
 
-    Init --> Worktree
-    Worktree --> TmuxLaunch
-    TmuxLaunch --> Watchdog
-    Watchdog --> Comment
-    Comment --> Polling
-
-    Polling --> AutoWrapup: goal_complete
-    Polling --> Timeout: timeout
-    Polling --> Handoff: token >= threshold
-
-    AutoWrapup: autoWrapup - Objective validation + MR
-    Timeout: handleTimeout - Logs + labels
-    Handoff: handleHandoff - Context switch
-
-    AutoWrapup --> RetryCheck: verifyAC FAIL
-    AutoWrapup --> Success: verifyAC PASS
-    RetryCheck --> HITL: retry > max
-    RetryCheck --> [*]: Retry new session
-
-    Success --> [*]: MR created
-    Timeout --> [*]: Escalate or retry
-    Handoff --> Polling: handoff_ready
-    HITL --> [*]: Human intervention
+    P2 --> Poll2[Poll for ac_result]
+    Poll2 --> Check2{ac_pass?}
+    Check2 -->|yes| Wrapup[autoWrapup]
+    Check2 -->|no| Retry{retry < max?}
+    Retry -->|yes| NewSess[New session]
+    Retry -->|no| HITL[Escalate to HITL]
+    NewSess --> P1
+    Wrapup --> CreateMR[Create MR]
+    CreateMR --> Done[Success]
+    HITL --> Done
 ```
 
-### Sequence Diagram: Complete Lifecycle
+### Two-Phase Design
+
+**Phase 1 (Implement):** Send `/goal "实现 issue #N"` → wait for `goal_complete` signal or context threshold
+
+**Phase 2 (Verify):** Send `/goal "验证 issue #N 的 AC"` → wait for `ac_result` signal
+
+**autoWrapup:** Push branch → create MR → add `stage::qa` label
+
+### Handoff System
+
+When context threshold is reached:
+1. **HandoffCoordinator** negotiates summary with agent
+2. Persists summary to handoff document
+3. Posts summary as issue comment
+4. Relaunches session with summary injected
+5. Continues until phase completes or budget exhausts
 
 ```mermaid
 sequenceDiagram
-    participant U as User/CLI
-    participant W as WorkflowRunner
+    participant R as WorkflowRunner
+    participant HC as HandoffCoordinator
+    participant A as Agent
     participant T as TrackerProvider
-    participant G as Git/Worktree
-    participant M as TmuxClient
-    participant A as AI Agent
-    participant Wd as Watchdog
+    participant FS as FileSystem
+    participant Sess as SessionStore
 
-    U->>W: afk implement iid
-    W->>T: getIssue(iid)
-    T-->>W: TrackedIssue
-    W->>T: parseAC(issue) - labels first, fallback markdown
-
-    W->>G: createWorktree(iid, baseBranch)
-    G-->>W: Worktree
-
-    W->>W: configureStatusline(write settings.json + placeholder status)
-
-    par Parallel startup
-        W->>M: createSession(name, wt.path, claude)
-        M->>A: spawn claude process
-        W->>Wd: setsid write timeout signal + sleep + kill-session
-        Note over Wd: Independent process, triggers even if parent crashes
-    end
-
-    M->>W: waitForPrompt - Check placeholder file exists
-    W->>M: sendGoal(goalText)
-    M->>A: Send /goal + AC
-
-    A->>A: Implement feature + commit
-    Note over A: First turn triggers statusline tee, overwrites placeholder with real payload
-
-    loop Signal polling (every 2s)
-        W->>A: read .afk-signal.json
-        alt goal_complete
-            A-->>W: goal_complete signal
-            W->>G: pushBranch()
-            W->>A: sendResumeWithAC()
-            A->>A: Check each AC item
-            W->>W: verifyAC(commit count + AC items)
-            alt verifyAC OK
-                W->>T: createMR(iid, branch, target)
-                T-->>W: MR URL
-                W->>T: addLabel(stage::qa)
-            else verifyAC FAIL
-                W->>W: handleACFail
-            end
-        else timeout (5min)
-            Note over W: Soft timeout, continue waiting
-        end
-    end
-
-    opt Hard timeout (60min)
-        Wd->>M: kill-session
-        Note over Wd: timeout signal already written
-    end
+    R->>HC: triggerHandoff(context_high)
+    HC->>A: requestSummary
+    A-->>HC: summary text
+    HC->>FS: persist to handoff.md
+    HC->>T: postComment(summary)
+    HC->>R: handoff doc path
+    R->>Sess: save snapshot
+    R->>A: resume with summary injected
 ```
 
-### Key Design of autoWrapup
+### autoWrapup Key Design
 
 **AC acceptance doesn't rely on Agent self-assessment**. Runner performs objective validation:
 
@@ -491,9 +505,6 @@ sequenceDiagram
    - Issue has AC items (labels or markdown)
 3. Agent sends `ac_result` signal as **a hint**, not a gate
 4. **Runner makes the decision itself**, moving evaluation responsibility from "the evaluated" to "the evaluator"
-
-**Why not trust Agent's PASS/FAIL?**
-LLMs tend to "optimistic reporting". Even if Agent writes `result: 'PASS'`, empty repos or issues without AC are still caught by `verifyAC`.
 
 ### AC Data Sources
 
@@ -610,7 +621,7 @@ The CLI entry point is a **thin dispatcher** (~50 lines), intentionally minimal 
 graph TD
     A["CLI invoked"] --> B{"cmd argument?"}
     B -->|none| TUI["startDashboard (board-entry)"]
-    B -->|--version| Ver["Print 0.1.0"]
+    B -->|--version| Ver["Print version"]
     B -->|board| Err["Error: use afk with no args"]
     B -->|other| LL["lazyLoad(cmd, extraArgs)"]
     TUI --> Ink["Ink TUI (React)"]
@@ -625,20 +636,20 @@ graph TD
 
 ```typescript
 export const COMMANDS: CommandEntry[] = [
-  { names: ['signal'], loader: () => import('./commands/signal.js') },
-  { names: ['issue', 'mr'], loader: () => import('./commands/tracker.js') },
-  { names: ['tmux'], loader: () => import('./commands/tmux.js') },
-  { names: ['worktree'], loader: () => import('./commands/worktree.js') },
-  { names: ['workflow'], loader: () => import('./commands/workflow.js') },
-  { names: ['scheduler'], loader: () => import('./commands/scheduler.js') },
-  { names: ['board'], loader: () => import('./commands/board.js') },
-  { names: ['kanban'], loader: () => import('./commands/kanban.js') },
-  { names: ['debug'], loader: () => import('./commands/debug.js') },
-  { names: ['escalate'], loader: () => import('./commands/escalate.js') },
-  { names: ['isolate'], loader: () => import('./commands/isolate.js') },
-  { names: ['qa'], loader: () => import('./commands/qa.js') },
-  { names: ['loop'], loader: () => import('./commands/loop.js') },
-  { names: ['completion', '__complete'], loader: () => import('./commands/completion.js') },
+  { names: ['signal'], loader: () => import('./commands/signal.js').then(m => m.registerSignalCommands) },
+  { names: ['issue', 'mr'], loader: () => import('./commands/tracker.js').then(m => m.registerTrackerCommands) },
+  { names: ['tmux'], loader: () => import('./commands/tmux.js').then(m => m.registerTmuxCommands) },
+  { names: ['worktree'], loader: () => import('./commands/worktree.js').then(m => m.registerWorktreeCommands) },
+  { names: ['workflow'], loader: () => import('./commands/workflow.js').then(m => m.registerWorkflowCommands) },
+  { names: ['scheduler'], loader: () => import('./commands/scheduler.js').then(m => m.registerSchedulerCommands) },
+  { names: ['board'], loader: () => import('./commands/board.js').then(m => m.registerBoardCommands) },
+  { names: ['kanban'], loader: () => import('./commands/kanban.js').then(m => m.registerKanbanCommands) },
+  { names: ['debug'], loader: () => import('./commands/debug.js').then(m => m.registerDebugCommands) },
+  { names: ['escalate'], loader: () => import('./commands/escalate.js').then(m => m.registerEscalateCommands) },
+  { names: ['isolate'], loader: () => import('./commands/isolate.js').then(m => m.registerIsolateCommands) },
+  { names: ['qa'], loader: () => import('./commands/qa.js').then(m => m.registerQACommands) },
+  { names: ['loop'], loader: () => import('./commands/loop.js').then(m => m.registerLoopCommands) },
+  { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },
 ];
 ```
 
@@ -693,6 +704,137 @@ graph LR
 
 ---
 
+## Lifecycle Modules
+
+Modules extend the WorkflowRunner with additional capabilities:
+
+### Module Registry (`src/lib/modules/_registry.ts`)
+
+```typescript
+loadModules(names: string[], params: Record<string, unknown>): LifecycleModule[]
+parseModuleParams(params: string[]): Record<string, unknown>
+```
+
+### Available Modules
+
+| Module | File | Purpose |
+|--------|------|---------|
+| **loop-runner** | `modules/loop-runner.ts` | Continuous integration loop |
+| **qa-runner** | `modules/qa-runner.ts` | QA verification on merged code |
+| **isolate** | `modules/isolate.ts` | DB service isolation per worktree |
+| **project-resolver** | `modules/project-resolver.ts` | Cross-project issue resolution |
+
+### Module Loading
+
+```mermaid
+graph TD
+    CLI[CLI] --> Load[loadModules]
+    Load --> Parse[parseModuleParams]
+    Parse --> Filter[Filter by names]
+    Filter --> Instantiate[Instantiate modules]
+    Instantiate --> Attach[Attach to WorkflowRunner]
+```
+
+---
+
+## Sandbox Providers
+
+### Provider Architecture
+
+```mermaid
+graph TD
+    Runner["WorkflowRunner"]
+    Factory["createSandboxProvider"]
+    Local["LocalSandboxProvider"]
+    Container["ContainerSandboxProvider"]
+
+    Runner --> Factory
+    Factory -->|local| Local
+    Factory -->|container| Container
+
+    Local --> TMUX["TmuxClient"]
+    Container --> Docker["Docker/Podman"]
+
+    classDef provider fill:#fff4e1,stroke:#cc6600
+    class Factory,Local,Container provider
+```
+
+### Local Sandbox
+
+Uses tmux sessions for agent execution:
+- Spawns agent in dedicated tmux session
+- Shares filesystem with host (worktree)
+- Low overhead, fast startup
+
+### Container Sandbox
+
+Uses Docker/Podman for isolation:
+- Full process isolation
+- Configurable resource limits
+- Network isolation option
+
+---
+
+## Session Management
+
+### Session Store Chain
+
+```
+FileSessionStore (native Claude Code snapshots)
+    ↓ (fallback)
+HandoffSessionStore (Markdown handoff documents)
+```
+
+### Handoff Flow
+
+```mermaid
+sequenceDiagram
+    participant Old as Old Session
+    participant Sess as SessionStore
+    participant FS as FileSystem
+    participant New as New Session
+
+    Old->>Sess: saveSnapshot()
+    Sess->>FS: write .afk/sessions/{id}.json
+    Old->>FS: write handoff.md
+    New->>FS: read handoff.md
+    New->>New: resume with context
+```
+
+---
+
+## Template System
+
+### Template Registry
+
+Templates define workflow execution plans:
+
+```typescript
+planFor(name: string, ctx: PlanContext): ExecutionPlan
+loadBuiltinTemplates(): Template[]
+```
+
+### Built-in Templates
+
+| Template | Purpose |
+|----------|---------|
+| `implement` | Issue → MR two-phase workflow |
+| `qa` | QA verification |
+| `loop` | Continuous integration |
+
+### Template Resolution
+
+```mermaid
+graph LR
+    A[Template name] --> B[Check builtin]
+    B -->|found| C[Return builtin]
+    B -->|not found| D[Check custom path]
+    D -->|found| E[Load custom]
+    D -->|not found| F[Error]
+```
+
+---
+
 ## Tech Stack Selection
 
 | Selection | Alternative | Reason |
@@ -713,21 +855,31 @@ graph LR
 
 ```mermaid
 graph LR
-    A[Implement TrackerProvider interface] --> B[Add URL recognition in detectProject]
-    B --> C[Register branch in createTrackerClient]
-    C --> D[Encapsulate platform-specific differences]
-    D --> E[No business logic changes needed]
+    A[Implement TrackerProvider interface] --> B[In client-factory.ts, add detection]
+    B --> C[Add TrackerClient factory branch]
+    C --> D[No business logic changes needed]
 
     classDef new fill:#d4edda
-    class A,B,C,D,E new
+    class A,B,C,D new
 ```
 
-**No changes needed:** WorkflowRunner, business commands, Scheduler
+### Adding a New Lifecycle Module
+
+1. Create module in `src/lib/modules/`
+2. Export `LifecycleModule` interface implementation
+3. Register in `_registry.ts`
+4. Activate via `ext` option in `RunnerOptions`
+
+### Adding a New Agent Provider
+
+1. Implement `AgentProvider` interface in `src/lib/agents/`
+2. Register in `agents/registry.ts`
+3. Activate via `agentProvider` option in `RunnerOptions`
 
 ### Adding a New Signal Type
 
 1. Define Zod schema in `SignalSchema`
-2. Add new type in WorkflowRunner's `waitForAnySignal()`
+2. In WorkflowRunner's `waitForAnySignal()` add new type
 3. Add corresponding handler method
 4. Update Agent skill instructions
 
@@ -750,12 +902,6 @@ Statusline JSON provides rich session metadata (token usage, cache hit rate, cos
 | Model switch judgment | `model.display_name` | Config-driven |
 | Cache strategy evaluation | `cache_creation_input_tokens` growth rate | TBD |
 
-Extension: Add aggregated fields in `extractTokenUsage()` in `src/lib/core/io/status.ts`; add thresholds in `constants.ts`; read as needed in WorkflowRunner.
-
-### Custom Workflow Hooks
-
-RunnerOptions supports hooks like `customValidation`, allowing custom logic (lint, performance tests, screenshot verification) before/after AC checks.
-
 ---
 
 ## State Files
@@ -768,6 +914,8 @@ RunnerOptions supports hooks like `customValidation`, allowing custom logic (lin
 | `<worktree>/.afk/CRASHED` | Abnormal exit marker | watchdog | WorktreeManager |
 | `<worktree>/.afk/SUCCESS` | Success completion marker | workflow end | WorktreeManager |
 | `<worktree>/.claude/settings.json` | Auto-injected statusline config | configureStatusline | Claude Code |
+| `.afk/sessions/*.json` | Native session snapshots | FileSessionStore | Session chain |
+| `handoff.md` | Context handoff document | HandoffCoordinator | New session resume |
 | `~/.claude/logs/afk/` | Timeout logs, watchdog records | handleTimeout / watchdog | Ops |
 
 ---
@@ -784,13 +932,13 @@ Two scenarios:
 1. **AC parsing fails**: Check if issue has `ac::1::...` label or `## AC` markdown section
 2. **verifyAC fails**: Branch must have commits relative to baseBranch; empty repos are blocked
 
-### Q: Worktree disk usage
+### Q: Worktree占用空间
 
-`afk worktree clean --stale` cleans worktrees inactive for 7+ days.
+`afk worktree clean --stale` 清理 7 天未活动的 worktree。
 
-### Q: How to debug a single Issue?
+### Q: 如何调试单个 Issue？
 
-`afk implement <iid> --dry-run` skips execution, only prints the plan.
+`afk implement <iid> --dry-run` 跳过实际执行，只打印计划。
 
 ---
 
@@ -798,4 +946,4 @@ Two scenarios:
 
 - [Quick Start](GETTING-STARTED.md) — Installation and configuration
 - [Workflows](WORKFLOWS.md) — Complete Issue to MR flow
-- [Skills Guide](SKILLS.md) — 8 Claude Code skills
+- [Skills Guide](SKILLS.md) — Claude Code skills

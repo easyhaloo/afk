@@ -26,25 +26,54 @@ src/
 ├── lazy-loader.ts        # 按命令动态 import
 ├── full-cli.ts           # 兜底: 未知命令时加载全部
 ├── commands/             # 各命令实现
-│   ├── signal.ts, tracker.ts, tmux.ts, worktree.ts, workflow.ts
-│   ├── scheduler.ts, board.ts, kanban.ts, debug.ts, escalate.ts
-│   ├── isolate.ts, qa.ts, loop.ts, completion.ts
+│   ├── signal.ts         # 信号文件管理
+│   ├── tracker.ts        # Issue/MR CRUD (issue, mr 命令)
+│   ├── tmux.ts           # Tmux 会话管理
+│   ├── worktree.ts       # Git worktree 列出/清理
+│   ├── workflow.ts       # 工作流编排
+│   ├── scheduler.ts      # 后台调度器 CLI 封装
+│   ├── board.ts          # TUI 仪表盘
+│   ├── kanban.ts         # 看板
+│   ├── debug.ts          # 调试循环 (复现→验证)
+│   ├── escalate.ts       # 提 issue + 启动工作流
+│   ├── isolate.ts        # 每个 worktree 的 DB 服务隔离
+│   ├── qa.ts             # QA 验证
+│   ├── loop.ts           # 持续集成循环
+│   ├── completion.ts     # Shell 补全
 │   └── board-entry.ts    # TUI 入口 (Ink + React)
 ├── lib/
 │   ├── core/             # 平台客户端, IO, git, config, tmux
-│   │   ├── config/, git/, github/, gitlab/, io/, tmux/, tracker/
-│   ├── agents/           # Agent 提供商 (claude-code, cursor 等)
-│   ├── branches/         # 分支策略
-│   ├── modules/          # Runner workers (loop-runner, qa-runner)
-│   ├── sandbox/          # Docker/Podman 沙箱
+│   │   ├── config/       # 工作流配置
+│   │   ├── git/          # Git 操作 (WorktreeManager)
+│   │   ├── github/       # GitHub 客户端 (@octokit/rest)
+│   │   ├── gitlab/       # GitLab 客户端 (@gitbeaker/node)
+│   │   ├── io/           # Signal, status, statusline, logger
+│   │   ├── tmux/         # Tmux 客户端
+│   │   └── tracker/      # Tracker 抽象 (types, detect, ac)
+│   ├── agents/           # Agent 提供商 (claude-code, cursor, copilot 等)
+│   ├── branches/         # 分支策略 (issue, named, existing, merge-to-head)
+│   ├── modules/          # 生命周期模块 (loop-runner, qa-runner, isolate)
+│   │   ├── _registry.ts  # 模块加载器
+│   │   ├── loop-runner.ts
+│   │   ├── qa-runner.ts
+│   │   ├── isolate.ts
+│   │   └── project-resolver.ts
+│   ├── sandbox/          # 沙箱提供商 (local, container)
+│   │   ├── container/    # Docker/Podman 沙箱
+│   │   ├── providers/    # 沙箱提供商注册表
+│   │   ├── types.ts      # Sandbox, ExecutionResult 接口
+│   │   └── legacy-compat.ts
 │   ├── scheduler.ts      # 调度器逻辑 (内存队列，无 Redis)
-│   ├── sessions/         # Session 存储
-│   ├── templates/        # 工作流模板
-│   └── workflows/        # 工作流执行
+│   ├── sessions/         # Session 存储 (file, handoff, chain)
+│   ├── templates/        # 工作流模板 (registry, resolver, builtin)
+│   ├── workflows/        # 工作流执行 (lifecycle, handoff, watchdog, budget)
+│   ├── plugins/          # Skill 插件加载器
+│   ├── completion/       # Shell 补全工具
+│   └── stats/            # 统计
 ├── views/                # TUI 视图 (Ink + React)
-│   ├── app/
+│   ├── app/              # 主应用视图
 │   └── board/            # Dashboard, kanban, navigation, registry
-└── types/
+└── types/                # 共享 TypeScript 类型
 ```
 
 ### 模块依赖图
@@ -61,14 +90,18 @@ graph TD
     GH["GitHubClient"]
     AC["AC 提取 (tracker/ac.ts)"]
     Runner["WorkflowRunner 工作流编排"]
+    Sandbox["SandboxProvider"]
+    Agent["AgentProvider (claude-code)"]
     WT["WorktreeManager (git worktree)"]
     TMUX["TmuxClient 会话管理"]
     SIG["Signal I/O (.afk-signal.json)"]
     STATUS["Status I/O (.afk/claude-status.json)"]
-    SCONF["Statusline Config 自动注入 worktree settings"]
     Sched["Scheduler (内存队列)"]
-    Queue[("内存队列")]
-    Agent["AI Agent (claude)"]
+    Modules["生命周期模块 (loop-runner, qa-runner)"]
+    Templates["模板注册表"]
+    HC["HandoffCoordinator"]
+    Budget["BudgetManager"]
+    Watchdog["Watchdog"]
 
     CLI --> REG
     CLI --> LZ
@@ -86,12 +119,17 @@ graph TD
 
     Runner --> WT
     Runner --> TMUX
-    Runner --> SIG
-    Runner --> STATUS
-    Runner --> SCONF
+    Runner --> Sandbox
+    Runner --> Agent
+    Runner --> Modules
+    Runner --> Templates
+    Runner --> HC
+    Runner --> Budget
+    Runner --> Watchdog
+    Runner --> Sched
 
-    Sched --> Runner
-    Sched --> Queue
+    Modules --> Runner
+    Templates --> Runner
 
     Agent -. tmux session .-> TMUX
     Agent -. write signal .-> SIG
@@ -104,8 +142,8 @@ graph TD
     classDef io fill:#f0e1ff,stroke:#6600cc
 
     class CLI,REG,LZ,FULL,Agent cli
-    class Runner,Factory,GL,GH,Sched core
-    class WT,TMUX,SIG,STATUS,SCONF,Queue,AC io
+    class Runner,Factory,GL,GH,Sched,Modules,Templates,Watcher core
+    class WT,TMUX,SIG,STATUS,Sandbox,AC,HC,Budget io
 ```
 
 ### 模块职责
@@ -116,14 +154,20 @@ graph TD
 | **lazy-loader.ts** | 按命令动态 import | 快速路径: ~50ms 冷启动 |
 | **full-cli.ts** | 未知命令时加载全部的兜底 | 并行 `Promise.all` 加载 |
 | **index.ts** | 极简 CLI 分发器 | 导入时不加载共享日志栈 |
-| **WorkflowRunner** | 编排完整生命周期 | 信号驱动 + statusline 客观校验 + AC 客观验证 |
+| **WorkflowRunner** | 编排完整生命周期 | 模板驱动 + handoff + budget + AC 客观验证 |
+| **SandboxProvider** | Agent 运行环境抽象 | Local (tmux) 或 Container (Docker/Podman) |
+| **AgentProvider** | AI agent 抽象 | claude-code, cursor, copilot, codex, opencode, pi |
+| **HandoffCoordinator** | 上下文溢出管理 | 协商摘要 → 持久化文档 → 发评论 → 重启 |
+| **BudgetManager** | Token 和 handoff budget 追踪 | 追踪跨 handoff 生成的总 token |
+| **Watchdog** | 硬超时保护 | `setsid` 独立进程，即使父进程崩溃也能触发 |
 | **AC 提取** | 从 issue labels / 旧 markdown 提取 AC | 标签驱动优先，markdown 兼容 |
 | **WorktreeManager** | 每个 Issue 独立工作区 | 物理隔离，避免分支冲突 |
 | **TmuxClient** | Agent 运行环境 | 独立会话，崩溃不互相影响 |
 | **Signal I/O** | Agent↔Runner 控制通信 | 文件原子写入，Zod 校验 |
 | **Status I/O** | 读取 Claude statusline JSON | token 客观数据源 |
-| **Statusline Config** | 自动注入 worktree settings.json | tee stdin JSON 到文件 + placeholder 启动检测 |
 | **Scheduler** | 多 Issue 并发调度 | 内存队列 + 优先级，无 Redis 依赖 |
+| **生命周期模块** | 可扩展的运行器 | loop-runner (持续集成), qa-runner (验证), isolate (DB隔离) |
+| **模板注册表** | 工作流模板加载 | 内置模板 + 自定义模板支持 |
 
 ---
 
@@ -332,7 +376,7 @@ sequenceDiagram
     participant Tee as tee (statusline 入口)
     participant SL as ccstatusline 渲染
 
-    W->>SCONF: 写 settings.json + placeholder 文件
+    W->>SCONF: 写 settings.json + placeholder status
     SCONF->>JSON: 写入 placeholder (启动即可检测)
     W->>JSON: fs.access → 立即返回 true
 
@@ -381,104 +425,74 @@ Zod 在边界处快速失败，比让 `undefined.sha` 这种错误传播到深�
 
 ## WorkflowRunner 流程
 
-### 核心状态机
+### 核心架构
+
+WorkflowRunner 采用**模板驱动、多阶段设计**：
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Init: run(iid)
+graph TD
+    Start[run options] --> Init[初始化 tracker, tmux, sandbox]
+    Init --> Resolve[解析模板和分支策略]
+    Resolve --> LoadModules[加载生命周期模块]
+    LoadModules --> Plan[从模板解析执行计划]
+    Plan --> ExecutePhases
 
-    Init: 初始化 - getIssue / parseAC
-    Worktree: 创建 Worktree + 配置 statusline
-    TmuxLaunch: 启动 Tmux Session
-    Watchdog: 启动 Watchdog
-    Comment: 发布启动评论
-    Polling: 等待信号
+    subgraph ExecutePhases
+        P1[阶段 1: 实现] --> Poll1[轮询信号 / 上下文]
+        Poll1 --> Check1{goal_complete?}
+        Check1 -->|yes| P2[阶段 2: 验证]
+        Check1 -->|context_high| HC[HandoffCoordinator]
+        HC --> Resume1[用摘要恢复]
+        Resume1 --> P1
+        Poll1 -->|timeout| WD[Watchdog]
+    end
 
-    Init --> Worktree
-    Worktree --> TmuxLaunch
-    TmuxLaunch --> Watchdog
-    Watchdog --> Comment
-    Comment --> Polling
-
-    Polling --> AutoWrapup: goal_complete
-    Polling --> Timeout: timeout
-    Polling --> Handoff: token ≥ 阈值
-
-    AutoWrapup: autoWrapup - 客观校验 + MR
-    Timeout: handleTimeout - 日志 + 标签
-    Handoff: handleHandoff - 上下文切换
-
-    AutoWrapup --> RetryCheck: verifyAC FAIL
-    AutoWrapup --> Success: verifyAC PASS
-    RetryCheck --> HITL: retry > max
-    RetryCheck --> [*]: 重试新 session
-
-    Success --> [*]: MR 创建完成
-    Timeout --> [*]: 升级或重试
-    Handoff --> Polling: handoff_ready
-    HITL --> [*]: 人工介入
+    P2 --> Poll2[轮询 ac_result]
+    Poll2 --> Check2{ac_pass?}
+    Check2 -->|yes| Wrapup[autoWrapup]
+    Check2 -->|no| Retry{重试 < max?}
+    Retry -->|yes| NewSess[新 session]
+    Retry -->|no| HITL[升级到 HITL]
+    NewSess --> P1
+    Wrapup --> CreateMR[创建 MR]
+    CreateMR --> Done[成功]
+    HITL --> Done
 ```
 
-### 时序图：完整生命周期
+### 两阶段设计
+
+**阶段 1 (实现)：** 发送 `/goal "实现 issue #N"` → 等待 `goal_complete` 信号或上下文阈值
+
+**阶段 2 (验证)：** 发送 `/goal "验证 issue #N 的 AC"` → 等待 `ac_result` 信号
+
+**autoWrapup：** 推送分支 → 创建 MR → 添加 `stage::qa` 标签
+
+### Handoff 系统
+
+当上下文阈值达到时：
+1. **HandoffCoordinator** 与 agent 协商摘要
+2. 将摘要持久化到 handoff 文档
+3. 将摘要作为 issue 评论发布
+4. 用注入的摘要重新启动 session
+5. 继续直到阶段完成或 budget 耗尽
 
 ```mermaid
 sequenceDiagram
-    participant U as 用户/CLI
-    participant W as WorkflowRunner
+    participant R as WorkflowRunner
+    participant HC as HandoffCoordinator
+    participant A as Agent
     participant T as TrackerProvider
-    participant G as Git/Worktree
-    participant M as TmuxClient
-    participant A as AI Agent
-    participant Wd as Watchdog
+    participant FS as FileSystem
+    participant Sess as SessionStore
 
-    U->>W: afk implement iid
-    W->>T: getIssue(iid)
-    T-->>W: TrackedIssue
-    W->>T: parseAC(issue) - 优先 labels, fallback markdown
-
-    W->>G: createWorktree(iid, baseBranch)
-    G-->>W: Worktree
-
-    W->>W: configureStatusline(写 settings.json + placeholder status)
-
-    par 并行启动
-        W->>M: createSession(name, wt.path, claude)
-        M->>A: spawn claude process
-        W->>Wd: setsid 写 timeout signal + sleep + kill-session
-        Note over Wd: 独立进程，父进程崩溃也能触发
-    end
-
-    M->>W: waitForPrompt - 检测 placeholder 文件存在
-    W->>M: sendGoal(goalText)
-    M->>A: 发送 /goal + AC
-
-    A->>A: 实现功能 + 提交 commits
-    Note over A: 第一回合触发 statusline tee, 覆盖 placeholder 为真实 payload
-
-    loop 信号轮询 (每 2s)
-        W->>A: read .afk-signal.json
-        alt goal_complete
-            A-->>W: goal_complete signal
-            W->>G: pushBranch()
-            W->>A: sendResumeWithAC()
-            A->>A: 逐条检查 AC
-            W->>W: verifyAC(commit count + AC items)
-            alt verifyAC OK
-                W->>T: createMR(iid, branch, target)
-                T-->>W: MR URL
-                W->>T: addLabel(stage::qa)
-            else verifyAC FAIL
-                W->>W: handleACFail
-            end
-        else timeout (5min)
-            Note over W: 软超时，继续等待
-        end
-    end
-
-    opt 硬超时 (60min)
-        Wd->>M: kill-session
-        Note over Wd: timeout signal 已写入
-    end
+    R->>HC: triggerHandoff(context_high)
+    HC->>A: requestSummary
+    A-->>HC: summary text
+    HC->>FS: persist to handoff.md
+    HC->>T: postComment(summary)
+    HC->>R: handoff doc path
+    R->>Sess: save snapshot
+    R->>A: resume with summary injected
 ```
 
 ### autoWrapup 的关键设计
@@ -491,9 +505,6 @@ sequenceDiagram
    - issue 有 AC 条目（labels 或 markdown）
 3. Agent 发 `ac_result` 信号作为**提示**，不是门控
 4. **Runner 自己做裁决**，把评估责任从"被评估者"移到"评估者"
-
-**为什么不信任 Agent 的 PASS/FAIL？**
-LLM 倾向于"乐观报告"。即使 Agent 写 `result: 'PASS'`，空仓库或无 AC 的 issue 仍会被 `verifyAC` 拦下。
 
 ### AC 数据来源
 
@@ -610,7 +621,7 @@ CLI 入口是一个**极简分发器**（~50 行），刻意保持轻量以维�
 graph TD
     A["CLI 启动"] --> B{"是否有 cmd 参数?"}
     B -->|无参数| TUI["startDashboard (board-entry)"]
-    B -->|--version| Ver["输出 0.1.0"]
+    B -->|--version| Ver["输出版本"]
     B -->|board| Err["错误: 使用 afk 无参数启动 TUI"]
     B -->|其他命令| LL["lazyLoad(cmd, extraArgs)"]
     TUI --> Ink["Ink TUI (React)"]
@@ -625,20 +636,20 @@ graph TD
 
 ```typescript
 export const COMMANDS: CommandEntry[] = [
-  { names: ['signal'], loader: () => import('./commands/signal.js') },
-  { names: ['issue', 'mr'], loader: () => import('./commands/tracker.js') },
-  { names: ['tmux'], loader: () => import('./commands/tmux.js') },
-  { names: ['worktree'], loader: () => import('./commands/worktree.js') },
-  { names: ['workflow'], loader: () => import('./commands/workflow.js') },
-  { names: ['scheduler'], loader: () => import('./commands/scheduler.js') },
-  { names: ['board'], loader: () => import('./commands/board.js') },
-  { names: ['kanban'], loader: () => import('./commands/kanban.js') },
-  { names: ['debug'], loader: () => import('./commands/debug.js') },
-  { names: ['escalate'], loader: () => import('./commands/escalate.js') },
-  { names: ['isolate'], loader: () => import('./commands/isolate.js') },
-  { names: ['qa'], loader: () => import('./commands/qa.js') },
-  { names: ['loop'], loader: () => import('./commands/loop.js') },
-  { names: ['completion', '__complete'], loader: () => import('./commands/completion.js') },
+  { names: ['signal'], loader: () => import('./commands/signal.js').then(m => m.registerSignalCommands) },
+  { names: ['issue', 'mr'], loader: () => import('./commands/tracker.js').then(m => m.registerTrackerCommands) },
+  { names: ['tmux'], loader: () => import('./commands/tmux.js').then(m => m.registerTmuxCommands) },
+  { names: ['worktree'], loader: () => import('./commands/worktree.js').then(m => m.registerWorktreeCommands) },
+  { names: ['workflow'], loader: () => import('./commands/workflow.js').then(m => m.registerWorkflowCommands) },
+  { names: ['scheduler'], loader: () => import('./commands/scheduler.js').then(m => m.registerSchedulerCommands) },
+  { names: ['board'], loader: () => import('./commands/board.js').then(m => m.registerBoardCommands) },
+  { names: ['kanban'], loader: () => import('./commands/kanban.js').then(m => m.registerKanbanCommands) },
+  { names: ['debug'], loader: () => import('./commands/debug.js').then(m => m.registerDebugCommands) },
+  { names: ['escalate'], loader: () => import('./commands/escalate.js').then(m => m.registerEscalateCommands) },
+  { names: ['isolate'], loader: () => import('./commands/isolate.js').then(m => m.registerIsolateCommands) },
+  { names: ['qa'], loader: () => import('./commands/qa.js').then(m => m.registerQACommands) },
+  { names: ['loop'], loader: () => import('./commands/loop.js').then(m => m.registerLoopCommands) },
+  { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },
 ];
 ```
 
@@ -693,6 +704,137 @@ graph LR
 
 ---
 
+## 生命周期模块
+
+模块为 WorkflowRunner 提供扩展能力：
+
+### 模块注册表 (`src/lib/modules/_registry.ts`)
+
+```typescript
+loadModules(names: string[], params: Record<string, unknown>): LifecycleModule[]
+parseModuleParams(params: string[]): Record<string, unknown>
+```
+
+### 可用模块
+
+| 模块 | 文件 | 用途 |
+|------|------|------|
+| **loop-runner** | `modules/loop-runner.ts` | 持续集成循环 |
+| **qa-runner** | `modules/qa-runner.ts` | 合并代码的 QA 验证 |
+| **isolate** | `modules/isolate.ts` | 每个 worktree 的 DB 服务隔离 |
+| **project-resolver** | `modules/project-resolver.ts` | 跨项目 issue 解析 |
+
+### 模块加载
+
+```mermaid
+graph TD
+    CLI[CLI] --> Load[loadModules]
+    Load --> Parse[parseModuleParams]
+    Parse --> Filter[按名称过滤]
+    Filter --> Instantiate[实例化模块]
+    Instantiate --> Attach[挂载到 WorkflowRunner]
+```
+
+---
+
+## 沙箱提供商
+
+### 提供商架构
+
+```mermaid
+graph TD
+    Runner["WorkflowRunner"]
+    Factory["createSandboxProvider"]
+    Local["LocalSandboxProvider"]
+    Container["ContainerSandboxProvider"]
+
+    Runner --> Factory
+    Factory -->|local| Local
+    Factory -->|container| Container
+
+    Local --> TMUX["TmuxClient"]
+    Container --> Docker["Docker/Podman"]
+
+    classDef provider fill:#fff4e1,stroke:#cc6600
+    class Factory,Local,Container provider
+```
+
+### Local 沙箱
+
+使用 tmux session 执行 agent：
+- 在专用 tmux session 中启动 agent
+- 与主机共享文件系统（worktree）
+- 开销低，启动快
+
+### Container 沙箱
+
+使用 Docker/Podman 隔离：
+- 完全进程隔离
+- 可配置资源限制
+- 网络隔离选项
+
+---
+
+## Session 管理
+
+### Session Store 链
+
+```
+FileSessionStore (原生 Claude Code 快照)
+    ↓ (fallback)
+HandoffSessionStore (Markdown handoff 文档)
+```
+
+### Handoff 流程
+
+```mermaid
+sequenceDiagram
+    participant Old as 旧 Session
+    participant Sess as SessionStore
+    participant FS as FileSystem
+    participant New as 新 Session
+
+    Old->>Sess: saveSnapshot()
+    Sess->>FS: write .afk/sessions/{id}.json
+    Old->>FS: write handoff.md
+    New->>FS: read handoff.md
+    New->>New: resume with context
+```
+
+---
+
+## 模板系统
+
+### 模板注册表
+
+模板定义工作流执行计划：
+
+```typescript
+planFor(name: string, ctx: PlanContext): ExecutionPlan
+loadBuiltinTemplates(): Template[]
+```
+
+### 内置模板
+
+| 模板 | 用途 |
+|------|------|
+| `implement` | Issue → MR 两阶段工作流 |
+| `qa` | QA 验证 |
+| `loop` | 持续集成 |
+
+### 模板解析
+
+```mermaid
+graph LR
+    A[模板名称] --> B[检查内置]
+    B -->|找到| C[返回内置模板]
+    B -->|未找到| D[检查自定义路径]
+    D -->|找到| E[加载自定义]
+    D -->|未找到| F[错误]
+```
+
+---
+
 ## 技术栈选型
 
 | 选型 | 替代方案 | 选择理由 |
@@ -713,16 +855,26 @@ graph LR
 
 ```mermaid
 graph LR
-    A[实现 TrackerProvider 接口] --> B[在 detectProject 添加 URL 识别]
-    B --> C[在 createTrackerClient 注册分支]
-    C --> D[封装平台特定差异]
-    D --> E[无需修改业务逻辑]
+    A[实现 TrackerProvider 接口] --> B[在 client-factory.ts 添加检测]
+    B --> C[添加 TrackerClient 工厂分支]
+    C --> D[无需修改业务逻辑]
 
     classDef new fill:#d4edda
-    class A,B,C,D,E new
+    class A,B,C,D new
 ```
 
-**无需修改**：WorkflowRunner、业务命令、Scheduler
+### 添加新生命周期模块
+
+1. 在 `src/lib/modules/` 创建模块
+2. 实现并导出 `LifecycleModule` 接口
+3. 在 `_registry.ts` 注册
+4. 通过 `RunnerOptions` 的 `ext` 选项激活
+
+### 添加新 Agent 提供商
+
+1. 在 `src/lib/agents/` 实现 `AgentProvider` 接口
+2. 在 `agents/registry.ts` 注册
+3. 通过 `RunnerOptions` 的 `agentProvider` 选项激活
 
 ### 添加新信号类型
 
@@ -750,12 +902,6 @@ statusline JSON 提供丰富会话元数据（token 用量、缓存命中率、�
 | 模型切换判断 | `model.display_name` | 配置驱动 |
 | 缓存策略评估 | `cache_creation_input_tokens` 增长率 | 待定 |
 
-扩展方法：在 `src/lib/core/io/status.ts` 的 `extractTokenUsage()` 添加聚合字段；在 `constants.ts` 添加阈值；WorkflowRunner 中按需读取。
-
-### 自定义 Workflow 钩子
-
-RunnerOptions 支持 `customValidation` 等钩子，在 AC 检查前后插入自定义逻辑（lint、性能测试、截图验证等）。
-
 ---
 
 ## 状态文件
@@ -768,6 +914,8 @@ RunnerOptions 支持 `customValidation` 等钩子，在 AC 检查前后插入自
 | `<worktree>/.afk/CRASHED` | 异常退出标记 | watchdog | WorktreeManager |
 | `<worktree>/.afk/SUCCESS` | 成功完成标记 | workflow 结束 | WorktreeManager |
 | `<worktree>/.claude/settings.json` | 自动注入的 statusline 配置 | configureStatusline | Claude Code |
+| `.afk/sessions/*.json` | 原生 session 快照 | FileSessionStore | Session 链 |
+| `handoff.md` | 上下文 handoff 文档 | HandoffCoordinator | 新 session resume |
 | `~/.claude/logs/afk/` | 超时日志、watchdog 记录 | handleTimeout / watchdog | 运维 |
 
 ---
@@ -798,4 +946,4 @@ RunnerOptions 支持 `customValidation` 等钩子，在 AC 检查前后插入自
 
 - [快速开始](GETTING-STARTED.md) — 安装和配置
 - [工作流程](WORKFLOWS.md) — Issue → MR 完整流程
-- [Skills 说明](SKILLS.md) — 8 个 Claude Code skills
+- [Skills 说明](SKILLS.md) — Claude Code skills

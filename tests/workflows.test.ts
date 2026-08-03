@@ -16,6 +16,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { rm } from 'fs/promises';
 import { WorkflowRunner } from '../src/lib/workflows';
+import type { AgentProvider } from '../src/lib/agents/types';
 
 // Mock child_process.spawn globally for this file so the default
 // ProjectResolverModule (always loaded by loadModules as a core module)
@@ -54,8 +55,13 @@ function makeRunner() {
     addLabel: vi.fn().mockResolvedValue(undefined),
     removeLabel: vi.fn().mockResolvedValue(undefined),
   } as any;
+  const fakeAgentProvider: AgentProvider = {
+    name: 'claude-code' as any,
+    capabilities: new Set(['streaming', 'usage', 'resume', 'interactive']),
+    buildCommand: () => ({ argv: ['echo', 'fake'], env: {} }),
+  } as any;
 
-  const runner = new WorkflowRunner(tracker) as any;
+  const runner = new WorkflowRunner(tracker, { agentProvider: fakeAgentProvider }) as any;
   runner.tmux = {
     capturePane: vi.fn().mockResolvedValue('pane snapshot'),
     killSession: vi.fn().mockResolvedValue(undefined),
@@ -112,6 +118,7 @@ describe('WorkflowRunner cleanup control flow', () => {
     const { runner, tracker } = makeRunner();
     runner.pushBranch = vi.fn().mockResolvedValue(undefined);
     runner.createMR = vi.fn().mockResolvedValue('https://example.com/mr/1');
+    runner.setSandbox({ close: vi.fn().mockResolvedValue(undefined) } as any);
     runner.runBody = async function () {
       return await this.autoWrapup(42, '/tmp/wt', 'sess', 'main');
     };
@@ -119,8 +126,7 @@ describe('WorkflowRunner cleanup control flow', () => {
     const result = await runner.run(RUN_OPTS);
 
     expect(result).toEqual({ success: true, url: 'https://example.com/mr/1' });
-    expect(runner.tmux.killSession).toHaveBeenCalledWith('sess');
-    expect(runner.tmux.closeSession).toHaveBeenCalled();
+    expect((runner as any).sandbox.close).toHaveBeenCalled();
     expect(runner.worktree.cleanup).toHaveBeenCalledWith(42, true);
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'stage::qa');
     expect(tracker.addComment).not.toHaveBeenCalled();

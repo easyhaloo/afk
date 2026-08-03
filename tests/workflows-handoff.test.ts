@@ -23,6 +23,8 @@ import { promises as fs, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { WorkflowRunner } from '../src/lib/workflows';
+import { SessionStoreChain, SessionNotFoundError } from '../src/lib/sessions/chain';
+import type { AgentProvider } from '../src/lib/agents/types';
 
 const tmpDirs: string[] = [];
 
@@ -81,6 +83,21 @@ const handoffReady = (summary: string) => ({
   summary,
 });
 
+/**
+ * Always-throws session store chain — used to disable the Phase 4
+ * native-resume path and exercise the HandoffCoordinator flow in tests
+ * that verify coordinator-level behavior (handoff doc, labels, etc.).
+ */
+class NoopSessionStoreChain extends SessionStoreChain {
+  constructor() {
+    super([]);
+  }
+
+  override async loadFirst(options: { runId: string }) {
+    throw new SessionNotFoundError(options.runId);
+  }
+}
+
 function makeRunner(wtPath: string) {
   const tracker = {
     addComment: vi.fn().mockResolvedValue(undefined),
@@ -101,8 +118,20 @@ function makeRunner(wtPath: string) {
     closeSession: vi.fn().mockResolvedValue(undefined),
   };
   const watchdog = { arm: vi.fn(), disarm: vi.fn() };
+  const agentProvider: AgentProvider = {
+    name: 'claude-code' as any,
+    capabilities: new Set(['streaming', 'usage', 'resume', 'interactive']),
+    buildCommand: () => ({ argv: ['echo', 'fake'], env: {} }),
+  } as any;
 
-  const runner = new WorkflowRunner(tracker, { tmux: tmux as any, watchdog: watchdog as any }) as any;
+  // sessionStoreChain override: NoopSessionStoreChain disables Phase 4
+  // native-resume so these tests exercise the coordinator path.
+  const runner = new WorkflowRunner(tracker, {
+    tmux: tmux as any,
+    watchdog: watchdog as any,
+    agentProvider,
+    sessionStoreChain: () => new NoopSessionStoreChain(),
+  }) as any;
   runner.pollIntervalMs = 10;
   runner.worktree = {
     create: vi.fn().mockResolvedValue({ path: wtPath, branch: 'afk-issue-42', status: 'active' }),
@@ -243,7 +272,6 @@ describe('WorkflowRunner auto handoff continuation', () => {
     const runPromise = runner.run(RUN_OPTS);
 
     await waitFor(() => tmux.createSession.mock.calls.length === 2);
-    // The stale signal file must have been cleared before the relaunch.
     await expect(fs.access(join(wtPath, '.afk-signal.json'))).rejects.toThrow();
     await writeSignal(wtPath, 'goal_complete');
     await waitFor(() => tmux.sendGoal.mock.calls.length === 3);

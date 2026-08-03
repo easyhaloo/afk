@@ -2,9 +2,9 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { TrackerProvider } from '../core/tracker/types';
-import { TmuxClient } from '../core/tmux/tmux';
+import { TmuxClient } from '../core/tmux';
 import { clearSignal, logger, STATUS_FILENAME } from '../io';
-import { TIMEOUTS } from '../constants';
+import { getWorkflowConfig } from '../core/config/manager';
 import { Watchdog } from './watchdog';
 
 /**
@@ -132,8 +132,8 @@ export class HandoffCoordinator {
     await this.tmux.createSession(ctx.session, ctx.wtPath);
     logger.info({ iid: ctx.iid, session: ctx.session }, 'restartSession: tmux created');
     // waitForPrompt returns boolean, does NOT throw.
-    if (!await this.tmux.waitForPrompt(ctx.wtPath, 30_000)) {
-      throw new Error(`relaunch: claude not ready within 30s (${ctx.wtPath})`);
+    if (!await this.tmux.waitForPrompt(ctx.wtPath, getWorkflowConfig().promptTimeout)) {
+      throw new Error(`relaunch: claude not ready within ${getWorkflowConfig().promptTimeout}ms (${ctx.wtPath})`);
     }
     logger.info({ iid: ctx.iid, session: ctx.session }, 'restartSession: prompt ready');
     this.watchdog.arm(ctx.session, ctx.hardTimeoutMs, ctx.iid, ctx.wtPath); // fresh full hardTimeoutMs per generation
@@ -185,7 +185,7 @@ export class HandoffCoordinator {
   private async requestHandoffSummary(iid: number, session: string, worktreePath: string): Promise<HandoffSummary> {
     await this.typeHandoffRequest(session);
 
-    const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, TIMEOUTS.HANDOFF_TIMEOUT);
+    const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, getWorkflowConfig().handoffTimeout);
 
     const snapshot = await this.tmux.capturePane(session, 'main', { lines: 100, history: 200 });
     const { sha, branch } = await this.gitHead(worktreePath);
@@ -294,4 +294,16 @@ export class HandoffCoordinator {
     await this.tmux.killSession(session).catch(() => { /* already dead */ });
     await this.tmux.closeSession();
   }
+}
+
+/**
+ * Factory: create a HandoffCoordinator with its required dependencies.
+ * Tests may inject a fake via RunnerDependencies.coordinatorFactory instead.
+ */
+export function createHandoffCoordinator(deps: {
+  tracker: TrackerProvider;
+  tmux: TmuxClient;
+  watchdog: Watchdog;
+}): HandoffCoordinator {
+  return new HandoffCoordinator(deps.tracker, deps.tmux, deps.watchdog);
 }

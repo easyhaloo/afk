@@ -59,3 +59,11 @@ export class Watchdog {
     }
   }
 }
+
+/**
+ * Factory: create a Watchdog instance.
+ * Tests may inject a fake via RunnerDependencies.watchdog instead.
+ */
+export function createWatchdog(logDir: string): Watchdog {
+  return new Watchdog(logDir);
+}

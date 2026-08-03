@@ -12,6 +12,9 @@ import { WorkflowRunner } from '../workflows';
 import { createTrackerClient } from '../client-factory';
 import { getWorkflowConfig } from '../core/config/manager';
 import { success, warning, detail } from '../cli-utils';
+import type { SandboxProviderName } from '../sandbox/types';
+import type { AgentProviderName } from '../agents/types';
+import type { BranchStrategyConfig } from '../branches/types';
 
 export interface RunWorkflowCliOpts {
   iid: number;
@@ -26,6 +29,10 @@ export interface RunWorkflowCliOpts {
   maxTotalTokens?: number;
   ext?: string[];
   extParams?: string[];
+  sandboxProvider?: SandboxProviderName;
+  agentProvider?: AgentProviderName;
+  branchStrategy?: BranchStrategyConfig;
+  template?: string;
 }
 
 export async function runWorkflowCli(opts: RunWorkflowCliOpts): Promise<void> {
@@ -41,12 +48,16 @@ export async function runWorkflowCli(opts: RunWorkflowCliOpts): Promise<void> {
     targetBranch: opts.targetBranch ?? cfg.targetBranch,
     baseBranch: opts.baseBranch,
     maxRetries: opts.maxRetries ?? cfg.maxRetries,
-    hardTimeoutMs: opts.hardTimeoutMs ?? cfg.completionTimeout,
-    maxHandoffs: opts.maxHandoffs,
-    contextHighTokens: opts.contextHighTokens,
-    maxTotalTokens: opts.maxTotalTokens,
+    hardTimeoutMs: opts.hardTimeoutMs ?? cfg.workflowHardTimeout,
+    maxHandoffs: opts.maxHandoffs ?? Math.min(Math.ceil(cfg.goalBudget / 1_000_000), 20),
+    contextHighTokens: opts.contextHighTokens ?? cfg.contextThreshold,
+    maxTotalTokens: opts.maxTotalTokens ?? cfg.goalBudget,
     ext: opts.ext,
     extParams: opts.extParams,
+    sandboxProvider: opts.sandboxProvider,
+    agentProvider: opts.agentProvider,
+    branchStrategy: opts.branchStrategy,
+    template: opts.template,
   });
 
   if (result.success) {

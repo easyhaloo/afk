@@ -2,21 +2,62 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { TrackerProvider, Platform } from './core/tracker/types';
-import { TmuxClient } from './core/tmux/tmux';
-import { WorktreeManager } from './core/git/worktree';
-import { getTokenUsage, configureStatusline, logger, readSignal, SIGNAL_FILE } from './io';
-import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
+import { TmuxClient, createTmuxClient } from './core/tmux';
+import { WorktreeManager, createWorktreeManager } from './core/git';
+import { createSandboxProvider } from './sandbox';
+import { createAgentProvider } from './agents';
+import type {
+  Sandbox,
+  SandboxProvider,
+  SandboxProviderName,
+  AgentExecution,
+  ExecutionResult,
+} from './sandbox/types';
+import type { AgentProvider, AgentProviderName, SessionSnapshot } from './agents/types';
+import type { BranchStrategyConfig } from './branches/types';
+import { getTokenUsage, configureStatusline, logger, readSignal } from './io';
+import { getWorkflowConfig } from './core/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
-import { Watchdog } from './workflows/watchdog';
-import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
+import { Watchdog, createWatchdog } from './workflows/watchdog';
+import { HandoffCoordinator, handoffDocPath, createHandoffCoordinator } from './workflows/handoff';
+import { attemptNativeResume } from './workflows/resume';
+import { BudgetManager } from './workflows/budget';
 import type { InitContext } from './workflows/lifecycle';
+import { defaultSessionStoreChain } from './sessions/chain';
+import { planFor } from './templates/registry';
+import { evaluateWhen } from './templates/when-evaluator';
+import { strategyForConfig } from './branches/registry';
+import type { Step, StepResult, TemplateBranchStrategyConfig } from './templates/types';
+import type { ExecutionPlan, ExecutionGroup } from './templates/resolver';
+import type { BranchHandle } from './branches/types';
 
-/** One phase wait: done / timeout / verified context overflow. */
-type PhaseOutcome =
-  | { kind: 'done' }
-  | { kind: 'timeout' }
-  | { kind: 'handoff'; tokens: number };
+/**
+ * Signal-driven workflow runner.
+ *
+ * Two-phase design:
+ *   Phase 1 (Implement): send /goal "实现 issue #N" -> wait goal_complete
+ *   Phase 2 (Verify):   send /goal "验证 issue #N 的 AC" -> wait ac_result
+ *   autoWrapup:         push branch -> create MR -> stage::qa
+ *
+ * Each phase is a loop: send goal -> poll for the completion signal OR the
+ * context threshold (statusline token usage). On context_high the session is
+ * interrupted, the agent's summary is captured to a doc + issue comment, and
+ * the session is relaunched with the summary injected - until the phase
+ * completes or the handoff budget runs out.
+ *
+ * Context detection is done by the RUNNER, not the agent: the agent cannot
+ * reliably sense its own context limit (Claude Code's TUI warnings are
+ * rendering-layer only, and the compaction system message arrives too late),
+ * so we poll `<worktree>/.afk/claude-status.json` token usage (written by the
+ * statusline tee on every turn) against `contextHighTokens`.
+ *
+ * The handoff cluster (negotiate summary -> persist doc -> post comment ->
+ * relaunch or terminate) lives behind the {@link HandoffCoordinator} seam;
+ * the runner only decides WHEN to hand off (context_high, budget exhausted)
+ * and routes the outcome. The hard-timeout {@link Watchdog} is a separate
+ * module shared by both.
+ */
 
 export interface RunnerOptions {
   iid: number;
@@ -39,6 +80,14 @@ export interface RunnerOptions {
   ext?: string[];
   /** Module parameters (e.g., ['isolate.auto=true']) */
   extParams?: string[];
+  /** Sandbox provider name (default: 'local'). */
+  sandboxProvider?: SandboxProviderName;
+  /** Agent provider name (default: 'claude-code'). */
+  agentProvider?: AgentProviderName;
+  /** Branch strategy config for all steps (default: issue-based). */
+  branchStrategy?: BranchStrategyConfig;
+  /** Workflow template name to run instead of the default two-phase flow. */
+  template?: string;
 }
 
 /**
@@ -57,6 +106,12 @@ export interface RunnerDependencies {
   tmux?: TmuxClient;
   /** Override the watchdog (tests). Defaults to a new Watchdog. */
   watchdog?: Watchdog;
+  /** Sandbox provider (tests / future). Defaults to LocalSandboxProvider. */
+  sandboxProvider?: SandboxProvider;
+  /** Agent provider (tests). Defaults to ClaudeCodeProvider. */
+  agentProvider?: import('./agents/types').AgentProvider;
+  /** Session store chain (tests / future). Defaults to defaultSessionStoreChain. */
+  sessionStoreChain?: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
 }
 
 /**
@@ -85,30 +140,82 @@ export interface RunnerDependencies {
  * and routes the outcome. The hard-timeout {@link Watchdog} is a separate
  * module shared by both.
  */
+
+interface StepRunCtx {
+  iid: number;
+  session: string;
+  baseSession: string;
+  primaryWtPath: string;
+  primaryBranch: string;
+  baseBranch: string;
+  hardTimeoutMs: number;
+  completionTimeoutMs: number;
+  contextHighTokens: number;
+  budget: BudgetManager;
+  stepIndex: number;
+}
+
 export class WorkflowRunner {
   private tracker: TrackerProvider;
   private tmux: TmuxClient;
   private worktree: WorktreeManager;
   private watchdog: Watchdog;
   private coordinator: HandoffCoordinator;
+  private sandboxProvider: SandboxProvider;
+  private agentProvider: AgentProvider;
+  /** Session store chain factory — defaults to defaultSessionStoreChain. */
+  private sessionStoreChainFactory: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
+  /** Resolved sandbox provider name (set in run()). */
+  private sandboxProviderName: SandboxProviderName = 'local';
+  /** Resolved agent provider name (set in run()). */
+  private agentProviderName: AgentProviderName = 'claude-code';
+  private sandbox: Sandbox | undefined;
   private logDir: string;
   private modules: LifecycleModule[] = [];
   private extParams: Record<string, unknown> = {};
   private originalCwd: string = '';
   private lifecycleCtx: LifecycleContext = { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: {} };
+  /** Branch handles created per step in template execution. Cleaned up in teardownSession. */
+  private stepBranchHandles: BranchHandle[] = [];
 
-  /** Poll interval for waitForPhaseSignal (overridden by tests). */
-  private pollIntervalMs = 2000;
+  /**
+   * Inject a sandbox for testing. Production code goes through runBody →
+   * sandboxProvider.create(). This seam exists so tests can wire a fake
+   * sandbox that emits controlled ExecutionResult values without driving the
+   * real LocalSandboxProvider path (which creates tmux + worktree, neither
+   * of which exist in unit tests).
+   */
+  setSandbox(sandbox: Sandbox): void {
+    this.sandbox = sandbox;
+  }
+
+  /**
+   * Build a session store chain for the given worktree. The chain is created
+   * lazily per-worktree because the FileSessionStore / HandoffSessionStore
+   * pin the worktree directory at construction time.
+   *
+   * Tests / future hot-path wiring use this to consult native snapshots
+   * before falling back to the handoff Markdown. The phase loop in runPhase
+   * does not yet call this — that's wired separately; the chain is exposed
+   * here so the integration is testable in isolation.
+   */
+  sessionStoreChainFor(worktreePath: string): import('./sessions/types').SessionStoreChain {
+    return this.sessionStoreChainFactory(worktreePath);
+  }
 
   constructor(tracker: TrackerProvider, deps?: RunnerDependencies) {
     this.tracker = tracker;
-    this.tmux = deps?.tmux ?? new TmuxClient();
-    this.worktree = new WorktreeManager();
+    this.tmux = deps?.tmux ?? createTmuxClient();
+    this.worktree = createWorktreeManager();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;
-    this.watchdog = deps?.watchdog ?? new Watchdog(this.logDir);
+    this.watchdog = deps?.watchdog ?? createWatchdog(this.logDir);
     this.coordinator = deps?.coordinatorFactory
       ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog })
-      : new HandoffCoordinator(tracker, this.tmux, this.watchdog);
+      : createHandoffCoordinator({ tracker, tmux: this.tmux, watchdog: this.watchdog });
+    this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: this.worktree });
+    this.agentProvider = deps?.agentProvider ?? createAgentProvider(this.agentProviderName);
+    // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
+    this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
   }
 
   /**
@@ -123,21 +230,42 @@ export class WorkflowRunner {
       session,
       targetBranch,
       baseBranch = 'main',
-      hardTimeoutMs = TIMEOUTS.WORKFLOW_HARD_TIMEOUT,
-      completionTimeoutMs = TIMEOUTS.WORKFLOW_COMPLETION_TIMEOUT,
-      maxHandoffs = MAX_HANDOFFS,
-      contextHighTokens = CONTEXT.HIGH_THRESHOLD,
-      maxTotalTokens = MAX_TOTAL_TOKENS,
+      hardTimeoutMs = getWorkflowConfig().workflowHardTimeout,
+      completionTimeoutMs = getWorkflowConfig().completionTimeout,
+      maxHandoffs = Math.min(Math.ceil(getWorkflowConfig().goalBudget / 1_000_000), 20),
+      contextHighTokens = getWorkflowConfig().contextThreshold,
+      maxTotalTokens = getWorkflowConfig().goalBudget,
     } = options;
+
+    // Resolve sandbox provider by name (CLI path).
+    this.sandboxProviderName = options.sandboxProvider ?? 'local';
+    this.sandboxProvider = this.sandboxProviderByName(this.sandboxProviderName);
+
+    // Resolve agent provider by name (CLI path). Agent registry must already have
+    // the named provider registered (import side-effect or explicit registration).
+    // Skip if constructor already injected one via deps (tests use this path).
+    this.agentProviderName = options.agentProvider ?? 'claude-code';
+    if (!this.agentProvider) {
+      try {
+        this.agentProvider = createAgentProvider(this.agentProviderName);
+      } catch {
+        // Agent not yet registered (e.g., test environment). Fall back to
+        // claude-code; deps?.agentProvider already handled above.
+        this.agentProvider = createAgentProvider('claude-code');
+      }
+    }
 
     // Load lifecycle modules
     this.modules = await loadModules(options.ext);
     this.extParams = parseModuleParams(options.extParams);
     this.originalCwd = process.cwd();
-    logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams }, 'WorkflowRunner initialized');
+    logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
+
+    // Validate template early so failures throw before worktree creation.
+    if (options.template) planFor(options.template);
 
     try {
-      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName });
+      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName, branchStrategy: options.branchStrategy, template: options.template });
     } catch (error) {
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
       await this.cleanupOnFailure(iid, session);
@@ -147,6 +275,11 @@ export class WorkflowRunner {
       // stale timeout signal into the retained worktree.
       this.watchdog.disarm();
     }
+  }
+
+  /** Resolve sandbox provider name to a SandboxProvider instance. */
+  private sandboxProviderByName(name: SandboxProviderName): SandboxProvider {
+    return createSandboxProvider(name, { worktreeManager: this.worktree });
   }
 
   /**
@@ -184,17 +317,109 @@ Session was interrupted before completion.
    * worktree failed. Worktree itself is kept for inspection.
    */
   private async teardownSession(iid: number, session: string): Promise<void> {
-    try {
-      await this.tmux.killSession(session);
-    } catch { /* ignore if session already gone */ }
-    try {
-      await this.tmux.closeSession();
-    } catch { /* ignore */ }
+    await this.sandbox?.close();
     try {
       await this.worktree.updateStatus(iid, 'failed');
     } catch (err) {
       logger.warn({ iid, err }, 'failed to mark worktree as failed');
     }
+    // Cleanup all step worktrees created during template execution.
+    for (const handle of this.stepBranchHandles) {
+      try {
+        const config: TemplateBranchStrategyConfig = { type: 'named', branch: handle.branch };
+        const strategy = strategyForConfig(config);
+        await strategy.cleanup(simpleGit(), config, handle, { force: true });
+      } catch (err) {
+        logger.warn({ handle }, 'failed to cleanup step worktree');
+      }
+    }
+    this.stepBranchHandles = [];
+  }
+
+  // ── Template execution helpers ─────────────────────────────────────────────
+
+  private async resolveStepPrompt(step: Step): Promise<string> {
+    if (typeof step.prompt === 'string') return step.prompt;
+    return await fs.readFile(step.prompt.file, 'utf-8');
+  }
+
+  private resolveStepSignalType(role: string): 'goal_complete' | 'ac_result' {
+    const ROLE_TO_SIGNAL: Record<string, 'goal_complete' | 'ac_result'> = {
+      implementer: 'goal_complete',
+      verifier: 'ac_result',
+      reviewer: 'goal_complete',
+      planner: 'goal_complete',
+      wrapup: 'goal_complete',
+      qa: 'goal_complete',
+      agent: 'goal_complete',
+    };
+    return ROLE_TO_SIGNAL[role] ?? 'goal_complete';
+  }
+
+  private async prepareStepWorktree(
+    step: Step,
+    iid: number,
+    baseBranch: string,
+  ): Promise<BranchHandle> {
+    const config: TemplateBranchStrategyConfig = step.branch ?? { type: 'issue', iid };
+    const strategy = strategyForConfig(config);
+    return await strategy.prepareWorktree(simpleGit(), config, {
+      repoPath: this.originalCwd,
+      baseBranch,
+      worktreeBaseDir: join(this.originalCwd, '.worktrees'),
+    });
+  }
+
+  private async runStep(
+    step: Step,
+    ctx: StepRunCtx,
+    stepResults: Record<string, StepResult>,
+  ): Promise<StepResult> {
+    const startedAt = new Date().toISOString();
+    const goalBase = await this.resolveStepPrompt(step);
+    const signalType = this.resolveStepSignalType(step.role);
+    const effectiveTimeout = step.timeoutMs ?? ctx.hardTimeoutMs;
+
+    // Determine worktree: reuse primary for step 0 in group 0, create new for concurrent or branched steps.
+    let branchHandle: BranchHandle;
+    if (ctx.stepIndex > 0 || step.branch != null) {
+      branchHandle = await this.prepareStepWorktree(step, ctx.iid, ctx.baseBranch);
+      this.stepBranchHandles.push(branchHandle);
+    } else {
+      branchHandle = { branch: ctx.primaryBranch, path: ctx.primaryWtPath, isNewBranch: false };
+    }
+
+    const completed = await this.runPhase({
+      iid: ctx.iid,
+      session: ctx.session,
+      wtPath: branchHandle.path,
+      hardTimeoutMs: effectiveTimeout,
+      completionTimeoutMs: ctx.completionTimeoutMs,
+      contextHighTokens: ctx.contextHighTokens,
+      budget: ctx.budget,
+      goalBase,
+      signalType,
+    });
+
+    // Read summary from signal file (Phase 8 legacy fallback).
+    let summary: string | undefined;
+    try {
+      const sig = await readSignal(branchHandle.path);
+      if (sig && (sig.type === 'goal_complete' || sig.type === 'ac_result')) {
+        summary = sig.summary;
+      }
+    } catch { /* ignore */ }
+
+    const completedAt = new Date().toISOString();
+    return {
+      stepId: step.id,
+      status: completed ? 'completed' : 'failed',
+      summary,
+      branch: branchHandle.branch,
+      worktreePath: branchHandle.path,
+      startedAt,
+      completedAt,
+    };
   }
 
   /**
@@ -245,8 +470,10 @@ Session was interrupted before completion.
     baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number;
     maxHandoffs: number; contextHighTokens: number; maxTotalTokens: number;
     projectName?: string;
+    branchStrategy?: BranchStrategyConfig;
+    template?: string;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, branchStrategy, template } = ctx;
 
     // ── Step 0: Init hooks (pre-worktree) ─────────────────────────────────
     // ProjectResolverModule runs here and may chdir to the target repo.
@@ -267,11 +494,14 @@ Session was interrupted before completion.
     await this.runLifecycleHooks(['before'], this.lifecycleCtx);
     logger.info({ iid, hook: 'before_agent', moduleCount: this.modules.length }, 'lifecycle before_agent hooks complete');
 
-    // ── Step 2: Launch tmux session ─────────────────────────────────────────
-    await this.tmux.createSession(session, wt.path);
-    logger.info({ iid, session, worktree: wt.path }, 'tmux session created');
-    await this.tmux.waitForPrompt(wt.path, 30000);
-    logger.info({ iid, session, timeoutMs: 30000 }, 'tmux prompt ready');
+    // ── Step 2: Create sandbox (local: tmux session + prompt wait) ─────────
+    this.sandbox = await this.sandboxProvider.create({
+      worktreePath: wt.path,
+      session,
+      branch: targetBranch,
+      tmux: this.tmux,
+    });
+    logger.info({ iid, session, worktree: wt.path, sandboxId: this.sandbox.id }, 'sandbox created');
 
     // ── Step 3: Launch watchdog (detached, no blocking) ────────────────────
     this.watchdog.arm(session, hardTimeoutMs, iid, wt.path);
@@ -297,22 +527,69 @@ Session was interrupted before completion.
 
     // ── Phases: implement then verify; handoff budgets are shared across both ──
     // used = handoff rounds, tokens = accumulated total across generations.
-    const budget = { used: 0, tokens: 0 };
-    const phases = [
-      { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。全部完成后在 .afk-signal.json 写入 type 为 goal_complete 的信号。`, signalType: 'goal_complete' as const },
-      { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。全部通过后在 .afk-signal.json 写入 type 为 ac_result 的信号。`, signalType: 'ac_result' as const },
-    ];
+    //
+    // Phase 8: prompts no longer instruct the agent to write `.afk-signal.json`.
+    // Completion is reported via ExecutionResult (structured output); old
+    // worktrees that still write the signal file are still readable as a
+    // fallback — see core/io/signal.ts.
+    const budget = new BudgetManager(maxHandoffs, maxTotalTokens);
+    const stepResults: Record<string, StepResult> = {};
 
-    for (const phase of phases) {
-      logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify' }, 'phase begin');
-      const completed = await this.runPhase({
-        iid, session, wtPath: wt.path,
-        hardTimeoutMs, completionTimeoutMs, contextHighTokens,
-        budget, maxHandoffs, maxTotalTokens,
-        goalBase: phase.goalBase, signalType: phase.signalType,
-      });
-      logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify', completed }, 'phase end');
-      if (!completed) return { success: false };
+    if (template) {
+      // ── Template path: iterate ExecutionGroups ──────────────────────────────
+      logger.info({ iid, template }, 'using execution plan');
+      const plan = planFor(template);
+
+      for (const group of plan.groups) {
+        logger.info({ iid, level: group.level, stepCount: group.steps.length }, 'execution group begin');
+
+        const runnableSteps = group.steps.filter(step => evaluateWhen(step.when, stepResults));
+        if (runnableSteps.length === 0) {
+          logger.info({ iid, level: group.level }, 'all steps gated off; skipping group');
+          continue;
+        }
+
+        // Run all runnable steps in this group concurrently.
+        const groupResults = await Promise.all(
+          runnableSteps.map((step, idx) =>
+            this.runStep(step, {
+              iid, session: `${session}-${step.id}-${idx}`, baseSession: session,
+              primaryWtPath: wt.path, primaryBranch: targetBranch,
+              baseBranch, hardTimeoutMs, completionTimeoutMs,
+              contextHighTokens, budget, stepIndex: idx,
+            }, stepResults),
+          ),
+        );
+
+        for (const r of groupResults) stepResults[r.stepId] = r;
+        logger.info({ iid, level: group.level }, 'execution group end');
+
+        const groupFailed = Object.values(groupResults).some(
+          r => r.status === 'failed' || r.status === 'timed_out' || r.status === 'aborted',
+        );
+        if (groupFailed) {
+          logger.warn({ iid, level: group.level }, 'group had failures; aborting workflow');
+          return { success: false };
+        }
+      }
+    } else {
+      // ── Legacy path: hardcoded 2-phase behavior ────────────────────────────
+      const phases = [
+        { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。`, signalType: 'goal_complete' as const },
+        { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。`, signalType: 'ac_result' as const },
+      ];
+
+      for (const phase of phases) {
+        logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify' }, 'phase begin');
+        const completed = await this.runPhase({
+          iid, session, wtPath: wt.path,
+          hardTimeoutMs, completionTimeoutMs, contextHighTokens,
+          budget,
+          goalBase: phase.goalBase, signalType: phase.signalType,
+        });
+        logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify', completed }, 'phase end');
+        if (!completed) return { success: false };
+      }
     }
 
     // ── Lifecycle after_agent hooks (before cleanup) ────────────────────────
@@ -342,9 +619,9 @@ Session was interrupted before completion.
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
     logger.info({ iid, mrUrl }, 'MR created');
 
-    // Session is no longer needed; kill it to avoid orphaned sessions.
-    await this.tmux.killSession(session);
-    logger.info({ iid, session }, 'tmux session killed');
+    // Session is no longer needed; sandbox.close() handles all session teardown.
+    await this.sandbox!.close();
+    logger.info({ iid, session }, 'sandbox closed');
 
     // Query MR/PR status and pipeline
     try {
@@ -362,10 +639,9 @@ Session was interrupted before completion.
     await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
     logger.info({ iid, label: 'stage::afk-in-progress' }, 'tracker label removed');
 
-    // Success path cleanup: drop the control-mode connection and remove the
-    // now-redundant worktree (force: stray untracked artifacts may exist).
+    // Success path cleanup: sandbox already closed its control-mode connection;
+    // remove the now-redundant worktree (force: stray untracked artifacts may exist).
     try {
-      await this.tmux.closeSession();
       await this.worktree.cleanup(iid, true);
       logger.info({ iid, worktreePath }, 'worktree cleaned up');
     } catch (err) {
@@ -440,9 +716,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     hardTimeoutMs: number;
     completionTimeoutMs: number;
     contextHighTokens: number;
-    maxHandoffs: number;
-    maxTotalTokens: number;
-    budget: { used: number; tokens: number };
+    budget: BudgetManager;
     goalBase: string;
     signalType: 'goal_complete' | 'ac_result';
   }): Promise<boolean> {
@@ -452,57 +726,118 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
         : this.continueGoalText(p.goalBase, p.iid, p.wtPath, round - 1);
 
       logger.info({ iid: p.iid, round, signalType: p.signalType, budgetUsed: p.budget.used }, 'round begin');
-      try {
-        await this.tmux.sendGoal(p.wtPath, p.session, 'main', goalText, p.signalType);
-        logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
-      } catch (err) {
-        if (round === 1) throw err; // initial launch failure: unchanged crash path
-        logger.error({ iid: p.iid, err, round }, 'continue-goal failed after handoff; flipping to manual handoff');
-        // Goal-send failed on a resumed round: mark for manual resume. This
-        // mirrors the coordinator's internal flip, but the trigger here is a
-        // runner-level failure (sendGoal), not a handoff-relaunch failure.
-        await this.manualFlip(p.iid, p.session);
-        return false;
-      }
 
-      const outcome = await this.waitForPhaseSignal({
-        iid: p.iid,
-        wtPath: p.wtPath,
+      const command = this.agentProvider.buildCommand({
+        worktreePath: p.wtPath,
+        sessionId: p.session,
+      });
+      let execution = await this.sandbox!.startAgent({
+        command,
+        generation: p.budget.used + 1,
+        goalText,
         signalType: p.signalType,
+      });
+      logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
+
+      let result = await execution.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
       });
 
-      switch (outcome.kind) {
-        case 'done':
+      switch (result.status) {
+        case 'completed':
           return true;
-        case 'timeout':
+
+        case 'timed_out':
           await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs);
           return false;
-        case 'handoff': {
-          // Budget decisions stay in the runner; execution is delegated.
+
+        case 'context_high': {
           const hctx = {
-            iid: p.iid, session: p.session, wtPath: p.wtPath,
+            iid: p.iid,
+            session: p.session,
+            wtPath: p.wtPath,
             hardTimeoutMs: p.hardTimeoutMs,
-            gen: p.budget.used + 1, tokens: outcome.tokens,
+            gen: p.budget.used + 1,
+            tokens: result.usage?.totalTokens ?? 0,
           };
-          if (p.budget.used >= p.maxHandoffs) {
-            await this.coordinator.handoff(hctx, 'terminal', 'budget');
+
+          if (p.budget.isExhausted(hctx.tokens)) {
+            await this.coordinator.handoff(hctx, 'terminal', p.budget.exhaustionReason(hctx.tokens)!);
             return false;
           }
-          // Include the current session's usage: a relaunch would immediately
-          // blow the remaining budget, so terminate instead.
-          if (p.budget.tokens + outcome.tokens >= p.maxTotalTokens) {
-            await this.coordinator.handoff(hctx, 'terminal', 'tokens');
-            return false;
+
+          // Phase 4 — save session snapshot to the store chain before handing off.
+          // This allows future native-resume rounds to restore from the snapshot.
+          // Errors are best-effort and do not affect the handoff flow.
+          const chain = this.sessionStoreChainFactory(p.wtPath);
+          const runId = `issue-${p.iid}-gen-${p.budget.used + 1}`;
+          if (this.sandbox) {
+            try {
+              const snapshot = await execution.captureSession();
+              if (snapshot) {
+                await chain.saveFirst({ runId, provider: this.agentProvider.name, snapshot });
+                logger.info({ iid: p.iid, runId, provider: this.agentProvider.name }, 'session snapshot saved to store chain');
+              }
+            } catch (err) {
+              logger.info({ iid: p.iid, runId, err }, 'session snapshot save failed; proceeding with handoff');
+            }
           }
+
+          // Phase 4 native resume: attemptNativeResume encapsulates the full
+          // resume flow (capability check, load snapshot, restoreSession,
+          // startAgent, waitForResult). On 'completed' return true; on 'continued'
+          // reassign (execution, result) to the resumed values and loop back;
+          // on 'failed' fall through to HandoffCoordinator.
+          const resumeOutcome = await attemptNativeResume(
+            {
+              iid: p.iid,
+              session: p.session,
+              wtPath: p.wtPath,
+              runId,
+              generation: p.budget.used + 2,
+              completionTimeoutMs: p.completionTimeoutMs,
+              contextHighTokens: p.contextHighTokens,
+              signalType: p.signalType,
+              goalText,
+              triggerTokens: hctx.tokens,
+            },
+            p.budget,
+            this.agentProvider,
+            this.sandbox!,
+            () => chain,
+            () => execution.captureSession(),
+          );
+
+          if (resumeOutcome.status === 'completed') return true;
+          if (resumeOutcome.status === 'continued') {
+            execution = resumeOutcome.resumedExecution;
+            result = resumeOutcome.resumeResult;
+            logger.info({ iid: p.iid, runId }, 'native resume: agent hit context_high again; looping');
+            continue;
+          }
+          // 'failed' — fall through to coordinator
+
+          // Coordinator.restartSession() creates a new tmux session.
+          // After it returns, the loop continues and sends the continued goal in the next iteration.
+          // This mirrors the original behavior exactly.
           if ((await this.coordinator.handoff(hctx, 'auto')) === 'continued') {
-            p.budget.used++;
-            p.budget.tokens += outcome.tokens; // old session's usage is now sunk
+            p.budget.record(hctx.tokens);
+            logger.info({ iid: p.iid, round, generation: p.budget.used + 1 }, 'handoff continued; looping to send continued goal');
             continue;
           }
           return false; // auto-handoff flipped to manual; phase over
         }
+
+        default:
+          // 'failed', 'blocked', 'aborted' — treat as failure
+          logger.warn({ iid: p.iid, status: result.status }, 'execution returned non-success status');
+          if (round === 1) {
+            // Initial round failure: unchanged crash path
+            throw new Error(`execution failed: ${result.status}`);
+          }
+          await this.manualFlip(p.iid, p.session);
+          return false;
       }
     }
   }
@@ -516,56 +851,6 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
    * handoff); the watchdog's hardTimeoutMs - also re-armed per generation -
    * is the real ceiling on total phase duration.
    */
-  private async waitForPhaseSignal(p: {
-    iid: number;
-    wtPath: string;
-    signalType: 'goal_complete' | 'ac_result';
-    completionTimeoutMs: number;
-    contextHighTokens: number;
-  }): Promise<PhaseOutcome> {
-    const start = Date.now();
-    const signalPath = join(p.wtPath, SIGNAL_FILE);
-    let lastWarnTime = 0;
-
-    while (Date.now() - start < p.completionTimeoutMs) {
-      try {
-        // Signal file first: a completion signal wins over the token threshold.
-        const signal = await readSignal(p.wtPath);
-        if (signal?.type === p.signalType) {
-          logger.info({ iid: p.iid, signalType: p.signalType }, 'phase signal detected');
-          return { kind: 'done' };
-        }
-        if (signal?.type === 'timeout') return { kind: 'timeout' };
-
-        // Fallback: if the signal file exists but readSignal returned null,
-        // log a warning (once per 30s to avoid spam) so we can debug.
-        if (!signal) {
-          try {
-            const stat = await fs.stat(signalPath);
-            if (stat.size > 0 && Date.now() - lastWarnTime > 30000) {
-              lastWarnTime = Date.now();
-              logger.warn({ iid: p.iid, signalPath, size: stat.size }, 'signal file exists but readSignal returned null');
-            }
-          } catch { /* file doesn't exist yet, normal */ }
-        }
-
-        // Objective poll: statusline token usage reached the threshold.
-        const tokens = (await getTokenUsage(p.wtPath)).total;
-        logger.info({ iid: p.iid, tokens, threshold: p.contextHighTokens }, 'poll tick token read');
-        if (tokens >= p.contextHighTokens) {
-          logger.info({ iid: p.iid, tokens, threshold: p.contextHighTokens }, 'context near limit; interrupting for handoff');
-          return { kind: 'handoff', tokens };
-        }
-      } catch (err) {
-        // Swallow transient errors in the polling loop so one bad tick
-        // doesn't crash the entire phase.
-        logger.error({ iid: p.iid, err }, 'waitForPhaseSignal tick error (swallowed)');
-      }
-
-      await this.sleep(this.pollIntervalMs);
-    }
-    return { kind: 'timeout' };
-  }
 
   /** Goal text for a resumed round: read the handoff doc(s) before continuing. */
   private continueGoalText(goalBase: string, iid: number, wtPath: string, gen: number): string {
@@ -616,7 +901,4 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     return mr.url;
   }
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 }

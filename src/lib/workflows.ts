@@ -26,8 +26,15 @@ import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
 import { Watchdog } from './workflows/watchdog';
 import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
+import { attemptNativeResume } from './workflows/resume';
 import type { InitContext } from './workflows/lifecycle';
 import { defaultSessionStoreChain } from './sessions/chain';
+import { planFor } from './templates/registry';
+import { evaluateWhen } from './templates/when-evaluator';
+import { strategyForConfig } from './branches/registry';
+import type { Step, StepResult, TemplateBranchStrategyConfig } from './templates/types';
+import type { ExecutionPlan, ExecutionGroup } from './templates/resolver';
+import type { BranchHandle } from './branches/types';
 
 /**
  * Legacy polling function — used by LegacyExecutionWrapper when sandbox is not injected.
@@ -200,6 +207,23 @@ export interface RunnerDependencies {
  * and routes the outcome. The hard-timeout {@link Watchdog} is a separate
  * module shared by both.
  */
+
+interface StepRunCtx {
+  iid: number;
+  session: string;
+  baseSession: string;
+  primaryWtPath: string;
+  primaryBranch: string;
+  baseBranch: string;
+  hardTimeoutMs: number;
+  completionTimeoutMs: number;
+  contextHighTokens: number;
+  maxHandoffs: number;
+  maxTotalTokens: number;
+  budget: { used: number; tokens: number };
+  stepIndex: number;
+}
+
 export class WorkflowRunner {
   private tracker: TrackerProvider;
   private tmux: TmuxClient;
@@ -220,6 +244,8 @@ export class WorkflowRunner {
   private extParams: Record<string, unknown> = {};
   private originalCwd: string = '';
   private lifecycleCtx: LifecycleContext = { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: {} };
+  /** Branch handles created per step in template execution. Cleaned up in teardownSession. */
+  private stepBranchHandles: BranchHandle[] = [];
 
   /** Poll interval for waitForPhaseSignal (overridden by tests). */
   private pollIntervalMs = 2000;
@@ -304,6 +330,9 @@ export class WorkflowRunner {
     this.originalCwd = process.cwd();
     logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
 
+    // Validate template early so failures throw before worktree creation.
+    if (options.template) planFor(options.template);
+
     try {
       return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName, branchStrategy: options.branchStrategy, template: options.template });
     } catch (error) {
@@ -379,6 +408,105 @@ Session was interrupted before completion.
     } catch (err) {
       logger.warn({ iid, err }, 'failed to mark worktree as failed');
     }
+    // Cleanup all step worktrees created during template execution.
+    for (const handle of this.stepBranchHandles) {
+      try {
+        const config: TemplateBranchStrategyConfig = { type: 'named', branch: handle.branch };
+        const strategy = strategyForConfig(config);
+        await strategy.cleanup(simpleGit(), config, handle, { force: true });
+      } catch (err) {
+        logger.warn({ handle }, 'failed to cleanup step worktree');
+      }
+    }
+    this.stepBranchHandles = [];
+  }
+
+  // ── Template execution helpers ─────────────────────────────────────────────
+
+  private async resolveStepPrompt(step: Step): Promise<string> {
+    if (typeof step.prompt === 'string') return step.prompt;
+    return await fs.readFile(step.prompt.file, 'utf-8');
+  }
+
+  private resolveStepSignalType(role: string): 'goal_complete' | 'ac_result' {
+    const ROLE_TO_SIGNAL: Record<string, 'goal_complete' | 'ac_result'> = {
+      implementer: 'goal_complete',
+      verifier: 'ac_result',
+      reviewer: 'goal_complete',
+      planner: 'goal_complete',
+      wrapup: 'goal_complete',
+      qa: 'goal_complete',
+      agent: 'goal_complete',
+    };
+    return ROLE_TO_SIGNAL[role] ?? 'goal_complete';
+  }
+
+  private async prepareStepWorktree(
+    step: Step,
+    iid: number,
+    baseBranch: string,
+  ): Promise<BranchHandle> {
+    const config: TemplateBranchStrategyConfig = step.branch ?? { type: 'issue', iid };
+    const strategy = strategyForConfig(config);
+    return await strategy.prepareWorktree(simpleGit(), config, {
+      repoPath: this.originalCwd,
+      baseBranch,
+      worktreeBaseDir: join(this.originalCwd, '.worktrees'),
+    });
+  }
+
+  private async runStep(
+    step: Step,
+    ctx: StepRunCtx,
+    stepResults: Record<string, StepResult>,
+  ): Promise<StepResult> {
+    const startedAt = new Date().toISOString();
+    const goalBase = await this.resolveStepPrompt(step);
+    const signalType = this.resolveStepSignalType(step.role);
+    const effectiveTimeout = step.timeoutMs ?? ctx.hardTimeoutMs;
+
+    // Determine worktree: reuse primary for step 0 in group 0, create new for concurrent or branched steps.
+    let branchHandle: BranchHandle;
+    if (ctx.stepIndex > 0 || step.branch != null) {
+      branchHandle = await this.prepareStepWorktree(step, ctx.iid, ctx.baseBranch);
+      this.stepBranchHandles.push(branchHandle);
+    } else {
+      branchHandle = { branch: ctx.primaryBranch, path: ctx.primaryWtPath, isNewBranch: false };
+    }
+
+    const completed = await this.runPhase({
+      iid: ctx.iid,
+      session: ctx.session,
+      wtPath: branchHandle.path,
+      hardTimeoutMs: effectiveTimeout,
+      completionTimeoutMs: ctx.completionTimeoutMs,
+      contextHighTokens: ctx.contextHighTokens,
+      maxHandoffs: ctx.maxHandoffs,
+      maxTotalTokens: ctx.maxTotalTokens,
+      budget: ctx.budget,
+      goalBase,
+      signalType,
+    });
+
+    // Read summary from signal file (Phase 8 legacy fallback).
+    let summary: string | undefined;
+    try {
+      const sig = await readSignal(branchHandle.path);
+      if (sig && (sig.type === 'goal_complete' || sig.type === 'ac_result')) {
+        summary = sig.summary;
+      }
+    } catch { /* ignore */ }
+
+    const completedAt = new Date().toISOString();
+    return {
+      stepId: step.id,
+      status: completed ? 'completed' : 'failed',
+      summary,
+      branch: branchHandle.branch,
+      worktreePath: branchHandle.path,
+      startedAt,
+      completedAt,
+    };
   }
 
   /**
@@ -492,21 +620,63 @@ Session was interrupted before completion.
     // worktrees that still write the signal file are still readable as a
     // fallback — see core/io/signal.ts.
     const budget = { used: 0, tokens: 0 };
-    const phases = [
-      { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。`, signalType: 'goal_complete' as const },
-      { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。`, signalType: 'ac_result' as const },
-    ];
+    const stepResults: Record<string, StepResult> = {};
 
-    for (const phase of phases) {
-      logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify' }, 'phase begin');
-      const completed = await this.runPhase({
-        iid, session, wtPath: wt.path,
-        hardTimeoutMs, completionTimeoutMs, contextHighTokens,
-        budget, maxHandoffs, maxTotalTokens,
-        goalBase: phase.goalBase, signalType: phase.signalType,
-      });
-      logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify', completed }, 'phase end');
-      if (!completed) return { success: false };
+    if (template) {
+      // ── Template path: iterate ExecutionGroups ──────────────────────────────
+      logger.info({ iid, template }, 'using execution plan');
+      const plan = planFor(template);
+
+      for (const group of plan.groups) {
+        logger.info({ iid, level: group.level, stepCount: group.steps.length }, 'execution group begin');
+
+        const runnableSteps = group.steps.filter(step => evaluateWhen(step.when, stepResults));
+        if (runnableSteps.length === 0) {
+          logger.info({ iid, level: group.level }, 'all steps gated off; skipping group');
+          continue;
+        }
+
+        // Run all runnable steps in this group concurrently.
+        const groupResults = await Promise.all(
+          runnableSteps.map((step, idx) =>
+            this.runStep(step, {
+              iid, session: `${session}-${step.id}-${idx}`, baseSession: session,
+              primaryWtPath: wt.path, primaryBranch: targetBranch,
+              baseBranch, hardTimeoutMs, completionTimeoutMs,
+              contextHighTokens, maxHandoffs, maxTotalTokens, budget, stepIndex: idx,
+            }, stepResults),
+          ),
+        );
+
+        for (const r of groupResults) stepResults[r.stepId] = r;
+        logger.info({ iid, level: group.level }, 'execution group end');
+
+        const groupFailed = Object.values(groupResults).some(
+          r => r.status === 'failed' || r.status === 'timed_out' || r.status === 'aborted',
+        );
+        if (groupFailed) {
+          logger.warn({ iid, level: group.level }, 'group had failures; aborting workflow');
+          return { success: false };
+        }
+      }
+    } else {
+      // ── Legacy path: hardcoded 2-phase behavior ────────────────────────────
+      const phases = [
+        { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。`, signalType: 'goal_complete' as const },
+        { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。`, signalType: 'ac_result' as const },
+      ];
+
+      for (const phase of phases) {
+        logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify' }, 'phase begin');
+        const completed = await this.runPhase({
+          iid, session, wtPath: wt.path,
+          hardTimeoutMs, completionTimeoutMs, contextHighTokens,
+          budget, maxHandoffs, maxTotalTokens,
+          goalBase: phase.goalBase, signalType: phase.signalType,
+        });
+        logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify', completed }, 'phase end');
+        if (!completed) return { success: false };
+      }
     }
 
     // ── Lifecycle after_agent hooks (before cleanup) ────────────────────────
@@ -724,53 +894,39 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
             }
           }
 
-          // Phase 4 native resume: try to restore the session from the snapshot
-          // and run the continued goal inside the same (resumed) execution.
-          // This avoids a full tmux restart — the agent picks up where it left off.
-          // If restoreSession() or the resumed execution fails/returns an
-          // unexpected status, fall through to the coordinator path (which does a
-          // clean tmux restart with the handoff doc providing context).
-          if (this.agentProvider.capabilities.has('resume') && this.sandbox) {
-            try {
-              const snapshot = await chain.loadFirst({ runId });
-              if (snapshot) {
-                logger.info({ iid: p.iid, runId, storeName: snapshot.storeName }, 'native resume: snapshot found in store chain');
-                await this.agentProvider.restoreSession!({
-                  snapshot: snapshot.snapshot,
-                  worktreePath: p.wtPath,
-                });
-                const resumed = await this.sandbox.startAgent({
-                  command: this.agentProvider.buildCommand({
-                    worktreePath: p.wtPath,
-                    sessionId: p.session,
-                  }),
-                  generation: p.budget.used + 2,
-                  goalText,
-                  signalType: p.signalType,
-                });
-                p.budget.used++;
-                p.budget.tokens += hctx.tokens;
-                const resumeResult = await resumed.waitForResult({
-                  completionTimeoutMs: p.completionTimeoutMs,
-                  contextHighTokens: p.contextHighTokens,
-                });
-                if (resumeResult.status === 'completed') return true;
-                if (resumeResult.status === 'context_high') {
-                  // Token accounting already done; loop back to re-check budget
-                  // and attempt another native resume with the new snapshot.
-                  execution = resumed;
-                  result = resumeResult;
-                  logger.info({ iid: p.iid, runId }, 'native resume: agent hit context_high again; looping');
-                  continue;
-                }
-                // 'timed_out', 'failed', etc. — fall through to coordinator
-                logger.info({ iid: p.iid, runId, status: resumeResult.status }, 'native resume returned non-continue status; falling through to coordinator');
-                execution = resumed;
-              }
-            } catch (err) {
-              logger.info({ iid: p.iid, runId, err: err instanceof Error ? err.message : err }, 'native resume failed; falling through to coordinator');
-            }
+          // Phase 4 native resume: attemptNativeResume encapsulates the full
+          // resume flow (capability check, load snapshot, restoreSession,
+          // startAgent, waitForResult). On 'completed' return true; on 'continued'
+          // reassign (execution, result) to the resumed values and loop back;
+          // on 'failed' fall through to HandoffCoordinator.
+          const resumeOutcome = await attemptNativeResume(
+            {
+              iid: p.iid,
+              session: p.session,
+              wtPath: p.wtPath,
+              runId,
+              generation: p.budget.used + 2,
+              completionTimeoutMs: p.completionTimeoutMs,
+              contextHighTokens: p.contextHighTokens,
+              signalType: p.signalType,
+              goalText,
+              triggerTokens: hctx.tokens,
+            },
+            p.budget,
+            this.agentProvider,
+            this.sandbox!,
+            () => chain,
+            () => execution.captureSession(),
+          );
+
+          if (resumeOutcome.status === 'completed') return true;
+          if (resumeOutcome.status === 'continued') {
+            execution = resumeOutcome.resumedExecution;
+            result = resumeOutcome.resumeResult;
+            logger.info({ iid: p.iid, runId }, 'native resume: agent hit context_high again; looping');
+            continue;
           }
+          // 'failed' — fall through to coordinator
 
           // Coordinator.restartSession() creates a new tmux session.
           // After it returns, the loop continues and sends the continued goal in the next iteration.

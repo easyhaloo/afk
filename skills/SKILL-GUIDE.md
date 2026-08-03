@@ -1,7 +1,25 @@
 # SKILL Authoring Guide
 
-Standards for writing `SKILL.md` files. A good skill is **focused,
-verifiable, and tool-agnostic**.
+Reference: [agentskills.io/specification](https://agentskills.io/specification)
+
+A good skill is **focused, verifiable, and tool-agnostic**.
+
+---
+
+## Directory structure
+
+```
+skill-name/
+├── SKILL.md          # Required: YAML frontmatter + instructions
+├── scripts/          # Optional: executable code
+├── references/       # Optional: REFERENCE.md, FORMS.md, domain docs
+├── assets/           # Optional: templates, images, data files
+└── ...
+```
+
+- `name` must match parent directory (lowercase, `a-z/0-9/-` only)
+- Keep `SKILL.md` under 500 lines / ~5000 tokens
+- Load reference files on demand; avoid deep nesting
 
 ---
 
@@ -9,22 +27,26 @@ verifiable, and tool-agnostic**.
 
 ```yaml
 ---
-name: afk-<noun>
-description: >-
+name: afk-<noun>                    # lowercase, 1-64ch, a-z/0-9/- only
+description: >-                     # 1-1024ch, what + when to use
   One sentence: when to invoke, what it produces.
-  Include "mode" hint: HITL / AFK / Auto.
-disable-model-invocation: true   # true = LLM reasoning only, no subagents
-disallowed-tools: >-
-  Edit(*) Write(*)               # never bare names; always Tool(pattern)
-  Bash(git push*) Bash(rm -rf*) # specific dangerous patterns only
+  Include mode hint: HITL / AFK / Auto.
+license: MIT                        # optional
+compatibility: Requires git, glab   # optional, 1-500ch
+metadata:                           # optional, arbitrary kv
+  author: example-org
+  version: "1.0"
+disallowed-tools: >-               # AFK extension: denylist
+  Edit(*) Write(*)
+  Bash(git push*) Bash(rm -rf*)
 ---
 ```
 
 **Rules:**
-- `disallowed-tools` is **denylist only** — do not list allowed tools
-- Each entry: `Tool(subpattern)` — subpattern supports glob `*`
-- Prefer specific subpatterns over broad tool blocks (`Bash(git push*)` not `Bash(*)`)
-- `disable-model-invocation: true` for pure reasoning / interview / routing skills
+- `name` must match directory name exactly
+- `description` should include trigger keywords for agent matching
+- `disallowed-tools` is an AFK-specific denylist; use `Tool(pattern)` syntax
+- Progressive loading: metadata (~100 token) → body on activation → files on demand
 
 ---
 
@@ -55,40 +77,42 @@ Numbered, imperative. Each step:
 
 ---
 
-## Style Constraints
+## AFK-Specific Constraints
 
 | Rule | Reason |
 |------|--------|
-| No tool names in body | Agents / Tasks / Bash are primitives; body describes intent |
+| No tool names in body | Agents / Tasks / Bash are primitives; describe intent |
 | No example code blocks | Code dates; intent is stable |
 | Prefer nouns over verbs | "Fan out independent paths" not "Use Agent to fan out" |
 | Bounded scope | One skill, one mode, one exit condition |
 | HITL gates for destructive steps | Never auto-delete, auto-merge, auto-push |
 | Output path explicit | `/tmp/` for transient, repo for durable |
-| No Swiss-army skills | If it needs sub-skills, it needs its own pipeline |
+| `disallowed-tools` uses `Tool(pattern)` | Subcommand glob, not blanket block |
 
 ---
 
 ## Quality Checklist
 
-- [ ] Description includes mode (HITL / AFK / Auto)
-- [ ] `disallowed-tools` uses `Tool(pattern)` syntax
+- [ ] `name` matches directory, lowercase, no consecutive hyphens
+- [ ] `description` ≤ 1024 characters, includes mode hint and trigger keywords
+- [ ] `disallowed-tools` uses `Tool(subpattern)` syntax
 - [ ] No tool names appear in body text
-- [ ] Each step has a clear precondition and output
+- [ ] Each step has clear precondition and output
 - [ ] Anti-patterns are concrete (specific failure, not "be careful")
 - [ ] Output location specified (`/tmp/` vs repo)
 - [ ] Termination condition is explicit
 - [ ] No example code or command snippets
+- [ ] `SKILL.md` under 500 lines
 - [ ] Single responsibility — one skill does one thing
 
 ---
 
 ## Common Mistakes
 
-### Over-restrictive disallowed-tools
+### Over-restrictive denylist
 
 ```yaml
-# Bad — blocks too much, makes skill unusable
+# Bad — blocks too much
 disallowed-tools: Bash(*) Agent(*) Task(*)
 ```
 
@@ -112,18 +136,15 @@ Fan out independent paths to parallel workers.
 ```markdown
 # Bad — tries to be everything
 # Implement, test, and deploy a feature
-```
 
-```markdown
 # Good — bounded
 # Implement a tracker issue to MR, with QA gate.
 ```
 
 ---
 
-## Anti-patterns (Examples)
+## Validation
 
-- **MUST NOT write output to repo** — only `/tmp/` for transient drafts
-- **MUST NOT skip the human gate** — destructive actions always need confirmation
-- **MUST NOT use the same source for verification as for assumption** — cross-validate
-- **MUST NOT produce partial work** — if blocked, escalate to HITL
+```bash
+skills-ref validate ./my-skill   # frontmatter + naming conventions
+```

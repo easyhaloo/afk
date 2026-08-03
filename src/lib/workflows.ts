@@ -232,9 +232,9 @@ export class WorkflowRunner {
       baseBranch = 'main',
       hardTimeoutMs = getWorkflowConfig().workflowHardTimeout,
       completionTimeoutMs = getWorkflowConfig().completionTimeout,
-      maxHandoffs = Math.min(Math.ceil(getWorkflowConfig().goalBudget / 1_000_000), 20) || 3,
+      maxHandoffs = Math.min(Math.ceil(getWorkflowConfig().goalBudget / 1_000_000), 20),
       contextHighTokens = getWorkflowConfig().contextThreshold,
-      maxTotalTokens = getWorkflowConfig().goalBudget || 500_000,
+      maxTotalTokens = getWorkflowConfig().goalBudget,
     } = options;
 
     // Resolve sandbox provider by name (CLI path).

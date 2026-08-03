@@ -19,7 +19,7 @@ import { getTokenUsage, configureStatusline, logger, readSignal } from './io';
 import { getWorkflowConfig } from './core/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
-import { Watchdog, WatchdogAdapter, createWatchdog$legacy } from './workflows/watchdog';
+import { Watchdog, createWatchdog } from './workflows/watchdog';
 import type { WorkflowConfig } from './core/config/manager';
 import { HandoffCoordinator, handoffDocPath, createHandoffCoordinator } from './workflows/handoff';
 import { attemptNativeResume } from './workflows/resume';
@@ -101,13 +101,13 @@ export interface RunnerDependencies {
   coordinatorFactory?: (deps: {
     tracker: TrackerProvider;
     tmux: TmuxClient;
-    watchdog: WatchdogAdapter;
+    watchdog: Watchdog;
     config: WorkflowConfig;
   }) => HandoffCoordinator;
   /** Override the tmux client (tests). Defaults to a new TmuxClient. */
   tmux?: TmuxClient;
   /** Override the watchdog (tests). Defaults to a new Watchdog. */
-  watchdog?: WatchdogAdapter;
+  watchdog?: Watchdog;
   /** Sandbox provider (tests / future). Defaults to LocalSandboxProvider. */
   sandboxProvider?: SandboxProvider;
   /** Agent provider (tests). Defaults to ClaudeCodeProvider. */
@@ -163,7 +163,7 @@ export class WorkflowRunner {
   private tracker: TrackerProvider;
   private tmux: TmuxClient;
   private worktree: WorktreeManager;
-  private watchdog: WatchdogAdapter;
+  private watchdog: Watchdog;
   private coordinator: HandoffCoordinator;
   private sandboxProvider: SandboxProvider;
   private agentProvider: AgentProvider;
@@ -213,7 +213,7 @@ export class WorkflowRunner {
     this.tmux = deps?.tmux ?? createTmuxClient();
     this.worktree = createWorktreeManager();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;
-    this.watchdog = deps?.watchdog ?? createWatchdog$legacy(this.logDir);
+    this.watchdog = deps?.watchdog ?? createWatchdog(this.logDir);
     this.config = deps?.config ?? getWorkflowConfig();
     this.coordinator = deps?.coordinatorFactory
       ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog, config: this.config })

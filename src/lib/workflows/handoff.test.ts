@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import { HandoffCoordinator } from './handoff';
 import type { TrackerProvider } from '../core/tracker/types';
 import type { TmuxClient } from '../core/tmux/tmux';
-import type { WatchdogAdapter } from './watchdog';
+import type { Watchdog } from './watchdog';
 import type { WorkflowConfig } from '../core/config/manager';
 
 /** Fake tmux: every method is a vi.fn with sane defaults, overridable per-test. */
@@ -23,7 +23,7 @@ function makeTmux(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
 }
 
 function makeWatchdog() {
-  return { arm: vi.fn(), disarm: vi.fn(), isArmed: vi.fn(() => false) } as unknown as WatchdogAdapter;
+  return { arm: vi.fn(), disarm: vi.fn(), isArmed: vi.fn(() => false) } as unknown as Watchdog;
 }
 
 function makeConfig(): WorkflowConfig {

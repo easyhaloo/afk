@@ -141,7 +141,7 @@ afk signal goal-complete               # 工作流信号通信
 | `/afk-prototype` | 方案验证 | 承诺投入前验证技术方案 |
 | `/afk-implement` | TDD 实现 | 清晰实现目标 |
 | `/afk-qa` | 独立验证 | MR/PR 准备合并 |
-| `/afk-debug` | 快速修复 | 具体、可复现的故障 |
+| `/afk-diagnose` | 诊断 | 具体、可复现的故障 |
 | `/afk-pipeline` | 阶段路由 | 不确定使用哪个 skill |
 | `/afk-branch-migrate` | 跨分支迁移 | 在分歧分支间 cherry-pick |
 | `/afk-hand-off` | 工作交接 | 任务转移给其他开发者 |

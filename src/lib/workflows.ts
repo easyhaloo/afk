@@ -5,16 +5,20 @@ import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './core/tmux/tmux';
 import { WorktreeManager } from './core/git/worktree';
 import { LocalSandboxProvider } from './sandbox/local';
+import { ContainerSandboxProvider, DockerContainerProvider, PodmanContainerProvider } from './sandbox/container';
 import { ClaudeCodeProvider } from './agents/claude-code';
 import type {
   Sandbox,
   SandboxProvider,
+  SandboxProviderName,
   AgentExecution,
   ExecutionEvent,
   ExecutionResult,
   InterruptReason,
 } from './sandbox/types';
-import type { AgentProvider, SessionSnapshot } from './agents/types';
+import type { AgentProvider, AgentProviderName, SessionSnapshot } from './agents/types';
+import { requireAgentProvider } from './agents/registry';
+import type { BranchStrategyConfig } from './branches/types';
 import { getTokenUsage, configureStatusline, logger, readSignal, SIGNAL_FILE, clearSignal } from './io';
 import { readLegacySignalResult } from './sandbox/legacy-compat';
 import { TIMEOUTS, CONTEXT, MAX_HANDOFFS, MAX_TOTAL_TOKENS } from './constants';
@@ -136,6 +140,14 @@ export interface RunnerOptions {
   ext?: string[];
   /** Module parameters (e.g., ['isolate.auto=true']) */
   extParams?: string[];
+  /** Sandbox provider name (default: 'local'). */
+  sandboxProvider?: SandboxProviderName;
+  /** Agent provider name (default: 'claude-code'). */
+  agentProvider?: AgentProviderName;
+  /** Branch strategy config for all steps (default: issue-based). */
+  branchStrategy?: BranchStrategyConfig;
+  /** Workflow template name to run instead of the default two-phase flow. */
+  template?: string;
 }
 
 /**
@@ -198,6 +210,10 @@ export class WorkflowRunner {
   private agentProvider: AgentProvider;
   /** Session store chain factory — defaults to defaultSessionStoreChain. */
   private sessionStoreChainFactory: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
+  /** Resolved sandbox provider name (set in run()). */
+  private sandboxProviderName: SandboxProviderName = 'local';
+  /** Resolved agent provider name (set in run()). */
+  private agentProviderName: AgentProviderName = 'claude-code';
   private sandbox: Sandbox | null = null;
   private logDir: string;
   private modules: LifecycleModule[] = [];
@@ -267,14 +283,29 @@ export class WorkflowRunner {
       maxTotalTokens = MAX_TOTAL_TOKENS,
     } = options;
 
+    // Resolve sandbox provider by name (CLI path).
+    this.sandboxProviderName = options.sandboxProvider ?? 'local';
+    this.sandboxProvider = this.sandboxProviderByName(this.sandboxProviderName);
+
+    // Resolve agent provider by name (CLI path). Agent registry must already have
+    // the named provider registered (import side-effect or explicit registration).
+    this.agentProviderName = options.agentProvider ?? 'claude-code';
+    try {
+      this.agentProvider = requireAgentProvider(this.agentProviderName);
+    } catch {
+      // Agent not yet registered (e.g., test environment). Fall back to
+      // ClaudeCodeProvider as the default; deps?.agentProvider already handled above.
+      this.agentProvider = new ClaudeCodeProvider();
+    }
+
     // Load lifecycle modules
     this.modules = await loadModules(options.ext);
     this.extParams = parseModuleParams(options.extParams);
     this.originalCwd = process.cwd();
-    logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams }, 'WorkflowRunner initialized');
+    logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
 
     try {
-      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName });
+      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName, branchStrategy: options.branchStrategy, template: options.template });
     } catch (error) {
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
       await this.cleanupOnFailure(iid, session);
@@ -283,6 +314,18 @@ export class WorkflowRunner {
       // Never leave an armed watchdog behind: it would fire later and write a
       // stale timeout signal into the retained worktree.
       this.watchdog.disarm();
+    }
+  }
+
+  /** Resolve sandbox provider name to a SandboxProvider instance. */
+  private sandboxProviderByName(name: SandboxProviderName): SandboxProvider {
+    switch (name) {
+      case 'local':
+        return new LocalSandboxProvider(this.worktree);
+      case 'docker':
+        return new ContainerSandboxProvider({ provider: new DockerContainerProvider() });
+      case 'podman':
+        return new ContainerSandboxProvider({ provider: new PodmanContainerProvider() });
     }
   }
 
@@ -386,8 +429,10 @@ Session was interrupted before completion.
     baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number;
     maxHandoffs: number; contextHighTokens: number; maxTotalTokens: number;
     projectName?: string;
+    branchStrategy?: BranchStrategyConfig;
+    template?: string;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, branchStrategy, template } = ctx;
 
     // ── Step 0: Init hooks (pre-worktree) ─────────────────────────────────
     // ProjectResolverModule runs here and may chdir to the target repo.
@@ -630,7 +675,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
       }
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 
-      const result = await execution.waitForResult({
+      let result = await execution.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
       });

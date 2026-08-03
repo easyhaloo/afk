@@ -157,6 +157,9 @@ describe('WorkflowRunner.runPhase routing', () => {
     writeHighTokens(wtPath); // context_high, no completion signal -> handoff outcome
     const coord = { handoff: vi.fn(async () => 'terminated') };
     const runner = runnerWith(coord);
+    runner.setSandbox(makeFakeSandbox(makeFakeExecution([
+      { version: 1, runId: 'r1', status: 'context_high', provider: 'local', usage: { inputTokens: 150_000, outputTokens: 0, totalTokens: 150_000 }, commits: [] },
+    ])));
 
     const completed = await runPhase(runner, { budget: BudgetManager.forTest(3, 0, 3, 500_000) }); // used >= maxHandoffs
 
@@ -172,6 +175,9 @@ describe('WorkflowRunner.runPhase routing', () => {
     writeHighTokens(wtPath);
     const coord = { handoff: vi.fn(async () => 'terminated') };
     const runner = runnerWith(coord);
+    runner.setSandbox(makeFakeSandbox(makeFakeExecution([
+      { version: 1, runId: 'r1', status: 'context_high', provider: 'local', usage: { inputTokens: 150_000, outputTokens: 0, totalTokens: 150_000 }, commits: [] },
+    ])));
 
     // used(1) < maxHandoffs(3), but tokens(400k) + outcome(150k) >= maxTotalTokens(500k).
     const completed = await runPhase(runner, {

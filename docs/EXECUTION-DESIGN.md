@@ -1,8 +1,8 @@
-# AFK 执行环境与多 Agent 工作流设计
+# AFK Execution Environment and Multi-Agent Workflow Design
 
-## 1. 目标
+## 1. Goals
 
-在不破坏现有 Issue、Tracker、QA、HITL 和 TUI 能力的前提下，将 AFK 的执行层改造成可扩展架构：
+Transform AFK's execution layer into an extensible architecture without breaking existing Issue, Tracker, QA, HITL, and TUI capabilities:
 
 ```text
 Issue Workflow
@@ -26,71 +26,71 @@ Agent Provider
       └── copilot
 ```
 
-核心要求：
+Core requirements:
 
-- `local` 模式保留当前 `tmux + worktree` 的实时中断能力
-- `sandbox` 统一抽象本地和容器执行环境
-- 支持 Agent 在上下文增长到阈值前被 Runner 实时打断
-- 支持 session resume 或 handoff 文档恢复
-- 支持多 Agent Provider
-- 支持分支策略
-- 支持可组合工作流模板
-- 源码文件名、类名、注释和用户可见文案只使用 AFK 自己的概念
+- `local` mode preserves the current `tmux + worktree` real-time interrupt capability
+- `sandbox` unifies local and container execution environments
+- Support for Runner to interrupt Agent in real-time before context grows past a threshold
+- Support for session resume or handoff document recovery
+- Support for multiple Agent Providers
+- Support for branch strategies
+- Support for composable workflow templates
+- Source filenames, class names, comments, and user-facing text use only AFK's own concepts
 
-## 2. 设计原则
+## 2. Design Principles
 
-### 2.1 保留现有业务层
+### 2.1 Preserve Existing Business Layer
 
-以下能力继续属于 AFK 上层，不迁移到 Agent 或 Sandbox：
+The following capabilities remain part of AFK's upper layer and are not migrated to Agent or Sandbox:
 
 - GitHub/GitLab Tracker
 - Issue labels
-- AC 提取和验证
-- PR/MR 创建
-- QA 阶段
-- HITL 状态
+- AC extraction and verification
+- PR/MR creation
+- QA phase
+- HITL state
 - Scheduler / LoopRunner
 - Board / Kanban TUI
 
-### 2.2 分离四个概念
+### 2.2 Separate Four Concepts
 
 ```text
-Agent Provider       = Agent CLI 差异
-Sandbox Provider     = Agent 运行环境差异
-Branch Strategy      = Git 分支和 worktree 策略
-Workflow Template    = 多步骤业务流程
+Agent Provider       = Agent CLI differences
+Sandbox Provider     = Agent runtime environment differences
+Branch Strategy      = Git branch and worktree strategy
+Workflow Template    = Multi-step business process
 ```
 
-不要形成 Agent、执行环境和业务流程的组合类；使用组合表达：
+Do not create combined classes of Agent, execution environment, and business process; use composition instead:
 
 ```text
 Claude Code + local sandbox + issue branch + sequential-review template
 Codex + docker sandbox + named branch + planner template
 ```
 
-### 2.3 tmux 不是普通日志容器
+### 2.3 tmux Is Not an Ordinary Log Container
 
-`local` 模式必须保留：
+`local` mode must preserve:
 
-- 实时发送 prompt
-- 实时发送 interrupt
-- 上下文阈值触发 handoff
-- session 捕获
-- 人工 attach
-- HITL 接管
+- Real-time prompt sending
+- Real-time interrupt sending
+- Context threshold-triggered handoff
+- Session capture
+- Human attach
+- HITL takeover
 
-### 2.4 `.afk-signal.json` 逐步退役
+### 2.4 Gradual Retirement of `.afk-signal.json`
 
-不再让 Agent 通过 prompt 主动写控制信号。新的控制协议使用：
+Agents should no longer actively write control signals via prompt. The new control protocol uses:
 
-- AgentProvider 事件流
-- 结构化最终结果
+- AgentProvider event stream
+- Structured final result
 - ExecutionHandle
-- AFK runtime 管理的运行状态文件
+- Runtime state file managed by AFK runtime
 
-迁移期间保留旧 signal 兼容读取。
+Old signal compatible reading is preserved during migration.
 
-## 3. 目标目录结构
+## 3. Target Directory Structure
 
 ```text
 src/lib/
@@ -149,9 +149,9 @@ src/lib/
         └── planner-with-review/
 ```
 
-现有 `WorktreeManager`、`TmuxClient`、`WorkflowRunner`、`HandoffCoordinator` 和 `Watchdog` 先通过 adapter 接入，不进行大规模文件移动。
+Existing `WorktreeManager`, `TmuxClient`, `WorkflowRunner`, `HandoffCoordinator`, and `Watchdog` are connected via adapters first, without large-scale file reorganization.
 
-## 4. 核心接口
+## 4. Core Interfaces
 
 ### 4.1 AgentProvider
 
@@ -168,7 +168,7 @@ export interface AgentProvider {
 }
 ```
 
-Provider 能力：
+Provider capabilities:
 
 ```ts
 export type AgentCapability =
@@ -180,7 +180,7 @@ export type AgentCapability =
   | 'interactive';
 ```
 
-首批注册：`claude-code`、`codex`、`cursor`、`pi`、`opencode`、`copilot`。每个 Provider 必须明确声明能力差异，不能假设全部支持 resume、fork 或 structured output。
+First batch registered: `claude-code`, `codex`, `cursor`, `pi`, `opencode`, `copilot`. Each Provider must explicitly declare capability differences; do not assume all support resume, fork, or structured output.
 
 ### 4.2 AgentEvent
 
@@ -195,7 +195,7 @@ export type AgentEvent =
   | { type: 'error'; error: Error };
 ```
 
-`AgentEvent` 是运行时内部协议，不直接表达 Issue 状态。
+`AgentEvent` is a runtime internal protocol and does not directly express Issue state.
 
 ### 4.3 SandboxProvider
 
@@ -209,9 +209,9 @@ export interface SandboxProvider {
 }
 ```
 
-Provider：`local`、`docker`、`podman`。
+Providers: `local`, `docker`, `podman`.
 
-隔离等级：
+Isolation levels:
 
 ```ts
 export type IsolationLevel =
@@ -221,7 +221,7 @@ export type IsolationLevel =
   | 'vm';
 ```
 
-能力：
+Capabilities:
 
 ```ts
 export type SandboxCapability =
@@ -233,7 +233,7 @@ export type SandboxCapability =
   | 'session-transfer';
 ```
 
-### 4.4 Sandbox 与 AgentExecution
+### 4.4 Sandbox and AgentExecution
 
 ```ts
 export interface Sandbox {
@@ -259,49 +259,49 @@ export interface AgentExecution {
 }
 ```
 
-`interrupt()` 和 `kill()` 必须区分：
+`interrupt()` and `kill()` must be distinguished:
 
 ```text
-interrupt = 优雅停止，准备 resume/handoff
-kill      = 强制结束，不再假设 session 可恢复
+interrupt = graceful stop, prepare for resume/handoff
+kill      = forced termination, do not assume session is recoverable
 ```
 
 ## 5. Local Sandbox
 
-`LocalSandboxProvider` 将当前 `git worktree + tmux` 组合为统一的本地执行环境：
+`LocalSandboxProvider` unifies the current `git worktree + tmux` combination as a unified local execution environment:
 
 ```text
 create
-  → 创建/复用 worktree
-  → 创建 tmux session
-  → 启动 Agent
-  → 返回 AgentExecution
+  → create/reuse worktree
+  → create tmux session
+  → start Agent
+  → return AgentExecution
 
 interrupt
-  → tmux 发送 Ctrl-C
-  → 等待 Agent flush
+  → tmux send Ctrl-C
+  → wait for Agent flush
   → capture session
-  → 保留 worktree
+  → preserve worktree
 
 resume
-  → 新 generation tmux session
-  → restore session 或读取 handoff
-  → 继续执行
+  → new generation tmux session
+  → restore session or read handoff
+  → continue execution
 
 close
-  → 关闭 tmux
+  → close tmux
   → close control mode
-  → 更新 worktree 状态
-  → 按分支策略清理
+  → update worktree state
+  → cleanup per branch strategy
 ```
 
-`interrupt()` 不清理 worktree、不删除 session；`close()` 才是最终资源释放。
+`interrupt()` does not clean up worktree or delete session; `close()` is the final resource release.
 
-Local 模式提供任务隔离和实时控制，但不是安全隔离边界：它不能阻止 Agent 访问其他宿主文件、进程或环境变量。
+Local mode provides task isolation and real-time control, but is not a security isolation boundary: it cannot prevent Agent from accessing other host files, processes, or environment variables.
 
 ## 6. Container Sandbox
 
-第一版 Docker/Podman 使用 worktree bind mount：
+Version 1 Docker/Podman uses worktree bind mount:
 
 ```text
 host:
@@ -311,7 +311,7 @@ container:
   /workspace
 ```
 
-只挂载：
+Only mount:
 
 ```text
 /workspace
@@ -319,43 +319,43 @@ container:
 /afk/result
 ```
 
-不默认挂载：
+Do not mount by default:
 
 ```text
-宿主整个 HOME
+entire host HOME
 ~/.ssh
 ~/.aws
 Docker socket
-其他仓库
+other repositories
 ```
 
-默认使用非 root 用户，并通过显式 allowlist 注入环境变量。Agent 进程控制必须保存 container ID、exec ID、Agent PID 和进程组信息；先优雅 interrupt，等待 session flush，超时后再 kill process group，最后才强制终止容器。
+Use non-root user by default and inject environment variables via explicit allowlist. Agent process control must save container ID, exec ID, Agent PID, and process group information; first gracefully interrupt, wait for session flush, then kill process group after timeout, and finally forcibly terminate the container.
 
-第一版采用“一次 workflow 一个 container，每次 context handoff 只重启 Agent process”，保留依赖和缓存，同时保持 generation 边界清晰。
+Version 1 uses "one container per workflow, only restart Agent process on each context handoff", preserving dependencies and cache while keeping generation boundaries clear.
 
-## 7. 上下文交接
+## 7. Context Handoff
 
-上下文交接必须独立于完成判断：
+Context handoff must be independent of completion judgment:
 
 ```text
-完成判断 ≠ 上下文中断判断
+completion judgment ≠ context interrupt judgment
 ```
 
-流程：
+Flow:
 
 ```text
-1. Runner 读取 AgentProvider usage/event
-2. token 达到 contextHighTokens
+1. Runner reads AgentProvider usage/event
+2. token reaches contextHighTokens
 3. execution.interrupt()
-4. 等待 session flush
-5. capture session 并校验完整性
-6. 优先原生 session resume
-7. resume 不支持或失败时使用 handoff Markdown
-8. 启动新 generation
-9. 继续当前 workflow step
+4. wait for session flush
+5. capture session and verify integrity
+6. prefer native session resume
+7. use handoff Markdown when resume is not supported or fails
+8. start new generation
+9. continue current workflow step
 ```
 
-运行状态目录：
+Run state directory:
 
 ```text
 <worktree>/.afk/runs/<run-id>/
@@ -368,7 +368,7 @@ Docker socket
     └── handoff-2.md
 ```
 
-Session 文件必须使用临时文件、校验和原子 rename，避免新 generation 读取半截 JSONL。
+Session files must use temp files, checksums, and atomic rename to avoid new generation reading half-written JSONL.
 
 ## 8. ExecutionResult
 
@@ -391,17 +391,17 @@ export interface ExecutionResult {
 }
 ```
 
-新 WorkflowRunner 读取 `ExecutionResult` 推进业务状态。Agent 不再需要主动写控制信号。
+New WorkflowRunner reads `ExecutionResult` to advance business state. Agent no longer needs to actively write control signals.
 
-迁移期间读取优先级：
+Migration period read priority:
 
 ```text
 1. AgentExecution result
 2. result.json
-3. 旧 .afk-signal.json
+3. old .afk-signal.json
 ```
 
-## 9. 分支策略
+## 9. Branch Strategy
 
 ```ts
 export type BranchStrategy =
@@ -411,7 +411,7 @@ export type BranchStrategy =
   | { type: 'existing'; branch: string; worktreePath?: string };
 ```
 
-策略职责：
+Strategy responsibilities:
 
 - resolve branch name
 - prepare worktree
@@ -419,11 +419,11 @@ export type BranchStrategy =
 - merge if required
 - cleanup branch/worktree
 
-必须明确：session fork 不等于 branch fork，branch fork 不等于 sandbox fork。并行步骤必须显式使用独立 branch/worktree。
+Must be explicit: session fork does not equal branch fork, branch fork does not equal sandbox fork. Parallel steps must explicitly use independent branch/worktree.
 
-## 10. 工作流模板
+## 10. Workflow Template
 
-模板使用 YAML 描述步骤，prompt 独立存储：
+Templates use YAML to describe steps, with prompts stored separately:
 
 ```yaml
 name: sequential-review
@@ -450,7 +450,7 @@ steps:
     when: review.status == "failed"
 ```
 
-内置模板：
+Built-in templates:
 
 ```text
 issue-implementation
@@ -460,21 +460,21 @@ parallel-planner
 planner-with-review
 ```
 
-当前 AFK 两阶段 Issue 流程应首先抽成 `issue-implementation` 内置模板：
+Current AFK two-phase Issue flow should first be extracted as `issue-implementation` built-in template:
 
 ```text
 implement → verify-ac → create-mr → qa
 ```
 
-模板加载优先级：
+Template load priority:
 
 ```text
-CLI 指定路径 → 项目级 .afk/workflows → 用户级 ~/.afk/workflows → 内置模板
+CLI specified path → project-level .afk/workflows → user-level ~/.afk/workflows → built-in templates
 ```
 
-## 11. 配置与 CLI
+## 11. Configuration and CLI
 
-CLI 示例：
+CLI example:
 
 ```bash
 afk workflow run \
@@ -485,7 +485,7 @@ afk workflow run \
   --template issue-implementation
 ```
 
-配置示例：
+Configuration example:
 
 ```yaml
 agent:
@@ -504,40 +504,40 @@ workflow:
   maxTotalTokens: 500000
 ```
 
-配置优先级：CLI → `.afk/config.yml` → 环境变量 → 默认值。
+Configuration priority: CLI → `.afk/config.yml` → environment variables → defaults.
 
-## 12. 分阶段开发计划
+## 12. Phased Development Plan
 
-### 阶段 0：基线与接口设计
+### Phase 0: Baseline and Interface Design
 
-- 固定当前测试基线
-- 建立 Agent、Sandbox、Execution、Session、Branch、Template 类型
-- 不改变现有运行行为
+- Lock current test baseline
+- Establish Agent, Sandbox, Execution, Session, Branch, Template types
+- Do not change existing runtime behavior
 
-验收：`pnpm build`、`pnpm test` 通过。
+Acceptance: `pnpm build`, `pnpm test` pass.
 
-### 阶段 1：Local Sandbox 兼容接入
+### Phase 1: Local Sandbox Compatible Integration
 
-- 实现 `LocalSandboxProvider`
-- 封装现有 `WorktreeManager` 和 `TmuxClient`
-- 将 `WorkflowRunner` 改为依赖 Sandbox/Execution 接口
-- 保留现有 context handoff、watchdog 和 HITL
+- Implement `LocalSandboxProvider`
+- Wrap existing `WorktreeManager` and `TmuxClient`
+- Change `WorkflowRunner` to depend on Sandbox/Execution interface
+- Preserve existing context handoff, watchdog, and HITL
 
-验收：现有 tmux workflow 行为不变；运行中 context threshold 能触发 interrupt 和 handoff。
+Acceptance: existing tmux workflow behavior unchanged; context threshold during execution can trigger interrupt and handoff.
 
-### 阶段 2：事件流与结果协议
+### Phase 2: Event Stream and Result Protocol
 
-- 实现 `AgentEvent`
-- 实现 `ExecutionResult`
-- 新增 run 状态目录
-- Agent 结果优先走结构化协议
-- 保留 `.afk-signal.json` fallback
+- Implement `AgentEvent`
+- Implement `ExecutionResult`
+- Add run state directory
+- Agent results prefer structured protocol
+- Preserve `.afk-signal.json` fallback
 
-验收：结构化完成、失败、阻塞、超时和非法结果均有测试。
+Acceptance: structured completion, failure, blocked, timeout, and invalid results all have tests.
 
-### 阶段 3：多 Agent Provider
+### Phase 3: Multiple Agent Providers
 
-一次性建立并注册：
+Establish and register all at once:
 
 - Claude Code
 - Codex
@@ -546,107 +546,107 @@ workflow:
 - OpenCode
 - Copilot
 
-每个 Provider 实现独立 command builder、stream parser 和 capability matrix。
+Each Provider implements independent command builder, stream parser, and capability matrix.
 
-验收：每个 Provider 有 fixture 测试；不支持 resume 的 Provider 不得被错误地进入 resume 流程。
+Acceptance: each Provider has fixture tests; Providers that do not support resume must not incorrectly enter resume flow.
 
-### 阶段 4：Session Store 与交接增强
+### Phase 4: Session Store and Handoff Enhancement
 
-- 实现 provider-specific session store
-- 优先原生 resume
-- 失败时 fallback 到 handoff Markdown
-- 保存 generation、checksum 和恢复元数据
+- Implement provider-specific session store
+- Prefer native resume
+- Fallback to handoff Markdown on failure
+- Save generation, checksum, and recovery metadata
 
-验收：上下文超限后的新 generation 能继续当前阶段；session 损坏时能安全降级。
+Acceptance: new generation after context limit can continue current stage; session corruption can safely degrade.
 
-### 阶段 5：Docker/Podman Sandbox
+### Phase 5: Docker/Podman Sandbox
 
-- 实现容器创建和清理
+- Implement container creation and cleanup
 - worktree bind mount
-- 非 root 用户
-- 环境变量 allowlist
+- non-root user
+- environment variable allowlist
 - streaming exec
 - process group interrupt/kill
-- 同一 container 内 generation 重启
+- generation restart within same container
 
-验收：容器内 Agent 能修改宿主 worktree；context handoff、失败清理和容器回收正常。
+Acceptance: Agent in container can modify host worktree; context handoff, failure cleanup, and container recovery work correctly.
 
-### 阶段 6：Branch Strategy
+### Phase 6: Branch Strategy
 
 - `issue`
 - `named`
 - `merge-to-head`
 - `existing`
 
-验收：每种策略均有 Git fixture/integration test；并行 workflow 不共享可写 branch/worktree。
+Acceptance: each strategy has Git fixture/integration test; parallel workflows do not share writable branch/worktree.
 
-### 阶段 7：Workflow Template
+### Phase 7: Workflow Template
 
-- 实现模板 schema、loader、registry
-- 将现有流程抽成 `issue-implementation`
-- 增加 `simple-loop`
-- 增加 `sequential-review`
-- 增加 `parallel-planner`
-- 增加 `planner-with-review`
+- Implement template schema, loader, registry
+- Extract existing flow as `issue-implementation`
+- Add `simple-loop`
+- Add `sequential-review`
+- Add `parallel-planner`
+- Add `planner-with-review`
 
-验收：模板能表达依赖、条件、执行模式、Agent、分支策略和结构化输出。
+Acceptance: templates can express dependencies, conditions, execution modes, Agent, branch strategy, and structured output.
 
-### 阶段 8：移除旧 signal 协议 ✅
+### Phase 8: Remove Old Signal Protocol
 
-前提：所有新 workflow 和默认 Provider 已使用 ExecutionResult。
+Prerequisite: all new workflows and default Provider use ExecutionResult.
 
-- ✅ 删除新 prompt 中的 signal 写入要求 (`templates/builtin.ts`, `workflows.ts` phases)
-- ✅ Runner 仍读取 signal 作为向后兼容 fallback (`sandbox/legacy-compat.ts`)
-- ⏳ 清理 legacy signal CLI/schema/tests（保留 readSignal/writeSignal/clearSignal + 单元测试；CLI/技能暂无独立 signal 子命令）
-- ✅ 更新 skills、README 和架构文档（`CLAUDE.md` 含 Phase 状态表）
+- Delete signal writing requirements from new prompts (`templates/builtin.ts`, `workflows.ts` phases)
+- Runner still reads signal as backward-compatible fallback (`sandbox/legacy-compat.ts`)
+- Clean up legacy signal CLI/schema/tests (preserve readSignal/writeSignal/clearSignal + unit tests; CLI/skills have no independent signal subcommand yet)
+- Update skills, README, and architecture docs (`CLAUDE.md` contains Phase status table)
 
-验收：全量测试通过，旧 worktree 可以被兼容读取或明确迁移。
+Acceptance: full test suite passes, old worktrees can be compatibly read or explicitly migrated.
 
-实现细节：
-- `sandbox/legacy-compat.ts` —— `readLegacySignalResult()` 将 `.afk-signal.json` 映射为 `ExecutionResult`。
-- `LocalAgentExecution.waitForResult` 调用 legacy adapter 作为 fallback。
-- `core/io/signal.ts` 顶部加 `@deprecated` JSDoc。
+Implementation details:
+- `sandbox/legacy-compat.ts` — `readLegacySignalResult()` maps `.afk-signal.json` to `ExecutionResult`.
+- `LocalAgentExecution.waitForResult` calls legacy adapter as fallback.
+- `core/io/signal.ts` top has `@deprecated` JSDoc.
 
-## 13. 测试计划
+## 13. Testing Plan
 
-### 单元测试
+### Unit Tests
 
-覆盖：
+Coverage:
 
-- Provider command 构造
-- stream event 解析
-- usage 聚合
-- capability 检测
+- Provider command construction
+- stream event parsing
+- usage aggregation
+- capability detection
 - invalid result
-- interrupt/kill 区分
+- interrupt/kill distinction
 - session capture/restore
 - branch strategy
 - template dependency resolution
 
-### Local Sandbox 集成测试
+### Local Sandbox Integration Tests
 
-使用 fake Agent process 验证：
+Use fake Agent process to verify:
 
 - context threshold interrupt
-- handoff 后 resume
+- resume after handoff
 - timeout
 - manual abort
 - tmux cleanup
-- worktree 保留
+- worktree preservation
 
-### Docker/Podman 集成测试
+### Docker/Podman Integration Tests
 
-在运行环境可用时验证：
+Verify when runtime is available:
 
 - worktree mount
-- 环境变量白名单
-- 非 root 用户
+- environment variable allowlist
+- non-root user
 - process interrupt
-- 子进程 cleanup
+- subprocess cleanup
 - session transfer
 - container cleanup
 
-### 端到端测试
+### End-to-End Tests
 
 ```text
 Issue
@@ -659,9 +659,9 @@ Issue
 → PR/MR
 ```
 
-## 14. 文档同步
+## 14. Documentation Sync
 
-需要同步：
+Needs sync:
 
 - `README.md`
 - `CLAUDE.md`
@@ -671,24 +671,24 @@ Issue
 - `docs/TESTING.md`
 - `docs/SKILLS.md`
 
-文档必须说明：
+Documentation must explain:
 
-1. `local` 是任务隔离，不是安全隔离
-2. Docker/Podman 的挂载边界
-3. Agent Provider 能力差异
-4. context handoff 的实时中断流程
+1. `local` is task isolation, not security isolation
+2. Docker/Podman mount boundaries
+3. Agent Provider capability differences
+4. context handoff real-time interrupt flow
 5. branch strategy
 6. workflow template
-7. session resume 和 handoff fallback
-8. `.afk-signal.json` 的迁移状态
+7. session resume and handoff fallback
+8. `.afk-signal.json` migration status
 
-同时修正现有架构文档中的实现漂移：
+Also fix implementation drift in existing architecture docs:
 
-- Scheduler 实际是内存队列，不是 BullMQ/Redis
-- AC 验证文档需要与当前 WorkflowRunner 实际流程一致
-- 默认 timeout 以 `src/lib/constants.ts` 为准
+- Scheduler is actually an in-memory queue, not BullMQ/Redis
+- AC verification docs need to match current WorkflowRunner actual flow
+- Default timeout follows `src/lib/constants.ts`
 
-## 15. 最终架构
+## 15. Final Architecture
 
 ```text
 afk workflow run
@@ -726,13 +726,13 @@ WorkflowRunner
           continue workflow
 ```
 
-最终职责：
+Final responsibilities:
 
-- `Worktree`：代码和 branch 隔离
-- `Sandbox`：Agent 执行环境
-- `ExecutionHandle`：实时输出、中断、恢复
-- `AgentProvider`：不同 Agent CLI 的适配
-- `SessionStore`：上下文交接
-- `BranchStrategy`：分支和 worktree 生命周期
-- `WorkflowTemplate`：多步骤流程定义
-- `WorkflowRunner`：Issue 业务状态和整体编排
+- `Worktree`: code and branch isolation
+- `Sandbox`: Agent execution environment
+- `ExecutionHandle`: real-time output, interrupt, resume
+- `AgentProvider`: different Agent CLI adapters
+- `SessionStore`: context handoff
+- `BranchStrategy`: branch and worktree lifecycle
+- `WorkflowTemplate`: multi-step process definition
+- `WorkflowRunner`: Issue business state and overall orchestration

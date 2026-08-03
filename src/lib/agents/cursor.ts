@@ -38,7 +38,9 @@ export class CursorProvider implements AgentProvider {
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
     const argv = ['cursor-agent'];
-    if (options.interactive) {
+    if (options.executionMode === 'batch') {
+      argv.push('--print', '--output-format', 'stream-json');
+    } else if (options.interactive) {
       argv.push('--interactive');
     } else {
       argv.push('--print');

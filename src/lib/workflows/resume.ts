@@ -11,8 +11,8 @@
  * effects on the caller's shared `budget` object — this mirrors the original
  * behavior and is the only reasonable interface given the loop's local bindings.
  */
-import type { AgentProvider, SessionSnapshot } from '../agents/types';
-import type { Sandbox } from '../sandbox/types';
+import type { AgentProvider, SessionSnapshot, ExecutionMode } from '../agents/types';
+import type { Sandbox, AgentExecution, ExecutionResult } from '../sandbox/types';
 import type { SessionStoreChain } from '../sessions/types';
 import { logger } from '../io';
 import type { BudgetManager } from './budget';
@@ -26,20 +26,22 @@ export interface ResumeContext {
   completionTimeoutMs: number;
   contextHighTokens: number;
   signalType: 'goal_complete' | 'ac_result';
-  goalText: string;
+  prompt: string;
   /** Token count that triggered the outer context_high — used for budget accounting. */
   triggerTokens: number;
+  /** Execution mode for the resumed execution. */
+  executionMode?: ExecutionMode;
 }
 
 export type ResumeOutcome =
   | { status: 'completed' }
-  | { status: 'continued'; resumedExecution: import('../sandbox/types').AgentExecution; resumeResult: import('../sandbox/types').ExecutionResult }
+  | { status: 'continued'; resumedExecution: AgentExecution; resumeResult: ExecutionResult }
   | { status: 'failed' };
 
 /**
  * Attempt to resume the agent from a session snapshot.
  *
- * @param ctx          - Resume-specific context (runId, generation, goalText, triggerTokens)
+ * @param ctx          - Resume-specific context (runId, generation, prompt, triggerTokens)
  * @param budget       - Shared mutable budget object; mutated on 'continued' and 'failed' path budget accounting is done by caller
  * @param agentProvider - Must have 'resume' capability
  * @param sandbox      - The active sandbox
@@ -91,16 +93,19 @@ export async function attemptNativeResume(
     return { status: 'failed' };
   }
 
-  let resumed: import('../sandbox/types').AgentExecution;
+  let resumed: AgentExecution;
   try {
     resumed = await sandbox.startAgent({
       command: agentProvider.buildCommand({
         worktreePath: ctx.wtPath,
         sessionId: ctx.session,
+        executionMode: ctx.executionMode,
       }),
       generation: ctx.generation,
-      goalText: ctx.goalText,
+      prompt: ctx.prompt,
       signalType: ctx.signalType,
+      executionMode: ctx.executionMode,
+      agentProvider,
     });
   } catch (err) {
     logger.info({ iid: ctx.iid, runId: ctx.runId, err: err instanceof Error ? err.message : err }, 'native resume: startAgent failed; falling through to coordinator');
@@ -110,7 +115,7 @@ export async function attemptNativeResume(
   // Budget accounting is applied here (once per resume round), not by the caller.
   budget.record(ctx.triggerTokens);
 
-  let resumeResult: import('../sandbox/types').ExecutionResult;
+  let resumeResult: ExecutionResult;
   try {
     resumeResult = await resumed.waitForResult({
       completionTimeoutMs: ctx.completionTimeoutMs,

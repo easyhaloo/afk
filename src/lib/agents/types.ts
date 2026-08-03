@@ -42,6 +42,9 @@ export interface AgentCommand {
   cwd?: string;
 }
 
+/** Execution mode — determines how the runner waits for agent completion. */
+export type ExecutionMode = 'interactive' | 'batch';
+
 /** Options for building an agent command. */
 export interface AgentCommandOptions {
   /** Path the agent should operate in. */
@@ -52,6 +55,8 @@ export interface AgentCommandOptions {
   goal?: string;
   /** Whether to attach interactively (HITL). */
   interactive?: boolean;
+  /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
+  executionMode?: ExecutionMode;
 }
 
 /** An event emitted by the agent during execution. */

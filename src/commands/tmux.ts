@@ -48,7 +48,7 @@ export function registerTmuxCommands(program: Command): void {
         const client = new TmuxClient();
 
         info(`Sending /goal to ${options.session}:${options.window}...`);
-        await client.sendGoal(options.worktree, options.session, options.window, options.text);
+        await client.sendPrompt(options.worktree, options.session, options.window, options.text);
 
         success('Goal sent successfully');
       } catch (error) {

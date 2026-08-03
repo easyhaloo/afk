@@ -7,7 +7,7 @@
  * (AgentProvider) and "what workflow steps run" (WorkflowTemplate).
  */
 
-import type { AgentCommand, AgentEvent, SessionSnapshot, TokenUsage } from '../agents/types';
+import type { AgentCommand, AgentEvent, SessionSnapshot, TokenUsage, ExecutionMode, AgentProvider } from '../agents/types';
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
@@ -38,6 +38,8 @@ export interface SandboxOptions {
    * instance the HandoffCoordinator uses, so session lifecycle is coherent.
    */
   tmux?: import('../core/tmux/tmux').TmuxClient;
+  /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
+  executionMode?: ExecutionMode;
 }
 
 /** A started sandbox — can create AgentExecutions. */
@@ -66,9 +68,16 @@ export interface AgentStartOptions {
   /** Generation index for this execution (1 = first generation). */
   generation: number;
   /** Goal/prompt text to send to the agent. */
-  goalText: string;
+  prompt: string;
   /** Signal type to wait for (goal_complete / ac_result). */
   signalType: 'goal_complete' | 'ac_result';
+  /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
+  executionMode?: ExecutionMode;
+  /**
+   * Agent provider instance for batch mode event parsing.
+   * Required when executionMode is 'batch'.
+   */
+  agentProvider?: AgentProvider;
 }
 
 /** Reason for an interrupt — determines graceful vs. forced termination. */

@@ -7,7 +7,7 @@
  * Responsibilities:
  * - SandboxProvider.createWorktree() → creates git worktree via WorktreeManager
  * - SandboxProvider.create() → creates tmux session in existing worktree
- * - Sandbox.startAgent() → launches agent via tmux.sendGoal
+ * - Sandbox.startAgent() → launches agent via tmux.sendPrompt
  * - AgentExecution → wraps tmux session lifecycle with ExecutionResult
  *
  * Does NOT manage lifecycle modules (isolate, etc.) — those are runner-owned.
@@ -18,6 +18,7 @@ import { promises as fs } from 'fs';
 import { WorktreeManager } from '../../core/git';
 import { TmuxClient } from '../../core/tmux/tmux';
 import { getTokenUsage, readSignal } from '../../io';
+import { StreamingAgentExecution } from './streaming';
 import {
   type SandboxProvider,
   type Sandbox,
@@ -34,7 +35,7 @@ import {
   type IsolationLevel,
   type WorktreeInfo,
 } from '../types';
-import type { SessionSnapshot } from '../../agents/types';
+import type { AgentCommand, SessionSnapshot } from '../../agents/types';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',
@@ -80,16 +81,33 @@ export class LocalSandbox implements Sandbox {
 
   async startAgent(options: AgentStartOptions): Promise<AgentExecution> {
     if (this._closed) throw new Error('sandbox already closed');
+
+    // Batch mode: spawn child process directly, parse stream-json stdout.
+    // No tmux involvement; StreamingAgentExecution manages its own process.
+    if (options.executionMode === 'batch') {
+      const execution = new StreamingAgentExecution({
+        command: options.command,
+        prompt: options.prompt,
+        signalType: options.signalType,
+        worktreePath: this.worktreePath,
+        sessionId: this.sessionName,
+        agentProvider: options.agentProvider,
+      });
+      execution.start();
+      return execution;
+    }
+
+    // Interactive mode (default): use tmux session to drive the agent.
     const execution = new LocalAgentExecution({
       worktreePath: this.worktreePath,
       sessionName: this.sessionName,
       command: options.command,
       generation: options.generation,
-      goalText: options.goalText,
+      prompt: options.prompt,
       signalType: options.signalType,
       tmux: this.tmux,
     });
-    await execution.sendGoal();
+    await execution.sendPrompt();
     return execution;
   }
 
@@ -108,7 +126,7 @@ export class LocalSandbox implements Sandbox {
 /**
  * Execution inside a LocalSandbox — wraps tmux session operations.
  *
- * Sends goal via tmux.sendGoal(), then waits for result by polling:
+ * Sends prompt via tmux.sendPrompt(), then waits for result by polling:
  * - Signal file (goal_complete / ac_result) → status: completed
  * - Token threshold reached → status: context_high
  * - Hard timeout → status: timed_out
@@ -123,7 +141,7 @@ export class LocalAgentExecution implements AgentExecution {
   private readonly sessionName: string;
   private readonly tmux: TmuxClient;
   private readonly generation: number;
-  private readonly goalText: string;
+  private readonly prompt: string;
   private readonly signalType: 'goal_complete' | 'ac_result';
   private done = false;
   private interruptAcked = false;
@@ -131,9 +149,9 @@ export class LocalAgentExecution implements AgentExecution {
   constructor(opts: {
     worktreePath: string;
     sessionName: string;
-    command: import('../../agents/types').AgentCommand;
+    command: AgentCommand;
     generation: number;
-    goalText: string;
+    prompt: string;
     signalType: 'goal_complete' | 'ac_result';
     tmux: TmuxClient;
   }) {
@@ -142,18 +160,18 @@ export class LocalAgentExecution implements AgentExecution {
     this.sessionName = opts.sessionName;
     this.tmux = opts.tmux;
     this.generation = opts.generation;
-    this.goalText = opts.goalText;
+    this.prompt = opts.prompt;
     this.signalType = opts.signalType;
     this.sessionId = opts.sessionName;
   }
 
   /** Send the goal to the tmux session — called by LocalSandbox.startAgent(). */
-  async sendGoal(): Promise<void> {
-    await this.tmux.sendGoal(
+  async sendPrompt(): Promise<void> {
+    await this.tmux.sendPrompt(
       this.worktreePath,
       this.sessionName,
       'main',
-      this.goalText,
+      this.prompt,
       this.signalType,
     );
   }

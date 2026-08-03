@@ -234,13 +234,14 @@ export class TmuxClient {
    * Send /goal command with text, followed by instructions to write signal.
    * @param signalType - The signal type to write on completion (default: 'goal_complete')
    */
-  async sendGoal(worktreeDir: string, session: string, window: string, goalText: string, signalType: string = 'goal_complete'): Promise<void> {
+  async sendPrompt(worktreeDir: string, session: string, window: string, prompt: string, signalType: string = 'goal_complete'): Promise<void> {
     const hasPrompt = await this.waitForPrompt(worktreeDir);
     if (!hasPrompt) throw new Error('Timeout waiting for claude prompt');
 
-    // Type /goal command with the goal text. The text is submitted as a single line
+    // Type the prompt text directly (which already contains `/goal ` prefix).
+    // The text is submitted as a single line
     // (no embedded newlines which would cause premature submission in the TUI).
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', `/goal ${goalText}`]);
+    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', prompt]);
     await this.sleep(500);
 
     // After the agent completes the goal, it reports completion via

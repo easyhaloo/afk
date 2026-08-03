@@ -118,6 +118,7 @@ describe('WorkflowRunner cleanup control flow', () => {
     const { runner, tracker } = makeRunner();
     runner.pushBranch = vi.fn().mockResolvedValue(undefined);
     runner.createMR = vi.fn().mockResolvedValue('https://example.com/mr/1');
+    runner.setSandbox({ close: vi.fn().mockResolvedValue(undefined) } as any);
     runner.runBody = async function () {
       return await this.autoWrapup(42, '/tmp/wt', 'sess', 'main');
     };
@@ -125,8 +126,7 @@ describe('WorkflowRunner cleanup control flow', () => {
     const result = await runner.run(RUN_OPTS);
 
     expect(result).toEqual({ success: true, url: 'https://example.com/mr/1' });
-    expect(runner.tmux.killSession).toHaveBeenCalledWith('sess');
-    expect(runner.tmux.closeSession).toHaveBeenCalled();
+    expect((runner as any).sandbox.close).toHaveBeenCalled();
     expect(runner.worktree.cleanup).toHaveBeenCalledWith(42, true);
     expect(tracker.addLabel).toHaveBeenCalledWith(42, 'stage::qa');
     expect(tracker.addComment).not.toHaveBeenCalled();

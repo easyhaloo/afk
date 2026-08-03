@@ -1,62 +1,89 @@
 /**
  * Application-wide constants
  *
- * This file centralizes magic numbers and strings to improve maintainability.
+ * Workflow-related values are sourced from config; scheduler/scheduler-only
+ * values remain here as compile-time constants.
  */
+
+import { getWorkflowConfig } from './core/config/manager';
 
 /**
- * Timeout values in milliseconds
+ * Timeout values used by the scheduler and QA runner (not workflow runtime).
+ * Workflow timeouts are read from WorkflowConfig at run time.
  */
 export const TIMEOUTS = {
-  /** Hard timeout for workflow execution (2 hours) */
-  WORKFLOW_HARD_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
-
-  /** Completion timeout for workflow (2 hours) */
-  WORKFLOW_COMPLETION_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
-
-  /** Timeout for handoff ready signal (1 minute) */
-  HANDOFF_TIMEOUT: 1 * 60 * 1000, // 60000ms
-
-  /** Default tmux session wait timeout (2 hours) */
-  TMUX_SESSION_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
-
   /** Job retry delay (1 minute) */
   JOB_RETRY_DELAY: 1 * 60 * 1000, // 60000ms
 
   /** Job delay for rescheduling (1 hour) */
   JOB_RESCHEDULE_DELAY: 1 * 60 * 60 * 1000, // 3600000ms
+
+  /** Default tmux session wait timeout (2 hours) */
+  TMUX_SESSION_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
+
+  /** Completion timeout for workflow (2 hours) — CLI/QA fallback */
+  WORKFLOW_COMPLETION_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
+
+  /** Hard timeout for workflow (2 hours) — CLI fallback */
+  WORKFLOW_HARD_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
 } as const;
 
-/**
- * Context monitoring thresholds (tokens)
- */
 export const CONTEXT = {
-  /**
-   * Threshold (absolute tokens) at which the runner interrupts the session
-   * for a context handoff, polled from the statusline data. Detection is
-   * runner-side only — context overflow is not a signal.
-   * ~50% of Claude's 200K context window as a conservative cutoff.
-   */
   HIGH_THRESHOLD: 100_000,
 } as const;
 
 /**
- * Max automatic context-handoff rounds per workflow run before falling back
- * to the terminal (manual-resume) handoff.
+ * Context threshold — sourced from WorkflowConfig at runtime.
+ */
+export function getContextHighThreshold(): number {
+  return getWorkflowConfig().contextThreshold;
+}
+
+/**
+ * Compile-time fallback for CLI defaults (not env-driven).
+ * Runtime: use getContextHighThreshold() instead.
+ */
+export const CONTEXT_HIGH_THRESHOLD = 100_000;
+
+/**
+ * Max automatic context-handoff rounds — read from WorkflowConfig at runtime.
+ * Falls back to 3 when called before config is loaded.
+ */
+export function getMaxHandoffs(): number {
+  const gb = getWorkflowConfig().goalBudget;
+  return gb > 0 ? Math.min(Math.ceil(gb / 1_000_000), 20) : 3;
+}
+
+/**
+ * Compile-time fallback for CLI defaults (not env-driven).
+ * Runtime: use getMaxHandoffs() instead.
  */
 export const MAX_HANDOFFS = 3;
 
 /**
- * Max total tokens a workflow run may consume across all handoff
- * generations (accumulated at each handoff: the old session's usage is
- * added to the running total). Reaching it terminates the run with a
- * terminal handoff. ~5 sessions' worth of HIGH_THRESHOLD.
+ * Max total tokens across handoff generations — read from WorkflowConfig at runtime.
+ * Falls back to 500_000 when called before config is loaded.
+ */
+export function getMaxTotalTokens(): number {
+  return getWorkflowConfig().goalBudget || 500_000;
+}
+
+/**
+ * Compile-time fallback for CLI defaults (not env-driven).
+ * Runtime: use getMaxTotalTokens() instead.
  */
 export const MAX_TOTAL_TOKENS = 500_000;
 
 /**
- * Port numbers for services
+ * Workflow timeouts — sourced from WorkflowConfig at runtime.
  */
+export function getWorkflowHardTimeout(): number {
+  return getWorkflowConfig().workflowHardTimeout;
+}
+
+export function getWorkflowCompletionTimeout(): number {
+  return getWorkflowConfig().completionTimeout;
+}
 export const PORTS = {
   /** MinIO base port */
   MINIO_BASE: 9000,

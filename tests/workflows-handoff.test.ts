@@ -272,7 +272,6 @@ describe('WorkflowRunner auto handoff continuation', () => {
     const runPromise = runner.run(RUN_OPTS);
 
     await waitFor(() => tmux.createSession.mock.calls.length === 2);
-    // The stale signal file must have been cleared before the relaunch.
     await expect(fs.access(join(wtPath, '.afk-signal.json'))).rejects.toThrow();
     await writeSignal(wtPath, 'goal_complete');
     await waitFor(() => tmux.sendGoal.mock.calls.length === 3);

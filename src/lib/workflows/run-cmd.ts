@@ -37,8 +37,8 @@ export interface RunWorkflowCliOpts {
 
 export async function runWorkflowCli(opts: RunWorkflowCliOpts): Promise<void> {
   const tracker = await createTrackerClient(opts.projectName);
-  const runner = new WorkflowRunner(tracker);
   const cfg = getWorkflowConfig();
+  const runner = new WorkflowRunner(tracker, { config: cfg });
   const session = opts.session || `afk-${opts.iid}`;
 
   const result = await runner.run({

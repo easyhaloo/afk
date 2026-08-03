@@ -5,6 +5,7 @@ import type { TrackerProvider } from './core/tracker/types';
 import { WorkflowRunner } from './workflows';
 import { QARunner } from './qa-runner';
 import { checkIssuePreconditions } from './preconditions';
+import { getWorkflowConfig } from './core/config/manager';
 import { logger } from './io';
 
 export interface LoopRunnerOptions {
@@ -23,9 +24,9 @@ export interface LoopRunnerOptions {
   /** If set, the runner stops itself after this many successful completions. */
   maxIterations?: number;
   /** Factory for WorkflowRunner — overridable for tests. */
-  workflowRunnerFactory?: (tracker: TrackerProvider) => WorkflowRunner;
+  workflowRunnerFactory?: (tracker: TrackerProvider, config: import('./core/config/manager').WorkflowConfig) => WorkflowRunner;
   /** Factory for QARunner — overridable for tests. */
-  qaRunnerFactory?: (tracker: TrackerProvider) => QARunner;
+  qaRunnerFactory?: (tracker: TrackerProvider, config: import('./core/config/manager').WorkflowConfig) => QARunner;
   /** Where to write this process's pid (so `afk loop stop` can find it). */
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
@@ -65,8 +66,8 @@ interface InternalOptions {
   excludeLabels: string[];
   shutdownTimeoutMs: number;
   maxIterations: number | undefined;
-  workflowRunnerFactory: (tracker: TrackerProvider) => WorkflowRunner;
-  qaRunnerFactory: (tracker: TrackerProvider) => QARunner;
+  workflowRunnerFactory: (tracker: TrackerProvider, config: import('./core/config/manager').WorkflowConfig) => WorkflowRunner;
+  qaRunnerFactory: (tracker: TrackerProvider, config: import('./core/config/manager').WorkflowConfig) => QARunner;
   pidFilePath: string;
   statusFilePath: string;
   ext: string[] | undefined;
@@ -148,8 +149,8 @@ export class LoopRunner {
       excludeLabels: options.excludeLabels ?? DEFAULTS.excludeLabels,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULTS.shutdownTimeoutMs,
       maxIterations: options.maxIterations,
-      workflowRunnerFactory: options.workflowRunnerFactory ?? (t => new WorkflowRunner(t)),
-      qaRunnerFactory: options.qaRunnerFactory ?? (t => new QARunner(t)),
+      workflowRunnerFactory: options.workflowRunnerFactory ?? ((t, cfg) => new WorkflowRunner(t, { config: cfg })),
+      qaRunnerFactory: options.qaRunnerFactory ?? ((t, cfg) => new QARunner(t, cfg)),
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
       statusFilePath: options.statusFilePath ?? DEFAULTS.statusFilePath,
       ext: options.ext,
@@ -366,7 +367,7 @@ export class LoopRunner {
     try {
       const resolvedExt = await this.resolveModules(iid);
       logger.info({ iid, resolvedExt }, 'modules resolved');
-      const runner = this.opts.workflowRunnerFactory(this.tracker);
+      const runner = this.opts.workflowRunnerFactory(this.tracker, getWorkflowConfig());
       const result = await runner.run({
         iid,
         session,
@@ -504,7 +505,7 @@ export class LoopRunner {
     logger.info({ iid, session: ctx.session }, 'qa chain starting');
 
     try {
-      const qa = this.opts.qaRunnerFactory(this.tracker);
+      const qa = this.opts.qaRunnerFactory(this.tracker, getWorkflowConfig());
       const result = await qa.process(iid);
       const elapsed = formatDuration(Date.now() - ctx.startedAt);
 

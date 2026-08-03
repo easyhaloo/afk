@@ -2,10 +2,10 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { TrackerProvider } from '../core/tracker/types';
-import { TmuxClient } from '../core/tmux';
+import type { TmuxClient } from '../core/tmux';
 import { clearSignal, logger, STATUS_FILENAME } from '../io';
-import { getWorkflowConfig } from '../core/config/manager';
-import { Watchdog } from './watchdog';
+import type { WorkflowConfig } from '../core/config/manager';
+import type { WatchdogAdapter } from './watchdog';
 
 /**
  * Path of a handoff recovery doc inside a worktree. The runner uses this to
@@ -55,7 +55,8 @@ export class HandoffCoordinator {
   constructor(
     private readonly tracker: TrackerProvider,
     private readonly tmux: TmuxClient,
-    private readonly watchdog: Watchdog,
+    private readonly watchdog: WatchdogAdapter,
+    private readonly config: WorkflowConfig,
   ) {}
 
   /**
@@ -132,8 +133,8 @@ export class HandoffCoordinator {
     await this.tmux.createSession(ctx.session, ctx.wtPath);
     logger.info({ iid: ctx.iid, session: ctx.session }, 'restartSession: tmux created');
     // waitForPrompt returns boolean, does NOT throw.
-    if (!await this.tmux.waitForPrompt(ctx.wtPath, getWorkflowConfig().promptTimeout)) {
-      throw new Error(`relaunch: claude not ready within ${getWorkflowConfig().promptTimeout}ms (${ctx.wtPath})`);
+    if (!await this.tmux.waitForPrompt(ctx.wtPath, this.config.promptTimeout)) {
+      throw new Error(`relaunch: claude not ready within ${this.config.promptTimeout}ms (${ctx.wtPath})`);
     }
     logger.info({ iid: ctx.iid, session: ctx.session }, 'restartSession: prompt ready');
     this.watchdog.arm(ctx.session, ctx.hardTimeoutMs, ctx.iid, ctx.wtPath); // fresh full hardTimeoutMs per generation
@@ -185,7 +186,7 @@ export class HandoffCoordinator {
   private async requestHandoffSummary(iid: number, session: string, worktreePath: string): Promise<HandoffSummary> {
     await this.typeHandoffRequest(session);
 
-    const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, getWorkflowConfig().handoffTimeout);
+    const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, this.config.handoffTimeout);
 
     const snapshot = await this.tmux.capturePane(session, 'main', { lines: 100, history: 200 });
     const { sha, branch } = await this.gitHead(worktreePath);
@@ -303,7 +304,8 @@ export class HandoffCoordinator {
 export function createHandoffCoordinator(deps: {
   tracker: TrackerProvider;
   tmux: TmuxClient;
-  watchdog: Watchdog;
+  watchdog: WatchdogAdapter;
+  config: WorkflowConfig;
 }): HandoffCoordinator {
-  return new HandoffCoordinator(deps.tracker, deps.tmux, deps.watchdog);
+  return new HandoffCoordinator(deps.tracker, deps.tmux, deps.watchdog, deps.config);
 }

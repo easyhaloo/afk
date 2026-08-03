@@ -107,7 +107,7 @@ Attach, read the last `Next:` line, decide:
 - **Secrets discipline:** a secret in a WIP commit is unrecoverable —
   never read credential files beyond `.env.fork`.
 
-## Anti-patterns
+## Caveats
 
 - MUST NOT hand-write a `while true; do claude -p ...; done` loop.
 - MUST NOT bypass `afk workflow run` and reimplement its steps in bash.

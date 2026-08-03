@@ -94,9 +94,9 @@ Fan out **independent items** to parallel workers when:
 
 Dependency patterns: `A → B` (B blocked by A); `A | B | C` (all unblocked).
 
-**Anti-pattern:** hidden coupling — serial when in doubt.
+Note: hidden coupling → serial when in doubt.
 
-## Anti-patterns
+## Caveats
 
 - MUST NOT skip Step 2 — methodology load is non-negotiable.
 - MUST NOT push directly to protected branches.

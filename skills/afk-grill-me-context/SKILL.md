@@ -89,7 +89,7 @@ which is incompatible with `/tmp/` generation.
 
 Never write to the repo working tree.
 
-## Anti-patterns
+## Caveats
 
 - MUST NOT write CONTEXT.md to the repo working tree — only to `/tmp/`.
 - MUST NOT skip the Step 4 gate.

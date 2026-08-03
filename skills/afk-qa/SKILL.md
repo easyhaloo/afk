@@ -87,14 +87,9 @@ If binary evidence was generated, write paths to `.afk/artifacts.txt`
 
 ### Step 5 — Conflict during merge
 
-1. Post comment: "Merge conflict detected. Will attempt rebase."
-2. Rebase on `prd/<N>`:
-   ```bash
-   git -C .worktrees/issue-<iid> fetch origin "prd/<N>"
-   git -C .worktrees/issue-<iid> rebase origin/"prd/<N>"
-   ```
-   - **Text conflict resolved:** push, retry merge.
-   - **Semantic conflict:** escalate to `mode::hitl`, leave MR in `stage::qa`.
+Post comment: "Merge conflict detected. Will attempt rebase."
+Rebase on `prd/<N>`. Text conflict resolved → push, retry merge.
+Semantic conflict → escalate to `mode::hitl`, leave MR in `stage::qa`.
 
 ### Step 6 — Any AC fail
 

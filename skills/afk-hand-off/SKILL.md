@@ -20,55 +20,22 @@ disallowed-tools: >-
 
 ### Step 1 — Collect
 
-```bash
-git status --short
-git log --oneline -5
-git worktree list 2>/dev/null || true
-```
+Run: git status, git log, git worktree list.
 
 ### Step 2 — Draft
 
-Write a **single snapshot**. Do not create a draft and revise — write
-once, completely, then stop. Leave sections blank if no content.
-
-```markdown
-# Hand-off — <title>
-
-## Goal
-<what this session set out to accomplish>
-
-## Where we are
-<branch or worktree name>
-
-## What was done
-- <concrete action or finding>
-- ...
-
-## Key findings
-- <analysis, code trace, root cause>
-
-## Key decisions
-- <choice between alternatives, with why this option was chosen>
-
-## Next action
-<specific next step — concrete enough that another agent could act on it>
-```
+Write a **single snapshot**: Goal, Where we are, What was done, Key
+findings, Key decisions, Next action. Do not create a draft and revise —
+write once, completely, then stop. Leave sections blank if no content.
 
 ### Step 3 — Write
 
-Write directly to `/tmp/` using Bash (`cat > /tmp/... << 'EOF'` or `tee`):
-```
-/tmp/handoff-YYYYMMDD-HHMMSS.md
-```
-**Do not use the Write tool** — the Write tool requires reading the file
-first even for new paths, which is incompatible with `/tmp/` generation.
+Write directly to `/tmp/` using Bash (cat or tee). Do NOT use the Write
+tool — it requires reading the file first even for new paths.
 
 ### Step 4 — Report
 
-Display the path so the user can resume in the next session:
-```
-/afk-hand-off --resume /tmp/handoff-YYYYMMDD-HHMMSS.md
-```
+Display the path so the user can resume in the next session.
 
 ## Mode: resume
 

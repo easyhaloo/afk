@@ -53,42 +53,16 @@ All checks are mandatory. Stop immediately if any fails.
 Every run starts by identifying the task type, then loading the
 corresponding reference document.
 
-```
-Is this task asking me to:
-- ADD new behavior?                    → Feature
-- CHANGE structure, not behavior?      → Refactor
-- FIND information or decide?          → Research
-- FIX a live bug under pressure?       → Hotfix
-- PROVE something works first?         → Spike
-```
+Task type detection: ADD behavior → Feature; CHANGE structure → Refactor;
+FIND information → Research; FIX bug → Hotfix; PROVE feasibility → Spike.
 
 If unsure, default to `references/tdd-feature.md`.
 
 ## Progress checkpoints
 
-Git commit is the SSOT. Every WIP commit MUST have this structure:
-
-```bash
-mkdir -p .afk
-cat > .afk/progress.json <<EOF
-{"done": <N>, "total": <M>}
-EOF
-
-git add -A && git commit -m "$(cat <<'EOF'
-<type>: <short description> #<iid>
-
-Progress:
-- [x] <AC line 1> -- <evidence>
-- [ ] <AC line 2> -- <status or blocker>
-
-Next: <concrete next action>
-EOF
-)"
-```
-
-**Progress trailer contract:** `Next:` MUST be the last paragraph of
-the commit body (git trailer, git 2.32+). Do not add paragraphs after
-`Next:` — they silently displace it.
+Git commit is the SSOT. Every WIP commit must track: done count, total
+count, Progress lines per AC, Next action trailer. `Next:` MUST be the
+last paragraph of the commit body.
 
 ## Steps
 
@@ -111,13 +85,9 @@ Before writing any code:
 
 ### Step 4 — Takeover (human-in-the-loop, optional)
 
-```bash
-tmux attach -t afk \; select-window -t <window>
-```
-
-Before touching anything: `git log --oneline -5` in the worktree. The
-`Next:` line outranks any guess. Then `/goal pause`, manual work,
-`/goal resume`, detach (`ctrl-b d`).
+Attach to the tmux session, read `git log --oneline -5` in the worktree.
+The `Next:` line outranks any guess. Then `/goal pause`, manual work,
+`/goal resume`, detach.
 
 ### Step 5 — Escalation on repeated failure
 

@@ -9,7 +9,7 @@ Skills are reusable workflow templates for Claude Code. Each skill encapsulates 
 ### Design Philosophy
 
 1. **Single Responsibility** — Each skill solves one category of problems, avoiding feature overlap
-2. **Explicit Triggers** — Descriptions start with "Use when" to clearly define applicable scenarios
+2. **Explicit Triggers** — `description` is the only trigger carrier. Loaded at startup for skill matching. Body loads only after activation.
 3. **Verifiable Workflows** — Quality assurance through Signal mechanisms and AC checks
 4. **Methodology Integration** — Built-in best practices like TDD and DDD
 
@@ -44,6 +44,7 @@ User Request
 /md-to-pdf ──────────→ Markdown to PDF
 /reasoning-guard ────→ In-session Reasoning Path Guardian
 /reasoning-watchdog ──→ Hooks-based Automatic Reasoning Monitor
+/afk-skill-craft ────→ Skill Create / Diagnose / Refactor
 ```
 
 ## Core Skills Details

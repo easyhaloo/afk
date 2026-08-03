@@ -13,7 +13,7 @@
 ## Constraint Rules
 
 - **LLM-first design**: concise keywords, structured sections, no prose walls
-- **Concise description**: binary judgment, "does X, not Y"
+- **Concise description**: description is the **only trigger carrier** — startup loads it for matching, body loads only after activation. Binary judgment, "does X, not Y". Never duplicate trigger logic in body.
 - **Body minimization**: detail in references/, SKILL.md is the index
 - **Abstraction over explanation**: keyword-driven, trust model priors
 - **Domain knowledge separation**: specialized knowledge in references/

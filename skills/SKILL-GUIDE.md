@@ -107,10 +107,11 @@ without deciphering verbose explanations.
 
 ### Concise description
 
-Frontmatter `description` is a lookup key, not a manual. One to two
-sentences: what it does and when to invoke it. The body expands on how.
-Use binary judgment — "does X, not Y" — not scoring scales, fuzzy
-qualifiers, or self-referential statements.
+Frontmatter `description` is the **only trigger carrier**. It is loaded
+at startup for skill matching. Body is only loaded after activation.
+One to two sentences: what it does and when to invoke it. Use binary
+judgment — "does X, not Y" — not scoring scales, fuzzy qualifiers, or
+self-referential statements. Never duplicate trigger logic in body.
 
 ### Body minimization
 

@@ -16,7 +16,7 @@ import type {
 import type { AgentProvider, AgentProviderName, SessionSnapshot } from './agents/types';
 import type { BranchStrategyConfig } from './branches/types';
 import { getTokenUsage, configureStatusline, logger, readSignal } from './io';
-import { getContextHighThreshold, getMaxHandoffs, getMaxTotalTokens, getWorkflowHardTimeout, getWorkflowCompletionTimeout } from './constants';
+import { getWorkflowConfig } from './core/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
 import { Watchdog, createWatchdog } from './workflows/watchdog';
@@ -230,11 +230,11 @@ export class WorkflowRunner {
       session,
       targetBranch,
       baseBranch = 'main',
-      hardTimeoutMs = getWorkflowHardTimeout(),
-      completionTimeoutMs = getWorkflowCompletionTimeout(),
-      maxHandoffs = getMaxHandoffs(),
-      contextHighTokens = getContextHighThreshold(),
-      maxTotalTokens = getMaxTotalTokens(),
+      hardTimeoutMs = getWorkflowConfig().workflowHardTimeout,
+      completionTimeoutMs = getWorkflowConfig().completionTimeout,
+      maxHandoffs = Math.min(Math.ceil(getWorkflowConfig().goalBudget / 1_000_000), 20) || 3,
+      contextHighTokens = getWorkflowConfig().contextThreshold,
+      maxTotalTokens = getWorkflowConfig().goalBudget || 500_000,
     } = options;
 
     // Resolve sandbox provider by name (CLI path).

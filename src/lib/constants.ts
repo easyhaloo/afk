@@ -1,93 +1,31 @@
 /**
- * Application-wide constants
+ * Scheduler-only compile-time constants.
  *
- * Workflow-related values are sourced from config; scheduler/scheduler-only
- * values remain here as compile-time constants.
+ * All workflow values are sourced from WorkflowConfig via getWorkflowConfig().
+ * Import config functions from './core/config/manager' instead.
+ *
+ * This file is kept minimal: only values that are truly scheduler/isolator
+ * internal and have no counterpart in any Config interface.
  */
 
-import { getWorkflowConfig } from './core/config/manager';
-
 /**
- * Timeout values used by the scheduler and QA runner (not workflow runtime).
- * Workflow timeouts are read from WorkflowConfig at run time.
+ * Scheduler retry / delay constants.
  */
 export const TIMEOUTS = {
   /** Job retry delay (1 minute) */
-  JOB_RETRY_DELAY: 1 * 60 * 1000, // 60000ms
+  JOB_RETRY_DELAY: 1 * 60 * 1000,
 
   /** Job delay for rescheduling (1 hour) */
-  JOB_RESCHEDULE_DELAY: 1 * 60 * 60 * 1000, // 3600000ms
+  JOB_RESCHEDULE_DELAY: 1 * 60 * 60 * 1000,
 
-  /** Default tmux session wait timeout (2 hours) */
-  TMUX_SESSION_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
-
-  /** Completion timeout for workflow (2 hours) — CLI/QA fallback */
-  WORKFLOW_COMPLETION_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
-
-  /** Hard timeout for workflow (2 hours) — CLI fallback */
-  WORKFLOW_HARD_TIMEOUT: 2 * 60 * 60 * 1000, // 7200000ms
-} as const;
-
-export const CONTEXT = {
-  HIGH_THRESHOLD: 100_000,
+  /** Default tmux session wait timeout (2 hours) — used by TmuxClient methods */
+  TMUX_SESSION_TIMEOUT: 2 * 60 * 60 * 1000,
 } as const;
 
 /**
- * Context threshold — sourced from WorkflowConfig at runtime.
+ * MinIO / service port numbers.
  */
-export function getContextHighThreshold(): number {
-  return getWorkflowConfig().contextThreshold;
-}
-
-/**
- * Compile-time fallback for CLI defaults (not env-driven).
- * Runtime: use getContextHighThreshold() instead.
- */
-export const CONTEXT_HIGH_THRESHOLD = 100_000;
-
-/**
- * Max automatic context-handoff rounds — read from WorkflowConfig at runtime.
- * Falls back to 3 when called before config is loaded.
- */
-export function getMaxHandoffs(): number {
-  const gb = getWorkflowConfig().goalBudget;
-  return gb > 0 ? Math.min(Math.ceil(gb / 1_000_000), 20) : 3;
-}
-
-/**
- * Compile-time fallback for CLI defaults (not env-driven).
- * Runtime: use getMaxHandoffs() instead.
- */
-export const MAX_HANDOFFS = 3;
-
-/**
- * Max total tokens across handoff generations — read from WorkflowConfig at runtime.
- * Falls back to 500_000 when called before config is loaded.
- */
-export function getMaxTotalTokens(): number {
-  return getWorkflowConfig().goalBudget || 500_000;
-}
-
-/**
- * Compile-time fallback for CLI defaults (not env-driven).
- * Runtime: use getMaxTotalTokens() instead.
- */
-export const MAX_TOTAL_TOKENS = 500_000;
-
-/**
- * Workflow timeouts — sourced from WorkflowConfig at runtime.
- */
-export function getWorkflowHardTimeout(): number {
-  return getWorkflowConfig().workflowHardTimeout;
-}
-
-export function getWorkflowCompletionTimeout(): number {
-  return getWorkflowConfig().completionTimeout;
-}
 export const PORTS = {
-  /** MinIO base port */
   MINIO_BASE: 9000,
-
-  /** MinIO console port */
   MINIO_CONSOLE: 9001,
 } as const;

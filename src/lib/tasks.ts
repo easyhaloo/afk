@@ -68,8 +68,6 @@ export class TaskService {
     const worktrees = await this.worktreeManager.list();
     const worktreeMap = new Map(worktrees.map(wt => [wt.iid, wt]));
 
-    // Derive tasks from tmux sessions
-    // Sessions starting with "afk-gh-" or "afk-gl-" are task sessions
     return sessions
       .filter(s => s.name.startsWith('afk-gh-') || s.name.startsWith('afk-gl-') || s.name.startsWith('issue-') || s.name.startsWith('task-'))
       .map(s => {
@@ -89,7 +87,8 @@ export class TaskService {
           };
         }
 
-        // Legacy format (issue-* / task-*)
+        // Legacy format: issue-{iid}[-{branch}] or task-{iid}[-{branch}]
+        // Use split+slice to preserve branch names that contain hyphens.
         const parts = s.name.split('-');
         const iid = parseInt(parts[1]) || 0;
         const worktree = worktreeMap.get(iid);

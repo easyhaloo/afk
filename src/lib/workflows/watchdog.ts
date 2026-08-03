@@ -13,16 +13,16 @@ function spawnDetached(file: string, args: string[], opts: SpawnOptions): ChildP
 }
 
 /**
- * Hard-timeout watchdog: a detached process-group that fires after hardTimeoutMs,
- * writes a timeout signal to .afk-signal.json, then kills the tmux session.
+ * Hard-timeout watchdog: a detached process-group that fires after hardTimeoutMs
+ * and kills the tmux session.
  *
- * The WorkflowRunner arms one per phase / generation. The runner polls the
- * signal file, so the watchdog communicates its firing the same way the agent
- * does - by writing .afk-signal.json - rather than relying on tmux exit codes.
+ * The WorkflowRunner arms one per phase / generation. The runner's
+ * waitForResult() polls the tmux session state directly, so the watchdog
+ * only needs to kill the session — it does not need to write any signal file.
  *
  * `disarm()` kills the whole process group (negative pid targets the sleep
- * child too); a stale armed watchdog would otherwise fire later and clobber a
- * handoff signal written into the retained worktree.
+ * child too); a stale armed watchdog would otherwise fire later and
+ * unexpectedly kill a later session.
  */
 export class Watchdog {
   private child: ChildProcess | null = null;
@@ -35,13 +35,8 @@ export class Watchdog {
    */
   arm(session: string, hardTimeoutMs: number, iid: number, worktreePath: string): void {
     this.disarm();
-    const signalPath = `${worktreePath}/.afk-signal.json`;
     const shellCmd =
       `sleep ${hardTimeoutMs / 1000} && ` +
-      `cat > "${signalPath}.tmp" <<EOF\n` +
-      `{"type":"timeout","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}\n` +
-      `EOF\n` +
-      `mv "${signalPath}.tmp" "${signalPath}" 2>/dev/null; ` +
       `tmux kill-session -t "${session}" 2>/dev/null || true; ` +
       `echo "WATCHDOG:${iid}:${session}:${hardTimeoutMs}" >> "${this.logDir}/watchdog.log"`;
     this.child = spawnDetached('bash', ['-c', shellCmd], { cwd: process.cwd() });

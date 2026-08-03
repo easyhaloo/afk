@@ -275,22 +275,6 @@ export class GitLabClient implements TrackerProvider {
     return '';
   }
 
-  // Legacy methods from old client.ts (used by scheduler, workflows, preconditions)
-
-  async getRetryCountFromIssue(iid: number): Promise<number> {
-    const issue = await this.getIssue(iid);
-    return this.getRetryCount(issue);
-  }
-
-  async incrementRetryCount(iid: number): Promise<number> {
-    const issue = await this.getIssue(iid);
-    const current = this.getRetryCount(issue);
-    const newCount = current + 1;
-    const withoutOld = issue.labels.filter(l => !/^retry-count::/.test(l));
-    await this.updateIssue(iid, { labels: [...withoutOld, `retry-count::${newCount}`] });
-    return newCount;
-  }
-
   async updateLabels(iid: number, labels: string[]): Promise<void> {
     await this.updateIssue(iid, { labels });
   }

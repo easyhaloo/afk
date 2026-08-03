@@ -244,9 +244,7 @@ export class TmuxClient {
     await this.sleep(500);
 
     // After the agent completes the goal, it reports completion via
-    // ExecutionResult (Phase 8+). Old agents (pre-Phase-8) wrote the signal
-    // file; that path is kept as a fallback for in-flight worktrees — see
-    // sandbox/legacy-compat.ts.
+    // ExecutionResult (structured output).
     //
     // Double-tap C-m to submit: the first Enter can be lost if the TUI is
     // mid-redraw on a long wrapped line; the second is a harmless no-op.

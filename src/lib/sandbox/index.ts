@@ -9,7 +9,6 @@
  * Import from here rather than from individual sub-modules.
  */
 export * from './types';
-export * from './legacy-compat';
 export * from './providers';
 
 import { LocalSandboxProvider } from './providers/local';

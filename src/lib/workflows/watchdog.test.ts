@@ -24,11 +24,9 @@ describe('Watchdog', () => {
     expect(opts).toMatchObject({ detached: true, stdio: 'ignore' });
 
     const cmd = args[1] as string;
-    // Timeout in seconds, session kill, signal path, log line.
+    // Timeout in seconds, session kill, log line.
     expect(cmd).toContain('sleep 60');
     expect(cmd).toContain('tmux kill-session -t "afk-gh-42"');
-    expect(cmd).toContain('/tmp/wt-42/.afk-signal.json');
-    expect(cmd).toContain('"type":"timeout"');
     expect(cmd).toContain('WATCHDOG:42:afk-gh-42:60000');
     expect(cmd).toContain('/tmp/afk-logs-test/watchdog.log');
   });

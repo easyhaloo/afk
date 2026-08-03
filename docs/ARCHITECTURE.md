@@ -61,8 +61,7 @@ src/
 │   ├── sandbox/          # Sandbox providers (local, container)
 │   │   ├── container/    # Docker/Podman sandbox
 │   │   ├── providers/    # Sandbox provider registry
-│   │   ├── types.ts      # Sandbox, ExecutionResult interfaces
-│   │   └── legacy-compat.ts
+│   │   └── types.ts      # Sandbox, ExecutionResult interfaces
 │   ├── scheduler.ts      # Scheduler logic (in-memory queue, no Redis)
 │   ├── sessions/         # Session stores (file, handoff, chain)
 │   ├── templates/        # Workflow templates (registry, resolver, builtin)
@@ -163,7 +162,7 @@ graph TD
 | **AC Extraction** | Extract AC from issue labels / legacy markdown | Label-driven first, markdown as fallback |
 | **WorktreeManager** | Independent workspace per Issue | Physical isolation, no branch conflicts |
 | **TmuxClient** | Agent runtime environment | Independent sessions, crashes don't affect each other |
-| **Signal I/O** | Agent-Runner control communication | Atomic file writes, Zod validation |
+| **Signal I/O** | Agent-Runner control communication (interactive mode) | Atomic file writes, Zod validation; batch mode uses event stream (see [ADR-0014](./adr/0014-interactive-and-batch-structured-output.md)) |
 | **Status I/O** | Read Claude statusline JSON | Token objective data source |
 | **Scheduler** | Multi-Issue concurrent scheduling | In-memory queue + priority, no Redis dependency |
 | **Lifecycle Modules** | Extensible runners | loop-runner (continuous), qa-runner (verification), isolate (DB isolation) |

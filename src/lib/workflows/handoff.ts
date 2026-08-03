@@ -3,7 +3,7 @@ import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { TrackerProvider } from '../core/tracker/types';
 import type { TmuxClient } from '../core/tmux';
-import { clearSignal, logger, STATUS_FILENAME } from '../io';
+import { logger, STATUS_FILENAME, clearSignal } from '../io';
 import type { WorkflowConfig } from '../core/config/manager';
 import { Watchdog } from './watchdog';
 
@@ -126,8 +126,7 @@ export class HandoffCoordinator {
     await this.tmux.killSession(ctx.session).catch(() => { /* already dead */ });
     logger.info({ iid: ctx.iid, session: ctx.session }, 'restartSession: tmux killed');
     await this.tmux.closeSession();
-    await clearSignal(ctx.wtPath); // a stale completion signal would end the next wait immediately
-    logger.info({ iid: ctx.iid, wtPath: ctx.wtPath }, 'restartSession: signal cleared');
+    await clearSignal(ctx.wtPath); // stale completion signal must not end the next wait immediately
     await fs.rm(join(ctx.wtPath, '.afk', STATUS_FILENAME), { force: true }); // fresh session must not inherit old token data
     logger.info({ iid: ctx.iid, wtPath: ctx.wtPath }, 'restartSession: statusline data cleared');
     await this.tmux.createSession(ctx.session, ctx.wtPath);

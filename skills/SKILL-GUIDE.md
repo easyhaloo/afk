@@ -61,7 +61,7 @@ Precise trigger conditions. "When X, not when Y."
 
 Numbered, imperative. Each step has a clear precondition and output.
 
-## Anti-patterns
+## Caveats
 
 Concrete failure modes — specific, not vague.
 ```
@@ -129,7 +129,7 @@ The model knows the syntax; show it what to do, not how to do it.
 - [ ] `name` matches directory, lowercase, no consecutive hyphens
 - [ ] `description` ≤ 1024 characters, includes trigger keywords
 - [ ] Each step has clear precondition and output
-- [ ] Anti-patterns are concrete (specific failure, not "be careful")
+- [ ] Caveats are concrete (specific failure, not "be careful")
 - [ ] No example code or command snippets
 - [ ] `SKILL.md` under 500 lines
 - [ ] Single responsibility — one skill does one thing
@@ -159,7 +159,7 @@ Add new efficiency patterns under **Efficiency Patterns** with:
 
 Add new constraint rules under **Constraint Rules** with:
 - Rule name
-- Concrete failure scenario
+- Concrete caveat scenario
 - Why it causes errors
 
 ---

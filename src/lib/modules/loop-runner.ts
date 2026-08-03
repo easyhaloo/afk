@@ -1,12 +1,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { TrackerProvider } from './core/tracker/types';
-import { WorkflowRunner } from './workflows';
+import type { TrackerProvider } from '../core/tracker/types';
+import { WorkflowRunner } from '../workflows';
 import { QARunner } from './qa-runner';
-import { checkIssuePreconditions } from './preconditions';
-import { getWorkflowConfig } from './core/config/manager';
-import { logger } from './io';
+import { checkIssuePreconditions } from '../preconditions';
+import { getWorkflowConfig } from '../core/config/manager';
+import { logger } from '../io';
 
 export interface LoopRunnerOptions {
   /** Max simultaneous implement chains (WorkflowRunner instances). */
@@ -24,9 +24,9 @@ export interface LoopRunnerOptions {
   /** If set, the runner stops itself after this many successful completions. */
   maxIterations?: number;
   /** Factory for WorkflowRunner — overridable for tests. */
-  workflowRunnerFactory?: (tracker: TrackerProvider, config: import('./core/config/manager').WorkflowConfig) => WorkflowRunner;
+  workflowRunnerFactory?: (tracker: TrackerProvider, config: import('../core/config/manager').WorkflowConfig) => WorkflowRunner;
   /** Factory for QARunner — overridable for tests. */
-  qaRunnerFactory?: (tracker: TrackerProvider, config: import('./core/config/manager').WorkflowConfig) => QARunner;
+  qaRunnerFactory?: (tracker: TrackerProvider, config: import('../core/config/manager').WorkflowConfig) => QARunner;
   /** Where to write this process's pid (so `afk loop stop` can find it). */
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
@@ -66,8 +66,8 @@ interface InternalOptions {
   excludeLabels: string[];
   shutdownTimeoutMs: number;
   maxIterations: number | undefined;
-  workflowRunnerFactory: (tracker: TrackerProvider, config: import('./core/config/manager').WorkflowConfig) => WorkflowRunner;
-  qaRunnerFactory: (tracker: TrackerProvider, config: import('./core/config/manager').WorkflowConfig) => QARunner;
+  workflowRunnerFactory: (tracker: TrackerProvider, config: import('../core/config/manager').WorkflowConfig) => WorkflowRunner;
+  qaRunnerFactory: (tracker: TrackerProvider, config: import('../core/config/manager').WorkflowConfig) => QARunner;
   pidFilePath: string;
   statusFilePath: string;
   ext: string[] | undefined;

@@ -1,9 +1,9 @@
-import { TmuxClient } from './core/tmux/tmux';
-import { WorktreeManager } from './core/git';
-import { configureStatusline, logger } from './io';
-import { getWorkflowConfig } from './core/config/manager';
-import type { TrackerProvider } from './core/tracker/types';
-import type { WorkflowConfig } from './core/config/manager';
+import { TmuxClient } from '../core/tmux/tmux';
+import { WorktreeManager } from '../core/git';
+import { configureStatusline, logger } from '../io';
+import { getWorkflowConfig } from '../core/config/manager';
+import type { TrackerProvider } from '../core/tracker/types';
+import type { WorkflowConfig } from '../core/config/manager';
 
 /**
  * QA Runner — event-driven worker for verifying AC on merged code.

@@ -64,9 +64,16 @@ Run through checklist quality items. Fix any failures before reporting.
 
 Parse frontmatter fields. Read `references/SKILL-GUIDE-CHECKLIST.md`.
 
-### Step 2 — Run checklist
+### Step 2 — Run checklist (with reasoning)
 
-For each quality item, report pass/fail:
+For each quality item, **think before marking pass/fail**:
+
+1. **Read the item.** What does it require?
+2. **Find evidence.** Where in the SKILL.md is the relevant content?
+3. **Reason.** Does this actually pass? What could be wrong?
+4. **Mark.** Then mark pass/fail — not before reasoning.
+
+Checklist:
 - `name` matches directory, lowercase, no consecutive hyphens
 - `description` ≤ 1024 characters, includes trigger keywords
 - Steps reflect actual workflow shape; no formulaic decoration
@@ -76,17 +83,25 @@ For each quality item, report pass/fail:
 - Single responsibility
 - **Domain-specific terms and values preserved**
 
-### Step 3 — Check constraint rules
+### Step 3 — Check constraint rules (with reasoning)
 
-Flag violations:
-- Abstraction applied to domain terms the LLM doesn't know (e.g., `mode::afk` abstracted to "mode label")
-- Precondition/Output added as formulaic decoration when workflow is linear/obvious
+For each constraint rule, **think before flagging**:
+
+1. **Read the rule.** What does it prevent?
+2. **Scan the SKILL.md.** Does any content violate it?
+3. **Self-reflect.** Am I flagging correctly? Could this be a false positive?
+4. **Reason through examples.** If rule says "no example code", trace through every code block and confirm: is this intent description or an example?
+
+Flag violations only after explicit reasoning:
+- Abstraction applied to domain terms the LLM doesn't know
+- Precondition/Output added as formulaic decoration
 - Example code or commands present
 - Ambiguous language in steps
 
 ### Step 4 — Report
 
 Present findings as actionable issue list with severity tag per item.
+For each item: state **why** it failed, not just that it failed.
 Suggest fixes. Do not auto-fix unless user confirms.
 
 ---
@@ -97,9 +112,15 @@ Suggest fixes. Do not auto-fix unless user confirms.
 
 Run Diagnose mode.
 
-### Step 2 — Apply checklist rules
+### Step 2 — Apply checklist rules (with reasoning)
 
-Per Diagnose findings. Pay special attention to:
+For each Diagnose finding:
+1. **Understand the issue.** What is the actual problem?
+2. **Trace the cause.** Why did this happen? Is it a false positive?
+3. **Apply the fix.** Does the fix introduce new issues?
+4. **Self-reflect.** Did the fix make it better or worse?
+
+Pay special attention to:
 - Domain-specific terms abstracted away → restore concrete values
 - Formulaic Precondition/Output decoration → remove if workflow is linear
 - Example code blocks → replace with intent descriptions

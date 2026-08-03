@@ -4,7 +4,7 @@ import { simpleGit } from 'simple-git';
 import type { TrackerProvider, Platform } from './core/tracker/types';
 import { TmuxClient } from './core/tmux/tmux';
 import { WorktreeManager } from './core/git/worktree';
-import { LocalSandboxProvider } from './sandbox/local';
+import { LocalSandboxProvider } from './sandbox';
 import { ContainerSandboxProvider, DockerContainerProvider, PodmanContainerProvider } from './sandbox/container';
 import { ClaudeCodeProvider } from './agents/claude-code';
 import type {

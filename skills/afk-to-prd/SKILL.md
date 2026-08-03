@@ -91,14 +91,16 @@ to create an ADR. If irreversible and expensive to change → create an
 ADR in `docs/adr/ADR-NNNN.md` (status: proposed) and reference it in the
 PRD.
 
-Draft to `/tmp/PRD-<slug>.md` — this is a temporary file. Do NOT
+Draft to `/tmp/PRD-<slug>.md` — this is a temporary file. Use Bash
+(`cat > /tmp/... << 'EOF'` or `tee`) to write. **Do not use the Write
+tool** — it requires reading the file first even for new paths. Do NOT
 publish until Step 3 approval.
 
 ### Step 3 — Gate (AskQuestion)
 
 Use `AskQuestion` with single-select to collect the caller's decision:
 
-- **Approve** → publish PRD as issue (`afk issue create ... --label stage::prd`), write approved PRD to `/tmp/PRD-<slug>.md` → **END**
+- **Approve** → publish PRD as issue (`afk issue create ... --label stage::prd`), write approved PRD to `/tmp/PRD-<slug>.md` using Bash → **END**
 - **Revise** → return to Step 2 with specific feedback
 - **Drill deeper** → return to Step 1 (verify) or Step 2 (re-draft)
 - **Add open question** → record gap in Open Risks, return to Step 3 Gate for re-confirmation
@@ -115,6 +117,7 @@ Do NOT proceed to any action until one option is selected.
   `--` separator with a controlled `evidence_type`.
 - MUST NOT put undecided things under Key Decisions, or decided things
   under Open Risks.
+- MUST NOT use the Write tool for `/tmp/` output — use Bash (`cat >`, `tee`, or similar) instead. The Write tool requires a prior Read even for new file paths.
 
 ## References
 

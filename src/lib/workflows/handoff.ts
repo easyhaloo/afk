@@ -5,7 +5,7 @@ import type { TrackerProvider } from '../core/tracker/types';
 import type { TmuxClient } from '../core/tmux';
 import { clearSignal, logger, STATUS_FILENAME } from '../io';
 import type { WorkflowConfig } from '../core/config/manager';
-import type { WatchdogAdapter } from './watchdog';
+import { Watchdog } from './watchdog';
 
 /**
  * Path of a handoff recovery doc inside a worktree. The runner uses this to
@@ -55,7 +55,7 @@ export class HandoffCoordinator {
   constructor(
     private readonly tracker: TrackerProvider,
     private readonly tmux: TmuxClient,
-    private readonly watchdog: WatchdogAdapter,
+    private readonly watchdog: Watchdog,
     private readonly config: WorkflowConfig,
   ) {}
 
@@ -304,7 +304,7 @@ export class HandoffCoordinator {
 export function createHandoffCoordinator(deps: {
   tracker: TrackerProvider;
   tmux: TmuxClient;
-  watchdog: WatchdogAdapter;
+  watchdog: Watchdog;
   config: WorkflowConfig;
 }): HandoffCoordinator {
   return new HandoffCoordinator(deps.tracker, deps.tmux, deps.watchdog, deps.config);

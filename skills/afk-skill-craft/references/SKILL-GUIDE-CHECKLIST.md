@@ -20,9 +20,9 @@
 
   **Knowledge determination:** LLM knows (1) training data + (2) current context.
   ```
-  判定公式:
-    训练数据中有 → 抽象 (LLM 知道)
-    只有 skill 文件中有 → 保留 (LLM 只因上下文而知道)
+  Decision rule:
+    In training data → Abstract (LLM knows it)
+    Only in skill file → PRESERVE (LLM knows it only from context)
   ```
   - Training data has it → abstract (e.g., `git commit`, `jest`)
   - Only in skill file → PRESERVE (e.g., `mode::afk`, `afk issue create --label`)

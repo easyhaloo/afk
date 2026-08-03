@@ -109,7 +109,7 @@ export class ContainerSandbox implements Sandbox {
       signalType: options.signalType,
       execId: execResult.execId,
     });
-    await execution.sendGoal();
+    await execution.sendPrompt();
     return execution;
   }
 
@@ -193,9 +193,9 @@ export class ContainerAgentExecution implements AgentExecution {
   /**
    * Send the goal to the in-container agent by writing it to /afk/session/goal.txt
    * (the agent process inside the container watches this file). This mirrors the
-   * local tmux.sendGoal() pattern but goes through the bind-mounted session dir.
+   * local tmux.sendPrompt() pattern but goes through the bind-mounted session dir.
    */
-  async sendGoal(): Promise<void> {
+  async sendPrompt(): Promise<void> {
     // Caller responsibility: agent command itself consumes stdin/argv.
     // For now the goal text is delivered via the agent argv (--prompt or
     // equivalent). Future: write to goal.txt via container exec.

@@ -34,7 +34,9 @@ export class ClaudeCodeProvider implements AgentProvider {
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
     const argv = ['claude', '--dangerously-skip-permissions'];
-    if (options.interactive) {
+    if (options.executionMode === 'batch') {
+      argv.push('--print', '--output-format', 'stream-json');
+    } else if (options.interactive) {
       argv.push('--no-input');
     }
     return {

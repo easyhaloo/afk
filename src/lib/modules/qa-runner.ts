@@ -72,7 +72,7 @@ export class QARunner {
       logger.info({ iid, session, timeoutMs: 30000 }, 'QA tmux prompt ready');
 
       // ── Step 4: Send /goal to verify AC ───────────────────────────────────
-      await this.tmux.sendGoal(wt.path, session, 'main', `验证 issue #${iid} 的 AC 在合并后的代码上全部通过`, 'ac_result');
+      await this.tmux.sendPrompt(wt.path, session, 'main', `/goal QA 验证合并后的代码。`, 'ac_result');
       logger.info({ iid, session }, 'QA goal sent');
 
       // Log start

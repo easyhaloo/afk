@@ -13,7 +13,7 @@ import type {
   AgentExecution,
   ExecutionResult,
 } from './sandbox/types';
-import type { AgentProvider, AgentProviderName, SessionSnapshot } from './agents/types';
+import type { AgentProvider, AgentProviderName, SessionSnapshot, ExecutionMode } from './agents/types';
 import type { BranchStrategyConfig } from './branches/types';
 import { getTokenUsage, configureStatusline, logger } from './io';
 import { getWorkflowConfig } from './core/config/manager';
@@ -89,6 +89,8 @@ export interface RunnerOptions {
   branchStrategy?: BranchStrategyConfig;
   /** Workflow template name to run instead of the default two-phase flow. */
   template?: string;
+  /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). Default: 'interactive'. */
+  executionMode?: ExecutionMode;
 }
 
 /**
@@ -111,7 +113,7 @@ export interface RunnerDependencies {
   /** Sandbox provider (tests / future). Defaults to LocalSandboxProvider. */
   sandboxProvider?: SandboxProvider;
   /** Agent provider (tests). Defaults to ClaudeCodeProvider. */
-  agentProvider?: import('./agents/types').AgentProvider;
+  agentProvider?: AgentProvider;
   /** Session store chain (tests / future). Defaults to defaultSessionStoreChain. */
   sessionStoreChain?: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
   /** Workflow config: all timeout and budget values. Defaults to getWorkflowConfig(). */
@@ -157,6 +159,7 @@ interface StepRunCtx {
   contextHighTokens: number;
   budget: BudgetManager;
   stepIndex: number;
+  executionMode?: ExecutionMode;
 }
 
 export class WorkflowRunner {
@@ -173,6 +176,8 @@ export class WorkflowRunner {
   private sandboxProviderName: SandboxProviderName = 'local';
   /** Resolved agent provider name (set in run()). */
   private agentProviderName: AgentProviderName = 'claude-code';
+  /** Execution mode (set in run()). */
+  private executionMode: ExecutionMode = 'interactive';
   private sandbox: Sandbox | undefined;
   private logDir: string;
   private modules: LifecycleModule[] = [];
@@ -251,6 +256,7 @@ export class WorkflowRunner {
     // the named provider registered (import side-effect or explicit registration).
     // Skip if constructor already injected one via deps (tests use this path).
     this.agentProviderName = options.agentProvider ?? 'claude-code';
+    this.executionMode = options.executionMode ?? 'interactive';
     if (!this.agentProvider) {
       try {
         this.agentProvider = createAgentProvider(this.agentProviderName);
@@ -268,10 +274,11 @@ export class WorkflowRunner {
     logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
 
     // Validate template early so failures throw before worktree creation.
-    if (options.template) planFor(options.template);
+    const effectiveTemplate = options.template ?? 'issue-implementation';
+    planFor(effectiveTemplate);
 
     try {
-      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName, branchStrategy: options.branchStrategy, template: options.template });
+      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName, branchStrategy: options.branchStrategy, template: effectiveTemplate, executionMode: this.executionMode });
     } catch (error) {
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
       await this.cleanupOnFailure(iid, session);
@@ -344,9 +351,13 @@ Session was interrupted before completion.
 
   // ── Template execution helpers ─────────────────────────────────────────────
 
-  private async resolveStepPrompt(step: Step): Promise<string> {
-    if (typeof step.prompt === 'string') return step.prompt;
-    return await fs.readFile(step.prompt.file, 'utf-8');
+  private async resolveStepPrompt(step: Step, ctx?: StepRunCtx): Promise<string> {
+    let prompt = typeof step.prompt === 'string' ? step.prompt : await fs.readFile(step.prompt.file, 'utf-8');
+    // Variable substitution: {iid} → issue number
+    if (ctx?.iid) {
+      prompt = prompt.replaceAll('{iid}', String(ctx.iid));
+    }
+    return prompt;
   }
 
   private resolveStepSignalType(role: string): 'goal_complete' | 'ac_result' {
@@ -368,7 +379,7 @@ Session was interrupted before completion.
     stepResults: Record<string, StepResult>,
   ): Promise<StepResult> {
     const startedAt = new Date().toISOString();
-    const goalBase = await this.resolveStepPrompt(step);
+    const prompt = await this.resolveStepPrompt(step, ctx);
     const signalType = this.resolveStepSignalType(step.role);
     const effectiveTimeout = step.timeoutMs ?? ctx.hardTimeoutMs;
 
@@ -397,8 +408,9 @@ Session was interrupted before completion.
       completionTimeoutMs: ctx.completionTimeoutMs,
       contextHighTokens: ctx.contextHighTokens,
       budget: ctx.budget,
-      goalBase,
+      prompt,
       signalType,
+      executionMode: ctx.executionMode ?? 'interactive',
     });
 
     const completedAt = new Date().toISOString();
@@ -474,9 +486,10 @@ Session was interrupted before completion.
     maxHandoffs: number; contextHighTokens: number; maxTotalTokens: number;
     projectName?: string;
     branchStrategy?: BranchStrategyConfig;
-    template?: string;
+    template: string;
+    executionMode?: ExecutionMode;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, branchStrategy, template } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, branchStrategy, template, executionMode } = ctx;
 
     // ── Step 0: Init hooks (pre-worktree) ─────────────────────────────────
     // ProjectResolverModule runs here and may chdir to the target repo.
@@ -533,60 +546,41 @@ Session was interrupted before completion.
     const budget = new BudgetManager(maxHandoffs, maxTotalTokens);
     const stepResults: Record<string, StepResult> = {};
 
-    if (template) {
-      // ── Template path: iterate ExecutionGroups ──────────────────────────────
-      logger.info({ iid, template }, 'using execution plan');
-      const plan = planFor(template);
+    // ── Template execution: iterate ExecutionGroups ────────────────────────────
+    logger.info({ iid, template }, 'using execution plan');
+    const plan = planFor(template);
 
-      for (const group of plan.groups) {
-        logger.info({ iid, level: group.level, stepCount: group.steps.length }, 'execution group begin');
+    for (const group of plan.groups) {
+      logger.info({ iid, level: group.level, stepCount: group.steps.length }, 'execution group begin');
 
-        const runnableSteps = group.steps.filter(step => evaluateWhen(step.when, stepResults));
-        if (runnableSteps.length === 0) {
-          logger.info({ iid, level: group.level }, 'all steps gated off; skipping group');
-          continue;
-        }
-
-        // Run all runnable steps in this group concurrently.
-        const groupResults = await Promise.all(
-          runnableSteps.map((step, idx) =>
-            this.runStep(step, {
-              iid, session: `${session}-${step.id}-${idx}`, baseSession: session,
-              primaryWtPath: wt.path, primaryBranch: targetBranch,
-              baseBranch, hardTimeoutMs, completionTimeoutMs,
-              contextHighTokens, budget, stepIndex: idx,
-            }, stepResults),
-          ),
-        );
-
-        for (const r of groupResults) stepResults[r.stepId] = r;
-        logger.info({ iid, level: group.level }, 'execution group end');
-
-        const groupFailed = Object.values(groupResults).some(
-          r => r.status === 'failed' || r.status === 'timed_out' || r.status === 'aborted',
-        );
-        if (groupFailed) {
-          logger.warn({ iid, level: group.level }, 'group had failures; aborting workflow');
-          return { success: false };
-        }
+      const runnableSteps = group.steps.filter(step => evaluateWhen(step.when, stepResults));
+      if (runnableSteps.length === 0) {
+        logger.info({ iid, level: group.level }, 'all steps gated off; skipping group');
+        continue;
       }
-    } else {
-      // ── Legacy path: hardcoded 2-phase behavior (used when no template specified) ──
-      const phases = [
-        { goalBase: `实现 issue #${iid} 的功能需求。请先执行 afk issue get ${iid} 查看 issue 详情、验收标准和 PRD 链接，然后根据需求实现功能。每完成一个 AC 就提交一次。`, signalType: 'goal_complete' as const },
-        { goalBase: `验证 issue #${iid} 的 AC 全部通过。请先执行 afk issue get ${iid} 查看 issue 的验收标准，逐条验证代码是否实现了对应功能。如果发现 AC 未实现或实现不完整，请修复。`, signalType: 'ac_result' as const },
-      ];
 
-      for (const phase of phases) {
-        logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify' }, 'phase begin');
-        const completed = await this.runPhase({
-          iid, session, wtPath: wt.path,
-          hardTimeoutMs, completionTimeoutMs, contextHighTokens,
-          budget,
-          goalBase: phase.goalBase, signalType: phase.signalType,
-        });
-        logger.info({ iid, phase: phase.signalType === 'goal_complete' ? 'implement' : 'verify', completed }, 'phase end');
-        if (!completed) return { success: false };
+      // Run all runnable steps in this group concurrently.
+      const groupResults = await Promise.all(
+        runnableSteps.map((step, idx) =>
+          this.runStep(step, {
+            iid, session: `${session}-${step.id}-${idx}`, baseSession: session,
+            primaryWtPath: wt.path, primaryBranch: targetBranch,
+            baseBranch, hardTimeoutMs, completionTimeoutMs,
+            contextHighTokens, budget, stepIndex: idx,
+            executionMode,
+          }, stepResults),
+        ),
+      );
+
+      for (const r of groupResults) stepResults[r.stepId] = r;
+      logger.info({ iid, level: group.level }, 'execution group end');
+
+      const groupFailed = Object.values(groupResults).some(
+        r => r.status === 'failed' || r.status === 'timed_out' || r.status === 'aborted',
+      );
+      if (groupFailed) {
+        logger.warn({ iid, level: group.level }, 'group had failures; aborting workflow');
+        return { success: false };
       }
     }
 
@@ -692,25 +686,29 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     completionTimeoutMs: number;
     contextHighTokens: number;
     budget: BudgetManager;
-    goalBase: string;
+    prompt: string;
     signalType: 'goal_complete' | 'ac_result';
+    executionMode?: ExecutionMode;
   }): Promise<boolean> {
     for (let round = 1; ; round++) {
-      const goalText = round === 1
-        ? p.goalBase
-        : this.continueGoalText(p.goalBase, p.iid, p.wtPath, round - 1);
+      const prompt = round === 1
+        ? p.prompt
+        : this.continuePrompt(p.prompt, p.iid, p.wtPath, round - 1);
 
       logger.info({ iid: p.iid, round, signalType: p.signalType, budgetUsed: p.budget.used }, 'round begin');
 
       const command = this.agentProvider.buildCommand({
         worktreePath: p.wtPath,
         sessionId: p.session,
+        executionMode: p.executionMode,
       });
       let execution = await this.sandbox!.startAgent({
         command,
         generation: p.budget.used + 1,
-        goalText,
+        prompt,
         signalType: p.signalType,
+        executionMode: p.executionMode,
+        agentProvider: this.agentProvider,
       });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 
@@ -774,8 +772,9 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
               completionTimeoutMs: p.completionTimeoutMs,
               contextHighTokens: p.contextHighTokens,
               signalType: p.signalType,
-              goalText,
+              prompt,
               triggerTokens: hctx.tokens,
+              executionMode: p.executionMode,
             },
             p.budget,
             this.agentProvider,
@@ -827,10 +826,10 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
    * is the real ceiling on total phase duration.
    */
 
-  /** Goal text for a resumed round: read the handoff doc(s) before continuing. */
-  private continueGoalText(goalBase: string, iid: number, wtPath: string, gen: number): string {
+  /** Prompt for a resumed round: read the handoff doc(s) before continuing. */
+  private continuePrompt(prompt: string, iid: number, wtPath: string, gen: number): string {
     const docPath = handoffDocPath(wtPath, iid, gen);
-    return `继续${goalBase}（上下文已交接，请先阅读交接文档 ${docPath}；若存在更早的交接文档（同目录 handoff-${iid}-*.md），请一并阅读以获取完整上下文，再继续）`;
+    return `继续${prompt}（上下文已交接，请先阅读交接文档 ${docPath}；若存在更早的交接文档（同目录 handoff-${iid}-*.md），请一并阅读以获取完整上下文，再继续）`;
   }
 
   /**

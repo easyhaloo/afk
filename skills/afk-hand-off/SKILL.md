@@ -56,10 +56,12 @@ once, completely, then stop. Leave sections blank if no content.
 
 ### Step 3 — Write
 
-Write directly to `/tmp/`:
+Write directly to `/tmp/` using Bash (`cat > /tmp/... << 'EOF'` or `tee`):
 ```
 /tmp/handoff-YYYYMMDD-HHMMSS.md
 ```
+**Do not use the Write tool** — the Write tool requires reading the file
+first even for new paths, which is incompatible with `/tmp/` generation.
 
 ### Step 4 — Report
 
@@ -93,3 +95,4 @@ HANDOFF left off.
 - MUST NOT omit the `Next action` — a hand-off without a concrete next
   step is a dead end.
 - MUST NOT overwrite an existing HANDOFF file — each save is a new file.
+- MUST NOT use the Write tool for `/tmp/` output — use Bash (`cat >`, `tee`, or similar) instead. The Write tool requires a prior Read even for new file paths.

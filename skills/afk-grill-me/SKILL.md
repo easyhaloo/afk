@@ -107,10 +107,15 @@ Offer exactly four outcomes:
 ### Step 5 — Write to /tmp/ (only after Step 4 confirmation)
 
 Write directly to `/tmp/grill-me-context-<YYYYMMDD-HHMMSS>.md` using
-the Write tool. Never write to the repo working tree.
+Bash (`cat > /tmp/... << 'EOF'` or `tee`). **Do not use the Write tool**
+— the Write tool requires reading the file first even for new paths,
+which is incompatible with `/tmp/` generation.
+
+Never write to the repo working tree.
 
 ## Anti-patterns
 
 - MUST NOT assume an unstated answer — ask.
 - MUST NOT write `CONTEXT.md` to the repo working tree — only to `/tmp/`.
 - MUST NOT skip the Step 4 gate even if the user seems satisfied.
+- MUST NOT use the Write tool for `/tmp/` output — use Bash (`cat >`, `tee`, or similar) instead. The Write tool requires a prior Read even for new file paths.

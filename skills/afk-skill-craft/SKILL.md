@@ -1,5 +1,5 @@
 ---
-name: afk-skill-workflow
+name: afk-skill-craft
 disable-model-invocation: true
 description: >-
   Create a new SKILL.md, diagnose an existing one for quality issues,
@@ -7,9 +7,9 @@ description: >-
   Trigger: user asks to create, audit, or improve a skill.
 ---
 
-# Skill Workflow
+# Skill Craft
 
-**Goal:** create, diagnose, or refactor a skill following the SKILL-GUIDE.
+**Goal:** create, diagnose, or refactor a SKILL.md per SKILL-GUIDE.
 
 ## Modes
 

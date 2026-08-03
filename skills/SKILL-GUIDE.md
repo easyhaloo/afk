@@ -113,6 +113,8 @@ without deciphering verbose explanations.
 
 Frontmatter `description` is a lookup key, not a manual. One to two
 sentences: what it does and when to invoke it. The body expands on how.
+Use binary judgment — "does X, not Y" — not scoring scales, fuzzy
+qualifiers, or self-referential statements.
 
 ### Body minimization
 

@@ -131,11 +131,15 @@ expect(data).toHaveProperty('items');
 ### Hardcoded Credentials
 
 ```typescript
-// WRONG
+// WRONG: hardcoded credential
 headers: { 'X-API-Key': 'dev-api-key-12345' }
 
-// CORRECT: Use environment variables
+// WRONG: still has a hardcoded fallback
 headers: { 'X-API-Key': process.env.WIKI_API_KEY || 'dev-api-key-12345' }
+
+// CORRECT: fail-fast with no secret fallback
+import { requireEnv } from '../utils/require-env';
+headers: { 'X-API-Key': requireEnv('WIKI_API_KEY') }
 ```
 
 ## Pre-Generation Checklist

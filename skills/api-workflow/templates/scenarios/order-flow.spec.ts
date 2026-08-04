@@ -13,6 +13,7 @@ import { getApiContext, authHeaders } from '../fixtures/api-context';
 import { TestDataManager } from '../fixtures/test-data';
 import { pollUntil } from '../utils/poll-until';
 import { login } from '../utils/auth';
+import { requireEnv } from '../utils/require-env';
 
 // ─────────────────────────────────────────────────────────────
 // Step Functions
@@ -22,8 +23,8 @@ export async function step_loginUser(email?: string, password?: string) {
   const apiContext = getApiContext();
   const result = await login(
     apiContext,
-    email || process.env.TEST_EMAIL || 'test@example.com',
-    password || process.env.TEST_PASSWORD || 'password'
+    email || requireEnv('TEST_EMAIL'),
+    password || requireEnv('TEST_PASSWORD'),
   );
   return result;
 }

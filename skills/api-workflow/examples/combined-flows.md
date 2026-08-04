@@ -63,16 +63,57 @@ Real-world scenarios combining multiple patterns.
 
 ---
 
-## Example 5: File Processing Pipeline
+## Example 5: Authenticated UI Test with storage-state
 
-**Patterns:** browser-trigger → poll-until-complete → browser-verify
+**Patterns:** storage-state (API setup) → browser-verify
 
-**Scenario:** User uploads file in browser, system processes asynchronously, verify result.
+**Mode:** `storage-state`
+
+**Scenario:** API login, save auth state, open browser and verify protected pages.
+
+**Generated artifacts:** `fixtures/browser-session.ts` (storage-state), `setup/auth-api.setup.ts`, `playwright/.auth/` (gitignored), `.env.example`
 
 **Steps:**
-1. Browser: Upload file and submit
-2. API: Poll job status until COMPLETED
-3. Browser: Verify result displayed
+1. Setup: API login → save state to `playwright/.auth/user.json`
+2. Test: load state → open browser → verify dashboard/profile pages
+3. State file is gitignored; expires when server session expires
+
+---
+
+## Example 6: SSO-Protected App with persistent-profile
+
+**Patterns:** persistent-profile → browser-verify
+
+**Mode:** `persistent-profile`
+
+**Scenario:** App uses SSO with MFA. One-time manual login in a dedicated profile, then reuse across test runs.
+
+**Generated artifacts:** `fixtures/browser-session.ts` (persistent-profile), `browser-auth-runbook.md`, `.env.example`
+
+**Steps:**
+1. One-time: launch headed browser, complete SSO + MFA, close browser
+2. Profile directory at `AUTH_PROFILE_DIR` now holds the authenticated session
+3. Test: fixture launches browser with the profile, creates a fresh page, verifies UI
+4. Profile is gitignored. Re-authenticate when session expires
+
+---
+
+## Example 7: Reuse Existing Browser Session via CDP
+
+**Patterns:** localhost-cdp → browser-verify
+
+**Mode:** `localhost-cdp`
+
+**Scenario:** Developer has already logged in manually in a Chromium window started with `--remote-debugging-port`. Tests attach to the existing session.
+
+**Generated artifacts:** `fixtures/browser-session.ts` (localhost-cdp), `browser-auth-runbook.md`, `.env.example`
+
+**Steps:**
+1. Start Chromium: `google-chrome --user-data-dir=/tmp/profile --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1`
+2. Log in manually in the browser
+3. Set `CDP_ENDPOINT=http://127.0.0.1:9222`
+4. Test: fixture connects over CDP, uses existing context, creates a new page, verifies UI
+5. Only the test-owned page is closed; external browser and pre-existing tabs are untouched
 
 ---
 
@@ -86,3 +127,6 @@ Real-world scenarios combining multiple patterns.
 | Webhook | verify-webhook + error-validation |
 | File processing | browser-trigger + poll + browser-verify |
 | Eligibility | conditional-flow + expect-error |
+| Auth UI (API login) | storage-state + browser-verify |
+| Auth UI (SSO/MFA) | persistent-profile + browser-verify |
+| Auth UI (CDP reuse) | localhost-cdp + browser-verify |

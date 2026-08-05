@@ -44,3 +44,13 @@ dump.rdb
 .worktrees/
 .playwright-mcp/
 .claude/
+
+# Local dev artifacts
+.playwright-cli/
+.superpowers/
+design-demos/
+dt-mdp-llm-research.json
+dt-mdp-llm-research.md
+llm-app-design-methodology.json
+llm-app-design-methodology.md
+anthropic_context_article.md

@@ -77,6 +77,7 @@ export function AppContent({
   const tasksRef = useRef<Task[]>([]);
   const backlogsRef = useRef<BacklogViewModel[]>([]);
   const projectsRef = useRef<Project[]>([]);
+  const slashPendingRef = useRef(false);
   tasksRef.current = tasks;
   backlogsRef.current = backlogs;
   projectsRef.current = projects;
@@ -138,8 +139,27 @@ export function AppContent({
       return;
     }
     if (input === '/') {
-      actions.enableSearch();
+      if (state.isSearchMode) {
+        // In search mode, '/' appends to query
+        actions.appendSearchChar(input);
+        dispatch({ type: 'selection:top' });
+      } else {
+        // Set pending slash - if next char is 's', enter search mode with 's' as first char
+        slashPendingRef.current = true;
+      }
       return;
+    }
+    // Check for /s pattern when slash is pending
+    if (slashPendingRef.current && input === 's' && !state.isSearchMode) {
+      slashPendingRef.current = false;
+      actions.enableSearch();
+      actions.appendSearchChar('s');
+      dispatch({ type: 'selection:top' });
+      return;
+    }
+    // Clear pending slash for any other input outside search mode
+    if (slashPendingRef.current && !state.isSearchMode) {
+      slashPendingRef.current = false;
     }
     if (state.isSearchMode) {
       if (key.escape || key.return) actions.disableSearch();

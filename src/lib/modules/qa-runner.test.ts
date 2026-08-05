@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QARunner } from './qa-runner';
 
+const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
+vi.mock('../io', async importOriginal => ({
+  ...await importOriginal<typeof import('../io')>(),
+  configureStatusline: ioMocks.configureStatusline,
+}));
+
 const config = {
   targetBranch: 'main',
   completionTimeout: 1000,
@@ -117,6 +123,22 @@ describe('QARunner execution boundary', () => {
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
     expect(f.sandboxProvider.create.mock.calls[0][0]).toMatchObject({ executionMode: 'interactive', tmux });
+  });
+
+  it('configures the interactive statusline after merging the QA worktree', async () => {
+    const f = fixture();
+    const mergeBranch = vi.fn(async () => {});
+    ioMocks.configureStatusline.mockClear();
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'interactive',
+      tmux: {} as any, mergeBranch,
+    });
+
+    await expect(runner.process('60')).resolves.toMatchObject({ success: true });
+
+    expect(mergeBranch).toHaveBeenCalled();
+    expect(ioMocks.configureStatusline).toHaveBeenCalledWith(process.cwd());
+    expect(mergeBranch.mock.invocationCallOrder[0]).toBeLessThan(ioMocks.configureStatusline.mock.invocationCallOrder[0]);
   });
 
   it('publishes an independent QA runtime record through completion', async () => {

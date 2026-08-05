@@ -32,7 +32,7 @@ afk --version
 
 ## 安装 Claude Code 插件（可选）
 
-AFK 提供完整的 Claude Code skill 套件，可作为插件集成（**v1.1.0**）。
+AFK 提供完整的 Claude Code skill 套件，可作为插件集成（**v1.0.5**）。
 
 ### 方式一：在 Claude Code 会话中（推荐）
 

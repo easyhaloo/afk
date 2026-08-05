@@ -32,7 +32,7 @@ See [Getting Started Guide](docs/GETTING-STARTED.md) for detailed setup.
 
 ## Install Claude Code Plugin (Optional)
 
-AFK provides a full Claude Code skill suite that can be integrated as a plugin (**v1.1.0**).
+AFK provides a full Claude Code skill suite that can be integrated as a plugin (**v1.0.5**).
 
 ### Method 1: In Claude Code Session (Recommended)
 

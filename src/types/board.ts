@@ -1,21 +1,21 @@
 export interface Task {
-  iid: number;
+  /** Canonical backlog ID; intentionally not a tracker-specific issue number. */
+  iid: string;
+  runId: string;
   title: string;
+  phase: 'implementing' | 'verifying';
+  executionMode: 'interactive' | 'batch';
+  sandboxProvider: string;
+  agentProvider: string;
   branch?: string;
   session?: string;
-  status: 'active' | 'pending' | 'completed';
+  status: 'active' | 'stale';
   progress?: string;
   startedAt?: Date;
+  heartbeatAt?: Date;
   worktree?: string;
-  platform?: 'github' | 'gitlab';
-}
-
-export interface TmuxSession {
-  name: string;
-  window: string;
-  dir: string;
-  status?: string;
-  created?: string;
+  diagnosticPath?: string;
+  errorSummary?: string;
 }
 
 export interface Project {

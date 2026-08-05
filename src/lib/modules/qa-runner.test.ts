@@ -107,4 +107,56 @@ describe('QARunner execution boundary', () => {
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
     expect(f.sandboxProvider.create.mock.calls[0][0]).toMatchObject({ executionMode: 'interactive', tmux });
   });
+
+  it('publishes an independent QA runtime record through completion', async () => {
+    const f = fixture();
+    const runtime = {
+      start: vi.fn(async () => {}),
+      heartbeat: vi.fn(async () => ({})),
+      finish: vi.fn(async () => ({})),
+      writeDiagnostics: vi.fn(async () => '/tmp/diagnostics'),
+    };
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+      runtimeManager: runtime as any,
+    });
+
+    await expect(runner.process('60')).resolves.toMatchObject({ success: true });
+    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
+      backlogId: '60', phase: 'verifying', executionMode: 'batch', status: 'running',
+    }));
+    expect(runtime.heartbeat).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ worktree: process.cwd() }));
+    expect(runtime.writeDiagnostics).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      result: expect.objectContaining({ status: 'completed' }), output: expect.any(String),
+    }));
+    expect(runtime.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'completed' }));
+  });
+
+  it('archives a failing QA result as blocked with diagnostics', async () => {
+    const f = fixture();
+    f.execution.waitForResult.mockResolvedValue({
+      version: 1,
+      runId: 'execution-60',
+      status: 'completed',
+      provider: 'batch',
+      structuredOutput: { type: 'goal_complete', kind: 'qa', result: 'FAIL' },
+      commits: [],
+    });
+    const runtime = { start: vi.fn(async () => {}), heartbeat: vi.fn(async () => ({})), finish: vi.fn(async () => ({})), writeDiagnostics: vi.fn(async () => '/tmp/diagnostics') };
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+      runtimeManager: runtime as any,
+    });
+
+    await expect(runner.process('60')).resolves.toMatchObject({ success: false });
+    expect(runtime.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      status: 'blocked', errorSummary: expect.stringContaining('result=PASS'),
+    }));
+  });
 });

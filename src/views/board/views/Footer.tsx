@@ -34,9 +34,9 @@ export function Footer({ view = 'tasks', detail = false, search = false }: Props
     return () => { cancelled = true; };
   }, []);
 
-  const canOpen = view !== 'tasks';
+  const canOpen = true;
   const openHint = canOpen ? ' · o open' : '';
-  const attachHint = view === 'tasks' ? ' · a attach' : '';
+  const attachHint = view === 'tasks' ? ' · a attach (interactive)' : '';
   const shortcuts = detail
     ? `b/ESC back${openHint}${attachHint} · ? help`
     : `↑↓ move · enter detail${openHint} · ${search ? 'esc finish search' : '/ search'} · ? help`;

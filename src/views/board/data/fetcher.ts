@@ -1,24 +1,40 @@
-import { Task, TmuxSession } from '../../../types/board';
-import { TaskService } from '../../../lib/tasks';
-import { TmuxClient } from '../../../lib/core/tmux/tmux';
+import { Task } from '../../../types/board';
+import { TaskRuntimeManager, type ActiveTaskRuntimeRecord } from '../../../lib/runtime/task-runtime';
 import { createGitLabClient } from '../../../lib/client-factory';
 import { detectGitLabProject } from '../../../lib/core/tracker/detect';
 import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
 import { fileLogger } from '../../../lib/io';
 
-const taskService = new TaskService();
-const tmux = new TmuxClient();
+const runtimeManager = new TaskRuntimeManager();
 
-export async function fetchTasks(): Promise<{ active: Task[]; completed: Task[] }> {
-  const data = await taskService.listTasks();
+export async function fetchTasks(manager: TaskRuntimeManager = runtimeManager): Promise<{ active: Task[]; completed: Task[] }> {
+  const data = await manager.listActive();
   return {
-    active: data.filter(t => t.status === 'active' || t.status === 'pending'),
-    completed: data.filter(t => t.status === 'completed'),
+    active: data.map(toRuntimeTask),
+    completed: [],
   };
 }
 
-export async function fetchSessions(): Promise<TmuxSession[]> {
-  return tmux.listSessions();
+/** Convert the local runtime projection into the narrow TUI task view model. */
+export function toRuntimeTask(runtime: ActiveTaskRuntimeRecord): Task {
+  return {
+    iid: runtime.backlogId,
+    runId: runtime.runId,
+    title: runtime.title ?? `Backlog ${runtime.backlogId}`,
+    phase: runtime.phase,
+    executionMode: runtime.executionMode,
+    sandboxProvider: runtime.sandboxProvider,
+    agentProvider: runtime.agentProvider,
+    status: runtime.status === 'stale' ? 'stale' : 'active',
+    branch: runtime.branch,
+    session: runtime.session,
+    progress: runtime.progress,
+    startedAt: new Date(runtime.startedAt),
+    heartbeatAt: new Date(runtime.heartbeatAt),
+    worktree: runtime.worktree,
+    diagnosticPath: runtime.diagnosticPath,
+    errorSummary: runtime.errorSummary,
+  };
 }
 
 /**

@@ -11,6 +11,7 @@ import { createManagementProviderBundle } from '../../lib/client-factory';
 import { useData } from '../board/data/useData';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
 import { SplashScreen } from '../board/components/SplashScreen';
+import { openInBrowser } from '../../lib/cli-utils';
 
 initRegistry();
 
@@ -41,12 +42,20 @@ export function DashboardEntry() {
   const data = useData(currentView, management);
 
   const attachSession = useCallback(async (task: Task) => {
-    const sessionName = task.session
-      ?? (task.platform === 'github' ? `afk-gh-${task.iid}` : `afk-gl-${task.iid}`);
+    if (task.executionMode !== 'interactive' || !task.session) return;
     try {
-      await new TmuxClient().attach(sessionName);
+      await new TmuxClient().attach(task.session);
     } catch {
       // The app stays read-only even when a session is unavailable.
+    }
+  }, []);
+
+  const openTaskDiagnostics = useCallback(async (task: Task) => {
+    if (!task.diagnosticPath) return;
+    try {
+      await openInBrowser(task.diagnosticPath);
+    } catch {
+      // Diagnostics are supplementary and failure to open must not mutate runtime state.
     }
   }, []);
 
@@ -69,6 +78,7 @@ export function DashboardEntry() {
           onFetchMoreProjects={data.fetchMoreProjects}
           onInvalidateDetailCache={data.invalidateDetailCache}
           onAttachSession={attachSession}
+          onOpenTaskDiagnostics={openTaskDiagnostics}
           onViewChange={setCurrentView}
         />
       </StateProvider>

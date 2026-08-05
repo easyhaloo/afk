@@ -87,4 +87,33 @@ describe('StreamingAgentExecution', () => {
       error: { code: 'MISSING_RESULT', message: expect.stringContaining('implemented the changes but forgot the AFK marker') },
     });
   });
+
+  it('captures batch stdout for runtime diagnostics', async () => {
+    const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'completed' });
+    await expect(execution.captureOutput()).resolves.toContain('goal_complete');
+  });
+
+  it('kills the full batch process group, including child agent processes', async () => {
+    const execution = new StreamingAgentExecution({
+      command: command("const { spawn } = require('node:child_process'); const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10000)'], { stdio: 'ignore' }); console.log(child.pid); setInterval(() => {}, 10000);"),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+    });
+    execution.start();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const childPid = Number((await execution.captureOutput()).trim());
+    expect(childPid).toBeGreaterThan(0);
+
+    await execution.kill();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    try {
+      process.kill(childPid, 0);
+      throw new Error(`child process ${childPid} is still alive`);
+    } catch (error) {
+      expect((error as NodeJS.ErrnoException).code).toBe('ESRCH');
+    }
+  });
 });

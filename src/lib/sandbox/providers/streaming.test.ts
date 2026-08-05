@@ -1,0 +1,90 @@
+import { describe, expect, it } from 'vitest';
+import { StreamingAgentExecution } from './streaming';
+
+function command(script: string) {
+  return { argv: [process.execPath, '-e', script], cwd: process.cwd() };
+}
+
+describe('StreamingAgentExecution', () => {
+  it('buffers JSONL records split across stdout chunks', async () => {
+    const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
+    const execution = new StreamingAgentExecution({ command: command(`process.stdout.write(${JSON.stringify(payload.slice(0, 20))}); setTimeout(() => process.stdout.write(${JSON.stringify(payload.slice(20) + '\n')}), 5)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    execution.start();
+    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'completed' });
+  });
+
+  it('accepts a completion marker whose payload omits the redundant type field', async () => {
+    const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"summary":"done"}</goal_complete>' });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
+      status: 'completed',
+      structuredOutput: { type: 'goal_complete', summary: 'done' },
+    });
+  });
+
+  it('extracts a completion marker after ordinary result text', async () => {
+    const result = [
+      'Implemented and verified the requested change.',
+      '',
+      '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>',
+    ].join('\n');
+    const payload = JSON.stringify({ type: 'result', result });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
+      status: 'completed',
+      structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' },
+    });
+  });
+
+  it('completes when a valid marker arrives before the child exits', async () => {
+    const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
+    const execution = new StreamingAgentExecution({
+      command: command(`console.log(${JSON.stringify(payload)}); setInterval(() => {}, 1_000)`),
+      prompt: 'go',
+      signalType: 'goal_complete',
+      worktreePath: process.cwd(),
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+      status: 'completed',
+      structuredOutput: { type: 'goal_complete' },
+    });
+  });
+
+  it('fails when the child exits non-zero even after emitting a result', async () => {
+    const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)}); process.exit(3)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    execution.start();
+    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'failed', exitCode: 3 });
+  });
+
+  it('includes the final stdout tail when a child exits without stderr', async () => {
+    const payload = JSON.stringify({ type: 'assistant', message: 'provider failure: invalid request' });
+    const execution = new StreamingAgentExecution({
+      command: command(`console.log(${JSON.stringify(payload)}); process.exit(1)`),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
+      status: 'failed',
+      error: { code: 'NON_ZERO_EXIT', message: expect.stringContaining('provider failure') },
+    });
+  });
+
+  it('includes the final agent result when it exits successfully without a completion marker', async () => {
+    const payload = JSON.stringify({ type: 'result', result: 'implemented the changes but forgot the AFK marker' });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
+      status: 'failed',
+      error: { code: 'MISSING_RESULT', message: expect.stringContaining('implemented the changes but forgot the AFK marker') },
+    });
+  });
+});

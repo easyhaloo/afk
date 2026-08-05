@@ -49,8 +49,9 @@ Create directories as needed.
 Per body structure in checklist: **Goal**, **Steps**, **Caveats**.
 **Critical:** Do not add formulaic Precondition/Output to every step.
 Only add when workflow has complex dependencies.
-**Critical:** Preserve domain-specific terms and values — do not abstract
-`mode::afk` to "mode label", `stage::ready-for-issues` to "stage label", etc.
+**Critical:** Preserve canonical backlog terms and values (`ready`,
+`in_progress`, `verification`, `merge_ready`, `done`, `blocked`; `afk` or
+`hitl`). Do not expose provider adapter labels in skill instructions.
 
 ### Step 5 — Verify
 

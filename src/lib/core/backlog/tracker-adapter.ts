@@ -1,0 +1,196 @@
+import type { BacklogClaim, BacklogExecutionMode, BacklogItem, BacklogProvider, BacklogState } from './index';
+import { deriveBacklogBranchName } from './index';
+import { FilesystemClaimLock, type ExpiredClaim } from './claim';
+import {
+  NativeOrLockedClaimStrategy,
+  type AtomicClaim,
+  type AtomicClaimPredicate,
+  type ClaimLock,
+  type ClaimLockFactory,
+} from './claim-strategy';
+import { BACKLOG_METADATA, type BacklogProviderCapabilities } from './initialization';
+import { extractBacklogTags, isWorkflowMetadataLabel, validateBusinessTag } from './tags';
+import type { TrackerProvider, TrackedIssue } from '../tracker/types';
+
+const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
+const MODE_LABELS = BACKLOG_METADATA.executionModeLabels;
+
+export type { AtomicClaimPredicate } from './claim-strategy';
+
+export interface TrackerBacklogAdapterOptions {
+  /** Platform-specific conditional update. It takes precedence over a local lease. */
+  atomicClaim?: AtomicClaim;
+  /** Preconfigured lock; without a recovery callback it deliberately fails closed on expiry. */
+  claimLock?: ClaimLock;
+  /** Creates a lock with this provider's expiry-recovery callback attached. */
+  claimLockFactory?: ClaimLockFactory;
+  /** Lease duration for the local fallback claim path. */
+  claimTtlMs?: number;
+  /** Optional provider-side metadata setup hook (labels are adapter details). */
+  ensureMetadata?: (metadata: typeof BACKLOG_METADATA) => Promise<void>;
+}
+
+export class TrackerBacklogProvider implements BacklogProvider {
+  readonly capabilities: BacklogProviderCapabilities;
+  private readonly atomicClaim?: TrackerBacklogAdapterOptions['atomicClaim'];
+  private readonly claimStrategy: NativeOrLockedClaimStrategy;
+
+  constructor(private readonly tracker: TrackerProvider, options: TrackerBacklogAdapterOptions = {}) {
+    this.options = options;
+    this.atomicClaim = options.atomicClaim;
+    const onExpiredClaim = (key: string, claim: ExpiredClaim) => this.recoverExpiredClaim(key, claim);
+    const claimLock = options.claimLock
+      ?? options.claimLockFactory?.(onExpiredClaim)
+      ?? new FilesystemClaimLock(undefined, { onExpiredClaim });
+    this.claimStrategy = new NativeOrLockedClaimStrategy({
+      atomicClaim: this.atomicClaim,
+      claimLock,
+      claimKey: id => this.claimKey(id),
+      claimTtlMs: options.claimTtlMs ?? 60 * 60_000,
+      read: id => this.get(id),
+      isRunnable: item => this.isRunnable(item),
+      transitionToInProgress: id => this.transition(id, 'in_progress'),
+      isConfirmedClaim: item => this.isConfirmedClaim(item),
+      blockAndRouteToHitl: (id, reason) => this.blockAndRouteToHitl(id, reason),
+    });
+    this.capabilities = { atomicClaim: true, tags: true, initialization: true };
+  }
+
+  async get(id: string): Promise<BacklogItem> {
+    const issue = await this.tracker.getIssue(this.issueId(id));
+    return toBacklogItem(issue);
+  }
+
+  async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {
+    // Read all issues so closed `done` children still prevent a parent from
+    // being treated as an executable item and dependencies can be resolved.
+    const issues = await this.tracker.listIssues({ state: 'all' });
+    const items = issues.map(toBacklogItem).filter(item =>
+      (options.state === undefined || item.state === options.state) &&
+      (options.executionMode === undefined || item.executionMode === options.executionMode) &&
+      (options.parentId === undefined || item.parentId === options.parentId) &&
+      (options.tag === undefined || item.tags.includes(options.tag)),
+    );
+    return items;
+  }
+
+  async claim(id: string, owner: string): Promise<BacklogClaim | null> {
+    return this.claimStrategy.claim(id, owner);
+  }
+
+  async transition(id: string, state: BacklogState, _details?: { reason?: string; changeId?: string }): Promise<void> {
+    const issueId = this.issueId(id);
+    const issue = await this.tracker.getIssue(issueId);
+    const retained = issue.labels.filter(label => !isWorkflowMetadataLabel(label));
+    const labels = [...retained, STATE_LABELS[state]];
+    if (state === 'blocked') labels.push(MODE_LABELS.hitl);
+    await this.tracker.updateIssue(issueId, { labels: [...new Set(labels)] });
+  }
+
+  async setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> {
+    const issueId = this.issueId(id);
+    const issue = await this.tracker.getIssue(issueId);
+    const retained = issue.labels.filter(label => !Object.values(MODE_LABELS).includes(label));
+    await this.tracker.updateIssue(issueId, { labels: [...retained, MODE_LABELS[mode]] });
+  }
+
+  async addTag(id: string, tag: string): Promise<void> {
+    const normalized = validateBusinessTag(tag);
+    const issueId = this.issueId(id);
+    const issue = await this.tracker.getIssue(issueId);
+    if (issue.labels.includes(normalized)) return;
+    await this.tracker.updateIssue(issueId, { labels: [...issue.labels, normalized] });
+  }
+
+  async removeTag(id: string, tag: string): Promise<void> {
+    const normalized = validateBusinessTag(tag);
+    const issueId = this.issueId(id);
+    const issue = await this.tracker.getIssue(issueId);
+    if (!issue.labels.includes(normalized)) return;
+    await this.tracker.updateIssue(issueId, { labels: issue.labels.filter(label => label !== normalized) });
+  }
+
+  async initialize(): Promise<void> {
+    // Trackers create labels lazily when an issue is updated.  Validate access
+    // and let a platform adapter provision metadata when it supports it.
+    const options = this.options;
+    if (options.ensureMetadata) {
+      await options.ensureMetadata(BACKLOG_METADATA);
+      return;
+    }
+    await this.tracker.listIssues({ state: 'all', perPage: 1 });
+  }
+
+  async isRunnable(item: BacklogItem): Promise<boolean> {
+    if (item.state !== 'ready' || item.executionMode !== 'afk') return false;
+    const children = await this.list({ parentId: item.id });
+    if (children.length > 0) return false;
+    for (const dependencyId of item.dependsOn) {
+      const dependency = await this.get(dependencyId).catch(() => null);
+      if (!dependency || dependency.state !== 'done') return false;
+    }
+    return true;
+  }
+
+  private async isConfirmedClaim(item: BacklogItem): Promise<boolean> {
+    if (item.state !== 'in_progress' || item.executionMode !== 'afk') return false;
+    const children = await this.list({ parentId: item.id });
+    if (children.length > 0) return false;
+    for (const dependencyId of item.dependsOn) {
+      const dependency = await this.get(dependencyId).catch(() => null);
+      if (!dependency || dependency.state !== 'done') return false;
+    }
+    return true;
+  }
+
+  private claimKey(id: string): string {
+    return `${this.tracker.platform}/${this.tracker.projectId}/${this.issueId(id)}`;
+  }
+
+  private async recoverExpiredClaim(key: string, _claim: ExpiredClaim): Promise<boolean> {
+    const prefix = `${this.tracker.platform}/${this.tracker.projectId}/`;
+    if (!key.startsWith(prefix)) return false;
+    const backlogId = key.slice(prefix.length);
+    if (!backlogId || backlogId.includes('/')) return false;
+    try {
+      if (key !== this.claimKey(backlogId)) return false;
+      return this.blockAndRouteToHitl(backlogId, 'filesystem claim lease expired');
+    } catch {
+      return false;
+    }
+  }
+
+  private async blockAndRouteToHitl(id: string, _reason?: string): Promise<boolean> {
+    try {
+      await this.transition(id, 'blocked');
+      const blocked = await this.get(id);
+      return blocked.state === 'blocked' && blocked.executionMode === 'hitl';
+    } catch {
+      return false;
+    }
+  }
+
+  private issueId(id: string): number {
+    const value = Number(id);
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`tracker backlog id must be a positive integer: ${id}`);
+    return value;
+  }
+
+  private readonly options: TrackerBacklogAdapterOptions;
+}
+
+function toBacklogItem(issue: TrackedIssue): BacklogItem {
+  const parentId = issue.labels.find(label => /^parent::[^:]+$/.test(label))?.slice('parent::'.length);
+  const dependsOn = issue.labels
+    .filter(label => /^depends-on::[^:]+$/.test(label) || /^depends_on::[^:]+$/.test(label))
+    .map(label => label.split('::')[1]);
+  const labeledState = Object.entries(STATE_LABELS).find(([, label]) => issue.labels.includes(label))?.[0] as BacklogState | undefined;
+  const state = labeledState ?? (issue.state === 'closed' || issue.state === 'merged' ? 'done' : 'ready');
+  const executionMode: BacklogExecutionMode = issue.labels.includes(MODE_LABELS.hitl) ? 'hitl' : 'afk';
+  return {
+    id: String(issue.id), title: issue.title, description: issue.description,
+    parentId, dependsOn, state: state ?? 'ready', executionMode, tags: extractBacklogTags(issue.labels),
+    branchName: deriveBacklogBranchName(String(issue.id)), providerRef: `${issue.platform}:${issue.projectId}#${issue.id}`,
+    webUrl: issue.url,
+  };
+}

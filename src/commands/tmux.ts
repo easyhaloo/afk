@@ -92,7 +92,7 @@ export function registerTmuxCommands(program: Command): void {
     .description('Wait for signal file or pane marker')
     .requiredOption('-s, --session <name>', 'Session name')
     .option('-w, --window <name>', 'Window name', 'main')
-    .requiredOption('-t, --type <type>', 'Signal type (goal_complete, ac_result, handoff_ready)')
+    .requiredOption('-t, --type <type>', 'Signal type (goal_complete, handoff_ready)')
     .requiredOption('-d, --dir <path>', 'Worktree directory')
     .option('--timeout <ms>', 'Timeout in milliseconds', '300000')
     .action(async (options) => {

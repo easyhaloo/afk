@@ -1,16 +1,13 @@
 import { Command } from 'commander';
 import { registerSignalCommands } from '../../commands/signal';
-import { registerTrackerCommands } from '../../commands/tracker';
 import { registerTmuxCommands } from '../../commands/tmux';
-import { registerWorktreeCommands } from '../../commands/worktree';
-import { registerWorkflowCommands } from '../../commands/workflow';
-import { registerSchedulerCommands } from '../../commands/scheduler';
 import { registerKanbanCommands } from '../../commands/kanban';
 import { registerDebugCommands } from '../../commands/debug';
-import { registerEscalateCommands } from '../../commands/escalate';
 import { registerIsolateCommands } from '../../commands/isolate';
 import { registerQACommands } from '../../commands/qa';
 import { registerLoopCommands } from '../../commands/loop';
+import { registerBacklogCommands } from '../../commands/backlog';
+import { registerRunCommands } from '../../commands/run';
 
 /**
  * Build a commander tree containing every completable command, for completion
@@ -32,16 +29,13 @@ export function buildCompletionTree(): Command {
   const program = new Command();
   program.name('afk');
   registerSignalCommands(program);
-  registerTrackerCommands(program);
   registerTmuxCommands(program);
-  registerWorktreeCommands(program);
-  registerWorkflowCommands(program);
-  registerSchedulerCommands(program);
   registerKanbanCommands(program);
   registerDebugCommands(program);
-  registerEscalateCommands(program);
   registerIsolateCommands(program);
   registerQACommands(program);
   registerLoopCommands(program);
+  registerBacklogCommands(program);
+  registerRunCommands(program);
   return program;
 }

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-AFK needs to detect when an agent completes a goal (e.g., `goal_complete`, `ac_result`) or is ready for context handoff (`handoff_ready`). This is the **structured output** problem: how does the agent communicate structured data back to the runner?
+AFK needs to detect when an agent completes a goal (`goal_complete`) or is ready for context handoff (`handoff_ready`). This is the **structured output** problem: how does the agent communicate structured data back to the runner?
 
 Two agent execution modes exist in AFK:
 
@@ -32,25 +32,29 @@ The runner polls the file every 2s. The write is atomic (temp + rename).
 
 | Signal type | Meaning |
 |------------|---------|
-| `goal_complete` | Implementer completed a goal |
-| `ac_result` | Verifier finished AC checks |
+| `goal_complete` | Any agent step completed; QA supplies `kind: "qa"` and `result: "PASS" | "FAIL"` in its payload |
 | `handoff_ready` | Agent ready for context handoff (summary in payload) |
 | `timeout` | Watchdog fired (written by watchdog process, not agent) |
 
 **Why not stream?** In interactive mode, the agent runs in a tmux TUI — there is no stdout stream to parse. The session persists to `~/.claude/projects/.../sessions/<id>.jsonl`, but that file is only accessible on the machine where the agent ran.
 
-### Batch Mode → Event Stream Parsing (Future)
+### Batch Mode → Event Stream Parsing
 
 The agent runs with `--print --output-format stream-json`. Output is newline-delimited JSON:
 
 ```json
-{"type":"result","result":"<goal_complete>{\"summary\":\"...\"}</goal_complete>"}
+{"type":"result","result":"<goal_complete>{\"type\":\"goal_complete\",\"kind\":\"task\",\"summary\":\"...\"}</goal_complete>"}
 {"type":"usage","usage":{...}}
 ```
 
-The runner captures stdout and parses `result` events for structured output tags.
+The runner preserves the task's `/goal` prompt and appends this completion
+protocol before batch execution. It captures stdout and parses `result` events
+for the single structured output tag. QA uses the same tag with
+`{"type":"goal_complete","kind":"qa","result":"PASS" | "FAIL",...}`.
 
-**Status:** Not yet implemented. Requires a separate batch-mode sandbox provider.
+**Status:** Implemented by `StreamingAgentExecution`. It buffers JSONL records
+across stdout chunks, requires a structured completion result, and reports
+malformed output, non-zero exits, and timeouts as failed executions.
 
 ## Consequences
 

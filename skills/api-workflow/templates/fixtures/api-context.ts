@@ -11,6 +11,7 @@
 // ============================================================
 
 import { test, APIRequestContext } from '@playwright/test';
+import { requireEnv, requireEnvOrDefault } from '../utils/require-env';
 
 let apiContext: APIRequestContext | null = null;
 let currentKbId: string;
@@ -43,8 +44,8 @@ export function getCurrentApiKey(): string {
  * Called once before all tests in the file.
  */
 test.beforeAll(async () => {
-  currentKbId = process.env.KB_ID || 'demo-kb';
-  currentApiKey = process.env.WIKI_API_KEY || 'dev-api-key-12345';
+  currentKbId = requireEnvOrDefault('KB_ID', 'demo-kb');
+  currentApiKey = requireEnv('WIKI_API_KEY');
 
   apiContext = await getNewApiContext(currentApiKey);
 });
@@ -54,16 +55,16 @@ test.beforeAll(async () => {
  * Use this when you need an isolated context for a specific test.
  */
 export async function getNewApiContext(apiKey?: string): Promise<APIRequestContext> {
-  const key = apiKey || currentApiKey || process.env.WIKI_API_KEY || 'dev-api-key-12345';
+  const key = apiKey || currentApiKey || requireEnv('WIKI_API_KEY');
 
   return await globalThis.test?.request?.newContext?.({
-    baseURL: process.env.BASE_URL || 'http://localhost:8080',
+    baseURL: requireEnvOrDefault('BASE_URL', 'http://localhost:8080'),
     extraHTTPHeaders: {
       'Content-Type': 'application/json',
       'X-API-Key': key,
     },
   }) || await globalThis.request?.newContext?.({
-    baseURL: process.env.BASE_URL || 'http://localhost:8080',
+    baseURL: requireEnvOrDefault('BASE_URL', 'http://localhost:8080'),
     extraHTTPHeaders: {
       'Content-Type': 'application/json',
       'X-API-Key': key,
@@ -105,7 +106,7 @@ export function wikiEndpoint(path: string, kbId?: string): string {
  * Ensures X-API-Key is always set correctly.
  */
 export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  const key = currentApiKey || process.env.WIKI_API_KEY || 'dev-api-key-12345';
+  const key = currentApiKey || requireEnv('WIKI_API_KEY');
   return {
     'Content-Type': 'application/json',
     'X-API-Key': key,

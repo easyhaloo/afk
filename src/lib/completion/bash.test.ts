@@ -14,14 +14,15 @@ describe('emitBash', () => {
     const m = script.match(/_afk_sub_TOP="([^"]*)"/);
     expect(m).toBeDefined();
     const words = m![1].split(/\s+/);
-    expect(words).toContain('issue');
+    expect(words).toContain('backlog');
     expect(words).toContain('signal');
-    expect(words).toContain('mr');
+    expect(words).toContain('run');
+    expect(words).toContain('qa');
     expect(words).not.toContain('board');
   });
 
   it('inlines option flags', () => {
-    expect(script).toContain('--json');
+    expect(script).toContain('--backlog-id');
   });
 
   it('pre-wires the __complete dynamic hook', () => {

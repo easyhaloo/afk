@@ -1,9 +1,8 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
-import type { TrackerProvider, Platform } from './core/tracker/types';
+import { WorktreeManager } from './core/git';
 import { TmuxClient, createTmuxClient } from './core/tmux';
-import { WorktreeManager, createWorktreeManager } from './core/git';
 import { createSandboxProvider } from './sandbox';
 import { createAgentProvider } from './agents';
 import type {
@@ -14,32 +13,64 @@ import type {
   ExecutionResult,
 } from './sandbox/types';
 import type { AgentProvider, AgentProviderName, SessionSnapshot, ExecutionMode } from './agents/types';
-import type { BranchStrategyConfig } from './branches/types';
 import { getTokenUsage, configureStatusline, logger } from './io';
 import { getWorkflowConfig } from './core/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
-import type { LifecycleModule, LifecycleContext } from './workflows/lifecycle';
+import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle';
 import { Watchdog, createWatchdog } from './workflows/watchdog';
 import type { WorkflowConfig } from './core/config/manager';
-import { HandoffCoordinator, handoffDocPath, createHandoffCoordinator } from './workflows/handoff';
+import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
 import { attemptNativeResume } from './workflows/resume';
 import { BudgetManager } from './workflows/budget';
 import type { InitContext } from './workflows/lifecycle';
 import { defaultSessionStoreChain } from './sessions/chain';
-import { planFor } from './templates/registry';
-import { evaluateWhen } from './templates/when-evaluator';
-import { strategyForConfig } from './branches/registry';
-import type { Step, StepResult, TemplateBranchStrategyConfig } from './templates/types';
-import type { ExecutionPlan, ExecutionGroup } from './templates/resolver';
+import { TemplateLoader } from './templates/loader';
+import { PlanExecutor } from './workflows/plan-executor';
+import { SystemActionExecutor } from './workflows/system-actions';
+import { RunResourceScope, type RunOutcomeStatus } from './workflows/resource-scope';
+import { buildExecutionPrompt } from './workflows/execution-protocol';
+import { shouldReusePrimaryWorktree } from './workflows/worktree-selection';
+import type { PluginRuntime } from './plugins/runtime';
+import type { Step, StepResult } from './templates/types';
 import type { BranchHandle } from './branches/types';
+import type { ProviderBundle } from './core/providers';
+import type { BacklogClaim, BacklogItem, BacklogState } from './core/backlog';
+
+/**
+ * Preserve the provider boundary details when an agent execution fails.
+ * The result may contain provider-native structured output, so keep it in the
+ * message without assuming a particular provider schema.
+ */
+export function formatExecutionFailure(result: ExecutionResult): string {
+  const details = [
+    `status=${result.status}`,
+    `provider=${result.provider}`,
+    `runId=${result.runId}`,
+    result.sessionId ? `sessionId=${result.sessionId}` : undefined,
+    result.exitCode === undefined ? undefined : `exitCode=${result.exitCode}`,
+    result.error ? `${result.error.code}: ${result.error.message}` : undefined,
+    result.structuredOutput === undefined
+      ? undefined
+      : `structuredOutput=${safeExecutionJson(result.structuredOutput)}`,
+  ].filter((value): value is string => value !== undefined);
+  return details.join('; ');
+}
+
+function safeExecutionJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '[unserializable]';
+  }
+}
 
 /**
  * Signal-driven workflow runner.
  *
  * Two-phase design:
  *   Phase 1 (Implement): run implement step -> wait goal_complete
- *   Phase 2 (Verify):   run verify step -> wait ac_result
- *   autoWrapup:         close sandbox, update labels, cleanup worktree
+ *   Phase 2 (Verify):   run verify step -> wait goal_complete with QA payload
+ *   autoWrapup:         close sandbox, transition state, cleanup worktree
  *
  * Each phase is a loop: send goal -> poll for the completion signal OR the
  * context threshold (statusline token usage). On context_high the session is
@@ -61,7 +92,10 @@ import type { BranchHandle } from './branches/types';
  */
 
 export interface RunnerOptions {
-  iid: number;
+  /** Canonical backlog ID. */
+  backlogId: string;
+  /** Local-only numeric worktree key for older git helpers. */
+  iid?: number;
   session: string;
   targetBranch: string;
   baseBranch?: string;
@@ -74,9 +108,10 @@ export interface RunnerOptions {
   contextHighTokens?: number;
   /** Max total tokens across all handoff generations before a terminal handoff. */
   maxTotalTokens?: number;
-  platform?: Platform;
   /** Target project (cross-project dispatch). Drives ProjectResolverModule. */
   projectName?: string;
+  /** Explicit repository root. Cross-project runs never mutate process.cwd(). */
+  repoRoot?: string;
   /** Module names to activate (e.g., ['isolate', 'mock-server']) */
   ext?: string[];
   /** Module parameters (e.g., ['isolate.auto=true']) */
@@ -85,23 +120,25 @@ export interface RunnerOptions {
   sandboxProvider?: SandboxProviderName;
   /** Agent provider name (default: 'claude-code'). */
   agentProvider?: AgentProviderName;
-  /** Branch strategy config for all steps (default: issue-based). */
-  branchStrategy?: BranchStrategyConfig;
+  /** Provider-resolved branch strategy metadata. */
+  branchStrategy?: unknown;
   /** Workflow template name to run instead of the default two-phase flow. */
   template?: string;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). Default: 'interactive'. */
   executionMode?: ExecutionMode;
+  /** Lease heartbeat cadence for providers using a durable claim. */
+  claimHeartbeatIntervalMs?: number;
 }
 
 /**
  * Optional collaborator overrides for WorkflowRunner. Tests inject a fake
  * coordinator (and tmux) to exercise the phase loop's routing without a real
- * tmux / tracker / filesystem - the same factory pattern LoopRunner uses for
+ * tmux / provider / filesystem - the same factory pattern LoopRunner uses for
  * WorkflowRunner itself.
  */
 export interface RunnerDependencies {
   coordinatorFactory?: (deps: {
-    tracker: TrackerProvider;
+    backlog: import('./core/backlog').BacklogProvider;
     tmux: TmuxClient;
     watchdog: Watchdog;
     config: WorkflowConfig;
@@ -118,6 +155,10 @@ export interface RunnerDependencies {
   sessionStoreChain?: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
   /** Workflow config: all timeout and budget values. Defaults to getWorkflowConfig(). */
   config?: WorkflowConfig;
+  /** Typed plugin capabilities available to this run. */
+  plugins?: PluginRuntime;
+  /** Canonical backlog/branch/change providers. */
+  providers?: ProviderBundle;
 }
 
 /**
@@ -125,8 +166,8 @@ export interface RunnerDependencies {
  *
  * Two-phase design:
  *   Phase 1 (Implement): run implement step -> wait goal_complete
- *   Phase 2 (Verify):   run verify step -> wait ac_result
- *   autoWrapup:         close sandbox, update labels, cleanup worktree
+ *   Phase 2 (Verify):   run verify step -> wait goal_complete with QA payload
+ *   autoWrapup:         close sandbox, transition state, cleanup worktree
  *
  * Each phase is a loop: send goal -> poll for the completion signal OR the
  * context threshold (statusline token usage). On context_high the session is
@@ -163,9 +204,8 @@ interface StepRunCtx {
 }
 
 export class WorkflowRunner {
-  private tracker: TrackerProvider;
+  private readonly worktree = new WorktreeManager();
   private tmux: TmuxClient;
-  private worktree: WorktreeManager;
   private watchdog: Watchdog;
   private coordinator: HandoffCoordinator;
   private sandboxProvider: SandboxProvider;
@@ -181,12 +221,25 @@ export class WorkflowRunner {
   private sandbox: Sandbox | undefined;
   private logDir: string;
   private modules: LifecycleModule[] = [];
+  private lifecycleDispatcher?: LifecycleDispatcher;
   private extParams: Record<string, unknown> = {};
   private originalCwd: string = '';
+  private repoRoot: string = '';
   private lifecycleCtx: LifecycleContext = { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: {} };
   /** Branch handles created per step in template execution. Cleaned up in teardownSession. */
   private stepBranchHandles: BranchHandle[] = [];
+  private stepSandboxes: Sandbox[] = [];
   private config: WorkflowConfig;
+  private systemActionUrl: string | undefined;
+  private systemActionsRan = false;
+  private readonly agentProviderInjected: boolean;
+  private primaryHandle?: BranchHandle;
+  private resourceScope?: RunResourceScope;
+  private readonly plugins?: PluginRuntime;
+  private readonly providers: ProviderBundle;
+  private activeBacklog?: BacklogItem;
+  private activeClaim?: BacklogClaim;
+  private leaseLost = false;
 
   /**
    * Inject a sandbox for testing. Production code goes through runBody →
@@ -213,17 +266,18 @@ export class WorkflowRunner {
     return this.sessionStoreChainFactory(worktreePath);
   }
 
-  constructor(tracker: TrackerProvider, deps?: RunnerDependencies) {
-    this.tracker = tracker;
+  constructor(providers: ProviderBundle, deps?: RunnerDependencies) {
     this.tmux = deps?.tmux ?? createTmuxClient();
-    this.worktree = createWorktreeManager();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;
     this.watchdog = deps?.watchdog ?? createWatchdog(this.logDir);
     this.config = deps?.config ?? getWorkflowConfig();
+    this.plugins = deps?.plugins;
+    this.providers = providers;
     this.coordinator = deps?.coordinatorFactory
-      ? deps.coordinatorFactory({ tracker, tmux: this.tmux, watchdog: this.watchdog, config: this.config })
-      : createHandoffCoordinator({ tracker, tmux: this.tmux, watchdog: this.watchdog, config: this.config });
+      ? deps.coordinatorFactory({ backlog: providers?.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config } as never)
+      : ({ handoff: async () => 'terminal' } as unknown as HandoffCoordinator);
     this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: this.worktree });
+    this.agentProviderInjected = deps?.agentProvider !== undefined;
     this.agentProvider = deps?.agentProvider ?? createAgentProvider(this.agentProviderName);
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
@@ -237,7 +291,7 @@ export class WorkflowRunner {
    */
   async run(options: RunnerOptions): Promise<{ success: boolean; url?: string }> {
     const {
-      iid,
+      iid: requestedIid,
       session,
       targetBranch,
       baseBranch = 'main',
@@ -248,6 +302,63 @@ export class WorkflowRunner {
       maxTotalTokens = this.config.goalBudget,
     } = options;
 
+    const backlogId = options.backlogId;
+    const iid = requestedIid ?? (Number.isSafeInteger(Number(backlogId)) ? Number(backlogId) : 0);
+    let terminalOutcome: RunOutcomeStatus = 'failed';
+    this.resourceScope = undefined;
+    this.activeBacklog = undefined;
+    this.activeClaim = undefined;
+    this.leaseLost = false;
+    if (this.providers) {
+      const claimed = await this.providers.backlog.claim(backlogId, session);
+      if (!claimed) {
+        logger.info({ backlogId }, 'backlog is not runnable or was claimed by another worker');
+        return { success: false };
+      }
+      this.activeBacklog = claimed.item;
+      this.activeClaim = claimed;
+      // Establish the terminalizer immediately after claim acquisition, before
+      // template validation or any branch/sandbox resource can be created.
+      // Every terminal path shares this scope, so a native no-op lease and a
+      // filesystem lease have identical release semantics.
+      this.resourceScope = new RunResourceScope({
+        repoRoot: options.repoRoot ?? process.cwd(),
+        baseBranch,
+        onCleanup: () => claimed.release(),
+      });
+      try {
+        this.resourceScope.registerHeartbeat(
+          claimed.heartbeat,
+          options.claimHeartbeatIntervalMs ?? 30_000,
+          async error => {
+            this.leaseLost = true;
+            try {
+              await this.providers.backlog.transition(claimed.item.id, 'blocked', { reason: `claim heartbeat failed: ${(error as Error).message}` });
+              await this.providers.backlog.setExecutionMode(claimed.item.id, 'hitl');
+            } catch (routeError) {
+              logger.warn({ backlogId: claimed.item.id, error: routeError }, 'failed to route heartbeat failure to hitl');
+            }
+          },
+        );
+      } catch (error) {
+        await this.markBacklogBlocked(`claim heartbeat setup failed: ${(error as Error).message}`);
+        await this.resourceScope.finish({ status: 'failed' });
+        throw error;
+      }
+      if (!options.branchStrategy) options = { ...options, branchStrategy: { type: 'named', branch: claimed.item.branchName, baseBranch } };
+    }
+
+    const effectiveTemplate = options.template ?? 'issue-implementation';
+    try {
+    // Bind all git/worktree operations to the explicit project root. This
+    // deliberately avoids process.chdir(), which is process-global state.
+    this.repoRoot = options.repoRoot ?? process.cwd();
+    this.systemActionUrl = undefined;
+    this.systemActionsRan = false;
+    this.primaryHandle = undefined;
+    // Preserve injected WorktreeManager fakes and legacy cwd behavior when
+    // no explicit project context was requested.
+
     // Resolve sandbox provider by name (CLI path).
     this.sandboxProviderName = options.sandboxProvider ?? 'local';
     this.sandboxProvider = this.sandboxProviderByName(this.sandboxProviderName);
@@ -256,37 +367,64 @@ export class WorkflowRunner {
     // the named provider registered (import side-effect or explicit registration).
     // Skip if constructor already injected one via deps (tests use this path).
     this.agentProviderName = options.agentProvider ?? 'claude-code';
-    this.executionMode = options.executionMode ?? 'interactive';
-    if (!this.agentProvider) {
-      try {
-        this.agentProvider = createAgentProvider(this.agentProviderName);
-      } catch {
-        // Agent not yet registered (e.g., test environment). Fall back to
-        // claude-code; deps?.agentProvider already handled above.
-        this.agentProvider = createAgentProvider('claude-code');
-      }
+    this.executionMode = options.executionMode ?? 'batch';
+    if (!this.agentProviderInjected) {
+      this.agentProvider = createAgentProvider(this.agentProviderName);
     }
 
     // Load lifecycle modules
-    this.modules = await loadModules(options.ext);
+    this.modules = [...await loadModules(options.ext), ...(this.plugins?.getLifecycleModules() ?? [])];
+    this.lifecycleDispatcher = new LifecycleDispatcher(this.modules);
     this.extParams = parseModuleParams(options.extParams);
     this.originalCwd = process.cwd();
     logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
 
-    // Validate template early so failures throw before worktree creation.
-    const effectiveTemplate = options.template ?? 'issue-implementation';
-    planFor(effectiveTemplate);
+    // Validate template early so failures throw before worktree creation. A
+    // claimed backlog must never be left in-progress when validation fails.
+    await new TemplateLoader({ projectRoot: this.repoRoot }).load(effectiveTemplate);
+    } catch (error) {
+      await this.markBacklogBlocked(`workflow setup failed: ${(error as Error).message}`);
+      await this.resourceScope?.finish({ status: 'failed' });
+      throw error;
+    }
 
     try {
-      return await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName, branchStrategy: options.branchStrategy, template: effectiveTemplate, executionMode: this.executionMode });
+      const result = await this.runBody({ iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName: options.projectName, repoRoot: this.repoRoot, branchStrategy: options.branchStrategy, template: effectiveTemplate, executionMode: this.executionMode });
+      if (result.success && this.leaseLost) {
+        await this.markBacklogBlocked('claim heartbeat failed');
+        terminalOutcome = 'failed';
+        return { success: false };
+      }
+      if (this.providers && this.activeBacklog) {
+        await this.providers.backlog.transition(this.activeBacklog.id, result.success ? 'verification' : 'blocked', result.success ? undefined : { reason: 'workflow execution failed' });
+        if (!result.success) await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
+      }
+      terminalOutcome = result.success ? 'success' : 'failed';
+      return result;
     } catch (error) {
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
       await this.cleanupOnFailure(iid, session);
+      await this.markBacklogBlocked('workflow crashed');
       throw error;
     } finally {
+      let scopeError: unknown;
+      try {
+        await this.resourceScope?.finish({ status: terminalOutcome });
+      } catch (err) {
+        scopeError = err;
+        if (terminalOutcome !== 'success') {
+          scopeError = undefined;
+          logger.warn({ iid, err }, 'resource scope cleanup failed on terminal failure');
+        }
+      }
       // Never leave an armed watchdog behind: it would fire later and write a
       // stale timeout signal into the retained worktree.
       this.watchdog.disarm();
+      this.activeClaim = undefined;
+      if (scopeError !== undefined) {
+        await this.markBacklogBlocked('resource cleanup failed');
+        throw scopeError;
+      }
     }
   }
 
@@ -303,14 +441,7 @@ export class WorkflowRunner {
    */
   private async cleanupOnFailure(iid: number, session: string): Promise<void> {
     try {
-      await this.tracker.addComment(iid, `<!-- afk-event: crashed -->
-**💥 Workflow Failed**
-
-Session was interrupted before completion.
-
-**Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
-      await this.tracker.addLabel(iid, 'mode::hitl');
-      await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
+      await this.transitionBacklog(iid, 'blocked', 'workflow crashed');
     } catch (err) {
       logger.error({ iid, err }, 'failed to update GitHub on cleanup');
     }
@@ -318,11 +449,15 @@ Session was interrupted before completion.
     await this.teardownSession(iid, session);
     // Lifecycle cleanup hooks (zeroed context - may run before runBody
     // populates lifecycleCtx; modules must be idempotent).
-    await this.runLifecycleHooks(
-      ['after', 'cleanup'],
-      { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: this.extParams },
-      true,
-    );
+    try {
+      await this.runLifecycleHooks(
+        ['after', 'cleanup'],
+        { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: this.extParams },
+        true,
+      );
+    } catch (err) {
+      logger.warn({ iid, err }, 'lifecycle cleanup failed after workflow crash');
+    }
   }
 
   /**
@@ -330,28 +465,17 @@ Session was interrupted before completion.
    * worktree failed. Worktree itself is kept for inspection.
    */
   private async teardownSession(iid: number, session: string): Promise<void> {
-    await this.sandbox?.close();
-    try {
-      await this.worktree.updateStatus(iid, 'failed');
-    } catch (err) {
-      logger.warn({ iid, err }, 'failed to mark worktree as failed');
-    }
-    // Cleanup all step worktrees created during template execution.
-    for (const handle of this.stepBranchHandles) {
-      try {
-        const config: TemplateBranchStrategyConfig = { type: 'named', branch: handle.branch };
-        const strategy = strategyForConfig(config);
-        await strategy.cleanup(simpleGit(), config, handle, { force: true });
-      } catch (err) {
-        logger.warn({ handle }, 'failed to cleanup step worktree');
-      }
+    try { await this.resourceScope?.finish({ status: 'failed' }); } catch (err) {
+      logger.warn({ iid, err }, 'resource scope cleanup failed');
     }
     this.stepBranchHandles = [];
+    this.stepSandboxes = [];
   }
 
   // ── Template execution helpers ─────────────────────────────────────────────
 
   private async resolveStepPrompt(step: Step, ctx?: StepRunCtx): Promise<string> {
+    if (!step.prompt) throw new Error(`agent step '${step.id}' is missing prompt`);
     let prompt = typeof step.prompt === 'string' ? step.prompt : await fs.readFile(step.prompt.file, 'utf-8');
     // Variable substitution: {iid} → issue number
     if (ctx?.iid) {
@@ -360,17 +484,8 @@ Session was interrupted before completion.
     return prompt;
   }
 
-  private resolveStepSignalType(role: string): 'goal_complete' | 'ac_result' {
-    const ROLE_TO_SIGNAL: Record<string, 'goal_complete' | 'ac_result'> = {
-      implementer: 'goal_complete',
-      verifier: 'ac_result',
-      reviewer: 'goal_complete',
-      planner: 'goal_complete',
-      wrapup: 'goal_complete',
-      qa: 'goal_complete',
-      agent: 'goal_complete',
-    };
-    return ROLE_TO_SIGNAL[role] ?? 'goal_complete';
+  private resolveStepSignalType(_role: string): 'goal_complete' {
+    return 'goal_complete';
   }
 
   private async runStep(
@@ -380,26 +495,36 @@ Session was interrupted before completion.
   ): Promise<StepResult> {
     const startedAt = new Date().toISOString();
     const prompt = await this.resolveStepPrompt(step, ctx);
-    const signalType = this.resolveStepSignalType(step.role);
+    const typedStep = step as Step & { completionSignal?: 'goal_complete' };
+    const signalType = typedStep.completionSignal ?? this.resolveStepSignalType(step.role ?? 'agent');
     const effectiveTimeout = step.timeoutMs ?? ctx.hardTimeoutMs;
 
     // Determine worktree: reuse primary for step 0 in group 0, or when the
     // step's branch config uses the iid:0 placeholder (should reuse primary).
     // Create a new worktree only for concurrent/branched steps with a real iid.
     let branchHandle: BranchHandle;
-    const branchConfig = step.branch ?? { type: 'issue' as const, iid: ctx.iid };
-    // iid: 0 is a placeholder meaning "use the primary worktree" — do not create a new one.
-    const isPlaceholder = branchConfig.type === 'issue' && branchConfig.iid === 0;
-    if (!isPlaceholder && step.branch != null) {
+    const branchConfig = step.branch;
+    // A step without an explicit branch reuses the provider-created primary worktree.
+    if (!shouldReusePrimaryWorktree(branchConfig)) {
       // Non-placeholder explicit branch: create a dedicated worktree (for parallel branches).
-      const config: TemplateBranchStrategyConfig = branchConfig;
-      branchHandle = await this.prepareStepWorktree(config, ctx.iid, ctx.baseBranch);
+      branchHandle = await this.prepareStepWorktree(branchConfig, ctx.iid, ctx.baseBranch);
       this.stepBranchHandles.push(branchHandle);
+      this.resourceScope?.registerStepHandle(
+        { branch: branchHandle.branch, path: branchHandle.path, isNewBranch: branchHandle.isNewBranch },
+        () => this.providers.branches.cleanup(branchHandle.path, { preserve: false }),
+      );
     } else {
       // Placeholder (iid:0) or no explicit branch: reuse primary worktree.
       branchHandle = { branch: ctx.primaryBranch, path: ctx.primaryWtPath, isNewBranch: false };
     }
 
+    const sandbox = branchHandle.path === ctx.primaryWtPath
+      ? this.sandbox!
+      : await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode });
+    if (sandbox !== this.sandbox) {
+      this.stepSandboxes.push(sandbox);
+      this.resourceScope?.registerSandbox(sandbox);
+    }
     const completed = await this.runPhase({
       iid: ctx.iid,
       session: ctx.session,
@@ -410,7 +535,9 @@ Session was interrupted before completion.
       budget: ctx.budget,
       prompt,
       signalType,
-      executionMode: ctx.executionMode ?? 'interactive',
+      executionMode: ctx.executionMode ?? 'batch',
+      agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
+      sandbox,
     });
 
     const completedAt = new Date().toISOString();
@@ -425,16 +552,13 @@ Session was interrupted before completion.
   }
 
   private async prepareStepWorktree(
-    config: TemplateBranchStrategyConfig,
+    config: unknown,
     iid: number,
     baseBranch: string,
   ): Promise<BranchHandle> {
-    const strategy = strategyForConfig(config);
-    return await strategy.prepareWorktree(simpleGit(), config, {
-      repoPath: this.originalCwd,
-      baseBranch,
-      worktreeBaseDir: join(this.originalCwd, '.worktrees'),
-    });
+    if (!this.activeBacklog) throw new Error('backlog is not active');
+    const handle = await this.providers.branches.createVerificationWorktree(this.activeBacklog, baseBranch);
+    return { branch: handle.branchName, path: handle.worktreePath, isNewBranch: true };
   }
 
   /**
@@ -450,6 +574,13 @@ Session was interrupted before completion.
     ctx: LifecycleContext,
     reverse = false,
   ): Promise<void> {
+    if (this.lifecycleDispatcher) {
+      for (const hook of hooks) {
+        const phase = hook === 'before' ? 'before-agent' : hook === 'after' ? 'after-agent' : 'cleanup';
+        await this.lifecycleDispatcher.run(phase, ctx);
+      }
+      return;
+    }
     const modules = reverse ? [...this.modules].reverse() : this.modules;
     for (const mod of modules) {
       for (const hook of hooks) {
@@ -472,6 +603,10 @@ Session was interrupted before completion.
    * downstream operation pointed at the wrong directory.
    */
   private async runInitHooks(ctx: InitContext): Promise<void> {
+    if (this.lifecycleDispatcher) {
+      await this.lifecycleDispatcher.run('init', ctx);
+      return;
+    }
     for (const mod of this.modules) {
       if (mod.onInit) {
         logger.info({ iid: ctx.iid, module: mod.name, projectName: ctx.projectName }, 'lifecycle onInit');
@@ -485,28 +620,34 @@ Session was interrupted before completion.
     baseBranch: string; hardTimeoutMs: number; completionTimeoutMs: number;
     maxHandoffs: number; contextHighTokens: number; maxTotalTokens: number;
     projectName?: string;
-    branchStrategy?: BranchStrategyConfig;
+    repoRoot: string;
+    branchStrategy?: unknown;
     template: string;
     executionMode?: ExecutionMode;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, branchStrategy, template, executionMode } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, branchStrategy, template, executionMode } = ctx;
 
     // ── Step 0: Init hooks (pre-worktree) ─────────────────────────────────
     // ProjectResolverModule runs here and may chdir to the target repo.
     // Init failures throw — init is infrastructure, not opt-in.
-    await this.runInitHooks({ iid, projectName, baseBranch, params: this.extParams, originalCwd: this.originalCwd });
+    await this.runInitHooks({ iid, projectName, baseBranch, params: this.extParams, originalCwd: this.originalCwd, repoRoot });
     logger.info({ iid, projectName, baseBranch, moduleCount: this.modules.length }, 'init hooks complete');
 
     // ── Step 1: Create worktree ─────────────────────────────────────────────
-    const wt = await this.worktree.create(iid, baseBranch);
+    let wt: { iid: number; path: string; branch: string; createdAt: Date; status: 'active' };
+    if (!this.activeBacklog) throw new Error('backlog is not active');
+    const handle = await this.providers.branches.createBranch(this.activeBacklog, baseBranch);
+    this.primaryHandle = { branch: handle.branchName, path: handle.worktreePath, isNewBranch: true };
+    wt = { iid, path: handle.worktreePath, branch: handle.branchName, createdAt: new Date(), status: 'active' };
     logger.info({ iid, worktree: wt.path, branch: wt.branch }, 'worktree created');
-    await this.worktree.updateStatus(iid, 'active');
     logger.info({ iid, status: 'active' }, 'worktree status updated');
-    await configureStatusline(wt.path);
-    logger.info({ iid, worktree: wt.path }, 'statusline configured');
+    if (this.executionMode === 'interactive') {
+      await configureStatusline(wt.path);
+      logger.info({ iid, worktree: wt.path }, 'statusline configured');
+    }
 
     // ── Step 1b: Lifecycle before_agent hooks ──────────────────────────────
-    this.lifecycleCtx = { iid, worktreePath: wt.path, baseBranch, sessionName: session, params: this.extParams };
+    this.lifecycleCtx = { iid, worktreePath: wt.path, baseBranch, sessionName: session, params: this.extParams, repoRoot, projectName, originalCwd: this.originalCwd };
     await this.runLifecycleHooks(['before'], this.lifecycleCtx);
     logger.info({ iid, hook: 'before_agent', moduleCount: this.modules.length }, 'lifecycle before_agent hooks complete');
 
@@ -516,7 +657,9 @@ Session was interrupted before completion.
       session,
       branch: targetBranch,
       tmux: this.tmux,
+      executionMode: this.executionMode,
     });
+    this.resourceScope?.registerSandbox(this.sandbox);
     logger.info({ iid, session, worktree: wt.path, sandboxId: this.sandbox.id }, 'sandbox created');
 
     // ── Step 3: Launch watchdog (detached, no blocking) ────────────────────
@@ -524,98 +667,103 @@ Session was interrupted before completion.
     logger.info({ iid, session, hardTimeoutMs }, 'watchdog armed');
 
     // ── Step 4: Post launch comment ────────────────────────────────────────
-    await this.tracker.addComment(iid, [
-      '<!-- afk-event: launch -->',
-      '**🚀 AFK Session Started**',
-      '',
-      `- **Worktree:** \`${wt.path}\``,
-      `- **Branch:** \`${targetBranch}\``,
-      `- **Session:** \`${session}\``,
-      `- **Issue:** #${iid}`,
-    ].join('\n'));
-    logger.info({ iid, event: 'launch' }, 'tracker comment posted');
-    await this.tracker.addLabel(iid, `session::${session}`);
-    logger.info({ iid, label: `session::${session}` }, 'tracker label added');
-    await this.tracker.addLabel(iid, 'stage::afk-in-progress');
-    logger.info({ iid, label: 'stage::afk-in-progress' }, 'tracker label added');
-    await this.tracker.removeLabel(iid, 'stage::ready-for-issues');
-    logger.info({ iid, label: 'stage::ready-for-issues' }, 'tracker label removed');
+    await this.transitionBacklog(iid, 'in_progress');
 
     // ── Phases: implement then verify; handoff budgets are shared across both ──
     // used = handoff rounds, tokens = accumulated total across generations.
     const budget = new BudgetManager(maxHandoffs, maxTotalTokens);
     const stepResults: Record<string, StepResult> = {};
 
-    // ── Template execution: iterate ExecutionGroups ────────────────────────────
-    logger.info({ iid, template }, 'using execution plan');
-    const plan = planFor(template);
-
-    for (const group of plan.groups) {
-      logger.info({ iid, level: group.level, stepCount: group.steps.length }, 'execution group begin');
-
-      const runnableSteps = group.steps.filter(step => evaluateWhen(step.when, stepResults));
-      if (runnableSteps.length === 0) {
-        logger.info({ iid, level: group.level }, 'all steps gated off; skipping group');
-        continue;
-      }
-
-      // Run all runnable steps in this group concurrently.
-      const groupResults = await Promise.all(
-        runnableSteps.map((step, idx) =>
-          this.runStep(step, {
-            iid, session: `${session}-${step.id}-${idx}`, baseSession: session,
-            primaryWtPath: wt.path, primaryBranch: targetBranch,
-            baseBranch, hardTimeoutMs, completionTimeoutMs,
-            contextHighTokens, budget, stepIndex: idx,
-            executionMode,
-          }, stepResults),
-        ),
-      );
-
-      for (const r of groupResults) stepResults[r.stepId] = r;
-      logger.info({ iid, level: group.level }, 'execution group end');
-
-      const groupFailed = Object.values(groupResults).some(
-        r => r.status === 'failed' || r.status === 'timed_out' || r.status === 'aborted',
-      );
-      if (groupFailed) {
-        logger.warn({ iid, level: group.level }, 'group had failures; aborting workflow');
-        return { success: false };
-      }
+    // ── Template execution: compilation + typed dispatch ─────────────────────
+    logger.info({ iid, template }, 'using compiled execution plan');
+    const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot }).load(template);
+    const autoWrapupOverridden = this.autoWrapup !== WorkflowRunner.prototype.autoWrapup;
+    const systemActions = new SystemActionExecutor({
+      publishChange: async () => {
+        if (autoWrapupOverridden) return { url: undefined };
+        await this.providers.branches.push(wt.branch, wt.path);
+        this.systemActionUrl = await this.createMR(iid, wt.path, targetBranch);
+        this.systemActionsRan = true;
+        return { url: this.systemActionUrl };
+      },
+      queueQA: async () => {
+        if (autoWrapupOverridden) return { queued: true };
+        await this.transitionBacklog(iid, 'verification');
+        this.systemActionsRan = true;
+        return { queued: true };
+      },
+      plugins: this.plugins,
+    });
+    const executor = new PlanExecutor({
+      executeAgent: (step, results) => this.runStep(step, {
+        iid, session: `${session}-${step.id}`, baseSession: session,
+        primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
+        hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, stepIndex: 0,
+        executionMode: step.executionMode ?? executionMode,
+      }, results),
+      executeSystem: async step => {
+        const startedAt = new Date().toISOString();
+        try {
+          const output = await systemActions.execute(step.action, { iid, worktreePath: wt.path, branch: wt.branch, targetBranch });
+          return { stepId: step.id, status: 'completed', output, startedAt, completedAt: new Date().toISOString() };
+        } catch (error) {
+          return { stepId: step.id, status: 'failed', summary: (error as Error).message, startedAt, completedAt: new Date().toISOString() };
+        }
+      },
+      systemActions: this.plugins?.listSystemActions(),
+    });
+    const executedResults = await executor.execute(loadedTemplate);
+    Object.assign(stepResults, executedResults);
+    if (Object.values(stepResults).some(result => result.status === 'failed' || result.status === 'timed_out' || result.status === 'aborted')) {
+      return { success: false };
     }
 
     // ── Lifecycle after_agent hooks (before cleanup) ────────────────────────
     await this.runLifecycleHooks(['after'], this.lifecycleCtx);
     logger.info({ iid, hook: 'after_agent', moduleCount: this.modules.length }, 'lifecycle after_agent hooks complete');
 
+    // Keep the explicit autoWrapup seam usable for legacy embedders/tests that
+    // replace it; production typed templates use the system-action terminalizer.
+    if (this.systemActionsRan && !autoWrapupOverridden) {
+      await this.cleanupPrimary(iid, true);
+      return { success: true, url: this.systemActionUrl };
+    }
     return this.autoWrapup(iid, wt.path, session, targetBranch);
   }
 
+  private async cleanupPrimary(iid: number, force: boolean): Promise<void> {
+    try {
+      if (!this.primaryHandle) return;
+      await this.providers.branches.cleanup(this.primaryHandle.path, { preserve: !force });
+    } catch (error) {
+      logger.warn({ iid, error }, 'failed to remove primary worktree');
+    }
+  }
+
   /**
-   * Post-success workflow cleanup: push branch, create MR, close sandbox, update labels, clean up worktree.
+   * Post-success workflow cleanup: push branch, create change, close sandbox, transition state, clean up worktree.
    * Called after all steps complete (template or legacy).
    */
   private async autoWrapup(iid: number, worktreePath: string, session: string, targetBranch: string): Promise<{ success: boolean; url?: string }> {
+    if (this.leaseLost) {
+      await this.markBacklogBlocked('claim heartbeat failed');
+      return { success: false };
+    }
     // Push branch and create MR
     await this.pushBranch(worktreePath);
     logger.info({ iid, worktreePath }, 'branch pushed');
     const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
     logger.info({ iid, mrUrl }, 'MR created');
 
-    await this.sandbox!.close();
-    logger.info({ iid, session }, 'sandbox closed');
-
-    await this.tracker.addLabel(iid, 'stage::qa');
-    logger.info({ iid, label: 'stage::qa' }, 'tracker label added');
-    await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
-    logger.info({ iid, label: 'stage::afk-in-progress' }, 'tracker label removed');
-
-    try {
-      await this.worktree.cleanup(iid, true);
-      logger.info({ iid, worktreePath }, 'worktree cleaned up');
-    } catch (err) {
-      logger.warn({ iid, err }, 'failed to remove worktree on success');
+    if (this.leaseLost) {
+      await this.markBacklogBlocked('claim heartbeat failed');
+      return { success: false };
     }
+
+    await this.transitionBacklog(iid, 'verification');
+
+    await this.cleanupPrimary(iid, true);
+    logger.info({ iid, worktreePath }, 'worktree cleaned up');
 
     return { success: true, url: mrUrl };
   }
@@ -629,7 +777,7 @@ Session was interrupted before completion.
   }
 
   /**
-   * Handle hard timeout: capture session, post the recovery comment + labels,
+   * Handle hard timeout: capture session and transition the backlog,
    * and tear down local resources. The timeout is one of the explicit
    * terminal paths - it owns its own cleanup.
    */
@@ -646,27 +794,22 @@ Session was interrupted before completion.
     await fs.writeFile(logPath, snapshot, 'utf-8');
 
     try {
-      await this.tracker.addComment(iid, `<!-- afk-event: timeout -->
-**⏱️ Hard Timeout**
-
-Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
-
-- **Log:** \`${logPath}\`
-
-**Recovery:** Remove \`mode::hitl\` label and re-trigger \`/afk-implement ${iid}\``);
-      await this.tracker.addLabel(iid, 'mode::hitl');
-      await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
+      await this.transitionBacklog(iid, 'blocked', 'workflow timeout');
     } catch (err) {
       logger.error({ iid, err }, 'failed to update GitHub on timeout');
     }
 
     await this.teardownSession(iid, session);
     // Lifecycle cleanup hooks (zeroed context, same as cleanupOnFailure).
-    await this.runLifecycleHooks(
-      ['after', 'cleanup'],
-      { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: this.extParams },
-      true,
-    );
+    try {
+      await this.runLifecycleHooks(
+        ['after', 'cleanup'],
+        { iid: 0, worktreePath: '', baseBranch: '', sessionName: '', params: this.extParams },
+        true,
+      );
+    } catch (err) {
+      logger.warn({ iid, err }, 'lifecycle cleanup failed after timeout');
+    }
   }
 
   /**
@@ -687,29 +830,36 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
     contextHighTokens: number;
     budget: BudgetManager;
     prompt: string;
-    signalType: 'goal_complete' | 'ac_result';
+    signalType: 'goal_complete';
     executionMode?: ExecutionMode;
+    agentProvider?: AgentProvider;
+    sandbox?: Sandbox;
   }): Promise<boolean> {
+    const basePrompt = p.prompt ?? (p as unknown as { goalBase?: string }).goalBase ?? '';
     for (let round = 1; ; round++) {
-      const prompt = round === 1
-        ? p.prompt
-        : this.continuePrompt(p.prompt, p.iid, p.wtPath, round - 1);
+      const rawPrompt = round === 1
+        ? basePrompt
+        : this.continuePrompt(basePrompt, p.iid, p.wtPath, round - 1);
+      const prompt = buildExecutionPrompt(rawPrompt, p.executionMode, 'task');
 
       logger.info({ iid: p.iid, round, signalType: p.signalType, budgetUsed: p.budget.used }, 'round begin');
 
-      const command = this.agentProvider.buildCommand({
+      const agentProvider = p.agentProvider ?? this.agentProvider;
+      const sandbox = p.sandbox ?? this.sandbox!;
+      const command = agentProvider.buildCommand({
         worktreePath: p.wtPath,
         sessionId: p.session,
         executionMode: p.executionMode,
       });
-      let execution = await this.sandbox!.startAgent({
+      let execution = await sandbox.startAgent({
         command,
         generation: p.budget.used + 1,
         prompt,
         signalType: p.signalType,
         executionMode: p.executionMode,
-        agentProvider: this.agentProvider,
+        agentProvider,
       });
+      this.resourceScope?.registerExecution(execution);
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 
       let result = await execution.waitForResult({
@@ -727,7 +877,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
         case 'context_high': {
           const hctx = {
-            iid: p.iid,
+            backlogId: this.activeBacklog?.id ?? String(p.iid),
             session: p.session,
             wtPath: p.wtPath,
             hardTimeoutMs: p.hardTimeoutMs,
@@ -745,7 +895,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
           // Errors are best-effort and do not affect the handoff flow.
           const chain = this.sessionStoreChainFactory(p.wtPath);
           const runId = `issue-${p.iid}-gen-${p.budget.used + 1}`;
-          if (this.sandbox) {
+          if (sandbox) {
             try {
               const snapshot = await execution.captureSession();
               if (snapshot) {
@@ -777,8 +927,8 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
               executionMode: p.executionMode,
             },
             p.budget,
-            this.agentProvider,
-            this.sandbox!,
+            agentProvider,
+            sandbox,
             () => chain,
             () => execution.captureSession(),
           );
@@ -786,6 +936,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
           if (resumeOutcome.status === 'completed') return true;
           if (resumeOutcome.status === 'continued') {
             execution = resumeOutcome.resumedExecution;
+            this.resourceScope?.registerExecution(execution);
             result = resumeOutcome.resumeResult;
             logger.info({ iid: p.iid, runId }, 'native resume: agent hit context_high again; looping');
             continue;
@@ -805,10 +956,11 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
         default:
           // 'failed', 'blocked', 'aborted' — treat as failure
-          logger.warn({ iid: p.iid, status: result.status }, 'execution returned non-success status');
+          const diagnostics = formatExecutionFailure(result);
+          logger.warn({ iid: p.iid, status: result.status, diagnostics }, 'execution returned non-success status');
           if (round === 1) {
             // Initial round failure: unchanged crash path
-            throw new Error(`execution failed: ${result.status}`);
+            throw new Error(`execution failed: ${diagnostics}`);
           }
           await this.manualFlip(p.iid, p.session);
           return false;
@@ -828,8 +980,9 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
 
   /** Prompt for a resumed round: read the handoff doc(s) before continuing. */
   private continuePrompt(prompt: string, iid: number, wtPath: string, gen: number): string {
-    const docPath = handoffDocPath(wtPath, iid, gen);
-    return `继续${prompt}（上下文已交接，请先阅读交接文档 ${docPath}；若存在更早的交接文档（同目录 handoff-${iid}-*.md），请一并阅读以获取完整上下文，再继续）`;
+    const docPath = handoffDocPath(wtPath, this.activeBacklog?.id ?? String(iid), gen);
+    const continuation = prompt.replace(/^\/goal\s*/i, '');
+    return `继续${continuation}（上下文已交接，请先阅读交接文档 ${docPath}；若存在更早的交接文档（同目录 handoff-${iid}-*.md），请一并阅读以获取完整上下文，再继续）`;
   }
 
   /**
@@ -838,9 +991,7 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
    * coordinator's internal relaunch-failure flip).
    */
   private async manualFlip(iid: number, session: string): Promise<void> {
-    await this.tracker
-      .addLabel(iid, 'handoff::active')
-      .catch(err => logger.warn({ iid, err }, 'failed to add handoff::active label'));
+    await this.markBacklogBlocked('handoff failed');
     await this.tmux.killSession(session).catch(() => { /* already dead */ });
     await this.tmux.closeSession();
   }
@@ -851,28 +1002,44 @@ Session exceeded ${Math.round(timeoutMs / 60000)}min and was force killed.
   private async pushBranch(worktreePath: string): Promise<void> {
     const git = simpleGit(worktreePath);
     const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
-    await git.push('origin', branch, ['--set-upstream']);
+    await this.providers.branches.push(branch, worktreePath);
   }
 
   /**
-   * Create MR/PR via the tracker provider (GitHub: octokit PRs, GitLab: API).
+   * Create a change request through the provider.
    * Returns the MR/PR web URL for logging.
    */
   private async createMR(iid: number, worktreePath: string, targetBranch: string): Promise<string> {
     const git = simpleGit(worktreePath);
     const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
-    const issue = await this.tracker.getIssue(iid);
+    if (!this.activeBacklog) throw new Error('backlog is not active');
+    const change = await this.providers.changes.create({ backlog: this.activeBacklog, sourceBranch: branch, targetBranch, draft: true });
+    return change.url ?? change.id;
+  }
 
-    const mrId = await this.tracker.createMR({
-      title: `Draft: Resolve #${iid}`,
-      description: `Closes #${iid}\n\n${issue.title}`,
-      sourceBranch: branch,
-      targetBranch,
-      draft: true,
-    });
+  private async transitionBacklog(iid: number, state: BacklogState, reason?: string): Promise<void> {
+    const id = this.activeBacklog?.id ?? String(iid);
+    if (state === 'verification' && this.activeClaim) {
+      try {
+        await this.activeClaim.heartbeat();
+      } catch (error) {
+        this.leaseLost = true;
+        await this.markBacklogBlocked(`claim lease lost before verification: ${(error as Error).message}`);
+        throw error;
+      }
+    }
+    await this.providers.backlog.transition(id, state, reason ? { reason } : undefined);
+    if (state === 'blocked') await this.providers.backlog.setExecutionMode(id, 'hitl');
+  }
 
-    const mr = await this.tracker.getMR(mrId);
-    return mr.url;
+  private async markBacklogBlocked(reason: string): Promise<void> {
+    if (!this.providers || !this.activeBacklog) return;
+    try {
+      await this.providers.backlog.transition(this.activeBacklog.id, 'blocked', { reason });
+      await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
+    } catch (error) {
+      logger.warn({ backlogId: this.activeBacklog.id, error }, 'failed to mark backlog blocked');
+    }
   }
 
 }

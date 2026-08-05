@@ -2,136 +2,134 @@
 name: afk-to-issues
 disable-model-invocation: true
 description: >-
-  Decompose requirements into tracker issues with machine-checkable
-  acceptance criteria. Two entry points: an approved PRD with
-  Observable Behaviors, or any requirement context in Direct Mode.
-  Reads the codebase to choose verification means (test runner,
-  HTTP endpoint, log file, manual check).
+  Decompose approved requirements into a provider-neutral backlog manifest
+  with machine-checkable acceptance criteria, dependencies, parent links,
+  execution modes, and business tags. This skill drafts and validates the
+  handoff; an external backlog system creates the records.
 disallowed-tools: >-
-  Bash(afk mr merge*)
-  Bash(glab mr merge*) Bash(glab issue delete*) Bash(glab mr delete*)
-  Bash(glab repo delete*) Bash(gh issue delete*) Bash(gh repo delete*)
-  Bash(git push -f) Bash(git reset --hard*) Bash(git branch -D*)
+  Bash(git push -f) Bash(git reset --hard*)
+  Bash(git branch -D*)
 ---
 
-# Requirements -> Issues
+# Requirements -> Backlog Manifest
 
-**Goal:** Independently pickable tracker issues with verifiable completion conditions.
-**Mode:** HITL-gated — draft first, approve before creating.
+**Goal:** Produce independently executable backlog items with verifiable
+completion conditions. The output is a provider-neutral manifest for the
+external backlog/decomposition system. AFK consumes the resulting backlog;
+it does not create, link, or split provider records.
+**Mode:** HITL-gated — draft first, obtain explicit approval, then emit the
+approved manifest.
 
-## Mode Decision
+## Mode decision
 
-| Mode | Input | Trigger |
-|------|-------|---------|
-| **PRD Mode** | `PRD.md` `## User Stories` with Observable Behavior lists | An approved PRD exists |
-| **Direct Mode** | Any requirement context (free text / notes / chat) | No PRD, or fast path |
+| Input | Use |
+|---|---|
+| Approved `PRD.md` with `User Stories` and Observable Behaviors | PRD Mode |
+| Any aligned requirement context without a PRD | Direct Mode |
 
-Mode propagates to labels: `mode::afk` (autonomous) or `mode::hitl` (human-in-the-loop).
-Base label: `base::prd-<iid>` (PRD Mode) or `base::direct` (Direct Mode).
+Choose `executionMode` per item: `afk` for deterministic, automatable work;
+`hitl` when a human decision, manual check, or non-automatable action is
+required. This is a backlog field, not a provider label. Use business tags
+only (for example `frontend`, `security`, or `needs-isolation`); never encode
+state or execution mode in tag names.
 
-## Verification Inference
+## Verification inference
 
-For each Observable Behavior (PRD) or requirement clause (Direct), read the
+For each Observable Behavior (PRD) or requirement clause (Direct), inspect the
 codebase to infer:
 
-1. **What proves the behavior** — locate test runner, HTTP route, log format, or module
-2. **What `evidence_type` fits** — controlled vocabulary: `test` | `curl` | `log` | `manual` | `none`
-3. **What `check_command` exits 0 on PASS** — concrete shell snippet
+1. What proves the behavior — test runner, HTTP endpoint, log, file, or manual check.
+2. The `evidence_type`: `test` | `curl` | `log` | `manual` | `none`.
+3. A concrete `check_command` that exits 0 on PASS and does not mutate state.
 
-If no signal found → default to `manual`, flag as "needs automated check".
-Allowed tools: Read, Grep, Bash (read-only only).
+If no signal is available, use `manual` and mark the item as needing an
+automated check. Do not guess an evidence type.
 
-## Slice Strategy
+## Slice strategy
 
-1. Analyze: count distinct domains, layers, team ownership lines
-2. Infer strategy:
-   - One team, end-to-end → **Vertical** (default)
-   - Multiple teams, layer ownership → **Horizontal**
-   - Unclear → ask user
-3. Tell user which strategy and why
+1. Count distinct domains, layers, and ownership boundaries.
+2. Select **Vertical** (model + API/logic + test) for one team and an
+   end-to-end outcome; select **Horizontal** (one item per owned layer) when
+   ownership is split. If unclear, ask the user.
+3. Explain the selected strategy in the draft.
 
-| Strategy | Shape | Best when |
-|----------|-------|-----------|
-| **Vertical** | model+API+logic+test in one issue | Single team |
-| **Horizontal** | one issue per layer (API, DB, UI) | Layer-owned teams |
+Split an item when acceptance criteria exceed roughly five lines, it spans
+more than three modules, or it has a separate owner. Fold items with no
+user-observable behavior into a neighboring item or mark them as tech debt.
+Trace the dependency graph and reject cycles.
 
-## Slicing Rules
+## Backlog item contract
 
-- **Too big:** AC > ~5 lines, or touches > ~3 modules → split
-- **Too small:** no user-observable behavior → fold or mark tech-debt
-- **Cycle check:** trace `blocked_by` graph; redraw if cyclic
-- **Direct Mode:** ask user to narrow if too large
+Emit one manifest entry per item with these provider-neutral fields:
 
-## Isolate Analysis
+```yaml
+- title: <short imperative title>
+  description: <context and intended outcome>
+  parentId: <provider backlog id or null>
+  dependsOn: [<provider backlog ids>]
+  executionMode: afk | hitl
+  tags: [<business tags>]
+  acceptanceCriteria:
+    - text: <observable condition>
+      evidenceType: test | curl | log | manual | none
+      checkCommand: <command exiting 0 on pass>
+  outOfScope: [<explicit non-goals>]
+```
 
-For each slice, check for: schema change, middleware config change, new middleware dependency.
-If any matches → mark slice `need::isolate: true`.
-
-## Issue Body Composition
-
-Fields per `references/issue-template.md`:
-- `# <Title>` — PRD story title or Direct Mode title
-- `## Context` — problem statement from PRD or paraphrased
-- `## Acceptance Criteria` — one per Observable Behavior, 3-field format: `<text> -- <evidence_type> -- <check_command>`
-- `## Out of Scope` — from PRD or inferred
-- `## Dependencies` — DAG edges from `blocked_by`; `none` if standalone
+`parentId` and `dependsOn` are references supplied by the external provider;
+use stable temporary references in a draft and have the provider resolve them
+to IDs. Parents are organizational and are not runnable. Every dependency
+must be complete before an `afk` item can be claimed. The provider assigns
+the canonical ID and initial state; do not invent state labels in this
+manifest.
 
 ## Steps
 
-### 1. Pick mode
+### 1. Select mode and read inputs
 
-PRD exists → PRD Mode. Else → Direct Mode. Lock in labels:
-- `mode::afk` or `mode::hitl`
-- `base::prd-<iid>` or `base::direct`
+Determine PRD or Direct Mode, read the input, and inspect relevant code for
+verification signals. Record unresolved questions rather than inventing
+requirements.
 
-### 2. Read inputs + read codebase
+### 2. Slice and compose drafts
 
-Apply Verification Inference per Observable Behavior (PRD) or requirement clause (Direct).
-Output: AC list in 3-field format.
+Apply the slice strategy, dependency-cycle check, and isolation analysis.
+For middleware, schema, or environment changes, add the business tag
+`needs-isolation` and explain why. Compose every field in the item contract;
+use `[]` for empty dependencies or out-of-scope lists.
 
-### 3. Slice + Cross-Project Dispatch
+### 3. Self-quality gate
 
-Apply Slice Strategy + Slicing Rules.
-If requirement spans multiple repos: per slice, decide target repo → `--project <repo>` flag.
-If strategy ambiguous → ask user.
+Run every `checkCommand` in a sandbox. Fix non-zero results, invalid evidence
+types, mutating commands, missing dependencies, or ambiguous ownership before
+requesting approval.
 
-### 4. Isolate Analysis
+### 4. HITL approval
 
-Apply Isolate Analysis per slice. Set `need::isolate` label if middleware signals found.
+Present all proposed items, parent/dependency edges, execution modes, business
+tags, and isolation decisions. Wait for explicit approval. On revision,
+incorporate the requested changes and repeat the gate.
 
-### 5. Compose drafts
+### 5. Emit handoff
 
-Fill every Issue Body Composition field per slice. `none` for empty Dependencies.
-
-### 6. Self-quality-gate
-
-Run every `check_command` in sandbox. Non-zero exit or vocabulary violation → fix draft before proceeding.
-
-### 7. HITL gate
-
-Present all drafts + DAG + label scheme + `need::isolate` decisions.
-Wait for explicit approval. Do not proceed until user confirms.
-
-### 8. Create
-
-On approval:
-```
-afk issue create --label stage::ready-for-issues --label <mode> --label <base> [--label need::isolate]
-afk issue link <iid> <blocked-by-iid>
-```
-For cross-project: `--project <owner/repo>` and `<project>:<iid>` syntax for linking.
+After approval, write the provider-neutral manifest and PRD reference to the
+requested artifact location. Hand the artifact to the external backlog
+provider/importer. Do not invoke an AFK command, create a branch, start an
+agent, update provider metadata, or run QA.
 
 ## References
 
-Always read `references/issue-template.md` — defines the AC schema and body fields.
+Read `references/issue-template.md` for the acceptance-criteria field
+conventions when composing item bodies. Its historical filename does not
+change this skill's provider-neutral output contract.
 
 ## Caveats
 
-- AC without `-- <evidence_type> -- <check_command>` suffix
-- `evidence_type` chosen without reading codebase (guessing forbidden)
-- `evidence_type` outside controlled vocabulary
-- `check_command` with no exit-code contract or mutating state
-- Skipping Step 6 self-quality-gate
-- Creating issues before Step 7 approval
-- `mode::afk` for cross-context or mid-flight product decisions
-- Forgetting `need::isolate` — loop won't start isolated containers without it
+- Never create provider records before the approval gate.
+- Never use provider-specific IDs, issue/MR terminology, state labels, or
+  internal metadata names in the manifest.
+- Every acceptance criterion must use the three-field evidence contract.
+- `executionMode: afk` is appropriate only for work that can be fully
+  automated; use `hitl` when a person must decide or act.
+- Keep dependency references acyclic and explain any unresolved external
+  reference for the importer.

@@ -11,7 +11,7 @@ describe('emitFish', () => {
   });
 
   it('inlines top-level commands gated on __fish_use_subcommand', () => {
-    expect(script).toMatch(/complete -c afk -n '__fish_use_subcommand' -a 'issue'/);
+    expect(script).toMatch(/complete -c afk -n '__fish_use_subcommand' -a 'backlog'/);
     expect(script).toMatch(/complete -c afk -n '__fish_use_subcommand' -a 'signal'/);
   });
 
@@ -20,11 +20,11 @@ describe('emitFish', () => {
   });
 
   it('gates subcommands on __fish_seen_subcommand_from', () => {
-    expect(script).toMatch(/__fish_seen_subcommand_from issue/);
+    expect(script).toMatch(/__fish_seen_subcommand_from backlog/);
   });
 
   it('inlines option flags as -l long', () => {
-    expect(script).toContain('-l json');
+    expect(script).toContain('-l backlog-id');
   });
 
   it('pre-wires the __complete dynamic hook', () => {

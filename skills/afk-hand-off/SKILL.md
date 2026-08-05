@@ -63,3 +63,36 @@ HANDOFF left off.
   step is a dead end.
 - MUST NOT overwrite an existing HANDOFF file — each save is a new file.
 - MUST NOT use the Write tool for `/tmp/` output — use Bash (`cat >`, `tee`, or similar) instead. The Write tool requires a prior Read even for new file paths.
+
+## Browser Session Handoff
+
+When the work involves an authenticated browser session, the snapshot
+must capture enough detail for the next session to resume without
+re-authentication.
+
+**Include in the snapshot:**
+
+| Field | What to record |
+|-------|----------------|
+| `Browser CDP endpoint` | `http://127.0.0.1:9222` (or whatever port) |
+| `Browser profile path` | e.g. `/Users/<user>/.afk-browser-profile` |
+| `playwright-cli session` | e.g. `playwright-cli -s=afk attach --cdp=http://127.0.0.1:9222` |
+| `Logged-in origins` | list of origins (e.g. `geelib.qihoo.net`, `www.aiwanwu.cc`) |
+| `Token expiry notes` | short-lived cookies/JWTs that will force re-login, with timestamps |
+
+**Recovery on resume:**
+
+1. Check the browser is still running: `curl http://127.0.0.1:9222/json/version`.
+2. If dead, restart with the recorded profile path:
+   ```bash
+   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+     --user-data-dir=/Users/<user>/.afk-browser-profile \
+     --remote-debugging-port=9222 about:blank &
+   ```
+3. Verify logged-in origins still work — short-lived tokens may have
+   expired during the gap. If so, the user must re-login before the
+   resumed task can proceed.
+
+**Do NOT include** raw cookies, JWTs, refresh tokens, or other secrets
+in the HANDOFF. Reference files by path instead; remind the user to
+`chmod 600` them.

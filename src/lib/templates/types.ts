@@ -53,8 +53,15 @@ const PromptSchema = z.union([
 
 export const StepSchema = z.object({
   id: z.string().min(1).regex(/^[a-z0-9-]+$/, 'step id must be kebab-case'),
-  role: z.string().min(1),
-  prompt: PromptSchema,
+  /** Omitted means legacy v1 agent step. */
+  kind: z.enum(['agent', 'system']).optional(),
+  role: z.string().min(1).optional(),
+  prompt: PromptSchema.optional(),
+  /** System actions are deliberately enumerated by the compiler. */
+  action: z.string().min(1).optional(),
+  completion: z.literal('goal_complete').optional(),
+  provider: z.enum(['claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot']).optional(),
+  executionMode: z.enum(['interactive', 'batch']).optional(),
   branch: BranchStrategyConfigSchema.optional(),
   dependsOn: z.array(z.string()).optional(),
   when: WhenClauseSchema.optional(),
@@ -62,6 +69,13 @@ export const StepSchema = z.object({
   parallel: z.string().optional(),
   /** Per-step timeout; defaults to the runner's hard timeout. */
   timeoutMs: z.number().int().positive().optional(),
+}).superRefine((step, ctx) => {
+  if (step.kind === 'system') {
+    if (!step.action) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'system step requires action', path: ['action'] });
+    return;
+  }
+  if (!step.role) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'agent step requires role', path: ['role'] });
+  if (!step.prompt) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'agent step requires prompt', path: ['prompt'] });
 });
 
 // ── Template ───────────────────────────────────────────────────────────────

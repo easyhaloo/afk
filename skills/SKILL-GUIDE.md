@@ -149,11 +149,11 @@ Ask: Does this term exist outside this skill file?
 | Type | Action | Example |
 |------|--------|---------|
 | Training data has it | Abstract | `git commit`, `jest`, `for loop` |
-| Only in skill file | PRESERVE | `mode::afk`, `base::prd-<iid>`, `afk issue create --label` |
+| Only in skill file | PRESERVE | canonical backlog states/modes, provider capabilities, `afk run --backlog-id` |
 
-**Critical:** When in doubt, keep the concrete value. "mode label" is
-ambiguous; `mode::afk` is precise. Over-abstraction causes execution
-errors; over-specification only adds verbosity.
+**Critical:** Keep canonical backlog states and execution modes concrete.
+Provider-specific labels are adapter details and must not be exposed in skill
+instructions.
 
 ### Domain knowledge separation
 

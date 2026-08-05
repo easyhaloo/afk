@@ -1,32 +1,28 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { TrackerProvider } from '../core/tracker/types';
 import { WorkflowRunner } from '../workflows';
 import { QARunner } from './qa-runner';
-import { checkIssuePreconditions } from '../preconditions';
 import { getWorkflowConfig } from '../core/config/manager';
 import { logger } from '../io';
+import type { ManagementProviderBundle, ProviderBundle } from '../core/providers';
+import { ManagementBacklogProvider } from '../core/backlog/management-provider';
 
 export interface LoopRunnerOptions {
   /** Max simultaneous implement chains (WorkflowRunner instances). */
   maxConcurrent: number;
-  /** Tracker polling interval in ms. */
+  /** Backlog polling interval in ms. */
   pollIntervalMs: number;
   /** Periodic status print interval in ms. */
   statusIntervalMs: number;
-  /** Labels required for an issue to be picked up. */
-  requiredLabels: string[];
-  /** Labels that disqualify an issue (already in flight elsewhere). */
-  excludeLabels: string[];
   /** Max wait for in-flight work on SIGTERM, in ms. */
   shutdownTimeoutMs: number;
   /** If set, the runner stops itself after this many successful completions. */
   maxIterations?: number;
   /** Factory for WorkflowRunner — overridable for tests. */
-  workflowRunnerFactory?: (tracker: TrackerProvider, config: import('../core/config/manager').WorkflowConfig) => WorkflowRunner;
+  workflowRunnerFactory?: (providers: ProviderBundle, config: import('../core/config/manager').WorkflowConfig) => WorkflowRunner;
   /** Factory for QARunner — overridable for tests. */
-  qaRunnerFactory?: (tracker: TrackerProvider, config: import('../core/config/manager').WorkflowConfig) => QARunner;
+  qaRunnerFactory?: (providers: ManagementProviderBundle, config: import('../core/config/manager').WorkflowConfig) => QARunner;
   /** Where to write this process's pid (so `afk loop stop` can find it). */
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
@@ -42,37 +38,38 @@ export interface LoopRunnerOptions {
    * E.g. { 'need::isolate': ['isolate'] }
    */
   moduleTriggers?: Record<string, string[]>;
+  /** Canonical providers for backlog-aware execution. */
+  providers: ProviderBundle;
 }
 
 export interface ChainContext {
-  iid: number;
+  iid: string;
   session: string;
   startedAt: number;
 }
 
 export interface LoopStatus {
-  implement: { active: number; ids: number[] };
-  qa: { active: number | null; queue: number[] };
+  implement: { active: number; ids: string[] };
+  qa: { active: string | null; queue: string[] };
   totals: { completed: number; failed: number; started: number };
   uptimeMs: number;
-  lastError: Record<number, string>;
+  lastError: Record<string, string>;
 }
 
 interface InternalOptions {
   maxConcurrent: number;
   pollIntervalMs: number;
   statusIntervalMs: number;
-  requiredLabels: string[];
-  excludeLabels: string[];
   shutdownTimeoutMs: number;
   maxIterations: number | undefined;
-  workflowRunnerFactory: (tracker: TrackerProvider, config: import('../core/config/manager').WorkflowConfig) => WorkflowRunner;
-  qaRunnerFactory: (tracker: TrackerProvider, config: import('../core/config/manager').WorkflowConfig) => QARunner;
+  workflowRunnerFactory: (providers: ProviderBundle, config: import('../core/config/manager').WorkflowConfig) => WorkflowRunner;
+  qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../core/config/manager').WorkflowConfig) => QARunner;
   pidFilePath: string;
   statusFilePath: string;
   ext: string[] | undefined;
   extParams: string[] | undefined;
   moduleTriggers: Record<string, string[]>;
+  providers: ProviderBundle;
 }
 
 const DEFAULTS = {
@@ -80,13 +77,6 @@ const DEFAULTS = {
   pollIntervalMs: 60_000,
   statusIntervalMs: 30_000,
   shutdownTimeoutMs: 300_000,
-  requiredLabels: ['mode::afk', 'stage::ready-for-issues'] as string[],
-  excludeLabels: [
-    'stage::afk-in-progress',
-    'stage::qa',
-    'stage::done',
-    'mode::hitl',
-  ] as string[],
   pidFilePath: path.join(os.homedir(), '.afk', 'loop.pid'),
   statusFilePath: path.join(os.homedir(), '.afk', 'loop-status.json'),
 };
@@ -95,7 +85,7 @@ const POLL_RETRY_DELAY_MS = 5_000;
 
 /**
  * LoopRunner — drives the full pipeline (implement → QA → done) for every
- * `stage::ready-for-issues` issue, continuously.
+ * canonical `ready`/`afk` backlog item, continuously.
  *
  * Two pools:
  *   - implement: N parallel `WorkflowRunner` instances, bounded by
@@ -104,30 +94,30 @@ const POLL_RETRY_DELAY_MS = 5_000;
  *
  * Each issue flows: poll → implement → qaQueue → qa → done/failed.
  *
- * Tracker labels remain the SSOT: the in-memory `inFlight` set is per-process
+ * Provider state remains the SSOT: the in-memory `inFlight` set is per-process
  * and rebuilt on restart. A reservation is held from poll until the chain
  * finishes (implement failure or QA completion release it — success keeps it
  * reserved while QA is queued, so poll can't double-start).
  */
 export class LoopRunner {
-  private readonly tracker: TrackerProvider;
   private readonly opts: InternalOptions;
+  private readonly managementProviders: ManagementProviderBundle;
 
   // Two pools + queue
-  private inImplement = new Map<number, ChainContext>();
+  private inImplement = new Map<string, ChainContext>();
   private inQA: ChainContext | null = null;
-  private qaQueue: number[] = [];
+  private qaQueue: string[] = [];
   // Serial QA executor: each enqueue appends a segment to this chain, so QA
   // runs FIFO, one at a time, with zero polling.
   private qaChain: Promise<void> = Promise.resolve();
 
   // Dedup + counters
-  private inFlight = new Set<number>();
+  private inFlight = new Set<string>();
   private polling = false; // true while a poll() tick is in flight
   private completed = 0;
   private failed = 0;
   private started = 0;
-  private lastError = new Map<number, string>();
+  private lastError = new Map<string, string>();
   private startTime = 0;
 
   // Lifecycle
@@ -139,23 +129,26 @@ export class LoopRunner {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private statusTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(tracker: TrackerProvider, options: Partial<LoopRunnerOptions> = {}) {
-    this.tracker = tracker;
+  constructor(private readonly providers: ProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
+    this.managementProviders = {
+      backlog: new ManagementBacklogProvider(providers.backlog),
+      branches: providers.branches,
+      changes: providers.changes,
+    };
     this.opts = {
       maxConcurrent: options.maxConcurrent ?? DEFAULTS.maxConcurrent,
       pollIntervalMs: options.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
       statusIntervalMs: options.statusIntervalMs ?? DEFAULTS.statusIntervalMs,
-      requiredLabels: options.requiredLabels ?? DEFAULTS.requiredLabels,
-      excludeLabels: options.excludeLabels ?? DEFAULTS.excludeLabels,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULTS.shutdownTimeoutMs,
       maxIterations: options.maxIterations,
-      workflowRunnerFactory: options.workflowRunnerFactory ?? ((t, cfg) => new WorkflowRunner(t, { config: cfg })),
-      qaRunnerFactory: options.qaRunnerFactory ?? ((t, cfg) => new QARunner(t, cfg)),
+      workflowRunnerFactory: options.workflowRunnerFactory ?? ((p, cfg) => new WorkflowRunner(p, { config: cfg })),
+      qaRunnerFactory: options.qaRunnerFactory ?? ((p, cfg) => new QARunner(p, cfg)),
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
       statusFilePath: options.statusFilePath ?? DEFAULTS.statusFilePath,
       ext: options.ext,
       extParams: options.extParams,
       moduleTriggers: options.moduleTriggers ?? {},
+      providers: this.providers,
     };
   }
 
@@ -176,8 +169,6 @@ export class LoopRunner {
       {
         maxConcurrent: this.opts.maxConcurrent,
         pollIntervalMs: this.opts.pollIntervalMs,
-        requiredLabels: this.opts.requiredLabels,
-        excludeLabels: this.opts.excludeLabels,
         pid: process.pid,
         pidFile: this.opts.pidFilePath,
       },
@@ -286,7 +277,7 @@ export class LoopRunner {
   }
 
   /**
-   * Pull ready issues from the tracker and fire implement chains.
+   * Pull runnable backlog items from the provider and fire implement chains.
    * Tracker errors are logged and swallowed — the loop never dies from a
    * single bad poll.
    */
@@ -299,39 +290,36 @@ export class LoopRunner {
     this.polling = true;
     logger.info({ tickIntervalMs: this.opts.pollIntervalMs }, 'poll tick begin');
     try {
-      const issues = await this.tracker.listIssues({
-        labels: this.opts.requiredLabels,
-        state: 'opened',
-      });
+      const issues = await this.providers.backlog.list({ state: 'ready', executionMode: 'afk' });
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;
       let skipped = 0;
 
       for (const issue of issues) {
+        const issueId = String(issue.id);
         if (!this.running) break;
 
-        if (this.inFlight.has(issue.id)) { skipped++; continue; }
-        if (this.opts.excludeLabels.some(l => issue.labels.includes(l))) { skipped++; continue; }
+        if (this.inFlight.has(issueId)) { skipped++; continue; }
         // Cap reached: later issues can't start either — break, don't continue.
         if (this.inImplement.size >= this.opts.maxConcurrent) { skipped++; break; }
 
         // Reserve BEFORE any await so overlapping ticks cannot double-start.
-        this.inFlight.add(issue.id);
-        const check = await checkIssuePreconditions(this.tracker, issue.id);
+        this.inFlight.add(issueId);
+        const check = { ok: await this.providers.backlog.isRunnable(issue) };
         if (!check.ok) {
-          this.inFlight.delete(issue.id);
-          logger.info({ iid: issue.id, reason: check.reason }, 'issue skipped by preconditions');
+          this.inFlight.delete(issueId);
+          logger.info({ iid: issueId, reason: (check as any).reason }, 'issue skipped by preconditions');
           skipped++;
           continue;
         }
 
-        this.inImplement.set(issue.id, { iid: issue.id, session: '', startedAt: 0 });
+        this.inImplement.set(issueId, { iid: issueId, session: '', startedAt: 0 });
         this.started++;
         enqueued++;
-        logger.info({ iid: issue.id, projectId: issue.projectId, inImplement: this.inImplement.size }, 'issue enqueued for implement');
+        logger.info({ iid: issueId, inImplement: this.inImplement.size }, 'backlog enqueued for implement');
         // Fire-and-forget — chain manages its own inImplement membership
-        void this.runChain(issue.id, issue.projectId);
+        void this.runChain(issueId);
       }
 
       logger.info({ found: issues.length, enqueued, skipped }, 'poll complete');
@@ -349,49 +337,44 @@ export class LoopRunner {
    * Implement chain: WorkflowRunner → on success, push to qaQueue.
    * Errors never crash the loop.
    */
-  private async runChain(iid: number, projectName?: string): Promise<void> {
-    const session = this.tracker.platform === 'github' ? `afk-gh-${iid}` : `afk-gl-${iid}`;
+  private async runChain(iid: string, projectName?: string): Promise<void> {
+    const session = `afk-${iid}-${Date.now()}`;
     const ctx: ChainContext = { iid, session, startedAt: Date.now() };
     this.inImplement.set(iid, ctx);
     this.emitEvent(`#${iid} implement started (session=${session})`);
     logger.info({ iid, session, projectName }, 'implement chain starting');
 
     let baseBranch = 'main';
-    try {
-      baseBranch = await this.tracker.detectTargetBranch(iid);
-      logger.info({ iid, baseBranch }, 'target branch detected');
-    } catch (err) {
-      logger.warn({ iid, err }, 'detectTargetBranch failed, defaulting to main');
-    }
 
     try {
       const resolvedExt = await this.resolveModules(iid);
       logger.info({ iid, resolvedExt }, 'modules resolved');
-      const runner = this.opts.workflowRunnerFactory(this.tracker, getWorkflowConfig());
+      const runner = this.opts.workflowRunnerFactory(this.providers, getWorkflowConfig());
       const result = await runner.run({
-        iid,
         session,
         projectName,
         targetBranch: baseBranch,
         baseBranch,
         ext: resolvedExt,
         extParams: this.opts.extParams,
+        backlogId: String(iid),
+        executionMode: 'batch',
       });
       logger.info({ iid, success: result.success, url: result.url }, 'WorkflowRunner.run returned');
 
       if (result.success) {
         const elapsed = formatDuration(Date.now() - ctx.startedAt);
-        this.emitEvent(`#${iid} implement → stage::qa (${elapsed})`);
+        this.emitEvent(`${iid} implement → verification (${elapsed})`);
         this.enqueueQA(iid);
         logger.info({ iid, elapsed, url: result.url }, 'implement succeeded; queued for QA');
       } else {
-        // WorkflowRunner's own cleanupOnFailure already added mode::hitl
+        // WorkflowRunner terminalized the failure in the provider.
         this.failed++;
         // Release the reservation: a failed issue must be re-pickable once
-        // a human clears mode::hitl (otherwise it's skipped forever).
+        // a human can requeue the item after resolving the failure.
         this.inFlight.delete(iid);
         this.lastError.set(iid, 'implement-failed');
-        this.emitEvent(`#${iid} implement failed → mode::hitl`);
+        this.emitEvent(`${iid} implement failed → blocked/hitl`);
         logger.warn({ iid }, 'implement returned unsuccessful');
       }
     } catch (error) {
@@ -403,10 +386,10 @@ export class LoopRunner {
       this.inFlight.delete(iid);
       this.lastError.set(iid, `implement-crash: ${msg}`);
       logger.error({ iid, err: error }, 'implement chain crashed');
-      this.emitEvent(`#${iid} implement crashed: ${msg}`);
+        this.emitEvent(`${iid} implement crashed → blocked/hitl: ${msg}`);
       try {
-        await this.tracker.addLabel(iid, 'mode::hitl');
-        await this.tracker.removeLabel(iid, 'stage::afk-in-progress');
+        await this.providers.backlog.transition(String(iid), 'blocked', { reason: msg });
+        await this.providers.backlog.setExecutionMode(String(iid), 'hitl');
       } catch { /* best-effort */ }
     } finally {
       this.inImplement.delete(iid);
@@ -415,16 +398,16 @@ export class LoopRunner {
   }
 
   /**
-   * Resolve activated modules for an issue based on its labels.
+   * Resolve activated modules from provider-neutral business tags.
    *
    * 1. Start with the static `--ext` list (if any)
-   * 2. If `moduleTriggers` is configured, fetch the issue and check its labels
+   * 2. If `moduleTriggers` is configured, fetch the item and check its tags
    * 3. Union the triggered modules with the base list
    *
    * On fetch failure, falls back to the static `--ext` list (doesn't break the
    * loop — the caller handles the error path).
    */
-  private async resolveModules(iid: number): Promise<string[] | undefined> {
+  private async resolveModules(iid: string): Promise<string[] | undefined> {
     const triggers = this.opts.moduleTriggers;
     const base = this.opts.ext ?? [];
 
@@ -434,11 +417,11 @@ export class LoopRunner {
     }
 
     try {
-      const issue = await this.tracker.getIssue(iid);
+      const item = await this.providers.backlog.get(iid);
       const merged = new Set(base);
 
-      for (const [label, modules] of Object.entries(triggers)) {
-        if (issue.labels.includes(label)) {
+      for (const [tag, modules] of Object.entries(triggers)) {
+        if (item.tags.includes(tag)) {
           for (const mod of modules) {
             merged.add(mod);
           }
@@ -447,7 +430,7 @@ export class LoopRunner {
 
       return [...merged];
     } catch (err) {
-      logger.warn({ iid, err }, 'failed to resolve modules from labels, falling back to static ext');
+      logger.warn({ iid, err }, 'failed to resolve modules from tags, falling back to static ext');
       return base.length > 0 ? base : undefined;
     }
   }
@@ -456,7 +439,7 @@ export class LoopRunner {
    * Enqueue an issue for QA. Appends to the serial promise chain — QA runs
    * FIFO, one at a time, with no polling timer.
    */
-  private enqueueQA(iid: number): void {
+  private enqueueQA(iid: string): void {
     this.qaQueue.push(iid);
     this.qaChain = this.qaChain
       .then(() => this.runQA())
@@ -483,16 +466,11 @@ export class LoopRunner {
     };
 
     // Re-check the issue is still ready for QA (could be already done/hitl
-    // by another process since the chain finished). Trust that the implement
-    // chain just pushed it to qaQueue — it must have been labeled stage::qa
-    // by WorkflowRunner.autoWrapup, or this entry shouldn't be here.
+    // by another process since the chain finished).
     try {
-      const issue = await this.tracker.getIssue(iid);
-      const hasDone = issue.labels.includes('stage::done');
-      const hasHitl = issue.labels.includes('mode::hitl');
-      if (hasDone || hasHitl) {
-        logger.info({ iid, hasDone, hasHitl }, 'issue no longer needs QA, skipping');
-        this.emitEvent(`#${iid} qa skipped (state changed: done=${hasDone} hitl=${hasHitl})`);
+      const item = await this.providers.backlog.get(String(iid));
+      if (item.state !== 'verification') {
+        logger.info({ iid, state: item.state }, 'backlog no longer needs QA, skipping');
         this.inFlight.delete(iid);
         return;
       }
@@ -501,24 +479,24 @@ export class LoopRunner {
     }
 
     this.inQA = ctx;
-    this.emitEvent(`#${iid} qa started`);
+      this.emitEvent(`${iid} QA started`);
     logger.info({ iid, session: ctx.session }, 'qa chain starting');
 
     try {
-      const qa = this.opts.qaRunnerFactory(this.tracker, getWorkflowConfig());
+      const qa = this.opts.qaRunnerFactory(this.managementProviders, getWorkflowConfig());
       const result = await qa.process(iid);
       const elapsed = formatDuration(Date.now() - ctx.startedAt);
 
       if (result.success) {
         this.completed++;
         this.lastError.delete(iid);
-        this.emitEvent(`#${iid} qa passed → stage::done (${elapsed})${result.mrUrl ? ` mr=${result.mrUrl}` : ''}`);
+        this.emitEvent(`${iid} QA passed → done (${elapsed})${result.mrUrl ? ` change=${result.mrUrl}` : ''}`);
         logger.info({ iid, mrUrl: result.mrUrl, elapsed }, 'qa passed');
       } else {
-        // QARunner adds mode::hitl on its own failure paths
+        // QARunner terminalizes failure in the provider.
         this.failed++;
         this.lastError.set(iid, 'qa-failed');
-        this.emitEvent(`#${iid} qa failed → mode::hitl (${elapsed})`);
+        this.emitEvent(`${iid} QA failed → blocked/hitl (${elapsed})`);
         logger.warn({ iid, elapsed }, 'qa failed');
       }
     } catch (error) {
@@ -528,7 +506,8 @@ export class LoopRunner {
       logger.error({ iid, err: error }, 'qa crashed');
       this.emitEvent(`#${iid} qa crashed: ${msg}`);
       try {
-        await this.tracker.addLabel(iid, 'mode::hitl');
+        await this.providers.backlog.transition(String(iid), 'blocked', { reason: msg });
+        await this.providers.backlog.setExecutionMode(String(iid), 'hitl');
       } catch { /* best-effort */ }
     } finally {
       this.inQA = null;

@@ -1,8 +1,8 @@
-# DDD-Aware Issue Slicing
+# DDD-Aware Backlog Slicing
 
-**Purpose**: Slice PRD user stories into issues along bounded context boundaries, not horizontal layers.
+**Purpose**: Slice PRD user stories into backlog items along bounded context boundaries, not horizontal layers.
 **When**: Every afk-to-issues session — after reading PRD and identifying contexts.
-**Output**: tracker issues with bounded context annotations and relevant ADR references.
+**Output**: provider-neutral backlog items with bounded context annotations and relevant ADR references.
 
 ---
 
@@ -24,10 +24,10 @@ Vertical slices can be implemented, tested, and shipped independently within one
 
 ## Slicing Rules
 
-### Rule 1 — One Context Per Issue
+### Rule 1 — One Context Per Backlog
 
-Each issue should operate within **one bounded context**.
-If work crosses a context boundary, split into multiple issues with `blocked_by` links.
+Each backlog item should operate within **one bounded context**.
+If work crosses a context boundary, split into multiple items with `dependsOn` links.
 
 ### Rule 2 — Full Stack Within Context
 
@@ -43,11 +43,11 @@ If an aggregate (e.g., WikiPage) spans multiple concerns, split along the aggreg
 
 ### Rule 4 — Cross-Context Events
 
-If issue A publishes an event and issue B consumes it, B MUST be `blocked_by` A.
+If item A publishes an event and item B consumes it, B MUST list A in `dependsOn`.
 
 ---
 
-## Issue Template with Architecture Context
+## Backlog Manifest Item with Architecture Context
 
 ```markdown
 ## Context
@@ -67,12 +67,12 @@ If issue A publishes an event and issue B consumes it, B MUST be `blocked_by` A.
 
 ## Slicing Checklist
 
-Before creating an issue, confirm:
+Before emitting a backlog manifest item, confirm:
 
-- [ ] Does this issue operate within ONE bounded context?
-- [ ] Can this be implemented and tested without depending on another unmerged issue?
+- [ ] Does this backlog item operate within ONE bounded context?
+- [ ] Can this be implemented and tested without depending on another incomplete item?
 - [ ] Does it include everything within the context (model + API + logic + test)?
-- [ ] If it triggers downstream contexts via events, is the consumer issue `blocked_by` this one?
+- [ ] If it triggers downstream contexts via events, does the consumer list this item in `dependsOn`?
 
 ---
 
@@ -83,21 +83,21 @@ Given PRD with contexts: Order, Inventory, Notification
 ```
 PRD User Story: "Customer can reorder an out-of-stock item"
 
-→ Issue #1:  [Inventory] Reorder trigger: detect low stock, create reorder proposal
-    blocked_by: none
+→ backlog-inventory:  [Inventory] Reorder trigger: detect low stock, create reorder proposal
+    dependsOn: []
 
-→ Issue #2:  [Order] Reorder: create new Order from reorder proposal
-    blocked_by: #1
+→ backlog-order:  [Order] Reorder: create new Order from reorder proposal
+    dependsOn: [backlog-inventory]
 
-→ Issue #3:  [Notification] Reorder: notify customer when item is available
-    blocked_by: #2 (same Order trigger, different behavior)
+→ backlog-notification:  [Notification] Reorder: notify customer when item is available
+    dependsOn: [backlog-order] (same Order trigger, different behavior)
 ```
 
 ---
 
 ## Anti-Patterns
 
-- MUST NOT create an issue that spans two bounded contexts without splitting
-- MUST NOT create an issue for only "the model" or "the API" — must be full vertical
-- MUST NOT skip `blocked_by` for event-driven cross-context dependencies
-- MUST NOT slice so fine that each issue is just one method — aggregate related changes
+- MUST NOT create a backlog item that spans two bounded contexts without splitting
+- MUST NOT create an item for only "the model" or "the API" — it must be a full vertical slice
+- MUST NOT omit `dependsOn` for event-driven cross-context dependencies
+- MUST NOT slice so fine that each item is just one method — aggregate related changes

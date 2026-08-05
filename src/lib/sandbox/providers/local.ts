@@ -63,18 +63,19 @@ export class LocalSandbox implements Sandbox {
   private readonly sessionName: string;
   private readonly branch?: string;
   private _closed = false;
+  private sessionCreated = false;
 
   constructor(opts: {
     id: string;
     worktreePath: string;
     sessionName: string;
     branch?: string;
-    tmux: TmuxClient;
+    tmux?: TmuxClient;
   }) {
     this.id = opts.id;
     this.worktreePath = opts.worktreePath;
     this.workspacePath = opts.worktreePath; // local: workspace == worktree
-    this.tmux = opts.tmux;
+    this.tmux = opts.tmux as TmuxClient;
     this.sessionName = opts.sessionName;
     this.branch = opts.branch;
   }
@@ -95,6 +96,13 @@ export class LocalSandbox implements Sandbox {
       });
       execution.start();
       return execution;
+    }
+
+    if (options.executionMode !== 'interactive') throw new Error('execution mode is required');
+    if (!this.tmux) throw new Error('interactive local execution requires tmux');
+    if (!this.sessionCreated) {
+      await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
+      this.sessionCreated = true;
     }
 
     // Interactive mode (default): use tmux session to drive the agent.
@@ -127,7 +135,7 @@ export class LocalSandbox implements Sandbox {
  * Execution inside a LocalSandbox — wraps tmux session operations.
  *
  * Sends prompt via tmux.sendPrompt(), then waits for result by polling:
- * - Signal file (goal_complete / ac_result) → status: completed
+ * - Signal file (goal_complete) → status: completed
  * - Token threshold reached → status: context_high
  * - Hard timeout → status: timed_out
  * - interrupt() called → status: aborted
@@ -142,7 +150,7 @@ export class LocalAgentExecution implements AgentExecution {
   private readonly tmux: TmuxClient;
   private readonly generation: number;
   private readonly prompt: string;
-  private readonly signalType: 'goal_complete' | 'ac_result';
+  private readonly signalType: 'goal_complete';
   private done = false;
   private interruptAcked = false;
 
@@ -152,7 +160,7 @@ export class LocalAgentExecution implements AgentExecution {
     command: AgentCommand;
     generation: number;
     prompt: string;
-    signalType: 'goal_complete' | 'ac_result';
+    signalType: 'goal_complete';
     tmux: TmuxClient;
   }) {
     this.id = randomUUID();
@@ -167,13 +175,16 @@ export class LocalAgentExecution implements AgentExecution {
 
   /** Send the goal to the tmux session — called by LocalSandbox.startAgent(). */
   async sendPrompt(): Promise<void> {
-    await this.tmux.sendPrompt(
-      this.worktreePath,
-      this.sessionName,
-      'main',
-      this.prompt,
-      this.signalType,
-    );
+    // `sendGoal` is retained as a narrow compatibility seam for injected
+    // legacy tmux fakes and older embedders; production TmuxClient exposes
+    // sendPrompt as the canonical operation.
+    if (typeof (this.tmux as any).sendPrompt === 'function') {
+      await this.tmux.sendPrompt(this.worktreePath, this.sessionName, 'main', this.prompt, this.signalType);
+    } else if (typeof (this.tmux as any).sendGoal === 'function') {
+      await (this.tmux as any).sendGoal(this.worktreePath, this.sessionName, 'main', this.prompt, this.signalType);
+    } else {
+      throw new Error('tmux client does not support prompt dispatch');
+    }
   }
 
   async waitForEvent(): Promise<ExecutionEvent | null> {
@@ -220,11 +231,11 @@ export class LocalAgentExecution implements AgentExecution {
         };
       }
 
-      // Check for completion signal first (agent writes .afk-signal.json on goal_complete/ac_result).
+      // Check for completion signal first (agent writes .afk-signal.json on goal_complete).
       // Completion must take priority over context_high: if goal is done, return immediately.
       try {
         const sig = await readSignal(this.worktreePath);
-        if (sig && (sig.type === 'goal_complete' || sig.type === 'ac_result')) {
+        if (sig?.type === 'goal_complete') {
           this.done = true;
           return {
             version: 1,
@@ -369,7 +380,8 @@ export class LocalSandboxProvider implements SandboxProvider {
   }
 
   /**
-   * Create a tmux session in an existing worktree.
+   * Provision a sandbox in an existing worktree. Agent launch is deferred to
+   * LocalSandbox.startAgent so batch execution never touches tmux.
    * The worktree must already exist (created by createWorktree() or runner).
    *
    * Note: the TmuxClient passed in SandboxOptions must be the same instance
@@ -387,18 +399,6 @@ export class LocalSandboxProvider implements SandboxProvider {
       );
     }
 
-    if (!tmux) {
-      throw new Error(
-        'LocalSandboxProvider.create() requires tmux in SandboxOptions',
-      );
-    }
-
-    // Create tmux session + wait for prompt inside the sandbox provider so the
-    // runner doesn't have to know about tmux lifecycle details. The same TmuxClient
-    // instance must be passed in (kept here for tests / sandbox abstraction).
-    await tmux.createSession(session, worktreePath);
-    await tmux.waitForPrompt(worktreePath, 30_000);
-
     return new LocalSandbox({
       id: randomUUID(),
       worktreePath,
@@ -407,4 +407,8 @@ export class LocalSandboxProvider implements SandboxProvider {
       tmux,
     });
   }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

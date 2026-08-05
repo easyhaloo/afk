@@ -17,7 +17,7 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { WorktreeManager } from '../../core/git';
 import { TmuxClient } from '../../core/tmux/tmux';
-import { getTokenUsage, readSignal } from '../../io';
+import { clearSignal, getTokenUsage, readSignal } from '../../io';
 import { StreamingAgentExecution } from './streaming';
 import {
   type SandboxProvider,
@@ -100,6 +100,7 @@ export class LocalSandbox implements Sandbox {
 
     if (options.executionMode !== 'interactive') throw new Error('execution mode is required');
     if (!this.tmux) throw new Error('interactive local execution requires tmux');
+    await clearSignal(this.worktreePath);
     if (!this.sessionCreated) {
       await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
       this.sessionCreated = true;

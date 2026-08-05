@@ -94,6 +94,9 @@ describe('QARunner execution boundary', () => {
       agentProvider: f.agentProvider,
       prompt: expect.stringContaining('"kind":"qa"'),
     }));
+    const qaPrompt = f.sandbox.startAgent.mock.calls[0][0].prompt;
+    expect(qaPrompt).toContain('Backlog title: search mode');
+    expect(qaPrompt).toContain('Backlog description:\nsupport /s');
     expect(tmux.createSession).not.toHaveBeenCalled();
     expect(tmux.waitForPrompt).not.toHaveBeenCalled();
     expect(tmux.sendPrompt).not.toHaveBeenCalled();

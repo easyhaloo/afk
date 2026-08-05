@@ -109,7 +109,9 @@ export class QARunner {
       });
       logger.info({ backlogId: id, session, sandboxId: sandbox.id }, 'QA sandbox created');
 
-      const prompt = buildExecutionPrompt(qaStep.prompt.replaceAll('{iid}', id), this.executionMode, 'qa');
+      const description = backlog.description?.trim();
+      const goal = `${qaStep.prompt.replaceAll('{iid}', id)}\n\nBacklog title: ${backlog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
+      const prompt = buildExecutionPrompt(goal, this.executionMode, 'qa');
       const command = this.agentProvider.buildCommand({
         worktreePath,
         sessionId: session,

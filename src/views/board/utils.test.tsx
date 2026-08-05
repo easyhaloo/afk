@@ -13,7 +13,7 @@ describe('visualWidth', () => {
   });
 
   it('handles mixed content', () => {
-    expect(visualWidth('stage::qa')).toBe(9); // s-t-a-g-e-::-q-a = 9
+    expect(visualWidth('team:qa')).toBe(7);
   });
 });
 
@@ -34,15 +34,13 @@ describe('truncateByVisualWidth', () => {
   });
 
   it('handles mixed ASCII and CJK', () => {
-    // 'stage::中文' = 8 visual width, leaving room for '…' (2) = total 10
-    // So we can fit 'stage::中文' + '…' = 10
-    const result = truncateByVisualWidth('stage::中文标签', 10);
+    const result = truncateByVisualWidth('team:中文标签', 10);
     expect(visualWidth(result)).toBeLessThanOrEqual(10);
     expect(result.endsWith('…')).toBe(true);
   });
 
-  it('truncates long label strings at 20 visual width (issue #40)', () => {
-    const longLabels = 'mode::afk, stage::qa, base::prd-33, session::afk-gh-35';
+  it('truncates long tag strings at 20 visual width', () => {
+    const longLabels = 'team:api, priority:high, domain:billing, owner:platform';
     const result = truncateByVisualWidth(longLabels, 20);
     expect(visualWidth(result)).toBeLessThanOrEqual(20);
     expect(result.endsWith('…')).toBe(true);

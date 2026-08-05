@@ -1,7 +1,7 @@
 # TDD Feature Development
 
 **Use when:** Adding new behavior, API endpoints, data models, or UI
-components. The majority of AFK issues fall here.
+components. The majority of AFK backlog items fall here.
 
 ## Core Loop
 
@@ -22,9 +22,9 @@ HC-2.
 
 1. **Read git log** (`git log --oneline -5`) — know where you are.
 2. **Identify AC lines** — each AC maps to at least one test.
-3. **Write the first failing test** — Red. Commit with `wip: <desc> #<iid>`.
-4. **Implement to make it pass** — Green. Commit with `feat: <desc> #<iid>`.
-5. **Refactor if needed** — commit with `refactor: <desc> #<iid>`.
+3. **Write the first failing test** — Red. Commit with `wip: <desc> (backlog {backlogId})`.
+4. **Implement to make it pass** — Green. Commit with `feat: <desc> (backlog {backlogId})`.
+5. **Refactor if needed** — commit with `refactor: <desc> (backlog {backlogId})`.
 6. **Repeat for each AC**.
 7. **Final verification** — run all tests, verify all AC lines satisfied.
 8. **WIP commit** with the standard Progress format.
@@ -33,7 +33,7 @@ HC-2.
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-<type>: <short description> #<iid>
+<type>: <short description> (backlog {backlogId})
 
 Progress:
 - [x] <AC line 1> -- <evidence, e.g. "TestX passes"
@@ -46,7 +46,7 @@ EOF
 
 Valid `<type>` values: `feat`, `fix`, `refactor`, `wip`.
 The `wip:` prefix is used only for intermediate checkpoints, not the
-final commit before MR.
+final commit before publishing the provider change.
 
 ## Anti-Patterns
 

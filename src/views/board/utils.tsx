@@ -76,7 +76,10 @@ export function parseMarkdownLine(line: string): React.ReactNode[] | null {
     // - list item (but not ---)
     const listMatch = remaining.match(/^-\s+(.*)/);
     if (listMatch) {
-      parts.push(<Text key={key++}>• {listMatch[1]}</Text>);
+      const nested = parseMarkdownLine(listMatch[1]);
+      parts.push(nested
+        ? <Text key={key++}>• {nested}</Text>
+        : <Text key={key++}>• {listMatch[1]}</Text>);
       remaining = remaining.slice(listMatch[0].length);
       continue;
     }
@@ -84,7 +87,10 @@ export function parseMarkdownLine(line: string): React.ReactNode[] | null {
     // 1. ordered list item
     const orderedMatch = remaining.match(/^\d+\.\s+(.*)/);
     if (orderedMatch) {
-      parts.push(<Text key={key++}>· {orderedMatch[1]}</Text>);
+      const nested = parseMarkdownLine(orderedMatch[1]);
+      parts.push(nested
+        ? <Text key={key++}>· {nested}</Text>
+        : <Text key={key++}>· {orderedMatch[1]}</Text>);
       remaining = remaining.slice(orderedMatch[0].length);
       continue;
     }

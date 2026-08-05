@@ -19,19 +19,13 @@ export interface CommandEntry {
  */
 export const COMMANDS: CommandEntry[] = [
   { names: ['signal'], loader: () => import('./commands/signal.js').then(m => m.registerSignalCommands) },
-  // tracker.ts registers flat `issue` + `mr` commands (no `tracker` parent).
-  // The legacy `github` / `gitlab` command groups are gone: all issue/mr
-  // operations go through `afk issue` / `afk mr`.
-  { names: ['issue', 'mr'], loader: () => import('./commands/tracker.js').then(m => m.registerTrackerCommands) },
   { names: ['tmux'], loader: () => import('./commands/tmux.js').then(m => m.registerTmuxCommands) },
-  { names: ['worktree'], loader: () => import('./commands/worktree.js').then(m => m.registerWorktreeCommands) },
-  { names: ['workflow'], loader: () => import('./commands/workflow.js').then(m => m.registerWorkflowCommands) },
-  { names: ['scheduler'], loader: () => import('./commands/scheduler.js').then(m => m.registerSchedulerCommands) },
   { names: ['board'], loader: () => import('./commands/board.js').then(m => m.registerBoardCommands) },
   { names: ['kanban'], loader: () => import('./commands/kanban.js').then(m => m.registerKanbanCommands) },
   { names: ['debug'], loader: () => import('./commands/debug.js').then(m => m.registerDebugCommands) },
-  { names: ['escalate'], loader: () => import('./commands/escalate.js').then(m => m.registerEscalateCommands) },
   { names: ['isolate'], loader: () => import('./commands/isolate.js').then(m => m.registerIsolateCommands) },
+  { names: ['backlog'], loader: () => import('./commands/backlog.js').then(m => m.registerBacklogCommands) },
+  { names: ['run'], loader: () => import('./commands/run.js').then(m => m.registerRunCommands) },
   { names: ['qa'], loader: () => import('./commands/qa.js').then(m => m.registerQACommands) },
   { names: ['loop'], loader: () => import('./commands/loop.js').then(m => m.registerLoopCommands) },
   { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },

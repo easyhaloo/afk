@@ -15,11 +15,20 @@
  */
 
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { dirname, isAbsolute, join, resolve } from 'path';
 import { homedir } from 'os';
 import * as YAML from 'js-yaml';
 import { WorkflowTemplateSchema, type WorkflowTemplate } from './types';
 import { TemplateError } from './types';
+import { getTemplate } from './registry';
+
+export type TemplateSource = 'cli' | 'project' | 'user' | 'builtin';
+export interface LoadedTemplate {
+  template: WorkflowTemplate;
+  source: TemplateSource;
+  /** Directory that owns prompt paths. Undefined for in-memory builtins. */
+  baseDir?: string;
+}
 
 export interface TemplateLoaderOptions {
   /** Project root for `.afk/workflows/`. Defaults to process.cwd(). */
@@ -33,7 +42,7 @@ export interface TemplateLoaderOptions {
 export class TemplateLoader {
   private readonly projectRoot: string;
   private readonly homeDir: string;
-  private readonly cache = new Map<string, WorkflowTemplate>();
+  private readonly cache = new Map<string, LoadedTemplate>();
 
   constructor(opts: TemplateLoaderOptions = {}) {
     this.projectRoot = opts.projectRoot ?? process.cwd();
@@ -42,12 +51,17 @@ export class TemplateLoader {
 
   /** Search priority chain for the named template; returns first hit. */
   async load(name: string, opts: TemplateLoaderOptions = {}): Promise<WorkflowTemplate> {
+    return (await this.loadWithSource(name, opts)).template;
+  }
+
+  /** Load a template plus its origin so callers can resolve relative assets. */
+  async loadWithSource(name: string, opts: TemplateLoaderOptions = {}): Promise<LoadedTemplate> {
     if (!opts.bypassCache && this.cache.has(name)) {
       return this.cache.get(name)!;
     }
 
     // CLI path: if name contains '/' or '.yml', treat as a direct file path.
-    const candidates: Array<{ path: string; source: string }> = [];
+    const candidates: Array<{ path: string; source: TemplateSource }> = [];
     if (name.includes('/') || name.endsWith('.yml') || name.endsWith('.yaml')) {
       candidates.push({ path: name, source: 'cli' });
     }
@@ -59,9 +73,10 @@ export class TemplateLoader {
     for (const c of candidates) {
       try {
         const content = await fs.readFile(c.path, 'utf-8');
-        const template = this.parseAndValidate(content, name);
-        this.cache.set(name, template);
-        return template;
+        const template = this.resolvePromptPaths(this.parseAndValidate(content, name), dirname(resolve(c.path)));
+        const loaded = { template, source: c.source, baseDir: dirname(resolve(c.path)) };
+        this.cache.set(name, loaded);
+        return loaded;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
         if (err instanceof TemplateError) {
@@ -70,6 +85,12 @@ export class TemplateLoader {
         }
         throw err;
       }
+    }
+    const builtin = getTemplate(name);
+    if (builtin) {
+      const loaded = { template: builtin, source: 'builtin' as const };
+      this.cache.set(name, loaded);
+      return loaded;
     }
     throw new TemplateError(`template '${name}' not found in CLI / project / user paths`, name);
   }
@@ -93,5 +114,15 @@ export class TemplateLoader {
   /** Clear the cache (used by tests after filesystem changes). */
   clearCache(): void {
     this.cache.clear();
+  }
+
+  private resolvePromptPaths(template: WorkflowTemplate, baseDir: string): WorkflowTemplate {
+    return {
+      ...template,
+      steps: template.steps.map(step => {
+        if (!step.prompt || typeof step.prompt === 'string' || isAbsolute(step.prompt.file)) return step;
+        return { ...step, prompt: { file: resolve(baseDir, step.prompt.file) } };
+      }),
+    };
   }
 }

@@ -1,381 +1,243 @@
-/**
- * App - Main app component with declarative state-driven architecture
- */
-import React, { useEffect, useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { useState as useAppState, createActions } from './hooks';
 import { initRegistry } from '../board/registry/init';
-import { TaskListView, IssueListView, ProjectListView, BoardView, DetailScreen, HelpDialog, BreathingSeparator, DebugOverlay, Header, Footer, Notification } from '../board/views/index';
-import type { Task, Issue, Project } from '../../types/board';
+import {
+  TaskListView,
+  BacklogListView,
+  ProjectListView,
+  BoardView,
+  DetailScreen,
+  HelpDialog,
+  DebugOverlay,
+  Header,
+  Footer,
+  Notification,
+} from '../board/views/index';
+import { getListViewportHeight } from '../board/layout';
+import type { Task, Project } from '../../types/board';
+import type { Branch, Commit, Tag } from '../../lib/core/tracker/types';
+import type { BacklogViewModel } from '../board/data/backlog-adapter';
+import type { View } from '../board/types';
 
-// Initialize view registry at module load
 initRegistry();
 
 interface Props {
   tasks: Task[];
-  issues: Issue[];
+  backlogs: BacklogViewModel[];
   projects: Project[];
-  sessions: any[];
-  projectBranches: any[];
-  projectTags: any[];
-  projectCommits: any[];
-  issueHasMore: boolean;
+  projectBranches: Branch[];
+  projectTags: Tag[];
+  projectCommits: Commit[];
   projectHasMore: boolean;
   onLoadProjectDetail: (project: Project) => void;
-  onReloadTasks: () => void;
-  onRemoveSession: (name: string) => void;
-  onAddTaskFromIssue: (issue: Issue, options: any) => Promise<Task>;
-  onLaunchFromIssue: (issue: Issue, options: any) => Promise<void>;
-  onLaunchExistingTask: (iid: number, session: string) => Promise<void>;
-  onFetchMoreIssues: () => void;
+  onReloadTasks: () => Promise<unknown> | void;
+  onReloadBacklogs: () => Promise<unknown> | void;
   onFetchMoreProjects: () => void;
   onInvalidateDetailCache: () => void;
   onAttachSession?: (task: Task) => void;
-  onViewChange?: (view: string) => void;
+  onViewChange?: (view: View) => void;
 }
 
 export function AppContent({
-  tasks, issues, projects, sessions,
-  projectBranches, projectTags, projectCommits,
-  issueHasMore, projectHasMore,
-  onLoadProjectDetail, onReloadTasks, onRemoveSession,
-  onAddTaskFromIssue, onLaunchFromIssue, onLaunchExistingTask,
-  onFetchMoreIssues, onFetchMoreProjects, onInvalidateDetailCache,
-  onAttachSession, onViewChange,
+  tasks,
+  backlogs,
+  projects,
+  projectBranches,
+  projectTags,
+  projectCommits,
+  projectHasMore,
+  onLoadProjectDetail,
+  onReloadTasks,
+  onReloadBacklogs,
+  onFetchMoreProjects,
+  onInvalidateDetailCache,
+  onAttachSession,
+  onViewChange,
 }: Props) {
   const { state, dispatch, currentView, currentContext, isDetailMode } = useAppState();
   const actions = createActions({ state, dispatch, currentView, currentContext, isDetailMode });
+  const [dimensions, setDimensions] = useState({ width: process.stdout.columns || 80, height: process.stdout.rows || 24 });
 
-  // Notify parent when view changes (for data loading)
-  React.useEffect(() => {
+  useEffect(() => {
     onViewChange?.(currentView);
   }, [currentView, onViewChange]);
 
-  // Window dimensions - update on resize
-  const [dimensions, setDimensions] = useState({ W: process.stdout.columns || 80, H: process.stdout.rows || 24 });
-
   useEffect(() => {
-    const checkSize = () => {
-      const newW = process.stdout.columns || 80;
-      const newH = process.stdout.rows || 24;
-      setDimensions((prev: { W: number; H: number }) => {
-        if (prev.W !== newW || prev.H !== newH) {
-          return { W: newW, H: newH };
-        }
-        return prev;
-      });
-    };
-    const interval = setInterval(checkSize, 500);
+    const interval = setInterval(() => {
+      const width = process.stdout.columns || 80;
+      const height = process.stdout.rows || 24;
+      setDimensions(previous => previous.width === width && previous.height === height ? previous : { width, height });
+    }, 500);
     return () => clearInterval(interval);
   }, []);
 
-  const { W, H } = dimensions;
-  const CONTENT_H = H - 2;
-
-  // Refs for stable access
   const tasksRef = useRef<Task[]>([]);
-  const issuesRef = useRef<Issue[]>([]);
+  const backlogsRef = useRef<BacklogViewModel[]>([]);
   const projectsRef = useRef<Project[]>([]);
   tasksRef.current = tasks;
-  issuesRef.current = issues;
+  backlogsRef.current = backlogs;
   projectsRef.current = projects;
 
-  // Get items based on current view
-  const getItems = (): (Task | Issue | Project)[] => {
-    let raw: (Task | Issue | Project)[] = [];
-    if (currentView === 'tasks') raw = tasksRef.current;
-    else if (currentView === 'issues') raw = issuesRef.current;
-    else if (currentView === 'board') raw = issuesRef.current;
-    else raw = projectsRef.current;
-
-    if (!state.searchQuery.trim()) return raw;
-
-    const q = state.searchQuery.toLowerCase();
+  const getItems = (): Array<Task | BacklogViewModel | Project> => {
+    const raw = currentView === 'tasks'
+      ? tasksRef.current
+      : currentView === 'backlogs' || currentView === 'board'
+        ? backlogsRef.current
+        : projectsRef.current;
+    const query = state.searchQuery.trim().toLowerCase();
+    if (!query) return raw;
     return raw.filter(item => {
-      if ('title' in item && item.title) return item.title.toLowerCase().includes(q);
-      if ('name' in item && item.name) return item.name.toLowerCase().includes(q);
-      if ('branch' in item && item.branch) return item.branch.toLowerCase().includes(q);
-      if ('labels' in item && item.labels) return item.labels.some(l => l.toLowerCase().includes(q));
+      if ('title' in item && item.title?.toLowerCase().includes(query)) return true;
+      if ('name' in item && item.name.toLowerCase().includes(query)) return true;
+      if ('branch' in item && item.branch?.toLowerCase().includes(query)) return true;
+      if ('branchName' in item && item.branchName.toLowerCase().includes(query)) return true;
+      if ('tags' in item && item.tags.some(tag => tag.toLowerCase().includes(query))) return true;
       return false;
     });
   };
 
   const items = getItems();
-  const getItem = () => items[state.selectedIndex];
-
-  const viewportHeight = Math.floor((CONTENT_H - 2) / 1);
+  const selectedItem = () => items[state.selectedIndex];
+  const viewportHeight = getListViewportHeight(dimensions.height, { header: 1, context: 1, footer: 1, spacer: 1 });
   const maxIndex = Math.max(0, items.length - 1);
 
-  // Auto-scroll: keep selected item visible
   useEffect(() => {
-    const desiredScrollOffset =
-      state.selectedIndex < state.scrollOffset
-        ? state.selectedIndex
-        : state.selectedIndex >= state.scrollOffset + viewportHeight
-          ? Math.min(state.selectedIndex - viewportHeight + 1, maxIndex)
-          : state.scrollOffset;
-    if (desiredScrollOffset !== state.scrollOffset) {
-      dispatch({ type: 'selection:move', payload: { index: state.selectedIndex, scrollOffset: desiredScrollOffset } });
+    const offset = state.selectedIndex < state.scrollOffset
+      ? state.selectedIndex
+      : state.selectedIndex >= state.scrollOffset + viewportHeight
+        ? Math.min(state.selectedIndex - viewportHeight + 1, maxIndex)
+        : state.scrollOffset;
+    if (offset !== state.scrollOffset) {
+      dispatch({ type: 'selection:move', payload: { index: state.selectedIndex, scrollOffset: offset } });
     }
-  }, [state.selectedIndex, state.scrollOffset, viewportHeight, maxIndex]);
+  }, [state.selectedIndex, state.scrollOffset, viewportHeight, maxIndex, dispatch]);
 
-  // Auto-load project detail
   useEffect(() => {
     if (isDetailMode && currentView === 'projects') {
-      const project = getItem() as Project;
+      const project = selectedItem() as Project;
       if (project?.id) onLoadProjectDetail(project);
     }
-  }, [isDetailMode, currentView]);
+  }, [isDetailMode, currentView, state.selectedIndex, onLoadProjectDetail]);
 
-  // Auto-load more
-  const handleSelectionChange = useCallback(() => {
-    if (state.selectedIndex >= items.length - 3) {
-      if (currentView === 'issues' && issueHasMore) onFetchMoreIssues();
-      else if (currentView === 'projects' && projectHasMore) onFetchMoreProjects();
+  const maybeLoadMoreProjects = useCallback(() => {
+    if (currentView === 'projects' && projectHasMore && state.selectedIndex >= items.length - 3) {
+      onFetchMoreProjects();
     }
-  }, [state.selectedIndex, items.length, currentView, issueHasMore, projectHasMore]);
+  }, [currentView, projectHasMore, state.selectedIndex, items.length, onFetchMoreProjects]);
 
-  // Keyboard input
   useInput((input, key) => {
-    // Help toggle
-    if (input === '?') { actions.toggleHelp(); return; }
-
-    // Debug toggle
-    if (input === 'D' || input === 'd') { actions.toggleDebug(); return; }
-
-    // Search mode
+    if (input === '?') {
+      actions.toggleHelp();
+      return;
+    }
+    if (input === 'D' || input === 'd') {
+      actions.toggleDebug();
+      return;
+    }
     if (input === '/') {
       actions.enableSearch();
       return;
     }
     if (state.isSearchMode) {
-      if (key.escape) { actions.disableSearch(); return; }
-      if (key.backspace) { actions.backspaceSearch(); return; }
-      if (key.return) { actions.disableSearch(); return; }
-      if (input.length === 1 && !key.ctrl && !key.meta) {
+      if (key.escape || key.return) actions.disableSearch();
+      else if (key.backspace) actions.backspaceSearch();
+      else if (input.length === 1 && !key.ctrl && !key.meta) {
         actions.appendSearchChar(input);
         dispatch({ type: 'selection:top' });
-        return;
       }
       return;
     }
-
-    // Escape / Quit
     if (key.escape || input === 'q') {
-      if (state.showHelp) { actions.toggleHelp(); return; }
-      if (input === 'q') { process.exit(0); }
-      if (isDetailMode) { process.exit(0); }
-      if (state.viewStack.length > 1) { actions.goBack(); return; }
+      if (state.showHelp) actions.toggleHelp();
+      else if (isDetailMode) actions.viewList();
+      else if (input === 'q') process.exit(0);
+      else if (state.viewStack.length > 1) actions.goBack();
       return;
     }
-
-    // Detail mode
     if (isDetailMode) {
+      const item = selectedItem();
       if (input === 'o') {
-        const item = getItem();
-        const url = currentView === 'issues' ? (item as Issue)?.web_url : (item as Project)?.web_url;
-        if (url) actions.openInBrowser(url);
+        if (currentView === 'backlogs' || currentView === 'board') void actions.openBacklog(item as BacklogViewModel);
+        else if (currentView === 'projects') {
+          const project = item as Project;
+          if (project?.web_url) void actions.openInBrowser(project.web_url, project.name);
+          else actions.notify('no browser URL', 'warning');
+        }
         return;
       }
-      if (input === 'b') { actions.viewList(); return; }
-      if (input === 'i' && currentView === 'projects') {
-        const project = getItem() as Project;
-        if (project) actions.viewIssues(project);
-        return;
-      }
-      if (input === 'a' && currentView === 'tasks' && onAttachSession) {
-        const task = getItem() as Task;
-        if (task) onAttachSession(task);
-        return;
-      }
+      if (input === 'a' && currentView === 'tasks' && item && onAttachSession) onAttachSession(item as Task);
+      if (input === 'b') actions.viewList();
       return;
     }
-
-    // Back
     if (input === 'b') {
       if (state.viewStack.length > 1) actions.goBack();
       return;
     }
-
-    // View switching
     if (input === '1') actions.switchView('tasks');
-    if (input === '2') actions.switchView('issues');
+    if (input === '2') actions.switchView('backlogs');
     if (input === '3') actions.switchView('projects');
     if (input === '4') actions.switchView('board');
-
-    // Navigation
     if (key.downArrow) {
       actions.selectionDown(items.length);
-      handleSelectionChange();
+      maybeLoadMoreProjects();
     }
     if (key.upArrow) actions.selectionUp();
     if (input === 'g') actions.selectionTop();
     if (key.shift && input === 'G') actions.selectionBottom(items.length);
-
-    // Enter detail
-    if (key.return) {
-      if (items.length === 0) return; // Guard: don't enter detail with empty list
-      actions.viewDetail();
-      return;
-    }
-
-    // Refresh
+    if (key.return && items.length > 0) actions.viewDetail();
     if (input === 'r') {
       onInvalidateDetailCache();
-      onReloadTasks();
-      actions.notify('done', 'success');
+      void Promise.all([onReloadTasks(), onReloadBacklogs()]).then(() => actions.notify('refreshed', 'success'));
     }
-
-    // Multi-select mode
-    if (state.multiSelectMode) {
-      if (input === ' ') {
-        const issue = getItem() as Issue;
-        if (issue) actions.toggleItem(issue.iid);
-        return;
-      }
-      if (input === 'B') {
-        actions.notify(`creating ${state.selectedItems.size} tasks...`, 'info');
-        return;
-      }
-      if (input === 'c') actions.clearSelection();
-      if (key.escape) {
-        dispatch({ type: 'multi-select:toggle' });
-        actions.notify('exit multi-select', 'info');
-      }
-      return;
-    }
-
-    // Issue-specific actions
-    if (currentView === 'issues') {
-      if (input === 'm') { actions.toggleMultiSelect(); return; }
-      if (input === 's') {
-        const issue = getItem() as Issue;
-        if (!issue) return;
-        actions.notify(`creating task from #${issue.iid}...`, 'info');
-        const branch = `issue-${issue.iid}-${issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)}`;
-        onAddTaskFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch })
-          .then(() => {
-            onReloadTasks();
-            dispatch({ type: 'dispatch', payload: { type: 'issue:create-task' } });
-            actions.notify(`created task #${issue.iid}`, 'success');
-          })
-          .catch(() => actions.notify('create failed', 'error'));
-        return;
-      }
-      if (input === 'l') {
-        const issue = getItem() as Issue;
-        if (!issue) return;
-        actions.notify(`launching #${issue.iid}...`, 'info');
-        const branch = `issue-${issue.iid}-${issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30)}`;
-        onLaunchFromIssue(issue, { branch, session: `issue-${issue.iid}`, worktree: branch })
-          .then(() => {
-            onReloadTasks();
-            dispatch({ type: 'dispatch', payload: { type: 'issue:launch' } });
-            actions.notify(`launched: issue-${issue.iid}`, 'success');
-          })
-          .catch(() => actions.notify('launch failed', 'error'));
-        return;
-      }
-      if (input === 'o') {
-        const issue = getItem() as Issue;
-        if (issue?.web_url) actions.openInBrowser(issue.web_url, `#${issue.iid}`);
-        return;
+    if (input === 'o') {
+      const item = selectedItem();
+      if (currentView === 'backlogs' || currentView === 'board') void actions.openBacklog(item as BacklogViewModel);
+      else if (currentView === 'projects') {
+        const project = item as Project;
+        if (project?.web_url) void actions.openInBrowser(project.web_url, project.name);
+        else actions.notify('no browser URL', 'warning');
       }
     }
-
-    // Task-specific actions
-    if (currentView === 'tasks') {
-      if ((input === 'a' || input === 'A') && onAttachSession) {
-        const task = getItem() as Task;
-        if (task) onAttachSession(task);
-        return;
-      }
-      if (input === 'k' || input === 'K') {
-        const task = getItem() as Task;
-        if (task?.session) {
-          onRemoveSession(task.session);
-          actions.notify(`killed: ${task.session}`, 'success');
-        }
-        return;
-      }
-      if (input === 'l' || input === 'L') {
-        const task = getItem() as Task;
-        if (task?.session) {
-          onLaunchExistingTask(task.iid, task.session);
-          actions.notify(`launched: ${task.session}`, 'success');
-        }
-        return;
-      }
-    }
-
-    // Project-specific actions
-    if (currentView === 'projects') {
-      if (input === 'o') {
-        const project = getItem() as Project;
-        if (project?.web_url) actions.openInBrowser(project.web_url, project.name);
-        return;
-      }
+    if ((input === 'a' || input === 'A') && currentView === 'tasks' && onAttachSession) {
+      const task = selectedItem() as Task;
+      if (task) onAttachSession(task);
     }
   });
 
-  // View title
-  const viewTitle = (() => {
-    const filtered = state.searchQuery ? ` (${items.length}/${tasks.length + issues.length + projects.length})` : '';
-    if (currentView === 'tasks') return `tasks running: ${items.length}${filtered}`;
-    if (currentView === 'issues') return state.multiSelectMode
-      ? `issues todo: ${items.length} | selected: ${state.selectedItems.size}`
-      : `issues todo: ${items.length}${filtered}`;
-    if (currentView === 'board') return `board view: ${items.length} issues${filtered}`;
-    return `gitlab projects: ${items.length}${filtered}`;
-  })();
-
   return (
-    <Box flexDirection="column" height={H}>
+    <Box flexDirection="column" height={dimensions.height}>
       {isDetailMode ? (
         <DetailScreen
-          item={getItem()}
+          item={selectedItem()}
           view={currentView}
-          height={H}
-          width={W}
+          height={Math.max(1, dimensions.height - 1)}
+          width={dimensions.width}
           branches={projectBranches}
           tags={projectTags}
           commits={projectCommits}
         />
       ) : (
         <>
-          <Header
-            view={currentView}
-            tasksCount={tasks.length}
-            issuesCount={issues.length}
-            projectsCount={projects.length}
-            selectedIssuesCount={state.selectedItems.size}
-            multiSelectMode={state.multiSelectMode}
-          />
-          <BreathingSeparator width={W} breathPhase={state.separatorPhase} isTop />
-          <Box paddingX={2} paddingY={0}>
-            <Text color="white"><Text bold>{viewTitle}</Text></Text>
-            {state.isSearchMode && (
-              <Text color="cyan"> │ /{state.searchQuery}_</Text>
-            )}
+          <Header view={currentView} tasksCount={tasks.length} backlogsCount={backlogs.length} projectsCount={projects.length} />
+          <Box height={1} flexShrink={0} paddingX={2}>
+            {state.isSearchMode
+              ? <Text color="cyan">filter · /{state.searchQuery}_ · {items.length} matches</Text>
+              : <Text dimColor>enter detail · / search</Text>}
           </Box>
-          <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2} paddingY={0}>
-            {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
-            {currentView === 'issues' && <IssueListView issues={items as Issue[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} multiSelectMode={state.multiSelectMode} selectedIssues={state.selectedItems} />}
-            {currentView === 'projects' && <ProjectListView projects={items as Project[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} />}
-            {currentView === 'board' && <BoardView issues={items as Issue[]} selectedIndex={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={W} />}
-            {(currentView === 'issues' && issueHasMore || currentView === 'projects' && projectHasMore) && (
-              <Box position="absolute" right={2} bottom={0}>
-                <Text dimColor>↓ more available</Text>
-              </Box>
-            )}
+          <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2}>
+            {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
+            {currentView === 'backlogs' && <BacklogListView backlogs={items as BacklogViewModel[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
+            {currentView === 'projects' && <ProjectListView projects={items as Project[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
+            {currentView === 'board' && <BoardView backlogs={items as BacklogViewModel[]} selectedIndex={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
+            {currentView === 'projects' && projectHasMore && <Box position="absolute" right={2} bottom={0}><Text dimColor>↓ more available</Text></Box>}
           </Box>
-          <BreathingSeparator width={W} breathPhase={state.separatorPhase + 50} isTop={false} />
-          <Footer />
-          <Notification notification={state.notification} animation={state.notifAnimation} />
-          {state.showHelp && <HelpDialog />}
-          {state.debugMode && <DebugOverlay logs={state.debugLog} />}
         </>
       )}
+      <Footer view={currentView} detail={isDetailMode} search={isDetailMode ? false : state.isSearchMode} />
+      <Notification notification={state.notification} animation={state.notifAnimation} />
+      {state.showHelp && <HelpDialog view={currentView} detail={isDetailMode} />}
+      {state.debugMode && <DebugOverlay logs={state.debugLog} />}
     </Box>
   );
 }

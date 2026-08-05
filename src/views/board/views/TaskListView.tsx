@@ -1,52 +1,50 @@
 import React from 'react';
-import { Box, Text } from 'ink';
 import { Task } from '../../../types/board';
-import { ListView } from './ListView';
+import { ListView, normalizeRowText } from './ListView';
 import { formatRelativeTime } from '../utils';
+import { OperationalRow } from './OperationalRow';
 
 interface Props {
   tasks: Task[];
   selected: number;
   scrollOffset: number;
   viewportHeight: number;
+  width?: number;
 }
 
-function WorktreePath({ path }: { path?: string }) {
-  if (!path) return null;
-  const short = path.replace(process.env.HOME || '', '~');
-  return (
-    <Text dimColor> · wt:{short}</Text>
-  );
-}
-
-export function TaskListView({ tasks, selected, scrollOffset, viewportHeight }: Props) {
+export function TaskListView({ tasks, selected, scrollOffset, viewportHeight, width: requestedWidth }: Props) {
+  const width = requestedWidth || process.stdout.columns || 80;
   return (
     <ListView
       items={tasks}
       selected={selected}
       scrollOffset={scrollOffset}
       viewportHeight={viewportHeight}
+      width={width}
       emptyMessage="ℹ  no running tasks"
       getKey={(task) => task.iid}
-      render={(task, index, isSelected) => {
-        const color = isSelected ? 'white' : 'gray';
-        const bullet = isSelected ? '◉' : (task.status === 'active' ? '●' : '○');
+      render={(task, _index, isSelected) => {
+        const worktree = task.worktree
+          ? normalizeRowText(task.worktree.replace(process.env.HOME || '', '~'))
+          : '–';
+        const summary = [
+          `session ${normalizeRowText(task.session || '') || '–'}`,
+          `branch ${normalizeRowText(task.branch || '') || '–'}`,
+          `worktree ${worktree}`,
+          `progress ${normalizeRowText(task.progress || '') || '0%'}`,
+          task.startedAt ? formatRelativeTime(task.startedAt) : '–',
+        ].join(' · ');
         return (
-          <Box
-            key={task.iid}
-            width="100%"
-            overflow="hidden"
-            flexDirection="row"
-            paddingX={1}
-          >
-            <Text color={isSelected ? 'white' : color}>{bullet} </Text>
-            <Text color={isSelected ? 'white' : color} bold> #{task.iid} </Text>
-            <Text color={isSelected ? 'white' : color}>{task.title || task.branch}</Text>
-            <Text dimColor> · {task.session || '–'}</Text>
-            <WorktreePath path={task.worktree} />
-            <Text dimColor> · {task.progress || '0%'}</Text>
-            <Text dimColor> · {task.startedAt ? formatRelativeTime(task.startedAt) : '–'}</Text>
-          </Box>
+          <OperationalRow
+            width={width}
+            selected={isSelected}
+            status={task.status}
+            statusColor={isSelected ? 'white' : 'gray'}
+            mode="task"
+            id={task.iid}
+            title={normalizeRowText(task.title || task.branch || '') || 'untitled task'}
+            summary={summary}
+          />
         );
       }}
     />

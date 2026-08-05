@@ -25,7 +25,7 @@ answering a specific question. The output is a finding, not a product.
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-<type>: <short description> #<iid>
+<type>: <short description> (backlog {backlogId})
 
 Progress:
 - [x] Spike: <specific question> -- <conclusion, e.g. "YES: library Z supports W"
@@ -49,8 +49,8 @@ Valid `<type>` values: `spike`, `wip`.
 - MUST NOT skip the time-box — if the question is not answered in
   time, document partial findings and stop.
 - MUST NOT run multiple spikes in one session — one question at a time.
-- MUST NOT file a spike commit as the solution to an issue — the spike
-  answers a question, the issue asks for a feature.
+- MUST NOT file a spike commit as the solution to a backlog item — the spike
+  answers a question, while the item asks for a feature.
 
 ## When to Use
 

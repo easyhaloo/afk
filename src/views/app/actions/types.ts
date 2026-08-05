@@ -1,21 +1,11 @@
-/**
- * Action types for the app
- */
-
 export type ActionType =
   | 'dispatch'
-  | 'issue:create-task'
-  | 'issue:launch'
-  | 'batch:create'
-  | 'project:view-issues'
+  | 'project:view-backlogs'
   | 'navigate:back'
   | 'navigate:reset'
   | 'navigate:switch'
   | 'navigate:goto-detail'
   | 'navigate:goto-list'
-  | 'multi-select:toggle'
-  | 'multi-select:toggle-item'
-  | 'multi-select:clear'
   | 'search:enable'
   | 'search:disable'
   | 'search:set-query'

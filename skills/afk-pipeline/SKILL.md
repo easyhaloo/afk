@@ -32,10 +32,10 @@ Pick the row that matches what the user has in hand right now:
 | An idea with technical risk to validate first | `/afk-prototype` |
 | An alignment record (interview, draft, requirements) | `/afk-to-prd` |
 | An approved PRD | `/afk-to-issues` |
-| A tracker issue to implement | `/afk-implement <iid>` |
-| Multiple issues to orchestrate | `/afk-scheduler` |
+| A ready backlog item to implement | `/afk-implement <backlog-id>` |
+| Multiple backlogs to orchestrate | `/afk-scheduler` (starts `afk loop`) |
 | A specific task in *this* session | `/afk-do "<task>"` |
-| An MR to verify | `/afk-qa <mr-url>` |
+| A backlog in verification | `/afk-qa --backlog-id <backlog-id>` |
 | A reproducible failure to diagnose | `/afk-diagnose` |
 | Session state to snapshot or resume | `/afk-hand-off` |
 
@@ -60,6 +60,7 @@ grill-me-context → grill-me → prototype (optional) → to-prd → to-issues
 
 - `grill-me` (or `grill-me-context`) is the start for new work.
 - `prototype` is recommended when technical risk exists.
-- `implement` does one issue; `scheduler` does many in DAG order.
+- `implement` executes one backlog; `scheduler` starts the loop for many
+  provider-backed backlogs in dependency order.
 - `qa` is the merge gate.
 - `do`, `debug`, `hand-off` are session-local utilities, off the pipeline.

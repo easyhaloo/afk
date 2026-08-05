@@ -78,7 +78,7 @@ Use standard ADR template (see `docs/adr/ADR-template.md`):
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-feat: <desc> #<iid>
+feat: <desc> (backlog {backlogId})
 
 ADR: ADR-NNNN "<title>" created
 

@@ -164,7 +164,7 @@ export class ContainerAgentExecution implements AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
   private readonly worktreePath: string;
-  private readonly signalType: 'goal_complete' | 'ac_result';
+  private readonly signalType: 'goal_complete';
   private readonly generation: number;
   private _interruptAcked = false;
   private _done = false;
@@ -175,7 +175,7 @@ export class ContainerAgentExecution implements AgentExecution {
     worktreePath: string;
     sessionName: string;
     generation: number;
-    signalType: 'goal_complete' | 'ac_result';
+    signalType: 'goal_complete';
     execId: string;
   }) {
     this.id = opts.execId;

@@ -22,15 +22,15 @@ interface DetailEntry {
 }
 
 interface CacheShape {
-  version: 1;
-  issues: Record<string, ListEntry<any>>;
+  version: 2;
+  backlogs: Record<string, ListEntry<any>>;
   projects: { all: ListEntry<any> | null };
   detail: Record<string, DetailEntry>;
 }
 
 const empty = (): CacheShape => ({
-  version: 1,
-  issues: {},
+  version: 2,
+  backlogs: {},
   projects: { all: null },
   detail: {},
 });
@@ -42,7 +42,7 @@ function load(): CacheShape {
   try {
     if (fs.existsSync(CACHE_FILE)) {
       mem = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8')) as CacheShape;
-      if (mem.version !== 1) mem = empty();
+      if (mem.version !== 2) mem = empty();
       return mem;
     }
   } catch {
@@ -63,17 +63,17 @@ function flush(): void {
   }
 }
 
-export function readIssuesList(projectKey: string): { items: any[]; hasMore: boolean } | null {
+export function readBacklogList(key = 'all'): { items: any[]; hasMore: boolean } | null {
   const c = load();
-  const entry = c.issues[projectKey];
+  const entry = c.backlogs[key];
   if (!entry || Date.now() - entry.fetchedAt > LIST_TTL_MS) return null;
   return { items: entry.items, hasMore: entry.hasMore };
 }
 
-export function writeIssuesList(projectKey: string, items: any[], hasMore: boolean): void {
+export function writeBacklogList(key = 'all', items: any[], hasMore = false): void {
   load();
   if (!mem) return;
-  mem.issues[projectKey] = { items, hasMore, fetchedAt: Date.now() };
+  mem.backlogs[key] = { items, hasMore, fetchedAt: Date.now() };
   flush();
 }
 

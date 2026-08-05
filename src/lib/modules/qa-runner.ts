@@ -1,291 +1,217 @@
-import { TmuxClient } from '../core/tmux/tmux';
+import { promises as fs } from 'fs';
 import { WorktreeManager } from '../core/git';
+import { createTmuxClient, type TmuxClient } from '../core/tmux';
 import { configureStatusline, logger } from '../io';
 import { getWorkflowConfig } from '../core/config/manager';
-import type { TrackerProvider } from '../core/tracker/types';
+import { TemplateLoader } from '../templates/loader';
+import { compileTemplate } from '../templates/compiler';
+import { createAgentProvider } from '../agents';
+import { createSandboxProvider } from '../sandbox';
+import type { AgentProvider, ExecutionMode } from '../agents/types';
+import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../sandbox/types';
+import type { ManagementProviderBundle } from '../core/providers';
 import type { WorkflowConfig } from '../core/config/manager';
+import type { BacklogItem } from '../core/backlog';
+import { formatExecutionFailure } from '../workflows';
+import { buildExecutionPrompt } from '../workflows/execution-protocol';
+
+export interface QARunnerDependencies {
+  sandboxProvider?: SandboxProvider;
+  agentProvider?: AgentProvider;
+  tmux?: TmuxClient;
+  executionMode?: ExecutionMode;
+  projectRoot?: string;
+  mergeBranch?: (worktreePath: string, branch: string) => Promise<void>;
+}
 
 /**
- * QA Runner — event-driven worker for verifying AC on merged code.
+ * QA worker for items in verification.
  *
- * After a WorkflowRunner completes Phase 1 + Phase 2 and creates an MR,
- * the issue is labeled stage::qa. QARunner picks it up:
- *
- * 1. Create worktree from PRD baseline branch
- * 2. Merge the feature branch into the worktree
- * 3. Launch tmux + agent, send /goal to verify AC
- * 4. Wait for ac_result signal
- * 5. On pass: merge MR, label stage::done
- * 6. On fail: label mode::hitl + comment with details
- *
- * Supports both per-issue and PRD-level batch verification.
+ * QA owns the verification workflow, but not the execution transport. The
+ * sandbox creates either a batch AgentExecution or an interactive tmux-backed
+ * AgentExecution. This runner only builds the provider command, waits for the
+ * typed result, and routes the backlog state.
  */
 export class QARunner {
-  private tracker: TrackerProvider;
-  private tmux: TmuxClient;
-  private worktree: WorktreeManager;
-  private logDir: string;
-  private config: WorkflowConfig;
+  private readonly logDir: string;
+  private readonly config: WorkflowConfig;
+  private readonly providers: ManagementProviderBundle;
+  private readonly sandboxProvider: SandboxProvider;
+  private readonly agentProvider: AgentProvider;
+  private readonly tmux?: TmuxClient;
+  private readonly executionMode: ExecutionMode;
+  private readonly projectRoot: string;
+  private readonly mergeBranchOverride?: (worktreePath: string, branch: string) => Promise<void>;
 
-  constructor(tracker: TrackerProvider, config?: WorkflowConfig) {
-    this.tracker = tracker;
-    this.tmux = new TmuxClient();
-    this.worktree = new WorktreeManager();
+  constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
     this.config = config ?? getWorkflowConfig();
+    this.providers = providers;
+    this.executionMode = deps.executionMode ?? 'batch';
+    this.projectRoot = deps.projectRoot ?? process.cwd();
+    this.mergeBranchOverride = deps.mergeBranch;
+    this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
+    this.agentProvider = deps.agentProvider ?? createAgentProvider('claude-code');
+    this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }
 
-  /**
-   * Run QA for a single issue.
-   */
-  async process(iid: number): Promise<{ success: boolean; mrUrl?: string }> {
-    logger.info({ iid }, 'QA processing started');
+  async process(backlogId: string): Promise<{ success: boolean; mrUrl?: string }> {
+    const id = String(backlogId);
+    logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
 
-    const issue = await this.tracker.getIssue(iid);
-    const baselineBranch = await this.tracker.detectTargetBranch(iid);
-    const session = `qa-${iid}-${Date.now()}`;
+    const backlog = await this.providers.backlog.get(id);
+    const baselineBranch = this.config.targetBranch ?? 'main';
+    const session = `qa-${id}-${Date.now()}`;
+    let worktreePath: string | undefined;
+    let sandbox: Sandbox | undefined;
+    let execution: AgentExecution | undefined;
 
-    let wt;
     try {
-      // ── Step 1: Create worktree from PRD baseline ──────────────────────────
-      wt = await this.worktree.create(iid, baselineBranch);
-      logger.info({ iid, worktree: wt.path, baselineBranch }, 'QA worktree created');
-      await this.worktree.updateStatus(iid, 'active');
-      await configureStatusline(wt.path);
-      logger.info({ iid, worktree: wt.path }, 'QA statusline configured');
+      const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
+      worktreePath = handle.worktreePath;
+      if (this.executionMode === 'interactive') await configureStatusline(worktreePath);
+      logger.info({ backlogId: id, worktree: worktreePath, baselineBranch }, 'QA worktree created');
 
-      // ── Step 2: Merge feature branch ───────────────────────────────────────
-      const featureBranch = await this.resolveFeatureBranch(iid);
-      logger.info({ iid, featureBranch }, 'QA feature branch resolved');
+      const featureBranch = backlog.branchName;
       if (!featureBranch) {
-        await this.tracker.addComment(iid, '<!-- afk-event: qa-failed -->\n**❌ QA Failed**\n\nCould not resolve feature branch.');
-        await this.tracker.addLabel(iid, 'mode::hitl');
+        await this.markBlocked(id, 'feature branch could not be resolved');
+        return { success: false };
+      }
+      if (this.mergeBranchOverride) await this.mergeBranchOverride(worktreePath, featureBranch);
+      else await this.mergeBranch(worktreePath, featureBranch);
+
+      const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot }).load('pre-merge-qa-verification');
+      const qaStep = compileTemplate(qaTemplate).groups
+        .flatMap(group => group.steps)
+        .find(step => step.kind === 'agent');
+      if (!qaStep || typeof qaStep.prompt !== 'string') {
+        throw new Error('pre-merge-qa-verification template must contain an inline agent prompt');
+      }
+
+      sandbox = await this.sandboxProvider.create({
+        worktreePath,
+        session,
+        branch: handle.branchName,
+        executionMode: this.executionMode,
+        tmux: this.executionMode === 'interactive' ? this.tmux : undefined,
+      });
+      logger.info({ backlogId: id, session, sandboxId: sandbox.id }, 'QA sandbox created');
+
+      const prompt = buildExecutionPrompt(qaStep.prompt.replaceAll('{iid}', id), this.executionMode, 'qa');
+      const command = this.agentProvider.buildCommand({
+        worktreePath,
+        sessionId: session,
+        executionMode: this.executionMode,
+      });
+      execution = await sandbox.startAgent({
+        command,
+        generation: 1,
+        prompt,
+        signalType: 'goal_complete',
+        executionMode: this.executionMode,
+        agentProvider: this.agentProvider,
+      });
+      logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
+
+      const result = await execution.waitForResult({ completionTimeoutMs: this.config.completionTimeout });
+      logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
+      if (result.status !== 'completed') {
+        await this.handleExecutionFailure(id, worktreePath, session, result, execution);
         return { success: false };
       }
 
-      await this.mergeBranch(wt.path, featureBranch);
-
-      // ── Step 3: Launch tmux + agent ───────────────────────────────────────
-      await this.tmux.createSession(session, wt.path);
-      logger.info({ iid, session, worktree: wt.path }, 'QA tmux session created');
-      await this.tmux.waitForPrompt(wt.path, 30000);
-      logger.info({ iid, session, timeoutMs: 30000 }, 'QA tmux prompt ready');
-
-      // ── Step 4: Send /goal to verify AC ───────────────────────────────────
-      await this.tmux.sendPrompt(wt.path, session, 'main', `/goal QA 验证合并后的代码。`, 'ac_result');
-      logger.info({ iid, session }, 'QA goal sent');
-
-      // Log start
-      await this.tracker.addComment(iid, [
-        '<!-- afk-event: qa-start -->',
-        '**🔍 QA Verification Started**',
-        '',
-        `- **Session:** \`${session}\``,
-        `- **Baseline:** \`${baselineBranch}\``,
-        `- **Feature:** \`${featureBranch}\``,
-      ].join('\n'));
-      logger.info({ iid, event: 'qa-start' }, 'QA start comment posted');
-
-      // ── Step 5: Wait for ac_result ────────────────────────────────────────
-      const signal = await this.tmux.waitForSignal(
-        session, 'main', 'ac_result', wt.path,
-        this.config.completionTimeout
-      );
-      logger.info({ iid, signalReceived: signal !== null, signalType: signal?.type }, 'QA signal received');
-
+      const signal = asQAResult(result.structuredOutput);
       if (!signal) {
-        return this.handleTimeout(iid, wt.path, session);
+        await this.markBlocked(id, `${formatExecutionFailure(result)}; missing QA completion payload`);
+        return { success: false };
       }
-
-      // ── Step 6: Process result ─────────────────────────────────────────────
-      return await this.handleACResult(iid, wt.path, session, signal);
-
+      return await this.handleACResult(id, signal);
+    } catch (error) {
+      const message = `QA execution failed: ${(error as Error).message}`;
+      await this.markBlocked(id, message);
+      logger.error({ backlogId: id, error }, 'QA execution failed');
+      return { success: false };
     } finally {
-      await this.tmux.closeSession();
-      if (wt) {
-        await this.worktree.cleanup(iid, false);
+      if (execution) await execution.kill().catch(() => {});
+      if (sandbox) await sandbox.close().catch(error => logger.warn({ backlogId: id, error }, 'failed to close QA sandbox'));
+      if (worktreePath) {
+        try {
+          await this.providers.branches.cleanup(worktreePath, { preserve: false });
+        } catch (error) {
+          logger.warn({ backlogId: id, error }, 'failed to clean QA worktree');
+        }
       }
     }
   }
 
-  /**
-   * Run QA for all issues under a PRD.
-   * Fetches all open issues with base::prd-<N> label and stage::qa,
-   * then verifies each one sequentially.
-   */
-  async processPRD(prdIid: number): Promise<{ success: boolean; results: Array<{ iid: number; passed: boolean }> }> {
-    logger.info({ prdIid }, 'PRD-level QA started');
-
-    const issues = await this.tracker.listIssues({
-      labels: [`base::prd-${prdIid}`, 'stage::qa'],
-      state: 'opened',
-    });
-
-    if (issues.length === 0) {
-      logger.info({ prdIid }, 'no issues found for PRD QA');
-      return { success: true, results: [] };
-    }
-
-    const results: Array<{ iid: number; passed: boolean }> = [];
-    for (const issue of issues) {
-      const result = await this.process(issue.id);
-      results.push({ iid: issue.id, passed: result.success });
-    }
-
-    const allPassed = results.every(r => r.passed);
-    return { success: allPassed, results };
-  }
-
-  /**
-   * Resolve the feature branch for an issue.
-   * Looks for the most recently pushed branch matching the expected pattern.
-   */
-  private async resolveFeatureBranch(iid: number): Promise<string | null> {
-    const issue = await this.tracker.getIssue(iid);
-    const baselineBranch = await this.tracker.detectTargetBranch(iid);
-
-    // The feature branch follows the worktree naming convention
-    const expectedBranch = `afk-${iid}`;
-
-    try {
-      const { simpleGit } = await import('simple-git');
-      const git = simpleGit();
-      const branches = await git.branch(['-r']);
-      const remoteBranch = branches.all.find(b => b.includes(expectedBranch));
-      if (remoteBranch) return remoteBranch;
-
-      // Fallback: check local branches
-      const localBranches = await git.branch();
-      const localBranch = localBranches.all.find(b => b.includes(expectedBranch));
-      if (localBranch) return localBranch;
-    } catch {
-      // git operation failed, try other methods
-    }
-
-    // Try to find the branch from the MR
-    try {
-      const mrs = await this.tracker.listMRs({ state: 'opened' });
-      const mr = mrs.find(m => m.title.includes(`#${iid}`) || m.sourceBranch.includes(expectedBranch));
-      if (mr) return mr.sourceBranch;
-    } catch {
-      // tracker operation failed
-    }
-
-    return null;
-  }
-
-  /**
-   * Merge a feature branch into the current worktree.
-   */
   private async mergeBranch(worktreePath: string, branch: string): Promise<void> {
     const { simpleGit } = await import('simple-git');
     const git = simpleGit(worktreePath);
-
-    // Fetch the branch first
-    try {
-      await git.fetch('origin', branch);
-    } catch {
-      // branch may be local only
-    }
-
-    try {
-      await git.merge([branch]);
-    } catch (err) {
-      await this.tracker.addComment(
-        parseInt(worktreePath.split('-').pop() || '0', 10),
-        `<!-- afk-event: qa-merge-conflict -->\n**❌ QA Merge Conflict**\n\nMerge of \`${branch}\` failed. Manual resolution required.`
-      );
-      throw err;
-    }
-
+    try { await git.fetch('origin', branch); } catch { /* branch may be local only */ }
+    await git.merge([branch]);
     logger.info({ worktreePath, branch }, 'branch merged successfully');
   }
 
-  /**
-   * Handle AC result signal.
-   */
-  private async handleACResult(
-    iid: number,
-    _worktreePath: string,
-    session: string,
-    signal: { type: string; summary?: string; result?: string }
-  ): Promise<{ success: boolean; mrUrl?: string }> {
-    await this.tmux.killSession(session);
-    logger.info({ iid, session }, 'QA tmux session killed');
-
-    // Find the MR for this issue
-    const mrs = await this.tracker.listMRs({ state: 'opened' });
-    const mr = mrs.find(m => m.title.includes(`#${iid}`));
-
-    if (!mr) {
-      await this.tracker.addComment(iid, '<!-- afk-event: qa-failed -->\n**❌ QA Failed**\n\nMR not found for this issue.');
-      await this.tracker.addLabel(iid, 'mode::hitl');
-      logger.warn({ iid }, 'QA failed: MR not found');
-      return { success: false };
-    }
-    logger.info({ iid, mrId: mr.id, mrUrl: mr.url }, 'QA MR located');
-
-    // AC passed → merge MR
-    try {
-      logger.info({ iid, mrId: mr.id }, 'attempting MR merge');
-      await this.tracker.mergeMR(mr.id, {
-        deleteSourceBranch: true,
-        squash: true,
-        mergeCommitMessage: `Merge QA verified: Resolve #${iid}`,
-      });
-      logger.info({ iid, mrId: mr.id }, 'MR merged');
-
-      await this.tracker.addComment(iid, [
-        '<!-- afk-event: qa-passed -->',
-        '**✅ QA Passed**',
-        '',
-        `- **MR:** ${mr.url}`,
-        signal.summary ? `- **Summary:** ${signal.summary}` : '',
-      ].filter(Boolean).join('\n'));
-
-      await this.tracker.removeLabel(iid, 'stage::qa');
-      logger.info({ iid, label: 'stage::qa' }, 'tracker label removed');
-      await this.tracker.addLabel(iid, 'stage::done');
-      logger.info({ iid, label: 'stage::done' }, 'tracker label added');
-
-      logger.info({ iid, mrId: mr.id }, 'QA passed, MR merged');
-      return { success: true, mrUrl: mr.url };
-
-    } catch (err) {
-      await this.tracker.addComment(iid, `<!-- afk-event: qa-failed -->\n**❌ QA Failed**\n\nMR merge failed: ${(err as Error).message}`);
-      await this.tracker.addLabel(iid, 'mode::hitl');
-      logger.error({ iid, mrId: mr.id, err }, 'QA failed: MR merge error');
-      return { success: false };
-    }
-  }
-
-  /**
-   * Handle QA timeout.
-   */
-  private async handleTimeout(
-    iid: number,
+  private async handleExecutionFailure(
+    backlogId: string,
     worktreePath: string,
-    session: string
-  ): Promise<{ success: boolean }> {
-    const snapshot = await this.tmux.capturePane(session, 'main', { lines: 100, history: 200 });
-    const logPath = `${this.logDir}/timeout-${iid}-${Date.now()}.log`;
-
-    await (await import('fs')).promises.mkdir(this.logDir, { recursive: true });
-    await (await import('fs')).promises.writeFile(logPath, snapshot, 'utf-8');
-
-    await this.tracker.addComment(iid, `<!-- afk-event: qa-timeout -->
-**⏱️ QA Timeout**
-
-Session exceeded timeout and was force killed.
-
-- **Log:** \`${logPath}\`
-
-**Recovery:** Remove \`mode::hitl\` label and re-trigger QA.`);
-
-    await this.tracker.addLabel(iid, 'mode::hitl');
-    await this.tmux.killSession(session);
-    await this.worktree.updateStatus(iid, 'failed');
-
-    return { success: false };
+    session: string,
+    result: ExecutionResult,
+    execution: AgentExecution,
+  ): Promise<void> {
+    if (result.status === 'timed_out') {
+      const snapshot = await execution.captureOutput({ lines: 100, history: 200 });
+      await fs.mkdir(this.logDir, { recursive: true });
+      await fs.writeFile(`${this.logDir}/timeout-${backlogId}-${Date.now()}.log`, snapshot, 'utf-8');
+    }
+    await this.markBlocked(backlogId, `QA ${result.status}: ${formatExecutionFailure(result)}`);
+    logger.warn({ backlogId, session, worktreePath, diagnostics: formatExecutionFailure(result) }, 'QA execution did not complete');
   }
+
+  private async handleACResult(
+    backlogId: string,
+    signal: { type: 'goal_complete'; kind: 'qa'; summary?: string; result?: string },
+  ): Promise<{ success: boolean; mrUrl?: string }> {
+    if (signal.result !== 'PASS') {
+      await this.markBlocked(backlogId, 'QA did not return goal_complete kind=qa result=PASS');
+      return { success: false };
+    }
+
+    const backlog = await this.providers.backlog.get(backlogId);
+    const mr = await this.providers.changes.findForBacklog(backlog);
+    if (!mr) {
+      await this.markBlocked(backlogId, 'change request not found');
+      logger.warn({ backlogId }, 'QA failed: change request not found');
+      return { success: false };
+    }
+
+    try {
+      await this.providers.backlog.transition(backlogId, 'merge_ready', { changeId: String(mr.id) });
+      await this.providers.changes.merge(String(mr.id));
+      await this.providers.backlog.transition(backlogId, 'done', { changeId: String(mr.id) });
+      logger.info({ backlogId, changeId: mr.id }, 'change merged');
+      return { success: true, mrUrl: mr.url };
+    } catch (error) {
+      await this.markBlocked(backlogId, `change merge failed: ${(error as Error).message}`);
+      logger.error({ backlogId, changeId: mr.id, error }, 'QA failed: change merge error');
+      return { success: false };
+    }
+  }
+
+  private async markBlocked(backlogId: string, reason: string): Promise<void> {
+    await this.providers.backlog.transition(backlogId, 'blocked', { reason });
+    await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
+  }
+}
+
+function asQAResult(value: unknown): { type: 'goal_complete'; kind: 'qa'; summary?: string; result?: string } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as { type?: unknown; kind?: unknown; summary?: unknown; result?: unknown };
+  if (candidate.type !== 'goal_complete' || candidate.kind !== 'qa') return undefined;
+  return {
+    type: 'goal_complete',
+    kind: 'qa',
+    summary: typeof candidate.summary === 'string' ? candidate.summary : undefined,
+    result: typeof candidate.result === 'string' ? candidate.result : undefined,
+  };
 }

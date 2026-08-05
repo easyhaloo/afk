@@ -7,9 +7,8 @@ describe('buildCompletionTree', () => {
     const program: Command = buildCompletionTree();
     const names = program.commands.map(c => c.name()).sort();
     expect(names).toEqual([
-      'debug', 'escalate', 'isolate', 'issue',
-      'kanban', 'loop', 'mr', 'qa', 'scheduler', 'signal', 'tmux',
-      'workflow', 'worktree',
+      'backlog', 'debug', 'isolate', 'kanban', 'loop',
+      'qa', 'run', 'signal', 'tmux',
     ]);
   });
 });

@@ -134,6 +134,7 @@ describe('WorkflowRunner backlog provider mode', () => {
       worktreePath: process.cwd(), session: 'afk-42-verify-ac', executionMode: 'interactive',
     }));
     expect(subject.runPhase).toHaveBeenCalledWith(expect.objectContaining({ sandbox: phaseSandbox, completionKind: 'ac' }));
+    expect(phaseSandbox.close).toHaveBeenCalledTimes(1);
   });
 
   it('retries a diagnosable AC failure in the same implementation branch', async () => {

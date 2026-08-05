@@ -587,21 +587,26 @@ export class WorkflowRunner {
     }
     await this.heartbeatRuntime({ worktree: branchHandle.path, branch: branchHandle.branch, progress: `running ${step.id}` });
     const completionKind: CompletionKind = step.id === 'verify-ac' ? 'ac' : 'task';
-    const phase = await this.runPhase({
-      iid: ctx.iid,
-      session: ctx.session,
-      wtPath: branchHandle.path,
-      hardTimeoutMs: effectiveTimeout,
-      completionTimeoutMs: ctx.completionTimeoutMs,
-      contextHighTokens: ctx.contextHighTokens,
-      budget: ctx.budget,
-      prompt,
-      signalType,
-      executionMode: ctx.executionMode ?? 'batch',
-      agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
-      sandbox,
-      completionKind,
-    });
+    let phase: PhaseResult;
+    try {
+      phase = await this.runPhase({
+        iid: ctx.iid,
+        session: ctx.session,
+        wtPath: branchHandle.path,
+        hardTimeoutMs: effectiveTimeout,
+        completionTimeoutMs: ctx.completionTimeoutMs,
+        contextHighTokens: ctx.contextHighTokens,
+        budget: ctx.budget,
+        prompt,
+        signalType,
+        executionMode: ctx.executionMode ?? 'batch',
+        agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
+        sandbox,
+        completionKind,
+      });
+    } finally {
+      if (sandbox !== this.sandbox && ctx.executionMode === 'interactive') await sandbox.close();
+    }
 
     const completedAt = new Date().toISOString();
     const acFailure = completionKind === 'ac' ? parseAcVerificationFailure(phase.output) : undefined;

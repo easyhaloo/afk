@@ -35,6 +35,7 @@ import type { Step, StepResult } from './templates/types';
 import type { BranchHandle } from './branches/types';
 import type { ProviderBundle } from './core/providers';
 import type { BacklogClaim, BacklogItem, BacklogState } from './core/backlog';
+import { TaskRuntimeManager } from './runtime/task-runtime';
 
 /**
  * Preserve the provider boundary details when an agent execution fails.
@@ -159,6 +160,8 @@ export interface RunnerDependencies {
   plugins?: PluginRuntime;
   /** Canonical backlog/branch/change providers. */
   providers?: ProviderBundle;
+  /** Local runtime projection for the read-only Tasks monitor. */
+  runtimeManager?: TaskRuntimeManager;
 }
 
 /**
@@ -240,6 +243,9 @@ export class WorkflowRunner {
   private activeBacklog?: BacklogItem;
   private activeClaim?: BacklogClaim;
   private leaseLost = false;
+  private readonly runtimeManager: TaskRuntimeManager;
+  private runtimeRunId?: string;
+  private runtimeErrorSummary?: string;
 
   /**
    * Inject a sandbox for testing. Production code goes through runBody →
@@ -281,6 +287,7 @@ export class WorkflowRunner {
     this.agentProvider = deps?.agentProvider ?? createAgentProvider(this.agentProviderName);
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
+    this.runtimeManager = deps?.runtimeManager ?? new TaskRuntimeManager();
   }
 
   /**
@@ -309,6 +316,8 @@ export class WorkflowRunner {
     this.activeBacklog = undefined;
     this.activeClaim = undefined;
     this.leaseLost = false;
+    this.runtimeRunId = undefined;
+    this.runtimeErrorSummary = undefined;
     if (this.providers) {
       const claimed = await this.providers.backlog.claim(backlogId, session);
       if (!claimed) {
@@ -349,6 +358,10 @@ export class WorkflowRunner {
     }
 
     const effectiveTemplate = options.template ?? 'issue-implementation';
+    this.sandboxProviderName = options.sandboxProvider ?? 'local';
+    this.agentProviderName = options.agentProvider ?? 'claude-code';
+    this.executionMode = options.executionMode ?? 'batch';
+    await this.startRuntime(options.backlogId, session);
     try {
     // Bind all git/worktree operations to the explicit project root. This
     // deliberately avoids process.chdir(), which is process-global state.
@@ -360,14 +373,11 @@ export class WorkflowRunner {
     // no explicit project context was requested.
 
     // Resolve sandbox provider by name (CLI path).
-    this.sandboxProviderName = options.sandboxProvider ?? 'local';
     this.sandboxProvider = this.sandboxProviderByName(this.sandboxProviderName);
 
     // Resolve agent provider by name (CLI path). Agent registry must already have
     // the named provider registered (import side-effect or explicit registration).
     // Skip if constructor already injected one via deps (tests use this path).
-    this.agentProviderName = options.agentProvider ?? 'claude-code';
-    this.executionMode = options.executionMode ?? 'batch';
     if (!this.agentProviderInjected) {
       this.agentProvider = createAgentProvider(this.agentProviderName);
     }
@@ -383,8 +393,10 @@ export class WorkflowRunner {
     // claimed backlog must never be left in-progress when validation fails.
     await new TemplateLoader({ projectRoot: this.repoRoot }).load(effectiveTemplate);
     } catch (error) {
+      this.runtimeErrorSummary = `workflow setup failed: ${(error as Error).message}`;
       await this.markBacklogBlocked(`workflow setup failed: ${(error as Error).message}`);
       await this.resourceScope?.finish({ status: 'failed' });
+      await this.finishRuntime('blocked', 'workflow setup failed');
       throw error;
     }
 
@@ -403,6 +415,7 @@ export class WorkflowRunner {
       return result;
     } catch (error) {
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
+      this.runtimeErrorSummary = `workflow crashed: ${(error as Error).message}`;
       await this.cleanupOnFailure(iid, session);
       await this.markBacklogBlocked('workflow crashed');
       throw error;
@@ -421,6 +434,10 @@ export class WorkflowRunner {
       // stale timeout signal into the retained worktree.
       this.watchdog.disarm();
       this.activeClaim = undefined;
+      await this.finishRuntime(
+        terminalOutcome === 'success' ? 'completed' : 'blocked',
+        terminalOutcome === 'success' ? 'implementation handed to QA' : 'implementation stopped',
+      );
       if (scopeError !== undefined) {
         await this.markBacklogBlocked('resource cleanup failed');
         throw scopeError;
@@ -525,6 +542,7 @@ export class WorkflowRunner {
       this.stepSandboxes.push(sandbox);
       this.resourceScope?.registerSandbox(sandbox);
     }
+    await this.heartbeatRuntime({ worktree: branchHandle.path, branch: branchHandle.branch, progress: `running ${step.id}` });
     const completed = await this.runPhase({
       iid: ctx.iid,
       session: ctx.session,
@@ -860,12 +878,14 @@ export class WorkflowRunner {
         agentProvider,
       });
       this.resourceScope?.registerExecution(execution);
+      await this.heartbeatRuntime({ phase: 'implementing', progress: `agent generation ${round}` });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 
       let result = await execution.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
       });
+      await this.writeRuntimeDiagnostics(result, execution);
 
       switch (result.status) {
         case 'completed':
@@ -957,6 +977,7 @@ export class WorkflowRunner {
         default:
           // 'failed', 'blocked', 'aborted' — treat as failure
           const diagnostics = formatExecutionFailure(result);
+          this.runtimeErrorSummary = diagnostics;
           logger.warn({ iid: p.iid, status: result.status, diagnostics }, 'execution returned non-success status');
           if (round === 1) {
             // Initial round failure: unchanged crash path
@@ -1039,6 +1060,64 @@ export class WorkflowRunner {
       await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
     } catch (error) {
       logger.warn({ backlogId: this.activeBacklog.id, error }, 'failed to mark backlog blocked');
+    }
+  }
+
+  private async startRuntime(backlogId: string, session: string): Promise<void> {
+    if (this.runtimeRunId) return;
+    const now = new Date().toISOString();
+    this.runtimeRunId = `${session}-${Date.now()}`;
+    try {
+      await this.runtimeManager.start({
+        runId: this.runtimeRunId,
+        backlogId,
+        title: this.activeBacklog?.title,
+        phase: 'implementing',
+        status: 'running',
+        sandboxProvider: this.sandboxProviderName,
+        executionMode: this.executionMode,
+        agentProvider: this.agentProviderName,
+        session,
+        branch: this.activeBacklog?.branchName,
+        startedAt: now,
+        heartbeatAt: now,
+        progress: 'claimed',
+      });
+    } catch (error) {
+      logger.warn({ backlogId, error }, 'failed to publish workflow runtime');
+      this.runtimeRunId = undefined;
+    }
+  }
+
+  private async heartbeatRuntime(changes: Parameters<TaskRuntimeManager['heartbeat']>[1]): Promise<void> {
+    if (!this.runtimeRunId) return;
+    try {
+      await this.runtimeManager.heartbeat(this.runtimeRunId, changes);
+    } catch (error) {
+      logger.warn({ runId: this.runtimeRunId, error }, 'failed to update workflow runtime');
+    }
+  }
+
+  private async finishRuntime(status: 'completed' | 'blocked', progress: string): Promise<void> {
+    if (!this.runtimeRunId) return;
+    try {
+      await this.runtimeManager.finish(this.runtimeRunId, {
+        status,
+        progress,
+        errorSummary: status === 'blocked' ? this.runtimeErrorSummary ?? 'workflow execution failed' : undefined,
+      });
+    } catch (error) {
+      logger.warn({ runId: this.runtimeRunId, error }, 'failed to archive workflow runtime');
+    }
+  }
+
+  private async writeRuntimeDiagnostics(result: ExecutionResult, execution: AgentExecution): Promise<void> {
+    if (!this.runtimeRunId) return;
+    try {
+      const output = await execution.captureOutput({ lines: 200, history: 2_000 });
+      await this.runtimeManager.writeDiagnostics(this.runtimeRunId, { result, output });
+    } catch (error) {
+      logger.warn({ runId: this.runtimeRunId, error }, 'failed to persist workflow runtime diagnostics');
     }
   }
 

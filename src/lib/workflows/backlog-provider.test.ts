@@ -76,6 +76,25 @@ describe('WorkflowRunner backlog provider mode', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it('publishes a runtime record independently of backlog state', async () => {
+    const { claim } = claimed();
+    const bundle = providers(vi.fn(async () => claim));
+    const runtime = {
+      start: vi.fn(async () => {}),
+      heartbeat: vi.fn(async () => ({})),
+      finish: vi.fn(async () => ({})),
+    };
+    const agent = { name: 'claude-code', capabilities: new Set(), buildCommand: () => ({ argv: ['echo'], env: {} }) } as unknown as AgentProvider;
+    const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any }) as any;
+    subject.runBody = vi.fn(async () => ({ success: false }));
+
+    await subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main', executionMode: 'batch' });
+    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
+      backlogId: '42', phase: 'implementing', executionMode: 'batch', status: 'running',
+    }));
+    expect(runtime.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'blocked' }));
+  });
+
   it('releases a claimed lease exactly once when cleanup and the run terminalizer race', async () => {
     const { claim, release } = claimed();
     const bundle = providers(vi.fn(async () => claim));
@@ -100,6 +119,21 @@ describe('WorkflowRunner backlog provider mode', () => {
 
     await expect(subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main' })).rejects.toThrow('sandbox setup failed');
     expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('archives a claimed runtime when setup fails before a worktree exists', async () => {
+    const { claim } = claimed();
+    const bundle = providers(vi.fn(async () => claim));
+    const runtime = { start: vi.fn(async () => {}), heartbeat: vi.fn(async () => ({})), finish: vi.fn(async () => ({})) };
+    const agent = { name: 'claude-code', capabilities: new Set(), buildCommand: () => ({ argv: ['echo'], env: {} }) } as unknown as AgentProvider;
+    const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any }) as any;
+    subject.sandboxProviderByName = vi.fn(() => { throw new Error('sandbox setup failed'); });
+
+    await expect(subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main' })).rejects.toThrow('sandbox setup failed');
+    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({ backlogId: '42', progress: 'claimed' }));
+    expect(runtime.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      status: 'blocked', errorSummary: expect.stringContaining('workflow setup failed'),
+    }));
   });
 
   it('does not transition a successful run to verification after lease heartbeat loss', async () => {

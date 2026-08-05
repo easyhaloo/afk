@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Task, TmuxSession } from '../../../types/board';
+import { Task } from '../../../types/board';
 import type { View } from '../types';
 import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
 import { fileLogger } from '../../../lib/io';
 import {
   fetchTasks,
-  fetchSessions,
   fetchProjectDetail,
   fetchProjects,
 } from './fetcher';
+export { toRuntimeTask } from './fetcher';
 import {
   readBacklogList,
   writeBacklogList,
@@ -36,7 +36,7 @@ export function loadDashboardBacklogs(
 
 /**
  * Read-only dashboard data flow. Backlogs come from the injected management
- * facade; tasks and tmux sessions are independent runtime read models.
+ * facade; Tasks come exclusively from the local execution runtime projection.
  */
 export function useData(
   currentView: View,
@@ -45,7 +45,6 @@ export function useData(
   const [tasks, setTasks] = useState<Task[]>([]);
   const [backlogs, setBacklogs] = useState<BacklogViewModel[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [sessions, setSessions] = useState<TmuxSession[]>([]);
   const [projectBranches, setProjectBranches] = useState<Branch[]>([]);
   const [projectTags, setProjectTags] = useState<Tag[]>([]);
   const [projectCommits, setProjectCommits] = useState<Commit[]>([]);
@@ -62,17 +61,11 @@ export function useData(
     return data;
   }, []);
 
-  const reloadSessions = useCallback(async () => {
-    const data = await fetchSessions();
-    setSessions(data);
-    return data;
-  }, []);
-
   useEffect(() => {
-    void Promise.all([reloadTasks(), reloadSessions()]).catch(err => {
+    void reloadTasks().catch(err => {
       fileLogger.warn({ err }, 'failed to load runtime dashboard data');
     });
-  }, [reloadTasks, reloadSessions]);
+  }, [reloadTasks]);
 
   const refreshBacklogs = useCallback(async () => {
     if (!management) return;
@@ -180,7 +173,6 @@ export function useData(
     tasks,
     backlogs,
     projects,
-    sessions,
     projectBranches,
     projectTags,
     projectCommits,
@@ -189,7 +181,6 @@ export function useData(
     refreshBacklogs,
     loadProjectDetail,
     reloadTasks,
-    reloadSessions,
     fetchMoreProjects,
     invalidateDetailCache,
   };

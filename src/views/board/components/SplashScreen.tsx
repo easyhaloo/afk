@@ -16,9 +16,9 @@ interface SplashScreenProps {
 
 const FADE_DURATION_MS = 800;
 
-// Each phase's time budget in ms (config, detect, connect, tasks, sessions, ready)
-const PHASE_BUDGETS = [400, 300, 800, 600, 500, 400];
-const TOTAL_BUDGET = PHASE_BUDGETS.reduce((a, b) => a + b, 0); // = 3000ms
+// Each phase's time budget in ms (config, detect, connect, task runtime, ready)
+const PHASE_BUDGETS = [400, 300, 800, 600, 400];
+const TOTAL_BUDGET = PHASE_BUDGETS.reduce((a, b) => a + b, 0); // = 2500ms
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const edgeChars = ['░', '▒', '▓', '█'];

@@ -56,6 +56,9 @@ Only add when workflow has complex dependencies.
 ### Step 5 — Verify
 
 Run through checklist quality items. Fix any failures before reporting.
+If the skill has or needs `references/hard-checks.md`, keep it rules-only
+(ID + one-line prohibition + escalation). Put recovery how-to in a separate
+HITL file if needed.
 
 ---
 
@@ -75,13 +78,16 @@ with explicit reasoning:
 3. **Reason.** Does this actually pass? What could be wrong?
 4. **Mark.** Then mark pass/fail — not before reasoning.
 
+If `references/hard-checks.md` exists, check the hard-checks style item:
+rules-only vs long command recovery playbooks.
+
 ### Step 3 — Check constraint rules (with reasoning)
 
 Read `references/SKILL-GUIDE-CHECKLIST.md` constraint rules section.
 For each rule, **think before flagging**:
 
 1. **Read the rule.** What does it prevent?
-2. **Scan the SKILL.md.** Does any content violate it?
+2. **Scan the SKILL.md** (and hard-checks references if present).
 3. **Self-reflect.** Am I flagging correctly? Could this be a false positive?
 4. **Reason through examples.** If rule says "no example code", trace through every code block and confirm: intent description or an example?
 
@@ -110,6 +116,9 @@ constraint rules. For each finding:
 2. **Trace the cause.** Why did this happen? Is it a false positive?
 3. **Apply the fix.** Does the fix introduce new issues?
 4. **Self-reflect.** Did the fix make it better or worse?
+
+When fixing hard-checks: strip recovery bash into `hard-checks-recovery.md`
+(or drop it); leave agent-facing hard-checks as the rules table only.
 
 ### Step 3 — Verify
 

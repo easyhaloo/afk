@@ -10,6 +10,7 @@
 - [ ] `SKILL.md` under 500 lines
 - [ ] Single responsibility — one skill does one thing
 - [ ] Domain-specific terms and values preserved
+- [ ] If `references/hard-checks.md` exists: rules-only (ID + one-line prohibition + escalation); no bash recovery playbooks or command recipes in that file
 
 ## Reasoning Chain
 
@@ -47,6 +48,7 @@ positives. Trace through each item explicitly.
 - **Explicit output location**: `/tmp/` for transient, skill dir for durable
 - **No example code or commands**: intent over syntax
 - **Self-contained**: directory boundary is absolute, no out-of-bounds reads
+- **Hard-checks style**: agent-facing `hard-checks.md` is rules-only (what to forbid and how to escalate). Recovery how-to belongs in a separate HITL reference (e.g. `hard-checks-recovery.md`) or outside the skill, never as long command recipes inside hard-checks.
 
 ## Directory Structure
 

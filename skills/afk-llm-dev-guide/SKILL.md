@@ -1,13 +1,13 @@
 ---
-name: afk-llm-app-guide
+name: afk-llm-dev-guide
 description: >-
   Use when user asks about LLM application design, architecture, skill-driven
-  systems, context engineering, HITL, or observability.
+  systems, context engineering, HITL, observability, or evolvability.
 disable-model-invocation: false
 disallowed-tools: null
 ---
 
-# LLM Application Guide
+# LLM Development Guide
 
 ## Core Decision Tree
 

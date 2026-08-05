@@ -2,7 +2,8 @@ import { mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
-import { LocalSandboxProvider } from './local';
+import { SignalSchema } from '../../schemas';
+import { LocalAgentExecution, LocalSandboxProvider } from './local';
 
 describe('LocalSandboxProvider', () => {
   it('provisions a batch sandbox without creating a tmux session', async () => {
@@ -85,5 +86,41 @@ describe('LocalSandboxProvider', () => {
     });
 
     await expect(import('../../io').then(({ readSignal }) => readSignal(worktreePath))).resolves.toBeNull();
+  });
+
+  it('accepts an AC verification completion signal', () => {
+    expect(SignalSchema.safeParse({
+      type: 'goal_complete',
+      timestamp: new Date().toISOString(),
+      kind: 'ac_verification',
+      result: 'PASS',
+      summary: 'acceptance criteria passed',
+    }).success).toBe(true);
+  });
+
+  it('returns the parsed interactive signal as structured output', async () => {
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-execution-'));
+    const signal = {
+      type: 'goal_complete' as const,
+      timestamp: new Date().toISOString(),
+      kind: 'task' as const,
+      summary: 'acceptance criteria passed',
+      failedCriteria: [],
+    };
+    await writeFile(join(worktreePath, '.afk-signal.json'), JSON.stringify(signal));
+    const execution = new LocalAgentExecution({
+      worktreePath,
+      sessionName: 'interactive-test',
+      command: { argv: ['agent'], cwd: worktreePath },
+      generation: 1,
+      prompt: 'verify acceptance criteria',
+      signalType: 'goal_complete',
+      tmux: {} as never,
+    });
+
+    await expect(execution.waitForResult()).resolves.toMatchObject({
+      status: 'completed',
+      structuredOutput: signal,
+    });
   });
 });

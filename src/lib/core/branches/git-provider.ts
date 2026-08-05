@@ -10,13 +10,24 @@ export class GitBranchProvider implements BranchProvider {
   constructor(private readonly repoRoot: string) {}
 
   async createBranch(item: BacklogItem, baseBranch: string): Promise<BranchHandle> {
+    const git = simpleGit(this.repoRoot);
+    if (await refExists(git, item.branchName)) {
+      const config = {
+        type: 'existing' as const,
+        branch: item.branchName,
+      };
+      const strategy = strategyForConfig(config);
+      const handle = await strategy.prepareWorktree(git, config, { repoPath: this.repoRoot });
+      this.handles.set(handle.path, handle);
+      return { branchName: handle.branch, worktreePath: handle.path };
+    }
     const config = {
       type: 'named' as const,
       branch: item.branchName,
       baseBranch: await this.resolveBaseBranch(item.branchName, baseBranch),
     };
     const strategy = strategyForConfig(config);
-    const handle = await strategy.prepareWorktree(simpleGit(this.repoRoot), config, { repoPath: this.repoRoot, baseBranch: config.baseBranch });
+    const handle = await strategy.prepareWorktree(git, config, { repoPath: this.repoRoot, baseBranch: config.baseBranch });
     this.handles.set(handle.path, handle);
     return { branchName: handle.branch, worktreePath: handle.path };
   }

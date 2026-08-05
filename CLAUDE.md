@@ -1,0 +1,103 @@
+# AFK — Away From Keyboard CLI
+
+Autonomous development workflow CLI + Skills system.
+
+## Project Overview
+
+AFK is a CLI tool for managing autonomous development workflows, particularly focused on GitLab/GitHub integration, tmux session management, and a TUI-based dashboard.
+
+**Tech Stack**: TypeScript, React (Ink), Node.js ≥18
+
+## Key Commands
+
+| Command | Purpose |
+|---------|---------|
+| `afk backlog` | Backlog management and inspection only |
+| `afk run --backlog-id <id>` | Execute one backlog item |
+| `afk loop` | Complete implementation → QA → merge pipeline |
+| `afk qa --backlog-id <id>` | Standalone QA retry/diagnostic entry point |
+| `afk loop` | Continuous integration loop |
+| `afk qa` | QA verification on merged code |
+| `afk signal` | Structured signal file management |
+| `afk worktree` | Git worktree management with state tracking |
+| `afk tmux` | Tmux session management |
+| `afk isolate` | DB service isolation per worktree |
+| `afk escalate` | File GitLab issue and launch workflow |
+| `afk board` | Interactive TUI dashboard |
+| `afk kanban` | Kanban board of issues |
+| `afk debug` | Debug loop (reproduce → verify) |
+
+The CLI is a breaking backlog hard cutover. `issue`, `tracker`, `mr`, and
+`workflow` execution commands and their old argument forms are removed; there
+are no compatibility aliases. Provider labels are internal adapter metadata.
+
+## Architecture
+
+```
+src/
+├── commands/          # CLI command implementations ( commander )
+├── lib/
+│   ├── ui/core/       # TUI core: View, Registry, Keyboard
+│   ├── core/          # GitLab, GitHub, Tracker, IO abstractions
+│   └── plugins/       # Skill loader
+└── index.ts           # Entry point
+```
+
+### TUI Core (`src/lib/ui/core/`)
+
+- **View** — Interface for TUI panels; each View has `id`, `shortcut`, `render()`
+- **ViewRegistry** — Manages View registration and active state; sorts by priority
+- **KeyboardDispatcher** — Routes keyboard events to global handlers or active View
+
+TUI built with React + Ink. Components live in `src/components/` (planned).
+
+## Related Projects
+
+| Project | Path | Purpose |
+|---------|------|---------|
+| afk-plugin | `~/.claude/plugins/cache/afk/` | Claude Code skill plugins |
+
+## Workflow
+
+1. Make changes in `src/`
+2. Run `pnpm build` to compile to `dist/`
+3. Test with `pnpm test` (vitest)
+4. For TUI testing, see [docs/TESTING.md](docs/TESTING.md)
+5. **Documentation sync**: CLI command changes (signature, flags, behavior) or skill modifications must update the corresponding docs — `README.md`, `CLAUDE.md` command table, skill docs, or related `docs/` files. Keep docs in lockstep with code.
+
+## Skill Development
+
+When modifying or creating skills, always work in the project's `skills/` directory:
+- **Do not** edit skills in `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/`
+- The project's `skills/` directory is the source of truth
+- Changes should be committed and pushed from here
+- See `skills/SKILL-GUIDE.md` for skill authoring standards
+- Use `afk-skill-craft` to create, diagnose, or refactor skills
+
+## Environment
+
+```bash
+# Required env vars for full functionality
+GITLAB_TOKEN=     # GitLab API token
+GITLAB_URL=       # GitLab instance URL
+GITHUB_TOKEN=     # GitHub API token
+TMUX_SESSION=     # tmux session name (default: afk)
+```
+
+## Execution Architecture Status
+
+All 8 phases of [docs/EXECUTION-DESIGN.md](docs/EXECUTION-DESIGN.md) are implemented:
+
+| Phase | Module | Notes |
+|-------|--------|-------|
+| 0 | `agents/types.ts`, `sandbox/types.ts` | Interfaces only |
+| 1 | `sandbox/local.ts`, `sandbox/types.ts` | Local sandbox wired into `WorkflowRunner` |
+| 2 | `sandbox/local.ts` (LocalAgentExecution), `agents/claude-code.ts` | ExecutionResult.status + LegacyExecutionWrapper for tests |
+| 3 | `agents/{codex,cursor,pi,opencode,copilot}.ts`, `agents/registry.ts` | 6 providers + capability-gated resume |
+| 4 | `sessions/{types,file-store,handoff-store,run-state}.ts` | SessionStore chain + atomic writes + checksum |
+| 5 | `sandbox/container/*` | Docker + Podman sandbox with env allowlist |
+| 6 | `branches/{issue,named,merge-to-head,existing}.ts` | 4 strategies + parallel-worktree isolation |
+| 7 | `templates/*` | 5 builtin templates + zod-validated loader |
+| 8 | `sandbox/legacy-compat.ts` | `.afk-signal.json` is legacy fallback only |
+
+`.afk-signal.json` (the legacy completion protocol) is deprecated — see `core/io/signal.ts` JSDoc and `sandbox/legacy-compat.ts`. New agents report via ExecutionResult; old worktrees are still readable.

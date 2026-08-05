@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "afk",
+  "description": "AFK — Away From Keyboard skill suite for autonomous development workflows on Claude Code.",
+  "owner": {
+    "name": "easyhaloo",
+    "url": "https://github.com/easyhaloo"
+  },
+  "plugins": [
+    {
+      "name": "afk",
+      "version": "1.0.5",
+      "description": "Full lifecycle skills: grill-me, PRD, issues, implement, QA, research, pipeline, skill-craft, complexity governance, reasoning guard, API workflow.",
+      "source": "./",
+      "category": "developer-tools"
+    }
+  ]
+}

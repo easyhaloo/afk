@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+.nyc_output/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+.afk-signal.json
+.afk/
+
+# Redis dump
+dump.rdb
+
+# Git worktrees
+.worktrees/
+.playwright-mcp/
+.claude/
+
+# Local dev artifacts
+.playwright-cli/
+.superpowers/
+design-demos/
+dt-mdp-llm-research.json
+dt-mdp-llm-research.md
+llm-app-design-methodology.json
+llm-app-design-methodology.md
+anthropic_context_article.md

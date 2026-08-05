@@ -1,0 +1,24 @@
+// View type - union of all registered view names
+export type View = 'tasks' | 'backlogs' | 'projects' | 'board';
+
+export type DetailView = 'list' | 'detail';
+
+export type NotificationType = 'info' | 'success' | 'warning' | 'error';
+
+export interface Notification {
+  message: string;
+  type: NotificationType;
+}
+
+// View context - carries data with a view state
+export interface ViewContext {
+  project?: import('../../lib/core/tracker/types').Project;
+  scrollOffset?: number;
+  selectedIndex?: number;
+}
+
+// View state - view name + context
+export interface ViewState {
+  view: View;
+  context: ViewContext;
+}

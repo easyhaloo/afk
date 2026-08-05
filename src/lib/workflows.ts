@@ -528,6 +528,10 @@ export class WorkflowRunner {
     if (ctx?.iid) {
       prompt = prompt.replaceAll('{iid}', String(ctx.iid));
     }
+    if (this.activeBacklog) {
+      const description = this.activeBacklog.description?.trim();
+      prompt = `${prompt}\n\nBacklog title: ${this.activeBacklog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
+    }
     if (step.id === 'implement') {
       const rework = this.activeRework ? formatReworkContext(this.activeRework) : '';
       const acCorrection = this.acFeedback ? formatAcCorrection(this.acFeedback) : '';

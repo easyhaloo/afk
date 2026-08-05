@@ -73,6 +73,21 @@ describe('WorkflowRunner backlog provider mode', () => {
     expect(verifier).not.toContain('AC correction required');
   });
 
+  it('injects the claimed backlog title and description into implementation prompts', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    subject.activeBacklog = {
+      ...item,
+      title: 'Add interactive JSON proof',
+      description: 'Create e2e-interactive-json-proof.txt with the exact required content.',
+    };
+
+    const prompt = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement issue #{iid}' }, { iid: 42 });
+
+    expect(prompt).toContain('Add interactive JSON proof');
+    expect(prompt).toContain('Create e2e-interactive-json-proof.txt');
+  });
+
   it('injects the active QA rework record into the next implementation prompt', async () => {
     const bundle = providers(vi.fn(async () => null));
     const subject = runner(bundle) as any;

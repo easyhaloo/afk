@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { LocalSandboxProvider } from './local';
 
@@ -46,5 +49,41 @@ describe('LocalSandboxProvider', () => {
     expect(tmux.sendPrompt).toHaveBeenCalledWith(
       process.cwd(), 'interactive-test', 'main', 'goal', 'goal_complete',
     );
+  });
+
+  it('clears a prior completion signal before starting the next interactive phase', async () => {
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-sandbox-'));
+    await writeFile(
+      join(worktreePath, '.afk-signal.json'),
+      JSON.stringify({
+        type: 'goal_complete',
+        timestamp: new Date().toISOString(),
+        kind: 'task',
+        summary: 'previous phase completed',
+      }),
+    );
+    const tmux = {
+      createSession: vi.fn(async () => ({})),
+      sendPrompt: vi.fn(async () => {}),
+      killSession: vi.fn(async () => {}),
+      closeSession: vi.fn(),
+    };
+    const provider = new LocalSandboxProvider();
+    const sandbox = await provider.create({
+      worktreePath,
+      session: 'interactive-test',
+      executionMode: 'interactive',
+      tmux: tmux as never,
+    });
+
+    await sandbox.startAgent({
+      command: { argv: ['agent', '--interactive'], cwd: worktreePath },
+      prompt: 'verify acceptance criteria',
+      generation: 2,
+      signalType: 'goal_complete',
+      executionMode: 'interactive',
+    });
+
+    await expect(import('../../io').then(({ readSignal }) => readSignal(worktreePath))).resolves.toBeNull();
   });
 });

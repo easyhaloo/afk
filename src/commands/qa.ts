@@ -12,7 +12,7 @@ import { getWorkflowConfig } from '../lib/core/config/manager';
 export function registerQACommands(program: Command): void {
   program
     .command('qa')
-    .description('Verify and merge one backlog item in verification state')
+    .description('Verify one backlog item and publish its change for the appropriate merge policy')
     .requiredOption('--backlog-id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
     .option('--mode <mode>', 'Agent execution mode: batch or interactive', 'batch')

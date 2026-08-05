@@ -10,7 +10,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
-| `afk loop` | 连续执行、QA 与合并 |
+| `afk loop` | 连续执行、基线同步 QA，以及按层级合并 |
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
 | `afk signal`、`afk tmux`、`afk board`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
 
@@ -78,16 +78,27 @@ sequenceDiagram
     R->>B: 创建分支/worktree
     R->>A: 执行 backlog
     A-->>R: 完成信号
-    R->>C: 创建变更请求
     R->>P: transition verification
     R->>Q: 验证 backlog
-    Q->>C: 合并变更请求
-    Q->>P: transition done
+    Q->>B: 拉取最新基线分支
+    Q->>B: 将实现分支合并到验证分支
+    Q->>A: 执行集成测试
+    Q->>B: 提交并推送验证分支
+    Q->>C: 创建可合并的 MR
+    alt 子 backlog
+      Q->>C: 自动合并到父分支
+      Q->>P: transition done
+    else 根 backlog
+      Q->>P: transition merge_ready + hitl
+      Note over Q,P: 人工审核后合并到 main
+    end
     R->>P: 资源作用域释放 lease
 ```
 
 `afk loop` 在进程内复用同一流程并集成 QA；独立 `qa` 命令使用管理 bundle，
-不会认领实现任务。
+不会认领实现任务。实现阶段只推送 feature 分支；QA 负责拉取最新基线、合并、
+执行集成测试、提交、推送并创建可合并的 MR。子 backlog 自动合并到父分支，根
+backlog 进入 `merge_ready + hitl`，等待人工审核后合并到 `main`。
 
 ## 扩展机制
 

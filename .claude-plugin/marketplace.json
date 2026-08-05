@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "afk",
-  "description": "AFK CLI skill suite — requirements interview, implementation, research, pipeline, and hand-off workflows.",
+  "description": "AFK — Away From Keyboard skill suite for autonomous development workflows on Claude Code.",
   "owner": {
     "name": "easyhaloo",
     "url": "https://github.com/easyhaloo"
@@ -9,7 +9,8 @@
   "plugins": [
     {
       "name": "afk",
-      "description": "Full-stack CLI workflow skills: grill-me interviews, implementation, research, QA, pipeline, and PRD publishing.",
+      "version": "1.1.0",
+      "description": "Full lifecycle skills: grill-me, PRD, issues, implement, QA, research, pipeline, skill-craft, complexity governance, reasoning guard, API workflow.",
       "source": "./",
       "category": "developer-tools"
     }

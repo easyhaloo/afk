@@ -13,7 +13,7 @@
 ## 功能特性
 
 - **跨平台** — 统一的 GitLab 和 GitHub CLI（issues、MRs/PRs）
-- **Skills 套件** — 19 个 Claude Code skills，覆盖完整开发周期
+- **Skills 套件** — Claude Code skills，覆盖完整开发周期与质量治理
 - **TUI 仪表盘** — 交互式 Issue 追踪仪表盘
 - **后台自动化** — 基于 tmux 的工作流调度器
 - **TDD 集成** — 内置测试驱动开发方法论
@@ -32,7 +32,7 @@ afk --version
 
 ## 安装 Claude Code 插件（可选）
 
-AFK 提供完整的 Claude Code skill 套件，可作为插件集成。
+AFK 提供完整的 Claude Code skill 套件，可作为插件集成（**v1.1.0**）。
 
 ### 方式一：在 Claude Code 会话中（推荐）
 
@@ -147,6 +147,7 @@ afk signal goal-complete               # 工作流信号通信
 | `/afk-hand-off` | 工作交接 | 任务转移给其他开发者 |
 | `/afk-scheduler` | 后台调度 | 多 Issue 依赖感知执行 |
 | `/afk-skill-craft` | Skill 创作 | 创建、诊断或重构 skills |
+| `/software-complexity-governance` | 复杂度与异味治理 | 测量复杂度、映射异味、建议重构 |
 | `/api-workflow` | API 测试 | 多步骤 API 链配合浏览器测试 |
 | `/md-to-pdf` | Markdown 转 PDF | 导出带 Mermaid 图表的文档 |
 | `/reasoning-guard` | 推理守卫 | 编码 Agent 多轮推理降级 |

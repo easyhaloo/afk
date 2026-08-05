@@ -13,7 +13,7 @@ Cross-platform issue tracking automation (GitLab/GitHub) powered by Claude AI ag
 ## Features
 
 - **Cross-platform** — Unified GitLab and GitHub CLI (issues, MRs/PRs)
-- **Skills Suite** — 19 Claude Code skills covering the full development lifecycle
+- **Skills Suite** — Claude Code skills covering the full development lifecycle plus quality governance
 - **TUI Dashboard** — Interactive issue tracking dashboard
 - **Background Automation** — tmux-based workflow scheduler
 - **TDD Integration** — Built-in test-driven development methodology
@@ -32,7 +32,7 @@ See [Getting Started Guide](docs/GETTING-STARTED.md) for detailed setup.
 
 ## Install Claude Code Plugin (Optional)
 
-AFK provides a full Claude Code skill suite that can be integrated as a plugin.
+AFK provides a full Claude Code skill suite that can be integrated as a plugin (**v1.1.0**).
 
 ### Method 1: In Claude Code Session (Recommended)
 
@@ -147,6 +147,7 @@ Full command reference: `afk --help`
 | `/afk-hand-off` | Work handoff | Transfer task to another developer |
 | `/afk-scheduler` | Background scheduling | Multiple issues with dependency-aware execution |
 | `/afk-skill-craft` | Skill authoring | Create, diagnose, or refactor skills |
+| `/software-complexity-governance` | Complexity & smells | Measure complexity, map smells, recommend refactorings |
 | `/api-workflow` | API testing | Multi-step API chains with browser testing |
 | `/md-to-pdf` | Markdown to PDF | Export docs with Mermaid diagrams |
 | `/reasoning-guard` | Reasoning guard | Multi-turn reasoning degradation in coding agents |

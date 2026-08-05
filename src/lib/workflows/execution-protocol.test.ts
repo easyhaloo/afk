@@ -47,6 +47,8 @@ describe('batch execution prompt protocol', () => {
     expect(prompt).toContain('atomically');
     expect(prompt).toContain('Do not only print');
     expect(prompt).toContain('Do not switch branches');
+    expect(prompt).toContain('JSON.stringify');
+    expect(prompt).toContain('JSON.parse');
   });
 
   it('injects the QA result contract into interactive QA prompts', () => {

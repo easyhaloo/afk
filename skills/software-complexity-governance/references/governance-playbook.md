@@ -1,48 +1,38 @@
 # Governance Playbook
 
-## Recommended Quality Gates (starting points)
+## Starting quality gates (calibrate per domain)
 
-Method level:
-- Cyclomatic ≤ 10 (or 15 for complex domains)
+Method:
+- Cyclomatic ≤ 10 (or ≤ 15 in complex domains)
 - Cognitive ≤ 15
 - NLOC ≤ 40–50
 - Parameters ≤ 5–7
 - Nesting depth ≤ 3–4
 
-File level:
-- Average CC ≤ 5–8
-- Max CC ≤ 20
-- File NLOC ≤ 300–500
-- MI ≥ 65–70
+File:
+- Average cyclomatic ≤ 5–8; max ≤ 20
+- NLOC ≤ 300–500
+- Maintainability index ≥ 65–70
 
 Project:
-- No new code violating gates (Clean as You Code)
-- Track trend of average / max complexity and debt ratio
-- Hotspot list (high complexity × high change frequency) reviewed quarterly
+- Prefer Clean-as-You-Code gates on new/changed code
+- Track trends of averages, maxima, and debt ratio
+- Review hotspots (high complexity × high change frequency) on a fixed cadence
 
-## Refactoring Patterns for High Complexity
+## Refactoring direction (detail in smells-refactorings.md)
 
-1. Extract Method / Function — split long or multi-responsibility blocks.
-2. Flatten nesting — early return / guard clauses; replace nested if with strategy or table-driven.
-3. Replace conditional with polymorphism or state machine.
-4. Introduce parameter object when param count high.
-5. Split class / module when CBO or WMC high.
-6. Hide incidental complexity behind well-named abstractions (facade, adapter).
-7. Delete or move dead / rarely-changed complex code.
+Extract method/class; flatten nesting (guards, early return); replace conditionals
+with polymorphism or strategy; introduce parameter objects; split high-CBO modules;
+hide incidental complexity behind clear abstractions; remove dead complexity.
 
-See also the full smells ↔ refactorings mapping in smells-refactorings.md.
+## Process
 
-## Process Integration
-
-- Pre-commit or CI: fail or warn on threshold breach for changed files.
-- PR review checklist: any new function > threshold needs justification or refactor.
-- Dashboard: SonarQube / CodeScene / custom lizard+radon reports.
-- Tech-debt backlog: quantify remediation effort (Sonar SQALE style) and prioritize by business impact + change frequency.
-- Education: share “why this metric” and examples of good vs bad complexity in team wiki.
+- CI: warn or fail on threshold breaches for changed files.
+- PR: justify or refactor any new function above threshold.
+- Debt backlog: estimate remediation cost; prioritize by business impact and churn.
+- Document exceptions; do not chase a single metric into worse design.
 
 ## Caveats
 
-- Metrics are proxies, not absolute truth. Context (domain, performance constraints, generated code) matters.
-- Over-focusing on lowering a single number can produce worse designs (excessive extraction, god classes elsewhere).
-- Generated / third-party / test code usually excluded or given looser thresholds.
-- Combine static metrics with runtime, coverage, and human review.
+Generated, vendored, and pure fixture code usually need looser or excluded gates.
+Combine static metrics with coverage, runtime evidence, and human review.

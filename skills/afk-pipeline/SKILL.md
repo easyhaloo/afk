@@ -38,6 +38,7 @@ Pick the row that matches what the user has in hand right now:
 | A backlog in verification | `/afk-qa --backlog-id <backlog-id>` |
 | A reproducible failure to diagnose | `/afk-diagnose` |
 | Session state to snapshot or resume | `/afk-hand-off` |
+| Codebase complexity, smells, or maintainability to measure | `/software-complexity-governance` |
 
 If multiple rows match, ask which to act on — do not pick silently.
 
@@ -63,4 +64,5 @@ grill-me-context → grill-me → prototype (optional) → to-prd → to-issues
 - `implement` executes one backlog; `scheduler` starts the loop for many
   provider-backed backlogs in dependency order.
 - `qa` is the merge gate.
-- `do`, `debug`, `hand-off` are session-local utilities, off the pipeline.
+- `do`, `diagnose`, `hand-off`, and `software-complexity-governance` are
+  session-local or quality utilities, off the main delivery pipeline.

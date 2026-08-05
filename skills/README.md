@@ -44,6 +44,12 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | [afk-diagnose](./afk-diagnose/) | `/afk-diagnose` | Diagnostic workflow for complex failures |
 | [reasoning-watchdog](./reasoning-watchdog/) | `/reasoning-watchdog` | Hook-based reasoning quality monitoring |
 
+## Quality & Governance Skills
+
+| Skill | Trigger | Description |
+|-------|---------|-------------|
+| [software-complexity-governance](./software-complexity-governance/) | complexity / 圈复杂度 / 代码异味 | Measure complexity, map smells, recommend refactorings and gates |
+
 ---
 
 Each skill directory contains:

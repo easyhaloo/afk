@@ -2,69 +2,39 @@
 
 ## Cyclomatic Complexity (McCabe, 1976)
 
-V(G) = E − N + 2P   (control-flow graph)
-Practical: start at 1, +1 for every decision point:
-- if, else if, case, while, for, do, catch
-- ternary ? :
-- logical && || (short-circuit)
-- switch often counts as 1 + cases (or modified variant counts switch once)
+V(G) = E − N + 2P on the control-flow graph.
+Practical count: start at 1; +1 per decision (if, else-if, case, loops, catch,
+ternary, short-circuit &&/||). Switch variants differ by tool (per-case vs once).
 
-Rank (common):
-- 1–5 A low risk
-- 6–10 B
-- 11–20 C moderate
-- 21–30 D
-- 31–40 E high
-- 41+ F very high
+Common ranks: 1–5 A; 6–10 B; 11–20 C; 21–30 D; 31–40 E; 41+ F.
+Primary use: testability (minimum paths). Weak on nesting and above-method aggregation.
 
-Limitation: does not penalize nesting; treats sequential ifs same as nested; aggregates poorly above method level.
+## Cognitive Complexity (SonarSource / Ann Campbell)
 
-## Cognitive Complexity (SonarSource / Ann Campbell, 2017)
+Measures human comprehension cost: +1 per control break; extra for nesting;
+else-if chains treated more gently than pure nesting.
+Useful thresholds: review around 15; serious concern above 25.
+Meaningful at method and higher levels; nesting-aware.
 
-Goals: better correlate with human understanding.
+## Halstead
 
-Rules (simplified):
-- +1 for each break in linear flow (if, else, for, while, catch, switch, ternary, logical ops in conditions)
-- +1 extra for each nesting level of the above
-- else-if / else does not add nesting increment beyond the first if
-- sequences of consecutive else-if add only +1 each (no extra nesting)
-- recursion, jumps, breaks, continues may add
-- modern constructs (lambdas, try-with-resources) handled sensibly
-
-Recommended: flag >15, serious concern >25.
-
-Advantage: meaningful at method, class and even application level; nesting-aware.
-
-## Halstead Metrics (1977)
-
-Four primitives:
-- n1 = distinct operators
-- n2 = distinct operands
-- N1 = total operators
-- N2 = total operands
-
-Derived:
-- Vocabulary η = n1 + n2
-- Length N = N1 + N2
-- Volume V = N · log₂(η)
-- Difficulty D = (n1/2) · (N2/n2)
-- Effort E = D · V
-- Time T ≈ E / 18 (seconds)
-- Bugs B ≈ V / 3000
-
-Useful secondary signal for “too many concepts juggled”.
+From distinct/total operators and operands: vocabulary, length, volume,
+difficulty, effort, estimated bugs ≈ volume/3000.
+Secondary signal for “too many concepts.”
 
 ## Maintainability Index
 
-Common form (Microsoft / Visual Studio / radon):
-MI = max(0, (171 − 5.2·ln(V) − 0.23·G − 16.2·ln(L)) · 100 / 171)
-(where V=Halstead volume, G=total CC, L=SLOC; sometimes + comment factor)
+Composite of Halstead volume, cyclomatic total, and SLOC (0–100 scale).
+Rough bands: >85 strong; 65–85 moderate; <65 hard to maintain.
+Dashboard convenience; inspect components when it drops.
 
-0–100 scale. Higher better.
+## Size and structure
 
-## Other
+- NLOC / SLOC / LOC — method often ≤30–50; file ≤300–500 as soft guides.
+- Nesting depth — prefer ≤3–4.
+- Parameter count — prefer ≤4–7.
+- CBO / fan-in / fan-out — high values signal coupling risk.
+- NPath — path product; very high values imply impractical exhaustive testing.
+- CK suite (WMC, DIT, NOC, CBO, RFC, LCOM) for class design.
 
-- NPath: product of branches (exponential).
-- Nesting depth: max depth of control structures.
-- CK OO suite: WMC (weighted methods = sum CC), CBO, RFC, LCOM, DIT, NOC.
-- Fan-in / Fan-out / Information flow complexity (Henry-Kafura).
+Project/module view: averages, maxima, distributions, hotspots (complexity × change frequency), debt ratio.

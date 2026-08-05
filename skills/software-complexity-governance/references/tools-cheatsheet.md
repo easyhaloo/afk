@@ -1,55 +1,33 @@
 # Tools Cheat-sheet
 
-## lizard (multi-language, primary recommendation)
+Intent: pick an analyzer that matches language and required metrics.
+Do not treat command lines below as mandatory copy-paste; adapt to the environment.
 
-```bash
-pip install lizard
-lizard .                          # whole tree
-lizard src/ -l python -l java     # filter languages
-lizard . -C 10 -a 5 -L 40         # thresholds: CCN, args, NLOC
-lizard . --csv                    # machine readable
-lizard . -Eduplicate              # also find clones
-```
+## Multi-language structural (cyclomatic, NLOC, params)
 
-Output columns: NLOC, CCN, token, PARAM, length, location, file, function.
+**lizard** — broad language set (C/C++, Java, JS/TS, Python, Go, Rust, and more).
+Use for mixed trees or when one CLI is preferred. Supports thresholds and clone detection.
 
-## radon (Python)
+## Python
 
-```bash
-pip install radon
-radon cc path/ -a -s              # CC with average + show all
-radon cc path/ -n C               # only rank C or worse
-radon mi path/ -s                 # Maintainability Index
-radon hal path/                   # Halstead
-radon raw path/                   # LOC / SLOC / comments / blank
-```
+**radon** — cyclomatic ranks, maintainability index, Halstead, raw size metrics.
+**complexipy** — cognitive complexity focused.
 
-Ranks A–F based on CC.
+## JavaScript / TypeScript
 
-## complexipy (Python cognitive)
+ESLint complexity rule; SonarJS or similar plugins for cognitive complexity when available.
 
-```bash
-pip install complexipy
-complexipy .
-complexipy path/ --max-complexity-allowed 15 --failed
-```
+## Multi-language cognitive + cyclomatic
 
-## ESLint (JS/TS)
+**cccc** (and similar AST-based CLIs) when both metrics are required in one pass
+for supported languages (e.g. TS/JS, Go, Rust, PHP).
 
-```bash
-npx eslint --rule 'complexity: ["error", 10]' src/
-# or with sonarjs plugin for cognitive:
-# "sonarjs/cognitive-complexity": ["error", 15]
-```
+## Platforms
 
-## cccc (cognitive + cyclomatic, multi)
+SonarQube / SonarCloud — project-level complexity, cognitive, debt, quality gates.
+CodeScene-style tools — behavioral hotspots (complexity × change frequency).
 
-Single binary, JSON output. Supports TS/JS, Rust, Go, PHP.
+## Fallback
 
-## SonarQube / SonarCloud
-
-Full platform: complexity, cognitive, debt ratio, quality gates, PR decoration. Use sonar-scanner CLI against a running server or cloud.
-
-## Manual / AST fallback
-
-When tools unavailable, parse AST (Python ast, tree-sitter, etc.) and apply the counting rules from metrics-detail.md.
+If no analyzer is available, apply counting rules from metrics-detail.md to the
+provided source (or AST) and state the limitation clearly.

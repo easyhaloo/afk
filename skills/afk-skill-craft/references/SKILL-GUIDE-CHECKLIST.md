@@ -40,7 +40,7 @@ positives. Trace through each item explicitly.
     Only in skill file → PRESERVE (LLM knows it only from context)
   ```
   - Training data has it → abstract (e.g., `git commit`, `jest`)
-  - Only in skill file → PRESERVE (e.g., `mode::afk`, `afk issue create --label`)
+  - Only in skill file → PRESERVE (e.g., a provider-specific artifact format)
 - **Domain knowledge separation**: specialized knowledge in references/
 - **Fail-closed on unclear state**: stop if precondition not met
 - **No ambiguous language**: no "consider", "maybe", "if appropriate"

@@ -1,12 +1,12 @@
-# Issue Template
+# Backlog Manifest Item Template
 
-> The authoritative structure for AFK-tracked issues.
+> The authoritative structure for provider-neutral AFK backlog items.
 > Audience: LLM agents writing issues, NOT human readers.
 > Optimize for: stable token structure, parseable fields, machine-checkable AC.
 
 ## When to Use
 
-When creating an issue that the autonomous workflow will process.
+When emitting a backlog item that the autonomous workflow will process.
 
 ## Structure
 
@@ -28,7 +28,7 @@ When creating an issue that the autonomous workflow will process.
 
 ## Dependencies
 
-<bulleted list of `blocks-<iid>` references, or "none">
+<bulleted list of backlog IDs in `dependsOn`, or "none">
 ```
 
 ## Field Reference
@@ -36,7 +36,7 @@ When creating an issue that the autonomous workflow will process.
 | Field | Required | Format | Purpose |
 |-------|----------|--------|---------|
 | `# <Title>` | yes | one line | Issue name |
-| `## PRD` | yes (PRD Mode) | `#<iid>` or `none` (Direct Mode) | Link to source PRD issue |
+| `## PRD` | yes (PRD Mode) | PRD artifact path or `none` | Link to source PRD artifact |
 | `## Context` | yes | one paragraph | Why this work |
 | `## Acceptance Criteria` | yes | list (≥1 item) | Machine-verifiable success |
 | `## Out of Scope` | no | list | Prevent scope creep |
@@ -85,7 +85,7 @@ Examples:
 
 ## Examples
 
-### Complete issue
+### Complete backlog item
 
 ```markdown
 # Add user login endpoint
@@ -113,7 +113,7 @@ endpoint that accepts email + password and returns a JWT.
 none
 ```
 
-### Minimal issue (no optional fields)
+### Minimal backlog item (no optional fields)
 
 ```markdown
 # Remove deprecated /v1/users endpoint
@@ -139,9 +139,8 @@ none
 - MUST NOT write `check_command` that mutates state without `--dry-run`
 - MUST NOT add AC items that have no observable check
 
-## Parsing
+## Handoff
 
-Issue template is parsed by `WorkflowRunner.verifyAC()` and
-`parseACLegacy()` in `src/lib/core/tracker/ac.ts`. The template
-format is the source of truth — change the parser only when changing
-this document.
+The external backlog provider owns parsing and publication of this manifest.
+AFK consumes the resulting provider-neutral fields (`parentId`, `dependsOn`,
+`executionMode`, and business `tags`) and does not create records here.

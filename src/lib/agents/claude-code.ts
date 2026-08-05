@@ -23,6 +23,7 @@ import type {
 /** Claude Code capabilities */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
   'streaming',
+  'structured-output',
   'usage',
   'resume',
   'interactive',
@@ -55,7 +56,14 @@ export class ClaudeCodeProvider implements AgentProvider {
         return [{ type: 'usage', usage: parsed.usage as TokenUsage }];
       }
       if (parsed.type === 'result') {
-        return [{ type: 'result', result: parsed.result }];
+        const resultEvent: AgentEvent = { type: 'result', result: parsed.result };
+        if (parsed.is_error === true) {
+          return [
+            { type: 'error', error: new Error(String(parsed.result ?? 'agent returned an error')) },
+            resultEvent,
+          ];
+        }
+        return [resultEvent];
       }
     } catch {
       // Not JSON — treat as text output

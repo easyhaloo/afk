@@ -1,7 +1,7 @@
 # Hard Checks
 
 Non-negotiable rules. Violating any of these is grounds for immediate
-escalation to `mode::hitl` — not a warning, not a retry.
+transition to canonical `blocked` with execution mode `hitl` — not a warning, not a retry.
 
 ---
 
@@ -20,13 +20,13 @@ incident — stop, escalate, do not continue the run.
 
 #### Recovery Checklist (HITL)
 
-**Detection:** Issue has `mode::hitl` label + comment mentioning "HC-1 violated"
+**Detection:** Backlog item is `blocked`/`hitl` with a record mentioning "HC-1 violated"
 
 **Steps:**
 
 1. **Confirm the leak scope**
    ```bash
-   cd .worktrees/issue-{iid}
+   cd .worktrees/backlog-{backlogId}
    git log --all --oneline | head -20
    git log --all -p | grep -C3 -i "password\|secret\|token\|api.key\|private.key"
    ```
@@ -43,7 +43,7 @@ incident — stop, escalate, do not continue the run.
 3. **If already pushed, history rewrite required (DANGEROUS):**
    ```bash
    # Backup current state first
-   git branch backup-issue-{iid}
+   git branch backup-backlog-{backlogId}
    
    # Option A: Interactive rebase (if only a few commits)
    git rebase -i HEAD~5  # Adjust number
@@ -57,7 +57,7 @@ incident — stop, escalate, do not continue the run.
    git gc --prune=now --aggressive
    
    # Force push (will rewrite remote history)
-   git push --force-with-lease origin afk/issue-{iid}
+   git push --force-with-lease origin afk/backlog-{backlogId}
    ```
 
 4. **Rotate all exposed credentials (CRITICAL)**
@@ -80,8 +80,9 @@ incident — stop, escalate, do not continue the run.
 
 6. **Resume AFK**
    ```bash
-   afk issue update-labels {id} --remove mode::hitl
-   /afk-implement {iid}
+   # After human remediation, transition the backlog item to ready/afk through
+   # the configured provider, then run:
+   afk run --backlog-id {backlogId}
    ```
 
 **Prevention in next run:** Agent should only read `.env.fork` for credentials, never `.env` or hardcoded values.
@@ -97,13 +98,13 @@ non-compliant on a feature task.
 
 #### Recovery Checklist (HITL)
 
-**Detection:** Issue has `mode::hitl` label + comment mentioning "HC-2 violated"
+**Detection:** Backlog item is `blocked`/`hitl` with a record mentioning "HC-2 violated"
 
 **Steps:**
 
 1. **Review commit history to find the violation**
    ```bash
-   cd .worktrees/issue-{iid}
+   cd .worktrees/backlog-{backlogId}
    git log --oneline --all
    git show <commit-sha> --stat
    ```
@@ -125,14 +126,14 @@ non-compliant on a feature task.
    # Write the failing test first
    # Example: create test/feature.test.ts with test cases
    git add test/
-   git commit -m "test: add failing tests for feature X #<iid>"
+   git commit -m "test: add failing tests for backlog {backlogId}"
    
    # Verify test fails
    npm test  # or appropriate test command
    
    # Then re-commit implementation
    git add src/
-   git commit -m "feat: implement feature X to pass tests #<iid>"
+   git commit -m "feat: implement backlog {backlogId} to pass tests"
    ```
 
 5. **Verify TDD cycle**
@@ -142,14 +143,15 @@ non-compliant on a feature task.
    npm test  # Should see failures
    
    # Return to latest
-   git checkout afk/issue-{iid}
+   git checkout afk/backlog-{backlogId}
    npm test  # Should pass
    ```
 
 6. **Resume AFK**
    ```bash
-   afk issue update-labels {id} --remove mode::hitl
-   /afk-implement {iid}
+   # After human remediation, transition the backlog item to ready/afk through
+   # the configured provider, then run:
+   afk run --backlog-id {backlogId}
    ```
 
 **Prevention:** Agent should always write test first, run it (expecting failure), then implement.
@@ -170,9 +172,10 @@ code was written.
 
 **Evidence that requires file upload:**
 If the evidence is a screenshot, log excerpt, or binary artifact, the file
-must be uploaded to the tracker to appear in the MR comment. To do this:
+must be uploaded through the configured change provider to appear on the
+associated change. To do this:
 1. Write the file path(s) to `.afk/artifacts.txt` (one absolute path per line)
-2. The wrapup script will upload them and embed URLs in the MR description
+2. The wrapup step will upload them and embed URLs in the change description
 3. Reference the uploaded URL in your Progress evidence, e.g.
    `![screenshot](uploads/xxx.png)` or `log: uploads/test.log`
 
@@ -186,13 +189,14 @@ written, that AC is not done. Run the code and capture its output.
 
 #### Recovery Checklist (HITL)
 
-**Detection:** Issue has `mode::hitl` label + comment mentioning "HC-3 violated"
+**Detection:** The backlog item is `blocked` with `executionMode: hitl` and an
+execution record mentioning "HC-3 violated".
 
 **Steps:**
 
 1. **Review Progress checklist in latest commit**
    ```bash
-   cd .worktrees/issue-{iid}
+   cd .worktrees/backlog-{backlogId}
    git log -1 --pretty=format:"%B"
    ```
 
@@ -231,31 +235,31 @@ written, that AC is not done. Run the code and capture its output.
 
 6. **Resume AFK**
    ```bash
-   afk issue update-labels {id} --remove mode::hitl
-   /afk-implement {iid}
+   afk run --backlog-id {backlogId}
    ```
 
 **Prevention:** Agent must always run the code and capture output, not just describe what was implemented.
 
-### HC-4: AC completeness check before Step 8
+### HC-4: AC completeness check before publishing a change
 
-Before opening the MR (Step 8), every AC line must be checked off in
+Before publishing a change, every AC line must be checked off in
 the Progress checklist with real evidence. `/goal` announcing done is
 not evidence.
 
 **Rule:** If any AC line is unchecked or has no observable-output
-evidence, do not proceed to Step 8. Add a WIP commit that marks the
+evidence, do not publish the change. Add a WIP commit that marks the
 missing lines and the `Next:` describes what is needed.
 
 #### Recovery Checklist (HITL)
 
-**Detection:** Issue has `mode::hitl` label + comment mentioning "HC-4 violated"
+**Detection:** The backlog item is `blocked` with `executionMode: hitl` and an
+execution record mentioning "HC-4 violated".
 
 **Steps:**
 
 1. **Review the Progress checklist**
    ```bash
-   cd .worktrees/issue-{iid}
+   cd .worktrees/backlog-{backlogId}
    git log -1 --pretty=format:"%B" | grep -A20 "Progress:"
    ```
 
@@ -291,26 +295,27 @@ missing lines and the `Next:` describes what is needed.
 
 6. **Resume AFK**
    ```bash
-   afk issue update-labels {id} --remove mode::hitl
-   /afk-implement {iid}
+   afk run --backlog-id {backlogId}
    ```
 
-**Prevention:** Agent must verify ALL AC items are checked before proceeding to MR creation.
+**Prevention:** Agent must verify ALL AC items are checked before publishing
+the change.
 
 ### HC-5: No destructive operations on shared infrastructure
 
 `main-down`, `fork --destroy`, `docker compose down -v`, `git clean
 -fdx` on the main repo — none of these are ever permitted in an AFK
-run. Only operations scoped to the issue's worktree or its DB fork are
+run. Only operations scoped to the backlog item's worktree or its DB fork are
 allowed.
 
 **Rule:** Any destructive command must be confirmed to target only
-`.worktrees/issue-<iid>` or the issue's named fork, not the shared
+`.worktrees/backlog-<backlogId>` or the backlog item's named fork, not the shared
 development environment.
 
 #### Recovery Checklist (HITL)
 
-**Detection:** Issue has `mode::hitl` label + comment mentioning "HC-5 violated"
+**Detection:** The backlog item is `blocked` with `executionMode: hitl` and an
+execution record mentioning "HC-5 violated".
 
 **Steps:**
 
@@ -339,40 +344,39 @@ development environment.
 4. **Ensure worktree isolation going forward**
    ```bash
    # All commands should be scoped to worktree
-   git -C .worktrees/issue-{iid} clean -fdx  # OK
+   git -C .worktrees/backlog-{backlogId} clean -fdx  # OK
    git clean -fdx  # NOT OK (operates on main repo)
    ```
 
 5. **Resume AFK with caution**
    ```bash
-   afk issue update-labels {id} --remove mode::hitl
-   # Manual review: ensure agent understands worktree scope
-   /afk-implement {iid}
+   afk run --backlog-id {backlogId}
    ```
 
-**Prevention:** All destructive commands must include explicit path to `.worktrees/issue-<iid>`.
+**Prevention:** All destructive commands must include explicit path to `.worktrees/backlog-<backlogId>`.
 
-### HC-6: No force-push to the issue branch
+### HC-6: No force-push to the backlog branch
 
-Force-pushing the issue branch rewrites history and destroys the
+Force-pushing the backlog branch rewrites history and destroys the
 checkpoint trail that `Next:` lines depend on.
 
-**Rule:** `git push --force` on `afk/issue-<iid>` is prohibited.
+**Rule:** `git push --force` on `afk/backlog-<backlogId>` is prohibited.
 Use regular push only.
 
 #### Recovery Checklist (HITL)
 
-**Detection:** Issue has `mode::hitl` label + comment mentioning "HC-6 violated"
+**Detection:** The backlog item is `blocked` with `executionMode: hitl` and an
+execution record mentioning "HC-6 violated".
 
 **Steps:**
 
 1. **Check if force-push already happened**
    ```bash
    # Check reflog on remote (if accessible)
-   git ls-remote origin afk/issue-{iid}
+   git ls-remote origin afk/backlog-{backlogId}
    
    # Check local reflog
-   cd .worktrees/issue-{iid}
+   cd .worktrees/backlog-{backlogId}
    git reflog
    ```
 
@@ -383,28 +387,28 @@ Use regular push only.
 3. **If force-push was attempted but failed**
    ```bash
    # Verify current state
-   git log --oneline origin/afk/issue-{iid}
+   git log --oneline origin/afk/backlog-{backlogId}
    git log --oneline HEAD
    
    # Regular push should work
-   git push origin afk/issue-{iid}
+   git push origin afk/backlog-{backlogId}
    ```
 
 4. **If there are conflicts preventing regular push**
    ```bash
    # Fetch and rebase (safer than force-push)
-   git fetch origin afk/issue-{iid}
-   git rebase origin/afk/issue-{iid}
-   git push origin afk/issue-{iid}
+   git fetch origin afk/backlog-{backlogId}
+   git rebase origin/afk/backlog-{backlogId}
+   git push origin afk/backlog-{backlogId}
    ```
 
 5. **Resume AFK**
    ```bash
-   afk issue update-labels {id} --remove mode::hitl
-   /afk-implement {iid}
+   afk run --backlog-id {backlogId}
    ```
 
-**Prevention:** Agent must never use `git push --force` or `--force-with-lease` on issue branches.
+**Prevention:** Agent must never use `git push --force` or `--force-with-lease`
+on backlog branches.
 
 ### HC-7: Retry count is not in worktree git config
 
@@ -412,32 +416,33 @@ Storing retry count in the worktree's `.git/config` means it is lost
 if the worktree is removed or recreated. The retry count must survive
 worktree deletion.
 
-**Rule:** Retry state is stored in the tracker issue label or comment,
-not in any worktree-local file.
+**Rule:** Retry state is stored in the provider-neutral backlog execution
+record, not in any worktree-local file.
 
 #### Recovery Checklist (HITL)
 
-**Detection:** Issue has `mode::hitl` label + comment mentioning "HC-7 violated"
+**Detection:** The backlog item is `blocked` with `executionMode: hitl` and an
+execution record mentioning "HC-7 violated".
 
 **Steps:**
 
 1. **Check current retry count storage**
    ```bash
    # Check if stored in worktree config (WRONG)
-   cd .worktrees/issue-{iid}
+   cd .worktrees/backlog-{backlogId}
    git config --local afk.retry-count
    
-   # Check if stored in tracker labels (CORRECT)
-   afk issue get {id} --json | jq -r '.labels[] | select(test("^retry-count::"))'
+   # Check the provider-neutral backlog execution record (CORRECT)
+   afk backlog show {backlogId} --json | jq -r '.execution.retryCount'
    ```
 
-2. **Migrate retry count to tracker label**
+2. **Migrate retry count to the backlog execution record**
    ```bash
    # Read from worktree config
    local_count=$(git config --local afk.retry-count)
    
-   # Write to tracker label
-   afk issue update-labels {id} --add "retry-count::${local_count}"
+   # Write the retry count through the configured provider's backlog execution
+   # record; this is a provider operation, not a label convention.
    
    # Remove from worktree config
    git config --local --unset afk.retry-count
@@ -447,22 +452,22 @@ not in any worktree-local file.
    ```bash
    # Remove worktree
    cd ~/project
-   git worktree remove .worktrees/issue-{iid}
+   git worktree remove .worktrees/backlog-{backlogId}
    
    # Recreate worktree
-   git worktree add .worktrees/issue-{iid} afk/issue-{iid}
+   git worktree add .worktrees/backlog-{backlogId} afk/backlog-{backlogId}
    
-   # Retry count should still be in the tracker
-   afk issue get {id} --json | jq -r '.labels[] | select(test("^retry-count::"))'
+   # Retry count should still be in the provider-neutral execution record
+   afk backlog show {backlogId} --json | jq -r '.execution.retryCount'
    ```
 
 4. **Resume AFK**
    ```bash
-   afk issue update-labels {id} --remove mode::hitl
-   /afk-implement {iid}
+   afk run --backlog-id {backlogId}
    ```
 
-**Prevention:** All retry state management must use the tracker API (labels or comments), never worktree-local storage.
+**Prevention:** All retry state management must use the provider-neutral
+backlog execution record, never worktree-local storage.
 
 ---
 
@@ -471,8 +476,10 @@ not in any worktree-local file.
 When a hard check is violated:
 
 1. Do not continue the run.
-2. Post a tracker comment describing which HC was violated.
-3. Relabel the issue `mode::hitl`.
+2. Append an execution record through the configured provider describing which
+   hard check was violated.
+3. Atomically transition the backlog item to `state: blocked` and
+   `executionMode: hitl`.
 4. Detach from tmux and stop the session.
 
 The human owns the recovery decision.

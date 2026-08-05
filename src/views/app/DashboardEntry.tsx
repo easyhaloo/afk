@@ -1,262 +1,76 @@
-/**
- * DashboardEntry - Entry point that connects App with data layer
- */
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box } from 'ink';
 import { AppContent } from './AppContent';
 import { initRegistry } from '../board/registry/init';
-import { Task, Issue, Project, TmuxSession } from '../../types/board';
+import type { Task } from '../../types/board';
+import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter';
+import type { View } from '../board/types';
 import { StateProvider } from './state/StateContext';
 import { TmuxClient } from '../../lib/core/tmux/tmux';
+import { createManagementProviderBundle } from '../../lib/client-factory';
+import { useData } from '../board/data/useData';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
 import { SplashScreen } from '../board/components/SplashScreen';
-import {
-  fetchTasks, fetchSessions, fetchIssues, fetchProjects,
-  killSession, createTaskFromIssue, launchTask, fetchProjectDetail,
-} from '../board/data/fetcher';
-import {
-  readIssuesList, writeIssuesList,
-  readProjectsList, writeProjectsList,
-  readDetail, writeDetail, clearDetailCache as clearDiskDetailCache,
-} from '../board/cache';
 
-// Initialize registry
 initRegistry();
 
-const PER_PAGE = 50;
-
+/** Compose the read-only dashboard with runtime session data. */
 export function DashboardEntry() {
   const { phases, isReady } = useLoadingPhases();
   const [showApp, setShowApp] = useState(false);
-  const [appReady, setAppReady] = useState(false);
+  const [currentView, setCurrentView] = useState<View>('tasks');
+  const [management, setManagement] = useState<TuiManagementProviderBundle | null>(null);
 
-  // After splash signals showApp, wait for fade-out then signal appReady
   useEffect(() => {
-    if (showApp) {
-      const timer = setTimeout(() => setAppReady(true), 600);
-      return () => clearTimeout(timer);
-    }
-    setAppReady(false);
-  }, [showApp]);
-
-  // Once isReady, show app and never go back
-  React.useEffect(() => {
-    if (isReady) {
-      setShowApp(true);
-    }
+    if (isReady) setShowApp(true);
   }, [isReady]);
 
-  // Loaded data
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [sessions, setSessions] = useState<TmuxSession[]>([]);
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [issueProject, setIssueProject] = useState<Project | null>(null);
-  const [currentView, setCurrentView] = useState<string>('tasks');
-
-  // Sync currentView from AppContent back to DashboardEntry for data loading
-  const handleViewChange = useCallback((view: string) => {
-    setCurrentView(view);
-  }, []);
-
-  // Load real data once ready
   useEffect(() => {
     if (!isReady) return;
-    (async () => {
-      try {
-        const [tasksData, sessionsData] = await Promise.all([
-          fetchTasks(),
-          fetchSessions(),
-        ]);
-        setTasks(tasksData.active);
-        setSessions(sessionsData);
-      } catch (err) {
-        console.warn('data loading failed:', err);
-      }
-    })();
+    let cancelled = false;
+    void createManagementProviderBundle(process.env.AFK_PROJECT, process.cwd())
+      .then(bundle => {
+        if (!cancelled) {
+          setManagement({ backlog: { list: options => bundle.backlog.list(options) } });
+        }
+      })
+      .catch(error => console.warn('backlog provider unavailable:', error));
+    return () => { cancelled = true; };
   }, [isReady]);
 
-  // Issue/Project pagination
-  const [issuePage, setIssuePage] = useState(1);
-  const [issueHasMore, setIssueHasMore] = useState(false);
-  const [projectPage, setProjectPage] = useState(1);
-  const [projectHasMore, setProjectHasMore] = useState(false);
+  const data = useData(currentView, management);
 
-  // Detail cache
-  const detailCacheRef = React.useRef<Map<number, { at: number; data: any }>>(new Map());
-  const [projectBranches, setProjectBranches] = useState<any[]>([]);
-  const [projectTags, setProjectTags] = useState<any[]>([]);
-  const [projectCommits, setProjectCommits] = useState<any[]>([]);
-
-  // Load issues when view changes (load even if isReady is false - user explicitly switched view)
-  useEffect(() => {
-    if (currentView !== 'issues') return;
-    const projectKey = issueProject ? String(issueProject.id) : '';
-    const cached = readIssuesList(projectKey);
-    if (cached && cached.items.length > 0) {
-      setIssues(cached.items);
-      setIssueHasMore(cached.hasMore);
-      setIssuePage(2);
-      return;
-    }
-    (async () => {
-      try {
-        const data = await fetchIssues({ projectId: issueProject?.id, page: 1, perPage: PER_PAGE });
-        setIssues(data.issues);
-        setIssueHasMore(data.hasMore);
-        setIssuePage(2);
-        if (data.issues.length > 0) writeIssuesList(projectKey, data.issues, data.hasMore);
-      } catch (err) {
-        // Log but don't crash - fetchIssues can fail if issueProject is not set
-        console.warn('fetchIssues failed:', err);
-        setIssues([]);
-        setIssueHasMore(false);
-      }
-    })();
-  }, [currentView, issueProject]);
-
-  // Load projects when view changes (load even if isReady is false - user explicitly switched view)
-  useEffect(() => {
-    if (currentView !== 'projects') return;
-    const cached = readProjectsList();
-    if (cached && cached.items.length > 0) {
-      setProjects(cached.items);
-      setProjectHasMore(cached.hasMore);
-      setProjectPage(2);
-      return;
-    }
-    (async () => {
-      try {
-        const data = await fetchProjects({ page: 1, perPage: PER_PAGE });
-        setProjects(data.projects);
-        setProjectHasMore(data.hasMore);
-        setProjectPage(2);
-        writeProjectsList(data.projects, data.hasMore);
-      } catch (err) {
-        console.warn('fetchProjects failed:', err);
-        setProjects([]);
-        setProjectHasMore(false);
-      }
-    })();
-  }, [currentView]);
-
-  const loadProjectDetail = useCallback(async (project: Project) => {
-    const memCached = detailCacheRef.current.get(project.id);
-    if (memCached && Date.now() - memCached.at < 60_000) {
-      setProjectBranches(memCached.data.branches);
-      setProjectTags(memCached.data.tags);
-      setProjectCommits(memCached.data.commits);
-      return;
-    }
-    const diskCached = readDetail(project.id);
-    if (diskCached) {
-      setProjectBranches(diskCached.branches);
-      setProjectTags(diskCached.tags);
-      setProjectCommits(diskCached.commits);
-      detailCacheRef.current.set(project.id, { at: Date.now(), data: diskCached });
-      return;
-    }
-    const detail = await fetchProjectDetail(project.id);
-    detailCacheRef.current.set(project.id, { at: Date.now(), data: detail });
-    writeDetail(project.id, detail.branches, detail.tags, detail.commits);
-    setProjectBranches(detail.branches);
-    setProjectTags(detail.tags);
-    setProjectCommits(detail.commits);
-  }, []);
-
-  const reloadTasks = useCallback(async () => {
-    const data = await fetchTasks();
-    setTasks(data.active);
-  }, []);
-
-  const removeSession = useCallback(async (name: string) => {
-    await killSession(name);
-    const [tasksData, sessionsData] = await Promise.all([fetchTasks(), fetchSessions()]);
-    setTasks(tasksData.active);
-    setSessions(sessionsData);
-  }, []);
-
-  const addTaskFromIssue = useCallback(async (issue: Issue, options: any) => {
-    const task = await createTaskFromIssue(issue, options);
-    await reloadTasks();
-    return task;
-  }, [reloadTasks]);
-
-  const launchFromIssue = useCallback(async (issue: Issue, options: any) => {
-    const task = await addTaskFromIssue(issue, options);
-    if (!task.session) return;
-    await launchTask(issue.iid, task.session);
-  }, [addTaskFromIssue]);
-
-  const launchExistingTask = useCallback(async (iid: number, session: string) => {
-    await launchTask(iid, session);
-  }, []);
-
-  const fetchMoreIssues = useCallback(async () => {
-    if (!issueHasMore) return;
-    const data = await fetchIssues({ projectId: issueProject?.id, page: issuePage, perPage: PER_PAGE });
-    setIssues(prev => [...prev, ...data.issues]);
-    setIssueHasMore(data.hasMore);
-    setIssuePage(p => p + 1);
-  }, [issueHasMore, issuePage, issueProject]);
-
-  const fetchMoreProjects = useCallback(async () => {
-    if (!projectHasMore) return;
-    const data = await fetchProjects({ page: projectPage, perPage: PER_PAGE });
-    setProjects(prev => [...prev, ...data.projects]);
-    setProjectHasMore(data.hasMore);
-    setProjectPage(p => p + 1);
-  }, [projectHasMore, projectPage]);
-
-  const invalidateDetailCache = useCallback(() => {
-    detailCacheRef.current.clear();
-    clearDiskDetailCache();
-    setProjectBranches([]);
-    setProjectTags([]);
-    setProjectCommits([]);
-  }, []);
-
-  const handleAttachSession = useCallback(async (task: Task) => {
-    const sessionName = task?.session
-      || (task?.platform === 'github' ? `afk-gh-${task.iid}` : null)
-      || (task?.platform === 'gitlab' ? `afk-gl-${task.iid}` : null)
-      || (task?.iid ? `afk-gl-${task.iid}` : null);
-    if (!sessionName) return;
+  const attachSession = useCallback(async (task: Task) => {
+    const sessionName = task.session
+      ?? (task.platform === 'github' ? `afk-gh-${task.iid}` : `afk-gl-${task.iid}`);
     try {
-      const tmux = new TmuxClient();
-      await tmux.attach(sessionName);
-    } catch {}
+      await new TmuxClient().attach(sessionName);
+    } catch {
+      // The app stays read-only even when a session is unavailable.
+    }
   }, []);
 
-  if (!showApp) {
-    return <SplashScreen phases={phases} onComplete={() => setShowApp(true)} />;
-  }
+  if (!showApp) return <SplashScreen phases={phases} onComplete={() => setShowApp(true)} />;
 
   return (
     <Box flexDirection="column">
       <StateProvider>
-      <AppContent
-        tasks={tasks}
-        issues={issues}
-        projects={projects}
-        sessions={sessions}
-        projectBranches={projectBranches}
-        projectTags={projectTags}
-        projectCommits={projectCommits}
-        issueHasMore={issueHasMore}
-        projectHasMore={projectHasMore}
-        onLoadProjectDetail={loadProjectDetail}
-        onReloadTasks={reloadTasks}
-        onRemoveSession={removeSession}
-        onAddTaskFromIssue={addTaskFromIssue}
-        onLaunchFromIssue={launchFromIssue}
-        onLaunchExistingTask={launchExistingTask}
-        onFetchMoreIssues={fetchMoreIssues}
-        onFetchMoreProjects={fetchMoreProjects}
-        onInvalidateDetailCache={invalidateDetailCache}
-        onAttachSession={handleAttachSession}
-        onViewChange={handleViewChange}
-      />
+        <AppContent
+          tasks={data.tasks}
+          backlogs={data.backlogs}
+          projects={data.projects}
+          projectBranches={data.projectBranches}
+          projectTags={data.projectTags}
+          projectCommits={data.projectCommits}
+          projectHasMore={data.projectHasMore}
+          onLoadProjectDetail={data.loadProjectDetail}
+          onReloadTasks={data.reloadTasks}
+          onReloadBacklogs={data.refreshBacklogs}
+          onFetchMoreProjects={data.fetchMoreProjects}
+          onInvalidateDetailCache={data.invalidateDetailCache}
+          onAttachSession={attachSession}
+          onViewChange={setCurrentView}
+        />
       </StateProvider>
     </Box>
   );

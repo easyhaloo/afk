@@ -18,15 +18,6 @@ export interface TmuxSession {
   created?: string;
 }
 
-export interface Issue {
-  iid: number;
-  title: string;
-  description: string;
-  labels: string[];
-  state: string;
-  web_url: string;
-}
-
 export interface Project {
   id: number;
   name: string;

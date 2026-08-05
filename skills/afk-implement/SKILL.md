@@ -1,9 +1,9 @@
 ---
 name: afk-implement
 description: >-
-  Use when a tracker issue with machine-checkable Acceptance Criteria
-  is ready for autonomous implementation. Runs in background tmux
-  session. Produces an MR against the integration branch.
+  Use when a backlog item with machine-checkable Acceptance Criteria
+  is ready for autonomous implementation. Produces a change request
+  through the configured provider.
 disable-model-invocation: true
 disallowed-tools: >-
   Bash(git push origin main) Bash(git push origin master)
@@ -12,26 +12,29 @@ disallowed-tools: >-
 
 # Implement
 
-**Goal:** autonomously implement one or more issues with AC.
-**Mode:** AFK — runs in background tmux session with `/goal` persistence.
-**Contract:** issue (AC present, unblocked, labeled `base::prd-<N>` or `base::direct`) →
-MR + `stage::done` (pass) or `mode::hitl` (escalation).
+**Goal:** autonomously implement one backlog item with Acceptance Criteria.
+**Mode:** AFK — the backlog item must have `executionMode: afk`.
+**Contract:** runnable backlog (AC present, dependencies complete, no parent
+execution) → change request and `verification`/`merge_ready`; any automation
+failure escalates to canonical `blocked` state with `executionMode: hitl`.
 
 ## Preconditions (fail-closed)
 
 All checks are mandatory. Stop immediately if any fails.
 
-1. **`## Acceptance Criteria` section exists with the 3-field format.**
+1. **The backlog description has an `## Acceptance Criteria` section with the 3-field format.**
    Each AC line: `- [ ] <text> -- <evidence_type> -- <check_command>`.
-   Missing or malformed → issue is not ready, stop.
+   Missing or malformed → backlog is not ready, stop.
 2. **AC lines are machine-verifiable.** Every AC's `check_command` must
    be a shell command with exit-code contract (0 = PASS). If any AC
    has `evidence_type: manual`, treat it as a gate requiring human
    signoff, not autonomous verification.
-3. **No open blockers.** Detection via label `blocks-<iid>` on blocker.
-   If any open blocker exists, stop.
-4. **`base::prd-<N>` or `base::direct` label exists.** Missing → issue was not created
-   through the standard pipeline, stop.
+3. **All dependencies are complete.** Use the provider's `dependsOn` field;
+   every referenced backlog must be `done`. If a dependency is unresolved,
+   stop without attempting execution.
+4. **The item is runnable.** Confirm `state: ready`, `executionMode: afk`,
+   and no `parentId` that makes this a grouping backlog. Claiming is atomic;
+   a lost claim means another worker owns the item, so stop.
 
 ## Routing
 
@@ -68,12 +71,13 @@ last paragraph of the commit body.
 
 ### Step 1 — Pre-flight checks
 
-Run Preconditions block against the issue. Fail-fast on any violation.
+Run Preconditions block against the backlog. Fail-fast on any violation.
 
 ### Step 2 — Launch
 
-Invoke `afk workflow run --iid <iid>`. The command returns when
-goal completes (pass or fail), times out, or exits with error.
+Invoke `afk run --backlog-id <id>`. The command claims the item through the
+provider, executes the implementation workflow, and returns when it reaches
+verification/merge-ready or a terminal failure.
 
 ### Step 3 — Methodology load (mandatory, before any code)
 
@@ -91,30 +95,33 @@ The `Next:` line outranks any guess. Then `/goal pause`, manual work,
 
 ### Step 5 — Escalation on repeated failure
 
-After exhausting retries, agent sets label `mode::hitl` and exits.
+After exhausting retries, the runner transitions the backlog to canonical
+`blocked` and `executionMode: hitl`, then exits. Do not edit provider labels
+directly; those are adapter-owned persistence details.
 Attach, read the last `Next:` line, decide:
 - **Extend budget** — re-run with higher retry count
 - **Correct course** — manually fix and add a fresh WIP commit
-- **Escalate** — already done; remove `mode::hitl` only when ready to resume
+- **Escalate** — already done; a human may move the item back to `ready` and
+  set `executionMode: afk` only after correcting the cause.
 
 ## Common failure modes
 
-- **Target branch moved:** agent rebases before opening MR.
+- **Target branch moved:** agent rebases before opening the change request.
 - **Flaky vs. real failure:** different errors on two consecutive attempts
   → flaky, rerun. Identical failure twice → fix the cause.
 - **Self-reported completion is not evidence:** if Progress checklist
-  does not show every AC line with evidence, MUST NOT proceed to MR.
+  does not show every AC line with evidence, MUST NOT proceed to the change request.
 - **Secrets discipline:** a secret in a WIP commit is unrecoverable —
   never read credential files beyond `.env.fork`.
 
 ## Caveats
 
 - MUST NOT hand-write a `while true; do claude -p ...; done` loop.
-- MUST NOT bypass `afk workflow run` and reimplement its steps in bash.
-- MUST NOT push directly to a protected branch — MR only.
-- MUST NOT treat tracker comments as the sole progress record — WIP
+- MUST NOT bypass `afk run --backlog-id` and reimplement its steps in bash.
+- MUST NOT push directly to a protected branch — use the provider change request.
+- MUST NOT treat comments as the sole progress record — WIP
   commit `Next:` trailer is the real handoff document.
-- MUST NOT squash/rewrite WIP commit history before MR.
+- MUST NOT squash/rewrite WIP commit history before the change request.
 - MUST NOT skip Step 3 — TDD methodology is not optional.
 - MUST NOT delete remote branches — remote history is the audit trail.
 - MUST NOT leave a tmux session hanging without idle detection.

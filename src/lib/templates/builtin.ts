@@ -16,6 +16,7 @@ import type { WorkflowTemplate } from './types';
 export function builtinTemplates(): WorkflowTemplate[] {
   return [
     issueImplementation(),
+    qaVerification(),
     simpleLoop(),
     sequentialReview(),
     parallelPlanner(),
@@ -26,7 +27,7 @@ export function builtinTemplates(): WorkflowTemplate[] {
 // ── issue-implementation ───────────────────────────────────────────────────
 
 /**
- * Default template: implement → verify-ac → create-mr → qa.
+ * Default template: implement → verify-ac → publish change → queue QA.
  */
 function issueImplementation(): WorkflowTemplate {
   return {
@@ -50,21 +51,31 @@ function issueImplementation(): WorkflowTemplate {
         dependsOn: ['implement'],
       },
       {
-        id: 'create-mr',
-        role: 'wrapup',
-        prompt: '/goal 推送分支并创建 MR/PR。',
-        branch: { type: 'issue', iid: 0 },
+        id: 'publish',
+        kind: 'system',
+        action: 'publish-change',
         dependsOn: ['verify-ac'],
         when: { step: 'verify-ac', equals: 'completed' },
       },
       {
-        id: 'qa',
-        role: 'qa',
-        prompt: '/goal QA 验证合并后的代码（issue #{iid}）。',
-        branch: { type: 'issue', iid: 0 },
-        dependsOn: ['create-mr'],
+        id: 'queue-qa',
+        kind: 'system',
+        action: 'queue-qa',
+        dependsOn: ['publish'],
       },
     ],
+  };
+}
+
+function qaVerification(): WorkflowTemplate {
+  return {
+    name: 'pre-merge-qa-verification',
+    version: 1,
+    description: 'Pre-merge integration QA verification. Only an explicit AC PASS may merge an MR.',
+    steps: [{
+      id: 'verify-ac', kind: 'agent', role: 'verifier', completion: 'goal_complete',
+      prompt: '/goal 验证 issue #{iid} 的 AC 全部通过，并返回 PASS 或 FAIL。',
+    }],
   };
 }
 

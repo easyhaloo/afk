@@ -6,29 +6,15 @@ import { z } from 'zod';
 export const GoalCompleteSignalSchema = z.object({
   type: z.literal('goal_complete'),
   timestamp: z.string().datetime(),
+  kind: z.enum(['task', 'qa']).optional(),
+  result: z.enum(['PASS', 'FAIL']).optional(),
   sha: z.string().optional(),
   summary: z.string().min(1, 'Summary is required'),
-});
-
-export type GoalCompleteSignal = z.infer<typeof GoalCompleteSignalSchema>;
-
-/**
- * Signal emitted after agent runs AC checks.
- *
- * In the two-phase design, Phase 2 (Verify) sends a /goal to the agent
- * to verify AC, and the agent writes this signal on completion. The
- * result fields are advisory — QARunner provides independent verification.
- */
-export const ACResultSignalSchema = z.object({
-  type: z.literal('ac_result'),
-  timestamp: z.string().datetime(),
-  result: z.enum(['PASS', 'FAIL']).optional(),
-  summary: z.string().optional(),
   tests_run: z.number().int().nonnegative().optional(),
   tests_passed: z.number().int().nonnegative().optional(),
 });
 
-export type ACResultSignal = z.infer<typeof ACResultSignalSchema>;
+export type GoalCompleteSignal = z.infer<typeof GoalCompleteSignalSchema>;
 
 /**
  * Signal emitted when agent is ready for context handoff
@@ -71,7 +57,6 @@ export type IdleSignal = z.infer<typeof IdleSignalSchema>;
  */
 export const SignalSchema = z.discriminatedUnion('type', [
   GoalCompleteSignalSchema,
-  ACResultSignalSchema,
   HandoffReadySignalSchema,
   TimeoutSignalSchema,
   IdleSignalSchema,

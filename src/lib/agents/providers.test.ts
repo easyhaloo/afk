@@ -14,6 +14,7 @@ import {
   guardedCaptureSession,
   _resetAgentRegistry,
 } from './registry';
+import { createAgentProvider, ensureBuiltinAgentProviders } from './index';
 import type { AgentProvider } from './types';
 
 /** Build minimal AgentCommandOptions for testing. */
@@ -37,6 +38,7 @@ describe('Agent providers — fixture coverage', () => {
     it('exposes correct name and capabilities', () => {
       expect(p.name).toBe('claude-code');
       expect(p.capabilities.has('streaming')).toBe(true);
+      expect(p.capabilities.has('structured-output')).toBe(true);
       expect(p.capabilities.has('usage')).toBe(true);
       expect(p.capabilities.has('resume')).toBe(true);
       expect(p.capabilities.has('interactive')).toBe(true);
@@ -47,6 +49,22 @@ describe('Agent providers — fixture coverage', () => {
       expect(cmd.argv[0]).toBe('claude');
       expect(cmd.argv).toContain('--dangerously-skip-permissions');
       expect(cmd.cwd).toBe('/tmp/worktree');
+    });
+
+    it('builds stream-json output for batch execution', () => {
+      const cmd = p.buildCommand({ ...opts(), executionMode: 'batch' });
+      expect(cmd.argv).toContain('--print');
+      expect(cmd.argv).toContain('--output-format');
+      expect(cmd.argv).toContain('stream-json');
+    });
+
+    it('surfaces an error result event from stream-json', () => {
+      const provider = new ClaudeCodeProvider();
+      expect(provider.parseLine(JSON.stringify({
+        type: 'result', is_error: true, result: 'invalid request',
+      }))).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'error', error: expect.objectContaining({ message: 'invalid request' }) }),
+      ]));
     });
 
     it('parseLine routes JSON usage/result events', () => {
@@ -193,6 +211,14 @@ describe('Agent registry', () => {
     registerAgentProvider(new ClaudeCodeProvider());
     registerAgentProvider(new CodexProvider());
     expect(listAgentProviders()).toEqual(['claude-code', 'codex']);
+  });
+
+  it('bootstraps builtin providers after a registry reset', () => {
+    _resetAgentRegistry();
+    ensureBuiltinAgentProviders();
+    expect(listAgentProviders().sort()).toEqual(['claude-code', 'codex', 'copilot', 'cursor', 'opencode', 'pi']);
+    _resetAgentRegistry();
+    expect(createAgentProvider('codex').name).toBe('codex');
   });
 });
 

@@ -28,8 +28,9 @@ receive work.
 5. Automation completion uses the typed `ExecutionResult` returned by the
    execution. `.afk-signal.json` and Claude statusline files are not gating
    inputs for automatic execution.
-6. QA uses the same sandbox/agent-execution path as implementation. It must not
-   create a second tmux-specific protocol.
+6. QA uses the same sandbox/agent-execution path and `goal_complete` transport
+   event as implementation. Its PASS/FAIL decision is a typed payload field,
+   not a separate completion tag.
 7. A failed process, missing structured result, timeout, or unsupported
    provider/mode combination returns a typed failed result. The existing
    workflow/loop terminal rule then routes the backlog to `blocked / hitl`.
@@ -58,6 +59,7 @@ database or middleware.
 ## Verification
 
 Tests prove that batch execution runs the provider argv, passes its prompt to
-stdin, parses a typed completion, handles non-zero exit and missing result, and
-that loop and QA request batch execution. A regression test proves automatic
+stdin, parses a typed completion, and handles non-zero exit and missing result.
+Separate interactive tests prove that the same provider-built argv creates the
+tmux session and receives the goal. A regression test proves automatic
 execution never invokes `TmuxClient.waitForPrompt`.

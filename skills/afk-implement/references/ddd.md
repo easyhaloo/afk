@@ -2,7 +2,7 @@
 
 **Purpose**: Apply DDD patterns during implementation — when the feature involves bounded contexts from `docs/ddd/`.
 **Tech stack**: Language-agnostic. Examples are illustrative; concepts apply to any language.
-**When**: afk-implement Step 3, if the issue operates within bounded contexts from `docs/ddd/`.
+**When**: afk-implement Step 3, if the backlog item operates within bounded contexts from `docs/ddd/`.
 
 ---
 

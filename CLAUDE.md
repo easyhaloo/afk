@@ -12,11 +12,11 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 
 | Command | Purpose |
 |---------|---------|
-| `afk issue` | Issue operations (auto-detects platform; `--project <repo>` for cross-project) |
-| `afk mr` | MR/PR operations (auto-detects platform) |
-| `afk workflow` | Signal-driven workflow orchestration |
+| `afk backlog` | Backlog management and inspection only |
+| `afk run --backlog-id <id>` | Execute one backlog item |
+| `afk loop` | Complete implementation → QA → merge pipeline |
+| `afk qa --backlog-id <id>` | Standalone QA retry/diagnostic entry point |
 | `afk loop` | Continuous integration loop |
-| `afk scheduler` | Background task scheduler |
 | `afk qa` | QA verification on merged code |
 | `afk signal` | Structured signal file management |
 | `afk worktree` | Git worktree management with state tracking |
@@ -26,6 +26,10 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 | `afk board` | Interactive TUI dashboard |
 | `afk kanban` | Kanban board of issues |
 | `afk debug` | Debug loop (reproduce → verify) |
+
+The CLI is a breaking backlog hard cutover. `issue`, `tracker`, `mr`, and
+`workflow` execution commands and their old argument forms are removed; there
+are no compatibility aliases. Provider labels are internal adapter metadata.
 
 ## Architecture
 

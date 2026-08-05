@@ -2,45 +2,44 @@
 name: afk-qa
 disable-model-invocation: true
 description: >-
-  Use when an MR from autonomous build needs independent verification
+  Use when a backlog change request needs independent verification
   against its Acceptance Criteria before merge. Verifies AC independently,
-  merges if all pass, escalates if not.
+  merges if all pass, and blocks the backlog if not.
 disallowed-tools: >-
-  Bash(glab mr merge*) Bash(glab issue delete*) Bash(glab mr delete*)
-  Bash(glab repo delete*) Bash(gh issue delete*) Bash(gh repo delete*)
-  Bash(afk mr merge*)
   Bash(git reset --hard*) Bash(git branch -D*)
 ---
 
 # QA
 
-**Goal:** independent verification of autonomous build output against
-Acceptance Criteria before merge into `prd/<N>`.
-**Mode:** AFK (verification + merge) — HITL (`prd/<N>` → `main`).
+**Goal:** independently verify a `verification` backlog item against its
+Acceptance Criteria and merge its provider change only on an explicit pass.
+**Mode:** AFK verification + merge; failures transition the item to
+canonical `blocked` with `executionMode: hitl`.
 
-**Architecture:** `prd/<N>` is integration branch; `afk/issue-<iid>` MR targets
-it; `main` only touched at final human gate.
+**Architecture:** the provider maps each backlog ID to its implementation
+branch and change request. Branch names, platform IDs, and provider labels
+remain adapter details; this skill operates on the backlog ID only.
 
 ## Two merge gates
 
 | Gate | Who | What | When |
 |------|-----|------|------|
-| AFK gate | afk-qa agent | Merge → `prd/<N>` | After all AC pass |
-| Human gate | Human | Merge `prd/<N>` → `main` | After all MRs in PRD are merged |
+| AFK gate | afk-qa runner | Merge the provider change | After all AC pass |
+| Human gate | Human | Release/integration decision | After all child backlogs are done |
 
 ## Preconditions
 
-- MR in `stage::qa`, targeting `prd/<N>` (not `main`), with linked
-  issue carrying `## Acceptance Criteria` using the 3-field `--` format.
-- MR target branch is `prd/<N>` — if targeting `main` directly, STOP.
+- Backlog is in `verification` and has a provider change request, with
+  `## Acceptance Criteria` using the 3-field `--` format.
+- The provider must expose a target branch/change that is safe to merge;
+  if the change targets a protected release branch directly, STOP.
 
 ## Merge-order gate
 
-MR description includes `## Merge Order` listing all `blocked_by` issues
-with status. Before approving:
-- **All blockers merged** → proceed to Step 4.
-- **Any blocker unmerged** → do not merge. Post comment and leave in
-  `stage::qa`.
+Backlog dependencies define merge order. Before approving:
+- **All `dependsOn` backlogs are `done`** → proceed to Step 4.
+- **Any dependency incomplete** → do not merge; leave the item in
+  `verification` and report the dependency.
 
 ## Signal vs. noise
 
@@ -52,15 +51,16 @@ with status. Before approving:
 
 ## Steps
 
-### Step 1 — Read MR + AC
+### Step 1 — Read change request + AC
 
-Open the MR. Read the linked issue's AC — the checklist, not code-review
-taste. Note the `base::prd-<N>` label.
+Open the provider change request. Read the backlog's AC — the checklist,
+not code-review taste. Confirm its `dependsOn` entries and `verification`
+state through `afk backlog show --id <id>`.
 
 ### Step 2 — Run AC checks fresh
 
 Re-run every AC command/check independently. Do not trust the
-implementing agent's self-report. Prefer MR's existing CI result over
+implementing agent's self-report. Prefer the change request's existing CI result over
 re-deriving locally.
 
 ### Step 3 — Record per-line results
@@ -69,37 +69,37 @@ Per AC line: pass/fail + evidence (command output or response snippet).
 If binary evidence was generated, write paths to `.afk/artifacts.txt`
 (one absolute path per line).
 
-### Step 4 — Merge to `prd/<N>` (all pass)
+### Step 4 — Merge (all pass)
 
-1. Approve the MR.
-2. `afk mr merge <mr-id> --delete-source-branch`
-3. Update labels: `stage::done`.
+1. Approve the provider change request.
+2. Ask `ChangeProvider` to merge the change after explicit `goal_complete` payload `kind: qa, result: PASS`.
+3. Let `BacklogProvider` transition the item to `done`.
 4. Discard DB fork if any.
-5. **Check if this was the last open MR in the PRD** — if so, post on
-   the PRD issue: "All issues merged. Ready for final human gate:
-   merge `prd/<N>` → `main`."
+5. **Check whether all child backlogs of the parent are now `done`** — if so,
+   notify the human release owner.
 
 ### Step 5 — Conflict during merge
 
-Post comment: "Merge conflict detected. Will attempt rebase."
-Rebase on `prd/<N>`. Text conflict resolved → push, retry merge.
-Semantic conflict → escalate to `mode::hitl`, leave MR in `stage::qa`.
+Post a diagnostic: "Merge conflict detected. Will attempt rebase."
+Rebase on the provider target branch. Text conflict resolved → push, retry
+merge. Semantic conflict → transition the backlog to `blocked` with
+`executionMode: hitl`.
 
 ### Step 6 — Any AC fail
 
-Do not merge. Resume the autonomous build run. If failure reveals
-mis-scoping: update labels to `stage::ready-for-issues` and involve human.
+Do not merge. Keep the item in `verification` when a rerun is safe; otherwise
+transition it to `blocked` with `executionMode: hitl` and involve a human.
 
 ## Final human gate
 
-When all MRs in a PRD are `stage::done`, human reviews `prd/<N>` and
-decides whether to merge to `main`. Always HITL — no automation touches
-`main`.
+When all child backlogs under a parent are `done`, a human reviews the
+provider's integration/release change and decides whether to release it.
+Always HITL — no automation bypasses the configured release gate.
 
 ## Caveats
 
 - MUST NOT approve on "looks reasonable" — every AC line needs evidence.
-- MUST NOT merge an MR targeting `main` directly.
-- MUST NOT merge if any blocker in Merge Order is unmerged.
+- MUST NOT merge a change targeting a protected release branch directly.
+- MUST NOT merge if any `dependsOn` backlog is incomplete.
 - MUST NOT discard a fork while build is still active.
 - MUST NOT skip the final human gate.

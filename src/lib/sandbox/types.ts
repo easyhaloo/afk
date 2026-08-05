@@ -69,8 +69,8 @@ export interface AgentStartOptions {
   generation: number;
   /** Goal/prompt text to send to the agent. */
   prompt: string;
-  /** Signal type to wait for (goal_complete / ac_result). */
-  signalType: 'goal_complete' | 'ac_result';
+  /** Completion signal shared by all automated agent steps. */
+  signalType: 'goal_complete';
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
   /**

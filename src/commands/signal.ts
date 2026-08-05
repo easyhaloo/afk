@@ -38,12 +38,10 @@ export function registerSignalCommands(program: Command): void {
       }
     });
 
-  /**
-   * ac-result command
-   */
+  /** QA completion uses the same transport event as all agent work. */
   signal
-    .command('ac-result')
-    .description('Signal acceptance criteria check result')
+    .command('qa-complete')
+    .description('Signal QA completion with a PASS or FAIL result')
     .requiredOption('-r, --result <result>', 'Result: PASS or FAIL')
     .requiredOption('-s, --summary <text>', 'Summary of test results')
     .option('--tests-run <n>', 'Number of tests run', parseInt)
@@ -56,15 +54,16 @@ export function registerSignalCommands(program: Command): void {
         }
 
         await writeSignal({
-          type: 'ac_result',
+          type: 'goal_complete',
           timestamp: getCurrentTimestamp(),
+          kind: 'qa',
           result: options.result as 'PASS' | 'FAIL',
           summary: options.summary,
           tests_run: options.testsRun,
           tests_passed: options.testsPassed,
         }, options.dir);
 
-        success(`AC result signal written: ${options.result}`);
+        success(`QA completion signal written: ${options.result}`);
         detail(`Summary: ${options.summary}`);
         if (options.testsRun) {
           detail(`Tests: ${options.testsPassed || 0}/${options.testsRun} passed`);
@@ -125,7 +124,7 @@ export function registerSignalCommands(program: Command): void {
             console.log(chalk.gray(`SHA: ${signalData.sha}`));
           }
 
-          if (signalData.type === 'ac_result') {
+          if (signalData.type === 'goal_complete' && signalData.kind === 'qa') {
             console.log(chalk.gray(`Result: ${signalData.result}`));
             if (signalData.tests_run) {
               console.log(chalk.gray(`Tests: ${signalData.tests_passed || 0}/${signalData.tests_run}`));
@@ -143,7 +142,7 @@ export function registerSignalCommands(program: Command): void {
   signal
     .command('wait')
     .description('Wait for a specific signal type')
-    .requiredOption('-t, --type <type>', 'Signal type to wait for')
+    .requiredOption('-t, --type <type>', 'Signal type to wait for (goal_complete, handoff_ready, timeout, idle)')
     .option('--timeout <ms>', 'Timeout in milliseconds', '300000')
     .option('--interval <ms>', 'Polling interval in milliseconds', '2000')
     .option('--dir <path>', 'Working directory', process.cwd())

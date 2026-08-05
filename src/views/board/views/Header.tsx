@@ -1,36 +1,43 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import type { View } from '../types';
 
 interface Props {
-  view: string;
+  view: View;
   tasksCount: number;
-  issuesCount: number;
+  backlogsCount: number;
   projectsCount: number;
-  selectedIssuesCount: number;
-  multiSelectMode: boolean;
 }
 
-export function Header({
-  view, tasksCount, issuesCount, projectsCount,
-  selectedIssuesCount, multiSelectMode,
-}: Props) {
-  const icon = view === 'tasks' ? '●' : view === 'issues' ? '○'
-    : view === 'board' ? '▦' : '▸';
-  const count = view === 'tasks' ? tasksCount
-    : view === 'issues' ? issuesCount
-    : view === 'board' ? issuesCount
-    : projectsCount;
+export function Header({ view, tasksCount, backlogsCount, projectsCount }: Props) {
+  const counts: Record<View, number> = {
+    tasks: tasksCount,
+    backlogs: backlogsCount,
+    projects: projectsCount,
+    board: backlogsCount,
+  };
+  const tabs: ReadonlyArray<readonly [string, View]> = [
+    ['1', 'tasks'],
+    ['2', 'backlogs'],
+    ['3', 'projects'],
+    ['4', 'board'],
+  ] as const;
 
   return (
     <Box height={1} flexShrink={0} paddingX={2} backgroundColor="black" justifyContent="space-between">
       <Text color="white"><Text bold>▸ AFK Dashboard</Text></Text>
       <Text color="white">
-        <Text>{icon}</Text>
-        <Text> {view} </Text>
-        <Text>{count}</Text>
-        {view === 'issues' && multiSelectMode && (
-          <Text dimColor> ({selectedIssuesCount})</Text>
-        )}
+        {tabs.map(([key, name], index) => {
+          const active = view === name;
+          return (
+            <React.Fragment key={name}>
+              {index > 0 && <Text color="gray"> │ </Text>}
+              <Text bold={active} color={active ? 'cyan' : 'white'}>
+                {key} {name}{active ? ` ${counts[name]}` : ''}
+              </Text>
+            </React.Fragment>
+          );
+        })}
       </Text>
     </Box>
   );

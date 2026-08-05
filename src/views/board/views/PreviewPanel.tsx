@@ -1,137 +1,75 @@
-/**
- * PreviewPanel - Right-side preview panel for selected issue
- *
- * Shows: title, description, labels, state.
- * Adapts to window width; hidden when W < 100.
- */
 import React, { useMemo } from 'react';
 import { Box, Text } from 'ink';
-import type { Issue } from '../../../types/board';
+import type { BacklogViewModel } from '../data/backlog-adapter';
 import { truncate } from '../utils';
 
 interface Props {
-  issue: Issue | undefined;
-  width: number; // total terminal width
-  /** Called when content updates to allow parent to measure flicker */
-  onUpdated?: () => void;
+  backlog: BacklogViewModel | undefined;
+  width: number;
 }
 
-const MIN_WIDTH = 100; // minimum columns to show preview
+const MIN_WIDTH = 100;
 
-/**
- * Wrap text to a given width (simple word-break)
- */
 function wrapText(text: string, maxWidth: number): string[] {
   const lines: string[] = [];
-  const paragraphs = text.split('\n');
-  for (const para of paragraphs) {
-    if (!para.trim()) { lines.push(''); continue; }
-    const words = para.split(' ');
-    let current = '';
-    for (const word of words) {
-      if ((current + ' ' + word).trim().length <= maxWidth) {
-        current = (current + ' ' + word).trim();
-      } else {
-        if (current) lines.push(current);
-        current = word;
+  for (const paragraph of text.split('\n')) {
+    if (!paragraph.trim()) {
+      lines.push('');
+      continue;
+    }
+    let line = '';
+    for (const word of paragraph.split(' ')) {
+      if (`${line} ${word}`.trim().length <= maxWidth) line = `${line} ${word}`.trim();
+      else {
+        if (line) lines.push(line);
+        line = word;
       }
     }
-    if (current) lines.push(current);
+    if (line) lines.push(line);
   }
   return lines;
 }
 
-function renderDescription(text: string | undefined, maxWidth: number): React.ReactNode {
-  if (!text) return <Text dimColor>no description</Text>;
-  const lines = wrapText(text, maxWidth);
-  return (
-    <Box flexDirection="column">
-      {lines.slice(0, 20).map((line, i) => (
-        <Text key={i} color="white">{line}</Text>
-      ))}
-      {lines.length > 20 && <Text dimColor>… ({lines.length - 20} more lines)</Text>}
-    </Box>
-  );
+function stateColor(state: BacklogViewModel['state']): string {
+  if (state === 'blocked') return 'red';
+  if (state === 'in_progress') return 'yellow';
+  if (state === 'verification') return 'magenta';
+  if (state === 'done') return 'green';
+  return 'cyan';
 }
 
-export const PreviewPanel: React.FC<Props> = ({ issue, width }) => {
+export const PreviewPanel: React.FC<Props> = ({ backlog, width }) => {
   const previewWidth = Math.floor(width * 0.4);
-  const showPreview = width >= MIN_WIDTH;
-
   const content = useMemo(() => {
-    if (!issue) {
-      return (
-        <Box paddingX={1} paddingY={0} flexDirection="column">
-          <Text dimColor italic>no issue selected</Text>
-        </Box>
-      );
-    }
+    if (!backlog) return <Box paddingX={1}><Text dimColor italic>no backlog selected</Text></Box>;
 
-    const stateColor = issue.state === 'closed' ? 'green'
-      : issue.state === 'open' ? 'cyan' : 'yellow';
-
+    const description = wrapText(backlog.description || 'no description', previewWidth - 4);
     return (
-      <Box flexDirection="column" paddingX={1} paddingY={0} flexGrow={1}>
-        {/* Title */}
-        <Text bold color="cyan" wrap="wrap">{issue.title}</Text>
-
-        {/* Issue ID + State */}
+      <Box flexDirection="column" paddingX={1} flexGrow={1}>
+        <Text bold color="cyan" wrap="wrap">{backlog.title}</Text>
         <Box marginTop={1}>
-          <Text dimColor>#{issue.iid}</Text>
+          <Text dimColor>backlog {backlog.id} · </Text>
+          <Text color={stateColor(backlog.state)} bold>{backlog.state}</Text>
           <Text dimColor> · </Text>
-          <Text color={stateColor} bold>{issue.state}</Text>
+          <Text color="cyan">{backlog.executionMode}</Text>
         </Box>
-
-        {/* Labels */}
-        {issue.labels.length > 0 && (
-          <Box flexDirection="row" flexWrap="wrap" marginTop={1}>
-            <Text dimColor>labels: </Text>
-            {issue.labels.map(label => (
-              <Text key={label} color="magenta" dimColor> [{label}]</Text>
-            ))}
-          </Box>
-        )}
-
-        {/* Separator */}
-        <Box marginTop={1}>
-          <Text dimColor>{'─'.repeat(Math.min(previewWidth - 4, 40))}</Text>
-        </Box>
-
-        {/* Description */}
+        <Text dimColor>branch: {backlog.branchName}</Text>
+        {backlog.tags.length > 0 && <Text dimColor>tags: {backlog.tags.join(', ')}</Text>}
+        <Box marginTop={1}><Text dimColor>{'─'.repeat(Math.min(previewWidth - 4, 40))}</Text></Box>
         <Box marginTop={1} flexDirection="column" flexGrow={1}>
           <Text dimColor>description:</Text>
-          <Box marginTop={0} flexDirection="column">
-            {renderDescription(issue.description, previewWidth - 4)}
-          </Box>
+          {description.slice(0, 20).map((line, index) => <Text key={index}>{line}</Text>)}
         </Box>
-
-        {/* Web URL */}
-        {issue.web_url && (
-          <Box marginTop={1}>
-            <Text dimColor italic wrap="wrap">{truncate(issue.web_url, previewWidth - 4)}</Text>
-          </Box>
-        )}
+        {backlog.webUrl && <Box marginTop={1}><Text dimColor italic wrap="wrap">{truncate(backlog.webUrl, previewWidth - 4)}</Text></Box>}
       </Box>
     );
-  }, [issue, previewWidth]);
+  }, [backlog, previewWidth]);
 
-  if (!showPreview) return null;
-
+  if (width < MIN_WIDTH) return null;
   return (
-    <Box
-      flexDirection="column"
-      width={previewWidth}
-      borderStyle="single"
-      borderColor="gray"
-      paddingX={0}
-      paddingY={0}
-    >
-      <Box paddingX={1} paddingY={0}>
-        <Text bold color="gray">preview</Text>
-      </Box>
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {content}
-      </Box>
+    <Box flexDirection="column" width={previewWidth} borderStyle="single" borderColor="gray">
+      <Box paddingX={1}><Text bold color="gray">preview</Text></Box>
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">{content}</Box>
     </Box>
   );
 };

@@ -184,11 +184,12 @@ describe('Builtin templates', () => {
   beforeEach(() => _resetTemplateRegistry());
   afterEach(() => _resetTemplateRegistry());
 
-  it('all 5 builtins are registered', () => {
+  it('all builtin templates are registered', () => {
     expect(listTemplates().sort()).toEqual([
       'issue-implementation',
       'parallel-planner',
       'planner-with-review',
+      'pre-merge-qa-verification',
       'sequential-review',
       'simple-loop',
     ]);
@@ -200,8 +201,8 @@ describe('Builtin templates', () => {
     expect(plan.groups.map(g => g.steps.map(s => s.id))).toEqual([
       ['implement'],
       ['verify-ac'],
-      ['create-mr'],
-      ['qa'],
+      ['publish'],
+      ['queue-qa'],
     ]);
   });
 
@@ -276,6 +277,23 @@ steps:
     expect(t.name).toBe('custom');
   });
 
+  it('returns source metadata and resolves prompt files relative to the template', async () => {
+    const wfDir = path.join(projectRoot, '.afk', 'workflows');
+    await afs.mkdir(wfDir, { recursive: true });
+    await afs.writeFile(path.join(wfDir, 'prompt.md'), 'hello');
+    await afs.writeFile(path.join(wfDir, 'relative.yml'), `
+name: relative
+version: 1
+steps:
+  - id: only
+    role: implementer
+    prompt: { file: prompt.md }
+`);
+    const result = await new TemplateLoader({ projectRoot, homeDir }).loadWithSource('relative');
+    expect(result.source).toBe('project');
+    expect(result.template.steps[0]?.prompt).toEqual({ file: path.join(wfDir, 'prompt.md') });
+  });
+
   it('throws TemplateError when nothing matches and not builtin', async () => {
     const loader = new TemplateLoader({ projectRoot, homeDir });
     await expect(loader.load('nonexistent')).rejects.toThrow(/not found/);
@@ -307,7 +325,8 @@ steps:
     expect(t?.steps[0].id).toBe('replaced');
   });
 
-  it('builtinTemplates returns 5 templates', () => {
-    expect(builtinTemplates().length).toBe(5);
+  it('builtinTemplates includes QA verification', () => {
+    expect(builtinTemplates().length).toBe(6);
+    expect(builtinTemplates().some(template => template.name === 'pre-merge-qa-verification')).toBe(true);
   });
 });

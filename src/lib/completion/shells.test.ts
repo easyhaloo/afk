@@ -12,9 +12,9 @@ describe('emitZsh', () => {
   });
 
   it('inlines top-level command names with descriptions', () => {
-    expect(script).toContain("'issue:");
+    expect(script).toContain("'backlog:");
     expect(script).toContain("'signal:");
-    expect(script).toContain("'mr:");
+    expect(script).toContain("'run:");
     expect(script).toContain("'loop:");
   });
 
@@ -23,7 +23,7 @@ describe('emitZsh', () => {
   });
 
   it('inlines option flags', () => {
-    expect(script).toContain('--json');
+    expect(script).toContain('--backlog-id');
   });
 
   it('pre-wires the __complete dynamic hook', () => {

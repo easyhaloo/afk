@@ -20,6 +20,6 @@
 
 // Re-export all step functions and types
 // Add exports here as you create new scenario files
-// export * from './order-flow';
+export * from './order-flow.spec';
 // export * from './lint-flow';
 // export * from './review-flow';

@@ -28,7 +28,7 @@ export interface RunRequest {
   provider: string;
   worktreePath: string;
   goalText: string;
-  signalType: 'goal_complete' | 'ac_result';
+  signalType: 'goal_complete';
   startedAt: string;
 }
 

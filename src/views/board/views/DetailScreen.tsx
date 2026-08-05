@@ -1,304 +1,130 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
-import { exec } from 'child_process';
-import { Task, Issue, Project } from '../../../types/board';
+import React from 'react';
+import { Box, Text } from 'ink';
+import type { Task, Project } from '../../../types/board';
+import type { Branch, Commit, Tag } from '../../../lib/core/tracker/types';
+import type { BacklogViewModel } from '../data/backlog-adapter';
+import { parseMarkdownLine } from '../utils';
 
 interface Props {
-  item: Task | Issue | Project | undefined;
+  item: Task | BacklogViewModel | Project | undefined;
   view: string;
   height: number;
   width: number;
-  branches?: any[];
-  tags?: any[];
-  commits?: any[];
+  branches?: Branch[];
+  tags?: Tag[];
+  commits?: Commit[];
 }
 
 export function DetailScreen({ item, view, height, width, branches = [], tags = [], commits = [] }: Props) {
-  const [hoverIdx, setHoverIdx] = useState(-1);
-  const [descScrollOffset, setDescScrollOffset] = useState(0);
-  const prevItemRef = useRef<number | undefined>(undefined);
-
-  if (!item || !('iid' in item || 'id' in item || 'session' in item)) {
-    return <Box><Text color="gray">ℹ  no item selected</Text></Box>;
+  if (!item) {
+    return (
+      <Box flexDirection="column" height={height}>
+        <Box height={1} paddingX={1}><Text bold color="white">detail</Text></Box>
+        <Box flexGrow={1} paddingX={2}><Text color="gray">no item selected</Text></Box>
+      </Box>
+    );
   }
 
-  const HDR = 1;
-  const FTR = 1;
-  const BODY = height - HDR - FTR;
-  const MAX_W = 90;
-  const W = Math.min(MAX_W, width - 4);
-
-  const title = view === 'issues' ? `issue #${(item as Issue).iid}`
-    : view === 'projects' ? `project #${(item as Project).id}`
-    : `task #${(item as Task).iid}`;
-
-  const subtitle = view === 'projects' ? (item as Project).name
-    : (item as any).title || (item as Task).branch;
-
-  const top = '┌' + '─'.repeat(W) + '┐';
-  const bottom = '└' + '─'.repeat(W) + '┘';
-
-  // Build clickable rows in visual order
-  const clickableRows: { idx: number; url: string; label: string }[] = [];
-  if (view === 'issues') {
-    const url = (item as Issue).web_url;
-    if (url) clickableRows.push({ idx: 0, url, label: 'url' });
-  }
-  if (view === 'projects') {
-    const projUrl = (item as Project).web_url || '';
-    clickableRows.push({ idx: 0, url: projUrl, label: 'project' });
-    // commits render at body rows 3..7 (offset: -1 from "row = 2+i" in code)
-    commits.slice(0, 5).forEach((c, i) => clickableRows.push({ idx: 3 + i, url: `${projUrl}/-/commit/${c.id}`, label: `commit ${c.id}` }));
-    // branches render at body rows 9..12 (offset: -1 from "row = 8+i" in code)
-    branches.slice(0, 4).forEach((b, i) => clickableRows.push({ idx: 9 + i, url: `${projUrl}/-/tree/${b.name}`, label: `branch ${b.name}` }));
-    // tags render at body rows 14..17
-    tags.slice(0, 4).forEach((t, i) => clickableRows.push({ idx: 14 + i, url: `${projUrl}/-/tags/${t.name}`, label: `tag ${t.name}` }));
-  }
-
-  // Preserve scroll position when the same item is selected; reset when item changes
-  const currentItemId = 'iid' in item ? item.iid : 'id' in item ? item.id : undefined;
-  useEffect(() => {
-    if (currentItemId !== prevItemRef.current) {
-      setDescScrollOffset(0);
-      prevItemRef.current = currentItemId;
-    }
-  }, [currentItemId]);
-
-  // Calculate description lines for scrolling (issues view)
-  const descriptionLines = view === 'issues' && (item as Issue).description
-    ? (item as Issue).description!.split('\n')
-    : [];
-  const maxDescScroll = Math.max(0, descriptionLines.length - 1);
-  const canScrollDown = descScrollOffset < maxDescScroll;
-  const canScrollUp = descScrollOffset > 0;
-
-  // Keyboard navigation
-  useInput((input, key) => {
-    if (key.return) {
-      if (hoverIdx >= 0 && hoverIdx < clickableRows.length) {
-        const url = clickableRows[hoverIdx].url;
-        const cmd = process.platform === 'darwin'
-          ? `open "${url}"`
-          : process.platform === 'win32'
-            ? `start "" "${url}"`
-            : `xdg-open "${url}"`;
-        exec(cmd, (err) => {
-          if (err) process.stderr.write(`[open] err: ${err.message}\n`);
-        });
-      }
-      return;
-    }
-    if (key.downArrow || input === 'j' || input === 'J') {
-      // j key scrolls issue detail content down by one line when not at bottom
-      if (view === 'issues' && canScrollDown) {
-        setDescScrollOffset(i => i + 1);
-        return;
-      }
-      if (view !== 'issues') {
-        setHoverIdx(i => Math.min(i + 1, clickableRows.length - 1));
-      }
-    }
-    if (key.upArrow || input === 'k' || input === 'K') {
-      // k key scrolls issue detail content up by one line when not at top
-      if (view === 'issues' && canScrollUp) {
-        setDescScrollOffset(i => i - 1);
-        return;
-      }
-      if (view !== 'issues') {
-        setHoverIdx(i => Math.max(i - 1, 0));
-      }
-    }
-    if (key.rightArrow) {
-      setHoverIdx(i => Math.min(i + 1, clickableRows.length - 1));
-    }
-    if (key.leftArrow) {
-      setHoverIdx(i => Math.max(i - 1, 0));
-    }
-  });
-
-  const isHovered = (idx: number) => hoverIdx >= 0 && clickableRows[hoverIdx]?.idx === idx;
+  const title = view === 'tasks'
+    ? `task #${(item as Task).iid} · ${(item as Task).title}`
+    : view === 'projects'
+      ? `project · ${(item as Project).name}`
+      : `${view === 'board' ? 'board' : 'backlog'} · ${(item as BacklogViewModel).title}`;
 
   return (
-    <Box flexDirection="column" height={height}>
-      <Box height={HDR} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
-        <Text color="white"><Text bold>▸ </Text><Text>{title}</Text><Text color="gray"> │ </Text><Text>{subtitle}</Text></Text>
+    <Box flexDirection="column" height={height} width={width}>
+      <Box height={1} flexShrink={0} paddingX={1} backgroundColor="black">
+        <Text bold color="white">▸ {title}</Text>
       </Box>
-
-      <Box height={BODY} flexShrink={0} flexDirection="column" paddingX={2} paddingY={1}>
-        <Text color="gray">{top}</Text>
-
+      <Box flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2} paddingY={1}>
         {view === 'tasks' && <TaskDetail item={item as Task} />}
-        {view === 'issues' && <IssueDetail item={item as Issue} hovered={isHovered(0)} scrollOffset={descScrollOffset} />}
-        {view === 'projects' && (
-          <ProjectDetail
-            item={item as Project}
-            branches={branches}
-            tags={tags}
-            commits={commits}
-            innerW={W}
-            isHovered={isHovered}
-          />
-        )}
-
-        <Text color="gray">{bottom}</Text>
-      </Box>
-
-      <Box height={FTR} flexShrink={0} paddingX={1} backgroundColor="black" justifyContent="center">
-        <Text color="gray">b │ q exit │ ↑↓ navigate │ ↵ open</Text>
+        {(view === 'backlogs' || view === 'board') && <BacklogDetail item={item as BacklogViewModel} />}
+        {view === 'projects' && <ProjectDetail item={item as Project} branches={branches} tags={tags} commits={commits} />}
       </Box>
     </Box>
   );
+}
+
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text color="cyan" bold>{title}</Text>
+      {children}
+    </Box>
+  );
+}
+
+function Field({ name, value, color = 'white' }: { name: string; value: string | number | undefined; color?: string }) {
+  const displayValue = value === undefined || value === '' ? '–' : String(value);
+  return <Text color={color}>{`  ${name} · ${displayValue}`}</Text>;
 }
 
 function TaskDetail({ item }: { item: Task }) {
-  const fmtDate = (d: Date) => {
-    const diff = Date.now() - d.getTime();
-    const m = Math.floor(diff / 60000);
-    const h = Math.floor(m / 60);
-    if (m < 1) return 'just now';
-    if (m < 60) return `${m}m ago`;
-    if (h < 24) return `${h}h ago`;
-    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-  };
-
-  const shortWt = item.worktree?.replace(process.env.HOME || '', '~') || '–';
-  const session = item.session || (item.platform === 'github' ? `afk-gh-${item.iid}` : `afk-gl-${item.iid}`);
-
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Text color="white">  ◉ status · {item.status}</Text>
-      <Text color="white">  ◉ branch · {item.branch || '–'}</Text>
-      <Text color="white">  ◉ session · {session}</Text>
-      <Text color="white">  ◉ progress · {item.progress || '0%'}</Text>
-      <Text color="white">  ◉ started · {item.startedAt ? fmtDate(item.startedAt) : '–'}</Text>
-      <Text color="white">  ◉ worktree · {shortWt}</Text>
-      <Box marginTop={1}>
-        <Text dimColor>  → tmux attach -t {session}</Text>
-      </Box>
-    </Box>
+    <Group title="runtime">
+      <Field name="session" value={item.session} />
+      <Field name="status" value={item.status} />
+      <Field name="worktree" value={item.worktree} />
+      <Field name="branch" value={item.branch} />
+      <Field name="progress" value={item.progress} />
+    </Group>
   );
 }
 
-function IssueDetail({ item, hovered, scrollOffset }: { item: Issue; hovered: boolean; scrollOffset: number }) {
-  const lines = (item.description || '').split('\n');
-  const visibleLines = lines.slice(scrollOffset);
+function BacklogDetail({ item }: { item: BacklogViewModel }) {
   return (
-    <Box flexDirection="column" paddingX={1}>
-      <Text color={hovered ? 'cyan' : 'white'} underline={hovered}>  ─ url: {item.web_url}</Text>
-      <Text color="white">  ─ labels: {item.labels.join(', ') || '–'}</Text>
-      <Text color="white">  ─ state: {item.state}</Text>
-      <Box marginTop={1}><Text color="gray">  ─ description:</Text></Box>
-      {visibleLines.length > 0
-        ? visibleLines.map((line, i) => <Text key={i} color="gray">    {line}</Text>)
-        : <Text color="gray">    no description</Text>
-      }
-    </Box>
+    <>
+      <Group title="identity">
+        <Field name="title" value={item.title} />
+        <Field name="state" value={item.state} />
+        <Field name="executionMode" value={item.executionMode} />
+      </Group>
+      <Group title="relationships">
+        <Field name="parent" value={item.parentId} />
+        <Field name="dependsOn" value={item.dependsOn.join(', ')} />
+        <Field name="branch" value={item.branchName} />
+        <Field name="providerRef" value={item.providerRef} />
+      </Group>
+      <Group title="metadata">
+        <Field name="tags" value={item.tags.join(', ')} />
+      </Group>
+      <Description text={item.description} />
+      {item.webUrl && <Field name="provider URL" value={item.webUrl} color="cyan" />}
+    </>
   );
 }
 
-function ProjectDetail({ item, branches, tags, commits, innerW, isHovered }: {
-  item: Project; branches: any[]; tags: any[]; commits: any[]; innerW: number; isHovered: (r: number) => boolean;
-}) {
-  const fmtDate = (d: string | undefined) => {
-    if (!d) return '–';
-    const diff = Date.now() - new Date(d).getTime();
-    const m = Math.floor(diff / 60000);
-    const h = Math.floor(m / 60);
-    const day = Math.floor(h / 24);
-    if (m < 1) return 'just now';
-    if (m < 60) return `${m}m`;
-    if (h < 24) return `${h}h`;
-    if (day < 30) return `${day}d`;
-    return new Date(d).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-  };
-
-  const maxCommitTitle = Math.max(20, innerW - 38);
-  const maxBranchName = Math.max(20, innerW - 45);
-  const maxDesc = innerW - 4;
-
+function ProjectDetail({ item, branches, tags, commits }: { item: Project; branches: Branch[]; tags: Tag[]; commits: Commit[] }) {
   return (
-    <Box flexDirection="column" paddingX={1} overflow="hidden">
-      {/* Row 0: project path + url */}
-      <Text color={isHovered(0) ? 'cyan' : 'white'} underline={isHovered(0)}>  {item.path_with_namespace}</Text>
-      {item.description && <Text dimColor>  {truncate(item.description, maxDesc)}</Text>}
-
-      {/* "recent" header */}
-      <Box marginTop={1}>
-        <Text color="white" bold>recent</Text>
-      </Box>
-
-      {/* Rows 3–7: commits */}
-      {commits.length === 0 ? (
-        <Text dimColor>  loading…</Text>
-      ) : (
-        commits.slice(0, 5).map((c, i) => {
-          const row = 3 + i;
-          return (
-            <Box key={i} flexWrap="wrap">
-              <Text color={isHovered(row) ? 'cyan' : 'white'} underline={isHovered(row)}>{'  '}{c.id}</Text>
-              <Text color="gray"> · {truncate(c.author, 12)}</Text>
-              <Text color="gray"> · {truncate(c.title, maxCommitTitle)}</Text>
-              <Text dimColor> · {fmtDate(c.committed_date)}</Text>
-            </Box>
-          );
-        })
-      )}
-
-      {/* "branches" header */}
-      <Box marginTop={1}>
-        <Text color="white" bold>branches</Text>
-        <Text dimColor> ({branches.length})</Text>
-      </Box>
-
-      {/* Rows 9–12: branches */}
-      {branches.length === 0 ? (
-        <Text dimColor>  loading…</Text>
-      ) : (
-        branches.slice(0, 4).map((b, i) => {
-          const row = 9 + i;
-          return (
-            <Box key={i} flexWrap="wrap">
-              <Text color={isHovered(row) ? 'cyan' : (b.protected ? 'cyan' : 'gray')} underline={isHovered(row)}>
-                {b.protected ? '  ★' : '  ○'} {truncate(b.name, maxBranchName)}
-              </Text>
-              <Text dimColor> · {truncate(b.commit, 8)}</Text>
-              <Text dimColor> · {truncate(b.author || '—', 12)}</Text>
-              <Text dimColor> · {fmtDate(b.committed_date)}</Text>
-            </Box>
-          );
-        })
-      )}
-
-      {/* Tags */}
-      {tags.length > 0 && (
-        <>
-          <Box marginTop={1}>
-            <Text color="white" bold>tags</Text>
-            <Text dimColor> ({tags.length})</Text>
-          </Box>
-          {tags.slice(0, 4).map((t, i) => {
-            const row = 14 + i;
-            const msg = t.message ? truncate(t.message, maxDesc - 6) : '';
-            return (
-              <Box key={i} flexDirection="column">
-                <Box flexWrap="wrap">
-                  <Text color={isHovered(row) ? 'cyan' : 'white'} underline={isHovered(row)}>  {t.name}</Text>
-                  <Text dimColor> · {truncate(t.commit, 8)}</Text>
-                  {t.commit_author ? <Text dimColor> · {truncate(t.commit_author, 12)}</Text> : null}
-                  <Text dimColor> · {fmtDate(t.commit_date)}</Text>
-                </Box>
-                {msg ? <Text dimColor>      {msg}</Text> : null}
-              </Box>
-            );
-          })}
-        </>
-      )}
-    </Box>
+    <>
+      <Group title="project">
+        <Field name="namespace" value={item.namespace?.name} />
+        <Field name="path" value={item.path_with_namespace} />
+        {item.web_url && <Field name="provider URL" value={item.web_url} color="cyan" />}
+      </Group>
+      <Group title="repository">
+        <Field name="commits" value={commits.length} />
+        {commits.slice(0, 5).map((commit, index) => <Text key={`commit-${index}`} color="gray">    {commit.id}</Text>)}
+        <Field name="branches" value={branches.length} />
+        {branches.slice(0, 5).map((branch, index) => <Text key={`branch-${index}`} color="gray">    {branch.name}</Text>)}
+        <Field name="tags" value={tags.length} />
+        {tags.slice(0, 5).map((tag, index) => <Text key={`tag-${index}`} color="gray">    {tag.name}</Text>)}
+      </Group>
+      <Description text={item.description} />
+    </>
   );
 }
 
-function truncate(text: string, max: number): string {
-  if (!text) return '';
-  if (text.length <= max) return text;
-  return text.substring(0, max - 1) + '…';
+function Description({ text }: { text?: string }) {
+  const lines = (text || 'no description').split('\n');
+  return (
+    <Group title="description">
+      {lines.map((line, index) => {
+        const parsed = parseMarkdownLine(line);
+        return parsed
+          ? <Text key={index} color="gray">{parsed}</Text>
+          : <Text key={index} color="gray">{line || ' '}</Text>;
+      })}
+    </Group>
+  );
 }

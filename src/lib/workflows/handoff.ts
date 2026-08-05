@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
-import type { TrackerProvider } from '../core/tracker/types';
+import type { BacklogProvider } from '../core/backlog';
 import type { TmuxClient } from '../core/tmux';
 import { logger, STATUS_FILENAME, clearSignal } from '../io';
 import type { WorkflowConfig } from '../core/config/manager';
@@ -12,8 +12,8 @@ import { Watchdog } from './watchdog';
  * build the resumed-round goal text; the coordinator uses it to write the doc.
  * Keeping the convention in one place stops the two from drifting.
  */
-export function handoffDocPath(worktreePath: string, iid: number, gen: number): string {
-  return join(worktreePath, '.afk', 'handoff', `handoff-${iid}-${gen}.md`);
+export function handoffDocPath(worktreePath: string, backlogId: string, gen: number): string {
+  return join(worktreePath, '.afk', 'handoff', `handoff-${backlogId}-${gen}.md`);
 }
 
 export type HandoffMode = 'auto' | 'terminal';
@@ -21,7 +21,7 @@ export type HandoffOutcome = 'continued' | 'terminated';
 export type TerminalReason = 'budget' | 'tokens';
 
 export interface HandoffContext {
-  iid: number;
+  backlogId: string;
   session: string;
   wtPath: string;
   /** Per-generation hard timeout (ms) - re-armed on restart. */
@@ -53,7 +53,7 @@ interface HandoffSummary {
  */
 export class HandoffCoordinator {
   constructor(
-    private readonly tracker: TrackerProvider,
+    private readonly backlog: BacklogProvider,
     private readonly tmux: TmuxClient,
     private readonly watchdog: Watchdog,
     private readonly config: WorkflowConfig,
@@ -88,28 +88,21 @@ export class HandoffCoordinator {
     // Stop the hard budget during summary negotiation; the old watchdog's
     // timeout signal would clobber handoff_ready and kill the session mid-negotiation.
     this.watchdog.disarm();
-    logger.info({ iid: ctx.iid, gen: ctx.gen }, 'auto-handoff starting');
+    logger.info({ backlogId: ctx.backlogId, gen: ctx.gen }, 'auto-handoff starting');
 
     // Negotiate summary (throws -> unchanged crash path, surfaced to the runner).
-    const info = await this.requestHandoffSummary(ctx.iid, ctx.session, ctx.wtPath);
-    logger.info({ iid: ctx.iid, gen: ctx.gen, sha: info.sha, branch: info.branch, hasSummary: info.summary !== null }, 'handoff summary negotiated');
-    const { path: docPath } = await this.writeHandoffDoc(ctx.wtPath, ctx.iid, ctx.gen, info);
-    logger.info({ iid: ctx.iid, gen: ctx.gen, docPath }, 'handoff doc written');
-
-    // In-progress record; no handoff::active label in auto mode (that label is
-    // the manual-resume marker). Best-effort: a comment failure must not abort.
-    await this.tracker
-      .addComment(ctx.iid, this.handoffComment({ ...info, iid: ctx.iid, tokens: ctx.tokens, gen: ctx.gen, docPath }))
-      .catch(err => logger.warn({ iid: ctx.iid, err }, 'failed to post auto-handoff comment'));
-    logger.info({ iid: ctx.iid, gen: ctx.gen }, 'auto-handoff comment posted');
+    const info = await this.requestHandoffSummary(ctx.backlogId, ctx.session, ctx.wtPath);
+    logger.info({ backlogId: ctx.backlogId, gen: ctx.gen, sha: info.sha, branch: info.branch, hasSummary: info.summary !== null }, 'handoff summary negotiated');
+    const { path: docPath } = await this.writeHandoffDoc(ctx.wtPath, ctx.backlogId, ctx.gen, info);
+    logger.info({ backlogId: ctx.backlogId, gen: ctx.gen, docPath }, 'handoff doc written');
 
     try {
       await this.restartSession(ctx);
-      logger.info({ iid: ctx.iid, gen: ctx.gen }, 'auto-handoff session restarted (continued)');
+      logger.info({ backlogId: ctx.backlogId, gen: ctx.gen }, 'auto-handoff session restarted (continued)');
       return 'continued';
     } catch (err) {
-      logger.error({ iid: ctx.iid, err, gen: ctx.gen }, 'auto-continue relaunch failed; flipping to manual handoff');
-      await this.flipToManual(ctx.iid, ctx.session);
+      logger.error({ backlogId: ctx.backlogId, err, gen: ctx.gen }, 'auto-continue relaunch failed; marking blocked');
+      await this.flipToManual(ctx.backlogId, ctx.session);
       return 'terminated';
     }
   }
@@ -122,22 +115,22 @@ export class HandoffCoordinator {
    * getTokenUsage read the old session's tokens.
    */
   private async restartSession(ctx: HandoffContext): Promise<void> {
-    logger.info({ iid: ctx.iid, gen: ctx.gen, session: ctx.session }, 'restartSession begin');
+    logger.info({ backlogId: ctx.backlogId, gen: ctx.gen, session: ctx.session }, 'restartSession begin');
     await this.tmux.killSession(ctx.session).catch(() => { /* already dead */ });
-    logger.info({ iid: ctx.iid, session: ctx.session }, 'restartSession: tmux killed');
+    logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: tmux killed');
     await this.tmux.closeSession();
     await clearSignal(ctx.wtPath); // stale completion signal must not end the next wait immediately
     await fs.rm(join(ctx.wtPath, '.afk', STATUS_FILENAME), { force: true }); // fresh session must not inherit old token data
-    logger.info({ iid: ctx.iid, wtPath: ctx.wtPath }, 'restartSession: statusline data cleared');
+    logger.info({ backlogId: ctx.backlogId, wtPath: ctx.wtPath }, 'restartSession: statusline data cleared');
     await this.tmux.createSession(ctx.session, ctx.wtPath);
-    logger.info({ iid: ctx.iid, session: ctx.session }, 'restartSession: tmux created');
+    logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: tmux created');
     // waitForPrompt returns boolean, does NOT throw.
     if (!await this.tmux.waitForPrompt(ctx.wtPath, this.config.promptTimeout)) {
       throw new Error(`relaunch: claude not ready within ${this.config.promptTimeout}ms (${ctx.wtPath})`);
     }
-    logger.info({ iid: ctx.iid, session: ctx.session }, 'restartSession: prompt ready');
-    this.watchdog.arm(ctx.session, ctx.hardTimeoutMs, ctx.iid, ctx.wtPath); // fresh full hardTimeoutMs per generation
-    logger.info({ iid: ctx.iid, session: ctx.session, hardTimeoutMs: ctx.hardTimeoutMs }, 'restartSession: watchdog armed');
+    logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: prompt ready');
+    this.watchdog.arm(ctx.session, ctx.hardTimeoutMs, Number(ctx.backlogId) || 0, ctx.wtPath);
+    logger.info({ backlogId: ctx.backlogId, session: ctx.session, hardTimeoutMs: ctx.hardTimeoutMs }, 'restartSession: watchdog armed');
   }
 
   // ── terminal ───────────────────────────────────────────────────────────────
@@ -151,25 +144,15 @@ export class HandoffCoordinator {
    */
   private async terminalHandoff(ctx: HandoffContext, reason?: TerminalReason): Promise<HandoffOutcome> {
     this.watchdog.disarm(); // stale watchdog must not later write a timeout signal into the retained worktree
-    logger.info({ iid: ctx.iid, reason }, 'terminal handoff starting');
-    const info = await this.requestHandoffSummary(ctx.iid, ctx.session, ctx.wtPath);
-    logger.info({ iid: ctx.iid, sha: info.sha, branch: info.branch, hasSummary: info.summary !== null }, 'terminal handoff summary negotiated');
-    const doc = await this.writeHandoffDoc(ctx.wtPath, ctx.iid, 'terminal', info);
-    logger.info({ iid: ctx.iid, docPath: doc.path }, 'terminal handoff doc written');
-    const reasonText = reason === 'tokens' ? '已达总 token 上限' : '已达最大交接轮数';
-    await this.tracker.addLabel(ctx.iid, 'handoff::active');
-    logger.info({ iid: ctx.iid, label: 'handoff::active' }, 'tracker label added');
-    await this.tracker.addComment(ctx.iid, [
-      '<!-- afk-event: handoff -->',
-      `**🔄 Context Handoff（终止：${reasonText}）**`,
-      '',
-      doc.content,
-      '',
-      `**To resume:** Remove \`handoff::active\` label and re-trigger \`/afk-implement ${ctx.iid}\``,
-    ].join('\n'));
-    logger.info({ iid: ctx.iid, event: 'handoff-terminal' }, 'terminal handoff comment posted');
+    logger.info({ backlogId: ctx.backlogId, reason }, 'terminal handoff starting');
+    const info = await this.requestHandoffSummary(ctx.backlogId, ctx.session, ctx.wtPath);
+    logger.info({ backlogId: ctx.backlogId, sha: info.sha, branch: info.branch, hasSummary: info.summary !== null }, 'terminal handoff summary negotiated');
+    const doc = await this.writeHandoffDoc(ctx.wtPath, ctx.backlogId, 'terminal', info);
+    logger.info({ backlogId: ctx.backlogId, docPath: doc.path }, 'terminal handoff doc written');
+    await this.backlog.transition(ctx.backlogId, 'blocked', { reason: reason ?? 'context handoff exhausted' });
+    await this.backlog.setExecutionMode(ctx.backlogId, 'hitl');
     await this.tmux.killSession(ctx.session).catch(() => {});
-    logger.info({ iid: ctx.iid, session: ctx.session }, 'terminal handoff session killed');
+    logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'terminal handoff session killed');
     await this.tmux.closeSession();
     return 'terminated';
   }
@@ -182,7 +165,7 @@ export class HandoffCoordinator {
    * picker), wait for handoff_ready, and fall back to the pane snapshot when
    * no summary arrives in time.
    */
-  private async requestHandoffSummary(iid: number, session: string, worktreePath: string): Promise<HandoffSummary> {
+  private async requestHandoffSummary(backlogId: string, session: string, worktreePath: string): Promise<HandoffSummary> {
     await this.typeHandoffRequest(session);
 
     const signal = await this.tmux.waitForSignal(session, 'main', 'handoff_ready', worktreePath, this.config.handoffTimeout);
@@ -232,15 +215,15 @@ export class HandoffCoordinator {
    */
   private async writeHandoffDoc(
     worktreePath: string,
-    iid: number,
+    backlogId: string,
     gen: number | 'terminal',
     info: HandoffSummary,
   ): Promise<{ path: string; content: string }> {
     const handoffDir = join(worktreePath, '.afk', 'handoff');
     await fs.mkdir(handoffDir, { recursive: true });
-    const docPath = join(handoffDir, `handoff-${iid}-${gen}.md`);
+    const docPath = join(handoffDir, `handoff-${backlogId}-${gen}.md`);
     const content = [
-      `# Handoff #${iid} (round ${gen})`,
+      `# Handoff ${backlogId} (round ${gen})`,
       '',
       `- **Branch:** \`${info.branch}\``,
       `- **Commit:** \`${info.sha}\``,
@@ -260,37 +243,10 @@ export class HandoffCoordinator {
     return { path: docPath, content };
   }
 
-  /** Issue comment for an AUTO handoff round (in-progress record; terminal uses the full doc). */
-  private handoffComment(p: HandoffSummary & { iid: number; tokens: number; gen: number; docPath: string }): string {
-    return [
-      '<!-- afk-event: handoff -->',
-      '**🔄 Context Handoff**',
-      '',
-      `- **Reason:** context_high (~${p.tokens} tokens)`,
-      `- **Round:** ${p.gen}（自动继续中）`,
-      `- **Branch:** \`${p.branch}\``,
-      `- **Commit:** \`${p.sha}\``,
-      `- **Handoff doc:** \`${p.docPath}\``,
-      '',
-      '### Summary',
-      '',
-      p.summary ?? '(agent did not provide a summary)',
-      '',
-      '<details>',
-      '<summary>Session Snapshot (last 100 lines)</summary>',
-      '',
-      '```',
-      p.snapshot,
-      '```',
-      '</details>',
-    ].join('\n');
-  }
-
-  /** Fall back to the manual-resume protocol: handoff::active label, session killed. */
-  private async flipToManual(iid: number, session: string): Promise<void> {
-    await this.tracker
-      .addLabel(iid, 'handoff::active')
-      .catch(err => logger.warn({ iid, err }, 'failed to add handoff::active label'));
+  /** Mark the backlog blocked/hitl and terminate the session. */
+  private async flipToManual(backlogId: string, session: string): Promise<void> {
+    await this.backlog.transition(backlogId, 'blocked', { reason: 'handoff relaunch failed' });
+    await this.backlog.setExecutionMode(backlogId, 'hitl');
     await this.tmux.killSession(session).catch(() => { /* already dead */ });
     await this.tmux.closeSession();
   }
@@ -301,10 +257,10 @@ export class HandoffCoordinator {
  * Tests may inject a fake via RunnerDependencies.coordinatorFactory instead.
  */
 export function createHandoffCoordinator(deps: {
-  tracker: TrackerProvider;
+  backlog: BacklogProvider;
   tmux: TmuxClient;
   watchdog: Watchdog;
   config: WorkflowConfig;
 }): HandoffCoordinator {
-  return new HandoffCoordinator(deps.tracker, deps.tmux, deps.watchdog, deps.config);
+  return new HandoffCoordinator(deps.backlog, deps.tmux, deps.watchdog, deps.config);
 }

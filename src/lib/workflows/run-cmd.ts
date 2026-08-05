@@ -1,23 +1,18 @@
 /**
- * Shared CLI invocation of WorkflowRunner — used by both `afk workflow run`
- * (signal-driven workflow) and `afk issue run <iid> --project` (one-shot).
- *
- * Centralizes:
- *   - tracker construction (with --project forwarding)
- *   - session default (`afk-<iid>`)
- *   - cfg-default fallback for targetBranch / maxRetries / hardTimeoutMs
- *   - success / warning / process.exit semantics
+ * Shared single-backlog execution entry point used exclusively by `afk run`.
+ * It claims before creating workflow resources; loop claims its own items.
  */
-import { WorkflowRunner } from '../workflows';
+import { WorkflowRunner, type RunnerOptions } from '../workflows';
 import { createTrackerClient } from '../client-factory';
+import { createProviderBundle } from '../core/providers';
 import { getWorkflowConfig } from '../core/config/manager';
-import { success, warning, detail } from '../cli-utils';
 import type { SandboxProviderName } from '../sandbox/types';
-import type { AgentProviderName } from '../agents/types';
+import type { AgentProviderName, ExecutionMode } from '../agents/types';
 import type { BranchStrategyConfig } from '../branches/types';
+import { resolveWorkflowRunRequest } from './run-request';
 
 export interface RunWorkflowCliOpts {
-  iid: number;
+  backlogId: string;
   session?: string;
   projectName?: string;
   targetBranch?: string;
@@ -31,40 +26,22 @@ export interface RunWorkflowCliOpts {
   extParams?: string[];
   sandboxProvider?: SandboxProviderName;
   agentProvider?: AgentProviderName;
+  executionMode?: ExecutionMode;
   branchStrategy?: BranchStrategyConfig;
   template?: string;
 }
 
-export async function runWorkflowCli(opts: RunWorkflowCliOpts): Promise<void> {
-  const tracker = await createTrackerClient(opts.projectName);
+export interface RunWorkflowCliResult {
+  success: boolean;
+  url?: string;
+}
+
+export async function runWorkflowCli(opts: RunWorkflowCliOpts): Promise<RunWorkflowCliResult> {
   const cfg = getWorkflowConfig();
-  const runner = new WorkflowRunner(tracker, { config: cfg });
-  const session = opts.session || `afk-${opts.iid}`;
-
-  const result = await runner.run({
-    iid: opts.iid,
-    session,
-    projectName: opts.projectName,
-    targetBranch: opts.targetBranch ?? cfg.targetBranch,
-    baseBranch: opts.baseBranch,
-    maxRetries: opts.maxRetries ?? cfg.maxRetries,
-    hardTimeoutMs: opts.hardTimeoutMs ?? cfg.workflowHardTimeout,
-    maxHandoffs: opts.maxHandoffs ?? Math.min(Math.ceil(cfg.goalBudget / 1_000_000), 20),
-    contextHighTokens: opts.contextHighTokens ?? cfg.contextThreshold,
-    maxTotalTokens: opts.maxTotalTokens ?? cfg.goalBudget,
-    ext: opts.ext,
-    extParams: opts.extParams,
-    sandboxProvider: opts.sandboxProvider,
-    agentProvider: opts.agentProvider,
-    branchStrategy: opts.branchStrategy,
-    template: opts.template,
-  });
-
-  if (result.success) {
-    success('Workflow completed!');
-    if (result.url) detail(`MR: ${result.url}`);
-    process.exit(0);
-  }
-  warning('Workflow did not complete successfully');
-  process.exit(1);
+  const request = await resolveWorkflowRunRequest(opts, cfg);
+  const tracker = await createTrackerClient(request.projectName, request.repoRoot);
+  const providers = createProviderBundle(tracker, request.repoRoot);
+  const runner = new WorkflowRunner(providers, { config: cfg });
+  const result = await runner.run(request as unknown as RunnerOptions);
+  return { success: result.success, url: result.url };
 }

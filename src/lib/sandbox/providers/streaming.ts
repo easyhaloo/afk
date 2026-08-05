@@ -8,7 +8,7 @@
  * 1. Spawns the agent as a detached child process (no tmux)
  * 2. Collects and parses stdout line-by-line as stream-json events
  * 3. Emits ExecutionEvents for usage/result/error as they arrive
- * 4. Returns ExecutionResult when goal_complete/ac_result is detected
+ * 4. Returns ExecutionResult when goal_complete is detected
  *
  * Unlike LocalAgentExecution (interactive mode), this class does NOT use tmux
  * or signal files — completion is detected purely via the stream-json output.
@@ -37,7 +37,7 @@ export class StreamingAgentExecution implements AgentExecution {
 
   private readonly command: AgentCommand;
   private readonly prompt: string;
-  private readonly signalType: 'goal_complete' | 'ac_result';
+  private readonly signalType: 'goal_complete';
   private readonly worktreePath: string;
   private readonly agentProvider?: AgentProvider;
 
@@ -48,11 +48,15 @@ export class StreamingAgentExecution implements AgentExecution {
   private error: ExecutionResult['error'] | undefined;
   private structuredOutput: unknown;
   private usage: TokenUsage | undefined;
+  private stdoutBuffer = '';
+  private stdoutTail = '';
+  private stderrBuffer = '';
+  private lastResultOutput = '';
 
   constructor(opts: {
     command: AgentCommand;
     prompt: string;
-    signalType: 'goal_complete' | 'ac_result';
+    signalType: 'goal_complete';
     worktreePath: string;
     sessionId?: string;
     agentProvider?: AgentProvider;
@@ -91,27 +95,31 @@ export class StreamingAgentExecution implements AgentExecution {
 
     if (this.proc.stdout) {
       this.proc.stdout.on('data', (chunk: Buffer) => {
-        const lines = chunk.toString('utf-8').split('\n');
-        for (const line of lines) {
-          if (line.trim()) this.handleLine(line);
-        }
+        const text = chunk.toString('utf-8');
+        this.stdoutBuffer += text;
+        this.stdoutTail = (this.stdoutTail + text).slice(-4000);
+        this.drainStdoutLines();
       });
     }
 
     if (this.proc.stderr) {
       this.proc.stderr.on('data', (chunk: Buffer) => {
         // Stream-json errors may appear on stderr; treat as text events
-        const text = chunk.toString('utf-8').trim();
-        if (text) {
-          // pass through — runner may surface these
-        }
+        this.stderrBuffer += chunk.toString('utf-8');
       });
     }
 
     this.proc.on('exit', (code, signal) => {
+      if (this.stdoutBuffer.trim()) this.handleLine(this.stdoutBuffer);
+      this.stdoutBuffer = '';
       this.exitCode = code ?? undefined;
       if (signal) {
         this.error = { code: signal, message: `Process killed by ${signal}` };
+      } else if (code !== 0) {
+        this.error = {
+          code: 'NON_ZERO_EXIT',
+          message: this.stderrBuffer.trim() || this.stdoutTail.trim() || `Process exited with code ${code}`,
+        };
       }
       this.done = true;
     });
@@ -149,10 +157,11 @@ export class StreamingAgentExecution implements AgentExecution {
           case 'result': {
             // result field contains raw output: <goal_complete>{"summary":"..."}</goal_complete>
             const raw = String(event.result ?? '');
+            this.lastResultOutput = raw.trim().slice(-4000);
             const extracted = this.extractSignal(raw);
             if (extracted) {
               this.structuredOutput = extracted;
-              this.done = true;
+              if (this.hasExpectedSignal()) this.done = true;
             }
             break;
           }
@@ -180,10 +189,11 @@ export class StreamingAgentExecution implements AgentExecution {
         break;
       case 'result': {
         const raw = String(parsed.result ?? '');
+        this.lastResultOutput = raw.trim().slice(-4000);
         const extracted = this.extractSignal(raw);
         if (extracted) {
           this.structuredOutput = extracted;
-          this.done = true;
+          if (this.hasExpectedSignal()) this.done = true;
         }
         break;
       }
@@ -212,7 +222,7 @@ export class StreamingAgentExecution implements AgentExecution {
     if (!trimmed) return undefined;
 
     // Try wrapped format: <goal_complete>{...}</goal_complete>
-    const wrapped = trimmed.match(/^<(\w+)>(.+)<\/\1>$/s);
+    const wrapped = trimmed.match(/<(\w+)>([\s\S]*?)<\/\1>/);
     if (wrapped) {
       const [, wrapperTag, json] = wrapped;
       let data: unknown;
@@ -227,7 +237,7 @@ export class StreamingAgentExecution implements AgentExecution {
         return data;
       }
       // Malformed or no type — return null so caller treats as unknown result
-      return null;
+      return { type: wrapperTag, ...(data as Record<string, unknown>) };
     }
 
     // Try bare JSON (e.g., handoff_ready)
@@ -236,6 +246,11 @@ export class StreamingAgentExecution implements AgentExecution {
     } catch {
       return null;
     }
+  }
+
+  private hasExpectedSignal(): boolean {
+    if (!this.structuredOutput || typeof this.structuredOutput !== 'object') return false;
+    return (this.structuredOutput as { type?: unknown }).type === this.signalType;
   }
 
   async waitForEvent(): Promise<ExecutionEvent | null> {
@@ -281,21 +296,7 @@ export class StreamingAgentExecution implements AgentExecution {
       };
     }
 
-    if (this.error) {
-      // If we already detected a result (goal_complete), prefer completed over failed
-      if (this.structuredOutput) {
-        return {
-          version: 1,
-          runId: this.id,
-          status: 'completed',
-          provider: 'batch',
-          sessionId: this.sessionId,
-          exitCode: this.exitCode,
-          structuredOutput: this.structuredOutput,
-          usage: this.usage,
-          commits: [],
-        };
-      }
+    if (this.error || (this.exitCode !== undefined && this.exitCode !== 0)) {
       return {
         version: 1,
         runId: this.id,
@@ -309,7 +310,24 @@ export class StreamingAgentExecution implements AgentExecution {
       };
     }
 
-    return {
+    if (!this.structuredOutput || !this.hasExpectedSignal()) {
+      return {
+        version: 1,
+        runId: this.id,
+        status: 'failed',
+        provider: 'batch',
+        sessionId: this.sessionId,
+        exitCode: this.exitCode,
+        error: {
+          code: 'MISSING_RESULT',
+          message: `batch execution ended without ${this.signalType} result${this.lastResultOutput ? `; lastResult=${this.lastResultOutput}` : ''}`,
+        },
+        usage: this.usage,
+        commits: [],
+      };
+    }
+
+    const completed: ExecutionResult = {
       version: 1,
       runId: this.id,
       status: 'completed',
@@ -320,6 +338,8 @@ export class StreamingAgentExecution implements AgentExecution {
       usage: this.usage,
       commits: [],
     };
+    this.terminateProcess();
+    return completed;
   }
 
   async interrupt(_reason: InterruptReason): Promise<void> {
@@ -357,5 +377,21 @@ export class StreamingAgentExecution implements AgentExecution {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private drainStdoutLines(): void {
+    let newline: number;
+    while ((newline = this.stdoutBuffer.indexOf('\n')) >= 0) {
+      const line = this.stdoutBuffer.slice(0, newline);
+      this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
+      if (line.trim()) this.handleLine(line);
+    }
+  }
+
+  private terminateProcess(): void {
+    if (this.exitCode !== undefined) return;
+    try {
+      this.proc?.kill('SIGKILL');
+    } catch { /* process already exited */ }
   }
 }

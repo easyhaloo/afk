@@ -81,7 +81,6 @@ export class QARunner {
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
       await this.heartbeatRuntime(runtimeRunId, { worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
-      if (this.executionMode === 'interactive') await configureStatusline(worktreePath);
       logger.info({ backlogId: id, worktree: worktreePath, baselineBranch }, 'QA worktree created');
 
       const featureBranch = backlog.branchName;
@@ -91,6 +90,7 @@ export class QARunner {
       }
       if (this.mergeBranchOverride) await this.mergeBranchOverride(worktreePath, baselineBranch, featureBranch);
       else await this.mergeBranch(worktreePath, baselineBranch, featureBranch);
+      if (this.executionMode === 'interactive') await configureStatusline(worktreePath);
 
       const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot }).load('pre-merge-qa-verification');
       const qaStep = compileTemplate(qaTemplate).groups

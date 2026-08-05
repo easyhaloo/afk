@@ -62,11 +62,18 @@ function Field({ name, value, color = 'white' }: { name: string; value: string |
 function TaskDetail({ item }: { item: Task }) {
   return (
     <Group title="runtime">
-      <Field name="session" value={item.session} />
+      <Field name="run" value={item.runId} />
+      <Field name="phase" value={item.phase} />
       <Field name="status" value={item.status} />
+      <Field name="execution mode" value={item.executionMode} />
+      <Field name="sandbox" value={item.sandboxProvider} />
+      <Field name="agent" value={item.agentProvider} />
+      <Field name="session" value={item.session} />
       <Field name="worktree" value={item.worktree} />
       <Field name="branch" value={item.branch} />
       <Field name="progress" value={item.progress} />
+      <Field name="diagnostics" value={item.diagnosticPath} />
+      <Field name="error" value={item.errorSummary} color="yellow" />
     </Group>
   );
 }

@@ -25,7 +25,8 @@ export function HelpDialog({ view = 'tasks', detail = false }: Props) {
       {!detail && <Text color="white">  Enter - detail</Text>}
       {!detail && <Text color="white">  r - refresh</Text>}
       {providerView && <Text color="white">  o - open provider URL</Text>}
-      {!detail && view === 'tasks' && <Text color="white">  a - attach selected task</Text>}
+      {view === 'tasks' && <Text color="white">  o - open task diagnostics</Text>}
+      {!detail && view === 'tasks' && <Text color="white">  a - attach interactive task</Text>}
       <Box marginTop={1} justifyContent="center"><Text color="gray">? or ESC to close</Text></Box>
     </Box>
   );

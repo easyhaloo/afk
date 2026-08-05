@@ -13,12 +13,12 @@ describe('Footer', () => {
     expect(output).not.toContain('↑↓');
   });
 
-  it('does not advertise browser open for task details', () => {
+  it('advertises diagnostic opening and interactive attach for task details', () => {
     const output = renderToString(<Footer view="tasks" detail search={false} />);
 
     expect(output).toContain('b/ESC back');
     expect(output).toContain('a attach');
-    expect(output).not.toContain('o open');
+    expect(output).toContain('o open');
   });
 
   it('shows list navigation and search shortcuts', () => {
@@ -38,11 +38,11 @@ describe('Footer', () => {
     expect(output).not.toContain('/ search');
   });
 
-  it('adds attach to the task list shortcuts', () => {
+  it('adds diagnostic and interactive attach shortcuts to the task list', () => {
     const output = renderToString(<Footer view="tasks" detail={false} search={false} />);
 
     expect(output).toContain('a attach');
-    expect(output).not.toContain('o open');
+    expect(output).toContain('o open');
   });
 
   it('fits long path labels within the available footer width', () => {

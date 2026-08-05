@@ -14,6 +14,7 @@ import type { WorkflowConfig } from '../core/config/manager';
 import type { BacklogItem } from '../core/backlog';
 import { formatExecutionFailure } from '../workflows';
 import { buildExecutionPrompt } from '../workflows/execution-protocol';
+import { TaskRuntimeManager } from '../runtime/task-runtime';
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -22,6 +23,7 @@ export interface QARunnerDependencies {
   executionMode?: ExecutionMode;
   projectRoot?: string;
   mergeBranch?: (worktreePath: string, branch: string) => Promise<void>;
+  runtimeManager?: TaskRuntimeManager;
 }
 
 /**
@@ -42,6 +44,7 @@ export class QARunner {
   private readonly executionMode: ExecutionMode;
   private readonly projectRoot: string;
   private readonly mergeBranchOverride?: (worktreePath: string, branch: string) => Promise<void>;
+  private readonly runtimeManager: TaskRuntimeManager;
 
   constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
@@ -50,6 +53,7 @@ export class QARunner {
     this.executionMode = deps.executionMode ?? 'batch';
     this.projectRoot = deps.projectRoot ?? process.cwd();
     this.mergeBranchOverride = deps.mergeBranch;
+    this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
     this.agentProvider = deps.agentProvider ?? createAgentProvider('claude-code');
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
@@ -65,10 +69,16 @@ export class QARunner {
     let worktreePath: string | undefined;
     let sandbox: Sandbox | undefined;
     let execution: AgentExecution | undefined;
+    const runtimeRunId = `${session}-runtime`;
+    let runtimeStarted = false;
+    let runtimeErrorSummary: string | undefined;
 
     try {
+      await this.startRuntime(runtimeRunId, backlog, session);
+      runtimeStarted = true;
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
+      await this.heartbeatRuntime(runtimeRunId, { worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
       if (this.executionMode === 'interactive') await configureStatusline(worktreePath);
       logger.info({ backlogId: id, worktree: worktreePath, baselineBranch }, 'QA worktree created');
 
@@ -111,23 +121,34 @@ export class QARunner {
         executionMode: this.executionMode,
         agentProvider: this.agentProvider,
       });
+      await this.heartbeatRuntime(runtimeRunId, { progress: 'QA agent running' });
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
       const result = await execution.waitForResult({ completionTimeoutMs: this.config.completionTimeout });
+      await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
       logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
       if (result.status !== 'completed') {
+        runtimeErrorSummary = formatExecutionFailure(result);
         await this.handleExecutionFailure(id, worktreePath, session, result, execution);
         return { success: false };
       }
 
       const signal = asQAResult(result.structuredOutput);
       if (!signal) {
+        runtimeErrorSummary = `${formatExecutionFailure(result)}; missing QA completion payload`;
         await this.markBlocked(id, `${formatExecutionFailure(result)}; missing QA completion payload`);
         return { success: false };
       }
-      return await this.handleACResult(id, signal);
+      const outcome = await this.handleACResult(id, signal);
+      if (!outcome.success) {
+        runtimeErrorSummary = signal.result === 'PASS'
+          ? 'QA terminal routing failed'
+          : 'QA did not return goal_complete kind=qa result=PASS';
+      }
+      return outcome;
     } catch (error) {
       const message = `QA execution failed: ${(error as Error).message}`;
+      runtimeErrorSummary = message;
       await this.markBlocked(id, message);
       logger.error({ backlogId: id, error }, 'QA execution failed');
       return { success: false };
@@ -140,6 +161,9 @@ export class QARunner {
         } catch (error) {
           logger.warn({ backlogId: id, error }, 'failed to clean QA worktree');
         }
+      }
+      if (runtimeStarted) {
+        await this.finishRuntime(runtimeRunId, runtimeErrorSummary ? 'blocked' : 'completed', runtimeErrorSummary);
       }
     }
   }
@@ -201,6 +225,58 @@ export class QARunner {
   private async markBlocked(backlogId: string, reason: string): Promise<void> {
     await this.providers.backlog.transition(backlogId, 'blocked', { reason });
     await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
+  }
+
+  private async startRuntime(runId: string, backlog: BacklogItem, session: string): Promise<void> {
+    const now = new Date().toISOString();
+    try {
+      await this.runtimeManager.start({
+        runId,
+        backlogId: backlog.id,
+        title: backlog.title,
+        phase: 'verifying',
+        status: 'running',
+        sandboxProvider: this.sandboxProvider.name,
+        executionMode: this.executionMode,
+        agentProvider: this.agentProvider.name,
+        session: this.executionMode === 'interactive' ? session : undefined,
+        branch: backlog.branchName,
+        startedAt: now,
+        heartbeatAt: now,
+        progress: 'QA starting',
+      });
+    } catch (error) {
+      logger.warn({ backlogId: backlog.id, error }, 'failed to publish QA runtime');
+    }
+  }
+
+  private async heartbeatRuntime(runId: string, changes: Parameters<TaskRuntimeManager['heartbeat']>[1]): Promise<void> {
+    try {
+      await this.runtimeManager.heartbeat(runId, changes);
+    } catch (error) {
+      logger.warn({ runId, error }, 'failed to update QA runtime');
+    }
+  }
+
+  private async finishRuntime(runId: string, status: 'completed' | 'blocked', errorSummary?: string): Promise<void> {
+    try {
+      await this.runtimeManager.finish(runId, {
+        status,
+        progress: status === 'completed' ? 'QA completed' : 'QA stopped',
+        errorSummary,
+      });
+    } catch (error) {
+      logger.warn({ runId, error }, 'failed to archive QA runtime');
+    }
+  }
+
+  private async writeRuntimeDiagnostics(runId: string, result: ExecutionResult, execution: AgentExecution): Promise<void> {
+    try {
+      const output = await execution.captureOutput({ lines: 200, history: 2_000 });
+      await this.runtimeManager.writeDiagnostics(runId, { result, output });
+    } catch (error) {
+      logger.warn({ runId, error }, 'failed to persist QA runtime diagnostics');
+    }
   }
 }
 

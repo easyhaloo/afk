@@ -6,7 +6,7 @@ import { DashboardEntry } from '../views/app/index';
 export function registerBoardCommands(program: Command) {
   program
     .command('board')
-    .description('Interactive TUI board for monitoring tasks and sessions')
+    .description('Interactive TUI board for monitoring backlog and task runtime')
     .action(() => {
       // Enable alternate screen buffer
       process.stdout.write('\x1b[?1049h');

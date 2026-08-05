@@ -71,6 +71,23 @@ describe('GitBranchProvider', () => {
     await expect(worktreeGit.raw(['show', 'HEAD:child-result.txt'])).resolves.toContain('merged child result');
   });
 
+  it('reuses an existing local backlog branch after a prior interrupted run', async () => {
+    const { repoPath } = await repository();
+    const git = simpleGit(repoPath);
+    await git.checkoutLocalBranch('afk/backlog-42', 'main');
+    await writeFile(join(repoPath, 'interrupted-work.txt'), 'preserve this work\n');
+    await git.add('interrupted-work.txt');
+    await git.commit('interrupted work');
+    await git.checkout('main');
+
+    const provider = new GitBranchProvider(repoPath);
+    const handle = await provider.createBranch(item(), 'main');
+    const worktreeGit = simpleGit(handle.worktreePath);
+
+    expect(handle.branchName).toBe('afk/backlog-42');
+    await expect(worktreeGit.raw(['show', 'HEAD:interrupted-work.txt'])).resolves.toContain('preserve this work');
+  });
+
   it('integrates remote child results that arrive before the parent branch is pushed', async () => {
     const { repoPath, remotePath } = await repository();
     const publisherPath = await mkdtemp(join(tmpdir(), 'afk-git-provider-publisher-'));

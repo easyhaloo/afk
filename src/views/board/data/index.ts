@@ -1,5 +1,5 @@
 export { useData } from './useData';
-export { fetchTasks, fetchSessions, fetchProjectDetail } from './fetcher';
+export { fetchTasks, fetchProjectDetail, toRuntimeTask } from './fetcher';
 export {
   loadBacklogViewModels,
   toBacklogViewModel,

@@ -22,12 +22,14 @@ export function TaskListView({ tasks, selected, scrollOffset, viewportHeight, wi
       viewportHeight={viewportHeight}
       width={width}
       emptyMessage="ℹ  no running tasks"
-      getKey={(task) => task.iid}
+      getKey={(task) => task.runId}
       render={(task, _index, isSelected) => {
         const worktree = task.worktree
           ? normalizeRowText(task.worktree.replace(process.env.HOME || '', '~'))
           : '–';
         const summary = [
+          `phase ${task.phase}`,
+          `${task.executionMode}/${task.sandboxProvider}`,
           `session ${normalizeRowText(task.session || '') || '–'}`,
           `branch ${normalizeRowText(task.branch || '') || '–'}`,
           `worktree ${worktree}`,
@@ -40,7 +42,7 @@ export function TaskListView({ tasks, selected, scrollOffset, viewportHeight, wi
             selected={isSelected}
             status={task.status}
             statusColor={isSelected ? 'white' : 'gray'}
-            mode="task"
+            mode={task.executionMode}
             id={task.iid}
             title={normalizeRowText(task.title || task.branch || '') || 'untitled task'}
             summary={summary}

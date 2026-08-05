@@ -15,6 +15,7 @@
 
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
+import { join } from 'path';
 import { WorktreeManager } from '../../core/git';
 import { TmuxClient } from '../../core/tmux/tmux';
 import { clearSignal, getTokenUsage, readSignal } from '../../io';
@@ -102,6 +103,11 @@ export class LocalSandbox implements Sandbox {
     if (!this.tmux) throw new Error('interactive local execution requires tmux');
     await clearSignal(this.worktreePath);
     if (!this.sessionCreated) {
+      // The marker belongs to a Claude process, not the worktree. A prior
+      // phase's file must not make a freshly-created tmux session look ready.
+      await fs.unlink(join(this.worktreePath, '.afk', 'claude-status.json')).catch(error => {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      });
       await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
       this.sessionCreated = true;
     }

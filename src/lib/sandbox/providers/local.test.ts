@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'fs/promises';
+import { access, mkdir, mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
@@ -86,6 +86,30 @@ describe('LocalSandboxProvider', () => {
     });
 
     await expect(import('../../io').then(({ readSignal }) => readSignal(worktreePath))).resolves.toBeNull();
+  });
+
+  it('clears a stale status marker before launching an interactive session', async () => {
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-status-'));
+    const statusPath = join(worktreePath, '.afk', 'claude-status.json');
+    await mkdir(join(worktreePath, '.afk'));
+    await writeFile(statusPath, '{"stale":true}');
+    const tmux = {
+      createSession: vi.fn(async () => ({})),
+      sendPrompt: vi.fn(async () => {}),
+      killSession: vi.fn(async () => {}),
+      closeSession: vi.fn(),
+    };
+    const provider = new LocalSandboxProvider();
+    const sandbox = await provider.create({
+      worktreePath, session: 'fresh-session', executionMode: 'interactive', tmux: tmux as never,
+    });
+
+    await sandbox.startAgent({
+      command: { argv: ['agent'], cwd: worktreePath }, prompt: 'goal', generation: 1,
+      signalType: 'goal_complete', executionMode: 'interactive',
+    });
+
+    await expect(access(statusPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('accepts an AC verification completion signal', () => {

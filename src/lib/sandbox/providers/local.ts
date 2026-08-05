@@ -246,6 +246,7 @@ export class LocalAgentExecution implements AgentExecution {
             sessionId: this.sessionId,
             commits: [],
             branch: this.sessionName,
+            structuredOutput: sig,
           };
         }
       } catch { /* ignore */ }

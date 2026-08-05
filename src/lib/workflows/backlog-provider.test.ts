@@ -16,6 +16,7 @@ function providers(claim: ReturnType<typeof vi.fn>): ProviderBundle {
     backlog: {
       claim, transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}),
       get: vi.fn(async () => item), list: vi.fn(async () => []), isRunnable: vi.fn(async () => true),
+      getActiveRework: vi.fn(async () => undefined),
     },
     branches: { createBranch: vi.fn(), push: vi.fn(), commit: vi.fn(), cleanup: vi.fn() },
     changes: { create: vi.fn(), get: vi.fn(), findForBacklog: vi.fn(), merge: vi.fn(), close: vi.fn() },
@@ -41,6 +42,97 @@ function runner(bundle: ProviderBundle): WorkflowRunner {
 }
 
 describe('WorkflowRunner backlog provider mode', () => {
+  it('does not create a change request before QA verification', async () => {
+    const { claim } = claimed();
+    const bundle = providers(vi.fn(async () => claim));
+    const subject = runner(bundle) as any;
+    subject.activeBacklog = item;
+    subject.primaryHandle = { branch: item.branchName, path: process.cwd(), isNewBranch: true };
+    subject.pushBranch = vi.fn(async () => {});
+    subject.cleanupPrimary = vi.fn(async () => {});
+
+    await expect(subject.autoWrapup(42, process.cwd(), 'worker-a', 'main')).resolves.toEqual({ success: true });
+    expect(subject.pushBranch).toHaveBeenCalledWith(process.cwd());
+    expect(bundle.changes.create).not.toHaveBeenCalled();
+    expect(bundle.backlog.transition).toHaveBeenCalledWith('42', 'verification', undefined);
+  });
+
+  it('adds structured AC feedback only to a corrective implementation prompt', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    subject.acFeedback = {
+      type: 'goal_complete', kind: 'ac_verification', result: 'FAIL', summary: 'search shortcut failed',
+      failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }],
+    };
+
+    const implementation = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 });
+    const verifier = await subject.resolveStepPrompt({ id: 'verify-ac', prompt: '/goal verify #{iid}' }, { iid: 42 });
+
+    expect(implementation).toContain('AC correction required');
+    expect(implementation).toContain('/s enters search');
+    expect(verifier).not.toContain('AC correction required');
+  });
+
+  it('injects the active QA rework record into the next implementation prompt', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    subject.activeRework = {
+      id: 'r2', attempt: 2, source: 'qa', status: 'open', createdAt: '2026-08-05T00:00:00.000Z',
+      summary: 'integration QA found a shortcut regression',
+      failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/s is ignored' }],
+      requiredChecks: [{ command: 'pnpm vitest run', expected: 'passes' }],
+    };
+
+    const prompt = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 });
+
+    expect(prompt).toContain('open QA rework record (r2, attempt 2)');
+    expect(prompt).toContain('/s enters search');
+    expect(prompt).toContain('pnpm vitest run');
+  });
+
+  it('retries a diagnosable AC failure in the same implementation branch', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    subject.config = { ...subject.config, maxSelfIterations: 2 };
+    const initial = {
+      stepId: 'verify-ac', status: 'failed', output: {
+        type: 'goal_complete', kind: 'ac_verification', result: 'FAIL', summary: 'shortcut is missing',
+        failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/s is ignored' }],
+      }, startedAt: '', completedAt: '',
+    };
+    const results: Record<string, any> = { 'verify-ac': initial };
+    subject.runStep = vi.fn()
+      .mockResolvedValueOnce({ stepId: 'implement', status: 'completed', startedAt: '', completedAt: '' })
+      .mockResolvedValueOnce({ stepId: 'verify-ac', status: 'completed', startedAt: '', completedAt: '' });
+    subject.heartbeatRuntime = vi.fn(async () => {});
+    const template = {
+      steps: [{ id: 'implement', prompt: '/goal implement' }, { id: 'verify-ac', prompt: '/goal verify' }],
+    };
+
+    await expect(subject.retryFailedAcVerification(template, {
+      iid: 42, session: 'worker', baseSession: 'worker', primaryWtPath: process.cwd(), primaryBranch: 'afk/backlog-42', baseBranch: 'main',
+      hardTimeoutMs: 1_000, completionTimeoutMs: 1_000, contextHighTokens: 1_000, budget: {}, executionMode: 'batch',
+    }, initial, results)).resolves.toBe(true);
+
+    expect(subject.runStep).toHaveBeenNthCalledWith(1, template.steps[0], expect.objectContaining({ primaryBranch: 'afk/backlog-42', stepIndex: 1 }), results);
+    expect(subject.runStep).toHaveBeenNthCalledWith(2, template.steps[1], expect.objectContaining({ primaryBranch: 'afk/backlog-42', stepIndex: 1 }), results);
+    expect(results['verify-ac'].status).toBe('completed');
+    expect(subject.acFeedback).toBeUndefined();
+  });
+
+  it('does not retry an AC failure without a complete diagnosis', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    const initial = { stepId: 'verify-ac', status: 'failed', output: { type: 'goal_complete', kind: 'ac_verification', result: 'FAIL' }, startedAt: '', completedAt: '' };
+    subject.runStep = vi.fn();
+
+    await expect(subject.retryFailedAcVerification({ steps: [{ id: 'implement' }, { id: 'verify-ac' }] }, {
+      iid: 42, session: 'worker', baseSession: 'worker', primaryWtPath: process.cwd(), primaryBranch: 'afk/backlog-42', baseBranch: 'main',
+      hardTimeoutMs: 1_000, completionTimeoutMs: 1_000, contextHighTokens: 1_000, budget: {}, executionMode: 'batch',
+    }, initial, {})).resolves.toBe(false);
+    expect(subject.runStep).not.toHaveBeenCalled();
+  });
+
   it('claims backlog before execution and transitions a successful run to verification', async () => {
     const { claim: backlogClaim, release } = claimed();
     const claim = vi.fn(async () => backlogClaim);
@@ -60,7 +152,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     const subject = runner(bundle) as any;
     subject.runBody = vi.fn();
 
-    await expect(subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main' })).resolves.toEqual({ success: false });
+    await expect(subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main' })).resolves.toEqual({ success: false, skipped: 'not_claimed' });
     expect(subject.runBody).not.toHaveBeenCalled();
   });
 

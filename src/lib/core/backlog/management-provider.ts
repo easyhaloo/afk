@@ -1,4 +1,4 @@
-import type { BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, QABacklogProvider } from './index';
+import type { BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index';
 
 /**
  * Physical capability boundary for backlog management and QA. It forwards
@@ -12,6 +12,9 @@ export class ManagementBacklogProvider implements QABacklogProvider {
   list(options?: BacklogListOptions): Promise<BacklogItem[]> { return this.provider.list(options); }
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> { return this.provider.transition(id, state, details); }
   setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.provider.setExecutionMode(id, mode); }
+  createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord> { return this.provider.createRework(id, record); }
+  getActiveRework(id: string): Promise<ReworkRecord | undefined> { return this.provider.getActiveRework(id); }
+  resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> { return this.provider.resolveRework(id, reworkId, resolution); }
   addTag(id: string, tag: string): Promise<void> { return this.provider.addTag(id, tag); }
   removeTag(id: string, tag: string): Promise<void> { return this.provider.removeTag(id, tag); }
   initialize(): Promise<void> { return this.provider.initialize(); }

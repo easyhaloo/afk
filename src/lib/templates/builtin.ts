@@ -1,7 +1,7 @@
 /**
  * Built-in workflow templates (EXECUTION-DESIGN.md §10).
  *
- *   issue-implementation   — current AFK two-phase flow (implement → verify → MR)
+ *   issue-implementation   — current AFK implementation flow (implement → verify → push)
  *   simple-loop            — single step that loops until the agent reports done
  *   sequential-review      — implement → review → fix-if-failed
  *   parallel-planner       — multiple planners in parallel
@@ -27,13 +27,13 @@ export function builtinTemplates(): WorkflowTemplate[] {
 // ── issue-implementation ───────────────────────────────────────────────────
 
 /**
- * Default template: implement → verify-ac → publish change → queue QA.
+ * Default template: implement → verify-ac → publish branch → queue QA.
  */
 function issueImplementation(): WorkflowTemplate {
   return {
     name: 'issue-implementation',
     version: 1,
-    description: 'Implement an issue end-to-end: code, verify AC, open MR, QA.',
+    description: 'Implement a backlog item: code, verify AC, push the branch, and queue QA.',
     defaultBranch: { type: 'issue', iid: 0 }, // runner overrides per-run
     defaultProvider: 'claude-code',
     steps: [
@@ -71,7 +71,7 @@ function qaVerification(): WorkflowTemplate {
   return {
     name: 'pre-merge-qa-verification',
     version: 1,
-    description: 'Pre-merge integration QA verification. Only an explicit AC PASS may merge an MR.',
+    description: 'Pre-merge integration QA verification. Sync the latest baseline, test, commit, push, and publish a mergeable change.',
     steps: [{
       id: 'verify-ac', kind: 'agent', role: 'verifier', completion: 'goal_complete',
       prompt: '/goal 验证 issue #{iid} 的 AC 全部通过，并返回 PASS 或 FAIL。',

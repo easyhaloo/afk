@@ -135,6 +135,19 @@ describe('NamedBranchStrategy', () => {
     // '/' in branch becomes '-' in directory name.
     expect(handle.path).toMatch(/feature-login$/);
   });
+
+  it('refuses to replace an existing local branch', async () => {
+    await git.checkoutLocalBranch('feature/existing', 'main');
+    await fs.writeFileSync(path.join(repoPath, 'preserve.txt'), 'keep this commit\n');
+    await git.add('preserve.txt');
+    const { commit } = await git.commit('existing work');
+    await git.checkout('main');
+
+    const s = new NamedBranchStrategy();
+    await expect(s.prepareWorktree(git, { type: 'named', branch: 'feature/existing' }, { repoPath }))
+      .rejects.toThrow(/already exists|已经存在/);
+    await expect(git.revparse(['feature/existing'])).resolves.toContain(commit);
+  });
 });
 
 describe('MergeToHeadBranchStrategy', () => {

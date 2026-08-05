@@ -21,6 +21,7 @@ export interface WorkflowConfig {
   promptTimeout: number;
   handoffTimeout: number;
   maxRetries: number;
+  maxSelfIterations: number;
   targetBranch: string;
   trackerTargetBranch: string;
   goalBudget: number;
@@ -57,6 +58,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   promptTimeout: 30_000,
   handoffTimeout: 60_000,
   maxRetries: 2,
+  maxSelfIterations: 2,
   targetBranch: 'main',
   trackerTargetBranch: 'main',
   goalBudget: 10_000_000,
@@ -108,6 +110,7 @@ function loadWorkflowConfig(): WorkflowConfig {
     promptTimeout: parseEnvMs('AFK_PROMPT_TIMEOUT', DEFAULT_WORKFLOW.promptTimeout),
     handoffTimeout: parseEnvMs('AFK_HANDOFF_TIMEOUT', DEFAULT_WORKFLOW.handoffTimeout),
     maxRetries: parseIntEnv('AFK_MAX_RETRIES', DEFAULT_WORKFLOW.maxRetries),
+    maxSelfIterations: parseIntEnv('AFK_MAX_SELF_ITERATIONS', DEFAULT_WORKFLOW.maxSelfIterations),
     targetBranch: process.env.AFK_TARGET_BRANCH || DEFAULT_WORKFLOW.targetBranch,
     trackerTargetBranch: process.env.AFK_TRACKER_TARGET_BRANCH || DEFAULT_WORKFLOW.trackerTargetBranch,
     goalBudget: parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget),

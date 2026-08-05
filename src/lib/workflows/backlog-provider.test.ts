@@ -105,6 +105,37 @@ describe('WorkflowRunner backlog provider mode', () => {
     expect(prompt).toContain('pnpm vitest run');
   });
 
+  it('uses an independent sandbox session for an interactive primary-worktree phase', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const subject = runner(bundle) as any;
+    const primarySandbox = { id: 'primary', startAgent: vi.fn(), close: vi.fn() };
+    const phaseSandbox = { id: 'verify', startAgent: vi.fn(), close: vi.fn() };
+    const create = vi.fn(async () => phaseSandbox);
+    subject.activeBacklog = item;
+    subject.sandbox = primarySandbox;
+    subject.sandboxProvider = { create };
+    subject.heartbeatRuntime = vi.fn(async () => {});
+    subject.runPhase = vi.fn(async () => ({
+      completed: true,
+      output: { type: 'goal_complete', kind: 'ac_verification', result: 'PASS', summary: 'verified' },
+    }));
+
+    await subject.runStep(
+      { id: 'verify-ac', prompt: '/goal verify', branch: { type: 'issue', iid: 0 } },
+      {
+        iid: 42, session: 'afk-42-verify-ac', primaryWtPath: process.cwd(), primaryBranch: 'afk/backlog-42',
+        baseBranch: 'main', hardTimeoutMs: 1_000, completionTimeoutMs: 1_000, contextHighTokens: 1_000,
+        budget: {}, executionMode: 'interactive', stepIndex: 0,
+      },
+      {},
+    );
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      worktreePath: process.cwd(), session: 'afk-42-verify-ac', executionMode: 'interactive',
+    }));
+    expect(subject.runPhase).toHaveBeenCalledWith(expect.objectContaining({ sandbox: phaseSandbox }));
+  });
+
   it('retries a diagnosable AC failure in the same implementation branch', async () => {
     const bundle = providers(vi.fn(async () => null));
     const subject = runner(bundle) as any;

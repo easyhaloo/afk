@@ -574,9 +574,13 @@ export class WorkflowRunner {
       branchHandle = { branch: ctx.primaryBranch, path: ctx.primaryWtPath, isNewBranch: false };
     }
 
-    const sandbox = branchHandle.path === ctx.primaryWtPath
-      ? this.sandbox!
-      : await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode });
+    // A local interactive session must own one workflow phase. Reusing the
+    // implementation TUI for AC verification can submit the next prompt while
+    // Claude is still returning from the previous one, losing that prompt.
+    const needsDedicatedSandbox = ctx.executionMode === 'interactive' || branchHandle.path !== ctx.primaryWtPath;
+    const sandbox = needsDedicatedSandbox
+      ? await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode })
+      : this.sandbox!;
     if (sandbox !== this.sandbox) {
       this.stepSandboxes.push(sandbox);
       this.resourceScope?.registerSandbox(sandbox);

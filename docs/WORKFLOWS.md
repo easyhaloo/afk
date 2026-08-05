@@ -1,5 +1,14 @@
 # AFK Workflows
 
+> Breaking CLI note: use `afk backlog` for management,
+> `afk run --backlog-id <id>` for one item, `afk loop` for the complete
+> implementation → QA → merge pipeline, and `afk qa --backlog-id <id>` for
+> standalone verification. There are no issue, tracker, or workflow aliases.
+
+AFK executes backlog items prepared outside the runner. A backlog item may be a GitHub/GitLab issue today, but the runner depends only on `BacklogProvider`, `BranchProvider`, and `ChangeProvider`.
+
+The loop claims a canonical `ready` item atomically, verifies parent/dependency constraints, derives `afk/backlog-<id>`, runs the selected template, pushes a change request, and queues QA. QA merges only on explicit `goal_complete` payload `{ kind: "qa", result: "PASS" }`; otherwise the provider transitions the item to `blocked` and `hitl`.
+
 ## Overview
 
 AFK implements three primary workflow patterns:
@@ -14,20 +23,20 @@ End-to-end workflow from issue discovery to merge request.
 ### Manual Execution
 
 ```bash
-# 1. Discover ready issues
-afk issue list --label "stage::ready-for-implement"
+# 1. Inspect and manage backlog
+afk backlog list --state ready --mode afk
 
-# 2. Launch workflow for specific issue
-afk workflow launch --iid 123 --base main --timeout 7200
+# 2. Execute one externally-created backlog item
+afk run --backlog-id 123
 
 # 3. Monitor progress (workflow runs in tmux session)
 tmux attach -t afk-issue-123
 
 # 4. Run acceptance criteria checks
-afk workflow run-ac --iid 123 --session afk-issue-123 --worktree /tmp/afk-worktrees/issue-123
+afk qa --backlog-id 123
 
 # 5. Create merge request if passed
-afk workflow create-mr --iid 123 --worktree /tmp/afk-worktrees/issue-123
+# MR publication and QA queueing are typed system steps in issue-implementation
 
 # 6. Cleanup worktree
 afk worktree cleanup --iid 123
@@ -36,8 +45,8 @@ afk worktree cleanup --iid 123
 ### Automated Execution (Scheduler)
 
 ```bash
-# Start scheduler daemon
-afk scheduler start --max-concurrent 3 --poll-interval 60
+# Start the complete implementation and QA loop
+afk loop --max-concurrent 3 --poll-interval 60
 
 # Scheduler automatically:
 # 1. Polls for issues with stage::ready-for-implement
@@ -287,7 +296,7 @@ stateDiagram-v2
 **Red Phase:**
 ```bash
 # /afk-implement first creates failing test
-$ afk workflow launch --iid 123
+$ afk workflow run --iid 123
 # Claude writes tests
 $ npm test
 # ❌ Tests fail (expected)

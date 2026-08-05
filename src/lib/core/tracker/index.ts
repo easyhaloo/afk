@@ -16,6 +16,7 @@ export type {
 } from './types';
 
 export { detectPlatform, detectGitHubRepo, detectGitLabProject, detectProject } from './detect';
+export type { BacklogItem, BacklogProvider, BacklogState, BacklogExecutionMode, BacklogProviderCapabilities } from '../backlog';
 
 /**
  * Tracker config

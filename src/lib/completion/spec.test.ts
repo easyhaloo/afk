@@ -5,19 +5,15 @@ import { extractSpec } from './spec';
 describe('extractSpec', () => {
   const spec = extractSpec(buildCompletionTree());
 
-  it('includes the issue command with its subcommands', () => {
-    const issue = spec.commands.find(c => c.name === 'issue');
-    expect(issue).toBeDefined();
-    const subNames = issue!.subcommands.map(c => c.name).sort();
-    expect(subNames).toEqual(['comment', 'create', 'edit', 'get', 'link', 'list', 'open', 'run', 'update-labels']);
+  it('includes the backlog command with its management subcommands', () => {
+    const backlog = spec.commands.find(c => c.name === 'backlog');
+    expect(backlog).toBeDefined();
+    expect(backlog!.subcommands.map(c => c.name).sort()).toEqual(['init', 'list', 'show', 'tag']);
   });
 
-  it('captures positional arguments and option flags on issue get', () => {
-    const issue = spec.commands.find(c => c.name === 'issue')!;
-    const get = issue.subcommands.find(c => c.name === 'get')!;
-    expect(get.args.map(a => a.name)).toEqual(['id']);
-    expect(get.args[0].required).toBe(true);
-    expect(get.options.map(o => o.long)).toContain('--json');
+  it('captures required backlog ID and options on run', () => {
+    const run = spec.commands.find(c => c.name === 'run')!;
+    expect(run.options.map(o => o.long)).toContain('--backlog-id');
   });
 
   it('excludes commander auto-generated help subcommands', () => {

@@ -25,7 +25,7 @@ a question it set out to answer — the commit is proof that you answered it.
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-<type>: <short description> #<iid>
+<type>: <short description> (backlog {backlogId})
 
 Progress:
 - [x] Research: <specific question> -- <conclusion, e.g. "Recommendation: X"
@@ -55,7 +55,7 @@ Valid `<type>` values: `research`, `wip`.
   document that and explain why the question is unanswerable in this
   context.
 - MUST NOT let research expand into implementation — if the research
-  reveals a feature needs building, file a separate issue.
+  reveals a feature needs building, record a separate backlog item.
 - MUST NOT skip citing sources — a recommendation without evidence is
   an opinion, not a decision.
 

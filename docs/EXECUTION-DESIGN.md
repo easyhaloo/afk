@@ -463,7 +463,7 @@ planner-with-review
 Current AFK two-phase Issue flow should first be extracted as `issue-implementation` built-in template:
 
 ```text
-implement → verify-ac → create-mr → qa
+implement → verify-ac → publish-change → queue-qa
 ```
 
 Template load priority:

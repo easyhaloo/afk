@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { HandoffCoordinator } from './handoff';
-import type { TrackerProvider } from '../core/tracker/types';
+import type { BacklogProvider } from '../core/backlog';
 import type { TmuxClient } from '../core/tmux/tmux';
 import type { Watchdog } from './watchdog';
 import type { WorkflowConfig } from '../core/config/manager';
@@ -45,15 +45,11 @@ function makeConfig(): WorkflowConfig {
   };
 }
 
-function makeTracker() {
+function makeBacklog() {
   return {
-    platform: 'github',
-    projectId: 'test/repo',
-    addComment: vi.fn(async () => {}),
-    addLabel: vi.fn(async () => {}),
-    removeLabel: vi.fn(async () => {}),
-    getIssue: vi.fn(async () => ({ id: 42, title: 'Issue 42', description: '' })),
-  } as unknown as TrackerProvider;
+    transition: vi.fn(async () => {}),
+    setExecutionMode: vi.fn(async () => {}),
+  } as unknown as BacklogProvider;
 }
 
 describe('HandoffCoordinator', () => {
@@ -67,9 +63,9 @@ describe('HandoffCoordinator', () => {
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
 
-  const ctx = (over: Partial<{ iid: number; gen: number; tokens: number; hardTimeoutMs: number }> = {}) => ({
-    iid: 42,
-    session: 'afk-gh-42',
+  const ctx = (over: Partial<{ backlogId: string; gen: number; tokens: number; hardTimeoutMs: number }> = {}) => ({
+    backlogId: '42',
+    session: 'afk-backlog-42',
     wtPath,
     hardTimeoutMs: 60_000,
     gen: 1,
@@ -80,31 +76,24 @@ describe('HandoffCoordinator', () => {
   // ── auto ───────────────────────────────────────────────────────────────────
 
   it('auto success: writes doc, posts comment, restarts session, re-arms watchdog', async () => {
-    const tracker = makeTracker();
+    const backlog = makeBacklog();
     const tmux = makeTmux({
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'implemented AC 1-3' })),
       capturePane: vi.fn(async () => 'line1\nline2'),
       waitForPrompt: vi.fn(async () => true),
     });
     const watchdog = makeWatchdog();
-    const coord = new HandoffCoordinator(tracker, tmux, watchdog, makeConfig());
+    const coord = new HandoffCoordinator(backlog, tmux, watchdog, makeConfig());
 
     const outcome = await coord.handoff(ctx(), 'auto');
 
     expect(outcome).toBe('continued');
     // Disarm before negotiation, re-arm after relaunch.
     expect(watchdog.disarm).toHaveBeenCalledTimes(1);
-    expect(watchdog.arm).toHaveBeenCalledWith('afk-gh-42', 60_000, 42, wtPath);
+    expect(watchdog.arm).toHaveBeenCalledWith('afk-backlog-42', 60_000, 42, wtPath);
     // Session torn down and recreated.
-    expect(tmux.killSession).toHaveBeenCalledWith('afk-gh-42');
-    expect(tmux.createSession).toHaveBeenCalledWith('afk-gh-42', wtPath);
-    // In-progress comment posted with round + summary.
-    expect(tracker.addComment).toHaveBeenCalledTimes(1);
-    expect(tracker.addComment.mock.calls[0][0]).toBe(42);
-    const comment = tracker.addComment.mock.calls[0][1];
-    expect(comment).toContain('Round:** 1');
-    expect(comment).toContain('implemented AC 1-3');
-    expect(comment).toContain('context_high (~120000 tokens)');
+    expect(tmux.killSession).toHaveBeenCalledWith('afk-backlog-42');
+    expect(tmux.createSession).toHaveBeenCalledWith('afk-backlog-42', wtPath);
     // Recovery doc on disk, travels with the worktree.
     const doc = fs.readFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), 'utf-8');
     expect(doc).toContain('implemented AC 1-3');
@@ -112,83 +101,77 @@ describe('HandoffCoordinator', () => {
   });
 
   it('auto relaunch failure: flips to manual (handoff::active + killed), returns terminated', async () => {
-    const tracker = makeTracker();
+    const backlog = makeBacklog();
     const tmux = makeTmux({
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'partial work' })),
       waitForPrompt: vi.fn(async () => false), // relaunch: claude never ready
     });
     const watchdog = makeWatchdog();
-    const coord = new HandoffCoordinator(tracker, tmux, watchdog, makeConfig());
+    const coord = new HandoffCoordinator(backlog, tmux, watchdog, makeConfig());
 
     const outcome = await coord.handoff(ctx(), 'auto');
 
     expect(outcome).toBe('terminated');
-    expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
-    expect(tmux.killSession).toHaveBeenCalledWith('afk-gh-42');
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'handoff relaunch failed' });
+    expect(backlog.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
+    expect(tmux.killSession).toHaveBeenCalledWith('afk-backlog-42');
     // No re-arm: the session is dead, manual resume takes over.
     expect(watchdog.arm).not.toHaveBeenCalled();
   });
 
   it('auto no-summary (placeholder "<总结>"): doc falls back to snapshot, no summary', async () => {
-    const tracker = makeTracker();
+    const backlog = makeBacklog();
     const tmux = makeTmux({
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: '<总结>' })),
       capturePane: vi.fn(async () => 'snapshot-line'),
       waitForPrompt: vi.fn(async () => true),
     });
     const watchdog = makeWatchdog();
-    const coord = new HandoffCoordinator(tracker, tmux, watchdog, makeConfig());
+    const coord = new HandoffCoordinator(backlog, tmux, watchdog, makeConfig());
 
     await coord.handoff(ctx(), 'auto');
 
     const doc = fs.readFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), 'utf-8');
     expect(doc).toContain('(agent did not provide a summary)');
     expect(doc).toContain('snapshot-line');
-    const comment = tracker.addComment.mock.calls[0][1];
-    expect(comment).toContain('(agent did not provide a summary)');
   });
 
   // ── terminal ───────────────────────────────────────────────────────────────
 
   it('terminal/budget: embeds terminal doc in comment, labels handoff::active, no re-arm', async () => {
-    const tracker = makeTracker();
+    const backlog = makeBacklog();
     const tmux = makeTmux({
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'final summary' })),
       capturePane: vi.fn(async () => 'final-snapshot'),
     });
     const watchdog = makeWatchdog();
-    const coord = new HandoffCoordinator(tracker, tmux, watchdog, makeConfig());
+    const coord = new HandoffCoordinator(backlog, tmux, watchdog, makeConfig());
 
     const outcome = await coord.handoff(ctx({ gen: 2 }), 'terminal', 'budget');
 
     expect(outcome).toBe('terminated');
     expect(watchdog.disarm).toHaveBeenCalledTimes(1);
     expect(watchdog.arm).not.toHaveBeenCalled();
-    expect(tracker.addLabel).toHaveBeenCalledWith(42, 'handoff::active');
-    // Terminal comment embeds the doc content + resume instruction.
-    const comment = tracker.addComment.mock.calls[0][1];
-    expect(comment).toContain('已达最大交接轮数');
-    expect(comment).toContain('To resume');
-    expect(comment).toContain('final summary');
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'budget' });
+    expect(backlog.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
     // Terminal doc on disk with the 'terminal' generation marker.
     const doc = fs.readFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-terminal.md'), 'utf-8');
     expect(doc).toContain('round terminal');
     // Session killed, not restarted.
-    expect(tmux.killSession).toHaveBeenCalledWith('afk-gh-42');
+    expect(tmux.killSession).toHaveBeenCalledWith('afk-backlog-42');
     expect(tmux.createSession).not.toHaveBeenCalled();
   });
 
   it('terminal/tokens: surfaces the token-budget reason text', async () => {
-    const tracker = makeTracker();
+    const backlog = makeBacklog();
     const tmux = makeTmux({
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 's' })),
       capturePane: vi.fn(async () => 'snap'),
     });
-    const coord = new HandoffCoordinator(tracker, tmux, makeWatchdog(), makeConfig());
+    const coord = new HandoffCoordinator(backlog, tmux, makeWatchdog(), makeConfig());
 
     await coord.handoff(ctx(), 'terminal', 'tokens');
 
-    const comment = tracker.addComment.mock.calls[0][1];
-    expect(comment).toContain('已达总 token 上限');
+    expect(backlog.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'tokens' });
   });
 });

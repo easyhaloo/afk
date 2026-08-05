@@ -35,16 +35,18 @@ const STATE_FILE = '.afk/worktrees.json';
 export class WorktreeManager {
   private git: SimpleGit;
   private stateFilePath: string;
+  private readonly repoPath: string;
   private _stateCache: WorktreeState | null = null;
 
   constructor(repoPath: string = process.cwd()) {
+    this.repoPath = repoPath;
     this.git = simpleGit(repoPath);
     this.stateFilePath = join(repoPath, STATE_FILE);
   }
 
   async create(iid: number, baseBranch: string, baseDir?: string): Promise<Worktree> {
     const branch = `afk-issue-${iid}`;
-    const worktreeDir = baseDir || join(process.cwd(), '.worktrees');
+    const worktreeDir = baseDir || join(this.repoPath, '.worktrees');
     const path = join(worktreeDir, `issue-${iid}`);
     await fs.mkdir(worktreeDir, { recursive: true });
 

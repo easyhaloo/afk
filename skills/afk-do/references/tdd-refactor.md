@@ -27,7 +27,7 @@ refactor.
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-<type>: <short description> #<iid>
+<type>: <short description> (backlog {backlogId})
 
 Progress:
 - [x] <AC line 1> -- <evidence, e.g. "all existing tests pass"
@@ -43,7 +43,7 @@ Valid `<type>` values: `refactor`, `feat` (for new test coverage), `wip`.
 ## Anti-Patterns
 
 - MUST NOT change behavior while refactoring — if you want to add
-  behavior, file a separate issue or mark it as `TODO:` comment.
+  behavior, record a separate backlog item or mark it as a `TODO:` comment.
 - MUST NOT refactor on red tests — you are guessing, not engineering.
 - MUST NOT do a big-bang refactor — one small change at a time, commit
   each, keep tests green throughout.

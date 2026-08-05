@@ -4,13 +4,13 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { createTrackerClient } from '../lib/client-factory';
+import { createProviderBundle } from '../lib/client-factory';
 import { LoopRunner } from '../lib/modules/loop-runner';
 import { getSchedulerConfig } from '../lib/core/config/manager';
 import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
 import { logger, redirectStdioToLog, resolveLogPath } from '../lib/io';
 
-// ── Config: read moduleTriggers from .afk/config.yml ──────────────────────
+// ── Config: read extension triggers from .afk/config.yml ──────────────────
 
 interface LoopConfig {
   moduleTriggers: Record<string, string[]>;
@@ -26,25 +26,23 @@ export function loadLoopConfig(): LoopConfig {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const lines = raw.split('\n');
 
-    // Parse: loop.module_triggers
-    //   need::isolate: [isolate]
-    //   need::mock: [mock-server]
+    // Parse the provider-neutral loop.module_triggers map.
     let inTriggers = false;
     for (const line of lines) {
       const trimmed = line.trim();
       if (trimmed === 'module_triggers:') { inTriggers = true; continue; }
       if (inTriggers) {
-        // Each line:   label: [module, ...]
-        // Use lastIndexOf(':') so labels with :: (e.g. need::isolate) parse correctly
+        // Each line:   trigger: [module, ...]
+        // Use lastIndexOf(':') so namespaced triggers parse correctly.
         const colon = trimmed.lastIndexOf(':');
         if (colon < 0) { inTriggers = false; continue; }
-        const label = trimmed.slice(0, colon).trim();
+        const trigger = trimmed.slice(0, colon).trim();
         const value = trimmed.slice(colon + 1).trim();
-        if (!label) { inTriggers = false; continue; }
+        if (!trigger) { inTriggers = false; continue; }
         // Parse value: [isolate] or [isolate, mock-server]
         const listMatch = value.match(/^\[([^\]]*)\]$/);
         if (listMatch) {
-          result.moduleTriggers[label] = listMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+          result.moduleTriggers[trigger] = listMatch[1].split(',').map(s => s.trim()).filter(Boolean);
         }
       }
     }
@@ -65,17 +63,15 @@ const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');
 /**
  * `afk loop` — single-command continuous-integration worker.
  *
- * Polls `stage::ready-for-issues` (and other `mode::afk` issues), runs
- * WorkflowRunner (implement → MR → `stage::qa`), then immediately hands off
- * to QARunner (verify on merged code → `stage::done` or `mode::hitl`).
+ * Polls runnable AFK backlog items, runs WorkflowRunner (implementation), then
+ * immediately hands off to QARunner (verification and merge).
  * Loops forever until SIGINT/SIGTERM.
  *
  * Concurrency model: N implement chains in parallel (--max-concurrent, default
  * 3), QA runs serially (1 at a time) to avoid worktree/tmux thrash.
  *
- * Failure handling: a QA failure (`mode::hitl`) is logged and the issue is
- * skipped — the loop continues with the next issue. Implement failures are
- * handled the same way (WorkflowRunner itself labels the issue `mode::hitl`).
+ * Failure handling is provider-owned: failures become blocked/hitl and the
+ * loop continues with the next runnable backlog item.
  *
  * Subcommands:
  *   afk loop start [--daemon] [opts]   start the loop (foreground or detached)
@@ -86,13 +82,13 @@ const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');
  * background process. All its output (banners, status lines, diagnostics)
  * goes to the unified day-rotated log file `~/.afk/logs/afk-YYYY-MM-DD.log`
  * (the daemon child calls redirectStdioToLog()).
- * Replaces the need to run `afk scheduler start` + `afk qa start` in parallel.
+ * Replaces separate implementation and verification workers.
  */
 /** Options shared by `afk loop` and `afk loop start`. */
 const START_OPTIONS = [
   ['-d, --daemon', 'Run as background daemon (returns immediately, logs to file)'],
   ['-n, --max-concurrent <n>', 'Max parallel implement chains'],
-  ['-p, --poll-interval <seconds>', 'Tracker poll interval'],
+  ['-p, --poll-interval <seconds>', 'Backlog poll interval'],
   ['-i, --status-interval <seconds>', 'Status file write interval'],
   ['-t, --shutdown-timeout <seconds>', 'Max wait for in-flight on SIGTERM'],
   ['-m, --max-iterations <n>', 'Stop after N successful completions (testing)'],
@@ -208,18 +204,17 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
   const shutdownTimeout = ((options.shutdownTimeout as number | undefined) ?? 300) * 1000;
   const maxIterations = options.maxIterations as number | undefined;
 
-  const tracker = await createTrackerClient();
-  const runner = new LoopRunner(tracker, {
+  const providers = await createProviderBundle(undefined, process.cwd());
+  const runner = new LoopRunner(providers, {
     maxConcurrent,
     pollIntervalMs: pollInterval,
     statusIntervalMs: statusInterval,
-    requiredLabels: cfg.requiredLabels,
-    excludeLabels: cfg.excludeLabels,
     shutdownTimeoutMs: shutdownTimeout,
     maxIterations,
     ext: options.ext as string[] | undefined,
     extParams: options.extParam as string[] | undefined,
     moduleTriggers: loopCfg.moduleTriggers,
+    providers,
   });
 
   console.log(chalk.bold('\n🔁 AFK Loop started\n'));
@@ -228,15 +223,13 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
   console.log(chalk.gray(`    poll-interval:     ${pollInterval / 1000}s`));
   console.log(chalk.gray(`    status-interval:   ${statusInterval / 1000}s`));
   console.log(chalk.gray(`    shutdown-timeout:  ${shutdownTimeout / 1000}s`));
-  console.log(chalk.gray(`    required-labels:   ${cfg.requiredLabels.join(', ')}`));
-  console.log(chalk.gray(`    exclude-labels:    ${cfg.excludeLabels.join(', ')}`));
   if (maxIterations !== undefined) {
     console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
   }
   const mt = loopCfg.moduleTriggers;
   if (Object.keys(mt).length > 0) {
     const triggers = Object.entries(mt)
-      .map(([label, modules]) => `${label}=${modules.join(',')}`)
+      .map(([trigger, modules]) => `${trigger}=${modules.join(',')}`)
       .join('; ');
     console.log(chalk.gray(`    module-triggers:   ${triggers}`));
   }

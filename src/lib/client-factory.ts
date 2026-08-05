@@ -5,6 +5,8 @@ import { detectGitLabProject, detectProject } from './core/tracker/detect';
 import { detectGitHubRepo } from './core/tracker/detect';
 import { getGlabToken } from './core/gitlab/glab-config';
 import type { TrackerProvider } from './core/tracker/types';
+import { createProviderBundle as createBundle, createManagementProviderBundle as createManagementBundle } from './core/providers';
+import type { ManagementProviderBundle, ProviderBundle, ProviderBundleOptions } from './core/providers';
 
 /**
  * Get GitHub token from gh CLI if available and authenticated
@@ -34,7 +36,7 @@ interface GitLabConfig {
  *   1. Explicit `projectId` argument (from `--project <repo>` flag)
  *   2. Git remote detection (cwd's repo)
  */
-async function resolveGitLabConfig(projectId?: string): Promise<GitLabConfig> {
+async function resolveGitLabConfig(projectId?: string, cwd?: string): Promise<GitLabConfig> {
   const envUrl = process.env.GITLAB_URL;
   let token = process.env.GITLAB_TOKEN;
   let resolvedProjectId = projectId;
@@ -54,7 +56,7 @@ async function resolveGitLabConfig(projectId?: string): Promise<GitLabConfig> {
 
   // Detect project ID from git remote if no explicit arg was provided
   if (!resolvedProjectId) {
-    const detected = await detectGitLabProject();
+    const detected = await detectGitLabProject(cwd);
     if (!detected) {
       throw new Error(
         'Could not determine GitLab project. Pass --project <repo-path> ' +
@@ -74,8 +76,8 @@ async function resolveGitLabConfig(projectId?: string): Promise<GitLabConfig> {
  *   1. Explicit `projectId` argument (from `--project <repo>` flag)
  *   2. Git remote detection (cwd's repo)
  */
-export async function createGitLabClient(projectId?: string): Promise<GitLabClient> {
-  const { url, token, projectId: resolvedProjectId } = await resolveGitLabConfig(projectId);
+export async function createGitLabClient(projectId?: string, cwd?: string): Promise<GitLabClient> {
+  const { url, token, projectId: resolvedProjectId } = await resolveGitLabConfig(projectId, cwd);
   return new GitLabClient({ url, token, projectId: resolvedProjectId });
 }
 
@@ -87,7 +89,7 @@ export async function createGitLabClient(projectId?: string): Promise<GitLabClie
  *   2. GITHUB_REPOSITORY env var
  *   3. Git remote detection (cwd's repo)
  */
-export async function createGitHubClient(repo?: string): Promise<GitHubClient> {
+export async function createGitHubClient(repo?: string, cwd?: string): Promise<GitHubClient> {
   const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || getGhToken();
   if (!token) {
     throw new Error(
@@ -98,7 +100,7 @@ export async function createGitHubClient(repo?: string): Promise<GitHubClient> {
 
   let resolvedRepo = repo || process.env.GITHUB_REPOSITORY;
   if (!resolvedRepo) {
-    const detected = await detectGitHubRepo();
+    const detected = await detectGitHubRepo(cwd);
     if (!detected) {
       throw new Error(
         'Could not detect GitHub repository. Pass --project owner/repo ' +
@@ -117,12 +119,23 @@ export async function createGitHubClient(repo?: string): Promise<GitHubClient> {
  * Detects platform from git remote and returns appropriate client.
  * This is the unified entry point for platform-agnostic commands.
  */
-export async function createTrackerClient(projectId?: string): Promise<TrackerProvider> {
-  const { platform } = await detectProject();
+export async function createTrackerClient(projectId?: string, cwd?: string): Promise<TrackerProvider> {
+  const { platform } = await detectProject(cwd);
 
   if (platform === 'github') {
-    return await createGitHubClient(projectId);
+    return await createGitHubClient(projectId, cwd);
   } else {
-    return await createGitLabClient(projectId);
+    return await createGitLabClient(projectId, cwd);
   }
+}
+
+/** Construct the canonical provider bundle used by backlog-aware workflows. */
+export async function createProviderBundle(projectId?: string, cwd?: string, options?: ProviderBundleOptions): Promise<ProviderBundle> {
+  const tracker = await createTrackerClient(projectId, cwd);
+  return createBundle(tracker, cwd ?? process.cwd(), options);
+}
+
+export async function createManagementProviderBundle(projectId?: string, cwd?: string): Promise<ManagementProviderBundle> {
+  const tracker = await createTrackerClient(projectId, cwd);
+  return createManagementBundle(tracker, cwd ?? process.cwd());
 }

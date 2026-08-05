@@ -1,27 +1,13 @@
-import { Task, Issue, TmuxSession } from '../../../types/board';
+import { Task, TmuxSession } from '../../../types/board';
 import { TaskService } from '../../../lib/tasks';
 import { TmuxClient } from '../../../lib/core/tmux/tmux';
 import { createGitLabClient } from '../../../lib/client-factory';
 import { detectGitLabProject } from '../../../lib/core/tracker/detect';
-import type { TrackedIssue, Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
+import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
 import { fileLogger } from '../../../lib/io';
 
 const taskService = new TaskService();
 const tmux = new TmuxClient();
-
-/**
- * Convert TrackedIssue (platform-agnostic) to Issue (board format).
- */
-function toIssue(t: TrackedIssue): Issue {
-  return {
-    iid: t.id,
-    title: t.title,
-    description: t.description,
-    labels: t.labels,
-    state: t.state,
-    web_url: t.url,
-  };
-}
 
 export async function fetchTasks(): Promise<{ active: Task[]; completed: Task[] }> {
   const data = await taskService.listTasks();
@@ -76,93 +62,6 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
   return { projects, hasMore: projects.length === (options.perPage || 50) };
 }
 
-/**
- * Fetch issues with priority:
- * 1. projectId provided: issues for that specific project
- * 2. git remote detected: issues for that platform's project
- * 3. no projectId + no detection: return empty (user should select a project)
- *
- * Supports both GitHub and GitLab based on detected platform.
- */
-export async function fetchIssues(options: {
-  projectId?: string | number | null;
-  page?: number;
-  perPage?: number;
-  labels?: string[];
-  state?: string;
-} = {}): Promise<{ issues: Issue[]; hasMore: boolean }> {
-  try {
-    const { detectPlatform } = await import('../../../lib/core/tracker/detect');
-    const platform = await detectPlatform();
-
-    if (platform === 'github') {
-      const { createGitHubClient } = await import('../../../lib/client-factory');
-      const client = await createGitHubClient();
-      const trackedIssues = await client.listIssues({
-        labels: options.labels,
-        state: options.state as 'opened' | 'closed' | 'all' || 'opened',
-        perPage: options.perPage,
-      });
-      return {
-        issues: trackedIssues.map(toIssue),
-        hasMore: trackedIssues.length === (options.perPage || 20),
-      };
-    }
-
-    // GitLab path
-    let token = process.env.GITLAB_TOKEN;
-    let url = process.env.GITLAB_URL || 'https://gitlab.com';
-
-    if (!token) {
-      const glab = await import('../../../lib/core/gitlab/glab-config').then(m => m.getGlabToken(url));
-      if (glab) {
-        token = glab.token;
-        url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
-      }
-    }
-
-    if (!token) {
-      return { issues: [], hasMore: false };
-    }
-
-    // Resolve projectId
-    let projectId = options.projectId ? String(options.projectId) : null;
-    if (!projectId) {
-      try {
-        projectId = await detectGitLabProject();
-      } catch {
-        projectId = null;
-      }
-    }
-
-    // If still no projectId, return empty
-    if (!projectId) {
-      return { issues: [], hasMore: false };
-    }
-
-    const client = new (await import('../../../lib/core/gitlab/index')).GitLabClient({
-      url,
-      token,
-      projectId,
-    });
-
-    const issues = await client.listIssues({
-      labels: options.labels,
-      state: options.state as 'opened' | 'closed' | 'all' || 'opened',
-      perPage: options.perPage,
-    });
-
-    return {
-      issues: issues.map(toIssue),
-      hasMore: issues.length === (options.perPage || 20),
-    };
-  } catch (err) {
-    // Platform detection failed or API error
-    fileLogger.warn({ err }, 'fetchIssues failed');
-    return { issues: [], hasMore: false };
-  }
-}
-
 export async function fetchProjects(options: { page?: number; perPage?: number } = {}): Promise<{ projects: Project[]; hasMore: boolean }> {
   // Always fetch all GitLab projects (unaffected by current git remote)
   // This allows viewing all accessible projects even when running from a GitHub repo
@@ -182,20 +81,4 @@ export async function fetchProjectDetail(projectId: number): Promise<{ branches:
     client.getRecentCommits(projectId, 5),
   ]);
   return { branches, tags, commits };
-}
-
-export async function killSession(sessionName: string): Promise<void> {
-  return tmux.killSession(sessionName);
-}
-
-export async function createTaskFromIssue(issue: Issue, options: {
-  branch: string;
-  session: string;
-  worktree: string;
-}): Promise<Task> {
-  return taskService.createTaskFromIssue(issue, options);
-}
-
-export async function launchTask(iid: number, sessionName: string): Promise<void> {
-  return taskService.launch(iid, sessionName);
 }

@@ -120,7 +120,7 @@ src/
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-feat: <desc> #<iid>
+feat: <desc> (backlog {backlogId})
 
 Architecture:
 - Module graph: <who calls whom>
@@ -132,4 +132,3 @@ Next: <concrete next action>
 EOF
 )"
 ```
-

@@ -1,7 +1,7 @@
 /**
  * State Context - provides app state and dispatch
  */
-import React, { createContext, useContext, useReducer, useCallback, useRef, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useCallback } from 'react';
 import type { AppState, ViewState, ViewType, ViewContext } from './initialState';
 import { initialState } from './initialState';
 import type { AppAction } from '../actions/types';
@@ -14,19 +14,14 @@ const navigationPolicy: Record<string, {
   context?: (state: AppState, action: AppAction) => ViewContext;
   setDetailView?: 'list' | 'detail' | null;
 }> = {
-  'issue:create-task': { target: 'tasks' },
-  'issue:launch': { target: 'tasks' },
-  'batch:create': { target: 'tasks' },
-  'project:view-issues': { target: 'issues', context: (s) => ({ project: s.viewStack[s.viewStack.length - 1]?.context?.project }) },
+  'project:view-backlogs': { target: 'backlogs', context: (s) => ({ project: s.viewStack[s.viewStack.length - 1]?.context?.project }) },
   'navigate:back': { target: 'back' },
   'navigate:reset': { target: 'tasks' },
-  'multi-select:toggle': { setDetailView: null },
-  'multi-select:clear': { setDetailView: null },
   'search:disable': { setDetailView: null },
   'search:enable': { setDetailView: null },
 };
 
-function reducer(state: AppState, action: AppAction): AppState {
+export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'dispatch': {
       const nav = navigationPolicy[action.payload?.type];
@@ -57,24 +52,6 @@ function reducer(state: AppState, action: AppAction): AppState {
       }
       return state;
     }
-
-    case 'multi-select:toggle':
-      return {
-        ...state,
-        multiSelectMode: !state.multiSelectMode,
-        selectedItems: new Set(),
-      };
-
-    case 'multi-select:toggle-item': {
-      const id = action.payload?.id;
-      if (id === undefined) return state;
-      const next = new Set(state.selectedItems);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return { ...state, selectedItems: next };
-    }
-
-    case 'multi-select:clear':
-      return { ...state, selectedItems: new Set() };
 
     case 'search:enable':
       return { ...state, isSearchMode: true, searchQuery: '' };
@@ -123,7 +100,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, detailView: 'detail' };
 
     case 'navigate:goto-list':
-      return { ...state, detailView: 'list', selectedIndex: 0 };
+      return { ...state, detailView: 'list' };
 
     // Selection
     case 'selection:set':
@@ -153,10 +130,6 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, selectedIndex: idx, scrollOffset: Math.max(0, idx) };
     }
 
-    // Animation
-    case 'separator:tick':
-      return { ...state, separatorPhase: (state.separatorPhase + 1) % 100 };
-
     // Debug
     case 'debug:log': {
       const msg = action.payload?.message;
@@ -180,7 +153,7 @@ export interface StateContextValue {
 const StateContext = createContext<StateContextValue | null>(null);
 
 export function StateProvider({ children }: { children: React.ReactNode }) {
-  const [state, baseDispatch] = useReducer(reducer, initialState);
+  const [state, baseDispatch] = useReducer(appReducer, initialState);
 
   const dispatch = useCallback((action: AppAction) => {
     baseDispatch(action);
@@ -189,13 +162,6 @@ export function StateProvider({ children }: { children: React.ReactNode }) {
   const currentView = state.viewStack[state.viewStack.length - 1]?.view ?? 'tasks';
   const currentContext = state.viewStack[state.viewStack.length - 1]?.context ?? {};
   const isDetailMode = state.detailView === 'detail';
-
-  // Animation tick
-  useEffect(() => {
-    if (isDetailMode) return;
-    const t = setInterval(() => dispatch({ type: 'separator:tick' }), 500);
-    return () => clearInterval(t);
-  }, [isDetailMode]);
 
   return (
     <StateContext.Provider value={{ state, dispatch, currentView, currentContext, isDetailMode }}>

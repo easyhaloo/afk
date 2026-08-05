@@ -25,7 +25,7 @@ export interface ResumeContext {
   generation: number;
   completionTimeoutMs: number;
   contextHighTokens: number;
-  signalType: 'goal_complete' | 'ac_result';
+  signalType: 'goal_complete';
   prompt: string;
   /** Token count that triggered the outer context_high — used for budget accounting. */
   triggerTokens: number;

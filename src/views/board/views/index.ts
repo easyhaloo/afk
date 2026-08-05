@@ -1,13 +1,13 @@
 export { TaskListView } from './TaskListView';
-export { IssueListView } from './IssueListView';
+export { BacklogListView } from './BacklogListView';
 export { ProjectListView } from './ProjectListView';
 export { DetailScreen } from './DetailScreen';
 export { HelpDialog } from './HelpDialog';
-export { BreathingSeparator } from './BreathingSeparator';
 export { DebugOverlay } from './DebugOverlay';
 export { Header } from './Header';
 export { Footer } from './Footer';
 export { Notification } from './Notification';
 export { ListView } from './ListView';
+export { OperationalRow } from './OperationalRow';
+export { BacklogRow } from './BacklogRow';
 export { BoardView } from '../board/index';
-export { PreviewPanel } from './PreviewPanel';

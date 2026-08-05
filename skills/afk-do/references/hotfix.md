@@ -24,7 +24,7 @@ no refactoring, no feature expansion.
 
 ```bash
 git add -A && git commit -m "$(cat <<'EOF'
-<type>: <short description> #<iid>
+<type>: <short description> (backlog {backlogId})
 
 Progress:
 - [x] <AC line 1> -- <evidence, e.g. "regression test passes, bug reproduced then fixed"
@@ -43,17 +43,17 @@ it is fixed (e.g. "regression test passes", "verified manually").
 ## Anti-Patterns
 
 - MUST NOT add new behavior while fixing — even if "while you're in
-  there anyway". File a separate issue.
+  there anyway". Record a separate backlog item.
 - MUST NOT skip reproduction — fixing blind is guessing.
 - MUST NOT use a hotfix as an excuse to skip testing — regression
   test is mandatory if the area had no test coverage.
-- MUST NOT close the issue without verifying the fix does not break
+- MUST NOT mark the backlog done without verifying the fix does not break
   existing behavior.
 
 ## Scope Discipline
 
 - One bug per commit. If you find additional bugs, note them and
-  treat them as separate issues.
+  treat them as separate backlog items.
 - If the minimal fix requires touching stable code you do not own,
   consider whether a proper feature fix (not hotfix) is more
   appropriate.

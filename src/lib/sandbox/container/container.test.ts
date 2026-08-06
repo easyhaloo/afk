@@ -321,11 +321,16 @@ describe('ContainerSandboxProvider — auto engine detection', () => {
 
   it('forwards only allowed agent credentials into the container', async () => {
     const worktreePath = fs.mkdtempSync(join(os.tmpdir(), 'afk-container-env-'));
+    const hostClaudeConfigDir = fs.mkdtempSync(join(os.tmpdir(), 'afk-host-claude-'));
+    const hostClaudeConfigFile = join(hostClaudeConfigDir, '.claude.json');
+    fs.writeFileSync(hostClaudeConfigFile, '{}\n');
     let captured: Record<string, string> = {};
+    let mounts: Array<{ hostPath: string; containerPath: string; readOnly?: boolean }> = [];
     const provider: ContainerProvider = {
       engine: 'docker', binary: 'docker', isAvailable: async () => true,
       create: async options => {
         captured = options.env;
+        mounts = options.mounts;
         return { id: 'cid', name: 'cid', engine: 'docker' };
       },
       exec: async () => ({ execId: 'exec' }), killExec: async () => {},
@@ -333,20 +338,24 @@ describe('ContainerSandboxProvider — auto engine detection', () => {
       inspect: async id => ({ id, name: id, status: 'running' }),
     };
     try {
-      const sandbox = await new ContainerSandboxProvider({ provider, image: 'afk-sandbox-claude:node22' }).create({
+      const sandbox = await new ContainerSandboxProvider({ provider, image: 'afk-sandbox-claude:node22', hostClaudeConfigDir, hostClaudeConfigFile }).create({
         worktreePath,
         session: 'env-check',
         env: {
           ANTHROPIC_API_KEY: 'allowed',
+          CLAUDE_CONFIG_DIR: '/unmapped/host/claude',
           HOME: '/host/home',
           PATH: '/host/bin',
           AWS_SECRET_ACCESS_KEY: 'rejected',
         },
       });
       expect(captured).toEqual({ ANTHROPIC_API_KEY: 'allowed' });
+      expect(mounts).toContainEqual({ hostPath: hostClaudeConfigDir, containerPath: '/home/node/.claude', readOnly: true });
+      expect(mounts).toContainEqual({ hostPath: hostClaudeConfigFile, containerPath: '/home/node/.claude.json', readOnly: true });
       await sandbox.close();
     } finally {
       fs.rmSync(worktreePath, { recursive: true, force: true });
+      fs.rmSync(hostClaudeConfigDir, { recursive: true, force: true });
     }
   });
 });

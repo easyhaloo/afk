@@ -21,6 +21,8 @@ import { PodmanContainerProvider } from './podman';
 import { ContainerSandbox } from './sandbox';
 import type { ContainerProvider } from './types';
 import { EnvVarAllowlist } from './env-allowlist';
+import { homedir } from 'os';
+import { join } from 'path';
 
 const CONTAINER_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'persistent-filesystem',
@@ -45,6 +47,8 @@ export class ContainerSandboxProvider implements SandboxProvider {
   private readonly provider: ContainerProvider;
   private readonly image: string;
   private readonly user: string;
+  private readonly hostClaudeConfigDir: string;
+  private readonly hostClaudeConfigFile: string;
 
   constructor(opts?: {
     worktreeManager?: WorktreeManager;
@@ -52,11 +56,17 @@ export class ContainerSandboxProvider implements SandboxProvider {
     provider?: ContainerProvider;
     image?: string;
     user?: string;
+    /** Host Claude configuration directory mounted read-only into the sandbox. */
+    hostClaudeConfigDir?: string;
+    /** Host Claude auth/config file mounted read-only into the sandbox. */
+    hostClaudeConfigFile?: string;
   }) {
     this.worktreeManager = opts?.worktreeManager ?? new WorktreeManager();
     this.provider = opts?.provider ?? (globalThis as { __afkContainerProvider?: ContainerProvider }).__afkContainerProvider ?? new DockerContainerProvider();
     this.image = opts?.image ?? (process.env.AFK_SANDBOX_IMAGE?.trim() || DEFAULT_IMAGE);
     this.user = opts?.user ?? DEFAULT_USER;
+    this.hostClaudeConfigDir = opts?.hostClaudeConfigDir ?? join(homedir(), '.claude');
+    this.hostClaudeConfigFile = opts?.hostClaudeConfigFile ?? join(homedir(), '.claude.json');
     this.name = this.provider.engine === 'podman' ? 'podman' : 'docker';
   }
 
@@ -80,11 +90,16 @@ export class ContainerSandboxProvider implements SandboxProvider {
       );
     }
 
+    const hostClaudeConfigDir = await existingDirectory(this.hostClaudeConfigDir);
+    const hostClaudeConfigFile = await existingFile(this.hostClaudeConfigFile);
+    const extraEnv = containerAgentEnv(options.env ?? process.env);
     const sandbox = new ContainerSandbox({
       worktreePath: options.worktreePath,
       image: this.image,
       user: this.user,
-      extraEnv: containerAgentEnv(options.env ?? process.env),
+      extraEnv,
+      hostClaudeConfigDir,
+      hostClaudeConfigFile,
     });
     sandbox.bindProvider(this.provider);
     await sandbox.createContainer();
@@ -102,6 +117,24 @@ export class ContainerSandboxProvider implements SandboxProvider {
     if (await podman.isAvailable()) return podman;
     return null;
   }
+}
+
+async function existingDirectory(path: string): Promise<string | undefined> {
+  try {
+    if ((await fs.stat(path)).isDirectory()) return path;
+  } catch {
+    // A missing host configuration is valid; credentials may be env-based.
+  }
+  return undefined;
+}
+
+async function existingFile(path: string): Promise<string | undefined> {
+  try {
+    if ((await fs.stat(path)).isFile()) return path;
+  } catch {
+    // A missing host config is valid; credentials may be env-based.
+  }
+  return undefined;
 }
 
 function containerAgentEnv(input: Record<string, string | undefined>): Record<string, string> {

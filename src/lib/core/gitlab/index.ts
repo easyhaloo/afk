@@ -19,6 +19,7 @@ import type {
   Tag,
   Commit,
   TrackerIssueComment,
+  LabelDelta,
 } from '../tracker/types';
 import { extractAC } from '../tracker/ac';
 
@@ -285,8 +286,10 @@ export class GitLabClient implements TrackerProvider {
     return '';
   }
 
-  async updateLabels(iid: number, labels: string[]): Promise<void> {
-    await this.updateIssue(iid, { labels });
+  async updateLabels(iid: number, delta: LabelDelta): Promise<void> {
+    const remove = [...new Set(delta.remove)];
+    const add = [...new Set(delta.add.filter(label => !remove.includes(label)))];
+    await this.updateLabelsBatch(iid, add, remove);
   }
 
   async addLabelsToIssue(iid: number, labels: string[]): Promise<void> {

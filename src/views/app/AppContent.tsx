@@ -137,7 +137,7 @@ export function AppContent({
       actions.toggleDebug();
       return;
     }
-    if (input === '/') {
+    if (input === 's' && !key.ctrl && !key.meta) {
       actions.enableSearch();
       return;
     }
@@ -230,7 +230,7 @@ export function AppContent({
           <Box height={1} flexShrink={0} paddingX={2}>
             {state.isSearchMode
               ? <Text color="cyan">filter · /{state.searchQuery}_ · {items.length} matches</Text>
-              : <Text dimColor>enter detail · / search</Text>}
+              : <Text dimColor>enter detail · s search</Text>}
           </Box>
           <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2}>
             {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}

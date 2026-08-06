@@ -32,6 +32,11 @@ export interface UpdateIssueOptions {
   labels?: string[];
 }
 
+export interface LabelDelta {
+  add: string[];
+  remove: string[];
+}
+
 /**
  * List MR/PR options
  */
@@ -152,6 +157,7 @@ export interface TrackerProvider {
   listIssues(options?: ListOptions): Promise<TrackedIssue[]>;
   createIssue(options: CreateIssueOptions): Promise<number>;
   updateIssue(id: number, updates: UpdateIssueOptions): Promise<void>;
+  updateLabels(id: number, delta: LabelDelta): Promise<void>;
   addLabel(id: number, label: string): Promise<void>;
   removeLabel(id: number, label: string): Promise<void>;
   addComment(id: number, body: string): Promise<void>;

@@ -17,6 +17,7 @@ import type {
   Branch,
   Tag,
   Commit,
+  TrackerIssueComment,
 } from '../tracker/types';
 import { extractAC } from '../tracker/ac';
 import { logger } from '../../io';
@@ -172,6 +173,17 @@ export class GitHubClient implements TrackerProvider {
       issue_number: id,
       body,
     });
+  }
+
+  async listIssueComments(id: number): Promise<TrackerIssueComment[]> {
+    const { owner, repo } = this.getOwnerRepo();
+    const { data } = await this.client.issues.listComments({ owner, repo, issue_number: id, per_page: 100 });
+    return data.map(comment => ({ id: String(comment.id), body: comment.body ?? '' }));
+  }
+
+  async updateIssueComment(_id: number, commentId: string, body: string): Promise<void> {
+    const { owner, repo } = this.getOwnerRepo();
+    await this.client.issues.updateComment({ owner, repo, comment_id: Number(commentId), body });
   }
 
   async linkIssues(sourceId: number, targetId: number, type: LinkType, targetProjectId?: string): Promise<void> {

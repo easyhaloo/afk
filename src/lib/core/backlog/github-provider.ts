@@ -1,4 +1,4 @@
-import type { BacklogClaim, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState } from './index';
+import type { BacklogClaim, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index';
 import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-adapter';
 import type { TrackerProvider } from '../tracker/types';
 
@@ -18,6 +18,9 @@ export class GitHubBacklogProvider implements BacklogProvider {
   claim(id: string, owner: string): Promise<BacklogClaim | null> { return this.implementation.claim(id, owner); }
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> { return this.implementation.transition(id, state, details); }
   setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.implementation.setExecutionMode(id, mode); }
+  createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord> { return this.implementation.createRework(id, record); }
+  getActiveRework(id: string): Promise<ReworkRecord | undefined> { return this.implementation.getActiveRework(id); }
+  resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> { return this.implementation.resolveRework(id, reworkId, resolution); }
   addTag(id: string, tag: string): Promise<void> { return this.implementation.addTag(id, tag); }
   removeTag(id: string, tag: string): Promise<void> { return this.implementation.removeTag(id, tag); }
   initialize(): Promise<void> { return this.implementation.initialize(); }

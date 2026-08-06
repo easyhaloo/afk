@@ -10,7 +10,8 @@
     "build": "node scripts/build.mjs && tsc --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
     "dev": "tsc --watch",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "postinstall": "node scripts/fix-permissions.mjs",
     "prepublishOnly": "npm run build"
   },

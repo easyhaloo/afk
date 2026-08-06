@@ -20,6 +20,7 @@ import { DockerContainerProvider } from './docker';
 import { PodmanContainerProvider } from './podman';
 import { ContainerSandbox } from './sandbox';
 import type { ContainerProvider } from './types';
+import { EnvVarAllowlist } from './env-allowlist';
 
 const CONTAINER_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'persistent-filesystem',
@@ -32,7 +33,7 @@ const CONTAINER_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
 const ISOLATION: IsolationLevel = 'filesystem';
 
 /** Default image + user — overridable per provider instance. */
-const DEFAULT_IMAGE = 'node:20-slim';
+const DEFAULT_IMAGE = 'afk-sandbox-claude:node22';
 const DEFAULT_USER = '1000:1000';
 
 export class ContainerSandboxProvider implements SandboxProvider {
@@ -54,7 +55,7 @@ export class ContainerSandboxProvider implements SandboxProvider {
   }) {
     this.worktreeManager = opts?.worktreeManager ?? new WorktreeManager();
     this.provider = opts?.provider ?? (globalThis as { __afkContainerProvider?: ContainerProvider }).__afkContainerProvider ?? new DockerContainerProvider();
-    this.image = opts?.image ?? DEFAULT_IMAGE;
+    this.image = opts?.image ?? (process.env.AFK_SANDBOX_IMAGE?.trim() || DEFAULT_IMAGE);
     this.user = opts?.user ?? DEFAULT_USER;
     this.name = this.provider.engine === 'podman' ? 'podman' : 'docker';
   }
@@ -83,6 +84,7 @@ export class ContainerSandboxProvider implements SandboxProvider {
       worktreePath: options.worktreePath,
       image: this.image,
       user: this.user,
+      extraEnv: containerAgentEnv(options.env ?? process.env),
     });
     sandbox.bindProvider(this.provider);
     await sandbox.createContainer();
@@ -100,4 +102,17 @@ export class ContainerSandboxProvider implements SandboxProvider {
     if (await podman.isAvailable()) return podman;
     return null;
   }
+}
+
+function containerAgentEnv(input: Record<string, string | undefined>): Record<string, string> {
+  const source: Record<string, string> = {};
+  for (const [name, value] of Object.entries(input)) {
+    if (value !== undefined) source[name] = value;
+  }
+  const filtered = new EnvVarAllowlist().filter(source).allowed;
+  // Container defaults must win for host-specific paths and shell identity.
+  const excluded = new Set(['HOME', 'PATH', 'SHELL', 'TERM', 'COLORTERM']);
+  return Object.fromEntries(
+    Object.entries(filtered).filter(([name]) => !excluded.has(name)),
+  );
 }

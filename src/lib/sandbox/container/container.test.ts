@@ -8,6 +8,7 @@ import type { ContainerProvider, ContainerCreateOptions, ContainerHandle } from 
 import { join } from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { promises as fsp } from 'fs';
 
 describe('EnvVarAllowlist', () => {
   it('permits known defaults', () => {
@@ -234,6 +235,67 @@ describe('ContainerSandbox — interrupt escalation', () => {
     expect(capturedEnv.PATH).toBe('/bin');
     expect(capturedEnv.AWS_SECRET_ACCESS_KEY).toBeUndefined();
   });
+
+  it('rejects interactive execution because a container has no prompt transport', async () => {
+    const { provider } = fakeProvider();
+    const sb = new ContainerSandbox({ worktreePath: '/tmp', image: 'alpine', user: '1000:1000' });
+    sb.bindProvider(provider);
+    await sb.createContainer();
+
+    await expect(sb.startAgent({
+      command: { argv: ['echo'] },
+      generation: 1,
+      prompt: 'interactive goal',
+      signalType: 'goal_complete',
+      executionMode: 'interactive',
+    })).rejects.toThrow(/batch/);
+  });
+});
+
+describe('ContainerAgentExecution — batch result files', () => {
+  it('returns the structured completion result produced by a detached agent', async () => {
+    const root = await fsp.mkdtemp(join(os.tmpdir(), 'afk-container-result-'));
+    const outputPath = join(root, 'agent.stdout');
+    const errorPath = join(root, 'agent.stderr');
+    const exitPath = join(root, 'agent.exit');
+    await fsp.writeFile(outputPath, '{"type":"result","result":"<goal_complete>{\\"type\\":\\"goal_complete\\",\\"kind\\":\\"task\\",\\"summary\\":\\"finished\\"}</goal_complete>"}\n');
+    await fsp.writeFile(errorPath, '');
+    await fsp.writeFile(exitPath, '0\n');
+
+    const provider: ContainerProvider = {
+      engine: 'docker', binary: 'docker', isAvailable: async () => true,
+      create: async () => ({ id: 'cid', name: 'cid', engine: 'docker' }),
+      exec: async () => ({ execId: 'exec-1' }), killExec: async () => {},
+      killContainer: async () => {}, remove: async () => {},
+      inspect: async id => ({ id, name: id, status: 'running' }),
+    };
+    const execution = new ContainerAgentExecution({
+      provider,
+      containerId: 'cid',
+      worktreePath: root,
+      sessionName: 'sandbox-1',
+      generation: 1,
+      signalType: 'goal_complete',
+      execId: 'exec-1',
+      outputPath,
+      errorPath,
+      exitPath,
+      agentProvider: {
+        name: 'claude-code', capabilities: new Set(),
+        buildCommand: () => ({ argv: ['claude'] }),
+        parseLine: line => {
+          const parsed = JSON.parse(line);
+          return [{ type: 'result', result: parsed.result }];
+        },
+      },
+    });
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 100 })).resolves.toMatchObject({
+      status: 'completed',
+      provider: 'container',
+      structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'finished' },
+    });
+  });
 });
 
 describe('ContainerSandboxProvider — auto engine detection', () => {
@@ -254,6 +316,37 @@ describe('ContainerSandboxProvider — auto engine detection', () => {
       expect(result).toBeNull();
     } else {
       expect(['docker', 'podman']).toContain(result.engine);
+    }
+  });
+
+  it('forwards only allowed agent credentials into the container', async () => {
+    const worktreePath = fs.mkdtempSync(join(os.tmpdir(), 'afk-container-env-'));
+    let captured: Record<string, string> = {};
+    const provider: ContainerProvider = {
+      engine: 'docker', binary: 'docker', isAvailable: async () => true,
+      create: async options => {
+        captured = options.env;
+        return { id: 'cid', name: 'cid', engine: 'docker' };
+      },
+      exec: async () => ({ execId: 'exec' }), killExec: async () => {},
+      killContainer: async () => {}, remove: async () => {},
+      inspect: async id => ({ id, name: id, status: 'running' }),
+    };
+    try {
+      const sandbox = await new ContainerSandboxProvider({ provider, image: 'afk-sandbox-claude:node22' }).create({
+        worktreePath,
+        session: 'env-check',
+        env: {
+          ANTHROPIC_API_KEY: 'allowed',
+          HOME: '/host/home',
+          PATH: '/host/bin',
+          AWS_SECRET_ACCESS_KEY: 'rejected',
+        },
+      });
+      expect(captured).toEqual({ ANTHROPIC_API_KEY: 'allowed' });
+      await sandbox.close();
+    } finally {
+      fs.rmSync(worktreePath, { recursive: true, force: true });
     }
   });
 });
@@ -282,6 +375,40 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
       expect(fs.existsSync(hostFile)).toBe(true);
       expect(fs.readFileSync(hostFile, 'utf-8').trim()).toBe('hello');
 
+      await sb.close();
+    } finally {
+      fs.rmSync(wtPath, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!enabled)('runs a detached sandbox execution and observes goal_complete', async () => {
+    const wtPath = fs.mkdtempSync(join(os.tmpdir(), 'afk-docker-agent-e2e-'));
+    try {
+      const provider = new DockerContainerProvider();
+      if (!(await provider.isAvailable())) return;
+
+      const sb = new ContainerSandbox({
+        worktreePath: wtPath,
+        image: process.env.AFK_SANDBOX_IMAGE || 'afk-sandbox-claude:node22',
+        user: '1000:1000',
+      });
+      sb.bindProvider(provider);
+      await sb.createContainer();
+
+      const execution = await sb.startAgent({
+        command: {
+          argv: ['sh', '-c', 'printf \'%s\\n\' \'<goal_complete>{"type":"goal_complete","kind":"task","summary":"docker sandbox"}</goal_complete>\''],
+        },
+        generation: 1,
+        prompt: 'container smoke prompt',
+        signalType: 'goal_complete',
+        executionMode: 'batch',
+      });
+      await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
+        status: 'completed',
+        provider: 'container',
+        structuredOutput: { type: 'goal_complete', summary: 'docker sandbox' },
+      });
       await sb.close();
     } finally {
       fs.rmSync(wtPath, { recursive: true, force: true });

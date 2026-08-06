@@ -92,6 +92,9 @@ export function AppContent({
     return raw.filter(item => {
       if ('title' in item && item.title?.toLowerCase().includes(query)) return true;
       if ('name' in item && item.name.toLowerCase().includes(query)) return true;
+      if ('description' in item && item.description?.toLowerCase().includes(query)) return true;
+      if ('id' in item && String(item.id).toLowerCase().includes(query)) return true;
+      if ('iid' in item && String(item.iid).toLowerCase().includes(query)) return true;
       if ('branch' in item && item.branch?.toLowerCase().includes(query)) return true;
       if ('branchName' in item && item.branchName.toLowerCase().includes(query)) return true;
       if ('tags' in item && item.tags.some(tag => tag.toLowerCase().includes(query))) return true;

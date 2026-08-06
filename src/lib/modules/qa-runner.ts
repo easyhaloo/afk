@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import { WorktreeManager } from '../core/git';
+import { captureWorktreeDiagnostics } from '../core/git/worktree-diagnostics';
 import { createTmuxClient, type TmuxClient } from '../core/tmux';
 import { configureStatusline, logger } from '../io';
 import { getWorkflowConfig } from '../core/config/manager';
@@ -80,6 +81,7 @@ export class QARunner {
       runtimeStarted = true;
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
+      await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
       await this.heartbeatRuntime(runtimeRunId, { worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
       logger.info({ backlogId: id, worktree: worktreePath, baselineBranch }, 'QA worktree created');
 
@@ -90,7 +92,11 @@ export class QARunner {
       }
       if (this.mergeBranchOverride) await this.mergeBranchOverride(worktreePath, baselineBranch, featureBranch);
       else await this.mergeBranch(worktreePath, baselineBranch, featureBranch);
-      if (this.executionMode === 'interactive') await configureStatusline(worktreePath);
+      await this.logWorktreeDiagnostics(id, 'branches-merged', worktreePath);
+      if (this.executionMode === 'interactive') {
+        await configureStatusline(worktreePath);
+        await this.logWorktreeDiagnostics(id, 'statusline-configured', worktreePath);
+      }
 
       const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot }).load('pre-merge-qa-verification');
       const qaStep = compileTemplate(qaTemplate).groups
@@ -108,6 +114,7 @@ export class QARunner {
         tmux: this.executionMode === 'interactive' ? this.tmux : undefined,
       });
       logger.info({ backlogId: id, session, sandboxId: sandbox.id }, 'QA sandbox created');
+      await this.logWorktreeDiagnostics(id, 'before-agent-start', worktreePath);
 
       const description = backlog.description?.trim();
       const goal = `${qaStep.prompt.replaceAll('{iid}', id)}\n\nBacklog title: ${backlog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
@@ -129,6 +136,7 @@ export class QARunner {
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
       const result = await execution.waitForResult({ completionTimeoutMs: this.config.completionTimeout });
+      await this.logWorktreeDiagnostics(id, 'agent-completed', worktreePath);
       await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
       logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
       if (result.status !== 'completed') {
@@ -315,6 +323,15 @@ export class QARunner {
       await this.runtimeManager.writeDiagnostics(runId, { result, output });
     } catch (error) {
       logger.warn({ runId, error }, 'failed to persist QA runtime diagnostics');
+    }
+  }
+
+  private async logWorktreeDiagnostics(backlogId: string, phase: string, worktreePath: string): Promise<void> {
+    try {
+      const diagnostics = await captureWorktreeDiagnostics(worktreePath);
+      logger.info({ backlogId, phase, worktreePath, diagnostics }, 'QA worktree diagnostics');
+    } catch (error) {
+      logger.warn({ backlogId, phase, worktreePath, error }, 'failed to collect QA worktree diagnostics');
     }
   }
 }

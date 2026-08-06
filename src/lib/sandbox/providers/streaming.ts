@@ -102,6 +102,7 @@ export class StreamingAgentExecution implements AgentExecution {
         this.stdoutBuffer += text;
         this.stdoutTail = (this.stdoutTail + text).slice(-4000);
         this.drainStdoutLines();
+        this.completeFromBufferedSignal();
       });
     }
 
@@ -389,6 +390,17 @@ export class StreamingAgentExecution implements AgentExecution {
       this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
       if (line.trim()) this.handleLine(line);
     }
+  }
+
+  private completeFromBufferedSignal(): void {
+    if (this.done) return;
+    const marker = this.stdoutBuffer.match(/<goal_complete>[\s\S]*?<\/goal_complete>/)?.[0];
+    if (!marker) return;
+
+    const extracted = this.extractSignal(marker);
+    if (!extracted) return;
+    this.structuredOutput = extracted;
+    if (this.hasExpectedSignal()) this.done = true;
   }
 
   private terminateProcess(): void {

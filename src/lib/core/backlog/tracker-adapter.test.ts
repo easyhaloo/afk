@@ -9,6 +9,12 @@ function tracker(issue: any): TrackerProvider {
     getIssue: vi.fn(async () => ({ ...issue })),
     listIssues: vi.fn(async () => [{ ...issue }]),
     updateIssue: vi.fn(async (_id, updates) => { issue.labels = updates.labels ?? issue.labels; }),
+    updateLabels: vi.fn(async (_id, delta) => {
+      issue.labels = [
+        ...issue.labels.filter((label: string) => !delta.remove.includes(label)),
+        ...delta.add.filter((label: string) => !issue.labels.includes(label)),
+      ];
+    }),
   } as unknown as TrackerProvider;
 }
 
@@ -30,7 +36,35 @@ describe('TrackerBacklogProvider', () => {
     const t = tracker(issue);
     const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
     await provider.transition('42', 'blocked', { reason: 'timeout' });
-    expect(t.updateIssue).toHaveBeenCalledWith(42, { labels: ['team::api', 'stage::blocked', 'mode::hitl'] });
+    expect(t.updateLabels).toHaveBeenCalledWith(42, {
+      add: ['stage::blocked', 'mode::hitl'],
+      remove: ['stage::ready-for-issues', 'mode::afk'],
+    });
+    expect(t.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it('preserves the execution mode when transitioning a non-blocked state', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'team::api'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.transition('42', 'verification');
+
+    expect(t.updateLabels).toHaveBeenCalledWith(42, {
+      add: ['stage::qa'],
+      remove: ['stage::ready-for-issues'],
+    });
+    expect(t.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it('does not write labels when the requested workflow state is already present', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk', 'team::api'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.transition('42', 'verification');
+
+    expect(t.updateLabels).not.toHaveBeenCalled();
   });
 
   it('returns null when a second claim observes in-progress state', async () => {
@@ -96,6 +130,9 @@ describe('TrackerBacklogProvider', () => {
     await provider.addTag('7', 'urgent');
     await provider.removeTag('7', 'team::api');
     expect(issue.labels).toEqual(['stage::ready-for-issues', 'mode::afk', 'urgent']);
+    expect(t.updateLabels).toHaveBeenCalledWith(7, { add: ['urgent'], remove: [] });
+    expect(t.updateLabels).toHaveBeenCalledWith(7, { add: [], remove: ['team::api'] });
+    expect(t.updateIssue).not.toHaveBeenCalled();
     await expect(provider.list({ tag: 'urgent' })).resolves.toHaveLength(1);
   });
 
@@ -214,8 +251,8 @@ describe('TrackerBacklogProvider', () => {
   it('blocks and releases a fallback lease when post-transition confirmation fails', async () => {
     const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
     const t = tracker(issue);
-    t.updateIssue = vi.fn(async (_id, updates) => {
-      if (updates.labels?.includes('stage::blocked')) issue.labels = updates.labels;
+    t.updateLabels = vi.fn(async (_id, delta) => {
+      if (delta.add.includes('stage::blocked')) issue.labels = ['stage::blocked', 'mode::hitl'];
     });
     const release = vi.fn(async () => {});
     const provider = new TrackerBacklogProvider(t, { claimLock: { acquire: vi.fn(async () => ({ ...lease('fallback-claim'), release })) } });

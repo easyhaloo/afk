@@ -18,6 +18,7 @@ import type {
   Tag,
   Commit,
   TrackerIssueComment,
+  LabelDelta,
 } from '../tracker/types';
 import { extractAC } from '../tracker/ac';
 import { logger } from '../../io';
@@ -139,6 +140,19 @@ export class GitHubClient implements TrackerProvider {
       state: updates.state,
       labels: updates.labels,
     });
+  }
+
+  async updateLabels(id: number, delta: LabelDelta): Promise<void> {
+    const oct = this.client;
+    const { owner, repo } = this.getOwnerRepo();
+    const remove = [...new Set(delta.remove)];
+    const add = [...new Set(delta.add.filter(label => !remove.includes(label)))];
+    for (const name of remove) {
+      await oct.issues.removeLabel({ owner, repo, issue_number: id, name });
+    }
+    if (add.length > 0) {
+      await oct.issues.addLabels({ owner, repo, issue_number: id, labels: add });
+    }
   }
 
   async addLabel(id: number, label: string): Promise<void> {

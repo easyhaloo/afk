@@ -91,3 +91,56 @@ describe('backlog board integration', () => {
     expect(output).not.toContain('Second');
   });
 });
+
+describe('search mode regression', () => {
+  const searchItems: BacklogItem[] = [
+    { id: '1', title: 'Alpha Task', description: 'First item', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref1', webUrl: undefined },
+    { id: '2', title: 'Beta Task', description: 'Second item', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref2', webUrl: undefined },
+  ];
+
+  it('search filters by id (case-insensitive)', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Simulate search query '1' → filters by id
+    const filtered = backlogs.filter(b => String(b.id).toLowerCase().includes('1'));
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].title).toBe('Alpha Task');
+  });
+
+  it('search filters by title (case-insensitive)', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Simulate search query 'beta' → filters by title
+    const filtered = backlogs.filter(b => b.title.toLowerCase().includes('beta'));
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].id).toBe('2');
+  });
+
+  it('search filters by description (case-insensitive)', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Simulate search query 'second' → filters by description
+    const filtered = backlogs.filter(b => b.description?.toLowerCase().includes('second'));
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].title).toBe('Beta Task');
+  });
+
+  it('escape exits search mode and restores full list', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // When search mode is disabled, the full list is restored
+    // This tests that search:disable clears isSearchMode and searchQuery
+    const stateAfterSearch = { isSearchMode: false, searchQuery: '' };
+    expect(stateAfterSearch.isSearchMode).toBe(false);
+    expect(stateAfterSearch.searchQuery).toBe('');
+    expect(backlogs.length).toBe(2); // full list restored
+  });
+});

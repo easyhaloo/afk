@@ -15,6 +15,32 @@ const item: BacklogItem = {
 };
 
 describe('LoopRunner QA boundary', () => {
+  it('polls rework backlogs as AFK implementation candidates', async () => {
+    const rework = { ...item, state: 'rework' as const };
+    const list = vi.fn(async (options: { state?: string }) => options.state === 'rework' ? [rework] : []);
+    const run = vi.fn(async () => ({ success: false, skipped: 'not_claimed' as const }));
+    const providers: ProviderBundle = {
+      backlog: {
+        get: vi.fn(async () => rework), list, claim: vi.fn(),
+        transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}),
+        addTag: vi.fn(async () => {}), removeTag: vi.fn(async () => {}), initialize: vi.fn(async () => {}),
+        isRunnable: vi.fn(async () => true),
+      },
+      branches: {} as ProviderBundle['branches'], changes: {} as ProviderBundle['changes'],
+    };
+    const subject = new LoopRunner(providers, { workflowRunnerFactory: vi.fn(() => ({ run }) as any) });
+    const internals = subject as any;
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.poll();
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(list).toHaveBeenCalledWith({ state: 'ready', executionMode: 'afk' });
+    expect(list).toHaveBeenCalledWith({ state: 'rework', executionMode: 'afk' });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ backlogId: '42' }));
+  });
+
   it('passes a claim-free backlog facade to QARunner', async () => {
     const providers: ProviderBundle = {
       backlog: {

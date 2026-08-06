@@ -40,7 +40,7 @@ function issueImplementation(): WorkflowTemplate {
       {
         id: 'implement',
         role: 'implementer',
-        prompt: '/goal 实现 issue #{iid} 的功能需求。每完成一个 AC 就提交一次。',
+        prompt: '/goal 实现 issue #{iid} 的功能需求。每完成一个代码或测试 AC 就提交一次。不要创建或合并 MR：基线集成、提交 QA 结果、推送和创建 MR 都由后续 QARunner 负责。',
         branch: { type: 'issue', iid: 0 },
       },
       {
@@ -71,10 +71,10 @@ function qaVerification(): WorkflowTemplate {
   return {
     name: 'pre-merge-qa-verification',
     version: 1,
-    description: 'Pre-merge integration QA verification. Sync the latest baseline, test, commit, push, and publish a mergeable change.',
+    description: 'Pre-merge integration QA verification. Sync the latest baseline and verify the acceptance criteria; the QA runner commits, pushes, and publishes the mergeable change after PASS.',
     steps: [{
       id: 'verify-ac', kind: 'agent', role: 'verifier', completion: 'goal_complete',
-      prompt: '/goal 验证 issue #{iid} 的 AC 全部通过，并返回 PASS 或 FAIL。',
+      prompt: '/goal 在已合并最新基线的 QA 工作树中验证 issue #{iid} 的 AC 和集成测试，并返回 PASS 或 FAIL。不要把 commit、push 或创建 MR 作为本次 Agent 的失败条件；这些由 QA runner 在 PASS 后自动完成。',
     }],
   };
 }

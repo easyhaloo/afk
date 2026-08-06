@@ -206,6 +206,18 @@ describe('Builtin templates', () => {
     ]);
   });
 
+  it('implementation delegates merge-request publication to QA', () => {
+    const template = requireTemplate('issue-implementation');
+    const step = template.steps.find(item => item.id === 'implement');
+    expect(step?.prompt).toContain('不要创建或合并 MR');
+  });
+
+  it('QA verification delegates change publication to the runner', () => {
+    const template = requireTemplate('pre-merge-qa-verification');
+    const step = template.steps.find(item => item.id === 'verify-ac');
+    expect(step?.prompt).toContain('不要把 commit、push 或创建 MR 作为本次 Agent 的失败条件');
+  });
+
   it('sequential-review fix step is gated on review=failed', () => {
     const t = requireTemplate('sequential-review');
     const plan = resolveExecutionPlan(t);

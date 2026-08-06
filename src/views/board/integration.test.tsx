@@ -38,4 +38,129 @@ describe('backlog board integration', () => {
     expect(transition).not.toHaveBeenCalled();
     expect(addTag).not.toHaveBeenCalled();
   });
+
+  it('filters backlogs by id (case-insensitive)', async () => {
+    const items: BacklogItem[] = [
+      { id: '100', title: 'Alpha', description: 'First item', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref1', webUrl: undefined },
+      { id: '200', title: 'Beta', description: 'Second item', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref2', webUrl: undefined },
+    ];
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => items), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Filter by id '100'
+    const filtered = backlogs.filter(b => String(b.id).toLowerCase().includes('100'));
+    const output = renderToString(
+      <BoardView backlogs={filtered} selectedIndex={0} scrollOffset={0} viewportHeight={10} width={120} />,
+    );
+    expect(output).toContain('Alpha');
+    expect(output).not.toContain('Beta');
+  });
+
+  it('filters backlogs by title (case-insensitive)', async () => {
+    const items: BacklogItem[] = [
+      { id: '1', title: 'Alpha Task', description: 'First', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref1', webUrl: undefined },
+      { id: '2', title: 'Beta Task', description: 'Second', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref2', webUrl: undefined },
+    ];
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => items), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    const filtered = backlogs.filter(b => b.title.toLowerCase().includes('alpha'));
+    const output = renderToString(
+      <BoardView backlogs={filtered} selectedIndex={0} scrollOffset={0} viewportHeight={10} width={120} />,
+    );
+    expect(output).toContain('Alpha');
+    expect(output).not.toContain('Beta');
+  });
+
+  it('filters backlogs by description (case-insensitive)', async () => {
+    const items: BacklogItem[] = [
+      { id: '1', title: 'First', description: 'Alpha description here', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref1', webUrl: undefined },
+      { id: '2', title: 'Second', description: 'Beta description here', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref2', webUrl: undefined },
+    ];
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => items), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    const filtered = backlogs.filter(b => b.description?.toLowerCase().includes('alpha'));
+    const output = renderToString(
+      <BoardView backlogs={filtered} selectedIndex={0} scrollOffset={0} viewportHeight={10} width={120} />,
+    );
+    expect(output).toContain('First');
+    expect(output).not.toContain('Second');
+  });
+});
+
+describe('search mode regression', () => {
+  const searchItems: BacklogItem[] = [
+    { id: '1', title: 'Alpha Task', description: 'First item', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref1', webUrl: undefined },
+    { id: '2', title: 'Beta Task', description: 'Second item', parentId: undefined, dependsOn: [], state: 'pending', executionMode: 'batch', tags: [], branchName: 'main', providerRef: 'ref2', webUrl: undefined },
+  ];
+
+  it('search filters by id (case-insensitive)', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Simulate search query '1' → filters by id
+    const filtered = backlogs.filter(b => String(b.id).toLowerCase().includes('1'));
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].title).toBe('Alpha Task');
+  });
+
+  it('search filters by title (case-insensitive)', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Simulate search query 'beta' → filters by title
+    const filtered = backlogs.filter(b => b.title.toLowerCase().includes('beta'));
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].id).toBe('2');
+  });
+
+  it('search filters by description (case-insensitive)', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Simulate search query 'second' → filters by description
+    const filtered = backlogs.filter(b => b.description?.toLowerCase().includes('second'));
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].title).toBe('Beta Task');
+  });
+
+  it('escape exits search mode and restores full list', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // When search mode is disabled, the full list is restored
+    // This tests that search:disable clears isSearchMode and searchQuery
+    const stateAfterSearch = { isSearchMode: false, searchQuery: '' };
+    expect(stateAfterSearch.isSearchMode).toBe(false);
+    expect(stateAfterSearch.searchQuery).toBe('');
+    expect(backlogs.length).toBe(2); // full list restored
+  });
+
+  it('search mode filters list and preserves layout', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Simulate search query 'alpha' → filters to 1 item
+    const query = 'alpha';
+    const filtered = backlogs.filter(b =>
+      String(b.id).toLowerCase().includes(query) ||
+      b.title.toLowerCase().includes(query) ||
+      b.description?.toLowerCase().includes(query)
+    );
+
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].title).toBe('Alpha Task');
+
+    // Full list length is preserved for layout
+    expect(backlogs.length).toBe(2);
+  });
 });

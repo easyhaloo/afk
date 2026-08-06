@@ -14,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-DEFAULT_INSTALL_DIR="/usr/local/bin"
+DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
 INSTALL_DIR="$DEFAULT_INSTALL_DIR"
 FORCE=false
 SKIP_DEPS=false
@@ -67,7 +67,7 @@ AFK CLI Installation Script
 Usage: $0 [OPTIONS]
 
 Options:
-  --system        Install to /usr/bin instead of /usr/local/bin
+  --system        Install to /usr/bin (requires sudo)
   --prefix DIR    Install to custom directory
   --force         Overwrite existing installation
   --skip-deps     Skip dependency checks
@@ -75,9 +75,8 @@ Options:
   -h, --help      Show this help message
 
 Examples:
-  $0                          # Install to /usr/local/bin (default)
+  $0                          # Install to ~/.local/bin (default, no sudo)
   $0 --system                 # Install to /usr/bin (requires sudo)
-  $0 --prefix ~/.local/bin    # Install to user directory
   $0 --force                  # Force reinstall
 
 Requirements:
@@ -100,6 +99,12 @@ if [[ "$INSTALL_DIR" == "/usr/bin" ]] && [[ $EUID -ne 0 ]]; then
     print_error "Installing to /usr/bin requires sudo privileges"
     echo "Please run: sudo $0 --system"
     exit 1
+fi
+
+# Auto-create user install directory if needed
+if [[ "$INSTALL_DIR" == "${HOME}/.local/bin" ]] && [[ ! -d "$INSTALL_DIR" ]]; then
+    print_info "Creating install directory: $INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR"
 fi
 
 # Welcome message
@@ -158,8 +163,8 @@ if [[ ! -d "$SCRIPT_DIR/src" ]]; then
     exit 1
 fi
 
-# Check if install directory exists
-if [[ ! -d "$INSTALL_DIR" ]]; then
+# Check if install directory exists (only for system dirs; user dirs are auto-created)
+if [[ "$INSTALL_DIR" != "${HOME}/.local/bin" ]] && [[ ! -d "$INSTALL_DIR" ]]; then
     print_error "Install directory does not exist: $INSTALL_DIR"
     echo "Please create it first: sudo mkdir -p $INSTALL_DIR"
     exit 1

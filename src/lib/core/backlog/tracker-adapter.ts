@@ -11,7 +11,7 @@ import {
 import { BACKLOG_METADATA, type BacklogProviderCapabilities } from './initialization';
 import { extractBacklogTags, isWorkflowMetadataLabel, validateBusinessTag } from './tags';
 import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record';
-import type { TrackerProvider, TrackedIssue } from '../tracker/types';
+import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
 const MODE_LABELS = BACKLOG_METADATA.executionModeLabels;
@@ -82,17 +82,26 @@ export class TrackerBacklogProvider implements BacklogProvider {
   async transition(id: string, state: BacklogState, _details?: { reason?: string; changeId?: string }): Promise<void> {
     const issueId = this.issueId(id);
     const issue = await this.tracker.getIssue(issueId);
-    const retained = issue.labels.filter(label => !isWorkflowMetadataLabel(label));
-    const labels = [...retained, STATE_LABELS[state]];
-    if (state === 'blocked') labels.push(MODE_LABELS.hitl);
-    await this.tracker.updateIssue(issueId, { labels: [...new Set(labels)] });
+    const currentMode = issue.labels.find(label => Object.values(MODE_LABELS).includes(label));
+    const mode = state === 'blocked' ? MODE_LABELS.hitl : currentMode ?? MODE_LABELS.afk;
+    await this.updateWorkflowLabels(issueId, issue.labels, [STATE_LABELS[state], mode]);
   }
 
   async setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> {
     const issueId = this.issueId(id);
     const issue = await this.tracker.getIssue(issueId);
-    const retained = issue.labels.filter(label => !Object.values(MODE_LABELS).includes(label));
-    await this.tracker.updateIssue(issueId, { labels: [...retained, MODE_LABELS[mode]] });
+    const currentStage = issue.labels.find(label => Object.values(STATE_LABELS).includes(label));
+    if (currentStage) await this.updateWorkflowLabels(issueId, issue.labels, [currentStage, MODE_LABELS[mode]]);
+    else await this.tracker.updateLabels(issueId, labelDelta(issue.labels, [MODE_LABELS[mode]], isModeLabel));
+  }
+
+  private async updateWorkflowLabels(issueId: number, current: string[], desired: string[]): Promise<void> {
+    await this.applyLabelDelta(issueId, labelDelta(current, desired, isWorkflowMetadataLabel));
+  }
+
+  private async applyLabelDelta(issueId: number, delta: LabelDelta): Promise<void> {
+    if (delta.add.length === 0 && delta.remove.length === 0) return;
+    await this.tracker.updateLabels(issueId, delta);
   }
 
   async createRework(id: string, input: NewReworkRecord): Promise<ReworkRecord> {
@@ -144,7 +153,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const issueId = this.issueId(id);
     const issue = await this.tracker.getIssue(issueId);
     if (issue.labels.includes(normalized)) return;
-    await this.tracker.updateIssue(issueId, { labels: [...issue.labels, normalized] });
+    await this.tracker.updateLabels(issueId, { add: [normalized], remove: [] });
   }
 
   async removeTag(id: string, tag: string): Promise<void> {
@@ -152,7 +161,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const issueId = this.issueId(id);
     const issue = await this.tracker.getIssue(issueId);
     if (!issue.labels.includes(normalized)) return;
-    await this.tracker.updateIssue(issueId, { labels: issue.labels.filter(label => label !== normalized) });
+    await this.tracker.updateLabels(issueId, { add: [], remove: [normalized] });
   }
 
   async initialize(): Promise<void> {
@@ -222,6 +231,19 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   private readonly options: TrackerBacklogAdapterOptions;
+}
+
+function isModeLabel(label: string): boolean {
+  return Object.values(MODE_LABELS).some(modeLabel => modeLabel === label);
+}
+
+function labelDelta(current: readonly string[], desired: readonly string[], isWorkflowLabel: (label: string) => boolean): LabelDelta {
+  const currentWorkflow = [...new Set(current.filter(isWorkflowLabel))];
+  const desiredWorkflow = [...new Set(desired)];
+  return {
+    add: desiredWorkflow.filter(label => !currentWorkflow.includes(label)),
+    remove: currentWorkflow.filter(label => !desiredWorkflow.includes(label)),
+  };
 }
 
 function toBacklogItem(issue: TrackedIssue): BacklogItem {

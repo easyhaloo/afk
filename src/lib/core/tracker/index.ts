@@ -10,6 +10,7 @@ export type {
   ListOptions,
   CreateIssueOptions,
   UpdateIssueOptions,
+  LabelDelta,
   ListMROptions,
   AcceptanceCriteria,
   LinkType,

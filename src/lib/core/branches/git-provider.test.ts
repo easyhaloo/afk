@@ -122,4 +122,26 @@ describe('GitBranchProvider', () => {
     await expect(remote.raw(['show', 'afk/backlog-42:parent-work.txt'])).resolves.toContain('parent work');
     await expect(remote.raw(['show', 'afk/backlog-42:second-child.txt'])).resolves.toContain('second child');
   });
+
+  it('creates QA worktrees from a remote-only parent branch', async () => {
+    const { repoPath, remotePath } = await repository();
+    const publisherPath = await mkdtemp(join(tmpdir(), 'afk-git-provider-publisher-'));
+    cleanupPaths.push(publisherPath);
+    const publisher = simpleGit(publisherPath);
+    await publisher.clone(remotePath, publisherPath);
+    await publisher.addConfig('user.email', 'test@example.com');
+    await publisher.addConfig('user.name', 'Test');
+    await publisher.checkoutLocalBranch('afk/backlog-42', 'origin/main');
+    await writeFile(join(publisherPath, 'parent-result.txt'), 'parent baseline\n');
+    await publisher.add('parent-result.txt');
+    await publisher.commit('parent baseline');
+    await publisher.push('origin', 'afk/backlog-42');
+
+    const provider = new GitBranchProvider(repoPath);
+    const child: BacklogItem = { ...item(), id: '43', branchName: 'afk/backlog-43' };
+    const handle = await provider.createVerificationWorktree(child, 'afk/backlog-42');
+
+    expect(handle.branchName).toBe('afk/backlog-43-qa');
+    await expect(simpleGit(handle.worktreePath).raw(['show', 'HEAD:parent-result.txt'])).resolves.toContain('parent baseline');
+  });
 });

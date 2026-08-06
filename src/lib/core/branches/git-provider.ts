@@ -33,9 +33,11 @@ export class GitBranchProvider implements BranchProvider {
   }
 
   async createVerificationWorktree(item: BacklogItem, baseBranch: string): Promise<BranchHandle> {
-    const config = { type: 'named' as const, branch: `${item.branchName}-qa`, baseBranch };
+    const git = simpleGit(this.repoRoot);
+    const verificationBase = await this.resolveVerificationBaseBranch(git, baseBranch);
+    const config = { type: 'named' as const, branch: `${item.branchName}-qa`, baseBranch: verificationBase };
     const strategy = strategyForConfig(config);
-    const handle = await strategy.prepareWorktree(simpleGit(this.repoRoot), config, { repoPath: this.repoRoot, baseBranch });
+    const handle = await strategy.prepareWorktree(git, config, { repoPath: this.repoRoot, baseBranch: verificationBase });
     this.handles.set(handle.path, handle);
     return { branchName: handle.branch, worktreePath: handle.path };
   }
@@ -79,6 +81,12 @@ export class GitBranchProvider implements BranchProvider {
     if (await refExists(git, `origin/${branchName}`)) return `origin/${branchName}`;
     if (await refExists(git, `origin/${fallback}`)) return `origin/${fallback}`;
     return fallback;
+  }
+
+  private async resolveVerificationBaseBranch(git: ReturnType<typeof simpleGit>, baseBranch: string): Promise<string> {
+    await git.fetch('origin');
+    if (await refExists(git, `origin/${baseBranch}`)) return `origin/${baseBranch}`;
+    return baseBranch;
   }
 }
 

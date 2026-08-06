@@ -60,7 +60,6 @@ describe('search actions', () => {
 
     expect(dispatch).toHaveBeenCalledWith({ type: 'search:set-query', payload: { query: 'tes' } });
   });
-
   it('/s keyboard shortcut enters search mode via enableSearch', () => {
     // Simulates the 's' keypress handler in AppContent.tsx
     const dispatch = vi.fn();

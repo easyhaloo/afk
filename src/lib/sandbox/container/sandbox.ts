@@ -55,6 +55,8 @@ export class ContainerSandbox implements Sandbox {
     extraEnv?: Record<string, string>;
     extraAllowedEnv?: string[];
     workdir?: string;
+    hostClaudeConfigDir?: string;
+    hostClaudeConfigFile?: string;
   }) {
     this.id = opts.id ?? randomUUID();
     this.worktreePath = opts.worktreePath;
@@ -66,6 +68,8 @@ export class ContainerSandbox implements Sandbox {
     this._extraEnv = opts.extraEnv ?? {};
     this._extraAllowedEnv = opts.extraAllowedEnv ?? [];
     this._workdir = opts.workdir ?? '/workspace';
+    this._hostClaudeConfigDir = opts.hostClaudeConfigDir;
+    this._hostClaudeConfigFile = opts.hostClaudeConfigFile;
   }
 
   // Configuration captured at construction. Provider is injected at create()
@@ -76,6 +80,8 @@ export class ContainerSandbox implements Sandbox {
   private _extraEnv: Record<string, string>;
   private _extraAllowedEnv: string[];
   private _workdir: string;
+  private _hostClaudeConfigDir?: string;
+  private _hostClaudeConfigFile?: string;
 
   /** Bind the provider. Called by ContainerSandboxProvider.create(). */
   bindProvider(provider: ContainerProvider, image?: string, user?: string): void {
@@ -179,6 +185,12 @@ export class ContainerSandbox implements Sandbox {
         { hostPath: this.worktreePath, containerPath: '/workspace' },
         { hostPath: afkSessionDir, containerPath: '/afk/session' },
         { hostPath: afkResultDir, containerPath: '/afk/result' },
+        ...(this._hostClaudeConfigDir
+          ? [{ hostPath: this._hostClaudeConfigDir, containerPath: '/home/node/.claude', readOnly: true }]
+          : []),
+        ...(this._hostClaudeConfigFile
+          ? [{ hostPath: this._hostClaudeConfigFile, containerPath: '/home/node/.claude.json', readOnly: true }]
+          : []),
       ],
       env: this._extraEnv,
       // PID 1 sleeps forever so the container stays alive across agent

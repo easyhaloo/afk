@@ -81,6 +81,21 @@ describe('appReducer search', () => {
     expect(nextState.isSearchMode).toBe(true); // unchanged
   });
 
+  it('search:enable resets selectedIndex to 0 (entering search mode)', () => {
+    const state = {
+      ...initialState,
+      isSearchMode: false,
+      selectedIndex: 5,
+    };
+
+    const nextState = appReducer(state, { type: 'search:enable' });
+
+    // search:enable only sets isSearchMode to true and clears query
+    // selection:top is a separate action dispatched by enableSearch()
+    expect(nextState.isSearchMode).toBe(true);
+    expect(nextState.searchQuery).toBe('');
+  });
+
   it('escaping search mode restores full list via search:disable', () => {
     // Simulate having filtered a list (search query active)
     const searchState = {

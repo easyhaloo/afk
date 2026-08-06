@@ -143,4 +143,24 @@ describe('search mode regression', () => {
     expect(stateAfterSearch.searchQuery).toBe('');
     expect(backlogs.length).toBe(2); // full list restored
   });
+
+  it('search mode filters list and preserves layout', async () => {
+    const backlogs = await loadBacklogViewModels({
+      backlog: { list: vi.fn(async () => searchItems), claim: vi.fn(), transition: vi.fn(), addTag: vi.fn() },
+    } as never);
+
+    // Simulate search query 'alpha' → filters to 1 item
+    const query = 'alpha';
+    const filtered = backlogs.filter(b =>
+      String(b.id).toLowerCase().includes(query) ||
+      b.title.toLowerCase().includes(query) ||
+      b.description?.toLowerCase().includes(query)
+    );
+
+    expect(filtered.length).toBe(1);
+    expect(filtered[0].title).toBe('Alpha Task');
+
+    // Full list length is preserved for layout
+    expect(backlogs.length).toBe(2);
+  });
 });

@@ -60,4 +60,17 @@ describe('search actions', () => {
 
     expect(dispatch).toHaveBeenCalledWith({ type: 'search:set-query', payload: { query: 'tes' } });
   });
+
+  it('/s keyboard shortcut enters search mode via enableSearch', () => {
+    // Simulates the 's' keypress handler in AppContent.tsx
+    const dispatch = vi.fn();
+    const state = { ...initialState, isSearchMode: false, searchQuery: 'old query', selectedIndex: 5 };
+    const actions = createActions({ state, dispatch, currentView: 'tasks', currentContext: {}, isDetailMode: false });
+
+    // User presses 's' to enter search mode
+    actions.enableSearch();
+
+    expect(dispatch).toHaveBeenCalledWith({ type: 'search:enable' });
+    expect(dispatch).toHaveBeenCalledWith({ type: 'selection:top' });
+  });
 });

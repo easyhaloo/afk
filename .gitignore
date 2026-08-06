@@ -40,7 +40,7 @@ coverage/
 # Redis dump
 dump.rdb
 
-# Git worktrees
+# Git worktrees and Claude Code local state
 .worktrees/
 .playwright-mcp/
 .claude/

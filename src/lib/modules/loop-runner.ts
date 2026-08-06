@@ -290,7 +290,17 @@ export class LoopRunner {
     this.polling = true;
     logger.info({ tickIntervalMs: this.opts.pollIntervalMs }, 'poll tick begin');
     try {
-      const issues = await this.providers.backlog.list({ state: 'ready', executionMode: 'afk' });
+      // Rework is a runnable AFK state too. Keep the provider state explicit
+      // instead of making rework look like ready: the active rework record
+      // remains the source of implementation feedback, while the loop owns
+      // the same claim/execute lifecycle for both states.
+      const [readyIssues, reworkIssues] = await Promise.all([
+        this.providers.backlog.list({ state: 'ready', executionMode: 'afk' }),
+        this.providers.backlog.list({ state: 'rework', executionMode: 'afk' }),
+      ]);
+      const issues = [...readyIssues, ...reworkIssues].filter((issue, index, all) =>
+        all.findIndex(candidate => candidate.id === issue.id) === index,
+      );
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;
@@ -344,7 +354,9 @@ export class LoopRunner {
     this.emitEvent(`#${iid} implement started (session=${session})`);
     logger.info({ iid, session, projectName }, 'implement chain starting');
 
-    let baseBranch = 'main';
+    const backlog = await this.providers.backlog.get(iid);
+    const parent = backlog.parentId ? await this.providers.backlog.get(backlog.parentId) : undefined;
+    const baseBranch = parent?.branchName ?? getWorkflowConfig().targetBranch ?? 'main';
 
     try {
       const resolvedExt = await this.resolveModules(iid);
@@ -367,6 +379,10 @@ export class LoopRunner {
         this.emitEvent(`${iid} implement → verification (${elapsed})`);
         this.enqueueQA(iid);
         logger.info({ iid, elapsed, url: result.url }, 'implement succeeded; queued for QA');
+      } else if (result.skipped === 'not_claimed') {
+        this.inFlight.delete(iid);
+        this.emitEvent(`${iid} implement skipped (claim unavailable)`);
+        logger.info({ iid }, 'implement skipped because backlog claim was unavailable');
       } else {
         // WorkflowRunner terminalized the failure in the provider.
         this.failed++;
@@ -490,8 +506,13 @@ export class LoopRunner {
       if (result.success) {
         this.completed++;
         this.lastError.delete(iid);
-        this.emitEvent(`${iid} QA passed → done (${elapsed})${result.mrUrl ? ` change=${result.mrUrl}` : ''}`);
+        const terminal = result.autoMerged === false ? 'merge_ready (human approval)' : 'done';
+        this.emitEvent(`${iid} QA passed → ${terminal} (${elapsed})${result.mrUrl ? ` change=${result.mrUrl}` : ''}`);
         logger.info({ iid, mrUrl: result.mrUrl, elapsed }, 'qa passed');
+      } else if (result.rework) {
+        this.lastError.delete(iid);
+        this.emitEvent(`${iid} QA failed → rework/afk (${elapsed})`);
+        logger.info({ iid, elapsed }, 'QA queued rework');
       } else {
         // QARunner terminalizes failure in the provider.
         this.failed++;

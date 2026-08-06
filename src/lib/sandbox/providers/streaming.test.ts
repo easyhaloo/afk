@@ -56,6 +56,20 @@ describe('StreamingAgentExecution', () => {
     });
   });
 
+  it('completes from a marker in an unterminated stdout record', async () => {
+    const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
+    const execution = new StreamingAgentExecution({
+      command: command(`process.stdout.write(${JSON.stringify(payload)}); setInterval(() => {}, 10_000)`),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+      status: 'completed',
+      structuredOutput: { type: 'goal_complete' },
+    });
+  });
+
   it('fails when the child exits non-zero even after emitting a result', async () => {
     const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
     const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)}); process.exit(3)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
@@ -103,8 +117,16 @@ describe('StreamingAgentExecution', () => {
       prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
     });
     execution.start();
-    await new Promise(resolve => setTimeout(resolve, 100));
-    const childPid = Number((await execution.captureOutput()).trim());
+    const childPid = await new Promise<number>((resolve, reject) => {
+      const deadline = Date.now() + 1_000;
+      const poll = async () => {
+        const pid = Number((await execution.captureOutput()).trim());
+        if (pid > 0) return resolve(pid);
+        if (Date.now() >= deadline) return reject(new Error('child PID was not captured'));
+        setTimeout(poll, 10);
+      };
+      void poll();
+    });
     expect(childPid).toBeGreaterThan(0);
 
     await execution.kill();
@@ -115,5 +137,32 @@ describe('StreamingAgentExecution', () => {
     } catch (error) {
       expect((error as NodeJS.ErrnoException).code).toBe('ESRCH');
     }
+  });
+
+  it('kills descendants that create their own process groups after completion', async () => {
+    const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
+    const execution = new StreamingAgentExecution({
+      command: command(`const { spawn } = require('node:child_process'); const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10000)'], { detached: true, stdio: 'ignore' }); console.log(child.pid); console.log(${JSON.stringify(payload)}); setInterval(() => {}, 10000);`),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+    });
+    execution.start();
+
+    const childPid = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('child PID was not captured')), 1_000);
+      const poll = async () => {
+        const pid = Number((await execution.captureOutput()).split('\n')[0]);
+        if (pid > 0) {
+          clearTimeout(timer);
+          resolve(pid);
+          return;
+        }
+        setTimeout(poll, 10);
+      };
+      void poll();
+    });
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({ status: 'completed' });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(() => process.kill(childPid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
   });
 });

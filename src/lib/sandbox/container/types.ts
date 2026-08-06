@@ -70,6 +70,8 @@ export interface ContainerExecOptions {
   containerId: string;
   command: string[];
   env?: Record<string, string>;
+  /** Optional stdin supplied to the in-container command. */
+  stdin?: string;
   /** If true, return a stream handle instead of waiting for completion. */
   detach?: boolean;
   /** Working directory inside the container. */

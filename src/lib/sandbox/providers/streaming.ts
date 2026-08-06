@@ -14,7 +14,7 @@
  * or signal files — completion is detected purely via the stream-json output.
  */
 
-import { spawn, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import type {
   AgentProvider,
@@ -401,6 +401,15 @@ export class StreamingAgentExecution implements AgentExecution {
   private signalProcess(signal: NodeJS.Signals): void {
     const pid = this.proc?.pid;
     if (!pid) return;
+
+    // Claude may start shell commands in their own process groups. Capture
+    // descendants before signalling the agent group so they cannot be orphaned.
+    const descendants = this.findDescendantPids(pid);
+    for (const descendant of descendants) {
+      try {
+        process.kill(descendant, signal);
+      } catch { /* process already exited */ }
+    }
     if (process.platform !== 'win32') {
       try {
         process.kill(-pid, signal);
@@ -410,5 +419,35 @@ export class StreamingAgentExecution implements AgentExecution {
       }
     }
     this.proc?.kill(signal);
+  }
+
+  private findDescendantPids(rootPid: number): number[] {
+    if (process.platform === 'win32') return [];
+
+    try {
+      const output = execFileSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
+      const children = new Map<number, number[]>();
+      for (const line of output.split('\n')) {
+        const [pidText, parentText] = line.trim().split(/\s+/);
+        const pid = Number(pidText);
+        const parent = Number(parentText);
+        if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
+        const siblings = children.get(parent) ?? [];
+        siblings.push(pid);
+        children.set(parent, siblings);
+      }
+
+      const descendants: number[] = [];
+      const visit = (parent: number): void => {
+        for (const child of children.get(parent) ?? []) {
+          visit(child);
+          descendants.push(child);
+        }
+      };
+      visit(rootPid);
+      return descendants;
+    } catch {
+      return [];
+    }
   }
 }

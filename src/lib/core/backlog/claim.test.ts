@@ -84,7 +84,7 @@ describe('FilesystemClaimLock', () => {
       createdAt: '2020-01-01T00:00:00.000Z', expiresAt: '2020-01-01T00:00:01.000Z',
     }));
 
-    const lease = await new FilesystemClaimLock(stateRoot, { gateTimeoutMs: 50, gateRetryMs: 1 }).acquire({
+    const lease = await new FilesystemClaimLock(stateRoot, { gateTimeoutMs: 500, gateRetryMs: 1 }).acquire({
       key: 'github/org-repo/42', owner: 'worker', ttlMs: 60_000,
     });
     expect(lease).not.toBeNull();

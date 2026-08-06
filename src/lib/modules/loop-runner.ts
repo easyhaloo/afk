@@ -290,7 +290,17 @@ export class LoopRunner {
     this.polling = true;
     logger.info({ tickIntervalMs: this.opts.pollIntervalMs }, 'poll tick begin');
     try {
-      const issues = await this.providers.backlog.list({ state: 'ready', executionMode: 'afk' });
+      // Rework is a runnable AFK state too. Keep the provider state explicit
+      // instead of making rework look like ready: the active rework record
+      // remains the source of implementation feedback, while the loop owns
+      // the same claim/execute lifecycle for both states.
+      const [readyIssues, reworkIssues] = await Promise.all([
+        this.providers.backlog.list({ state: 'ready', executionMode: 'afk' }),
+        this.providers.backlog.list({ state: 'rework', executionMode: 'afk' }),
+      ]);
+      const issues = [...readyIssues, ...reworkIssues].filter((issue, index, all) =>
+        all.findIndex(candidate => candidate.id === issue.id) === index,
+      );
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;

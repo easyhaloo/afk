@@ -24,14 +24,15 @@ describe('backlog provider', () => {
     expect(() => deriveBacklogBranchName('')).toThrow('backlog id');
   });
 
-  it('does not consider a parent backlog runnable', async () => {
+  it('allows a parent backlog to run after every child backlog is done', async () => {
     const provider = new InMemoryBacklogProvider([
       item({ id: 'parent', branchName: 'afk/backlog-parent' }),
       item({ id: 'child', parentId: 'parent' }),
     ]);
 
     expect(await provider.isRunnable(await provider.get('parent'))).toBe(false);
-    expect(await provider.isRunnable(await provider.get('child'))).toBe(true);
+    await provider.transition('child', 'done');
+    expect(await provider.isRunnable(await provider.get('parent'))).toBe(true);
   });
 
   it('waits for every dependency to be done', async () => {
@@ -61,6 +62,31 @@ describe('backlog provider', () => {
     await provider.transition('123', 'blocked', { reason: 'timeout' });
     await provider.setExecutionMode('123', 'hitl');
     await expect(provider.get('123')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
+  });
+
+  it('claims an AFK rework item on its original backlog branch', async () => {
+    const provider = new InMemoryBacklogProvider([item({ state: 'rework', branchName: 'afk/backlog-123' })]);
+
+    await expect(provider.claim('123', 'worker-a')).resolves.toMatchObject({
+      item: { id: '123', state: 'in_progress', branchName: 'afk/backlog-123' },
+    });
+  });
+
+  it('keeps QA rework history and resolves only the active record', async () => {
+    const provider = new InMemoryBacklogProvider([item({ state: 'verification' })]);
+    const first = await provider.createRework('123', {
+      source: 'qa', summary: 'first integration defect',
+      failedCriteria: [{ id: 'first', expected: 'works', actual: 'fails' }], requiredChecks: [],
+    });
+    await provider.resolveRework('123', first.id, { summary: 'first defect verified' });
+    const second = await provider.createRework('123', {
+      source: 'qa', summary: 'new integration defect',
+      failedCriteria: [{ id: 'second', expected: 'works', actual: 'fails' }], requiredChecks: [],
+    });
+
+    expect(first).toMatchObject({ id: 'r1', status: 'open' });
+    expect(second).toMatchObject({ id: 'r2', attempt: 2, status: 'open' });
+    await expect(provider.getActiveRework('123')).resolves.toMatchObject({ id: 'r2', summary: 'new integration defect' });
   });
 
   it('supports provider-neutral business tags and tag filtering', async () => {

@@ -12,7 +12,7 @@ import {
 import type { BacklogExecutionMode, BacklogState } from '../lib/core/backlog';
 import { handleCommandError, success, warning, detail } from '../lib/cli-utils';
 
-const states: BacklogState[] = ['ready', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
+const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];
 
 function providerFor(project?: string): Promise<BacklogManagementProvider> {

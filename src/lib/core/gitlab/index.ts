@@ -18,6 +18,7 @@ import type {
   Branch,
   Tag,
   Commit,
+  TrackerIssueComment,
 } from '../tracker/types';
 import { extractAC } from '../tracker/ac';
 
@@ -130,6 +131,15 @@ export class GitLabClient implements TrackerProvider {
 
   async addComment(id: number, body: string): Promise<void> {
     await this.client.IssueNotes.create(this.projectId, id, body);
+  }
+
+  async listIssueComments(id: number): Promise<TrackerIssueComment[]> {
+    const notes = await this.client.IssueNotes.all(this.projectId, id, { perPage: 100 }) as any[];
+    return notes.map(note => ({ id: String(note.id), body: note.body ?? '' }));
+  }
+
+  async updateIssueComment(id: number, commentId: string, body: string): Promise<void> {
+    await this.client.IssueNotes.edit(this.projectId, id, Number(commentId), body);
   }
 
   async linkIssues(sourceId: number, targetId: number, type: LinkType, targetProjectId?: string): Promise<void> {

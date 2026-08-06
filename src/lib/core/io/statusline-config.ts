@@ -3,10 +3,10 @@ import { join } from 'path';
 import { STATUS_FILENAME } from './status';
 
 const SETTINGS_DIR = '.claude';
-const SETTINGS_FILE = 'settings.json';
+const SETTINGS_FILE = 'settings.local.json';
 
 /**
- * Configure the worktree's Claude Code statusline so it tees its stdin JSON
+ * Configure the worktree's local Claude Code statusline so it tees its stdin JSON
  * to <worktree>/.afk/claude-status.json in addition to (or instead of)
  * rendering a statusline. This is what lets AFK Runner read authoritative
  * token counts via getTokenUsage().
@@ -15,7 +15,8 @@ const SETTINGS_FILE = 'settings.json';
  * detect "session is up" via file presence immediately. The real statusline
  * tee overwrites this on the first turn.
  *
- * Idempotent: re-running won't overwrite user customizations that aren't ours.
+ * The tracked project settings remain untouched. Re-running only updates the
+ * local override and never duplicates its tee command.
  */
 export async function configureStatusline(worktreeDir: string): Promise<void> {
   const claudeDir = join(worktreeDir, SETTINGS_DIR);
@@ -37,9 +38,11 @@ export async function configureStatusline(worktreeDir: string): Promise<void> {
   const existingCommand =
     (existing.statusLine as { command?: string } | undefined)?.command ?? '';
   const teeCommand = `tee '${statusJsonPath}' > /dev/null`;
-  const newCommand = existingCommand
-    ? `(${teeCommand}) && ${existingCommand}`
-    : teeCommand;
+  const newCommand = existingCommand.includes(statusJsonPath)
+    ? existingCommand
+    : existingCommand
+      ? `(${teeCommand}) && ${existingCommand}`
+      : teeCommand;
 
   const next = {
     ...existing,

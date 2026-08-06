@@ -28,7 +28,13 @@ import { TemplateLoader } from './templates/loader';
 import { PlanExecutor } from './workflows/plan-executor';
 import { SystemActionExecutor } from './workflows/system-actions';
 import { RunResourceScope, type RunOutcomeStatus } from './workflows/resource-scope';
-import { buildExecutionPrompt } from './workflows/execution-protocol';
+import {
+  buildExecutionPrompt,
+  isAcVerificationPass,
+  parseAcVerificationFailure,
+  type AcVerificationFailure,
+  type CompletionKind,
+} from './workflows/execution-protocol';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection';
 import type { PluginRuntime } from './plugins/runtime';
 import type { Step, StepResult } from './templates/types';
@@ -65,13 +71,25 @@ function safeExecutionJson(value: unknown): string {
   }
 }
 
+function formatCriteria(criteria: Array<{ id: string; expected: string; actual: string }>): string {
+  return criteria.map(criterion => `- ${criterion.id}: expected ${criterion.expected}; actual ${criterion.actual}`).join('\n');
+}
+
+function formatAcCorrection(failure: AcVerificationFailure): string {
+  return `\n\nAC correction required. Work on the current branch and repair exactly these failed acceptance criteria before the verifier runs again:\n${formatCriteria(failure.failedCriteria)}\nVerifier summary: ${failure.summary}`;
+}
+
+function formatReworkContext(rework: import('./core/backlog').ReworkRecord): string {
+  return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
+}
+
 /**
  * Signal-driven workflow runner.
  *
  * Two-phase design:
  *   Phase 1 (Implement): run implement step -> wait goal_complete
  *   Phase 2 (Verify):   run verify step -> wait goal_complete with QA payload
- *   autoWrapup:         close sandbox, transition state, cleanup worktree
+ *   autoWrapup:         push implementation branch, transition verification, cleanup worktree
  *
  * Each phase is a loop: send goal -> poll for the completion signal OR the
  * context threshold (statusline token usage). On context_high the session is
@@ -131,6 +149,10 @@ export interface RunnerOptions {
   claimHeartbeatIntervalMs?: number;
 }
 
+export type WorkflowRunResult =
+  | { success: true; url?: string }
+  | { success: false; url?: string; skipped?: 'not_claimed' };
+
 /**
  * Optional collaborator overrides for WorkflowRunner. Tests inject a fake
  * coordinator (and tmux) to exercise the phase loop's routing without a real
@@ -170,7 +192,7 @@ export interface RunnerDependencies {
  * Two-phase design:
  *   Phase 1 (Implement): run implement step -> wait goal_complete
  *   Phase 2 (Verify):   run verify step -> wait goal_complete with QA payload
- *   autoWrapup:         close sandbox, transition state, cleanup worktree
+ *   autoWrapup:         push implementation branch, transition verification, cleanup worktree
  *
  * Each phase is a loop: send goal -> poll for the completion signal OR the
  * context threshold (statusline token usage). On context_high the session is
@@ -206,6 +228,11 @@ interface StepRunCtx {
   executionMode?: ExecutionMode;
 }
 
+interface PhaseResult {
+  completed: boolean;
+  output?: unknown;
+}
+
 export class WorkflowRunner {
   private readonly worktree = new WorktreeManager();
   private tmux: TmuxClient;
@@ -233,7 +260,6 @@ export class WorkflowRunner {
   private stepBranchHandles: BranchHandle[] = [];
   private stepSandboxes: Sandbox[] = [];
   private config: WorkflowConfig;
-  private systemActionUrl: string | undefined;
   private systemActionsRan = false;
   private readonly agentProviderInjected: boolean;
   private primaryHandle?: BranchHandle;
@@ -246,6 +272,8 @@ export class WorkflowRunner {
   private readonly runtimeManager: TaskRuntimeManager;
   private runtimeRunId?: string;
   private runtimeErrorSummary?: string;
+  private acFeedback?: AcVerificationFailure;
+  private activeRework?: import('./core/backlog').ReworkRecord;
 
   /**
    * Inject a sandbox for testing. Production code goes through runBody →
@@ -296,7 +324,7 @@ export class WorkflowRunner {
    * covers unexpected exceptions (crash path), and the finally only ever
    * disarms the watchdog.
    */
-  async run(options: RunnerOptions): Promise<{ success: boolean; url?: string }> {
+  async run(options: RunnerOptions): Promise<WorkflowRunResult> {
     const {
       iid: requestedIid,
       session,
@@ -322,10 +350,11 @@ export class WorkflowRunner {
       const claimed = await this.providers.backlog.claim(backlogId, session);
       if (!claimed) {
         logger.info({ backlogId }, 'backlog is not runnable or was claimed by another worker');
-        return { success: false };
+        return { success: false, skipped: 'not_claimed' };
       }
       this.activeBacklog = claimed.item;
       this.activeClaim = claimed;
+      this.activeRework = await this.providers.backlog.getActiveRework(backlogId);
       // Establish the terminalizer immediately after claim acquisition, before
       // template validation or any branch/sandbox resource can be created.
       // Every terminal path shares this scope, so a native no-op lease and a
@@ -366,9 +395,9 @@ export class WorkflowRunner {
     // Bind all git/worktree operations to the explicit project root. This
     // deliberately avoids process.chdir(), which is process-global state.
     this.repoRoot = options.repoRoot ?? process.cwd();
-    this.systemActionUrl = undefined;
     this.systemActionsRan = false;
     this.primaryHandle = undefined;
+    this.acFeedback = undefined;
     // Preserve injected WorktreeManager fakes and legacy cwd behavior when
     // no explicit project context was requested.
 
@@ -434,6 +463,7 @@ export class WorkflowRunner {
       // stale timeout signal into the retained worktree.
       this.watchdog.disarm();
       this.activeClaim = undefined;
+      this.activeRework = undefined;
       await this.finishRuntime(
         terminalOutcome === 'success' ? 'completed' : 'blocked',
         terminalOutcome === 'success' ? 'implementation handed to QA' : 'implementation stopped',
@@ -498,6 +528,15 @@ export class WorkflowRunner {
     if (ctx?.iid) {
       prompt = prompt.replaceAll('{iid}', String(ctx.iid));
     }
+    if (this.activeBacklog) {
+      const description = this.activeBacklog.description?.trim();
+      prompt = `${prompt}\n\nBacklog title: ${this.activeBacklog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
+    }
+    if (step.id === 'implement') {
+      const rework = this.activeRework ? formatReworkContext(this.activeRework) : '';
+      const acCorrection = this.acFeedback ? formatAcCorrection(this.acFeedback) : '';
+      prompt = `${prompt}${rework}${acCorrection}`;
+    }
     return prompt;
   }
 
@@ -535,33 +574,50 @@ export class WorkflowRunner {
       branchHandle = { branch: ctx.primaryBranch, path: ctx.primaryWtPath, isNewBranch: false };
     }
 
-    const sandbox = branchHandle.path === ctx.primaryWtPath
-      ? this.sandbox!
-      : await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode });
+    // A local interactive session must own one workflow phase. Reusing the
+    // implementation TUI for AC verification can submit the next prompt while
+    // Claude is still returning from the previous one, losing that prompt.
+    const needsDedicatedSandbox = ctx.executionMode === 'interactive' || branchHandle.path !== ctx.primaryWtPath;
+    const sandbox = needsDedicatedSandbox
+      ? await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode })
+      : this.sandbox!;
     if (sandbox !== this.sandbox) {
       this.stepSandboxes.push(sandbox);
       this.resourceScope?.registerSandbox(sandbox);
     }
     await this.heartbeatRuntime({ worktree: branchHandle.path, branch: branchHandle.branch, progress: `running ${step.id}` });
-    const completed = await this.runPhase({
-      iid: ctx.iid,
-      session: ctx.session,
-      wtPath: branchHandle.path,
-      hardTimeoutMs: effectiveTimeout,
-      completionTimeoutMs: ctx.completionTimeoutMs,
-      contextHighTokens: ctx.contextHighTokens,
-      budget: ctx.budget,
-      prompt,
-      signalType,
-      executionMode: ctx.executionMode ?? 'batch',
-      agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
-      sandbox,
-    });
+    const completionKind: CompletionKind = step.id === 'verify-ac' ? 'ac' : 'task';
+    let phase: PhaseResult;
+    try {
+      phase = await this.runPhase({
+        iid: ctx.iid,
+        session: ctx.session,
+        wtPath: branchHandle.path,
+        hardTimeoutMs: effectiveTimeout,
+        completionTimeoutMs: ctx.completionTimeoutMs,
+        contextHighTokens: ctx.contextHighTokens,
+        budget: ctx.budget,
+        prompt,
+        signalType,
+        executionMode: ctx.executionMode ?? 'batch',
+        agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
+        sandbox,
+        completionKind,
+      });
+    } finally {
+      if (sandbox !== this.sandbox && ctx.executionMode === 'interactive') await sandbox.close();
+    }
 
     const completedAt = new Date().toISOString();
+    const acFailure = completionKind === 'ac' ? parseAcVerificationFailure(phase.output) : undefined;
+    const completed = completionKind === 'ac'
+      ? phase.completed && isAcVerificationPass(phase.output)
+      : phase.completed;
     return {
       stepId: step.id,
       status: completed ? 'completed' : 'failed',
+      summary: acFailure?.summary ?? (phase.completed ? 'AC verifier returned an invalid completion payload' : 'agent step did not complete'),
+      output: acFailure,
       branch: branchHandle.branch,
       worktreePath: branchHandle.path,
       startedAt,
@@ -700,9 +756,8 @@ export class WorkflowRunner {
       publishChange: async () => {
         if (autoWrapupOverridden) return { url: undefined };
         await this.providers.branches.push(wt.branch, wt.path);
-        this.systemActionUrl = await this.createMR(iid, wt.path, targetBranch);
         this.systemActionsRan = true;
-        return { url: this.systemActionUrl };
+        return { url: undefined };
       },
       queueQA: async () => {
         if (autoWrapupOverridden) return { queued: true };
@@ -732,6 +787,18 @@ export class WorkflowRunner {
     });
     const executedResults = await executor.execute(loadedTemplate);
     Object.assign(stepResults, executedResults);
+    const verification = stepResults['verify-ac'];
+    if (verification?.status === 'failed') {
+      const recovered = await this.retryFailedAcVerification(loadedTemplate, {
+        iid, session, baseSession: session, primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
+        hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, executionMode,
+      }, verification, stepResults);
+      if (recovered) {
+        await this.providers.branches.push(wt.branch, wt.path);
+        await this.transitionBacklog(iid, 'verification');
+        this.systemActionsRan = true;
+      }
+    }
     if (Object.values(stepResults).some(result => result.status === 'failed' || result.status === 'timed_out' || result.status === 'aborted')) {
       return { success: false };
     }
@@ -744,7 +811,7 @@ export class WorkflowRunner {
     // replace it; production typed templates use the system-action terminalizer.
     if (this.systemActionsRan && !autoWrapupOverridden) {
       await this.cleanupPrimary(iid, true);
-      return { success: true, url: this.systemActionUrl };
+      return { success: true };
     }
     return this.autoWrapup(iid, wt.path, session, targetBranch);
   }
@@ -759,7 +826,8 @@ export class WorkflowRunner {
   }
 
   /**
-   * Post-success workflow cleanup: push branch, create change, close sandbox, transition state, clean up worktree.
+   * Post-success implementation cleanup: push branch, transition to verification,
+   * close sandbox, and clean up the worktree. QA owns change creation.
    * Called after all steps complete (template or legacy).
    */
   private async autoWrapup(iid: number, worktreePath: string, session: string, targetBranch: string): Promise<{ success: boolean; url?: string }> {
@@ -767,11 +835,10 @@ export class WorkflowRunner {
       await this.markBacklogBlocked('claim heartbeat failed');
       return { success: false };
     }
-    // Push branch and create MR
+    // Push the implementation branch. QA creates the change request only
+    // after merging the latest baseline and running integration tests.
     await this.pushBranch(worktreePath);
     logger.info({ iid, worktreePath }, 'branch pushed');
-    const mrUrl = await this.createMR(iid, worktreePath, targetBranch);
-    logger.info({ iid, mrUrl }, 'MR created');
 
     if (this.leaseLost) {
       await this.markBacklogBlocked('claim heartbeat failed');
@@ -783,15 +850,7 @@ export class WorkflowRunner {
     await this.cleanupPrimary(iid, true);
     logger.info({ iid, worktreePath }, 'worktree cleaned up');
 
-    return { success: true, url: mrUrl };
-  }
-
-  /**
-   * Extract MR/PR numeric ID from URL
-   */
-  private extractMRIdFromUrl(url: string): number | null {
-    const match = url.match(/\/(merge_requests|pull)\/(\d+)/);
-    return match ? parseInt(match[2], 10) : null;
+    return { success: true };
   }
 
   /**
@@ -852,13 +911,14 @@ export class WorkflowRunner {
     executionMode?: ExecutionMode;
     agentProvider?: AgentProvider;
     sandbox?: Sandbox;
-  }): Promise<boolean> {
+    completionKind: CompletionKind;
+  }): Promise<PhaseResult> {
     const basePrompt = p.prompt ?? (p as unknown as { goalBase?: string }).goalBase ?? '';
     for (let round = 1; ; round++) {
       const rawPrompt = round === 1
         ? basePrompt
         : this.continuePrompt(basePrompt, p.iid, p.wtPath, round - 1);
-      const prompt = buildExecutionPrompt(rawPrompt, p.executionMode, 'task');
+      const prompt = buildExecutionPrompt(rawPrompt, p.executionMode, p.completionKind);
 
       logger.info({ iid: p.iid, round, signalType: p.signalType, budgetUsed: p.budget.used }, 'round begin');
 
@@ -889,11 +949,11 @@ export class WorkflowRunner {
 
       switch (result.status) {
         case 'completed':
-          return true;
+          return { completed: true, output: result.structuredOutput };
 
         case 'timed_out':
           await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs);
-          return false;
+          return { completed: false };
 
         case 'context_high': {
           const hctx = {
@@ -907,7 +967,7 @@ export class WorkflowRunner {
 
           if (p.budget.isExhausted(hctx.tokens)) {
             await this.coordinator.handoff(hctx, 'terminal', p.budget.exhaustionReason(hctx.tokens)!);
-            return false;
+            return { completed: false };
           }
 
           // Phase 4 — save session snapshot to the store chain before handing off.
@@ -953,7 +1013,7 @@ export class WorkflowRunner {
             () => execution.captureSession(),
           );
 
-          if (resumeOutcome.status === 'completed') return true;
+          if (resumeOutcome.status === 'completed') return { completed: true };
           if (resumeOutcome.status === 'continued') {
             execution = resumeOutcome.resumedExecution;
             this.resourceScope?.registerExecution(execution);
@@ -971,7 +1031,7 @@ export class WorkflowRunner {
             logger.info({ iid: p.iid, round, generation: p.budget.used + 1 }, 'handoff continued; looping to send continued goal');
             continue;
           }
-          return false; // auto-handoff flipped to manual; phase over
+          return { completed: false }; // auto-handoff flipped to manual; phase over
         }
 
         default:
@@ -984,9 +1044,39 @@ export class WorkflowRunner {
             throw new Error(`execution failed: ${diagnostics}`);
           }
           await this.manualFlip(p.iid, p.session);
-          return false;
+          return { completed: false };
       }
     }
+  }
+
+  private async retryFailedAcVerification(
+    template: import('./templates/types').WorkflowTemplate,
+    ctx: Omit<StepRunCtx, 'stepIndex'>,
+    initial: StepResult,
+    results: Record<string, StepResult>,
+  ): Promise<boolean> {
+    let failure = parseAcVerificationFailure(initial.output);
+    const implement = template.steps.find(step => step.id === 'implement');
+    const verify = template.steps.find(step => step.id === 'verify-ac');
+    if (!failure || !implement || !verify) return false;
+
+    for (let iteration = 1; iteration <= this.config.maxSelfIterations; iteration++) {
+      this.acFeedback = failure;
+      await this.heartbeatRuntime({ progress: `AC correction ${iteration}/${this.config.maxSelfIterations}` });
+      const implementation = await this.runStep(implement, { ...ctx, stepIndex: iteration }, results);
+      results.implement = implementation;
+      if (implementation.status !== 'completed') break;
+      const verification = await this.runStep(verify, { ...ctx, stepIndex: iteration }, results);
+      results['verify-ac'] = verification;
+      if (verification.status === 'completed') {
+        this.acFeedback = undefined;
+        return true;
+      }
+      failure = parseAcVerificationFailure(verification.output);
+      if (!failure) break;
+    }
+    this.acFeedback = undefined;
+    return false;
   }
 
   /**
@@ -1024,18 +1114,6 @@ export class WorkflowRunner {
     const git = simpleGit(worktreePath);
     const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
     await this.providers.branches.push(branch, worktreePath);
-  }
-
-  /**
-   * Create a change request through the provider.
-   * Returns the MR/PR web URL for logging.
-   */
-  private async createMR(iid: number, worktreePath: string, targetBranch: string): Promise<string> {
-    const git = simpleGit(worktreePath);
-    const branch = await git.revparse(['--abbrev-ref', 'HEAD']);
-    if (!this.activeBacklog) throw new Error('backlog is not active');
-    const change = await this.providers.changes.create({ backlog: this.activeBacklog, sourceBranch: branch, targetBranch, draft: true });
-    return change.url ?? change.id;
   }
 
   private async transitionBacklog(iid: number, state: BacklogState, reason?: string): Promise<void> {

@@ -83,8 +83,9 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const issueId = this.issueId(id);
     const issue = await this.tracker.getIssue(issueId);
     const retained = issue.labels.filter(label => !isWorkflowMetadataLabel(label));
-    const labels = [...retained, STATE_LABELS[state]];
-    if (state === 'blocked') labels.push(MODE_LABELS.hitl);
+    const currentMode = issue.labels.find(label => Object.values(MODE_LABELS).includes(label));
+    const mode = state === 'blocked' ? MODE_LABELS.hitl : currentMode ?? MODE_LABELS.afk;
+    const labels = [...retained, STATE_LABELS[state], mode];
     await this.tracker.updateIssue(issueId, { labels: [...new Set(labels)] });
   }
 

@@ -41,9 +41,9 @@ export async function gitWorktreeAdd(
   } catch (err: unknown) {
     const msg = String(err);
     if (msg.includes('already exists') || msg.includes('already exists') || msg.includes('已经存在')) {
-      // Stale branch + worktree from a failed retry. Clean and retry once.
+      // A stale worktree path can be retried, but an existing branch is
+      // intentionally never deleted here: it may contain unpushed work.
       try { await git.raw(['worktree', 'remove', worktreePath, '--force']); } catch { /* ignore */ }
-      try { await git.raw(['branch', '-D', branch]); } catch { /* ignore */ }
       await git.raw(['worktree', 'add', '-b', branch, worktreePath, baseBranch]);
     } else {
       throw new BranchStrategyError(`worktree add failed: ${msg}`, kind as never, err);

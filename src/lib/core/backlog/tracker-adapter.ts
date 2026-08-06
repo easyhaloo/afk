@@ -10,6 +10,7 @@ import {
 } from './claim-strategy';
 import { BACKLOG_METADATA, type BacklogProviderCapabilities } from './initialization';
 import { extractBacklogTags, isWorkflowMetadataLabel, validateBusinessTag } from './tags';
+import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record';
 import type { TrackerProvider, TrackedIssue } from '../tracker/types';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
@@ -62,8 +63,8 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {
-    // Read all issues so closed `done` children still prevent a parent from
-    // being treated as an executable item and dependencies can be resolved.
+    // Read all issues so parent readiness can be derived from every child,
+    // including completed children and dependencies.
     const issues = await this.tracker.listIssues({ state: 'all' });
     const items = issues.map(toBacklogItem).filter(item =>
       (options.state === undefined || item.state === options.state) &&
@@ -94,6 +95,50 @@ export class TrackerBacklogProvider implements BacklogProvider {
     await this.tracker.updateIssue(issueId, { labels: [...retained, MODE_LABELS[mode]] });
   }
 
+  async createRework(id: string, input: NewReworkRecord): Promise<ReworkRecord> {
+    const issueId = this.issueId(id);
+    const comments = await this.tracker.listIssueComments(issueId);
+    if (latestOpenRework(comments)) throw new Error(`backlog ${id} already has an open rework record`);
+    const attempts = comments
+      .map(parseReworkRecord)
+      .filter((entry): entry is NonNullable<ReturnType<typeof parseReworkRecord>> => entry !== undefined)
+      .map(entry => entry.record.attempt);
+    const attempt = (attempts.length ? Math.max(...attempts) : 0) + 1;
+    const record: ReworkRecord = {
+      ...input,
+      version: 1,
+      id: `r${attempt}`,
+      attempt,
+      status: 'open',
+      createdAt: new Date().toISOString(),
+    };
+    await this.tracker.addComment(issueId, renderReworkRecord(record));
+    await this.transition(id, 'rework');
+    await this.setExecutionMode(id, 'afk');
+    return record;
+  }
+
+  async getActiveRework(id: string): Promise<ReworkRecord | undefined> {
+    const comments = await this.tracker.listIssueComments(this.issueId(id));
+    return latestOpenRework(comments)?.record;
+  }
+
+  async resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> {
+    const issueId = this.issueId(id);
+    const comments = await this.tracker.listIssueComments(issueId);
+    const target = comments
+      .map(parseReworkRecord)
+      .find((entry): entry is NonNullable<ReturnType<typeof parseReworkRecord>> => entry?.record.id === reworkId && entry.record.status === 'open');
+    if (!target) throw new Error(`open rework record not found: ${reworkId}`);
+    const record: ReworkRecord = {
+      ...target.record,
+      status: 'resolved',
+      resolvedAt: new Date().toISOString(),
+      resolutionSummary: resolution.summary,
+    };
+    await this.tracker.updateIssueComment(issueId, target.commentId, renderReworkRecord(record));
+  }
+
   async addTag(id: string, tag: string): Promise<void> {
     const normalized = validateBusinessTag(tag);
     const issueId = this.issueId(id);
@@ -122,9 +167,9 @@ export class TrackerBacklogProvider implements BacklogProvider {
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
-    if (item.state !== 'ready' || item.executionMode !== 'afk') return false;
+    if ((item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
     const children = await this.list({ parentId: item.id });
-    if (children.length > 0) return false;
+    if (children.some(child => child.state !== 'done')) return false;
     for (const dependencyId of item.dependsOn) {
       const dependency = await this.get(dependencyId).catch(() => null);
       if (!dependency || dependency.state !== 'done') return false;
@@ -135,7 +180,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
   private async isConfirmedClaim(item: BacklogItem): Promise<boolean> {
     if (item.state !== 'in_progress' || item.executionMode !== 'afk') return false;
     const children = await this.list({ parentId: item.id });
-    if (children.length > 0) return false;
+    if (children.some(child => child.state !== 'done')) return false;
     for (const dependencyId of item.dependsOn) {
       const dependency = await this.get(dependencyId).catch(() => null);
       if (!dependency || dependency.state !== 'done') return false;

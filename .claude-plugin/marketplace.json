@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "afk",
-      "version": "1.0.5",
-      "description": "Full lifecycle skills: grill-me, PRD, issues, implement, QA, research, pipeline, skill-craft, complexity governance, reasoning guard, API workflow.",
+      "version": "1.0.6",
+      "description": "Full lifecycle skills: grill-me, PRD, issues, implement, QA, research, pipeline, skill-craft, complexity governance (boundaries & reuse), reasoning guard, API workflow.",
       "source": "./",
       "category": "developer-tools"
     }

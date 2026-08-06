@@ -72,6 +72,16 @@ describe('TrackerBacklogProvider', () => {
     expect(atomicClaim).toHaveBeenCalledWith('42', 'worker', 'ready', expect.objectContaining({ parentId: '10' }));
   });
 
+  it('allows a parent backlog to run after every tracker child is done', async () => {
+    const parent = { id: 10, title: 'Parent', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const child = { id: 42, title: 'Child', description: '', labels: ['stage::done', 'parent::10'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(parent);
+    t.listIssues = vi.fn(async () => [{ ...parent }, { ...child }]);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.isRunnable(await provider.get('10'))).resolves.toBe(true);
+  });
+
   it('maps a closed issue without workflow labels to done for dependency checks', async () => {
     const issue = { id: 9, title: 'Dependency', description: '', labels: [], state: 'closed', url: '', projectId: '' };
     const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
@@ -97,6 +107,32 @@ describe('TrackerBacklogProvider', () => {
     await provider.initialize();
     expect(ensureMetadata).toHaveBeenCalledTimes(2);
     expect(provider.capabilities).toEqual({ atomicClaim: true, tags: true, initialization: true });
+  });
+
+  it('appends a QA rework record and resolves that exact comment without overwriting history', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(issue) as any;
+    const comments: Array<{ id: string; body: string }> = [];
+    t.listIssueComments = vi.fn(async () => comments.map(comment => ({ ...comment })));
+    t.addComment = vi.fn(async (_id: number, body: string) => { comments.push({ id: 'comment-1', body }); });
+    t.updateIssueComment = vi.fn(async (_id: number, commentId: string, body: string) => {
+      const comment = comments.find(candidate => candidate.id === commentId);
+      if (comment) comment.body = body;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    const record = await provider.createRework('42', {
+      source: 'qa',
+      summary: 'The required /s key sequence was not implemented.',
+      failedCriteria: [{ id: 'search-shortcut', expected: '/ then s enters search', actual: '/ alone enters search' }],
+      requiredChecks: [{ command: 'PTY / then s', expected: 'search mode is active' }],
+    });
+    await provider.resolveRework('42', record.id, { summary: 'Verified by QA run qa-42-r2.' });
+
+    expect(record).toMatchObject({ id: 'r1', attempt: 1, status: 'open' });
+    expect(t.addComment).toHaveBeenCalledWith(42, expect.stringContaining('<!-- afk:rework:v1 id=r1 -->'));
+    expect(t.updateIssueComment).toHaveBeenCalledWith(42, 'comment-1', expect.stringContaining('"status":"resolved"'));
+    await expect(provider.get('42')).resolves.toMatchObject({ state: 'rework', executionMode: 'afk' });
   });
 
   it('uses a filesystem lease to serialize tracker claims without native CAS', async () => {

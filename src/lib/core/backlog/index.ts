@@ -1,12 +1,14 @@
-export type BacklogState = 'ready' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
+export type BacklogState = 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
 export type BacklogExecutionMode = 'afk' | 'hitl';
 import { randomUUID } from 'node:crypto';
 export type { BacklogClaim, ClaimLease } from './claim';
 export { FilesystemClaimLock } from './claim';
 export type { BacklogProviderCapabilities } from './initialization';
 export { BACKLOG_METADATA } from './initialization';
+export type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record';
 export { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags';
 import type { BacklogClaim } from './claim';
+import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record';
 import { validateBusinessTag } from './tags';
 
 export interface BacklogItem {
@@ -48,6 +50,9 @@ export interface BacklogManagementProvider {
 export interface QABacklogProvider extends BacklogManagementProvider {
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void>;
   setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void>;
+  createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord>;
+  getActiveRework(id: string): Promise<ReworkRecord | undefined>;
+  resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
 }
 
 export interface BacklogProvider {
@@ -57,6 +62,9 @@ export interface BacklogProvider {
   claim(id: string, owner: string): Promise<BacklogClaim | null>;
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void>;
   setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void>;
+  createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord>;
+  getActiveRework(id: string): Promise<ReworkRecord | undefined>;
+  resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
   addTag(id: string, tag: string): Promise<void>;
   removeTag(id: string, tag: string): Promise<void>;
   initialize(): Promise<void>;
@@ -73,6 +81,7 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   readonly capabilities = { atomicClaim: true, tags: true, initialization: true } as const;
   private readonly items = new Map<string, BacklogItem>();
   private readonly owners = new Map<string, string>();
+  private readonly reworks = new Map<string, ReworkRecord[]>();
   private claimChain: Promise<void> = Promise.resolve();
 
   constructor(items: BacklogItem[] = []) {
@@ -102,7 +111,7 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     await previous;
     try {
       const item = await this.get(id);
-      if (item.state !== 'ready' || !(await this.isRunnable(item))) return null;
+      if ((item.state !== 'ready' && item.state !== 'rework') || !(await this.isRunnable(item))) return null;
       this.owners.set(id, owner);
       item.state = 'in_progress';
       this.items.set(id, item);
@@ -131,6 +140,38 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     this.items.set(id, item);
   }
 
+  async createRework(id: string, input: NewReworkRecord): Promise<ReworkRecord> {
+    const records = this.reworks.get(id) ?? [];
+    if (records.some(record => record.status === 'open')) throw new Error(`backlog ${id} already has an open rework record`);
+    const record: ReworkRecord = {
+      ...input,
+      version: 1,
+      id: `r${records.length + 1}`,
+      attempt: records.length + 1,
+      status: 'open',
+      createdAt: new Date().toISOString(),
+    };
+    records.push(record);
+    this.reworks.set(id, records);
+    await this.transition(id, 'rework');
+    await this.setExecutionMode(id, 'afk');
+    return { ...record, failedCriteria: [...record.failedCriteria], requiredChecks: [...record.requiredChecks] };
+  }
+
+  async getActiveRework(id: string): Promise<ReworkRecord | undefined> {
+    const record = (this.reworks.get(id) ?? []).find(candidate => candidate.status === 'open');
+    return record && { ...record, failedCriteria: [...record.failedCriteria], requiredChecks: [...record.requiredChecks] };
+  }
+
+  async resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void> {
+    const records = this.reworks.get(id) ?? [];
+    const record = records.find(candidate => candidate.id === reworkId);
+    if (!record || record.status !== 'open') throw new Error(`open rework record not found: ${reworkId}`);
+    record.status = 'resolved';
+    record.resolvedAt = new Date().toISOString();
+    record.resolutionSummary = resolution.summary;
+  }
+
   async addTag(id: string, tag: string): Promise<void> {
     tag = validateBusinessTag(tag);
     const item = await this.get(id);
@@ -149,9 +190,10 @@ export class InMemoryBacklogProvider implements BacklogProvider {
   }
 
   async isRunnable(item: BacklogItem): Promise<boolean> {
-    if (item.state !== 'ready' || item.executionMode !== 'afk') return false;
-    const children = [...this.items.values()].some(candidate => candidate.parentId === item.id);
-    if (children) return false;
+    if ((item.state !== 'ready' && item.state !== 'rework') || item.executionMode !== 'afk') return false;
+    const hasIncompleteChild = [...this.items.values()]
+      .some(candidate => candidate.parentId === item.id && candidate.state !== 'done');
+    if (hasIncompleteChild) return false;
     for (const dependencyId of item.dependsOn) {
       const dependency = this.items.get(dependencyId);
       if (!dependency || dependency.state !== 'done') return false;

@@ -92,6 +92,9 @@ export function AppContent({
     return raw.filter(item => {
       if ('title' in item && item.title?.toLowerCase().includes(query)) return true;
       if ('name' in item && item.name.toLowerCase().includes(query)) return true;
+      if ('description' in item && item.description?.toLowerCase().includes(query)) return true;
+      if ('id' in item && String(item.id).toLowerCase().includes(query)) return true;
+      if ('iid' in item && String(item.iid).toLowerCase().includes(query)) return true;
       if ('branch' in item && item.branch?.toLowerCase().includes(query)) return true;
       if ('branchName' in item && item.branchName.toLowerCase().includes(query)) return true;
       if ('tags' in item && item.tags.some(tag => tag.toLowerCase().includes(query))) return true;
@@ -137,7 +140,7 @@ export function AppContent({
       actions.toggleDebug();
       return;
     }
-    if (input === '/') {
+    if (input === 's' && !key.ctrl && !key.meta) {
       actions.enableSearch();
       return;
     }
@@ -230,7 +233,7 @@ export function AppContent({
           <Box height={1} flexShrink={0} paddingX={2}>
             {state.isSearchMode
               ? <Text color="cyan">filter · /{state.searchQuery}_ · {items.length} matches</Text>
-              : <Text dimColor>enter detail · / search</Text>}
+              : <Text dimColor>enter detail · s search</Text>}
           </Box>
           <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2}>
             {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}

@@ -106,6 +106,11 @@ export interface TrackedIssue {
   projectId: string;   // GitLab: path, GitHub: owner/repo
 }
 
+export interface TrackerIssueComment {
+  id: string;
+  body: string;
+}
+
 /**
  * Unified TrackedMR across platforms
  */
@@ -150,6 +155,8 @@ export interface TrackerProvider {
   addLabel(id: number, label: string): Promise<void>;
   removeLabel(id: number, label: string): Promise<void>;
   addComment(id: number, body: string): Promise<void>;
+  listIssueComments(id: number): Promise<TrackerIssueComment[]>;
+  updateIssueComment(id: number, commentId: string, body: string): Promise<void>;
   /**
    * Link source issue to target issue. For cross-project links, pass
    * `targetProjectId` (GitLab path or GitHub owner/repo). Without it, both

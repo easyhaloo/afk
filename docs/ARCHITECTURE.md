@@ -11,7 +11,7 @@ single source of truth for the supported surface:
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk run --backlog-id <id>` | Execute one claimed item |
-| `afk loop` | Repeated execution followed by QA and merge |
+| `afk loop` | Repeated implementation, baseline-aware QA, and conditional merge |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
 | `afk signal`, `afk tmux`, `afk board`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
@@ -41,17 +41,23 @@ exposes claiming and runnable checks.
 ## Backlog lifecycle
 
 ```text
-ready --claim--> in_progress --> verification --> merge_ready --> done
-   \                         \
-    \                         +--> blocked (execution mode: hitl)
-     +--> blocked (conflict, failure, timeout, or expired lease)
+ready/rework --claim--> in_progress --> verification --> merge_ready --> done
+       \                         \
+        \                         +--> rework + afk (diagnosable integration QA failure)
+         +--> blocked + hitl (conflict, timeout, transport failure, malformed result, or expired lease)
 ```
 
-An item is runnable only when it is in `ready`, uses the `afk` execution mode,
+An item is runnable only when it is in `ready` or `rework`, uses the `afk` execution mode,
 has no child items, and all `dependsOn` items are `done`. `parentId` groups
-child items; a parent itself is never runnable. Any automation failure,
-conflict, timeout, or uncertain lease recovery transitions the item to
-`blocked` and routes it to `hitl`.
+child items; a parent itself is never runnable. A complete implementation AC
+failure is corrected in the same branch and worktree, up to
+`AFK_MAX_SELF_ITERATIONS` (default 2), and creates no persistent record. A
+cross-process integration QA failure with a complete diagnosis appends a
+provider-backed `ReworkRecord`, sets `rework + afk`, and injects that record
+into the next run on the original branch. GitHub stores it as an Issue comment
+and GitLab as an Issue note. Records are append-only: QA PASS resolves the
+exact open record, and a later distinct failure creates the next one. Ambiguous
+results, conflicts, timeouts, and transport failures are `blocked + hitl`.
 
 ## Claim boundary and local fallback
 
@@ -86,17 +92,33 @@ sequenceDiagram
     R->>B: create branch/worktree
     R->>A: execute item
     A-->>R: completion signal
-    R->>C: create change request
     R->>P: transition verification
     R->>Q: verify item
-    Q->>C: merge change request
-    Q->>P: transition done
+    Q->>B: fetch latest baseline
+    Q->>B: merge feature into verification branch
+    Q->>A: run integration tests
+    alt diagnosable QA failure
+      Q->>P: append ReworkRecord and transition rework + afk
+      Note over P,R: Next AFK claim reuses original branch and record context
+    end
+    Q->>B: commit and push verification branch
+    Q->>C: create mergeable change request
+    alt child backlog
+      Q->>C: merge into parent branch
+      Q->>P: transition done
+    else root backlog
+      Q->>P: transition merge_ready + hitl
+      Note over Q,P: Human reviews and merges into main
+    end
     R->>P: release lease (resource scope)
 ```
 
 `afk loop` runs the same sequence repeatedly and invokes QA in-process. The
 standalone QA command uses the management bundle and cannot claim
-implementation work.
+implementation work. Implementation only pushes its feature branch; QA owns
+the latest-baseline merge, integration tests, commit, push, and mergeable change
+request. Child changes merge automatically into their parent branch, while a
+root change remains `merge_ready + hitl` until a human approves the main merge.
 
 ## Extension points
 
@@ -109,8 +131,9 @@ filesystem lease directory.
 
 ## Reliability rules
 
-- A failed transition, conflict, timeout, or expired lease is `blocked` plus
-  `hitl`; it is never silently retried as automatic work.
+- A failed transition, conflict, timeout, malformed result, transport failure,
+  or expired lease is `blocked + hitl`; only complete QA diagnoses enter
+  `rework + afk`.
 - Native claim is preferred; the filesystem fallback is deliberately scoped to
   a trusted local filesystem on one host.
 - Lease cleanup is lifecycle-owned and idempotent.

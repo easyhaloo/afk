@@ -115,21 +115,33 @@ export abstract class CliContainerProvider implements ContainerProvider {
     // `docker exec` returns the exec_id on stdout via --detach. For non-detached,
     // the command runs inline and we capture stdout/stderr + exit code.
     if (options.detach) {
-      const argv = [this.binary, 'exec', '-d', options.containerId, ...options.command];
-      const r = await this.run(argv);
+      const argv = this.buildExecArgs(options, true);
+      const r = await this.run(argv, { stdin: options.stdin });
       if (r.code !== 0) {
         throw new ContainerError(`exec failed: ${r.stderr}`, this.engine);
       }
       return { execId: r.stdout.trim() || '(detached)' };
     }
-    const argv = [this.binary, 'exec', options.containerId, ...options.command];
-    const r = await this.run(argv);
+    const argv = this.buildExecArgs(options, false);
+    const r = await this.run(argv, { stdin: options.stdin });
     return {
       execId: '(inline)',
       stdout: r.stdout,
       stderr: r.stderr,
       exitCode: r.code,
     };
+  }
+
+  private buildExecArgs(options: ContainerExecOptions, detach: boolean): string[] {
+    const argv = [this.binary, 'exec'];
+    if (detach) argv.push('-d');
+    if (options.stdin !== undefined) argv.push('-i');
+    if (options.workdir) argv.push('-w', options.workdir);
+    for (const [name, value] of Object.entries(options.env ?? {})) {
+      argv.push('-e', `${name}=${value}`);
+    }
+    argv.push(options.containerId, ...options.command);
+    return argv;
   }
 
   async killExec(_execId: string, _signal = 'SIGTERM'): Promise<void> {

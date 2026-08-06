@@ -33,6 +33,16 @@ describe('TrackerBacklogProvider', () => {
     expect(t.updateIssue).toHaveBeenCalledWith(42, { labels: ['team::api', 'stage::blocked', 'mode::hitl'] });
   });
 
+  it('preserves the execution mode when transitioning a non-blocked state', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'team::api'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.transition('42', 'verification');
+
+    expect(t.updateIssue).toHaveBeenCalledWith(42, { labels: ['team::api', 'stage::qa', 'mode::afk'] });
+  });
+
   it('returns null when a second claim observes in-progress state', async () => {
     const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: '' };
     const t = tracker(issue);

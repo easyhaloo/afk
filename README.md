@@ -32,7 +32,7 @@ See [Getting Started Guide](docs/GETTING-STARTED.md) for detailed setup.
 
 ## Install Claude Code Plugin (Optional)
 
-AFK provides a full Claude Code skill suite that can be integrated as a plugin (**v1.0.5**).
+AFK provides a full Claude Code skill suite that can be integrated as a plugin (**v1.0.6**).
 
 ### Method 1: In Claude Code Session (Recommended)
 
@@ -147,7 +147,7 @@ Full command reference: `afk --help`
 | `/afk-hand-off` | Work handoff | Transfer task to another developer |
 | `/afk-scheduler` | Background scheduling | Multiple issues with dependency-aware execution |
 | `/afk-skill-craft` | Skill authoring | Create, diagnose, or refactor skills |
-| `/software-complexity-governance` | Complexity & smells | Measure complexity, map smells, recommend refactorings |
+| `/software-complexity-governance` | Complexity governance | Metrics, smells, module/service boundaries, anti-CP reuse |
 | `/api-workflow` | API testing | Multi-step API chains with browser testing |
 | `/md-to-pdf` | Markdown to PDF | Export docs with Mermaid diagrams |
 | `/reasoning-guard` | Reasoning guard | Multi-turn reasoning degradation in coding agents |

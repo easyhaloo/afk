@@ -24,7 +24,7 @@ export function ListView<T>({
   const width = requestedWidth || process.stdout.columns || 80;
   if (items.length === 0) {
     return (
-      <Box width={width} justifyContent="center" alignItems="center" height="100%">
+      <Box width={width} height={viewportHeight} overflow="hidden" justifyContent="center" alignItems="center">
         <Text color="gray">  {emptyMessage}</Text>
       </Box>
     );
@@ -32,7 +32,7 @@ export function ListView<T>({
 
   const visible = items.slice(scrollOffset, scrollOffset + viewportHeight);
   return (
-    <Box flexDirection="column" width={width} alignItems="stretch">
+    <Box flexDirection="column" width={width} height={viewportHeight} overflow="hidden" alignItems="stretch">
       {visible.map((item, i) => {
         const index = scrollOffset + i;
         const node = render(item, index, index === selected);

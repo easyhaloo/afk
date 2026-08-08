@@ -12,6 +12,6 @@ export function getListViewportHeight(height: number, chrome: FixedChrome): numb
 export function getRowColumns(width: number): { summary: boolean; metadataWidth: number } {
   return {
     summary: width >= 80,
-    metadataWidth: width >= 120 ? 30 : 20,
+    metadataWidth: width >= 120 ? 24 : 18,
   };
 }

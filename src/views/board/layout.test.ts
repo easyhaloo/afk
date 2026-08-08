@@ -18,8 +18,8 @@ describe('getRowColumns', () => {
   });
 
   it('widens metadata at 120 columns', () => {
-    expect(getRowColumns(80).metadataWidth).toBe(20);
-    expect(getRowColumns(119).metadataWidth).toBe(20);
-    expect(getRowColumns(120).metadataWidth).toBe(30);
+    expect(getRowColumns(80).metadataWidth).toBe(18);
+    expect(getRowColumns(119).metadataWidth).toBe(18);
+    expect(getRowColumns(120).metadataWidth).toBe(24);
   });
 });

@@ -7,9 +7,10 @@ interface Props {
   tasksCount: number;
   backlogsCount: number;
   projectsCount: number;
+  width?: number;
 }
 
-export function Header({ view, tasksCount, backlogsCount, projectsCount }: Props) {
+export function Header({ view, tasksCount, backlogsCount, projectsCount, width }: Props) {
   const counts: Record<View, number> = {
     tasks: tasksCount,
     backlogs: backlogsCount,
@@ -24,21 +25,23 @@ export function Header({ view, tasksCount, backlogsCount, projectsCount }: Props
   ] as const;
 
   return (
-    <Box height={1} flexShrink={0} paddingX={2} backgroundColor="black" justifyContent="space-between">
-      <Text color="white"><Text bold>▸ AFK Dashboard</Text></Text>
-      <Text color="white">
-        {tabs.map(([key, name], index) => {
-          const active = view === name;
-          return (
-            <React.Fragment key={name}>
-              {index > 0 && <Text color="gray"> │ </Text>}
-              <Text bold={active} color={active ? 'cyan' : 'white'}>
-                {key} {name}{active ? ` ${counts[name]}` : ''}
-              </Text>
-            </React.Fragment>
-          );
-        })}
-      </Text>
+    <Box width={width} height={1} flexShrink={0} overflow="hidden" flexDirection="column" backgroundColor="black">
+      <Box height={1} paddingX={2} justifyContent="space-between" overflow="hidden">
+        <Text color="white" wrap="truncate"><Text bold>▸ AFK Dashboard</Text></Text>
+        <Text color="white" wrap="truncate">
+          {tabs.map(([key, name], index) => {
+            const active = view === name;
+            return (
+              <React.Fragment key={name}>
+                {index > 0 && <Text color="gray"> │ </Text>}
+                <Text bold={active} color={active ? 'cyan' : 'white'}>
+                  {key} {name}{active ? ` ${counts[name]}` : ''}
+                </Text>
+              </React.Fragment>
+            );
+          })}
+        </Text>
+      </Box>
     </Box>
   );
 }

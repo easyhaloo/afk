@@ -39,6 +39,8 @@ export function Footer({ view = 'tasks', detail = false, search = false }: Props
   const attachHint = view === 'tasks' ? ' · a attach (interactive)' : '';
   const shortcuts = detail
     ? `b/ESC back${openHint}${attachHint} · ? help`
+    : view === 'board'
+      ? `←→ lanes · ↑↓ cards · enter detail${openHint} · ${search ? 'esc finish search' : '/ search'} · ? help`
     : `↑↓ move · enter detail${openHint} · ${search ? 'esc finish search' : '/ search'} · ? help`;
   const columns = stdout.columns || process.stdout.columns || 80;
   const visiblePath = fitFooterPath(pathInfo, columns, `${shortcuts}${!detail ? attachHint : ''}`);

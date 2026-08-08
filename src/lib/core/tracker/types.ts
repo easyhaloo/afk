@@ -197,6 +197,8 @@ export interface TrackerProvider {
  */
 export interface Project {
   id: number;
+  /** Provider identity used by the multi-provider dashboard. */
+  platform?: 'github' | 'gitlab';
   name: string;
   path_with_namespace: string;
   description?: string;

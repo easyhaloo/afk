@@ -4,6 +4,7 @@ import type { Task, Project } from '../../../types/board';
 import type { Branch, Commit, Tag } from '../../../lib/core/tracker/types';
 import type { BacklogViewModel } from '../data/backlog-adapter';
 import { parseMarkdownLine } from '../utils';
+import { getExecutionModeColor, getExecutionModeIcon, getStatusColor, getStatusIcon } from './display';
 
 interface Props {
   item: Task | BacklogViewModel | Project | undefined;
@@ -59,13 +60,21 @@ function Field({ name, value, color = 'white' }: { name: string; value: string |
   return <Text color={color}>{`  ${name} · ${displayValue}`}</Text>;
 }
 
+function StatusField({ name, status }: { name: string; status: string }) {
+  return <Field name={name} value={getStatusIcon(status)} color={getStatusColor(status)} />;
+}
+
+function ExecutionModeField({ name, mode }: { name: string; mode: string }) {
+  return <Field name={name} value={getExecutionModeIcon(mode) ?? '•'} color={getExecutionModeColor(mode)} />;
+}
+
 function TaskDetail({ item }: { item: Task }) {
   return (
     <Group title="runtime">
       <Field name="run" value={item.runId} />
       <Field name="phase" value={item.phase} />
-      <Field name="status" value={item.status} />
-      <Field name="execution mode" value={item.executionMode} />
+      <StatusField name="status" status={item.status} />
+      <ExecutionModeField name="execution mode" mode={item.executionMode} />
       <Field name="sandbox" value={item.sandboxProvider} />
       <Field name="agent" value={item.agentProvider} />
       <Field name="session" value={item.session} />
@@ -83,8 +92,8 @@ function BacklogDetail({ item }: { item: BacklogViewModel }) {
     <>
       <Group title="identity">
         <Field name="title" value={item.title} />
-        <Field name="state" value={item.state} />
-        <Field name="executionMode" value={item.executionMode} />
+        <StatusField name="state" status={item.state} />
+        <ExecutionModeField name="executionMode" mode={item.executionMode} />
       </Group>
       <Group title="relationships">
         <Field name="parent" value={item.parentId} />

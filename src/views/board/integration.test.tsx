@@ -31,9 +31,11 @@ describe('backlog board integration', () => {
       <BoardView backlogs={backlogs} selectedIndex={0} scrollOffset={0} viewportHeight={10} width={120} />,
     );
 
-    expect(output).toContain('verification');
-    expect(output).toContain('hitl');
-    expect(output).toContain('backlog 42');
+    expect(output).toContain('flow');
+    expect(output).toContain('◌');
+    expect(output).toContain('◇');
+    expect(output).toContain('#42');
+    expect(output).toContain('Verify release');
     expect(claim).not.toHaveBeenCalled();
     expect(transition).not.toHaveBeenCalled();
     expect(addTag).not.toHaveBeenCalled();

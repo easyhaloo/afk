@@ -20,6 +20,7 @@ export interface Task {
 
 export interface Project {
   id: number;
+  platform?: 'github' | 'gitlab';
   name: string;
   path_with_namespace: string;
   description?: string;

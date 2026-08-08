@@ -6,6 +6,7 @@ export { HelpDialog } from './HelpDialog';
 export { DebugOverlay } from './DebugOverlay';
 export { Header } from './Header';
 export { Footer } from './Footer';
+export { Body, getBodyViewportHeight } from './Body';
 export { Notification } from './Notification';
 export { ListView } from './ListView';
 export { OperationalRow } from './OperationalRow';

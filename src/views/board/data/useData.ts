@@ -23,6 +23,7 @@ import {
   type BacklogViewModel,
   type TuiManagementProviderBundle,
 } from './backlog-adapter';
+import { projectDetailKey } from './fetcher';
 
 const PER_PAGE = 50;
 const DETAIL_TTL_MS = 60_000;
@@ -52,8 +53,8 @@ export function useData(
   const [projectHasMore, setProjectHasMore] = useState(false);
 
   const projectPage = useRef(1);
-  const detailCacheRef = useRef<Map<number, { at: number; data: Awaited<ReturnType<typeof fetchProjectDetail>> }>>(new Map());
-  const detailInFlightRef = useRef<Map<number, Promise<Awaited<ReturnType<typeof fetchProjectDetail>>>>>(new Map());
+  const detailCacheRef = useRef<Map<string, { at: number; data: Awaited<ReturnType<typeof fetchProjectDetail>> }>>(new Map());
+  const detailInFlightRef = useRef<Map<string, Promise<Awaited<ReturnType<typeof fetchProjectDetail>>>>>(new Map());
 
   const reloadTasks = useCallback(async () => {
     const data = await fetchTasks();
@@ -107,39 +108,40 @@ export function useData(
   }, [currentView, projects.length]);
 
   const loadProjectDetail = useCallback(async (project: Project) => {
-    const memCached = detailCacheRef.current.get(project.id);
+    const cacheKey = projectDetailKey(project);
+    const memCached = detailCacheRef.current.get(cacheKey);
     if (memCached && Date.now() - memCached.at < DETAIL_TTL_MS) {
       setProjectBranches(memCached.data.branches);
       setProjectTags(memCached.data.tags);
       setProjectCommits(memCached.data.commits);
       return;
     }
-    const diskCached = readDetail(project.id);
+    const diskCached = readDetail(cacheKey);
     if (diskCached) {
       setProjectBranches(diskCached.branches as Branch[]);
       setProjectTags(diskCached.tags as Tag[]);
       setProjectCommits(diskCached.commits as Commit[]);
-      detailCacheRef.current.set(project.id, { at: Date.now(), data: diskCached });
+      detailCacheRef.current.set(cacheKey, { at: Date.now(), data: diskCached });
       return;
     }
-    let request = detailInFlightRef.current.get(project.id);
+    let request = detailInFlightRef.current.get(cacheKey);
     if (!request) {
-      request = fetchProjectDetail(project.id);
-      detailInFlightRef.current.set(project.id, request);
+      request = fetchProjectDetail(project);
+      detailInFlightRef.current.set(cacheKey, request);
     }
     try {
       const detail = await request;
-      detailCacheRef.current.set(project.id, { at: Date.now(), data: detail });
-      writeDetail(project.id, detail.branches, detail.tags, detail.commits);
+      detailCacheRef.current.set(cacheKey, { at: Date.now(), data: detail });
+      writeDetail(cacheKey, detail.branches, detail.tags, detail.commits);
       setProjectBranches(detail.branches);
       setProjectTags(detail.tags);
       setProjectCommits(detail.commits);
     } catch (err) {
       // Detail data is supplementary; an unavailable provider must not bring
       // down the interactive dashboard or leave an unhandled rejection.
-      fileLogger.warn({ err, projectId: project.id }, 'failed to load project detail');
+      fileLogger.warn({ err, projectId: project.id, platform: project.platform }, 'failed to load project detail');
     } finally {
-      detailInFlightRef.current.delete(project.id);
+      detailInFlightRef.current.delete(cacheKey);
     }
   }, []);
 

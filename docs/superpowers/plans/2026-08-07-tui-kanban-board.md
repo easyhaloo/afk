@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the flat Board list with a responsive, read-only Kanban that exposes all seven backlog lifecycle lanes and supports lane-aware keyboard navigation.
+**Goal:** Replace the flat Board list with a responsive, read-only Kanban that exposes a four-stage primary pipeline, an exception queue, and a Done archive with lane-aware keyboard navigation.
 
-**Architecture:** Add a pure board model for lane order, grouping, responsive lane windows, and selection targets. Keep provider data unchanged; `AppContent` adapts board key events to the model, while `BoardView` renders lane headers and fixed-height cards inside the existing fixed Header/Context/Viewport/Footer shell. Use the selected backlog to determine the focused lane; empty lanes remain visible but are skipped by lateral navigation.
+**Architecture:** Add a pure board model for state grouping, four primary lanes, a conditional Attention column, a Done archive column, responsive windows, and selection targets. Keep provider data unchanged; `AppContent` adapts board key events to the model, while `BoardView` renders named flow summaries, icon-based lane headers, and fixed-height cards inside the existing Header/Context/Viewport/Footer shell. Backlog list rows use the same icon vocabulary but defer parent, dependency, and tag metadata to details.
 
 **Tech Stack:** TypeScript, React 19, Ink 7, Vitest, node-pty PTY tests.
 
@@ -14,13 +14,13 @@
 
 - Create `src/views/board/board/model.ts`: canonical seven-lane order, grouping, responsive lane-window calculation, and board selection navigation.
 - Create `src/views/board/board/model.test.ts`: pure model tests for state mapping, counts, windows, and navigation.
-- Create `src/views/board/board/BoardCard.tsx`: three-row read-only backlog card with visual-width-safe truncation.
-- Create `src/views/board/board/BoardLane.tsx`: lane heading, count, divider, and clipped card stack.
+- Create `src/views/board/board/BoardCard.tsx`: two-row read-only backlog card with visual-width-safe truncation.
+- Create `src/views/board/board/BoardLane.tsx`: icon lane heading, count, divider, and clipped card stack.
 - Modify `src/views/board/board/BoardView.tsx`: render grouped lanes, selected card, responsive lane window, pipeline strip, and empty state.
 - Modify `src/views/board/board/BoardView.test.tsx`: render lanes/cards at compact, medium, and wide widths and verify viewport clipping.
 - Modify `src/views/board/layout.ts`: expose board layout thresholds and lane width calculations without changing list layout behavior.
 - Modify `src/views/app/AppContent.tsx`: use board model navigation for arrow/g/G keys and pass board selection context to `BoardView`; retain existing navigation for Tasks, Backlogs, and Projects.
-- Modify `tests/e2e/dashboard-layout.test.ts`: assert all lane headings, board card rendering, board keyboard navigation, detail entry, and fixed Header/Footer under PTY.
+- Modify `tests/e2e/dashboard-layout.test.ts`: assert the icon/count pipeline strip, board card rendering, board keyboard navigation, detail entry, and fixed Header/Footer under PTY.
 
 ### Task 1: Define the Pure Board Model
 
@@ -28,15 +28,14 @@
 - Create: `src/views/board/board/model.ts`
 - Test: `src/views/board/board/model.test.ts`
 
-- [ ] **Step 1: Write failing tests for lane order and grouping**
+- [ ] **Step 1: Write failing tests for state grouping and column composition**
 
-Create fixtures covering one item in every `BacklogState`, then assert:
+Create fixtures covering one item in every `BacklogState`, then assert the four primary columns, one combined Attention column, and one Done archive column:
 
 ```ts
-expect(BOARD_LANES.map(lane => lane.state)).toEqual([
-  'ready', 'in_progress', 'verification', 'merge_ready', 'rework', 'blocked', 'done',
+expect(getBoardColumns(groupBacklogsByState(items)).map(column => column.key)).toEqual([
+  'ready', 'in_progress', 'verification', 'merge_ready', 'attention', 'done',
 ]);
-expect(groupBacklogsByState(items).map(lane => lane.items.length)).toEqual([1, 1, 1, 1, 1, 1, 1]);
 ```
 
 Also assert an empty input still returns seven lanes with zero counts and that grouping preserves input order inside each lane.
@@ -83,7 +82,7 @@ Use a `Map` keyed by state and iterate `BOARD_LANES` so the function always emit
 Test:
 
 ```ts
-expect(getBoardLayout(160)).toMatchObject({ visibleLaneCount: 7 });
+expect(getBoardLayout(160)).toMatchObject({ visibleLaneCount: 4 });
 expect(getBoardLayout(120)).toMatchObject({ visibleLaneCount: 3 });
 expect(getBoardLayout(80)).toMatchObject({ visibleLaneCount: 1 });
 expect(getBoardVisibleLaneIndexes(3, 7, 3)).toEqual([2, 3, 4]);
@@ -96,7 +95,7 @@ For navigation, use lane fixtures with two cards in `ready`, one in `verificatio
 Export:
 
 ```ts
-export interface BoardLayout { visibleLaneCount: 1 | 3 | 7; laneWidth: number; compact: boolean; }
+export interface BoardLayout { visibleLaneCount: 1 | 3 | 4; laneWidth: number; compact: boolean; }
 export function getBoardLayout(width: number): BoardLayout;
 export function getBoardVisibleLaneIndexes(focusedLane: number, laneCount: number, visibleLaneCount: number): number[];
 export function getBoardSelectionTarget(
@@ -130,7 +129,7 @@ git commit -m "feat(tui): add kanban board model"
 
 - [ ] **Step 1: Write failing card/lane rendering tests**
 
-Add tests asserting a card contains the backlog ID, execution mode, title, and compact parent/dependency text but excludes the full description and provider URL. Assert a lane renders its state label and count, and that the lane body never exceeds the supplied height.
+Add tests asserting a card contains the backlog ID, execution mode icon, and title but excludes the full description and provider URL. Assert a lane renders its state icon and count, and that the lane body never exceeds the supplied height.
 
 - [ ] **Step 2: Run focused tests to verify failure**
 
@@ -144,13 +143,12 @@ Expected: FAIL because `BoardCard` and `BoardLane` are not present and `BoardVie
 
 - [ ] **Step 3: Implement `BoardCard`**
 
-Render a fixed three-row box with `overflow="hidden"`:
+Render a fixed two-row box with `overflow="hidden"`:
 
 ```tsx
 <Box flexDirection="column" height={3} overflow="hidden">
   <Text>{selected ? '▶ ' : '  '}#{backlog.id} · {backlog.executionMode}</Text>
   <Text wrap="truncate">  {truncateByVisualWidth(backlog.title, Math.max(1, width - 2))}</Text>
-  <Text dimColor wrap="truncate">  parent {backlog.parentId || '-'} · deps {backlog.dependsOn.length}</Text>
 </Box>
 ```
 
@@ -158,7 +156,7 @@ Use existing state colors and visual-width truncation helpers. Do not introduce 
 
 - [ ] **Step 4: Implement `BoardLane`**
 
-Render a fixed-width column with a one-row heading (`label · count`), one divider row, and a clipped card stack. Slice cards to the available height after the two heading rows. Highlight the selected lane/card without changing row height.
+Render a fixed-width column with a one-row colored icon/count heading, one divider row, and a clipped card stack. Slice cards to the available height after the two heading rows. Highlight the selected lane/card without changing row height.
 
 - [ ] **Step 5: Run focused tests and commit**
 
@@ -187,13 +185,13 @@ git commit -m "feat(tui): render kanban cards and lanes"
 Build fixtures across all seven states and assert:
 
 ```ts
-expect(renderToString(<BoardView ... width={160} />)).toContain('Ready · 1');
-expect(renderToString(<BoardView ... width={160} />)).toContain('Done · 1');
+expect(renderToString(<BoardView ... width={160} />)).toContain('○1');
+expect(renderToString(<BoardView ... width={160} />)).toContain('✓1');
 expect(renderToString(<BoardView ... width={120} />)).toContain('pipeline');
 expect(renderToString(<BoardView ... width={80} />)).toContain('ready');
 ```
 
-Assert wide output has all seven lane labels, medium output has exactly three lane columns plus pipeline strip, and compact output has one focused lane plus the strip. Assert a long card list is clipped to the allocated viewport.
+Assert wide output has the four primary columns, medium output has exactly three lane columns plus pipeline strip, and compact output has one focused lane plus the strip. Assert a long card list is clipped to the allocated viewport.
 
 - [ ] **Step 2: Run tests and verify the old Board fails**
 
@@ -321,7 +319,7 @@ Expected: no failed tests, no TypeScript errors, successful build, and no whites
 Confirm manually in a real terminal at 80, 120, and 160 columns:
 
 - Header and Footer remain visible with many cards.
-- Wide screens show all seven lanes; medium screens show three; narrow screens show one plus the pipeline strip.
+- Wide screens show four primary lanes; medium screens show three; narrow screens show one plus the pipeline strip.
 - Empty lanes remain visible, while left/right skips them.
 - Card selection, detail entry, browser opening, search, `b/ESC`, and global `q` behave as specified.
 - No Board key path invokes provider mutation or execution services.

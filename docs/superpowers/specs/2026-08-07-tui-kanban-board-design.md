@@ -9,18 +9,26 @@ opening, and global dashboard chrome.
 
 ## Scope
 
-The Board renders seven fixed lifecycle lanes in this order:
+The Board renders four primary lifecycle lanes in this order:
 
 ```text
-Ready -> In Progress -> Verification -> Merge Ready -> Rework -> Blocked -> Done
+Ready -> In Progress -> Verification -> Merge Ready
 ```
 
-Every `BacklogState` maps directly to one lane. Lanes are always visible,
-including empty lanes, so the lifecycle remains understandable and state
-counts can be compared without changing filters.
+`Rework` and `Blocked` are combined into a conditional `Attention` column,
+with red/yellow card-level distinction. `Done` is a conditional archive
+column. Both remain reachable through left/right navigation and are shown in
+the global status strip, but do not consume normal pipeline width when they
+are empty or not focused.
 
 The TUI remains read-only. It does not claim work, transition backlog state,
 change execution mode, mutate labels, or merge changes.
+
+All lifecycle and execution-mode values use a compact colored icon vocabulary.
+The Board owns a named flow summary (`Ready`, `Processing`, `Verification`,
+`Merge`, `Attention`, and `Done`) so the workflow remains readable without
+requiring a separate legend row. On narrow terminals the summary switches to
+short labels to keep Attention and Done counts visible.
 
 ## Layout
 
@@ -33,15 +41,16 @@ Kanban viewport
 Footer
 ```
 
-Within the viewport, each lane has:
+Within the viewport, each primary lane has:
 
-1. A lifecycle label and item count.
+1. A colored lifecycle icon and item count.
 2. A restrained divider.
-3. Three-row backlog cards: ID/state line, truncated title, and relationship/mode line.
+3. Two-row backlog cards: icon/state line and truncated title. Parent and
+   dependency details are intentionally deferred to the detail subview.
 
 A card contains the backlog ID, a visual-width-truncated title, execution
-mode, and compact relationship information (`parent`, dependency count). The
-full description, branch, provider reference, tags, and URL stay in the
+mode. The full description, parent, dependencies, branch, provider reference,
+tags, and URL stay in the
 existing detail subview.
 
 The selected card has a stable marker and high-contrast state treatment. A
@@ -54,13 +63,15 @@ The Kanban view uses lane windows instead of rendering unusably narrow cards.
 
 | Terminal width | Visible lanes | Behavior |
 | --- | --- | --- |
-| `>= 154` | All seven | Equal-width lanes shown in parallel. |
+| `>= 154` | Four primary lanes | Equal-width core pipeline lanes shown in parallel. |
 | `100-153` | Three | Focused lane plus immediate neighbors; left/right shifts the window. |
 | `< 100` | One | Focused lane fills the viewport; a compact pipeline strip shows every lane and count. |
 
-The focused lane is derived from the selected backlog. Empty lanes remain
-visible for lifecycle context but are skipped by left/right navigation; this
-avoids introducing a second, independent lane-focus state into the app.
+The focused lane is derived from the selected backlog. Empty primary lanes
+remain visible for lifecycle context but are skipped by left/right navigation.
+When an Attention or Done item is selected, that auxiliary column expands to
+the full board width so it can be inspected without reserving a permanent
+empty column.
 
 ## Navigation
 
@@ -87,12 +98,12 @@ Introduce a small pure board model alongside `BoardView`:
 ```text
 BacklogViewModel[]
   -> groupBacklogsByState()
-  -> BoardLane[]
+  -> BoardColumn[]
   -> BoardView / BoardCard
 ```
 
-The model owns lane order, grouping, visible-lane-window calculation, and
-selection navigation targets. `AppContent` delegates arrow and home/end keys
+The model owns state grouping, primary/auxiliary column composition,
+visible-lane-window calculation, and selection navigation targets. `AppContent` delegates arrow and home/end keys
 to these pure helpers only while `currentView === 'board'`; Tasks, Backlogs,
 and Projects retain their existing list navigation.
 
@@ -104,7 +115,7 @@ state or writable capabilities to the view.
 ## Errors and Empty States
 
 When no backlogs match, the viewport displays `no matching backlogs` while
-retaining the pipeline strip and seven lane headings. Missing optional parent
+retaining the pipeline strip. Missing optional parent
 or dependency data uses the existing compact placeholder. Provider failures
 remain owned by the data hook and surface through the existing notification
 path.
@@ -113,10 +124,10 @@ path.
 
 Automated coverage must include:
 
-- direct mapping of all seven states to fixed lanes and counts;
+- direct mapping of all seven states to primary, Attention, and Done columns;
 - selected-card movement within a lane and across lanes;
 - compact, medium, and wide lane-window calculations;
-- card title truncation and relationship summaries;
+- card title truncation and auxiliary-state summaries;
 - `Enter`, `o`, search, `b`/`Esc`, and global `q` regressions;
 - real PTY rendering at 80, 120, and 160 columns, proving Header/Footer stay
   visible and cards do not escape the board viewport.

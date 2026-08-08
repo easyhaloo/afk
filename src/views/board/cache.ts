@@ -91,14 +91,14 @@ export function writeProjectsList(items: any[], hasMore: boolean): void {
   flush();
 }
 
-export function readDetail(projectId: number): DetailEntry | null {
+export function readDetail(projectId: string | number): DetailEntry | null {
   const c = load();
   const entry = c.detail[String(projectId)];
   if (!entry || Date.now() - entry.fetchedAt > DETAIL_TTL_MS) return null;
   return entry;
 }
 
-export function writeDetail(projectId: number, branches: any[], tags: any[], commits: any[]): void {
+export function writeDetail(projectId: string | number, branches: any[], tags: any[], commits: any[]): void {
   load();
   if (!mem) return;
   mem.detail[String(projectId)] = { branches, tags, commits, fetchedAt: Date.now() };

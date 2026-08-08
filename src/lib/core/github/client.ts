@@ -374,6 +374,7 @@ export class GitHubClient implements TrackerProvider {
     const { data } = await oct.repos.get({ owner, repo });
     return [{
       id: data.id,
+      platform: 'github',
       name: data.name,
       path_with_namespace: data.full_name,
       description: data.description || undefined,

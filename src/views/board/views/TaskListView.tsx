@@ -3,6 +3,7 @@ import { Task } from '../../../types/board';
 import { ListView, normalizeRowText } from './ListView';
 import { formatRelativeTime } from '../utils';
 import { OperationalRow } from './OperationalRow';
+import { getStatusColor } from './display';
 
 interface Props {
   tasks: Task[];
@@ -41,7 +42,7 @@ export function TaskListView({ tasks, selected, scrollOffset, viewportHeight, wi
             width={width}
             selected={isSelected}
             status={task.status}
-            statusColor={isSelected ? 'white' : 'gray'}
+            statusColor={isSelected ? 'white' : getStatusColor(task.status)}
             mode={task.executionMode}
             id={task.iid}
             title={normalizeRowText(task.title || task.branch || '') || 'untitled task'}

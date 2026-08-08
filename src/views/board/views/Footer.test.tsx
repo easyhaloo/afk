@@ -31,6 +31,14 @@ describe('Footer', () => {
     expect(output).toContain('? help');
   });
 
+  it('shows lane-aware navigation on the board', () => {
+    const output = renderToString(<Footer view="board" detail={false} search={false} />);
+
+    expect(output).toContain('←→ lanes');
+    expect(output).toContain('↑↓ cards');
+    expect(output).toContain('enter detail');
+  });
+
   it('replaces the search hint while search mode is active', () => {
     const output = renderToString(<Footer view="projects" detail={false} search />);
 

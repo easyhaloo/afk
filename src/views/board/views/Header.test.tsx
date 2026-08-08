@@ -23,4 +23,14 @@ describe('Header', () => {
     expect(output).toContain('3 projects 2');
     expect(output).not.toContain('1 tasks 1');
   });
+
+  it('keeps board chrome to one row because flow states belong to the board', () => {
+    const output = renderToString(
+      <Header view="board" tasksCount={1} backlogsCount={4} projectsCount={2} width={120} />,
+    );
+
+    expect(output.trimEnd().split('\n')).toHaveLength(1);
+    expect(output).toContain('4 board 4');
+    expect(output).not.toContain('ready');
+  });
 });

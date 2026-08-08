@@ -13,24 +13,26 @@ const baseProps = {
 };
 
 describe('OperationalRow', () => {
-  it('renders only status, mode, and title at compact widths', () => {
+  it('renders only colored status/mode icons and title at compact widths', () => {
     const output = renderToString(
       <OperationalRow {...baseProps} width={79} selected title="修复中文显示宽度" />,
     );
 
-    expect(output).toContain('ready');
-    expect(output).toContain('afk');
+    expect(output).toContain('○');
+    expect(output).toContain('⚙');
+    expect(output).not.toContain('ready');
+    expect(output).not.toContain('afk');
     expect(output).toContain('修复中文显示宽度');
     expect(output).not.toContain('depends 7');
   });
 
   it('truncates CJK titles by visual width', () => {
     const output = renderToString(
-      <OperationalRow {...baseProps} width={32} selected title="修复中文显示宽度问题" />,
+        <OperationalRow {...baseProps} width={32} selected title="修复中文显示宽度问题以及更多内容" />,
     );
 
-    expect(output).toContain('修复中文显…');
-    expect(output).not.toContain('修复中文显示宽度问题');
+    expect(output).toContain('修复中文显示宽度问题…');
+    expect(output).not.toContain('修复中文显示宽度问题以及更多内容');
   });
 
   it('uses a fixed-width selected marker', () => {
@@ -39,16 +41,16 @@ describe('OperationalRow', () => {
 
     expect(selected).toContain('▶ ');
     expect(unselected).toContain('  ');
-    expect(selected.indexOf('[ready]')).toBe(2);
-    expect(unselected.indexOf('[ready]')).toBe(2);
+    expect(selected.indexOf('○')).toBe(2);
+    expect(unselected.indexOf('○')).toBe(2);
   });
 
   it('allocates the same title width for selected and unselected symbols', () => {
     const selected = renderToString(
-      <OperationalRow {...baseProps} width={32} selected title="修复中文显示宽度问题" />,
+      <OperationalRow {...baseProps} width={32} selected title="修复中文显示宽度问题以及更多内容" />,
     );
     const unselected = renderToString(
-      <OperationalRow {...baseProps} width={32} selected={false} title="修复中文显示宽度问题" />,
+      <OperationalRow {...baseProps} width={32} selected={false} title="修复中文显示宽度问题以及更多内容" />,
     );
 
     expect(selected.replace('▶ ', '  ')).toBe(unselected);
@@ -64,8 +66,22 @@ describe('OperationalRow', () => {
       />,
     );
 
-    expect(output).toContain(' · parent 10 · depends…');
+    expect(output).toContain(' · parent 10 · depen…');
     expect(output).not.toContain('labels team:platform');
+  });
+
+  it('preserves the title before allocating tail metadata', () => {
+    const output = renderToString(
+      <OperationalRow
+        {...baseProps}
+        width={120}
+        selected={false}
+        title="Keep the primary backlog title readable"
+        summary="parent 10 · depends 7 · labels team:platform"
+      />,
+    );
+
+    expect(output).toContain('Keep the primary backlog title readable');
   });
 
   it('keeps a narrow row on one line', () => {
@@ -88,7 +104,7 @@ describe('OperationalRow', () => {
     const output = renderToString(
       <OperationalRow
         {...baseProps}
-        width={13}
+        width={7}
         selected
         status="r"
         mode="m"

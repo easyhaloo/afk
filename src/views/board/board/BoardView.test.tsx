@@ -6,6 +6,7 @@ import type { BacklogViewModel } from '../data/backlog-adapter';
 import { BacklogListView } from '../views/BacklogListView';
 import { ProjectListView } from '../views/ProjectListView';
 import { BacklogRow } from '../views/BacklogRow';
+import { TaskListView } from '../views/TaskListView';
 
 const backlog: BacklogViewModel = {
   id: '42',
@@ -33,8 +34,10 @@ describe('BoardView', () => {
       />,
     );
 
-    expect(output).toContain('[verification]');
-    expect(output).toContain('(hitl)');
+    expect(output).toContain('◌');
+    expect(output).toContain('◇');
+    expect(output).not.toContain('[verification]');
+    expect(output).not.toContain('(hitl)');
     expect(output).not.toContain(backlog.description);
   });
 
@@ -43,7 +46,29 @@ describe('BoardView', () => {
       <BacklogRow backlog={backlog} selected width={120} />,
     );
 
-    expect(output).toContain('parent 10 · depends 1');
+    expect(output).toContain('Fix API');
+    expect(output).not.toContain('backlog 42');
+    expect(output).not.toContain('parent 10');
+  });
+
+  it('uses compact icons rather than raw runtime state and mode text', () => {
+    const output = renderToString(
+      <TaskListView
+        tasks={[{
+          iid: '7', runId: 'run-7', title: 'Apply the selected backlog', phase: 'implementing',
+          executionMode: 'batch', sandboxProvider: 'local', agentProvider: 'claude-code', status: 'active',
+        }]}
+        selected={0}
+        scrollOffset={0}
+        viewportHeight={10}
+        width={100}
+      />,
+    );
+
+    expect(output).toContain('●');
+    expect(output).toContain('⚙');
+    expect(output).not.toContain('active');
+    expect(output).not.toContain('batch');
   });
 
   it('keeps a project title visible when its branch is very long', () => {
@@ -88,7 +113,7 @@ describe('BoardView', () => {
     expect(output).toContain('Project Dashboard');
   });
 
-  it('renders canonical backlog state and execution mode', () => {
+  it('renders the kanban pipeline and selected card', () => {
     const output = renderToString(
       <BoardView
         backlogs={[backlog]}
@@ -99,23 +124,75 @@ describe('BoardView', () => {
       />,
     );
 
-    expect(output).toContain('verification');
-    expect(output).toContain('hitl');
-    expect(output).toContain('backlog 42');
+    expect(output).toContain('flow');
+    expect(output).toContain('◌');
+    expect(output).toContain('◇');
+    expect(output).toContain('#42');
+    expect(output).toContain('Fix API');
   });
 
-  it('does not render a preview panel in the board subview', () => {
+  it('renders named flow columns and persistent auxiliary summaries', () => {
+    const allStates = [
+      { ...backlog, id: 'ready', state: 'ready' as const },
+      { ...backlog, id: 'processing', state: 'in_progress' as const },
+      { ...backlog, id: 'merge', state: 'merge_ready' as const },
+      { ...backlog, id: 'blocked', state: 'blocked' as const },
+      { ...backlog, id: 'rework', state: 'rework' as const },
+      { ...backlog, id: 'done', state: 'done' as const },
+      backlog,
+    ];
     const output = renderToString(
       <BoardView
-        backlogs={[backlog]}
-        selectedIndex={0}
+        backlogs={allStates}
+        selectedIndex={6}
         scrollOffset={0}
         viewportHeight={10}
         width={160}
       />,
     );
 
-    expect(output).toContain('backlog 42');
-    expect(output).not.toContain('preview');
+    expect(output).toContain('Ready 1');
+    expect(output).toContain('Processing 1');
+    expect(output).toContain('Verification 1');
+    expect(output).toContain('Merge 1');
+    expect(output).toContain('Attention 2');
+    expect(output).toContain('Done 1');
+  });
+
+  it('uses compact labels to keep auxiliary counts visible on narrow terminals', () => {
+    const output = renderToString(
+      <BoardView
+        backlogs={[
+          { ...backlog, id: 'ready', state: 'ready' as const },
+          { ...backlog, id: 'processing', state: 'in_progress' as const },
+          { ...backlog, id: 'merge', state: 'merge_ready' as const },
+          { ...backlog, id: 'blocked', state: 'blocked' as const },
+          { ...backlog, id: 'rework', state: 'rework' as const },
+          { ...backlog, id: 'done', state: 'done' as const },
+          backlog,
+        ]}
+        selectedIndex={0}
+        scrollOffset={0}
+        viewportHeight={8}
+        width={80}
+      />,
+    );
+
+    expect(output).toContain('Alert 2');
+    expect(output).toContain('Done 1');
+  });
+
+  it('clips board rows to the allocated viewport', () => {
+    const output = renderToString(
+      <BoardView
+        backlogs={[backlog]}
+        selectedIndex={0}
+        scrollOffset={0}
+        viewportHeight={2}
+        width={120}
+      />,
+    );
+
+    expect(output.trim().split('\n')).toHaveLength(2);
   });
 });

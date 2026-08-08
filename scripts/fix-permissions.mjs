@@ -14,6 +14,30 @@ if (!fs.existsSync(nodeModules)) {
   process.exit(0);
 }
 
+function ensureNodePtyHelperExecutable() {
+  if (process.platform === 'win32') return;
+
+  const candidates = [
+    path.join(nodeModules, 'node-pty', 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'),
+    path.join(nodeModules, 'node-pty', 'build', 'Release', 'spawn-helper'),
+  ];
+
+  for (const helperPath of candidates) {
+    if (!fs.existsSync(helperPath)) continue;
+    try {
+      const mode = fs.statSync(helperPath).mode;
+      if ((mode & 0o111) === 0) {
+        fs.chmodSync(helperPath, mode | 0o755);
+        console.log(`[fix-permissions] enabled node-pty spawn helper: ${helperPath}`);
+      }
+    } catch (err) {
+      console.warn(`[fix-permissions] Could not enable node-pty spawn helper: ${err.message}`);
+    }
+  }
+}
+
+ensureNodePtyHelperExecutable();
+
 const currentUser = process.env.SUDO_USER || process.env.USER || execSync('whoami', { encoding: 'utf-8' }).trim();
 
 try {

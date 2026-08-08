@@ -2,6 +2,7 @@ import React from 'react';
 import type { BacklogViewModel } from '../data/backlog-adapter';
 import { normalizeRowText } from './ListView';
 import { OperationalRow } from './OperationalRow';
+import { getStatusColor } from './display';
 
 export interface BacklogRowProps {
   backlog: BacklogViewModel;
@@ -10,21 +11,10 @@ export interface BacklogRowProps {
 }
 
 export function backlogStateColor(state: BacklogViewModel['state']): string {
-  if (state === 'blocked') return 'red';
-  if (state === 'in_progress') return 'yellow';
-  if (state === 'verification') return 'magenta';
-  if (state === 'merge_ready') return 'blue';
-  if (state === 'done') return 'green';
-  return 'cyan';
+  return getStatusColor(state);
 }
 
 export function BacklogRow({ backlog, selected, width }: BacklogRowProps) {
-  const summary = [
-    `parent ${normalizeRowText(backlog.parentId || '') || '-'}`,
-    `depends ${backlog.dependsOn.length}`,
-    backlog.tags.map(normalizeRowText).filter(Boolean).join(', ') || '-',
-  ].join(' · ');
-
   return (
     <OperationalRow
       width={width}
@@ -33,8 +23,7 @@ export function BacklogRow({ backlog, selected, width }: BacklogRowProps) {
       statusColor={selected ? 'white' : backlogStateColor(backlog.state)}
       mode={backlog.executionMode}
       id={backlog.id}
-      title={`backlog ${backlog.id} · ${normalizeRowText(backlog.title)}`}
-      summary={summary}
+      title={normalizeRowText(backlog.title)}
     />
   );
 }

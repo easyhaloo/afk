@@ -8,8 +8,8 @@ const backlog: BacklogViewModel = {
   id: 'BL-42',
   title: 'Ship the operational detail view',
   description: '## Acceptance\n\n- **compact** metadata',
-  state: 'open',
-  executionMode: 'serial',
+  state: 'ready',
+  executionMode: 'afk',
   parentId: 'BL-1',
   dependsOn: ['BL-7'],
   tags: ['tui', 'ops'],
@@ -25,8 +25,10 @@ describe('DetailScreen', () => {
     );
 
     expect(output).toContain('Ship the operational detail view');
-    expect(output).toContain('state · open');
-    expect(output).toContain('executionMode · serial');
+    expect(output).toContain('state · ○');
+    expect(output).toContain('executionMode · ⚙');
+    expect(output).not.toContain('state · ready');
+    expect(output).not.toContain('executionMode · afk');
     expect(output).toContain('parent · BL-1');
     expect(output).toContain('dependsOn · BL-7');
     expect(output).toContain('tags · tui, ops');
@@ -47,9 +49,11 @@ describe('DetailScreen', () => {
     const task = { iid: '7', runId: 'run-7', title: 'Run task', status: 'active' as const, phase: 'implementing' as const, executionMode: 'batch' as const, sandboxProvider: 'local', agentProvider: 'claude-code', branch: 'main', progress: '50%', worktree: '/tmp/afk-7', diagnosticPath: '/tmp/afk-7/.afk/runs/run-7' };
     const output = renderToString(<DetailScreen item={task} view="tasks" height={24} width={80} />);
 
-    expect(output.indexOf('phase · implementing')).toBeLessThan(output.indexOf('status · active'));
-    expect(output.indexOf('status · active')).toBeLessThan(output.indexOf('execution mode · batch'));
-    expect(output.indexOf('execution mode · batch')).toBeLessThan(output.indexOf('worktree · /tmp/afk-7'));
+    expect(output.indexOf('phase · implementing')).toBeLessThan(output.indexOf('status · ●'));
+    expect(output.indexOf('status · ●')).toBeLessThan(output.indexOf('execution mode · ⚙'));
+    expect(output.indexOf('execution mode · ⚙')).toBeLessThan(output.indexOf('worktree · /tmp/afk-7'));
+    expect(output).not.toContain('status · active');
+    expect(output).not.toContain('execution mode · batch');
     expect(output.indexOf('worktree · /tmp/afk-7')).toBeLessThan(output.indexOf('branch · main'));
     expect(output.indexOf('branch · main')).toBeLessThan(output.indexOf('progress · 50%'));
     expect(output).toContain('diagnostics · /tmp/afk-7/.afk/runs/run-7');

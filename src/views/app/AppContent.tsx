@@ -1,24 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, useInput } from 'ink';
 import { useState as useAppState, createActions } from './hooks';
 import { initRegistry } from '../board/registry/init';
-import {
-  TaskListView,
-  BacklogListView,
-  ProjectListView,
-  BoardView,
-  DetailScreen,
-  HelpDialog,
-  DebugOverlay,
-  Header,
-  Footer,
-  Notification,
-} from '../board/views/index';
-import { getListViewportHeight } from '../board/layout';
+import { Body, DebugOverlay, Footer, Header, HelpDialog, Notification, getBodyViewportHeight } from '../board/views/index';
 import type { Task, Project } from '../../types/board';
 import type { Branch, Commit, Tag } from '../../lib/core/tracker/types';
 import type { BacklogViewModel } from '../board/data/backlog-adapter';
 import type { View } from '../board/types';
+import { getBoardColumns, getBoardSelectionTarget, groupBacklogsByState } from '../board/board/model';
 
 initRegistry();
 
@@ -101,19 +90,20 @@ export function AppContent({
 
   const items = getItems();
   const selectedItem = () => items[state.selectedIndex];
-  const viewportHeight = getListViewportHeight(dimensions.height, { header: 1, context: 1, footer: 1, spacer: 1 });
+  const viewportHeight = getBodyViewportHeight(dimensions.height, state.isSearchMode);
   const maxIndex = Math.max(0, items.length - 1);
 
   useEffect(() => {
+    if (currentView === 'board') return;
     const offset = state.selectedIndex < state.scrollOffset
       ? state.selectedIndex
-      : state.selectedIndex >= state.scrollOffset + viewportHeight
+        : state.selectedIndex >= state.scrollOffset + viewportHeight
         ? Math.min(state.selectedIndex - viewportHeight + 1, maxIndex)
         : state.scrollOffset;
     if (offset !== state.scrollOffset) {
       dispatch({ type: 'selection:move', payload: { index: state.selectedIndex, scrollOffset: offset } });
     }
-  }, [state.selectedIndex, state.scrollOffset, viewportHeight, maxIndex, dispatch]);
+  }, [currentView, state.selectedIndex, state.scrollOffset, viewportHeight, maxIndex, dispatch]);
 
   useEffect(() => {
     if (isDetailMode && currentView === 'projects') {
@@ -150,10 +140,13 @@ export function AppContent({
       }
       return;
     }
-    if (key.escape || input === 'q') {
+    if (input === 'q') {
+      process.exit(0);
+      return;
+    }
+    if (key.escape) {
       if (state.showHelp) actions.toggleHelp();
       else if (isDetailMode) actions.viewList();
-      else if (input === 'q') process.exit(0);
       else if (state.viewStack.length > 1) actions.goBack();
       return;
     }
@@ -180,6 +173,26 @@ export function AppContent({
       if (state.viewStack.length > 1) actions.goBack();
       return;
     }
+
+    if (currentView === 'board') {
+      const boardItems = items as BacklogViewModel[];
+      const columns = getBoardColumns(groupBacklogsByState(boardItems));
+      const currentId = boardItems[state.selectedIndex]?.id;
+      const selectTarget = (direction: 'up' | 'down' | 'left' | 'right' | 'top' | 'bottom') => {
+        const targetId = getBoardSelectionTarget(columns, currentId, direction);
+        if (!targetId) return;
+        const index = boardItems.findIndex(item => item.id === targetId);
+        if (index >= 0) dispatch({ type: 'selection:move', payload: { index, scrollOffset: 0 } });
+      };
+
+      if (key.upArrow) { selectTarget('up'); return; }
+      if (key.downArrow) { selectTarget('down'); return; }
+      if (key.leftArrow) { selectTarget('left'); return; }
+      if (key.rightArrow) { selectTarget('right'); return; }
+      if (input === 'g') { selectTarget('top'); return; }
+      if (key.shift && input === 'G') { selectTarget('bottom'); return; }
+    }
+
     if (input === '1') actions.switchView('tasks');
     if (input === '2') actions.switchView('backlogs');
     if (input === '3') actions.switchView('projects');
@@ -213,34 +226,25 @@ export function AppContent({
   });
 
   return (
-    <Box flexDirection="column" height={dimensions.height}>
-      {isDetailMode ? (
-        <DetailScreen
-          item={selectedItem()}
-          view={currentView}
-          height={Math.max(1, dimensions.height - 1)}
-          width={dimensions.width}
-          branches={projectBranches}
-          tags={projectTags}
-          commits={projectCommits}
-        />
-      ) : (
-        <>
-          <Header view={currentView} tasksCount={tasks.length} backlogsCount={backlogs.length} projectsCount={projects.length} />
-          <Box height={1} flexShrink={0} paddingX={2}>
-            {state.isSearchMode
-              ? <Text color="cyan">filter · /{state.searchQuery}_ · {items.length} matches</Text>
-              : <Text dimColor>enter detail · / search</Text>}
-          </Box>
-          <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2}>
-            {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
-            {currentView === 'backlogs' && <BacklogListView backlogs={items as BacklogViewModel[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
-            {currentView === 'projects' && <ProjectListView projects={items as Project[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
-            {currentView === 'board' && <BoardView backlogs={items as BacklogViewModel[]} selectedIndex={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
-            {currentView === 'projects' && projectHasMore && <Box position="absolute" right={2} bottom={0}><Text dimColor>↓ more available</Text></Box>}
-          </Box>
-        </>
-      )}
+      <Box flexDirection="column" height={dimensions.height} overflow="hidden">
+      <Header view={currentView} tasksCount={tasks.length} backlogsCount={backlogs.length} projectsCount={projects.length} width={dimensions.width} />
+      <Body
+        view={currentView}
+        detail={isDetailMode}
+        search={state.isSearchMode}
+        searchQuery={state.searchQuery}
+        tasks={currentView === 'tasks' ? items as Task[] : []}
+        backlogs={currentView === 'backlogs' || currentView === 'board' ? items as BacklogViewModel[] : []}
+        projects={currentView === 'projects' ? items as Project[] : []}
+        selectedIndex={state.selectedIndex}
+        scrollOffset={state.scrollOffset}
+        height={dimensions.height}
+        width={dimensions.width}
+        projectBranches={projectBranches}
+        projectTags={projectTags}
+        projectCommits={projectCommits}
+        projectHasMore={projectHasMore}
+      />
       <Footer view={currentView} detail={isDetailMode} search={isDetailMode ? false : state.isSearchMode} />
       <Notification notification={state.notification} animation={state.notifAnimation} />
       {state.showHelp && <HelpDialog view={currentView} detail={isDetailMode} />}

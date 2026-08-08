@@ -390,6 +390,7 @@ export class GitLabClient implements TrackerProvider {
     }) as any[];
     return items.map(project => ({
       id: project.id,
+      platform: 'gitlab' as const,
       name: project.name,
       path_with_namespace: project.path_with_namespace,
       description: project.description || undefined,

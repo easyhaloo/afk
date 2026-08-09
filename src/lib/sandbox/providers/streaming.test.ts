@@ -1,11 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import { StreamingAgentExecution } from './streaming';
+import { CodexProvider } from '../../agents/codex';
 
 function command(script: string) {
   return { argv: [process.execPath, '-e', script], cwd: process.cwd() };
 }
 
 describe('StreamingAgentExecution', () => {
+  it('completes from Codex JSONL and preserves normalized token usage', async () => {
+    const usage = JSON.stringify({
+      type: 'turn.completed',
+      usage: { input_tokens: 12, cached_input_tokens: 2, output_tokens: 5 },
+    });
+    const result = JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'agent_message',
+        text: '<goal_complete>{"type":"goal_complete","kind":"task","summary":"codex fixture complete"}</goal_complete>',
+      },
+    });
+    const execution = new StreamingAgentExecution({
+      command: command(`console.log(${JSON.stringify(usage)}); console.log(${JSON.stringify(result)})`),
+      prompt: 'go',
+      signalType: 'goal_complete',
+      worktreePath: process.cwd(),
+      agentProvider: new CodexProvider(),
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+      status: 'completed',
+      structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'codex fixture complete' },
+      usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
+    });
+  });
+
   it('buffers JSONL records split across stdout chunks', async () => {
     const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
     const execution = new StreamingAgentExecution({ command: command(`process.stdout.write(${JSON.stringify(payload.slice(0, 20))}); setTimeout(() => process.stdout.write(${JSON.stringify(payload.slice(20) + '\n')}), 5)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });

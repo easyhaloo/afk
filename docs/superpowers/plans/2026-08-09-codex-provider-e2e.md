@@ -218,7 +218,7 @@ git commit -m "feat(agent): propagate codex through loop qa"
 **Files:**
 - Modify: `src/lib/sandbox/providers/streaming.test.ts`
 
-- [ ] **Step 1: Write the Codex JSONL fixture test**
+- [x] **Step 1: Write the Codex JSONL fixture test**
 
 Use a real `CodexProvider` with a Node command that reads stdin and emits these newline-delimited events:
 
@@ -230,13 +230,13 @@ Use a real `CodexProvider` with a Node command that reads stdin and emits these 
 
 Assert `waitForResult()` returns `status: 'completed'`, the structured task payload, and normalized usage when usage arrives before process completion.
 
-- [ ] **Step 2: Run the streaming test and verify it passes through production parsing**
+- [x] **Step 2: Run the streaming test and verify it passes through production parsing**
 
 Run: `npx vitest run src/lib/sandbox/providers/streaming.test.ts --reporter=dot`
 
 Expected: the new Codex fixture and all existing streaming cases pass. If it fails because completion terminates before the usage line, reorder the fixture so usage precedes the final agent message; do not weaken production completion behavior.
 
-- [ ] **Step 3: Commit the integration fixture**
+- [x] **Step 3: Commit the integration fixture**
 
 ```bash
 git add src/lib/sandbox/providers/streaming.test.ts

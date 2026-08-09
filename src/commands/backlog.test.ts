@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { registerBacklogCommands } from './backlog';
 import { registerRunCommands } from './run';
 import { registerQACommands } from './qa';
+import { registerLoopCommands } from './loop';
 
 function commandTree(register: (program: Command) => void): Command {
   const program = new Command();
@@ -26,5 +27,15 @@ describe('hard-cutover command surface', () => {
     expect(qa?.options.some(option => option.long === '--backlog-id' && option.required)).toBe(true);
     expect(run?.options.some(option => option.long === '--iid')).toBe(false);
     expect(qa?.options.some(option => option.long === '--iid')).toBe(false);
+  });
+
+  it('exposes explicit agent selection on every execution command', () => {
+    const run = commandTree(registerRunCommands).commands.find(command => command.name() === 'run');
+    const loop = commandTree(registerLoopCommands).commands.find(command => command.name() === 'loop');
+    const qa = commandTree(registerQACommands).commands.find(command => command.name() === 'qa');
+
+    expect(run?.options.some(option => option.long === '--agent')).toBe(true);
+    expect(loop?.options.some(option => option.long === '--agent')).toBe(true);
+    expect(qa?.options.some(option => option.long === '--agent')).toBe(true);
   });
 });

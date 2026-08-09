@@ -43,3 +43,10 @@ export function createAgentProvider(name: AgentProviderName = 'claude-code'): Ag
   ensureBuiltinAgentProviders();
   return requireAgentProvider(name);
 }
+
+/** Validate an untyped config or CLI value against the provider registry. */
+export function resolveAgentProviderName(raw: string = 'claude-code'): AgentProviderName {
+  ensureBuiltinAgentProviders();
+  requireAgentProvider(raw as AgentProviderName);
+  return raw as AgentProviderName;
+}

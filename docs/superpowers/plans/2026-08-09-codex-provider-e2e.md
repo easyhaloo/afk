@@ -17,6 +17,10 @@
 - Modify `src/commands/loop.ts`: expose and forward `--agent`.
 - Modify `src/commands/qa.ts`: expose and resolve `--agent`.
 - Modify `src/commands/backlog.test.ts`: canonical CLI option coverage.
+- Modify `src/lib/core/config/manager.ts`: canonical `claude-code` default.
+- Modify `tests/config.test.ts`: default provider regression.
+- Modify `src/lib/workflows/run-request.ts`: remove the old `claude` alias branch.
+- Modify `src/lib/workflows/run-request.test.ts`: provider selection and validation.
 - Modify `src/lib/modules/loop-runner.ts`: carry one agent provider through implementation and QA.
 - Modify `src/lib/modules/loop-runner.test.ts`: cross-phase provider propagation coverage.
 - Modify `src/lib/modules/qa-runner.ts`: resolve configured provider instead of hard-coding Claude Code.
@@ -112,12 +116,16 @@ git commit -m "fix(agent): implement codex cli protocol"
 - Modify: `src/commands/loop.ts`
 - Modify: `src/commands/qa.ts`
 - Modify: `src/commands/backlog.test.ts`
+- Modify: `src/lib/core/config/manager.ts`
+- Modify: `tests/config.test.ts`
+- Modify: `src/lib/workflows/run-request.ts`
+- Modify: `src/lib/workflows/run-request.test.ts`
 - Modify: `src/lib/modules/loop-runner.ts`
 - Modify: `src/lib/modules/loop-runner.test.ts`
 - Modify: `src/lib/modules/qa-runner.ts`
 - Modify: `src/lib/modules/qa-runner.test.ts`
 
-- [ ] **Step 1: Write failing CLI surface tests**
+- [x] **Step 1: Write failing CLI surface tests**
 
 Register loop alongside run and QA, then assert all three canonical execution commands expose `--agent`:
 
@@ -127,7 +135,7 @@ expect(loop?.options.some(option => option.long === '--agent')).toBe(true);
 expect(qa?.options.some(option => option.long === '--agent')).toBe(true);
 ```
 
-- [ ] **Step 2: Write a failing LoopRunner cross-phase propagation test**
+- [x] **Step 2: Write a failing LoopRunner cross-phase propagation test**
 
 Construct LoopRunner with `agentProvider: 'codex'`, capture WorkflowRunner `.run()` options and the config passed to `qaRunnerFactory`, then assert:
 
@@ -138,17 +146,21 @@ expect(qaFactory).toHaveBeenCalledWith(expect.anything(), expect.objectContainin
 
 The fixture must return implementation success, enqueue QA, set the backlog to `verification`, and execute the queued QA segment.
 
-- [ ] **Step 3: Write a failing QARunner config selection test**
+- [x] **Step 3: Write a failing QARunner config selection test**
 
-Reset the agent registry, register a fake named `codex`, construct QARunner with `{ ...config, agentDefault: 'codex' }` and no injected agent provider, then assert the sandbox receives that fake provider.
+Register a fake named `codex`, construct QARunner with `{ ...config, agentDefault: 'codex' }` and no injected agent provider, then assert the runner resolves that fake provider.
 
-- [ ] **Step 4: Run focused tests and verify RED**
+Also update the config regression to expect the canonical default `claude-code`, and assert `resolveWorkflowRequest()` accepts `codex` but rejects the removed `claude` alias.
+
+- [x] **Step 4: Run focused tests and verify RED**
 
 Run:
 
 ```bash
 npx vitest run \
   src/commands/backlog.test.ts \
+  tests/config.test.ts \
+  src/lib/workflows/run-request.test.ts \
   src/lib/modules/loop-runner.test.ts \
   src/lib/modules/qa-runner.test.ts \
   --reporter=dot
@@ -156,22 +168,22 @@ npx vitest run \
 
 Expected: CLI options are absent and loop/QA select `claude-code`.
 
-- [ ] **Step 5: Implement one canonical provider-name resolver**
+- [x] **Step 5: Implement canonical provider-name validation**
 
 Export a resolver beside the agent factory:
 
 ```ts
-export function resolveAgentProviderName(raw?: string): AgentProviderName {
-  const name = raw === 'claude' || raw === undefined ? 'claude-code' : raw;
+export function resolveAgentProviderName(raw: string = 'claude-code'): AgentProviderName {
+  const name = raw as AgentProviderName;
   ensureBuiltinAgentProviders();
-  requireAgentProvider(name as AgentProviderName);
-  return name as AgentProviderName;
+  requireAgentProvider(name);
+  return name;
 }
 ```
 
-Use it for config/CLI boundaries so invalid providers fail before worktree creation. Do not add compatibility branches elsewhere.
+Change `DEFAULT_WORKFLOW.agentDefault` to `claude-code` and delete the `config.agentDefault === 'claude'` alias branch from `resolveWorkflowRequest`. Use the resolver for config/CLI boundaries so invalid providers fail before worktree creation. Do not add compatibility branches elsewhere.
 
-- [ ] **Step 6: Implement CLI and runner propagation**
+- [x] **Step 6: Implement CLI and runner propagation**
 
 Add `['--agent <name>', 'Agent provider']` to loop start options and `.option('--agent <name>', 'Agent provider')` to QA. Add `agentProvider?: AgentProviderName` to LoopRunnerOptions and InternalOptions. Resolve the selected name once and:
 
@@ -184,16 +196,18 @@ await runner.run({
 
 For QA, pass a config copy with `agentDefault: this.opts.agentProvider`. QARunner uses `createAgentProvider(resolveAgentProviderName(this.config.agentDefault))` when no provider dependency is injected.
 
-- [ ] **Step 7: Run focused tests and verify GREEN**
+- [x] **Step 7: Run focused tests and verify GREEN**
 
 Run the Step 4 command again.
 
 Expected: all command, loop, and QA tests pass.
 
-- [ ] **Step 8: Commit provider propagation**
+- [x] **Step 8: Commit provider propagation**
 
 ```bash
 git add src/commands/loop.ts src/commands/qa.ts src/commands/backlog.test.ts \
+  src/lib/core/config/manager.ts tests/config.test.ts \
+  src/lib/workflows/run-request.ts src/lib/workflows/run-request.test.ts \
   src/lib/modules/loop-runner.ts src/lib/modules/loop-runner.test.ts \
   src/lib/modules/qa-runner.ts src/lib/modules/qa-runner.test.ts src/lib/agents/index.ts
 git commit -m "feat(agent): propagate codex through loop qa"

@@ -7,6 +7,8 @@ import { getWorkflowConfig } from '../core/config/manager';
 import { logger } from '../io';
 import type { ManagementProviderBundle, ProviderBundle } from '../core/providers';
 import { ManagementBacklogProvider } from '../core/backlog/management-provider';
+import { resolveAgentProviderName } from '../agents';
+import type { AgentProviderName } from '../agents/types';
 
 export interface LoopRunnerOptions {
   /** Max simultaneous implement chains (WorkflowRunner instances). */
@@ -40,6 +42,8 @@ export interface LoopRunnerOptions {
   moduleTriggers?: Record<string, string[]>;
   /** Canonical providers for backlog-aware execution. */
   providers: ProviderBundle;
+  /** Agent provider shared by implementation and QA for each chain. */
+  agentProvider?: AgentProviderName;
 }
 
 export interface ChainContext {
@@ -70,6 +74,7 @@ interface InternalOptions {
   extParams: string[] | undefined;
   moduleTriggers: Record<string, string[]>;
   providers: ProviderBundle;
+  agentProvider: AgentProviderName;
 }
 
 const DEFAULTS = {
@@ -149,6 +154,7 @@ export class LoopRunner {
       extParams: options.extParams,
       moduleTriggers: options.moduleTriggers ?? {},
       providers: this.providers,
+      agentProvider: resolveAgentProviderName(options.agentProvider ?? getWorkflowConfig().agentDefault),
     };
   }
 
@@ -361,7 +367,8 @@ export class LoopRunner {
     try {
       const resolvedExt = await this.resolveModules(iid);
       logger.info({ iid, resolvedExt }, 'modules resolved');
-      const runner = this.opts.workflowRunnerFactory(this.providers, getWorkflowConfig());
+      const config = { ...getWorkflowConfig(), agentDefault: this.opts.agentProvider };
+      const runner = this.opts.workflowRunnerFactory(this.providers, config);
       const result = await runner.run({
         session,
         projectName,
@@ -371,6 +378,7 @@ export class LoopRunner {
         extParams: this.opts.extParams,
         backlogId: String(iid),
         executionMode: 'batch',
+        agentProvider: this.opts.agentProvider,
       });
       logger.info({ iid, success: result.success, url: result.url }, 'WorkflowRunner.run returned');
 
@@ -499,7 +507,10 @@ export class LoopRunner {
     logger.info({ iid, session: ctx.session }, 'qa chain starting');
 
     try {
-      const qa = this.opts.qaRunnerFactory(this.managementProviders, getWorkflowConfig());
+      const qa = this.opts.qaRunnerFactory(this.managementProviders, {
+        ...getWorkflowConfig(),
+        agentDefault: this.opts.agentProvider,
+      });
       const result = await qa.process(iid);
       const elapsed = formatDuration(Date.now() - ctx.startedAt);
 

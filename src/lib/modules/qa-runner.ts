@@ -6,7 +6,7 @@ import { configureStatusline, logger } from '../io';
 import { getWorkflowConfig } from '../core/config/manager';
 import { TemplateLoader } from '../templates/loader';
 import { compileTemplate } from '../templates/compiler';
-import { createAgentProvider } from '../agents';
+import { createAgentProvider, resolveAgentProviderName } from '../agents';
 import { createSandboxProvider } from '../sandbox';
 import type { AgentProvider, ExecutionMode } from '../agents/types';
 import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../sandbox/types';
@@ -57,7 +57,7 @@ export class QARunner {
     this.mergeBranchOverride = deps.mergeBranch;
     this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
-    this.agentProvider = deps.agentProvider ?? createAgentProvider('claude-code');
+    this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }
 

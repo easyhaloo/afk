@@ -47,7 +47,7 @@ export interface WorktreeConfig {
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKFLOW: WorkflowConfig = {
-  agentDefault: 'claude',
+  agentDefault: 'claude-code',
   tmuxSession: 'afk',
   completionTimeout: 7200 * 1000,
   workflowHardTimeout: 7200 * 1000,

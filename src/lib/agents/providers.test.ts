@@ -91,15 +91,64 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('interactive')).toBe(true);
     });
 
-    it('buildCommand produces argv starting with "codex"', () => {
-      const cmd = p.buildCommand(opts({ interactive: true }));
-      expect(cmd.argv[0]).toBe('codex');
-      expect(cmd.argv).toContain('--full-auto');
+    it('builds JSONL batch execution with autonomous permissions', () => {
+      const cmd = p.buildCommand({ ...opts(), executionMode: 'batch' });
+      expect(cmd.argv).toEqual([
+        'codex',
+        'exec',
+        '--json',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-C',
+        '/tmp/worktree',
+      ]);
+      expect(cmd.cwd).toBe('/tmp/worktree');
     });
 
-    it('parseLine returns text for unknown input', () => {
+    it('builds inline interactive execution with autonomous permissions', () => {
+      const cmd = p.buildCommand({ ...opts(), executionMode: 'interactive' });
+      expect(cmd.argv).toEqual([
+        'codex',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--no-alt-screen',
+        '-C',
+        '/tmp/worktree',
+      ]);
+    });
+
+    it('parses completed agent messages as result events', () => {
+      const events = p.parseLine(JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'agent_message',
+          text: '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>',
+        },
+      }));
+
+      expect(events).toEqual([{ type: 'result', result: expect.stringContaining('goal_complete') }]);
+    });
+
+    it('normalizes turn usage and surfaces Codex errors', () => {
+      expect(p.parseLine(JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 10, cached_input_tokens: 3, output_tokens: 4 },
+      }))).toContainEqual({
+        type: 'usage',
+        usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+      });
+
+      const [event] = p.parseLine(JSON.stringify({ type: 'error', message: 'request failed' }));
+      expect(event).toMatchObject({
+        type: 'error',
+        error: expect.objectContaining({ message: 'request failed' }),
+      });
+    });
+
+    it('parseLine returns text for unknown or malformed input', () => {
       const events = p.parseLine('hello');
       expect(events[0].type).toBe('text');
+      expect(p.parseLine(JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }))).toEqual([
+        { type: 'text', text: expect.stringContaining('thread.started') },
+      ]);
     });
   });
 

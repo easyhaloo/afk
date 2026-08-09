@@ -1194,6 +1194,12 @@ export class WorkflowRunner {
     try {
       const output = await execution.captureOutput({ lines: 200, history: 2_000 });
       await this.runtimeManager.writeDiagnostics(this.runtimeRunId, { result, output });
+      const structured = result.structuredOutput as { result?: string; summary?: string } | undefined;
+      const failed = result.status !== 'completed' || structured?.result === 'FAIL';
+      await this.runtimeManager.appendActivity(this.runtimeRunId, {
+        kind: failed ? 'error' : 'test',
+        message: structured?.summary ?? (failed ? 'acceptance verification failed' : 'acceptance verification completed'),
+      });
     } catch (error) {
       logger.warn({ runId: this.runtimeRunId, error }, 'failed to persist workflow runtime diagnostics');
     }

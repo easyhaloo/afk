@@ -56,7 +56,7 @@ AFK LIVE · 3 running · 1 attention     1 Tasks  2 Backlogs  3 Projects  4 Boar
 At narrow widths it reduces to:
 
 ```text
-AFK · ●3 !1                            1 2 3 4
+AFK · ●3 · !1             1 Tasks  2 Backlogs  3 Projects  4 Board
 ```
 
 The active view is highlighted. Counts describe the current read model:
@@ -82,11 +82,12 @@ task cockpit:
 ```
 
 The focused task is selected from the active task list. `↑↓` moves focus;
-the queue remains visible and updates immediately. The task identity line
+the queue remains visible and updates immediately when other tasks exist. An
+empty queue does not reserve a column or render a zero-count summary. The task identity line
 contains the backlog ID and concise title. The context line exposes phase,
 execution mode, sandbox provider, agent provider, branch, worktree, and
-session only when available. Optional values collapse to a single placeholder
-instead of producing empty labels.
+session only when available. Missing optional values and their separators are
+omitted instead of producing empty labels.
 
 The activity stream is a structured runtime projection, not raw tmux output.
 Each event has a timestamp/relative age, category, and short message. The
@@ -94,9 +95,9 @@ initial categories are `agent`, `tool`, `test`, `state`, `qa`, and `error`.
 The stream is read-only and bounded to the viewport; `Enter` opens the full
 task detail/diagnostics view and `o` opens the diagnostics path when present.
 
-If no active task exists, Body renders a calm empty state with the latest
-runtime refresh time and a shortcut to Backlogs; it does not fabricate a
-running task or fall back to tmux sessions.
+If no active task exists, Body renders a calm empty state with refresh and
+Backlogs shortcuts; it does not fabricate a running task or fall back to tmux
+sessions.
 
 ## Secondary views
 
@@ -131,30 +132,29 @@ the compact cockpit may show the icon and `AFK`/`HITL` abbreviation together.
 
 Dynamic feedback communicates state change without becoming a distraction:
 
-- active heartbeat: a subtle one-step color pulse no faster than once per
-  second;
-- phase transition: selected phase underline changes and the event stream
-  receives one `state` event;
-- new activity: append with a short fade/slide-in, never reflow the header;
-- blocked/error: stable red marker and one notification; no continuous blink;
-- stale heartbeat: downgrade the live marker to amber/red after the existing
-  runtime threshold;
-- refresh: preserve selected task by `runId` when data reloads.
+- the local runtime projection refreshes once per second without overlapping
+  slow reads and stops polling when the TUI unmounts;
+- phase transitions append a `state` event and update the selected phase;
+- new activity appends without reflowing the Header or Footer;
+- blocked/error uses a stable red marker with no continuous blink;
+- stale heartbeat downgrades the live marker to red after the existing runtime
+  threshold;
+- refresh preserves the selected task by `runId` when data reorders.
 
-Animation must degrade to static color/marker changes when `NO_COLOR` or a
-non-interactive output is detected. No timers may keep the process alive after
-the TUI exits.
+The verified implementation uses static markers rather than animation, so it
+behaves consistently under `NO_COLOR` and does not add animation timers.
 
 ## Responsive rules
 
 | Width | Body layout |
 | --- | --- |
-| `< 80` | focused task only; queue becomes a one-line `+N queued` summary; activity shows latest two events |
-| `80–119` | focused task main column + compact queue; activity shows latest four events |
-| `≥ 120` | focused task main column + queue column; full structured activity context |
+| `< 80` | focused task only; a non-empty queue becomes a one-line `+N queued` summary; activity shows latest two events |
+| `80–119` | focused task main column + compact non-empty queue; activity shows latest four events |
+| `≥ 120` | focused task main column + non-empty queue column; full structured activity context |
 
 The Header and Footer are always one row. Long titles, branches, and event
-messages truncate by display width. Full values remain available in Detail.
+messages truncate by display width. When no other task is queued, the focused
+task expands to the full Body width. Full values remain available in Detail.
 
 ## Data boundaries
 
@@ -177,6 +177,9 @@ interface TaskActivity {
 The existing `TaskRuntimeManager` remains the source of truth for active task
 identity and health. Activity storage may use the existing local filesystem
 diagnostic/status files; no database or middleware dependency is introduced.
+Per-run mutations are serialized, temporary writes use collision-resistant
+names, and malformed activity records are filtered independently so one bad
+event cannot hide its task.
 
 ## Keyboard behavior
 
@@ -199,8 +202,8 @@ Coverage must include:
 
 - task cockpit selection and preservation across refresh;
 - event projection mapping and display-width truncation;
-- empty, active, stale, blocked, and completed task states;
-- 80/100/120/160-column PTY layout with fixed Header/Footer;
+- empty, active, stale, and error task states in the active projection;
+- populated 80/100/120/160-column PTY layout with fixed Header/Footer;
 - narrow queue collapse and wide activity expansion;
 - `Enter`, `o`, `/`, `r`, `q`, and `Ctrl+D` regressions;
 - existing Backlogs/Projects/Board read-only and navigation tests;

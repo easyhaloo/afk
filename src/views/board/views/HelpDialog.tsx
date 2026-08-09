@@ -5,9 +5,11 @@ import type { View } from '../types';
 interface Props {
   view?: View;
   detail?: boolean;
+  canOpen?: boolean;
+  canAttach?: boolean;
 }
 
-export function HelpDialog({ view = 'tasks', detail = false }: Props) {
+export function HelpDialog({ view = 'tasks', detail = false, canOpen = false, canAttach = false }: Props) {
   const providerView = view !== 'tasks';
 
   return (
@@ -20,13 +22,14 @@ export function HelpDialog({ view = 'tasks', detail = false }: Props) {
         <Box marginTop={1}><Text color="gray">navigate:</Text></Box>
         <Text color="white">  ↑↓ - move     g/G - top/bottom</Text>
       </>}
-      <Box marginTop={1}><Text color="gray">actions:</Text></Box>
+      <Text color="gray">actions:</Text>
       {detail && <Text color="white">  b/ESC back</Text>}
       {!detail && <Text color="white">  Enter - detail</Text>}
       {!detail && <Text color="white">  r - refresh</Text>}
-      {providerView && <Text color="white">  o - open provider URL</Text>}
-      {view === 'tasks' && <Text color="white">  o - open task diagnostics</Text>}
-      {!detail && view === 'tasks' && <Text color="white">  a - attach interactive task</Text>}
+      {providerView && canOpen && <Text color="white">  o - open provider URL</Text>}
+      {view === 'tasks' && canOpen && <Text color="white">  o - open task diagnostics</Text>}
+      {view === 'tasks' && canAttach && <Text color="white">  a - attach interactive task</Text>}
+      <Text color="white">  Ctrl+D - debug overlay</Text>
       <Box marginTop={1} justifyContent="center"><Text color="gray">? or ESC to close</Text></Box>
     </Box>
   );

@@ -27,6 +27,22 @@ import { projectDetailKey } from './fetcher';
 
 const PER_PAGE = 50;
 const DETAIL_TTL_MS = 60_000;
+const TASK_REFRESH_INTERVAL_MS = 1_000;
+
+export function startTaskPolling(
+  reload: () => Promise<unknown> | void,
+  intervalMs = TASK_REFRESH_INTERVAL_MS,
+): () => void {
+  let pending = false;
+  const timer = setInterval(() => {
+    if (pending) return;
+    pending = true;
+    void Promise.resolve(reload()).catch(() => undefined).finally(() => {
+      pending = false;
+    });
+  }, intervalMs);
+  return () => clearInterval(timer);
+}
 
 /** Keep the provider call separately testable from React lifecycle code. */
 export function loadDashboardBacklogs(
@@ -63,9 +79,11 @@ export function useData(
   }, []);
 
   useEffect(() => {
-    void reloadTasks().catch(err => {
+    const refresh = () => reloadTasks().catch(err => {
       fileLogger.warn({ err }, 'failed to load runtime dashboard data');
     });
+    void refresh();
+    return startTaskPolling(refresh);
   }, [reloadTasks]);
 
   const refreshBacklogs = useCallback(async () => {

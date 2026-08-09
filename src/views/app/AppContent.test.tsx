@@ -27,6 +27,33 @@ afterEach(() => {
 });
 
 describe('AppContent', () => {
+  it('uses the live task cockpit as the default task body', () => {
+    Object.defineProperty(process.stdout, 'columns', { configurable: true, value: 100 });
+    Object.defineProperty(process.stdout, 'rows', { configurable: true, value: 16 });
+
+    const output = renderToString(
+      <StateProvider>
+        <AppContent
+          tasks={[task(1)]}
+          backlogs={[]}
+          projects={[]}
+          projectBranches={[]}
+          projectTags={[]}
+          projectCommits={[]}
+          projectHasMore={false}
+          onLoadProjectDetail={() => {}}
+          onReloadTasks={() => {}}
+          onReloadBacklogs={() => {}}
+          onFetchMoreProjects={() => {}}
+          onInvalidateDetailCache={() => {}}
+        />
+      </StateProvider>,
+    );
+
+    expect(output).toContain('recent activity');
+    expect(output).not.toContain('no other tasks');
+  });
+
   it('keeps static list commands in the footer instead of repeating them above the content', () => {
     Object.defineProperty(process.stdout, 'columns', { configurable: true, value: 100 });
     Object.defineProperty(process.stdout, 'rows', { configurable: true, value: 12 });

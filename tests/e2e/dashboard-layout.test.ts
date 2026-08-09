@@ -97,7 +97,7 @@ describePty('dashboard layout (node-pty)', () => {
 
     await delay(800);
     await dashboard.send('\x1B', 1_200);
-    const frame = await dashboard.waitFor('AFK Dashboard');
+    const frame = await dashboard.waitFor('▸ AFK');
 
     expect(frame).toContain('1 tasks');
     expect(frame).toContain('2 backlogs');
@@ -106,9 +106,24 @@ describePty('dashboard layout (node-pty)', () => {
     expect(frame.toLowerCase()).not.toContain('preview');
   }, 8_000);
 
+  it.each([80, 100, 120, 160])('renders a populated cockpit and queue at %i columns', async cols => {
+    const dashboard = start(process.execPath, [tsxPath, fixturePath], cols);
+    const frame = await dashboard.waitFor('recent activity');
+
+    expect(frame).toContain('#17');
+    expect(frame).toContain('#18');
+    expect(frame).toContain('edited ListView.tsx');
+    expect(frame).not.toContain('+1 queued');
+  }, 8_000);
+
   it('switches independent subviews and returns from a grouped detail screen', async () => {
     const dashboard = start(process.execPath, [tsxPath, fixturePath], 120);
     await dashboard.waitFor('Exercise responsive task navigation');
+
+    const cockpit = await dashboard.waitFor('recent activity');
+    expect(cockpit).toContain('processing');
+    expect(cockpit).toContain('edited ListView.tsx');
+    expect(cockpit).toContain('test');
 
     const backlogs = await dashboard.send('2');
     expect(backlogs).toContain('#42');
@@ -154,11 +169,24 @@ describePty('dashboard layout (node-pty)', () => {
   it('exits globally with q from a detail subview', async () => {
     const dashboard = start(process.execPath, [tsxPath, fixturePath], 120);
     await dashboard.waitFor('Exercise responsive task navigation');
-    await dashboard.send('\r');
-    await dashboard.waitFor('runtime');
+    await dashboard.waitFor('recent activity');
+    await delay(300);
+    await dashboard.send('\r', 500);
+    await dashboard.waitFor('runtime', 8_000);
 
     await dashboard.send('q', 50);
     await dashboard.waitForExit();
+  }, 8_000);
+
+  it('opens debug mode only with ctrl+d', async () => {
+    const dashboard = start(process.execPath, [tsxPath, fixturePath], 120);
+    await dashboard.waitFor('Exercise responsive task navigation');
+
+    const plainD = await dashboard.send('d', 350);
+    expect(plainD).not.toContain('DEBUG LOG');
+
+    const ctrlD = await dashboard.send('\x04', 350);
+    expect(ctrlD).toContain('DEBUG LOG');
   }, 8_000);
 });
 

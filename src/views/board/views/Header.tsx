@@ -7,10 +7,13 @@ interface Props {
   tasksCount: number;
   backlogsCount: number;
   projectsCount: number;
+  runningCount?: number;
+  attentionCount?: number;
   width?: number;
 }
 
-export function Header({ view, tasksCount, backlogsCount, projectsCount, width }: Props) {
+export function Header({ view, tasksCount, backlogsCount, projectsCount, runningCount, attentionCount, width }: Props) {
+  const compact = (width || process.stdout.columns || 80) < 100;
   const counts: Record<View, number> = {
     tasks: tasksCount,
     backlogs: backlogsCount,
@@ -27,7 +30,15 @@ export function Header({ view, tasksCount, backlogsCount, projectsCount, width }
   return (
     <Box width={width} height={1} flexShrink={0} overflow="hidden" flexDirection="column" backgroundColor="black">
       <Box height={1} paddingX={2} justifyContent="space-between" overflow="hidden">
-        <Text color="white" wrap="truncate"><Text bold>▸ AFK Dashboard</Text></Text>
+        <Text color="white" wrap="truncate">
+          <Text bold>{compact ? '▸ AFK' : '▸ AFK Dashboard'}</Text>
+          {runningCount !== undefined && <>
+            <Text dimColor> · </Text>
+            <Text color="cyan">{compact ? `●${runningCount}` : `●${runningCount} running`}</Text>
+            <Text dimColor> · </Text>
+            <Text color={attentionCount ? 'red' : 'gray'}>{compact ? `!${attentionCount ?? 0}` : `!${attentionCount ?? 0} attention`}</Text>
+          </>}
+        </Text>
         <Text color="white" wrap="truncate">
           {tabs.map(([key, name], index) => {
             const active = view === name;

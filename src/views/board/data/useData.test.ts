@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BacklogItem } from '../../../lib/core/backlog';
-import { loadDashboardBacklogs, toRuntimeTask } from './useData';
+import { loadDashboardBacklogs, startTaskPolling, toRuntimeTask } from './useData';
 
 const backlog: BacklogItem = {
   id: '42',
@@ -35,6 +35,26 @@ describe('dashboard backlog data flow', () => {
 });
 
 describe('dashboard task runtime data flow', () => {
+  it('polls the runtime projection without overlapping slow reads and stops cleanly', async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const reload = vi.fn(() => new Promise<void>(resolve => { release = resolve; }));
+    const stop = startTaskPolling(reload, 100);
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(reload).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(reload).toHaveBeenCalledTimes(2);
+
+    stop();
+    release();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(reload).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
   it('maps a filesystem runtime record without using backlog or tmux state', () => {
     expect(toRuntimeTask({
       runId: 'afk-42-1',

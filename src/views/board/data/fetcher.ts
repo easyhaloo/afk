@@ -34,6 +34,7 @@ export function toRuntimeTask(runtime: ActiveTaskRuntimeRecord): Task {
     worktree: runtime.worktree,
     diagnosticPath: runtime.diagnosticPath,
     errorSummary: runtime.errorSummary,
+    activities: runtime.activities?.map(activity => ({ ...activity, at: new Date(activity.at) })),
   };
 }
 

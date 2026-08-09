@@ -13,6 +13,7 @@ export function getStatusIcon(status: string): string {
     case 'done': return '✓';
     case 'active': return '●';
     case 'stale': return '!';
+    case 'error': return '!';
     case 'project': return '◆';
     case 'project_github': return GITHUB_ICON;
     case 'project_gitlab': return GITLAB_ICON;
@@ -24,6 +25,7 @@ export function getStatusColor(status: string): string {
   switch (status) {
     case 'blocked':
     case 'stale': return 'red';
+    case 'error': return 'red';
     case 'in_progress':
     case 'active':
     case 'rework': return 'yellow';

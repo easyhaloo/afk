@@ -149,6 +149,7 @@ describe('QARunner execution boundary', () => {
       heartbeat: vi.fn(async () => ({})),
       finish: vi.fn(async () => ({})),
       writeDiagnostics: vi.fn(async () => '/tmp/diagnostics'),
+      appendActivity: vi.fn(async () => ({})),
     };
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
@@ -166,6 +167,7 @@ describe('QARunner execution boundary', () => {
     expect(runtime.writeDiagnostics).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
       result: expect.objectContaining({ status: 'completed' }), output: expect.any(String),
     }));
+    expect(runtime.appendActivity).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ kind: 'qa' }));
     expect(runtime.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'completed' }));
   });
 

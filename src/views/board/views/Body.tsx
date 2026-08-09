@@ -6,10 +6,10 @@ import type { BacklogViewModel } from '../data/backlog-adapter';
 import { getListViewportHeight } from '../layout';
 import type { View } from '../types';
 import { BoardView } from '../board';
+import { TaskCockpit } from '../task-cockpit';
 import { BacklogListView } from './BacklogListView';
 import { DetailScreen } from './DetailScreen';
 import { ProjectListView } from './ProjectListView';
-import { TaskListView } from './TaskListView';
 
 type DashboardItem = Task | BacklogViewModel | Project;
 
@@ -84,7 +84,7 @@ export function Body({
           tags={projectTags}
           commits={projectCommits}
         />}
-        {!detail && view === 'tasks' && <TaskListView tasks={tasks} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} width={contentWidth} />}
+        {!detail && view === 'tasks' && <TaskCockpit tasks={tasks} selectedIndex={selectedIndex} viewportHeight={viewportHeight} width={contentWidth} terminalWidth={width} />}
         {!detail && view === 'backlogs' && <BacklogListView backlogs={backlogs} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} width={contentWidth} />}
         {!detail && view === 'projects' && <ProjectListView projects={projects} selected={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} width={contentWidth} />}
         {!detail && view === 'board' && <BoardView backlogs={backlogs} selectedIndex={selectedIndex} scrollOffset={scrollOffset} viewportHeight={viewportHeight} width={contentWidth} />}

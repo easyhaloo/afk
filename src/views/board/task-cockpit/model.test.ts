@@ -18,14 +18,14 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 describe('task cockpit model', () => {
-  it('orders active tasks before stale tasks and removes the focused run', () => {
+  it('orders tasks while retaining the focused run for the queue projection', () => {
     const queue = getTaskQueue([
       task({ runId: 'stale', iid: '40', status: 'stale', heartbeatAt: new Date('2026-08-09T09:00:00.000Z') }),
       task({ runId: 'focused', iid: '41', heartbeatAt: new Date('2026-08-09T10:02:00.000Z') }),
       task({ runId: 'active', iid: '43', heartbeatAt: new Date('2026-08-09T10:01:00.000Z') }),
-    ], 'focused');
+    ]);
 
-    expect(queue.map(item => item.runId)).toEqual(['active', 'stale']);
+    expect(queue.map(item => item.runId)).toEqual(['focused', 'active', 'stale']);
   });
 
   it('chooses an activity budget from terminal width', () => {

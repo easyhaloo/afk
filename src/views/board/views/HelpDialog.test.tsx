@@ -5,7 +5,7 @@ import { HelpDialog } from './HelpDialog';
 
 describe('HelpDialog', () => {
   it('documents task runtime actions without provider open', () => {
-    const output = renderToString(<Box height={24}><HelpDialog /></Box>);
+    const output = renderToString(<Box height={24}><HelpDialog canOpen canAttach /></Box>);
 
     expect(output).toContain('1 - tasks');
     expect(output).toContain('2 - backlogs');
@@ -15,6 +15,7 @@ describe('HelpDialog', () => {
     expect(output).toContain('r - refresh');
     expect(output).toContain('a - attach interactive task');
     expect(output).toContain('o - open task diagnostics');
+    expect(output).toContain('Ctrl+D - debug overlay');
     expect(output).not.toContain('o - open provider URL');
     expect(output).not.toContain('sessions');
     expect(output).not.toContain('kill');
@@ -22,12 +23,19 @@ describe('HelpDialog', () => {
   });
 
   it('shows provider actions for a backlog list', () => {
-    const output = renderToString(<Box height={24}><HelpDialog view="backlogs" /></Box>);
+    const output = renderToString(<Box height={24}><HelpDialog view="backlogs" canOpen /></Box>);
 
     expect(output).toContain('r - refresh');
     expect(output).toContain('o - open provider URL');
     expect(output).not.toContain('a - attach selected task');
     expect(output).not.toContain('b/ESC back');
+  });
+
+  it('omits unavailable selected-item actions', () => {
+    const output = renderToString(<Box height={24}><HelpDialog view="tasks" /></Box>);
+
+    expect(output).not.toContain('open task diagnostics');
+    expect(output).not.toContain('attach interactive task');
   });
 
   it('shows only back navigation for task details', () => {

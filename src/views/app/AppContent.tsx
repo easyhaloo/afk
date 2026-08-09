@@ -3,6 +3,7 @@ import { Box, useInput } from 'ink';
 import { useState as useAppState, createActions } from './hooks';
 import { initRegistry } from '../board/registry/init';
 import { Body, DebugOverlay, Footer, Header, HelpDialog, Notification, getBodyViewportHeight } from '../board/views/index';
+import { getTaskSelectionIndex } from '../board/task-cockpit';
 import type { Task, Project } from '../../types/board';
 import type { Branch, Commit, Tag } from '../../lib/core/tracker/types';
 import type { BacklogViewModel } from '../board/data/backlog-adapter';
@@ -66,6 +67,8 @@ export function AppContent({
   const tasksRef = useRef<Task[]>([]);
   const backlogsRef = useRef<BacklogViewModel[]>([]);
   const projectsRef = useRef<Project[]>([]);
+  const previousTasksRef = useRef<Task[]>(tasks);
+  const selectedTaskRunIdRef = useRef<string | undefined>(undefined);
   tasksRef.current = tasks;
   backlogsRef.current = backlogs;
   projectsRef.current = projects;
@@ -94,6 +97,21 @@ export function AppContent({
   const maxIndex = Math.max(0, items.length - 1);
 
   useEffect(() => {
+    if (currentView !== 'tasks') return;
+    const taskItems = items as Task[];
+    if (previousTasksRef.current !== tasks) {
+      const nextIndex = getTaskSelectionIndex(taskItems, selectedTaskRunIdRef.current, state.selectedIndex);
+      if (nextIndex !== state.selectedIndex) {
+        dispatch({ type: 'selection:move', payload: { index: nextIndex, scrollOffset: 0 } });
+      }
+      selectedTaskRunIdRef.current = taskItems[nextIndex]?.runId;
+      previousTasksRef.current = tasks;
+      return;
+    }
+    selectedTaskRunIdRef.current = taskItems[state.selectedIndex]?.runId;
+  }, [currentView, dispatch, items, state.selectedIndex, tasks]);
+
+  useEffect(() => {
     if (currentView === 'board') return;
     const offset = state.selectedIndex < state.scrollOffset
       ? state.selectedIndex
@@ -118,12 +136,23 @@ export function AppContent({
     }
   }, [currentView, projectHasMore, state.selectedIndex, items.length, onFetchMoreProjects]);
 
+  const selectedForActions = selectedItem();
+  const canOpen = currentView === 'tasks'
+    ? Boolean((selectedForActions as Task | undefined)?.diagnosticPath && onOpenTaskDiagnostics)
+    : currentView === 'projects'
+      ? Boolean((selectedForActions as Project | undefined)?.web_url)
+      : Boolean((selectedForActions as BacklogViewModel | undefined)?.webUrl);
+  const canAttach = currentView === 'tasks'
+    && Boolean(onAttachSession)
+    && (selectedForActions as Task | undefined)?.executionMode === 'interactive'
+    && Boolean((selectedForActions as Task | undefined)?.session);
+
   useInput((input, key) => {
     if (input === '?') {
       actions.toggleHelp();
       return;
     }
-    if (input === 'D' || input === 'd') {
+    if (key.ctrl && (input === 'd' || input === 'D' || input === '\x04')) {
       actions.toggleDebug();
       return;
     }
@@ -227,7 +256,15 @@ export function AppContent({
 
   return (
       <Box flexDirection="column" height={dimensions.height} overflow="hidden">
-      <Header view={currentView} tasksCount={tasks.length} backlogsCount={backlogs.length} projectsCount={projects.length} width={dimensions.width} />
+      <Header
+        view={currentView}
+        tasksCount={tasks.length}
+        backlogsCount={backlogs.length}
+        projectsCount={projects.length}
+        runningCount={tasks.filter(task => task.status === 'active').length}
+        attentionCount={tasks.filter(task => task.status === 'stale' || Boolean(task.errorSummary)).length}
+        width={dimensions.width}
+      />
       <Body
         view={currentView}
         detail={isDetailMode}
@@ -245,9 +282,9 @@ export function AppContent({
         projectCommits={projectCommits}
         projectHasMore={projectHasMore}
       />
-      <Footer view={currentView} detail={isDetailMode} search={isDetailMode ? false : state.isSearchMode} />
+      <Footer view={currentView} detail={isDetailMode} search={isDetailMode ? false : state.isSearchMode} canOpen={canOpen} canAttach={canAttach} />
       <Notification notification={state.notification} animation={state.notifAnimation} />
-      {state.showHelp && <HelpDialog view={currentView} detail={isDetailMode} />}
+      {state.showHelp && <HelpDialog view={currentView} detail={isDetailMode} canOpen={canOpen} canAttach={canAttach} />}
       {state.debugMode && <DebugOverlay logs={state.debugLog} />}
     </Box>
   );

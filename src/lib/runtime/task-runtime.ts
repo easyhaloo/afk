@@ -1,10 +1,21 @@
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 
 export type TaskRuntimePhase = 'implementing' | 'verifying';
 export type TaskRuntimeStatus = 'running' | 'completed' | 'blocked' | 'failed';
 export type VisibleTaskRuntimeStatus = TaskRuntimeStatus | 'stale';
+export type TaskRuntimeActivityKind = 'agent' | 'tool' | 'test' | 'state' | 'qa' | 'error';
+
+export interface TaskRuntimeActivity {
+  id: string;
+  taskRunId: string;
+  at: string;
+  kind: TaskRuntimeActivityKind;
+  message: string;
+  detail?: string;
+}
 
 export interface TaskRuntimeRecord {
   runId: string;
@@ -24,6 +35,7 @@ export interface TaskRuntimeRecord {
   diagnosticPath?: string;
   errorSummary?: string;
   completedAt?: string;
+  activities?: TaskRuntimeActivity[];
 }
 
 export type ActiveTaskRuntimeRecord = Omit<TaskRuntimeRecord, 'status'> & {
@@ -40,6 +52,7 @@ export interface TaskRuntimeDiagnostics {
 }
 
 export class TaskRuntimeStore {
+  private readonly mutations = new Map<string, Promise<void>>();
   readonly root: string;
   readonly activePath: string;
   readonly archivePath: string;
@@ -55,8 +68,16 @@ export class TaskRuntimeStore {
   }
 
   async start(record: TaskRuntimeRecord): Promise<void> {
+    const startedActivity: TaskRuntimeActivity = {
+      id: activityId(record.runId, record.startedAt, 'state', 'runtime started'),
+      taskRunId: record.runId,
+      at: record.startedAt,
+      kind: 'state',
+      message: 'runtime started',
+    };
     const activeRecord = {
       ...record,
+      activities: boundActivities([startedActivity, ...(record.activities ?? [])], record.runId),
       diagnosticPath: record.diagnosticPath ?? this.diagnosticPathFor(record.runId),
     };
     await fs.mkdir(activeRecord.diagnosticPath, { recursive: true });
@@ -68,31 +89,70 @@ export class TaskRuntimeStore {
     return this.read(join(this.activePath, `${runtimeFileKey(runId)}.json`));
   }
 
-  async update(runId: string, changes: Partial<Omit<TaskRuntimeRecord, 'runId' | 'startedAt' | 'status'>>): Promise<TaskRuntimeRecord> {
-    const current = await this.getActive(runId);
-    if (!current) throw new Error(`active task runtime '${runId}' was not found`);
-    const lastHeartbeat = Date.parse(current.heartbeatAt);
-    const heartbeatAt = new Date(Math.max(Date.now(), lastHeartbeat + 1)).toISOString();
-    const updated: TaskRuntimeRecord = { ...current, ...changes, heartbeatAt };
-    await this.write(this.activePath, updated);
-    return updated;
+  async update(runId: string, changes: Partial<Omit<TaskRuntimeRecord, 'runId' | 'startedAt' | 'status' | 'activities'>>): Promise<TaskRuntimeRecord> {
+    return this.mutate(runId, async () => {
+      const current = await this.getActive(runId);
+      if (!current) throw new Error(`active task runtime '${runId}' was not found`);
+      const lastHeartbeat = Date.parse(current.heartbeatAt);
+      const heartbeatAt = new Date(Math.max(Date.now(), lastHeartbeat + 1)).toISOString();
+      const activity = activityForChanges(current, changes);
+      const updated: TaskRuntimeRecord = {
+        ...current,
+        ...changes,
+        heartbeatAt,
+        activities: activity ? boundActivities([...(current.activities ?? []), activity], runId) : current.activities,
+      };
+      await this.write(this.activePath, updated);
+      return updated;
+    });
+  }
+
+  async appendActivity(
+    runId: string,
+    activity: Omit<TaskRuntimeActivity, 'id' | 'taskRunId' | 'at'> & { id?: string; at?: string },
+  ): Promise<TaskRuntimeRecord> {
+    return this.mutate(runId, async () => {
+      const current = await this.getActive(runId);
+      if (!current) throw new Error(`active task runtime '${runId}' was not found`);
+      const at = activity.at || new Date().toISOString();
+      const next: TaskRuntimeActivity = {
+        ...activity,
+        id: activity.id ?? activityId(runId, at, activity.kind, activity.message),
+        taskRunId: runId,
+        at,
+      };
+      const heartbeatAt = new Date(Math.max(Date.now(), Date.parse(current.heartbeatAt) + 1)).toISOString();
+      const updated = { ...current, heartbeatAt, activities: boundActivities([...(current.activities ?? []), next], runId) };
+      await this.write(this.activePath, updated);
+      return updated;
+    });
   }
 
   async finish(runId: string, changes: Pick<Partial<TaskRuntimeRecord>, 'status' | 'progress' | 'diagnosticPath' | 'errorSummary'>): Promise<TaskRuntimeRecord> {
-    const current = await this.getActive(runId);
-    if (!current) throw new Error(`active task runtime '${runId}' was not found`);
-    const status = changes.status ?? 'completed';
-    if (status === 'running') throw new Error('terminal task runtime status is required');
-    const terminal: TaskRuntimeRecord = {
-      ...current,
-      ...changes,
-      status,
-      completedAt: new Date().toISOString(),
-      heartbeatAt: new Date().toISOString(),
-    };
-    await this.write(this.archivePath, terminal);
-    await fs.rm(join(this.activePath, `${runtimeFileKey(runId)}.json`), { force: true });
-    return terminal;
+    return this.mutate(runId, async () => {
+      const current = await this.getActive(runId);
+      if (!current) throw new Error(`active task runtime '${runId}' was not found`);
+      const status = changes.status ?? 'completed';
+      if (status === 'running') throw new Error('terminal task runtime status is required');
+      const at = new Date().toISOString();
+      const terminal: TaskRuntimeRecord = {
+        ...current,
+        ...changes,
+        status,
+        completedAt: at,
+        heartbeatAt: at,
+        activities: boundActivities([...(current.activities ?? []), {
+          id: activityId(current.runId, at, 'state', `runtime ${status}`),
+          taskRunId: current.runId,
+          at,
+          kind: 'state',
+          message: `runtime ${status}`,
+        }], runId),
+      };
+      await this.write(this.archivePath, terminal);
+      await fs.rm(join(this.activePath, `${runtimeFileKey(runId)}.json`), { force: true });
+      return terminal;
+    });
   }
 
   async listActive(): Promise<TaskRuntimeRecord[]> {
@@ -141,7 +201,11 @@ export class TaskRuntimeStore {
   private async read(path: string): Promise<TaskRuntimeRecord | undefined> {
     try {
       const value: unknown = JSON.parse(await fs.readFile(path, 'utf8'));
-      return isTaskRuntimeRecord(value) ? value : undefined;
+      if (!isTaskRuntimeRecord(value)) return undefined;
+      const activities = Array.isArray(value.activities)
+        ? boundActivities(value.activities, value.runId)
+        : undefined;
+      return { ...value, activities };
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
       return undefined;
@@ -155,9 +219,21 @@ export class TaskRuntimeStore {
   }
 
   private async atomicWriteFile(path: string, content: string): Promise<void> {
-    const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+    const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
     await fs.writeFile(temporaryPath, content, 'utf8');
     await fs.rename(temporaryPath, path);
+  }
+
+  private async mutate<T>(runId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.mutations.get(runId) ?? Promise.resolve();
+    const result = previous.then(operation);
+    const tail = result.then(() => undefined, () => undefined);
+    this.mutations.set(runId, tail);
+    try {
+      return await result;
+    } finally {
+      if (this.mutations.get(runId) === tail) this.mutations.delete(runId);
+    }
   }
 }
 
@@ -183,8 +259,12 @@ export class TaskRuntimeManager {
     return this.store.start(record);
   }
 
-  heartbeat(runId: string, changes: Partial<Pick<TaskRuntimeRecord, 'phase' | 'progress' | 'diagnosticPath' | 'worktree' | 'branch'>> = {}): Promise<TaskRuntimeRecord> {
+  heartbeat(runId: string, changes: Partial<Pick<TaskRuntimeRecord, 'phase' | 'progress' | 'diagnosticPath' | 'worktree' | 'branch' | 'errorSummary'>> = {}): Promise<TaskRuntimeRecord> {
     return this.store.update(runId, changes);
+  }
+
+  appendActivity(runId: string, activity: Omit<TaskRuntimeActivity, 'id' | 'taskRunId' | 'at'> & { id?: string; at?: string }): Promise<TaskRuntimeRecord> {
+    return this.store.appendActivity(runId, activity);
   }
 
   finish(runId: string, changes: Pick<Partial<TaskRuntimeRecord>, 'status' | 'progress' | 'diagnosticPath' | 'errorSummary'>): Promise<TaskRuntimeRecord> {
@@ -216,4 +296,44 @@ function isTaskRuntimeRecord(value: unknown): value is TaskRuntimeRecord {
     && typeof record.agentProvider === 'string'
     && typeof record.startedAt === 'string'
     && typeof record.heartbeatAt === 'string';
+}
+
+function isTaskRuntimeActivity(value: unknown): value is TaskRuntimeActivity {
+  if (!value || typeof value !== 'object') return false;
+  const activity = value as Partial<TaskRuntimeActivity>;
+  return typeof activity.id === 'string' && activity.id.trim().length > 0
+    && typeof activity.taskRunId === 'string' && activity.taskRunId.trim().length > 0
+    && typeof activity.at === 'string' && Number.isFinite(Date.parse(activity.at))
+    && ['agent', 'tool', 'test', 'state', 'qa', 'error'].includes(activity.kind ?? '')
+    && typeof activity.message === 'string' && activity.message.trim().length > 0
+    && (activity.detail === undefined || typeof activity.detail === 'string');
+}
+
+function boundActivities(activities: TaskRuntimeActivity[], runId?: string): TaskRuntimeActivity[] {
+  return [...activities]
+    .filter(activity => isTaskRuntimeActivity(activity) && (!runId || activity.taskRunId === runId))
+    .sort((left, right) => left.at.localeCompare(right.at))
+    .slice(-50);
+}
+
+function activityId(runId: string, at: string, kind: TaskRuntimeActivityKind, message: string): string {
+  return createHash('sha256').update(`${runId}:${at}:${kind}:${message}`).digest('base64url');
+}
+
+function activityForChanges(
+  current: TaskRuntimeRecord,
+  changes: Partial<Omit<TaskRuntimeRecord, 'runId' | 'startedAt' | 'status' | 'activities'>>,
+): TaskRuntimeActivity | undefined {
+  const at = new Date().toISOString();
+  if (changes.errorSummary) {
+    return { id: activityId(current.runId, at, 'error', changes.errorSummary), taskRunId: current.runId, at, kind: 'error', message: changes.errorSummary };
+  }
+  if (changes.phase && changes.phase !== current.phase) {
+    const message = `phase ${changes.phase}`;
+    return { id: activityId(current.runId, at, 'state', message), taskRunId: current.runId, at, kind: 'state', message };
+  }
+  if (changes.progress && changes.progress !== current.progress) {
+    return { id: activityId(current.runId, at, 'agent', changes.progress), taskRunId: current.runId, at, kind: 'agent', message: changes.progress };
+  }
+  return undefined;
 }

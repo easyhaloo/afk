@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -30,6 +30,75 @@ function record(overrides: Partial<TaskRuntimeRecord> = {}): TaskRuntimeRecord {
 }
 
 describe('TaskRuntimeStore', () => {
+  it('preserves the task while filtering malformed persisted activities', async () => {
+    const store = await storeFixture();
+    await store.start(record());
+    const [filename] = await readdir(store.activePath);
+    const path = join(store.activePath, filename!);
+    const persisted = JSON.parse(await readFile(path, 'utf8'));
+    persisted.activities = [
+      persisted.activities[0],
+      { id: '', taskRunId: 'run-42', at: 'not-a-date', kind: 'tool', message: '' },
+    ];
+    await writeFile(path, JSON.stringify(persisted));
+
+    const active = await store.listActive();
+
+    expect(active).toHaveLength(1);
+    expect(active[0]?.activities).toHaveLength(1);
+    expect(active[0]?.activities?.[0]?.message).toBe('runtime started');
+  });
+
+  it('serializes concurrent activity appends without losing events', async () => {
+    const store = await storeFixture();
+    const manager = new TaskRuntimeManager(store);
+    await manager.start(record());
+
+    await Promise.all(Array.from({ length: 20 }, (_, index) => manager.appendActivity('run-42', {
+      kind: 'tool', message: `concurrent-${index}`,
+    })));
+
+    const active = await store.getActive('run-42');
+    const appended = active?.activities?.filter(item => item.kind === 'tool') ?? [];
+    expect(appended).toHaveLength(20);
+    expect(new Set(appended.map(item => item.id)).size).toBe(20);
+  });
+
+  it('creates distinct activity IDs for long externally-derived run IDs', async () => {
+    const runId = `session-${'x'.repeat(80)}`;
+    const store = await storeFixture();
+    const manager = new TaskRuntimeManager(store);
+    await manager.start(record({ runId }));
+
+    await manager.appendActivity(runId, { at: '2026-08-09T10:00:00.000Z', kind: 'tool', message: 'first' });
+    await manager.appendActivity(runId, { at: '2026-08-09T10:00:01.000Z', kind: 'tool', message: 'second' });
+
+    const ids = (await store.getActive(runId))?.activities?.map(item => item.id) ?? [];
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('keeps only the newest bounded runtime activities in chronological order', async () => {
+    const store = await storeFixture();
+    const manager = new TaskRuntimeManager(store);
+    await manager.start(record());
+
+    for (let index = 0; index < 55; index += 1) {
+      await manager.appendActivity('run-42', {
+        at: new Date(Date.now() + index).toISOString(),
+        kind: 'tool',
+        message: `tool-${index}`,
+      });
+    }
+
+    const active = await store.getActive('run-42');
+    expect(active?.activities).toHaveLength(50);
+    expect(active?.activities?.[0]?.message).toBe('tool-5');
+    expect(active?.activities?.at(-1)?.message).toBe('tool-54');
+    expect(active?.activities?.map(item => item.at)).toEqual(
+      [...(active?.activities ?? [])].sort((left, right) => left.at.localeCompare(right.at)).map(item => item.at),
+    );
+  });
+
   it('atomically persists active records and updates their heartbeat', async () => {
     const store = await storeFixture();
     const initial = record();
@@ -70,7 +139,9 @@ describe('TaskRuntimeStore', () => {
     expect(diagnosticPath).toBe(store.diagnosticPathFor('run-42'));
     expect(await readFile(join(diagnosticPath, 'result.json'), 'utf8')).toContain('"exitCode": 1');
     await expect(readFile(join(diagnosticPath, 'output.log'), 'utf8')).resolves.toBe('agent stderr tail');
-    await expect(store.getActive('run-42')).resolves.toMatchObject({ diagnosticPath });
+    const active = await store.getActive('run-42');
+    expect(active).toMatchObject({ diagnosticPath });
+    expect(active?.activities?.some(activity => activity.message === 'diagnostics captured')).toBe(false);
   });
 
   it('keeps externally-derived run IDs inside the runtime root', async () => {

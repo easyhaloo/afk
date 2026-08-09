@@ -5,12 +5,37 @@ import { StateProvider } from '../../src/views/app/state/StateContext';
 
 const tasks = [{
   iid: 17,
+  runId: 'afk-e2e-task',
   title: 'Exercise responsive task navigation',
   status: 'active' as const,
   session: 'afk-e2e-task',
+  phase: 'implementing' as const,
+  executionMode: 'batch' as const,
+  sandboxProvider: 'local',
+  agentProvider: 'claude-code',
   branch: 'afk/e2e-layout',
   progress: '50%',
   worktree: '/tmp/afk-e2e-layout',
+  activities: [
+    { id: 'fixture-event-1', taskRunId: 'afk-e2e-task', at: new Date('2026-08-09T10:07:00.000Z'), kind: 'tool' as const, message: 'edited ListView.tsx' },
+    { id: 'fixture-event-2', taskRunId: 'afk-e2e-task', at: new Date('2026-08-09T10:08:00.000Z'), kind: 'test' as const, message: '4 passed · 0 failed' },
+  ],
+}, {
+  iid: 18,
+  runId: 'afk-e2e-task-qa',
+  title: 'Run QA verification in parallel',
+  status: 'active' as const,
+  session: 'afk-e2e-task-qa',
+  phase: 'verifying' as const,
+  executionMode: 'interactive' as const,
+  sandboxProvider: 'docker',
+  agentProvider: 'claude-code',
+  branch: 'afk/e2e-qa',
+  progress: '75%',
+  worktree: '/tmp/afk-e2e-qa',
+  activities: [
+    { id: 'fixture-event-3', taskRunId: 'afk-e2e-task-qa', at: new Date('2026-08-09T10:09:00.000Z'), kind: 'qa' as const, message: 'acceptance checks running' },
+  ],
 }];
 
 const backlogs = [

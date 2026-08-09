@@ -12,3 +12,4 @@ export { ListView } from './ListView';
 export { OperationalRow } from './OperationalRow';
 export { BacklogRow } from './BacklogRow';
 export { BoardView } from '../board/index';
+export { TaskCockpit } from '../task-cockpit';

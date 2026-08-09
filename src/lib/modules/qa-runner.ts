@@ -321,6 +321,12 @@ export class QARunner {
     try {
       const output = await execution.captureOutput({ lines: 200, history: 2_000 });
       await this.runtimeManager.writeDiagnostics(runId, { result, output });
+      const structured = result.structuredOutput as { result?: string; summary?: string } | undefined;
+      const failed = result.status !== 'completed' || structured?.result === 'FAIL';
+      await this.runtimeManager.appendActivity(runId, {
+        kind: failed ? 'error' : 'qa',
+        message: structured?.summary ?? (failed ? 'QA execution failed' : 'QA execution completed'),
+      });
     } catch (error) {
       logger.warn({ runId, error }, 'failed to persist QA runtime diagnostics');
     }

@@ -20,7 +20,7 @@ export function DebugOverlay({ logs }: Props) {
       borderColor="cyan"
     >
       <Box flexShrink={0} paddingY={0}>
-        <Text color="cyan" bold>▼ DEBUG LOG (D to close)</Text>
+        <Text color="cyan" bold>▼ DEBUG LOG (Ctrl+D to close)</Text>
       </Box>
       <Box flexDirection="column" overflow="hidden">
         {logs.map((line, i) => (

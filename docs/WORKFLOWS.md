@@ -11,6 +11,23 @@ The loop atomically claims a canonical `ready` or `rework` item, verifies parent
 
 Integration QA is cross-process, so a diagnosable QA `FAIL` creates a persistent, append-only `ReworkRecord` in the provider Issue (GitHub comment or GitLab note), sets `rework + afk`, and lets the next AFK run repair the original branch with the record injected into its implementation prompt. QA PASS resolves exactly that open record. An ambiguous result, conflict, timeout, agent failure, or exhausted AC self-correction loop becomes `blocked + hitl`.
 
+### Agent provider selection
+
+Claude Code remains the default agent provider. Select Codex explicitly when
+testing or running a Codex-backed chain:
+
+```bash
+afk run --backlog-id 123 --agent codex --execution-mode batch
+afk qa --backlog-id 123 --agent codex --mode batch
+afk loop --agent codex --max-iterations 1
+```
+
+AFK resolves `codex` directly from `PATH`; it does not install or wrap the
+binary. In batch mode AFK writes the provider-neutral execution prompt to
+stdin and parses Codex JSONL output. A loop uses the selected provider for
+both implementation and QA, and the Tasks projection and runtime diagnostics
+record `agentProvider: codex` for each phase.
+
 ## Overview
 
 AFK implements three primary workflow patterns:

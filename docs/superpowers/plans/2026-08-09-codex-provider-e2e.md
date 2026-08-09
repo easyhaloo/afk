@@ -249,7 +249,7 @@ git commit -m "test(agent): cover codex streaming completion"
 - Modify: `docs/WORKFLOWS.md`
 - Modify: `docs/WORKFLOWS_zh.md`
 
-- [ ] **Step 1: Document direct CLI selection**
+- [x] **Step 1: Document direct CLI selection**
 
 Add matching English and Chinese examples:
 
@@ -261,7 +261,7 @@ afk loop --agent codex --max-iterations 1
 
 State that Claude Code remains default, Codex must resolve from `PATH`, AFK supplies its prompt over stdin in batch mode, and the runtime projection records the selected provider.
 
-- [ ] **Step 2: Run static and full automated verification**
+- [x] **Step 2: Run static and full automated verification**
 
 Run:
 
@@ -274,7 +274,7 @@ git diff --check
 
 Expected: typecheck/build exit 0, full Vitest suite has 0 failures, and diff check emits no output.
 
-- [ ] **Step 3: Commit documentation**
+- [x] **Step 3: Commit documentation**
 
 ```bash
 git add docs/WORKFLOWS.md docs/WORKFLOWS_zh.md

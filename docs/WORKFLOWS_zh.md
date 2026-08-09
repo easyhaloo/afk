@@ -1,5 +1,20 @@
 # AFK 工作流程
 
+### Agent Provider 选择
+
+默认 Agent Provider 仍然是 Claude Code。测试或运行 Codex 全链路时需要显式选择：
+
+```bash
+afk run --backlog-id 123 --agent codex --execution-mode batch
+afk qa --backlog-id 123 --agent codex --mode batch
+afk loop --agent codex --max-iterations 1
+```
+
+AFK 直接从 `PATH` 解析 `codex`，不会安装或包装该二进制。Batch 模式通过
+stdin 传入 provider-neutral prompt，并解析 Codex JSONL 输出。Loop 会在实现和
+QA 阶段使用同一个显式 provider；Tasks 投影与运行诊断都会记录
+`agentProvider: codex`。
+
 ## 概述
 
 AFK 实现三种主要工作流模式：

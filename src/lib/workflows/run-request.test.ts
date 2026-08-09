@@ -29,4 +29,12 @@ describe('resolveWorkflowRequest', () => {
   it('rejects invalid execution modes', () => {
     expect(() => resolveWorkflowRequest({ backlogId: '42', executionMode: 'stream' as any }, {} as any)).toThrow(/execution-mode/);
   });
+
+  it('accepts registered provider names and rejects removed aliases', () => {
+    expect(resolveWorkflowRequest({ backlogId: '42', agentProvider: 'codex' }, {})).toMatchObject({
+      provider: 'codex',
+      agentProvider: 'codex',
+    });
+    expect(() => resolveWorkflowRequest({ backlogId: '42', agentProvider: 'claude' as any }, {})).toThrow(/agent provider/);
+  });
 });

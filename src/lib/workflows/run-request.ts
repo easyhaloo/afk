@@ -4,6 +4,7 @@ import type { BranchStrategyConfig } from '../branches/types';
 import { deriveBacklogBranchName } from '../core/backlog';
 import { getWorkflowConfig, type WorkflowConfig } from '../core/config/manager';
 import { resolveProjectContext, type ProjectContext } from '../core/project-context';
+import { resolveAgentProviderName } from '../agents';
 
 /** Canonical request for a single backlog implementation execution. */
 export interface WorkflowRunRequest {
@@ -86,9 +87,9 @@ export function resolveWorkflowRequest(
   const backlogId = input.backlogId?.trim();
   if (!backlogId) throw new Error('backlogId is required');
   const budget = input.maxTotalTokens ?? config.goalBudget ?? defaults.goalBudget;
-  const agentProvider = input.agentProvider ?? input.provider ??
-    (config.agentDefault === 'claude' ? 'claude-code' : config.agentDefault as AgentProviderName) ??
-    defaults.agentProvider;
+  const agentProvider = resolveAgentProviderName(
+    input.agentProvider ?? input.provider ?? config.agentDefault ?? defaults.agentProvider,
+  );
   const context = project ?? {
     repoRoot: input.repoRoot ?? process.cwd(),
     projectName: input.projectName,

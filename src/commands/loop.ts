@@ -6,9 +6,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { createProviderBundle } from '../lib/client-factory';
 import { LoopRunner } from '../lib/modules/loop-runner';
-import { getSchedulerConfig } from '../lib/core/config/manager';
+import { getSchedulerConfig, getWorkflowConfig } from '../lib/core/config/manager';
 import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
 import { logger, redirectStdioToLog, resolveLogPath } from '../lib/io';
+import { resolveAgentProviderName } from '../lib/agents';
 
 // ── Config: read extension triggers from .afk/config.yml ──────────────────
 
@@ -94,6 +95,7 @@ const START_OPTIONS = [
   ['-m, --max-iterations <n>', 'Stop after N successful completions (testing)'],
   ['--ext <modules...>', 'Lifecycle modules to activate (e.g., isolate)'],
   ['--ext-param <params...>', 'Module parameters (e.g., isolate.auto=true)'],
+  ['--agent <name>', 'Agent provider'],
 ] as const;
 
 function startAction(options: Record<string, unknown>): Promise<void> {
@@ -203,6 +205,9 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
   const statusInterval = ((options.statusInterval as number | undefined) ?? 30) * 1000;
   const shutdownTimeout = ((options.shutdownTimeout as number | undefined) ?? 300) * 1000;
   const maxIterations = options.maxIterations as number | undefined;
+  const agentProvider = resolveAgentProviderName(
+    (options.agent as string | undefined) ?? getWorkflowConfig().agentDefault,
+  );
 
   const providers = await createProviderBundle(undefined, process.cwd());
   const runner = new LoopRunner(providers, {
@@ -215,6 +220,7 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
     extParams: options.extParam as string[] | undefined,
     moduleTriggers: loopCfg.moduleTriggers,
     providers,
+    agentProvider,
   });
 
   console.log(chalk.bold('\n🔁 AFK Loop started\n'));
@@ -223,6 +229,7 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
   console.log(chalk.gray(`    poll-interval:     ${pollInterval / 1000}s`));
   console.log(chalk.gray(`    status-interval:   ${statusInterval / 1000}s`));
   console.log(chalk.gray(`    shutdown-timeout:  ${shutdownTimeout / 1000}s`));
+  console.log(chalk.gray(`    agent:             ${agentProvider}`));
   if (maxIterations !== undefined) {
     console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
   }

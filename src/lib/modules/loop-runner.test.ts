@@ -15,6 +15,38 @@ const item: BacklogItem = {
 };
 
 describe('LoopRunner QA boundary', () => {
+  it('propagates one explicit agent provider through implementation and QA', async () => {
+    const providers: ProviderBundle = {
+      backlog: {
+        get: vi.fn(async () => item), list: vi.fn(async () => []), claim: vi.fn(),
+        transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}),
+        addTag: vi.fn(async () => {}), removeTag: vi.fn(async () => {}), initialize: vi.fn(async () => {}),
+        isRunnable: vi.fn(async () => true),
+      }, branches: {} as ProviderBundle['branches'], changes: {} as ProviderBundle['changes'],
+    };
+    const run = vi.fn(async () => ({ success: true }));
+    const qaFactory = vi.fn(() => ({ process: vi.fn(async () => ({ success: true })) }) as any);
+    const subject = new LoopRunner(providers, {
+      agentProvider: 'codex',
+      workflowRunnerFactory: vi.fn(() => ({ run }) as any),
+      qaRunnerFactory: qaFactory,
+    });
+    const internals = subject as any;
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    internals.enqueueQA = vi.fn();
+
+    await internals.runChain('42');
+    internals.qaQueue.push('42');
+    await internals.runQA();
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ agentProvider: 'codex' }));
+    expect(qaFactory).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ agentDefault: 'codex' }),
+    );
+  });
+
   it('polls rework backlogs as AFK implementation candidates', async () => {
     const rework = { ...item, state: 'rework' as const };
     const list = vi.fn(async (options: { state?: string }) => options.state === 'rework' ? [rework] : []);

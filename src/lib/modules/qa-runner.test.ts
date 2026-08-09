@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QARunner } from './qa-runner';
+import { createAgentProvider, registerAgentProvider } from '../agents';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../io', async importOriginal => ({
@@ -78,6 +79,23 @@ function fixture() {
 }
 
 describe('QARunner execution boundary', () => {
+  it('resolves the configured agent provider when none is injected', () => {
+    const original = createAgentProvider('codex');
+    const codex = {
+      name: 'codex' as const,
+      capabilities: new Set(),
+      buildCommand: vi.fn(() => ({ argv: ['codex'] })),
+    };
+    registerAgentProvider(codex);
+
+    try {
+      const runner = new QARunner(fixture().providers, { ...config, agentDefault: 'codex' });
+      expect((runner as any).agentProvider).toBe(codex);
+    } finally {
+      registerAgentProvider(original);
+    }
+  });
+
   it('runs batch QA through SandboxProvider without tmux readiness calls', async () => {
     const f = fixture();
     f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });

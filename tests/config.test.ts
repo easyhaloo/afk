@@ -27,7 +27,7 @@ describe('WorkflowConfig env var loading', () => {
 
   it('defaults when no env vars set', async () => {
     const cfg = await freshConfig();
-    expect(cfg.agentDefault).toBe('claude');
+    expect(cfg.agentDefault).toBe('claude-code');
     expect(cfg.tmuxSession).toBe('afk');
     expect(cfg.workflowHardTimeout).toBe(7200 * 1000);
     expect(cfg.completionTimeout).toBe(7200 * 1000);

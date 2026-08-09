@@ -112,6 +112,8 @@ describePty('dashboard layout (node-pty)', () => {
 
     expect(frame).toContain('#17');
     expect(frame).toContain('#18');
+    expect(frame).toContain('▶ #17');
+    expect(frame).toContain('┆');
     expect(frame).toContain('edited ListView.tsx');
     expect(frame).not.toContain('+1 queued');
   }, 8_000);

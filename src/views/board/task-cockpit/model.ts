@@ -1,10 +1,8 @@
 import type { Task } from '../../../types/board';
 import { truncateByVisualWidth } from '../utils';
 
-export function getTaskQueue(tasks: Task[], focusedRunId?: string): Task[] {
-  return tasks
-    .filter(task => task.runId !== focusedRunId)
-    .sort((left, right) => {
+export function getTaskQueue(tasks: Task[]): Task[] {
+  return [...tasks].sort((left, right) => {
       if (left.status !== right.status) return left.status === 'active' ? -1 : 1;
       const leftHeartbeat = left.heartbeatAt?.getTime() ?? 0;
       const rightHeartbeat = right.heartbeatAt?.getTime() ?? 0;

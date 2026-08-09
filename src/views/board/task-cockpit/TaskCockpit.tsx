@@ -25,11 +25,12 @@ export function TaskCockpit({ tasks, selectedIndex, viewportHeight, width, termi
     );
   }
 
-  const queue = getTaskQueue(tasks, focused.runId);
+  const queue = getTaskQueue(tasks);
   const compact = terminalWidth < 80;
-  const showQueue = !compact && queue.length > 0;
+  const showQueue = !compact && tasks.length > 1;
   const queueWidth = terminalWidth >= 120 ? 28 : 24;
-  const mainWidth = showQueue ? Math.max(1, width - queueWidth) : width;
+  const queueSeparatorWidth = showQueue ? 1 : 0;
+  const mainWidth = showQueue ? Math.max(1, width - queueWidth - queueSeparatorWidth) : width;
   const activities = focused.activities ?? [];
   const activityLimit = getActivityLimit(terminalWidth);
   const visibleActivities = Number.isFinite(activityLimit) ? activities.slice(-activityLimit) : activities;
@@ -51,7 +52,8 @@ export function TaskCockpit({ tasks, selectedIndex, viewportHeight, width, termi
     focused.session ? `session ${focused.session}` : undefined,
   ].filter((item): item is string => item !== undefined);
   const errorRows = focused.errorSummary ? 1 : 0;
-  const queueSummaryRows = compact && queue.length > 0 ? 1 : 0;
+  const queuedCount = Math.max(0, tasks.length - 1);
+  const queueSummaryRows = compact && queuedCount > 0 ? 1 : 0;
   const identityRows = 2 + (runtimeContext.length > 0 ? 1 : 0) + (locationContext.length > 0 ? 1 : 0);
   const activityHeight = Math.max(1, viewportHeight - identityRows - 2 - 1 - errorRows - queueSummaryRows);
 
@@ -81,14 +83,17 @@ export function TaskCockpit({ tasks, selectedIndex, viewportHeight, width, termi
             <Text wrap="truncate" dimColor>{locationContext.join(' · ')}</Text>
           </Box>
         )}
-        {queueSummaryRows > 0 && <Box height={1} flexShrink={0} overflow="hidden"><Text dimColor>+{queue.length} queued</Text></Box>}
+        {queueSummaryRows > 0 && <Box height={1} flexShrink={0} overflow="hidden"><Text dimColor>+{queuedCount} queued</Text></Box>}
         <ProgressBar width={mainWidth} progress={progress} task={focused} />
         <PhaseRail phase={phase} width={mainWidth} />
         {focused.errorSummary && <Box height={1} flexShrink={0} overflow="hidden"><Text color="red" wrap="truncate">! error · {focused.errorSummary}</Text></Box>}
         <ActivityStream activities={visibleActivities} width={mainWidth} height={activityHeight} />
       </Box>
       {showQueue && (
-        <TaskQueue tasks={queue} width={queueWidth} height={viewportHeight} />
+        <>
+          <QueueSeparator height={viewportHeight} />
+          <TaskQueue tasks={queue} focusedRunId={focused.runId} width={queueWidth} height={viewportHeight} />
+        </>
       )}
     </Box>
   );
@@ -143,15 +148,23 @@ function ActivityRow({ activity, width }: { activity: TaskActivity; width: numbe
   return <Text wrap="truncate"><Text dimColor>{time} </Text><Text color={activity.kind === 'error' ? 'red' : activity.kind === 'test' ? 'green' : 'cyan'}>{activity.kind.padEnd(5, ' ')}</Text><Text> {message}</Text></Text>;
 }
 
-function TaskQueue({ tasks, width, height }: { tasks: Task[]; width: number; height: number }) {
+function QueueSeparator({ height }: { height: number }) {
   return (
-    <Box flexDirection="column" width={width} height={height} overflow="hidden" borderLeft borderColor="gray" paddingLeft={1}>
+    <Box width={1} height={height} flexShrink={0} overflow="hidden">
+      <Text color="gray" dimColor>{Array.from({ length: height }, () => '┆').join('\n')}</Text>
+    </Box>
+  );
+}
+
+function TaskQueue({ tasks, focusedRunId, width, height }: { tasks: Task[]; focusedRunId: string; width: number; height: number }) {
+  return (
+    <Box flexDirection="column" width={width} height={height} overflow="hidden" paddingLeft={1}>
       <Text color="gray" dimColor>queue {tasks.length}</Text>
-      {tasks.length === 0
-        ? <Text color="gray" dimColor>no other tasks</Text>
-        : tasks.map(task => (
+      {tasks.map(task => (
           <Box key={task.runId} flexDirection="column" height={2} overflow="hidden">
-            <Text wrap="truncate" color={task.status === 'stale' ? 'red' : 'white'}>{getStatusIcon(task.status === 'stale' ? 'stale' : 'active')} #{task.iid}</Text>
+            <Text wrap="truncate" color={task.runId === focusedRunId ? 'cyan' : task.status === 'stale' ? 'red' : 'white'} bold={task.runId === focusedRunId}>
+              {task.runId === focusedRunId ? '▶' : getStatusIcon(task.status === 'stale' ? 'stale' : 'active')} #{task.iid}
+            </Text>
             <Text wrap="truncate" dimColor>{truncateByVisualWidth(task.title, Math.max(1, width - 3))}</Text>
           </Box>
         ))}

@@ -42,7 +42,10 @@ describe('TaskCockpit', () => {
     expect(output).toContain('tool');
     expect(output).toContain('edited ListView.tsx');
     expect(output).toContain('test');
+    expect(output).toContain('▶ #42');
     expect(output).toContain('#43');
+    expect(output.match(/▶ #42/g)).toHaveLength(1);
+    expect(output).toContain('┆');
   });
 
   it('collapses the queue on narrow terminals while keeping a queued count', () => {
@@ -71,7 +74,22 @@ describe('TaskCockpit', () => {
     );
 
     expect(output).toContain('#43');
+    expect(output).toContain('▶ #42');
     expect(output).not.toContain('+1 queued');
+  });
+
+  it('moves the queue pointer with the focused task', () => {
+    const output = renderToString(
+      <TaskCockpit
+        tasks={[activeTask, { ...activeTask, iid: '43', runId: 'run-43', title: 'Verify acceptance criteria' }]}
+        selectedIndex={1}
+        viewportHeight={12}
+        width={120}
+      />,
+    );
+
+    expect(output).toContain('▶ #43');
+    expect(output).not.toContain('▶ #42');
   });
 
   it('omits the narrow queue summary when no other task is queued', () => {
@@ -98,7 +116,9 @@ describe('TaskCockpit', () => {
     );
 
     expect(output).not.toContain('queue 0');
+    expect(output).not.toContain('queue 1');
     expect(output).not.toContain('no other tasks');
+    expect(output).not.toContain('┆');
   });
 
   it('surfaces stale semantics without relying on color alone', () => {

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadLoopConfig } from './loop';
+import { registerLoopCommands } from './loop';
+import { Command } from 'commander';
 
 const CONFIG_DIR = path.join('/tmp', `afk-loop-config-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 const CONFIG_PATH = path.join(CONFIG_DIR, '.afk', 'config.yml');
@@ -81,5 +83,18 @@ describe('loadLoopConfig', () => {
     const result = loadLoopConfig();
     // No label entries under module_triggers → empty
     expect(result.moduleTriggers).toEqual({});
+  });
+});
+
+describe('loop option parsing', () => {
+  it('keeps provider and module option values as strings', () => {
+    const program = new Command().exitOverride();
+    registerLoopCommands(program);
+    const loop = program.commands.find(command => command.name() === 'loop')!;
+    const agent = loop.options.find(option => option.long === '--agent')!;
+    const ext = loop.options.find(option => option.long === '--ext')!;
+
+    expect(agent.parseArg).toBeUndefined();
+    expect(ext.parseArg).toBeUndefined();
   });
 });

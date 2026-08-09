@@ -30,7 +30,7 @@
 - Modify: `src/lib/agents/codex.ts`
 - Test: `src/lib/agents/providers.test.ts`
 
-- [ ] **Step 1: Write failing command-construction tests**
+- [x] **Step 1: Write failing command-construction tests**
 
 Add assertions for batch and interactive modes:
 
@@ -52,7 +52,7 @@ it('builds inline interactive execution with autonomous permissions', () => {
 });
 ```
 
-- [ ] **Step 2: Write failing Codex JSONL parsing tests**
+- [x] **Step 2: Write failing Codex JSONL parsing tests**
 
 Cover an agent result, normalized usage, an error event, and unrelated progress:
 
@@ -72,13 +72,13 @@ expect(p.parseLine(JSON.stringify({ type: 'error', message: 'request failed' }))
 });
 ```
 
-- [ ] **Step 3: Run the provider tests and verify RED**
+- [x] **Step 3: Run the provider tests and verify RED**
 
 Run: `npx vitest run src/lib/agents/providers.test.ts --reporter=dot`
 
 Expected: failures show the missing `exec --json`, obsolete `--full-auto`, and text-only parsing.
 
-- [ ] **Step 4: Implement minimal command and event mapping**
+- [x] **Step 4: Implement minimal command and event mapping**
 
 Set capabilities to `streaming`, `structured-output`, `usage`, and `interactive`. Build exact argv by execution mode and parse only documented Codex shapes:
 
@@ -93,13 +93,13 @@ argv.push('--dangerously-bypass-approvals-and-sandbox', '-C', options.worktreePa
 
 Use snake_case token fields from Codex and return `text` for valid but unhandled events or malformed lines. Do not add resume support.
 
-- [ ] **Step 5: Run provider tests and verify GREEN**
+- [x] **Step 5: Run provider tests and verify GREEN**
 
 Run: `npx vitest run src/lib/agents/providers.test.ts --reporter=dot`
 
 Expected: all provider and registry tests pass.
 
-- [ ] **Step 6: Commit the provider contract**
+- [x] **Step 6: Commit the provider contract**
 
 ```bash
 git add src/lib/agents/codex.ts src/lib/agents/providers.test.ts

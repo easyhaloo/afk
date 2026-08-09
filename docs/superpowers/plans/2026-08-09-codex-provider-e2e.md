@@ -297,7 +297,7 @@ PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" codex login status
 
 Expected: a working Codex version and authenticated status. If either fails, stop and report the environment blocker; do not claim E2E success.
 
-- [ ] **Step 2: Create a bounded AFK backlog**
+- [x] **Step 2: Create a bounded AFK backlog**
 
 Create a root backlog whose acceptance criteria require one small, testable repository change and no unrelated refactoring. Record its backlog URL and ID. Ensure its execution mode is `afk` and state is `ready`.
 
@@ -313,7 +313,7 @@ PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" \
 
 Expected: implement is claimed with `agentProvider=codex`, reaches verification, QA starts with `agentProvider=codex`, and loop stops after the QA terminal result.
 
-- [ ] **Step 4: Audit runtime and provider evidence**
+- [x] **Step 4: Audit runtime and provider evidence**
 
 Inspect `afk loop status`, the Tasks TUI, `~/.afk/runs`, AFK logs, backlog state/tags, the feature/QA branches, and the change request. Confirm implementation and QA both used Codex, `goal_complete` was parsed, root backlog ends `merge_ready + hitl`, and the change request targets `main` without auto-merge.
 

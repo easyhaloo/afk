@@ -129,12 +129,11 @@ export function registerLoopCommands(program: Command): void {
     .description('Continuous integration loop: poll → implement → QA → done, forever')
     .usage('[command] [options]');
 
-  // Only pass a value parser to options that take a value — commander 12
-  // calls the parser for boolean flags too, and parseInt(undefined) → NaN
-  // (falsy), which would silently disable -d/--daemon.
+  // Only numeric placeholders use the positive integer parser. String and
+  // variadic values must retain Commander's identity parsing.
   const addOptions = (cmd: Command) => {
     for (const [flags, description] of START_OPTIONS) {
-      if (flags.includes('<')) {
+      if (/<(?:n|seconds)>/.test(flags)) {
         cmd.option(flags, description, parsePositiveInt);
       } else {
         cmd.option(flags, description);

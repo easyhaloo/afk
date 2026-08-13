@@ -34,8 +34,8 @@ import type {
   ResumeOptions,
 } from '../types';
 import type { ContainerProvider, ContainerExecResult } from './types';
-import type { SessionSnapshot } from '../../agents/types';
-import type { AgentProvider } from '../../agents/types';
+import type { SessionSnapshot } from '../../../domain/agents/types';
+import type { AgentProvider } from '../../../domain/agents/types';
 import { EnvVarAllowlist } from './env-allowlist';
 
 export class ContainerSandbox implements Sandbox {

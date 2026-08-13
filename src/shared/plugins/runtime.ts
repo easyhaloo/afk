@@ -1,8 +1,8 @@
-import type { AgentProvider } from '../agents/types';
-import type { SandboxProvider } from '../sandbox/types';
-import type { WorkflowTemplate } from '../templates/types';
+import type { AgentProvider } from '../../domain/agents/types';
+import type { SandboxProvider } from '../../infrastructure/sandbox/types';
+import type { WorkflowTemplate } from '../../domain/templates/types';
 import type { LifecycleModule } from '../workflows/lifecycle';
-import type { BacklogProvider } from '../core/backlog';
+import type { BacklogProvider } from '../../domain/backlog/index';
 
 export type PluginSystemAction = (input: unknown) => unknown | Promise<unknown>;
 

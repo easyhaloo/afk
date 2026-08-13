@@ -7,7 +7,7 @@
  * (AgentProvider) and "what workflow steps run" (WorkflowTemplate).
  */
 
-import type { AgentCommand, AgentEvent, SessionSnapshot, TokenUsage, ExecutionMode, AgentProvider } from '../agents/types';
+import type { AgentCommand, AgentEvent, SessionSnapshot, TokenUsage, ExecutionMode, AgentProvider } from '../../domain/agents/types';
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
@@ -37,7 +37,7 @@ export interface SandboxOptions {
    * TmuxClient instance to use. For local provider this must be the same
    * instance the HandoffCoordinator uses, so session lifecycle is coherent.
    */
-  tmux?: import('../core/tmux/tmux').TmuxClient;
+  tmux?: import('../tmux/tmux').TmuxClient;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
 }

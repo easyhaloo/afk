@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { basename } from 'path';
-import { IsolateManager } from '../lib/isolate';
+import { IsolateManager } from '../../application/isolate';
 import { handleCommandError, success, info, fail } from '../lib/cli-utils';
 
 function createIsolate(cwd?: string): IsolateManager {

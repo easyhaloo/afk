@@ -6,7 +6,7 @@ import type { Task } from '../../types/board';
 import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter';
 import type { View } from '../board/types';
 import { StateProvider } from './state/StateContext';
-import { TmuxClient } from '../../lib/core/tmux/tmux';
+import { TmuxClient } from '../../infrastructure/tmux/tmux';
 import { createManagementProviderBundle } from '../../lib/client-factory';
 import { useData } from '../board/data/useData';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase';

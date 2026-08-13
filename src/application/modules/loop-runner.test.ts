@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LoopRunner } from './loop-runner';
-import type { ProviderBundle } from '../core/providers';
-import type { BacklogItem } from '../core/backlog';
+import type { ProviderBundle } from '../providers';
+import type { BacklogItem } from '../../domain/backlog/index';
 
 const item: BacklogItem = {
   id: '42',

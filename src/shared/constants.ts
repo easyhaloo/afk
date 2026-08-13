@@ -2,7 +2,7 @@
  * Scheduler-only compile-time constants.
  *
  * All workflow values are sourced from WorkflowConfig via getWorkflowConfig().
- * Import config functions from './core/config/manager' instead.
+ * Import config functions from '../infrastructure/config/manager' instead.
  *
  * This file is kept minimal: only values that are truly scheduler/isolator
  * internal and have no counterpart in any Config interface.

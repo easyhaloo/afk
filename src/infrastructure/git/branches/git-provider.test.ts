@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { GitBranchProvider } from './git-provider';
 import type { BacklogItem } from '../backlog';
-import { _clearPreparedWorktreesForTest } from '../../branches/base';
+import { _clearPreparedWorktreesForTest } from '../../../domain/branches/base';
 
 const cleanupPaths: string[] = [];
 

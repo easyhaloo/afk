@@ -1,9 +1,9 @@
 import { Task } from '../../../types/board';
-import { TaskRuntimeManager, type ActiveTaskRuntimeRecord } from '../../../lib/runtime/task-runtime';
+import { TaskRuntimeManager, type ActiveTaskRuntimeRecord } from '../../../application/runtime/task-runtime';
 import { createGitHubClient, createGitLabClient } from '../../../lib/client-factory';
 import { detectGitLabProject } from '../../../lib/core/tracker/detect';
-import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
-import { fileLogger } from '../../../lib/io';
+import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types';
+import { fileLogger } from '../../../infrastructure/io/index';
 
 const runtimeManager = new TaskRuntimeManager();
 
@@ -53,7 +53,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
   let url = process.env.GITLAB_URL || 'https://gitlab.com';
 
   if (!token) {
-    const glab = await import('../../../lib/core/gitlab/glab-config').then(m => m.getGlabToken(url));
+    const glab = await import('../../../infrastructure/gitlab/glab-config').then(m => m.getGlabToken(url));
     if (glab) {
       token = glab.token;
       url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
@@ -66,7 +66,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
 
   // Use projectId if available, otherwise fallback to first accessible project
   const effectiveProjectId = projectId || 'glab';
-  const client = new (await import('../../../lib/core/gitlab/index')).GitLabClient({
+  const client = new (await import('../../../infrastructure/gitlab/index')).GitLabClient({
     url,
     token,
     projectId: effectiveProjectId,

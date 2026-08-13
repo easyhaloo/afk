@@ -13,7 +13,7 @@
  * session-transfer}. No 'streaming-exec' yet (Phase 7/8 will add stream-json).
  */
 
-import { WorktreeManager } from '../../core/git';
+import { WorktreeManager } from '../../git/index';
 import { promises as fs } from 'fs';
 import type { SandboxProvider, Sandbox, SandboxOptions, SandboxProviderName, IsolationLevel, SandboxCapability, WorktreeInfo } from '../types';
 import { DockerContainerProvider } from './docker';

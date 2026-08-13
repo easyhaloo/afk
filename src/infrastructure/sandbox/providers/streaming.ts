@@ -21,7 +21,7 @@ import type {
   AgentCommand,
   TokenUsage,
   SessionSnapshot,
-} from '../../../lib/agents/types';
+} from '../../../domain/agents/types';
 import type {
   AgentExecution,
   ExecutionEvent,

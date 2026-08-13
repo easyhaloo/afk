@@ -1,10 +1,10 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
-import type { BacklogProvider } from '../core/backlog';
-import type { TmuxClient } from '../core/tmux';
-import { logger, STATUS_FILENAME, clearSignal } from '../io';
-import type { WorkflowConfig } from '../core/config/manager';
+import type { BacklogProvider } from '../../domain/backlog/index';
+import type { TmuxClient } from '../../infrastructure/tmux/index';
+import { logger, STATUS_FILENAME, clearSignal } from '../../infrastructure/io/index';
+import type { WorkflowConfig } from '../../infrastructure/config/manager';
 import { Watchdog } from './watchdog';
 
 /**

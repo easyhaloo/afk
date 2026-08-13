@@ -1,13 +1,13 @@
 import { Command } from 'commander';
-import { registerSignalCommands } from '../../commands/signal';
-import { registerTmuxCommands } from '../../commands/tmux';
-import { registerKanbanCommands } from '../../commands/kanban';
-import { registerDebugCommands } from '../../commands/debug';
-import { registerIsolateCommands } from '../../commands/isolate';
-import { registerQACommands } from '../../commands/qa';
-import { registerLoopCommands } from '../../commands/loop';
-import { registerBacklogCommands } from '../../commands/backlog';
-import { registerRunCommands } from '../../commands/run';
+import { registerSignalCommands } from '../../cli/commands/signal';
+import { registerTmuxCommands } from '../../cli/commands/tmux';
+import { registerKanbanCommands } from '../../cli/commands/kanban';
+import { registerDebugCommands } from '../../cli/commands/debug';
+import { registerIsolateCommands } from '../../application/isolate';
+import { registerQACommands } from '../../cli/commands/qa';
+import { registerLoopCommands } from '../../cli/commands/loop';
+import { registerBacklogCommands } from '../../cli/commands/backlog';
+import { registerRunCommands } from '../../cli/commands/run';
 
 /**
  * Build a commander tree containing every completable command, for completion

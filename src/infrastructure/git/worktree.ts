@@ -1,7 +1,7 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { logger } from '../../io';
+import { logger } from '../io/index';
 
 export type MarkerStatus = 'crashed' | 'success';
 export type WorktreeStatus = 'active' | 'completed' | 'failed';

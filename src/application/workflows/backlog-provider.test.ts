@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WorkflowRunner } from '../workflows';
-import type { ProviderBundle } from '../core/providers';
-import type { BacklogClaim, BacklogItem } from '../core/backlog';
-import type { AgentProvider } from '../agents/types';
+import { WorkflowRunner } from '../workflow-engine';
+import type { ProviderBundle } from '../providers';
+import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index';
+import type { AgentProvider } from '../../domain/agents/types';
 
 vi.mock('../modules/project-resolver', () => ({ default: () => ({ name: 'project-resolver' }) }));
 

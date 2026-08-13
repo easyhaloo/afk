@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
-import { SignalSchema } from '../../schemas';
+import { SignalSchema } from '../../../domain/schemas';
 import { LocalAgentExecution, LocalSandboxProvider } from './local';
 
 describe('LocalSandboxProvider', () => {

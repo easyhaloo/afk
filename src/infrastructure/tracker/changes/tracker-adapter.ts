@@ -1,6 +1,6 @@
 import type { BacklogItem } from '../backlog';
 import type { ChangeProvider, ChangeRequest } from './provider';
-import type { TrackerProvider } from '../tracker/types';
+import type { TrackerProvider } from '../../../domain/tracker/types';
 
 export class TrackerChangeProvider implements ChangeProvider {
   constructor(private readonly tracker: TrackerProvider) {}

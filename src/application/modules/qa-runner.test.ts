@@ -3,7 +3,7 @@ import { QARunner } from './qa-runner';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../io', async importOriginal => ({
-  ...await importOriginal<typeof import('../io')>(),
+  ...await importOriginal<typeof import('../../infrastructure/io/index')>(),
   configureStatusline: ioMocks.configureStatusline,
 }));
 

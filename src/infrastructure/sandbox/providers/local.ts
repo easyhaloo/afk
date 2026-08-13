@@ -16,8 +16,8 @@
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { WorktreeManager } from '../../core/git';
-import { TmuxClient } from '../../core/tmux/tmux';
+import { WorktreeManager } from '../../git/index';
+import { TmuxClient } from '../../tmux/tmux';
 import { clearSignal, getTokenUsage, readSignal } from '../../io';
 import { StreamingAgentExecution } from './streaming';
 import {
@@ -36,7 +36,7 @@ import {
   type IsolationLevel,
   type WorktreeInfo,
 } from '../types';
-import type { AgentCommand, SessionSnapshot } from '../../agents/types';
+import type { AgentCommand, SessionSnapshot } from '../../../domain/agents/types';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',

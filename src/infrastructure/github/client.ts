@@ -19,9 +19,9 @@ import type {
   Commit,
   TrackerIssueComment,
   LabelDelta,
-} from '../tracker/types';
-import { extractAC } from '../tracker/ac';
-import { logger } from '../../io';
+} from '../../domain/tracker/types';
+import { extractAC } from '../../domain/tracker/ac';
+import { logger } from '../io/index';
 
 /**
  * GitHub authentication options

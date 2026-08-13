@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { TmuxClient } from '../lib/core/tmux/tmux';
+import { TmuxClient } from '../../infrastructure/tmux/tmux';
 import { handleCommandError, success, info, warning, detail, formatJson } from '../lib/cli-utils';
 
 export function registerTmuxCommands(program: Command): void {

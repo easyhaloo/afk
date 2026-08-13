@@ -12,7 +12,7 @@
  * the first store that returns a valid snapshot wins.
  */
 
-import type { SessionSnapshot } from '../agents/types';
+import type { SessionSnapshot } from '../../domain/agents/types';
 
 /** Errors thrown by session stores. Distinct error type so the runner can
  *  detect 'corrupt' specifically and fall back without aborting the phase. */

@@ -1,6 +1,6 @@
-import { compileTemplate, type CompiledAgentStep, type CompiledSystemStep } from '../templates/compiler';
-import { evaluateWhen } from '../templates/when-evaluator';
-import type { StepResult, WorkflowTemplate } from '../templates/types';
+import { compileTemplate, type CompiledAgentStep, type CompiledSystemStep } from '../../domain/templates/compiler';
+import { evaluateWhen } from '../../domain/templates/when-evaluator';
+import type { StepResult, WorkflowTemplate } from '../../domain/templates/types';
 
 export interface PlanExecutorOptions {
   executeAgent(step: CompiledAgentStep, results: Record<string, StepResult>): Promise<StepResult>;

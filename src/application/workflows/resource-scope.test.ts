@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RunResourceScope } from './resource-scope';
-import type { BranchHandle, BranchStrategy, BranchStrategyConfig } from '../branches/types';
+import type { BranchHandle, BranchStrategy, BranchStrategyConfig } from '../../domain/branches/types';
 import { simpleGit } from 'simple-git';
 
 function strategy(): BranchStrategy {

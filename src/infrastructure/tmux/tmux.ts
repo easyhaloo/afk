@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
-import { Signal } from '../../schemas';
+import { Signal } from '../../domain/schemas';
 import { readSignal, readSignalSync } from '../io/signal';
-import { TIMEOUTS } from '../../constants';
+import { TIMEOUTS } from '../../shared/constants';
 import { ControlModeConnection } from './control-mode';
 
 export interface TmuxSession {

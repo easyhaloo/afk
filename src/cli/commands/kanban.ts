@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { createTracker } from '../lib/core/tracker/index.js';
-import type { TrackedIssue } from '../lib/core/tracker/types.js';
+import { createTracker } from '../../domain/tracker/index.js';
+import type { TrackedIssue } from '../../domain/tracker/types.js';
 import { handleCommandError, warning, detail } from '../lib/cli-utils.js';
 
 interface BoardColumn {

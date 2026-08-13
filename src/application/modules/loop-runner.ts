@@ -1,12 +1,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { WorkflowRunner } from '../workflows';
+import { WorkflowRunner } from '../workflow-engine';
 import { QARunner } from './qa-runner';
-import { getWorkflowConfig } from '../core/config/manager';
-import { logger } from '../io';
-import type { ManagementProviderBundle, ProviderBundle } from '../core/providers';
-import { ManagementBacklogProvider } from '../core/backlog/management-provider';
+import { getWorkflowConfig } from '../../infrastructure/config/manager';
+import { logger } from '../../infrastructure/io/index';
+import type { ManagementProviderBundle, ProviderBundle } from '../providers';
+import { ManagementBacklogProvider } from '../../domain/backlog/management-provider';
 
 export interface LoopRunnerOptions {
   /** Max simultaneous implement chains (WorkflowRunner instances). */
@@ -20,9 +20,9 @@ export interface LoopRunnerOptions {
   /** If set, the runner stops itself after this many successful completions. */
   maxIterations?: number;
   /** Factory for WorkflowRunner — overridable for tests. */
-  workflowRunnerFactory?: (providers: ProviderBundle, config: import('../core/config/manager').WorkflowConfig) => WorkflowRunner;
+  workflowRunnerFactory?: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig) => WorkflowRunner;
   /** Factory for QARunner — overridable for tests. */
-  qaRunnerFactory?: (providers: ManagementProviderBundle, config: import('../core/config/manager').WorkflowConfig) => QARunner;
+  qaRunnerFactory?: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig) => QARunner;
   /** Where to write this process's pid (so `afk loop stop` can find it). */
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
@@ -62,8 +62,8 @@ interface InternalOptions {
   statusIntervalMs: number;
   shutdownTimeoutMs: number;
   maxIterations: number | undefined;
-  workflowRunnerFactory: (providers: ProviderBundle, config: import('../core/config/manager').WorkflowConfig) => WorkflowRunner;
-  qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../core/config/manager').WorkflowConfig) => QARunner;
+  workflowRunnerFactory: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig) => WorkflowRunner;
+  qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig) => QARunner;
   pidFilePath: string;
   statusFilePath: string;
   ext: string[] | undefined;

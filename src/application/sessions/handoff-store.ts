@@ -14,7 +14,7 @@
 
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import type { SessionSnapshot } from '../agents/types';
+import type { SessionSnapshot } from '../../domain/agents/types';
 import type {
   SessionStore,
   SessionSaveOptions,

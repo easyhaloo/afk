@@ -6,7 +6,7 @@ import { FileSessionStore } from './file-store';
 import { HandoffSessionStore } from './handoff-store';
 import { SessionStoreChain, SessionCorruptError, SessionNotFoundError } from './types';
 import { RunStateWriter } from './run-state';
-import type { SessionSnapshot } from '../agents/types';
+import type { SessionSnapshot } from '../../domain/agents/types';
 
 function makeSnapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
   return {

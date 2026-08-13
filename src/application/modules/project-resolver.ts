@@ -12,9 +12,9 @@
  * assume cwd is the target repo. Doing it here means no other code has to
  * think about cross-project dispatch.
  */
-import { JumpProjectResolver } from '../core/project-resolver';
+import { JumpProjectResolver } from './project-resolver';
 import type { InitContext, LifecycleContext, LifecycleModule } from '../workflows/lifecycle';
-import { logger } from '../io';
+import { logger } from '../../infrastructure/io/index';
 
 export class ProjectResolverModule implements LifecycleModule {
   name = 'project-resolver';

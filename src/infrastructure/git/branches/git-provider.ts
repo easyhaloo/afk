@@ -1,8 +1,8 @@
 import { simpleGit } from 'simple-git';
 import type { BacklogItem } from '../backlog';
 import type { BranchProvider, BranchHandle } from './provider';
-import { strategyForConfig } from '../../branches/registry';
-import type { BranchHandle as StrategyHandle } from '../../branches/types';
+import { strategyForConfig } from '../../../domain/branches/registry';
+import type { BranchHandle as StrategyHandle } from '../../../domain/branches/types';
 
 export class GitBranchProvider implements BranchProvider {
   private readonly handles = new Map<string, StrategyHandle>();

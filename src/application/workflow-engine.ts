@@ -1,30 +1,30 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
-import { WorktreeManager } from './core/git';
-import { TmuxClient, createTmuxClient } from './core/tmux';
-import { createSandboxProvider } from './sandbox';
-import { createAgentProvider } from './agents';
+import { WorktreeManager } from '../infrastructure/git/index';
+import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index';
+import { createSandboxProvider } from '../infrastructure/sandbox/index';
+import { createAgentProvider } from '../domain/agents/index';
 import type {
   Sandbox,
   SandboxProvider,
   SandboxProviderName,
   AgentExecution,
   ExecutionResult,
-} from './sandbox/types';
-import type { AgentProvider, AgentProviderName, SessionSnapshot, ExecutionMode } from './agents/types';
-import { getTokenUsage, configureStatusline, logger } from './io';
-import { getWorkflowConfig } from './core/config/manager';
+} from '../infrastructure/sandbox/types';
+import type { AgentProvider, AgentProviderName, SessionSnapshot, ExecutionMode } from '../domain/agents/types';
+import { getTokenUsage, configureStatusline, logger } from '../infrastructure/io/index';
+import { getWorkflowConfig } from '../infrastructure/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
 import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle';
 import { Watchdog, createWatchdog } from './workflows/watchdog';
-import type { WorkflowConfig } from './core/config/manager';
+import type { WorkflowConfig } from '../infrastructure/config/manager';
 import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
 import { attemptNativeResume } from './workflows/resume';
 import { BudgetManager } from './workflows/budget';
 import type { InitContext } from './workflows/lifecycle';
 import { defaultSessionStoreChain } from './sessions/chain';
-import { TemplateLoader } from './templates/loader';
+import { TemplateLoader } from '../domain/templates/loader';
 import { PlanExecutor } from './workflows/plan-executor';
 import { SystemActionExecutor } from './workflows/system-actions';
 import { RunResourceScope, type RunOutcomeStatus } from './workflows/resource-scope';
@@ -36,11 +36,11 @@ import {
   type CompletionKind,
 } from './workflows/execution-protocol';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection';
-import type { PluginRuntime } from './plugins/runtime';
-import type { Step, StepResult } from './templates/types';
-import type { BranchHandle } from './branches/types';
-import type { ProviderBundle } from './core/providers';
-import type { BacklogClaim, BacklogItem, BacklogState } from './core/backlog';
+import type { PluginRuntime } from '../shared/plugins/runtime';
+import type { Step, StepResult } from '../domain/templates/types';
+import type { BranchHandle } from '../domain/branches/types';
+import type { ProviderBundle } from './providers';
+import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index';
 import { TaskRuntimeManager } from './runtime/task-runtime';
 
 /**
@@ -79,7 +79,7 @@ function formatAcCorrection(failure: AcVerificationFailure): string {
   return `\n\nAC correction required. Work on the current branch and repair exactly these failed acceptance criteria before the verifier runs again:\n${formatCriteria(failure.failedCriteria)}\nVerifier summary: ${failure.summary}`;
 }
 
-function formatReworkContext(rework: import('./core/backlog').ReworkRecord): string {
+function formatReworkContext(rework: import('../domain/backlog/index').ReworkRecord): string {
   return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
@@ -161,7 +161,7 @@ export type WorkflowRunResult =
  */
 export interface RunnerDependencies {
   coordinatorFactory?: (deps: {
-    backlog: import('./core/backlog').BacklogProvider;
+    backlog: import('../domain/backlog/index').BacklogProvider;
     tmux: TmuxClient;
     watchdog: Watchdog;
     config: WorkflowConfig;
@@ -273,7 +273,7 @@ export class WorkflowRunner {
   private runtimeRunId?: string;
   private runtimeErrorSummary?: string;
   private acFeedback?: AcVerificationFailure;
-  private activeRework?: import('./core/backlog').ReworkRecord;
+  private activeRework?: import('../domain/backlog/index').ReworkRecord;
 
   /**
    * Inject a sandbox for testing. Production code goes through runBody →
@@ -1050,7 +1050,7 @@ export class WorkflowRunner {
   }
 
   private async retryFailedAcVerification(
-    template: import('./templates/types').WorkflowTemplate,
+    template: import('../domain/templates/types').WorkflowTemplate,
     ctx: Omit<StepRunCtx, 'stepIndex'>,
     initial: StepResult,
     results: Record<string, StepResult>,

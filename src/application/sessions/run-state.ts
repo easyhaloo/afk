@@ -17,7 +17,7 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
-import type { ExecutionResult } from '../sandbox/types';
+import type { ExecutionResult } from '../../infrastructure/sandbox/types';
 
 const RUNS_DIR = '.afk/runs';
 

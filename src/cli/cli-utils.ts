@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { logger } from './io';
+import { logger } from '../infrastructure/io/index';
 
 /**
  * Parse comma-separated string into trimmed array

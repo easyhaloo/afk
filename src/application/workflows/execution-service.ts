@@ -1,5 +1,5 @@
-import type { AgentProvider, ExecutionMode } from '../agents/types';
-import type { ExecutionResult, Sandbox } from '../sandbox/types';
+import type { AgentProvider, ExecutionMode } from '../../domain/agents/types';
+import type { ExecutionResult, Sandbox } from '../../infrastructure/sandbox/types';
 import { RunStateWriter } from '../sessions/run-state';
 
 export interface AgentStepExecutionRequest {

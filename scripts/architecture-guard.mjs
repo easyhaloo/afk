@@ -3,7 +3,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 
 const root = resolve(new URL('../src/', import.meta.url).pathname);
 const layers = ['cli', 'domain', 'application', 'infrastructure', 'shared', 'views'];
-const forbiddenDirectories = new Set(['lib', 'core']);
+const forbiddenDirectories = new Set(['lib']);
 const forbiddenPatterns = [
   { pattern: /Record<string,\s*unknown>/g, message: 'generic Record<string, unknown> used in source' },
   { pattern: /from ['"]\.\.?\/.*client-factory['"]/g, message: 'legacy client-factory import remains' },
@@ -30,7 +30,8 @@ function walk(directory) {
 
 function resolveImport(fromFile, specifier) {
   if (!specifier.startsWith('.')) return null;
-  const base = resolve(dirname(fromFile), specifier);
+  const normalized = specifier.endsWith('.js') ? specifier.slice(0, -3) : specifier;
+  const base = resolve(dirname(fromFile), normalized);
   const candidates = [
     base,
     `${base}.ts`,

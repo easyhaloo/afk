@@ -1,4 +1,4 @@
-import type { ExecutionMode } from '../agents/types';
+import type { ExecutionMode } from '../../domain/agents/types';
 
 export type CompletionKind = 'task' | 'qa' | 'ac';
 

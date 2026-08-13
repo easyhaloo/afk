@@ -20,8 +20,8 @@ import type {
   Commit,
   TrackerIssueComment,
   LabelDelta,
-} from '../tracker/types';
-import { extractAC } from '../tracker/ac';
+} from '../../domain/tracker/types';
+import { extractAC } from '../../domain/tracker/ac';
 
 export interface GitLabConfig {
   url: string;

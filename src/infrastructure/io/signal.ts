@@ -1,12 +1,12 @@
 import { promises as fs, readFileSync } from 'fs';
 import { join } from 'path';
 import { z } from 'zod';
-import type { Signal } from '../../schemas.js';
-import { SignalSchema } from '../../schemas.js';
+import type { Signal } from '../../domain/schemas.js';
+import { SignalSchema } from '../../domain/schemas.js';
 
-export type { Signal } from '../../schemas.js';
-export { SignalSchema } from '../../schemas.js';
-export { getCurrentTimestamp } from '../../schemas.js';
+export type { Signal } from '../../domain/schemas.js';
+export { SignalSchema } from '../../domain/schemas.js';
+export { getCurrentTimestamp } from '../../domain/schemas.js';
 
 export const SIGNAL_FILE = '.afk-signal.json';
 

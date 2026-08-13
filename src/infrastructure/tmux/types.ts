@@ -1,4 +1,4 @@
-import { Signal } from '../../schemas';
+import { Signal } from '../../domain/schemas';
 
 export interface TmuxSession {
   name: string;

@@ -1,4 +1,4 @@
-import type { StatsProvider, StatsAPI } from '../ui/core/types';
+import type { StatsProvider, StatsAPI } from '../../views/ui/core/types';
 
 /**
  * StatsAggregator — merges stats from all registered StatsProviders on a timer.

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentExecutionService } from './execution-service';
-import type { AgentProvider } from '../agents/types';
-import type { AgentExecution, Sandbox, ExecutionResult } from '../sandbox/types';
+import type { AgentProvider } from '../../domain/agents/types';
+import type { AgentExecution, Sandbox, ExecutionResult } from '../../infrastructure/sandbox/types';
 
 const provider: AgentProvider = {
   name: 'claude-code', capabilities: new Set(['interactive']),

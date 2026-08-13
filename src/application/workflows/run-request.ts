@@ -1,8 +1,8 @@
-import type { AgentProviderName, ExecutionMode } from '../agents/types';
-import type { SandboxProviderName } from '../sandbox/types';
-import type { BranchStrategyConfig } from '../branches/types';
-import { deriveBacklogBranchName } from '../core/backlog';
-import { getWorkflowConfig, type WorkflowConfig } from '../core/config/manager';
+import type { AgentProviderName, ExecutionMode } from '../../domain/agents/types';
+import type { SandboxProviderName } from '../../infrastructure/sandbox/types';
+import type { BranchStrategyConfig } from '../../domain/branches/types';
+import { deriveBacklogBranchName } from '../../domain/backlog/index';
+import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager';
 import { resolveProjectContext, type ProjectContext } from '../core/project-context';
 
 /** Canonical request for a single backlog implementation execution. */

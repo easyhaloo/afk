@@ -3,10 +3,10 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { HandoffCoordinator } from './handoff';
-import type { BacklogProvider } from '../core/backlog';
-import type { TmuxClient } from '../core/tmux/tmux';
+import type { BacklogProvider } from '../../domain/backlog/index';
+import type { TmuxClient } from '../../infrastructure/tmux/tmux';
 import type { Watchdog } from './watchdog';
-import type { WorkflowConfig } from '../core/config/manager';
+import type { WorkflowConfig } from '../../infrastructure/config/manager';
 
 /** Fake tmux: every method is a vi.fn with sane defaults, overridable per-test. */
 function makeTmux(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {

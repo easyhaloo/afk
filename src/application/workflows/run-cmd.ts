@@ -2,13 +2,13 @@
  * Shared single-backlog execution entry point used exclusively by `afk run`.
  * It claims before creating workflow resources; loop claims its own items.
  */
-import { WorkflowRunner, type RunnerOptions } from '../workflows';
+import { WorkflowRunner, type RunnerOptions } from '../workflow-engine';
 import { createTrackerClient } from '../client-factory';
-import { createProviderBundle } from '../core/providers';
-import { getWorkflowConfig } from '../core/config/manager';
-import type { SandboxProviderName } from '../sandbox/types';
-import type { AgentProviderName, ExecutionMode } from '../agents/types';
-import type { BranchStrategyConfig } from '../branches/types';
+import { createProviderBundle } from '../providers';
+import { getWorkflowConfig } from '../../infrastructure/config/manager';
+import type { SandboxProviderName } from '../../infrastructure/sandbox/types';
+import type { AgentProviderName, ExecutionMode } from '../../domain/agents/types';
+import type { BranchStrategyConfig } from '../../domain/branches/types';
 import { resolveWorkflowRunRequest } from './run-request';
 
 export interface RunWorkflowCliOpts {

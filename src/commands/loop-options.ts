@@ -1,5 +1,4 @@
-import type { Command } from 'commander';
-import { InvalidArgumentError } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 
 export interface LoopStartOptions {
   daemon?: boolean;
@@ -12,16 +11,22 @@ export interface LoopStartOptions {
   extParam?: string[];
 }
 
-export const LOOP_START_OPTIONS = [
-  ['-d, --daemon', 'Run as background daemon (returns immediately, logs to file)'],
-  ['-n, --max-concurrent <n>', 'Max parallel implement chains'],
-  ['-p, --poll-interval <seconds>', 'Backlog poll interval'],
-  ['-i, --status-interval <seconds>', 'Status file write interval'],
-  ['-t, --shutdown-timeout <seconds>', 'Max wait for in-flight on SIGTERM'],
-  ['-m, --max-iterations <n>', 'Stop after N successful completions (testing)'],
-  ['--ext <modules...>', 'Lifecycle modules to activate (e.g., isolate)'],
-  ['--ext-param <params...>', 'Module parameters (e.g., isolate.auto=true)'],
-] as const;
+interface LoopOptionDefinition {
+  flags: string;
+  description: string;
+  numeric?: boolean;
+}
+
+export const LOOP_START_OPTIONS: readonly LoopOptionDefinition[] = [
+  { flags: '-d, --daemon', description: 'Run as background daemon (returns immediately, logs to file)' },
+  { flags: '-n, --max-concurrent <n>', description: 'Max parallel implement chains', numeric: true },
+  { flags: '-p, --poll-interval <seconds>', description: 'Backlog poll interval', numeric: true },
+  { flags: '-i, --status-interval <seconds>', description: 'Status file write interval', numeric: true },
+  { flags: '-t, --shutdown-timeout <seconds>', description: 'Max wait for in-flight on SIGTERM', numeric: true },
+  { flags: '-m, --max-iterations <n>', description: 'Stop after N successful completions (testing)', numeric: true },
+  { flags: '--ext <modules...>', description: 'Lifecycle modules to activate (e.g., isolate)' },
+  { flags: '--ext-param <params...>', description: 'Module parameters (e.g., isolate.auto=true)' },
+];
 
 export function parsePositiveInt(value: string, _previous: number | undefined): number {
   const numberValue = parseInt(value, 10);
@@ -32,11 +37,11 @@ export function parsePositiveInt(value: string, _previous: number | undefined): 
 }
 
 export function addLoopStartOptions(command: Command): void {
-  for (const [flags, description] of LOOP_START_OPTIONS) {
-    if (flags.includes('<')) {
-      command.option(flags, description, parsePositiveInt);
+  for (const option of LOOP_START_OPTIONS) {
+    if (option.numeric) {
+      command.option(option.flags, option.description, parsePositiveInt);
     } else {
-      command.option(flags, description);
+      command.option(option.flags, option.description);
     }
   }
 }

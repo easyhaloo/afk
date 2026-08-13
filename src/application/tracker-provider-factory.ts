@@ -1,18 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { GitHubClient } from '../infrastructure/github/client';
 import { GitLabClient } from '../infrastructure/gitlab';
-import { detectGitHubRepo, detectGitLabProject, detectProject } from '../domain/tracker/detect';
+import {
+  resolveGitHubRepository,
+  resolveGitLabProject,
+  resolveTrackerProject,
+} from '../infrastructure/tracker/resolver';
 import { getGlabToken } from '../infrastructure/gitlab/glab-config';
 import type { TrackerProvider } from '../domain/tracker/types';
-import {
-  createManagementProviderBundle,
-  createProviderBundle,
-} from './providers';
-import type {
-  ManagementProviderBundle,
-  ProviderBundle,
-  ProviderBundleOptions,
-} from './providers';
+import { createManagementProviderBundle, createProviderBundle } from './providers';
+import type { ManagementProviderBundle, ProviderBundle, ProviderBundleOptions } from './providers';
 
 function readGhToken(): string | null {
   try {
@@ -34,9 +31,7 @@ function resolveGitHubToken(): string {
 function resolveGitLabAuth(preferredHost?: string): { url: string; token: string } {
   const envUrl = process.env.GITLAB_URL;
   const envToken = process.env.GITLAB_TOKEN;
-  if (envToken) {
-    return { url: envUrl ?? 'https://gitlab.com', token: envToken };
-  }
+  if (envToken) return { url: envUrl ?? 'https://gitlab.com', token: envToken };
 
   const glab = getGlabToken(preferredHost);
   if (!glab) {
@@ -48,7 +43,7 @@ function resolveGitLabAuth(preferredHost?: string): { url: string; token: string
 }
 
 export async function createGitHubTracker(repo?: string, cwd?: string): Promise<GitHubClient> {
-  const project = repo ?? process.env.GITHUB_REPOSITORY ?? await detectGitHubRepo(cwd);
+  const project = repo ?? process.env.GITHUB_REPOSITORY ?? await resolveGitHubRepository(cwd);
   if (!project) {
     throw new Error('Could not determine GitHub repository. Pass owner/repo or run inside a GitHub repository.');
   }
@@ -56,7 +51,7 @@ export async function createGitHubTracker(repo?: string, cwd?: string): Promise<
 }
 
 export async function createGitLabTracker(projectId?: string, cwd?: string): Promise<GitLabClient> {
-  const project = projectId ?? await detectGitLabProject(cwd);
+  const project = projectId ?? await resolveGitLabProject(cwd);
   if (!project) {
     throw new Error('Could not determine GitLab project. Pass the project path or run inside a GitLab repository.');
   }
@@ -65,7 +60,7 @@ export async function createGitLabTracker(projectId?: string, cwd?: string): Pro
 }
 
 export async function createTracker(projectId?: string, cwd?: string): Promise<TrackerProvider> {
-  const detected = await detectProject(cwd);
+  const detected = await resolveTrackerProject(cwd);
   return detected.platform === 'github'
     ? createGitHubTracker(projectId, cwd)
     : createGitLabTracker(projectId, cwd);

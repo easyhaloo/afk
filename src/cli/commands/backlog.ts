@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { createManagementProviderBundle } from '../lib/client-factory';
+import { createManagementProviders } from '../../application/tracker-provider-factory';
 import {
   addBacklogTag,
   initializeBacklog,
@@ -8,15 +8,15 @@ import {
   removeBacklogTag,
   showBacklog,
   type BacklogManagementProvider,
-} from '../lib/backlog/commands';
-import type { BacklogExecutionMode, BacklogState } from '../lib/core/backlog';
-import { handleCommandError, success, warning, detail } from '../lib/cli-utils';
+} from '../../domain/backlog/commands';
+import type { BacklogExecutionMode, BacklogState } from '../../domain/backlog';
+import { handleCommandError, success, warning, detail } from '../cli-utils';
 
 const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];
 
 function providerFor(project?: string): Promise<BacklogManagementProvider> {
-  return createManagementProviderBundle(project).then(bundle => bundle.backlog);
+  return createManagementProviders(project).then(bundle => bundle.backlog);
 }
 
 function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
@@ -29,25 +29,19 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
 }
 
 export function registerBacklogCommands(program: Command): void {
-  const backlog = program
-    .command('backlog')
-    .description('Manage and inspect backlog items (read/manage only)');
+  const backlog = program.command('backlog').description('Manage and inspect backlog items (read/manage only)');
 
-  backlog
-    .command('init')
+  backlog.command('init')
     .description('Initialize provider metadata for backlog state and mode')
     .option('--project <project>', 'Provider project/repository')
     .action(async options => {
       try {
         await initializeBacklog(await providerFor(options.project));
         success('Backlog provider initialized');
-      } catch (error) {
-        handleCommandError(error);
-      }
+      } catch (error) { handleCommandError(error); }
     });
 
-  backlog
-    .command('list')
+  backlog.command('list')
     .description('List backlog items')
     .option('--state <state>', `Filter by state (${states.join('|')})`)
     .option('--mode <mode>', `Filter by execution mode (${modes.join('|')})`)
@@ -64,32 +58,22 @@ export function registerBacklogCommands(program: Command): void {
           tag: options.tag,
           parentId: options.parent,
         });
-        if (items.length === 0) {
-          warning('No backlog items found');
-          return;
-        }
+        if (items.length === 0) { warning('No backlog items found'); return; }
         for (const item of items) printItem(item);
-      } catch (error) {
-        handleCommandError(error);
-      }
+      } catch (error) { handleCommandError(error); }
     });
 
-  backlog
-    .command('show')
+  backlog.command('show')
     .description('Show one backlog item')
     .requiredOption('--id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
     .action(async options => {
-      try {
-        printItem(await showBacklog(await providerFor(options.project), options.id));
-      } catch (error) {
-        handleCommandError(error);
-      }
+      try { printItem(await showBacklog(await providerFor(options.project), options.id)); }
+      catch (error) { handleCommandError(error); }
     });
 
   const tag = backlog.command('tag').description('Manage business tags on a backlog item');
-  tag
-    .command('add')
+  tag.command('add')
     .description('Add a business tag')
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--tag <tag>', 'Tag name')
@@ -98,13 +82,10 @@ export function registerBacklogCommands(program: Command): void {
       try {
         await addBacklogTag(await providerFor(options.project), options.id, options.tag);
         success(`Tag added to backlog ${options.id}`);
-      } catch (error) {
-        handleCommandError(error);
-      }
+      } catch (error) { handleCommandError(error); }
     });
 
-  tag
-    .command('remove')
+  tag.command('remove')
     .description('Remove a business tag')
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--tag <tag>', 'Tag name')
@@ -113,9 +94,7 @@ export function registerBacklogCommands(program: Command): void {
       try {
         await removeBacklogTag(await providerFor(options.project), options.id, options.tag);
         success(`Tag removed from backlog ${options.id}`);
-      } catch (error) {
-        handleCommandError(error);
-      }
+      } catch (error) { handleCommandError(error); }
     });
 
   backlog.action(() => backlog.outputHelp());

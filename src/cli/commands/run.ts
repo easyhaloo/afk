@@ -1,7 +1,7 @@
 import { Command, InvalidArgumentError } from 'commander';
-import { handleCommandError, success, warning, detail } from '../lib/cli-utils';
-import { runWorkflowCli } from '../lib/workflows/run-cmd';
-import { getWorkflowConfig } from '../lib/core/config/manager';
+import { handleCommandError, success, warning, detail } from '../cli-utils';
+import { runWorkflowCli } from '../../application/workflows/run-cmd';
+import { getWorkflowConfig } from '../../infrastructure/config/manager';
 
 function positiveInt(value: string): number {
   const parsed = Number(value);
@@ -10,6 +10,7 @@ function positiveInt(value: string): number {
   }
   return parsed;
 }
+
 export function registerRunCommands(program: Command): void {
   program
     .command('run')
@@ -32,18 +33,18 @@ export function registerRunCommands(program: Command): void {
     .option('--template <name>', 'Workflow template name')
     .action(async options => {
       try {
-        const cfg = getWorkflowConfig();
-        const goalBudget = cfg.goalBudget || 500_000;
+        const config = getWorkflowConfig();
+        const goalBudget = config.goalBudget || 500_000;
         const result = await runWorkflowCli({
           backlogId: options.backlogId,
           session: options.session,
           projectName: options.project,
           targetBranch: options.targetBranch,
           baseBranch: options.baseBranch,
-          maxRetries: options.maxRetries ?? cfg.maxRetries,
-          hardTimeoutMs: options.hardTimeout ?? cfg.workflowHardTimeout,
+          maxRetries: options.maxRetries ?? config.maxRetries,
+          hardTimeoutMs: options.hardTimeout ?? config.workflowHardTimeout,
           maxHandoffs: options.maxHandoffs ?? (Math.min(Math.ceil(goalBudget / 1_000_000), 20) || 3),
-          contextHighTokens: options.contextHigh ?? cfg.contextThreshold,
+          contextHighTokens: options.contextHigh ?? config.contextThreshold,
           maxTotalTokens: options.maxTotalTokens ?? goalBudget,
           ext: options.ext,
           extParams: options.extParam,

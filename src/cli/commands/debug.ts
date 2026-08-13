@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { spawnSync } from 'child_process';
-import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
+import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils';
 
 export interface DebugState {
   original_command: string;

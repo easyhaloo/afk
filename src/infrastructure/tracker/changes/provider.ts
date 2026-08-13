@@ -1,4 +1,4 @@
-import type { BacklogItem } from '../backlog';
+import type { BacklogItem } from '../../../domain/backlog/index';
 
 export interface ChangeRequest {
   id: string;

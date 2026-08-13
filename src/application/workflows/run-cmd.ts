@@ -3,7 +3,7 @@
  * It claims before creating workflow resources; loop claims its own items.
  */
 import { WorkflowRunner, type RunnerOptions } from '../workflow-engine';
-import { createTrackerClient } from '../client-factory';
+import { createTrackerClient } from '../tracker-provider-factory';
 import { createProviderBundle } from '../providers';
 import { getWorkflowConfig } from '../../infrastructure/config/manager';
 import type { SandboxProviderName } from '../../infrastructure/sandbox/types';

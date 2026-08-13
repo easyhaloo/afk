@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { createTracker } from '../../domain/tracker/index.js';
 import type { TrackedIssue } from '../../domain/tracker/types.js';
-import { handleCommandError, warning, detail } from '../lib/cli-utils.js';
+import { handleCommandError, warning, detail } from '../cli-utils.js';
 
 interface BoardColumn {
   title: string;

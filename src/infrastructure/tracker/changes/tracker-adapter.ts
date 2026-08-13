@@ -1,4 +1,4 @@
-import type { BacklogItem } from '../backlog';
+import type { BacklogItem } from '../../../domain/backlog/index';
 import type { ChangeProvider, ChangeRequest } from './provider';
 import type { TrackerProvider } from '../../../domain/tracker/types';
 

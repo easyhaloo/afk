@@ -6,7 +6,7 @@
 import { render } from 'ink';
 import React from 'react';
 import { DashboardEntry } from '../../views/app/index.js';
-import { handleCommandError } from '../lib/cli-utils.js';
+import { handleCommandError } from '../cli-utils.js';
 
 export async function startDashboard() {
   if (!process.stdin.isTTY) {

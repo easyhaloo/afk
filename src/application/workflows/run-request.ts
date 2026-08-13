@@ -3,7 +3,7 @@ import type { SandboxProviderName } from '../../infrastructure/sandbox/types';
 import type { BranchStrategyConfig } from '../../domain/branches/types';
 import { deriveBacklogBranchName } from '../../domain/backlog/index';
 import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager';
-import { resolveProjectContext, type ProjectContext } from '../core/project-context';
+import { resolveProjectContext, type ProjectContext } from '../project-context';
 
 /** Canonical request for a single backlog implementation execution. */
 export interface WorkflowRunRequest {

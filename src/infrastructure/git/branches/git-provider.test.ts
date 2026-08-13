@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { GitBranchProvider } from './git-provider';
-import type { BacklogItem } from '../backlog';
+import type { BacklogItem } from '../../../domain/backlog/index';
 import { _clearPreparedWorktreesForTest } from '../../../domain/branches/base';
 
 const cleanupPaths: string[] = [];

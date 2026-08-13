@@ -1,5 +1,5 @@
 import { simpleGit } from 'simple-git';
-import type { BacklogItem } from '../backlog';
+import type { BacklogItem } from '../../../domain/backlog/index';
 import type { BranchProvider, BranchHandle } from './provider';
 import { strategyForConfig } from '../../../domain/branches/registry';
 import type { BranchHandle as StrategyHandle } from '../../../domain/branches/types';

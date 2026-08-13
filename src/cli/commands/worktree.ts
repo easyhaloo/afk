@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { WorktreeManager } from '../../infrastructure/git/worktree';
 import { getWorktreeConfig } from '../../infrastructure/config/manager';
-import { handleCommandError, success, warning, detail, formatJson } from '../lib/cli-utils';
+import { handleCommandError, success, warning, detail, formatJson } from '../cli-utils';
 
 export function registerWorktreeCommands(program: Command): void {
   const worktree = program

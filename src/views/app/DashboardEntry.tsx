@@ -7,11 +7,11 @@ import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter'
 import type { View } from '../board/types';
 import { StateProvider } from './state/StateContext';
 import { TmuxClient } from '../../infrastructure/tmux/tmux';
-import { createManagementProviderBundle } from '../../lib/client-factory';
+import { createManagementProviderBundle } from '../../application/tracker-provider-factory';
 import { useData } from '../board/data/useData';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
 import { SplashScreen } from '../board/components/SplashScreen';
-import { openInBrowser } from '../../lib/cli-utils';
+import { openInBrowser } from '../../cli/cli-utils';
 
 initRegistry();
 

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { spawn } from 'child_process';
-import { createGitLabClient } from '../lib/client-factory';
-import { handleCommandError, success, info, detail } from '../lib/cli-utils';
+import { createGitLabClient } from '../../application/tracker-provider-factory';
+import { handleCommandError, success, info, detail } from '../cli-utils';
 
 export function registerEscalateCommands(program: Command): void {
   const escalate = program

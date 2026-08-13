@@ -1,7 +1,7 @@
 import { Task } from '../../../types/board';
 import { TaskRuntimeManager, type ActiveTaskRuntimeRecord } from '../../../application/runtime/task-runtime';
-import { createGitHubClient, createGitLabClient } from '../../../lib/client-factory';
-import { detectGitLabProject } from '../../../lib/core/tracker/detect';
+import { createGitHubClient, createGitLabClient } from '../../../application/tracker-provider-factory';
+import { detectGitLabProject } from '../../../infrastructure/tracker/resolver';
 import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types';
 import { fileLogger } from '../../../infrastructure/io/index';
 

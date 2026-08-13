@@ -1,4 +1,4 @@
-import type { ProjectContext } from '../core/project-context';
+import type { ProjectContext } from '../project-context';
 
 export type LifecyclePhase = 'init' | 'before-agent' | 'after-agent' | 'cleanup';
 

@@ -1,13 +1,13 @@
-import type { TrackerProvider } from './tracker/types';
-import type { BacklogProvider, QABacklogProvider } from './backlog';
-import { GitHubBacklogProvider } from './backlog/github-provider';
-import { GitLabBacklogProvider } from './backlog/gitlab-provider';
-import { ManagementBacklogProvider } from './backlog/management-provider';
-import type { AtomicClaim, ClaimLock, ClaimLockFactory } from './backlog/claim-strategy';
-import type { BranchProvider } from './branches/provider';
-import { GitBranchProvider } from './branches/git-provider';
-import type { ChangeProvider } from './changes/provider';
-import { TrackerChangeProvider } from './changes/tracker-adapter';
+import type { TrackerProvider } from '../domain/tracker/types';
+import type { BacklogProvider, QABacklogProvider } from '../domain/backlog';
+import { GitHubBacklogProvider } from '../domain/backlog/github-provider';
+import { GitLabBacklogProvider } from '../domain/backlog/gitlab-provider';
+import { ManagementBacklogProvider } from '../domain/backlog/management-provider';
+import type { AtomicClaim, ClaimLock, ClaimLockFactory } from '../domain/backlog/claim-strategy';
+import type { BranchProvider } from '../infrastructure/git/branches/provider';
+import { GitBranchProvider } from '../infrastructure/git/branches/git-provider';
+import type { ChangeProvider } from '../infrastructure/tracker/changes/provider';
+import { TrackerChangeProvider } from '../infrastructure/tracker/changes/tracker-adapter';
 
 export interface ProviderBundle {
   backlog: BacklogProvider;
@@ -15,7 +15,6 @@ export interface ProviderBundle {
   changes: ChangeProvider;
 }
 
-/** Bundle for backlog administration and QA; its backlog has no claim() path. */
 export interface ManagementProviderBundle {
   backlog: QABacklogProvider;
   branches: BranchProvider;
@@ -23,17 +22,17 @@ export interface ManagementProviderBundle {
 }
 
 export interface ProviderBundleOptions {
-  /** Provider-native conditional claim. The filesystem lease is used when absent. */
   atomicClaim?: AtomicClaim;
-  /** Optional preconfigured local lease (primarily useful for tests/embedding). */
   claimLock?: ClaimLock;
-  /** Factory receiving the provider-qualified expiry recovery callback. */
   claimLockFactory?: ClaimLockFactory;
-  /** Duration of the local fallback lease. */
   claimTtlMs?: number;
 }
 
-export function createProviderBundle(tracker: TrackerProvider, repoRoot: string, options: ProviderBundleOptions = {}): ProviderBundle {
+export function createProviderBundle(
+  tracker: TrackerProvider,
+  repoRoot: string,
+  options: ProviderBundleOptions = {},
+): ProviderBundle {
   return {
     backlog: tracker.platform === 'github'
       ? new GitHubBacklogProvider(tracker, options)
@@ -43,8 +42,10 @@ export function createProviderBundle(tracker: TrackerProvider, repoRoot: string,
   };
 }
 
-/** Backlog administration and QA bundle with a physical claim-free facade. */
-export function createManagementProviderBundle(tracker: TrackerProvider, repoRoot: string): ManagementProviderBundle {
+export function createManagementProviderBundle(
+  tracker: TrackerProvider,
+  repoRoot: string,
+): ManagementProviderBundle {
   return {
     backlog: new ManagementBacklogProvider(createProviderBundle(tracker, repoRoot).backlog),
     branches: new GitBranchProvider(repoRoot),

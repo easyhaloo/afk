@@ -25,4 +25,4 @@ jobs:
       - run: npm run architecture:check
       - run: npm run typecheck
       - run: npm run build
-      - run: npm test -- --runInBand
+      - run: npm test

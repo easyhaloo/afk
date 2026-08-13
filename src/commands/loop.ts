@@ -9,7 +9,9 @@ import { LoopRunner } from '../lib/modules/loop-runner';
 import { getSchedulerConfig } from '../lib/core/config/manager';
 import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
 import { logger, redirectStdioToLog, resolveLogPath } from '../lib/io';
-import { addLoopStartOptions, type LoopStartOptions, parsePositiveInt } from './loop-options';
+import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options';
+
+// ── Config: read extension triggers from .afk/config.yml ──────────────────
 
 interface LoopConfig {
   moduleTriggers: Record<string, string[]>;
@@ -25,41 +27,85 @@ export function loadLoopConfig(): LoopConfig {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const lines = raw.split('\n');
 
+    // Parse the provider-neutral loop.module_triggers map.
     let inTriggers = false;
     for (const line of lines) {
       const trimmed = line.trim();
       if (trimmed === 'module_triggers:') { inTriggers = true; continue; }
       if (inTriggers) {
+        // Each line:   trigger: [module, ...]
+        // Use lastIndexOf(':') so namespaced triggers parse correctly.
         const colon = trimmed.lastIndexOf(':');
         if (colon < 0) { inTriggers = false; continue; }
         const trigger = trimmed.slice(0, colon).trim();
         const value = trimmed.slice(colon + 1).trim();
         if (!trigger) { inTriggers = false; continue; }
+        // Parse value: [isolate] or [isolate, mock-server]
         const listMatch = value.match(/^\[([^\]]*)\]$/);
         if (listMatch) {
-          result.moduleTriggers[trigger] = listMatch[1].split(',').map(item => item.trim()).filter(Boolean);
+          result.moduleTriggers[trigger] = listMatch[1].split(',').map(s => s.trim()).filter(Boolean);
         }
       }
     }
-  } catch (error) {
-    logger.warn({ err: error, path: configPath }, 'failed to load loop config');
+  } catch (err) {
+    logger.warn({ err, path: configPath }, 'failed to load loop config');
   }
 
   return result;
 }
 
+// ── File locations (single source of truth) ─────────────────────────────────
+
 const AFK_HOME = path.join(os.homedir(), '.afk');
 const PID_FILE = path.join(AFK_HOME, 'loop.pid');
 const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');
+// Log file is the shared day-rotated file from the logger (resolveLogPath()).
 
-const startAction = (options: LoopStartOptions): Promise<void> => {
+/**
+ * `afk loop` — single-command continuous-integration worker.
+ *
+ * Polls runnable AFK backlog items, runs WorkflowRunner (implementation), then
+ * immediately hands off to QARunner (verification and merge).
+ * Loops forever until SIGINT/SIGTERM.
+ *
+ * Concurrency model: N implement chains in parallel (--max-concurrent, default
+ * 3), QA runs serially (1 at a time) to avoid worktree/tmux thrash.
+ *
+ * Failure handling is provider-owned: failures become blocked/hitl and the
+ * loop continues with the next runnable backlog item.
+ *
+ * Subcommands:
+ *   afk loop start [--daemon] [opts]   start the loop (foreground or detached)
+ *   afk loop status                    show running daemon's state
+ *   afk loop stop [--timeout N]        gracefully stop the daemon
+ *
+ * `afk loop start --daemon` returns immediately and runs the loop as a
+ * background process. All its output (banners, status lines, diagnostics)
+ * goes to the unified day-rotated log file `~/.afk/logs/afk-YYYY-MM-DD.log`
+ * (the daemon child calls redirectStdioToLog()).
+ * Replaces separate implementation and verification workers.
+ */
+/** Options shared by `afk loop` and `afk loop start`. */
+
+function startAction(options: LoopStartOptions): Promise<void> {
+  // A daemon child never re-daemonizes: combined short flags (-dn 3) survive
+  // the token filter in startDaemon, and without this guard the child would
+  // see daemon=true and spawn another detached grandchild.
   if (options.daemon && process.env.AFK_LOOP_CHILD !== '1') {
     return startDaemon(process.argv.slice(2));
   }
   return runForeground(options);
-};
+}
+
+/**
+ * Validating parser for numeric options. Must NOT be parseInt directly:
+ * commander calls parsers as (value, previous), so a bare parseInt would
+ * receive the previous option value as its radix (e.g. `-n 4 -n 5` parses
+ * '5' with radix 4 → NaN). Also rejects non-positive / non-integer values.
+ */
 
 export function registerLoopCommands(program: Command): void {
+  // `afk loop` with no subcommand behaves exactly like `afk loop start`
   const loop = program
     .command('loop')
     .description('Continuous integration loop: poll → implement → QA → done, forever')
@@ -102,7 +148,7 @@ export function registerLoopCommands(program: Command): void {
     .command('stop')
     .description('Stop the running loop daemon (SIGTERM, then SIGKILL after timeout)')
     .option('-t, --timeout <seconds>', 'Max wait for graceful shutdown before SIGKILL', parsePositiveInt)
-    .action(async (options: { timeout?: number }) => {
+    .action(async (options) => {
       try {
         await stopDaemon({ timeoutSeconds: options.timeout ?? 30 });
       } catch (error) {
@@ -111,14 +157,20 @@ export function registerLoopCommands(program: Command): void {
     });
 }
 
+// ── foreground runner ───────────────────────────────────────────────────────
+
 async function runForeground(options: LoopStartOptions): Promise<void> {
+  // Daemon child (AFK_LOOP_CHILD=1, stdio ignored): swap console + stdout
+  // onto the day log BEFORE any output, so banners and status lines land in
+  // the same unified log file as diagnostics. Foreground runs (TTY or piped)
+  // keep their normal stdout/stderr.
   if (process.env.AFK_LOOP_CHILD === '1') redirectStdioToLog();
 
-  const schedulerConfig = getSchedulerConfig();
-  const loopConfig = loadLoopConfig();
+  const cfg = getSchedulerConfig();
+  const loopCfg = loadLoopConfig();
 
-  const maxConcurrent = options.maxConcurrent ?? schedulerConfig.maxConcurrent;
-  const pollInterval = (options.pollInterval ?? schedulerConfig.pollInterval) * 1000;
+  const maxConcurrent = options.maxConcurrent ?? cfg.maxConcurrent;
+  const pollInterval = (options.pollInterval ?? cfg.pollInterval) * 1000;
   const statusInterval = (options.statusInterval ?? 30) * 1000;
   const shutdownTimeout = (options.shutdownTimeout ?? 300) * 1000;
   const maxIterations = options.maxIterations;
@@ -132,7 +184,7 @@ async function runForeground(options: LoopStartOptions): Promise<void> {
     maxIterations,
     ext: options.ext,
     extParams: options.extParam,
-    moduleTriggers: loopConfig.moduleTriggers,
+    moduleTriggers: loopCfg.moduleTriggers,
     providers,
   });
 
@@ -142,23 +194,26 @@ async function runForeground(options: LoopStartOptions): Promise<void> {
   console.log(chalk.gray(`    poll-interval:     ${pollInterval / 1000}s`));
   console.log(chalk.gray(`    status-interval:   ${statusInterval / 1000}s`));
   console.log(chalk.gray(`    shutdown-timeout:  ${shutdownTimeout / 1000}s`));
-  if (maxIterations !== undefined) console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
-
-  const moduleTriggers = loopConfig.moduleTriggers;
-  if (Object.keys(moduleTriggers).length > 0) {
-    const triggers = Object.entries(moduleTriggers)
+  if (maxIterations !== undefined) {
+    console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
+  }
+  const mt = loopCfg.moduleTriggers;
+  if (Object.keys(mt).length > 0) {
+    const triggers = Object.entries(mt)
       .map(([trigger, modules]) => `${trigger}=${modules.join(',')}`)
       .join('; ');
     console.log(chalk.gray(`    module-triggers:   ${triggers}`));
   }
   console.log(chalk.dim('\nPress Ctrl+C to stop (will drain in-flight work)\n'));
 
+  // Register signal handlers BEFORE start() so we catch signals during
+  // the first poll and during drain.
   const shutdown = async (signal: string) => {
     warning(`Received ${signal}, draining in-flight work...`);
     try {
       await runner.stop();
-    } catch (error) {
-      logger.error({ err: error }, 'error during stop');
+    } catch (err) {
+      logger.error({ err }, 'error during stop');
     }
     process.exit(0);
   };
@@ -167,11 +222,20 @@ async function runForeground(options: LoopStartOptions): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   await runner.start();
+  // start() resolves when --max-iterations is reached
   success('Loop finished (max-iterations reached)');
   process.exit(0);
 }
 
+// ── daemon mode ─────────────────────────────────────────────────────────────
+
+/**
+ * Re-exec the same CLI without `--daemon`, with stdio redirected to the log
+ * file and a new session. Parent waits briefly for the child to write its
+ * pid file, then exits.
+ */
 async function startDaemon(args: string[]): Promise<void> {
+  // 1. Refuse to start if another instance is already running.
   const existing = readPid();
   if (existing !== null && isProcessAlive(existing)) {
     handleCommandError(
@@ -180,12 +244,22 @@ async function startDaemon(args: string[]): Promise<void> {
     );
   }
   if (existing !== null) {
+    // Stale pid file from a previous crash
     try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ }
   }
 
+  // 2. Make sure the pid dir exists before spawn.
   fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });
-  const childArgs = args.filter(argument => argument !== '--daemon' && argument !== '-d');
 
+  // 3. Strip --daemon/-d from the child args (it's a parent-side signal only).
+  const childArgs = args.filter(a => a !== '--daemon' && a !== '-d');
+
+  // 4. Spawn detached. `detached: true` puts the child in its own session so
+  //    it survives terminal disconnect (no SIGHUP). `unref()` lets the parent
+  //    exit without waiting for the child. stdio is ignored: the child swaps
+  //    its console/stdout onto the day-rotated log file itself
+  //    (redirectStdioToLog in runForeground) so ALL its output — banners,
+  //    status lines, diagnostics — lands in the unified log.
   const child = spawn(process.execPath, [process.argv[1], ...childArgs], {
     detached: true,
     stdio: ['ignore', 'ignore', 'ignore'],
@@ -193,7 +267,11 @@ async function startDaemon(args: string[]): Promise<void> {
   });
   child.unref();
 
+  // 6. Wait briefly for the child to write its pid file. LoopRunner writes
+  //    it inside start() — typically <100ms after fork, but TrackerClient
+  //    construction can be slow on first run.
   const pid = await waitForChildPid(2000);
+
   if (pid !== null) {
     success('afk loop daemonized');
     detail(`pid:        ${pid}`);
@@ -215,10 +293,12 @@ async function waitForChildPid(timeoutMs: number): Promise<number | null> {
   while (Date.now() < deadline) {
     const pid = readPid();
     if (pid !== null && isProcessAlive(pid)) return pid;
-    await new Promise(resolveDelay => setTimeout(resolveDelay, 50));
+    await new Promise(r => setTimeout(r, 50));
   }
   return null;
 }
+
+// ── status subcommand ───────────────────────────────────────────────────────
 
 function showStatus(): void {
   const pid = readPid();
@@ -250,44 +330,53 @@ function showStatus(): void {
     detail(`implement:  ${status.implement.active} ${JSON.stringify(status.implement.ids)}`);
     detail(`qa:         ${status.qa.active ?? '-'}`);
     detail(`qaQueue:    ${JSON.stringify(status.qa.queue)}`);
-    detail(`completed:  ${status.totals.completed}`);
+    detail(`done:       ${status.totals.completed}`);
     detail(`failed:     ${status.totals.failed}`);
-    detail(`started:    ${status.totals.started}`);
-    detail(`last-update: ${new Date(status.lastUpdateAt).toISOString()}`);
   } catch {
-    detail('status file not available yet');
+    detail('(status file not yet written — wait for first status tick)');
   }
 }
 
-async function stopDaemon(options: { timeoutSeconds: number }): Promise<void> {
+// ── stop subcommand ─────────────────────────────────────────────────────────
+
+async function stopDaemon(opts: { timeoutSeconds: number }): Promise<void> {
   const pid = readPid();
   if (pid === null) {
-    warning('afk loop: not running');
+    warning('afk loop: not running (no pid file)');
     return;
   }
   if (!isProcessAlive(pid)) {
+    fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`);
     try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ }
-    warning('afk loop: stale pid file removed');
     return;
   }
-
-  process.kill(pid, 'SIGTERM');
-  const deadline = Date.now() + options.timeoutSeconds * 1000;
-  while (Date.now() < deadline && isProcessAlive(pid)) {
-    await new Promise(resolveDelay => setTimeout(resolveDelay, 100));
+  info(`afk loop: sending SIGTERM to pid=${pid} (waiting up to ${opts.timeoutSeconds}s)...`);
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (err) {
+    handleCommandError(new Error(`failed to send signal: ${(err as Error).message}`));
   }
-  if (isProcessAlive(pid)) {
-    process.kill(pid, 'SIGKILL');
-    fail(`afk loop: force-killed pid=${pid}`);
-    return;
+  const deadline = Date.now() + opts.timeoutSeconds * 1000;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      success(`afk loop: pid=${pid} exited`);
+      // LoopRunner deletes the pid file in its own stop() — nothing to do here.
+      return;
+    }
+    await new Promise(r => setTimeout(r, 200));
   }
-  success('afk loop stopped');
+  warning(`afk loop: pid=${pid} did not exit within ${opts.timeoutSeconds}s, sending SIGKILL`);
+  try { process.kill(pid, 'SIGKILL'); } catch { /* ignore */ }
 }
+
+// ── pid / process helpers ───────────────────────────────────────────────────
 
 function readPid(): number | null {
   try {
-    const value = Number(fs.readFileSync(PID_FILE, 'utf-8').trim());
-    return Number.isInteger(value) && value > 0 ? value : null;
+    const raw = fs.readFileSync(PID_FILE, 'utf-8').trim();
+    const pid = parseInt(raw, 10);
+    if (!Number.isFinite(pid) || pid <= 0) return null;
+    return pid;
   } catch {
     return null;
   }
@@ -297,15 +386,19 @@ function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    // EPERM = process exists but not ours; still alive
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 
 function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  return hours > 0 ? `${hours}h ${minutes}m ${seconds}s` : `${minutes}m ${seconds}s`;
+  if (ms < 1000) return `${ms}ms`;
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  if (m < 60) return `${m}m ${rs}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
 }

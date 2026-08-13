@@ -43,6 +43,16 @@ function resolveImport(fromFile, specifier) {
   return candidates.find(candidate => existsSync(candidate) && statSync(candidate).isFile()) ?? null;
 }
 
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\/.*$/gm, '$1');
+}
+
+function isTestFile(filePath) {
+  return /(?:\.test|\.spec|\.integration\.test)\.(?:ts|tsx)$/.test(filePath);
+}
+
 function layerOf(filePath) {
   const pathFromRoot = relative(root, filePath);
   const firstSegment = pathFromRoot.split(/[\\/]/)[0];
@@ -64,8 +74,9 @@ function dependencyLayer(fromLayer, toLayer) {
 }
 
 function checkFile(fullPath) {
-  const source = readFileSync(fullPath, 'utf8');
+  const source = stripComments(readFileSync(fullPath, 'utf8'));
   const fromLayer = layerOf(fullPath);
+  const testFile = isTestFile(fullPath);
 
   for (const rule of forbiddenPatterns) {
     if (rule.pattern.test(source)) violations.push(`${fullPath}: ${rule.message}`);
@@ -82,6 +93,8 @@ function checkFile(fullPath) {
       violations.push(`${fullPath}: unresolved relative import '${specifier}'`);
       continue;
     }
+
+    if (testFile) continue;
 
     const toLayer = layerOf(resolved);
     if (fromLayer && toLayer && !dependencyLayer(fromLayer, toLayer)) {

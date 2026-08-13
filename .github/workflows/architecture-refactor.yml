@@ -90,35 +90,24 @@ jobs:
             const candidates = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, path.join(base, 'index.ts'), path.join(base, 'index.tsx')];
             return candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
           };
-
           const cleanSpec = (specifier) => specifier.endsWith('.js') ? specifier.slice(0, -3) : specifier;
-          const isResolvable = (fromFile, specifier) => {
-            if (!specifier.startsWith('.')) return true;
-            return Boolean(resolveSource(path.resolve(path.dirname(fromFile), cleanSpec(specifier))));
-          };
-
+          const isResolvable = (fromFile, specifier) => !specifier.startsWith('.') || Boolean(resolveSource(path.resolve(path.dirname(fromFile), cleanSpec(specifier))));
           const targetFor = (specifier) => {
             const clean = cleanSpec(specifier);
             if (/(^|\/)workflows$/.test(clean)) return 'application/workflow-engine';
             if (/(^|\/)isolate$/.test(clean)) return 'application/isolate';
-
             const lib = clean.indexOf('/lib/');
-            let logical = lib >= 0 ? clean.slice(lib + 5) : clean.replace(/^\.\.?\//, '').replace(/^\.\.\//g, '');
+            const logical = lib >= 0 ? clean.slice(lib + 5) : clean.replace(/^\.\.?\//, '').replace(/^\.\.\//g, '');
             if (logical.startsWith('ui/')) return `views/ui/${logical.slice(3)}`;
-
             for (const [from, to] of map) {
               if (logical === from || logical.startsWith(`${from}/`)) return `${to}${logical.slice(from.length)}`;
             }
-
-            if (logical.startsWith('ui/')) return `views/ui/${logical.slice(3)}`;
             return null;
           };
-
           const toImport = (fromFile, targetRel, jsExtension) => {
             const target = resolveSource(path.resolve(srcRoot, targetRel));
             if (!target) return null;
-            let value = path.relative(path.dirname(fromFile), target).replaceAll('\\', '/');
-            value = value.replace(/\.(tsx?|mts|cts)$/, '');
+            let value = path.relative(path.dirname(fromFile), target).replaceAll('\\', '/').replace(/\.(tsx?|mts|cts)$/, '');
             if (!value.startsWith('.')) value = `./${value}`;
             return jsExtension ? `${value}.js` : value;
           };
@@ -126,7 +115,6 @@ jobs:
           const pattern = /((?:from\s+|import\(\s*)['"])([^'"]+)(['"])/g;
           let changedFiles = 0;
           let changedImports = 0;
-
           for (const file of files) {
             const source = fs.readFileSync(file, 'utf8');
             let changed = false;
@@ -149,12 +137,8 @@ jobs:
           const guardFile = 'scripts/architecture-guard.mjs';
           let guard = fs.readFileSync(guardFile, 'utf8');
           guard = guard.replace("const forbiddenDirectories = new Set(['lib', 'core']);", "const forbiddenDirectories = new Set(['lib']);");
-          guard = guard.replace(
-            "  const base = resolve(dirname(fromFile), specifier);",
-            "  const normalized = specifier.endsWith('.js') ? specifier.slice(0, -3) : specifier;\n  const base = resolve(dirname(fromFile), normalized);",
-          );
+          guard = guard.replace("  const base = resolve(dirname(fromFile), specifier);", "  const normalized = specifier.endsWith('.js') ? specifier.slice(0, -3) : specifier;\n  const base = resolve(dirname(fromFile), normalized);");
           fs.writeFileSync(guardFile, guard);
-
           console.log(`architecture repair rewrote ${changedImports} imports in ${changedFiles} files`);
           NODE
       - name: Commit repaired tree
@@ -173,6 +157,8 @@ jobs:
 
   architecture:
     name: Architecture
+    needs: repair
+    if: always() && (github.event_name == 'pull_request' || needs.repair.result == 'success' || contains(github.event.head_commit.message, '[architecture-repair]'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -189,6 +175,8 @@ jobs:
 
   typecheck:
     name: Typecheck
+    needs: repair
+    if: always() && (github.event_name == 'pull_request' || needs.repair.result == 'success' || contains(github.event.head_commit.message, '[architecture-repair]'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -205,6 +193,8 @@ jobs:
 
   build:
     name: Build
+    needs: repair
+    if: always() && (github.event_name == 'pull_request' || needs.repair.result == 'success' || contains(github.event.head_commit.message, '[architecture-repair]'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -221,6 +211,8 @@ jobs:
 
   test:
     name: Test
+    needs: repair
+    if: always() && (github.event_name == 'pull_request' || needs.repair.result == 'success' || contains(github.event.head_commit.message, '[architecture-repair]'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

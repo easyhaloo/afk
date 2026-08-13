@@ -1,4 +1,4 @@
-import { Command, InvalidArgumentError } from 'commander';
+import { Command } from 'commander';
 import chalk from 'chalk';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -9,6 +9,7 @@ import { LoopRunner } from '../lib/modules/loop-runner';
 import { getSchedulerConfig } from '../lib/core/config/manager';
 import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
 import { logger, redirectStdioToLog, resolveLogPath } from '../lib/io';
+import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options';
 
 // ── Config: read extension triggers from .afk/config.yml ──────────────────
 
@@ -85,18 +86,8 @@ const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');
  * Replaces separate implementation and verification workers.
  */
 /** Options shared by `afk loop` and `afk loop start`. */
-const START_OPTIONS = [
-  ['-d, --daemon', 'Run as background daemon (returns immediately, logs to file)'],
-  ['-n, --max-concurrent <n>', 'Max parallel implement chains'],
-  ['-p, --poll-interval <seconds>', 'Backlog poll interval'],
-  ['-i, --status-interval <seconds>', 'Status file write interval'],
-  ['-t, --shutdown-timeout <seconds>', 'Max wait for in-flight on SIGTERM'],
-  ['-m, --max-iterations <n>', 'Stop after N successful completions (testing)'],
-  ['--ext <modules...>', 'Lifecycle modules to activate (e.g., isolate)'],
-  ['--ext-param <params...>', 'Module parameters (e.g., isolate.auto=true)'],
-] as const;
 
-function startAction(options: Record<string, unknown>): Promise<void> {
+function startAction(options: LoopStartOptions): Promise<void> {
   // A daemon child never re-daemonizes: combined short flags (-dn 3) survive
   // the token filter in startDaemon, and without this guard the child would
   // see daemon=true and spawn another detached grandchild.
@@ -112,13 +103,6 @@ function startAction(options: Record<string, unknown>): Promise<void> {
  * receive the previous option value as its radix (e.g. `-n 4 -n 5` parses
  * '5' with radix 4 → NaN). Also rejects non-positive / non-integer values.
  */
-function parsePositiveInt(value: string, _previous: number | undefined): number {
-  const n = parseInt(value, 10);
-  if (!Number.isInteger(n) || n <= 0) {
-    throw new InvalidArgumentError(`expected a positive integer, got '${value}'`);
-  }
-  return n;
-}
 
 export function registerLoopCommands(program: Command): void {
   // `afk loop` with no subcommand behaves exactly like `afk loop start`
@@ -127,21 +111,8 @@ export function registerLoopCommands(program: Command): void {
     .description('Continuous integration loop: poll → implement → QA → done, forever')
     .usage('[command] [options]');
 
-  // Only pass a value parser to options that take a value — commander 12
-  // calls the parser for boolean flags too, and parseInt(undefined) → NaN
-  // (falsy), which would silently disable -d/--daemon.
-  const addOptions = (cmd: Command) => {
-    for (const [flags, description] of START_OPTIONS) {
-      if (flags.includes('<')) {
-        cmd.option(flags, description, parsePositiveInt);
-      } else {
-        cmd.option(flags, description);
-      }
-    }
-  };
-
-  addOptions(loop);
-  loop.action(async (options) => {
+  addLoopStartOptions(loop);
+  loop.action(async (options: LoopStartOptions) => {
     try {
       await startAction(options);
     } catch (error) {
@@ -153,8 +124,8 @@ export function registerLoopCommands(program: Command): void {
     .command('start')
     .description('Start the loop (foreground by default; -d runs in background)')
     .usage('[options]');
-  addOptions(start);
-  start.action(async (options) => {
+  addLoopStartOptions(start);
+  start.action(async (options: LoopStartOptions) => {
     try {
       await startAction(options);
     } catch (error) {
@@ -188,7 +159,7 @@ export function registerLoopCommands(program: Command): void {
 
 // ── foreground runner ───────────────────────────────────────────────────────
 
-async function runForeground(options: Record<string, unknown>): Promise<void> {
+async function runForeground(options: LoopStartOptions): Promise<void> {
   // Daemon child (AFK_LOOP_CHILD=1, stdio ignored): swap console + stdout
   // onto the day log BEFORE any output, so banners and status lines land in
   // the same unified log file as diagnostics. Foreground runs (TTY or piped)
@@ -198,11 +169,11 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
   const cfg = getSchedulerConfig();
   const loopCfg = loadLoopConfig();
 
-  const maxConcurrent = (options.maxConcurrent as number | undefined) ?? cfg.maxConcurrent;
-  const pollInterval = ((options.pollInterval as number | undefined) ?? cfg.pollInterval) * 1000;
-  const statusInterval = ((options.statusInterval as number | undefined) ?? 30) * 1000;
-  const shutdownTimeout = ((options.shutdownTimeout as number | undefined) ?? 300) * 1000;
-  const maxIterations = options.maxIterations as number | undefined;
+  const maxConcurrent = options.maxConcurrent ?? cfg.maxConcurrent;
+  const pollInterval = (options.pollInterval ?? cfg.pollInterval) * 1000;
+  const statusInterval = (options.statusInterval ?? 30) * 1000;
+  const shutdownTimeout = (options.shutdownTimeout ?? 300) * 1000;
+  const maxIterations = options.maxIterations;
 
   const providers = await createProviderBundle(undefined, process.cwd());
   const runner = new LoopRunner(providers, {
@@ -211,8 +182,8 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
     statusIntervalMs: statusInterval,
     shutdownTimeoutMs: shutdownTimeout,
     maxIterations,
-    ext: options.ext as string[] | undefined,
-    extParams: options.extParam as string[] | undefined,
+    ext: options.ext,
+    extParams: options.extParam,
     moduleTriggers: loopCfg.moduleTriggers,
     providers,
   });

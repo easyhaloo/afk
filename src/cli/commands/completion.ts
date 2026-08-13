@@ -2,9 +2,9 @@ import { Command } from 'commander';
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { buildCompletionTree } from '../lib/completion/tree';
-import { extractSpec } from '../lib/completion/spec';
-import { emitZsh, emitBash, emitFish } from '../lib/completion/shells';
+import { buildCompletionTree } from '../../shared/completion/tree';
+import { extractSpec } from '../../shared/completion/spec';
+import { emitZsh, emitBash, emitFish } from '../../shared/completion/shells';
 
 const SHELLS = ['zsh', 'bash', 'fish'] as const;
 type Shell = (typeof SHELLS)[number];
@@ -12,8 +12,8 @@ type Shell = (typeof SHELLS)[number];
 const BEGIN = '# >>> afk completion >>>';
 const END = '# <<< afk completion <<<';
 
-function isShell(s: string): s is Shell {
-  return (SHELLS as readonly string[]).includes(s);
+function isShell(shell: string): shell is Shell {
+  return (SHELLS as readonly string[]).includes(shell);
 }
 
 function detectShell(): Shell | undefined {
@@ -30,8 +30,6 @@ function emitScript(shell: Shell): string {
   }
 }
 
-/** Where the completion script file is written. fish uses its auto-load dir
- * (no rc edit); zsh/bash use a file under ~/.afk/completion/ sourced from rc. */
 function completionFilePath(shell: Shell): string {
   const home = process.env.HOME || homedir();
   switch (shell) {
@@ -41,7 +39,6 @@ function completionFilePath(shell: Shell): string {
   }
 }
 
-/** rc file to add a source line to, or undefined if the shell auto-loads. */
 function rcFile(shell: Shell): string | undefined {
   const home = process.env.HOME || homedir();
   switch (shell) {
@@ -58,8 +55,6 @@ interface InstallResult {
   rcUpdated: boolean;
 }
 
-/** Write the completion script to its file (always refreshes) and, for
- * zsh/bash, add an idempotent source block to the rc file. */
 function installCompletion(shell?: string): InstallResult {
   let resolved: Shell;
   if (shell) {
@@ -94,21 +89,10 @@ function printScript(shell: string): void {
     case 'zsh': process.stdout.write(emitZsh(spec)); return;
     case 'bash': process.stdout.write(emitBash(spec)); return;
     case 'fish': process.stdout.write(emitFish(spec)); return;
-    default:
-      throw new Error(`Unsupported shell '${shell}'. Supported: ${SHELLS.join(', ')}.`);
+    default: throw new Error(`Unsupported shell '${shell}'. Supported: ${SHELLS.join(', ')}.`);
   }
 }
 
-/**
- * Register the `completion` and hidden `__complete` commands.
- *
- * `afk completion <shell>` prints an eval-able completion script with inlined
- * static data. `afk completion <shell> --install` (or `--install` alone to
- * auto-detect from $SHELL) writes the script to a file and wires it into the
- * shell: fish auto-loads from ~/.config/fish/completions/; zsh/bash source a
- * file under ~/.afk/completion/ from the rc file (idempotent, no per-startup
- * afk spawn). `afk __complete` is the reserved dynamic-completion callback.
- */
 export function registerCompletionCommands(program: Command): void {
   program
     .command('completion [shell]')
@@ -125,27 +109,21 @@ export function registerCompletionCommands(program: Command): void {
           } else {
             console.log('fish auto-loads from ~/.config/fish/completions/ (no rc edit needed).');
           }
-        } catch (e) {
-          this.error((e as Error).message, { exitCode: 1 });
+        } catch (error) {
+          this.error((error as Error).message, { exitCode: 1 });
         }
         return;
       }
       if (!shell) {
         this.error('Specify a shell (zsh, bash, fish) or use --install.', { exitCode: 1 });
+        return;
       }
-      try {
-        printScript(shell);
-      } catch (e) {
-        this.error((e as Error).message, { exitCode: 1 });
-      }
+      try { printScript(shell); }
+      catch (error) { this.error((error as Error).message, { exitCode: 1 }); }
     });
 
   program
     .command('__complete [words...]', { hidden: true })
     .description('Internal: dynamic completion callback (reserved, currently empty).')
-    .action(() => {
-      // Reserved for dynamic value completion (issue IDs, branch names, etc.).
-      // Shell scripts already route argument-value positions here; until
-      // implemented, it returns no candidates.
-    });
+    .action(() => {});
 }

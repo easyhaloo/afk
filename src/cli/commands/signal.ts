@@ -1,9 +1,36 @@
-import { Command } from 'commander';
+import { Command, InvalidArgumentError } from 'commander';
 import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
-import { getCurrentTimestamp } from '../../domain/schemas';
+import { getCurrentTimestamp, type Signal } from '../../domain/schemas';
 import { writeSignal, readSignal, clearSignal, waitForSignal } from '../../infrastructure/io';
 import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils';
+
+function parseNonNegativeInt(value: string, _previous: number | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new InvalidArgumentError(`expected a non-negative integer, got '${value}'`);
+  }
+  return parsed;
+}
+
+function parsePositiveInt(value: string, _previous: number | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new InvalidArgumentError(`expected a positive integer, got '${value}'`);
+  }
+  return parsed;
+}
+
+function signalSummary(signal: Signal): string {
+  switch (signal.type) {
+    case 'goal_complete':
+    case 'handoff_ready':
+      return signal.summary;
+    case 'timeout':
+    case 'idle':
+      return '';
+  }
+}
 
 export function registerSignalCommands(program: Command): void {
   const signal = program.command('signal').description('Manage structured signal files for workflow communication');
@@ -27,12 +54,15 @@ export function registerSignalCommands(program: Command): void {
     .description('Signal QA completion with a PASS or FAIL result')
     .requiredOption('-r, --result <result>', 'Result: PASS or FAIL')
     .requiredOption('-s, --summary <text>', 'Summary of test results')
-    .option('--tests-run <n>', 'Number of tests run', parseInt)
-    .option('--tests-passed <n>', 'Number of tests passed', parseInt)
+    .option('--tests-run <n>', 'Number of tests run', parseNonNegativeInt)
+    .option('--tests-passed <n>', 'Number of tests passed', parseNonNegativeInt)
     .option('--dir <path>', 'Working directory', process.cwd())
     .action(async options => {
       try {
         if (!['PASS', 'FAIL'].includes(options.result)) throw new Error('Result must be PASS or FAIL');
+        if (options.testsPassed !== undefined && options.testsRun !== undefined && options.testsPassed > options.testsRun) {
+          throw new Error('tests-passed cannot exceed tests-run');
+        }
         await writeSignal({
           type: 'goal_complete',
           timestamp: getCurrentTimestamp(),
@@ -44,7 +74,7 @@ export function registerSignalCommands(program: Command): void {
         }, options.dir);
         success(`QA completion signal written: ${options.result}`);
         detail(`Summary: ${options.summary}`);
-        if (options.testsRun) detail(`Tests: ${options.testsPassed || 0}/${options.testsRun} passed`);
+        if (options.testsRun !== undefined) detail(`Tests: ${options.testsPassed ?? 0}/${options.testsRun} passed`);
       } catch (error) { handleCommandError(error); }
     });
 
@@ -73,11 +103,13 @@ export function registerSignalCommands(program: Command): void {
         } else {
           console.log(chalk.bold(`Type: ${signalData.type}`));
           console.log(chalk.gray(`Timestamp: ${signalData.timestamp}`));
-          console.log(chalk.gray(`Summary: ${(signalData as any).summary ?? ''}`));
+          console.log(chalk.gray(`Summary: ${signalSummary(signalData)}`));
           if (signalData.type === 'goal_complete' && signalData.sha) console.log(chalk.gray(`SHA: ${signalData.sha}`));
           if (signalData.type === 'goal_complete' && signalData.kind === 'qa') {
             console.log(chalk.gray(`Result: ${signalData.result}`));
-            if (signalData.tests_run) console.log(chalk.gray(`Tests: ${signalData.tests_passed || 0}/${signalData.tests_run}`));
+            if (signalData.tests_run !== undefined) {
+              console.log(chalk.gray(`Tests: ${signalData.tests_passed ?? 0}/${signalData.tests_run}`));
+            }
           }
         }
       } catch (error) { handleCommandError(error); }
@@ -93,8 +125,8 @@ export function registerSignalCommands(program: Command): void {
       try {
         info(`Waiting for signal: ${options.type}...`);
         const signalData = await waitForSignal(options.type, {
-          timeout: parseInt(options.timeout),
-          interval: parseInt(options.interval),
+          timeout: parsePositiveInt(String(options.timeout)),
+          interval: parsePositiveInt(String(options.interval)),
           dir: options.dir,
         });
         success(`Signal received: ${signalData.type}`);

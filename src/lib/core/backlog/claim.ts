@@ -2,79 +2,25 @@ import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { BacklogItem } from './index';
+import type {
+  BacklogClaim,
+  ClaimLease,
+  ClaimLockSnapshot,
+  ExpiredClaim,
+  FilesystemClaimLockOptions,
+  FilesystemClaimRequest,
+  GateSnapshot,
+  StoredClaim,
+  StoredOperationGate,
+} from './claim-types';
 
-export interface BacklogClaim {
-  item: BacklogItem;
-  claimId: string;
-  heartbeat(): Promise<void>;
-  release(): Promise<void>;
-}
-
-export interface ClaimLease {
-  claimId: string;
-  heartbeat(): Promise<void>;
-  release(): Promise<void>;
-}
-
-export interface FilesystemClaimRequest {
-  /** A provider-qualified key, for example `github/org-repo/42`. */
-  key: string;
-  owner: string;
-  ttlMs: number;
-}
-
-interface StoredClaim {
-  claimId: string;
-  owner: string;
-  createdAt: string;
-  heartbeatAt: string;
-  expiresAt: string;
-  ttlMs: number;
-}
-
-interface StoredOperationGate {
-  gateId: string;
-  owner: string;
-  pid: number;
-  hostname: string;
-  createdAt: string;
-  expiresAt: string;
-}
-
-interface GateSnapshot {
-  identity: string;
-  gate: StoredOperationGate | null;
-  ageMs: number;
-}
-
-interface ClaimLockSnapshot {
-  identity: string;
-  claim: StoredClaim | null;
-  ageMs: number;
-}
-
-export interface FilesystemClaimLockOptions {
-  /** Maximum time to wait for the short-lived filesystem operation gate. */
-  gateTimeoutMs?: number;
-  /** Delay between operation gate acquisition attempts. */
-  gateRetryMs?: number;
-  /** Duration after which a dead local operation gate may be recovered. */
-  gateStaleMs?: number;
-  /** Grace period for recovering a legacy/incomplete lease directory. */
-  incompleteClaimGraceMs?: number;
-  /** Must mark the provider backlog blocked + hitl before expired lease cleanup. */
-  onExpiredClaim?: (key: string, claim: ExpiredClaim) => Promise<boolean>;
-}
-
-export interface ExpiredClaim {
-  claimId: string;
-  owner: string;
-  createdAt: string;
-  heartbeatAt: string;
-  expiresAt: string;
-  ttlMs: number;
-}
+export type {
+  BacklogClaim,
+  ClaimLease,
+  FilesystemClaimLockOptions,
+  FilesystemClaimRequest,
+  ExpiredClaim,
+} from './claim-types';
 
 /**
  * A durable, single-host lease used by backlog providers that cannot make a
@@ -183,11 +129,6 @@ export class FilesystemClaimLock {
     };
   }
 
-  /**
-   * Keys must be provider-qualified: provider / project (one or more
-   * segments) / backlog ID. This prevents a bare issue number from colliding
-   * across projects.
-   */
   private keyPathFor(key: string): string {
     const segments = key.split('/');
     if (segments.length < 3 || segments.some(segment => !segment || segment === '.' || segment === '..')) {
@@ -236,8 +177,6 @@ export class FilesystemClaimLock {
         await mkdir(ownerPath, { mode: 0o700 });
         await syncDirectory(dirname(ownerPath));
         try {
-          // Publish the already-durable owner directory atomically. A normal
-          // active gate is never observed without its gate.json record.
           await writeGate(ownerPath, gate);
           await rename(ownerPath, gatePath);
           await syncDirectory(dirname(gatePath));
@@ -262,9 +201,6 @@ export class FilesystemClaimLock {
     const inspected = await inspectGate(gatePath);
     if (!inspected || !isRecoverableGate(inspected, this.gateStaleMs)) return;
 
-    // Every contender for the same observed gate identity elects one recovery
-    // owner. The winner must inspect the active gate again after winning; it
-    // never renames a replacement that appeared after its first inspection.
     const recoveryPath = join(dirname(gatePath), `.operation-gate-recovery-${encodeSegment(inspected.identity)}`);
     try {
       await mkdir(recoveryPath, { mode: 0o700 });
@@ -277,9 +213,6 @@ export class FilesystemClaimLock {
       const current = await inspectGate(gatePath);
       if (!current || current.identity !== inspected.identity || !isRecoverableGate(current, this.gateStaleMs)) return;
 
-      // The active path still identifies the gate elected above. Once moved,
-      // a new claimant may only create a fresh active gate at the old path;
-      // cleanup touches the unique tombstone, never that active path.
       const tombstonePath = join(dirname(gatePath), `.operation-gate-recovered-${randomUUID()}`);
       try {
         await rename(gatePath, tombstonePath);
@@ -296,9 +229,6 @@ export class FilesystemClaimLock {
   }
 
   private async recoverClaimLock(lockPath: string, inspected: ClaimLockSnapshot): Promise<void> {
-    // This method always runs inside the operation gate. Release and heartbeat
-    // use that same gate, so re-reading the exact identity before rename makes
-    // recovery a compare-and-remove operation for all compliant claimers.
     const current = await inspectClaimLock(lockPath);
     if (!current || current.identity !== inspected.identity || !isRecoverableClaimLock(current, this.incompleteClaimGraceMs)) return;
 
@@ -316,8 +246,6 @@ export class FilesystemClaimLock {
   private async releaseOperationGate(gatePath: string, gateId: string): Promise<void> {
     const current = (await inspectGate(gatePath))?.gate;
     if (current?.gateId !== gateId) return;
-    // Recovery only moves gates whose local PID is dead. A live owner can
-    // therefore remove only its own gate, never a replacement gate.
     await rm(gatePath, { recursive: true, force: true });
     await syncDirectory(dirname(gatePath));
   }
@@ -327,13 +255,7 @@ function defaultStateRoot(): string {
   return process.env.AFK_STATE_DIR ?? join(homedir(), '.afk', 'state');
 }
 
-function createStoredClaim(
-  claimId: string,
-  owner: string,
-  ttlMs: number,
-  now: Date,
-  createdAt = now.toISOString(),
-): StoredClaim {
+function createStoredClaim(claimId: string, owner: string, ttlMs: number, now: Date, createdAt = now.toISOString()): StoredClaim {
   if (!owner) throw new Error('claim owner is required');
   if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new Error('claim ttlMs must be a positive number');
   return {
@@ -389,8 +311,6 @@ function claimOwnerPath(lockPath: string, claimId: string): string {
 }
 
 function isGateOwnerAlive(gate: StoredOperationGate): boolean {
-  // The fallback lock is intentionally single-host. A gate from another host
-  // is conservatively treated as live because this process cannot verify it.
   if (gate.hostname !== hostname() || !Number.isSafeInteger(gate.pid) || gate.pid <= 0) return true;
   try {
     process.kill(gate.pid, 0);
@@ -417,8 +337,6 @@ async function inspectGate(gatePath: string): Promise<GateSnapshot | null> {
       ageMs: Math.max(0, Date.now() - Date.parse(gate.createdAt)),
     };
   }
-  // A SIGKILL between mkdir and gate.json creation leaves an empty directory.
-  // Its inode and mtime identify the exact incomplete gate for recovery.
   return {
     identity: `empty:${metadata.dev}:${metadata.ino}:${Math.floor(metadata.mtimeMs)}`,
     gate: null,
@@ -523,9 +441,6 @@ async function syncDirectory(path: string): Promise<void> {
     directory = await open(path, 'r');
     await directory.sync();
   } catch (error: unknown) {
-    // Windows and a few network filesystems do not permit fsync on directory
-    // handles. mkdir/rename/unlink remain atomic there; all other failures
-    // remain visible rather than weakening durability silently.
     if (!isUnsupportedDirectorySync(error)) throw error;
   } finally {
     await directory?.close();

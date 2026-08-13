@@ -3,7 +3,6 @@ import { homedir, hostname } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
-  BacklogClaim,
   ClaimLease,
   ClaimLockSnapshot,
   ExpiredClaim,

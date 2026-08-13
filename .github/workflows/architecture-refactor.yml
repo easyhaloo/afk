@@ -29,11 +29,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p src/application/loop src/infrastructure/process
+          mkdir -p src/application/loop src/infrastructure/process src/application
           curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/refactor/code-governance-phase1-clean/src/application/loop/loop-config.ts" -o src/application/loop/loop-config.ts
           curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/refactor/code-governance-phase1-clean/src/infrastructure/process/daemon.ts" -o src/infrastructure/process/daemon.ts
           curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/refactor/code-governance-phase1-clean/src/infrastructure/process/pid-file.ts" -o src/infrastructure/process/pid-file.ts
           curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/main/src/lib/isolate.ts" -o src/application/isolate.ts
+          curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/main/src/lib/core/project-context.ts" -o src/application/project-context.ts
       - name: Rewrite relocated imports and repair architecture resolver
         run: |
           node <<'NODE'
@@ -48,8 +49,11 @@ jobs:
             ['core/backlog', 'domain/backlog'],
             ['core/providers', 'application/providers'],
             ['core/project-resolver', 'application/modules/project-resolver'],
+            ['core/project-context', 'application/project-context'],
             ['core/gitlab', 'infrastructure/gitlab'],
             ['core/github', 'infrastructure/github'],
+            ['core/io', 'infrastructure/io'],
+            ['core/tracker/detect', 'infrastructure/tracker/resolver'],
             ['core/tracker', 'domain/tracker'],
             ['agents', 'domain/agents'],
             ['sandbox', 'infrastructure/sandbox'],
@@ -59,9 +63,13 @@ jobs:
             ['sessions', 'application/sessions'],
             ['branches', 'domain/branches'],
             ['tracker', 'domain/tracker'],
+            ['backlog', 'domain/backlog'],
             ['io', 'infrastructure/io'],
             ['commands', 'cli/commands'],
             ['views', 'views'],
+            ['workflows', 'application/workflows'],
+            ['client-factory', 'application/tracker-provider-factory'],
+            ['cli-utils', 'cli/cli-utils'],
             ['schemas', 'domain/schemas'],
             ['constants', 'shared/constants'],
           ];

@@ -9,220 +9,40 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: architecture-refactor-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  repair:
-    name: Repair import graph
-    if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[architecture-repair]')
+  verify:
+    name: Verify
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - name: Restore migrated files removed during the hard cut
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p src/application/loop src/infrastructure/process src/application
-          curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/refactor/code-governance-phase1-clean/src/application/loop/loop-config.ts" -o src/application/loop/loop-config.ts
-          curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/refactor/code-governance-phase1-clean/src/infrastructure/process/daemon.ts" -o src/infrastructure/process/daemon.ts
-          curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/refactor/code-governance-phase1-clean/src/infrastructure/process/pid-file.ts" -o src/infrastructure/process/pid-file.ts
-          curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/main/src/lib/isolate.ts" -o src/application/isolate.ts
-          curl -fsSL "https://raw.githubusercontent.com/easyhaloo/afk/main/src/lib/core/project-context.ts" -o src/application/project-context.ts
-      - name: Rewrite relocated imports and repair architecture resolver
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const path = require('node:path');
 
-          const srcRoot = path.resolve('src');
-          const map = [
-            ['core/git', 'infrastructure/git'],
-            ['core/tmux', 'infrastructure/tmux'],
-            ['core/config', 'infrastructure/config'],
-            ['core/backlog', 'domain/backlog'],
-            ['core/providers', 'application/providers'],
-            ['core/project-resolver', 'application/modules/project-resolver'],
-            ['core/project-context', 'application/project-context'],
-            ['core/gitlab', 'infrastructure/gitlab'],
-            ['core/github', 'infrastructure/github'],
-            ['core/io', 'infrastructure/io'],
-            ['core/tracker/detect', 'infrastructure/tracker/resolver'],
-            ['core/tracker', 'domain/tracker'],
-            ['agents', 'domain/agents'],
-            ['sandbox', 'infrastructure/sandbox'],
-            ['templates', 'domain/templates'],
-            ['plugins', 'shared/plugins'],
-            ['runtime', 'application/runtime'],
-            ['sessions', 'application/sessions'],
-            ['branches', 'domain/branches'],
-            ['tracker', 'domain/tracker'],
-            ['backlog', 'domain/backlog'],
-            ['io', 'infrastructure/io'],
-            ['commands', 'cli/commands'],
-            ['views', 'views'],
-            ['workflows', 'application/workflows'],
-            ['client-factory', 'application/tracker-provider-factory'],
-            ['cli-utils', 'cli/cli-utils'],
-            ['schemas', 'domain/schemas'],
-            ['constants', 'shared/constants'],
-          ];
-
-          const extensions = new Set(['.ts', '.tsx']);
-          const files = [];
-          const walk = (dir) => {
-            for (const name of fs.readdirSync(dir)) {
-              const full = path.join(dir, name);
-              const stat = fs.statSync(full);
-              if (stat.isDirectory()) walk(full);
-              else if (extensions.has(path.extname(full))) files.push(full);
-            }
-          };
-          walk(srcRoot);
-
-          const resolveSource = (base) => {
-            const candidates = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, path.join(base, 'index.ts'), path.join(base, 'index.tsx')];
-            return candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile());
-          };
-          const cleanSpec = (specifier) => specifier.endsWith('.js') ? specifier.slice(0, -3) : specifier;
-          const isResolvable = (fromFile, specifier) => !specifier.startsWith('.') || Boolean(resolveSource(path.resolve(path.dirname(fromFile), cleanSpec(specifier))));
-          const targetFor = (specifier) => {
-            const clean = cleanSpec(specifier);
-            if (/(^|\/)workflows$/.test(clean)) return 'application/workflow-engine';
-            if (/(^|\/)isolate$/.test(clean)) return 'application/isolate';
-            const lib = clean.indexOf('/lib/');
-            const logical = lib >= 0 ? clean.slice(lib + 5) : clean.replace(/^\.\.?\//, '').replace(/^\.\.\//g, '');
-            if (logical.startsWith('ui/')) return `views/ui/${logical.slice(3)}`;
-            for (const [from, to] of map) {
-              if (logical === from || logical.startsWith(`${from}/`)) return `${to}${logical.slice(from.length)}`;
-            }
-            return null;
-          };
-          const toImport = (fromFile, targetRel, jsExtension) => {
-            const target = resolveSource(path.resolve(srcRoot, targetRel));
-            if (!target) return null;
-            let value = path.relative(path.dirname(fromFile), target).replaceAll('\\', '/').replace(/\.(tsx?|mts|cts)$/, '');
-            if (!value.startsWith('.')) value = `./${value}`;
-            return jsExtension ? `${value}.js` : value;
-          };
-
-          const pattern = /((?:from\s+|import\(\s*)['"])([^'"]+)(['"])/g;
-          let changedFiles = 0;
-          let changedImports = 0;
-          for (const file of files) {
-            const source = fs.readFileSync(file, 'utf8');
-            let changed = false;
-            const rewritten = source.replace(pattern, (full, prefix, specifier, suffix) => {
-              if (!specifier.startsWith('.') || isResolvable(file, specifier)) return full;
-              const targetRel = targetFor(specifier);
-              if (!targetRel) return full;
-              const replacement = toImport(file, targetRel, specifier.endsWith('.js'));
-              if (!replacement || replacement === specifier) return full;
-              changed = true;
-              changedImports += 1;
-              return `${prefix}${replacement}${suffix}`;
-            });
-            if (changed) {
-              fs.writeFileSync(file, rewritten);
-              changedFiles += 1;
-            }
-          }
-
-          const guardFile = 'scripts/architecture-guard.mjs';
-          let guard = fs.readFileSync(guardFile, 'utf8');
-          guard = guard.replace("const forbiddenDirectories = new Set(['lib', 'core']);", "const forbiddenDirectories = new Set(['lib']);");
-          guard = guard.replace("  const base = resolve(dirname(fromFile), specifier);", "  const normalized = specifier.endsWith('.js') ? specifier.slice(0, -3) : specifier;\n  const base = resolve(dirname(fromFile), normalized);");
-          fs.writeFileSync(guardFile, guard);
-          console.log(`architecture repair rewrote ${changedImports} imports in ${changedFiles} files`);
-          NODE
-      - name: Commit repaired tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet; then
-            echo 'No repair changes required.'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src scripts/architecture-guard.mjs
-          git commit -m 'refactor(architecture): repair relocated imports [architecture-repair]'
-          git push origin HEAD:${GITHUB_REF_NAME}
-
-  architecture:
-    name: Architecture
-    needs: repair
-    if: always() && (github.event_name == 'pull_request' || needs.repair.result == 'success' || contains(github.event.head_commit.message, '[architecture-repair]'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
           version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run architecture:check
 
-  typecheck:
-    name: Typecheck
-    needs: repair
-    if: always() && (github.event_name == 'pull_request' || needs.repair.result == 'success' || contains(github.event.head_commit.message, '[architecture-repair]'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run typecheck
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-  build:
-    name: Build
-    needs: repair
-    if: always() && (github.event_name == 'pull_request' || needs.repair.result == 'success' || contains(github.event.head_commit.message, '[architecture-repair]'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
+      - name: Architecture
+        run: pnpm run architecture:check
 
-  test:
-    name: Test
-    needs: repair
-    if: always() && (github.event_name == 'pull_request' || needs.repair.result == 'success' || contains(github.event.head_commit.message, '[architecture-repair]'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm test

@@ -2,9 +2,9 @@ import { Command } from 'commander';
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { buildCompletionTree } from '../../shared/completion/tree';
-import { extractSpec } from '../../shared/completion/spec';
-import { emitZsh, emitBash, emitFish } from '../../shared/completion/shells';
+import { buildCompletionTree } from '../completion/tree';
+import { extractSpec } from '../completion/spec';
+import { emitZsh, emitBash, emitFish } from '../completion/shells';
 
 const SHELLS = ['zsh', 'bash', 'fish'] as const;
 type Shell = (typeof SHELLS)[number];

@@ -1,4 +1,4 @@
-import { openInBrowser } from '../../../cli/cli-utils';
+import { openInBrowser } from '../../../shared/browser';
 import type { BacklogViewModel } from '../../board/data/backlog-adapter';
 import type { StateContextValue } from '../state/StateContext';
 

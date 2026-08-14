@@ -11,9 +11,6 @@ on:
 permissions:
   contents: read
 
-env:
-  ARTIFACT_SHA: ${{ github.sha }}
-
 concurrency:
   group: architecture-refactor-${{ github.ref }}
   cancel-in-progress: true
@@ -48,18 +45,19 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Snapshot dependencies for local sandbox
-        uses: actions/upload-artifact@v4
+      - name: Cache Puppeteer
+        uses: actions/cache@v4
         with:
-          name: afk-node-modules-${{ github.sha }}
-          path: node_modules
-          include-hidden-files: true
-          compression-level: 1
-          if-no-files-found: error
-          retention-days: 1
+          path: ~/.cache/puppeteer
+          key: puppeteer-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            puppeteer-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 12m pnpm install --frozen-lockfile --reporter=append-only
 
       - name: Architecture
         run: pnpm run architecture:check

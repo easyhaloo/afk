@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCompletionTree } from './tree';
+import { buildCompletionTree } from '../../cli/completion/tree';
 import { extractSpec } from './spec';
 import { emitFish } from './shells';
 

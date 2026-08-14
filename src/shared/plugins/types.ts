@@ -1,11 +1,14 @@
 import type { View } from '../../views/ui/core/types';
 
+export type PluginConfigValue = string | number | boolean | null | PluginConfigObject | PluginConfigValue[];
+export interface PluginConfigObject { [key: string]: PluginConfigValue | undefined; }
+
 export interface Plugin {
   readonly id: string;
   readonly name: string;
   readonly version: string;
   readonly views: View[];
-  readonly config?: Record<string, unknown>;
+  readonly config?: PluginConfigObject;
 }
 
 export interface PluginManifest {

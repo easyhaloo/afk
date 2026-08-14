@@ -62,10 +62,15 @@ jobs:
           set -euo pipefail
           timeout 12m pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
 
-      - name: Build native dependencies explicitly
+      - name: Build node-pty native dependency
         run: |
           set -euo pipefail
-          timeout 8m pnpm rebuild node-pty esbuild puppeteer --reporter=append-only
+          timeout 5m pnpm rebuild node-pty --reporter=append-only
+
+      - name: Build esbuild native dependency
+        run: |
+          set -euo pipefail
+          timeout 3m pnpm rebuild esbuild --reporter=append-only
 
       - name: Run project permission setup explicitly
         run: node scripts/fix-permissions.mjs
@@ -78,6 +83,11 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+      - name: Ensure Puppeteer browser for tests
+        run: |
+          set -euo pipefail
+          timeout 5m pnpm exec puppeteer browsers install chrome-headless-shell
 
       - name: Test
         run: pnpm test

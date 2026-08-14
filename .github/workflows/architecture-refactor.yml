@@ -9,7 +9,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: architecture-refactor-${{ github.ref }}
@@ -19,7 +19,7 @@ jobs:
   verify:
     name: Verify
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -31,102 +31,6 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-
-      - name: One-time architecture migration
-        if: github.event_name == 'push' && github.event.head_commit.message == 'chore: run architecture migration'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p src/application/plugins src/application/stats
-
-          if [ -d src/shared/plugins ]; then
-            git mv src/shared/plugins src/application/plugins
-          fi
-          if [ -d src/shared/stats ]; then
-            git mv src/shared/stats src/application/stats
-          fi
-          if [ -f src/shared/completion/tree.ts ] && [ -f src/cli/completion/tree.ts ]; then
-            git rm src/shared/completion/tree.ts
-          fi
-
-          python3 <<'PY'
-          from pathlib import Path
-          import os
-          import re
-
-          root = Path.cwd()
-          src_root = root / 'src'
-
-          mappings = [
-              ('src/shared/plugins', 'src/application/plugins'),
-              ('src/shared/stats', 'src/application/stats'),
-              ('src/shared/completion/tree', 'src/cli/completion/tree'),
-          ]
-
-          import_re = re.compile(r"((?:from|import)\s*\(??\s*['\"])(\.[^'\"]+)(['\"])")
-
-          def resolve_module(file_path: Path, spec: str) -> str | None:
-              if not spec.startswith('.'):
-                  return None
-              candidate = (file_path.parent / spec).resolve()
-              for suffix in ('', '.ts', '.tsx', '.js', '.jsx'):
-                  p = Path(str(candidate) + suffix)
-                  if p.exists():
-                      return p.relative_to(root).as_posix()
-              return None
-
-          def rewrite_spec(file_path: Path, spec: str) -> str:
-              resolved = resolve_module(file_path, spec)
-              if not resolved:
-                  # Also rewrite known old targets that may currently be missing.
-                  base = (file_path.parent / spec).resolve()
-                  try:
-                      rel = base.relative_to(root).as_posix()
-                  except ValueError:
-                      return spec
-              else:
-                  rel = resolved
-
-              new_rel = rel
-              for old, new in mappings:
-                  if rel == old or rel.startswith(old + '/'):
-                      new_rel = new + rel[len(old):]
-                      break
-              if new_rel == rel:
-                  return spec
-
-              target = root / new_rel
-              relative = os.path.relpath(target, file_path.parent).replace(os.sep, '/')
-              if not relative.startswith('.'):
-                  relative = './' + relative
-              return relative
-
-          for path in src_root.rglob('*'):
-              if path.suffix not in {'.ts', '.tsx', '.js', '.jsx'}:
-                  continue
-              if path.name.endswith('.map'):
-                  continue
-              text = path.read_text(encoding='utf-8')
-              rewritten = import_re.sub(lambda m: m.group(1) + rewrite_spec(path, m.group(2)) + m.group(3), text)
-              rewritten = rewritten.replace('Record<string, unknown>', 'Record<string, string | number | boolean | null | object>')
-              if path.as_posix().endswith('/src/views/app/DashboardEntry.tsx'):
-                  rewritten = rewritten.replace("../../cli/cli-utils", "../../shared/browser")
-              if path.as_posix().endswith('/src/views/app/actions/handlers.ts'):
-                  rewritten = rewritten.replace("../../../cli/cli-utils", "../../../shared/browser")
-              if rewritten != text:
-                  path.write_text(rewritten, encoding='utf-8')
-          PY
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src
-          if git diff --cached --quiet; then
-            echo 'No migration changes detected.'
-          else
-            git commit -m 'chore(architecture): apply one-time hard migration'
-            git push origin HEAD:${GITHUB_REF_NAME}
-          fi
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

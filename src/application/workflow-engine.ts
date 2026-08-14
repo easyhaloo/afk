@@ -16,6 +16,7 @@ import type { AgentProvider, AgentProviderName, SessionSnapshot, ExecutionMode }
 import { getTokenUsage, configureStatusline, logger } from '../infrastructure/io/index';
 import { getWorkflowConfig } from '../infrastructure/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
+import type { ModuleParams } from './modules/_registry';
 import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle';
 import { Watchdog, createWatchdog } from './workflows/watchdog';
 import type { WorkflowConfig } from '../infrastructure/config/manager';

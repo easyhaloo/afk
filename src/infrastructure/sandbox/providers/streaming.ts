@@ -241,7 +241,7 @@ export class StreamingAgentExecution implements AgentExecution {
         return data;
       }
       // Malformed or no type — return null so caller treats as unknown result
-      return { type: wrapperTag, ...(data as Record<string, unknown>) };
+      return { type: wrapperTag, ...(data && typeof data === 'object' ? data : {}) };
     }
 
     // Try bare JSON (e.g., handoff_ready)

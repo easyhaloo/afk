@@ -342,6 +342,10 @@ export class QARunner {
   }
 }
 
+interface CriteriaCandidate { id?: unknown; expected?: unknown; actual?: unknown }
+interface CheckCandidate { command?: unknown; expected?: unknown }
+interface QAResultCandidate { type?: unknown; kind?: unknown; result?: unknown; summary?: unknown; requiredChecks?: unknown; failedCriteria?: unknown }
+
 interface QAResult {
   type: 'goal_complete';
   kind: 'qa';
@@ -364,7 +368,7 @@ function parseCriteria(value: unknown): Array<{ id: string; expected: string; ac
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const criteria = value.map(entry => {
     if (!entry || typeof entry !== 'object') return undefined;
-    const item = entry as Record<string, unknown>;
+    const item = entry as CriteriaCandidate;
     return nonEmptyString(item.id) && nonEmptyString(item.expected) && nonEmptyString(item.actual)
       ? { id: item.id, expected: item.expected, actual: item.actual }
       : undefined;
@@ -377,7 +381,7 @@ function parseRequiredChecks(value: unknown): Array<{ command: string; expected:
   if (!Array.isArray(value)) return undefined;
   const checks = value.map(entry => {
     if (!entry || typeof entry !== 'object') return undefined;
-    const item = entry as Record<string, unknown>;
+    const item = entry as CheckCandidate;
     return nonEmptyString(item.command) && nonEmptyString(item.expected)
       ? { command: item.command, expected: item.expected }
       : undefined;
@@ -387,7 +391,7 @@ function parseRequiredChecks(value: unknown): Array<{ command: string; expected:
 
 function asQAResult(value: unknown): QAResult | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  const candidate = value as Record<string, unknown>;
+  const candidate = value as QAResultCandidate;
   if (
     candidate.type !== 'goal_complete' || candidate.kind !== 'qa' || !nonEmptyString(candidate.summary) ||
     (candidate.result !== 'PASS' && candidate.result !== 'FAIL')

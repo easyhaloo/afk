@@ -131,19 +131,7 @@ export interface TrackedMR {
   pipeline?: { status: string };  // GitLab only
 }
 
-import type { ACItem } from './ac';
-
-/**
- * Acceptance Criteria.
- *
- * `items` is ordered (by AC index when from labels, by source order when
- * from legacy markdown). `source` tells callers whether the data came
- * from the structured label path or the legacy markdown parser.
- */
-export interface AcceptanceCriteria {
-  items: ACItem[];
-  source: 'labels' | 'legacy' | 'none';
-}
+import type { ACItem, AcceptanceCriteria } from './ac-types';
 
 /**
  * TrackerProvider interface — unified for GitLab and GitHub

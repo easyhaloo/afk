@@ -1,0 +1,63 @@
+name: one-time-restore-workflow-engine
+on:
+  push:
+    branches:
+      - refactor/architecture-aggressive
+permissions:
+  contents: write
+jobs:
+  restore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore complete workflow-engine and migrate imports
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show cada97afcab91739a1694c21e09551741fdb8a15:src/application/workflow-engine.ts > src/application/workflow-engine.ts
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/application/workflow-engine.ts')
+          s = p.read_text()
+          replacements = {
+              "from './core/git'": "from '../infrastructure/git/index'",
+              "from './core/tmux'": "from '../infrastructure/tmux/index'",
+              "from './sandbox'": "from '../infrastructure/sandbox/index'",
+              "from './agents'": "from '../domain/agents/index'",
+              "from './sandbox/types'": "from '../infrastructure/sandbox/types'",
+              "from './agents/types'": "from '../domain/agents/types'",
+              "from './io'": "from '../infrastructure/io/index'",
+              "from './core/config/manager'": "from '../infrastructure/config/manager'",
+              "from './templates/loader'": "from '../domain/templates/loader'",
+              "from './templates/types'": "from '../domain/templates/types'",
+              "from './core/providers'": "from './providers'",
+              "from './core/backlog'": "from '../domain/backlog/index'",
+              "import('./core/backlog')": "import('../domain/backlog/index')",
+              "import('./templates/types')": "import('../domain/templates/types')",
+          }
+          for a, b in replacements.items():
+              s = s.replace(a, b)
+          p.write_text(s)
+          PY
+      - name: Verify architecture and typecheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+          pnpm rebuild node-pty --reporter=append-only
+          pnpm rebuild esbuild --reporter=append-only
+          pnpm run architecture:check
+          pnpm run typecheck
+      - name: Commit and remove one-time workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/restore-workflow-engine.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/application/workflow-engine.ts .github/workflows/restore-workflow-engine.yml
+          git commit -m 'fix: restore workflow engine implementation after architecture migration'
+          git push origin refactor/architecture-aggressive

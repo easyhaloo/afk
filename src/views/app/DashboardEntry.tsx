@@ -11,7 +11,7 @@ import { createManagementProviderBundle } from '../../application/tracker-provid
 import { useData } from '../board/data/useData';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
 import { SplashScreen } from '../board/components/SplashScreen';
-import { openInBrowser } from '../../cli/cli-utils';
+import { openInBrowser } from '../../shared/browser';
 
 initRegistry();
 

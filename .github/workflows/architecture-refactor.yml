@@ -50,14 +50,25 @@ jobs:
         with:
           path: ~/.cache/puppeteer
           key: puppeteer-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            puppeteer-${{ runner.os }}-
 
-      - name: Install dependencies
-        shell: bash
+      - name: Cache node-gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/node-gyp
+          key: node-gyp-${{ runner.os }}-node20-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies without root postinstall
         run: |
           set -euo pipefail
-          timeout 12m pnpm install --frozen-lockfile --reporter=append-only
+          timeout 12m pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+
+      - name: Build native dependencies explicitly
+        run: |
+          set -euo pipefail
+          timeout 8m pnpm rebuild node-pty esbuild puppeteer --reporter=append-only
+
+      - name: Run project permission setup explicitly
+        run: node scripts/fix-permissions.mjs
 
       - name: Architecture
         run: pnpm run architecture:check

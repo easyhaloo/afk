@@ -1,0 +1,78 @@
+name: Apply type cleanup
+
+on:
+  push:
+    branches:
+      - refactor/architecture-aggressive
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor == 'easyhaloo'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/architecture-aggressive
+          fetch-depth: 1
+
+      - name: Apply targeted refactor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # workflow-engine: use the domain-specific module parameter type.
+          p = Path('src/application/workflow-engine.ts')
+          s = p.read_text()
+          s = s.replace("import { loadModules, parseModuleParams } from './modules/_registry';", "import { loadModules, parseModuleParams } from './modules/_registry';\nimport type { ModuleParams } from './modules/_registry';")
+          s = s.replace('private extParams: Record<string, unknown> = {};', 'private extParams: ModuleParams = {};')
+          p.write_text(s)
+
+          # qa-runner: replace generic object casts with narrow validation shapes.
+          p = Path('src/application/modules/qa-runner.ts')
+          s = p.read_text()
+          s = s.replace(
+              "interface QAResult {",
+              "interface CriteriaCandidate { id?: unknown; expected?: unknown; actual?: unknown }\ninterface CheckCandidate { command?: unknown; expected?: unknown }\ninterface QAResultCandidate { type?: unknown; kind?: unknown; result?: unknown; summary?: unknown; requiredChecks?: unknown; failedCriteria?: unknown }\n\ninterface QAResult {"
+          )
+          s = s.replace('const item = entry as Record<string, unknown>;', 'const item = entry as CriteriaCandidate;', 1)
+          s = s.replace('const item = entry as Record<string, unknown>;', 'const item = entry as CheckCandidate;', 1)
+          s = s.replace('const candidate = value as Record<string, unknown>;', 'const candidate = value as QAResultCandidate;')
+          p.write_text(s)
+
+          # streaming: spreading an object is enough; no generic Record cast is needed.
+          p = Path('src/infrastructure/sandbox/providers/streaming.ts')
+          s = p.read_text()
+          s = s.replace('return { type: wrapperTag, ...(data as Record<string, unknown>) };', 'return { type: wrapperTag, ...(data && typeof data === \'object\' ? data : {}) };')
+          p.write_text(s)
+
+          # Completion tests: tree moved to CLI.
+          for name in ['fish.test.ts', 'shells.test.ts', 'spec.test.ts', 'tree.test.ts']:
+              p = Path('src/shared/completion') / name
+              if p.exists():
+                  s = p.read_text().replace("from './tree'", "from '../../cli/completion/tree'")
+                  p.write_text(s)
+
+          # Plugin runtime test: runtime moved to application/plugins.
+          p = Path('src/shared/plugins/runtime.test.ts')
+          if p.exists():
+              p.write_text(p.read_text().replace("from './runtime'", "from '../../application/plugins/runtime'"))
+          PY
+
+      - name: Verify targeted cleanup
+        run: |
+          ! grep -R 'Record<string, unknown>' -n src/application src/infrastructure/sandbox/providers/streaming.ts
+          ! grep -R "from '../shared/plugins/runtime'\|from '../../shared/plugins/runtime'" -n src/application
+          ! grep -R "from './tree'" -n src/shared/completion/*.test.ts
+          ! grep -R "from './runtime'" -n src/shared/plugins/runtime.test.ts
+
+      - name: Commit and remove migration workflow
+        run: |
+          git config user.name 'easyhaloo'
+          git config user.email '32064710+easyhaloo@users.noreply.github.com'
+          git rm .github/workflows/apply-type-cleanup.yml
+          git add src/application/workflow-engine.ts src/application/modules/qa-runner.ts src/infrastructure/sandbox/providers/streaming.ts src/shared/completion/*.test.ts src/shared/plugins/runtime.test.ts
+          git commit -m 'refactor: finish architecture type cleanup'
+          git push origin refactor/architecture-aggressive

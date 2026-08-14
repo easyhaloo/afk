@@ -1,3 +1,4 @@
+# Architecture verification for the aggressive refactor branch.
 name: Architecture Refactor
 
 on:

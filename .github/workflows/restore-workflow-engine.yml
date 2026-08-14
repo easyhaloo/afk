@@ -29,24 +29,24 @@ jobs:
           from pathlib import Path
           p = Path('src/application/workflow-engine.ts')
           s = p.read_text()
-          replacements = {
-              "from './core/git'": "from '../infrastructure/git/index'",
-              "from './core/tmux'": "from '../infrastructure/tmux/index'",
-              "from './sandbox'": "from '../infrastructure/sandbox/index'",
-              "from './agents'": "from '../domain/agents/index'",
-              "from './sandbox/types'": "from '../infrastructure/sandbox/types'",
-              "from './agents/types'": "from '../domain/agents/types'",
-              "from './io'": "from '../infrastructure/io/index'",
-              "from './core/config/manager'": "from '../infrastructure/config/manager'",
-              "from './templates/loader'": "from '../domain/templates/loader'",
-              "from './templates/types'": "from '../domain/templates/types'",
-              "from './core/providers'": "from './providers'",
-              "from './core/backlog'": "from '../domain/backlog/index'",
-              "import('./core/backlog')": "import('../domain/backlog/index')",
-              "import('./templates/types')": "import('../domain/templates/types')",
-          }
-          for a, b in replacements.items():
-              s = s.replace(a, b)
+          s = s.replace("from './core/git'", "from '../infrastructure/git/index'")
+          s = s.replace("from './core/tmux'", "from '../infrastructure/tmux/index'")
+          s = s.replace("from './sandbox'", "from '../infrastructure/sandbox/index'")
+          s = s.replace("from './agents'", "from '../domain/agents/index'")
+          s = s.replace("from './sandbox/types'", "from '../infrastructure/sandbox/types'")
+          s = s.replace("from './agents/types'", "from '../domain/agents/types'")
+          s = s.replace("from './io'", "from '../infrastructure/io/index'")
+          s = s.replace("from './core/config/manager'", "from '../infrastructure/config/manager'")
+          s = s.replace("from './templates/loader'", "from '../domain/templates/loader'")
+          s = s.replace("from './templates/types'", "from '../domain/templates/types'")
+          s = s.replace("from './core/providers'", "from './providers'")
+          s = s.replace("from './core/backlog'", "from '../domain/backlog/index'")
+          s = s.replace("import('./core/backlog')", "import('../domain/backlog/index')")
+          s = s.replace("import('./templates/types')", "import('../domain/templates/types')")
+          s = s.replace("import type { Step, StepResult } from './templates/types';", "import type { Step, StepResult } from '../domain/templates/types';")
+          s = s.replace("import type { BranchHandle } from './branches/types';", "import type { BranchHandle } from '../domain/branches/types';")
+          s = s.replace("import { loadModules, parseModuleParams } from './modules/_registry';", "import { loadModules, parseModuleParams } from './modules/_registry';\nimport type { ModuleParams } from './modules/_registry';")
+          s = s.replace("private extParams: Record<string, unknown> = {};", "private extParams: ModuleParams = {};")
           p.write_text(s)
           PY
       - name: Verify architecture and typecheck

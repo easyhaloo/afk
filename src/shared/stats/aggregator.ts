@@ -1,33 +1,29 @@
-import type { StatsProvider, StatsAPI } from '../../views/ui/core/types';
+import type { StatsProvider, StatsAPI, StatsValue } from './types';
 
-/**
- * StatsAggregator — merges stats from all registered StatsProviders on a timer.
- * Data source priority: disk cache > git history > API.
- */
 export class StatsAggregator implements StatsAPI {
   private providers = new Map<string, StatsProvider>();
-  private merged: Record<string, number | string> = {};
-  private intervalMs: number;
+  private merged: Record<string, StatsValue> = {};
+  private readonly intervalMs: number;
   private timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(intervalMs = 60_000) {
     this.intervalMs = intervalMs;
   }
 
-  register(p: StatsProvider, id: string): void {
-    this.providers.set(id, p);
+  register(provider: StatsProvider, id: string): void {
+    this.providers.set(id, provider);
   }
 
   unregister(id: string): void {
     this.providers.delete(id);
   }
 
-  getAll(): Record<string, number | string> {
+  getAll(): Record<string, StatsValue> {
     return { ...this.merged };
   }
 
   start(): void {
-    this.tick(); // immediate first run
+    this.tick();
     this.timer = setInterval(() => this.tick(), this.intervalMs);
   }
 
@@ -39,7 +35,7 @@ export class StatsAggregator implements StatsAPI {
   }
 
   private tick(): void {
-    const result: Record<string, number | string> = {};
+    const result: Record<string, StatsValue> = {};
     for (const [id, provider] of this.providers) {
       const stats = provider.provide();
       for (const [key, value] of Object.entries(stats)) {

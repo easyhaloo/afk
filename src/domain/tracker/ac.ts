@@ -1,4 +1,5 @@
 import type { TrackedIssue } from './types';
+import type { ACItem } from './ac-types';
 
 /**
  * AC is represented as issue labels with prefix `ac::`.
@@ -55,21 +56,6 @@ export function extractACFromLabels(labels: readonly string[]): ACItem[] {
       evidenceType: 'none',
       checkCommand: '',
     }));
-}
-
-/** Controlled evidence types per docs/ISSUE-TEMPLATE.md */
-export const EVIDENCE_TYPES = ['test', 'curl', 'log', 'manual', 'bash', 'none'] as const;
-export type EvidenceType = typeof EVIDENCE_TYPES[number];
-
-/**
- * Parsed AC item. `text` is the human-readable condition; `evidenceType`
- * and `checkCommand` enable machine verification.
- */
-export interface ACItem {
-  index: number;
-  text: string;
-  evidenceType: EvidenceType;
-  checkCommand: string;
 }
 
 /**

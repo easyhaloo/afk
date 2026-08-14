@@ -51,6 +51,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Snapshot dependencies for local sandbox
+        uses: actions/upload-artifact@v4
+        with:
+          name: afk-node-modules-${{ github.sha }}
+          path: node_modules
+          include-hidden-files: true
+          compression-level: 1
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Architecture
         run: pnpm run architecture:check
 

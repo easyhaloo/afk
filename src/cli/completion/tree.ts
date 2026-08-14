@@ -3,7 +3,7 @@ import { registerSignalCommands } from '../commands/signal';
 import { registerTmuxCommands } from '../commands/tmux';
 import { registerKanbanCommands } from '../commands/kanban';
 import { registerDebugCommands } from '../commands/debug';
-import { registerIsolateCommands } from '../../application/isolate';
+import { registerIsolateCommands } from '../commands/isolate';
 import { registerQACommands } from '../commands/qa';
 import { registerLoopCommands } from '../commands/loop';
 import { registerBacklogCommands } from '../commands/backlog';

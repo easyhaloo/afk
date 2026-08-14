@@ -3,8 +3,8 @@ import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } fr
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { buildCompletionTree } from '../completion/tree';
-import { extractSpec } from '../completion/spec';
-import { emitZsh, emitBash, emitFish } from '../completion/shells';
+import { extractSpec } from '../../shared/completion/spec';
+import { emitZsh, emitBash, emitFish } from '../../shared/completion/shells';
 
 const SHELLS = ['zsh', 'bash', 'fish'] as const;
 type Shell = (typeof SHELLS)[number];
@@ -76,7 +76,7 @@ function installCompletion(shell?: string): InstallResult {
   if (rc) {
     const existing = existsSync(rc) ? readFileSync(rc, 'utf8') : '';
     if (!existing.includes(BEGIN)) {
-      appendFileSync(rc, `\n${BEGIN}\nsource "${file}"\n${END}\n`);
+      appendFileSync(rc, `\n${BEGIN}\nsource \"${file}\"\n${END}\n`);
       rcUpdated = true;
     }
   }

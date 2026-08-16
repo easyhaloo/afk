@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { loadLoopConfig } from './loop';
 import { registerLoopCommands } from './loop';
+import { registerRunCommands } from './run';
+import { registerQACommands } from './qa';
 import { Command } from 'commander';
 
 const CONFIG_DIR = path.join('/tmp', `afk-loop-config-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -96,5 +98,30 @@ describe('loop option parsing', () => {
 
     expect(agent.parseArg).toBeUndefined();
     expect(ext.parseArg).toBeUndefined();
+  });
+
+  it('exposes the same Codex runtime overrides on run, loop, loop start, and qa', () => {
+    const program = new Command().exitOverride();
+    registerRunCommands(program);
+    registerLoopCommands(program);
+    registerQACommands(program);
+    const loop = program.commands.find(command => command.name() === 'loop')!;
+    const commands = [
+      program.commands.find(command => command.name() === 'run')!,
+      loop,
+      loop.commands.find(command => command.name() === 'start')!,
+      program.commands.find(command => command.name() === 'qa')!,
+    ];
+    const expected = [
+      '--agent-transport', '--agent-auth', '--agent-provider', '--agent-profile',
+      '--agent-app-server', '--agent-app-server-auth-env',
+    ];
+
+    for (const command of commands) {
+      expect(expected.every(flag => command.options.some(option => option.long === flag))).toBe(true);
+    }
+    const transport = commands[0].options.find(option => option.long === '--agent-transport')!;
+    expect(transport.parseArg?.('app-server', undefined)).toBe('app-server');
+    expect(() => transport.parseArg?.('remote', undefined)).toThrow(/transport/i);
   });
 });

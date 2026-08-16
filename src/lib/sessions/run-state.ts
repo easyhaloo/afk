@@ -26,6 +26,10 @@ export interface RunRequest {
   iid: number;
   generation: number;
   provider: string;
+  agentTransport?: 'process' | 'exec' | 'app-server';
+  agentAuth?: 'chatgpt' | 'api' | 'unknown';
+  agentModelProvider?: string;
+  agentThreadId?: string;
   worktreePath: string;
   goalText: string;
   signalType: 'goal_complete';

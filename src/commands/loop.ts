@@ -10,6 +10,7 @@ import { getSchedulerConfig, getWorkflowConfig } from '../lib/core/config/manage
 import { handleCommandError, success, info, warning, fail, detail } from '../lib/cli-utils';
 import { logger, redirectStdioToLog, resolveLogPath } from '../lib/io';
 import { resolveAgentProviderName } from '../lib/agents';
+import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options';
 
 // ── Config: read extension triggers from .afk/config.yml ──────────────────
 
@@ -139,6 +140,7 @@ export function registerLoopCommands(program: Command): void {
         cmd.option(flags, description);
       }
     }
+    addAgentRuntimeOptions(cmd);
   };
 
   addOptions(loop);
@@ -204,9 +206,9 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
   const statusInterval = ((options.statusInterval as number | undefined) ?? 30) * 1000;
   const shutdownTimeout = ((options.shutdownTimeout as number | undefined) ?? 300) * 1000;
   const maxIterations = options.maxIterations as number | undefined;
-  const agentProvider = resolveAgentProviderName(
-    (options.agent as string | undefined) ?? getWorkflowConfig().agentDefault,
-  );
+  const workflowConfig = getWorkflowConfig();
+  const agentProvider = resolveAgentProviderName((options.agent as string | undefined) ?? workflowConfig.agentDefault);
+  const agentRuntime = resolveAgentRuntimeOptions(agentProvider, workflowConfig, options);
 
   const providers = await createProviderBundle(undefined, process.cwd());
   const runner = new LoopRunner(providers, {
@@ -220,6 +222,7 @@ async function runForeground(options: Record<string, unknown>): Promise<void> {
     moduleTriggers: loopCfg.moduleTriggers,
     providers,
     agentProvider,
+    agentRuntime,
   });
 
   console.log(chalk.bold('\n🔁 AFK Loop started\n'));

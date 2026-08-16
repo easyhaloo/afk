@@ -2,6 +2,8 @@ import { Command, InvalidArgumentError } from 'commander';
 import { handleCommandError, success, warning, detail } from '../lib/cli-utils';
 import { runWorkflowCli } from '../lib/workflows/run-cmd';
 import { getWorkflowConfig } from '../lib/core/config/manager';
+import { resolveAgentProviderName } from '../lib/agents';
+import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options';
 
 function positiveInt(value: string): number {
   const parsed = Number(value);
@@ -11,7 +13,7 @@ function positiveInt(value: string): number {
   return parsed;
 }
 export function registerRunCommands(program: Command): void {
-  program
+  const command = program
     .command('run')
     .description('Claim and execute one backlog item')
     .requiredOption('--backlog-id <id>', 'Backlog ID')
@@ -29,10 +31,12 @@ export function registerRunCommands(program: Command): void {
     .option('--sandbox <provider>', 'Sandbox provider: local | docker | podman')
     .option('--agent <name>', 'Agent provider')
     .option('--execution-mode <mode>', 'Agent execution mode: interactive | batch')
-    .option('--template <name>', 'Workflow template name')
+    .option('--template <name>', 'Workflow template name');
+  addAgentRuntimeOptions(command)
     .action(async options => {
       try {
         const cfg = getWorkflowConfig();
+        const agentProvider = resolveAgentProviderName(options.agent ?? cfg.agentDefault);
         const goalBudget = cfg.goalBudget || 500_000;
         const result = await runWorkflowCli({
           backlogId: options.backlogId,
@@ -48,7 +52,8 @@ export function registerRunCommands(program: Command): void {
           ext: options.ext,
           extParams: options.extParam,
           sandboxProvider: options.sandbox,
-          agentProvider: options.agent,
+          agentProvider,
+          agentRuntime: resolveAgentRuntimeOptions(agentProvider, cfg, options),
           executionMode: options.executionMode,
           template: options.template,
         });

@@ -17,6 +17,7 @@ import type { NewReworkRecord } from '../core/backlog';
 import { formatExecutionFailure } from '../workflows';
 import { buildExecutionPrompt } from '../workflows/execution-protocol';
 import { TaskRuntimeManager } from '../runtime/task-runtime';
+import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata';
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -131,6 +132,7 @@ export class QARunner {
         executionMode: this.executionMode,
         runtime: this.agentRuntime,
       });
+      await this.heartbeatRuntime(runtimeRunId, runtimeFieldsFromExecution(execution.metadata));
       await this.heartbeatRuntime(runtimeRunId, { progress: 'QA agent running' });
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
@@ -285,6 +287,7 @@ export class QARunner {
         sandboxProvider: this.sandboxProvider.name,
         executionMode: this.executionMode,
         agentProvider: this.agentProvider.name,
+        ...runtimeFieldsFromSelection(this.agentProvider.name, this.agentRuntime),
         session: this.executionMode === 'interactive' ? session : undefined,
         branch: backlog.branchName,
         startedAt: now,

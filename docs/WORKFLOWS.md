@@ -28,6 +28,61 @@ stdin and parses Codex JSONL output. A loop uses the selected provider for
 both implementation and QA, and the Tasks projection and runtime diagnostics
 record `agentProvider: codex` for each phase.
 
+#### Codex runtime selection
+
+The same Codex runtime options are available on `afk run`, `afk loop`, and
+`afk qa`:
+
+```bash
+--agent-transport auto|exec|app-server
+--agent-auth auto|chatgpt|api
+--agent-provider <model-provider>
+--agent-profile <host-profile>
+--agent-app-server stdio://|unix://PATH|ws://HOST:PORT|wss://HOST:PORT
+--agent-app-server-auth-env <environment-variable>
+```
+
+Resolution is deterministic: command-line overrides win over `.afk/config.yml`,
+then host Codex diagnostics fill `auto` values. `auto` transport selects
+`app-server` only when an endpoint is explicitly configured; otherwise it
+selects `exec`. Explicit provider values are passed to both the readiness
+probes and the selected execution transport. A profile is exec-only: AFK
+applies it to the live exec probe and final exec process, but never passes it
+to `codex doctor` or `codex app-server`. Selecting app-server together with a
+profile is rejected before execution. AFK never reads or copies raw Codex
+credentials.
+
+`stdio://` starts a new host `codex app-server` process and is supported only
+by the local sandbox. `unix://`, `ws://`, and `wss://` connect directly to a
+configured server; WebSocket bearer tokens are read from the named environment
+variable and are never persisted. AFK cannot attach to the private stdio
+process owned by the Codex desktop UI, but a process it starts uses the same
+host Codex configuration and login cache.
+
+Before Loop polls or claims a backlog, AFK runs redacted `codex doctor --json`.
+For `exec` and spawned stdio it also performs a bounded, ephemeral, read-only
+model call so a cached but rejected API key cannot pass readiness. Remote
+app-server modes perform the JSON-RPC handshake and a bounded read-only live
+turn through the configured endpoint; opening a socket alone is not considered
+ready. Connection setup uses the same startup timeout and actively terminates
+a socket that never opens. Failures use fixed messages (`CLI_NOT_FOUND`,
+`AUTH_INVALID`, `PROVIDER_INVALID`, or `ENDPOINT_UNREACHABLE`) and create no
+backlog claim.
+
+Codex-specific Tasks diagnostics expose only transport, auth mode, provider
+name, endpoint kind, and app-server thread ID. To recover from readiness failure, repair the
+selected host Codex login/provider or endpoint, verify `codex doctor --json`,
+then rerun the same AFK command. A real opt-in matrix is available with:
+
+```bash
+npm run test:e2e:codex -- --transport exec
+npm run test:e2e:codex -- --transport app-server
+```
+
+An explicit E2E invocation exits nonzero on readiness or workflow failure; it
+never reports a skip. A successful root backlog finishes as
+`merge_ready + hitl` and prints both the backlog and merge-request URLs.
+
 ## Overview
 
 AFK implements three primary workflow patterns:

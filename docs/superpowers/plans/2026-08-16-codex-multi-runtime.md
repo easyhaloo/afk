@@ -55,7 +55,7 @@
 - Test: `src/lib/agents/providers.test.ts`
 - Test: `src/lib/modules/qa-runner.test.ts`
 
-- [ ] **Step 1: Write failing execution-boundary tests**
+- [x] **Step 1: Write failing execution-boundary tests**
 
 Update the fake provider in `execution-service.test.ts` so it exposes only `createExecution`, and assert that the service delegates the complete request:
 
@@ -80,7 +80,7 @@ expect(createExecution).toHaveBeenCalledWith(expect.objectContaining({
 
 Add QA and Workflow assertions that their providers may omit `buildCommand`; this proves callers no longer construct commands.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -90,7 +90,7 @@ npx vitest run src/lib/workflows/execution-service.test.ts src/lib/modules/qa-ru
 
 Expected: TypeScript/test failures report missing `createExecution` and current direct `buildCommand` usage.
 
-- [ ] **Step 3: Define the provider-owned execution contract**
+- [x] **Step 3: Define the provider-owned execution contract**
 
 Add to `src/lib/agents/types.ts`:
 
@@ -140,7 +140,7 @@ Keep existing optional usage/resume methods.
 
 Add required `metadata: AgentExecutionMetadata` to the running `AgentExecution` interface in `sandbox/types.ts`, pass metadata through `AgentStartOptions`, and expose it from local, streaming, and container executions. This gives process and app-server executions one diagnostics surface without optional compatibility behavior.
 
-- [ ] **Step 4: Implement the process provider base**
+- [x] **Step 4: Implement the process provider base**
 
 Create `src/lib/agents/process-provider.ts`:
 
@@ -173,7 +173,7 @@ Make every current CLI provider extend `ProcessAgentProvider`. Keep each concret
 
 Replace `AgentStartOptions.agentProvider` with a provider-neutral `parseLine?: (line: string) => AgentEvent[]`. Streaming execution consumes that callback, so Sandbox no longer depends on the complete provider object.
 
-- [ ] **Step 5: Remove direct command construction from workflow callers**
+- [x] **Step 5: Remove direct command construction from workflow callers**
 
 Replace each `buildCommand() + sandbox.startAgent()` sequence in `AgentExecutionService`, `WorkflowRunner.runPhase`, `QARunner.process`, and resume flow with:
 
@@ -193,7 +193,7 @@ const execution = await agentProvider.createExecution({
 
 Do not retain a caller fallback to `buildCommand`.
 
-- [ ] **Step 6: Run focused and compile verification**
+- [x] **Step 6: Run focused and compile verification**
 
 ```bash
 npx vitest run src/lib/workflows/execution-service.test.ts src/lib/modules/qa-runner.test.ts src/lib/agents/providers.test.ts --reporter=dot
@@ -202,7 +202,7 @@ npm run typecheck
 
 Expected: all selected tests and typecheck pass.
 
-- [ ] **Step 7: Commit the execution boundary**
+- [x] **Step 7: Commit the execution boundary**
 
 ```bash
 git add src/lib/agents src/lib/sandbox src/lib/workflows/execution-service.ts src/lib/workflows.ts src/lib/modules/qa-runner.ts src/lib/workflows/resume.ts
@@ -219,7 +219,7 @@ git commit -m "refactor(agent): own execution behind provider boundary"
 - Modify: `src/lib/workflows/run-request.ts`
 - Test: `src/lib/workflows/run-request.test.ts`
 
-- [ ] **Step 1: Write failing config and precedence tests**
+- [x] **Step 1: Write failing config and precedence tests**
 
 Cover:
 
@@ -241,7 +241,7 @@ expect(resolveCodexRuntime({
 
 Add a config fixture proving `.afk/config.yml` is parsed structurally and environment values fill only missing fields.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 npx vitest run src/lib/agents/codex-runtime.test.ts tests/config.test.ts src/lib/workflows/run-request.test.ts --reporter=dot
@@ -249,7 +249,7 @@ npx vitest run src/lib/agents/codex-runtime.test.ts tests/config.test.ts src/lib
 
 Expected: missing resolver/types and missing structured Codex config.
 
-- [ ] **Step 3: Implement typed runtime configuration**
+- [x] **Step 3: Implement typed runtime configuration**
 
 ```ts
 export type CodexTransport = 'auto' | 'exec' | 'app-server';
@@ -271,7 +271,7 @@ export interface CodexConfig {
 
 Use the `CodexRuntimeSelection` already defined by Task 1; this task owns only configuration parsing, resolution, and readiness.
 
-- [ ] **Step 4: Replace ad hoc workflow config parsing with structured parsing**
+- [x] **Step 4: Replace ad hoc workflow config parsing with structured parsing**
 
 Use `js-yaml` for `.afk/config.yml`. Keep existing environment names and add:
 
@@ -287,7 +287,7 @@ AFK_CODEX_APP_SERVER_STARTUP_TIMEOUT
 
 Validate enum values and endpoint schemes. Invalid configuration must fail before provider bundle creation.
 
-- [ ] **Step 5: Implement redacted host readiness probing**
+- [x] **Step 5: Implement redacted host readiness probing**
 
 Run `codex doctor --json` with `execFile`, parse only redacted fields, and return:
 
@@ -299,11 +299,11 @@ export type CodexReadiness =
 
 Never include environment values, token fragments, or `auth.json` contents. Inject the command runner in tests.
 
-- [ ] **Step 6: Propagate immutable runtime selection in run requests**
+- [x] **Step 6: Propagate immutable runtime selection in run requests**
 
 Add `agentRuntime?: AgentRuntimeSelection` to `WorkflowRunCliInput` and `WorkflowRunRequest`. Resolve it once when `agentProvider === 'codex'`; use `{ kind: 'default' }` for other providers.
 
-- [ ] **Step 7: Run focused tests and commit**
+- [x] **Step 7: Run focused tests and commit**
 
 ```bash
 npx vitest run src/lib/agents/codex-runtime.test.ts tests/config.test.ts src/lib/workflows/run-request.test.ts --reporter=dot
@@ -325,7 +325,7 @@ git commit -m "feat(agent): resolve codex runtime configuration"
 - Modify: `package.json`
 - Modify: `package-lock.json`
 
-- [ ] **Step 1: Add WebSocket support**
+- [x] **Step 1: Add WebSocket support**
 
 ```bash
 npm install ws
@@ -334,7 +334,7 @@ npm install --save-dev @types/ws
 
 Use Node streams and `net` for stdio/Unix plumbing; do not add a JSON-RPC framework.
 
-- [ ] **Step 2: Write failing transport/client contract tests**
+- [x] **Step 2: Write failing transport/client contract tests**
 
 Use in-memory newline streams to assert request IDs and handshake order:
 
@@ -349,7 +349,7 @@ expect(sent.map(message => message.method)).toEqual([
 
 Assert out-of-order responses are correlated by `id`, server errors reject the matching request, and close rejects pending requests.
 
-- [ ] **Step 3: Implement JSON-RPC transports**
+- [x] **Step 3: Implement JSON-RPC transports**
 
 ```ts
 interface AppServerTransport {
@@ -361,7 +361,7 @@ interface AppServerTransport {
 
 Implement stdio by spawning `codex app-server --listen stdio://`; Unix as WebSocket over `net.createConnection(socketPath)`; and `ws`/`wss` with a bearer token read only from the configured environment variable. Never log headers or environment values.
 
-- [ ] **Step 4: Implement the typed app-server client**
+- [x] **Step 4: Implement the typed app-server client**
 
 ```ts
 await client.request('initialize', {
@@ -382,7 +382,7 @@ await client.request('turn/start', {
 
 Cancellation sends `turn/interrupt` with active thread and turn IDs.
 
-- [ ] **Step 5: Normalize app-server notifications**
+- [x] **Step 5: Normalize app-server notifications**
 
 Map:
 
@@ -396,11 +396,11 @@ turn status failed                 -> error
 
 Export and reuse `extractGoalComplete()` from `execution-protocol.ts`; do not duplicate StreamingAgentExecution marker parsing.
 
-- [ ] **Step 6: Implement the running execution lifecycle**
+- [x] **Step 6: Implement the running execution lifecycle**
 
 `CodexAppServerExecution` implements `waitForEvent`, `waitForResult`, `interrupt`, `kill`, `captureOutput`, `captureSession`, and `resume`. Resume remains unsupported through the existing capability gate. Result metadata includes app-server thread ID and the same structured completion payload as CLI streaming.
 
-- [ ] **Step 7: Select app-server from CodexProvider**
+- [x] **Step 7: Select app-server from CodexProvider**
 
 ```ts
 if (options.runtime?.kind === 'codex' && options.runtime.transport === 'app-server') {
@@ -411,7 +411,7 @@ return super.createExecution(options);
 
 Reject spawned stdio app-server with Docker/Podman before starting; configured remote endpoints own their isolation.
 
-- [ ] **Step 8: Run focused tests and commit**
+- [x] **Step 8: Run focused tests and commit**
 
 ```bash
 npx vitest run src/lib/agents/codex-app-server/client.test.ts src/lib/agents/codex-app-server/execution.test.ts src/lib/agents/providers.test.ts --reporter=dot
@@ -437,11 +437,11 @@ git commit -m "feat(agent): execute codex through app server"
 - Modify: `src/lib/runtime/task-runtime.test.ts`
 - Modify: `src/lib/sessions/run-state.ts`
 
-- [ ] **Step 1: Write failing CLI and propagation tests**
+- [x] **Step 1: Write failing CLI and propagation tests**
 
 Assert `run`, `loop`, and `qa` expose the same six runtime overrides and preserve string values. Add a Loop test proving implementation and QA receive the same `CodexRuntimeSelection` object.
 
-- [ ] **Step 2: Write readiness-before-claim test**
+- [x] **Step 2: Write readiness-before-claim test**
 
 Inject a failing readiness probe, start one loop iteration, and assert:
 
@@ -451,15 +451,15 @@ expect(backlog.transition).not.toHaveBeenCalled();
 expect(loop.status().infrastructureError).toMatch(/authentication/i);
 ```
 
-- [ ] **Step 3: Add shared Commander options**
+- [x] **Step 3: Add shared Commander options**
 
 Create one `addAgentRuntimeOptions(command)` helper used by all three commands. Validate enum values at the CLI boundary and pass a normalized override object into runtime resolution.
 
-- [ ] **Step 4: Propagate one runtime selection through Loop and QA**
+- [x] **Step 4: Propagate one runtime selection through Loop and QA**
 
 Resolve readiness before `LoopRunner.start()` polls. Store the selection in internal options and pass it unchanged to `WorkflowRunner.run()` and QARunner dependencies. Do not re-read host config between implementation and QA.
 
-- [ ] **Step 5: Extend local runtime diagnostics**
+- [x] **Step 5: Extend local runtime diagnostics**
 
 Add optional fields to `TaskRuntimeRecord` and `RunRequest`:
 
@@ -472,7 +472,7 @@ agentThreadId?: string;
 
 Persist only redacted values. Update Tasks projection tests without increasing backlog data responsibilities.
 
-- [ ] **Step 6: Run integration-focused tests and commit**
+- [x] **Step 6: Run integration-focused tests and commit**
 
 ```bash
 npx vitest run src/commands/loop.test.ts src/commands/backlog.test.ts src/lib/modules/loop-runner.test.ts src/lib/modules/qa-runner.test.ts src/lib/runtime/task-runtime.test.ts --reporter=dot
@@ -490,7 +490,7 @@ git commit -m "feat(agent): propagate codex runtime through workflow"
 - Modify: `package.json`
 - Modify: `.gitignore`
 
-- [ ] **Step 1: Build a protocol fixture**
+- [x] **Step 1: Build a protocol fixture**
 
 The fixture reads JSON-RPC JSONL from stdin and emits initialize, thread/start, turn/start, `item/completed`, usage, and `turn/completed` responses. Its agent message ends with:
 
@@ -498,11 +498,11 @@ The fixture reads JSON-RPC JSONL from stdin and emits initialize, thread/start, 
 <goal_complete>{"type":"goal_complete","kind":"task","summary":"app server fixture complete"}</goal_complete>
 ```
 
-- [ ] **Step 2: Add deterministic integration coverage**
+- [x] **Step 2: Add deterministic integration coverage**
 
 Run real `CodexAppServerExecution` against the fixture and assert completed result, thread ID, usage, diagnostics, cancellation, and process cleanup.
 
-- [ ] **Step 3: Add the opt-in real host runner**
+- [x] **Step 3: Add the opt-in real host runner**
 
 Add:
 
@@ -512,7 +512,7 @@ Add:
 
 Support `--transport exec|app-server`. The script must run readiness and fail redacted when invalid; create a bounded backlog only after readiness; run Loop implementation and QA; assert `goal_complete`, Tasks metadata, and root `merge_ready + hitl`; and print backlog/MR URLs. It must never silently skip when explicitly invoked.
 
-- [ ] **Step 4: Run fixture integration and commit**
+- [x] **Step 4: Run fixture integration and commit**
 
 ```bash
 npx vitest run tests/e2e/codex-runtime.test.ts --reporter=dot
@@ -528,11 +528,11 @@ git commit -m "test(agent): cover codex runtime transports"
 - Modify: `docs/WORKFLOWS_zh.md`
 - Modify: `docs/superpowers/plans/2026-08-16-codex-multi-runtime.md`
 
-- [ ] **Step 1: Document supported runtime combinations**
+- [x] **Step 1: Document supported runtime combinations**
 
 Document automatic selection, explicit overrides, ChatGPT/API/custom provider requirements, app-server endpoints, local-only restriction for spawned app-server, redacted readiness failures, and recovery.
 
-- [ ] **Step 2: Run full automated verification**
+- [x] **Step 2: Run full automated verification**
 
 ```bash
 npm run typecheck
@@ -543,6 +543,10 @@ git diff --check
 
 Expected: zero failures and only intentional platform skips already present in the baseline.
 
+Verification evidence (2026-08-16): build, typecheck, and `git diff --check`
+exited 0; Vitest reported 79 passed files, 1 skipped file, 561 passed tests,
+and 3 existing platform skips.
+
 - [ ] **Step 3: Run real exec E2E**
 
 ```bash
@@ -550,6 +554,9 @@ PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" npm run test:e2e:codex
 ```
 
 Expected: implementation and QA complete with Codex, and a root MR waits for human approval. If readiness fails, stop without creating or claiming a backlog.
+
+Current host evidence (2026-08-16): exited 1 with redacted `AUTH_INVALID` before
+tracker creation; GitHub contained no `[Codex E2E]` backlog after the run.
 
 - [ ] **Step 4: Run real app-server E2E**
 
@@ -559,7 +566,10 @@ PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" npm run test:e2e:codex
 
 Expected: the same lifecycle passes through a spawned app-server and records its thread ID.
 
-- [ ] **Step 5: Commit documentation and final evidence**
+Current host evidence (2026-08-16): exited 1 at the shared `AUTH_INVALID`
+readiness gate before app-server startup or tracker creation.
+
+- [x] **Step 5: Commit documentation and final evidence**
 
 ```bash
 git add docs/WORKFLOWS.md docs/WORKFLOWS_zh.md docs/superpowers/plans/2026-08-16-codex-multi-runtime.md

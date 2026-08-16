@@ -17,7 +17,8 @@ export function normalizeAppServerNotification(message: JsonRpcMessage): AppServ
         : [];
     }
     case 'thread/tokenUsage/updated': {
-      const raw = record(params.tokenUsage ?? params.usage);
+      const tokenUsage = record(params.tokenUsage ?? params.usage);
+      const raw = record(tokenUsage.total ?? tokenUsage);
       const inputTokens = number(raw.inputTokens ?? raw.input_tokens);
       const outputTokens = number(raw.outputTokens ?? raw.output_tokens);
       const totalTokens = number(raw.totalTokens ?? raw.total_tokens) || inputTokens + outputTokens;

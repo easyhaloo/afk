@@ -72,8 +72,8 @@ export class AppServerClient {
         if (message.method) this.pushNotification(message);
       }
       this.failPending(new Error('Codex app-server transport closed'));
-    } catch {
-      this.failPending(new Error('Codex app-server transport closed unexpectedly'));
+    } catch (error) {
+      this.failPending(transportFailure(error));
     } finally {
       this.endNotifications();
     }
@@ -101,4 +101,12 @@ export class AppServerClient {
     this.notificationsEnded = true;
     for (const reader of this.notificationReaders.splice(0)) reader({ done: true, value: undefined });
   }
+}
+
+function transportFailure(error: unknown): Error {
+  const failure = new Error('Codex app-server transport closed unexpectedly') as NodeJS.ErrnoException;
+  if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+    failure.code = 'ENOENT';
+  }
+  return failure;
 }

@@ -543,8 +543,8 @@ git diff --check
 
 Expected: zero failures and only intentional platform skips already present in the baseline.
 
-Verification evidence (2026-08-16): build, typecheck, and `git diff --check`
-exited 0; Vitest reported 79 passed files, 1 skipped file, 561 passed tests,
+Verification evidence (2026-08-17): build, typecheck, and `git diff --check`
+exited 0; Vitest reported 79 passed files, 1 skipped file, 567 passed tests,
 and 3 existing platform skips.
 
 - [ ] **Step 3: Run real exec E2E**
@@ -558,7 +558,7 @@ Expected: implementation and QA complete with Codex, and a root MR waits for hum
 Current host evidence (2026-08-16): exited 1 with redacted `AUTH_INVALID` before
 tracker creation; GitHub contained no `[Codex E2E]` backlog after the run.
 
-- [ ] **Step 4: Run real app-server E2E**
+- [x] **Step 4: Run real app-server E2E**
 
 ```bash
 PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" npm run test:e2e:codex -- --transport app-server
@@ -566,8 +566,10 @@ PATH="/Applications/ChatGPT.app/Contents/Resources:$PATH" npm run test:e2e:codex
 
 Expected: the same lifecycle passes through a spawned app-server and records its thread ID.
 
-Current host evidence (2026-08-16): exited 1 at the shared `AUTH_INVALID`
-readiness gate before app-server startup or tracker creation.
+Host evidence (2026-08-17): exited 0 using the Codex desktop-bundled CLI and
+spawned stdio app-server. Backlog #105 completed implementation, AC
+self-correction, and QA; PR #106 targets `main` from `afk/backlog-105-qa`, and
+the root backlog stopped at `merge_ready + hitl` for human approval.
 
 - [x] **Step 5: Commit documentation and final evidence**
 

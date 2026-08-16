@@ -83,7 +83,12 @@ describe('CodexAppServerExecution', () => {
     });
     transport.push({
       jsonrpc: '2.0', method: 'thread/tokenUsage/updated',
-      params: { tokenUsage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 } },
+      params: {
+        tokenUsage: {
+          total: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
+          last: { inputTokens: 2, outputTokens: 1, totalTokens: 3 },
+        },
+      },
     });
     transport.push({
       jsonrpc: '2.0', method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } },
@@ -101,6 +106,26 @@ describe('CodexAppServerExecution', () => {
     });
     expect(await execution.captureOutput()).toContain('<goal_complete>');
     expect(transport.closeCalls).toBe(1);
+  });
+
+  it('recognizes a completion marker split across app-server message items', async () => {
+    const transport = new ScriptedTransport();
+    const execution = await CodexAppServerExecution.start(options(), runtime, () => transport);
+    transport.push({
+      jsonrpc: '2.0', method: 'item/completed',
+      params: { item: { type: 'agentMessage', text: '<goal_complete>{"type":"goal_complete","kind":"task","summ' } },
+    });
+    transport.push({
+      jsonrpc: '2.0', method: 'item/completed',
+      params: { item: { type: 'agentMessage', text: 'ary":"split"}</goal_complete>' } },
+    });
+    transport.push({
+      jsonrpc: '2.0', method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } },
+    });
+
+    await expect(execution.waitForResult()).resolves.toMatchObject({
+      status: 'completed', structuredOutput: { type: 'goal_complete', summary: 'split' },
+    });
   });
 
   it('interrupts the active turn and reports an aborted result', async () => {

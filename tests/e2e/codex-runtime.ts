@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     const change = (await tracker.listMRs({ state: 'opened', perPage: 100 }))
       .find(candidate => candidate.title === `Backlog ${backlogId}: ${title}`);
     assert(change, 'root backlog did not create an open merge request');
-    assert.equal(change.sourceBranch, final.branchName, 'merge request source branch does not match the backlog branch');
+    assert.equal(change.sourceBranch, `${final.branchName}-qa`, 'merge request source branch does not match the QA branch');
     assert.equal(change.targetBranch, workflow.targetBranch, 'root backlog merge request targets the wrong baseline');
     await assertRemoteFixture(change.sourceBranch, fixturePath, fixtureContent);
     console.log(`Codex E2E merge request: ${change.url}`);
@@ -146,7 +146,8 @@ async function waitForTerminal(
   );
   while (Date.now() < deadline) {
     const current = await backlog.get(backlogId);
-    if (current.state === 'merge_ready' || current.state === 'blocked' || current.state === 'done') return current;
+    if (current.state === 'merge_ready' && current.executionMode === 'hitl') return current;
+    if (current.state === 'blocked' || current.state === 'done') return current;
     if (loopFailure) throw loopFailure;
     if (loopStopped) throw new Error(`loop stopped while backlog was ${current.state}`);
     await delay(1_000);

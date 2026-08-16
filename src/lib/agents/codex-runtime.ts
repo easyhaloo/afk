@@ -37,7 +37,7 @@ export const DEFAULT_CODEX_CONFIG: Readonly<CodexConfig> = {
   transport: 'auto',
   auth: 'auto',
   provider: 'auto',
-  appServer: { startupTimeoutMs: 10_000 },
+  appServer: { startupTimeoutMs: 30_000 },
 };
 
 export function resolveCodexRuntime(input: {
@@ -117,7 +117,7 @@ export async function probeCodexReadiness(
   run: CodexDoctorRunner = runCodexDoctor,
   checkEndpoint: CodexEndpointProbe = probeCodexAppServerEndpoint,
 ): Promise<CodexReadiness> {
-  if (runtime.transport === 'app-server' && runtime.endpoint && runtime.endpoint !== 'stdio://') {
+  if (runtime.transport === 'app-server') {
     try {
       await checkEndpoint(runtime);
       return { ready: true, auth: runtime.auth, provider: runtime.provider };
@@ -169,7 +169,10 @@ export async function probeCodexAppServerEndpoint(
   let transport: AppServerTransport;
   try {
     transport = await createTransport(runtime);
-  } catch {
+  } catch (error) {
+    if ((runtime.endpoint ?? 'stdio://') === 'stdio://' && isErrno(error, 'ENOENT')) {
+      throw readinessError('CLI_NOT_FOUND');
+    }
     throw readinessError('ENDPOINT_UNREACHABLE');
   }
   const client = new AppServerClient(transport);
@@ -200,7 +203,10 @@ export async function probeCodexAppServerEndpoint(
         }],
       });
       for await (const notification of client.notifications()) {
-        if (notification.method === 'error') throw new Error('Codex app-server readiness turn failed');
+        if (notification.method === 'error') {
+          if (record(notification.params).willRetry === true) continue;
+          throw new Error('Codex app-server readiness turn failed');
+        }
         if (notification.method !== 'turn/completed') continue;
         const params = record(notification.params);
         const turn = record(params.turn);
@@ -211,6 +217,9 @@ export async function probeCodexAppServerEndpoint(
     })(), runtime.startupTimeoutMs);
   } catch (error) {
     failed = true;
+    if ((runtime.endpoint ?? 'stdio://') === 'stdio://' && isErrno(error, 'ENOENT')) {
+      throw readinessError('CLI_NOT_FOUND');
+    }
     throw readinessError(readinessErrorCode(error) ?? stage);
   } finally {
     try {
@@ -224,7 +233,7 @@ export async function probeCodexAppServerEndpoint(
 async function withStartupTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('Codex app-server readiness timed out')), timeoutMs);
+    timer = setTimeout(() => reject(readinessError('ENDPOINT_UNREACHABLE')), timeoutMs);
   });
   try {
     return await Promise.race([promise, timeout]);

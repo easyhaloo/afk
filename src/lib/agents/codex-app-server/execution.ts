@@ -158,6 +158,7 @@ export class CodexAppServerExecution implements AgentExecution {
           await this.finish(this.buildResult('failed', { code: 'AGENT_ERROR', message: event.error.message }));
           return;
         } else if (event.type === 'completed') {
+          this.structuredOutput ??= extractGoalComplete(this.output.join(''));
           if (this.structuredOutput?.type === this.options.signalType) {
             await this.finish(this.buildResult('completed'));
           } else {

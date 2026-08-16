@@ -102,7 +102,7 @@ agents:
     appServer:
       endpoint: null
       authTokenEnv: null
-      startupTimeout: 10s
+      startupTimeout: 30s
 ```
 
 CLI overrides are available on `run`, `loop`, and `qa`:

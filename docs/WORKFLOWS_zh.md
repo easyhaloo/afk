@@ -15,6 +15,52 @@ stdin 传入 provider-neutral prompt，并解析 Codex JSONL 输出。Loop 会�
 QA 阶段使用同一个显式 provider；Tasks 投影与运行诊断都会记录
 `agentProvider: codex`。
 
+#### Codex 运行时选择
+
+`afk run`、`afk loop` 和 `afk qa` 使用同一组 Codex 运行时参数：
+
+```bash
+--agent-transport auto|exec|app-server
+--agent-auth auto|chatgpt|api
+--agent-provider <model-provider>
+--agent-profile <host-profile>
+--agent-app-server stdio://|unix://PATH|ws://HOST:PORT|wss://HOST:PORT
+--agent-app-server-auth-env <environment-variable>
+```
+
+解析顺序固定为：命令行覆盖项 > `.afk/config.yml` > 宿主 Codex 诊断结果。
+`auto` transport 只在显式配置 endpoint 时选择 `app-server`，否则选择
+`exec`。显式 provider 会传给 readiness 探测与最终执行命令。profile 仅支持
+exec：AFK 只把它传给 exec live probe 和最终 exec 进程，不会传给
+`codex doctor` 或 `codex app-server`；profile 与 app-server 同时配置会在执行前
+直接拒绝。AFK 不读取、复制或持久化 Codex 原始凭据。
+
+`stdio://` 会在宿主机启动新的 `codex app-server` 进程，仅支持 local
+sandbox。`unix://`、`ws://`、`wss://` 会直连配置的 server；WebSocket
+bearer token 只从指定环境变量读取，不写入 Tasks 或诊断文件。AFK 不能附加到
+Codex 桌面端私有的 stdio 进程，但 AFK 启动的新进程会复用同一套宿主 Codex
+配置和登录缓存。
+
+Loop 在轮询或认领 backlog 之前先执行脱敏的 `codex doctor --json`。对于
+`exec` 和本地 stdio，还会执行一次有超时、ephemeral、只读的最小模型调用，
+避免“本地存在缓存 key、但上游已拒绝”被误判为 ready；远端 app-server 则通过
+配置的 endpoint 完成 JSON-RPC 握手和一次有界、只读的 live turn，仅打开 socket
+不算 ready。连接建立也受同一个 startup timeout 限制，超时会主动终止 socket。
+失败只返回固定错误 `CLI_NOT_FOUND`、`AUTH_INVALID`、`PROVIDER_INVALID` 或
+`ENDPOINT_UNREACHABLE`，并且不会认领 backlog。
+
+Tasks 中 Codex 专属诊断字段只展示 transport、auth mode、provider name、endpoint kind 与
+app-server thread ID。恢复时修复所选宿主 Codex 登录/provider 或 endpoint，
+确认 `codex doctor --json` 后重跑原命令。真实可选 E2E 矩阵为：
+
+```bash
+npm run test:e2e:codex -- --transport exec
+npm run test:e2e:codex -- --transport app-server
+```
+
+显式运行 E2E 时，readiness 或工作流失败都会返回非零，不会标记为 skipped；
+成功的根 backlog 必须停在 `merge_ready + hitl`，并输出 backlog 与 MR 地址。
+
 ## 概述
 
 AFK 实现三种主要工作流模式：

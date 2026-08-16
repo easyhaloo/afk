@@ -44,6 +44,11 @@ export class CodexProvider extends ProcessAgentProvider {
     if (options.executionMode === 'batch') {
       argv.push('exec', '--json');
     }
+    const runtime = options.runtime?.kind === 'codex' ? options.runtime : undefined;
+    if (runtime?.profile) argv.push('--profile', runtime.profile);
+    if (runtime?.provider && runtime.provider !== 'auto') {
+      argv.push('--config', `model_provider=${JSON.stringify(runtime.provider)}`);
+    }
     argv.push('--dangerously-bypass-approvals-and-sandbox');
     if (options.executionMode !== 'batch') argv.push('--no-alt-screen');
     argv.push('-C', options.worktreePath);

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadLoopConfig } from './loop';
+import { loadLoopConfig } from '../../application/loop/loop-config';
 
 const CONFIG_DIR = path.join('/tmp', `afk-loop-config-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 const CONFIG_PATH = path.join(CONFIG_DIR, '.afk', 'config.yml');

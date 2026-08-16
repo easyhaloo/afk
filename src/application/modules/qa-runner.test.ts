@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { QARunner } from './qa-runner';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
-vi.mock('../io', async importOriginal => ({
+vi.mock('../../infrastructure/io/index', async importOriginal => ({
   ...await importOriginal<typeof import('../../infrastructure/io/index')>(),
   configureStatusline: ioMocks.configureStatusline,
 }));

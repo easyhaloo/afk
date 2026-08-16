@@ -1,5 +1,6 @@
 # Architecture verification for the aggressive refactor branch.
 # CI trigger marker: validate current refactor head.
+# Test migration marker: verify canonical paths and CI auth.
 name: Architecture Refactor
 
 on:

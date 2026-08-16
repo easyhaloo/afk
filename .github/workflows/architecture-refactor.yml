@@ -1,4 +1,5 @@
 # Architecture verification for the aggressive refactor branch.
+# CI trigger marker: validate current refactor head.
 name: Architecture Refactor
 
 on:

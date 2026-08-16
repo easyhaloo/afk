@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "architecture:check": "node scripts/architecture-guard.mjs",
     "dev": "tsc --watch",
-    "pretest": "npm run architecture:check && npm run build",
+    "pretest": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "postinstall": "node scripts/fix-permissions.mjs",

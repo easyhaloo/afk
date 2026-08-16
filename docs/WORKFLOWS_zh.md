@@ -41,11 +41,11 @@ bearer token 只从指定环境变量读取，不写入 Tasks 或诊断文件。
 Codex 桌面端私有的 stdio 进程，但 AFK 启动的新进程会复用同一套宿主 Codex
 配置和登录缓存。
 
-Loop 在轮询或认领 backlog 之前先执行脱敏的 `codex doctor --json`。对于
-`exec` 和本地 stdio，还会执行一次有超时、ephemeral、只读的最小模型调用，
-避免“本地存在缓存 key、但上游已拒绝”被误判为 ready；远端 app-server 则通过
-配置的 endpoint 完成 JSON-RPC 握手和一次有界、只读的 live turn，仅打开 socket
-不算 ready。连接建立也受同一个 startup timeout 限制，超时会主动终止 socket。
+Loop 在轮询或认领 backlog 之前，exec 模式先执行脱敏的 `codex doctor --json`，
+再执行一次有超时、ephemeral、只读的最小模型调用，避免“本地存在缓存 key、但
+上游已拒绝”被误判为 ready。所有 app-server 模式（包括本地 stdio）都通过所选
+endpoint 完成 JSON-RPC 握手和一次有界、只读的 live turn，仅打开 socket 不算
+ready。startup timeout 默认 30 秒，连接建立也受同一个限制，超时会主动终止 socket。
 失败只返回固定错误 `CLI_NOT_FOUND`、`AUTH_INVALID`、`PROVIDER_INVALID` 或
 `ENDPOINT_UNREACHABLE`，并且不会认领 backlog。
 

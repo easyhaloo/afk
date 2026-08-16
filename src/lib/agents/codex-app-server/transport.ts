@@ -6,7 +6,7 @@ import type { CodexRuntimeSelection } from '../types';
 export type JsonRpcId = string | number | null;
 
 export interface JsonRpcMessage {
-  jsonrpc: '2.0';
+  jsonrpc?: '2.0';
   id?: JsonRpcId;
   method?: string;
   params?: unknown;
@@ -47,7 +47,7 @@ export async function createAppServerTransport(runtime: CodexRuntimeSelection): 
 export function createStdioAppServerTransport(
   executable: string,
   args: readonly string[],
-): AppServerTransport {
+): Promise<AppServerTransport> {
   return StdioAppServerTransport.start(executable, args);
 }
 
@@ -122,9 +122,16 @@ class StdioAppServerTransport implements AppServerTransport {
     });
   }
 
-  static start(executable: string, args: readonly string[]): StdioAppServerTransport {
+  static start(executable: string, args: readonly string[]): Promise<StdioAppServerTransport> {
     const child = spawn(executable, [...args], { stdio: ['pipe', 'pipe', 'pipe'] });
-    return new StdioAppServerTransport(child);
+    return new Promise((resolve, reject) => {
+      const onError = (error: Error) => reject(error);
+      child.once('error', onError);
+      child.once('spawn', () => {
+        child.off('error', onError);
+        resolve(new StdioAppServerTransport(child));
+      });
+    });
   }
 
   async send(message: JsonRpcMessage): Promise<void> {
@@ -168,8 +175,8 @@ class StdioAppServerTransport implements AppServerTransport {
 
   private parseLine(line: string): void {
     try {
-      const value = JSON.parse(line) as JsonRpcMessage;
-      if (value?.jsonrpc === '2.0') this.queue.push(value);
+      const value = JSON.parse(line) as unknown;
+      if (isAppServerMessage(value)) this.queue.push(value);
     } catch {
       // Stderr/stdout diagnostics are intentionally not surfaced as credentials may be present.
     }
@@ -201,8 +208,8 @@ class WebSocketAppServerTransport implements AppServerTransport {
   ) {
     socket.on('message', data => {
       try {
-        const value = JSON.parse(data.toString()) as JsonRpcMessage;
-        if (value?.jsonrpc === '2.0') this.queue.push(value);
+        const value = JSON.parse(data.toString()) as unknown;
+        if (isAppServerMessage(value)) this.queue.push(value);
       } catch {
         // Ignore malformed remote diagnostics; the protocol client remains alive.
       }
@@ -258,6 +265,14 @@ class WebSocketAppServerTransport implements AppServerTransport {
       this.queue.end();
     }
   }
+}
+
+function isAppServerMessage(value: unknown): value is JsonRpcMessage {
+  if (value === null || typeof value !== 'object') return false;
+  const message = value as Record<string, unknown>;
+  if (message.jsonrpc !== undefined && message.jsonrpc !== '2.0') return false;
+  if (typeof message.method === 'string') return true;
+  return 'id' in message && ('result' in message || 'error' in message);
 }
 
 export function waitForWebSocketOpen(socket: WebSocket, timeoutMs: number): Promise<void> {

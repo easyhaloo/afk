@@ -59,13 +59,13 @@ variable and are never persisted. AFK cannot attach to the private stdio
 process owned by the Codex desktop UI, but a process it starts uses the same
 host Codex configuration and login cache.
 
-Before Loop polls or claims a backlog, AFK runs redacted `codex doctor --json`.
-For `exec` and spawned stdio it also performs a bounded, ephemeral, read-only
-model call so a cached but rejected API key cannot pass readiness. Remote
-app-server modes perform the JSON-RPC handshake and a bounded read-only live
-turn through the configured endpoint; opening a socket alone is not considered
-ready. Connection setup uses the same startup timeout and actively terminates
-a socket that never opens. Failures use fixed messages (`CLI_NOT_FOUND`,
+Before Loop polls or claims a backlog, exec mode runs redacted
+`codex doctor --json` plus a bounded, ephemeral, read-only model call so a
+cached but rejected API key cannot pass readiness. All app-server modes,
+including spawned stdio, perform the JSON-RPC handshake and a bounded read-only
+live turn through the selected endpoint; opening a socket alone is not
+considered ready. The default startup timeout is 30 seconds; connection setup
+uses the same limit and actively terminates a socket that never opens. Failures use fixed messages (`CLI_NOT_FOUND`,
 `AUTH_INVALID`, `PROVIDER_INVALID`, or `ENDPOINT_UNREACHABLE`) and create no
 backlog claim.
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_CODEX_CONFIG,
   prepareAgentRuntime,
   probeCodexAppServerEndpoint,
   probeCodexReadiness,
@@ -7,6 +8,7 @@ import {
   type CodexConfig,
 } from './codex-runtime';
 import type { AppServerTransport, JsonRpcMessage } from './codex-app-server/transport';
+import { createStdioAppServerTransport } from './codex-app-server/transport';
 
 const config = (overrides: Partial<CodexConfig> = {}): CodexConfig => ({
   transport: 'auto',
@@ -17,6 +19,10 @@ const config = (overrides: Partial<CodexConfig> = {}): CodexConfig => ({
 });
 
 describe('resolveCodexRuntime', () => {
+  it('allows enough startup time for a host app-server live turn', () => {
+    expect(DEFAULT_CODEX_CONFIG.appServer.startupTimeoutMs).toBe(30_000);
+  });
+
   it('defaults to host-managed exec with unknown authentication', () => {
     expect(resolveCodexRuntime({ cli: {}, config: config() })).toEqual({
       kind: 'codex',
@@ -251,6 +257,21 @@ describe('probeCodexReadiness', () => {
     expect(checkEndpoint).toHaveBeenCalledWith(runtime);
   });
 
+  it('probes spawned stdio through app-server without requiring exec readiness', async () => {
+    const runtime = resolveCodexRuntime({
+      cli: { transport: 'app-server', endpoint: 'stdio://' },
+      config: config(),
+    });
+    const run = vi.fn(async () => { throw new Error('exec provider is unavailable'); });
+    const checkEndpoint = vi.fn(async () => {});
+
+    await expect(probeCodexReadiness(runtime, run, checkEndpoint)).resolves.toEqual({
+      ready: true, auth: 'unknown', provider: 'auto',
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(checkEndpoint).toHaveBeenCalledWith(runtime);
+  });
+
   it('preserves a classified remote live-turn authentication failure', async () => {
     const runtime = resolveCodexRuntime({
       cli: {
@@ -272,6 +293,65 @@ describe('probeCodexReadiness', () => {
 });
 
 describe('probeCodexAppServerEndpoint', () => {
+  it('preserves a missing CLI classification for spawned stdio', async () => {
+    const runtime = resolveCodexRuntime({
+      cli: { transport: 'app-server', endpoint: 'stdio://' },
+      config: config(),
+    });
+    await expect(probeCodexAppServerEndpoint(
+      runtime,
+      async () => createStdioAppServerTransport('/afk-missing-codex-app-server', []),
+    )).rejects.toMatchObject({ code: 'CLI_NOT_FOUND' });
+  });
+
+  it('classifies a live-turn timeout as endpoint readiness, not invalid authentication', async () => {
+    const queue: JsonRpcMessage[] = [];
+    const readers: Array<(result: IteratorResult<JsonRpcMessage>) => void> = [];
+    let closed = false;
+    const push = (message: JsonRpcMessage) => {
+      const reader = readers.shift();
+      if (reader) reader({ done: false, value: message });
+      else queue.push(message);
+    };
+    const transport: AppServerTransport = {
+      endpointKind: 'stdio',
+      async send(message) {
+        if (message.id === undefined) return;
+        if (message.method === 'initialize') push({ id: message.id, result: {} });
+        if (message.method === 'thread/start') push({ id: message.id, result: { thread: { id: 'probe-thread' } } });
+        if (message.method === 'turn/start') push({ id: message.id, result: { turn: { id: 'probe-turn' } } });
+      },
+      messages: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => {
+            const message = queue.shift();
+            if (message) return Promise.resolve({ done: false, value: message });
+            if (closed) return Promise.resolve({ done: true, value: undefined });
+            return new Promise(resolve => readers.push(resolve));
+          },
+        }),
+      }),
+      async close() {
+        closed = true;
+        for (const reader of readers.splice(0)) reader({ done: true, value: undefined });
+      },
+    };
+    const runtime = resolveCodexRuntime({
+      cli: { transport: 'app-server', endpoint: 'stdio://', startupTimeoutMs: 5 },
+      config: config(),
+    });
+
+    await expect(probeCodexReadiness(
+      runtime,
+      vi.fn(),
+      selected => probeCodexAppServerEndpoint(selected, async () => transport),
+    )).resolves.toEqual({
+      ready: false,
+      code: 'ENDPOINT_UNREACHABLE',
+      message: 'Codex app-server endpoint is not reachable',
+    });
+  });
+
   it('requires a successful read-only protocol turn and closes the transport', async () => {
     const sent: JsonRpcMessage[] = [];
     let closed = false;
@@ -291,6 +371,10 @@ describe('probeCodexAppServerEndpoint', () => {
         if (message.method === 'thread/start') push({ jsonrpc: '2.0', id: message.id, result: { thread: { id: 'probe-thread' } } });
         if (message.method === 'turn/start') {
           push({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'probe-turn' } } });
+          push({
+            jsonrpc: '2.0', method: 'error',
+            params: { willRetry: true, message: 'transient upstream failure' },
+          });
           push({
             jsonrpc: '2.0', method: 'turn/completed',
             params: { turn: { id: 'probe-turn', status: 'completed' } },

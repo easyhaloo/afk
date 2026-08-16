@@ -18,7 +18,7 @@ export interface AcVerificationFailure {
 
 /** Parse the one provider-neutral completion marker accepted from agent text. */
 export function extractGoalComplete(text: string): Record<string, unknown> | undefined {
-  const match = text.match(/<goal_complete>([\s\S]*?)<\/goal_complete>/);
+  const match = text.match(/<goal_complete>([\s\S]*?)<(?:\\)?\/goal_complete>/);
   if (!match) return undefined;
   try {
     const parsed = JSON.parse(match[1]!) as unknown;

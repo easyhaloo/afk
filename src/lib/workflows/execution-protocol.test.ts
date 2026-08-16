@@ -20,6 +20,12 @@ describe('batch execution prompt protocol', () => {
     expect(extractGoalComplete('<goal_complete>invalid-json</goal_complete>')).toBeUndefined();
   });
 
+  it('accepts a JSON-escaped slash in the completion closing tag', () => {
+    expect(extractGoalComplete(
+      '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}<\\/goal_complete>',
+    )).toEqual({ type: 'goal_complete', kind: 'task', summary: 'done' });
+  });
+
   it('requires QA to report its PASS or FAIL outcome in the unified completion payload', () => {
     const prompt = buildBatchPrompt('/goal verify issue #60', 'qa');
 

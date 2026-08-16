@@ -86,13 +86,5 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Prepare Puppeteer browser for tests
-        run: |
-          set -euo pipefail
-          timeout 5m pnpm rebuild puppeteer --reporter=append-only
-          executable="$(node -e "const p=require('puppeteer'); process.stdout.write(p.executablePath())")"
-          test -x "$executable"
-          echo "Puppeteer executable: $executable"
-
       - name: Test
         run: pnpm test

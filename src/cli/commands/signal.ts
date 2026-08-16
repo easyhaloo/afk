@@ -5,7 +5,7 @@ import { getCurrentTimestamp, type Signal } from '../../domain/schemas';
 import { writeSignal, readSignal, clearSignal, waitForSignal } from '../../infrastructure/io';
 import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils';
 
-function parseNonNegativeInt(value: string, _previous: number | undefined): number {
+function parseNonNegativeInt(value: string, _previous?: number): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new InvalidArgumentError(`expected a non-negative integer, got '${value}'`);
@@ -13,7 +13,7 @@ function parseNonNegativeInt(value: string, _previous: number | undefined): numb
   return parsed;
 }
 
-function parsePositiveInt(value: string, _previous: number | undefined): number {
+function parsePositiveInt(value: string, _previous?: number): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new InvalidArgumentError(`expected a positive integer, got '${value}'`);

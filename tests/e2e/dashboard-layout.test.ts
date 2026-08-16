@@ -11,7 +11,7 @@ import { stripVTControlCharacters } from 'node:util';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repositoryRoot = join(__dirname, '../..');
-const distPath = join(repositoryRoot, 'dist/index.js');
+const distPath = join(repositoryRoot, 'dist/cli/commands/board-entry.js');
 const tsxPath = join(repositoryRoot, 'node_modules/tsx/dist/cli.mjs');
 const fixturePath = join(__dirname, 'dashboard-layout.fixture.tsx');
 

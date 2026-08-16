@@ -42,7 +42,12 @@ class DashboardPty {
       cols,
       rows: 30,
       cwd: repositoryRoot,
-      env: { ...process.env, NO_TMUX: '1', FORCE_COLOR: '0' },
+      env: {
+        ...process.env,
+        NO_TMUX: '1',
+        FORCE_COLOR: '0',
+        ...(command === process.execPath && args[0] === distPath ? { AFK_SKIP_SPLASH: '1' } : {}),
+      },
     });
     this.proc.onData(data => this.output.push(data));
     this.exited = new Promise(resolve => this.proc.onExit(() => resolve()));
@@ -102,9 +107,6 @@ describePty('dashboard layout (node-pty)', () => {
 
   it.each([80, 100, 120, 160])('renders the production dashboard as one subview at %i columns', async cols => {
     const dashboard = start(process.execPath, [distPath], cols);
-
-    await delay(800);
-    await dashboard.send('\x1B', 1_200);
     const frame = await dashboard.waitFor('▸ AFK');
 
     expect(frame).toContain('1 tasks');

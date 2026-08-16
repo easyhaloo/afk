@@ -22,6 +22,8 @@ export interface LoopRunnerOptions {
   shutdownTimeoutMs: number;
   /** If set, the runner stops itself after this many successful completions. */
   maxIterations?: number;
+  /** Optional exact backlog scope for bounded runs such as real E2E verification. */
+  backlogIds?: readonly string[];
   /** Factory for WorkflowRunner — overridable for tests. */
   workflowRunnerFactory?: (providers: ProviderBundle, config: import('../core/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
   /** Factory for QARunner — overridable for tests. */
@@ -72,6 +74,7 @@ interface InternalOptions {
   statusIntervalMs: number;
   shutdownTimeoutMs: number;
   maxIterations: number | undefined;
+  backlogIds: ReadonlySet<string> | undefined;
   workflowRunnerFactory: (providers: ProviderBundle, config: import('../core/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
   qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../core/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => QARunner;
   pidFilePath: string;
@@ -160,6 +163,7 @@ export class LoopRunner {
       statusIntervalMs: options.statusIntervalMs ?? DEFAULTS.statusIntervalMs,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULTS.shutdownTimeoutMs,
       maxIterations: options.maxIterations,
+      backlogIds: options.backlogIds ? new Set(options.backlogIds.map(String)) : undefined,
       workflowRunnerFactory: options.workflowRunnerFactory ?? ((p, cfg, runtime) => new WorkflowRunner(p, { config: cfg, agentRuntime: runtime })),
       qaRunnerFactory: options.qaRunnerFactory ?? ((p, cfg, runtime) => new QARunner(p, cfg, { agentRuntime: runtime })),
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
@@ -329,9 +333,9 @@ export class LoopRunner {
         this.providers.backlog.list({ state: 'ready', executionMode: 'afk' }),
         this.providers.backlog.list({ state: 'rework', executionMode: 'afk' }),
       ]);
-      const issues = [...readyIssues, ...reworkIssues].filter((issue, index, all) =>
-        all.findIndex(candidate => candidate.id === issue.id) === index,
-      );
+      const issues = [...readyIssues, ...reworkIssues]
+        .filter((issue, index, all) => all.findIndex(candidate => candidate.id === issue.id) === index)
+        .filter(issue => !this.opts.backlogIds || this.opts.backlogIds.has(String(issue.id)));
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;

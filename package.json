@@ -12,6 +12,7 @@
     "dev": "tsc --watch",
     "pretest": "npm run build",
     "test": "vitest run",
+    "test:e2e:codex": "tsx tests/e2e/codex-runtime.ts",
     "test:watch": "vitest",
     "postinstall": "node scripts/fix-permissions.mjs",
     "prepublishOnly": "npm run build"

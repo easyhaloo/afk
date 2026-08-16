@@ -59,6 +59,8 @@ export interface AgentCommandOptions {
   interactive?: boolean;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
+  /** Immutable provider runtime resolved before backlog claim. */
+  runtime?: AgentRuntimeSelection;
 }
 
 export interface AgentExecutionMetadata {

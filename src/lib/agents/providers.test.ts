@@ -139,6 +139,45 @@ describe('Agent providers — fixture coverage', () => {
       ]);
     });
 
+    it('applies the resolved Codex profile and explicit model provider', () => {
+      const cmd = p.buildCommand({
+        ...opts(),
+        executionMode: 'batch',
+        runtime: {
+          kind: 'codex', transport: 'exec', auth: 'api', provider: 'custom',
+          profile: 'work', startupTimeoutMs: 5_000,
+        },
+      });
+
+      expect(cmd.argv).toEqual([
+        'codex',
+        'exec',
+        '--json',
+        '--profile',
+        'work',
+        '--config',
+        'model_provider="custom"',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-C',
+        '/tmp/worktree',
+      ]);
+    });
+
+    it('does not override the provider selected by an exec profile', () => {
+      const cmd = p.buildCommand({
+        ...opts(),
+        executionMode: 'batch',
+        runtime: {
+          kind: 'codex', transport: 'exec', auth: 'api', provider: 'auto',
+          profile: 'work', startupTimeoutMs: 5_000,
+        },
+      });
+
+      expect(cmd.argv).toContain('work');
+      expect(cmd.argv).not.toContain('--config');
+      expect(cmd.argv.some(arg => arg.startsWith('model_provider='))).toBe(false);
+    });
+
     it('reports exec metadata with redacted runtime auth and model provider', async () => {
       const execution = { id: 'codex-execution' } as AgentExecution;
       const startAgent = vi.fn(async () => execution);

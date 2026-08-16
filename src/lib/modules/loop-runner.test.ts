@@ -111,6 +111,35 @@ describe('LoopRunner QA boundary', () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ backlogId: '42' }));
   });
 
+  it('limits polling to an explicit backlog execution scope', async () => {
+    const ready = { ...item, state: 'ready' as const };
+    const other = { ...ready, id: '43', branchName: 'afk/backlog-43' };
+    const run = vi.fn(async () => ({ success: false, skipped: 'not_claimed' as const }));
+    const providers: ProviderBundle = {
+      backlog: {
+        get: vi.fn(async (id: string) => id === '42' ? ready : other),
+        list: vi.fn(async (options: { state?: string }) => options.state === 'ready' ? [ready, other] : []),
+        claim: vi.fn(), transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}),
+        addTag: vi.fn(async () => {}), removeTag: vi.fn(async () => {}), initialize: vi.fn(async () => {}),
+        isRunnable: vi.fn(async () => true),
+      },
+      branches: {} as ProviderBundle['branches'], changes: {} as ProviderBundle['changes'],
+    };
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'],
+      workflowRunnerFactory: vi.fn(() => ({ run }) as any),
+    });
+    const internals = subject as any;
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.poll();
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ backlogId: '42' }));
+  });
+
   it('passes a claim-free backlog facade to QARunner', async () => {
     const providers: ProviderBundle = {
       backlog: {

@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   prepareAgentRuntime,
+  probeCodexAppServerEndpoint,
   probeCodexReadiness,
   resolveCodexRuntime,
   type CodexConfig,
 } from './codex-runtime';
+import type { AppServerTransport, JsonRpcMessage } from './codex-app-server/transport';
 
 const config = (overrides: Partial<CodexConfig> = {}): CodexConfig => ({
   transport: 'auto',
@@ -64,6 +66,13 @@ describe('resolveCodexRuntime', () => {
       config: config(),
     })).toThrow(/endpoint/i);
   });
+
+  it('rejects host profiles for app-server transports', () => {
+    expect(() => resolveCodexRuntime({
+      cli: { transport: 'app-server', profile: 'work' },
+      config: config(),
+    })).toThrow(/profile.*app-server/i);
+  });
 });
 
 describe('probeCodexReadiness', () => {
@@ -81,8 +90,10 @@ describe('probeCodexReadiness', () => {
   });
 
   it('returns redacted host diagnostics from codex doctor', async () => {
-    const run = vi.fn(async () => ({
-      stdout: JSON.stringify({ ready: true, auth: 'chatgpt', provider: 'openai', token: 'must-not-leak' }),
+    const run = vi.fn(async (_executable: string, args: string[]) => ({
+      stdout: args[0] === 'doctor'
+        ? JSON.stringify({ ready: true, auth: 'chatgpt', provider: 'openai', token: 'must-not-leak' })
+        : '{"type":"turn.completed"}\n',
       stderr: '',
     }));
 
@@ -91,7 +102,101 @@ describe('probeCodexReadiness', () => {
       auth: 'chatgpt',
       provider: 'openai',
     });
-    expect(run).toHaveBeenCalledWith('codex', ['doctor', '--json']);
+    expect(run).toHaveBeenNthCalledWith(1, 'codex', ['doctor', '--json'], { timeoutMs: 10_000 });
+    expect(run.mock.calls[1][1]).toEqual(expect.arrayContaining(['exec', '--json', '--ephemeral', '--sandbox', 'read-only']));
+  });
+
+  it('reads current doctor diagnostics and ignores unrelated terminal failures', async () => {
+    const run = vi.fn(async (_executable: string, args: string[]) => ({
+      stdout: args[0] === 'doctor'
+        ? JSON.stringify({
+            schemaVersion: 1,
+            overallStatus: 'fail',
+            checks: {
+              'auth.credentials': {
+                status: 'warning',
+                details: { 'stored auth mode': 'api_key', 'stored API key': 'true' },
+              },
+              'config.load': { status: 'ok', details: { 'model provider': 'custom' } },
+              'network.provider_reachability': { status: 'ok' },
+              'terminal.env': { status: 'fail', summary: 'TERM=dumb' },
+            },
+          })
+        : '{"type":"turn.completed"}\n',
+      stderr: '',
+    }));
+
+    await expect(probeCodexReadiness(resolveCodexRuntime({ cli: {}, config: config() }), run)).resolves.toEqual({
+      ready: true,
+      auth: 'api',
+      provider: 'custom',
+    });
+  });
+
+  it('fails redacted readiness when the live model probe rejects configured credentials', async () => {
+    const run = vi.fn(async (_executable: string, args: string[]) => {
+      if (args[0] === 'doctor') {
+        return { stdout: JSON.stringify({ ready: true, auth: 'api', provider: 'custom' }), stderr: '' };
+      }
+      throw new Error('401 INVALID_API_KEY sk-secret-fragment');
+    });
+
+    const result = await probeCodexReadiness(resolveCodexRuntime({ cli: {}, config: config() }), run);
+    expect(result).toEqual({ ready: false, code: 'AUTH_INVALID', message: 'Codex authentication is not ready' });
+    expect(JSON.stringify(result)).not.toContain('secret-fragment');
+  });
+
+  it('rejects an explicit auth mode that differs from host diagnostics', async () => {
+    const run = vi.fn(async (_executable: string, args: string[]) => ({
+      stdout: args[0] === 'doctor'
+        ? JSON.stringify({ ready: true, auth: 'chatgpt', provider: 'openai' })
+        : '{"type":"turn.completed"}\n',
+      stderr: '',
+    }));
+    const runtime = resolveCodexRuntime({ cli: { auth: 'api' }, config: config() });
+
+    await expect(probeCodexReadiness(runtime, run)).resolves.toEqual({
+      ready: false, code: 'AUTH_INVALID', message: 'Codex authentication is not ready',
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies profile and provider selection to doctor and live probes', async () => {
+    const run = vi.fn(async (_executable: string, args: string[]) => ({
+      stdout: args[0] === 'doctor'
+        ? JSON.stringify({ ready: true, auth: 'api', provider: 'custom' })
+        : '{"type":"turn.completed"}\n',
+      stderr: '',
+    }));
+    const runtime = resolveCodexRuntime({
+      cli: { profile: 'work', provider: 'custom' },
+      config: config(),
+    });
+
+    await expect(probeCodexReadiness(runtime, run)).resolves.toMatchObject({ ready: true });
+    expect(run.mock.calls[0][1]).not.toContain('--profile');
+    expect(run.mock.calls[0][1]).toEqual(expect.arrayContaining([
+      '--config', 'model_provider="custom"',
+    ]));
+    expect(run.mock.calls[1][1]).toEqual(expect.arrayContaining([
+      '--profile', 'work', '--config', 'model_provider="custom"',
+    ]));
+  });
+
+  it('lets an exec profile resolve its own provider when provider is auto', async () => {
+    const run = vi.fn(async (_executable: string, args: string[]) => ({
+      stdout: args[0] === 'doctor'
+        ? JSON.stringify({ ready: true, auth: 'api', provider: 'base-provider' })
+        : '{"type":"turn.completed"}\n',
+      stderr: '',
+    }));
+    const runtime = resolveCodexRuntime({ cli: { profile: 'work' }, config: config() });
+
+    const readiness = await probeCodexReadiness(runtime, run);
+    const prepared = await prepareAgentRuntime(runtime, async () => readiness);
+
+    expect(readiness).toMatchObject({ ready: true, provider: 'auto' });
+    expect(prepared).toMatchObject({ profile: 'work', provider: 'auto' });
   });
 
   it('maps authentication failures without exposing command output', async () => {
@@ -142,6 +247,91 @@ describe('probeCodexReadiness', () => {
       code: 'ENDPOINT_UNREACHABLE',
       message: 'Codex app-server endpoint is not reachable',
     });
+    expect(run).not.toHaveBeenCalled();
     expect(checkEndpoint).toHaveBeenCalledWith(runtime);
+  });
+
+  it('preserves a classified remote live-turn authentication failure', async () => {
+    const runtime = resolveCodexRuntime({
+      cli: {
+        transport: 'app-server', endpoint: 'ws://localhost:7777', provider: 'custom',
+      },
+      config: config(),
+    });
+    const checkEndpoint = vi.fn(async () => {
+      throw Object.assign(new Error('upstream secret'), { code: 'AUTH_INVALID' });
+    });
+
+    const result = await probeCodexReadiness(runtime, vi.fn(), checkEndpoint);
+
+    expect(result).toEqual({
+      ready: false, code: 'AUTH_INVALID', message: 'Codex authentication is not ready',
+    });
+    expect(JSON.stringify(result)).not.toContain('upstream secret');
+  });
+});
+
+describe('probeCodexAppServerEndpoint', () => {
+  it('requires a successful read-only protocol turn and closes the transport', async () => {
+    const sent: JsonRpcMessage[] = [];
+    let closed = false;
+    const queue: JsonRpcMessage[] = [];
+    const readers: Array<(result: IteratorResult<JsonRpcMessage>) => void> = [];
+    const push = (message: JsonRpcMessage) => {
+      const reader = readers.shift();
+      if (reader) reader({ done: false, value: message });
+      else queue.push(message);
+    };
+    const transport: AppServerTransport = {
+      endpointKind: 'ws',
+      async send(message) {
+        sent.push(message);
+        if (message.id === undefined) return;
+        if (message.method === 'initialize') push({ jsonrpc: '2.0', id: message.id, result: {} });
+        if (message.method === 'thread/start') push({ jsonrpc: '2.0', id: message.id, result: { thread: { id: 'probe-thread' } } });
+        if (message.method === 'turn/start') {
+          push({ jsonrpc: '2.0', id: message.id, result: { turn: { id: 'probe-turn' } } });
+          push({
+            jsonrpc: '2.0', method: 'turn/completed',
+            params: { turn: { id: 'probe-turn', status: 'completed' } },
+          });
+        }
+      },
+      messages: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => {
+            const message = queue.shift();
+            if (message) return Promise.resolve({ done: false, value: message });
+            if (closed) return Promise.resolve({ done: true, value: undefined });
+            return new Promise(resolve => readers.push(resolve));
+          },
+        }),
+      }),
+      async close() {
+        closed = true;
+        for (const reader of readers.splice(0)) reader({ done: true, value: undefined });
+      },
+    };
+    const runtime = resolveCodexRuntime({
+      cli: { transport: 'app-server', endpoint: 'ws://localhost:7777' },
+      config: config(),
+    });
+
+    await probeCodexAppServerEndpoint(runtime, async () => transport);
+
+    expect(sent.map(message => message.method)).toEqual([
+      'initialize', 'initialized', 'thread/start', 'turn/start',
+    ]);
+    expect(sent[2]).toMatchObject({
+      params: { cwd: process.cwd(), approvalPolicy: 'never', sandbox: 'read-only' },
+    });
+    expect(sent[2].params).not.toHaveProperty('modelProvider');
+    expect(sent[3]).toMatchObject({
+      params: {
+        threadId: 'probe-thread',
+        input: [{ type: 'text', text: expect.stringContaining('READY'), text_elements: [] }],
+      },
+    });
+    expect(closed).toBe(true);
   });
 });

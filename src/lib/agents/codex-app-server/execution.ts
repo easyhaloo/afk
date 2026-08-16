@@ -27,6 +27,7 @@ export class CodexAppServerExecution implements AgentExecution {
   private readonly events: ExecutionEvent[] = [];
   private readonly eventReaders: Array<(result: IteratorResult<ExecutionEvent>) => void> = [];
   private result?: ExecutionResult;
+  private finishPromise?: Promise<void>;
   private resolveResult!: (result: ExecutionResult) => void;
   private readonly resultPromise: Promise<ExecutionResult>;
   private structuredOutput?: Record<string, unknown>;
@@ -44,7 +45,7 @@ export class CodexAppServerExecution implements AgentExecution {
       provider: 'codex',
       transport: 'app-server',
       auth: runtime.auth,
-      modelProvider: runtime.provider,
+      ...(runtime.provider !== 'auto' ? { modelProvider: runtime.provider } : {}),
       endpointKind: transport.endpointKind,
     };
     this.client = new AppServerClient(transport);
@@ -63,13 +64,17 @@ export class CodexAppServerExecution implements AgentExecution {
     const transport = await createTransport(runtime);
     const execution = new CodexAppServerExecution(options, runtime, transport);
     execution.client.start();
-    void execution.consumeNotifications();
+    void execution.consumeNotifications().catch(() => {
+      void execution.finish(execution.buildResult('failed', {
+        code: 'APP_SERVER_FAILURE', message: 'Codex app-server notification handling failed',
+      }));
+    });
     try {
       await withTimeout(execution.initialize(), runtime.startupTimeoutMs);
       return execution;
-    } catch (error) {
-      await execution.client.close();
-      throw error;
+    } catch {
+      await execution.client.close().catch(() => {});
+      throw new Error('Codex app-server startup failed');
     }
   }
 
@@ -82,19 +87,15 @@ export class CodexAppServerExecution implements AgentExecution {
   }
 
   async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
-    if (this.result) return this.result;
     const timeoutMs = options?.completionTimeoutMs ?? 600_000;
-    let timer: NodeJS.Timeout | undefined;
-    const timeout = new Promise<ExecutionResult>(resolve => {
-      timer = setTimeout(() => {
-        void this.client.close();
-        resolve(this.buildResult('timed_out'));
-      }, timeoutMs);
-    });
-    const result = await Promise.race([this.resultPromise, timeout]);
-    if (timer) clearTimeout(timer);
-    if (!this.result) this.finish(result);
-    return result;
+    const timer = setTimeout(() => {
+      void this.finish(this.buildResult('timed_out'));
+    }, timeoutMs);
+    try {
+      return await this.resultPromise;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async interrupt(_reason: InterruptReason): Promise<void> {
@@ -102,13 +103,12 @@ export class CodexAppServerExecution implements AgentExecution {
     if (this.threadId && this.turnId) {
       await this.client.request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId });
     }
-    this.finish(this.buildResult('aborted'));
-    await this.client.close();
+    await this.finish(this.buildResult('aborted'));
   }
 
   async kill(): Promise<void> {
-    if (!this.result) this.finish(this.buildResult('aborted'));
-    await this.client.close();
+    if (!this.result) await this.finish(this.buildResult('aborted'));
+    else await (this.finishPromise ?? this.client.close());
   }
 
   async captureOutput(_options?: CaptureOptions): Promise<string> {
@@ -132,7 +132,7 @@ export class CodexAppServerExecution implements AgentExecution {
       cwd: this.options.worktreePath,
       approvalPolicy: 'never',
       sandbox: 'danger-full-access',
-      modelProvider: this.runtime.provider,
+      ...(this.runtime.provider !== 'auto' ? { modelProvider: this.runtime.provider } : {}),
     });
     this.threadId = started.thread.id;
     this.metadata.threadId = this.threadId;
@@ -155,21 +155,23 @@ export class CodexAppServerExecution implements AgentExecution {
           this.emit({ type: 'usage', usage: event.usage });
         } else if (event.type === 'error') {
           this.emit({ type: 'error', error: event.error });
-          this.finish(this.buildResult('failed', { code: 'AGENT_ERROR', message: event.error.message }));
+          await this.finish(this.buildResult('failed', { code: 'AGENT_ERROR', message: event.error.message }));
+          return;
         } else if (event.type === 'completed') {
           if (this.structuredOutput?.type === this.options.signalType) {
-            this.finish(this.buildResult('completed'));
+            await this.finish(this.buildResult('completed'));
           } else {
-            this.finish(this.buildResult('failed', {
+            await this.finish(this.buildResult('failed', {
               code: 'MISSING_RESULT',
               message: `app-server execution ended without ${this.options.signalType} result`,
             }));
           }
+          return;
         }
       }
     }
     if (!this.result) {
-      this.finish(this.buildResult('failed', {
+      await this.finish(this.buildResult('failed', {
         code: 'TRANSPORT_CLOSED', message: 'Codex app-server transport closed before completion',
       }));
     }
@@ -189,11 +191,23 @@ export class CodexAppServerExecution implements AgentExecution {
     };
   }
 
-  private finish(result: ExecutionResult): void {
-    if (this.result) return;
+  private finish(result: ExecutionResult): Promise<void> {
+    if (this.finishPromise) return this.finishPromise;
     this.result = result;
-    this.resolveResult(result);
     for (const reader of this.eventReaders.splice(0)) reader({ done: true, value: undefined });
+    this.finishPromise = (async () => {
+      let finalResult = result;
+      try {
+        await this.client.close();
+      } catch {
+        finalResult = this.buildResult('failed', {
+          code: 'TRANSPORT_CLOSE_FAILED', message: 'Codex app-server cleanup failed',
+        });
+      }
+      this.result = finalResult;
+      this.resolveResult(finalResult);
+    })();
+    return this.finishPromise;
   }
 
   private emit(event: ExecutionEvent): void {

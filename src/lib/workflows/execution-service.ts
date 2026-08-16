@@ -42,6 +42,10 @@ export class AgentExecutionService {
         runId: execution.id, iid: request.iid ?? 0, generation: request.generation + attempt,
         provider: request.provider.name, worktreePath: request.worktreePath, goalText: request.prompt,
         signalType: request.signalType, startedAt: new Date().toISOString(),
+        agentTransport: execution.metadata.transport,
+        agentAuth: execution.metadata.auth,
+        agentModelProvider: execution.metadata.modelProvider,
+        agentThreadId: execution.metadata.threadId,
       });
       result = await execution.waitForResult({
         completionTimeoutMs: request.completionTimeoutMs,

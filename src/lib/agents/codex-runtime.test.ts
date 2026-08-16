@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  prepareAgentRuntime,
   probeCodexReadiness,
   resolveCodexRuntime,
   type CodexConfig,
@@ -66,6 +67,19 @@ describe('resolveCodexRuntime', () => {
 });
 
 describe('probeCodexReadiness', () => {
+  it('does not let host readiness diagnostics override explicit runtime choices', async () => {
+    const runtime = resolveCodexRuntime({
+      cli: { auth: 'api', provider: 'custom' },
+      config: config(),
+    });
+    const prepared = await prepareAgentRuntime(
+      runtime,
+      async () => ({ ready: true, auth: 'chatgpt', provider: 'openai' }),
+    );
+
+    expect(prepared).toMatchObject({ auth: 'api', provider: 'custom' });
+  });
+
   it('returns redacted host diagnostics from codex doctor', async () => {
     const run = vi.fn(async () => ({
       stdout: JSON.stringify({ ready: true, auth: 'chatgpt', provider: 'openai', token: 'must-not-leak' }),
@@ -113,5 +127,21 @@ describe('probeCodexReadiness', () => {
       code: 'CLI_NOT_FOUND',
       message: 'Codex CLI was not found on PATH',
     });
+  });
+
+  it('checks configured remote app-server endpoints before execution', async () => {
+    const runtime = resolveCodexRuntime({
+      cli: { transport: 'app-server', endpoint: 'unix:///tmp/missing-codex.sock' },
+      config: config(),
+    });
+    const run = vi.fn(async () => ({ stdout: '{"ready":true}', stderr: '' }));
+    const checkEndpoint = vi.fn(async () => { throw new Error('connect ENOENT /tmp/missing-codex.sock'); });
+
+    await expect(probeCodexReadiness(runtime, run, checkEndpoint)).resolves.toEqual({
+      ready: false,
+      code: 'ENDPOINT_UNREACHABLE',
+      message: 'Codex app-server endpoint is not reachable',
+    });
+    expect(checkEndpoint).toHaveBeenCalledWith(runtime);
   });
 });

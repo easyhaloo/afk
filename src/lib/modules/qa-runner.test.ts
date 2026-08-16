@@ -175,6 +175,11 @@ describe('QARunner execution boundary', () => {
 
   it('publishes an independent QA runtime record through completion', async () => {
     const f = fixture();
+    f.agentProvider.name = 'codex';
+    f.execution.metadata = {
+      provider: 'codex', transport: 'app-server', auth: 'chatgpt', modelProvider: 'openai',
+      endpointKind: 'stdio', threadId: 'thread-60',
+    };
     f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
     const runtime = {
       start: vi.fn(async () => {}),
@@ -189,11 +194,19 @@ describe('QARunner execution boundary', () => {
       executionMode: 'batch',
       mergeBranch: vi.fn(async () => {}),
       runtimeManager: runtime as any,
+      agentRuntime: {
+        kind: 'codex', transport: 'app-server', auth: 'chatgpt', provider: 'openai',
+        endpoint: 'stdio://', startupTimeoutMs: 5_000,
+      },
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
     expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
       backlogId: '60', phase: 'verifying', executionMode: 'batch', status: 'running',
+      agentProvider: 'codex', agentTransport: 'app-server', agentAuth: 'chatgpt', agentModelProvider: 'openai',
+    }));
+    expect(runtime.heartbeat).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      agentTransport: 'app-server', agentThreadId: 'thread-60',
     }));
     expect(runtime.heartbeat).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ worktree: process.cwd() }));
     expect(runtime.writeDiagnostics).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({

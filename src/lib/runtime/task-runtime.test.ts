@@ -116,6 +116,25 @@ describe('TaskRuntimeStore', () => {
     await expect(readFile(join(store.diagnosticPathFor('run-42'), 'runtime.json'), 'utf8')).resolves.toContain('"backlogId": "42"');
   });
 
+  it('persists only redacted transport-neutral agent diagnostics', async () => {
+    const store = await storeFixture();
+    await store.start(record({
+      agentProvider: 'codex',
+      agentTransport: 'app-server',
+      agentAuth: 'chatgpt',
+      agentModelProvider: 'openai',
+      agentThreadId: 'thread-42',
+    }));
+
+    await expect(store.getActive('run-42')).resolves.toMatchObject({
+      agentProvider: 'codex',
+      agentTransport: 'app-server',
+      agentAuth: 'chatgpt',
+      agentModelProvider: 'openai',
+      agentThreadId: 'thread-42',
+    });
+  });
+
   it('archives terminal records and keeps the final diagnostic summary', async () => {
     const store = await storeFixture();
     await store.start(record());

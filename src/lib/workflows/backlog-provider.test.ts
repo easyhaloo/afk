@@ -91,6 +91,9 @@ describe('WorkflowRunner backlog provider mode', () => {
       executionMode: 'batch',
       runtime,
     });
+    expect(subject.heartbeatRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      agentTransport: 'exec',
+    }));
   });
 
   it('does not create a change request before QA verification', async () => {

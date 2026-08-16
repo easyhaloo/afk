@@ -42,6 +42,7 @@ import type { BranchHandle } from './branches/types';
 import type { ProviderBundle } from './core/providers';
 import type { BacklogClaim, BacklogItem, BacklogState } from './core/backlog';
 import { TaskRuntimeManager } from './runtime/task-runtime';
+import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata';
 
 /**
  * Preserve the provider boundary details when an agent execution fails.
@@ -940,6 +941,7 @@ export class WorkflowRunner {
         executionMode: p.executionMode,
         runtime: p.runtime,
       });
+      await this.heartbeatRuntime(runtimeFieldsFromExecution(execution.metadata));
       this.resourceScope?.registerExecution(execution);
       await this.heartbeatRuntime({ phase: 'implementing', progress: `agent generation ${round}` });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
@@ -1159,6 +1161,7 @@ export class WorkflowRunner {
         sandboxProvider: this.sandboxProviderName,
         executionMode: this.executionMode,
         agentProvider: this.agentProviderName,
+        ...runtimeFieldsFromSelection(this.agentProviderName, this.agentRuntime),
         session,
         branch: this.activeBacklog?.branchName,
         startedAt: now,

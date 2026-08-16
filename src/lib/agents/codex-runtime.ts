@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import type { CodexRuntimeSelection } from './types';
+import type { AgentRuntimeSelection, CodexRuntimeSelection } from './types';
 
 export type CodexTransport = 'auto' | 'exec' | 'app-server';
 export type CodexAuth = 'auto' | 'chatgpt' | 'api';
@@ -85,15 +85,40 @@ export type CodexDoctorRunner = (
   args: string[],
 ) => Promise<{ stdout: string; stderr: string }>;
 
+export type CodexReadinessProbe = (runtime: CodexRuntimeSelection) => Promise<CodexReadiness>;
+export type CodexEndpointProbe = (runtime: CodexRuntimeSelection) => Promise<void>;
+
+export async function prepareAgentRuntime(
+  runtime: AgentRuntimeSelection,
+  probe: CodexReadinessProbe = probeCodexReadiness,
+): Promise<AgentRuntimeSelection> {
+  if (runtime.kind !== 'codex') return runtime;
+  const readiness = await probe(runtime);
+  if (!readiness.ready) throw new Error(readiness.message);
+  return Object.freeze({
+    ...runtime,
+    auth: runtime.auth === 'unknown' ? readiness.auth : runtime.auth,
+    provider: runtime.provider === 'auto' ? readiness.provider : runtime.provider,
+  });
+}
+
 export async function probeCodexReadiness(
   runtime: CodexRuntimeSelection,
   run: CodexDoctorRunner = runCodexDoctor,
+  checkEndpoint: CodexEndpointProbe = probeAppServerEndpoint,
 ): Promise<CodexReadiness> {
   try {
     const { stdout } = await run('codex', ['doctor', '--json']);
     const diagnostics = parseDoctorOutput(stdout);
     if (diagnostics.ready === false) {
       return readinessFailure(diagnostics.code, runtime);
+    }
+    if (runtime.transport === 'app-server' && runtime.endpoint && runtime.endpoint !== 'stdio://') {
+      try {
+        await checkEndpoint(runtime);
+      } catch {
+        return { ready: false, code: 'ENDPOINT_UNREACHABLE', message: 'Codex app-server endpoint is not reachable' };
+      }
     }
     return {
       ready: true,
@@ -106,6 +131,12 @@ export async function probeCodexReadiness(
     }
     return readinessFailure(undefined, runtime);
   }
+}
+
+async function probeAppServerEndpoint(runtime: CodexRuntimeSelection): Promise<void> {
+  const { createAppServerTransport } = await import('./codex-app-server/transport');
+  const transport = await createAppServerTransport(runtime);
+  await transport.close();
 }
 
 function runCodexDoctor(executable: string, args: string[]): Promise<{ stdout: string; stderr: string }> {

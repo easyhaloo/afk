@@ -24,11 +24,17 @@ describe('LoopRunner QA boundary', () => {
         isRunnable: vi.fn(async () => true),
       }, branches: {} as ProviderBundle['branches'], changes: {} as ProviderBundle['changes'],
     };
+    const agentRuntime = Object.freeze({
+      kind: 'codex', transport: 'app-server', auth: 'chatgpt', provider: 'openai',
+      endpoint: 'stdio://', startupTimeoutMs: 5_000,
+    } as const);
     const run = vi.fn(async () => ({ success: true }));
+    const workflowFactory = vi.fn(() => ({ run }) as any);
     const qaFactory = vi.fn(() => ({ process: vi.fn(async () => ({ success: true })) }) as any);
     const subject = new LoopRunner(providers, {
       agentProvider: 'codex',
-      workflowRunnerFactory: vi.fn(() => ({ run }) as any),
+      agentRuntime,
+      workflowRunnerFactory: workflowFactory,
       qaRunnerFactory: qaFactory,
     });
     const internals = subject as any;
@@ -41,10 +47,42 @@ describe('LoopRunner QA boundary', () => {
     await internals.runQA();
 
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ agentProvider: 'codex' }));
+    expect(workflowFactory.mock.calls[0][2]).toBe(agentRuntime);
     expect(qaFactory).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ agentDefault: 'codex' }),
+      agentRuntime,
     );
+  });
+
+  it('fails readiness before polling or claiming a backlog', async () => {
+    const backlog = {
+      get: vi.fn(), list: vi.fn(), claim: vi.fn(), transition: vi.fn(), setExecutionMode: vi.fn(),
+      addTag: vi.fn(), removeTag: vi.fn(), initialize: vi.fn(), isRunnable: vi.fn(),
+    };
+    const providers = {
+      backlog, branches: {} as ProviderBundle['branches'], changes: {} as ProviderBundle['changes'],
+    } as ProviderBundle;
+    const subject = new LoopRunner(providers, {
+      agentProvider: 'codex',
+      agentRuntime: {
+        kind: 'codex', transport: 'exec', auth: 'api', provider: 'openai', startupTimeoutMs: 5_000,
+      },
+      readinessProbe: vi.fn(async () => ({
+        ready: false as const, code: 'AUTH_INVALID' as const, message: 'Codex authentication is not ready',
+      })),
+    });
+
+    await expect(Promise.race([
+      subject.start(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('readiness was not checked')), 25)),
+    ])).rejects.toThrow(/authentication/i);
+
+    expect(backlog.list).not.toHaveBeenCalled();
+    expect(backlog.claim).not.toHaveBeenCalled();
+    expect(backlog.transition).not.toHaveBeenCalled();
+    expect(subject.getStatus().infrastructureError).toMatch(/authentication/i);
+    await subject.stop();
   });
 
   it('polls rework backlogs as AFK implementation candidates', async () => {

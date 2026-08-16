@@ -101,9 +101,17 @@ describe('QARunner execution boundary', () => {
     const f = fixture();
     f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
     const tmux = { createSession: vi.fn(), waitForPrompt: vi.fn(), sendPrompt: vi.fn(), waitForSignal: vi.fn() };
+    const runtime = {
+      kind: 'codex',
+      transport: 'exec',
+      auth: 'chatgpt',
+      provider: 'openai',
+      startupTimeoutMs: 5_000,
+    } as const;
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
       agentProvider: f.agentProvider,
+      agentRuntime: runtime,
       executionMode: 'batch',
       tmux: tmux as any,
       mergeBranch: vi.fn(async () => {}),
@@ -112,12 +120,17 @@ describe('QARunner execution boundary', () => {
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
     expect(f.sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'batch' }));
     expect(f.sandboxProvider.create.mock.calls[0][0].tmux).toBeUndefined();
-    expect(f.agentProvider.createExecution).toHaveBeenCalledWith(expect.objectContaining({
+    const session = f.sandboxProvider.create.mock.calls[0][0].session;
+    expect(f.agentProvider.createExecution).toHaveBeenCalledWith({
       sandbox: f.sandbox,
+      worktreePath: process.cwd(),
+      sessionId: session,
       executionMode: 'batch',
       signalType: 'goal_complete',
       prompt: expect.stringContaining('"kind":"qa"'),
-    }));
+      generation: 1,
+      runtime,
+    });
     expect(f.sandbox.startAgent).not.toHaveBeenCalled();
     const qaPrompt = f.agentProvider.createExecution.mock.calls[0][0].prompt;
     expect(qaPrompt).toContain('Backlog title: search mode');

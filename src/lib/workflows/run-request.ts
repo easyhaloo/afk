@@ -1,10 +1,11 @@
-import type { AgentProviderName, ExecutionMode } from '../agents/types';
+import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../agents/types';
 import type { SandboxProviderName } from '../sandbox/types';
 import type { BranchStrategyConfig } from '../branches/types';
 import { deriveBacklogBranchName } from '../core/backlog';
 import { getWorkflowConfig, type WorkflowConfig } from '../core/config/manager';
 import { resolveProjectContext, type ProjectContext } from '../core/project-context';
 import { resolveAgentProviderName } from '../agents';
+import { DEFAULT_CODEX_CONFIG, resolveCodexRuntime } from '../agents/codex-runtime';
 
 /** Canonical request for a single backlog implementation execution. */
 export interface WorkflowRunRequest {
@@ -25,6 +26,7 @@ export interface WorkflowRunRequest {
   agentProvider: AgentProviderName;
   sandboxProvider: SandboxProviderName;
   executionMode: ExecutionMode;
+  agentRuntime: AgentRuntimeSelection;
   branchStrategy: BranchStrategyConfig;
   ext?: string[];
   extParams?: string[];
@@ -48,6 +50,7 @@ export interface WorkflowRunCliInput {
   agentProvider?: AgentProviderName;
   provider?: AgentProviderName;
   executionMode?: ExecutionMode | string;
+  agentRuntime?: AgentRuntimeSelection;
   branchStrategy?: BranchStrategyConfig;
   ext?: string[];
   extParams?: string[];
@@ -113,11 +116,22 @@ export function resolveWorkflowRequest(
     agentProvider,
     sandboxProvider: input.sandboxProvider ?? defaults.sandboxProvider,
     executionMode: executionMode(input.executionMode),
+    agentRuntime: agentProvider === 'codex'
+      ? (input.agentRuntime?.kind === 'codex' ? input.agentRuntime : resolveDefaultCodexRuntime(config))
+      : { kind: 'default' },
     branchStrategy: deriveBranchStrategy(backlogId, input.branchStrategy),
     ext: input.ext,
     extParams: input.extParams,
     template: input.template,
   };
+}
+
+function resolveDefaultCodexRuntime(config: Partial<WorkflowConfig>): AgentRuntimeSelection {
+  const configured = config.agents?.codex ?? {
+    ...DEFAULT_CODEX_CONFIG,
+    appServer: { ...DEFAULT_CODEX_CONFIG.appServer },
+  };
+  return resolveCodexRuntime({ cli: {}, config: configured });
 }
 
 export async function resolveWorkflowRunRequest(input: WorkflowRunCliInput, config?: Partial<WorkflowConfig>): Promise<WorkflowRunRequest> {

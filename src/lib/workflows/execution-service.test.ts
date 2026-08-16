@@ -18,13 +18,41 @@ describe('AgentExecutionService', () => {
   it('retries failed agent steps but never retries timeout', async () => {
     const createExecution = vi.mocked(provider.createExecution)
       .mockResolvedValueOnce(execution({ version: 1, runId: '1', status: 'failed', provider: 'local', commits: [] }))
-      .mockResolvedValueOnce(execution({ version: 1, runId: '2', status: 'completed', provider: 'local', commits: [] }));
+      .mockResolvedValueOnce(execution({
+        version: 1,
+        runId: '2',
+        status: 'completed',
+        provider: 'local',
+        structuredOutput: { type: 'goal_complete' },
+        commits: [],
+      }));
     const sandbox = { close: async () => {} } as unknown as Sandbox;
+    const runtime = {
+      kind: 'codex',
+      transport: 'exec',
+      auth: 'chatgpt',
+      provider: 'openai',
+      startupTimeoutMs: 5_000,
+    } as const;
     const service = new AgentExecutionService();
-    const result = await service.execute({ provider, sandbox, worktreePath: '/tmp/worktree', prompt: 'do it', signalType: 'goal_complete', generation: 1, maxRetries: 1, completionTimeoutMs: 10, contextHighTokens: 100 });
+    const result = await service.execute({ provider, sandbox, worktreePath: '/tmp/worktree', sessionId: 'session-1', prompt: 'do it', signalType: 'goal_complete', executionMode: 'batch', runtime, generation: 1, maxRetries: 1, completionTimeoutMs: 10, contextHighTokens: 100 });
     expect(result.status).toBe('completed');
     expect(createExecution).toHaveBeenCalledTimes(2);
-    expect(createExecution).toHaveBeenCalledWith(expect.objectContaining({ sandbox, prompt: 'do it' }));
+    expect(createExecution).toHaveBeenNthCalledWith(1, {
+      sandbox,
+      worktreePath: '/tmp/worktree',
+      sessionId: 'session-1',
+      prompt: 'do it',
+      signalType: 'goal_complete',
+      generation: 1,
+      interactive: false,
+      executionMode: 'batch',
+      runtime,
+    });
+    expect(createExecution).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      generation: 2,
+      runtime,
+    }));
   });
 
   it('accepts a completed batch result through the unified signal', async () => {

@@ -7,7 +7,7 @@ import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter'
 import type { View } from '../board/types';
 import { StateProvider } from './state/StateContext';
 import { TmuxClient } from '../../infrastructure/tmux/tmux';
-import { createManagementProviderBundle } from '../../application/tracker-provider-factory';
+import { createManagementProviders } from '../../application/tracker-provider-factory';
 import { useData } from '../board/data/useData';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
 import { SplashScreen } from '../board/components/SplashScreen';
@@ -29,7 +29,7 @@ export function DashboardEntry() {
   useEffect(() => {
     if (!isReady) return;
     let cancelled = false;
-    void createManagementProviderBundle(process.env.AFK_PROJECT, process.cwd())
+    void createManagementProviders(process.env.AFK_PROJECT, process.cwd())
       .then(bundle => {
         if (!cancelled) {
           setManagement({ backlog: { list: options => bundle.backlog.list(options) } });

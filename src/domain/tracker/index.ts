@@ -1,3 +1,4 @@
+import type { Platform } from './types';
 export type { TrackerProvider, Platform } from './types';
 export type {
   TrackedIssue,

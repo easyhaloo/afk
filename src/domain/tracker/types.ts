@@ -228,3 +228,5 @@ export interface Commit {
   author?: string;
   committed_date?: string;
 }
+
+export type { AcceptanceCriteria } from './ac-types';

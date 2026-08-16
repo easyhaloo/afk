@@ -3,7 +3,7 @@
  * It claims before creating workflow resources; loop claims its own items.
  */
 import { WorkflowRunner, type RunnerOptions } from '../workflow-engine';
-import { createTrackerClient } from '../tracker-provider-factory';
+import { createTracker } from '../tracker-provider-factory';
 import { createProviderBundle } from '../providers';
 import { getWorkflowConfig } from '../../infrastructure/config/manager';
 import type { SandboxProviderName } from '../../infrastructure/sandbox/types';
@@ -39,7 +39,7 @@ export interface RunWorkflowCliResult {
 export async function runWorkflowCli(opts: RunWorkflowCliOpts): Promise<RunWorkflowCliResult> {
   const cfg = getWorkflowConfig();
   const request = await resolveWorkflowRunRequest(opts, cfg);
-  const tracker = await createTrackerClient(request.projectName, request.repoRoot);
+  const tracker = await createTracker(request.projectName, request.repoRoot);
   const providers = createProviderBundle(tracker, request.repoRoot);
   const runner = new WorkflowRunner(providers, { config: cfg });
   const result = await runner.run(request as unknown as RunnerOptions);

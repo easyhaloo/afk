@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { spawn } from 'child_process';
-import { createGitLabClient } from '../../application/tracker-provider-factory';
+import { createGitLabTracker } from '../../application/tracker-provider-factory';
 import { handleCommandError, success, info, detail } from '../cli-utils';
 
 export function registerEscalateCommands(program: Command): void {
@@ -45,9 +45,9 @@ export function registerEscalateCommands(program: Command): void {
 
       try {
         // Route through the TrackerProvider seam instead of constructing a raw
-        // gitbeaker client: createGitLabClient() resolves env > glab CLI > git
+        // gitbeaker client: createGitLabTracker() resolves env > glab CLI > git
         // remote, and createIssue() handles the labels array + returns the iid.
-        const tracker = await createGitLabClient();
+        const tracker = await createGitLabTracker();
         const iid = await tracker.createIssue({ title, description: body, labels });
         success(`Created issue #${iid}: ${title}`);
 

@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { createTracker } from '../../domain/tracker/index.js';
+import { createTracker } from '../../application/tracker-provider-factory';
 import type { TrackedIssue } from '../../domain/tracker/types.js';
 import { handleCommandError, warning, detail } from '../cli-utils.js';
 

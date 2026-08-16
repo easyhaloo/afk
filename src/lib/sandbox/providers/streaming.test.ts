@@ -6,6 +6,8 @@ function command(script: string) {
   return { argv: [process.execPath, '-e', script], cwd: process.cwd() };
 }
 
+const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
+
 describe('StreamingAgentExecution', () => {
   it('completes from Codex JSONL and preserves normalized token usage', async () => {
     const usage = JSON.stringify({
@@ -24,7 +26,8 @@ describe('StreamingAgentExecution', () => {
       prompt: 'go',
       signalType: 'goal_complete',
       worktreePath: process.cwd(),
-      agentProvider: new CodexProvider(),
+      metadata: { provider: 'codex', transport: 'exec' },
+      parseLine: new CodexProvider().parseLine.bind(new CodexProvider()),
     });
     execution.start();
 
@@ -33,18 +36,19 @@ describe('StreamingAgentExecution', () => {
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'codex fixture complete' },
       usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
     });
+    expect(execution.metadata).toEqual({ provider: 'codex', transport: 'exec' });
   });
 
   it('buffers JSONL records split across stdout chunks', async () => {
     const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
-    const execution = new StreamingAgentExecution({ command: command(`process.stdout.write(${JSON.stringify(payload.slice(0, 20))}); setTimeout(() => process.stdout.write(${JSON.stringify(payload.slice(20) + '\n')}), 5)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    const execution = new StreamingAgentExecution({ command: command(`process.stdout.write(${JSON.stringify(payload.slice(0, 20))}); setTimeout(() => process.stdout.write(${JSON.stringify(payload.slice(20) + '\n')}), 5)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
     await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'completed' });
   });
 
   it('accepts a completion marker whose payload omits the redundant type field', async () => {
     const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"summary":"done"}</goal_complete>' });
-    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
 
     await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
@@ -60,7 +64,7 @@ describe('StreamingAgentExecution', () => {
       '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>',
     ].join('\n');
     const payload = JSON.stringify({ type: 'result', result });
-    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
 
     await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
@@ -76,6 +80,7 @@ describe('StreamingAgentExecution', () => {
       prompt: 'go',
       signalType: 'goal_complete',
       worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
     });
     execution.start();
 
@@ -90,6 +95,7 @@ describe('StreamingAgentExecution', () => {
     const execution = new StreamingAgentExecution({
       command: command(`process.stdout.write(${JSON.stringify(payload)}); setInterval(() => {}, 10_000)`),
       prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
     });
     execution.start();
 
@@ -101,7 +107,7 @@ describe('StreamingAgentExecution', () => {
 
   it('fails when the child exits non-zero even after emitting a result', async () => {
     const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
-    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)}); process.exit(3)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)}); process.exit(3)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
     await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'failed', exitCode: 3 });
   });
@@ -111,6 +117,7 @@ describe('StreamingAgentExecution', () => {
     const execution = new StreamingAgentExecution({
       command: command(`console.log(${JSON.stringify(payload)}); process.exit(1)`),
       prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
     });
     execution.start();
 
@@ -122,7 +129,7 @@ describe('StreamingAgentExecution', () => {
 
   it('includes the final agent result when it exits successfully without a completion marker', async () => {
     const payload = JSON.stringify({ type: 'result', result: 'implemented the changes but forgot the AFK marker' });
-    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
 
     await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
@@ -133,7 +140,7 @@ describe('StreamingAgentExecution', () => {
 
   it('captures batch stdout for runtime diagnostics', async () => {
     const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
-    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd() });
+    const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
 
     await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'completed' });
@@ -144,6 +151,7 @@ describe('StreamingAgentExecution', () => {
     const execution = new StreamingAgentExecution({
       command: command("const { spawn } = require('node:child_process'); const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10000)'], { stdio: 'ignore' }); console.log(child.pid); setInterval(() => {}, 10000);"),
       prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
     });
     execution.start();
     const childPid = await new Promise<number>((resolve, reject) => {
@@ -173,6 +181,7 @@ describe('StreamingAgentExecution', () => {
     const execution = new StreamingAgentExecution({
       command: command(`const { spawn } = require('node:child_process'); const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 10000)'], { detached: true, stdio: 'ignore' }); console.log(child.pid); console.log(${JSON.stringify(payload)}); setInterval(() => {}, 10000);`),
       prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
     });
     execution.start();
 

@@ -37,7 +37,7 @@ function claimed(itemToClaim = item): { claim: BacklogClaim; release: ReturnType
 }
 
 function runner(bundle: ProviderBundle): WorkflowRunner {
-  const agent = { name: 'claude-code', capabilities: new Set(), buildCommand: () => ({ argv: ['echo'], env: {} }) } as unknown as AgentProvider;
+  const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
   return new WorkflowRunner(bundle, { agentProvider: agent });
 }
 
@@ -223,7 +223,7 @@ describe('WorkflowRunner backlog provider mode', () => {
       heartbeat: vi.fn(async () => ({})),
       finish: vi.fn(async () => ({})),
     };
-    const agent = { name: 'claude-code', capabilities: new Set(), buildCommand: () => ({ argv: ['echo'], env: {} }) } as unknown as AgentProvider;
+    const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
     const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any }) as any;
     subject.runBody = vi.fn(async () => ({ success: false }));
 
@@ -264,7 +264,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     const { claim } = claimed();
     const bundle = providers(vi.fn(async () => claim));
     const runtime = { start: vi.fn(async () => {}), heartbeat: vi.fn(async () => ({})), finish: vi.fn(async () => ({})) };
-    const agent = { name: 'claude-code', capabilities: new Set(), buildCommand: () => ({ argv: ['echo'], env: {} }) } as unknown as AgentProvider;
+    const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
     const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any }) as any;
     subject.sandboxProviderByName = vi.fn(() => { throw new Error('sandbox setup failed'); });
 

@@ -13,7 +13,6 @@
  */
 
 import type {
-  AgentProvider,
   AgentProviderName,
   AgentCapability,
   AgentCommand,
@@ -21,6 +20,7 @@ import type {
   AgentEvent,
   TokenUsage,
 } from './types';
+import { ProcessAgentProvider } from './process-provider';
 
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'streaming',
@@ -28,7 +28,7 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'interactive',
 ] as const);
 
-export class CopilotProvider implements AgentProvider {
+export class CopilotProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'copilot';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
 

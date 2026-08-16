@@ -8,6 +8,8 @@
  * - Session capture/restore (capability: resume)
  */
 
+import type { AgentExecution, Sandbox } from '../sandbox/types';
+
 export type AgentProviderName =
   | 'claude-code'
   | 'codex'
@@ -59,6 +61,36 @@ export interface AgentCommandOptions {
   executionMode?: ExecutionMode;
 }
 
+export interface AgentExecutionMetadata {
+  provider: AgentProviderName;
+  transport: 'process' | 'exec' | 'app-server';
+  auth?: 'chatgpt' | 'api' | 'unknown';
+  modelProvider?: string;
+  endpointKind?: 'stdio' | 'unix' | 'ws' | 'wss';
+  threadId?: string;
+}
+
+export interface CodexRuntimeSelection {
+  kind: 'codex';
+  transport: 'exec' | 'app-server';
+  auth: 'chatgpt' | 'api' | 'unknown';
+  provider: string;
+  profile?: string;
+  endpoint?: string;
+  authTokenEnv?: string;
+  startupTimeoutMs: number;
+}
+
+export type AgentRuntimeSelection = { kind: 'default' } | CodexRuntimeSelection;
+
+export interface AgentExecutionOptions extends AgentCommandOptions {
+  sandbox: Sandbox;
+  prompt: string;
+  signalType: 'goal_complete';
+  generation: number;
+  runtime?: AgentRuntimeSelection;
+}
+
 /** An event emitted by the agent during execution. */
 export type AgentEvent =
   | { type: 'text'; text: string }
@@ -104,17 +136,7 @@ export interface AgentProvider {
   readonly name: AgentProviderName;
   readonly capabilities: ReadonlySet<AgentCapability>;
 
-  /**
-   * Build an AgentCommand for the given options.
-   * The runner executes this command and manages its lifecycle.
-   */
-  buildCommand(options: AgentCommandOptions): AgentCommand;
-
-  /**
-   * Parse a raw output line into one or more AgentEvents.
-   * Only required if the provider has 'streaming' capability.
-   */
-  parseLine?(line: string): AgentEvent[];
+  createExecution(options: AgentExecutionOptions): Promise<AgentExecution>;
 
   /**
    * Get token usage for a running or completed session.

@@ -8,13 +8,15 @@
  */
 
 import type {
-  AgentProvider,
+  AgentExecutionMetadata,
+  AgentExecutionOptions,
   AgentProviderName,
   AgentCapability,
   AgentCommand,
   AgentCommandOptions,
   AgentEvent,
 } from './types';
+import { ProcessAgentProvider } from './process-provider';
 
 /** Codex capabilities — resume deliberately excluded. */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
@@ -24,7 +26,7 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'interactive',
 ] as const);
 
-export class CodexProvider implements AgentProvider {
+export class CodexProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'codex';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
 
@@ -70,6 +72,15 @@ export class CodexProvider implements AgentProvider {
     }
 
     return [{ type: 'text', text: line }];
+  }
+
+  protected override executionMetadata(options: AgentExecutionOptions): AgentExecutionMetadata {
+    const runtime = options.runtime?.kind === 'codex' ? options.runtime : undefined;
+    return {
+      provider: this.name,
+      transport: 'exec',
+      ...(runtime ? { auth: runtime.auth, modelProvider: runtime.provider } : {}),
+    };
   }
 }
 

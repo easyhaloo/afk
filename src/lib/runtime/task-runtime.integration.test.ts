@@ -47,13 +47,14 @@ describe.runIf(process.env.AFK_REAL_CLAUDE_E2E === '1')('task runtime monitor in
     });
 
     try {
-      const execution = await sandbox.startAgent({
-        command: agent.buildCommand({ worktreePath: workspace, sessionId: 'integration-session', executionMode: 'batch' }),
+      const execution = await agent.createExecution({
+        sandbox,
+        worktreePath: workspace,
+        sessionId: 'integration-session',
         generation: 1,
         prompt: buildExecutionPrompt('/goal Do not use tools or modify files. Confirm that the isolated sandbox is available, then complete the task.', 'batch', 'task'),
         signalType: 'goal_complete',
         executionMode: 'batch',
-        agentProvider: agent,
       });
       const result = await execution.waitForResult({ completionTimeoutMs: 30_000 });
       const output = await execution.captureOutput();

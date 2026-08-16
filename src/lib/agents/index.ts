@@ -10,7 +10,8 @@ import { PiProvider } from './pi';
 import { OpenCodeProvider } from './opencode';
 import { CopilotProvider } from './copilot';
 export { registerAgentProvider, getAgentProvider, requireAgentProvider } from './registry';
-export type { AgentProvider, AgentProviderName, AgentCapability, AgentCommand, AgentEvent, AgentSession, TokenUsage, SessionSnapshot, AgentCommandOptions, CaptureSessionOptions, RestoreSessionOptions } from './types';
+export { ProcessAgentProvider } from './process-provider';
+export type { AgentProvider, AgentProviderName, AgentCapability, AgentCommand, AgentEvent, AgentSession, TokenUsage, SessionSnapshot, AgentCommandOptions, AgentExecutionMetadata, AgentExecutionOptions, AgentRuntimeSelection, CodexRuntimeSelection, CaptureSessionOptions, RestoreSessionOptions } from './types';
 
 /** Register all bundled providers on demand. Safe after test registry resets. */
 export function ensureBuiltinAgentProviders(): void {

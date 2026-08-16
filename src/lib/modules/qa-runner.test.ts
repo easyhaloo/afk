@@ -47,6 +47,7 @@ function fixture() {
   };
   const execution = {
     id: 'execution-60',
+    metadata: { provider: 'claude-code', transport: 'process' },
     waitForEvent: vi.fn(async () => null),
     waitForResult: vi.fn(async () => ({
       version: 1,
@@ -73,7 +74,7 @@ function fixture() {
   const agentProvider = {
     name: 'claude-code',
     capabilities: new Set(['streaming', 'structured-output']),
-    buildCommand: vi.fn(() => ({ argv: ['claude', '--print'], cwd: process.cwd() })),
+    createExecution: vi.fn(async () => execution),
   };
   return { providers: { backlog, changes, branches } as any, changes, branches, sandboxProvider: sandboxProvider as any, agentProvider: agentProvider as any, sandbox, execution };
 }
@@ -84,7 +85,7 @@ describe('QARunner execution boundary', () => {
     const codex = {
       name: 'codex' as const,
       capabilities: new Set(),
-      buildCommand: vi.fn(() => ({ argv: ['codex'] })),
+      createExecution: vi.fn(),
     };
     registerAgentProvider(codex);
 
@@ -111,14 +112,14 @@ describe('QARunner execution boundary', () => {
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
     expect(f.sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'batch' }));
     expect(f.sandboxProvider.create.mock.calls[0][0].tmux).toBeUndefined();
-    expect(f.agentProvider.buildCommand).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'batch' }));
-    expect(f.sandbox.startAgent).toHaveBeenCalledWith(expect.objectContaining({
+    expect(f.agentProvider.createExecution).toHaveBeenCalledWith(expect.objectContaining({
+      sandbox: f.sandbox,
       executionMode: 'batch',
       signalType: 'goal_complete',
-      agentProvider: f.agentProvider,
       prompt: expect.stringContaining('"kind":"qa"'),
     }));
-    const qaPrompt = f.sandbox.startAgent.mock.calls[0][0].prompt;
+    expect(f.sandbox.startAgent).not.toHaveBeenCalled();
+    const qaPrompt = f.agentProvider.createExecution.mock.calls[0][0].prompt;
     expect(qaPrompt).toContain('Backlog title: search mode');
     expect(qaPrompt).toContain('Backlog description:\nsupport /s');
     expect(tmux.createSession).not.toHaveBeenCalled();

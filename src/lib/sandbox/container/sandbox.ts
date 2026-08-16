@@ -34,8 +34,7 @@ import type {
   ResumeOptions,
 } from '../types';
 import type { ContainerProvider, ContainerExecResult } from './types';
-import type { SessionSnapshot } from '../../agents/types';
-import type { AgentProvider } from '../../agents/types';
+import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../agents/types';
 import { EnvVarAllowlist } from './env-allowlist';
 
 export class ContainerSandbox implements Sandbox {
@@ -148,7 +147,8 @@ export class ContainerSandbox implements Sandbox {
       outputPath,
       errorPath,
       exitPath,
-      agentProvider: options.agentProvider,
+      metadata: options.metadata,
+      parseLine: options.parseLine,
     });
     await execution.sendPrompt();
     return execution;
@@ -210,13 +210,14 @@ export class ContainerSandbox implements Sandbox {
 export class ContainerAgentExecution implements AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
+  readonly metadata: AgentExecutionMetadata;
   private readonly worktreePath: string;
   private readonly signalType: 'goal_complete';
   private readonly generation: number;
   private readonly outputPath: string;
   private readonly errorPath: string;
   private readonly exitPath: string;
-  private readonly agentProvider?: AgentProvider;
+  private readonly parseLine?: (line: string) => AgentEvent[];
   private _interruptAcked = false;
   private _done = false;
 
@@ -231,10 +232,12 @@ export class ContainerAgentExecution implements AgentExecution {
     outputPath: string;
     errorPath: string;
     exitPath: string;
-    agentProvider?: AgentProvider;
+    metadata: AgentExecutionMetadata;
+    parseLine?: (line: string) => AgentEvent[];
   }) {
     this.id = opts.execId;
     this.sessionId = opts.sessionName;
+    this.metadata = opts.metadata;
     this.worktreePath = opts.worktreePath;
     this.signalType = opts.signalType;
     this.generation = opts.generation;
@@ -243,7 +246,7 @@ export class ContainerAgentExecution implements AgentExecution {
     this.outputPath = opts.outputPath;
     this.errorPath = opts.errorPath;
     this.exitPath = opts.exitPath;
-    this.agentProvider = opts.agentProvider;
+    this.parseLine = opts.parseLine;
   }
 
   private _provider: ContainerProvider;
@@ -354,7 +357,7 @@ export class ContainerAgentExecution implements AgentExecution {
   private readStructuredOutput(stdout: string): unknown {
     for (const line of stdout.split(/\r?\n/)) {
       if (!line.trim()) continue;
-      const events = this.agentProvider?.parseLine?.(line) ?? [];
+      const events = this.parseLine?.(line) ?? [];
       for (const event of events) {
         if (event.type !== 'result') continue;
         const parsed = parseGoalComplete(String(event.result ?? ''));

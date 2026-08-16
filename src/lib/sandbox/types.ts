@@ -7,7 +7,7 @@
  * (AgentProvider) and "what workflow steps run" (WorkflowTemplate).
  */
 
-import type { AgentCommand, AgentEvent, SessionSnapshot, TokenUsage, ExecutionMode, AgentProvider } from '../agents/types';
+import type { AgentCommand, AgentEvent, AgentExecutionMetadata, SessionSnapshot, TokenUsage, ExecutionMode } from '../agents/types';
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
@@ -65,6 +65,8 @@ export interface Sandbox {
 export interface AgentStartOptions {
   /** Pre-built agent command from AgentProvider. */
   command: AgentCommand;
+  /** Provider and transport diagnostics for the execution. */
+  metadata: AgentExecutionMetadata;
   /** Generation index for this execution (1 = first generation). */
   generation: number;
   /** Goal/prompt text to send to the agent. */
@@ -73,11 +75,8 @@ export interface AgentStartOptions {
   signalType: 'goal_complete';
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
-  /**
-   * Agent provider instance for batch mode event parsing.
-   * Required when executionMode is 'batch'.
-   */
-  agentProvider?: AgentProvider;
+  /** Provider-neutral structured output parser for batch mode. */
+  parseLine?: (line: string) => AgentEvent[];
 }
 
 /** Reason for an interrupt — determines graceful vs. forced termination. */
@@ -97,6 +96,7 @@ export type InterruptReason =
 export interface AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
+  readonly metadata: AgentExecutionMetadata;
 
   /**
    * Wait for the next event from this execution.

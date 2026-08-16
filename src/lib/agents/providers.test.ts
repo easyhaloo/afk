@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ClaudeCodeProvider } from './claude-code';
 import { CodexProvider } from './codex';
 import { CursorProvider } from './cursor';
@@ -15,6 +15,7 @@ import {
   _resetAgentRegistry,
 } from './registry';
 import { createAgentProvider, ensureBuiltinAgentProviders } from './index';
+import type { AgentExecution, Sandbox } from '../sandbox/types';
 import type { AgentProvider } from './types';
 
 /** Build minimal AgentCommandOptions for testing. */
@@ -56,6 +57,29 @@ describe('Agent providers — fixture coverage', () => {
       expect(cmd.argv).toContain('--print');
       expect(cmd.argv).toContain('--output-format');
       expect(cmd.argv).toContain('stream-json');
+    });
+
+    it('owns process execution creation and passes neutral parser metadata to the sandbox', async () => {
+      const execution = { id: 'execution-1' } as AgentExecution;
+      const startAgent = vi.fn(async () => execution);
+      const sandbox = { startAgent } as unknown as Sandbox;
+
+      await expect(p.createExecution({
+        sandbox,
+        worktreePath: '/tmp/worktree',
+        sessionId: 'sess-1',
+        prompt: 'do something',
+        signalType: 'goal_complete',
+        generation: 1,
+        executionMode: 'batch',
+      })).resolves.toBe(execution);
+
+      expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
+        command: expect.objectContaining({ argv: expect.arrayContaining(['claude']) }),
+        metadata: { provider: 'claude-code', transport: 'process' },
+        parseLine: expect.any(Function),
+      }));
+      expect(startAgent.mock.calls[0][0]).not.toHaveProperty('agentProvider');
     });
 
     it('surfaces an error result event from stream-json', () => {
@@ -113,6 +137,37 @@ describe('Agent providers — fixture coverage', () => {
         '-C',
         '/tmp/worktree',
       ]);
+    });
+
+    it('reports exec metadata with redacted runtime auth and model provider', async () => {
+      const execution = { id: 'codex-execution' } as AgentExecution;
+      const startAgent = vi.fn(async () => execution);
+
+      await p.createExecution({
+        sandbox: { startAgent } as unknown as Sandbox,
+        worktreePath: '/tmp/worktree',
+        sessionId: 'sess-1',
+        prompt: 'do something',
+        signalType: 'goal_complete',
+        generation: 1,
+        executionMode: 'batch',
+        runtime: {
+          kind: 'codex',
+          transport: 'exec',
+          auth: 'chatgpt',
+          provider: 'openai',
+          startupTimeoutMs: 5_000,
+        },
+      });
+
+      expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
+        metadata: {
+          provider: 'codex',
+          transport: 'exec',
+          auth: 'chatgpt',
+          modelProvider: 'openai',
+        },
+      }));
     });
 
     it('parses completed agent messages as result events', () => {
@@ -245,7 +300,7 @@ describe('Agent registry', () => {
     const fake: AgentProvider = {
       name: 'claude-code',
       capabilities: new Set(['usage']),
-      buildCommand: () => ({ argv: ['fake'] }),
+      createExecution: async () => ({ id: 'fake' }) as AgentExecution,
     };
     registerAgentProvider(fake);
     expect(requireAgentProvider('claude-code')).toBe(fake);

@@ -17,8 +17,9 @@
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import type {
-  AgentProvider,
   AgentCommand,
+  AgentEvent,
+  AgentExecutionMetadata,
   TokenUsage,
   SessionSnapshot,
 } from '../../../lib/agents/types';
@@ -34,12 +35,13 @@ import type {
 export class StreamingAgentExecution implements AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
+  readonly metadata: AgentExecutionMetadata;
 
   private readonly command: AgentCommand;
   private readonly prompt: string;
   private readonly signalType: 'goal_complete';
   private readonly worktreePath: string;
-  private readonly agentProvider?: AgentProvider;
+  private readonly parseLine?: (line: string) => AgentEvent[];
 
   private proc: ChildProcess | null = null;
   private done = false;
@@ -59,15 +61,17 @@ export class StreamingAgentExecution implements AgentExecution {
     signalType: 'goal_complete';
     worktreePath: string;
     sessionId?: string;
-    agentProvider?: AgentProvider;
+    metadata: AgentExecutionMetadata;
+    parseLine?: (line: string) => AgentEvent[];
   }) {
     this.id = randomUUID();
     this.sessionId = opts.sessionId;
+    this.metadata = opts.metadata;
     this.command = opts.command;
     this.prompt = opts.prompt;
     this.signalType = opts.signalType;
     this.worktreePath = opts.worktreePath;
-    this.agentProvider = opts.agentProvider;
+    this.parseLine = opts.parseLine;
   }
 
   /**
@@ -137,16 +141,15 @@ export class StreamingAgentExecution implements AgentExecution {
   /**
    * Parse a single line of stream-json output.
    *
-   * Delegates to AgentProvider.parseLine() for generic event parsing (usage/error/result).
+   * Delegates to the provider-neutral parser for generic events.
    * Only the AFK-specific signal wrapping (<goal_complete>...</goal_complete>) is handled
    * locally, keeping the provider free of AFK protocol knowledge.
    */
   private handleLine(line: string): void {
     if (this.done) return;
 
-    // Try provider.parseLine first (provider-specific stream-json format)
-    if (this.agentProvider?.parseLine) {
-      const events = this.agentProvider.parseLine(line);
+    if (this.parseLine) {
+      const events = this.parseLine(line);
       for (const event of events) {
         switch (event.type) {
           case 'usage':

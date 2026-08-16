@@ -10,6 +10,8 @@ import * as os from 'os';
 import * as fs from 'fs';
 import { promises as fsp } from 'fs';
 
+const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
+
 describe('EnvVarAllowlist', () => {
   it('permits known defaults', () => {
     const a = new EnvVarAllowlist();
@@ -173,8 +175,9 @@ describe('ContainerSandbox — interrupt escalation', () => {
     const exec = await sb.startAgent({
       command: { argv: ['sleep', '1'] },
       generation: 1,
-      goalText: 'do x',
+      prompt: 'do x',
       signalType: 'goal_complete',
+      metadata: PROCESS_METADATA,
     });
     await exec.interrupt('context-high');
     expect(killed).toContain('cid-fake:SIGINT');
@@ -188,8 +191,9 @@ describe('ContainerSandbox — interrupt escalation', () => {
     const exec = await sb.startAgent({
       command: { argv: ['sleep', '1'] },
       generation: 1,
-      goalText: 'do x',
+      prompt: 'do x',
       signalType: 'goal_complete',
+      metadata: PROCESS_METADATA,
     });
     await exec.kill();
     expect(killed).toContain('cid-fake:SIGKILL');
@@ -229,8 +233,9 @@ describe('ContainerSandbox — interrupt escalation', () => {
     await sb.startAgent({
       command: { argv: ['echo'] },
       generation: 1,
-      goalText: 'x',
+      prompt: 'x',
       signalType: 'goal_complete',
+      metadata: PROCESS_METADATA,
     });
     expect(capturedEnv.PATH).toBe('/bin');
     expect(capturedEnv.AWS_SECRET_ACCESS_KEY).toBeUndefined();
@@ -248,6 +253,7 @@ describe('ContainerSandbox — interrupt escalation', () => {
       prompt: 'interactive goal',
       signalType: 'goal_complete',
       executionMode: 'interactive',
+      metadata: PROCESS_METADATA,
     })).rejects.toThrow(/batch/);
   });
 });
@@ -280,13 +286,10 @@ describe('ContainerAgentExecution — batch result files', () => {
       outputPath,
       errorPath,
       exitPath,
-      agentProvider: {
-        name: 'claude-code', capabilities: new Set(),
-        buildCommand: () => ({ argv: ['claude'] }),
-        parseLine: line => {
-          const parsed = JSON.parse(line);
-          return [{ type: 'result', result: parsed.result }];
-        },
+      metadata: PROCESS_METADATA,
+      parseLine: line => {
+        const parsed = JSON.parse(line);
+        return [{ type: 'result', result: parsed.result }];
       },
     });
 
@@ -295,6 +298,7 @@ describe('ContainerAgentExecution — batch result files', () => {
       provider: 'container',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'finished' },
     });
+    expect(execution.metadata).toEqual(PROCESS_METADATA);
   });
 });
 
@@ -412,6 +416,7 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
         prompt: 'container smoke prompt',
         signalType: 'goal_complete',
         executionMode: 'batch',
+        metadata: PROCESS_METADATA,
       });
       await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
         status: 'completed',

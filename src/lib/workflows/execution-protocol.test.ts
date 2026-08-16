@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBatchPrompt, buildExecutionPrompt, parseAcVerificationFailure } from './execution-protocol';
+import { buildBatchPrompt, buildExecutionPrompt, extractGoalComplete, parseAcVerificationFailure } from './execution-protocol';
 
 describe('batch execution prompt protocol', () => {
   it('preserves the goal prompt and appends the requested completion marker', () => {
@@ -11,6 +11,13 @@ describe('batch execution prompt protocol', () => {
     expect(prompt).toContain('</goal_complete>');
     expect(prompt).toContain('Do not switch branches');
     expect(prompt).toContain('pnpm vitest run');
+  });
+
+  it('extracts a typed completion payload from surrounding agent text', () => {
+    expect(extractGoalComplete('finished\n<goal_complete>{"type":"goal_complete","summary":"done"}</goal_complete>')).toEqual({
+      type: 'goal_complete', summary: 'done',
+    });
+    expect(extractGoalComplete('<goal_complete>invalid-json</goal_complete>')).toBeUndefined();
   });
 
   it('requires QA to report its PASS or FAIL outcome in the unified completion payload', () => {

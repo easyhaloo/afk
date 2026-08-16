@@ -31,6 +31,7 @@ import type {
   CaptureOptions,
   ResumeOptions,
 } from '../types';
+import { extractGoalComplete } from '../../workflows/execution-protocol';
 
 export class StreamingAgentExecution implements AgentExecution {
   readonly id: string;
@@ -227,25 +228,8 @@ export class StreamingAgentExecution implements AgentExecution {
   private extractSignal(raw: string): unknown {
     const trimmed = raw.trim();
     if (!trimmed) return undefined;
-
-    // Try wrapped format: <goal_complete>{...}</goal_complete>
-    const wrapped = trimmed.match(/<(\w+)>([\s\S]*?)<\/\1>/);
-    if (wrapped) {
-      const [, wrapperTag, json] = wrapped;
-      let data: unknown;
-      try {
-        data = JSON.parse(json);
-      } catch {
-        // Malformed JSON — fall through to bare result
-        data = null;
-      }
-      // Prefer payload type; fall back to wrapper tag only if payload has no type
-      if (data && typeof data === 'object' && 'type' in data) {
-        return data;
-      }
-      // Malformed or no type — return null so caller treats as unknown result
-      return { type: wrapperTag, ...(data as Record<string, unknown>) };
-    }
+    const completion = extractGoalComplete(trimmed);
+    if (completion) return completion;
 
     // Try bare JSON (e.g., handoff_ready)
     try {
@@ -397,10 +381,14 @@ export class StreamingAgentExecution implements AgentExecution {
 
   private completeFromBufferedSignal(): void {
     if (this.done) return;
-    const marker = this.stdoutBuffer.match(/<goal_complete>[\s\S]*?<\/goal_complete>/)?.[0];
-    if (!marker) return;
-
-    const extracted = this.extractSignal(marker);
+    try {
+      JSON.parse(this.stdoutBuffer);
+      this.handleLine(this.stdoutBuffer);
+      if (this.done) return;
+    } catch {
+      // The buffer may instead contain a provider's raw completion marker.
+    }
+    const extracted = extractGoalComplete(this.stdoutBuffer);
     if (!extracted) return;
     this.structuredOutput = extracted;
     if (this.hasExpectedSignal()) this.done = true;

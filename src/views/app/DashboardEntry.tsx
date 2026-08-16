@@ -18,7 +18,7 @@ initRegistry();
 /** Compose the read-only dashboard with runtime session data. */
 export function DashboardEntry() {
   const { phases, isReady } = useLoadingPhases();
-  const [showApp, setShowApp] = useState(false);
+  const [showApp, setShowApp] = useState(process.env.AFK_SKIP_SPLASH === '1');
   const [currentView, setCurrentView] = useState<View>('tasks');
   const [management, setManagement] = useState<TuiManagementProviderBundle | null>(null);
 

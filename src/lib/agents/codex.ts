@@ -17,6 +17,8 @@ import type {
   AgentEvent,
 } from './types';
 import { ProcessAgentProvider } from './process-provider';
+import type { AgentExecution } from '../sandbox/types';
+import { CodexAppServerExecution } from './codex-app-server/execution';
 
 /** Codex capabilities — resume deliberately excluded. */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
@@ -29,6 +31,13 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
 export class CodexProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'codex';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
+
+  override async createExecution(options: AgentExecutionOptions): Promise<AgentExecution> {
+    if (options.runtime?.kind === 'codex' && options.runtime.transport === 'app-server') {
+      return CodexAppServerExecution.start(options, options.runtime);
+    }
+    return super.createExecution(options);
+  }
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
     const argv = ['codex'];

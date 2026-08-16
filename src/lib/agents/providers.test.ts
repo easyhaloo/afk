@@ -170,6 +170,26 @@ describe('Agent providers — fixture coverage', () => {
       }));
     });
 
+    it('selects app-server execution before delegating to a process sandbox', async () => {
+      const startAgent = vi.fn();
+      await expect(p.createExecution({
+        sandbox: {
+          id: 'container', worktreePath: '/host/worktree', workspacePath: '/workspace', startAgent,
+        } as unknown as Sandbox,
+        worktreePath: '/host/worktree',
+        sessionId: 'sess-app-server',
+        prompt: 'do something',
+        signalType: 'goal_complete',
+        generation: 1,
+        executionMode: 'batch',
+        runtime: {
+          kind: 'codex', transport: 'app-server', auth: 'chatgpt', provider: 'openai',
+          endpoint: 'stdio://', startupTimeoutMs: 5_000,
+        },
+      })).rejects.toThrow(/container/i);
+      expect(startAgent).not.toHaveBeenCalled();
+    });
+
     it('parses completed agent messages as result events', () => {
       const events = p.parseLine(JSON.stringify({
         type: 'item.completed',

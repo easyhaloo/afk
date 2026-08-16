@@ -37,4 +37,20 @@ describe('resolveWorkflowRequest', () => {
     });
     expect(() => resolveWorkflowRequest({ backlogId: '42', agentProvider: 'claude' as any }, {})).toThrow(/agent provider/);
   });
+
+  it('resolves one immutable Codex runtime selection', () => {
+    const agentRuntime = {
+      kind: 'codex', transport: 'app-server', auth: 'chatgpt', provider: 'openai',
+      endpoint: 'stdio://', startupTimeoutMs: 10_000,
+    } as const;
+    const request = resolveWorkflowRequest({ backlogId: '42', agentProvider: 'codex', agentRuntime }, {});
+
+    expect(request.agentRuntime).toBe(agentRuntime);
+  });
+
+  it('uses the provider-neutral default runtime for non-Codex agents', () => {
+    expect(resolveWorkflowRequest({ backlogId: '42', agentProvider: 'claude-code' }, {})).toMatchObject({
+      agentRuntime: { kind: 'default' },
+    });
+  });
 });

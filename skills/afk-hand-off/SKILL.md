@@ -1,9 +1,6 @@
 ---
 name: afk-hand-off
-description: >-
-  Use when the current session should snapshot its state so the next
-  session resumes immediately without re-explaining context.
-  Save mode writes to /tmp/; resume mode reads and continues.
+description: Create a compact session handoff so another agent can resume work without replaying the conversation.
 disable-model-invocation: true
 disallowed-tools: >-
   Edit(*) NotebookEdit(*)
@@ -11,88 +8,33 @@ disallowed-tools: >-
   Bash(git branch -D*) Bash(docker*) Bash(rm -rf*) Bash(chmod*)
 ---
 
-# Hand-off + Resume
+# Session Handoff
 
-**Goal:** Zero context loss between sessions.
-**Mode:** save (snapshot) or resume (continue from snapshot).
+> **Handoff:** Extract the minimum state required for another agent to continue this session without replaying the conversation. Capture the **goal, current progress, completed work, key decisions, pending tasks, blockers, and immediate next action**. Preserve technical context, constraints, file changes, commands, and test results only when they affect continuation. Clearly distinguish **what is done, what remains, and what happens next**. Do not repeat conversation history, reasoning, abandoned approaches, or irrelevant details. The result must be factual, actionable, self-contained, and optimized for immediate continuation.
 
-## Mode: save
+## Save
 
-### Step 1 — Collect
+Analyze the entire current session and compress it into a concise Markdown handoff that describes the current state of the work. Record the objective, current progress, completed work, important decisions, remaining work, blockers, and the single most appropriate next action. Include technical context, constraints, changed files, commands, or verification results only when they are necessary for the next agent to continue correctly.
 
-Run: git status, git log, git worktree list.
+Do not summarize the conversation chronologically. Do not include redundant reasoning, abandoned approaches, or information that does not affect continuation. Clearly distinguish completed work from pending work and decisions from findings. The next action must be concrete and immediately executable.
 
-### Step 2 — Draft
+Create a temporary handoff directory and write the generated Markdown snapshot into a uniquely named file:
 
-Write a **single snapshot**: Goal, Where we are, What was done, Key
-findings, Key decisions, Next action. Do not create a draft and revise —
-write once, completely, then stop. Leave sections blank if no content.
+```bash
+HANDOFF_DIR=$(mktemp -d /tmp/afk-handoff-XXXXXX)
+HANDOFF_FILE="$HANDOFF_DIR/handoff.md"
+```
 
-### Step 3 — Write
+Write the generated handoff content to `$HANDOFF_FILE` using an appropriate non-interactive command or mechanism. Do not modify the repository working tree or overwrite an existing handoff.
 
-Write directly to `/tmp/` using Bash (cat or tee). Do NOT use the Write
-tool — it requires reading the file first even for new paths.
+After saving, report the absolute path of the generated handoff file.
 
-### Step 4 — Report
+## Resume
 
-Display the path so the user can resume in the next session.
+Read the handoff snapshot and validate its state against the current environment and repository before continuing.
 
-## Mode: resume
+If the state is still consistent, continue directly from the recorded next action. If the state has changed, reassess the remaining work and determine a new next action instead of blindly following the outdated snapshot.
 
-### Step 1 — Read
+Do not repeat work already recorded as completed.
 
-Display the HANDOFF content and confirm it is the right session.
-
-### Step 2 — Confirm next action
-
-Ask: "Is the `Next action` still valid? Has the context changed?"
-
-- **Yes →** proceed to Step 3.
-- **No →** discard this HANDOFF and continue work directly. Do not
-  edit the HANDOFF file.
-
-### Step 3 — Act
-
-Run the `Verify:` command if present. Then continue from where the
-HANDOFF left off.
-
-## Caveats
-
-- MUST NOT write to the repo working tree — only to `/tmp/`.
-- MUST NOT omit the `Next action` — a hand-off without a concrete next
-  step is a dead end.
-- MUST NOT overwrite an existing HANDOFF file — each save is a new file.
-- MUST NOT use the Write tool for `/tmp/` output — use Bash (`cat >`, `tee`, or similar) instead. The Write tool requires a prior Read even for new file paths.
-
-## Browser Session Handoff
-
-When the work involves an authenticated browser session, the snapshot
-must capture enough detail for the next session to resume without
-re-authentication.
-
-**Include in the snapshot:**
-
-| Field | What to record |
-|-------|----------------|
-| `Browser CDP endpoint` | `http://127.0.0.1:9222` (or whatever port) |
-| `Browser profile path` | e.g. `/Users/<user>/.afk-browser-profile` |
-| `playwright-cli session` | e.g. `playwright-cli -s=afk attach --cdp=http://127.0.0.1:9222` |
-| `Logged-in origins` | list of origins (e.g. `geelib.qihoo.net`, `www.aiwanwu.cc`) |
-| `Token expiry notes` | short-lived cookies/JWTs that will force re-login, with timestamps |
-
-**Recovery on resume:**
-
-1. Check the browser is still running: `curl http://127.0.0.1:9222/json/version`.
-2. If dead, restart with the recorded profile path:
-   ```bash
-   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-     --user-data-dir=/Users/<user>/.afk-browser-profile \
-     --remote-debugging-port=9222 about:blank &
-   ```
-3. Verify logged-in origins still work — short-lived tokens may have
-   expired during the gap. If so, the user must re-login before the
-   resumed task can proceed.
-
-**Do NOT include** raw cookies, JWTs, refresh tokens, or other secrets
-in the HANDOFF. Reference files by path instead; remind the user to
-`chmod 600` them.
+> **Principle:** Preserve work state, not conversation history.

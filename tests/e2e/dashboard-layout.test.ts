@@ -36,8 +36,6 @@ class DashboardPty {
   private readonly output: string[] = [];
   private readonly proc: ReturnType<typeof spawn>;
   private readonly exited: Promise<void>;
-  private exitCode: number | undefined;
-  private exitSignal: number | undefined;
 
   constructor(command: string, args: string[], cols: number) {
     this.proc = spawn(command, args, {
@@ -52,13 +50,7 @@ class DashboardPty {
       },
     });
     this.proc.onData(data => this.output.push(data));
-    this.exited = new Promise(resolve => {
-      this.proc.onExit(({ exitCode, signal }) => {
-        this.exitCode = exitCode;
-        this.exitSignal = signal;
-        resolve();
-      });
-    });
+    this.exited = new Promise(resolve => this.proc.onExit(() => resolve()));
 
     // node-pty starts with the requested dimensions, but Ink/Yoga can miss the
     // initial terminal-size event in CI. Emit an explicit resize after spawn so
@@ -74,9 +66,6 @@ class DashboardPty {
     while (Date.now() - started < timeout) {
       const frame = plainText(this.output.join(''));
       if (frame.includes(text)) return frame;
-      if (this.exitCode !== undefined || this.exitSignal !== undefined) {
-        throw new Error(`Dashboard exited before ${JSON.stringify(text)} (code=${this.exitCode ?? 'null'}, signal=${this.exitSignal ?? 'null'}). Output: ${frame}`);
-      }
       await delay(50);
     }
     throw new Error(`Timed out waiting for ${JSON.stringify(text)}. Output: ${plainText(this.output.join(''))}`);

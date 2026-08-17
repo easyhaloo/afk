@@ -175,4 +175,4 @@ function DashboardFixture() {
   );
 }
 
-render(<DashboardFixture />, { exitOnCtrlC: true, patchConsole: false });
+render(<DashboardFixture />, { exitOnCtrlC: true, patchConsole: false, interactive: true });

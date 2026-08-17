@@ -21,6 +21,7 @@ export async function startDashboard() {
   const { waitUntilExit } = render(React.createElement(DashboardEntry), {
     exitOnCtrlC: true,
     patchConsole: false,
+    interactive: true,
   });
 
   await waitUntilExit();

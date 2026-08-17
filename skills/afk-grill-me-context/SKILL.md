@@ -1,31 +1,34 @@
 ---
 name: afk-grill-me-context
+description: Refine existing context by analyzing the codebase and documentation first, then asking only targeted questions that available evidence cannot resolve.
 disable-model-invocation: true
-description: Verify and deepen existing requirements, architecture, or domain context through targeted human-in-the-loop questioning.
 disallowed-tools: >-
-  Edit(*) Agent(*) Task*(*)
-  Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
-  Bash(git branch -D*) Bash(docker*) Bash(rm -rf*) Bash(chmod*)
-  Bash(chown*) Bash(mkdir*)
+  Edit(*) NotebookEdit(*) Agent(*) Task*(*)
+  Bash(git push*) Bash(git merge*) Bash(git reset --hard*)
+  Bash(git branch -D*) Bash(docker*) Bash(rm -rf*) Bash(chmod*) Bash(chown*)
 ---
 
-# Grill-me with Context
+# Context Refinement
 
-> **Gap-fill:** Start from existing context rather than interviewing from scratch. Identify what is already known, then question only the gaps, contradictions, assumptions, and missing rules that could affect implementation. The goal is to **verify, correct, and deepen shared understanding**, not to rewrite the source material mechanically.
+> **Context Refinement:** Analyze the existing codebase, documentation, configuration, APIs, and current context before asking any questions. Establish what can be objectively determined from available evidence, identify gaps, contradictions, assumptions, and unresolved decisions, then ask only the minimum targeted questions that cannot be resolved from the evidence. The goal is to refine the existing context into a precise, validated, implementation-ready understanding without asking the user to explain what the codebase or documentation already makes clear.
 
-Require human input for every questioning round. Focus on boundary accuracy, terminology conflicts, missing invariants, cross-context relationships, ambiguous business rules, and other gaps relevant to the current task. Read the codebase when it can provide evidence about how the system actually behaves, but treat code findings as evidence for questions, not as permission to change the agreed context without human confirmation.
+## Process
 
-If no meaningful context is provided, stop rather than starting a from-scratch requirements interview. Preserve confirmed information, clearly distinguish newly discovered information from existing context, and keep unresolved issues explicit.
+**Inspect first.** Review the relevant code, documentation, configuration, APIs, tests, and existing context. Do not ask the user to provide information that can be established from the available evidence.
 
-Before writing anything, show the revised context and require explicit human confirmation with one of four outcomes: **Approve, Revise, Drill deeper, or Add open question**. Do not silently resolve conflicting requirements or infer decisions from code alone.
+**Analyze next.** Separate verified facts from assumptions, identify inconsistencies, missing requirements, unclear boundaries, terminology conflicts, business rules, invariants, and implementation constraints. Treat repository evidence as evidence, not as permission to silently redefine the intended behavior.
 
-After approval, create an isolated temporary directory and write the confirmed Markdown context there. Do not write to the repository or overwrite an existing artifact:
+**Grill selectively.** Ask only questions that remain unresolved after inspection. Prefer focused questions that resolve a specific ambiguity or decision. Avoid generic discovery questions and avoid repeating information already established by the codebase or documentation.
+
+**Validate last.** Incorporate the user's answers, reconcile them with the discovered evidence, and confirm the resulting context is consistent and actionable. Preserve unresolved issues explicitly rather than inventing answers.
+
+## Output
+
+Produce a concise context refinement containing the verified understanding, important findings, resolved decisions, remaining open questions, and implementation-relevant constraints. Write the result to a uniquely created temporary directory under `/tmp/` after the user confirms the refined understanding; never modify the repository working tree.
 
 ```bash
 CONTEXT_DIR=$(mktemp -d /tmp/afk-grill-me-context-XXXXXX)
-CONTEXT_FILE="$CONTEXT_DIR/CONTEXT.md"
+CONTEXT_FILE="$CONTEXT_DIR/context.md"
 ```
 
-Use an appropriate non-interactive mechanism to write the approved context to `$CONTEXT_FILE`, then report its absolute path. Do not use the repository editing tools for this artifact.
-
-> **Principle:** Validate what is known, expose what is missing, and let the human decide what becomes truth.
+> **Principle:** Inspect before asking; use evidence before assumptions; ask only what the evidence cannot answer.

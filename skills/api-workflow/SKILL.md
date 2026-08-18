@@ -5,11 +5,16 @@ description: Build reliable Playwright tests for multi-step API workflows by dis
 
 # API Workflow
 
-> **API Workflow:** Discover the application's real API, authentication, state transitions, asynchronous behavior, and authoritative data sources, then translate the requested business workflow into the smallest reliable Playwright test. Reuse existing test infrastructure and references, resolve strategy from evidence, ask only for decisions that cannot be established from the repository or environment, and verify the workflow against its real success conditions.
+> **API Workflow:** Discover the application's real API, authentication, state transitions, asynchronous behavior, and authoritative data sources, then translate the requested business workflow into the smallest reliable Playwright test. Before generating anything, inspect the relevant references, templates, scripts, and examples together with the target codebase. Reuse them when they fit the repository; adapt or replace them when evidence shows they do not. Ask only for decisions that cannot be established from available evidence, and verify the complete workflow against its real success conditions.
 
 ## Discover
 
-Inspect the codebase, existing tests, Playwright configuration, relevant documentation, and all applicable files under `references/` and `templates/` before designing the test.
+Inspect the target codebase, existing tests, Playwright configuration, relevant documentation, and the complete applicable skill context:
+
+- `references/` — reusable patterns, constraints, and domain knowledge
+- `templates/` — optional scaffolding and implementation building blocks
+- `scripts/` — validators or executable checks that define verifiable expectations
+- `examples/` — illustrative combinations, not normative requirements
 
 Establish:
 
@@ -21,13 +26,13 @@ Establish:
 - existing fixtures, utilities, setup, and project layout
 - local/CI execution constraints
 
-Do not infer API behavior when the implementation, tests, or documentation can establish it.
+Do not infer API behavior when the implementation, tests, documentation, or executable evidence can establish it.
 
 ## Model the Workflow
 
 Represent the requested scenario as a business workflow before generating code. Identify the sequence of actions, state passed between them, asynchronous boundaries, and observable success conditions.
 
-Map business steps to the actual API and browser operations only after the workflow is understood. Reuse existing patterns from `references/api-patterns/` and `references/hybrid-patterns/` rather than duplicating their implementation details in this skill.
+Map business steps to actual API and browser operations only after the workflow is understood. Use references for reusable patterns, templates for scaffolding, and examples for composition ideas. Do not copy an example blindly or introduce template infrastructure that the target project does not need.
 
 A typical workflow may look like:
 
@@ -40,23 +45,25 @@ Business Action
   → Browser Verification
 ```
 
-The actual sequence must come from the application rather than this example.
+The actual sequence must come from the application.
 
 ## Authentication
 
-Select authentication from actual execution constraints and available mechanisms, not from a fixed preference. Prefer an existing repository-supported strategy.
+Select authentication from the application's real auth model, execution environment, and existing test infrastructure. Treat authentication references and templates as implementation options, not a fixed decision tree.
 
-For browser-session workflows, use `localhost-cdp` only when an interactive Chromium session is intentionally available locally. Use `storage-state` or another repository-supported scripted mechanism when execution is non-interactive. Do not silently fall back between incompatible authentication strategies.
-
-When no reliable authentication strategy can be established, stop and ask for the missing environment or test identity rather than generating a speculative solution.
+Use an existing repository-supported strategy whenever possible. If a required identity, session, environment, or auth capability cannot be established, stop and ask for the missing information instead of generating speculative credentials or bypasses.
 
 ## Generate
 
-Generate only the artifacts required by the selected workflow and existing project structure. Reuse root Playwright configuration, fixtures, utilities, authentication setup, templates, and environment conventions whenever available.
+Generate only the artifacts required by the selected workflow and existing project structure. Reuse compatible fixtures, utilities, setup, authentication helpers, templates, and configuration rather than creating parallel infrastructure.
 
-Do not create parallel infrastructure when existing test infrastructure can support the workflow. Keep credentials, secrets, and environment-specific values outside test source.
+Templates are starting points, not mandatory files. Preserve project conventions and remove unused scaffold when adapting them. Keep credentials, secrets, auth state, and environment-specific values outside source-controlled test code.
 
-Before changing files, confirm only decisions that cannot be established from evidence and that materially affect the generated workflow or its execution.
+## Validate
+
+Use relevant executable checks from `scripts/` when they apply. Treat validator failures as evidence that the generated artifacts or their assumptions need review; do not weaken tests merely to satisfy a validator.
+
+Before execution, verify that references, templates, scripts, and examples remain internally consistent with the workflow and selected authentication strategy.
 
 ## Verify
 
@@ -64,10 +71,10 @@ Execute the generated test against the real target environment when available. V
 
 A passing individual API request is not sufficient if the workflow depends on later state or UI behavior. Prefer authoritative state over cached or incidental observations.
 
-If execution fails, diagnose the failure using the observed evidence and correct the workflow or test only when the evidence supports the change. Do not mask application failures by weakening assertions.
+If execution fails, diagnose the failure using observed evidence and correct the workflow or test only when the evidence supports the change. Do not mask application failures by weakening assertions.
 
 ## Output
 
-Produce the executable test and only the supporting artifacts required to run it. Report the discovered workflow, authentication strategy, verification strategy, execution result, and any unresolved environment or application constraints.
+Produce the executable test and only the supporting artifacts required to run it. Report the discovered workflow, authentication strategy, verification strategy, validation/execution result, and any unresolved environment or application constraints.
 
-> **Principles:** Discover before generating. Model the business workflow before writing tests. Evidence over assumptions. Reuse existing infrastructure. Generate only what is required. Verify the complete workflow, not isolated requests. Never hide failures by weakening assertions.
+> **Principles:** Discover before generating. Inspect the whole skill context. Model the business workflow before writing tests. References inform; templates scaffold; scripts validate; examples illustrate. Evidence over assumptions. Reuse existing infrastructure. Generate only what is required. Verify the complete workflow, not isolated requests.

@@ -1,21 +1,23 @@
-# Backlog Manifest Item Template
+# Backlog Item Contract
 
-> The authoritative structure for provider-neutral AFK backlog items.
-> Audience: LLM agents writing issues, NOT human readers.
-> Optimize for: stable token structure, parseable fields, machine-checkable AC.
-
-## When to Use
-
-When emitting a backlog item that the autonomous workflow will process.
+> Use this structure when composing a backlog item for creation through AFK CLI. It defines the information an executor needs; AFK owns provider-specific publication and canonical IDs.
 
 ## Structure
 
 ```markdown
 # <Title>
 
+## PRD
+
+<source PRD artifact or stable reference>
+
 ## Context
 
-<one paragraph: what problem, why now>
+<why this work exists and the intended outcome>
+
+## Scope
+
+<what is included and the relevant repository change surface>
 
 ## Acceptance Criteria
 
@@ -24,123 +26,98 @@ When emitting a backlog item that the autonomous workflow will process.
 
 ## Out of Scope
 
-<bulleted list of explicit non-goals>
+<explicit non-goals>
 
 ## Dependencies
 
-<bulleted list of backlog IDs in `dependsOn`, or "none">
+<planned task references, or "none">
+
+## Verification
+
+<how the implementation should be validated>
 ```
 
 ## Field Reference
 
-| Field | Required | Format | Purpose |
-|-------|----------|--------|---------|
-| `# <Title>` | yes | one line | Issue name |
-| `## PRD` | yes (PRD Mode) | PRD artifact path or `none` | Link to source PRD artifact |
-| `## Context` | yes | one paragraph | Why this work |
-| `## Acceptance Criteria` | yes | list (≥1 item) | Machine-verifiable success |
-| `## Out of Scope` | no | list | Prevent scope creep |
-| `## Dependencies` | no | list or `none` | Execution ordering |
-
-## Acceptance Criteria Item Format
-
-Each AC item is a single line with three `--`-separated fields:
-
-```
-- [ ] <ac_text> -- <evidence_type> -- <check_command>
-```
-
-### Field 1: `ac_text`
-
-The condition being verified. Must be:
-- **Verifiable** (someone can point at shipped behavior and say "yes/no")
-- **Atomic** (one observable fact, not "and also...")
-- **Bounded** (no time/person pronouns like "developer feels")
-
-**Bad:** "code looks clean", "works correctly", "user is happy"
-**Good:** "API returns 200 for GET /health", "Login form rejects empty email"
-
-### Field 2: `evidence_type` (controlled vocabulary)
-
-Exactly one of:
-
-| Value | Meaning | Use when |
-|-------|---------|----------|
-| `test` | Automated unit/integration test | Code behavior |
-| `curl` | HTTP request assertion | API endpoints |
-| `log` | Process log line check | Background workers |
-| `manual` | Human inspection required | UI / copy / a11y |
-| `none` | Declarative; no runtime check | Removal / refactor |
-
-### Field 3: `check_command`
-
-Shell command that **exits 0 on PASS, non-zero on FAIL**.
-
-Examples:
-- `npm test -- --testPathPattern=auth/login` (test)
-- `curl -fsS http://localhost:3000/health` (curl)
-- `grep -q "ERROR" /var/log/worker.log` (log)
-- `echo "manual review needed"` (manual — always exits 0; gate is human signoff)
-- `! grep -rn "TODO" src/` (none — declarative; command verifies a property)
-
-## Examples
-
-### Complete backlog item
-
-```markdown
-# Add user login endpoint
-
-## Context
-
-Users currently have no way to authenticate. Need a POST /api/login
-endpoint that accepts email + password and returns a JWT.
+| Field | Required | Purpose |
+|---|---|---|
+| `Title` | yes | Short imperative outcome |
+| `PRD` | yes | Traceability to the approved source |
+| `Context` | yes | Why the work exists |
+| `Scope` | yes | Execution boundary and relevant change surface |
+| `Acceptance Criteria` | yes | Observable completion conditions |
+| `Out of Scope` | recommended | Prevent scope expansion |
+| `Dependencies` | yes | Planned execution prerequisites |
+| `Verification` | yes | Evidence required to establish completion |
 
 ## Acceptance Criteria
 
-- [ ] POST /api/login with valid creds returns 200 + JWT -- curl -- curl -fsS -X POST -H "Content-Type: application/json" -d '{"email":"a@b.c","password":"x"}' http://localhost:3000/api/login | jq -e .token
-- [ ] POST /api/login with bad password returns 401 -- curl -- curl -fsS -o /dev/null -w "%{http_code}" -X POST ... | grep -q 401
-- [ ] AuthService.validatePassword unit tests pass -- test -- npm test -- --testPathPattern=auth
-- [ ] Rate-limit: 6th request in 1min returns 429 -- curl -- for i in {1..6}; do curl ...; done | tail -1 | grep -q 429
+Each criterion should be:
+
+- **Observable** — a reviewer can determine pass/fail.
+- **Atomic** — one verifiable condition rather than several unrelated claims.
+- **Bounded** — no vague statements such as "works correctly" or "code is clean".
+- **Traceable** — derived from the PRD or directly necessary to verify an approved requirement.
+
+Use one evidence type:
+
+| Value | Use when |
+|---|---|
+| `test` | Automated unit, integration, or end-to-end test proves the behavior |
+| `curl` | HTTP/API behavior can be verified directly |
+| `log` | An authoritative runtime signal proves the result |
+| `manual` | Human inspection is genuinely required |
+| `none` | No reliable runtime signal exists; explain the verification limitation |
+
+A `check_command` must be repository-supported, non-mutating, and exit 0 on success. Never fabricate a command merely to fill the field.
+
+## Example
+
+```markdown
+# Add document permission inheritance
+
+## PRD
+
+docs/prd/document-permissions.md
+
+## Context
+
+Extend the existing document permission model so inherited permissions are
+resolved consistently for child documents.
+
+## Scope
+
+Extend the existing permission evaluation path and its API/UI integration;
+reuse the current permission model and test infrastructure where possible.
+
+## Acceptance Criteria
+
+- [ ] Child documents resolve inherited permissions from the parent -- test -- npm test -- permission-inheritance
+- [ ] The API returns the effective permission for an inherited document -- curl -- curl -fsS "$BASE_URL/api/documents/$ID/permissions"
 
 ## Out of Scope
 
-- Refresh token rotation
-- OAuth providers
-- Password reset flow
+- Replacing the existing permission model
+- Introducing a new authentication system
 
 ## Dependencies
 
-none
-```
+permission-model
 
-### Minimal backlog item (no optional fields)
+## Verification
 
-```markdown
-# Remove deprecated /v1/users endpoint
-
-## Context
-
-/v1/users is unused; cleaning up before v2 release.
-
-## Acceptance Criteria
-
-- [ ] No source file imports from v1/users -- none -- ! grep -rn "v1/users" src/
-
-## Out of Scope
-
-- Migrating any v1 data
+Run the targeted permission tests and the API verification command.
 ```
 
 ## Anti-Patterns
 
-- MUST NOT include `- [x]` items (everything starts unchecked)
-- MUST NOT put `--` inside `ac_text` (breaks 3-field parse)
-- MUST NOT use evidence types outside the controlled vocabulary
-- MUST NOT write `check_command` that mutates state without `--dry-run`
-- MUST NOT add AC items that have no observable check
+- Do not use unchecked criteria as completed state (`- [x]`).
+- Do not invent API contracts, endpoints, limits, or architecture absent from the PRD or repository evidence.
+- Do not split a coherent vertical slice merely to produce more issues.
+- Do not use file/layer names as the task's only scope definition.
+- Do not make dependencies provider IDs during planning; use stable task references until AFK resolves them.
+- Do not use mutating verification commands.
 
-## Handoff
+## Handoff to AFK
 
-The external backlog provider owns parsing and publication of this manifest.
-AFK consumes the resulting provider-neutral fields (`parentId`, `dependsOn`,
-`executionMode`, and business `tags`) and does not create records here.
+The agent supplies the reviewed task plan and item content. AFK CLI is responsible for creating provider records, assigning canonical IDs, establishing supported relationships, and returning the resulting backlog state. The skill must verify that the created records match the approved plan.

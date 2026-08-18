@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { ViewRegistry } from '../registry';
 import type { View, ViewState, ViewContext } from '../types';
 import { navigationPolicy, type ActionType } from './policy';
-import { fileLogger } from '../../../lib/io';
+import { fileLogger } from '../../../infrastructure/io/index';
 
 // Default initial view state
 const DEFAULT_VIEW_STATE: ViewState = { view: 'tasks', context: {} };

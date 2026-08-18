@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../../lib/core/backlog';
+import type { BacklogItem } from '../../../domain/backlog/index';
 import { loadDashboardBacklogs, startTaskPolling, toRuntimeTask } from './useData';
 
 const backlog: BacklogItem = {

@@ -5,7 +5,7 @@ import { initRegistry } from '../board/registry/init';
 import { Body, DebugOverlay, Footer, Header, HelpDialog, Notification, getBodyViewportHeight } from '../board/views/index';
 import { getTaskSelectionIndex } from '../board/task-cockpit';
 import type { Task, Project } from '../../types/board';
-import type { Branch, Commit, Tag } from '../../lib/core/tracker/types';
+import type { Branch, Commit, Tag } from '../../domain/tracker/types';
 import type { BacklogViewModel } from '../board/data/backlog-adapter';
 import type { View } from '../board/types';
 import { getBoardColumns, getBoardSelectionTarget, groupBacklogsByState } from '../board/board/model';

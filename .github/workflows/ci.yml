@@ -1,0 +1,72 @@
+name: CI Verification
+
+on:
+  push:
+    branches:
+      - main
+      - 'refactor/**'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Cache node-gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/node-gyp
+          key: node-gyp-${{ runner.os }}-node20-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            node-gyp-${{ runner.os }}-node20-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+
+      - name: Build native dependencies
+        run: |
+          pnpm rebuild node-pty --reporter=append-only
+          pnpm rebuild esbuild --reporter=append-only
+
+      - name: Fix permissions
+        run: node scripts/fix-permissions.mjs
+
+      - name: Architecture guard
+        run: pnpm run architecture:check
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm test

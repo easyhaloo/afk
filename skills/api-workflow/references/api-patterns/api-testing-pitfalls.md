@@ -1,170 +1,44 @@
 # API Testing Pitfalls
 
-Common mistakes in API workflow tests and how to avoid them.
+Use these pitfalls when reviewing or generating API workflow tests. Treat them as diagnostic guidance, not as a mandatory generation checklist.
 
-## 1. Configuration Issues
+## Configuration
 
-### Wrong testDir Path
+- Derive `testDir` from the actual Playwright configuration and test location; do not assume a repository layout.
+- Keep `baseURL` environment-driven unless the repository explicitly defines a fixed target.
+- Reuse existing Playwright configuration rather than creating a parallel configuration.
 
-```typescript
-// WRONG: If config is in frontend/e2e/api-workflow/
-testDir: './tests/api-workflow'  // Looks for ./tests/api-workflow/**/*.spec.ts
+## Naming and Discovery
 
-// CORRECT: Points to current directory
-testDir: '.'
-```
+- Follow the repository's existing test naming and discovery conventions.
+- For Playwright projects that use the default discovery rules, ensure generated test files match the configured pattern; do not assume `.spec.ts` if the configuration defines another pattern.
 
-### Hardcoded Base URL
+## Async State and Authoritative Data
 
-```typescript
-// WRONG
-baseURL: 'https://api.example.com'
+- Do not assume a response immediately after an asynchronous trigger represents the terminal state.
+- Poll or await the application's actual completion signal when the workflow is asynchronous.
+- Do not use cached or incidental responses as authoritative verification when the application exposes a stronger source of truth.
 
-// CORRECT: Environment variable with fallback
-baseURL: process.env.BASE_URL || 'http://localhost:8080'
-```
+## Test Isolation
 
-## 2. Naming Issues
+- Avoid shared mutable module-level state between tests when it can leak failures or retries across cases.
+- Prefer isolated Playwright contexts and repository-supported fixtures.
+- Dispose explicitly created API contexts and other resources when the repository's infrastructure does not already manage their lifecycle.
 
-### Missing `.spec.ts` Suffix
+## Assertions
 
-```bash
-# WRONG: Playwright won't find these
-lint-flow.ts
-review-flow.ts
+- A successful HTTP response alone does not prove the business workflow succeeded.
+- Assert the response contract and the state transition that matters to the workflow.
+- Do not replace meaningful assertions with logging or weaken assertions merely to make a test pass.
 
-# CORRECT: Must end with .spec.ts
-lint-flow.spec.ts
-review-flow.spec.ts
-```
+## Environment and Secrets
 
-## 3. Async Data Issues
+- Never hardcode credentials or secret fallbacks in test source.
+- Use the repository's existing environment/secret mechanism and fail clearly when required credentials are unavailable.
+- Treat authentication state files, browser profiles, and debugging endpoints as credentials and keep them outside version control.
 
-### Assuming Cached Data is Fresh
+## Before Generation
 
-Some GET endpoints return cached responses that may be stale:
+Before generating a test, use repository evidence to establish the actual routes, authentication requirements, request/response contracts, state transitions, asynchronous boundaries, authoritative verification sources, test configuration, and environment constraints.
 
-```typescript
-// WRONG: Some endpoints return cached issues that may be empty
-const report = await apiContext.get('/some-report');
-console.log(report.issues.length); // May be 0!
-
-// CORRECT: Use the async run's summary for accurate counts
-const run = await pollLintRun(apiContext, runId);
-console.log(run.summary.orphan); // Accurate
-```
-
-### Not Accounting for Async State
-
-```typescript
-// WRONG: Immediately checking status after trigger
-await apiContext.post('/some-async-action');
-const status = await apiContext.get('/runs/latest');
-// Status might still be "running"!
-
-// CORRECT: Poll until terminal state
-const run = await pollUntil(apiContext, `/runs/${runId}`,
-  data => data.status,
-  ['completed', 'failed'],
-  { intervalMs: 1000, timeoutMs: 30000 }
-);
-```
-
-## 4. Test Isolation Issues
-
-### Shared Mutable State
-
-```typescript
-// WRONG: Module-level mutable state causes flaky tests
-let apiContext: APIRequestContext;
-
-test.beforeAll(async ({ playwright }) => {
-  apiContext = await playwright.request.newContext({...});
-});
-
-test('test1', async () => {
-  // If test1 fails and retries, apiContext may be in bad state
-});
-
-// CORRECT: Add null checks and handle cleanup
-let apiContext: APIRequestContext | null = null;
-
-test.beforeAll(async ({ playwright }) => {
-  apiContext = await playwright.request.newContext({...});
-});
-
-test.afterAll(async () => {
-  if (apiContext) {
-    try {
-      await apiContext.dispose();
-      apiContext = null;
-    } catch (e) {
-      // Ignore - may already be closed
-    }
-  }
-});
-
-function getApiContext(): APIRequestContext {
-  if (!apiContext) throw new Error('Context not initialized');
-  return apiContext;
-}
-```
-
-## 5. Assertion Issues
-
-### Weak Assertions
-
-```typescript
-// WRONG: No actual verification
-const res = await apiContext.get('/some-data');
-const data = await res.json();
-console.log(data.issues); // Just logging!
-
-// CORRECT: Verify response structure
-expect(res.ok()).toBe(true);
-expect(Array.isArray(data.issues)).toBe(true);
-expect(data).toHaveProperty('items');
-```
-
-## 6. Environment Issues
-
-### Hardcoded Credentials
-
-```typescript
-// WRONG: hardcoded credential
-headers: { 'X-API-Key': 'dev-api-key-12345' }
-
-// WRONG: still has a hardcoded fallback
-headers: { 'X-API-Key': process.env.WIKI_API_KEY || 'dev-api-key-12345' }
-
-// CORRECT: fail-fast with no secret fallback
-import { requireEnv } from '../utils/require-env';
-headers: { 'X-API-Key': requireEnv('WIKI_API_KEY') }
-```
-
-## Pre-Generation Checklist
-
-**IMPORTANT:** These steps MUST be completed BEFORE any code generation:
-
-### Step 1: Codebase Analysis
-```
-- Read router.go to find actual endpoint definitions
-- Identify HTTP method and path for each operation
-- Find authentication requirements in middleware
-- Identify response structs and field names
-```
-
-### Step 2: Workflow Clarification
-```
-- Map out the complete workflow step by step
-- Identify which endpoints are sync vs async
-- Determine where authoritative data lives
-- Confirm with user before proceeding
-```
-
-### Step 3: Environment Check
-```
-- Verify testDir path based on config location
-- Confirm base URL via env var
-- Ensure credentials via env var
-```
+If the evidence is sufficient, proceed without unnecessary user confirmation. Ask only when a missing fact materially affects the workflow or execution strategy and cannot be established from the repository or environment.

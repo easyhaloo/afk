@@ -1,22 +1,35 @@
-# auth-login
+# Authentication
 
-Login to extract token for subsequent authenticated requests.
+Authentication is an application-specific workflow. Discover the real authentication contract before generating requests or browser state.
 
-## Concept
+## Determine
 
-Call login API, extract token from response, use in Authorization header for subsequent requests.
+Inspect the application and existing test infrastructure to establish:
 
-## Usage
+- authentication entry point and protocol
+- required credentials or test identity
+- tokens, cookies, headers, or other session state returned
+- authorization scope, tenant, and identity requirements
+- refresh or expiry behavior
+- repository-supported fixtures or setup projects
 
-Use `utils/auth.ts` from templates:
+Do not assume `/auth/login`, a `token` field, `userId`, Bearer authentication, or API-key headers unless the target application proves them.
 
-```typescript
-import { login } from '../utils/auth';
+## API Authentication
 
-const { token, userId } = await login(apiContext, email, password);
-```
+When the application authenticates through an API:
 
-## When to Use
+1. Call the discovered authentication endpoint with the required payload.
+2. Verify the authentication response and extract only the state required by subsequent requests.
+3. Apply that state using the application's actual mechanism.
+4. Verify authorization against the intended identity and scope before testing the workflow.
 
-- User needs to authenticate before making other API calls
-- Need token for subsequent request headers
+Reuse an existing repository auth helper when available.
+
+## Browser Authentication
+
+When authentication is browser-session based, use the strategy selected from the application's auth model and execution environment. See `hybrid-patterns/browser-auth-modes.md` for implementation options.
+
+## Principle
+
+Authentication references describe the reasoning and invariants; endpoint paths, payloads, field names, and credentials must come from the target application.

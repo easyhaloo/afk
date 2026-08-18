@@ -1,103 +1,109 @@
-# DDD-Aware Backlog Slicing
+# Task Slicing Strategy
 
-**Purpose**: Slice PRD user stories into backlog items along bounded context boundaries, not horizontal layers.
-**When**: Every afk-to-issues session — after reading PRD and identifying contexts.
-**Output**: provider-neutral backlog items with bounded context annotations and relevant ADR references.
-
----
+Use this reference when deciding how a PRD should be decomposed into executable backlog items.
 
 ## Core Principle
 
-**Slice vertically along bounded contexts, not horizontally across layers.**
+**Choose the slicing strategy from the work, not from the repository's directory structure.** Prefer vertical slices for coherent business outcomes, use horizontal slices for foundational or inherently technical work, and combine them when a shared foundation enables multiple independent capabilities.
 
-| | ❌ Wrong (horizontal slice) | ✅ Correct (vertical slice) |
-|--|---|---|
-| Issue 1 | Add L2 entity model | Ingest → L2 entity extraction + storage |
-| Issue 2 | Add L2 repository | Query → Archive API + storage |
-| Issue 3 | Add L2 service | Graph → Ego API + traversal |
+## Vertical Slicing — Preferred for Capabilities
 
-Horizontal slices mean Issue 1 can't be tested independently — it only creates the model, nothing else works.
+A vertical slice contains the changes required to deliver one coherent outcome. It may cross domain, application, API, UI, persistence, and test layers.
 
-Vertical slices can be implemented, tested, and shipped independently within one context.
+```text
+Document permission inheritance
+├── permission rules
+├── API behavior
+├── persistence changes
+├── UI behavior
+└── tests
+```
 
----
+Use vertical slicing when:
 
-## Slicing Rules
+- the item represents a user story or business capability;
+- the outcome can be independently accepted;
+- one execution unit can own the required cross-layer changes; or
+- end-to-end verification is meaningful.
 
-### Rule 1 — One Context Per Backlog
+Do not create separate issues merely for controller, service, repository, or UI files.
 
-Each backlog item should operate within **one bounded context**.
-If work crosses a context boundary, split into multiple items with `dependsOn` links.
+## Horizontal Slicing — Purposeful for Foundations
 
-### Rule 2 — Full Stack Within Context
+Use horizontal slicing when the work is inherently technical or has unavoidable sequencing:
 
-A vertical slice includes everything needed for that context to work:
-- Data model
-- API endpoint
-- Business logic
-- Tests
+- database/schema migrations;
+- shared infrastructure;
+- framework or SDK changes;
+- reusable platform components;
+- large refactors;
+- compatibility or migration foundations.
 
-### Rule 3 — Aggregate Boundaries
+A horizontal task must still have a coherent responsibility and verification boundary. Repository layers alone are not sufficient justification.
 
-If an aggregate (e.g., WikiPage) spans multiple concerns, split along the aggregate's invariant groups.
+```text
+Permission foundation
+├── schema migration
+├── shared permission model
+└── evaluation engine
+```
 
-### Rule 4 — Cross-Context Events
+## Hybrid Slicing
 
-If item A publishes an event and item B consumes it, B MUST list A in `dependsOn`.
+Use hybrid slicing when foundational work enables multiple independently deliverable capabilities.
 
----
+```text
+Foundation
+├── permission model
+└── permission engine
 
-## Backlog Manifest Item with Architecture Context
+Capabilities
+├── permission API
+├── permission UI
+└── inheritance behavior
 
-```markdown
-## Context
-<PRD link>
+Integration
+└── end-to-end verification
+```
+
+Foundations should be prerequisites only when the capability genuinely depends on them. Independent capabilities should remain parallelizable.
 
 ## Bounded Contexts
-- <context name from PRD>
 
-## Relevant ADRs
-- ADR-NNNN: <title>
+Bounded contexts are a useful boundary, not an absolute rule.
 
-## Acceptance Criteria (machine-checkable)
-- [ ] <text> -- <evidence_type> -- <check_command>
-```
+- Prefer keeping a capability within one bounded context when practical.
+- Split cross-context work when ownership, sequencing, or verification requires independent items.
+- Keep a cross-context item together when the outcome is genuinely one executable integration change and splitting would create artificial coordination overhead.
+- Model real cross-context dependencies explicitly.
 
----
+## Dependency Rules
 
-## Slicing Checklist
+If task B consumes a contract, schema, event, or behavior produced by task A, B should depend on A only when A must be completed first.
 
-Before emitting a backlog manifest item, confirm:
+Do not create dependencies solely because:
 
-- [ ] Does this backlog item operate within ONE bounded context?
-- [ ] Can this be implemented and tested without depending on another incomplete item?
-- [ ] Does it include everything within the context (model + API + logic + test)?
-- [ ] If it triggers downstream contexts via events, does the consumer list this item in `dependsOn`?
+- two tasks touch the same module;
+- two tasks belong to the same PRD story;
+- one task is conceptually related to another.
 
----
+The final dependency graph must be acyclic and should expose the earliest executable tasks and safe parallel groups.
 
-## Context-to-Issue Mapping Example
+## Task Boundary Test
 
-Given PRD with contexts: Order, Inventory, Notification
+A candidate task is a good backlog boundary when all three are true:
 
-```
-PRD User Story: "Customer can reorder an out-of-stock item"
+1. **Coherent responsibility** — it has one clear outcome or implementation boundary.
+2. **Independent execution** — it can proceed without unrelated incomplete work except declared prerequisites.
+3. **Independent verification** — completion can be demonstrated with concrete evidence.
 
-→ backlog-inventory:  [Inventory] Reorder trigger: detect low stock, create reorder proposal
-    dependsOn: []
-
-→ backlog-order:  [Order] Reorder: create new Order from reorder proposal
-    dependsOn: [backlog-inventory]
-
-→ backlog-notification:  [Notification] Reorder: notify customer when item is available
-    dependsOn: [backlog-order] (same Order trigger, different behavior)
-```
-
----
+Merge tasks when they cannot satisfy these conditions independently. Split tasks when they are too broad to have a coherent acceptance boundary.
 
 ## Anti-Patterns
 
-- MUST NOT create a backlog item that spans two bounded contexts without splitting
-- MUST NOT create an item for only "the model" or "the API" — it must be a full vertical slice
-- MUST NOT omit `dependsOn` for event-driven cross-context dependencies
-- MUST NOT slice so fine that each item is just one method — aggregate related changes
+- Do not split every layer into a separate issue by default.
+- Do not force every issue into one bounded context.
+- Do not create a single giant issue for an entire PRD when capabilities can be independently delivered.
+- Do not create one issue per method, class, or file.
+- Do not introduce dependencies without an actual execution constraint.
+- Do not invent architecture solely to make the task graph look cleaner.

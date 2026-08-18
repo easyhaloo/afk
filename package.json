@@ -9,6 +9,7 @@
   "scripts": {
     "build": "node scripts/build.mjs && tsc --emitDeclarationOnly",
     "typecheck": "tsc --noEmit",
+    "architecture:check": "node scripts/architecture-guard.mjs",
     "dev": "tsc --watch",
     "pretest": "npm run build",
     "test": "vitest run",
@@ -16,12 +17,7 @@
     "postinstall": "node scripts/fix-permissions.mjs",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [
-    "afk",
-    "gitlab",
-    "automation",
-    "ci-cd"
-  ],
+  "keywords": ["afk", "gitlab", "automation", "ci-cd"],
   "dependencies": {
     "@gitbeaker/node": "^35.8.0",
     "@m234/nerd-fonts": "^0.5.1",
@@ -59,14 +55,6 @@
     "vitest": "^1.2.0",
     "xterm": "^5.3.0"
   },
-  "engines": {
-    "node": ">=18"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "node-pty",
-      "puppeteer"
-    ]
-  }
+  "engines": {"node": ">=18"},
+  "pnpm": {"onlyBuiltDependencies": ["esbuild", "node-pty", "puppeteer"]}
 }

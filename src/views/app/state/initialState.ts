@@ -1,4 +1,4 @@
-import type { Project } from '../../../lib/core/tracker/types';
+import type { Project } from '../../../domain/tracker/types';
 
 export type ViewType = 'tasks' | 'backlogs' | 'projects' | 'board';
 export type DetailMode = 'list' | 'detail';

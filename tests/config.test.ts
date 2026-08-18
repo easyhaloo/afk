@@ -5,7 +5,7 @@
  * previously hardcoded in source or in constants.ts.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getWorkflowConfig, getSchedulerConfig } from '../src/lib/core/config/manager';
+import { getWorkflowConfig, getSchedulerConfig } from '../src/infrastructure/config/manager';
 
 describe('WorkflowConfig env var loading', () => {
   const ORIGINAL = process.env;
@@ -21,7 +21,7 @@ describe('WorkflowConfig env var loading', () => {
   });
 
   async function freshConfig() {
-    const { getWorkflowConfig: get } = await import('../src/lib/core/config/manager');
+    const { getWorkflowConfig: get } = await import('../src/infrastructure/config/manager');
     return get();
   }
 
@@ -127,7 +127,7 @@ describe('SchedulerConfig env var loading', () => {
   });
 
   async function freshSchedulerConfig() {
-    const { getSchedulerConfig: get } = await import('../src/lib/core/config/manager');
+    const { getSchedulerConfig: get } = await import('../src/infrastructure/config/manager');
     return get();
   }
 

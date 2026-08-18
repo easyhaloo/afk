@@ -1,7 +1,7 @@
 import type {
   BacklogItem,
   BacklogListOptions,
-} from '../../../lib/core/backlog';
+} from '../../../domain/backlog/index';
 
 /**
  * Capability boundary exposed to the TUI. Keep this structural type narrow so

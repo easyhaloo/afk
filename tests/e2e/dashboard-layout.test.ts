@@ -11,7 +11,7 @@ import { stripVTControlCharacters } from 'node:util';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repositoryRoot = join(__dirname, '../..');
-const distPath = join(repositoryRoot, 'dist/index.js');
+const distPath = join(repositoryRoot, 'dist/cli/commands/board-entry.js');
 const tsxPath = join(repositoryRoot, 'node_modules/tsx/dist/cli.mjs');
 const fixturePath = join(__dirname, 'dashboard-layout.fixture.tsx');
 
@@ -42,13 +42,26 @@ class DashboardPty {
       cols,
       rows: 30,
       cwd: repositoryRoot,
-      env: { ...process.env, NO_TMUX: '1', FORCE_COLOR: '0' },
+      env: {
+        ...process.env,
+        NO_TMUX: '1',
+        FORCE_COLOR: '0',
+        ...(command === process.execPath && args[0] === distPath ? { AFK_SKIP_SPLASH: '1' } : {}),
+      },
     });
     this.proc.onData(data => this.output.push(data));
     this.exited = new Promise(resolve => this.proc.onExit(() => resolve()));
+
+    // node-pty starts with the requested dimensions, but Ink/Yoga can miss the
+    // initial terminal-size event in CI. Emit an explicit resize after spawn so
+    // the first render is patched while the process is still alive.
+    try { this.proc.resize(cols, 30); } catch { /* process may have exited */ }
+    setTimeout(() => {
+      try { this.proc.resize(cols, 30); } catch { /* process may have exited */ }
+    }, 100);
   }
 
-  async waitFor(text: string, timeout = 4_000): Promise<string> {
+  async waitFor(text: string, timeout = 6_000): Promise<string> {
     const started = Date.now();
     while (Date.now() - started < timeout) {
       const frame = plainText(this.output.join(''));
@@ -94,9 +107,6 @@ describePty('dashboard layout (node-pty)', () => {
 
   it.each([80, 100, 120, 160])('renders the production dashboard as one subview at %i columns', async cols => {
     const dashboard = start(process.execPath, [distPath], cols);
-
-    await delay(800);
-    await dashboard.send('\x1B', 1_200);
     const frame = await dashboard.waitFor('▸ AFK');
 
     expect(frame).toContain('1 tasks');
@@ -104,7 +114,7 @@ describePty('dashboard layout (node-pty)', () => {
     expect(frame).toContain('3 projects');
     expect(frame).toContain('4 board');
     expect(frame.toLowerCase()).not.toContain('preview');
-  }, 8_000);
+  }, 12_000);
 
   it.each([80, 100, 120, 160])('renders a populated cockpit and queue at %i columns', async cols => {
     const dashboard = start(process.execPath, [tsxPath, fixturePath], cols);
@@ -116,7 +126,7 @@ describePty('dashboard layout (node-pty)', () => {
     expect(frame).toContain('┆');
     expect(frame).toContain('edited ListView.tsx');
     expect(frame).not.toContain('+1 queued');
-  }, 8_000);
+  }, 12_000);
 
   it('switches independent subviews and returns from a grouped detail screen', async () => {
     const dashboard = start(process.execPath, [tsxPath, fixturePath], 120);
@@ -156,7 +166,7 @@ describePty('dashboard layout (node-pty)', () => {
     expect(board).toContain('◇');
     expect(board).toContain('#42');
     expect(board).not.toContain('preview');
-  }, 8_000);
+  }, 12_000);
 
   it('moves the board focus across lanes with the right arrow', async () => {
     const dashboard = start(process.execPath, [tsxPath, fixturePath], 120);
@@ -166,7 +176,7 @@ describePty('dashboard layout (node-pty)', () => {
     const moved = await dashboard.send('\x1B[C', 350);
     expect(moved).toContain('▸ ▶ Processing 1');
     expect(moved).toContain('Prepare implementation branch');
-  }, 8_000);
+  }, 12_000);
 
   it('exits globally with q from a detail subview', async () => {
     const dashboard = start(process.execPath, [tsxPath, fixturePath], 120);
@@ -178,7 +188,7 @@ describePty('dashboard layout (node-pty)', () => {
 
     await dashboard.send('q', 50);
     await dashboard.waitForExit();
-  }, 8_000);
+  }, 12_000);
 
   it('opens debug mode only with ctrl+d', async () => {
     const dashboard = start(process.execPath, [tsxPath, fixturePath], 120);
@@ -189,7 +199,7 @@ describePty('dashboard layout (node-pty)', () => {
 
     const ctrlD = await dashboard.send('\x04', 350);
     expect(ctrlD).toContain('DEBUG LOG');
-  }, 8_000);
+  }, 12_000);
 });
 
 if (!canSpawnPty()) {

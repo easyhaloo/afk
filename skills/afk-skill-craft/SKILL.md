@@ -1,134 +1,43 @@
 ---
 name: afk-skill-craft
 disable-model-invocation: true
-description: >-
-  Create a new SKILL.md, diagnose an existing one for quality issues,
-  or refactor to align with SKILL-GUIDE standards.
-  Trigger: user asks to create, audit, or improve a skill.
+description: Create or improve a skill by analyzing its purpose, implementation, references, and repository conventions, then making the smallest changes needed to produce a focused, reusable, validated skill.
 ---
 
 # Skill Craft
 
-**Goal:** create, diagnose, or refactor a SKILL.md per local checklist.
+> **Skill Craft:** Create or improve a skill by first understanding its purpose, existing implementation, references, repository conventions, and related skills. Identify the smallest changes needed to make the skill clear, focused, reusable, and consistent with local design principles. Preserve valid domain knowledge, move detailed knowledge into references when appropriate, avoid procedural or redundant instructions, and validate the resulting skill against its intended behavior and local conventions.
 
-## Modes
+## Inspect
 
-| Mode | Entry | Output |
-|------|-------|--------|
-| **Create** | New skill needed | `skill-name/SKILL.md` |
-| **Diagnose** | Check existing skill quality | Issue list with fix suggestions |
-| **Refactor** | Improve existing skill | Updated `SKILL.md` |
+Determine whether the task is to create a new skill, diagnose an existing skill, or improve an existing implementation from the user's intent and available repository evidence. Do not force the user to select a mode when the intent is clear.
 
-Ask user which mode. If unclear, describe the three and let user pick.
+For an existing skill, inspect its complete directory context before changing it, including `SKILL.md`, relevant `references/`, `scripts/`, `assets/`, and closely related skills. Read applicable local guidance before judging the implementation.
 
----
+For a new skill, inspect related skills and repository conventions before designing its structure. Reuse established patterns only when they serve the new skill's responsibility.
 
-## Mode: Create
+## Understand
 
-### Step 1 — Name the skill
+Define the skill's single responsibility, trigger boundary, input/output contract, required domain knowledge, safety constraints, and relationship to neighboring skills.
 
-`name` must be lowercase, `a-z/0-9/-` only, 1-64 chars, matching directory.
-Confirm name with user before proceeding.
+Separate repository conventions from domain-specific knowledge. Preserve information that is necessary for the agent to perform the task correctly; remove repetition, generic advice, and implementation detail that can be inferred or maintained elsewhere.
 
-### Step 2 — Draft frontmatter
+Use `references/` for substantial or specialized knowledge that should not burden the main instruction. Keep `SKILL.md` focused on behavior, constraints, and navigation.
 
-Read `references/SKILL-GUIDE-CHECKLIST.md` for frontmatter rules.
-Draft: `name`, `description` (≤1024 chars, binary judgment, trigger keywords).
+## Improve
 
-### Step 3 — Identify structure needs
+Identify the smallest changes that materially improve correctness, clarity, reliability, or reuse. Prefer descriptive instructions over rigid SOPs, examples, arbitrary thresholds, and duplicated rules.
 
-Per directory structure in checklist:
-- `scripts/` if executable code needed
-- `references/` if detailed docs needed
-- `assets/` if templates/resources needed
+Do not silently change the skill's intended responsibility. When requirements or existing behavior conflict and cannot be resolved from repository evidence, surface the ambiguity before making a consequential design decision.
 
-Create directories as needed.
+Preserve valid terminology, values, contracts, and domain-specific behavior unless there is evidence they are incorrect or obsolete.
 
-### Step 4 — Draft body
+## Validate
 
-Per body structure in checklist: **Goal**, **Steps**, **Caveats**.
-**Critical:** Do not add formulaic Precondition/Output to every step.
-Only add when workflow has complex dependencies.
-**Critical:** Preserve canonical backlog terms and values (`ready`,
-`in_progress`, `verification`, `merge_ready`, `done`, `blocked`; `afk` or
-`hitl`). Do not expose provider adapter labels in skill instructions.
+Validate the result against the skill's intended behavior, frontmatter, local conventions, relevant references, and neighboring skills. Check that the skill has one clear responsibility, a precise trigger, sufficient instructions to execute correctly, no unnecessary procedural detail, and no contradictions between `SKILL.md` and its references.
 
-### Step 5 — Verify
+If a `references/hard-checks.md` exists or is needed, keep it focused on agent-facing prohibitions and escalation rules. Put recovery procedures or operational playbooks elsewhere.
 
-Run through checklist quality items. Fix any failures before reporting.
-If the skill has or needs `references/hard-checks.md`, keep it rules-only
-(ID + one-line prohibition + escalation). Put recovery how-to in a separate
-HITL file if needed.
+Do not claim completion while known validation failures remain unresolved. Report important remaining uncertainty explicitly.
 
----
-
-## Mode: Diagnose
-
-### Step 1 — Read SKILL.md
-
-Parse frontmatter fields. Read `references/SKILL-GUIDE-CHECKLIST.md`.
-
-### Step 2 — Run checklist (with reasoning)
-
-Read `references/SKILL-GUIDE-CHECKLIST.md`. Apply each quality item
-with explicit reasoning:
-
-1. **Read the item.** What does it require?
-2. **Find evidence.** Where in the SKILL.md is the relevant content?
-3. **Reason.** Does this actually pass? What could be wrong?
-4. **Mark.** Then mark pass/fail — not before reasoning.
-
-If `references/hard-checks.md` exists, check the hard-checks style item:
-rules-only vs long command recovery playbooks.
-
-### Step 3 — Check constraint rules (with reasoning)
-
-Read `references/SKILL-GUIDE-CHECKLIST.md` constraint rules section.
-For each rule, **think before flagging**:
-
-1. **Read the rule.** What does it prevent?
-2. **Scan the SKILL.md** (and hard-checks references if present).
-3. **Self-reflect.** Am I flagging correctly? Could this be a false positive?
-4. **Reason through examples.** If rule says "no example code", trace through every code block and confirm: intent description or an example?
-
-Flag violations only after explicit reasoning.
-
-### Step 4 — Report
-
-Present findings as actionable issue list with severity tag per item.
-For each item: state **why** it failed, not just that it failed.
-Suggest fixes. Do not auto-fix unless user confirms.
-
----
-
-## Mode: Refactor
-
-### Step 1 — Diagnose first
-
-Run Diagnose mode.
-
-### Step 2 — Apply checklist rules (with reasoning)
-
-Per Diagnose findings. Read `references/SKILL-GUIDE-CHECKLIST.md` for
-constraint rules. For each finding:
-
-1. **Understand the issue.** What is the actual problem?
-2. **Trace the cause.** Why did this happen? Is it a false positive?
-3. **Apply the fix.** Does the fix introduce new issues?
-4. **Self-reflect.** Did the fix make it better or worse?
-
-When fixing hard-checks: strip recovery bash into `hard-checks-recovery.md`
-(or drop it); leave agent-facing hard-checks as the rules table only.
-
-### Step 3 — Verify
-
-Run Diagnose mode again. All items pass → refactor complete.
-
----
-
-## Caveats
-
-- MUST NOT create a skill without confirming name with user
-- MUST NOT auto-apply fixes without user confirmation in Diagnose mode
-- MUST NOT read files outside own directory or network URLs
-- Output location: `skills/<name>/` for created skill; `/tmp/` for drafts
+> **Principles:** Inspect before changing. Understand responsibility before structure. Preserve necessary knowledge. Prefer minimal, descriptive instructions. Keep domain detail in references. Validate behavior, not just formatting.

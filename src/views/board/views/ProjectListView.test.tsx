@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../../../lib/core/tracker/types';
+import type { Project } from '../../../domain/tracker/types';
 import { ProjectListView, getBranchColor, getProjectPlatformIcon } from './ProjectListView';
 
 const githubProject: Project = {

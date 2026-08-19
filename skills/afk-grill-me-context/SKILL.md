@@ -1,97 +1,34 @@
 ---
 name: afk-grill-me-context
+description: Refine existing context by analyzing the codebase and documentation first, then asking only targeted questions that available evidence cannot resolve.
 disable-model-invocation: true
-description: >-
-  Gap-fill interview skill — use when bounded contexts, architecture
-  docs, a prior draft, or code audit results already exist and need
-  verification, correction, or expansion through targeted questioning.
-  Starts from what is already known, digs into holes. May read code to
-  verify context against the actual codebase. Produces a revised
-  CONTEXT.md via the same Step 4 gate (Approve / Revise / Drill /
-  Add Open Question). Output goes to /tmp/, never to the repo working tree.
 disallowed-tools: >-
-  Edit(*) Agent(*) Task*(*)
-  Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
-  Bash(git branch -D*) Bash(docker*) Bash(rm -rf*) Bash(chmod*)
-  Bash(chown*) Bash(mkdir*)
+  Edit(*) NotebookEdit(*) Agent(*) Task*(*)
+  Bash(git push*) Bash(git merge*) Bash(git reset --hard*)
+  Bash(git branch -D*) Bash(docker*) Bash(rm -rf*) Bash(chmod*) Bash(chown*)
 ---
 
-# Grill-me with Context (Gap-fill)
+# Context Refinement
 
-**Goal:** verify, correct, and deepen existing context through targeted
-questioning. A review and gap-fill on pre-existing material — for a
-from-scratch interview, the caller needs a different entry point.
-**Mode:** HITL — every round needs explicit human input.
-**Contract:** (existing context + topic) → approved `CONTEXT.md`.
+> **Context Refinement:** Analyze the existing codebase, documentation, configuration, APIs, and current context before asking any questions. Establish what can be objectively determined from available evidence, identify gaps, contradictions, assumptions, and unresolved decisions, then ask only the minimum targeted questions that cannot be resolved from the evidence. The goal is to refine the existing context into a precise, validated, implementation-ready understanding without asking the user to explain what the codebase or documentation already makes clear.
 
-## When to use
+## Process
 
-| Scenario |
-|----------|
-| Existing bounded contexts need verification |
-| Architecture docs have assumptions to probe |
-| Prior alignment draft exists, revisit with more info |
-| Stakeholder alignment done, need to verify specifics |
+**Inspect first.** Review the relevant code, documentation, configuration, APIs, tests, and existing context. Do not ask the user to provide information that can be established from the available evidence.
 
-## Steps
+**Analyze next.** Separate verified facts from assumptions, identify inconsistencies, missing requirements, unclear boundaries, terminology conflicts, business rules, invariants, and implementation constraints. Treat repository evidence as evidence, not as permission to silently redefine the intended behavior.
 
-### Step 1 — Identify the topic and review given context
+**Grill selectively.** Ask only questions that remain unresolved after inspection. Prefer focused questions that resolve a specific ambiguity or decision. Avoid generic discovery questions and avoid repeating information already established by the codebase or documentation.
 
-Read whatever context the human has provided and form a picture of what
-is already known.
+**Validate last.** Incorporate the user's answers, reconcile them with the discovered evidence, and confirm the resulting context is consistent and actionable. Preserve unresolved issues explicitly rather than inventing answers.
 
-If no context is provided → STOP.
+## Output
 
-### Step 2 — Gap-fill through targeted questioning (HITL)
+Produce a concise context refinement containing the verified understanding, important findings, resolved decisions, remaining open questions, and implementation-relevant constraints. Write the result to a uniquely created temporary directory under `/tmp/` after the user confirms the refined understanding; never modify the repository working tree.
 
-Based on the existing context, question specifically around gaps:
+```bash
+CONTEXT_DIR=$(mktemp -d /tmp/afk-grill-me-context-XXXXXX)
+CONTEXT_FILE="$CONTEXT_DIR/context.md"
+```
 
-- Does the existing bounded context boundary still hold?
-- Are there terminology conflicts not captured?
-- What invariants are missing or unclear?
-- Are cross-context relationships undocumented?
-- What business rules are ambiguous?
-
-Use `AskQuestion` with structured `options`. Apply multi-select when
-multiple verification topics are simultaneously relevant. Apply
-single-select when options are mutually exclusive.
-
-**Optional code audit:** if context is vague or may not match the
-codebase, read code to verify bounded context accuracy, actual
-terminology, undocumented invariants, or cross-context coupling.
-Findings are evidence for human verification questions, NOT final answers.
-
-**Core verification topics:**
-
-1. **Boundary accuracy** — do bounded contexts reflect how the system works?
-2. **Terminology conflicts** — any terms meaning different things in different contexts?
-3. **Missing invariants** — what rules must stay true within each context?
-4. **Cross-context gaps** — what events/data flow between contexts is undocumented?
-
-### Step 3 — Draft summary (show only, NOT written)
-
-Show the updated draft `CONTEXT.md` — mark which parts were
-pre-existing and which were added during this session.
-
-### Step 4 — Gate: explicit user confirmation
-
-1. **Approve** → write confirmed context to `/tmp/grill-me-context-*.md`, skill ends
-2. **Revise** → return to Step 3 with specific sections to rework
-3. **Drill deeper** → return to Step 2, identify more gaps
-4. **Add open question** → append unresolved question to context, then write
-
-### Step 5 — Write to /tmp/ (only after Step 4 confirmation)
-
-Write directly to `/tmp/grill-me-context-<YYYYMMDD-HHMMSS>.md` using
-Bash (`cat > /tmp/... << 'EOF'` or `tee`). **Do not use the Write tool**
-— the Write tool requires reading the file first even for new paths,
-which is incompatible with `/tmp/` generation.
-
-Never write to the repo working tree.
-
-## Caveats
-
-- MUST NOT write CONTEXT.md to the repo working tree — only to `/tmp/`.
-- MUST NOT skip the Step 4 gate.
-- MUST NOT update bounded contexts based on code alone without human confirmation.
-- MUST NOT use the Write tool for `/tmp/` output — use Bash (`cat >`, `tee`, or similar) instead. The Write tool requires a prior Read even for new file paths.
+> **Principle:** Inspect before asking; use evidence before assumptions; ask only what the evidence cannot answer.

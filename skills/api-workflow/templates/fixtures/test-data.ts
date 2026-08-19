@@ -1,10 +1,3 @@
-// ============================================================
-// Test Data Manager Fixture
-// ============================================================
-// Lifecycle management for test data: create → use → cleanup
-// Ensures all created resources are properly deleted after tests.
-// ============================================================
-
 import { APIRequestContext } from '@playwright/test';
 
 interface Resource {
@@ -12,25 +5,41 @@ interface Resource {
   id: string;
 }
 
+/**
+ * Tracks resources created by a workflow and cleans them up in reverse order.
+ * Endpoint shapes and deletion requirements must come from the target application.
+ */
 export class TestDataManager {
   private created: Resource[] = [];
 
-  constructor(private apiContext: APIRequestContext) {}
+  constructor(private readonly apiContext: APIRequestContext) {}
 
-  async create(type: string, data: Record<string, any>): Promise<string> {
-    const res = await this.apiContext.post(`/${type}`, { data });
-    if (!res.ok()) {
-      throw new Error(`Failed to create ${type}: ${res.status()}`);
-    }
-    const { id } = await res.json();
+  track(type: string, id: string): void {
     this.created.push({ type, id });
-    return id;
+  }
+
+  async create(type: string, data: Record<string, unknown>): Promise<string> {
+    const response = await this.apiContext.post(`/${type}`, { data });
+    if (!response.ok()) {
+      throw new Error(`Failed to create ${type}: ${response.status()}`);
+    }
+
+    const body = (await response.json()) as { id?: string };
+    if (!body.id) {
+      throw new Error(`Create ${type} response did not contain an id`);
+    }
+
+    this.track(type, body.id);
+    return body.id;
   }
 
   async cleanup(): Promise<void> {
-    // Delete in reverse order (handle dependencies)
-    for (const { type, id } of this.created.reverse()) {
-      await this.apiContext.delete(`/${type}/${id}`).catch(() => null);
+    for (const { type, id } of [...this.created].reverse()) {
+      try {
+        await this.apiContext.delete(`/${type}/${id}`);
+      } catch {
+        // Cleanup is best-effort; report cleanup failures from the owning test when needed.
+      }
     }
     this.created = [];
   }
@@ -39,19 +48,3 @@ export class TestDataManager {
     return [...this.created];
   }
 }
-
-// Usage:
-//
-// import { TestDataManager, getApiContext } from './fixtures/test-data';
-//
-// test('my test', async () => {
-//   const manager = new TestDataManager(getApiContext());
-//
-//   try {
-//     const userId = await manager.create('users', { name: 'Test' });
-//     const orderId = await manager.create('orders', { userId });
-//     // ... use test data
-//   } finally {
-//     await manager.cleanup();
-//   }
-// });

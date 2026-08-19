@@ -1,73 +1,59 @@
 ---
 name: afk-research
-description: >-
-  Understand how an existing system works, or evaluate feasibility
-  of an approach, before committing to a plan.
-  Outputs findings doc or spike summary.
+description: Investigate questions through independent evidence paths, using parallel agents and cross-validation when useful, before drawing conclusions or committing to a plan.
 disallowed-tools: >-
   Edit(*) Write(*)
   Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
   Bash(git branch -D*) Bash(docker*) Bash(rm -rf*)
 ---
 
-# Research / Spike
+# Research
 
-**Goal:** understand how an existing system works, or evaluate feasibility
-of an approach, before committing to a plan.
+> **Research:** Investigate the question through independent evidence paths before drawing conclusions. Analyze the codebase, documentation, tests, configuration, runtime behavior, and external sources as appropriate. When the problem has independent research paths, use multiple agents in parallel to explore them from different perspectives, then cross-check and reconcile their findings. Distinguish verified facts, assumptions, contradictions, and unknowns, and prefer independently corroborated evidence over a single agent's conclusion. Synthesize the validated findings into a concise, evidence-backed conclusion without silently making product or implementation decisions.
 
-## Dimensions
+## References
 
-Two orthogonal dimensions define every research task:
+Before investigating, inspect the relevant documents under `references/` and use them as research guidance throughout the session. References define source-of-truth rules, investigation patterns, evidence standards, and when to pivot between research domains.
 
-| | Codebase | Web |
-|--|----------|-----|
-| **Survey** | Confirm a code assumption quickly | Confirm a solution exists quickly |
-| **Investigate** | Deep-trace code to understand patterns | Multi-source cross-validation |
+Do not silently override reference guidance. If the references conflict with available evidence, surface the conflict and resolve it through stronger evidence rather than assumption.
 
-Choose one from each axis based on the question.
+## Investigate
 
-## Steps
+First determine what must be established to answer the question and identify independent research paths. Prioritize the strongest available evidence: repository evidence for repository-specific behavior and authoritative external sources for external facts.
 
-### Step 1 — Classify the question
+Possible paths include:
+- Codebase and implementation
+- Architecture and dependencies
+- Documentation and existing decisions
+- Tests and runtime behavior
+- External documentation and authoritative sources
+- Alternative approaches and feasibility
 
-Ask: "Where is the source of truth for this answer?" Code → codebase.
-External → web-research. Both → start with faster one, then deeper.
+Use sequential investigation when one finding is required to determine the next path.
 
-**Output:** information source classified.
+## Parallel Research
 
-### Step 2 — Set depth
+When paths are independent, delegate them to multiple agents in parallel. Prefer diversity of evidence and perspective over duplicating the same investigation. Give each agent a focused research question, relevant reference guidance, and require supporting evidence.
 
-Survey: find first credible answer, stop. Investigate: explore multiple
-paths until confident.
+Parallel agents are investigators, not voters. Agreement between agents is not proof; they may share the same incorrect assumption.
 
-**Output:** depth set.
+## Cross-Validation
 
-### Step 3 — Reason first, verify second
+After parallel exploration:
 
-For each path: state expectation, choose source, verify or disprove,
-update mental model.
+1. Collect each agent's findings and supporting evidence.
+2. Cross-check important claims against independent sources and the applicable research references.
+3. Identify agreement, contradiction, missing evidence, and unsupported assumptions.
+4. Resolve contradictions by inspecting stronger or additional evidence, or launch a focused follow-up investigation when necessary.
+5. Separate verified facts, evidence-based findings, hypotheses, and unknowns.
+6. Synthesize only after the evidence has been reconciled.
 
-**Output:** verified findings.
+Prefer evidence that can independently corroborate a claim. Explicitly report unresolved contradictions or uncertainty rather than forcing consensus.
 
-### Step 4 — Synthesize
+## Output
 
-Present findings aligned with expectations. Flag disconfirmed
-expectations — they are often the most valuable result.
+Produce a concise research result containing the question, key findings, supporting evidence, important contradictions or uncertainties, and evidence-backed conclusions. State what remains unknown when it affects the decision or next step.
 
-**Output:** synthesized findings doc.
+Do not make product decisions or implement production changes as part of research. A minimal proof of concept is allowed only when feasibility cannot otherwise be established.
 
----
-
-## Parallel execution
-
-Fan out independent research paths to parallel workers. Use **sequential**
-when one path's result narrows the next. Track >3-phase progress with
-task primitives (`in_progress` → `completed`).
-
----
-
-## Caveats
-
-- MUST NOT make product decisions — only report findings.
-- MUST NOT implement code beyond minimal spike proof-of-concept.
-- MUST NOT verify using the same source type as the initial assumption.
+> **Principles:** Investigate before concluding. References guide the investigation. Parallelize independent paths. Agents explore; evidence validates. Cross-check important claims. Never turn consensus into proof. Report uncertainty explicitly.

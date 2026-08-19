@@ -1,132 +1,80 @@
 ---
 name: api-workflow
-description: >-
-  Multi-step API testing with Playwright. Generates executable test files from
-  business scenarios with auth reuse. Pick the auth mode by where the test
-  runs: local dev uses a long-running Chrome on 9222 + CDP attach (default);
-  CI uses storage-state from API login. Triggers: "test order flow",
-  "verify webhook", "trigger async job, poll for completion",
-  "API then browser verify", "reuse browser login", "skip UI login",
-  "browser auth session".
+description: Build reliable Playwright tests for multi-step API workflows by discovering the application's real APIs, authentication, state transitions, async behavior, and authoritative verification sources, then mapping the business workflow to the smallest executable test.
 ---
 
-# API Workflow Testing
+# API Workflow
 
-**Tool:** Playwright | **Output:** `tests/api-workflow/` or standalone
+> **API Workflow:** Discover the application's real API, authentication, state transitions, asynchronous behavior, and authoritative data sources, then translate the requested business workflow into the smallest reliable Playwright test. Before generating anything, inspect the relevant references, templates, scripts, and examples together with the target codebase. Reuse them when they fit the repository; adapt or replace them when evidence shows they do not. Ask only for decisions that cannot be established from available evidence, and verify the complete workflow against its real success conditions.
 
-## References
+## Discover
 
-| Type | Path |
-|------|------|
-| Patterns | `references/api-patterns/` |
-| Hybrid | `references/hybrid-patterns/` |
-| Auth modes | `references/hybrid-patterns/browser-auth-modes.md` |
-| Templates | `templates/` |
+Inspect the target codebase, existing tests, Playwright configuration, relevant documentation, and the complete applicable skill context:
 
-## Process
+- `references/` — reusable patterns, constraints, and domain knowledge
+- `templates/` — optional scaffolding and implementation building blocks
+- `scripts/` — validators or executable checks that define verifiable expectations
+- `examples/` — illustrative combinations, not normative requirements
 
-### 1. Discover
+Establish:
 
-Analyze via codebase, NOT assumptions:
+- API routes, request/response contracts, and required dependencies
+- authentication and session mechanisms
+- state transitions and data dependencies
+- asynchronous triggers, completion signals, polling, or callbacks
+- authoritative sources for final verification
+- existing fixtures, utilities, setup, and project layout
+- local/CI execution constraints
 
-| Check | Action |
-|-------|--------|
-| Auth | Read middleware — X-API-Key / Bearer / Cookie? |
-| Auth storage | cookies, localStorage, IndexedDB, or sessionStorage? |
-| Login mechanism | API endpoint discoverable? SSO/OAuth? MFA? Passkey? |
-| Endpoints | Read route definitions |
-| Async | Identify trigger + poll pattern |
-| Freshness | Locate authoritative data source |
-| Layout | Detect project structure (frontend repo? Playwright setup?) |
-| CI/local | Is this running in CI or locally? |
+Do not infer API behavior when the implementation, tests, documentation, or executable evidence can establish it.
 
-Layout is auto-detected during codebase analysis.
+## Model the Workflow
 
-### 2. Pick Auth Mode (Environment-Driven)
+Represent the requested scenario as a business workflow before generating code. Identify the sequence of actions, state passed between them, asynchronous boundaries, and observable success conditions.
 
-Pick the mode based on **where the test will run**, not on the auth scheme:
+Map business steps to actual API and browser operations only after the workflow is understood. Use references for reusable patterns, templates for scaffolding, and examples for composition ideas. Do not copy an example blindly or introduce template infrastructure that the target project does not need.
 
-| Environment | Mode |
-|-------------|------|
-| **Local dev** — user already runs Chrome on 9222 with a dedicated profile, manually logged in | `localhost-cdp` |
-| **CI** — no interactive login, fully scripted | `storage-state` |
+A typical workflow may look like:
 
-Don't ask the user which mode to pick when the environment is obvious. The
-auth scheme (SSO, MFA, passkey, etc.) only matters when generating the
-storage state file in CI, not when picking the mode itself.
-
-**Hard rejects:**
-- Reject `localhost-cdp` in CI (no manual browser available).
-- Reject `localhost-cdp` for non-Chromium browsers or non-loopback endpoints.
-- When neither mode fits, stop and ask for a dedicated test identity.
-
-### 3. Clarify
-
-Confirm with user:
-- Detected layout and output location
-- Selected browser auth mode
-- Workflow steps (auth setup, API calls, browser verification)
-
-### 4. Generate
-
-Only after confirmation. Copy only the selected mode's fixture, setup,
-and config artifacts. Never generate unused modes.
-
-## Output Options
-
-**A: Inside frontend repo** (if Playwright setup detected)
-```
-frontend/e2e/api-workflow/
-|-- scenarios/*.spec.ts
-|-- fixtures/
-|-- utils/
-# Reuse root playwright.config.ts
+```text
+Business Action
+  → API Trigger
+  → Returned State / ID
+  → Poll or Await Completion
+  → Authoritative API Verification
+  → Browser Verification
 ```
 
-**B: Standalone project** (if no frontend or external tester)
-```
-tests/api-workflow/
-|-- package.json
-|-- playwright.config.ts
-|-- scenarios/*.spec.ts
-|-- fixtures/
-|-- utils/
-```
+The actual sequence must come from the application.
 
-## Auth Mode Artifacts
+## Authentication
 
-When a browser auth mode is selected, the generated project also receives:
+Select authentication from the application's real auth model, execution environment, and existing test infrastructure. Treat authentication references and templates as implementation options, not a fixed decision tree.
 
-| Artifact | Source template |
-|----------|----------------|
-| `fixtures/browser-session.ts` | Selected mode fixture (`localhost-cdp` or `storage-state`) |
-| `setup/auth-api.setup.ts` (storage-state only) | API setup to generate state file |
-| `playwright/.auth/` (gitignored) | Auth state file location |
-| `.gitignore` entries | `templates/auth-artifacts.gitignore` |
-| `.env.example` | `templates/auth.env.example` |
-| `browser-auth-runbook.md` | Setup and re-auth instructions |
+Use an existing repository-supported strategy whenever possible. If a required identity, session, environment, or auth capability cannot be established, stop and ask for the missing information instead of generating speculative credentials or bypasses.
 
-## Config
+## Generate
 
-```typescript
-baseURL: process.env.BASE_URL || 'http://localhost:8080'
-testDir: '.'
-'X-API-Key': requireEnv('WIKI_API_KEY')
-```
+Generate only the artifacts required by the selected workflow and existing project structure. Reuse compatible fixtures, utilities, setup, authentication helpers, templates, and configuration rather than creating parallel infrastructure.
 
-## Async Pattern
+Templates are starting points, not mandatory files. Preserve project conventions and remove unused scaffold when adapting them. Keep credentials, secrets, auth state, and environment-specific values outside source-controlled test code.
 
-```
-POST /action -> { run_id }
-GET  /runs/:id (poll) -> { status, summary }
-```
+## Validate
 
-Poll endpoint `summary` often more authoritative than cached GET.
+Use relevant executable checks from `scripts/` when they apply. Treat validator failures as evidence that the generated artifacts or their assumptions need review; do not weaken tests merely to satisfy a validator.
 
-## Anti-patterns
+Before execution, verify that references, templates, scripts, and examples remain internally consistent with the workflow and selected authentication strategy.
 
-- No hardcoded credentials / base URL
-- No `.spec.ts` suffix missing
-- No skipping codebase analysis / user confirmation
-- No silent fallback between auth modes
-- No generating unused auth mode artifacts
+## Verify
+
+Execute the generated test against the real target environment when available. Verify the original business workflow, including API results, asynchronous completion, state transitions, and browser-visible outcomes when applicable.
+
+A passing individual API request is not sufficient if the workflow depends on later state or UI behavior. Prefer authoritative state over cached or incidental observations.
+
+If execution fails, diagnose the failure using observed evidence and correct the workflow or test only when the evidence supports the change. Do not mask application failures by weakening assertions.
+
+## Output
+
+Produce the executable test and only the supporting artifacts required to run it. Report the discovered workflow, authentication strategy, verification strategy, validation/execution result, and any unresolved environment or application constraints.
+
+> **Principles:** Discover before generating. Inspect the whole skill context. Model the business workflow before writing tests. References inform; templates scaffold; scripts validate; examples illustrate. Evidence over assumptions. Reuse existing infrastructure. Generate only what is required. Verify the complete workflow, not isolated requests.

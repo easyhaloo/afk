@@ -1,32 +1,20 @@
-// ============================================================
-// Auth Setup — API
-// ============================================================
-// Setup project that authenticates via API and writes the
-// resulting auth state to a file. The generated code fills in
-// the discovered login endpoint and credentials.
-// ============================================================
-
 import { test as setup } from '@playwright/test';
-import path from 'path';
-import { requireEnv } from '../utils/require-env';
 
-const authFile = path.join(
-  __dirname,
-  '..',
-  'playwright',
-  '.auth',
-  'user.json',
-);
+const authFile = 'playwright/.auth/user.json';
 
 setup('authenticate via API', async ({ request }) => {
-  // TODO: Replace with the discovered login endpoint and payload.
-  // Example:
-  //   await request.post('/auth/login', {
-  //     data: {
-  //       email: requireEnv('TEST_EMAIL'),
-  //       password: requireEnv('TEST_PASSWORD'),
-  //     },
-  //   });
+  // Replace this scaffold with the authentication flow discovered in the target repository.
+  // The generated setup must:
+  // 1. call the real authentication contract,
+  // 2. verify identity and authorization scope,
+  // 3. persist the resulting Playwright storage state.
+  void request;
+  throw new Error(
+    'Authentication setup is a scaffold. Implement the repository-specific auth flow before running it.',
+  );
 
-  await request.storageState({ path: authFile });
+  // Example final step after successful authentication:
+  // await request.storageState({ path: authFile });
 });
+
+void authFile;

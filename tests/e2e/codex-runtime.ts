@@ -8,14 +8,14 @@ import {
   resolveCodexRuntime,
   type CodexRuntimeSelection,
   type CodexTransport,
-} from '../../src/lib/agents';
-import type { BacklogProvider } from '../../src/lib/core/backlog';
-import { BACKLOG_METADATA } from '../../src/lib/core/backlog';
-import { getWorkflowConfig } from '../../src/lib/core/config/manager';
-import { createProviderBundle as assembleProviderBundle } from '../../src/lib/core/providers';
-import { createTrackerClient } from '../../src/lib/client-factory';
-import { LoopRunner } from '../../src/lib/modules/loop-runner';
-import { TaskRuntimeManager } from '../../src/lib/runtime/task-runtime';
+} from '../../src/domain/agents/index';
+import type { BacklogProvider } from '../../src/domain/backlog/index';
+import { BACKLOG_METADATA } from '../../src/domain/backlog/index';
+import { getWorkflowConfig } from '../../src/infrastructure/config/manager';
+import { createProviderBundle as assembleProviderBundle } from '../../src/application/providers';
+import { createTracker } from '../../src/application/tracker-provider-factory';
+import { LoopRunner } from '../../src/application/modules/loop-runner';
+import { TaskRuntimeManager } from '../../src/application/runtime/task-runtime';
 
 const E2E_TIMEOUT_MS = positiveInteger(process.env.AFK_CODEX_E2E_TIMEOUT_MS) ?? 30 * 60_000;
 
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
 
   // Readiness must happen before a tracker client or backlog is created.
   const runtime = await prepareAgentRuntime(unresolvedRuntime);
-  const tracker = await createTrackerClient(undefined, process.cwd());
+  const tracker = await createTracker(undefined, process.cwd());
   const providers = assembleProviderBundle(tracker, process.cwd());
   await providers.backlog.initialize();
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Branch, Commit, Tag } from '../../../lib/core/tracker/types';
+import type { Branch, Commit, Tag } from '../../../domain/tracker/types';
 import type { Task, Project } from '../../../types/board';
 import type { BacklogViewModel } from '../data/backlog-adapter';
 import { getListViewportHeight } from '../layout';

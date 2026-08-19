@@ -1,48 +1,52 @@
 # Governance Playbook
 
-## Starting quality gates (calibrate per domain)
+Use gates as calibrated controls, not universal verdicts. Establish a baseline first and evaluate new or changed code against repository history, domain criticality, and change behavior.
 
-Method:
+## Baseline
 
-- Cyclomatic ≤ 10 (or ≤ 15 in complex domains)
-- Cognitive ≤ 15
-- NLOC ≤ 40–50
-- Parameters ≤ 5–7
-- Nesting depth ≤ 3–4
+Record, where available:
 
-File:
+- complexity distributions and top offenders
+- changed-code debt or threshold breaches
+- dependency cycles and boundary crossings
+- change frequency, churn, and modules touched per change
+- duplication hotspots
 
-- Average cyclomatic ≤ 5–8; max ≤ 20
-- NLOC ≤ 300–500
-- Maintainability index ≥ 65–70
+## Gates
 
-Project / organization:
+### Method / class
 
-- Prefer Clean-as-You-Code on new/changed code
-- Track averages, maxima, debt ratio trends
-- Review hotspots (complexity × change frequency) on a fixed cadence
-- Track cross-module/service PR ratio and dependency cycles
-- Ban new multi-writer shared databases without explicit exception
+Use cyclomatic, cognitive complexity, size, parameters, nesting, and coupling as signals. Starting ranges such as cyclomatic ≤10–15, cognitive ≤15, NLOC ≤40–50, and nesting ≤3–4 may be useful defaults, but calibrate them to the repository and language.
 
-## Refactoring direction
+### File / module
 
-Order when both code and organization debt exist:
+Track distributions and outliers rather than relying only on averages. Watch oversized files, dependency hubs, cycles, unstable ownership, and repeated cross-boundary changes.
 
-1. Prune or merge false boundaries; split mixed ownership (see module-service-boundaries).
-2. Replace CP clones with one shared capability at the right layer (see duplication-reuse).
-3. Local structure: extract method/class; flatten nesting; polymorphism/strategy;
-   parameter objects; reduce CBO; remove dead complexity.
+### Project / service
 
-Detail mappings: `smells-refactorings.md`.
+Prefer Clean-as-You-Code for changed code. Track trends in hotspots, debt, dependency cycles, cross-module change, and shared-data ownership. Require explicit review for new multi-writer shared data or new broad shared abstractions.
 
-## Process
+## Hotspot prioritization
 
-- CI: warn or fail on threshold breaches for changed files; optional package dependency rules.
-- PR: justify new functions above threshold; justify multi-module touches; reject large CP of existing flows.
-- Debt backlog: estimate cost; prioritize by business impact × churn × sharedness.
-- Document exceptions; do not chase a single metric into worse design or a kitchen-sink common.
+Prioritize findings where complexity combines with frequent change, broad change spread, dependency impact, or business/operational criticality. A single high metric in stable code is not sufficient justification for refactoring.
+
+## Refactoring order
+
+1. Fix false or unstable boundaries and ownership.
+2. Consolidate confirmed semantic duplication at the correct ownership layer.
+3. Simplify local code structure after the larger cause is addressed.
+
+## Delivery controls
+
+- CI: prefer regression checks on changed code; fail only on justified repository gates.
+- PR: require evidence for significant complexity growth or boundary expansion.
+- Backlog: prioritize by impact × change frequency × spread × risk.
+- Exceptions: document why a gate is unsuitable and define a review or expiry condition.
+
+## Verification
+
+Every accepted governance action should define how improvement will be measured. Re-run the relevant analyzer, dependency analysis, or change metric after the change and compare with the baseline.
 
 ## Caveats
 
-Generated, vendored, and pure fixture code usually need looser or excluded gates.
-Combine static metrics with coverage, runtime evidence, change history, and human review.
+Exclude or loosen gates for generated, vendored, third-party, and fixture code unless explicitly requested. Never fabricate unavailable metrics or treat a threshold as a substitute for engineering judgment.

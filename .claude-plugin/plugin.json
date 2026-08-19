@@ -1,6 +1,6 @@
 {
   "name": "afk",
-  "version": "1.0.6",
+  "version": "1.0.8",
   "description": "AFK skill suite for Claude Code: requirements interview → PRD → issues → TDD implement → QA, plus research, pipeline routing, skill-craft, complexity governance (metrics, module/service boundaries, anti-CP reuse), reasoning guard, and API workflow testing.",
   "author": {
     "name": "easyhaloo",

@@ -1,15 +1,7 @@
 ---
 name: afk-grill-me
 disable-model-invocation: true
-description: >-
-  Requirements interview skill — use when a feature/epic is ambiguous
-  and the team needs shared, falsifiable understanding before building.
-  Runs multi-round HITL interviews via AskQuestion. Produces a
-  structured CONTEXT.md with Audience, Success Criteria, Non-goals,
-  Constraints, and Open Questions. The interview has a non-negotiable
-  floor: at minimum, one Audience, one Success Criterion, and one
-  explicit Non-goal must be stated — no build proceeds below this floor.
-  Output goes to /tmp/, never to the repo working tree.
+description: Interview ambiguous requirements until there is a shared, falsifiable understanding of the problem, scope, success criteria, and constraints.
 disallowed-tools: >-
   Edit(*) Agent(*) Task*(*)
   Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
@@ -17,105 +9,25 @@ disallowed-tools: >-
   Bash(chown*) Bash(mkdir*)
 ---
 
-# Grill-me (Interview)
+# Grill-me
 
-**Goal:** unambiguous shared understanding of the problem before any
-build work. This is a conversation, not a document review.
-**Mode:** HITL — every round needs explicit human input; nothing here
-proceeds unattended.
-**Contract:** (none) → approved `CONTEXT.md`.
+> **Interview:** Turn an ambiguous feature or problem into a shared, falsifiable understanding before implementation. Use interactive questioning to establish **who it is for, what success means, what is explicitly out of scope, and which constraints matter**. Explore deeper only where answers are ambiguous, conflicting, or consequential; do not ask questions merely to make the interview longer.
 
-## Interview closure
+Use `AskQuestion` for every round and keep the interaction human-in-the-loop. Cover at minimum **Audience, Success Criteria, Non-goals, and Hard Constraints**. Add stakeholders, integrations, data sensitivity, failure handling, rollback, observability, dependencies, or timeline only when they materially affect the solution. Answers should be specific enough that someone can later verify whether the delivered result satisfies them.
 
-An interview has no natural stopping point unless you impose one:
+Do not assume unstated requirements or silently resolve conflicting stakeholder positions. Preserve unresolved conflicts and questions explicitly. Stop when the core topics have concrete answers and additional questioning produces diminishing returns; if two consecutive rounds add no meaningful constraint or non-goal, proceed with the known information and record the remaining uncertainty as open questions.
 
-- **"Enough" is concrete, not a feeling:** stop once each of Audience,
-  Success Criteria, Non-goals, and Constraints has at least one specific,
-  falsifiable answer — not once the user seems tired of answering.
-  Falsifiable means someone could point at a shipped feature and say
-  "no, that didn't satisfy this".
-- **Diminishing returns:** if two consecutive rounds produce no new
-  constraint or non-goal, draft `CONTEXT.md` with what you have and list
-  the rest as Open Questions.
-- **Conflicting stakeholders:** record the conflict verbatim in Open
-  Questions with all positions attributed. MUST NOT silently pick a side.
-- **"Just build it" pushback:** acknowledge it, but the floor is
-  non-negotiable — audience, one success criterion, one explicit
-  non-goal. Below that floor, downstream has nothing to slice into
-  machine-checkable AC.
+Before writing anything, show the proposed context for human review. Require explicit confirmation with one of four outcomes: **Approve, Revise, Drill deeper, or Add open question**. Only approved information may become the final context.
 
-## Steps
+The final context should concisely capture the problem, audience, success criteria, non-goals, constraints, important domain terminology, and unresolved questions. It must contain at least one concrete audience, one falsifiable success criterion, and one explicit non-goal before the interview can be considered complete.
 
-### Step 1 — Identify the topic
+After approval, create an isolated temporary directory and write the confirmed Markdown context there. Do not write to the repository or overwrite an existing artifact:
 
-Note what feature/epic this interview is for. Read the linked
-epic/issue title if one exists — use it as the interview anchor.
+```bash
+CONTEXT_DIR=$(mktemp -d /tmp/afk-grill-me-XXXXXX)
+CONTEXT_FILE="$CONTEXT_DIR/CONTEXT.md"
+```
 
-**Output:** topic confirmed.
+Use an appropriate non-interactive mechanism to write the approved context to `$CONTEXT_FILE`, then report its absolute path. Do not use the repository editing tools for this artifact.
 
-### Step 2 — Interview rounds (interactive, HITL)
-
-Use `AskQuestion` with structured `options`. Apply multi-select when
-multiple topics are simultaneously relevant (e.g. confirming Audience
-and Success criteria at once). Apply single-select when options are
-mutually exclusive. Options must not exceed 4.
-
-**Core topics (in order, all must be covered at minimum):**
-
-1. **Audience** — who will use this? Who will be affected?
-2. **Success criteria** — how do we know this is "done" and "right"?
-3. **Non-goals** — what is explicitly out of scope?
-4. **Hard constraints** — performance targets, security posture,
-   compliance requirements, budget limits.
-
-**Extended topics (add as relevant):**
-
-- Timeline / Milestones
-- Stakeholders / Decision-makers
-- Integration points
-- Data sensitivity
-- Failure handling
-- Rollback strategy
-- Monitoring / Observability requirements
-- Dependency constraints
-
-**Dive deep within each topic.** Follow up with "why", "what happens
-if", "who decides when", "what does failure look like" — until the
-answer space is genuinely exhausted.
-
-**Output:** all core topics covered with specific falsifiable answers.
-
-### Step 2.5 — Bounded Context Discovery
-
-Keep a running list of domain terms and flag any conflicts — these go
-into `CONTEXT.md`.
-
-**Output:** domain term list with conflict flags.
-
-### Step 3 — Draft summary (show only, NOT written)
-
-Show the full draft `CONTEXT.md` — Problem, Users, Success Criteria,
-Non-goals, Constraints, Open Questions. Nothing is written to disk yet.
-
-**Output:** draft CONTEXT.md shown.
-
-### Step 4 — Gate: explicit user confirmation (AskQuestion)
-
-Offer exactly four outcomes: Approve, Revise, Drill deeper, Add open question.
-
-**Output:** user decision.
-
-### Step 5 — Write to /tmp/ (only after Step 4 confirmation)
-
-Write to `/tmp/grill-me-context-<YYYYMMDD-HHMMSS>.md` using Bash (cat or tee).
-Do NOT use the Write tool — it requires reading the file first even for new paths.
-Never write to the repo working tree.
-
-**Output:** CONTEXT.md written to /tmp/.
-
-## Caveats
-
-- MUST NOT assume an unstated answer — ask.
-- MUST NOT write `CONTEXT.md` to the repo working tree — only to `/tmp/`.
-- MUST NOT skip the Step 4 gate even if the user seems satisfied.
-- MUST NOT use the Write tool for `/tmp/` output — use Bash (`cat >`, `tee`, or similar) instead. The Write tool requires a prior Read even for new file paths.
+> **Principle:** Ask until the requirements become testable, not until the questions run out.

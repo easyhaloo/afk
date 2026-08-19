@@ -1,8 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { CodexAppServerExecution } from '../../src/lib/agents/codex-app-server/execution';
-import { createStdioAppServerTransport } from '../../src/lib/agents/codex-app-server/transport';
-import type { AgentExecutionOptions, CodexRuntimeSelection } from '../../src/lib/agents/types';
+import { CodexAppServerExecution } from '../../src/domain/agents/codex-app-server/execution';
+import { createStdioAppServerTransport } from '../../src/domain/agents/codex-app-server/transport';
+import type { AgentExecutionOptions, CodexRuntimeSelection } from '../../src/domain/agents/types';
 
 const fixture = fileURLToPath(new URL('../fixtures/fake-codex-app-server.mjs', import.meta.url));
 const runtime: CodexRuntimeSelection = {

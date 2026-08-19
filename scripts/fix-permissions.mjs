@@ -1,12 +1,14 @@
 /**
  * fix-permissions.mjs
  *
- * Fixes node_modules ownership when installed by root or another user.
- * Runs automatically via postinstall, or manually: node scripts/fix-permissions.mjs
+ * Ensures node-pty's spawn helper is executable and, when installation was
+ * performed by another user, attempts to normalize node_modules ownership.
+ * The ownership fix is intentionally best-effort and never blocks CI.
  */
 import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 
 const nodeModules = path.resolve('node_modules');
 
@@ -38,27 +40,38 @@ function ensureNodePtyHelperExecutable() {
 
 ensureNodePtyHelperExecutable();
 
-const currentUser = process.env.SUDO_USER || process.env.USER || execSync('whoami', { encoding: 'utf-8' }).trim();
+if (process.platform === 'win32' || typeof process.getuid !== 'function') {
+  process.exit(0);
+}
+
+const currentUser = process.env.SUDO_USER || process.env.USER || os.userInfo().username;
+const currentGroup = (() => {
+  try {
+    return execSync('id -gn', { encoding: 'utf-8' }).trim();
+  } catch {
+    return undefined;
+  }
+})();
 
 try {
-  const result = execSync(`stat -f "%Su" "${nodeModules}" 2>/dev/null`, { encoding: 'utf-8' });
-  const owner = result.trim();
-
-  if (owner === currentUser) {
+  const ownerUid = fs.statSync(nodeModules).uid;
+  const currentUid = process.getuid();
+  if (ownerUid === currentUid) {
     console.log(`[fix-permissions] node_modules already owned by ${currentUser}`);
     process.exit(0);
   }
 
-  console.log(`[fix-permissions] Fixing ownership: ${owner} → ${currentUser}`);
+  if (!currentGroup) {
+    console.warn('[fix-permissions] Skipped: current group could not be determined');
+    process.exit(0);
+  }
 
-  // Only chown files/dirs owned by different user to avoid unnecessary operations
+  console.log(`[fix-permissions] Fixing ownership for ${nodeModules}`);
   execSync(
-    `find node_modules -not -user "${currentUser}" -exec chown -R "${currentUser}:staff" {} + 2>/dev/null || true`,
+    `find ${JSON.stringify(nodeModules)} -not -user ${JSON.stringify(currentUser)} -exec chown ${JSON.stringify(`${currentUser}:${currentGroup}`)} {} +`,
     { stdio: 'inherit' }
   );
-
   console.log('[fix-permissions] Done');
 } catch (err) {
-  // Silently ignore errors (e.g., no permission to chown system dirs)
   console.warn('[fix-permissions] Skipped:', err.message);
 }

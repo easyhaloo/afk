@@ -1,91 +1,54 @@
-# Browser Auth Runbook
+# Browser Authentication Runbook
 
-Two modes. Pick by environment:
+Authentication strategy must be selected from the target application's auth model, execution environment, and existing test infrastructure. This document describes implementation options; it does not prescribe one mode for local or CI execution.
 
-| Runs where | Mode | Setup |
-|------------|------|-------|
-| **Local dev** | `localhost-cdp` | One-time: launch a dedicated Chrome with `--remote-debugging-port=9222`, log in |
-| **CI** | `storage-state` | One-time: run setup project to generate `playwright/.auth/user.json` |
+## Select a Strategy
 
----
+Establish first:
 
-## localhost-cdp (local dev)
+- whether authentication is API-, browser-, token-, cookie-, or certificate-based
+- whether the environment is interactive
+- whether the repository already provides an auth fixture or setup project
+- whether session state can be safely persisted
+- whether the test identity and authorization scope are suitable
 
-The default for human-driven development. You start a Chrome once, log in
-to the sites you need, and leave it running on port 9222. Tests attach
-over CDP and reuse the live session — no per-run login.
+Prefer the existing repository-supported mechanism. Do not create a second authentication system unless the existing one cannot support the workflow.
 
-### One-time setup
+## CDP Session
 
-```bash
-# 1. Create a dedicated profile (NEVER point at the default personal profile)
-mkdir -p ~/.afk-browser-profile
+Use a dedicated local Chromium session only when interactive authentication is required and CDP is an appropriate repository-supported strategy.
 
-# 2. Launch Chrome with remote debugging
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-  --user-data-dir=$HOME/.afk-browser-profile \
-  --remote-debugging-port=9222 \
-  --no-first-run about:blank &
+A safe setup should:
 
-# 3. In the launched Chrome, log in to every site the tests need.
-#    Cookies / localStorage / sessionStorage / IndexedDB are persisted.
+1. Use a dedicated browser profile, never a personal profile.
+2. Bind the debugging endpoint to loopback.
+3. Keep the profile and endpoint out of version control.
+4. Authenticate manually in the dedicated session.
+5. Reuse the session only for tests that require it.
 
-# 4. Set the endpoint for the test runner
-export CDP_ENDPOINT=http://127.0.0.1:9222
-```
+The exact browser command, profile location, and endpoint must follow the target environment.
 
-### Re-authentication
+## Storage State
 
-Just re-login in the running Chrome. The next test run picks up the new
-session state automatically — no setup project to re-run.
+Use Playwright `storageState` when the repository and execution environment support scripted session reuse.
 
-### If Chrome is killed / restarted
+A setup project should:
 
-Re-run step 2 above. The profile (`~/.afk-browser-profile`) persists
-sessions across restarts, so you usually stay logged in.
+1. Perform the application's real authentication flow.
+2. Verify that authentication succeeded and the expected identity/scope is active.
+3. Persist the resulting state to a gitignored location.
+4. Load that state only for tests that require it.
 
-### Security
+The login endpoint, UI selectors, credential variable names, and state path must come from the target repository.
 
-- The CDP endpoint is a credential. Bind to loopback only (the default).
-- Never commit `CDP_ENDPOINT` or the profile directory.
+## Security
 
----
+- Never commit credentials, auth state, browser profiles, or debugging endpoints.
+- Use dedicated test identities with the minimum required permissions.
+- Do not expose CDP beyond loopback.
+- Do not weaken MFA or authorization controls to make tests pass.
+- Do not upload reusable credentials or auth state as unprotected artifacts.
 
-## storage-state (CI)
+## Verification
 
-For scripted environments with no interactive browser. Tests load a
-pre-generated auth state file.
-
-### One-time setup
-
-```bash
-# Run the setup project to generate the auth state file
-AUTH_STATE_FILE=playwright/.auth/user.json \
-TEST_EMAIL=your-test-email@example.com \
-TEST_PASSWORD=your-test-password \
-  npx playwright test --project=setup
-```
-
-The setup project calls the discovered login endpoint (or fills the UI
-login form), then writes the resulting cookies/localStorage to
-`playwright/.auth/user.json` (gitignored).
-
-### Re-authentication
-
-Delete the state file and re-run setup:
-
-```bash
-rm playwright/.auth/user.json
-npx playwright test --project=setup
-```
-
-Typical triggers for re-auth:
-- Auth tokens in the state file expired (e.g., short-lived JWT).
-- Login API contract changed.
-- Test identity was revoked.
-
-### Security
-
-- `playwright/.auth/user.json` is a credential. Keep it gitignored.
-- Use a dedicated test identity, never a personal account.
-- Never upload the state file as a CI artifact (or encrypt it first).
+Authentication is complete only when the test can establish the intended identity, authorization scope, and access to the required application state. A successful login response alone is insufficient.

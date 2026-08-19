@@ -124,7 +124,7 @@ export class ContainerSandbox implements Sandbox {
       'set +e',
       `"$@" < "$prompt" > '${outputInContainer}' 2> '${errorInContainer}'`,
       'code=$?',
-      `printf '%s\\n' "$code" > '${exitInContainer}'`,
+      `printf '%s\n' "$code" > '${exitInContainer}'`,
       'exit 0',
     ].join('; ');
     const argv = ['sh', '-c', script, 'afk-container-agent', promptInContainer, ...options.command.argv];

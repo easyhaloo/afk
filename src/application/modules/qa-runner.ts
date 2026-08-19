@@ -6,21 +6,24 @@ import { configureStatusline, logger } from '../../infrastructure/io/index';
 import { getWorkflowConfig } from '../../infrastructure/config/manager';
 import { TemplateLoader } from '../../domain/templates/loader';
 import { compileTemplate } from '../../domain/templates/compiler';
-import { createAgentProvider } from '../../domain/agents/index';
+import { createAgentProvider, resolveAgentProviderName } from '../../domain/agents/index';
 import { createSandboxProvider } from '../../infrastructure/sandbox/index';
-import type { AgentProvider, ExecutionMode } from '../../domain/agents/types';
+import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types';
 import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../../infrastructure/sandbox/types';
 import type { ManagementProviderBundle } from '../providers';
 import type { WorkflowConfig } from '../../infrastructure/config/manager';
-import type { BacklogItem } from '../../domain/backlog/index';
-import type { NewReworkRecord } from '../../domain/backlog/index';
+import type { BacklogItem, NewReworkRecord } from '../../domain/backlog/index';
 import { formatExecutionFailure } from '../workflow-engine';
 import { buildExecutionPrompt } from '../workflows/execution-protocol';
 import { TaskRuntimeManager } from '../runtime/task-runtime';
+import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata';
+
+type QAResultObject = { [key: string]: unknown };
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
   agentProvider?: AgentProvider;
+  agentRuntime?: AgentRuntimeSelection;
   tmux?: TmuxClient;
   executionMode?: ExecutionMode;
   projectRoot?: string;
@@ -32,9 +35,8 @@ export interface QARunnerDependencies {
  * QA worker for items in verification.
  *
  * QA owns the verification workflow, but not the execution transport. The
- * sandbox creates either a batch AgentExecution or an interactive tmux-backed
- * AgentExecution. This runner only builds the provider command, waits for the
- * typed result, and routes the backlog state.
+ * provider creates either a batch AgentExecution or an interactive tmux-backed
+ * AgentExecution. This runner waits for the typed result and routes backlog state.
  */
 export class QARunner {
   private readonly logDir: string;
@@ -42,6 +44,7 @@ export class QARunner {
   private readonly providers: ManagementProviderBundle;
   private readonly sandboxProvider: SandboxProvider;
   private readonly agentProvider: AgentProvider;
+  private readonly agentRuntime?: AgentRuntimeSelection;
   private readonly tmux?: TmuxClient;
   private readonly executionMode: ExecutionMode;
   private readonly projectRoot: string;
@@ -57,7 +60,8 @@ export class QARunner {
     this.mergeBranchOverride = deps.mergeBranch;
     this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
-    this.agentProvider = deps.agentProvider ?? createAgentProvider('claude-code');
+    this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
+    this.agentRuntime = deps.agentRuntime;
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }
 
@@ -119,19 +123,17 @@ export class QARunner {
       const description = backlog.description?.trim();
       const goal = `${qaStep.prompt.replaceAll('{iid}', id)}\n\nBacklog title: ${backlog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
       const prompt = buildExecutionPrompt(goal, this.executionMode, 'qa');
-      const command = this.agentProvider.buildCommand({
+      execution = await this.agentProvider.createExecution({
+        sandbox,
         worktreePath,
         sessionId: session,
-        executionMode: this.executionMode,
-      });
-      execution = await sandbox.startAgent({
-        command,
-        generation: 1,
         prompt,
         signalType: 'goal_complete',
+        generation: 1,
         executionMode: this.executionMode,
-        agentProvider: this.agentProvider,
+        runtime: this.agentRuntime,
       });
+      await this.heartbeatRuntime(runtimeRunId, runtimeFieldsFromExecution(execution.metadata));
       await this.heartbeatRuntime(runtimeRunId, { progress: 'QA agent running' });
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
@@ -286,6 +288,7 @@ export class QARunner {
         sandboxProvider: this.sandboxProvider.name,
         executionMode: this.executionMode,
         agentProvider: this.agentProvider.name,
+        ...runtimeFieldsFromSelection(this.agentProvider.name, this.agentRuntime),
         session: this.executionMode === 'interactive' ? session : undefined,
         branch: backlog.branchName,
         startedAt: now,
@@ -342,10 +345,6 @@ export class QARunner {
   }
 }
 
-interface CriteriaCandidate { id?: unknown; expected?: unknown; actual?: unknown }
-interface CheckCandidate { command?: unknown; expected?: unknown }
-interface QAResultCandidate { type?: unknown; kind?: unknown; result?: unknown; summary?: unknown; requiredChecks?: unknown; failedCriteria?: unknown }
-
 interface QAResult {
   type: 'goal_complete';
   kind: 'qa';
@@ -368,7 +367,7 @@ function parseCriteria(value: unknown): Array<{ id: string; expected: string; ac
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const criteria = value.map(entry => {
     if (!entry || typeof entry !== 'object') return undefined;
-    const item = entry as CriteriaCandidate;
+    const item = entry as QAResultObject;
     return nonEmptyString(item.id) && nonEmptyString(item.expected) && nonEmptyString(item.actual)
       ? { id: item.id, expected: item.expected, actual: item.actual }
       : undefined;
@@ -381,7 +380,7 @@ function parseRequiredChecks(value: unknown): Array<{ command: string; expected:
   if (!Array.isArray(value)) return undefined;
   const checks = value.map(entry => {
     if (!entry || typeof entry !== 'object') return undefined;
-    const item = entry as CheckCandidate;
+    const item = entry as QAResultObject;
     return nonEmptyString(item.command) && nonEmptyString(item.expected)
       ? { command: item.command, expected: item.expected }
       : undefined;
@@ -391,7 +390,7 @@ function parseRequiredChecks(value: unknown): Array<{ command: string; expected:
 
 function asQAResult(value: unknown): QAResult | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  const candidate = value as QAResultCandidate;
+  const candidate = value as QAResultObject;
   if (
     candidate.type !== 'goal_complete' || candidate.kind !== 'qa' || !nonEmptyString(candidate.summary) ||
     (candidate.result !== 'PASS' && candidate.result !== 'FAIL')

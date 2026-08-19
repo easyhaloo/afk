@@ -5,7 +5,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { createWorkflowProviders } from '../../application/tracker-provider-factory';
 import { LoopRunner } from '../../application/modules/loop-runner';
-import { getSchedulerConfig } from '../../infrastructure/config/manager';
+import { getSchedulerConfig, getWorkflowConfig } from '../../infrastructure/config/manager';
+import { resolveAgentProviderName } from '../../domain/agents/index';
 import { loadLoopConfig } from '../../application/loop/loop-config';
 import { logger, redirectStdioToLog, resolveLogPath } from '../../infrastructure/io';
 import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils';
@@ -18,6 +19,7 @@ import {
   isProcessAlive,
 } from '../../infrastructure/process/pid-file';
 import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options';
+import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options';
 
 const AFK_HOME = path.join(os.homedir(), '.afk');
 const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');
@@ -25,12 +27,14 @@ const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');
 export function registerLoopCommands(program: Command): void {
   const loop = program.command('loop').description('Continuous integration loop: poll → implement → QA → done, forever').usage('[command] [options]');
   addLoopStartOptions(loop);
+  addAgentRuntimeOptions(loop);
   loop.action(async (options: LoopStartOptions) => {
     try { await startLoop(options); } catch (error) { handleCommandError(error); }
   });
 
   const start = loop.command('start').description('Start the loop (foreground by default; -d runs in background)').usage('[options]');
   addLoopStartOptions(start);
+  addAgentRuntimeOptions(start);
   start.action(async (options: LoopStartOptions) => {
     try { await startLoop(options); } catch (error) { handleCommandError(error); }
   });
@@ -63,6 +67,9 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
   const pollIntervalMs = (options.pollInterval ?? schedulerConfig.pollInterval) * 1000;
   const statusIntervalMs = (options.statusInterval ?? 30) * 1000;
   const shutdownTimeoutMs = (options.shutdownTimeout ?? 300) * 1000;
+  const workflowConfig = getWorkflowConfig();
+  const agentProvider = resolveAgentProviderName(options.agent ?? workflowConfig.agentDefault);
+  const agentRuntime = resolveAgentRuntimeOptions(agentProvider, workflowConfig, options);
 
   const providers = await createWorkflowProviders(undefined, process.cwd());
   const runner = new LoopRunner(providers, {
@@ -75,9 +82,11 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
     extParams: options.extParam,
     moduleTriggers: loopConfig.moduleTriggers,
     providers,
+    agentProvider,
+    agentRuntime,
   });
 
-  printStartup(maxConcurrent, pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, loopConfig.moduleTriggers);
+  printStartup(maxConcurrent, pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, loopConfig.moduleTriggers, agentProvider);
   const shutdown = async (signal: string) => {
     warning(`Received ${signal}, draining in-flight work...`);
     try { await runner.stop(); } catch (error) { logger.error({ err: error }, 'error during loop shutdown'); }
@@ -90,13 +99,14 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
   process.exit(0);
 }
 
-function printStartup(maxConcurrent: number, pollIntervalMs: number, statusIntervalMs: number, shutdownTimeoutMs: number, maxIterations: number | undefined, moduleTriggers: Record<string, string[]>): void {
+function printStartup(maxConcurrent: number, pollIntervalMs: number, statusIntervalMs: number, shutdownTimeoutMs: number, maxIterations: number | undefined, moduleTriggers: Record<string, string[]>, agentProvider: string): void {
   console.log(chalk.bold('\n🔁 AFK Loop started\n'));
   console.log(chalk.gray('  Configuration:'));
   console.log(chalk.gray(`    max-concurrent:    ${maxConcurrent}`));
   console.log(chalk.gray(`    poll-interval:     ${pollIntervalMs / 1000}s`));
   console.log(chalk.gray(`    status-interval:   ${statusIntervalMs / 1000}s`));
   console.log(chalk.gray(`    shutdown-timeout:  ${shutdownTimeoutMs / 1000}s`));
+  console.log(chalk.gray(`    agent:             ${agentProvider}`));
   if (maxIterations !== undefined) console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
   if (Object.keys(moduleTriggers).length > 0) {
     const triggers = Object.entries(moduleTriggers).map(([trigger, modules]) => `${trigger}=${modules.join(',')}`).join('; ');

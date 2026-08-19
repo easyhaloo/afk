@@ -8,6 +8,13 @@ import { buildExecutionPrompt } from '../workflows/execution-protocol';
 import { fetchTasks } from '../../views/board/data/fetcher';
 import { TaskRuntimeManager, TaskRuntimeStore } from './task-runtime';
 
+class NoToolClaudeCodeProvider extends ClaudeCodeProvider {
+  override buildCommand(options: Parameters<ClaudeCodeProvider['buildCommand']>[0]) {
+    const command = super.buildCommand(options);
+    return { ...command, argv: [...command.argv, '--tools', ''] };
+  }
+}
+
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
@@ -39,7 +46,10 @@ describe.runIf(process.env.AFK_REAL_CLAUDE_E2E === '1')('task runtime monitor in
       heartbeatAt: now,
     });
 
-    const agent = new ClaudeCodeProvider();
+    // This smoke test exercises the real CLI and stream protocol only. The
+    // goal deliberately has no work to perform, so tool access is disabled to
+    // avoid unrelated host tool registration affecting completion.
+    const agent = new NoToolClaudeCodeProvider();
     const sandbox = await new LocalSandboxProvider().create({
       worktreePath: workspace,
       session: 'integration-session',
@@ -47,15 +57,16 @@ describe.runIf(process.env.AFK_REAL_CLAUDE_E2E === '1')('task runtime monitor in
     });
 
     try {
-      const execution = await sandbox.startAgent({
-        command: agent.buildCommand({ worktreePath: workspace, sessionId: 'integration-session', executionMode: 'batch' }),
+      const execution = await agent.createExecution({
+        sandbox,
+        worktreePath: workspace,
+        sessionId: 'integration-session',
         generation: 1,
         prompt: buildExecutionPrompt('/goal Do not use tools or modify files. Confirm that the isolated sandbox is available, then complete the task.', 'batch', 'task'),
         signalType: 'goal_complete',
         executionMode: 'batch',
-        agentProvider: agent,
       });
-      const result = await execution.waitForResult({ completionTimeoutMs: 30_000 });
+      const result = await execution.waitForResult({ completionTimeoutMs: 90_000 });
       const output = await execution.captureOutput();
       await manager.writeDiagnostics(runId, { result, output });
       await manager.heartbeat(runId, { progress: 'agent completed' });
@@ -76,5 +87,5 @@ describe.runIf(process.env.AFK_REAL_CLAUDE_E2E === '1')('task runtime monitor in
     } finally {
       await sandbox.close();
     }
-  });
+  }, 120_000);
 });

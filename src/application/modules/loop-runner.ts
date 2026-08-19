@@ -7,6 +7,9 @@ import { getWorkflowConfig } from '../../infrastructure/config/manager';
 import { logger } from '../../infrastructure/io/index';
 import type { ManagementProviderBundle, ProviderBundle } from '../providers';
 import { ManagementBacklogProvider } from '../../domain/backlog/management-provider';
+import { prepareAgentRuntime, resolveAgentProviderName, resolveCodexRuntime } from '../../domain/agents/index';
+import type { AgentProviderName, AgentRuntimeSelection } from '../../domain/agents/types';
+import type { CodexReadinessProbe } from '../../domain/agents/codex-runtime';
 
 export interface LoopRunnerOptions {
   /** Max simultaneous implement chains (WorkflowRunner instances). */
@@ -19,10 +22,12 @@ export interface LoopRunnerOptions {
   shutdownTimeoutMs: number;
   /** If set, the runner stops itself after this many successful completions. */
   maxIterations?: number;
+  /** Optional exact backlog scope for bounded runs such as real E2E verification. */
+  backlogIds?: readonly string[];
   /** Factory for WorkflowRunner — overridable for tests. */
-  workflowRunnerFactory?: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig) => WorkflowRunner;
+  workflowRunnerFactory?: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
   /** Factory for QARunner — overridable for tests. */
-  qaRunnerFactory?: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig) => QARunner;
+  qaRunnerFactory?: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => QARunner;
   /** Where to write this process's pid (so `afk loop stop` can find it). */
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
@@ -40,6 +45,12 @@ export interface LoopRunnerOptions {
   moduleTriggers?: Record<string, string[]>;
   /** Canonical providers for backlog-aware execution. */
   providers: ProviderBundle;
+  /** Agent provider shared by implementation and QA for each chain. */
+  agentProvider?: AgentProviderName;
+  /** Immutable runtime shared by implementation and QA. */
+  agentRuntime?: AgentRuntimeSelection;
+  /** Readiness seam used before the first provider/backlog operation. */
+  readinessProbe?: CodexReadinessProbe;
 }
 
 export interface ChainContext {
@@ -54,6 +65,7 @@ export interface LoopStatus {
   totals: { completed: number; failed: number; started: number };
   uptimeMs: number;
   lastError: Record<string, string>;
+  infrastructureError?: string;
 }
 
 interface InternalOptions {
@@ -62,14 +74,18 @@ interface InternalOptions {
   statusIntervalMs: number;
   shutdownTimeoutMs: number;
   maxIterations: number | undefined;
-  workflowRunnerFactory: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig) => WorkflowRunner;
-  qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig) => QARunner;
+  backlogIds: ReadonlySet<string> | undefined;
+  workflowRunnerFactory: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
+  qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => QARunner;
   pidFilePath: string;
   statusFilePath: string;
   ext: string[] | undefined;
   extParams: string[] | undefined;
   moduleTriggers: Record<string, string[]>;
   providers: ProviderBundle;
+  agentProvider: AgentProviderName;
+  agentRuntime: AgentRuntimeSelection;
+  readinessProbe?: CodexReadinessProbe;
 }
 
 const DEFAULTS = {
@@ -119,6 +135,7 @@ export class LoopRunner {
   private started = 0;
   private lastError = new Map<string, string>();
   private startTime = 0;
+  private infrastructureError?: string;
 
   // Lifecycle
   private running = false;
@@ -130,6 +147,11 @@ export class LoopRunner {
   private statusTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly providers: ProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
+    const workflowConfig = getWorkflowConfig();
+    const agentProvider = resolveAgentProviderName(options.agentProvider ?? workflowConfig.agentDefault);
+    const agentRuntime = options.agentRuntime ?? (agentProvider === 'codex'
+      ? resolveCodexRuntime({ cli: {}, config: workflowConfig.agents.codex })
+      : { kind: 'default' });
     this.managementProviders = {
       backlog: new ManagementBacklogProvider(providers.backlog),
       branches: providers.branches,
@@ -141,14 +163,18 @@ export class LoopRunner {
       statusIntervalMs: options.statusIntervalMs ?? DEFAULTS.statusIntervalMs,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULTS.shutdownTimeoutMs,
       maxIterations: options.maxIterations,
-      workflowRunnerFactory: options.workflowRunnerFactory ?? ((p, cfg) => new WorkflowRunner(p, { config: cfg })),
-      qaRunnerFactory: options.qaRunnerFactory ?? ((p, cfg) => new QARunner(p, cfg)),
+      backlogIds: options.backlogIds ? new Set(options.backlogIds.map(String)) : undefined,
+      workflowRunnerFactory: options.workflowRunnerFactory ?? ((p, cfg, runtime) => new WorkflowRunner(p, { config: cfg, agentRuntime: runtime })),
+      qaRunnerFactory: options.qaRunnerFactory ?? ((p, cfg, runtime) => new QARunner(p, cfg, { agentRuntime: runtime })),
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
       statusFilePath: options.statusFilePath ?? DEFAULTS.statusFilePath,
       ext: options.ext,
       extParams: options.extParams,
       moduleTriggers: options.moduleTriggers ?? {},
       providers: this.providers,
+      agentProvider,
+      agentRuntime,
+      readinessProbe: options.readinessProbe,
     };
   }
 
@@ -159,6 +185,14 @@ export class LoopRunner {
   async start(): Promise<void> {
     if (this.running) {
       throw new Error('LoopRunner already started');
+    }
+    this.infrastructureError = undefined;
+    try {
+      this.opts.agentRuntime = await prepareAgentRuntime(this.opts.agentRuntime, this.opts.readinessProbe);
+    } catch (error) {
+      this.infrastructureError = (error as Error).message;
+      logger.error({ error: this.infrastructureError }, 'loop agent readiness failed');
+      throw error;
     }
     this.running = true;
     this.startTime = Date.now();
@@ -255,6 +289,7 @@ export class LoopRunner {
       },
       uptimeMs: this.startTime ? Date.now() - this.startTime : 0,
       lastError: Object.fromEntries(this.lastError),
+      ...(this.infrastructureError ? { infrastructureError: this.infrastructureError } : {}),
     };
   }
 
@@ -298,9 +333,9 @@ export class LoopRunner {
         this.providers.backlog.list({ state: 'ready', executionMode: 'afk' }),
         this.providers.backlog.list({ state: 'rework', executionMode: 'afk' }),
       ]);
-      const issues = [...readyIssues, ...reworkIssues].filter((issue, index, all) =>
-        all.findIndex(candidate => candidate.id === issue.id) === index,
-      );
+      const issues = [...readyIssues, ...reworkIssues]
+        .filter((issue, index, all) => all.findIndex(candidate => candidate.id === issue.id) === index)
+        .filter(issue => !this.opts.backlogIds || this.opts.backlogIds.has(String(issue.id)));
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;
@@ -361,7 +396,8 @@ export class LoopRunner {
     try {
       const resolvedExt = await this.resolveModules(iid);
       logger.info({ iid, resolvedExt }, 'modules resolved');
-      const runner = this.opts.workflowRunnerFactory(this.providers, getWorkflowConfig());
+      const config = { ...getWorkflowConfig(), agentDefault: this.opts.agentProvider };
+      const runner = this.opts.workflowRunnerFactory(this.providers, config, this.opts.agentRuntime);
       const result = await runner.run({
         session,
         projectName,
@@ -371,6 +407,7 @@ export class LoopRunner {
         extParams: this.opts.extParams,
         backlogId: String(iid),
         executionMode: 'batch',
+        agentProvider: this.opts.agentProvider,
       });
       logger.info({ iid, success: result.success, url: result.url }, 'WorkflowRunner.run returned');
 
@@ -499,7 +536,10 @@ export class LoopRunner {
     logger.info({ iid, session: ctx.session }, 'qa chain starting');
 
     try {
-      const qa = this.opts.qaRunnerFactory(this.managementProviders, getWorkflowConfig());
+      const qa = this.opts.qaRunnerFactory(this.managementProviders, {
+        ...getWorkflowConfig(),
+        agentDefault: this.opts.agentProvider,
+      }, this.opts.agentRuntime);
       const result = await qa.process(iid);
       const elapsed = formatDuration(Date.now() - ctx.startedAt);
 

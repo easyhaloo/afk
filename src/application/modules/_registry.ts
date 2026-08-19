@@ -1,5 +1,5 @@
 /**
- * Module registry — auto-discovers modules from src/lib/modules/ and
+ * Module registry — auto-discovers modules from src/application/modules/ and
  * resolves the active set from CLI flags, config file, or env var.
  *
  * Priority (highest wins):

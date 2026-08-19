@@ -1,4 +1,5 @@
 import type { ExecutionMode } from '../../domain/agents/types';
+export { extractGoalComplete } from '../../shared/goal-complete';
 
 type JsonObject = Record<string, string | number | boolean | null | object>;
 
@@ -43,12 +44,15 @@ export function isAcVerificationPass(value: unknown): boolean {
 }
 
 export function buildBatchPrompt(prompt: string, kind: CompletionKind = 'task'): string {
+  // `/goal` is an interactive Claude command. Batch execution receives the
+  // same AFK prompt syntax, but must pass the goal as ordinary prompt text.
+  const batchGoal = prompt.trim().replace(/^\/goal\s*/i, '').trim();
   const payload = kind === 'qa'
     ? '{"type":"goal_complete","kind":"qa","result":"PASS|FAIL","summary":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}],"requiredChecks":[{"command":"...","expected":"..."}]}'
     : kind === 'ac'
       ? '{"type":"goal_complete","kind":"ac_verification","result":"PASS|FAIL","summary":"...","failedCriteria":[{"id":"...","expected":"...","actual":"..."}]}'
       : '{"type":"goal_complete","kind":"task","summary":"..."}';
-  return `${prompt.trim()}\n\nAFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish. When the task is complete, keep the work performed above and finish your response with exactly one machine-readable line in this format:\n<goal_complete>${payload}</goal_complete>\nThe marker must be valid JSON. Do not omit the marker.`;
+  return `AFK batch goal:\n${batchGoal}\n\nAFK batch completion protocol:\nWork only on the current checked-out branch. Do not switch branches or reset the branch. When running JavaScript tests, use a one-shot command such as \`pnpm vitest run\`; never use \`pnpm test\`, \`npm test\`, or bare \`vitest\`, because they may start watch mode and never finish. When the task is complete, keep the work performed above and finish your response with exactly one machine-readable line in this format:\n<goal_complete>${payload}</goal_complete>\nThe marker must be valid JSON. Do not omit the marker.`;
 }
 
 export function buildInteractivePrompt(prompt: string, kind: CompletionKind = 'task'): string {

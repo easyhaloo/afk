@@ -18,7 +18,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { WorktreeManager } from '../../git/index';
 import { TmuxClient } from '../../tmux/tmux';
-import { clearSignal, getTokenUsage, readSignal } from '../../io';
+import { clearSignal, getTokenUsage, readSignal } from '../../io/index';
 import { StreamingAgentExecution } from './streaming';
 import {
   type SandboxProvider,
@@ -36,7 +36,7 @@ import {
   type IsolationLevel,
   type WorktreeInfo,
 } from '../types';
-import type { AgentCommand, SessionSnapshot } from '../../../domain/agents/types';
+import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',
@@ -93,7 +93,8 @@ export class LocalSandbox implements Sandbox {
         signalType: options.signalType,
         worktreePath: this.worktreePath,
         sessionId: this.sessionName,
-        agentProvider: options.agentProvider,
+        metadata: options.metadata,
+        parseLine: options.parseLine,
       });
       execution.start();
       return execution;
@@ -120,6 +121,7 @@ export class LocalSandbox implements Sandbox {
       generation: options.generation,
       prompt: options.prompt,
       signalType: options.signalType,
+      metadata: options.metadata,
       tmux: this.tmux,
     });
     await execution.sendPrompt();
@@ -152,6 +154,7 @@ export class LocalSandbox implements Sandbox {
 export class LocalAgentExecution implements AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
+  readonly metadata: AgentExecutionMetadata;
   private readonly worktreePath: string;
   private readonly sessionName: string;
   private readonly tmux: TmuxClient;
@@ -168,6 +171,7 @@ export class LocalAgentExecution implements AgentExecution {
     generation: number;
     prompt: string;
     signalType: 'goal_complete';
+    metadata: AgentExecutionMetadata;
     tmux: TmuxClient;
   }) {
     this.id = randomUUID();
@@ -178,6 +182,7 @@ export class LocalAgentExecution implements AgentExecution {
     this.prompt = opts.prompt;
     this.signalType = opts.signalType;
     this.sessionId = opts.sessionName;
+    this.metadata = opts.metadata;
   }
 
   /** Send the goal to the tmux session — called by LocalSandbox.startAgent(). */

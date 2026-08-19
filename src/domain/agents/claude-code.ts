@@ -7,7 +7,6 @@
  */
 
 import type {
-  AgentProvider,
   AgentProviderName,
   AgentCapability,
   AgentCommand,
@@ -19,6 +18,7 @@ import type {
   CaptureSessionOptions,
   RestoreSessionOptions,
 } from './types';
+import { ProcessAgentProvider } from './process-provider';
 
 /** Claude Code capabilities */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
@@ -29,7 +29,7 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
   'interactive',
 ]);
 
-export class ClaudeCodeProvider implements AgentProvider {
+export class ClaudeCodeProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'claude-code';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
 

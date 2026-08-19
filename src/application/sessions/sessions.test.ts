@@ -243,6 +243,10 @@ describe('RunStateWriter', () => {
       iid: 42,
       generation: 1,
       provider: 'claude-code',
+      agentTransport: 'app-server',
+      agentAuth: 'chatgpt',
+      agentModelProvider: 'openai',
+      agentThreadId: 'thread-42',
       worktreePath: wtPath,
       goalText: 'do something',
       signalType: 'goal_complete',
@@ -259,6 +263,9 @@ describe('RunStateWriter', () => {
 
     const dir = path.join(wtPath, '.afk', 'runs', 'issue-42-gen-1');
     expect(fs.existsSync(path.join(dir, 'request.json'))).toBe(true);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'request.json'), 'utf8'))).toMatchObject({
+      agentTransport: 'app-server', agentAuth: 'chatgpt', agentModelProvider: 'openai', agentThreadId: 'thread-42',
+    });
     expect(fs.existsSync(path.join(dir, 'result.json'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'result.json.sha256'))).toBe(true);
     expect(fs.existsSync(path.join(dir, 'output.log'))).toBe(true);

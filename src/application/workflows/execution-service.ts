@@ -1,4 +1,4 @@
-import type { AgentProvider, ExecutionMode } from '../../domain/agents/types';
+import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types';
 import type { ExecutionResult, Sandbox } from '../../infrastructure/sandbox/types';
 import { RunStateWriter } from '../sessions/run-state';
 
@@ -10,6 +10,7 @@ export interface AgentStepExecutionRequest {
   signalType: 'goal_complete';
   sessionId?: string;
   executionMode?: ExecutionMode;
+  runtime?: AgentRuntimeSelection;
   generation: number;
   maxRetries: number;
   completionTimeoutMs: number;
@@ -24,20 +25,16 @@ export class AgentExecutionService {
     let result: ExecutionResult | undefined;
     do {
       const sessionId = request.sessionId ?? `afk-${request.iid ?? 'run'}-${request.generation}-${attempt}`;
-      const command = request.provider.buildCommand({
+      const execution = await request.provider.createExecution({
+        sandbox: request.sandbox,
         worktreePath: request.worktreePath,
         sessionId,
-        goal: request.prompt,
-        interactive: request.executionMode !== 'batch',
-        executionMode: request.executionMode,
-      });
-      const execution = await request.sandbox.startAgent({
-        command,
-        generation: request.generation + attempt,
         prompt: request.prompt,
         signalType: request.signalType,
+        generation: request.generation + attempt,
+        interactive: request.executionMode !== 'batch',
         executionMode: request.executionMode,
-        agentProvider: request.provider,
+        runtime: request.runtime,
       });
       const writer = new RunStateWriter(request.worktreePath, execution.id);
       await writer.init();
@@ -45,6 +42,10 @@ export class AgentExecutionService {
         runId: execution.id, iid: request.iid ?? 0, generation: request.generation + attempt,
         provider: request.provider.name, worktreePath: request.worktreePath, goalText: request.prompt,
         signalType: request.signalType, startedAt: new Date().toISOString(),
+        agentTransport: execution.metadata.transport,
+        agentAuth: execution.metadata.auth,
+        agentModelProvider: execution.metadata.modelProvider,
+        agentThreadId: execution.metadata.threadId,
       });
       result = await execution.waitForResult({
         completionTimeoutMs: request.completionTimeoutMs,

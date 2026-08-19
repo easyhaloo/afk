@@ -1,6 +1,7 @@
 import { Command, InvalidArgumentError } from 'commander';
+import type { AgentRuntimeCommandOptions } from './agent-runtime-options';
 
-export interface LoopStartOptions {
+export interface LoopStartOptions extends AgentRuntimeCommandOptions {
   daemon?: boolean;
   maxConcurrent?: number;
   pollInterval?: number;
@@ -9,6 +10,7 @@ export interface LoopStartOptions {
   maxIterations?: number;
   ext?: string[];
   extParam?: string[];
+  agent?: string;
 }
 
 interface LoopOptionDefinition {
@@ -26,6 +28,7 @@ export const LOOP_START_OPTIONS: readonly LoopOptionDefinition[] = [
   { flags: '-m, --max-iterations <n>', description: 'Stop after N successful completions (testing)', numeric: true },
   { flags: '--ext <modules...>', description: 'Lifecycle modules to activate (e.g., isolate)' },
   { flags: '--ext-param <params...>', description: 'Module parameters (e.g., isolate.auto=true)' },
+  { flags: '--agent <name>', description: 'Agent provider' },
 ];
 
 export function parsePositiveInt(value: string, _previous: number | undefined): number {

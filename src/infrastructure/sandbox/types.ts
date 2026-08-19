@@ -7,7 +7,21 @@
  * (AgentProvider) and "what workflow steps run" (WorkflowTemplate).
  */
 
-import type { AgentCommand, AgentEvent, SessionSnapshot, TokenUsage, ExecutionMode, AgentProvider } from '../../domain/agents/types';
+import type {
+  AgentExecution,
+  AgentExecutionHost,
+  AgentStartOptions,
+  ExecutionMode,
+} from '../../domain/agents/types';
+export type {
+  AgentExecution,
+  AgentStartOptions,
+  CaptureOptions,
+  ExecutionEvent,
+  ExecutionResult,
+  InterruptReason,
+  ResumeOptions,
+} from '../../domain/agents/types';
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
@@ -43,7 +57,7 @@ export interface SandboxOptions {
 }
 
 /** A started sandbox — can create AgentExecutions. */
-export interface Sandbox {
+export interface Sandbox extends AgentExecutionHost {
   readonly id: string;
   readonly worktreePath: string;
   readonly workspacePath: string;
@@ -59,126 +73,6 @@ export interface Sandbox {
    * Idempotent — safe to call multiple times.
    */
   close(): Promise<void>;
-}
-
-/** Options for Sandbox.startAgent() */
-export interface AgentStartOptions {
-  /** Pre-built agent command from AgentProvider. */
-  command: AgentCommand;
-  /** Generation index for this execution (1 = first generation). */
-  generation: number;
-  /** Goal/prompt text to send to the agent. */
-  prompt: string;
-  /** Completion signal shared by all automated agent steps. */
-  signalType: 'goal_complete';
-  /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
-  executionMode?: ExecutionMode;
-  /**
-   * Agent provider instance for batch mode event parsing.
-   * Required when executionMode is 'batch'.
-   */
-  agentProvider?: AgentProvider;
-}
-
-/** Reason for an interrupt — determines graceful vs. forced termination. */
-export type InterruptReason =
-  | 'context-high'   // Token threshold reached, handing off
-  | 'timeout'         // Hard timeout reached
-  | 'manual'          // User or runner manually interrupted
-  | 'error';         // Agent or sandbox error requiring restart */
-
-/**
- * A running or completed agent execution inside a Sandbox.
- *
- * interrupt() and kill() are distinct:
- *   interrupt = graceful stop, session preserved for resume/handoff
- *   kill     = forced termination, session may be lost
- */
-export interface AgentExecution {
-  readonly id: string;
-  readonly sessionId?: string;
-
-  /**
-   * Wait for the next event from this execution.
-   * Returns null when the execution has ended.
-   */
-  waitForEvent(): Promise<ExecutionEvent | null>;
-
-  /**
-   * Wait for the final result of this execution.
-   * Resolves when the agent completes, errors, or is interrupted.
-   */
-  waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
-
-  /**
-   * Gracefully interrupt the agent — send Ctrl-C equivalent.
-   * Preserves session state for resume or handoff.
-   * After interrupt(), waitForResult() will resolve.
-   */
-  interrupt(reason: InterruptReason): Promise<void>;
-
-  /**
-   * Forcibly terminate the agent process.
-   * Session state is NOT preserved.
-   * After kill(), waitForResult() will resolve.
-   */
-  kill(): Promise<void>;
-
-  /**
-   * Capture current pane output as a string.
-   */
-  captureOutput(options?: CaptureOptions): Promise<string>;
-
-  /**
-   * Capture the session snapshot for resume or handoff.
-   * Returns undefined if the provider doesn't support session capture.
-   */
-  captureSession(): Promise<SessionSnapshot | undefined>;
-
-  /**
-   * Resume this execution from a captured session snapshot.
-   * Starts a new AgentExecution with the restored session.
-   */
-  resume(options: ResumeOptions): Promise<AgentExecution>;
-}
-
-/** Event emitted by an AgentExecution. */
-export type ExecutionEvent =
-  | { type: 'text'; text: string }
-  | { type: 'usage'; usage: TokenUsage }
-  | { type: 'error'; error: Error }
-  | { type: 'interrupt-acked' }
-  | { type: 'killed' };
-
-/** Final result of an AgentExecution. */
-export interface ExecutionResult {
-  version: 1;
-  runId: string;
-  status: 'completed' | 'blocked' | 'failed' | 'aborted' | 'timed_out' | 'context_high';
-  provider: string;
-  sessionId?: string;
-  exitCode?: number;
-  /** Provider-native structured output (e.g., signal type, parsed result). */
-  structuredOutput?: unknown;
-  usage?: TokenUsage;
-  /** Commit SHAs created during this execution. */
-  commits: string[];
-  branch?: string;
-  error?: {
-    code: string;
-    message: string;
-  };
-}
-
-/** Options for AgentExecution.captureOutput() */
-export interface CaptureOptions {
-  lines?: number;
-  history?: number;
-}
-
-/** Options for AgentExecution.resume() */
-export interface ResumeOptions {
-  snapshot: SessionSnapshot;
 }
 
 /** Minimal worktree info returned by createWorktree — avoids circular dep with core/git/worktree. */

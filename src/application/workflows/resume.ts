@@ -11,7 +11,7 @@
  * effects on the caller's shared `budget` object — this mirrors the original
  * behavior and is the only reasonable interface given the loop's local bindings.
  */
-import type { AgentProvider, SessionSnapshot, ExecutionMode } from '../../domain/agents/types';
+import type { AgentProvider, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../../domain/agents/types';
 import type { Sandbox, AgentExecution, ExecutionResult } from '../../infrastructure/sandbox/types';
 import type { SessionStoreChain } from '../sessions/types';
 import { logger } from '../../infrastructure/io/index';
@@ -31,6 +31,7 @@ export interface ResumeContext {
   triggerTokens: number;
   /** Execution mode for the resumed execution. */
   executionMode?: ExecutionMode;
+  runtime?: AgentRuntimeSelection;
 }
 
 export type ResumeOutcome =
@@ -95,17 +96,15 @@ export async function attemptNativeResume(
 
   let resumed: AgentExecution;
   try {
-    resumed = await sandbox.startAgent({
-      command: agentProvider.buildCommand({
-        worktreePath: ctx.wtPath,
-        sessionId: ctx.session,
-        executionMode: ctx.executionMode,
-      }),
+    resumed = await agentProvider.createExecution({
+      sandbox,
+      worktreePath: ctx.wtPath,
+      sessionId: ctx.session,
       generation: ctx.generation,
       prompt: ctx.prompt,
       signalType: ctx.signalType,
       executionMode: ctx.executionMode,
-      agentProvider,
+      runtime: ctx.runtime,
     });
   } catch (err) {
     logger.info({ iid: ctx.iid, runId: ctx.runId, err: err instanceof Error ? err.message : err }, 'native resume: startAgent failed; falling through to coordinator');

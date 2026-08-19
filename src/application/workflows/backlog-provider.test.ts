@@ -37,11 +37,65 @@ function claimed(itemToClaim = item): { claim: BacklogClaim; release: ReturnType
 }
 
 function runner(bundle: ProviderBundle): WorkflowRunner {
-  const agent = { name: 'claude-code', capabilities: new Set(), buildCommand: () => ({ argv: ['echo'], env: {} }) } as unknown as AgentProvider;
+  const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
   return new WorkflowRunner(bundle, { agentProvider: agent });
 }
 
 describe('WorkflowRunner backlog provider mode', () => {
+  it('runs a phase through a provider that exposes only createExecution', async () => {
+    const bundle = providers(vi.fn(async () => null));
+    const runtime = {
+      kind: 'codex', transport: 'exec', auth: 'chatgpt', provider: 'openai', startupTimeoutMs: 5_000,
+    } as const;
+    const execution = {
+      id: 'execution-42',
+      metadata: { provider: 'codex', transport: 'exec' },
+      waitForResult: vi.fn(async () => ({
+        version: 1, runId: 'execution-42', status: 'completed', provider: 'batch',
+        structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' }, commits: [],
+      })),
+      waitForEvent: vi.fn(async () => null), interrupt: vi.fn(), kill: vi.fn(),
+      captureOutput: vi.fn(async () => ''), captureSession: vi.fn(async () => undefined), resume: vi.fn(),
+    };
+    const createExecution = vi.fn(async () => execution);
+    const agent = { name: 'codex', capabilities: new Set(), createExecution } as unknown as AgentProvider;
+    const sandbox = { id: 'sandbox-42' };
+    const subject = new WorkflowRunner(bundle, { agentProvider: agent, agentRuntime: runtime }) as any;
+    subject.heartbeatRuntime = vi.fn(async () => {});
+    subject.writeRuntimeDiagnostics = vi.fn(async () => {});
+
+    await expect(subject.runPhase({
+      iid: 42,
+      session: 'session-42',
+      wtPath: '/tmp/worktree-42',
+      hardTimeoutMs: 1_000,
+      completionTimeoutMs: 2_000,
+      contextHighTokens: 3_000,
+      budget: { used: 0 },
+      prompt: 'implement backlog 42',
+      signalType: 'goal_complete',
+      executionMode: 'batch',
+      agentProvider: agent,
+      runtime,
+      sandbox,
+      completionKind: 'task',
+    })).resolves.toMatchObject({ completed: true });
+
+    expect(createExecution).toHaveBeenCalledWith({
+      sandbox,
+      worktreePath: '/tmp/worktree-42',
+      sessionId: 'session-42',
+      prompt: expect.stringContaining('implement backlog 42'),
+      signalType: 'goal_complete',
+      generation: 1,
+      executionMode: 'batch',
+      runtime,
+    });
+    expect(subject.heartbeatRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      agentTransport: 'exec',
+    }));
+  });
+
   it('does not create a change request before QA verification', async () => {
     const { claim } = claimed();
     const bundle = providers(vi.fn(async () => claim));
@@ -223,7 +277,7 @@ describe('WorkflowRunner backlog provider mode', () => {
       heartbeat: vi.fn(async () => ({})),
       finish: vi.fn(async () => ({})),
     };
-    const agent = { name: 'claude-code', capabilities: new Set(), buildCommand: () => ({ argv: ['echo'], env: {} }) } as unknown as AgentProvider;
+    const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
     const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any }) as any;
     subject.runBody = vi.fn(async () => ({ success: false }));
 
@@ -264,7 +318,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     const { claim } = claimed();
     const bundle = providers(vi.fn(async () => claim));
     const runtime = { start: vi.fn(async () => {}), heartbeat: vi.fn(async () => ({})), finish: vi.fn(async () => ({})) };
-    const agent = { name: 'claude-code', capabilities: new Set(), buildCommand: () => ({ argv: ['echo'], env: {} }) } as unknown as AgentProvider;
+    const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
     const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any }) as any;
     subject.sandboxProviderByName = vi.fn(() => { throw new Error('sandbox setup failed'); });
 

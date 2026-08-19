@@ -29,4 +29,28 @@ describe('resolveWorkflowRequest', () => {
   it('rejects invalid execution modes', () => {
     expect(() => resolveWorkflowRequest({ backlogId: '42', executionMode: 'stream' as any }, {} as any)).toThrow(/execution-mode/);
   });
+
+  it('accepts registered provider names and rejects removed aliases', () => {
+    expect(resolveWorkflowRequest({ backlogId: '42', agentProvider: 'codex' }, {})).toMatchObject({
+      provider: 'codex',
+      agentProvider: 'codex',
+    });
+    expect(() => resolveWorkflowRequest({ backlogId: '42', agentProvider: 'claude' as any }, {})).toThrow(/agent provider/);
+  });
+
+  it('resolves one immutable Codex runtime selection', () => {
+    const agentRuntime = {
+      kind: 'codex', transport: 'app-server', auth: 'chatgpt', provider: 'openai',
+      endpoint: 'stdio://', startupTimeoutMs: 10_000,
+    } as const;
+    const request = resolveWorkflowRequest({ backlogId: '42', agentProvider: 'codex', agentRuntime }, {});
+
+    expect(request.agentRuntime).toBe(agentRuntime);
+  });
+
+  it('uses the provider-neutral default runtime for non-Codex agents', () => {
+    expect(resolveWorkflowRequest({ backlogId: '42', agentProvider: 'claude-code' }, {})).toMatchObject({
+      agentRuntime: { kind: 'default' },
+    });
+  });
 });

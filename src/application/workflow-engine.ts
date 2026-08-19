@@ -12,7 +12,7 @@ import type {
   AgentExecution,
   ExecutionResult,
 } from '../infrastructure/sandbox/types';
-import type { AgentProvider, AgentProviderName, SessionSnapshot, ExecutionMode } from '../domain/agents/types';
+import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types';
 import { getTokenUsage, configureStatusline, logger } from '../infrastructure/io/index';
 import { getWorkflowConfig } from '../infrastructure/config/manager';
 import { loadModules, parseModuleParams } from './modules/_registry';
@@ -43,6 +43,7 @@ import type { BranchHandle } from '../domain/branches/types';
 import type { ProviderBundle } from './providers';
 import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index';
 import { TaskRuntimeManager } from './runtime/task-runtime';
+import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata';
 
 /**
  * Preserve the provider boundary details when an agent execution fails.
@@ -175,6 +176,8 @@ export interface RunnerDependencies {
   sandboxProvider?: SandboxProvider;
   /** Agent provider (tests). Defaults to ClaudeCodeProvider. */
   agentProvider?: AgentProvider;
+  /** Immutable runtime selection resolved by the caller. */
+  agentRuntime?: AgentRuntimeSelection;
   /** Session store chain (tests / future). Defaults to defaultSessionStoreChain. */
   sessionStoreChain?: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
   /** Workflow config: all timeout and budget values. Defaults to getWorkflowConfig(). */
@@ -241,6 +244,7 @@ export class WorkflowRunner {
   private coordinator: HandoffCoordinator;
   private sandboxProvider: SandboxProvider;
   private agentProvider: AgentProvider;
+  private readonly agentRuntime?: AgentRuntimeSelection;
   /** Session store chain factory — defaults to defaultSessionStoreChain. */
   private sessionStoreChainFactory: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
   /** Resolved sandbox provider name (set in run()). */
@@ -314,6 +318,7 @@ export class WorkflowRunner {
     this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: this.worktree });
     this.agentProviderInjected = deps?.agentProvider !== undefined;
     this.agentProvider = deps?.agentProvider ?? createAgentProvider(this.agentProviderName);
+    this.agentRuntime = deps?.agentRuntime;
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
     this.runtimeManager = deps?.runtimeManager ?? new TaskRuntimeManager();
@@ -602,6 +607,7 @@ export class WorkflowRunner {
         signalType,
         executionMode: ctx.executionMode ?? 'batch',
         agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
+        runtime: this.agentRuntime,
         sandbox,
         completionKind,
       });
@@ -911,6 +917,7 @@ export class WorkflowRunner {
     signalType: 'goal_complete';
     executionMode?: ExecutionMode;
     agentProvider?: AgentProvider;
+    runtime?: AgentRuntimeSelection;
     sandbox?: Sandbox;
     completionKind: CompletionKind;
   }): Promise<PhaseResult> {
@@ -925,19 +932,17 @@ export class WorkflowRunner {
 
       const agentProvider = p.agentProvider ?? this.agentProvider;
       const sandbox = p.sandbox ?? this.sandbox!;
-      const command = agentProvider.buildCommand({
+      let execution = await agentProvider.createExecution({
+        sandbox,
         worktreePath: p.wtPath,
         sessionId: p.session,
-        executionMode: p.executionMode,
-      });
-      let execution = await sandbox.startAgent({
-        command,
-        generation: p.budget.used + 1,
         prompt,
         signalType: p.signalType,
+        generation: p.budget.used + 1,
         executionMode: p.executionMode,
-        agentProvider,
+        runtime: p.runtime,
       });
+      await this.heartbeatRuntime(runtimeFieldsFromExecution(execution.metadata));
       this.resourceScope?.registerExecution(execution);
       await this.heartbeatRuntime({ phase: 'implementing', progress: `agent generation ${round}` });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
@@ -1006,6 +1011,7 @@ export class WorkflowRunner {
               prompt,
               triggerTokens: hctx.tokens,
               executionMode: p.executionMode,
+              runtime: p.runtime,
             },
             p.budget,
             agentProvider,
@@ -1156,6 +1162,7 @@ export class WorkflowRunner {
         sandboxProvider: this.sandboxProviderName,
         executionMode: this.executionMode,
         agentProvider: this.agentProviderName,
+        ...runtimeFieldsFromSelection(this.agentProviderName, this.agentRuntime),
         session,
         branch: this.activeBacklog?.branchName,
         startedAt: now,

@@ -2,6 +2,8 @@ import { Command, InvalidArgumentError } from 'commander';
 import { handleCommandError, success, warning, detail } from '../cli-utils';
 import { runWorkflowCli } from '../../application/workflows/run-cmd';
 import { getWorkflowConfig } from '../../infrastructure/config/manager';
+import { resolveAgentProviderName } from '../../domain/agents/index';
+import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options';
 
 function positiveInt(value: string): number {
   const parsed = Number(value);
@@ -10,9 +12,8 @@ function positiveInt(value: string): number {
   }
   return parsed;
 }
-
 export function registerRunCommands(program: Command): void {
-  program
+  const command = program
     .command('run')
     .description('Claim and execute one backlog item')
     .requiredOption('--backlog-id <id>', 'Backlog ID')
@@ -30,26 +31,29 @@ export function registerRunCommands(program: Command): void {
     .option('--sandbox <provider>', 'Sandbox provider: local | docker | podman')
     .option('--agent <name>', 'Agent provider')
     .option('--execution-mode <mode>', 'Agent execution mode: interactive | batch')
-    .option('--template <name>', 'Workflow template name')
+    .option('--template <name>', 'Workflow template name');
+  addAgentRuntimeOptions(command)
     .action(async options => {
       try {
-        const config = getWorkflowConfig();
-        const goalBudget = config.goalBudget || 500_000;
+        const cfg = getWorkflowConfig();
+        const agentProvider = resolveAgentProviderName(options.agent ?? cfg.agentDefault);
+        const goalBudget = cfg.goalBudget || 500_000;
         const result = await runWorkflowCli({
           backlogId: options.backlogId,
           session: options.session,
           projectName: options.project,
           targetBranch: options.targetBranch,
           baseBranch: options.baseBranch,
-          maxRetries: options.maxRetries ?? config.maxRetries,
-          hardTimeoutMs: options.hardTimeout ?? config.workflowHardTimeout,
+          maxRetries: options.maxRetries ?? cfg.maxRetries,
+          hardTimeoutMs: options.hardTimeout ?? cfg.workflowHardTimeout,
           maxHandoffs: options.maxHandoffs ?? (Math.min(Math.ceil(goalBudget / 1_000_000), 20) || 3),
-          contextHighTokens: options.contextHigh ?? config.contextThreshold,
+          contextHighTokens: options.contextHigh ?? cfg.contextThreshold,
           maxTotalTokens: options.maxTotalTokens ?? goalBudget,
           ext: options.ext,
           extParams: options.extParam,
           sandboxProvider: options.sandbox,
-          agentProvider: options.agent,
+          agentProvider,
+          agentRuntime: resolveAgentRuntimeOptions(agentProvider, cfg, options),
           executionMode: options.executionMode,
           template: options.template,
         });

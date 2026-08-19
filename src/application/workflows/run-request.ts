@@ -1,9 +1,11 @@
-import type { AgentProviderName, ExecutionMode } from '../../domain/agents/types';
+import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types';
 import type { SandboxProviderName } from '../../infrastructure/sandbox/types';
 import type { BranchStrategyConfig } from '../../domain/branches/types';
 import { deriveBacklogBranchName } from '../../domain/backlog/index';
 import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager';
 import { resolveProjectContext, type ProjectContext } from '../project-context';
+import { resolveAgentProviderName } from '../../domain/agents/index';
+import { DEFAULT_CODEX_CONFIG, resolveCodexRuntime } from '../../domain/agents/codex-runtime';
 
 /** Canonical request for a single backlog implementation execution. */
 export interface WorkflowRunRequest {
@@ -24,6 +26,7 @@ export interface WorkflowRunRequest {
   agentProvider: AgentProviderName;
   sandboxProvider: SandboxProviderName;
   executionMode: ExecutionMode;
+  agentRuntime: AgentRuntimeSelection;
   branchStrategy: BranchStrategyConfig;
   ext?: string[];
   extParams?: string[];
@@ -47,6 +50,7 @@ export interface WorkflowRunCliInput {
   agentProvider?: AgentProviderName;
   provider?: AgentProviderName;
   executionMode?: ExecutionMode | string;
+  agentRuntime?: AgentRuntimeSelection;
   branchStrategy?: BranchStrategyConfig;
   ext?: string[];
   extParams?: string[];
@@ -86,9 +90,9 @@ export function resolveWorkflowRequest(
   const backlogId = input.backlogId?.trim();
   if (!backlogId) throw new Error('backlogId is required');
   const budget = input.maxTotalTokens ?? config.goalBudget ?? defaults.goalBudget;
-  const agentProvider = input.agentProvider ?? input.provider ??
-    (config.agentDefault === 'claude' ? 'claude-code' : config.agentDefault as AgentProviderName) ??
-    defaults.agentProvider;
+  const agentProvider = resolveAgentProviderName(
+    input.agentProvider ?? input.provider ?? config.agentDefault ?? defaults.agentProvider,
+  );
   const context = project ?? {
     repoRoot: input.repoRoot ?? process.cwd(),
     projectName: input.projectName,
@@ -112,11 +116,22 @@ export function resolveWorkflowRequest(
     agentProvider,
     sandboxProvider: input.sandboxProvider ?? defaults.sandboxProvider,
     executionMode: executionMode(input.executionMode),
+    agentRuntime: agentProvider === 'codex'
+      ? (input.agentRuntime?.kind === 'codex' ? input.agentRuntime : resolveDefaultCodexRuntime(config))
+      : { kind: 'default' },
     branchStrategy: deriveBranchStrategy(backlogId, input.branchStrategy),
     ext: input.ext,
     extParams: input.extParams,
     template: input.template,
   };
+}
+
+function resolveDefaultCodexRuntime(config: Partial<WorkflowConfig>): AgentRuntimeSelection {
+  const configured = config.agents?.codex ?? {
+    ...DEFAULT_CODEX_CONFIG,
+    appServer: { ...DEFAULT_CODEX_CONFIG.appServer },
+  };
+  return resolveCodexRuntime({ cli: {}, config: configured });
 }
 
 export async function resolveWorkflowRunRequest(input: WorkflowRunCliInput, config?: Partial<WorkflowConfig>): Promise<WorkflowRunRequest> {

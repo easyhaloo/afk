@@ -15,13 +15,13 @@
  */
 
 import type {
-  AgentProvider,
   AgentProviderName,
   AgentCapability,
   AgentCommand,
   AgentCommandOptions,
   AgentEvent,
 } from './types';
+import { ProcessAgentProvider } from './process-provider';
 
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'streaming',
@@ -29,7 +29,7 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'interactive',
 ] as const);
 
-export class OpenCodeProvider implements AgentProvider {
+export class OpenCodeProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'opencode';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
 

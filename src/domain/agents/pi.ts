@@ -12,7 +12,6 @@
  */
 
 import type {
-  AgentProvider,
   AgentProviderName,
   AgentCapability,
   AgentCommand,
@@ -23,6 +22,7 @@ import type {
   CaptureSessionOptions,
   RestoreSessionOptions,
 } from './types';
+import { ProcessAgentProvider } from './process-provider';
 
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'streaming',
@@ -31,7 +31,7 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'interactive',
 ] as const);
 
-export class PiProvider implements AgentProvider {
+export class PiProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'pi';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
 

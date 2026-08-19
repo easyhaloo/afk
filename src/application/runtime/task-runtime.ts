@@ -26,6 +26,10 @@ export interface TaskRuntimeRecord {
   sandboxProvider: string;
   executionMode: 'interactive' | 'batch';
   agentProvider: string;
+  agentTransport?: 'process' | 'exec' | 'app-server';
+  agentAuth?: 'chatgpt' | 'api' | 'unknown';
+  agentModelProvider?: string;
+  agentThreadId?: string;
   session?: string;
   worktree?: string;
   branch?: string;
@@ -259,7 +263,7 @@ export class TaskRuntimeManager {
     return this.store.start(record);
   }
 
-  heartbeat(runId: string, changes: Partial<Pick<TaskRuntimeRecord, 'phase' | 'progress' | 'diagnosticPath' | 'worktree' | 'branch' | 'errorSummary'>> = {}): Promise<TaskRuntimeRecord> {
+  heartbeat(runId: string, changes: Partial<Pick<TaskRuntimeRecord, 'phase' | 'progress' | 'diagnosticPath' | 'worktree' | 'branch' | 'errorSummary' | 'agentTransport' | 'agentAuth' | 'agentModelProvider' | 'agentThreadId'>> = {}): Promise<TaskRuntimeRecord> {
     return this.store.update(runId, changes);
   }
 
@@ -294,6 +298,10 @@ function isTaskRuntimeRecord(value: unknown): value is TaskRuntimeRecord {
     && typeof record.sandboxProvider === 'string'
     && (record.executionMode === 'interactive' || record.executionMode === 'batch')
     && typeof record.agentProvider === 'string'
+    && (record.agentTransport === undefined || ['process', 'exec', 'app-server'].includes(record.agentTransport))
+    && (record.agentAuth === undefined || ['chatgpt', 'api', 'unknown'].includes(record.agentAuth))
+    && (record.agentModelProvider === undefined || typeof record.agentModelProvider === 'string')
+    && (record.agentThreadId === undefined || typeof record.agentThreadId === 'string')
     && typeof record.startedAt === 'string'
     && typeof record.heartbeatAt === 'string';
 }

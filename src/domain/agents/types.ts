@@ -57,6 +57,45 @@ export interface AgentCommandOptions {
   interactive?: boolean;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
+  /** Immutable provider runtime resolved before backlog claim. */
+  runtime?: AgentRuntimeSelection;
+}
+
+export interface AgentExecutionMetadata {
+  provider: AgentProviderName;
+  transport: 'process' | 'exec' | 'app-server';
+  auth?: 'chatgpt' | 'api' | 'unknown';
+  modelProvider?: string;
+  endpointKind?: 'stdio' | 'unix' | 'ws' | 'wss';
+  threadId?: string;
+}
+
+export interface CodexRuntimeSelection {
+  kind: 'codex';
+  transport: 'exec' | 'app-server';
+  auth: 'chatgpt' | 'api' | 'unknown';
+  provider: string;
+  profile?: string;
+  endpoint?: string;
+  authTokenEnv?: string;
+  startupTimeoutMs: number;
+}
+
+export type AgentRuntimeSelection = { kind: 'default' } | CodexRuntimeSelection;
+
+/** Minimal execution host implemented by local and container sandboxes. */
+export interface AgentExecutionHost {
+  readonly worktreePath: string;
+  readonly workspacePath: string;
+  startAgent(options: AgentStartOptions): Promise<AgentExecution>;
+}
+
+export interface AgentExecutionOptions extends AgentCommandOptions {
+  sandbox: AgentExecutionHost;
+  prompt: string;
+  signalType: 'goal_complete';
+  generation: number;
+  runtime?: AgentRuntimeSelection;
 }
 
 /** An event emitted by the agent during execution. */
@@ -68,6 +107,17 @@ export type AgentEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'result'; result: unknown }
   | { type: 'error'; error: Error };
+
+/** Provider-neutral options used by an execution host to start an agent. */
+export interface AgentStartOptions {
+  command: AgentCommand;
+  metadata: AgentExecutionMetadata;
+  generation: number;
+  prompt: string;
+  signalType: 'goal_complete';
+  executionMode?: ExecutionMode;
+  parseLine?: (line: string) => AgentEvent[];
+}
 
 /** Snapshot of an agent session state — used for resume/restore. */
 export interface SessionSnapshot {
@@ -94,6 +144,51 @@ export interface RestoreSessionOptions {
   worktreePath: string;
 }
 
+export type InterruptReason = 'context-high' | 'timeout' | 'manual' | 'error';
+
+export interface CaptureOptions {
+  lines?: number;
+  history?: number;
+}
+
+export interface ResumeOptions {
+  snapshot: SessionSnapshot;
+}
+
+export type ExecutionEvent =
+  | { type: 'text'; text: string }
+  | { type: 'usage'; usage: TokenUsage }
+  | { type: 'error'; error: Error }
+  | { type: 'interrupt-acked' }
+  | { type: 'killed' };
+
+export interface ExecutionResult {
+  version: 1;
+  runId: string;
+  status: 'completed' | 'blocked' | 'failed' | 'aborted' | 'timed_out' | 'context_high';
+  provider: string;
+  sessionId?: string;
+  exitCode?: number;
+  structuredOutput?: unknown;
+  usage?: TokenUsage;
+  commits: string[];
+  branch?: string;
+  error?: { code: string; message: string };
+}
+
+export interface AgentExecution {
+  readonly id: string;
+  readonly sessionId?: string;
+  readonly metadata: AgentExecutionMetadata;
+  waitForEvent(): Promise<ExecutionEvent | null>;
+  waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
+  interrupt(reason: InterruptReason): Promise<void>;
+  kill(): Promise<void>;
+  captureOutput(options?: CaptureOptions): Promise<string>;
+  captureSession(): Promise<SessionSnapshot | undefined>;
+  resume(options: ResumeOptions): Promise<AgentExecution>;
+}
+
 /**
  * Agent provider interface.
  *
@@ -104,17 +199,7 @@ export interface AgentProvider {
   readonly name: AgentProviderName;
   readonly capabilities: ReadonlySet<AgentCapability>;
 
-  /**
-   * Build an AgentCommand for the given options.
-   * The runner executes this command and manages its lifecycle.
-   */
-  buildCommand(options: AgentCommandOptions): AgentCommand;
-
-  /**
-   * Parse a raw output line into one or more AgentEvents.
-   * Only required if the provider has 'streaming' capability.
-   */
-  parseLine?(line: string): AgentEvent[];
+  createExecution(options: AgentExecutionOptions): Promise<AgentExecution>;
 
   /**
    * Get token usage for a running or completed session.

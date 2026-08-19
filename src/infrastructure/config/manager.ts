@@ -1,4 +1,16 @@
 import { getGlabToken } from '../gitlab/glab-config';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { load as loadYaml } from 'js-yaml';
+import {
+  assertCodexEndpoint,
+  DEFAULT_CODEX_CONFIG,
+  type CodexAuth,
+  type CodexConfig,
+  type CodexTransport,
+} from '../../domain/agents/codex-runtime';
+
+type ConfigObject = { [key: string]: unknown };
 
 // ─── GitLab ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +37,9 @@ export interface WorkflowConfig {
   targetBranch: string;
   trackerTargetBranch: string;
   goalBudget: number;
+  agents: {
+    codex: CodexConfig;
+  };
 }
 
 // ─── Scheduler ────────────────────────────────────────────────────────────────
@@ -47,7 +62,7 @@ export interface WorktreeConfig {
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_WORKFLOW: WorkflowConfig = {
-  agentDefault: 'claude',
+  agentDefault: 'claude-code',
   tmuxSession: 'afk',
   completionTimeout: 7200 * 1000,
   workflowHardTimeout: 7200 * 1000,
@@ -62,6 +77,12 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   targetBranch: 'main',
   trackerTargetBranch: 'main',
   goalBudget: 10_000_000,
+  agents: {
+    codex: {
+      ...DEFAULT_CODEX_CONFIG,
+      appServer: { ...DEFAULT_CODEX_CONFIG.appServer },
+    },
+  },
 };
 
 const DEFAULT_SCHEDULER: SchedulerConfig = {
@@ -97,23 +118,28 @@ function loadGitLabConfig(): GitLabConfig {
   };
 }
 
-function loadWorkflowConfig(): WorkflowConfig {
+export function loadWorkflowConfig(
+  projectRoot = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): WorkflowConfig {
+  const file = readProjectConfig(projectRoot);
   return {
-    agentDefault: process.env.AFK_AGENT_DEFAULT || DEFAULT_WORKFLOW.agentDefault,
-    tmuxSession: process.env.AFK_TMUX_SESSION || DEFAULT_WORKFLOW.tmuxSession,
-    completionTimeout: parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW.completionTimeout),
-    workflowHardTimeout: parseEnvMs('AFK_WORKFLOW_HARD_TIMEOUT', DEFAULT_WORKFLOW.workflowHardTimeout),
-    completionPoll: parseSeconds('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll),
-    idleTimeout: parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW.idleTimeout),
-    acCheckTimeout: parseEnvMs('AFK_AC_CHECK_TIMEOUT', DEFAULT_WORKFLOW.acCheckTimeout),
-    contextThreshold: parseIntEnv('AFK_CONTEXT_THRESHOLD', DEFAULT_WORKFLOW.contextThreshold),
-    promptTimeout: parseEnvMs('AFK_PROMPT_TIMEOUT', DEFAULT_WORKFLOW.promptTimeout),
-    handoffTimeout: parseEnvMs('AFK_HANDOFF_TIMEOUT', DEFAULT_WORKFLOW.handoffTimeout),
-    maxRetries: parseIntEnv('AFK_MAX_RETRIES', DEFAULT_WORKFLOW.maxRetries),
-    maxSelfIterations: parseIntEnv('AFK_MAX_SELF_ITERATIONS', DEFAULT_WORKFLOW.maxSelfIterations),
-    targetBranch: process.env.AFK_TARGET_BRANCH || DEFAULT_WORKFLOW.targetBranch,
-    trackerTargetBranch: process.env.AFK_TRACKER_TARGET_BRANCH || DEFAULT_WORKFLOW.trackerTargetBranch,
-    goalBudget: parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget),
+    agentDefault: configString(file.agentDefault) ?? env.AFK_AGENT_DEFAULT ?? DEFAULT_WORKFLOW.agentDefault,
+    tmuxSession: configString(file.tmuxSession) ?? env.AFK_TMUX_SESSION ?? DEFAULT_WORKFLOW.tmuxSession,
+    completionTimeout: configNumber(file.completionTimeout) ?? parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW.completionTimeout, env),
+    workflowHardTimeout: configNumber(file.workflowHardTimeout) ?? parseEnvMs('AFK_WORKFLOW_HARD_TIMEOUT', DEFAULT_WORKFLOW.workflowHardTimeout, env),
+    completionPoll: configNumber(file.completionPoll) ?? parseSeconds('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll, env),
+    idleTimeout: configNumber(file.idleTimeout) ?? parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW.idleTimeout, env),
+    acCheckTimeout: configNumber(file.acCheckTimeout) ?? parseEnvMs('AFK_AC_CHECK_TIMEOUT', DEFAULT_WORKFLOW.acCheckTimeout, env),
+    contextThreshold: configNumber(file.contextThreshold) ?? parseIntEnv('AFK_CONTEXT_THRESHOLD', DEFAULT_WORKFLOW.contextThreshold, env),
+    promptTimeout: configNumber(file.promptTimeout) ?? parseEnvMs('AFK_PROMPT_TIMEOUT', DEFAULT_WORKFLOW.promptTimeout, env),
+    handoffTimeout: configNumber(file.handoffTimeout) ?? parseEnvMs('AFK_HANDOFF_TIMEOUT', DEFAULT_WORKFLOW.handoffTimeout, env),
+    maxRetries: configNumber(file.maxRetries) ?? parseIntEnv('AFK_MAX_RETRIES', DEFAULT_WORKFLOW.maxRetries, env),
+    maxSelfIterations: configNumber(file.maxSelfIterations) ?? parseIntEnv('AFK_MAX_SELF_ITERATIONS', DEFAULT_WORKFLOW.maxSelfIterations, env),
+    targetBranch: configString(file.targetBranch) ?? env.AFK_TARGET_BRANCH ?? DEFAULT_WORKFLOW.targetBranch,
+    trackerTargetBranch: configString(file.trackerTargetBranch) ?? env.AFK_TRACKER_TARGET_BRANCH ?? DEFAULT_WORKFLOW.trackerTargetBranch,
+    goalBudget: configNumber(file.goalBudget) ?? parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget, env),
+    agents: { codex: loadCodexConfig(file, env) },
   };
 }
 
@@ -134,21 +160,21 @@ function loadWorktreeConfig(): WorktreeConfig {
   };
 }
 
-function parseEnvMs(key: string, fallback: number): number {
-  const val = process.env[key];
+function parseEnvMs(key: string, fallback: number, env: NodeJS.ProcessEnv = process.env): number {
+  const val = env[key];
   if (!val) return fallback;
   return parseInt(val, 10) || fallback;
 }
 
-function parseSeconds(key: string, fallback: number): number {
-  const val = process.env[key];
+function parseSeconds(key: string, fallback: number, env: NodeJS.ProcessEnv = process.env): number {
+  const val = env[key];
   if (!val) return fallback;
   const n = parseInt(val, 10);
   return (n || fallback) * 1000;
 }
 
-function parseIntEnv(key: string, fallback: number): number {
-  const val = process.env[key];
+function parseIntEnv(key: string, fallback: number, env: NodeJS.ProcessEnv = process.env): number {
+  const val = env[key];
   if (!val) return fallback;
   return parseInt(val, 10) || fallback;
 }
@@ -174,4 +200,73 @@ export function getSchedulerConfig(): SchedulerConfig {
 
 export function getWorktreeConfig(): WorktreeConfig {
   return _worktree ??= loadWorktreeConfig();
+}
+
+function readProjectConfig(projectRoot: string): ConfigObject {
+  const path = join(projectRoot, '.afk', 'config.yml');
+  if (!existsSync(path)) return {};
+  const parsed = loadYaml(readFileSync(path, 'utf8')) as unknown;
+  if (parsed === undefined || parsed === null) return {};
+  if (!isRecord(parsed)) throw new Error('.afk/config.yml must contain a YAML object');
+  return parsed;
+}
+
+function loadCodexConfig(file: ConfigObject, env: NodeJS.ProcessEnv): CodexConfig {
+  const agents = recordValue(file.agents);
+  const codex = recordValue(agents.codex);
+  const appServer = recordValue(codex.appServer);
+  const transport = (configString(codex.transport) ?? env.AFK_CODEX_TRANSPORT ?? DEFAULT_CODEX_CONFIG.transport) as CodexTransport;
+  const auth = (configString(codex.auth) ?? env.AFK_CODEX_AUTH ?? DEFAULT_CODEX_CONFIG.auth) as CodexAuth;
+  const provider = configString(codex.provider) ?? env.AFK_CODEX_PROVIDER ?? DEFAULT_CODEX_CONFIG.provider;
+  const endpoint = configString(appServer.endpoint) ?? env.AFK_CODEX_APP_SERVER;
+  const authTokenEnv = configString(appServer.authTokenEnv) ?? env.AFK_CODEX_APP_SERVER_AUTH_ENV;
+  const startupTimeoutMs = durationMs(appServer.startupTimeoutMs ?? appServer.startupTimeout)
+    ?? durationMs(env.AFK_CODEX_APP_SERVER_STARTUP_TIMEOUT)
+    ?? DEFAULT_CODEX_CONFIG.appServer.startupTimeoutMs;
+
+  if (!['auto', 'exec', 'app-server'].includes(transport)) throw new Error(`Invalid Codex transport: ${transport}`);
+  if (!['auto', 'chatgpt', 'api'].includes(auth)) throw new Error(`Invalid Codex auth mode: ${auth}`);
+  if (endpoint) assertCodexEndpoint(endpoint);
+
+  return {
+    transport,
+    auth,
+    provider,
+    ...optionalConfig('profile', configString(codex.profile) ?? env.AFK_CODEX_PROFILE),
+    appServer: {
+      ...optionalConfig('endpoint', endpoint),
+      ...optionalConfig('authTokenEnv', authTokenEnv),
+      startupTimeoutMs,
+    },
+  };
+}
+
+function durationMs(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const match = /^(\d+)(ms|s|m)?$/.exec(value.trim());
+  if (!match) throw new Error(`Invalid duration: ${value}`);
+  const amount = Number(match[1]);
+  const factor = match[2] === 'm' ? 60_000 : match[2] === 's' ? 1_000 : 1;
+  return amount * factor;
+}
+
+function configString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function configNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function recordValue(value: unknown): ConfigObject {
+  return isRecord(value) ? value : {};
+}
+
+function isRecord(value: unknown): value is ConfigObject {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function optionalConfig<K extends string, V>(key: K, value: V | undefined): { [P in K]?: V } {
+  return value === undefined ? {} : { [key]: value } as { [P in K]?: V };
 }

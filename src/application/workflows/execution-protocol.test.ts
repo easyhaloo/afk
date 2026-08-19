@@ -1,16 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { buildBatchPrompt, buildExecutionPrompt, parseAcVerificationFailure } from './execution-protocol';
+import { buildBatchPrompt, buildExecutionPrompt, extractGoalComplete, parseAcVerificationFailure } from './execution-protocol';
 
 describe('batch execution prompt protocol', () => {
-  it('preserves the goal prompt and appends the requested completion marker', () => {
+  it('treats /goal as prompt syntax instead of a Claude slash command in batch mode', () => {
     const prompt = buildBatchPrompt('/goal implement issue #60');
 
-    expect(prompt).toContain('/goal implement issue #60');
+    expect(prompt).toContain('implement issue #60');
+    expect(prompt).not.toMatch(/^\/goal\b/i);
     expect(prompt).toContain('<goal_complete>');
     expect(prompt).toContain('"type":"goal_complete"');
     expect(prompt).toContain('</goal_complete>');
     expect(prompt).toContain('Do not switch branches');
     expect(prompt).toContain('pnpm vitest run');
+  });
+
+  it('extracts a typed completion payload from surrounding agent text', () => {
+    expect(extractGoalComplete('finished\n<goal_complete>{"type":"goal_complete","summary":"done"}</goal_complete>')).toEqual({
+      type: 'goal_complete', summary: 'done',
+    });
+    expect(extractGoalComplete('<goal_complete>invalid-json</goal_complete>')).toBeUndefined();
+  });
+
+  it('accepts a JSON-escaped slash in the completion closing tag', () => {
+    expect(extractGoalComplete(
+      '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}<\\/goal_complete>',
+    )).toEqual({ type: 'goal_complete', kind: 'task', summary: 'done' });
   });
 
   it('requires QA to report its PASS or FAIL outcome in the unified completion payload', () => {

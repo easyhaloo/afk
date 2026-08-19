@@ -6,6 +6,7 @@ import { SignalSchema } from '../../../domain/schemas';
 import { LocalAgentExecution, LocalSandboxProvider } from './local';
 
 describe('LocalSandboxProvider', () => {
+  const metadata = { provider: 'claude-code', transport: 'process' } as const;
   it('provisions a batch sandbox without creating a tmux session', async () => {
     const tmux = { createSession: vi.fn(), waitForPrompt: vi.fn() };
     const provider = new LocalSandboxProvider();
@@ -33,6 +34,7 @@ describe('LocalSandboxProvider', () => {
       worktreePath: process.cwd(),
       session: 'interactive-test',
       executionMode: 'interactive',
+      metadata,
       tmux: tmux as never,
     });
 
@@ -42,6 +44,7 @@ describe('LocalSandboxProvider', () => {
       generation: 1,
       signalType: 'goal_complete',
       executionMode: 'interactive',
+      metadata,
     });
 
     expect(tmux.createSession).toHaveBeenCalledWith(
@@ -107,6 +110,7 @@ describe('LocalSandboxProvider', () => {
     await sandbox.startAgent({
       command: { argv: ['agent'], cwd: worktreePath }, prompt: 'goal', generation: 1,
       signalType: 'goal_complete', executionMode: 'interactive',
+      metadata,
     });
 
     await expect(access(statusPath)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -139,8 +143,11 @@ describe('LocalSandboxProvider', () => {
       generation: 1,
       prompt: 'verify acceptance criteria',
       signalType: 'goal_complete',
+      metadata: { provider: 'claude-code', transport: 'process' },
       tmux: {} as never,
     });
+
+    expect(execution.metadata).toEqual({ provider: 'claude-code', transport: 'process' });
 
     await expect(execution.waitForResult()).resolves.toMatchObject({
       status: 'completed',

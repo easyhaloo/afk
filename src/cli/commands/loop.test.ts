@@ -2,6 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadLoopConfig } from '../../application/loop/loop-config';
+import { registerLoopCommands } from './loop';
+import { registerRunCommands } from './run';
+import { registerQACommands } from './qa';
+import { Command } from 'commander';
 
 const CONFIG_DIR = path.join('/tmp', `afk-loop-config-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 const CONFIG_PATH = path.join(CONFIG_DIR, '.afk', 'config.yml');
@@ -81,5 +85,43 @@ describe('loadLoopConfig', () => {
     const result = loadLoopConfig();
     // No label entries under module_triggers → empty
     expect(result.moduleTriggers).toEqual({});
+  });
+});
+
+describe('loop option parsing', () => {
+  it('keeps provider and module option values as strings', () => {
+    const program = new Command().exitOverride();
+    registerLoopCommands(program);
+    const loop = program.commands.find(command => command.name() === 'loop')!;
+    const agent = loop.options.find(option => option.long === '--agent')!;
+    const ext = loop.options.find(option => option.long === '--ext')!;
+
+    expect(agent.parseArg).toBeUndefined();
+    expect(ext.parseArg).toBeUndefined();
+  });
+
+  it('exposes the same Codex runtime overrides on run, loop, loop start, and qa', () => {
+    const program = new Command().exitOverride();
+    registerRunCommands(program);
+    registerLoopCommands(program);
+    registerQACommands(program);
+    const loop = program.commands.find(command => command.name() === 'loop')!;
+    const commands = [
+      program.commands.find(command => command.name() === 'run')!,
+      loop,
+      loop.commands.find(command => command.name() === 'start')!,
+      program.commands.find(command => command.name() === 'qa')!,
+    ];
+    const expected = [
+      '--agent-transport', '--agent-auth', '--agent-provider', '--agent-profile',
+      '--agent-app-server', '--agent-app-server-auth-env',
+    ];
+
+    for (const command of commands) {
+      expect(expected.every(flag => command.options.some(option => option.long === flag))).toBe(true);
+    }
+    const transport = commands[0].options.find(option => option.long === '--agent-transport')!;
+    expect(transport.parseArg?.('app-server', undefined)).toBe('app-server');
+    expect(() => transport.parseArg?.('remote', undefined)).toThrow(/transport/i);
   });
 });

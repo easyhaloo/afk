@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ClaudeCodeProvider } from './claude-code';
 import { CodexProvider } from './codex';
 import { CursorProvider } from './cursor';
@@ -15,6 +15,7 @@ import {
   _resetAgentRegistry,
 } from './registry';
 import { createAgentProvider, ensureBuiltinAgentProviders } from './index';
+import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types';
 import type { AgentProvider } from './types';
 
 /** Build minimal AgentCommandOptions for testing. */
@@ -58,6 +59,29 @@ describe('Agent providers — fixture coverage', () => {
       expect(cmd.argv).toContain('stream-json');
     });
 
+    it('owns process execution creation and passes neutral parser metadata to the sandbox', async () => {
+      const execution = { id: 'execution-1' } as AgentExecution;
+      const startAgent = vi.fn(async () => execution);
+      const sandbox = { startAgent } as unknown as Sandbox;
+
+      await expect(p.createExecution({
+        sandbox,
+        worktreePath: '/tmp/worktree',
+        sessionId: 'sess-1',
+        prompt: 'do something',
+        signalType: 'goal_complete',
+        generation: 1,
+        executionMode: 'batch',
+      })).resolves.toBe(execution);
+
+      expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
+        command: expect.objectContaining({ argv: expect.arrayContaining(['claude']) }),
+        metadata: { provider: 'claude-code', transport: 'process' },
+        parseLine: expect.any(Function),
+      }));
+      expect(startAgent.mock.calls[0][0]).not.toHaveProperty('agentProvider');
+    });
+
     it('surfaces an error result event from stream-json', () => {
       const provider = new ClaudeCodeProvider();
       expect(provider.parseLine(JSON.stringify({
@@ -91,15 +115,154 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('interactive')).toBe(true);
     });
 
-    it('buildCommand produces argv starting with "codex"', () => {
-      const cmd = p.buildCommand(opts({ interactive: true }));
-      expect(cmd.argv[0]).toBe('codex');
-      expect(cmd.argv).toContain('--full-auto');
+    it('builds JSONL batch execution with autonomous permissions', () => {
+      const cmd = p.buildCommand({ ...opts(), executionMode: 'batch' });
+      expect(cmd.argv).toEqual([
+        'codex',
+        'exec',
+        '--json',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-C',
+        '/tmp/worktree',
+      ]);
+      expect(cmd.cwd).toBe('/tmp/worktree');
     });
 
-    it('parseLine returns text for unknown input', () => {
+    it('builds inline interactive execution with autonomous permissions', () => {
+      const cmd = p.buildCommand({ ...opts(), executionMode: 'interactive' });
+      expect(cmd.argv).toEqual([
+        'codex',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--no-alt-screen',
+        '-C',
+        '/tmp/worktree',
+      ]);
+    });
+
+    it('applies the resolved Codex profile and explicit model provider', () => {
+      const cmd = p.buildCommand({
+        ...opts(),
+        executionMode: 'batch',
+        runtime: {
+          kind: 'codex', transport: 'exec', auth: 'api', provider: 'custom',
+          profile: 'work', startupTimeoutMs: 5_000,
+        },
+      });
+
+      expect(cmd.argv).toEqual([
+        'codex',
+        'exec',
+        '--json',
+        '--profile',
+        'work',
+        '--config',
+        'model_provider="custom"',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '-C',
+        '/tmp/worktree',
+      ]);
+    });
+
+    it('does not override the provider selected by an exec profile', () => {
+      const cmd = p.buildCommand({
+        ...opts(),
+        executionMode: 'batch',
+        runtime: {
+          kind: 'codex', transport: 'exec', auth: 'api', provider: 'auto',
+          profile: 'work', startupTimeoutMs: 5_000,
+        },
+      });
+
+      expect(cmd.argv).toContain('work');
+      expect(cmd.argv).not.toContain('--config');
+      expect(cmd.argv.some(arg => arg.startsWith('model_provider='))).toBe(false);
+    });
+
+    it('reports exec metadata with redacted runtime auth and model provider', async () => {
+      const execution = { id: 'codex-execution' } as AgentExecution;
+      const startAgent = vi.fn(async () => execution);
+
+      await p.createExecution({
+        sandbox: { startAgent } as unknown as Sandbox,
+        worktreePath: '/tmp/worktree',
+        sessionId: 'sess-1',
+        prompt: 'do something',
+        signalType: 'goal_complete',
+        generation: 1,
+        executionMode: 'batch',
+        runtime: {
+          kind: 'codex',
+          transport: 'exec',
+          auth: 'chatgpt',
+          provider: 'openai',
+          startupTimeoutMs: 5_000,
+        },
+      });
+
+      expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
+        metadata: {
+          provider: 'codex',
+          transport: 'exec',
+          auth: 'chatgpt',
+          modelProvider: 'openai',
+        },
+      }));
+    });
+
+    it('selects app-server execution before delegating to a process sandbox', async () => {
+      const startAgent = vi.fn();
+      await expect(p.createExecution({
+        sandbox: {
+          id: 'container', worktreePath: '/host/worktree', workspacePath: '/workspace', startAgent,
+        } as unknown as Sandbox,
+        worktreePath: '/host/worktree',
+        sessionId: 'sess-app-server',
+        prompt: 'do something',
+        signalType: 'goal_complete',
+        generation: 1,
+        executionMode: 'batch',
+        runtime: {
+          kind: 'codex', transport: 'app-server', auth: 'chatgpt', provider: 'openai',
+          endpoint: 'stdio://', startupTimeoutMs: 5_000,
+        },
+      })).rejects.toThrow(/container/i);
+      expect(startAgent).not.toHaveBeenCalled();
+    });
+
+    it('parses completed agent messages as result events', () => {
+      const events = p.parseLine(JSON.stringify({
+        type: 'item.completed',
+        item: {
+          type: 'agent_message',
+          text: '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>',
+        },
+      }));
+
+      expect(events).toEqual([{ type: 'result', result: expect.stringContaining('goal_complete') }]);
+    });
+
+    it('normalizes turn usage and surfaces Codex errors', () => {
+      expect(p.parseLine(JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 10, cached_input_tokens: 3, output_tokens: 4 },
+      }))).toContainEqual({
+        type: 'usage',
+        usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+      });
+
+      const [event] = p.parseLine(JSON.stringify({ type: 'error', message: 'request failed' }));
+      expect(event).toMatchObject({
+        type: 'error',
+        error: expect.objectContaining({ message: 'request failed' }),
+      });
+    });
+
+    it('parseLine returns text for unknown or malformed input', () => {
       const events = p.parseLine('hello');
       expect(events[0].type).toBe('text');
+      expect(p.parseLine(JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }))).toEqual([
+        { type: 'text', text: expect.stringContaining('thread.started') },
+      ]);
     });
   });
 
@@ -196,7 +359,7 @@ describe('Agent registry', () => {
     const fake: AgentProvider = {
       name: 'claude-code',
       capabilities: new Set(['usage']),
-      buildCommand: () => ({ argv: ['fake'] }),
+      createExecution: async () => ({ id: 'fake' }) as AgentExecution,
     };
     registerAgentProvider(fake);
     expect(requireAgentProvider('claude-code')).toBe(fake);

@@ -15,6 +15,76 @@ const item: BacklogItem = {
 };
 
 describe('LoopRunner QA boundary', () => {
+  it('propagates one explicit agent provider through implementation and QA', async () => {
+    const providers: ProviderBundle = {
+      backlog: {
+        get: vi.fn(async () => item), list: vi.fn(async () => []), claim: vi.fn(),
+        transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}),
+        addTag: vi.fn(async () => {}), removeTag: vi.fn(async () => {}), initialize: vi.fn(async () => {}),
+        isRunnable: vi.fn(async () => true),
+      }, branches: {} as ProviderBundle['branches'], changes: {} as ProviderBundle['changes'],
+    };
+    const agentRuntime = Object.freeze({
+      kind: 'codex', transport: 'app-server', auth: 'chatgpt', provider: 'openai',
+      endpoint: 'stdio://', startupTimeoutMs: 5_000,
+    } as const);
+    const run = vi.fn(async () => ({ success: true }));
+    const workflowFactory = vi.fn(() => ({ run }) as any);
+    const qaFactory = vi.fn(() => ({ process: vi.fn(async () => ({ success: true })) }) as any);
+    const subject = new LoopRunner(providers, {
+      agentProvider: 'codex',
+      agentRuntime,
+      workflowRunnerFactory: workflowFactory,
+      qaRunnerFactory: qaFactory,
+    });
+    const internals = subject as any;
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    internals.enqueueQA = vi.fn();
+
+    await internals.runChain('42');
+    internals.qaQueue.push('42');
+    await internals.runQA();
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ agentProvider: 'codex' }));
+    expect(workflowFactory.mock.calls[0][2]).toBe(agentRuntime);
+    expect(qaFactory).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ agentDefault: 'codex' }),
+      agentRuntime,
+    );
+  });
+
+  it('fails readiness before polling or claiming a backlog', async () => {
+    const backlog = {
+      get: vi.fn(), list: vi.fn(), claim: vi.fn(), transition: vi.fn(), setExecutionMode: vi.fn(),
+      addTag: vi.fn(), removeTag: vi.fn(), initialize: vi.fn(), isRunnable: vi.fn(),
+    };
+    const providers = {
+      backlog, branches: {} as ProviderBundle['branches'], changes: {} as ProviderBundle['changes'],
+    } as ProviderBundle;
+    const subject = new LoopRunner(providers, {
+      agentProvider: 'codex',
+      agentRuntime: {
+        kind: 'codex', transport: 'exec', auth: 'api', provider: 'openai', startupTimeoutMs: 5_000,
+      },
+      readinessProbe: vi.fn(async () => ({
+        ready: false as const, code: 'AUTH_INVALID' as const, message: 'Codex authentication is not ready',
+      })),
+    });
+
+    await expect(Promise.race([
+      subject.start(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('readiness was not checked')), 25)),
+    ])).rejects.toThrow(/authentication/i);
+
+    expect(backlog.list).not.toHaveBeenCalled();
+    expect(backlog.claim).not.toHaveBeenCalled();
+    expect(backlog.transition).not.toHaveBeenCalled();
+    expect(subject.getStatus().infrastructureError).toMatch(/authentication/i);
+    await subject.stop();
+  });
+
   it('polls rework backlogs as AFK implementation candidates', async () => {
     const rework = { ...item, state: 'rework' as const };
     const list = vi.fn(async (options: { state?: string }) => options.state === 'rework' ? [rework] : []);
@@ -38,6 +108,35 @@ describe('LoopRunner QA boundary', () => {
 
     expect(list).toHaveBeenCalledWith({ state: 'ready', executionMode: 'afk' });
     expect(list).toHaveBeenCalledWith({ state: 'rework', executionMode: 'afk' });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ backlogId: '42' }));
+  });
+
+  it('limits polling to an explicit backlog execution scope', async () => {
+    const ready = { ...item, state: 'ready' as const };
+    const other = { ...ready, id: '43', branchName: 'afk/backlog-43' };
+    const run = vi.fn(async () => ({ success: false, skipped: 'not_claimed' as const }));
+    const providers: ProviderBundle = {
+      backlog: {
+        get: vi.fn(async (id: string) => id === '42' ? ready : other),
+        list: vi.fn(async (options: { state?: string }) => options.state === 'ready' ? [ready, other] : []),
+        claim: vi.fn(), transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}),
+        addTag: vi.fn(async () => {}), removeTag: vi.fn(async () => {}), initialize: vi.fn(async () => {}),
+        isRunnable: vi.fn(async () => true),
+      },
+      branches: {} as ProviderBundle['branches'], changes: {} as ProviderBundle['changes'],
+    };
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'],
+      workflowRunnerFactory: vi.fn(() => ({ run }) as any),
+    });
+    const internals = subject as any;
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.poll();
+    await new Promise(resolve => setImmediate(resolve));
+
+    expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ backlogId: '42' }));
   });
 

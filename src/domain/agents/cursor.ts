@@ -13,7 +13,6 @@
  */
 
 import type {
-  AgentProvider,
   AgentProviderName,
   AgentCapability,
   AgentCommand,
@@ -24,6 +23,7 @@ import type {
   CaptureSessionOptions,
   RestoreSessionOptions,
 } from './types';
+import { ProcessAgentProvider } from './process-provider';
 
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'streaming',
@@ -32,7 +32,7 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'interactive',
 ] as const);
 
-export class CursorProvider implements AgentProvider {
+export class CursorProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'cursor';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
 

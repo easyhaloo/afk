@@ -1,4 +1,4 @@
-import type { BacklogClaim, BacklogExecutionMode, BacklogItem, BacklogProvider, BacklogState } from './index';
+import type { BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogProvider, BacklogState } from './index';
 import { deriveBacklogBranchName } from './index';
 import { FilesystemClaimLock, type ExpiredClaim } from './claim';
 import {
@@ -73,6 +73,42 @@ export class TrackerBacklogProvider implements BacklogProvider {
       (options.tag === undefined || item.tags.includes(options.tag)),
     );
     return items;
+  }
+
+  async create(input: BacklogCreateInput): Promise<BacklogItem> {
+    const title = input.title.trim();
+    if (!title) throw new Error('backlog title must not be empty');
+    const parentId = input.parentId && this.canonicalId(input.parentId);
+    const dependsOn = [...new Set((input.dependsOn ?? []).map(id => this.canonicalId(id)))];
+    const mode = input.executionMode ?? 'afk';
+    const tags = [...new Set((input.tags ?? []).map(validateBusinessTag))];
+    const linkedItems = await Promise.all([
+      ...(parentId ? [this.get(parentId)] : []),
+      ...dependsOn.map(id => this.get(id)),
+    ]);
+    const parent = parentId ? linkedItems[0] : undefined;
+    const dependencies = linkedItems.slice(parent ? 1 : 0);
+    const labels = [
+      BACKLOG_METADATA.stateLabels.ready,
+      MODE_LABELS[mode],
+      ...tags,
+      ...(parentId ? [`parent::${parentId}`] : []),
+      ...dependsOn.map(id => `depends-on::${id}`),
+    ];
+    const id = await this.tracker.createIssue({
+      title,
+      description: renderBacklogDescription(input.description, { parent, dependencies }),
+      labels,
+    });
+    for (const dependencyId of dependsOn) {
+      await this.tracker.linkIssues(id, this.issueId(dependencyId), 'blocked_by');
+    }
+    const created = await this.get(String(id));
+    if (!created.webUrl) return created;
+    await this.tracker.updateIssue(id, {
+      description: renderBacklogDescription(input.description, { parent, dependencies, self: created }),
+    });
+    return this.get(String(id));
   }
 
   async claim(id: string, owner: string): Promise<BacklogClaim | null> {
@@ -230,7 +266,25 @@ export class TrackerBacklogProvider implements BacklogProvider {
     return value;
   }
 
+  private canonicalId(id: string): string {
+    const issueId = this.issueId(id.trim());
+    return String(issueId);
+  }
+
   private readonly options: TrackerBacklogAdapterOptions;
+}
+
+function renderBacklogDescription(
+  description: string,
+  links: { parent?: BacklogItem; dependencies: BacklogItem[]; self?: BacklogItem },
+): string {
+  const entries = [
+    ...(links.self?.webUrl ? [`- This backlog: [#${links.self.id}](${links.self.webUrl})`] : []),
+    ...(links.parent?.webUrl ? [`- Parent backlog: [#${links.parent.id}](${links.parent.webUrl})`] : []),
+    ...links.dependencies.flatMap(item => item.webUrl ? [`- Depends on: [#${item.id}](${item.webUrl})`] : []),
+  ];
+  if (entries.length === 0) return description;
+  return `${description.trimEnd()}\n\n## Backlog Links\n\n${entries.join('\n')}\n`;
 }
 
 function isModeLabel(label: string): boolean {

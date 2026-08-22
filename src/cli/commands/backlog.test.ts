@@ -16,7 +16,7 @@ describe('hard-cutover command surface', () => {
   it('exposes backlog management subcommands only', () => {
     const program = commandTree(registerBacklogCommands);
     const backlog = program.commands.find(command => command.name() === 'backlog');
-    expect(backlog?.commands.map(command => command.name())).toEqual(['init', 'list', 'show', 'tag']);
+    expect(backlog?.commands.map(command => command.name())).toEqual(['init', 'list', 'show', 'create', 'tag']);
     expect(backlog?.commands.flatMap(command => command.commands.map(child => child.name()))).toEqual(['add', 'remove']);
   });
 
@@ -37,5 +37,17 @@ describe('hard-cutover command surface', () => {
     expect(run?.options.some(option => option.long === '--agent')).toBe(true);
     expect(loop?.options.some(option => option.long === '--agent')).toBe(true);
     expect(qa?.options.some(option => option.long === '--agent')).toBe(true);
+  });
+
+  it('exposes backlog creation relationship options', () => {
+    const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog');
+    const create = backlog?.commands.find(command => command.name() === 'create');
+
+    expect(create?.registeredArguments.map(argument => argument.name())).toEqual(['title']);
+    expect(create?.options.map(option => option.long)).toEqual([
+      '--description-file', '--parent', '--depends-on', '--mode', '--tag', '--project',
+    ]);
+    expect(create?.options.find(option => option.long === '--depends-on')?.short).toBe('-d');
   });
 });

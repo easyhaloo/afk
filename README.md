@@ -89,14 +89,11 @@ Run `/afk-grill-me` in Claude Code to confirm skills are loaded.
 ## CLI Commands
 
 ```bash
-# Issue Management
-afk issue get <id>
-afk issue list --label "stage::ready-for-implement"
-afk issue create "Title" --label "feature"
-afk issue edit <id> --label "bug"
-afk issue comment <id> "message"
-afk issue link <src> <project>:<iid>     # cross-project link
-afk issue run <iid> --project <repo>      # cross-project workflow
+# Backlog Management
+afk backlog init
+afk backlog list --mode afk
+afk backlog show --id <id>
+afk backlog create "Title" --description-file ./backlog.md --parent <id> --depends-on <id> --tag feature
 
 # MR/PR Operations
 afk mr create "feat: add login" --source feat/login --target main

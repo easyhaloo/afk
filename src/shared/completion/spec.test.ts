@@ -8,7 +8,7 @@ describe('extractSpec', () => {
   it('includes the backlog command with its management subcommands', () => {
     const backlog = spec.commands.find(c => c.name === 'backlog');
     expect(backlog).toBeDefined();
-    expect(backlog!.subcommands.map(c => c.name).sort()).toEqual(['init', 'list', 'show', 'tag']);
+    expect(backlog!.subcommands.map(c => c.name).sort()).toEqual(['create', 'init', 'list', 'show', 'tag']);
   });
 
   it('captures required backlog ID and options on run', () => {

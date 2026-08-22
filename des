@@ -1,0 +1,10 @@
+# AFK Control Electron
+
+独立于 AFK 根项目的 macOS Electron 客户端。主进程只向渲染器�独立于 AFK 根�本地 API：AFK CLI 诊断、`.afk/runs` 事件、Docker/Podman 容器、tmux 会话与经用户确认的一行接管输入。
+
+```bash
+cd desktop-client
+pnpm install
+pnpm dev
+pnpm package:mac
+`````````````````````��其父目录；也可以在客户端内选择任意 AFK 工作区。客户端不会将前端提供的字符串直接交给 shell 执行。

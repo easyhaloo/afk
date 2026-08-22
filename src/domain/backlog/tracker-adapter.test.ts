@@ -19,6 +19,37 @@ function tracker(issue: any): TrackerProvider {
 }
 
 describe('TrackerBacklogProvider', () => {
+  it('creates a child backlog with metadata, provider links, and concrete URLs in its body', async () => {
+    const parent = { id: 7, title: 'PRD', description: '', labels: [], state: 'opened', url: 'https://example/7', projectId: 'org/repo' };
+    const dependency = { id: 6, title: 'Foundation', description: '', labels: [], state: 'opened', url: 'https://example/6', projectId: 'org/repo' };
+    const created = { id: 42, title: 'Child', description: '', labels: [], state: 'opened', url: 'https://example/42', projectId: 'org/repo' };
+    const t = tracker(created);
+    t.getIssue = vi.fn(async id => ({ [6]: dependency, [7]: parent, [42]: created }[id]!));
+    t.createIssue = vi.fn(async input => {
+      created.title = input.title;
+      created.description = input.description ?? '';
+      created.labels = input.labels ?? [];
+      return 42;
+    });
+    t.updateIssue = vi.fn(async (_id, updates) => { created.description = updates.description ?? created.description; });
+    t.linkIssues = vi.fn(async () => {});
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.create({
+      title: 'Child', description: '## Context\n\nImplement the capability.', parentId: '7', dependsOn: ['6'], tags: ['feature'],
+    })).resolves.toMatchObject({ id: '42', parentId: '7', dependsOn: ['6'], webUrl: 'https://example/42' });
+
+    expect(t.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      labels: ['stage::ready-for-issues', 'mode::afk', 'feature', 'parent::7', 'depends-on::6'],
+      description: expect.stringContaining('[#7](https://example/7)'),
+    }));
+    expect(t.linkIssues).toHaveBeenCalledWith(42, 6, 'blocked_by');
+    expect(t.updateIssue).toHaveBeenCalledWith(42, expect.objectContaining({
+      description: expect.stringContaining('[#42](https://example/42)'),
+    }));
+    expect(created.description).toContain('[#6](https://example/6)');
+  });
+
   it('maps labels and relationship metadata to canonical backlog fields', async () => {
     const issue = {
       id: 42, title: 'Child', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'parent::10', 'depends-on::9'],

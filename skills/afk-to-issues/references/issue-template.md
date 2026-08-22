@@ -1,6 +1,8 @@
 # Backlog Item Contract
 
-> Use this structure when composing a backlog item for creation through AFK CLI. It defines the information an executor needs; AFK owns provider-specific publication and canonical IDs.
+> Use this structure when composing a child backlog item through AFK CLI. It
+> defines the information an executor needs; AFK owns provider publication,
+> canonical IDs, and returned URLs.
 
 ## Structure
 
@@ -9,7 +11,7 @@
 
 ## PRD
 
-<source PRD artifact or stable reference>
+<source PRD artifact and [root backlog](<rootBacklogUrl>)>
 
 ## Context
 
@@ -42,7 +44,7 @@
 | Field | Required | Purpose |
 |---|---|---|
 | `Title` | yes | Short imperative outcome |
-| `PRD` | yes | Traceability to the approved source |
+| `PRD` | yes | Approved source and returned root backlog URL |
 | `Context` | yes | Why the work exists |
 | `Scope` | yes | Execution boundary and relevant change surface |
 | `Acceptance Criteria` | yes | Observable completion conditions |
@@ -120,4 +122,9 @@ Run the targeted permission tests and the API verification command.
 
 ## Handoff to AFK
 
-The agent supplies the reviewed task plan and item content. AFK CLI is responsible for creating provider records, assigning canonical IDs, establishing supported relationships, and returning the resulting backlog state. The skill must verify that the created records match the approved plan.
+The agent supplies the reviewed task plan and body. Pass it through
+`afk backlog create --description-file`, with `--parent` and repeated
+`--depends-on` options. AFK creates provider records, assigns canonical IDs,
+establishes supported relationships, returns concrete URLs, and adds a
+`## Backlog Links` section with self, parent, and dependency URLs. Verify the
+created records match the approved plan.

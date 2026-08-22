@@ -28,5 +28,6 @@ export const COMMANDS: CommandEntry[] = [
   { names: ['run'], loader: () => import('./commands/run.js').then(m => m.registerRunCommands) },
   { names: ['qa'], loader: () => import('./commands/qa.js').then(m => m.registerQACommands) },
   { names: ['loop'], loader: () => import('./commands/loop.js').then(m => m.registerLoopCommands) },
+  { names: ['observe'], loader: () => import('./commands/observe.js').then(m => m.registerObserveCommands) },
   { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },
 ];

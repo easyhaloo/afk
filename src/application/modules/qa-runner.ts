@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { randomUUID } from 'node:crypto';
 import { WorktreeManager } from '../../infrastructure/git/index';
 import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-diagnostics';
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index';
@@ -17,6 +18,9 @@ import { formatExecutionFailure } from '../workflow-engine';
 import { buildExecutionPrompt } from '../workflows/execution-protocol';
 import { TaskRuntimeManager } from '../runtime/task-runtime';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata';
+import type { ObservationContext, RunEventData } from '../../core/events';
+import { RunObserver } from '../../observability/run-observer';
+import { createLegacyRunObserverFromEnvironment } from '../../observability/legacy-observer';
 
 type QAResultObject = { [key: string]: unknown };
 
@@ -29,6 +33,8 @@ export interface QARunnerDependencies {
   projectRoot?: string;
   mergeBranch?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   runtimeManager?: TaskRuntimeManager;
+  /** Optional append-only audit observer. Defaults to the observe-mode bridge. */
+  observer?: RunObserver;
 }
 
 /**
@@ -50,6 +56,8 @@ export class QARunner {
   private readonly projectRoot: string;
   private readonly mergeBranchOverride?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   private readonly runtimeManager: TaskRuntimeManager;
+  private readonly observer?: RunObserver;
+  private observationContext?: ObservationContext;
 
   constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
@@ -59,6 +67,7 @@ export class QARunner {
     this.projectRoot = deps.projectRoot ?? process.cwd();
     this.mergeBranchOverride = deps.mergeBranch;
     this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
+    this.observer = deps.observer ?? createLegacyRunObserverFromEnvironment();
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
     this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
     this.agentRuntime = deps.agentRuntime;
@@ -70,13 +79,25 @@ export class QARunner {
     logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
 
     const backlog = await this.providers.backlog.get(id);
+    this.observationContext = this.createObservationContext(id);
+    await this.recordObservation({
+      kind: 'run.requested',
+      run: {
+        id: this.observationContext.runId,
+        workItemId: id,
+        profileId: this.observationContext.profileId,
+        attempt: this.observationContext.attempt,
+        status: 'pending',
+      },
+    });
+    await this.recordObservation({ kind: 'run.started' });
     const parent = backlog.parentId ? await this.providers.backlog.get(backlog.parentId) : undefined;
     const baselineBranch = parent?.branchName ?? this.config.targetBranch ?? 'main';
     const session = `qa-${id}-${Date.now()}`;
     let worktreePath: string | undefined;
     let sandbox: Sandbox | undefined;
     let execution: AgentExecution | undefined;
-    const runtimeRunId = `${session}-runtime`;
+    const runtimeRunId = this.observationContext.runId;
     let runtimeStarted = false;
     let runtimeErrorSummary: string | undefined;
 
@@ -88,10 +109,15 @@ export class QARunner {
       await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
       await this.heartbeatRuntime(runtimeRunId, { worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
       logger.info({ backlogId: id, worktree: worktreePath, baselineBranch }, 'QA worktree created');
+      await this.recordObservation({ kind: 'workspace.prepared', branch: handle.branchName, workspace: worktreePath, baseBranch: baselineBranch });
 
       const featureBranch = backlog.branchName;
       if (!featureBranch) {
-        await this.markBlocked(id, 'feature branch could not be resolved');
+        const reason = 'feature branch could not be resolved';
+        runtimeErrorSummary = reason;
+        await this.recordObservation({ kind: 'failure.classified', failureClass: 'qa_branch_resolution', summary: reason });
+        await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason });
+        await this.markBlocked(id, reason);
         return { success: false };
       }
       if (this.mergeBranchOverride) await this.mergeBranchOverride(worktreePath, baselineBranch, featureBranch);
@@ -136,6 +162,7 @@ export class QARunner {
       await this.heartbeatRuntime(runtimeRunId, runtimeFieldsFromExecution(execution.metadata));
       await this.heartbeatRuntime(runtimeRunId, { progress: 'QA agent running' });
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
+      await this.recordObservation({ kind: 'step.started', stepId: 'qa-verification', phase: 'verification' });
 
       const result = await execution.waitForResult({ completionTimeoutMs: this.config.completionTimeout });
       await this.logWorktreeDiagnostics(id, 'agent-completed', worktreePath);
@@ -143,6 +170,9 @@ export class QARunner {
       logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
       if (result.status !== 'completed') {
         runtimeErrorSummary = formatExecutionFailure(result);
+        await this.recordObservation({ kind: 'step.completed', stepId: 'qa-verification', outcome: 'failed' });
+        await this.recordObservation({ kind: 'failure.classified', failureClass: 'qa_execution', summary: runtimeErrorSummary });
+        await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: 'QA execution did not complete' });
         await this.handleExecutionFailure(id, worktreePath, session, result, execution);
         return { success: false };
       }
@@ -150,6 +180,9 @@ export class QARunner {
       const signal = asQAResult(result.structuredOutput);
       if (!signal) {
         runtimeErrorSummary = `${formatExecutionFailure(result)}; missing QA completion payload`;
+        await this.recordObservation({ kind: 'step.completed', stepId: 'qa-verification', outcome: 'failed' });
+        await this.recordObservation({ kind: 'failure.classified', failureClass: 'qa_protocol', summary: runtimeErrorSummary });
+        await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: 'QA completion payload missing' });
         await this.markBlocked(id, `${formatExecutionFailure(result)}; missing QA completion payload`);
         return { success: false };
       }
@@ -158,11 +191,23 @@ export class QARunner {
         runtimeErrorSummary = signal.result === 'PASS'
           ? 'QA terminal routing failed'
           : signal.summary;
+        await this.recordObservation({ kind: 'step.completed', stepId: 'qa-verification', outcome: 'failed' });
+        await this.recordObservation({ kind: 'failure.classified', failureClass: 'qa_result', summary: runtimeErrorSummary });
+        await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: 'QA result failed' });
+      } else {
+        await this.recordObservation({ kind: 'step.completed', stepId: 'qa-verification', outcome: 'succeeded' });
+        if (outcome.autoMerged) {
+          await this.recordObservation({ kind: 'run.finished', outcome: 'succeeded', reason: 'QA change merged' });
+        } else {
+          await this.recordObservation({ kind: 'human_gate.opened', gateId: `merge-${id}`, reason: 'root merge requires review' });
+        }
       }
       return outcome;
     } catch (error) {
       const message = `QA execution failed: ${(error as Error).message}`;
       runtimeErrorSummary = message;
+      await this.recordObservation({ kind: 'failure.classified', failureClass: 'qa_crash', summary: message });
+      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: 'QA execution crashed' });
       await this.markBlocked(id, message);
       logger.error({ backlogId: id, error }, 'QA execution failed');
       return { success: false };
@@ -230,6 +275,7 @@ export class QARunner {
         targetBranch,
         draft: false,
       });
+      await this.recordObservation({ kind: 'change.created', changeId: String(mr.id), targetBranch, url: mr.url });
       if (activeRework) {
         await this.providers.backlog.resolveRework(backlogId, activeRework.id, {
           summary: `QA passed after rework ${activeRework.id}.`,
@@ -242,6 +288,7 @@ export class QARunner {
         return { success: true, autoMerged: false, mrUrl: mr.url };
       }
       await this.providers.changes.merge(String(mr.id));
+      await this.recordObservation({ kind: 'change.merge_verified', changeId: String(mr.id), targetBranch });
       await this.providers.backlog.transition(backlogId, 'done', { changeId: String(mr.id) });
       logger.info({ backlogId, changeId: mr.id, targetBranch }, 'child backlog change merged');
       return { success: true, autoMerged: true, mrUrl: mr.url };
@@ -274,6 +321,26 @@ export class QARunner {
   private async markBlocked(backlogId: string, reason: string): Promise<void> {
     await this.providers.backlog.transition(backlogId, 'blocked', { reason });
     await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
+  }
+
+  private createObservationContext(backlogId: string): ObservationContext {
+    return {
+      traceId: randomUUID().replaceAll('-', ''),
+      runId: `afk-qa-${backlogId}-${randomUUID()}`,
+      workItemId: backlogId,
+      profileId: process.env.AFK_PROFILE ?? 'legacy-compat',
+      attempt: 1,
+      actor: { kind: 'system', id: 'qa-runner' },
+    };
+  }
+
+  private async recordObservation(data: RunEventData): Promise<void> {
+    if (!this.observer || !this.observationContext) return;
+    try {
+      await this.observer.record(this.observationContext, data);
+    } catch (error) {
+      logger.error({ runId: this.observationContext.runId, eventType: data.kind, err: error }, 'failed to persist QA audit event');
+    }
   }
 
   private async startRuntime(runId: string, backlog: BacklogItem, session: string): Promise<void> {

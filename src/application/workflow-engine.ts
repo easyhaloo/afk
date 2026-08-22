@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
+import { randomUUID } from 'node:crypto';
 import { simpleGit } from 'simple-git';
 import { WorktreeManager } from '../infrastructure/git/index';
 import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index';
@@ -44,6 +45,9 @@ import type { ProviderBundle } from './providers';
 import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index';
 import { TaskRuntimeManager } from './runtime/task-runtime';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata';
+import type { ObservationContext, RunEventData } from '../core/events';
+import { RunObserver } from '../observability/run-observer';
+import { createLegacyRunObserverFromEnvironment } from '../observability/legacy-observer';
 
 /**
  * Preserve the provider boundary details when an agent execution fails.
@@ -188,6 +192,8 @@ export interface RunnerDependencies {
   providers?: ProviderBundle;
   /** Local runtime projection for the read-only Tasks monitor. */
   runtimeManager?: TaskRuntimeManager;
+  /** Optional append-only audit observer. Defaults to the observe-mode bridge. */
+  observer?: RunObserver;
 }
 
 /**
@@ -279,6 +285,8 @@ export class WorkflowRunner {
   private runtimeErrorSummary?: string;
   private acFeedback?: AcVerificationFailure;
   private activeRework?: import('../domain/backlog/index').ReworkRecord;
+  private readonly observer?: RunObserver;
+  private observationContext?: ObservationContext;
 
   /**
    * Inject a sandbox for testing. Production code goes through runBody →
@@ -322,6 +330,7 @@ export class WorkflowRunner {
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
     this.runtimeManager = deps?.runtimeManager ?? new TaskRuntimeManager();
+    this.observer = deps?.observer ?? createLegacyRunObserverFromEnvironment();
   }
 
   /**
@@ -352,15 +361,29 @@ export class WorkflowRunner {
     this.leaseLost = false;
     this.runtimeRunId = undefined;
     this.runtimeErrorSummary = undefined;
+    this.observationContext = this.createObservationContext(backlogId, session);
+    await this.recordObservation({
+      kind: 'run.requested',
+      run: {
+        id: this.observationContext.runId,
+        workItemId: backlogId,
+        profileId: this.observationContext.profileId,
+        attempt: this.observationContext.attempt,
+        status: 'pending',
+      },
+    });
     if (this.providers) {
       const claimed = await this.providers.backlog.claim(backlogId, session);
       if (!claimed) {
         logger.info({ backlogId }, 'backlog is not runnable or was claimed by another worker');
+        await this.recordObservation({ kind: 'run.finished', outcome: 'cancelled', reason: 'not_claimed' });
         return { success: false, skipped: 'not_claimed' };
       }
       this.activeBacklog = claimed.item;
       this.activeClaim = claimed;
       this.activeRework = await this.providers.backlog.getActiveRework(backlogId);
+      await this.recordObservation({ kind: 'run.started' });
+      await this.recordObservation({ kind: 'lease.granted', leaseId: session });
       // Establish the terminalizer immediately after claim acquisition, before
       // template validation or any branch/sandbox resource can be created.
       // Every terminal path shares this scope, so a native no-op lease and a
@@ -429,6 +452,8 @@ export class WorkflowRunner {
     await new TemplateLoader({ projectRoot: this.repoRoot }).load(effectiveTemplate);
     } catch (error) {
       this.runtimeErrorSummary = `workflow setup failed: ${(error as Error).message}`;
+      await this.recordObservation({ kind: 'failure.classified', failureClass: 'workflow_setup', summary: this.runtimeErrorSummary });
+      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: 'workflow setup failed' });
       await this.markBacklogBlocked(`workflow setup failed: ${(error as Error).message}`);
       await this.resourceScope?.finish({ status: 'failed' });
       await this.finishRuntime('blocked', 'workflow setup failed');
@@ -447,10 +472,13 @@ export class WorkflowRunner {
         if (!result.success) await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
       }
       terminalOutcome = result.success ? 'success' : 'failed';
+      await this.recordObservation({ kind: 'run.finished', outcome: result.success ? 'succeeded' : 'failed', reason: result.success ? 'implementation handed to QA' : 'workflow execution failed' });
       return result;
     } catch (error) {
       logger.error({ iid, err: error }, 'workflow runBody threw unexpectedly');
       this.runtimeErrorSummary = `workflow crashed: ${(error as Error).message}`;
+      await this.recordObservation({ kind: 'failure.classified', failureClass: 'workflow_crash', summary: this.runtimeErrorSummary });
+      await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: 'workflow crashed' });
       await this.cleanupOnFailure(iid, session);
       await this.markBacklogBlocked('workflow crashed');
       throw error;
@@ -593,6 +621,8 @@ export class WorkflowRunner {
     }
     await this.heartbeatRuntime({ worktree: branchHandle.path, branch: branchHandle.branch, progress: `running ${step.id}` });
     const completionKind: CompletionKind = step.id === 'verify-ac' ? 'ac' : 'task';
+    const observationPhase = completionKind === 'ac' ? 'verification' : 'implementation';
+    await this.recordObservation({ kind: 'step.started', stepId: step.id, phase: observationPhase });
     let phase: PhaseResult;
     try {
       phase = await this.runPhase({
@@ -611,6 +641,9 @@ export class WorkflowRunner {
         sandbox,
         completionKind,
       });
+    } catch (error) {
+      await this.recordObservation({ kind: 'step.completed', stepId: step.id, outcome: 'failed' });
+      throw error;
     } finally {
       if (sandbox !== this.sandbox && ctx.executionMode === 'interactive') await sandbox.close();
     }
@@ -620,6 +653,7 @@ export class WorkflowRunner {
     const completed = completionKind === 'ac'
       ? phase.completed && isAcVerificationPass(phase.output)
       : phase.completed;
+    await this.recordObservation({ kind: 'step.completed', stepId: step.id, outcome: completed ? 'succeeded' : 'failed' });
     return {
       stepId: step.id,
       status: completed ? 'completed' : 'failed',
@@ -721,6 +755,7 @@ export class WorkflowRunner {
     this.primaryHandle = { branch: handle.branchName, path: handle.worktreePath, isNewBranch: true };
     wt = { iid, path: handle.worktreePath, branch: handle.branchName, createdAt: new Date(), status: 'active' };
     logger.info({ iid, worktree: wt.path, branch: wt.branch }, 'worktree created');
+    await this.recordObservation({ kind: 'workspace.prepared', branch: wt.branch, workspace: wt.path, baseBranch });
     logger.info({ iid, status: 'active' }, 'worktree status updated');
     if (this.executionMode === 'interactive') {
       await configureStatusline(wt.path);
@@ -1148,10 +1183,33 @@ export class WorkflowRunner {
     }
   }
 
+  private createObservationContext(backlogId: string, session: string): ObservationContext {
+    const runId = `afk-${backlogId}-${randomUUID()}`;
+    return {
+      traceId: randomUUID().replaceAll('-', ''),
+      runId,
+      workItemId: backlogId,
+      profileId: process.env.AFK_PROFILE ?? 'legacy-compat',
+      attempt: 1,
+      actor: { kind: 'system', id: session },
+    };
+  }
+
+  private async recordObservation(data: RunEventData): Promise<void> {
+    if (!this.observer || !this.observationContext) return;
+    try {
+      await this.observer.record(this.observationContext, data);
+    } catch (error) {
+      // Observe mode must not change legacy run behavior. Coordinator mode will
+      // make EventStore health a fail-closed policy precondition.
+      logger.error({ runId: this.observationContext.runId, eventType: data.kind, err: error }, 'failed to persist run audit event');
+    }
+  }
+
   private async startRuntime(backlogId: string, session: string): Promise<void> {
     if (this.runtimeRunId) return;
     const now = new Date().toISOString();
-    this.runtimeRunId = `${session}-${Date.now()}`;
+    this.runtimeRunId = this.observationContext?.runId ?? `${session}-${Date.now()}`;
     try {
       await this.runtimeManager.start({
         runId: this.runtimeRunId,

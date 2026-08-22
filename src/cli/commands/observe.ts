@@ -22,6 +22,12 @@ function emit(value: unknown, json?: boolean): void {
 export function registerObserveCommands(program: Command): void {
   const observe = program.command('observe').description('Read append-only AFK run audit events');
 
+  observe.command('runs')
+    .description('List run IDs available in the local event store')
+    .option('--root <path>', 'Event-store root (defaults to AFK_EVENT_STORE_DIR or ~/.afk/events)')
+    .option('--json', 'Emit JSON')
+    .action(async options => emit(await queries(options.root).runs(), options.json));
+
   observe.command('timeline <runId>')
     .description('Show ordered audit events for a run')
     .option('--root <path>', 'Event-store root (defaults to AFK_EVENT_STORE_DIR or ~/.afk/events)')

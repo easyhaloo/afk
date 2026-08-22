@@ -75,7 +75,9 @@ export function evolve(state: RunAggregate, event: RunEvent): RunAggregate {
         humanGateId: undefined,
       };
     case 'run.finished':
-      requireRunStatus(state, 'running', event.type);
+      if (!state.run || (state.run.status !== 'running' && !(state.run.status === 'pending' && event.data.outcome === 'cancelled'))) {
+        throw new RunEventTransitionError(`event '${event.type}' requires a running run, except pending cancellation`);
+      }
       if (state.activeStep) throw new RunEventTransitionError('cannot finish run while a step is active');
       return {
         ...next,

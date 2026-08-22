@@ -13,7 +13,7 @@
 | Workflow / QA 双写 | 已实现 | `AFK_HARNESS_MODE=observe` 时记录 claim、workspace、step、failure、PR/MR 与 merge/human-gate 事实。 |
 | RunCoordinator | 已实现为 shadow foundation | 已有 command → decision → effect audit 解释器；尚未接管 legacy runner 的 effect 执行。 |
 | Trusted profile / capability manifest | 已实现 | 可解析能力、拒绝缺失与冲突；当前为仓库内可信组合，不下载远程插件。 |
-| 查询 CLI | 已实现 | `observe timeline|verify|replay|explain|doctor`。 |
+| 查询 CLI | 已实现 | `observe runs|timeline|verify|replay|explain|doctor`。 |
 | OTLP、跨进程 fencing、投影替换、confirm-merge | 未切换 | 下一阶段工作，保持为明确的生产门禁。 |
 
 ## 2. 启用 observe 模式
@@ -43,6 +43,9 @@ node dist/index.js run --backlog-id 123 --execution-mode batch
 ```bash
 # 检查当前模式和本地事件目录
 node dist/index.js observe doctor --json
+
+# 发现本地事件目录中的 run ID
+node dist/index.js observe runs --json
 
 # 查看事件时序与 hash-chain 校验结论
 node dist/index.js observe timeline <run-id> --json

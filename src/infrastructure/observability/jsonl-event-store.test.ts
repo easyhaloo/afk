@@ -21,16 +21,16 @@ async function root(): Promise<string> {
   return path;
 }
 
-function draft(id: string, kind: 'run.requested' | 'run.started'): RunEventDraft {
+function draft(id: string, kind: 'run.requested' | 'run.started', observation: ObservationContext = context): RunEventDraft {
   return {
     id,
     schemaVersion: 1,
     type: kind,
     occurredAt: '2026-08-23T00:00:00.000Z',
-    context,
-    correlationId: context.runId,
+    context: observation,
+    correlationId: observation.runId,
     data: kind === 'run.requested'
-      ? { kind, run: { id: context.runId, workItemId: context.workItemId, profileId: context.profileId, attempt: 1, status: 'pending' } }
+      ? { kind, run: { id: observation.runId, workItemId: observation.workItemId, profileId: observation.profileId, attempt: 1, status: 'pending' } }
       : { kind },
   };
 }
@@ -51,6 +51,18 @@ describe('JsonlEventStore', () => {
     expect(events.map(event => event.sequence)).toEqual([1, 2]);
     expect(events[1].integrity.prevHash).toBe(events[0].integrity.hash);
     await expect(store.verify(context.runId)).resolves.toMatchObject({ valid: true, lastSequence: 2 });
+  });
+
+  it('lists no runs for a missing directory and discovers multiple encoded run IDs', async () => {
+    const path = await root();
+    const store = new JsonlEventStore({ root: path });
+    await expect(store.listRuns()).resolves.toEqual([]);
+
+    await store.append([draft('one', 'run.requested')]);
+    const secondContext = { ...context, runId: 'run-2' };
+    await store.append([draft('two', 'run.requested', secondContext)]);
+
+    await expect(store.listRuns()).resolves.toEqual(['run-1', 'run-2']);
   });
 
   it('detects tampered payloads during verification', async () => {

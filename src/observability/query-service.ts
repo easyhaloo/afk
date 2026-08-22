@@ -12,6 +12,10 @@ export interface RunTimeline {
 export class RunQueryService {
   constructor(private readonly events: EventStorePort) {}
 
+  async runs(): Promise<readonly string[]> {
+    return this.events.listRuns();
+  }
+
   async timeline(runId: string): Promise<RunTimeline> {
     const events: RunEvent[] = [];
     for await (const event of this.events.read(runId)) events.push(event);

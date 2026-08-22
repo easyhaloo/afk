@@ -74,6 +74,21 @@ export class JsonlEventStore implements EventStorePort {
     }
   }
 
+  async listRuns(): Promise<readonly string[]> {
+    let names: string[];
+    try {
+      names = await fs.readdir(this.root);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+    return names
+      .filter(name => name.endsWith('.jsonl'))
+      .map(name => Buffer.from(name.slice(0, -'.jsonl'.length), 'base64url').toString('utf8'))
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right));
+  }
+
   async verify(runId: string): Promise<{ valid: boolean; lastSequence: number; lastHash?: string; reason?: string }> {
     let previous: RunEvent | undefined;
     let count = 0;

@@ -55,6 +55,19 @@ describe('Run reducer', () => {
     });
   });
 
+  it('allows a not-claimed pending run to terminate as cancelled', () => {
+    const state = replay([
+      requested(),
+      event(2, { kind: 'run.finished', outcome: 'cancelled', reason: 'not_claimed' }),
+    ]);
+
+    expect(state).toMatchObject({
+      sequence: 2,
+      terminal: true,
+      run: { id: context.runId, status: 'cancelled' },
+    });
+  });
+
   it('requires strictly increasing event sequences', () => {
     const state = evolve(initialRunAggregate(), requested());
     expect(() => evolve(state, event(3, { kind: 'run.started' }))).toThrow(RunEventSequenceError);

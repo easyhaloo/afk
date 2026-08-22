@@ -10,6 +10,7 @@ export interface AppendReceipt {
 export interface EventStorePort {
   append(events: readonly RunEventDraft[]): Promise<AppendReceipt>;
   read(runId: string, options?: { afterSequence?: number }): AsyncIterable<RunEvent>;
+  listRuns(): Promise<readonly string[]>;
   verify(runId: string): Promise<{ valid: boolean; lastSequence: number; lastHash?: string; reason?: string }>;
 }
 

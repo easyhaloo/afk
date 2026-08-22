@@ -2,18 +2,20 @@
 name: afk-to-issues
 disable-model-invocation: true
 description: >-
-  Decompose an approved PRD into executable, verifiable backlog items by
-  inspecting repository evidence, selecting an appropriate slicing strategy,
-  building dependencies, and using the AFK CLI to create and verify the
-  resulting backlog.
+  Decompose an approved PRD into executable, verifiable child backlog items by
+  inspecting repository evidence, selecting a slicing strategy, building
+  relationships, and using AFK CLI to create records with traceable URLs.
 disallowed-tools: >-
   Bash(git push -f) Bash(git reset --hard*)
   Bash(git branch -D*)
 ---
 
-# PRD -> Backlog
+# PRD -> AFK Child Backlogs
 
-**Goal:** Transform an approved PRD into a small set of independently executable and verifiable backlog items, then create them through the AFK CLI. The PRD defines **what** must be achieved; this skill determines **how the work should be organized for execution** without inventing requirements.
+**Goal:** Transform an approved PRD into independently executable and
+verifiable child backlogs under its root backlog. The PRD defines **what** must
+be achieved; this skill determines **how the work should be organized** without
+inventing requirements.
 
 **Mode:** HITL-gated — analyze and draft first, obtain explicit approval, then create the approved backlog through AFK.
 
@@ -123,7 +125,7 @@ Each item should contain:
 ```yaml
 - title: <short imperative title>
   description: <context and intended outcome>
-  parent: <planned parent reference or null>
+  parent: <planned parent reference or root backlog>
   depends_on: [<planned task references>]
   execution_mode: afk | hitl
   tags: [<business tags>]
@@ -135,7 +137,10 @@ Each item should contain:
   source: <PRD reference>
 ```
 
-Use stable temporary task references while planning; the AFK CLI resolves them to canonical backlog IDs during creation. Parents are organizational; dependencies control execution order. Keep the dependency graph acyclic.
+Use stable temporary task references while planning. After approval, resolve
+each reference to the canonical ID and URL returned by `afk backlog create`.
+The approved PRD root is the parent of every created child. Parents are
+organizational; dependencies control execution order. Keep the graph acyclic.
 
 ## Verification Inference
 
@@ -170,7 +175,40 @@ The agent owns reasoning and planning; the AFK CLI owns deterministic backlog op
 
 After explicit approval, automatically invoke the repository's AFK CLI backlog creation capability. Do not ask the user to manually create backlog items. Do not directly use `gh issue create` or provider APIs when an AFK CLI capability exists.
 
-Pass the reviewed plan to AFK rather than reconstructing issue bodies through ad-hoc shell commands. Capture the returned backlog IDs and relationship results, then verify the remote state.
+Require the approved root reference before creating any child:
+
+```text
+rootBacklogId: <returned by /afk-to-prd>
+rootBacklogUrl: <returned by /afk-to-prd>
+```
+
+Create approved items one at a time in topological dependency order. Write
+each body to a temporary Markdown file and include this traceability section:
+
+```markdown
+## PRD
+
+[PRD root backlog](<rootBacklogUrl>)
+```
+
+Invoke AFK with canonical IDs only:
+
+```bash
+afk backlog create "<title>" \
+  --description-file /tmp/backlog-<temporary-ref>.md \
+  --parent <rootBacklogId> \
+  --depends-on <canonical-dependency-id> \
+  --mode <afk|hitl> \
+  --tag <business-tag>
+```
+
+Repeat `--depends-on` and `--tag` for every declared value. Record the
+returned `Created backlog <id>` and `url:` for every temporary reference. AFK
+writes `## Backlog Links` with the concrete self, parent, and dependency URLs.
+Use returned IDs and URLs for subsequent items; never construct them.
+
+If a command fails, stop and report every already-created temporary reference,
+canonical ID, and URL. Do not bypass AFK with a provider API.
 
 If the AFK CLI lacks a required operation, report the capability gap instead of silently bypassing the CLI.
 
@@ -183,10 +221,14 @@ The skill is complete only when:
 - dependencies and supported relationships are established;
 - acceptance criteria and verification evidence are preserved;
 - created backlog identifiers are recorded; and
+- created backlog URLs are recorded; and
 - the resulting backlog is traceable to the published PRD.
 
 Do not begin implementation, modify the PRD, or create ADRs. Those responsibilities belong to other workflows.
 
 ## References
 
-Read `references/ddd-slicing.md` for slicing guidance and `references/issue-template.md` for acceptance-criteria conventions. These references support planning; repository evidence and the published PRD remain authoritative.
+Read `references/ddd-slicing.md` for slicing guidance and
+`references/issue-template.md` for acceptance-criteria and PRD-link
+conventions. These references support planning; repository evidence and the
+published PRD remain authoritative.

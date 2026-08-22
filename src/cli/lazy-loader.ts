@@ -29,7 +29,7 @@ export async function lazyLoad(cmd: string, extraArgs: string[]) {
       if (matched) {
         const sub = matched.commands.find(c => c.name() === extraArgs[0]);
         const target = sub ?? matched;
-        target.parse(['afk', cmd, ...extraArgs]);
+        target.parse(buildLazyArgv(cmd, extraArgs, sub?.name()));
         return;
       }
       program.parse(['afk', cmd, ...extraArgs]);
@@ -45,4 +45,10 @@ export async function lazyLoad(cmd: string, extraArgs: string[]) {
   // Unknown command -> full CLI
   const { runFullCLI } = await import('./full-cli.js');
   await runFullCLI();
+}
+
+export function buildLazyArgv(cmd: string, extraArgs: string[], subcommand?: string): string[] {
+  return subcommand
+    ? ['afk', subcommand, ...extraArgs.slice(1)]
+    : ['afk', cmd, ...extraArgs];
 }

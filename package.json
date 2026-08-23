@@ -7,8 +7,8 @@
     "afk": "./dist/index.js"
   },
   "scripts": {
-    "build": "node scripts/build.mjs && tsc --emitDeclarationOnly",
-    "typecheck": "tsc --noEmit",
+    "build": "pnpm --filter @afk/workflow-graph build && node scripts/build.mjs && tsc --emitDeclarationOnly",
+    "typecheck": "pnpm --filter @afk/workflow-graph build && tsc --noEmit",
     "architecture:check": "node scripts/architecture-guard.mjs",
     "dev": "tsc --watch",
     "pretest": "npm run build",

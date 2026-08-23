@@ -65,8 +65,14 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      - name: Test shared graph package
+        run: pnpm --filter @afk/workflow-graph test
+
       - name: Build
         run: pnpm run build
 
       - name: Test
         run: pnpm test
+
+      - name: Desktop typecheck, test, and build
+        run: pnpm --filter afk-control-electron build

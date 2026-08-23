@@ -17,6 +17,7 @@ Cross-platform issue tracking automation (GitLab/GitHub) powered by Claude AI ag
 - **TUI Dashboard** — Interactive issue tracking dashboard
 - **Background Automation** — tmux-based workflow scheduler
 - **TDD Integration** — Built-in test-driven development methodology
+- **Workflow graph review** — Generate deterministic workflow JSON for CLI and the embedded desktop review panel
 
 ## Quick Start
 
@@ -89,6 +90,10 @@ Run `/afk-grill-me` in Claude Code to confirm skills are loaded.
 ## CLI Commands
 
 ```bash
+afk graph workflow <template>                 # Generate a trusted workflow graph cache
+afk graph workflow <template> --format archify-json
+afk graph workflow <template> --validate
+
 # Backlog Management
 afk backlog init
 afk backlog list --mode afk
@@ -122,6 +127,8 @@ afk escalate create "title"           # File GitLab issue
 # Signal Management
 afk signal goal-complete               # Workflow signal communication
 ```
+
+Workflow graph files are derived from `.afk/workflows/<template>.yml`; the YAML remains the execution source of truth. Generated artifacts are hash-addressed below `.afk/cache/archify/workflow/` and are never used to execute a workflow. Installing the optional [Archify](https://github.com/tt-a1i/archify) CLI enables fixed `validate workflow` and `deliver workflow` checks, but graph generation works without it.
 
 Full command reference: `afk --help`
 

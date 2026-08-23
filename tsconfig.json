@@ -13,7 +13,11 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "jsx": "react"
+    "jsx": "react",
+    "baseUrl": ".",
+    "paths": {
+      "@afk/workflow-graph": ["packages/afk-workflow-graph/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests", "**/*.test.tsx", "**/*.test.ts"]

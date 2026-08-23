@@ -27,3 +27,4 @@ export { layoutWorkflow, workflowNodeSize } from './layout.js';
 export { routeBetween, routeEdges } from './routing.js';
 export { validateSnapshot } from './validate.js';
 export { createReceipt } from './receipt.js';
+export { toArchifyWorkflow, type ArchifyWorkflowDocument } from './archify.js';

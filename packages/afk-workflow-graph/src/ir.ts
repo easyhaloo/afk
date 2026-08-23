@@ -50,6 +50,7 @@ export interface GraphStep {
   readonly label?: string;
   readonly description?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly contentHash?: string;
 }
 
 export interface WorkflowGraphDefinition {

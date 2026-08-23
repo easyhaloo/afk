@@ -21,3 +21,5 @@ export {
   type WorkflowGraphDefinition,
   type WorkflowGraphPreferences,
 } from './ir.js';
+export { projectWorkflow, type WorkflowTemplateSummary } from './project.js';
+export { normalizeDefinition, type NormalizationResult } from './normalize.js';

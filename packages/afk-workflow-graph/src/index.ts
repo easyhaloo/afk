@@ -23,3 +23,7 @@ export {
 } from './ir.js';
 export { projectWorkflow, type WorkflowTemplateSummary } from './project.js';
 export { normalizeDefinition, type NormalizationResult } from './normalize.js';
+export { layoutWorkflow, workflowNodeSize } from './layout.js';
+export { routeBetween, routeEdges } from './routing.js';
+export { validateSnapshot } from './validate.js';
+export { createReceipt } from './receipt.js';

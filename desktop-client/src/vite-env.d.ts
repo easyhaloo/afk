@@ -35,5 +35,8 @@ interface Window {
     snapshot: (workspace: string) => Promise<Snapshot>;
     tmuxPane: (session: string) => Promise<string>;
     tmuxSend: (session: string, line: string) => Promise<boolean>;
+    graphStatus: (workspace: string, templateId: string) => Promise<unknown>;
+    graphGenerate: (request: unknown) => Promise<{ status: unknown; outputPath?: string }>;
+    graphExport: (request: unknown) => Promise<{ status: unknown; outputPath?: string }>;
   };
 }

@@ -16,6 +16,7 @@ import claudeIcon from "./assets/runtime-icons/claude-official.ico";
 import codexIcon from "./assets/runtime-icons/codex-openai-official.png";
 import geminiIcon from "./assets/runtime-icons/gemini-cli-official.png";
 import openCodeIcon from "./assets/runtime-icons/opencode-official.svg";
+import { GraphReviewPanel } from "./features/workflows/graph/GraphReviewPanel";
 
 type Phase = "ready" | "active" | "verify" | "attention";
 type View = "queue" | "board" | "agents" | "containers" | "events";
@@ -185,6 +186,7 @@ function App() {
           <header className="view-header"><div><span className="eyebrow"><i />AFK · LOCAL</span><h1>{title}</h1><p>{view === "agents" ? "检测本机 Agent CLI 的可用性、版本与路径" : "本地运行记录"}</p></div>{view === "agents" ? <AgentHeaderSummary available={availableRuntimeCount} total={runtimeTotal} missing={missingRuntimeCount} errors={errorRuntimeCount} checkedAt={lastCheckedAt} /> : <div className="view-stats"><span><i className="dot active" />{groups.active.length} 条执行中</span><span><i className="dot" />{groups.ready.length} 条待执行</span><span><i className="dot attention" />{groups.attention.length} 条待确认</span></div>}</header>
           {view === "queue" ? <Queue events={events} selected={selected} freshIds={freshIds} onSelect={setSelected} /> : null}
           {view === "board" ? <Board groups={groups} selected={selected} freshIds={freshIds} onSelect={setSelected} /> : null}
+          {view === "board" ? <GraphReviewPanel workspace={workspace} /> : null}
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
           {view === "containers" ? <Environments snapshot={snapshot} onTerminal={openSession} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={setSelected} /> : null}

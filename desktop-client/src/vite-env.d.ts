@@ -36,7 +36,7 @@ interface Window {
     tmuxPane: (session: string) => Promise<string>;
     tmuxSend: (session: string, line: string) => Promise<boolean>;
     graphStatus: (workspace: string, templateId: string) => Promise<unknown>;
-    graphGenerate: (request: unknown) => Promise<{ status: unknown; outputPath?: string }>;
-    graphExport: (request: unknown) => Promise<{ status: unknown; outputPath?: string }>;
+    graphGenerate: (request: { workspace: string; templateId: string; format?: "json" | "archify-json" }) => Promise<{ status: unknown; outputPath?: string }>;
+    graphExport: (request: { workspace: string; templateId: string; format?: "json" | "archify-json" }) => Promise<{ status: unknown; outputPath?: string }>;
   };
 }

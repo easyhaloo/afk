@@ -1,5 +1,3 @@
-import type { CSSProperties } from 'react';
-
 export type GraphSnapshot = {
   nodes: Array<{ id: string; stepId: string; label: string; kind: string; bounds: { x: number; y: number; width: number; height: number } }>;
   edges: Array<{ id: string; source: string; target: string; label?: string; route?: { points: Array<{ x: number; y: number }> } }>;

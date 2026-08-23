@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 type WorkflowGraphFormat = 'json' | 'archify-json';
@@ -37,7 +37,8 @@ export class WorkflowGraphService {
   async generate(request: WorkflowGraphGenerateRequest): Promise<WorkflowGraphGenerateResult> {
     validateRequest(request);
     const format = request.format ?? 'json';
-    const cli = path.resolve(request.workspace, 'node_modules', '.bin', 'afk');
+    const localCli = path.resolve(request.workspace, 'node_modules', '.bin', 'afk');
+    const cli = existsSync(localCli) ? localCli : (process.env.AFK_CLI ?? 'afk');
     try {
       const args = ['graph', 'workflow', request.templateId, '--project', request.workspace, '--format', format];
       const { stdout } = await run(cli, args, { cwd: request.workspace, timeout: 30_000, maxBuffer: 8_000_000 });

@@ -10,6 +10,7 @@
     "dev": "concurrently -k \"pnpm dev:main\" \"vite --port 5174\" \"wait-on tcp:5174 file:dist-electron/main.js && ELECTRON_RENDERER_URL=http://localhost:5174 electron .\"",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "build:main": "tsc -p tsconfig.electron.json",
+    "test": "vitest run",
     "build": "pnpm typecheck && pnpm build:main && vite build",
     "package:mac": "pnpm build && electron-builder --mac --dir"
   },
@@ -40,5 +41,6 @@
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "wait-on": "^8.0.1"
+    ,"vitest": "^1.2.0"
   }
 }

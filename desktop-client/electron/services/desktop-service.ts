@@ -6,6 +6,9 @@ import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { WorkflowGraphService } from "./graph-service";
+const GRAPH_IPC_CHANNELS = { status: "afk:graph:status", generate: "afk:graph:generate", export: "afk:graph:export" } as const;
+type WorkflowGraphGenerateRequest = { readonly workspace: string; readonly templateId: string; readonly format?: "json" | "archify-json" };
 
 const run = promisify(execFile);
 
@@ -226,6 +229,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  const graphService = new WorkflowGraphService();
   ipcMain.handle("afk:choose-workspace", async () => {
     const selected = await dialog.showOpenDialog({ title: "选择 AFK 工作区", properties: ["openDirectory"] });
     return selected.canceled ? null : selected.filePaths[0] || null;
@@ -244,6 +248,9 @@ app.whenReady().then(async () => {
     if (!result.ok) throw new Error(result.stderr);
     return true;
   });
+  ipcMain.handle(GRAPH_IPC_CHANNELS.status, async (_event, workspace: string, templateId: string) => graphService.status(workspace, templateId));
+  ipcMain.handle(GRAPH_IPC_CHANNELS.generate, async (_event, request: WorkflowGraphGenerateRequest) => graphService.generate(request));
+  ipcMain.handle(GRAPH_IPC_CHANNELS.export, async (_event, request: WorkflowGraphGenerateRequest) => graphService.generate({ ...request, format: request.format ?? "archify-json" }));
   await createWindow();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
 });

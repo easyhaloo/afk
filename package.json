@@ -20,6 +20,7 @@
   },
   "keywords": ["afk", "gitlab", "automation", "ci-cd"],
   "dependencies": {
+    "@afk/workflow-graph": "workspace:*",
     "@gitbeaker/node": "^35.8.0",
     "@m234/nerd-fonts": "^0.5.1",
     "@octokit/rest": "^22.0.1",

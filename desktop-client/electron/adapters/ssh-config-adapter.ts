@@ -32,35 +32,37 @@ function parseDirective(line: string) {
   return { key: match[1].toLowerCase(), value: match[2] };
 }
 
-function normalizeSafetyValue(value: string) {
+function tokenizeSafetyValue(value: string) {
+  const tokens: string[] = [];
+  let token = "";
   let quote: '"' | "'" | null = null;
-  let commentIndex = value.length;
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index];
     if (quote) {
       if (character === quote) quote = null;
+      else token += character;
     } else if (character === '"' || character === "'") {
       quote = character;
     } else if (character === "#") {
-      commentIndex = index;
       break;
+    } else if (/\s/.test(character)) {
+      if (token) tokens.push(token);
+      token = "";
+    } else {
+      token += character;
     }
   }
-  const normalized = value.slice(0, commentIndex).trim();
-  const first = normalized[0];
-  const last = normalized[normalized.length - 1];
-  return ((first === '"' && last === '"') || (first === "'" && last === "'"))
-    ? normalized.slice(1, -1).trim().toLowerCase()
-    : normalized.toLowerCase();
+  if (token) tokens.push(token);
+  return tokens;
 }
 
 function isHostKeyCheckingDisabled(value: string) {
-  return ["no", "off"].includes(normalizeSafetyValue(value));
+  const [setting] = tokenizeSafetyValue(value);
+  return setting !== undefined && ["no", "off"].includes(setting.toLowerCase());
 }
 
 function isKnownHostsDisabled(value: string) {
-  const files = normalizeSafetyValue(value).split(/\s+/);
-  return files.includes("none") || files.includes("/dev/null");
+  return tokenizeSafetyValue(value).some((file) => ["none", "/dev/null"].includes(file.toLowerCase()));
 }
 
 function parseBlocks(raw: string, source: "system" | "managed", configPath: string) {

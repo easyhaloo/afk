@@ -56,17 +56,18 @@ function tokenizeSafetyValue(value: string) {
       tokenStarted = true;
     }
   }
+  if (quote) return undefined;
   if (tokenStarted) tokens.push(token);
   return tokens;
 }
 
 function isHostKeyCheckingDisabled(value: string) {
-  const [setting] = tokenizeSafetyValue(value);
+  const setting = tokenizeSafetyValue(value)?.[0];
   return setting !== undefined && ["no", "off"].includes(setting.toLowerCase());
 }
 
 function isKnownHostsDisabled(value: string) {
-  return tokenizeSafetyValue(value).some((file) => ["none", "/dev/null"].includes(file.toLowerCase()));
+  return tokenizeSafetyValue(value)?.some((file) => ["none", "/dev/null"].includes(file.toLowerCase())) ?? false;
 }
 
 function parseBlocks(raw: string, source: "system" | "managed", configPath: string) {

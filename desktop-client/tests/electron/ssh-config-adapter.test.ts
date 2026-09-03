@@ -168,6 +168,26 @@ describe("SSH config adapter", () => {
     ]));
   });
 
+  it.each([
+    ['StrictHostKeyChecking "no', "ssh.host-key-checking-disabled"],
+    ["UserKnownHostsFile '/dev/null", "ssh.known-hosts-disabled"],
+  ])("defers incomplete safety value %s to ssh -G", async (directive, safetyCode) => {
+    const { home } = await createHome(`Host demo\n  ${directive}\n`);
+    const adapter = createSshConfigAdapter({
+      home,
+      exec: async () => ({ ok: false, stdout: "", stderr: "invalid configuration" }),
+    });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: safetyCode }),
+    ]));
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.resolve-failed", hostAlias: "demo", path: "~/.ssh/config" }),
+    ]));
+  });
+
   it("defers structurally valid standard directives to OpenSSH", async () => {
     const { home } = await createHome(`Host demo
   HostName demo.example.test

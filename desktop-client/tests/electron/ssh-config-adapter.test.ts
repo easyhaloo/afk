@@ -43,6 +43,8 @@ describe("SSH config adapter", () => {
       expect.objectContaining({ code: "ssh.malformed-directive", hostAlias: "broken" }),
       expect.objectContaining({ code: "ssh.unknown-directive", hostAlias: "broken" }),
     ]));
-    expect(result.diagnostics.find((item) => item.code === "ssh.non-concrete-host")).not.toHaveProperty("hostAlias");
+    const nonConcreteHostDiagnostic = result.diagnostics.find((item) => item.code === "ssh.non-concrete-host");
+    expect(nonConcreteHostDiagnostic).toBeDefined();
+    expect(nonConcreteHostDiagnostic).not.toHaveProperty("hostAlias");
   });
 });

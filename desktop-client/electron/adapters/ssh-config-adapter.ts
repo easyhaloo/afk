@@ -35,6 +35,7 @@ function parseDirective(line: string) {
 function tokenizeSafetyValue(value: string) {
   const tokens: string[] = [];
   let token = "";
+  let tokenStarted = false;
   let quote: '"' | "'" | null = null;
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index];
@@ -43,16 +44,19 @@ function tokenizeSafetyValue(value: string) {
       else token += character;
     } else if (character === '"' || character === "'") {
       quote = character;
-    } else if (character === "#" && !token) {
+      tokenStarted = true;
+    } else if (character === "#" && !tokenStarted) {
       break;
     } else if (/\s/.test(character)) {
-      if (token) tokens.push(token);
+      if (tokenStarted) tokens.push(token);
       token = "";
+      tokenStarted = false;
     } else {
       token += character;
+      tokenStarted = true;
     }
   }
-  if (token) tokens.push(token);
+  if (tokenStarted) tokens.push(token);
   return tokens;
 }
 

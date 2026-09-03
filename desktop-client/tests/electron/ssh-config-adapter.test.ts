@@ -14,6 +14,71 @@ async function createHome(config: string, managed = "") {
 }
 
 describe("SSH config adapter", () => {
+  it.each([
+    ["StrictHostKeyChecking", "no"],
+    ["stricthostkeychecking", "off"],
+    ["STRICTHOSTKEYCHECKING", "NO"],
+    ["StrictHostKeyChecking", "OFF"],
+  ])("warns when %s is %s", async (directive, value) => {
+    const { home } = await createHome(`Host demo\n  ${directive} ${value}\n`);
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      {
+        code: "ssh.host-key-checking-disabled",
+        severity: "warning",
+        message: "Host demo 已关闭 SSH 主机密钥严格校验",
+        path: "~/.ssh/config",
+        hostAlias: "demo",
+      },
+    ]));
+  });
+
+  it.each(["yes", "ask", "accept-new"])('does not warn when StrictHostKeyChecking is "%s"', async (value) => {
+    const { home } = await createHome(`Host demo\n  StrictHostKeyChecking ${value}\n`);
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.host-key-checking-disabled" }),
+    ]));
+  });
+
+  it.each([
+    ["UserKnownHostsFile", "none"],
+    ["userknownhostsfile", "/dev/null"],
+    ["USERKNOWNHOSTSFILE", "~/.ssh/known_hosts /dev/null ~/.ssh/known_hosts2"],
+  ])("warns when %s disables known hosts with %s", async (directive, value) => {
+    const { home } = await createHome(`Host demo\n  ${directive} ${value}\n`);
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      {
+        code: "ssh.known-hosts-disabled",
+        severity: "warning",
+        message: "Host demo 已禁用用户 known_hosts 文件",
+        path: "~/.ssh/config",
+        hostAlias: "demo",
+      },
+    ]));
+  });
+
+  it("does not warn for a normal UserKnownHostsFile", async () => {
+    const { home } = await createHome("Host demo\n  UserKnownHostsFile ~/.ssh/known_hosts\n");
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.known-hosts-disabled" }),
+    ]));
+  });
+
   it("defers structurally valid standard directives to OpenSSH", async () => {
     const { home } = await createHome(`Host demo
   HostName demo.example.test

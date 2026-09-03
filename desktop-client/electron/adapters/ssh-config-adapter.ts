@@ -26,6 +26,15 @@ function isConcreteAlias(alias: string) {
   return /^[A-Za-z0-9_.-]+$/.test(alias) && alias !== "." && alias !== "..";
 }
 
+function isHostKeyCheckingDisabled(value: string) {
+  return ["no", "off"].includes(value.trim().toLowerCase());
+}
+
+function isKnownHostsDisabled(value: string) {
+  const files = value.trim().toLowerCase().split(/\s+/);
+  return files.includes("none") || files.includes("/dev/null");
+}
+
 function parseBlocks(raw: string, source: "system" | "managed", configPath: string) {
   const blocks: ConfigBlock[] = [];
   const diagnostics: SshDiagnostic[] = [];
@@ -47,6 +56,12 @@ function parseBlocks(raw: string, source: "system" | "managed", configPath: stri
     }
     const key = directive[1].toLowerCase();
     const value = directive[2];
+    if (key === "stricthostkeychecking" && isHostKeyCheckingDisabled(value)) {
+      diagnostics.push({ code: "ssh.host-key-checking-disabled", severity: "warning", message: `Host ${current.alias} 已关闭 SSH 主机密钥严格校验`, path: configPath, hostAlias: current.alias });
+    }
+    if (key === "userknownhostsfile" && isKnownHostsDisabled(value)) {
+      diagnostics.push({ code: "ssh.known-hosts-disabled", severity: "warning", message: `Host ${current.alias} 已禁用用户 known_hosts 文件`, path: configPath, hostAlias: current.alias });
+    }
     if (["hostname", "port", "user", "identityfile", "proxyjump", "include"].includes(key) && current.values[key] === undefined) {
       current.values[key] = value;
     }

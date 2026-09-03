@@ -98,6 +98,22 @@ describe("SSH config adapter", () => {
     ]));
   });
 
+  it.each(['""#safe /dev/null', "''#safe /dev/null"])("warns when an empty quoted token precedes %s", async (value) => {
+    const { home } = await createHome(`Host demo\n  UserKnownHostsFile ${value}\n`);
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "ssh.known-hosts-disabled",
+        message: "Host demo 已禁用用户 known_hosts 文件",
+        hostAlias: "demo",
+        path: "~/.ssh/config",
+      }),
+    ]));
+  });
+
   it('warns when UserKnownHostsFile is quoted "/dev/null"', async () => {
     const { home } = await createHome('Host demo\n  UserKnownHostsFile "/dev/null"\n');
     const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });

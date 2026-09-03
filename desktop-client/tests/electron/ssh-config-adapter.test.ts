@@ -168,6 +168,24 @@ describe("SSH config adapter", () => {
     ]));
   });
 
+  it.each(
+    [
+      ["StrictHostKeyChecking", "yes", "no", "ssh.host-key-checking-disabled", 0],
+      ["StrictHostKeyChecking", "no", "yes", "ssh.host-key-checking-disabled", 1],
+      ["StrictHostKeyChecking", "no", "off", "ssh.host-key-checking-disabled", 1],
+      ["UserKnownHostsFile", "~/.ssh/known_hosts", "/dev/null", "ssh.known-hosts-disabled", 0],
+      ["UserKnownHostsFile", "/dev/null", "~/.ssh/known_hosts", "ssh.known-hosts-disabled", 1],
+      ["UserKnownHostsFile", "none", "/dev/null", "ssh.known-hosts-disabled", 1],
+    ] as Array<[string, string, string, string, number]>,
+  )("uses only the first %s value when configured as %s then %s", async (directive, first, second, code, expectedCount) => {
+    const { home } = await createHome(`Host demo\n  ${directive} ${first}\n  ${directive} ${second}\n`);
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics.filter((diagnostic) => diagnostic.code === code)).toHaveLength(expectedCount);
+  });
+
   it.each([
     ['StrictHostKeyChecking "no', "ssh.host-key-checking-disabled"],
     ["UserKnownHostsFile '/dev/null", "ssh.known-hosts-disabled"],

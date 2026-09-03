@@ -122,6 +122,7 @@ export type Snapshot = {
 };
 
 export type DesktopApi = {
+  copyText: (text: string) => Promise<boolean>;
   chooseWorkspace: () => Promise<string | null>;
   snapshot: (workspace: string) => Promise<Snapshot>;
   appearance: () => Promise<AppearancePreferences>;
@@ -130,7 +131,7 @@ export type DesktopApi = {
   tmuxPane: (workspace: string, session: string) => Promise<string>;
   tmuxSend: (workspace: string, session: string, line: string) => Promise<boolean>;
   ssh: {
-    list: () => Promise<SshListResult>;
+    list: (options?: SshListOptions) => Promise<SshListResult>;
     add: (input: ManagedSshHostInput) => Promise<SshHost>;
     remove: (hostId: string) => Promise<boolean>;
     trust: (request: SshTrustRequest) => Promise<SshFingerprint>;
@@ -138,6 +139,7 @@ export type DesktopApi = {
     deployKey: (hostId: string) => Promise<SshSession>;
     test: (hostId: string) => Promise<SshTestResult>;
     connect: (hostId: string) => Promise<SshSession>;
+    openExternal: (hostId: string, terminal?: SshExternalTerminalId) => Promise<SshExternalTerminalResult>;
     input: (request: SshInputRequest) => Promise<boolean>;
     resize: (request: SshResizeRequest) => Promise<boolean>;
     close: (sessionId: string) => Promise<boolean>;
@@ -147,6 +149,7 @@ export type DesktopApi = {
 };
 
 export const IPC_CHANNELS = {
+  copyText: "afk:copy-text",
   chooseWorkspace: "afk:choose-workspace",
   snapshot: "afk:snapshot",
   appearance: "afk:appearance",
@@ -162,6 +165,7 @@ export const IPC_CHANNELS = {
   sshDeployKey: "afk:ssh-deploy-key",
   sshTest: "afk:ssh-test",
   sshConnect: "afk:ssh-connect",
+  sshOpenExternal: "afk:ssh-open-external",
   sshInput: "afk:ssh-input",
   sshResize: "afk:ssh-resize",
   sshClose: "afk:ssh-close",
@@ -171,6 +175,7 @@ export const IPC_CHANNELS = {
 import type {
   ManagedSshHostInput,
   SshFingerprint,
+  SshExternalTerminalId,
   SshHost,
   SshInputRequest,
   SshListResult,
@@ -179,3 +184,11 @@ import type {
   SshTestResult,
   SshTrustRequest,
 } from "./ssh-contract";
+
+export type SshExternalTerminalResult = {
+  terminal: SshExternalTerminalId;
+};
+
+export type SshListOptions = {
+  forceRefresh?: boolean;
+};

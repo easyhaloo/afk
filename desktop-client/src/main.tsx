@@ -24,6 +24,7 @@ import { Empty } from "./components/EmptyState";
 import { Settings } from "./features/settings/SettingsPage";
 import { SshHostsPage } from "./features/ssh/SshHostsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
+import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
 import type { SshSession } from "../shared/ssh-contract";
 
 type Phase = "ready" | "active" | "verify" | "attention";
@@ -99,7 +100,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState("");
-  const [terminal, setTerminal] = useState<{ open: boolean; pane: string; mode: "tmux" | "ssh"; sshSession?: SshSession; publicKeyPath?: string }>({ open: false, pane: "", mode: "tmux" });
+  const [terminal, setTerminal] = useState<SshTerminalState>({ open: false, pane: "", mode: "tmux" });
   const [line, setLine] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -110,6 +111,8 @@ function App() {
   const [appearance, setAppearance] = useState<AppearancePreferences>(defaultAppearance);
   const freshTimer = useRef<number | null>(null);
   const refreshInFlight = useRef(false);
+  const activeSshSessionId = useRef<string | null>(null);
+  const earlySshSessionBuffer = useRef(createEarlySshSessionBuffer());
 
   const refresh = async (target = workspace) => {
     if (refreshInFlight.current) return;
@@ -145,9 +148,19 @@ function App() {
   useEffect(() => { void refresh(""); }, []);
   useEffect(() => { void window.afkDesktop.appearance().then(setAppearance).catch(() => setAppearance(defaultAppearance)); }, []);
   useEffect(() => {
-    const offData = window.afkDesktop.ssh.onData((sessionId, data) => setTerminal((current) => current.sshSession?.id === sessionId ? { ...current, pane: current.pane + data } : current));
-    const offExit = window.afkDesktop.ssh.onExit((sessionId, code) => setTerminal((current) => current.sshSession?.id === sessionId ? { ...current, pane: `${current.pane}\n\n[SSH 会话已退出，退出码 ${code}]`, sshSession: current.sshSession ? { ...current.sshSession, state: "closed" } : undefined } : current));
-    return () => { offData(); offExit(); };
+    const buffer = earlySshSessionBuffer.current;
+    const offData = window.afkDesktop.ssh.onData((sessionId, data) => {
+      if (activeSshSessionId.current === sessionId) setTerminal((current) => applySshSessionEvents(current, sessionId, [{ type: "data", data }]));
+      else buffer.pushData(sessionId, data);
+    });
+    const offExit = window.afkDesktop.ssh.onExit((sessionId, code) => {
+      if (activeSshSessionId.current === sessionId) {
+        setTerminal((current) => applySshSessionEvents(current, sessionId, [{ type: "exit", code }]));
+        activeSshSessionId.current = null;
+        buffer.close(sessionId);
+      } else buffer.pushExit(sessionId, code);
+    });
+    return () => { offData(); offExit(); buffer.clearAll(); };
   }, []);
   useEffect(() => {
     const root = document.documentElement;
@@ -169,6 +182,7 @@ function App() {
   };
 
   const openSession = async (name: string) => {
+    activeSshSessionId.current = null;
     setSession(name);
     setConfirmed(false);
     setTerminal({ open: true, pane: "正在读取 tmux 窗格…", mode: "tmux" });
@@ -180,9 +194,21 @@ function App() {
     }
   };
 
-  const openSshSession = (sshSession: SshSession, publicKeyPath?: string) => setTerminal({ open: true, pane: "", mode: "ssh", sshSession, publicKeyPath });
+  const openSshSession = (sshSession: SshSession, publicKeyPath?: string) => {
+    activeSshSessionId.current = sshSession.id;
+    const bufferedEvents = earlySshSessionBuffer.current.open(sshSession.id);
+    setTerminal(applySshSessionEvents({ open: true, pane: "", mode: "ssh", sshSession, publicKeyPath }, sshSession.id, bufferedEvents));
+    if (bufferedEvents.some((event) => event.type === "exit")) {
+      activeSshSessionId.current = null;
+      earlySshSessionBuffer.current.close(sshSession.id);
+    }
+  };
   const closeTerminal = () => {
-    if (terminal.mode === "ssh" && terminal.sshSession?.state !== "closed") void window.afkDesktop.ssh.close(terminal.sshSession?.id || "");
+    if (terminal.mode === "ssh" && terminal.sshSession) {
+      activeSshSessionId.current = null;
+      earlySshSessionBuffer.current.close(terminal.sshSession.id);
+      if (terminal.sshSession.state !== "closed") void window.afkDesktop.ssh.close(terminal.sshSession.id);
+    }
     setTerminal((current) => ({ ...current, open: false }));
   };
 
@@ -272,7 +298,15 @@ function App() {
         </div>
         {selected && view !== "containers" && view !== "events" && view !== "workflows" && view !== "settings" ? <Inspector event={selected} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onTerminal={() => session && void openSession(session)} /> : null}
       </section>
-      {terminal.open ? <TerminalSheet mode={terminal.mode} session={session} pane={terminal.pane} line={line} confirmed={confirmed} sshSession={terminal.sshSession} onClose={closeTerminal} onLine={setLine} onConfirmed={setConfirmed} onSend={() => void sendInput()} onSshInput={(data) => void window.afkDesktop.ssh.input({ sessionId: terminal.sshSession?.id || "", data })} /> : null}
+      {terminal.open ? <TerminalSheet mode={terminal.mode} session={session} pane={terminal.pane} line={line} confirmed={confirmed} sshSession={terminal.sshSession} onClose={closeTerminal} onLine={setLine} onConfirmed={setConfirmed} onSend={() => void sendInput()} onSshInput={(data) => {
+        const sshSession = terminal.sshSession;
+        if (!sshSession || sshSession.state === "closed" || sshSession.state === "failed") return;
+        return window.afkDesktop.ssh.input({ sessionId: sshSession.id, data });
+      }} onSshResize={(cols, rows) => {
+        const sshSession = terminal.sshSession;
+        if (!sshSession || sshSession.state === "closed" || sshSession.state === "failed") return;
+        return window.afkDesktop.ssh.resize({ sessionId: sshSession.id, cols, rows });
+      }} /> : null}
     </main>
   );
 }

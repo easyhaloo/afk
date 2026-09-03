@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CircleAlert, Copy, KeyRound, Link2, Plus, RefreshCw, Search, Server, ShieldCheck, Trash2, X } from "lucide-react";
 import type { ManagedSshHostInput, SshDiagnostic, SshHost, SshHostSource, SshHostStatus, SshSession } from "../../../shared/ssh-contract";
 import { groupSshDiagnostics, type GroupedSshDiagnostic } from "./ssh-diagnostics";
@@ -11,6 +11,11 @@ const statusLabels: Record<SshHostStatus, string> = { ready: "可连接", untrus
 const sourceLabels: Record<SshHostSource, string> = { system: "系统配置", managed: "AFK 管理" };
 const diagnosticTypeLabels: Record<string, string> = { "ssh.unknown-directive": "未识别配置项", "ssh.malformed-directive": "无法解析的配置行", "ssh.non-concrete-host": "非具体 Host" };
 const diagnosticSeverityLabels: Record<SshDiagnostic["severity"], string> = { info: "提示", warning: "警告", error: "错误" };
+const modalFocusableSelector = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
+
+function getFocusableElements(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLElement>(modalFocusableSelector)).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+}
 
 export function filterSshHosts(hosts: SshHost[], query: string, source: SourceFilter, status: StatusFilter) {
   const normalized = query.trim().toLowerCase();
@@ -45,6 +50,8 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const modalRef = useRef<HTMLFormElement>(null);
+  const addHostButtonRef = useRef<HTMLButtonElement>(null);
 
   const load = async () => {
     setBusy("list"); setError("");
@@ -58,6 +65,25 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
 
   useEffect(() => { void load(); }, []);
 
+  const closeForm = useCallback(() => {
+    setFormOpen(false);
+    addHostButtonRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!formOpen) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    getFocusableElements(modal)[0]?.focus();
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeForm();
+    };
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => document.removeEventListener("keydown", handleDocumentKeyDown);
+  }, [closeForm, formOpen]);
+
   const filtered = useMemo(() => filterSshHosts(hosts, query, source, status), [hosts, query, source, status]);
   const groupedDiagnostics = useMemo(() => groupSshDiagnostics(diagnostics), [diagnostics]);
   const selected = filtered.find((host) => host.id === selectedId) || filtered[0] || null;
@@ -70,7 +96,7 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
   };
 
   const add = async () => {
-    await run("add", async () => { const host = await window.afkDesktop.ssh.add({ ...form, user: form.user || undefined }); setFormOpen(false); setForm({ alias: "", hostname: "", port: 22, user: "" }); setSelectedId(host.id); });
+    await run("add", async () => { const host = await window.afkDesktop.ssh.add({ ...form, user: form.user || undefined }); closeForm(); setForm({ alias: "", hostname: "", port: 22, user: "" }); setSelectedId(host.id); });
   };
 
   const trust = () => selected?.fingerprint ? void run("trust", async () => { await window.afkDesktop.ssh.trust({ hostId: selected.id, fingerprint: selected.fingerprint! }); }) : undefined;
@@ -81,13 +107,13 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
   const remove = () => selected && selected.source === "managed" && window.confirm(`删除 AFK SSH 主机“${selected.alias}”？`) ? void run("remove", async () => { await window.afkDesktop.ssh.remove(selected.id); }) : undefined;
 
   return <section className="control-page ssh-page" aria-label="SSH 主机管理">
-    <header className="control-page-heading ssh-heading"><div><p>本地基础设施</p><h1>SSH 主机</h1><span>复用系统 OpenSSH 配置，在不托管私钥和密码的前提下管理远程连接。</span></div><div className="ssh-heading-actions"><button className="ssh-secondary-action" onClick={generate} disabled={!!busy}><KeyRound size={15} />生成 AFK 密钥</button><button className="ssh-primary-action" onClick={() => setFormOpen(true)}><Plus size={15} />添加主机</button></div></header>
+    <header className="control-page-heading ssh-heading"><div><p>本地基础设施</p><h1>SSH 主机</h1><span>复用系统 OpenSSH 配置，在不托管私钥和密码的前提下管理远程连接。</span></div><div className="ssh-heading-actions"><button className="ssh-secondary-action" onClick={generate} disabled={!!busy}><KeyRound size={15} />生成 AFK 密钥</button><button ref={addHostButtonRef} className="ssh-primary-action" onClick={() => setFormOpen(true)}><Plus size={15} />添加主机</button></div></header>
     {error ? <div className="ssh-alert error" role="alert"><CircleAlert size={15} />{error}<button onClick={() => setError("")} aria-label="关闭错误"><X size={14} /></button></div> : null}
     {notice ? <div className="ssh-alert success" role="status"><Check size={15} />{notice}</div> : null}
     {diagnostics.length ? <SshDiagnostics diagnostics={groupedDiagnostics} total={diagnostics.length} /> : null}
     <section className="ssh-toolbar"><label className="ssh-search"><Search size={15} /><input aria-label="搜索 SSH 主机" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索别名、地址或用户" /></label><select value={source} onChange={(event) => setSource(event.target.value as SourceFilter)} aria-label="来源筛选"><option value="all">全部来源</option><option value="system">系统配置</option><option value="managed">AFK 管理</option></select><select value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)} aria-label="状态筛选"><option value="all">全部状态</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button className="icon-button" onClick={() => void load()} disabled={!!busy} aria-label="刷新 SSH 主机"><RefreshCw size={16} className={busy === "list" ? "spin" : ""} /></button></section>
     <section className="ssh-layout"><div className="ssh-host-list">{filtered.length ? filtered.map((host) => <button className={`ssh-host-row${selected?.id === host.id ? " selected" : ""}`} key={host.id} onClick={() => setSelectedId(host.id)}><span className="ssh-host-icon"><Server size={16} /></span><span className="ssh-host-copy"><b>{host.alias}</b><small>{host.user ? `${host.user}@` : ""}{host.hostname}:{host.port}</small></span><span className={`ssh-status ${host.status}`}>{statusLabels[host.status]}</span><span className="ssh-source">{sourceLabels[host.source]}</span></button>) : <div className="ssh-empty"><Server size={24} /><b>{busy === "list" ? "正在读取 SSH 配置…" : "没有匹配的 SSH 主机"}</b><span>AFK 会读取 `~/.ssh/config`，并将新主机写入 `~/.ssh/afk_hosts`。</span></div>}</div><SshDetails host={selected} busy={busy} onTrust={trust} onTest={test} onConnect={connect} onDeploy={deploy} onRemove={remove} /></section>
-    {formOpen ? <div className="ssh-modal-backdrop"><form className="ssh-modal" role="dialog" aria-modal="true" aria-labelledby="ssh-add-host-title" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setFormOpen(false); } }} onSubmit={(event) => { event.preventDefault(); void add(); }}><header><div><small>AFK 管理</small><h2 id="ssh-add-host-title">添加 SSH 主机</h2></div><button type="button" className="icon-button" onClick={() => setFormOpen(false)} aria-label="关闭"><X size={16} /></button></header><label>Host 别名<input required value={form.alias} onChange={(event) => setForm({ ...form, alias: event.target.value })} placeholder="production-web" /></label><label>主机地址<input required value={form.hostname} onChange={(event) => setForm({ ...form, hostname: event.target.value })} placeholder="203.0.113.10" /></label><div className="ssh-form-row"><label>端口<input type="number" min="1" max="65535" value={form.port} onChange={(event) => setForm({ ...form, port: Number(event.target.value) })} /></label><label>用户<input value={form.user || ""} onChange={(event) => setForm({ ...form, user: event.target.value })} placeholder="deploy" /></label></div><label>已有私钥路径（可选）<input value={form.identityFile || ""} onChange={(event) => setForm({ ...form, identityFile: event.target.value || undefined })} placeholder="~/.ssh/id_ed25519" /></label><label>跳板机（可选）<input value={form.proxyJump || ""} onChange={(event) => setForm({ ...form, proxyJump: event.target.value || undefined })} placeholder="bastion" /></label><footer><button type="button" className="ssh-secondary-action" onClick={() => setFormOpen(false)}>取消</button><button type="submit" className="ssh-primary-action" disabled={busy === "add"}>{busy === "add" ? "保存中…" : "保存主机"}</button></footer></form></div> : null}
+    {formOpen ? <div className="ssh-modal-backdrop"><form ref={modalRef} className="ssh-modal" role="dialog" aria-modal="true" aria-labelledby="ssh-add-host-title" onKeyDown={(event) => { if (event.key !== "Tab") return; const focusableElements = getFocusableElements(event.currentTarget); if (!focusableElements.length) return; const firstFocusable = focusableElements[0]; const lastFocusable = focusableElements[focusableElements.length - 1]; if (event.shiftKey && document.activeElement === firstFocusable) { event.preventDefault(); lastFocusable.focus(); } else if (!event.shiftKey && document.activeElement === lastFocusable) { event.preventDefault(); firstFocusable.focus(); } }} onSubmit={(event) => { event.preventDefault(); void add(); }}><header><div><small>AFK 管理</small><h2 id="ssh-add-host-title">添加 SSH 主机</h2></div><button type="button" className="icon-button" onClick={closeForm} aria-label="关闭"><X size={16} /></button></header><label>Host 别名<input required value={form.alias} onChange={(event) => setForm({ ...form, alias: event.target.value })} placeholder="production-web" /></label><label>主机地址<input required value={form.hostname} onChange={(event) => setForm({ ...form, hostname: event.target.value })} placeholder="203.0.113.10" /></label><div className="ssh-form-row"><label>端口<input type="number" min="1" max="65535" value={form.port} onChange={(event) => setForm({ ...form, port: Number(event.target.value) })} /></label><label>用户<input value={form.user || ""} onChange={(event) => setForm({ ...form, user: event.target.value })} placeholder="deploy" /></label></div><label>已有私钥路径（可选）<input value={form.identityFile || ""} onChange={(event) => setForm({ ...form, identityFile: event.target.value || undefined })} placeholder="~/.ssh/id_ed25519" /></label><label>跳板机（可选）<input value={form.proxyJump || ""} onChange={(event) => setForm({ ...form, proxyJump: event.target.value || undefined })} placeholder="bastion" /></label><footer><button type="button" className="ssh-secondary-action" onClick={closeForm}>取消</button><button type="submit" className="ssh-primary-action" disabled={busy === "add"}>{busy === "add" ? "保存中…" : "保存主机"}</button></footer></form></div> : null}
   </section>;
 }
 

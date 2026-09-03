@@ -171,12 +171,17 @@ describe('LoopRunner QA boundary', () => {
     expect(managementBundle.backlog.transition).toBeDefined();
   });
 
-  it('passes main for a root backlog and the parent branch for a child backlog', async () => {
+  it('uses the target branch for organizational parents and an explicit unmerged execution base for stacked work', async () => {
     const root = { ...item, id: '10', branchName: 'afk/backlog-10', parentId: undefined };
-    const child = { ...item, id: '42', parentId: '10' };
+    const executionBase = { ...item, id: '11', branchName: 'afk/backlog-11', state: 'verification' as const };
+    const completedBase = { ...item, id: '12', branchName: 'afk/backlog-12', state: 'done' as const };
+    const organizationalChild = { ...item, id: '42', parentId: '10' };
+    const stackedChild = { ...item, id: '43', parentId: '10', baseBacklogId: '11', branchName: 'afk/backlog-43' };
+    const mergedBaseChild = { ...item, id: '44', baseBacklogId: '12', branchName: 'afk/backlog-44' };
+    const items = new Map([['10', root], ['11', executionBase], ['12', completedBase], ['42', organizationalChild], ['43', stackedChild], ['44', mergedBaseChild]]);
     const providers: ProviderBundle = {
       backlog: {
-        get: vi.fn(async (id: string) => id === '10' ? root : child),
+        get: vi.fn(async (id: string) => items.get(id)!),
         list: vi.fn(async () => []),
         claim: vi.fn(),
         transition: vi.fn(async () => {}),
@@ -199,10 +204,16 @@ describe('LoopRunner QA boundary', () => {
     internals.enqueueQA = vi.fn();
 
     await internals.runChain('42');
-    expect(runs[0]).toMatchObject({ targetBranch: 'afk/backlog-10', baseBranch: 'afk/backlog-10' });
+    expect(runs[0]).toMatchObject({ targetBranch: 'main', baseBranch: 'main' });
+
+    await internals.runChain('43');
+    expect(runs[1]).toMatchObject({ targetBranch: 'afk/backlog-11', baseBranch: 'afk/backlog-11' });
+
+    await internals.runChain('44');
+    expect(runs[2]).toMatchObject({ targetBranch: 'main', baseBranch: 'main' });
 
     await internals.runChain('10');
-    expect(runs[1]).toMatchObject({ targetBranch: 'main', baseBranch: 'main' });
+    expect(runs[3]).toMatchObject({ targetBranch: 'main', baseBranch: 'main' });
   });
 
   it('releases a claim-miss reservation without blocking or counting a failure', async () => {

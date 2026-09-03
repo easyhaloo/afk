@@ -46,8 +46,9 @@ describe('hard-cutover command surface', () => {
 
     expect(create?.registeredArguments.map(argument => argument.name())).toEqual(['title']);
     expect(create?.options.map(option => option.long)).toEqual([
-      '--description-file', '--parent', '--depends-on', '--mode', '--tag', '--project',
+      '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--tag', '--project',
     ]);
+    expect(create?.options.find(option => option.long === '--base-backlog')?.description).toContain('explicit execution base');
     expect(create?.options.find(option => option.long === '--depends-on')?.short).toBe('-d');
   });
 });

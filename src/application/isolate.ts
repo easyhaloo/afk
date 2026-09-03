@@ -3,6 +3,7 @@ import { promises as fs, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { load } from 'js-yaml';
+import { getAfkResourceRegistry, workspaceRootForWorktree } from './runtime/resource-registry';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -203,14 +204,22 @@ function parseDuration(s: string): number {
 
 export class IsolateManager {
   private worktreeRoot: string;
+  private workspaceRoot: string;
+  private runtimeRunId?: string;
   private projectHash: string;
   private offset: number | null = null;
   private services: ParsedService[] = [];
 
-  constructor(worktreeRoot: string) {
+  constructor(worktreeRoot: string, options: { workspaceRoot?: string; runtimeRunId?: string } = {}) {
     this.worktreeRoot = worktreeRoot;
-    // Hash the absolute path to use as registry key
+    this.workspaceRoot = options.workspaceRoot ?? workspaceRootForWorktree(worktreeRoot);
+    this.runtimeRunId = options.runtimeRunId;
+    // Hash the absolute path to use as registry key.
     this.projectHash = `p${hashString(worktreeRoot)}`;
+  }
+
+  private get composeProjectName(): string {
+    return `isolate-${this.projectHash}`;
   }
 
   /**
@@ -241,19 +250,30 @@ export class IsolateManager {
     await this.writeEnv();
 
     // docker compose up -d
-    const { status, stderr } = dc(['compose', 'up', '-d'], this.worktreeRoot);
+    const { status, stderr } = dc(['compose', '--project-name', this.composeProjectName, 'up', '-d'], this.worktreeRoot);
     if (status !== 0) {
       throw new Error(`docker compose up failed: ${stderr}`);
     }
 
     // Health check each service
     for (const svc of this.services) {
-      const container = `${svc.name}-isolate`;
-      const ok = await waitHealthy(container, svc.healthTimeout);
-      if (!ok) {
+      const containerId = this.containerIdFor(svc.name);
+      if (!containerId || !(await waitHealthy(containerId, svc.healthTimeout))) {
         await this.discard();
         throw new Error(`${svc.name} health check failed after ${svc.healthTimeout}s — isolate rolled back`);
       }
+      getAfkResourceRegistry().register({
+        workspacePath: this.workspaceRoot,
+        runId: this.runtimeRunId,
+        worktreePath: this.worktreeRoot,
+        kind: 'isolate-service',
+        origin: 'isolate',
+        engine: 'docker',
+        name: svc.name,
+        externalId: containerId,
+        detail: `${this.composeProjectName} · 127.0.0.1:${svc.hostPort + (this.offset ?? 0)}`,
+        metadata: { composeProjectName: this.composeProjectName, service: svc.name, port: svc.hostPort + (this.offset ?? 0) },
+      });
     }
 
     return this.getConnectionInfo();
@@ -263,7 +283,7 @@ export class IsolateManager {
    * Destroy isolate: docker compose down + release port offset.
    */
   async discard(): Promise<void> {
-    const { stderr } = dc(['compose', 'down', '-v', '--remove-orphans'], this.worktreeRoot);
+    const { stderr } = dc(['compose', '--project-name', this.composeProjectName, 'down', '-v', '--remove-orphans'], this.worktreeRoot);
     if (stderr) {
       // Non-fatal: log but don't throw
       console.error('docker compose down warning:', stderr);
@@ -280,8 +300,14 @@ export class IsolateManager {
       } catch { /* */ }
     }
 
+    getAfkResourceRegistry().closeActiveForWorktree(this.workspaceRoot, this.worktreeRoot, 'isolate');
     await releasePortOffset(this.projectHash);
     this.offset = null;
+  }
+
+  private containerIdFor(serviceName: string): string {
+    const { status, stdout } = dc(['compose', '--project-name', this.composeProjectName, 'ps', '-q', serviceName], this.worktreeRoot);
+    return status === 0 ? stdout.trim().split('\n').find(Boolean) ?? '' : '';
   }
 
   /**
@@ -385,11 +411,11 @@ export async function isolateGc(): Promise<number> {
     const eq = line.indexOf('=');
     if (eq < 0) return true;
     const hash = line.slice(0, eq);
-    // The hash is "p" + hash of the absolute path — we can't reverse it,
-    // but we can check if any docker-compose project is still running
-    // with this hash in its name
-    const { status } = dc(['compose', 'ps', '-q', '--filter', `label=com.docker.compose.project=isolate-${hash}`]);
-    if (status !== 0) {
+    // The hash is "p" + hash of the absolute path — we cannot reverse it,
+    // so retain it only while Docker still has a container carrying the exact
+    // Compose project label that AFK assigned at creation time.
+    const { status, stdout } = dc(['ps', '-q', '--filter', `label=com.docker.compose.project=isolate-${hash}`]);
+    if (status !== 0 || !stdout.trim()) {
       removed++;
       return false;
     }

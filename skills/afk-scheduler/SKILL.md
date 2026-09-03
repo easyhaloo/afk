@@ -50,8 +50,9 @@ Wave 3 (after wave 2): backlog-d — depends on c
 
 Idempotent — safe to re-run. Each run:
 1. Scan provider backlogs with `state: ready` and `executionMode: afk`.
-2. Filter out items with unresolved `dependsOn` or a `parentId` that makes
-   them a grouping backlog.
+2. Filter out items with unresolved `dependsOn` or with incomplete children
+   that make the item itself a grouping backlog. A child `parentId` alone is
+   organizational metadata and does not make that child non-runnable.
 3. Leave `in_progress`, `verification`, `merge_ready`, `done`, and `blocked`
    items to their current workflow; do not re-claim them.
 4. Start the single provider-backed loop; it claims runnable items atomically
@@ -88,13 +89,26 @@ Run `afk loop --daemon` (or `afk loop` in the foreground). The loop handles
 dependency checks, atomic claims, duplicate prevention, implementation, QA,
 merge, and terminal state transitions.
 
+For an isolated validation, pass every approved test item explicitly and bound
+concurrency and completions:
+
+```bash
+afk loop --max-concurrent 1 --max-iterations <n> \
+  --backlog-id <id-1> --backlog-id <id-2> \
+  --agent <provider>
+```
+
+A validation run MUST include one or more `--backlog-id` values; never scan all
+repository-ready items unless that broad scope was explicitly approved.
+
 **Precondition:** auto mode selected.
 **Output:** runnable backlogs available to the loop.
 
 ### Step 4 — Launch Wave N (manual mode)
 
 Run the loop with an appropriate `--poll-interval` and
-`--max-concurrent`. It advances to later waves as dependencies become
+`--max-concurrent`; for an isolated wave test, also pass each item via repeated
+`--backlog-id`. It advances to later waves as dependencies become
 `done`; any conflict, timeout, automation failure, or non-pass QA result
 becomes `blocked` + `hitl` while other runnable items continue.
 
@@ -115,5 +129,8 @@ any `blocked`/`hitl` items require human intervention before release.
 - MUST NOT let the loop run without user visibility — use loop status and
   provider backlog state after each transition.
 - MUST NOT delete remote branches — remote history is the audit trail.
-- MUST NOT confuse an empty dependency list with a runnable item — parents,
-  non-AFK modes, and non-`ready` states are not launchable.
+- MUST NOT confuse an empty dependency list with a runnable item — grouping
+  parents with incomplete children, non-AFK modes, and non-`ready` states are
+  not launchable.
+- MUST treat `parentId` as organizational only. Select an unmerged git base
+  branch only when the backlog declares an explicit execution-base reference.

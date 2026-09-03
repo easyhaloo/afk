@@ -54,6 +54,10 @@ export interface SandboxOptions {
   tmux?: import('../tmux/tmux').TmuxClient;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
+  /** Project workspace that owns this worktree; used for AFK resource registry scoping. */
+  workspaceRoot?: string;
+  /** Durable TaskRuntimeRecord runId when one has already been created. */
+  runtimeRunId?: string;
 }
 
 /** A started sandbox — can create AgentExecutions. */

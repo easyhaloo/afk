@@ -70,3 +70,11 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Desktop Electron verification
+        working-directory: desktop-client
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+          pnpm typecheck
+          pnpm test
+          pnpm build

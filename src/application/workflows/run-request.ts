@@ -122,7 +122,7 @@ export function resolveWorkflowRequest(
     branchStrategy: deriveBranchStrategy(backlogId, input.branchStrategy),
     ext: input.ext,
     extParams: input.extParams,
-    template: input.template,
+    template: input.template ?? config.template,
   };
 }
 

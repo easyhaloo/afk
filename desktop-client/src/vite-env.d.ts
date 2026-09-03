@@ -1,39 +1,36 @@
-/** AFK Control UI contract: the renderer only receives summarized, fixed-whitelist local diagnostics. */
 /// <reference types="vite/client" />
 
-interface RuntimeEvent {
-  id: string;
-  timestamp: string;
-  source: string;
-  result: string;
-  nextStep: string;
-  raw: string;
+import type {
+  AgentRuntime as AgentRuntimeDto,
+  AppearancePreferences as AppearancePreferencesDto,
+  CanvasTemplateNode as CanvasTemplateNodeDto,
+  CliCapability as CliCapabilityDto,
+  DesktopApi,
+  LoopStatus as LoopStatusDto,
+  RuntimeEvent as RuntimeEventDto,
+  Snapshot as SnapshotDto,
+  WorkflowConfigSummary as WorkflowConfigSummaryDto,
+  WorkflowRunSummary as WorkflowRunSummaryDto,
+  WorkflowTemplateStepSummary as WorkflowTemplateStepSummaryDto,
+  WorkflowTemplateSummary as WorkflowTemplateSummaryDto,
+} from "../shared/ipc-contract";
+
+declare global {
+  type RuntimeEvent = RuntimeEventDto;
+  type AgentRuntime = AgentRuntimeDto;
+  type CliCapability = CliCapabilityDto;
+  type CanvasTemplateNode = CanvasTemplateNodeDto;
+  type WorkflowTemplateStepSummary = WorkflowTemplateStepSummaryDto;
+  type WorkflowTemplateSummary = WorkflowTemplateSummaryDto;
+  type WorkflowConfigSummary = WorkflowConfigSummaryDto;
+  type WorkflowRunSummary = WorkflowRunSummaryDto;
+  type LoopStatus = LoopStatusDto;
+  type AppearancePreferences = AppearancePreferencesDto;
+  type Snapshot = SnapshotDto;
+
+  interface Window {
+    afkDesktop: DesktopApi;
+  }
 }
 
-interface AgentRuntime {
-  id: "claude" | "codex" | "gemini" | "opencode";
-  label: string;
-  command: string;
-  available: boolean;
-  executable: string;
-  summary: string;
-  status: "available" | "missing" | "error";
-}
-
-interface Snapshot {
-  workspace: { root: string; afkDirectoryPresent: boolean; eventCount: number };
-  afk: { available: boolean; executable: string; summary: string };
-  agentRuntimes: AgentRuntime[];
-  events: RuntimeEvent[];
-  containers: Array<{ engine: string; name: string; image: string; status: string }>;
-  sessions: Array<{ name: string; windows: string; attached: boolean }>;
-}
-
-interface Window {
-  afkDesktop: {
-    chooseWorkspace: () => Promise<string | null>;
-    snapshot: (workspace: string) => Promise<Snapshot>;
-    tmuxPane: (session: string) => Promise<string>;
-    tmuxSend: (session: string, line: string) => Promise<boolean>;
-  };
-}
+export {};

@@ -54,3 +54,9 @@ dt-mdp-llm-research.md
 llm-app-design-methodology.json
 llm-app-design-methodology.md
 anthropic_context_article.md
+
+# Desktop Electron generated output
+desktop-client/dist-electron/
+desktop-client/release/
+desktop-client/test-artifacts/
+.dev/

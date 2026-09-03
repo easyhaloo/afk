@@ -37,6 +37,8 @@ export interface WorkflowConfig {
   targetBranch: string;
   trackerTargetBranch: string;
   goalBudget: number;
+  /** Optional named AFK workflow template selected for executions. */
+  template?: string;
   agents: {
     codex: CodexConfig;
   };
@@ -139,6 +141,7 @@ export function loadWorkflowConfig(
     targetBranch: configString(file.targetBranch) ?? env.AFK_TARGET_BRANCH ?? DEFAULT_WORKFLOW.targetBranch,
     trackerTargetBranch: configString(file.trackerTargetBranch) ?? env.AFK_TRACKER_TARGET_BRANCH ?? DEFAULT_WORKFLOW.trackerTargetBranch,
     goalBudget: configNumber(file.goalBudget) ?? parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget, env),
+    template: configString(file.template),
     agents: { codex: loadCodexConfig(file, env) },
   };
 }

@@ -36,12 +36,15 @@ import type {
 import type { ContainerProvider, ContainerExecResult } from './types';
 import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types';
 import { EnvVarAllowlist } from './env-allowlist';
+import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../../application/runtime/resource-registry';
 
 export class ContainerSandbox implements Sandbox {
   readonly id: string;
   readonly worktreePath: string;
   readonly workspacePath: string;
   private readonly containerName: string;
+  private readonly workspaceRoot: string;
+  private readonly runtimeRunId?: string;
   private _containerId: string | null = null;
   private _closed = false;
 
@@ -56,6 +59,8 @@ export class ContainerSandbox implements Sandbox {
     workdir?: string;
     hostClaudeConfigDir?: string;
     hostClaudeConfigFile?: string;
+    workspaceRoot?: string;
+    runtimeRunId?: string;
   }) {
     this.id = opts.id ?? randomUUID();
     this.worktreePath = opts.worktreePath;
@@ -69,6 +74,8 @@ export class ContainerSandbox implements Sandbox {
     this._workdir = opts.workdir ?? '/workspace';
     this._hostClaudeConfigDir = opts.hostClaudeConfigDir;
     this._hostClaudeConfigFile = opts.hostClaudeConfigFile;
+    this.workspaceRoot = opts.workspaceRoot ?? workspaceRootForWorktree(opts.worktreePath);
+    this.runtimeRunId = opts.runtimeRunId;
   }
 
   // Configuration captured at construction. Provider is injected at create()
@@ -164,6 +171,13 @@ export class ContainerSandbox implements Sandbox {
       try {
         await this._provider.remove(this._containerId, true);
       } catch { /* already gone */ }
+      getAfkResourceRegistry().markClosed({
+        workspacePath: this.workspaceRoot,
+        worktreePath: this.worktreePath,
+        kind: 'container',
+        origin: 'container-sandbox',
+        name: this.containerName,
+      });
     }
   }
 
@@ -200,6 +214,18 @@ export class ContainerSandbox implements Sandbox {
       workdir: this._workdir,
     });
     this._containerId = handle.id;
+    getAfkResourceRegistry().register({
+      workspacePath: this.workspaceRoot,
+      runId: this.runtimeRunId,
+      worktreePath: this.worktreePath,
+      kind: 'container',
+      origin: 'container-sandbox',
+      engine: handle.engine,
+      name: handle.name,
+      externalId: handle.id,
+      detail: this._image,
+      metadata: { workdir: this._workdir },
+    });
   }
 }
 

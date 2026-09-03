@@ -3,33 +3,48 @@
   "version": "0.1.0",
   "private": true,
   "description": "AFK Control local desktop client",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "type": "commonjs",
   "scripts": {
     "dev:main": "tsc -p tsconfig.electron.json --watch",
-    "dev": "concurrently -k \"pnpm dev:main\" \"vite --port 5174\" \"wait-on tcp:5174 file:dist-electron/main.js && ELECTRON_RENDERER_URL=http://localhost:5174 electron .\"",
+    "dev:raw": "concurrently -k \"pnpm dev:main\" \"vite --port 5174\" \"wait-on tcp:5174 file:dist-electron/electron/main.js && ELECTRON_RENDERER_URL=http://localhost:5174 electron .\"",
+    "dev": "bash scripts/start-idempotent.sh",
+    "start": "bash scripts/start-idempotent.sh",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "vitest run --config vitest.config.ts",
     "build:main": "tsc -p tsconfig.electron.json",
     "build": "pnpm typecheck && pnpm build:main && vite build",
-    "package:mac": "pnpm build && electron-builder --mac --dir"
+    "package:mac": "pnpm build && electron-builder --mac --dir",
+    "verify:mac": "bash scripts/restart-packaged-mac.sh"
   },
   "build": {
     "appId": "im.afk.control",
     "productName": "AFK Control",
-    "directories": { "output": "release" },
-    "files": ["dist/**", "dist-electron/**", "package.json"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": ["dir"],
+      "target": [
+        "dir"
+      ],
       "minimumSystemVersion": "12.0"
     }
   },
   "dependencies": {
+    "js-yaml": "^5.3.0",
     "lucide-react": "^0.468.0",
+    "node-pty": "1.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -39,6 +54,7 @@
     "electron-builder": "^26.0.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
+    "vitest": "^1.6.1",
     "wait-on": "^8.0.1"
   }
 }

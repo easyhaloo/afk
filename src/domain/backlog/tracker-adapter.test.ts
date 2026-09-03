@@ -50,14 +50,37 @@ describe('TrackerBacklogProvider', () => {
     expect(created.description).toContain('[#6](https://example/6)');
   });
 
+  it('provisions tracker-native metadata before creating a backlog', async () => {
+    const created = { id: 42, title: 'Item', description: '', labels: [], state: 'opened', url: 'https://example/42', projectId: 'org/repo' };
+    const t = tracker(created);
+    const ensureBacklogMetadata = vi.fn(async () => {});
+    t.ensureBacklogMetadata = ensureBacklogMetadata;
+    t.createIssue = vi.fn(async input => {
+      created.title = input.title;
+      created.description = input.description ?? '';
+      created.labels = input.labels ?? [];
+      return 42;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.create({ title: 'Item', description: '## Acceptance Criteria\n- [ ] works -- test -- true' });
+
+    expect(ensureBacklogMetadata).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ name: 'stage::ready-for-issues' }),
+      expect.objectContaining({ name: 'mode::afk' }),
+    ]));
+    expect(ensureBacklogMetadata.mock.invocationCallOrder[0])
+      .toBeLessThan((t.createIssue as any).mock.invocationCallOrder[0]);
+  });
+
   it('maps labels and relationship metadata to canonical backlog fields', async () => {
     const issue = {
-      id: 42, title: 'Child', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'parent::10', 'depends-on::9'],
+      id: 42, title: 'Child', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'parent::10', 'base::8', 'depends-on::9'],
       state: 'opened', url: 'https://example/42', projectId: 'org/repo',
     };
     const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
     await expect(provider.get('42')).resolves.toMatchObject({
-      id: '42', parentId: '10', dependsOn: ['9'], state: 'ready', executionMode: 'afk', branchName: 'afk/backlog-42',
+      id: '42', parentId: '10', baseBacklogId: '8', dependsOn: ['9'], state: 'ready', executionMode: 'afk', branchName: 'afk/backlog-42',
       webUrl: 'https://example/42',
     });
   });

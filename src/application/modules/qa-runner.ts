@@ -70,8 +70,7 @@ export class QARunner {
     logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
 
     const backlog = await this.providers.backlog.get(id);
-    const parent = backlog.parentId ? await this.providers.backlog.get(backlog.parentId) : undefined;
-    const baselineBranch = parent?.branchName ?? this.config.targetBranch ?? 'main';
+    const baselineBranch = await this.resolveExecutionBranch(backlog);
     const session = `qa-${id}-${Date.now()}`;
     let worktreePath: string | undefined;
     let sandbox: Sandbox | undefined;
@@ -116,6 +115,8 @@ export class QARunner {
         branch: handle.branchName,
         executionMode: this.executionMode,
         tmux: this.executionMode === 'interactive' ? this.tmux : undefined,
+        workspaceRoot: this.projectRoot,
+        runtimeRunId,
       });
       logger.info({ backlogId: id, session, sandboxId: sandbox.id }, 'QA sandbox created');
       await this.logWorktreeDiagnostics(id, 'before-agent-start', worktreePath);
@@ -182,6 +183,14 @@ export class QARunner {
     }
   }
 
+  /** Resolve only an explicit unmerged execution base; parentId remains organizational. */
+  private async resolveExecutionBranch(backlog: BacklogItem): Promise<string> {
+    const targetBranch = this.config.targetBranch ?? 'main';
+    if (!backlog.baseBacklogId) return targetBranch;
+    const executionBase = await this.providers.backlog.get(backlog.baseBacklogId);
+    return executionBase.state === 'done' ? targetBranch : executionBase.branchName;
+  }
+
   private async mergeBranch(worktreePath: string, baselineBranch: string, featureBranch: string): Promise<void> {
     const { simpleGit } = await import('simple-git');
     const git = simpleGit(worktreePath);
@@ -220,8 +229,7 @@ export class QARunner {
     try {
       const backlog = await this.providers.backlog.get(backlogId);
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
-      const parent = backlog.parentId ? await this.providers.backlog.get(backlog.parentId) : undefined;
-      const targetBranch = parent?.branchName ?? this.config.targetBranch ?? 'main';
+      const targetBranch = await this.resolveExecutionBranch(backlog);
       await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
       await this.providers.branches.push(verificationBranch, worktreePath);
       const mr = await this.providers.changes.create({

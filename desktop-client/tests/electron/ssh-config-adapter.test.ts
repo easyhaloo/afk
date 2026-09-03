@@ -68,6 +68,7 @@ describe("SSH config adapter", () => {
   it.each([
     ["UserKnownHostsFile", "none"],
     ["userknownhostsfile", "/dev/null"],
+    ["UserKnownHostsFile", "/dev/null # reason"],
     ["USERKNOWNHOSTSFILE", "~/.ssh/known_hosts /dev/null ~/.ssh/known_hosts2"],
   ])("warns when %s disables known hosts with %s", async (directive, value) => {
     const { home } = await createHome(`Host demo\n  ${directive} ${value}\n`);
@@ -83,6 +84,17 @@ describe("SSH config adapter", () => {
         path: "~/.ssh/config",
         hostAlias: "demo",
       },
+    ]));
+  });
+
+  it.each(["/dev/null#safe", "none#backup"])("does not warn when UserKnownHostsFile is %s", async (value) => {
+    const { home } = await createHome(`Host demo\n  UserKnownHostsFile ${value}\n`);
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.known-hosts-disabled" }),
     ]));
   });
 

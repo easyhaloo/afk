@@ -89,13 +89,17 @@ function parseBlocks(raw: string, source: "system" | "managed", configPath: stri
       continue;
     }
     const { key, value } = directive;
-    if (key === "stricthostkeychecking" && isHostKeyCheckingDisabled(value)) {
+    const isFirstValue = current.values[key] === undefined;
+    if ((key === "stricthostkeychecking" || key === "userknownhostsfile") && isFirstValue) {
+      current.values[key] = value;
+    }
+    if (key === "stricthostkeychecking" && isFirstValue && isHostKeyCheckingDisabled(value)) {
       diagnostics.push({ code: "ssh.host-key-checking-disabled", severity: "warning", message: `Host ${current.alias} 已关闭 SSH 主机密钥严格校验`, path: configPath, hostAlias: current.alias });
     }
-    if (key === "userknownhostsfile" && isKnownHostsDisabled(value)) {
+    if (key === "userknownhostsfile" && isFirstValue && isKnownHostsDisabled(value)) {
       diagnostics.push({ code: "ssh.known-hosts-disabled", severity: "warning", message: `Host ${current.alias} 已禁用用户 known_hosts 文件`, path: configPath, hostAlias: current.alias });
     }
-    if (["hostname", "port", "user", "identityfile", "proxyjump", "include"].includes(key) && current.values[key] === undefined) {
+    if (["hostname", "port", "user", "identityfile", "proxyjump", "include"].includes(key) && isFirstValue) {
       current.values[key] = value;
     }
   }

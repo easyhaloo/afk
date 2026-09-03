@@ -47,9 +47,7 @@ function parseBlocks(raw: string, source: "system" | "managed", configPath: stri
     }
     const key = directive[1].toLowerCase();
     const value = directive[2];
-    if (!["hostname", "port", "user", "identityfile", "proxyjump", "include"].includes(key)) {
-      diagnostics.push({ code: "ssh.unknown-directive", severity: "warning", message: `Host ${current.alias} 包含未识别配置项`, path: configPath, hostAlias: current.alias });
-    } else if (current.values[key] === undefined) {
+    if (["hostname", "port", "user", "identityfile", "proxyjump", "include"].includes(key) && current.values[key] === undefined) {
       current.values[key] = value;
     }
   }
@@ -134,7 +132,7 @@ export function createSshConfigAdapter({ home, exec }: SshConfigAdapterOptions) 
     const diagnostics = [...systemParsed.diagnostics, ...managedParsed.diagnostics];
     for (const host of unique) {
       const resolved = await exec("ssh", ["-G", host.alias]);
-      if (!resolved.ok) diagnostics.push({ code: "ssh.resolve-failed", severity: "warning", message: `无法解析 SSH 主机 ${host.alias}`, path: host.configPath });
+      if (!resolved.ok) diagnostics.push({ code: "ssh.resolve-failed", severity: "warning", message: `无法解析 SSH 主机 ${host.alias}`, path: host.configPath, hostAlias: host.alias });
     }
     return { hosts: unique, diagnostics };
   }

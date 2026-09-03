@@ -5,9 +5,9 @@ import type { SshDiagnostic } from "../shared/ssh-contract";
 describe("SSH diagnostic grouping", () => {
   it("merges host-specific diagnostics and normalizes the message", () => {
     const grouped = groupSshDiagnostics([
-      { code: "ssh.unknown-directive", severity: "warning", message: "Host demo 包含未识别配置项", path: "~/.ssh/config", hostAlias: "demo" },
       { code: "ssh.unknown-directive", severity: "warning", message: "Host prod 包含未识别配置项", path: "~/.ssh/config", hostAlias: "prod" },
       { code: "ssh.unknown-directive", severity: "warning", message: "Host demo 包含未识别配置项", path: "~/.ssh/config", hostAlias: "demo" },
+      { code: "ssh.unknown-directive", severity: "warning", message: "Host prod 包含未识别配置项", path: "~/.ssh/config", hostAlias: "prod" },
     ]);
 
     expect(grouped).toEqual([

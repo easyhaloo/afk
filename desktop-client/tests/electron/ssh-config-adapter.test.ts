@@ -36,6 +36,23 @@ describe("SSH config adapter", () => {
     ]));
   });
 
+  it.each([
+    ["StrictHostKeyChecking=off", "Host demo 已关闭 SSH 主机密钥严格校验"],
+    ["StrictHostKeyChecking=no # reason", "Host demo 已关闭 SSH 主机密钥严格校验"],
+  ])("warns for normalized host-key safety directive %s", async (directive, message) => {
+    const { home } = await createHome(`Host demo\n  ${directive}\n`);
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.host-key-checking-disabled", message, hostAlias: "demo", path: "~/.ssh/config" }),
+    ]));
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.malformed-directive" }),
+    ]));
+  });
+
   it.each(["yes", "ask", "accept-new"])('does not warn when StrictHostKeyChecking is "%s"', async (value) => {
     const { home } = await createHome(`Host demo\n  StrictHostKeyChecking ${value}\n`);
     const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
@@ -65,6 +82,22 @@ describe("SSH config adapter", () => {
         path: "~/.ssh/config",
         hostAlias: "demo",
       },
+    ]));
+  });
+
+  it('warns when UserKnownHostsFile is quoted "/dev/null"', async () => {
+    const { home } = await createHome('Host demo\n  UserKnownHostsFile "/dev/null"\n');
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "ssh.known-hosts-disabled",
+        message: "Host demo 已禁用用户 known_hosts 文件",
+        hostAlias: "demo",
+        path: "~/.ssh/config",
+      }),
     ]));
   });
 
@@ -101,6 +134,36 @@ describe("SSH config adapter", () => {
     expect(calls).toEqual([{ command: "ssh", args: ["-G", "demo"] }]);
     expect(result.diagnostics).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "ssh.unknown-directive" }),
+    ]));
+  });
+
+  it("parses standard directives in equals form without losing spaces in values", async () => {
+    const { home } = await createHome(`Host demo
+  HostName=demo.example.test
+  Port=2200
+  User=admin
+  IdentityFile="~/.ssh/key with spaces"
+  ProxyJump=bastion
+  Include=~/.ssh/extra_hosts
+  ServerAliveInterval=60
+`);
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.hosts[0]).toMatchObject({
+      alias: "demo",
+      hostname: "demo.example.test",
+      port: 2200,
+      user: "admin",
+      identityFile: '"~/.ssh/key with spaces"',
+      proxyJump: "bastion",
+    });
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.unknown-directive" }),
+    ]));
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.malformed-directive" }),
     ]));
   });
 

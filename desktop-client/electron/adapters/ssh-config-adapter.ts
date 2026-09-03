@@ -26,12 +26,40 @@ function isConcreteAlias(alias: string) {
   return /^[A-Za-z0-9_.-]+$/.test(alias) && alias !== "." && alias !== "..";
 }
 
+function parseDirective(line: string) {
+  const match = line.trim().match(/^([A-Za-z][A-Za-z0-9]*)(?:\s*=\s*|\s+)(.+?)\s*$/);
+  if (!match) return null;
+  return { key: match[1].toLowerCase(), value: match[2] };
+}
+
+function normalizeSafetyValue(value: string) {
+  let quote: '"' | "'" | null = null;
+  let commentIndex = value.length;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      if (character === quote) quote = null;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === "#") {
+      commentIndex = index;
+      break;
+    }
+  }
+  const normalized = value.slice(0, commentIndex).trim();
+  const first = normalized[0];
+  const last = normalized[normalized.length - 1];
+  return ((first === '"' && last === '"') || (first === "'" && last === "'"))
+    ? normalized.slice(1, -1).trim().toLowerCase()
+    : normalized.toLowerCase();
+}
+
 function isHostKeyCheckingDisabled(value: string) {
-  return ["no", "off"].includes(value.trim().toLowerCase());
+  return ["no", "off"].includes(normalizeSafetyValue(value));
 }
 
 function isKnownHostsDisabled(value: string) {
-  const files = value.trim().toLowerCase().split(/\s+/);
+  const files = normalizeSafetyValue(value).split(/\s+/);
   return files.includes("none") || files.includes("/dev/null");
 }
 
@@ -40,22 +68,20 @@ function parseBlocks(raw: string, source: "system" | "managed", configPath: stri
   const diagnostics: SshDiagnostic[] = [];
   let current: ConfigBlock | null = null;
   for (const line of raw.split(/\r?\n/)) {
-    const match = line.match(/^\s*Host\s+(.+?)\s*$/i);
-    if (match) {
+    const directive = parseDirective(line);
+    if (directive?.key === "host") {
       if (current) blocks.push(current);
-      current = { alias: match[1], lines: [line], values: {} };
+      current = { alias: directive.value, lines: [line], values: {} };
       if (!isConcreteAlias(current.alias)) diagnostics.push({ code: "ssh.non-concrete-host", severity: "info", message: `已忽略非具体 Host：${current.alias}`, path: configPath });
       continue;
     }
     if (!current) continue;
     current.lines.push(line);
-    const directive = line.match(/^\s*([A-Za-z][A-Za-z0-9]+)\s+(.+?)\s*$/);
     if (!directive) {
       if (line.trim() && !line.trim().startsWith("#")) diagnostics.push({ code: "ssh.malformed-directive", severity: "warning", message: `Host ${current.alias} 包含无法解析的配置行`, path: configPath, hostAlias: current.alias });
       continue;
     }
-    const key = directive[1].toLowerCase();
-    const value = directive[2];
+    const { key, value } = directive;
     if (key === "stricthostkeychecking" && isHostKeyCheckingDisabled(value)) {
       diagnostics.push({ code: "ssh.host-key-checking-disabled", severity: "warning", message: `Host ${current.alias} 已关闭 SSH 主机密钥严格校验`, path: configPath, hostAlias: current.alias });
     }

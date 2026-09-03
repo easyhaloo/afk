@@ -79,7 +79,7 @@
 .ssh-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 @media (max-width: 850px) { .ssh-layout { grid-template-columns: 1fr; } .ssh-details { order: -1; } }
 @media (max-width: 620px) { .ssh-heading { display: block; } .ssh-heading-actions { justify-content: flex-start; margin-top: 14px; } .ssh-toolbar { flex-wrap: wrap; } .ssh-search { flex-basis: 100%; } .ssh-host-row { grid-template-columns: 30px minmax(0, 1fr) auto; } .ssh-source { display: none; } }
-:root[data-afk-theme="graphite"] .ssh-alert.error, :root[data-afk-theme="graphite"] .ssh-status.identity-changed, :root[data-afk-theme="graphite"] .ssh-status.invalid { background: #3a292b; }
+:root[data-afk-theme="graphite"] .ssh-status.identity-changed, :root[data-afk-theme="graphite"] .ssh-status.invalid { background: #3a292b; }
 :root[data-afk-theme="graphite"] .ssh-diagnostics { border-color: #5b5547; background: #302f2b; color: #d0c5a8; }
 :root[data-afk-theme="graphite"] .ssh-diagnostic-group.info { border-color: #4f5f60; background: #2d3535; color: #a9c0c0; }
 :root[data-afk-theme="graphite"] .ssh-diagnostic-group.warning { border-color: #5b5547; background: #39362d; color: #d0c5a8; }

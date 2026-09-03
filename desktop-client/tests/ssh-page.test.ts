@@ -19,6 +19,6 @@ describe("SSH diagnostic type labels", () => {
     expect(sshDiagnosticTypeLabel("ssh.host-key-checking-disabled")).toBe("主机密钥校验已关闭");
     expect(sshDiagnosticTypeLabel("ssh.known-hosts-disabled")).toBe("known_hosts 已禁用");
     expect(sshDiagnosticTypeLabel("ssh.malformed-directive")).toBe("无法解析的配置行");
-    expect(sshDiagnosticTypeLabel("ssh.unrecognized-code")).toBe("配置诊断");
+    expect(sshDiagnosticTypeLabel("ssh.unknown-directive")).toBe("配置诊断");
   });
 });

@@ -14,6 +14,46 @@ async function createHome(config: string, managed = "") {
 }
 
 describe("SSH config adapter", () => {
+  it("defers structurally valid standard directives to OpenSSH", async () => {
+    const { home } = await createHome(`Host demo
+  HostName demo.example.test
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+  ForwardAgent yes
+  ControlMaster auto
+`);
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const adapter = createSshConfigAdapter({
+      home,
+      exec: async (command, args) => {
+        calls.push({ command, args });
+        return { ok: true, stdout: "", stderr: "" };
+      },
+    });
+
+    const result = await adapter.listHosts();
+
+    expect(calls).toEqual([{ command: "ssh", args: ["-G", "demo"] }]);
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.unknown-directive" }),
+    ]));
+  });
+
+  it("associates OpenSSH resolution failures with the affected host", async () => {
+    const { home } = await createHome("Host demo\n  HostName demo.example.test\n  ServerAliveInterval 60\n");
+    const adapter = createSshConfigAdapter({
+      home,
+      exec: async () => ({ ok: false, stdout: "", stderr: "Bad configuration option" }),
+    });
+
+    const result = await adapter.listHosts();
+
+    const resolveFailures = result.diagnostics.filter((diagnostic) => diagnostic.code === "ssh.resolve-failed");
+    expect(resolveFailures).toEqual([
+      expect.objectContaining({ code: "ssh.resolve-failed", hostAlias: "demo" }),
+    ]);
+  });
+
   it("lists concrete system hosts and managed hosts while ignoring wildcards", async () => {
     const { home } = await createHome("Host *\n  ServerAliveInterval 30\n\nHost system-box\n  HostName system.example.test\n  User admin\n\nInclude ~/.ssh/afk_hosts\n", "Host managed-box\n  HostName managed.example.test\n  Port 2200\n");
     const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
@@ -41,7 +81,9 @@ describe("SSH config adapter", () => {
     expect(result.hosts).toHaveLength(1);
     expect(result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "ssh.malformed-directive", hostAlias: "broken" }),
-      expect.objectContaining({ code: "ssh.unknown-directive", hostAlias: "broken" }),
+    ]));
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.unknown-directive" }),
     ]));
     const nonConcreteHostDiagnostic = result.diagnostics.find((item) => item.code === "ssh.non-concrete-host");
     expect(nonConcreteHostDiagnostic).toBeDefined();

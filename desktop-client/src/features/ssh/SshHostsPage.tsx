@@ -78,7 +78,7 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
     const handleDocumentKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       closeForm();
     };
     document.addEventListener("keydown", handleDocumentKeyDown);

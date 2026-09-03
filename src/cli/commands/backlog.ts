@@ -24,6 +24,7 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
   console.log(`${chalk.bold(item.id)}  ${item.title}`);
   detail(`state: ${item.state}  mode: ${item.executionMode}`);
   if (item.parentId) detail(`parent: ${item.parentId}`);
+  if (item.baseBacklogId) detail(`execution-base: ${item.baseBacklogId}`);
   if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
   if (item.tags.length) detail(`tags: ${item.tags.join(', ')}`);
   detail(`branch: ${item.branchName}`);
@@ -78,7 +79,8 @@ export function registerBacklogCommands(program: Command): void {
     .description('Create one provider-backed backlog item')
     .argument('<title>', 'Backlog title')
     .option('--description-file <path>', 'Markdown description file (defaults to stdin)')
-    .option('--parent <id>', 'Parent backlog ID')
+    .option('--parent <id>', 'Organizational parent backlog ID (does not select a git base branch)')
+    .option('--base-backlog <id>', 'Backlog ID whose unmerged branch is the explicit execution base')
     .option('-d, --depends-on <id>', 'Backlog ID that must complete first', (value: string, previous: string[]) => [...previous, value], [])
     .option('--mode <mode>', `Execution mode (${modes.join('|')})`, 'afk')
     .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])
@@ -92,6 +94,7 @@ export function registerBacklogCommands(program: Command): void {
           title,
           description,
           parentId: options.parent,
+          baseBacklogId: options.baseBacklog,
           dependsOn: options.dependsOn,
           executionMode: options.mode,
           tags: options.tag,
@@ -100,6 +103,7 @@ export function registerBacklogCommands(program: Command): void {
         success(`Created backlog ${item.id}: ${item.title}`);
         detail(`url: ${item.webUrl}`);
         if (item.parentId) detail(`parent: ${item.parentId}`);
+        if (item.baseBacklogId) detail(`execution-base: ${item.baseBacklogId}`);
         if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
       } catch (error) {
         handleCommandError(error);

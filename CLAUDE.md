@@ -84,6 +84,35 @@ GITHUB_TOKEN=     # GitHub API token
 TMUX_SESSION=     # tmux session name (default: afk)
 ```
 
+## Desktop Electron Architecture
+
+The `desktop-client/` package is an Electron application with three explicit
+runtime layers: `electron/` (main process), `electron/preload.ts` (bridge),
+and `src/` (React renderer). Keep these boundaries strict:
+
+- `electron/main.ts` is bootstrap only. Window creation, IPC registration,
+  services, adapters, and workflow parsing belong in their respective modules.
+- The renderer must not import `electron`, Node built-ins, filesystem APIs,
+  child-process APIs, SQLite, or YAML parsers.
+- The preload exposes a typed, fixed whitelist from `desktop-client/shared/`.
+  It must not expose generic shell, filesystem, eval, or arbitrary IPC APIs.
+- Every IPC handler validates its sender frame and all arguments in the main
+  process. Production windows load packaged local assets only; navigation,
+  new-window, and permission requests are denied by default.
+- Shared DTOs and validation types live in `desktop-client/shared/` and must be
+  free of Node, Electron, React, DOM, and filesystem dependencies.
+- Workflow graph layout, routing, normalization, and validation are pure
+  functions outside React. Invalid dependencies and cycles return diagnostics;
+  they must never be represented as `undefined` nodes.
+- YAML is parsed through one schema-aware parser. Do not maintain a second
+  line-oriented parser for the same configuration.
+- Every extracted service and graph function gets focused tests. The desktop
+  package must expose `typecheck`, `build`, and `test` scripts and be covered by
+  CI independently of the root CLI.
+- `dist/`, `dist-electron/`, `release/`, and screenshot/test-artifact output are
+  generated files and must not be treated as source modules or committed as
+  implementation changes.
+
 ## Execution Architecture Status
 
 All 8 phases of [docs/EXECUTION-DESIGN.md](docs/EXECUTION-DESIGN.md) are implemented:

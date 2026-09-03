@@ -585,7 +585,7 @@ export class WorkflowRunner {
     // Claude is still returning from the previous one, losing that prompt.
     const needsDedicatedSandbox = ctx.executionMode === 'interactive' || branchHandle.path !== ctx.primaryWtPath;
     const sandbox = needsDedicatedSandbox
-      ? await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode })
+      ? await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode, workspaceRoot: this.repoRoot, runtimeRunId: this.runtimeRunId })
       : this.sandbox!;
     if (sandbox !== this.sandbox) {
       this.stepSandboxes.push(sandbox);
@@ -739,6 +739,8 @@ export class WorkflowRunner {
       branch: targetBranch,
       tmux: this.tmux,
       executionMode: this.executionMode,
+      workspaceRoot: this.repoRoot,
+      runtimeRunId: this.runtimeRunId,
     });
     this.resourceScope?.registerSandbox(this.sandbox);
     logger.info({ iid, session, worktree: wt.path, sandboxId: this.sandbox.id }, 'sandbox created');

@@ -100,6 +100,16 @@ describe('loop option parsing', () => {
     expect(ext.parseArg).toBeUndefined();
   });
 
+  it('parses repeated backlog scope values', () => {
+    const program = new Command().exitOverride();
+    registerLoopCommands(program);
+    const loop = program.commands.find(command => command.name() === 'loop')!;
+    const scope = loop.options.find(option => option.long === '--backlog-id')!;
+
+    expect(scope.parseArg?.('114', [])).toEqual(['114']);
+    expect(scope.parseArg?.('115', ['114'])).toEqual(['114', '115']);
+  });
+
   it('exposes the same Codex runtime overrides on run, loop, loop start, and qa', () => {
     const program = new Command().exitOverride();
     registerRunCommands(program);

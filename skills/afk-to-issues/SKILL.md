@@ -125,7 +125,8 @@ Each item should contain:
 ```yaml
 - title: <short imperative title>
   description: <context and intended outcome>
-  parent: <planned parent reference or root backlog>
+  parent: <planned parent reference or root backlog; organizational only>
+  base_backlog: <optional planned backlog whose unmerged branch is the explicit git base>
   depends_on: [<planned task references>]
   execution_mode: afk | hitl
   tags: [<business tags>]
@@ -139,8 +140,11 @@ Each item should contain:
 
 Use stable temporary task references while planning. After approval, resolve
 each reference to the canonical ID and URL returned by `afk backlog create`.
-The approved PRD root is the parent of every created child. Parents are
-organizational; dependencies control execution order. Keep the graph acyclic.
+The approved PRD root is the parent of every created child. `parent` is
+organizational only: it MUST NOT select a git branch or worktree base.
+Dependencies control execution order. Use `base_backlog` only for intentional
+stacked work that must start from another backlog's unmerged branch; otherwise
+children start from the configured target branch. Keep the graph acyclic.
 
 ## Verification Inference
 
@@ -194,16 +198,20 @@ each body to a temporary Markdown file and include this traceability section:
 Invoke AFK with canonical IDs only:
 
 ```bash
+# Omit --base-backlog unless stacking from an unmerged predecessor branch.
 afk backlog create "<title>" \
   --description-file /tmp/backlog-<temporary-ref>.md \
   --parent <rootBacklogId> \
+  --base-backlog <canonical-unmerged-base-id> \
   --depends-on <canonical-dependency-id> \
   --mode <afk|hitl> \
   --tag <business-tag>
 ```
 
-Repeat `--depends-on` and `--tag` for every declared value. Record the
-returned `Created backlog <id>` and `url:` for every temporary reference. AFK
+Repeat `--depends-on` and `--tag` for every declared value. Use
+`--base-backlog` only when the implementation plan explicitly requires an
+unmerged predecessor branch; a completed dependency is already available from
+the target branch. Record the returned `Created backlog <id>` and `url:` for every temporary reference. AFK
 writes `## Backlog Links` with the concrete self, parent, and dependency URLs.
 Use returned IDs and URLs for subsequent items; never construct them.
 

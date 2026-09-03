@@ -33,6 +33,8 @@ export default defineModule(() => ({
         join(isolateDir, 'isolate.json'),
         JSON.stringify({
           available: true,
+          isolateName: info.isolateName,
+          composeProjectName: `isolate-${info.isolateName}`,
           services: info.services.map(s => ({
             name: s.name,
             host: s.host,
@@ -57,7 +59,7 @@ export default defineModule(() => ({
 
   async onAfterAgent(ctx: LifecycleContext): Promise<void> {
     try {
-      const im = new IsolateManager(ctx.worktreePath);
+      const im = new IsolateManager(ctx.worktreePath, { workspaceRoot: ctx.repoRoot });
       await im.discard();
     } catch {
       // Best-effort cleanup

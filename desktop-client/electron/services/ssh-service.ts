@@ -1,7 +1,8 @@
 import { homedir } from "node:os";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ManagedSshHostInput, SshFingerprint, SshHost, SshListResult, SshSession, SshTestResult, SshTrustRequest } from "../../shared/ssh-contract";
+import type { ManagedSshHostInput, SshExternalTerminalId, SshFingerprint, SshHost, SshListResult, SshSession, SshTestResult, SshTrustRequest } from "../../shared/ssh-contract";
+import type { ExternalTerminalName } from "../adapters/external-terminal-adapter";
 import { assertAllowedSshPath, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 
 type ServiceDependencies = {
@@ -32,9 +33,33 @@ type ServiceDependencies = {
     resize: (sessionId: string, cols: number, rows: number) => boolean;
     close: (sessionId: string) => boolean;
   };
+  externalTerminal: {
+    open: (alias: string, terminal: SshExternalTerminalId) => Promise<ExternalTerminalName>;
+  };
   audit?: (event: { operation: string; hostId?: string; resultCode: string; startedAt: string; finishedAt: string }) => void;
   home?: string;
 };
+
+type ListHostsOptions = {
+  forceRefresh?: boolean;
+};
+
+type CacheEntry<T> = {
+  value: T;
+  expiresAt: number;
+};
+
+type ResolvedTarget = {
+  hostname: string;
+  port: number;
+};
+
+type ListInFlight = {
+  forceRefresh: boolean;
+  promise: Promise<SshListResult>;
+};
+
+const hostStatusTtlMs = 10_000;
 
 function now() { return new Date().toISOString(); }
 
@@ -44,6 +69,25 @@ function audit(deps: ServiceDependencies, operation: string, resultCode: string,
 
 export function createSshService(deps: ServiceDependencies) {
   const home = deps.home || homedir();
+  let listInFlight: ListInFlight | undefined;
+  let cacheGeneration = 0;
+  const resolvedTargetCache = new Map<string, CacheEntry<ResolvedTarget>>();
+  const hostStatusCache = new Map<string, CacheEntry<SshHost>>();
+
+  function hostDefinitionCacheKey(host: SshHost) {
+    return JSON.stringify([host.id, host.alias, host.hostname, host.port, host.user, host.identityFile, host.proxyJump, host.remoteWorkspace]);
+  }
+
+  function hostStatusCacheKey(host: SshHost, target: ResolvedTarget) {
+    return JSON.stringify([host.id, target.hostname, target.port]);
+  }
+
+  function invalidateListCache() {
+    cacheGeneration += 1;
+    listInFlight = undefined;
+    resolvedTargetCache.clear();
+    hostStatusCache.clear();
+  }
 
   async function findHost(hostId: string) {
     const id = validateSshHostId(hostId);
@@ -53,23 +97,69 @@ export function createSshService(deps: ServiceDependencies) {
     return host;
   }
 
-  async function listHosts() {
+  async function loadHostStatus(host: SshHost, forceRefresh: boolean, generation: number) {
+    const definitionKey = hostDefinitionCacheKey(host);
+    let target: ResolvedTarget | undefined;
+    let value: SshHost;
+    try {
+      const cachedTarget = resolvedTargetCache.get(definitionKey);
+      if (!forceRefresh && cachedTarget && cachedTarget.expiresAt > Date.now()) target = cachedTarget.value;
+      if (!target) {
+        const resolved = await deps.commands.resolve(host.alias);
+        target = { hostname: resolved.hostname || host.hostname, port: resolved.port || host.port };
+        if (cacheGeneration === generation) resolvedTargetCache.set(definitionKey, { value: target, expiresAt: Date.now() + hostStatusTtlMs });
+      }
+      const statusKey = hostStatusCacheKey(host, target);
+      const cached = hostStatusCache.get(statusKey);
+      if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.value;
+      const fingerprint = await deps.commands.scanFingerprint(target);
+      const trustStatus = deps.knownHosts.trustStatus ? await deps.knownHosts.trustStatus(target, fingerprint) : (await deps.knownHosts.isTrusted(target, fingerprint) ? "trusted" : "untrusted");
+      if (trustStatus === "identity-changed") value = { ...host, hostname: target.hostname, port: target.port, fingerprint, status: "identity-changed" };
+      else if (trustStatus !== "trusted") value = { ...host, hostname: target.hostname, port: target.port, fingerprint, status: "untrusted" };
+      else {
+        const tested = await deps.commands.testBatch(host.alias);
+        value = { ...host, hostname: target.hostname, port: target.port, fingerprint, status: tested.ok ? "ready" : tested.code };
+      }
+    } catch {
+      value = { ...host, status: "unreachable" };
+    }
+    if (target && cacheGeneration === generation) hostStatusCache.set(hostStatusCacheKey(host, target), { value, expiresAt: Date.now() + hostStatusTtlMs });
+    return value;
+  }
+
+  async function loadHosts(forceRefresh: boolean, generation: number) {
     const result = await deps.config.listHosts();
     const hosts = await Promise.all(result.hosts.map(async (host) => {
       try {
-        const resolved = await deps.commands.resolve(host.alias);
-        const target = { hostname: resolved.hostname || host.hostname, port: resolved.port || host.port };
-        const fingerprint = await deps.commands.scanFingerprint(target);
-        const trustStatus = deps.knownHosts.trustStatus ? await deps.knownHosts.trustStatus(target, fingerprint) : (await deps.knownHosts.isTrusted(target, fingerprint) ? "trusted" : "untrusted");
-        if (trustStatus === "identity-changed") return { ...host, hostname: target.hostname, port: target.port, fingerprint, status: "identity-changed" } as SshHost;
-        if (trustStatus !== "trusted") return { ...host, hostname: target.hostname, port: target.port, fingerprint, status: "untrusted" } as SshHost;
-        const tested = await deps.commands.testBatch(host.alias);
-        return { ...host, hostname: target.hostname, port: target.port, fingerprint, status: tested.ok ? "ready" : tested.code } as SshHost;
+        return await loadHostStatus(host, forceRefresh, generation);
       } catch {
         return { ...host, status: "unreachable" } as SshHost;
       }
     }));
     return { hosts, diagnostics: result.diagnostics };
+  }
+
+  function listHosts(options: ListHostsOptions = {}) {
+    const forceRefresh = options.forceRefresh === true;
+    if (listInFlight && (listInFlight.forceRefresh || !forceRefresh)) return listInFlight.promise;
+    if (forceRefresh) {
+      cacheGeneration += 1;
+      resolvedTargetCache.clear();
+      hostStatusCache.clear();
+      listInFlight = undefined;
+    }
+    const generation = cacheGeneration;
+    const entry: ListInFlight = { forceRefresh, promise: loadHosts(forceRefresh, generation) };
+    listInFlight = entry;
+    void entry.promise.then(
+      () => {
+        if (listInFlight === entry) listInFlight = undefined;
+      },
+      () => {
+        if (listInFlight === entry) listInFlight = undefined;
+      },
+    );
+    return entry.promise;
   }
 
   async function trustFingerprint(request: SshTrustRequest) {
@@ -78,6 +168,7 @@ export function createSshService(deps: ServiceDependencies) {
     if (host.hostname !== request.fingerprint.hostname || host.port !== request.fingerprint.port) throw new Error("SSH 指纹与主机目标不匹配");
     try {
       const trusted = await deps.knownHosts.trust(request.fingerprint);
+      invalidateListCache();
       audit(deps, "trust", "trusted", host.id, startedAt);
       return trusted;
     } catch (error) {
@@ -102,13 +193,17 @@ export function createSshService(deps: ServiceDependencies) {
 
   async function addHost(value: ManagedSshHostInput) {
     const input = validateSshHostInput(value);
-    return deps.config.upsertManagedHost(input);
+    const saved = await deps.config.upsertManagedHost(input);
+    invalidateListCache();
+    return saved;
   }
 
   async function removeHost(hostId: string) {
     const host = await findHost(hostId);
     if (host.source !== "managed") throw new Error("只能删除 AFK 管理的 SSH 主机");
-    return deps.config.removeManagedHost(host.id);
+    const removed = await deps.config.removeManagedHost(host.id);
+    if (removed) invalidateListCache();
+    return removed;
   }
 
   async function generateKey() {
@@ -144,6 +239,26 @@ export function createSshService(deps: ServiceDependencies) {
     return deps.pty.connect(host.id, host.alias);
   }
 
+  async function openExternal(hostId: string, terminalId: SshExternalTerminalId = "iterm2") {
+    const startedAt = now();
+    const host = await findHost(hostId);
+    const resolved = await deps.commands.resolve(host.alias);
+    const target = { hostname: resolved.hostname || host.hostname, port: resolved.port || host.port };
+    const fingerprint = await deps.commands.scanFingerprint(target);
+    if (!await deps.knownHosts.isTrusted(target, fingerprint)) {
+      audit(deps, "open-external", "untrusted", host.id, startedAt);
+      throw new Error("SSH 主机尚未信任，已阻止外部终端启动");
+    }
+    try {
+      const terminal = await deps.externalTerminal.open(host.alias, terminalId);
+      audit(deps, "open-external", terminal, host.id, startedAt);
+      return { terminal: terminalId };
+    } catch (error) {
+      audit(deps, "open-external", "failed", host.id, startedAt);
+      throw error;
+    }
+  }
+
   function input(sessionId: string, data: string) {
     return deps.pty.input(validateSshSessionId(sessionId), data);
   }
@@ -166,6 +281,7 @@ export function createSshService(deps: ServiceDependencies) {
     generateKey,
     deployKey,
     connect,
+    openExternal,
     input,
     resize,
     close,

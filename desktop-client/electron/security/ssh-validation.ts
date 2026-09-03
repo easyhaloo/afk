@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ManagedSshHostInput } from "../../shared/ssh-contract";
+import type { ManagedSshHostInput, SshExternalTerminalId } from "../../shared/ssh-contract";
 
 const ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 
@@ -41,6 +41,11 @@ export function validateSshHostId(value: unknown) {
   const id = requiredString(value, "SSH 主机 ID 无效");
   if (!id.startsWith("system:") && !id.startsWith("managed:")) throw new Error("SSH 主机 ID 无效");
   return id;
+}
+
+export function validateSshExternalTerminalId(value: unknown): SshExternalTerminalId {
+  if (value !== "iterm2" && value !== "warp" && value !== "ghostty" && value !== "cmux" && value !== "terminal") throw new Error("SSH 外部终端无效");
+  return value;
 }
 
 export function validateSshSessionId(value: unknown) {

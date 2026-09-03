@@ -10,6 +10,7 @@
 .ssh-alert button { margin-left: auto; border: 0; background: transparent; color: inherit; cursor: pointer; }
 .ssh-alert.error { border-color: #edcaca; background: #fff8f8; color: #a44e4e; }
 .ssh-alert.success { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
+.ssh-action-status { margin: 10px 0 0; color: var(--afk-accent); font-size: calc(10px * var(--afk-scale)); }
 .ssh-diagnostics { display: grid; gap: 10px; margin-bottom: 11px; border: 1px solid #e6d7b8; border-radius: 8px; padding: 10px 11px; background: #fcfaf4; color: #765f37; font-size: calc(11px * var(--afk-scale)); }
 .ssh-diagnostics-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ssh-diagnostics-heading > div { display: flex; align-items: center; gap: 7px; }
@@ -68,6 +69,10 @@
 .ssh-details dd { overflow: hidden; margin: 0; color: var(--afk-text); font-size: calc(10px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
 .ssh-details dd.fingerprint { color: var(--afk-accent); font-family: "SF Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
 .ssh-actions { margin-top: 15px; }
+.ssh-terminal-picker { display: inline-flex; align-items: center; gap: 7px; }
+.ssh-terminal-picker label { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.ssh-terminal-picker select { min-height: 32px; border: 1px solid var(--afk-border); border-radius: 7px; padding: 0 26px 0 9px; background: var(--afk-panel); color: var(--afk-text); font: inherit; font-size: calc(11px * var(--afk-scale)); }
+.ssh-terminal-picker select:disabled { cursor: not-allowed; opacity: .5; }
 .ssh-safety-note { display: flex; align-items: flex-start; gap: 7px; margin: 14px 0 0; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.5; }
 .ssh-safety-note svg { flex: 0 0 auto; color: var(--afk-accent); }
 .ssh-modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; background: rgba(25,25,35,.2); }

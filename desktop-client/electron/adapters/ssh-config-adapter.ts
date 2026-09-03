@@ -8,12 +8,24 @@ type ExecResult = { ok: boolean; stdout: string; stderr: string };
 type SshConfigAdapterOptions = {
   home: string;
   exec: (command: string, args: string[]) => Promise<ExecResult>;
+  fileSystem?: Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "stat" | "writeFile">;
 };
 
 type ConfigBlock = {
   alias: string;
   lines: string[];
   values: Record<string, string>;
+};
+
+type ConfigFingerprint =
+  | { exists: false }
+  | { exists: true; mtimeMs: number; size: number };
+
+type ParsedConfig = ReturnType<typeof parseBlocks>;
+
+type ConfigCacheEntry = {
+  fingerprint: ConfigFingerprint;
+  parsed: ParsedConfig;
 };
 
 const includeLine = "Include ~/.ssh/afk_hosts";
@@ -145,39 +157,94 @@ function replaceBlock(raw: string, alias: string, replacement: string | null) {
   return `${next.join("\n").replace(/\n+$/, "")}\n`;
 }
 
-async function readOrEmpty(file: string) {
-  return fs.readFile(file, "utf8").catch(() => "");
+function isFileNotFound(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
-async function atomicWrite(file: string, content: string, mode = 0o600) {
+function fingerprintsMatch(left: ConfigFingerprint, right: ConfigFingerprint) {
+  if (!left.exists || !right.exists) return left.exists === right.exists;
+  return left.mtimeMs === right.mtimeMs && left.size === right.size;
+}
+
+async function readOrEmpty(fileSystem: NonNullable<SshConfigAdapterOptions["fileSystem"]>, file: string) {
+  return fileSystem.readFile(file, "utf8").catch(() => "");
+}
+
+async function atomicWrite(fileSystem: NonNullable<SshConfigAdapterOptions["fileSystem"]>, file: string, content: string, mode = 0o600) {
   const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
-  await fs.writeFile(temporary, content, { mode });
-  await fs.chmod(temporary, mode);
-  try { await fs.rename(temporary, file); } catch (error) { await fs.rm(temporary, { force: true }); throw error; }
+  await fileSystem.writeFile(temporary, content, { mode });
+  await fileSystem.chmod(temporary, mode);
+  try { await fileSystem.rename(temporary, file); } catch (error) { await fileSystem.rm(temporary, { force: true }); throw error; }
 }
 
-export function createSshConfigAdapter({ home, exec }: SshConfigAdapterOptions) {
+export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfigAdapterOptions) {
   const configPath = userConfigPath(home);
   const managedPath = managedConfigPath(home);
   const displayConfigPath = "~/.ssh/config";
   const displayManagedPath = "~/.ssh/afk_hosts";
+  const configCache = new Map<string, ConfigCacheEntry>();
+  let cacheGeneration = 0;
+  let listHostsInFlight: Promise<SshListResult> | null = null;
+
+  function invalidateConfigCache() {
+    cacheGeneration += 1;
+    configCache.clear();
+    listHostsInFlight = null;
+  }
+
+  async function readParsedConfig(file: string, source: "system" | "managed", displayPath: string, generation: number) {
+    let fingerprint: ConfigFingerprint;
+    try {
+      const stats = await fileSystem.stat(file);
+      fingerprint = { exists: true, mtimeMs: stats.mtimeMs, size: stats.size };
+    } catch (error) {
+      if (isFileNotFound(error)) {
+        fingerprint = { exists: false };
+      } else {
+        configCache.delete(file);
+        const raw = await readOrEmpty(fileSystem, file);
+        return parseBlocks(raw, source, displayPath);
+      }
+    }
+
+    const cached = configCache.get(file);
+    if (cached && fingerprintsMatch(cached.fingerprint, fingerprint)) return cached.parsed;
+
+    if (!fingerprint.exists) {
+      const parsed = parseBlocks("", source, displayPath);
+      if (generation === cacheGeneration) configCache.set(file, { fingerprint, parsed });
+      return parsed;
+    }
+
+    try {
+      const raw = await fileSystem.readFile(file, "utf8");
+      const parsed = parseBlocks(raw, source, displayPath);
+      if (generation === cacheGeneration) configCache.set(file, { fingerprint, parsed });
+      return parsed;
+    } catch {
+      configCache.delete(file);
+      return parseBlocks("", source, displayPath);
+    }
+  }
 
   async function ensureSshDirectory() {
-    await fs.mkdir(sshDir(home), { recursive: true, mode: 0o700 });
-    await fs.chmod(sshDir(home), 0o700);
+    await fileSystem.mkdir(sshDir(home), { recursive: true, mode: 0o700 });
+    await fileSystem.chmod(sshDir(home), 0o700);
   }
 
   async function ensureInclude() {
     await ensureSshDirectory();
-    const raw = await readOrEmpty(configPath);
+    const raw = await readOrEmpty(fileSystem, configPath);
     if (raw.split(/\r?\n/).some((line) => line.trim() === includeLine)) return;
-    await atomicWrite(configPath, `${raw.replace(/\s*$/, "")}\n\n${includeLine}\n`);
+    await atomicWrite(fileSystem, configPath, `${raw.replace(/\s*$/, "")}\n\n${includeLine}\n`);
+    invalidateConfigCache();
   }
 
-  async function listHosts(): Promise<SshListResult> {
-    const [systemRaw, managedRaw] = await Promise.all([readOrEmpty(configPath), readOrEmpty(managedPath)]);
-    const systemParsed = parseBlocks(systemRaw, "system", displayConfigPath);
-    const managedParsed = parseBlocks(managedRaw, "managed", displayManagedPath);
+  async function loadHosts(generation: number): Promise<SshListResult> {
+    const [systemParsed, managedParsed] = await Promise.all([
+      readParsedConfig(configPath, "system", displayConfigPath, generation),
+      readParsedConfig(managedPath, "managed", displayManagedPath, generation),
+    ]);
     const hosts = [...systemParsed.blocks.map((block) => hostFromBlock(block, "system", displayConfigPath)), ...managedParsed.blocks.map((block) => hostFromBlock(block, "managed", displayManagedPath))];
     const seen = new Set<string>();
     const unique = hosts.filter((host) => { if (seen.has(host.id)) return false; seen.add(host.id); return true; });
@@ -189,13 +256,25 @@ export function createSshConfigAdapter({ home, exec }: SshConfigAdapterOptions) 
     return { hosts: unique, diagnostics };
   }
 
+  function listHosts(): Promise<SshListResult> {
+    if (listHostsInFlight) return listHostsInFlight;
+    const request = loadHosts(cacheGeneration);
+    listHostsInFlight = request;
+    request.then(
+      () => { if (listHostsInFlight === request) listHostsInFlight = null; },
+      () => { if (listHostsInFlight === request) listHostsInFlight = null; },
+    );
+    return request;
+  }
+
   async function upsertManagedHost(value: ManagedSshHostInput) {
     const input = validateSshHostInput(value);
     await ensureSshDirectory();
     await ensureInclude();
-    const raw = await readOrEmpty(managedPath);
+    const raw = await readOrEmpty(fileSystem, managedPath);
     const next = replaceBlock(raw, input.alias, managedBlock(input));
-    await atomicWrite(managedPath, next);
+    await atomicWrite(fileSystem, managedPath, next);
+    invalidateConfigCache();
     const result = await listHosts();
     const host = result.hosts.find((item) => item.id === `managed:${input.alias}`);
     if (!host) throw new Error("AFK SSH 主机写入后无法重新读取");
@@ -206,8 +285,9 @@ export function createSshConfigAdapter({ home, exec }: SshConfigAdapterOptions) 
     if (!id.startsWith("managed:")) throw new Error("只能删除 AFK 管理的 SSH 主机");
     const alias = id.slice("managed:".length);
     if (!isConcreteAlias(alias)) throw new Error("SSH 主机 ID 无效");
-    const raw = await readOrEmpty(managedPath);
-    await atomicWrite(managedPath, replaceBlock(raw, alias, null));
+    const raw = await readOrEmpty(fileSystem, managedPath);
+    await atomicWrite(fileSystem, managedPath, replaceBlock(raw, alias, null));
+    invalidateConfigCache();
     return true;
   }
 

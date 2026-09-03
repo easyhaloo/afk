@@ -1,8 +1,11 @@
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { installNavigationGuard } from "../security/navigation-guard";
 
 export async function createMainWindow() {
+  const iconPath = path.join(app.getAppPath(), "assets/afk-control.png");
+  if (process.platform === "darwin") app.dock?.setIcon(iconPath);
+
   const window = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -10,6 +13,7 @@ export async function createMainWindow() {
     minHeight: 640,
     title: "AFK Control",
     backgroundColor: "#f7f7fa",
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "../preload.js"),
       contextIsolation: true,

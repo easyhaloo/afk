@@ -1,7 +1,8 @@
+import { promises as fs } from "node:fs";
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createSshConfigAdapter } from "../../electron/adapters/ssh-config-adapter";
 
 async function createHome(config: string, managed = "") {
@@ -13,7 +14,234 @@ async function createHome(config: string, managed = "") {
   return { home, sshDir };
 }
 
+function createInstrumentedFileSystem() {
+  return {
+    ...fs,
+    stat: vi.fn(fs.stat),
+    readFile: vi.fn(fs.readFile),
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => { resolve = nextResolve; });
+  return { promise, resolve };
+}
+
+type ControlledConfigFile = {
+  content: string;
+  exists: boolean;
+  mtimeMs: number;
+  size: number;
+};
+
+function createControlledFileSystem(files: Map<string, ControlledConfigFile>) {
+  const fileSystem = createInstrumentedFileSystem();
+  const missing = () => Object.assign(new Error("file missing"), { code: "ENOENT" });
+  fileSystem.stat.mockImplementation(async (file) => {
+    const state = files.get(file);
+    if (!state?.exists) throw missing();
+    return { mtimeMs: state.mtimeMs, size: state.size } as never;
+  });
+  fileSystem.readFile.mockImplementation(async (file) => {
+    const state = files.get(file);
+    if (!state?.exists) throw missing();
+    return state.content;
+  });
+  return fileSystem;
+}
+
 describe("SSH config adapter", () => {
+  it("reuses config reads when both file fingerprints are unchanged", async () => {
+    const { home } = await createHome("Host demo\n  HostName demo.example.test\n", "Host managed\n  HostName managed.example.test\n");
+    const fileSystem = createInstrumentedFileSystem();
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.listHosts();
+    await adapter.listHosts();
+
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("rereads only the config file whose mtime or size changed", async () => {
+    const { home, sshDir } = await createHome("Host demo\n  HostName demo.example.test\n", "Host managed\n  HostName managed.example.test\n");
+    const fileSystem = createInstrumentedFileSystem();
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.listHosts();
+    await adapter.listHosts();
+    await writeFile(path.join(sshDir, "afk_hosts"), "Host managed\n  HostName changed.example.test\n  User deploy\n", { mode: 0o600 });
+    await adapter.listHosts();
+
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(3);
+  });
+
+  it("shares one in-flight listHosts request across concurrent callers", async () => {
+    const { home } = await createHome("Host demo\n  HostName demo.example.test\n");
+    const fileSystem = createInstrumentedFileSystem();
+    const release = createDeferred<{ ok: boolean; stdout: string; stderr: string }>();
+    let execCalls = 0;
+    const adapter = createSshConfigAdapter({
+      home,
+      fileSystem,
+      exec: async () => {
+        execCalls += 1;
+        return release.promise;
+      },
+    });
+
+    const first = adapter.listHosts();
+    const second = adapter.listHosts();
+    release.resolve({ ok: true, stdout: "", stderr: "" });
+    await Promise.all([first, second]);
+
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(1);
+    expect(execCalls).toBe(1);
+  });
+
+  it("does not reuse cached hosts after a stat failure", async () => {
+    const { home } = await createHome("Host demo\n  HostName demo.example.test\n");
+    const fileSystem = createInstrumentedFileSystem();
+    const configPath = path.join(home, ".ssh", "config");
+    const originalStat = fileSystem.stat.getMockImplementation()!;
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.listHosts();
+    fileSystem.stat.mockImplementation(async (file) => {
+      if (file === configPath) throw new Error("stat failed");
+      return originalStat(file);
+    });
+    fileSystem.readFile.mockImplementation(async (file, encoding) => {
+      if (file === configPath) throw new Error("read failed");
+      return fs.readFile(file, encoding);
+    });
+
+    const result = await adapter.listHosts();
+
+    expect(result.hosts).toHaveLength(0);
+    expect(fileSystem.readFile.mock.calls.filter(([file]) => file === configPath)).toHaveLength(2);
+  });
+
+  it("does not reuse cached hosts after a read failure", async () => {
+    const { home } = await createHome("Host demo\n  HostName demo.example.test\n");
+    const fileSystem = createInstrumentedFileSystem();
+    const configPath = path.join(home, ".ssh", "config");
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.listHosts();
+    await writeFile(configPath, "Host changed\n  HostName changed.example.test\n  User deploy\n", { mode: 0o600 });
+    fileSystem.readFile.mockImplementationOnce(async (file, encoding) => {
+      if (file === configPath) throw new Error("read failed");
+      return fs.readFile(file, encoding);
+    });
+
+    const failed = await adapter.listHosts();
+    const recovered = await adapter.listHosts();
+
+    expect(failed.hosts).toHaveLength(0);
+    expect(recovered.hosts.map((host) => host.alias)).toEqual(["changed"]);
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(3);
+  });
+
+  it("invalidates the cache after a successful managed host upsert", async () => {
+    const { home } = await createHome("Host demo\n  HostName demo.example.test\n");
+    const fileSystem = createInstrumentedFileSystem();
+    fileSystem.stat.mockResolvedValue({ mtimeMs: 1, size: 1 } as never);
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.listHosts();
+    await adapter.upsertManagedHost({ alias: "managed", hostname: "managed.example.test" });
+    const readsAfterUpsert = fileSystem.readFile.mock.calls.length;
+    const result = await adapter.listHosts();
+
+    expect(result.hosts.map((host) => host.alias)).toEqual(["demo", "managed"]);
+    expect(fileSystem.readFile).toHaveBeenCalledTimes(readsAfterUpsert);
+  });
+
+  it("invalidates the cache after a successful managed host removal", async () => {
+    const { home } = await createHome("Host demo\n  HostName demo.example.test\n", "Host managed\n  HostName managed.example.test\n");
+    const fileSystem = createInstrumentedFileSystem();
+    fileSystem.stat.mockResolvedValue({ mtimeMs: 1, size: 1 } as never);
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.listHosts();
+    await adapter.removeManagedHost("managed:managed");
+    const result = await adapter.listHosts();
+
+    expect(result.hosts.map((host) => host.alias)).toEqual(["demo"]);
+  });
+
+  it("returns current empty diagnostics after deletion and reads a rebuilt config", async () => {
+    const { home } = await createHome("Host demo\n  StrictHostKeyChecking no\n");
+    const configPath = path.join(home, ".ssh", "config");
+    const files = new Map<string, ControlledConfigFile>([
+      [configPath, { content: "Host demo\n  StrictHostKeyChecking no\n", exists: true, mtimeMs: 1, size: 10 }],
+    ]);
+    const fileSystem = createControlledFileSystem(files);
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const initial = await adapter.listHosts();
+    files.get(configPath)!.exists = false;
+    const deleted = await adapter.listHosts();
+    files.set(configPath, { content: "Host rebuilt\n  HostName rebuilt.example.test\n", exists: true, mtimeMs: 2, size: 10 });
+    const rebuilt = await adapter.listHosts();
+
+    expect(initial.hosts.map((host) => host.alias)).toEqual(["demo"]);
+    expect(initial.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.host-key-checking-disabled", hostAlias: "demo" }),
+    ]));
+    expect(deleted.hosts).toEqual([]);
+    expect(deleted.diagnostics).toEqual([]);
+    expect(rebuilt.hosts).toEqual([expect.objectContaining({ alias: "rebuilt", hostname: "rebuilt.example.test" })]);
+    expect(rebuilt.diagnostics).toEqual([]);
+  });
+
+  it.each(["mtimeMs", "size"] as const)("invalidates the cache when only %s changes", async (changedField) => {
+    const { home } = await createHome("Host original\n  HostName original.example.test\n");
+    const configPath = path.join(home, ".ssh", "config");
+    const files = new Map<string, ControlledConfigFile>([
+      [configPath, { content: "Host original\n  HostName original.example.test\n", exists: true, mtimeMs: 1, size: 10 }],
+    ]);
+    const fileSystem = createControlledFileSystem(files);
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.listHosts();
+    await adapter.listHosts();
+    files.set(configPath, {
+      content: "Host changed\n  HostName changed.example.test\n",
+      exists: true,
+      mtimeMs: changedField === "mtimeMs" ? 2 : 1,
+      size: changedField === "size" ? 11 : 10,
+    });
+    const result = await adapter.listHosts();
+
+    expect(result.hosts).toEqual([expect.objectContaining({ alias: "changed", hostname: "changed.example.test" })]);
+    expect(fileSystem.readFile.mock.calls.filter(([file]) => file === configPath)).toHaveLength(2);
+  });
+
+  it("keeps Include parsing and diagnostics consistent on a cache hit", async () => {
+    const { home } = await createHome("Host demo\n  Include ~/.ssh/afk_hosts\n  StrictHostKeyChecking no\n", "Host managed\n  HostName managed.example.test\n");
+    const configPath = path.join(home, ".ssh", "config");
+    const managedPath = path.join(home, ".ssh", "afk_hosts");
+    const files = new Map<string, ControlledConfigFile>([
+      [configPath, { content: "Host demo\n  Include ~/.ssh/afk_hosts\n  StrictHostKeyChecking no\n", exists: true, mtimeMs: 1, size: 10 }],
+      [managedPath, { content: "Host managed\n  HostName managed.example.test\n", exists: true, mtimeMs: 1, size: 10 }],
+    ]);
+    const fileSystem = createControlledFileSystem(files);
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const first = await adapter.listHosts();
+    const second = await adapter.listHosts();
+
+    expect(second).toEqual(first);
+    expect(second.hosts.map((host) => host.alias)).toEqual(["demo", "managed"]);
+    expect(second.diagnostics).toEqual([
+      expect.objectContaining({ code: "ssh.host-key-checking-disabled", hostAlias: "demo" }),
+    ]);
+    expect(fileSystem.readFile.mock.calls.filter(([file]) => file === configPath)).toHaveLength(1);
+    expect(fileSystem.readFile.mock.calls.filter(([file]) => file === managedPath)).toHaveLength(1);
+  });
+
   it.each([
     ["StrictHostKeyChecking", "no"],
     ["stricthostkeychecking", "off"],

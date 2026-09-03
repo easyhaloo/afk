@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">AFK Control</title>
+  <desc id="desc">A workflow path shaped like the letter A, with connected execution nodes and an independent away indicator.</desc>
+  <defs>
+    <linearGradient id="background" x1="128" y1="80" x2="888" y2="944" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#302B68" />
+      <stop offset="0.52" stop-color="#211F4A" />
+      <stop offset="1" stop-color="#14162F" />
+    </linearGradient>
+    <linearGradient id="route" x1="266" y1="276" x2="768" y2="746" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="0.54" stop-color="#F2F0FF" />
+      <stop offset="1" stop-color="#D8D2FF" />
+    </linearGradient>
+    <linearGradient id="accent" x1="340" y1="516" x2="684" y2="584" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B7A9FF" />
+      <stop offset="1" stop-color="#6D5DFC" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(744 252) rotate(135) scale(420)">
+      <stop stop-color="#9B8CFF" stop-opacity="0.32" />
+      <stop offset="1" stop-color="#9B8CFF" stop-opacity="0" />
+    </radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="26" stdDeviation="28" flood-color="#0A0B1B" flood-opacity="0.34" />
+    </filter>
+    <filter id="node-glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="40" y="40" width="944" height="944" rx="236" fill="#0F1027" opacity="0.46" filter="url(#shadow)" />
+  <rect x="40" y="40" width="944" height="944" rx="236" fill="url(#background)" />
+  <rect x="40" y="40" width="944" height="944" rx="236" fill="url(#glow)" />
+  <rect x="58" y="58" width="908" height="908" rx="220" fill="none" stroke="#FFFFFF" stroke-opacity="0.1" stroke-width="4" />
+
+  <path d="M228 735L380 329C389 305 406 292 432 292H592C618 292 635 305 644 329L796 735" fill="none" stroke="#11132D" stroke-opacity="0.34" stroke-width="112" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M228 735L380 329C389 305 406 292 432 292H592C618 292 635 305 644 329L796 735" fill="none" stroke="url(#route)" stroke-width="86" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M318 548H706" fill="none" stroke="#141632" stroke-opacity="0.28" stroke-width="94" stroke-linecap="round" />
+  <path d="M318 548H706" fill="none" stroke="url(#accent)" stroke-width="70" stroke-linecap="round" />
+
+  <g filter="url(#node-glow)">
+    <circle cx="228" cy="735" r="40" fill="#6D5DFC" stroke="#FFFFFF" stroke-width="14" />
+    <circle cx="512" cy="292" r="40" fill="#6D5DFC" stroke="#FFFFFF" stroke-width="14" />
+    <circle cx="796" cy="735" r="40" fill="#6D5DFC" stroke="#FFFFFF" stroke-width="14" />
+  </g>
+
+  <circle cx="804" cy="198" r="54" fill="#FFC86B" opacity="0.22" filter="url(#node-glow)" />
+  <circle cx="804" cy="198" r="30" fill="#FFC86B" stroke="#FFF4D9" stroke-width="10" />
+</svg>

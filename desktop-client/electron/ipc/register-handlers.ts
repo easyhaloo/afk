@@ -1,15 +1,17 @@
-import { BrowserWindow, dialog, ipcMain } from "electron";
-import { IPC_CHANNELS } from "../../shared/ipc-contract";
+import { BrowserWindow, clipboard, dialog, ipcMain } from "electron";
+import { IPC_CHANNELS, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
 import { createSshConfigAdapter } from "../adapters/ssh-config-adapter";
 import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter";
+import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter";
 import { isAfkTmuxSession, listAfkTmux } from "../adapters/resource-adapter";
 import { assertTrustedSender } from "../security/sender-guard";
-import { validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
+import { validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 import { readAppearance, saveAppearance } from "../services/appearance-service";
+import { createClipboardService } from "../services/clipboard-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { resolveWorkspace } from "../services/workspace-service";
@@ -24,6 +26,7 @@ function broadcast(channel: string, ...args: unknown[]) {
 }
 
 const home = homedir();
+const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
 const commands = createSshCommandAdapter({ exec });
 const knownHosts = createKnownHostsAdapter({
   home,
@@ -39,6 +42,7 @@ const sshService = createSshService({
   config: createSshConfigAdapter({ home, exec }),
   commands,
   knownHosts,
+  externalTerminal: createExternalTerminalAdapter(),
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
 });
 
@@ -49,7 +53,16 @@ function fingerprintInput(value: unknown): SshFingerprint {
   return { algorithm: input.algorithm, value: input.value, hostname: input.hostname, port: input.port, bits: typeof input.bits === "number" ? input.bits : undefined };
 }
 
+function sshListOptions(value: unknown): SshListOptions | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("SSH 列表参数无效");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some((key) => key !== "forceRefresh") || ("forceRefresh" in input && typeof input.forceRefresh !== "boolean")) throw new Error("SSH 列表参数无效");
+  return "forceRefresh" in input ? { forceRefresh: input.forceRefresh as boolean } : {};
+}
+
 export function registerIpcHandlers() {
+  ipcMain.handle(IPC_CHANNELS.copyText, (event, text: unknown) => { assertTrustedSender(event); return clipboardService.copyText(text); });
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);
     const selected = await dialog.showOpenDialog({ title: "选择 AFK 工作区", properties: ["openDirectory"] });
@@ -76,7 +89,11 @@ export function registerIpcHandlers() {
     if (!result.ok) throw new Error(result.stderr);
     return true;
   });
-  ipcMain.handle(IPC_CHANNELS.sshList, (event) => { assertTrustedSender(event); return sshService.listHosts(); });
+  ipcMain.handle(IPC_CHANNELS.sshList, (event, options: unknown) => {
+    assertTrustedSender(event);
+    const validated = sshListOptions(options);
+    return validated === undefined ? sshService.listHosts() : sshService.listHosts(validated);
+  });
   ipcMain.handle(IPC_CHANNELS.sshAdd, (event, input: unknown) => { assertTrustedSender(event); return sshService.addHost(validateSshHostInput(input)); });
   ipcMain.handle(IPC_CHANNELS.sshRemove, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.removeHost(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshTrust, (event, request: unknown) => {
@@ -89,6 +106,7 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.sshDeployKey, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.deployKey(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshTest, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.testHost(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshConnect, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.connect(validateSshHostId(hostId)); });
+  ipcMain.handle(IPC_CHANNELS.sshOpenExternal, (event, hostId: unknown, terminal: unknown) => { assertTrustedSender(event); return sshService.openExternal(validateSshHostId(hostId), terminal === undefined ? "iterm2" : validateSshExternalTerminalId(terminal)); });
   ipcMain.handle(IPC_CHANNELS.sshInput, (event, request: unknown) => {
     assertTrustedSender(event);
     if (!request || typeof request !== "object") throw new Error("SSH 输入参数无效");

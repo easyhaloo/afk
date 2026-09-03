@@ -4,6 +4,7 @@ import type { DesktopApi } from "../shared/ipc-contract";
 // Sandboxed preloads can only require Electron built-ins. Keep the wire names
 // local while the shared contract remains the source of renderer/main types.
 const IPC_CHANNELS = {
+  copyText: "afk:copy-text",
   chooseWorkspace: "afk:choose-workspace",
   snapshot: "afk:snapshot",
   appearance: "afk:appearance",
@@ -19,6 +20,7 @@ const IPC_CHANNELS = {
   sshDeployKey: "afk:ssh-deploy-key",
   sshTest: "afk:ssh-test",
   sshConnect: "afk:ssh-connect",
+  sshOpenExternal: "afk:ssh-open-external",
   sshInput: "afk:ssh-input",
   sshResize: "afk:ssh-resize",
   sshClose: "afk:ssh-close",
@@ -27,6 +29,7 @@ const IPC_CHANNELS = {
 } as const;
 
 const api: DesktopApi = {
+  copyText: (text) => ipcRenderer.invoke(IPC_CHANNELS.copyText, text),
   chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),
   snapshot: (workspace) => ipcRenderer.invoke(IPC_CHANNELS.snapshot, workspace),
   appearance: () => ipcRenderer.invoke(IPC_CHANNELS.appearance),
@@ -35,7 +38,7 @@ const api: DesktopApi = {
   tmuxPane: (workspace, session) => ipcRenderer.invoke(IPC_CHANNELS.tmuxPane, workspace, session),
   tmuxSend: (workspace, session, line) => ipcRenderer.invoke(IPC_CHANNELS.tmuxSend, workspace, session, line),
   ssh: {
-    list: () => ipcRenderer.invoke(IPC_CHANNELS.sshList),
+    list: (options) => options === undefined ? ipcRenderer.invoke(IPC_CHANNELS.sshList) : ipcRenderer.invoke(IPC_CHANNELS.sshList, options),
     add: (input) => ipcRenderer.invoke(IPC_CHANNELS.sshAdd, input),
     remove: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshRemove, hostId),
     trust: (request) => ipcRenderer.invoke(IPC_CHANNELS.sshTrust, request),
@@ -43,6 +46,7 @@ const api: DesktopApi = {
     deployKey: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshDeployKey, hostId),
     test: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshTest, hostId),
     connect: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshConnect, hostId),
+    openExternal: (hostId, terminal) => terminal ? ipcRenderer.invoke(IPC_CHANNELS.sshOpenExternal, hostId, terminal) : ipcRenderer.invoke(IPC_CHANNELS.sshOpenExternal, hostId),
     input: (request) => ipcRenderer.invoke(IPC_CHANNELS.sshInput, request),
     resize: (request) => ipcRenderer.invoke(IPC_CHANNELS.sshResize, request),
     close: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.sshClose, sessionId),

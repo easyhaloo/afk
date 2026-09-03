@@ -1,5 +1,7 @@
 export type SshHostSource = "system" | "managed";
 
+export type SshExternalTerminalId = "iterm2" | "warp" | "ghostty" | "cmux" | "terminal";
+
 export type SshHostStatus =
   | "ready"
   | "untrusted"

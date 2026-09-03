@@ -5,16 +5,16 @@ import type { SshDiagnostic } from "../shared/ssh-contract";
 describe("SSH diagnostic grouping", () => {
   it("merges host-specific diagnostics and normalizes the message", () => {
     const grouped = groupSshDiagnostics([
-      { code: "ssh.unknown-directive", severity: "warning", message: "Host prod 包含未识别配置项", path: "~/.ssh/config", hostAlias: "prod" },
-      { code: "ssh.unknown-directive", severity: "warning", message: "Host demo 包含未识别配置项", path: "~/.ssh/config", hostAlias: "demo" },
-      { code: "ssh.unknown-directive", severity: "warning", message: "Host prod 包含未识别配置项", path: "~/.ssh/config", hostAlias: "prod" },
+      { code: "ssh.host-key-checking-disabled", severity: "warning", message: "Host prod 已关闭 SSH 主机密钥严格校验", path: "~/.ssh/config", hostAlias: "prod" },
+      { code: "ssh.host-key-checking-disabled", severity: "warning", message: "Host demo 已关闭 SSH 主机密钥严格校验", path: "~/.ssh/config", hostAlias: "demo" },
+      { code: "ssh.host-key-checking-disabled", severity: "warning", message: "Host prod 已关闭 SSH 主机密钥严格校验", path: "~/.ssh/config", hostAlias: "prod" },
     ]);
 
     expect(grouped).toEqual([
       {
-        code: "ssh.unknown-directive",
+        code: "ssh.host-key-checking-disabled",
         severity: "warning",
-        message: "包含未识别配置项",
+        message: "已关闭 SSH 主机密钥严格校验",
         path: "~/.ssh/config",
         count: 3,
         hostAliases: ["demo", "prod"],
@@ -24,9 +24,9 @@ describe("SSH diagnostic grouping", () => {
 
   it("keeps diagnostics separate when their path, severity, or code differs", () => {
     const diagnostic: SshDiagnostic = {
-      code: "ssh.unknown-directive",
+      code: "ssh.host-key-checking-disabled",
       severity: "warning",
-      message: "Host demo 包含未识别配置项",
+      message: "Host demo 已关闭 SSH 主机密钥严格校验",
       path: "~/.ssh/config",
       hostAlias: "demo",
     };
@@ -39,9 +39,9 @@ describe("SSH diagnostic grouping", () => {
     ]);
 
     expect(grouped).toEqual([
-      expect.objectContaining({ code: "ssh.unknown-directive", severity: "warning", path: "~/.ssh/config", count: 1 }),
-      expect.objectContaining({ code: "ssh.unknown-directive", severity: "warning", path: "~/.ssh/afk_hosts", count: 1 }),
-      expect.objectContaining({ code: "ssh.unknown-directive", severity: "error", path: "~/.ssh/config", count: 1 }),
+      expect.objectContaining({ code: "ssh.host-key-checking-disabled", severity: "warning", path: "~/.ssh/config", count: 1 }),
+      expect.objectContaining({ code: "ssh.host-key-checking-disabled", severity: "warning", path: "~/.ssh/afk_hosts", count: 1 }),
+      expect.objectContaining({ code: "ssh.host-key-checking-disabled", severity: "error", path: "~/.ssh/config", count: 1 }),
       expect.objectContaining({ code: "ssh.malformed-directive", severity: "warning", path: "~/.ssh/config", count: 1 }),
     ]);
   });

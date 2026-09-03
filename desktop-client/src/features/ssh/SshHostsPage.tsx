@@ -9,7 +9,7 @@ type StatusFilter = "all" | SshHostStatus;
 
 const statusLabels: Record<SshHostStatus, string> = { ready: "可连接", untrusted: "待确认指纹", "key-missing": "缺少密钥", unreachable: "不可达", "auth-required": "需要免密", "identity-changed": "指纹异常", invalid: "配置异常" };
 const sourceLabels: Record<SshHostSource, string> = { system: "系统配置", managed: "AFK 管理" };
-const diagnosticTypeLabels: Record<string, string> = { "ssh.unknown-directive": "未识别配置项", "ssh.malformed-directive": "无法解析的配置行", "ssh.non-concrete-host": "非具体 Host" };
+const diagnosticTypeLabels: Record<string, string> = { "ssh.host-key-checking-disabled": "主机密钥校验已关闭", "ssh.known-hosts-disabled": "known_hosts 已禁用", "ssh.malformed-directive": "无法解析的配置行", "ssh.non-concrete-host": "非具体 Host" };
 const diagnosticSeverityLabels: Record<SshDiagnostic["severity"], string> = { info: "提示", warning: "警告", error: "错误" };
 const modalFocusableSelector = "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
 
@@ -25,11 +25,15 @@ export function filterSshHosts(hosts: SshHost[], query: string, source: SourceFi
   });
 }
 
+export function sshDiagnosticTypeLabel(code: string) {
+  return diagnosticTypeLabels[code] || "配置诊断";
+}
+
 function SshDiagnostics({ diagnostics, total }: { diagnostics: GroupedSshDiagnostic[]; total: number }) {
   return <section className="ssh-diagnostics" aria-label="SSH 配置提示">
     <header className="ssh-diagnostics-heading"><div><CircleAlert size={14} /><h2>SSH 配置提示</h2></div><span className="ssh-diagnostics-total">{total} 条</span></header>
     <ul className="ssh-diagnostic-list">{diagnostics.map((diagnostic) => <li className={`ssh-diagnostic-group ${diagnostic.severity}`} key={`${diagnostic.code}-${diagnostic.severity}-${diagnostic.message}-${diagnostic.path || ""}`}>
-      <div className="ssh-diagnostic-group-header"><strong>{diagnosticTypeLabels[diagnostic.code] || "配置诊断"}</strong><span className="ssh-diagnostic-severity">{diagnosticSeverityLabels[diagnostic.severity]}</span><span className="ssh-diagnostic-count">{diagnostic.count} 条</span></div>
+      <div className="ssh-diagnostic-group-header"><strong>{sshDiagnosticTypeLabel(diagnostic.code)}</strong><span className="ssh-diagnostic-severity">{diagnosticSeverityLabels[diagnostic.severity]}</span><span className="ssh-diagnostic-count">{diagnostic.count} 条</span></div>
       {diagnostic.path ? <code className="ssh-diagnostic-path">{diagnostic.path}</code> : null}
       {diagnostic.hostAliases.length ? <details className="ssh-diagnostic-hosts"><summary>查看受影响 Host</summary><div className="ssh-diagnostic-host-list">{diagnostic.hostAliases.map((alias) => <span className="ssh-diagnostic-host" key={alias}>{alias}</span>)}</div></details> : <p className="ssh-diagnostic-message">{diagnostic.message}</p>}
     </li>)}</ul>

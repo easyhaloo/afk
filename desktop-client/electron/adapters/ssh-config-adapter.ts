@@ -43,7 +43,7 @@ function tokenizeSafetyValue(value: string) {
       else token += character;
     } else if (character === '"' || character === "'") {
       quote = character;
-    } else if (character === "#") {
+    } else if (character === "#" && !token) {
       break;
     } else if (/\s/.test(character)) {
       if (token) tokens.push(token);

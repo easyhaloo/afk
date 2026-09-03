@@ -39,6 +39,7 @@ describe("SSH config adapter", () => {
   it.each([
     ["StrictHostKeyChecking=off", "Host demo 已关闭 SSH 主机密钥严格校验"],
     ["StrictHostKeyChecking=no # reason", "Host demo 已关闭 SSH 主机密钥严格校验"],
+    ["StrictHostKeyChecking 'OFF' # reason", "Host demo 已关闭 SSH 主机密钥严格校验"],
   ])("warns for normalized host-key safety directive %s", async (directive, message) => {
     const { home } = await createHome(`Host demo\n  ${directive}\n`);
     const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
@@ -101,8 +102,35 @@ describe("SSH config adapter", () => {
     ]));
   });
 
+  it("warns when a quoted UserKnownHostsFile list contains /dev/null before a comment", async () => {
+    const { home } = await createHome("Host demo\n  UserKnownHostsFile '~/.ssh/known_hosts' '/dev/null' # reason\n");
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "ssh.known-hosts-disabled",
+        message: "Host demo 已禁用用户 known_hosts 文件",
+        hostAlias: "demo",
+        path: "~/.ssh/config",
+      }),
+    ]));
+  });
+
   it("does not warn for a normal UserKnownHostsFile", async () => {
     const { home } = await createHome("Host demo\n  UserKnownHostsFile ~/.ssh/known_hosts\n");
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const result = await adapter.listHosts();
+
+    expect(result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "ssh.known-hosts-disabled" }),
+    ]));
+  });
+
+  it("does not warn for normal quoted UserKnownHostsFile paths", async () => {
+    const { home } = await createHome("Host demo\n  UserKnownHostsFile '~/.ssh/known_hosts' \"~/.ssh/known_hosts2\" # reason\n");
     const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
 
     const result = await adapter.listHosts();

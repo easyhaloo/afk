@@ -81,8 +81,8 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
       event.stopImmediatePropagation();
       closeForm();
     };
-    document.addEventListener("keydown", handleDocumentKeyDown);
-    return () => document.removeEventListener("keydown", handleDocumentKeyDown);
+    document.addEventListener("keydown", handleDocumentKeyDown, true);
+    return () => document.removeEventListener("keydown", handleDocumentKeyDown, true);
   }, [closeForm, formOpen]);
 
   const filtered = useMemo(() => filterSshHosts(hosts, query, source, status), [hosts, query, source, status]);

@@ -13,6 +13,13 @@ type PtyProcess = {
   kill: (signal?: string) => void;
 };
 
+type SshPtySession = {
+  process: PtyProcess;
+  session: SshSession;
+  pendingPassword?: string;
+  promptBuffer: string;
+};
+
 type SshPtyAdapterOptions = {
   spawn?: (file: string, args: string[], options: pty.IPtyForkOptions) => PtyProcess;
   prepareSpawn?: () => void;
@@ -34,6 +41,20 @@ function unpackedPath(value: string) {
   return value.replace("app.asar", "app.asar.unpacked").replace("node_modules.asar", "node_modules.asar.unpacked");
 }
 
+function stripTerminalControlSequences(value: string) {
+  return value
+    .replace(/\u001b\][\s\S]*?(?:\u0007|\u001b\\)/g, "")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001b[()][0-2A-Z]/g, "")
+    .replace(/\u001b[^[\]()].?/g, "");
+}
+
+function isSshPasswordPrompt(buffer: string) {
+  const visible = stripTerminalControlSequences(buffer);
+  const line = visible.split(/[\r\n]/).at(-1)?.trim() || "";
+  return /^(?:[^:\r\n]*['’]s\s+)?password:\s*$/i.test(line);
+}
+
 export function ensureNodePtySpawnHelperExecutable({
   packageRoot = path.dirname(path.dirname(require.resolve("node-pty"))),
   platform = process.platform,
@@ -53,19 +74,38 @@ export function createSshPtyAdapter(options: SshPtyAdapterOptions = {}) {
   const { onData, onExit } = options;
   const spawn = options.spawn ?? pty.spawn;
   const prepareSpawn = options.prepareSpawn ?? (options.spawn ? () => undefined : ensureNodePtySpawnHelperExecutable);
-  const sessions = new Map<string, { process: PtyProcess; session: SshSession }>();
+  const sessions = new Map<string, SshPtySession>();
   let spawnPrepared = false;
 
-  function open(command: string, args: string[], session: SshSession, after?: { command: string; args: string[] }) {
+  function open(command: string, args: string[], session: SshSession, after?: { command: string; args: string[] }, password?: string) {
     const start = (file: string, parameters: string[], chained?: { command: string; args: string[] }) => {
       if (!spawnPrepared) {
         try { prepareSpawn(); spawnPrepared = true; }
         catch (cause) { throw new Error(`无法准备 SSH 终端组件：${cause instanceof Error ? cause.message : String(cause)}`); }
       }
       const child = spawn(file, parameters, { name: "xterm-256color", cols: 120, rows: 32, cwd: homedir(), env: globalThis.process.env });
-      sessions.set(session.id, { process: child, session: { ...session, state: "open" } });
-      child.onData((data) => onData?.(session.id, data));
+      const item: SshPtySession = {
+        process: child,
+        session: { ...session, state: "open" },
+        pendingPassword: session.kind === "deploy" ? password : undefined,
+        promptBuffer: "",
+      };
+      sessions.set(session.id, item);
+      child.onData((data) => {
+        if (sessions.get(session.id) === item && item.pendingPassword !== undefined) {
+          item.promptBuffer = `${item.promptBuffer}${data}`.slice(-1_024);
+          if (isSshPasswordPrompt(item.promptBuffer)) {
+            const passwordToSend = item.pendingPassword;
+            item.pendingPassword = undefined;
+            item.promptBuffer = "";
+            child.write(`${passwordToSend}\n`);
+          }
+        }
+        onData?.(session.id, data);
+      });
       child.onExit(({ exitCode }) => {
+        item.pendingPassword = undefined;
+        item.promptBuffer = "";
         if (chained && exitCode === 0) { start(chained.command, chained.args); return; }
         sessions.delete(session.id);
         onExit?.(session.id, exitCode);
@@ -84,9 +124,9 @@ export function createSshPtyAdapter(options: SshPtyAdapterOptions = {}) {
       const id = sessionId();
       return open("/usr/bin/ssh-keygen", ["-t", "ed25519", "-f", identityFile, "-C", "afk-managed"], { id, hostId: "local", alias: "ssh-keygen", kind: "keygen", title: "生成 AFK Ed25519 密钥", state: "opening" }, { command: "/usr/bin/ssh-add", args: ["--apple-use-keychain", identityFile] });
     },
-    deployKey(hostId: string, alias: string, remoteCommand: string) {
+    deployKey(hostId: string, alias: string, remoteCommand: string, password?: string) {
       const id = sessionId();
-      return open("/usr/bin/ssh", [alias, remoteCommand], { id, hostId, alias, kind: "deploy", title: `部署公钥 · ${alias}`, state: "opening" });
+      return open("/usr/bin/ssh", [alias, remoteCommand], { id, hostId, alias, kind: "deploy", title: `部署公钥 · ${alias}`, state: "opening" }, undefined, password);
     },
     input(sessionIdValue: string, data: string) {
       const item = sessions.get(sessionIdValue);
@@ -103,6 +143,8 @@ export function createSshPtyAdapter(options: SshPtyAdapterOptions = {}) {
     close(sessionIdValue: string) {
       const item = sessions.get(sessionIdValue);
       if (!item) return false;
+      item.pendingPassword = undefined;
+      item.promptBuffer = "";
       item.process.kill("SIGTERM");
       sessions.delete(sessionIdValue);
       return true;

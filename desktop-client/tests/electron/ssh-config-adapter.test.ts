@@ -186,6 +186,7 @@ describe("SSH config adapter", () => {
     files.set(configPath, { content: "Host rebuilt\n  HostName rebuilt.example.test\n", exists: true, mtimeMs: 2, size: 10 });
     const rebuilt = await adapter.listHosts();
 
+    const configReads = fileSystem.readFile.mock.calls.filter(([file]) => file === configPath);
     expect(initial.hosts.map((host) => host.alias)).toEqual(["demo"]);
     expect(initial.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "ssh.host-key-checking-disabled", hostAlias: "demo" }),
@@ -194,28 +195,46 @@ describe("SSH config adapter", () => {
     expect(deleted.diagnostics).toEqual([]);
     expect(rebuilt.hosts).toEqual([expect.objectContaining({ alias: "rebuilt", hostname: "rebuilt.example.test" })]);
     expect(rebuilt.diagnostics).toEqual([]);
+    expect(configReads).toHaveLength(2);
   });
 
-  it.each(["mtimeMs", "size"] as const)("invalidates the cache when only %s changes", async (changedField) => {
+  it("rereads when only mtimeMs changes", async () => {
     const { home } = await createHome("Host original\n  HostName original.example.test\n");
     const configPath = path.join(home, ".ssh", "config");
+    const originalContent = "Host original\n  HostName original.example.test\n";
     const files = new Map<string, ControlledConfigFile>([
-      [configPath, { content: "Host original\n  HostName original.example.test\n", exists: true, mtimeMs: 1, size: 10 }],
+      [configPath, { content: originalContent, exists: true, mtimeMs: 1, size: originalContent.length }],
     ]);
     const fileSystem = createControlledFileSystem(files);
     const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
 
+    const first = await adapter.listHosts();
     await adapter.listHosts();
-    await adapter.listHosts();
-    files.set(configPath, {
-      content: "Host changed\n  HostName changed.example.test\n",
-      exists: true,
-      mtimeMs: changedField === "mtimeMs" ? 2 : 1,
-      size: changedField === "size" ? 11 : 10,
-    });
-    const result = await adapter.listHosts();
+    files.get(configPath)!.mtimeMs = 2;
+    const second = await adapter.listHosts();
 
-    expect(result.hosts).toEqual([expect.objectContaining({ alias: "changed", hostname: "changed.example.test" })]);
+    expect(second).toEqual(first);
+    expect(fileSystem.stat.mock.calls.filter(([file]) => file === configPath)).toHaveLength(3);
+    expect(fileSystem.readFile.mock.calls.filter(([file]) => file === configPath)).toHaveLength(2);
+  });
+
+  it("rereads when only size changes", async () => {
+    const { home } = await createHome("Host original\n  HostName original.example.test\n");
+    const configPath = path.join(home, ".ssh", "config");
+    const originalContent = "Host original\n  HostName original.example.test\n";
+    const files = new Map<string, ControlledConfigFile>([
+      [configPath, { content: originalContent, exists: true, mtimeMs: 1, size: originalContent.length }],
+    ]);
+    const fileSystem = createControlledFileSystem(files);
+    const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const first = await adapter.listHosts();
+    await adapter.listHosts();
+    files.get(configPath)!.size = originalContent.length + 1;
+    const second = await adapter.listHosts();
+
+    expect(second).toEqual(first);
+    expect(fileSystem.stat.mock.calls.filter(([file]) => file === configPath)).toHaveLength(3);
     expect(fileSystem.readFile.mock.calls.filter(([file]) => file === configPath)).toHaveLength(2);
   });
 
@@ -231,6 +250,8 @@ describe("SSH config adapter", () => {
     const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
 
     const first = await adapter.listHosts();
+    files.get(configPath)!.content = "Host changed\n  Include ~/.ssh/afk_hosts\n  StrictHostKeyChecking yes\n";
+    files.get(managedPath)!.content = "Host changed-managed\n  HostName changed.example.test\n";
     const second = await adapter.listHosts();
 
     expect(second).toEqual(first);

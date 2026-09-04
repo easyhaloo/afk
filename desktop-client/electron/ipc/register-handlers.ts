@@ -1,5 +1,5 @@
-import { BrowserWindow, clipboard, dialog, ipcMain } from "electron";
-import { IPC_CHANNELS, type SshListOptions } from "../../shared/ipc-contract";
+import { BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from "electron";
+import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
@@ -12,6 +12,7 @@ import { assertTrustedSender } from "../security/sender-guard";
 import { validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 import { readAppearance, saveAppearance } from "../services/appearance-service";
 import { createClipboardService } from "../services/clipboard-service";
+import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { resolveWorkspace } from "../services/workspace-service";
@@ -27,6 +28,7 @@ function broadcast(channel: string, ...args: unknown[]) {
 
 const home = homedir();
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
+const sshCredentialService = createSshCredentialService({ home, safeStorage });
 const commands = createSshCommandAdapter({ exec });
 const knownHosts = createKnownHostsAdapter({
   home,
@@ -42,6 +44,7 @@ const sshService = createSshService({
   config: createSshConfigAdapter({ home, exec }),
   commands,
   knownHosts,
+  credentialService: sshCredentialService,
   externalTerminal: createExternalTerminalAdapter(),
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
 });
@@ -59,6 +62,15 @@ function sshListOptions(value: unknown): SshListOptions | undefined {
   const input = value as Record<string, unknown>;
   if (Object.keys(input).some((key) => key !== "forceRefresh") || ("forceRefresh" in input && typeof input.forceRefresh !== "boolean")) throw new Error("SSH 列表参数无效");
   return "forceRefresh" in input ? { forceRefresh: input.forceRefresh as boolean } : {};
+}
+
+function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("SSH 凭据参数无效");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some((key) => key !== "hostId" && key !== "password") || !Object.prototype.hasOwnProperty.call(input, "hostId") || !Object.prototype.hasOwnProperty.call(input, "password")) throw new Error("SSH 凭据参数无效");
+  const hostId = validateSshHostId(input.hostId);
+  if (typeof input.password !== "string" || !input.password || input.password.includes("\0") || input.password.includes("\r") || input.password.includes("\n") || Buffer.byteLength(input.password, "utf8") > 4096) throw new Error("SSH 部署密码无效");
+  return { hostId, password: input.password };
 }
 
 export function registerIpcHandlers() {
@@ -107,6 +119,9 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.sshTest, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.testHost(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshConnect, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.connect(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshOpenExternal, (event, hostId: unknown, terminal: unknown) => { assertTrustedSender(event); return sshService.openExternal(validateSshHostId(hostId), terminal === undefined ? "iterm2" : validateSshExternalTerminalId(terminal)); });
+  ipcMain.handle(IPC_CHANNELS.sshCredentialHas, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.hasCredential(validateSshHostId(hostId)); });
+  ipcMain.handle(IPC_CHANNELS.sshCredentialSet, (event, input: unknown) => { assertTrustedSender(event); const validated = sshCredentialSetInput(input); return sshService.setCredential(validated.hostId, validated.password); });
+  ipcMain.handle(IPC_CHANNELS.sshCredentialRemove, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.removeCredential(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshInput, (event, request: unknown) => {
     assertTrustedSender(event);
     if (!request || typeof request !== "object") throw new Error("SSH 输入参数无效");

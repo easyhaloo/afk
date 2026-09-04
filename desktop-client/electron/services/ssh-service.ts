@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ManagedSshHostInput, SshExternalTerminalId, SshFingerprint, SshHost, SshListResult, SshSession, SshTestResult, SshTrustRequest } from "../../shared/ssh-contract";
 import type { ExternalTerminalName } from "../adapters/external-terminal-adapter";
 import { assertAllowedSshPath, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
+import type { SshCredentialTarget } from "./ssh-credential-service";
 
 type ServiceDependencies = {
   config: {
@@ -25,10 +26,16 @@ type ServiceDependencies = {
     trust: (fingerprint: SshFingerprint) => Promise<SshFingerprint>;
     remove: (target: { hostname: string; port: number }) => Promise<boolean>;
   };
+  credentialService?: {
+    has: (hostId: string, target: SshCredentialTarget) => Promise<boolean>;
+    get: (hostId: string, target: SshCredentialTarget) => Promise<string | undefined>;
+    set: (hostId: string, password: string, target: SshCredentialTarget) => Promise<boolean>;
+    remove: (hostId: string) => Promise<boolean>;
+  };
   pty: {
     connect: (hostId: string, alias: string) => SshSession;
     generateKey: (identityFile: string) => SshSession;
-    deployKey: (hostId: string, alias: string, remoteCommand: string) => SshSession;
+    deployKey: (hostId: string, alias: string, remoteCommand: string, password?: string) => SshSession;
     input: (sessionId: string, data: string) => boolean;
     resize: (sessionId: string, cols: number, rows: number) => boolean;
     close: (sessionId: string) => boolean;
@@ -44,6 +51,15 @@ type ListHostsOptions = {
   forceRefresh?: boolean;
 };
 
+function validateListHostsOptions(options: unknown): ListHostsOptions {
+  if (options === undefined) return {};
+  if (options === null || typeof options !== "object" || Array.isArray(options)) throw new Error("SSH 列表参数无效");
+  const keys = Object.keys(options);
+  if (keys.some((key) => key !== "forceRefresh")) throw new Error("SSH 列表参数无效");
+  if ("forceRefresh" in options && typeof (options as { forceRefresh?: unknown }).forceRefresh !== "boolean") throw new Error("SSH 列表参数无效");
+  return options as ListHostsOptions;
+}
+
 type CacheEntry<T> = {
   value: T;
   expiresAt: number;
@@ -52,6 +68,7 @@ type CacheEntry<T> = {
 type ResolvedTarget = {
   hostname: string;
   port: number;
+  user?: string;
 };
 
 type ListInFlight = {
@@ -80,6 +97,15 @@ export function createSshService(deps: ServiceDependencies) {
 
   function hostStatusCacheKey(host: SshHost, target: ResolvedTarget) {
     return JSON.stringify([host.id, target.hostname, target.port]);
+  }
+
+  async function resolveCredentialTarget(host: SshHost): Promise<SshCredentialTarget> {
+    const resolved = await deps.commands.resolve(host.alias);
+    return {
+      hostname: resolved.hostname || host.hostname,
+      port: resolved.port ?? host.port,
+      ...(resolved.user || host.user ? { user: resolved.user || host.user } : {}),
+    };
   }
 
   function invalidateListCache() {
@@ -139,8 +165,8 @@ export function createSshService(deps: ServiceDependencies) {
     return { hosts, diagnostics: result.diagnostics };
   }
 
-  function listHosts(options: ListHostsOptions = {}) {
-    const forceRefresh = options.forceRefresh === true;
+  function listHosts(options?: ListHostsOptions) {
+    const forceRefresh = validateListHostsOptions(options).forceRefresh === true;
     if (listInFlight && (listInFlight.forceRefresh || !forceRefresh)) return listInFlight.promise;
     if (forceRefresh) {
       cacheGeneration += 1;
@@ -201,8 +227,11 @@ export function createSshService(deps: ServiceDependencies) {
   async function removeHost(hostId: string) {
     const host = await findHost(hostId);
     if (host.source !== "managed") throw new Error("只能删除 AFK 管理的 SSH 主机");
+    await deps.credentialService?.remove(host.id);
     const removed = await deps.config.removeManagedHost(host.id);
-    if (removed) invalidateListCache();
+    if (removed) {
+      invalidateListCache();
+    }
     return removed;
   }
 
@@ -216,8 +245,9 @@ export function createSshService(deps: ServiceDependencies) {
   async function deployKey(hostId: string) {
     const startedAt = now();
     const host = await findHost(hostId);
-    const fingerprint = await deps.commands.scanFingerprint({ hostname: host.hostname, port: host.port });
-    if (!await deps.knownHosts.isTrusted({ hostname: host.hostname, port: host.port }, fingerprint)) {
+    const target = await resolveCredentialTarget(host);
+    const fingerprint = await deps.commands.scanFingerprint(target);
+    if (!await deps.knownHosts.isTrusted(target, fingerprint)) {
       audit(deps, "deploy-key", "untrusted", host.id, startedAt);
       throw new Error("SSH 主机尚未信任，已阻止公钥部署");
     }
@@ -227,9 +257,32 @@ export function createSshService(deps: ServiceDependencies) {
     if (!publicKey.trim()) throw new Error("SSH 公钥不存在，请先生成或配置 IdentityFile");
     const encoded = Buffer.from(publicKey.trim(), "utf8").toString("base64");
     const remoteCommand = `umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; key=$(printf '%s' ${encoded} | (base64 -d 2>/dev/null || base64 -D)); grep -qxF "$key" ~/.ssh/authorized_keys || printf '%s\\n' "$key" >> ~/.ssh/authorized_keys; chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys`;
-    const session = deps.pty.deployKey(host.id, host.alias, remoteCommand);
-    audit(deps, "deploy-key", "started", host.id, startedAt);
-    return session;
+    let password = await deps.credentialService?.get(host.id, target);
+    try {
+      const session = deps.pty.deployKey(host.id, host.alias, remoteCommand, password);
+      audit(deps, "deploy-key", "started", host.id, startedAt);
+      return session;
+    } finally {
+      password = undefined;
+    }
+  }
+
+  async function hasCredential(hostId: string) {
+    const host = await findHost(hostId);
+    if (!deps.credentialService) return false;
+    return deps.credentialService.has(host.id, await resolveCredentialTarget(host));
+  }
+
+  async function setCredential(hostId: string, password: string) {
+    const host = await findHost(hostId);
+    if (!deps.credentialService) throw new Error("SSH 凭据安全存储不可用");
+    return deps.credentialService.set(host.id, password, await resolveCredentialTarget(host));
+  }
+
+  async function removeCredential(hostId: string) {
+    const id = validateSshHostId(hostId);
+    if (!deps.credentialService) return false;
+    return deps.credentialService.remove(id);
   }
 
   async function connect(hostId: string) {
@@ -280,6 +333,9 @@ export function createSshService(deps: ServiceDependencies) {
     testHost,
     generateKey,
     deployKey,
+    hasCredential,
+    setCredential,
+    removeCredential,
     connect,
     openExternal,
     input,

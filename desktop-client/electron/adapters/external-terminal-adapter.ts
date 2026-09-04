@@ -61,6 +61,7 @@ const WARP_SCRIPT = `on run argv
     activate
   end tell
   tell application "System Events"
+    keystroke "t" using {command down}
     keystroke sshCommand
     key code 36
   end tell

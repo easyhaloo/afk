@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createSshService } from "../../electron/services/ssh-service";
 
@@ -26,10 +29,16 @@ function dependencies() {
     pty: {
       connect: () => ({ id: "session-1", hostId: host.id, alias: host.alias, kind: "ssh" as const, title: host.alias, state: "opening" as const }),
       generateKey: () => ({ id: "session-key", hostId: "local", alias: "keygen", kind: "keygen" as const, title: "keygen", state: "opening" as const }),
-      deployKey: () => ({ id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy" as const, title: host.alias, state: "opening" as const }),
+      deployKey: (_hostId: string, _alias: string, _remoteCommand: string, _password?: string) => ({ id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy" as const, title: host.alias, state: "opening" as const }),
       input: () => true,
       resize: () => true,
       close: () => true,
+    },
+    credentialService: {
+      has: async () => false,
+      get: async () => undefined as string | undefined,
+      set: async () => true,
+      remove: async () => true,
     },
     externalTerminal: {
       open: async () => "iTerm2" as const,
@@ -39,10 +48,174 @@ function dependencies() {
 }
 
 describe("SSH service", () => {
+  it.each([
+    [{ unexpected: true }, "unknown option"],
+    [["forceRefresh"], "array options"],
+    [null, "null options"],
+    ["options", "string options"],
+    [42, "number options"],
+    [true, "boolean options"],
+    [{ forceRefresh: "true" }, "non-boolean forceRefresh"],
+  ])("rejects invalid list options: %s", (options, _caseName) => {
+    const service = createSshService(dependencies());
+
+    expect(() => service.listHosts(options as never)).toThrow("SSH 列表参数无效");
+  });
+
   it("lists hosts with an explicit untrusted status", async () => {
     const service = createSshService(dependencies());
     const result = await service.listHosts();
     expect(result.hosts[0].status).toBe("untrusted");
+  });
+
+  it("reads the host credential after trust checks and passes it only to deploy PTY", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-service-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    await writeFile(path.join(home, ".ssh", "id_ed25519_afk.pub"), "ssh-ed25519 AAAATEST afk");
+    const deps = dependencies();
+    const calls: string[] = [];
+    let receivedPassword: string | undefined;
+    deps.home = home;
+    deps.knownHosts.isTrusted = async () => {
+      calls.push("trusted");
+      return true;
+    };
+    deps.commands.resolve = async () => ({ hostname: "resolved.example.test", port: 2222, user: "deploy" });
+    deps.credentialService.get = async (hostId, target) => {
+      calls.push(`credential:${hostId}:${target.hostname}:${target.port}:${target.user}`);
+      return "stored-secret";
+    };
+    deps.pty.deployKey = (_hostId, _alias, _remoteCommand, password) => {
+      receivedPassword = password;
+      calls.push("deploy");
+      return { id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy", title: host.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await service.deployKey(host.id);
+
+    expect(calls).toEqual(["trusted", `credential:${host.id}:resolved.example.test:2222:deploy`, "deploy"]);
+    expect(receivedPassword).toBe("stored-secret");
+  });
+
+  it("resolves the current target for credential status and save, but not removal", async () => {
+    const deps = dependencies();
+    const calls: unknown[][] = [];
+    let resolveCalls = 0;
+    deps.commands.resolve = async () => {
+      resolveCalls += 1;
+      return { hostname: "resolved.example.test", port: 2222, user: "deploy" };
+    };
+    deps.credentialService.has = async (...args) => { calls.push(["has", ...args]); return true; };
+    deps.credentialService.set = async (...args) => { calls.push(["set", ...args]); return true; };
+    deps.credentialService.remove = async (...args) => { calls.push(["remove", ...args]); return true; };
+    const service = createSshService(deps);
+
+    await expect(service.hasCredential(host.id)).resolves.toBe(true);
+    await expect(service.setCredential(host.id, "stored-secret")).resolves.toBe(true);
+    await expect(service.removeCredential(host.id)).resolves.toBe(true);
+
+    const target = { hostname: "resolved.example.test", port: 2222, user: "deploy" };
+    expect(calls).toEqual([
+      ["has", host.id, target],
+      ["set", host.id, "stored-secret", target],
+      ["remove", host.id],
+    ]);
+    expect(resolveCalls).toBe(2);
+  });
+
+  it("removes a credential even when the host target cannot be resolved", async () => {
+    const deps = dependencies();
+    deps.commands.resolve = async () => {
+      throw new Error("ssh config resolve failed");
+    };
+    const removeCredential = vi.fn().mockResolvedValue(true);
+    deps.credentialService.remove = removeCredential;
+    const service = createSshService(deps);
+
+    await expect(service.removeCredential(host.id)).resolves.toBe(true);
+
+    expect(removeCredential).toHaveBeenCalledWith(host.id);
+  });
+
+  it("keeps deployment interactive when a saved alias now resolves to another target", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-service-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    await writeFile(path.join(home, ".ssh", "id_ed25519_afk.pub"), "ssh-ed25519 AAAATEST afk");
+    const deps = dependencies();
+    let receivedPassword: string | undefined = "unexpected";
+    deps.home = home;
+    deps.commands.resolve = async () => ({ hostname: "replacement.example.test", port: 2200, user: "ubuntu" });
+    deps.knownHosts.isTrusted = async () => true;
+    deps.credentialService.get = async (_hostId, target) => target.hostname === host.hostname ? "old-secret" : undefined;
+    deps.pty.deployKey = (_hostId, _alias, _remoteCommand, password) => {
+      receivedPassword = password;
+      return { id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy", title: host.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await service.deployKey(host.id);
+
+    expect(receivedPassword).toBeUndefined();
+  });
+
+  it("keeps deployment interactive when no host credential is stored", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-service-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    await writeFile(path.join(home, ".ssh", "id_ed25519_afk.pub"), "ssh-ed25519 AAAATEST afk");
+    const deps = dependencies();
+    let receivedPassword: string | undefined = "unexpected";
+    deps.home = home;
+    deps.knownHosts.isTrusted = async () => true;
+    deps.pty.deployKey = (_hostId, _alias, _remoteCommand, password) => {
+      receivedPassword = password;
+      return { id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy", title: host.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await service.deployKey(host.id);
+
+    expect(receivedPassword).toBeUndefined();
+  });
+
+  it("keeps deployment interactive when credential service is unavailable", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-service-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    await writeFile(path.join(home, ".ssh", "id_ed25519_afk.pub"), "ssh-ed25519 AAAATEST afk");
+    const deps = dependencies();
+    let receivedPassword: string | undefined = "unexpected";
+    deps.home = home;
+    deps.credentialService = undefined;
+    deps.knownHosts.isTrusted = async () => true;
+    deps.pty.deployKey = (_hostId, _alias, _remoteCommand, password) => {
+      receivedPassword = password;
+      return { id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy", title: host.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await service.deployKey(host.id);
+
+    expect(receivedPassword).toBeUndefined();
+  });
+
+  it("does not read or pass a credential before the known_hosts check", async () => {
+    const deps = dependencies();
+    let credentialReads = 0;
+    let deployCalls = 0;
+    deps.credentialService.get = async () => {
+      credentialReads += 1;
+      return "stored-secret";
+    };
+    deps.pty.deployKey = () => {
+      deployCalls += 1;
+      return { id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy", title: host.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await expect(service.deployKey(host.id)).rejects.toThrow("尚未信任");
+
+    expect(credentialReads).toBe(0);
+    expect(deployCalls).toBe(0);
   });
 
   it("reuses host status within the cache TTL", async () => {
@@ -204,6 +377,62 @@ describe("SSH service", () => {
     await service.removeHost(host.id);
 
     await expect(service.listHosts()).resolves.toMatchObject({ hosts: [] });
+  });
+
+  it("removes the managed host credential before deleting the host", async () => {
+    const deps = dependencies();
+    const credentialPresent = new Set([host.id]);
+    const calls: string[] = [];
+    deps.credentialService.remove = async (hostId) => {
+      calls.push(`credential:${hostId}`);
+      credentialPresent.delete(hostId);
+      return true;
+    };
+    deps.config.removeManagedHost = async (hostId) => {
+      calls.push(`host:${hostId}`);
+      return true;
+    };
+    const service = createSshService(deps);
+
+    await expect(service.removeHost(host.id)).resolves.toBe(true);
+    expect(calls).toEqual([`credential:${host.id}`, `host:${host.id}`]);
+    expect(credentialPresent.has(host.id)).toBe(false);
+  });
+
+  it("does not delete the managed host when credential cleanup fails", async () => {
+    const deps = dependencies();
+    const cleanupError = new Error("credential cleanup failed");
+    const credentialPresent = new Set([host.id]);
+    let removeHostCalls = 0;
+    deps.credentialService.remove = async () => {
+      throw cleanupError;
+    };
+    deps.config.removeManagedHost = async () => {
+      removeHostCalls += 1;
+      return true;
+    };
+    const service = createSshService(deps);
+
+    await expect(service.removeHost(host.id)).rejects.toBe(cleanupError);
+    expect(removeHostCalls).toBe(0);
+    expect(credentialPresent.has(host.id)).toBe(true);
+  });
+
+  it("deletes the managed host when no credential exists", async () => {
+    const deps = dependencies();
+    const calls: string[] = [];
+    deps.credentialService.remove = async (hostId) => {
+      calls.push(`credential:${hostId}`);
+      return false;
+    };
+    deps.config.removeManagedHost = async (hostId) => {
+      calls.push(`host:${hostId}`);
+      return true;
+    };
+    const service = createSshService(deps);
+
+    await expect(service.removeHost(host.id)).resolves.toBe(true);
+    expect(calls).toEqual([`credential:${host.id}`, `host:${host.id}`]);
   });
 
   it("invalidates the related status after adding or updating a host", async () => {

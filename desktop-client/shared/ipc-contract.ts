@@ -140,6 +140,9 @@ export type DesktopApi = {
     test: (hostId: string) => Promise<SshTestResult>;
     connect: (hostId: string) => Promise<SshSession>;
     openExternal: (hostId: string, terminal?: SshExternalTerminalId) => Promise<SshExternalTerminalResult>;
+    credentialHas: (hostId: string) => Promise<boolean>;
+    credentialSet: (input: SshCredentialSetInput) => Promise<boolean>;
+    credentialRemove: (hostId: string) => Promise<boolean>;
     input: (request: SshInputRequest) => Promise<boolean>;
     resize: (request: SshResizeRequest) => Promise<boolean>;
     close: (sessionId: string) => Promise<boolean>;
@@ -166,6 +169,9 @@ export const IPC_CHANNELS = {
   sshTest: "afk:ssh-test",
   sshConnect: "afk:ssh-connect",
   sshOpenExternal: "afk:ssh-open-external",
+  sshCredentialHas: "afk:ssh-credential-has",
+  sshCredentialSet: "afk:ssh-credential-set",
+  sshCredentialRemove: "afk:ssh-credential-remove",
   sshInput: "afk:ssh-input",
   sshResize: "afk:ssh-resize",
   sshClose: "afk:ssh-close",
@@ -191,4 +197,9 @@ export type SshExternalTerminalResult = {
 
 export type SshListOptions = {
   forceRefresh?: boolean;
+};
+
+export type SshCredentialSetInput = {
+  hostId: string;
+  password: string;
 };

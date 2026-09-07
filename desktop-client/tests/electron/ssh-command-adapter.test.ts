@@ -2,6 +2,20 @@ import { describe, expect, it } from "vitest";
 import { createSshCommandAdapter } from "../../electron/adapters/ssh-command-adapter";
 
 describe("OpenSSH command adapter", () => {
+  it("builds SSH commands from a real host target instead of a display name", async () => {
+    const calls: Array<[string, string[]]> = [];
+    const adapter = createSshCommandAdapter({
+      exec: async (command, args) => {
+        calls.push([command, args]);
+        return { ok: true, stdout: "", stderr: "" };
+      },
+    });
+
+    await adapter.testBatch({ hostname: "172.16.0.241", port: 22, user: "root", identityFile: "~/.ssh/id_ed25519", proxyJump: "fangcloud-jumpserver" });
+
+    expect(calls).toEqual([["ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-p", "22", "-l", "root", "-i", "~/.ssh/id_ed25519", "-J", "fangcloud-jumpserver", "--", "172.16.0.241", "true"]]]);
+  });
+
   it("passes structured arguments to ssh config resolution and batch testing", async () => {
     const calls: Array<[string, string[]]> = [];
     const adapter = createSshCommandAdapter({

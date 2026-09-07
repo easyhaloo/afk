@@ -1,19 +1,27 @@
 import path from "node:path";
 import type { ManagedSshHostInput, SshExternalTerminalId, SshJumpHostType } from "../../shared/ssh-contract";
 
-const ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
+const ALIAS_PATTERN = /^[\p{L}\p{N}_.-]{1,100}$/u;
+const HOSTNAME_PATTERN = /^\S{1,253}$/u;
 
 function requiredString(value: unknown, message: string) {
   if (typeof value !== "string" || !value.trim() || value.includes("\0")) throw new Error(message);
   return value.trim();
 }
 
+function displayName(value: unknown) {
+  const name = requiredString(value, "SSH 主机别名无效");
+  if (!ALIAS_PATTERN.test(name) || name === "." || name === "..") throw new Error("SSH 主机别名无效");
+  if ([...name].length > 100) throw new Error("SSH 主机名称过长");
+  return name;
+}
+
 export function validateSshHostInput(value: unknown): ManagedSshHostInput {
   if (!value || typeof value !== "object") throw new Error("SSH 主机参数无效");
   const input = value as Record<string, unknown>;
-  const alias = requiredString(input.alias, "SSH 主机别名无效");
-  if (!ALIAS_PATTERN.test(alias) || alias === "." || alias === "..") throw new Error("SSH 主机别名无效");
+  const alias = displayName(input.alias);
   const hostname = requiredString(input.hostname, "SSH 主机地址无效");
+  if (!HOSTNAME_PATTERN.test(hostname) || hostname.startsWith("-")) throw new Error("SSH 主机地址无效");
   const port = input.port === undefined ? 22 : input.port;
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("SSH 端口无效");
   const optional = (key: string) => input[key] === undefined ? undefined : requiredString(input[key], `SSH ${key} 无效`);

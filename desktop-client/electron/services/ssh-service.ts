@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ManagedSshHostInput, SshExternalTerminalId, SshFingerprint, SshHost, SshListResult, SshSession, SshTestResult, SshTrustRequest } from "../../shared/ssh-contract";
+import type { ManagedSshHostInput, SshConnectionTarget, SshExternalTerminalId, SshFingerprint, SshHost, SshListResult, SshSession, SshTestResult, SshTrustRequest } from "../../shared/ssh-contract";
 import type { ExternalTerminalName } from "../adapters/external-terminal-adapter";
 import { assertAllowedSshPath, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 import type { SshCredentialTarget } from "./ssh-credential-service";
@@ -17,10 +17,10 @@ type ServiceDependencies = {
   commands: {
     resolve: (alias: string) => Promise<{ hostname?: string; port?: number; user?: string; identityFile?: string; proxyJump?: string }>;
     scanFingerprint: (target: { hostname: string; port: number }) => Promise<SshFingerprint>;
-    testBatch: (alias: string) => Promise<{ ok: boolean; code: SshTestResult["code"] }>;
+    testBatch: (target: SshConnectionTarget | string) => Promise<{ ok: boolean; code: SshTestResult["code"] }>;
     loadIdentity: (identityFile: string) => Promise<boolean>;
     keygenArgs: (identityFile: string) => string[];
-    deployArgs: (alias: string, publicKeyPath: string) => string[];
+    deployArgs: (target: SshConnectionTarget | string, publicKeyPath: string) => string[];
   };
   knownHosts: {
     isTrusted: (target: { hostname: string; port: number }, fingerprint: SshFingerprint) => Promise<boolean>;
@@ -34,16 +34,16 @@ type ServiceDependencies = {
     set: (hostId: string, password: string, target: SshCredentialTarget) => Promise<boolean>;
     remove: (hostId: string) => Promise<boolean>;
   };
-  pty: {
-    connect: (hostId: string, alias: string) => SshSession;
+    pty: {
+    connect: (hostId: string, target: SshConnectionTarget | string, displayAlias?: string) => SshSession;
     generateKey: (identityFile: string) => SshSession;
-    deployKey: (hostId: string, alias: string, remoteCommand: string, password?: string) => SshSession;
+    deployKey: (hostId: string, target: SshConnectionTarget | string, remoteCommand: string, password?: string, displayAlias?: string) => SshSession;
     input: (sessionId: string, data: string) => boolean;
     resize: (sessionId: string, cols: number, rows: number) => boolean;
     close: (sessionId: string) => boolean;
   };
   externalTerminal: {
-    open: (alias: string, terminal: SshExternalTerminalId) => Promise<ExternalTerminalName>;
+    open: (target: SshConnectionTarget | string, displayAliasOrTerminal: string | SshExternalTerminalId, terminal?: SshExternalTerminalId) => Promise<ExternalTerminalName>;
   };
   audit?: (event: { operation: string; hostId?: string; resultCode: string; startedAt: string; finishedAt: string }) => void;
   home?: string;
@@ -71,6 +71,8 @@ type ResolvedTarget = {
   hostname: string;
   port: number;
   user?: string;
+  identityFile?: string;
+  proxyJump?: string;
 };
 
 type ListInFlight = {
@@ -98,11 +100,15 @@ export function createSshService(deps: ServiceDependencies) {
   }
 
   function hostStatusCacheKey(host: SshHost, target: ResolvedTarget) {
-    return JSON.stringify([host.id, target.hostname, target.port]);
+    return JSON.stringify([host.id, target.hostname, target.port, target.user, target.identityFile, target.proxyJump]);
+  }
+
+  function isDirectManagedHost(host: SshHost) {
+    return host.source === "managed" && host.configPath !== "~/.ssh/afk_hosts";
   }
 
   async function resolveCredentialTarget(host: SshHost): Promise<SshCredentialTarget> {
-    const resolved = await deps.commands.resolve(connectionAlias(host));
+    const resolved = isDirectManagedHost(host) ? host : await deps.commands.resolve(legacyConnectionAlias(host));
     return {
       hostname: resolved.hostname || host.hostname,
       port: resolved.port ?? host.port,
@@ -111,12 +117,24 @@ export function createSshService(deps: ServiceDependencies) {
   }
 
   async function resolveFingerprintTarget(host: SshHost): Promise<ResolvedTarget> {
-    if (host.jumpHostType !== "jumpserver") return { hostname: host.hostname, port: host.port, user: host.user };
-    const resolved = await deps.commands.resolve(connectionAlias(host));
-    return { hostname: resolved.hostname || host.hostname, port: resolved.port ?? host.port, user: resolved.user || host.user };
+    if (isDirectManagedHost(host)) return connectionTarget(host);
+    if (host.source === "managed" && host.jumpHostType !== "jumpserver") return { hostname: host.hostname, port: host.port, user: host.user };
+    const resolved = await deps.commands.resolve(legacyConnectionAlias(host));
+    return { hostname: resolved.hostname || host.hostname, port: resolved.port ?? host.port, user: resolved.user || host.user, identityFile: resolved.identityFile, proxyJump: resolved.proxyJump };
   }
 
-  function connectionAlias(host: SshHost) {
+  function connectionTarget(host: SshHost): SshConnectionTarget {
+    if (!isDirectManagedHost(host)) throw new Error("该 SSH 主机必须通过 OpenSSH 配置连接");
+    const proxyJump = host.jumpHostType === "openssh" || host.jumpHostType === "jumpserver" ? host.jumpHost : host.proxyJump;
+    if ((host.jumpHostType === "openssh" || host.jumpHostType === "jumpserver") && !proxyJump) throw new Error("跳板机未配置");
+    return { hostname: host.hostname, port: host.port, user: host.user, identityFile: host.identityFile ? assertAllowedSshPath(host.identityFile, home) : undefined, proxyJump };
+  }
+
+  function connectionArgument(host: SshHost): SshConnectionTarget | string {
+    return isDirectManagedHost(host) ? connectionTarget(host) : legacyConnectionAlias(host);
+  }
+
+  function legacyConnectionAlias(host: SshHost) {
     if (host.jumpHostType === "jumpserver") {
       if (!host.jumpHost) throw new Error("JumpServer 跳板机未配置");
       return host.jumpHost;
@@ -144,12 +162,16 @@ export function createSshService(deps: ServiceDependencies) {
     let target: ResolvedTarget | undefined;
     let value: SshHost;
     try {
-      const alias = connectionAlias(host);
+      const argument = connectionArgument(host);
       const cachedTarget = resolvedTargetCache.get(definitionKey);
       if (!forceRefresh && cachedTarget && cachedTarget.expiresAt > Date.now()) target = cachedTarget.value;
       if (!target) {
-        const resolved = await deps.commands.resolve(alias);
-        target = { hostname: resolved.hostname || host.hostname, port: resolved.port || host.port };
+        if (typeof argument === "string") {
+          const resolved = await deps.commands.resolve(argument);
+          target = { hostname: resolved.hostname || host.hostname, port: resolved.port || host.port, user: resolved.user, identityFile: resolved.identityFile, proxyJump: resolved.proxyJump };
+        } else {
+          target = argument;
+        }
         if (cacheGeneration === generation) resolvedTargetCache.set(definitionKey, { value: target, expiresAt: Date.now() + hostStatusTtlMs });
       }
       const statusKey = hostStatusCacheKey(host, target);
@@ -160,10 +182,8 @@ export function createSshService(deps: ServiceDependencies) {
       if (trustStatus === "identity-changed") value = { ...host, hostname: target.hostname, port: target.port, fingerprint, status: "identity-changed" };
       else if (trustStatus !== "trusted") value = { ...host, hostname: target.hostname, port: target.port, fingerprint, status: "untrusted" };
       else {
-        const tested = await deps.commands.testBatch(alias);
-        value = host.jumpHostType === "jumpserver"
-          ? { ...host, fingerprint, status: tested.ok ? "ready" : tested.code }
-          : { ...host, hostname: target.hostname, port: target.port, fingerprint, status: tested.ok ? "ready" : tested.code };
+        const tested = await deps.commands.testBatch(argument);
+        value = { ...host, hostname: target.hostname, port: target.port, fingerprint, status: tested.ok ? "ready" : tested.code };
       }
     } catch {
       value = { ...host, status: "unreachable" };
@@ -232,7 +252,7 @@ export function createSshService(deps: ServiceDependencies) {
       audit(deps, "test", "untrusted", host.id, startedAt);
       throw new Error("SSH 主机尚未信任，已阻止连接测试");
     }
-    const result = await deps.commands.testBatch(connectionAlias(host));
+    const result = await deps.commands.testBatch(connectionArgument(host));
     const tested: SshTestResult = { ok: result.ok, code: result.code, checkedAt: now() };
     audit(deps, "test", result.code, host.id, startedAt);
     return tested;
@@ -299,7 +319,7 @@ export function createSshService(deps: ServiceDependencies) {
     const remoteCommand = `umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; key=$(printf '%s' ${encoded} | (base64 -d 2>/dev/null || base64 -D)); grep -qxF "$key" ~/.ssh/authorized_keys || printf '%s\\n' "$key" >> ~/.ssh/authorized_keys; chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys`;
     let password = await deps.credentialService?.get(host.id, target);
     try {
-      const session = deps.pty.deployKey(host.id, host.alias, remoteCommand, password);
+      const session = deps.pty.deployKey(host.id, connectionArgument(host), remoteCommand, password, host.alias);
       audit(deps, "deploy-key", "started", host.id, startedAt);
       return session;
     } finally {
@@ -327,25 +347,29 @@ export function createSshService(deps: ServiceDependencies) {
 
   async function connect(hostId: string) {
     const host = await findHost(hostId);
-    const target = await resolveCredentialTarget(host);
+    const target = await resolveFingerprintTarget(host);
     const fingerprint = await deps.commands.scanFingerprint(target);
     if (!await deps.knownHosts.isTrusted(target, fingerprint)) throw new Error("SSH 主机尚未信任，已阻止连接");
-    return deps.pty.connect(host.id, connectionAlias(host));
+    return deps.pty.connect(host.id, connectionArgument(host), host.alias);
   }
 
   async function openExternal(hostId: string, terminalId: SshExternalTerminalId = "iterm2") {
     const startedAt = now();
     const host = await findHost(hostId);
-    const alias = connectionAlias(host);
-    const resolved = await deps.commands.resolve(alias);
-    const target = { hostname: resolved.hostname || host.hostname, port: resolved.port || host.port };
+    const argument = connectionArgument(host);
+    const resolvedTarget = host.source === "managed" && !isDirectManagedHost(host)
+      ? await deps.commands.resolve(String(argument))
+      : await resolveFingerprintTarget(host);
+    const target: ResolvedTarget = { hostname: resolvedTarget.hostname || host.hostname, port: resolvedTarget.port || host.port, user: resolvedTarget.user, identityFile: resolvedTarget.identityFile, proxyJump: resolvedTarget.proxyJump };
     const fingerprint = await deps.commands.scanFingerprint(target);
     if (!await deps.knownHosts.isTrusted(target, fingerprint)) {
       audit(deps, "open-external", "untrusted", host.id, startedAt);
       throw new Error("SSH 主机尚未信任，已阻止外部终端启动");
     }
     try {
-      const terminal = await deps.externalTerminal.open(alias, terminalId);
+      const terminal = typeof argument === "string"
+        ? await deps.externalTerminal.open(argument, terminalId)
+        : await deps.externalTerminal.open(argument, host.alias, terminalId);
       audit(deps, "open-external", terminal, host.id, startedAt);
       return { terminal: terminalId };
     } catch (error) {

@@ -98,6 +98,14 @@ describe("LaunchServices application detection", () => {
 });
 
 describe("external terminal adapter", () => {
+  it("opens a managed host with structured IP arguments", async () => {
+    const { adapter, calls } = createHarness();
+
+    await expect(adapter.open({ hostname: "172.16.0.241", port: 22, user: "root" }, "kg演示", "iterm2")).resolves.toBe("iTerm2");
+
+    expect(calls[0].args).toEqual(["-e", expect.stringContaining("set sshCommand to item 1 of argv"), "--", "'/usr/bin/ssh' '-p' '22' '-l' 'root' '--' '172.16.0.241'"]);
+  });
+
   it("prefers iTerm2 when it is installed", async () => {
     const { adapter, calls, detections } = createHarness();
 

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSshService } from "../../electron/services/ssh-service";
 
 const host = { id: "managed:build-box", alias: "build-box", hostname: "build.example.test", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "untrusted" as const };
+const directHost = { ...host, configPath: "AFK 应用数据/ssh-hosts.yml" };
 
 function dependencies() {
   return {
@@ -50,6 +51,28 @@ function dependencies() {
 }
 
 describe("SSH service", () => {
+  it("connects a managed host directly without resolving its display alias", async () => {
+    const deps = dependencies();
+    deps.config.listHosts = async () => ({ hosts: [directHost], diagnostics: [] });
+    const resolve = vi.fn(deps.commands.resolve);
+    const scanFingerprint = vi.fn(deps.commands.scanFingerprint);
+    const testBatch = vi.fn(deps.commands.testBatch);
+    const connect = vi.fn(deps.pty.connect);
+    deps.commands.resolve = resolve;
+    deps.commands.scanFingerprint = scanFingerprint;
+    deps.commands.testBatch = testBatch;
+    deps.pty.connect = connect;
+    deps.knownHosts.isTrusted = async () => true;
+    const service = createSshService(deps);
+
+    await expect(service.listHosts()).resolves.toMatchObject({ hosts: [expect.objectContaining({ status: "ready" })] });
+    await service.connect(directHost.id);
+
+    expect(resolve).not.toHaveBeenCalled();
+    expect(testBatch).toHaveBeenCalledWith(expect.objectContaining({ hostname: host.hostname, port: host.port }));
+    expect(connect).toHaveBeenCalledWith(directHost.id, expect.objectContaining({ hostname: directHost.hostname, port: directHost.port }), directHost.alias);
+  });
+
   it("updates only managed hosts and invalidates the host list cache", async () => {
     const deps = dependencies();
     const updated = { ...host, alias: "renamed", id: "managed:renamed" };

@@ -45,31 +45,42 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const mountedRef = useRef(true);
+  const loadGenerationRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    loadGenerationRef.current += 1;
+    return () => {
+      mountedRef.current = false;
+      loadGenerationRef.current += 1;
+    };
   }, []);
 
-  const load = useCallback(async (force = false) => {
-    if (mountedRef.current) { setBusy(true); setError(""); }
+  const load = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
+    const generation = ++loadGenerationRef.current;
+    const isCurrentRequest = () => mountedRef.current && loadGenerationRef.current === generation;
+    if (isCurrentRequest()) {
+      setBusy(true);
+      setError("");
+    }
     try {
       const options: BacklogListOptions | undefined = platform === "auto" ? undefined : { platform };
       const data = await fetchBacklogList(workspace, () => {
         const opts = options ? { ...options } : undefined;
         return window.afkDesktop.backlog.list(workspace, opts);
       }, force ? { now: Date.now() + BACKLOG_FORCE_REFRESH } : {});
-      if (mountedRef.current) setItems(data);
+      if (!isCurrentRequest()) return;
+      setItems(data);
     } catch (cause) {
-      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause));
+      if (isCurrentRequest()) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      if (mountedRef.current) setBusy(false);
+      if (isCurrentRequest()) setBusy(false);
     }
   }, [platform, workspace]);
 
   useEffect(() => {
-    void load(false);
-  }, [load]);
+    void load();
+  }, [load, workspace]);
 
   useEffect(() => () => { resetBacklogCache(); }, []);
 
@@ -84,10 +95,10 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
           <span>读取 GitHub / GitLab 上由 AFK 管理的工作项；本机不持有凭据，由 afk CLI 完成 Provider 调用。</span>
         </div>
         <div className="backlog-heading-actions">
-          <select aria-label="选择 Provider" value={platform} onChange={(event) => setPlatform(event.currentTarget.value as "auto" | BacklogPlatform)} disabled={busy}>
+          <select aria-label="选择 Provider" value={platform} onChange={(event) => { invalidateBacklogCache(); setPlatform(event.currentTarget.value as "auto" | BacklogPlatform); }} disabled={busy}>
             {platformOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <button className="icon-button" onClick={() => { invalidateBacklogCache(); void load(true); }} disabled={busy} aria-label="刷新 Backlog">
+          <button className="icon-button" onClick={() => { invalidateBacklogCache(); void load({ force: true }); }} disabled={busy} aria-label="刷新 Backlog">
             <RefreshCw size={16} className={busy ? "spin" : ""} />
           </button>
         </div>

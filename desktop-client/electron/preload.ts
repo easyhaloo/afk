@@ -30,6 +30,11 @@ const IPC_CHANNELS = {
   sshClose: "afk:ssh-close",
   sshData: "afk:ssh-data",
   sshExit: "afk:ssh-exit",
+  backlogList: "afk:backlog-list",
+  backlogShow: "afk:backlog-show",
+  backlogCreate: "afk:backlog-create",
+  backlogTagAdd: "afk:backlog-tag-add",
+  backlogTagRemove: "afk:backlog-tag-remove",
 } as const;
 
 const api: DesktopApi = {
@@ -68,6 +73,15 @@ const api: DesktopApi = {
       ipcRenderer.on(IPC_CHANNELS.sshExit, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.sshExit, handler);
     },
+  },
+  backlog: {
+    list: (workspace, options) => options === undefined
+      ? ipcRenderer.invoke(IPC_CHANNELS.backlogList, workspace)
+      : ipcRenderer.invoke(IPC_CHANNELS.backlogList, workspace, options),
+    show: (workspace, id) => ipcRenderer.invoke(IPC_CHANNELS.backlogShow, workspace, id),
+    create: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogCreate, workspace, input),
+    addTag: (workspace, id, tag) => ipcRenderer.invoke(IPC_CHANNELS.backlogTagAdd, workspace, id, tag),
+    removeTag: (workspace, id, tag) => ipcRenderer.invoke(IPC_CHANNELS.backlogTagRemove, workspace, id, tag),
   },
 };
 

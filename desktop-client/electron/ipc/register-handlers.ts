@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
+import { parseBacklogCreateInput, parseBacklogListOptions, type BacklogPlatform } from "../../shared/backlog-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
@@ -12,6 +13,7 @@ import { isAfkTmuxSession, listAfkTmux } from "../adapters/resource-adapter";
 import { assertTrustedSender } from "../security/sender-guard";
 import { validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 import { readAppearance, saveAppearance } from "../services/appearance-service";
+import { createBacklogService } from "../services/backlog-service";
 import { createClipboardService } from "../services/clipboard-service";
 import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
@@ -50,6 +52,19 @@ const sshService = createSshService({
   credentialService: sshCredentialService,
   externalTerminal: createExternalTerminalAdapter(),
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
+});
+const backlogService = createBacklogService({
+  resolveAfk: async () => {
+    const result = await exec("/usr/bin/which", ["afk"]);
+    if (!result.ok) return "";
+    const candidate = result.stdout.split("\n")[0]?.trim() ?? "";
+    return candidate && candidate.startsWith("/") ? candidate : "";
+  },
+  resolveWorkspace,
+  exec: async (command, args, cwd) => {
+    const result = await exec(command, args, cwd);
+    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
+  },
 });
 
 function fingerprintInput(value: unknown): SshFingerprint {
@@ -141,4 +156,35 @@ export function registerIpcHandlers() {
     return sshService.resize(validateSshSessionId(input.sessionId), size.cols, size.rows);
   });
   ipcMain.handle(IPC_CHANNELS.sshClose, (event, sessionId: unknown) => { assertTrustedSender(event); return sshService.close(validateSshSessionId(sessionId)); });
+
+  ipcMain.handle(IPC_CHANNELS.backlogList, (event, workspace: unknown, options: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.list: workspace 必须是字符串");
+    return backlogService.list(workspace, parseBacklogListOptions(options));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogShow, (event, workspace: unknown, id: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.show: workspace 必须是字符串");
+    if (typeof id !== "string" || !id) throw new Error("backlog.show: id 必须是字符串");
+    return backlogService.show(workspace, id);
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogCreate, (event, workspace: unknown, input: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.create: workspace 必须是字符串");
+    return backlogService.create(workspace, parseBacklogCreateInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogTagAdd, (event, workspace: unknown, id: unknown, tag: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.tag.add: workspace 必须是字符串");
+    if (typeof id !== "string" || !id) throw new Error("backlog.tag.add: id 必须是字符串");
+    if (typeof tag !== "string" || !tag) throw new Error("backlog.tag.add: tag 必须是字符串");
+    return backlogService.addTag(workspace, id, tag);
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogTagRemove, (event, workspace: unknown, id: unknown, tag: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.tag.remove: workspace 必须是字符串");
+    if (typeof id !== "string" || !id) throw new Error("backlog.tag.remove: id 必须是字符串");
+    if (typeof tag !== "string" || !tag) throw new Error("backlog.tag.remove: tag 必须是字符串");
+    return backlogService.removeTag(workspace, id, tag);
+  });
 }

@@ -29,9 +29,20 @@ function resetStore() {
   if (existsSync(FAKE_AFK_STORE)) rmSync(FAKE_AFK_STORE);
 }
 
-function resetHome() {
-  if (existsSync(E2E_HOME)) rmSync(E2E_HOME, { recursive: true, force: true });
-  mkdirSync(path.join(E2E_HOME, ".ssh"), { recursive: true });
+async function resetHome() {
+  // The previous Electron child may still hold file handles on the
+  // scratch dir for a moment after it exits; retry on EBUSY/ENOTEMPTY.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      if (existsSync(E2E_HOME)) rmSync(E2E_HOME, { recursive: true, force: true });
+      mkdirSync(path.join(E2E_HOME, ".ssh"), { recursive: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOTEMPTY" && code !== "EBUSY" && code !== "EPERM") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+    }
+  }
 }
 
 export type Fixtures = {
@@ -42,7 +53,7 @@ export type Fixtures = {
 export const test = base.extend<Fixtures>({
   electronApp: async ({}, use) => {
     resetStore();
-    resetHome();
+    await resetHome();
     const app = await electron.launch({
       args: ["."],
       env: {

@@ -1,4 +1,4 @@
-import { Send, TerminalSquare, X } from "lucide-react";
+import { Maximize2, Minimize2, Minus, Plus, Send, TerminalSquare, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { SshSession } from "../../../shared/ssh-contract";
 import { SshTerminalView, sshTerminalErrorMessage } from "./SshTerminalView";
@@ -23,6 +23,8 @@ type TerminalSheetProps = {
 export function TerminalSheet({ mode = "tmux", session, pane, line, confirmed, sshSession, onClose, onLine, onConfirmed, onSend, onSshInput, onSshResize }: TerminalSheetProps) {
   const panelRef = useRef<HTMLElement>(null);
   const [terminalError, setTerminalError] = useState("");
+  const [standalone, setStandalone] = useState(false);
+  const [fontSize, setFontSize] = useState(11);
 
   useEffect(() => {
     setTerminalError("");
@@ -45,10 +47,18 @@ export function TerminalSheet({ mode = "tmux", session, pane, line, confirmed, s
 
   const sshDisabled = sshSession?.state === "closed" || sshSession?.state === "failed";
   return (
-    <section className={`terminal-sheet${mode === "ssh" ? " ssh-terminal-sheet" : ""}`} ref={panelRef}>
+    <section className={`terminal-sheet${mode === "ssh" ? " ssh-terminal-sheet" : ""}${standalone ? " standalone" : ""}`} ref={panelRef}>
       <header>
         <div><TerminalSquare size={17} /><strong>{mode === "ssh" ? sshSession?.title || "SSH 终端" : "终端"}</strong><span>{mode === "ssh" ? sshSession?.alias : session || "未选择 tmux 会话"}</span></div>
-        <button className="icon-button" onClick={onClose} aria-label="关闭终端"><X size={16} /></button>
+        <div className="terminal-window-actions">
+          {mode === "ssh" ? <>
+            <button className="icon-button" onClick={() => setFontSize((current) => Math.max(9, current - 1))} disabled={fontSize <= 9} aria-label="缩小终端文字" title="缩小终端文字"><Minus size={15} /></button>
+            <span className="terminal-font-size" aria-label={`终端字号 ${fontSize}`}>{fontSize}px</span>
+            <button className="icon-button" onClick={() => setFontSize((current) => Math.min(20, current + 1))} disabled={fontSize >= 20} aria-label="放大终端文字" title="放大终端文字"><Plus size={15} /></button>
+            <button className="icon-button" onClick={() => setStandalone((current) => !current)} aria-label={standalone ? "恢复浮动终端" : "独立显示终端"} title={standalone ? "恢复浮动终端" : "独立显示终端"}>{standalone ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
+          </> : null}
+          <button className="icon-button" onClick={onClose} aria-label="关闭终端"><X size={16} /></button>
+        </div>
       </header>
       {mode === "ssh" && sshSession ? (
         <>
@@ -56,6 +66,7 @@ export function TerminalSheet({ mode = "tmux", session, pane, line, confirmed, s
             sessionId={sshSession.id}
             output={pane}
             disabled={sshDisabled}
+            fontSize={fontSize}
             onInput={(data) => onSshInput?.(data)}
             onResize={(cols, rows) => onSshResize?.(cols, rows)}
             onCopy={(data) => window.afkDesktop.copyText(data)}

@@ -52,6 +52,46 @@ function createControlledFileSystem(files: Map<string, ControlledConfigFile>) {
 }
 
 describe("SSH config adapter", () => {
+  it("updates a managed host and moves its block when the alias changes", async () => {
+    const { home } = await createHome("", "Host old-name\n  HostName old.example.test\n  Port 22\n\nHost untouched\n  HostName untouched.example.test\n");
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.updateManagedHost("managed:old-name", {
+      alias: "new-name",
+      hostname: "new.example.test",
+      port: 2200,
+      user: "deploy",
+    });
+
+    const managed = await readFile(path.join(home, ".ssh", "afk_hosts"), "utf8");
+    expect(managed).toContain("Host new-name");
+    expect(managed).toContain("HostName new.example.test");
+    expect(managed).not.toContain("Host old-name");
+    expect(managed).toContain("Host untouched");
+    const result = await adapter.listHosts();
+    expect(result.hosts.map((host) => host.alias)).toEqual(["untouched", "new-name"]);
+  });
+
+  it("persists and reads a JumpServer selection without ProxyJump", async () => {
+    const { home } = await createHome("", "");
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.upsertManagedHost({
+      alias: "private-app",
+      hostname: "172.16.0.241",
+      jumpHostType: "jumpserver",
+      jumpHost: "fangcloud-jumpserver",
+    });
+
+    const managed = await readFile(path.join(home, ".ssh", "afk_hosts"), "utf8");
+    expect(managed).toContain("# AFK JumpHostType jumpserver");
+    expect(managed).toContain("# AFK JumpHost fangcloud-jumpserver");
+    expect(managed).not.toContain("ProxyJump");
+    await expect(adapter.listHosts()).resolves.toMatchObject({
+      hosts: [expect.objectContaining({ alias: "private-app", jumpHostType: "jumpserver", jumpHost: "fangcloud-jumpserver" })],
+    });
+  });
+
   it("reuses config reads when both file fingerprints are unchanged", async () => {
     const { home } = await createHome("Host demo\n  HostName demo.example.test\n", "Host managed\n  HostName managed.example.test\n");
     const fileSystem = createInstrumentedFileSystem();
@@ -169,6 +209,18 @@ describe("SSH config adapter", () => {
     const result = await adapter.listHosts();
 
     expect(result.hosts.map((host) => host.alias)).toEqual(["demo"]);
+  });
+
+  it("removes one concrete system host block without changing neighboring configuration", async () => {
+    const { home, sshDir } = await createHome("Include ~/.ssh/afk_hosts\n\nHost dead\n  HostName 192.0.2.10\n  User deploy\n\nHost healthy\n  HostName healthy.example.test\n");
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.removeSystemHost("system:dead");
+
+    const config = await readFile(path.join(sshDir, "config"), "utf8");
+    expect(config).not.toContain("Host dead");
+    expect(config).toContain("Include ~/.ssh/afk_hosts");
+    expect(config).toContain("Host healthy");
   });
 
   it("returns current empty diagnostics after deletion and reads a rebuilt config", async () => {
@@ -543,6 +595,16 @@ describe("SSH config adapter", () => {
     expect(config.match(/Include ~\/\.ssh\/afk_hosts/g)).toHaveLength(1);
     expect(managed).toContain("Host new-box");
     expect((await stat(path.join(sshDir, "afk_hosts"))).mode & 0o777).toBe(0o600);
+  });
+
+  it("keeps the managed Include in the global SSH config scope", async () => {
+    const { home, sshDir } = await createHome("Host existing\n  HostName existing.example.test\n");
+    const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    await adapter.upsertManagedHost({ alias: "jumpserver-target", hostname: "172.16.0.241", jumpHostType: "jumpserver", jumpHost: "fangcloud-jumpserver" });
+
+    const config = await readFile(path.join(sshDir, "config"), "utf8");
+    expect(config.trimStart().startsWith("Include ~/.ssh/afk_hosts")).toBe(true);
   });
 
   it("preserves host context for parsing diagnostics", async () => {

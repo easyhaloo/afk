@@ -33,6 +33,80 @@ describe("SSH diagnostic type labels", () => {
   });
 });
 
+describe("SSH diagnostic panel", () => {
+  it("starts collapsed and expands when its header is clicked", async () => {
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({
+      hosts,
+      diagnostics: [{ code: "ssh.host-key-checking-disabled", severity: "warning", message: "主机密钥校验已关闭", path: "~/.ssh/config", hostAlias: "prod" }],
+    }));
+    const toggle = renderer.root.findByProps({ className: "ssh-diagnostics-toggle" });
+
+    expect(toggle.props["aria-expanded"]).toBe(false);
+    expect(renderer.root.findAllByProps({ className: "ssh-diagnostic-list" })).toHaveLength(0);
+
+    await act(async () => {
+      toggle.props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(toggle.props["aria-expanded"]).toBe(true);
+    expect(renderer.root.findByProps({ className: "ssh-diagnostic-list" })).toBeDefined();
+    act(() => { renderer.unmount(); });
+  });
+});
+
+describe("SSH host editing", () => {
+  it("opens the edit modal with managed host values on double click", async () => {
+    const { renderer } = await renderSshPage();
+    const managedRow = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))[1];
+
+    await act(async () => {
+      managedRow.props.onDoubleClick();
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findByProps({ role: "dialog" })).toBeDefined();
+    expect(renderer.root.findAllByProps({ value: "stage" })).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ value: "staging.example.test" })).toHaveLength(1);
+    expect(renderer.root.findByProps({ children: "编辑 SSH 主机" })).toBeDefined();
+    act(() => { renderer.unmount(); });
+  });
+
+  it("does not open the edit modal for a system host", async () => {
+    const { renderer } = await renderSshPage();
+    const systemRow = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))[0];
+
+    await act(async () => {
+      systemRow.props.onDoubleClick();
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("submits edits through update and refreshes the host list", async () => {
+    const { renderer, api, list } = await renderSshPage();
+    const managedRow = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))[1];
+
+    await act(async () => {
+      managedRow.props.onDoubleClick();
+      await flushReactUpdates();
+    });
+    const hostname = renderer.root.findAllByProps({ value: "staging.example.test" })[0];
+    await act(async () => { hostname.props.onChange({ target: { value: "stage-new.example.test" } }); await flushReactUpdates(); });
+    await act(async () => {
+      const form = renderer.root.findByProps({ role: "dialog" });
+      form.props.onSubmit({ preventDefault: vi.fn() });
+      await flushReactUpdates();
+    });
+
+    expect(api.update).toHaveBeenCalledWith("managed:stage", expect.objectContaining({ hostname: "stage-new.example.test" }));
+    expect(list).toHaveBeenNthCalledWith(2, { forceRefresh: true });
+    act(() => { renderer.unmount(); });
+  });
+});
+
 function textContent(node: ReactTestInstance): string {
   return node.children.map((child) => typeof child === "string" ? child : textContent(child as ReactTestInstance)).join("");
 }
@@ -68,6 +142,7 @@ function createSshPageHarness(listImplementation: () => Promise<SshListResult> =
     connect,
     openExternal,
     add: vi.fn(),
+    update: vi.fn(async (_hostId: string, input: Partial<SshHost>) => ({ ...hosts[1], ...input, id: `managed:${input.alias}` })),
     remove: vi.fn(),
     trust: vi.fn(),
     generateKey: vi.fn(),
@@ -98,8 +173,58 @@ async function renderSshPage(onSession = vi.fn(), listImplementation?: () => Pro
 }
 
 describe("SSH connection modes", () => {
+  it("offers cleanup for unreachable system hosts without exposing deletion for reachable system hosts", async () => {
+    const unreachable = { ...hosts[0], id: "system:dead", alias: "dead", status: "unreachable" as const };
+    const { renderer, api, confirm, list } = await renderSshPage(vi.fn(), async () => ({ hosts: [hosts[0], unreachable], diagnostics: [] }));
+    confirm.mockReturnValue(true);
+
+    expect(renderer.root.findAllByProps({ "aria-label": "删除 SSH 主机 prod" })).toHaveLength(0);
+    const cleanupButton = renderer.root.findByProps({ "aria-label": "清理不可达 SSH 主机 dead" });
+    await act(async () => { cleanupButton.props.onClick({ stopPropagation: vi.fn() }); await flushReactUpdates(); });
+
+    expect(confirm).toHaveBeenCalledWith("从 ~/.ssh/config 清理不可达 SSH 主机“dead”？");
+    expect(api.remove).toHaveBeenCalledWith(unreachable.id);
+    expect(list).toHaveBeenNthCalledWith(2, { forceRefresh: true });
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("uses compact action buttons across the SSH host page", async () => {
+    const { renderer } = await renderSshPage();
+    const actionButtons = renderer.root.findAllByType("button").filter((button) => button.props.className?.includes("ssh-action-button"));
+
+    expect(actionButtons.length).toBeGreaterThan(0);
+    expect(actionButtons.every((button) => button.props.className.includes("ssh-action-button-sm"))).toBe(true);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("gives the SSH detail actions a clear primary hierarchy", async () => {
+    const managedReadyHost = { ...hosts[0], id: "managed:prod", source: "managed" as const };
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: [managedReadyHost], diagnostics: [] }));
+    const buttonByText = (label: string) => renderer.root.findAllByType("button").find((button) => textContent(button) === label)!;
+
+    expect(buttonByText("连接").props.className).toContain("ssh-action-button-primary");
+    expect(buttonByText("测试免密").props.className).toContain("ssh-action-button-secondary");
+    expect(renderer.root.findByProps({ "aria-label": "删除 SSH 主机 prod" }).props.className).toContain("ssh-host-delete");
+    expect(renderer.root.findByProps({ "aria-label": "prod SSH 详情" }).findAllByProps({ "aria-label": "删除 SSH 主机 prod" })).toHaveLength(0);
+    expect(renderer.root.findByProps({ className: "ssh-detail-action-groups" })).toBeDefined();
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("does not render the deployment password panel in host details", async () => {
+    const { renderer } = await renderSshPage();
+
+    expect(renderer.root.findAllByProps({ "aria-label": "部署密码" })).toHaveLength(0);
+    expect(renderer.root.findAllByType("input").some((input) => input.props.placeholder === "输入后保存到系统安全存储")).toBe(false);
+    expect(renderer.root.findAllByType("button").some((button) => textContent(button).includes("保存部署密码"))).toBe(false);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
   it("shows one terminal selector with built-in and external choices", async () => {
     const { renderer } = await renderSshPage();
+    expect(renderer.root.findAllByType("select")).toHaveLength(0);
     const selector = renderer.root.findByProps({ "aria-label": "选择 SSH 终端" });
     await act(async () => { selector.props.onClick(); });
     const listbox = renderer.root.findByProps({ role: "listbox" });
@@ -107,7 +232,8 @@ describe("SSH connection modes", () => {
     const labels = options.map((option) => textContent(option.findByType("b")));
 
     expect(labels).toEqual(["内置终端", "iTerm2", "Warp", "Ghostty", "cmux", "Terminal.app"]);
-    expect(options.every((option) => option.findAll((node) => typeof node.props.className === "string" && node.props.className.includes("ssh-terminal-icon")).length === 1)).toBe(true);
+    expect(listbox.props["data-placement"]).toBe("start");
+    expect(options.every((option) => option.findAll((node) => node.props["data-terminal-icon"] === option.props["data-terminal-id"]).length === 1)).toBe(true);
     expect(selector.props["aria-expanded"]).toBe(true);
     act(() => { renderer.unmount(); });
     vi.unstubAllGlobals();
@@ -352,11 +478,10 @@ describe("SSH connection modes", () => {
     const { renderer, list, api } = await renderSshPage();
     const pageWindow = globalThis.window as unknown as { confirm: ReturnType<typeof vi.fn> };
     pageWindow.confirm.mockReturnValue(true);
-    const managedHost = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row") && textContent(node).includes("stage"))[0];
-    await act(async () => { managedHost.props.onClick(); });
-    const removeButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "删除")!;
+    const removeButton = renderer.root.findByProps({ "aria-label": "删除 SSH 主机 stage" });
 
     await act(async () => { removeButton.props.onClick(); await flushReactUpdates(); });
+    expect(pageWindow.confirm).toHaveBeenCalledWith("删除 AFK SSH 主机“stage”？");
     expect(api.remove).toHaveBeenCalledWith(hosts[1].id);
     expect(list).toHaveBeenNthCalledWith(2, { forceRefresh: true });
     act(() => { renderer.unmount(); });
@@ -365,6 +490,57 @@ describe("SSH connection modes", () => {
 });
 
 describe("SSH host creation", () => {
+  it("offers optional jump host type and configured JumpServer choices", async () => {
+    const jumpServer = { ...hosts[0], id: "system:fangcloud-jumpserver", alias: "fangcloud-jumpserver", hostname: "dev-jumpserver.fangcloud.net", port: 2222, user: "shenggangshu" };
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: [hosts[0], jumpServer], diagnostics: [] }));
+    const addButton = renderer.root.findAllByType("button").find((button) => textContent(button).includes("添加主机"))!;
+
+    await act(async () => { addButton.props.onClick(); await flushReactUpdates(); });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    const jumpType = dialog.findByProps({ "aria-label": "选择跳板机类型" });
+    expect(dialog.findAllByType("select")).toHaveLength(0);
+    await act(async () => { jumpType.props.onClick(); await flushReactUpdates(); });
+    const jumpTypeOptions = dialog.findByProps({ role: "listbox", "aria-label": "选择跳板机类型" }).findAllByProps({ role: "option" });
+    expect(jumpTypeOptions.map((option) => textContent(option))).toEqual(["不使用跳板机", "OpenSSH ProxyJump", "JumpServer"]);
+    const stopPropagation = vi.fn();
+    await act(async () => { jumpTypeOptions[2].props.onPointerDown({ preventDefault: vi.fn(), stopPropagation }); await flushReactUpdates(); });
+    expect(stopPropagation).toHaveBeenCalledTimes(1);
+    expect(dialog.findAllByProps({ role: "listbox", "aria-label": "选择跳板机类型" })).toHaveLength(0);
+    expect(dialog.findByProps({ "aria-label": "选择跳板机类型" }).props["aria-expanded"]).toBe(false);
+    expect(textContent(dialog.findByProps({ "aria-label": "选择跳板机类型" }))).toContain("JumpServer");
+    const jumpHost = dialog.findByProps({ "aria-label": "选择跳板机" });
+    await act(async () => { jumpHost.props.onClick(); await flushReactUpdates(); });
+    const jumpHostOptions = dialog.findByProps({ role: "listbox", "aria-label": "选择跳板机" }).findAllByProps({ role: "option" });
+    expect(jumpHostOptions.map((option) => textContent(option))).toContain("fangcloud-jumpservershenggangshu@dev-jumpserver.fangcloud.net:2222");
+
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("submits a selected JumpServer separately from ProxyJump", async () => {
+    const jumpServer = { ...hosts[0], id: "system:fangcloud-jumpserver", alias: "fangcloud-jumpserver", hostname: "dev-jumpserver.fangcloud.net", port: 2222, user: "shenggangshu" };
+    const { renderer, api } = await renderSshPage(vi.fn(), async () => ({ hosts: [hosts[0], jumpServer], diagnostics: [] }));
+    api.add.mockResolvedValue({ ...hosts[1], id: "managed:private-app", alias: "private-app", hostname: "172.16.0.241" });
+    const addButton = renderer.root.findAllByType("button").find((button) => textContent(button).includes("添加主机"))!;
+
+    await act(async () => { addButton.props.onClick(); await flushReactUpdates(); });
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    const findInput = (placeholder: string) => dialog.findByProps({ placeholder });
+    await act(async () => { findInput("production-web").props.onChange({ target: { value: "private-app" } }); });
+    await act(async () => { findInput("203.0.113.10").props.onChange({ target: { value: "172.16.0.241" } }); });
+    await act(async () => { dialog.findByProps({ "aria-label": "选择跳板机类型" }).props.onClick(); await flushReactUpdates(); });
+    await act(async () => { dialog.findByProps({ role: "listbox", "aria-label": "选择跳板机类型" }).findAllByProps({ role: "option" })[2].props.onPointerDown({ preventDefault: vi.fn(), stopPropagation: vi.fn() }); await flushReactUpdates(); });
+    await act(async () => { dialog.findByProps({ "aria-label": "选择跳板机" }).props.onClick(); await flushReactUpdates(); });
+    await act(async () => { dialog.findByProps({ role: "listbox", "aria-label": "选择跳板机" }).findAllByProps({ role: "option" }).find((option) => textContent(option).startsWith("fangcloud-jumpserver"))!.props.onPointerDown({ preventDefault: vi.fn(), stopPropagation: vi.fn() }); await flushReactUpdates(); });
+    await act(async () => { dialog.props.onSubmit({ preventDefault: vi.fn() }); await flushReactUpdates(); });
+
+    expect(api.add).toHaveBeenCalledWith(expect.objectContaining({ alias: "private-app", hostname: "172.16.0.241", jumpHostType: "jumpserver", jumpHost: "fangcloud-jumpserver" }));
+    expect(api.add.mock.calls[0][0]).not.toHaveProperty("proxyJump");
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
   it("saves an optional deployment password while adding a host", async () => {
     const { renderer, api, credentials } = await renderSshPage();
     const addedHost = { ...hosts[1], id: "managed:new", alias: "new-host", hostname: "192.0.2.10", source: "managed" as const };
@@ -396,232 +572,7 @@ describe("SSH host creation", () => {
   });
 });
 
-describe("SSH deployment credentials", () => {
-  it("keeps password management recoverable when credential status loading fails", async () => {
-    const harness = createSshPageHarness();
-    const pendingStatus = deferred<boolean>();
-    const statusCall = deferred<void>();
-    harness.credentials.has.mockImplementationOnce(() => {
-      statusCall.resolve(undefined);
-      return pendingStatus.promise;
-    });
-    let renderer: ReturnType<typeof create>;
-    await act(async () => {
-      renderer = create(createElement(SshHostsPage, { onSession: vi.fn() }));
-      await flushReactUpdates();
-    });
-    await statusCall.promise;
-    await act(async () => {
-      pendingStatus.reject(new Error("读取部署密码失败"));
-      await pendingStatus.promise.catch(() => undefined);
-      await flushReactUpdates();
-    });
-
-    expect(textContent(renderer!.root.findByProps({ "aria-label": "部署密码" }))).toContain("读取失败");
-    const retryButton = renderer!.root.findAllByType("button").find((button) => textContent(button) === "重试读取")!;
-    expect(retryButton).toBeDefined();
-    const saveButton = renderer!.root.findAllByType("button").find((button) => textContent(button) === "保存部署密码")!;
-    expect(saveButton.props.disabled).toBe(false);
-
-    await act(async () => {
-      retryButton.props.onClick();
-      await flushReactUpdates();
-    });
-    expect(harness.credentials.has).toHaveBeenCalledTimes(2);
-    expect(textContent(renderer!.root.findByProps({ "aria-label": "部署密码" }))).toContain("未设置");
-
-    act(() => { renderer!.unmount(); });
-    vi.unstubAllGlobals();
-  });
-
-  it("loads only the saved status and never renders the password", async () => {
-    const { renderer, credentials } = await renderSshPage();
-
-    expect(credentials.has).toHaveBeenCalledWith(hosts[0].id);
-    expect(textContent(renderer.root)).toContain("未设置");
-    expect(textContent(renderer.root)).not.toContain("secret-password");
-    expect(renderer.root.findAll((node) => node.props.type === "password")).toHaveLength(1);
-    act(() => { renderer.unmount(); });
-    vi.unstubAllGlobals();
-  });
-
-  it("rejects blank passwords and saves a non-blank password through the typed credentials API", async () => {
-    const { renderer, credentials } = await renderSshPage();
-    const passwordInput = renderer.root.findByProps({ type: "password" });
-    const saveButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "保存部署密码")!;
-
-    await act(async () => {
-      passwordInput.props.onChange({ target: { value: "   " } });
-      await flushReactUpdates();
-    });
-    await act(async () => { saveButton.props.onClick(); await flushReactUpdates(); });
-    expect(credentials.set).not.toHaveBeenCalled();
-    expect(textContent(renderer.root.findByProps({ role: "alert" }))).toContain("密码不能为空");
-
-    await act(async () => {
-      passwordInput.props.onChange({ target: { value: "secret-password" } });
-      await flushReactUpdates();
-    });
-    await act(async () => { saveButton.props.onClick(); await flushReactUpdates(); });
-    expect(credentials.set).toHaveBeenCalledWith({ hostId: hosts[0].id, password: "secret-password" });
-    expect(credentials.has).toHaveBeenCalledTimes(2);
-    expect(textContent(renderer.root)).toContain("已保存");
-    expect(textContent(renderer.root)).not.toContain("secret-password");
-    act(() => { renderer.unmount(); });
-    vi.unstubAllGlobals();
-  });
-
-  it("removes a saved password and refreshes only its status", async () => {
-    const { renderer, credentials } = await renderSshPage();
-    const passwordInput = renderer.root.findByProps({ type: "password" });
-    const saveButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "保存部署密码")!;
-    await act(async () => {
-      passwordInput.props.onChange({ target: { value: "secret-password" } });
-      await flushReactUpdates();
-    });
-    await act(async () => { saveButton.props.onClick(); await flushReactUpdates(); });
-
-    const removeButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "删除已保存密码")!;
-    await act(async () => { removeButton.props.onClick(); await flushReactUpdates(); });
-    expect(credentials.remove).toHaveBeenCalledWith(hosts[0].id);
-    expect(credentials.has).toHaveBeenCalledTimes(3);
-    expect(textContent(renderer.root)).toContain("未设置");
-    expect(passwordInput.props.value).toBe("");
-    act(() => { renderer.unmount(); });
-    vi.unstubAllGlobals();
-  });
-
-  it("does not apply a pending password save result after switching hosts", async () => {
-    const pendingSave = deferred<boolean>();
-    const pendingStatus = deferred<boolean>();
-    const { renderer, credentials } = await renderSshPage();
-    credentials.set.mockImplementationOnce(() => pendingSave.promise);
-    credentials.has.mockImplementation(async (hostId) => hostId === hosts[0].id ? pendingStatus.promise : false);
-    const passwordInput = renderer.root.findByProps({ type: "password" });
-    const saveButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "保存部署密码")!;
-
-    await act(async () => {
-      passwordInput.props.onChange({ target: { value: "prod-password" } });
-      saveButton.props.onClick();
-      await flushReactUpdates();
-    });
-    const stageHost = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row") && textContent(node).includes("stage"))[0];
-    await act(async () => {
-      stageHost.props.onClick();
-      await flushReactUpdates();
-    });
-    const stagePasswordInput = renderer.root.findByProps({ type: "password" });
-    await act(async () => {
-      stagePasswordInput.props.onChange({ target: { value: "stage-password" } });
-      await flushReactUpdates();
-    });
-    expect(renderer.root.findAllByType("button").find((button) => textContent(button) === "保存部署密码")!.props.disabled).toBe(false);
-
-    await act(async () => {
-      pendingSave.resolve(true);
-      await pendingSave.promise;
-      await flushReactUpdates();
-    });
-    expect(credentials.has).toHaveBeenCalledWith(hosts[0].id);
-    await act(async () => {
-      pendingStatus.resolve(true);
-      await pendingStatus.promise;
-      await flushReactUpdates();
-    });
-
-    expect(textContent(renderer.root.findByProps({ "aria-label": "部署密码" }))).toContain("未设置");
-    expect(renderer.root.findByProps({ type: "password" }).props.value).toBe("stage-password");
-    expect(renderer.root.findAllByProps({ role: "status" }).some((node) => textContent(node).includes("部署密码已保存"))).toBe(false);
-    act(() => { renderer.unmount(); });
-    vi.unstubAllGlobals();
-  });
-
-  it("does not show a pending password save failure after switching hosts", async () => {
-    const pendingSave = deferred<boolean>();
-    const { renderer, credentials } = await renderSshPage();
-    credentials.set.mockImplementationOnce(() => pendingSave.promise);
-    const saveFailure = pendingSave.promise.catch(() => undefined);
-    const passwordInput = renderer.root.findByProps({ type: "password" });
-    const saveButton = renderer.root.findAllByType("button").find((button) => textContent(button) === "保存部署密码")!;
-
-    await act(async () => {
-      passwordInput.props.onChange({ target: { value: "prod-password" } });
-      saveButton.props.onClick();
-      await flushReactUpdates();
-    });
-    const stageHost = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row") && textContent(node).includes("stage"))[0];
-    await act(async () => {
-      stageHost.props.onClick();
-      await flushReactUpdates();
-    });
-    const stagePasswordInput = renderer.root.findByProps({ type: "password" });
-    await act(async () => {
-      stagePasswordInput.props.onChange({ target: { value: "stage-password" } });
-      await flushReactUpdates();
-    });
-
-    await act(async () => {
-      pendingSave.reject(new Error("prod 保存失败"));
-      await saveFailure;
-      await flushReactUpdates();
-    });
-
-    expect(renderer.root.findAllByProps({ role: "alert" })).toHaveLength(0);
-    expect(renderer.root.findByProps({ type: "password" }).props.value).toBe("stage-password");
-    expect(renderer.root.findAllByType("button").find((button) => textContent(button) === "保存部署密码")!.props.disabled).toBe(false);
-    act(() => { renderer.unmount(); });
-    vi.unstubAllGlobals();
-  });
-
-  it("does not apply a pending password removal result after switching hosts", async () => {
-    const pendingRemove = deferred<boolean>();
-    const pendingStatus = deferred<boolean>();
-    const harness = createSshPageHarness();
-    harness.credentials.has.mockResolvedValue(true);
-    let renderer: ReturnType<typeof create>;
-    await act(async () => {
-      renderer = create(createElement(SshHostsPage, { onSession: vi.fn() }));
-      await flushReactUpdates();
-    });
-    harness.credentials.remove.mockImplementationOnce(() => pendingRemove.promise);
-    harness.credentials.has.mockImplementation(async (hostId) => hostId === hosts[0].id ? pendingStatus.promise : false);
-    const removeButton = renderer!.root.findAllByType("button").find((button) => textContent(button) === "删除已保存密码")!;
-
-    await act(async () => {
-      removeButton.props.onClick();
-      await flushReactUpdates();
-    });
-    const stageHost = renderer!.root.findAll((node) => node.props.className?.includes("ssh-host-row") && textContent(node).includes("stage"))[0];
-    await act(async () => {
-      stageHost.props.onClick();
-      await flushReactUpdates();
-    });
-    const stagePasswordInput = renderer!.root.findByProps({ type: "password" });
-    await act(async () => {
-      stagePasswordInput.props.onChange({ target: { value: "stage-password" } });
-      await flushReactUpdates();
-    });
-
-    await act(async () => {
-      pendingRemove.resolve(true);
-      await pendingRemove.promise;
-      await flushReactUpdates();
-    });
-    expect(harness.credentials.has).toHaveBeenCalledWith(hosts[0].id);
-    await act(async () => {
-      pendingStatus.resolve(true);
-      await pendingStatus.promise;
-      await flushReactUpdates();
-    });
-
-    expect(textContent(renderer!.root.findByProps({ "aria-label": "部署密码" }))).toContain("未设置");
-    expect(renderer!.root.findByProps({ type: "password" }).props.value).toBe("stage-password");
-    expect(renderer!.root.findAllByProps({ role: "status" }).some((node) => textContent(node).includes("已删除部署密码"))).toBe(false);
-    expect(renderer!.root.findAllByType("button").find((button) => textContent(button) === "保存部署密码")!.props.disabled).toBe(false);
-    act(() => { renderer!.unmount(); });
-    vi.unstubAllGlobals();
-  });
-
+describe("SSH deployment actions", () => {
   it("does not expose deployment for untrusted or blocked hosts", async () => {
     for (const status of ["untrusted", "identity-changed", "invalid"] as const) {
       const blockedHost = { ...hosts[0], status };

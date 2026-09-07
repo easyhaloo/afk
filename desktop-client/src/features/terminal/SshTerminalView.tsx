@@ -18,6 +18,7 @@ export type SshTerminalViewProps = {
   sessionId: string;
   output: string;
   disabled: boolean;
+  fontSize?: number;
   onInput(data: string): MaybePromise;
   onResize(cols: number, rows: number): MaybePromise;
   onCopy(data: string): MaybePromise;
@@ -201,12 +202,21 @@ export function createSshTerminalRuntime(options: SshTerminalRuntimeOptions) {
     setDisabled(disabled: boolean) {
       if (active && terminal) terminal.options.disableStdin = disabled;
     },
+    setFontSize(fontSize: number) {
+      if (!active || !terminal) return;
+      terminal.options.fontSize = fontSize;
+      try {
+        fitAddon?.fit();
+      } catch (error) {
+        reportError(error);
+      }
+    },
     dispose,
   };
 }
 
 export function createSshTerminalView(runtimeFactory: typeof createSshTerminalRuntime = createSshTerminalRuntime) {
-  return function SshTerminalViewComponent({ sessionId, output, disabled, onInput, onResize, onCopy, onError }: SshTerminalViewProps) {
+  return function SshTerminalViewComponent({ sessionId, output, disabled, fontSize = 11, onInput, onResize, onCopy, onError }: SshTerminalViewProps) {
     const hostRef = useRef<HTMLDivElement>(null);
     const runtimeRef = useRef<ReturnType<typeof createSshTerminalRuntime> | null>(null);
     const disabledRef = useRef(disabled);
@@ -246,6 +256,10 @@ export function createSshTerminalView(runtimeFactory: typeof createSshTerminalRu
     useEffect(() => {
       runtimeRef.current?.setDisabled(disabled);
     }, [disabled, sessionId]);
+
+    useEffect(() => {
+      runtimeRef.current?.setFontSize(fontSize);
+    }, [fontSize, sessionId]);
 
     return <div className="ssh-terminal-shell"><div className="ssh-terminal-host" ref={hostRef} aria-label="SSH 交互终端" /></div>;
   };

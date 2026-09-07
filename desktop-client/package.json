@@ -12,6 +12,7 @@
     "start": "bash scripts/start-idempotent.sh",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run --config vitest.config.ts",
+    "e2e": "playwright test --config=playwright.config.ts",
     "build:main": "tsc -p tsconfig.electron.json",
     "build": "pnpm typecheck && pnpm build:main && vite build",
     "package:mac": "pnpm build && electron-builder --mac --dir",
@@ -49,6 +50,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",

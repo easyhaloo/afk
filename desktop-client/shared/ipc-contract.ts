@@ -133,6 +133,7 @@ export type DesktopApi = {
   ssh: {
     list: (options?: SshListOptions) => Promise<SshListResult>;
     add: (input: ManagedSshHostInput) => Promise<SshHost>;
+    update: (hostId: string, input: ManagedSshHostInput) => Promise<SshHost>;
     remove: (hostId: string) => Promise<boolean>;
     trust: (request: SshTrustRequest) => Promise<SshFingerprint>;
     generateKey: () => Promise<{ publicKeyPath: string; session: SshSession }>;
@@ -162,6 +163,7 @@ export const IPC_CHANNELS = {
   tmuxSend: "afk:tmux-send",
   sshList: "afk:ssh-list",
   sshAdd: "afk:ssh-add",
+  sshUpdate: "afk:ssh-update",
   sshRemove: "afk:ssh-remove",
   sshTrust: "afk:ssh-trust",
   sshGenerateKey: "afk:ssh-generate-key",

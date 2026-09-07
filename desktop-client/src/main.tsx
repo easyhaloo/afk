@@ -225,7 +225,7 @@ function App() {
   };
 
   const nav: Array<[View, string, typeof LayoutList]> = [
-    ["queue", "运行", Workflow],
+    ["queue", "工作项", Workflow],
     ["workflows", "工作流", Boxes],
     ["events", "记录", Archive],
     ["agents", "Agent", Activity],

@@ -107,6 +107,7 @@ export function registerIpcHandlers() {
     return validated === undefined ? sshService.listHosts() : sshService.listHosts(validated);
   });
   ipcMain.handle(IPC_CHANNELS.sshAdd, (event, input: unknown) => { assertTrustedSender(event); return sshService.addHost(validateSshHostInput(input)); });
+  ipcMain.handle(IPC_CHANNELS.sshUpdate, (event, hostId: unknown, input: unknown) => { assertTrustedSender(event); return sshService.updateHost(validateSshHostId(hostId), validateSshHostInput(input)); });
   ipcMain.handle(IPC_CHANNELS.sshRemove, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.removeHost(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshTrust, (event, request: unknown) => {
     assertTrustedSender(event);

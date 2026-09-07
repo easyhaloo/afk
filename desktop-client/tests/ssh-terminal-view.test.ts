@@ -100,6 +100,10 @@ describe("SSH terminal view", () => {
     runtime.setDisabled(true);
     expect(terminal.options.disableStdin).toBe(true);
 
+    runtime.setFontSize(15);
+    expect(terminal.options.fontSize).toBe(15);
+    expect(addon.fit).toHaveBeenCalledTimes(3);
+
     runtime.dispose();
     expect(cancelFrame).toHaveBeenCalledWith(17);
     expect(observer.disconnect).toHaveBeenCalledTimes(1);
@@ -173,7 +177,7 @@ describe("SSH terminal view", () => {
 
   it("keeps the real component lifecycle stable across StrictMode and rerenders", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const runtimes = Array.from({ length: 4 }, () => ({ syncOutput: vi.fn(), setDisabled: vi.fn(), dispose: vi.fn() }));
+    const runtimes = Array.from({ length: 4 }, () => ({ syncOutput: vi.fn(), setDisabled: vi.fn(), setFontSize: vi.fn(), dispose: vi.fn() }));
     const runtimeOptions: SshTerminalRuntimeOptions[] = [];
     const runtimeFactory = vi.fn((options: SshTerminalRuntimeOptions) => {
       runtimeOptions.push(options);
@@ -188,7 +192,7 @@ describe("SSH terminal view", () => {
 
     await act(async () => {
       renderer = create(createElement(StrictMode, null,
-        createElement(TestView, { sessionId: "session-a", output: "first", disabled: false, onInput: firstInput, ...commonProps }),
+        createElement(TestView, { sessionId: "session-a", output: "first", disabled: false, fontSize: 11, onInput: firstInput, ...commonProps }),
       ), {
         createNodeMock: (element) => element.props.className === "ssh-terminal-host" ? host : {},
       });
@@ -202,18 +206,19 @@ describe("SSH terminal view", () => {
 
     await act(async () => {
       renderer!.update(createElement(StrictMode, null,
-        createElement(TestView, { sessionId: "session-a", output: "second", disabled: true, onInput: latestInput, ...commonProps }),
+        createElement(TestView, { sessionId: "session-a", output: "second", disabled: true, fontSize: 14, onInput: latestInput, ...commonProps }),
       ));
     });
 
     expect(runtimeFactory).toHaveBeenCalledTimes(2);
     expect(runtimes[1].syncOutput).toHaveBeenCalledWith("second");
     expect(runtimes[1].setDisabled).toHaveBeenCalledWith(true);
+    expect(runtimes[1].setFontSize).toHaveBeenCalledWith(14);
     expect(runtimeOptions[1].callbacks().onInput).toBe(latestInput);
 
     await act(async () => {
       renderer!.update(createElement(StrictMode, null,
-        createElement(TestView, { sessionId: "session-b", output: "new session", disabled: false, onInput: latestInput, ...commonProps }),
+        createElement(TestView, { sessionId: "session-b", output: "new session", disabled: false, fontSize: 14, onInput: latestInput, ...commonProps }),
       ));
     });
 

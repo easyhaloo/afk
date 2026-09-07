@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ManagedSshHostInput, SshExternalTerminalId } from "../../shared/ssh-contract";
+import type { ManagedSshHostInput, SshExternalTerminalId, SshJumpHostType } from "../../shared/ssh-contract";
 
 const ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 
@@ -17,13 +17,22 @@ export function validateSshHostInput(value: unknown): ManagedSshHostInput {
   const port = input.port === undefined ? 22 : input.port;
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("SSH 端口无效");
   const optional = (key: string) => input[key] === undefined ? undefined : requiredString(input[key], `SSH ${key} 无效`);
+  const legacyProxyJump = optional("proxyJump");
+  const requestedJumpHostType = input.jumpHostType === "none" ? undefined : input.jumpHostType;
+  if (requestedJumpHostType !== undefined && requestedJumpHostType !== "openssh" && requestedJumpHostType !== "jumpserver") throw new Error("跳板机类型无效");
+  const jumpHostType = requestedJumpHostType || (legacyProxyJump ? "openssh" : undefined);
+  const requestedJumpHost = optional("jumpHost");
+  const jumpHost = jumpHostType === "openssh" ? requestedJumpHost || legacyProxyJump : jumpHostType === "jumpserver" ? requestedJumpHost : undefined;
+  if (jumpHostType && (!jumpHost || !ALIAS_PATTERN.test(jumpHost) || jumpHost === "." || jumpHost === "..")) throw new Error(jumpHost ? "跳板机别名无效" : "跳板机别名不能为空");
   return {
     alias,
     hostname,
     port,
     user: optional("user"),
     identityFile: optional("identityFile"),
-    proxyJump: optional("proxyJump"),
+    proxyJump: jumpHostType === "openssh" ? jumpHost : legacyProxyJump,
+    jumpHostType,
+    jumpHost,
     remoteWorkspace: optional("remoteWorkspace"),
   };
 }

@@ -11,7 +11,9 @@ function dependencies() {
     config: {
       listHosts: async () => ({ hosts: [host], diagnostics: [] }),
       upsertManagedHost: async () => host,
+      updateManagedHost: async (_hostId: string, input: typeof host) => ({ ...host, ...input, id: `managed:${input.alias}` }),
       removeManagedHost: async () => true,
+      removeSystemHost: async () => true,
     },
     commands: {
       resolve: async () => ({ hostname: host.hostname, port: host.port }),
@@ -48,6 +50,53 @@ function dependencies() {
 }
 
 describe("SSH service", () => {
+  it("updates only managed hosts and invalidates the host list cache", async () => {
+    const deps = dependencies();
+    const updated = { ...host, alias: "renamed", id: "managed:renamed" };
+    deps.config.listHosts = async () => ({ hosts: [host, { ...host, id: "system:prod", alias: "prod", hostname: "prod.example.test", source: "system" as const }], diagnostics: [] });
+    deps.config.updateManagedHost = vi.fn(async () => updated);
+    const service = createSshService(deps);
+
+    await service.listHosts();
+    await expect(service.updateHost(host.id, { alias: "renamed", hostname: host.hostname, port: host.port })).resolves.toEqual(updated);
+    expect(deps.config.updateManagedHost).toHaveBeenCalledWith(host.id, { alias: "renamed", hostname: host.hostname, port: host.port });
+    await expect(service.updateHost("system:prod", { alias: "prod", hostname: "prod.example.test", port: 22 })).rejects.toThrow("只能编辑 AFK 管理的 SSH 主机");
+  });
+
+  it("connects JumpServer hosts through the selected JumpServer alias", async () => {
+    const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
+    const deps = dependencies();
+    const resolvedAliases: string[] = [];
+    let connectedAlias = "";
+    deps.config.listHosts = async () => ({ hosts: [jumpServerHost], diagnostics: [] });
+    deps.commands.resolve = async (alias) => {
+      resolvedAliases.push(alias);
+      return { hostname: "dev-jumpserver.fangcloud.net", port: 2222, user: "shenggangshu" };
+    };
+    deps.knownHosts.isTrusted = async () => true;
+    deps.commands.testBatch = async (alias) => { resolvedAliases.push(`test:${alias}`); return { ok: true, code: "ready" as const }; };
+    deps.pty.connect = (_hostId, alias) => {
+      connectedAlias = alias;
+      return { id: "session-1", hostId: jumpServerHost.id, alias, kind: "ssh", title: alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await expect(service.listHosts()).resolves.toMatchObject({ hosts: [expect.objectContaining({ status: "ready" })] });
+    await service.connect(jumpServerHost.id);
+
+    expect(resolvedAliases).toEqual(["fangcloud-jumpserver", "test:fangcloud-jumpserver", "fangcloud-jumpserver"]);
+    expect(connectedAlias).toBe("fangcloud-jumpserver");
+  });
+
+  it("does not offer automatic key deployment through JumpServer", async () => {
+    const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
+    const deps = dependencies();
+    deps.config.listHosts = async () => ({ hosts: [jumpServerHost], diagnostics: [] });
+    const service = createSshService(deps);
+
+    await expect(service.deployKey(jumpServerHost.id)).rejects.toThrow("JumpServer 资产不支持");
+  });
+
   it.each([
     [{ unexpected: true }, "unknown option"],
     [["forceRefresh"], "array options"],
@@ -377,6 +426,34 @@ describe("SSH service", () => {
     await service.removeHost(host.id);
 
     await expect(service.listHosts()).resolves.toMatchObject({ hosts: [] });
+  });
+
+  it("removes an unreachable system host from its SSH config", async () => {
+    const deps = dependencies();
+    const systemHost = { ...host, id: "system:dead", alias: "dead", source: "system" as const, configPath: "~/.ssh/config" };
+    const removeSystemHost = vi.fn(async () => true);
+    deps.config.listHosts = async () => ({ hosts: [systemHost], diagnostics: [] });
+    deps.config.removeSystemHost = removeSystemHost;
+    deps.commands.resolve = async () => { throw new Error("unreachable"); };
+    const service = createSshService(deps);
+
+    await expect(service.removeHost(systemHost.id)).resolves.toBe(true);
+
+    expect(removeSystemHost).toHaveBeenCalledWith(systemHost.id);
+  });
+
+  it("does not remove a reachable system host", async () => {
+    const deps = dependencies();
+    const systemHost = { ...host, id: "system:prod", alias: "prod", source: "system" as const, configPath: "~/.ssh/config" };
+    const removeSystemHost = vi.fn(async () => true);
+    deps.config.listHosts = async () => ({ hosts: [systemHost], diagnostics: [] });
+    deps.config.removeSystemHost = removeSystemHost;
+    deps.knownHosts.isTrusted = async () => true;
+    const service = createSshService(deps);
+
+    await expect(service.removeHost(systemHost.id)).rejects.toThrow("只能清理不可达的系统 SSH 主机");
+
+    expect(removeSystemHost).not.toHaveBeenCalled();
   });
 
   it("removes the managed host credential before deleting the host", async () => {

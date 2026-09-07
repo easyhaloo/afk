@@ -11,6 +11,21 @@ describe("SSH input validation", () => {
     });
   });
 
+  it("accepts a JumpServer host selection and requires its alias", () => {
+    expect(validateSshHostInput({
+      alias: "private-app",
+      hostname: "172.16.0.241",
+      jumpHostType: "jumpserver",
+      jumpHost: "fangcloud-jumpserver",
+    })).toMatchObject({ jumpHostType: "jumpserver", jumpHost: "fangcloud-jumpserver" });
+    expect(() => validateSshHostInput({ alias: "private-app", hostname: "172.16.0.241", jumpHostType: "jumpserver" })).toThrow("跳板机别名不能为空");
+  });
+
+  it("rejects unsupported jump host types and unsafe aliases", () => {
+    expect(() => validateSshHostInput({ alias: "private-app", hostname: "172.16.0.241", jumpHostType: "vpn" })).toThrow("跳板机类型无效");
+    expect(() => validateSshHostInput({ alias: "private-app", hostname: "172.16.0.241", jumpHostType: "jumpserver", jumpHost: "jump host" })).toThrow("跳板机别名无效");
+  });
+
   it("rejects unsafe aliases and ports", () => {
     expect(() => validateSshHostInput({ alias: "build box", hostname: "example.test" })).toThrow("SSH 主机别名无效");
     expect(() => validateSshHostInput({ alias: "build-box", hostname: "example.test", port: 0 })).toThrow("SSH 端口无效");

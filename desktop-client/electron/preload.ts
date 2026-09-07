@@ -14,6 +14,7 @@ const IPC_CHANNELS = {
   tmuxSend: "afk:tmux-send",
   sshList: "afk:ssh-list",
   sshAdd: "afk:ssh-add",
+  sshUpdate: "afk:ssh-update",
   sshRemove: "afk:ssh-remove",
   sshTrust: "afk:ssh-trust",
   sshGenerateKey: "afk:ssh-generate-key",
@@ -43,6 +44,7 @@ const api: DesktopApi = {
   ssh: {
     list: (options) => options === undefined ? ipcRenderer.invoke(IPC_CHANNELS.sshList) : ipcRenderer.invoke(IPC_CHANNELS.sshList, options),
     add: (input) => ipcRenderer.invoke(IPC_CHANNELS.sshAdd, input),
+    update: (hostId, input) => ipcRenderer.invoke(IPC_CHANNELS.sshUpdate, hostId, input),
     remove: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshRemove, hostId),
     trust: (request) => ipcRenderer.invoke(IPC_CHANNELS.sshTrust, request),
     generateKey: () => ipcRenderer.invoke(IPC_CHANNELS.sshGenerateKey),

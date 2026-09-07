@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   exposedApi: undefined as unknown,
   invoke: vi.fn().mockResolvedValue(undefined),
   listHosts: vi.fn().mockResolvedValue({ hosts: [], diagnostics: [] }),
+  updateHost: vi.fn().mockResolvedValue({ id: "managed:build-box", alias: "build-box" }),
   deployKey: vi.fn().mockResolvedValue({ id: "session-deploy" }),
   openExternal: vi.fn().mockResolvedValue({ terminal: "iterm2" }),
   credentialHas: vi.fn().mockResolvedValue(false),
@@ -42,6 +43,7 @@ vi.mock("../../electron/services/ssh-service", () => ({
     mocks.serviceDependencies = dependencies;
     return {
       listHosts: mocks.listHosts,
+      updateHost: mocks.updateHost,
       deployKey: mocks.deployKey,
       openExternal: mocks.openExternal,
       hasCredential: mocks.credentialHas,
@@ -69,6 +71,28 @@ describe("SSH external terminal IPC contract", () => {
   it("registers a fixed external-terminal channel", () => {
     expect(IPC_CHANNELS.sshOpenExternal).toBe("afk:ssh-open-external");
     expect(mocks.handlers.has(IPC_CHANNELS.sshOpenExternal)).toBe(true);
+  });
+
+  it("registers and forwards managed-host updates through the fixed IPC channel", async () => {
+    const handler = mocks.handlers.get(IPC_CHANNELS.sshUpdate)!;
+    const api = mocks.exposedApi as { ssh: { update: (hostId: string, input: unknown) => Promise<unknown> } };
+    const input = { alias: "build-box", hostname: "build.example.test", port: 22 };
+    const sender = { senderFrame: { url: "http://localhost:5174" } };
+    mocks.updateHost.mockClear();
+    mocks.invoke.mockClear();
+
+    await expect(handler(sender, "managed:build-box", input)).resolves.toMatchObject({ id: "managed:build-box" });
+    expect(mocks.updateHost).toHaveBeenCalledWith("managed:build-box", input);
+    await api.ssh.update("managed:build-box", input);
+    expect(mocks.invoke).toHaveBeenCalledWith(IPC_CHANNELS.sshUpdate, "managed:build-box", input);
+  });
+
+  it("validates managed-host update arguments at the IPC boundary", async () => {
+    const handler = mocks.handlers.get(IPC_CHANNELS.sshUpdate)!;
+    const sender = { senderFrame: { url: "http://localhost:5174" } };
+
+    await expect(Promise.resolve().then(() => handler(sender, "invalid", { alias: "build-box", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机 ID 无效");
+    await expect(Promise.resolve().then(() => handler(sender, "managed:build-box", { alias: "bad alias", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机别名无效");
   });
 
   it("injects the created credential service into the SSH service", () => {

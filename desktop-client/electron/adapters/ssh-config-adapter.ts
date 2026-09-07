@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ManagedSshHostInput, SshDiagnostic, SshHost, SshListResult } from "../../shared/ssh-contract";
+import type { ManagedSshHostInput, SshDiagnostic, SshHost, SshJumpHostType, SshListResult } from "../../shared/ssh-contract";
 import { validateSshHostInput } from "../security/ssh-validation";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
@@ -96,6 +96,11 @@ function parseBlocks(raw: string, source: "system" | "managed", configPath: stri
     }
     if (!current) continue;
     current.lines.push(line);
+    const metadata = line.trim().match(/^#\s*AFK\s+(JumpHostType|JumpHost)\s+(\S+)\s*$/i);
+    if (metadata) {
+      current.values[`afk${metadata[1].toLowerCase()}`] = metadata[2];
+      continue;
+    }
     if (!directive) {
       if (line.trim() && !line.trim().startsWith("#")) diagnostics.push({ code: "ssh.malformed-directive", severity: "warning", message: `Host ${current.alias} 包含无法解析的配置行`, path: configPath, hostAlias: current.alias });
       continue;
@@ -121,6 +126,8 @@ function parseBlocks(raw: string, source: "system" | "managed", configPath: stri
 
 function hostFromBlock(block: ConfigBlock, source: "system" | "managed", configPath: string): SshHost {
   const port = Number.parseInt(block.values.port || "22", 10);
+  const metadataType = block.values.afkjumphosttype === "openssh" || block.values.afkjumphosttype === "jumpserver" ? block.values.afkjumphosttype as SshJumpHostType : undefined;
+  const jumpHost = block.values.afkjumphost || (block.values.proxyjump && !metadataType ? block.values.proxyjump : undefined);
   return {
     id: `${source}:${block.alias}`,
     alias: block.alias,
@@ -129,6 +136,8 @@ function hostFromBlock(block: ConfigBlock, source: "system" | "managed", configP
     user: block.values.user,
     identityFile: block.values.identityfile,
     proxyJump: block.values.proxyjump,
+    jumpHostType: metadataType || (block.values.proxyjump ? "openssh" : undefined),
+    jumpHost,
     source,
     configPath,
     status: "untrusted",
@@ -139,7 +148,11 @@ function managedBlock(input: ManagedSshHostInput) {
   const lines = [`Host ${input.alias}`, `  HostName ${input.hostname}`, `  Port ${input.port ?? 22}`];
   if (input.user) lines.push(`  User ${input.user}`);
   if (input.identityFile) lines.push(`  IdentityFile ${input.identityFile}`);
-  if (input.proxyJump) lines.push(`  ProxyJump ${input.proxyJump}`);
+  if (input.jumpHostType === "jumpserver" && input.jumpHost) {
+    lines.push(`  # AFK JumpHostType jumpserver`, `  # AFK JumpHost ${input.jumpHost}`);
+  } else if (input.proxyJump || (input.jumpHostType === "openssh" && input.jumpHost)) {
+    lines.push(`  ProxyJump ${input.proxyJump || input.jumpHost}`);
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -236,7 +249,8 @@ export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfi
     await ensureSshDirectory();
     const raw = await readOrEmpty(fileSystem, configPath);
     if (raw.split(/\r?\n/).some((line) => line.trim() === includeLine)) return;
-    await atomicWrite(fileSystem, configPath, `${raw.replace(/\s*$/, "")}\n\n${includeLine}\n`);
+    const existing = raw.replace(/^\s+|\s+$/g, "");
+    await atomicWrite(fileSystem, configPath, existing ? `${includeLine}\n\n${existing}\n` : `${includeLine}\n`);
     invalidateConfigCache();
   }
 
@@ -281,6 +295,25 @@ export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfi
     return host;
   }
 
+  async function updateManagedHost(id: string, value: ManagedSshHostInput) {
+    if (!id.startsWith("managed:")) throw new Error("只能编辑 AFK 管理的 SSH 主机");
+    const oldAlias = id.slice("managed:".length);
+    if (!isConcreteAlias(oldAlias)) throw new Error("SSH 主机 ID 无效");
+    const input = validateSshHostInput(value);
+    await ensureSshDirectory();
+    await ensureInclude();
+    const raw = await readOrEmpty(fileSystem, managedPath);
+    if (oldAlias !== input.alias && new RegExp(`^\\s*Host\\s+${input.alias.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\s*$`, "im").test(raw)) throw new Error("SSH 主机别名已存在");
+    const withoutOld = replaceBlock(raw, oldAlias, null);
+    const next = replaceBlock(withoutOld, input.alias, managedBlock(input));
+    await atomicWrite(fileSystem, managedPath, next);
+    invalidateConfigCache();
+    const result = await listHosts();
+    const host = result.hosts.find((item) => item.id === `managed:${input.alias}`);
+    if (!host) throw new Error("AFK SSH 主机更新后无法重新读取");
+    return host;
+  }
+
   async function removeManagedHost(id: string) {
     if (!id.startsWith("managed:")) throw new Error("只能删除 AFK 管理的 SSH 主机");
     const alias = id.slice("managed:".length);
@@ -291,5 +324,15 @@ export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfi
     return true;
   }
 
-  return { listHosts, upsertManagedHost, removeManagedHost, ensureInclude };
+  async function removeSystemHost(id: string) {
+    if (!id.startsWith("system:")) throw new Error("只能清理系统 SSH 主机");
+    const alias = id.slice("system:".length);
+    if (!isConcreteAlias(alias)) throw new Error("SSH 主机 ID 无效");
+    const raw = await readOrEmpty(fileSystem, configPath);
+    await atomicWrite(fileSystem, configPath, replaceBlock(raw, alias, null));
+    invalidateConfigCache();
+    return true;
+  }
+
+  return { listHosts, upsertManagedHost, updateManagedHost, removeManagedHost, removeSystemHost, ensureInclude };
 }

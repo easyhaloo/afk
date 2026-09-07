@@ -32,7 +32,7 @@ without crashing React.
 | `tmuxPane(session)` | 捕获指定 tmux 窗格的最后 160 行 | 会话名必须符合受限字符集，且存在于当前 tmux 会话列表。 |
 | `tmuxSend(session, line)` | 对指定会话执行 `tmux send-keys` | 前端需勾选确认；会话名、空字节与 4,000 字符上限均在主进程验证。 |
 | `ssh.list()` | 读取系统 Host 与 AFK Include 主机，执行 `ssh -G` 和指纹诊断 | 只返回非敏感 DTO；通配符和无法形成目标的 Host 仅生成诊断。 |
-| `ssh.add(input)` | 原子写入 `~/.ssh/afk_hosts`，必要时维护 Include | 别名、端口、路径和跳板机引用在主进程校验。 |
+| `ssh.add(input)` | 原子写入 `~/.ssh/afk_hosts`，必要时维护 Include | 别名、端口、路径和跳板机引用在主进程校验；普通跳板机使用 `ProxyJump`，JumpServer 使用受控的独立 SSH Host 别名。 |
 | `ssh.trust(request)` | 二次扫描并写入 `~/.ssh/known_hosts` | 候选指纹与二次扫描不一致时拒绝写入。 |
 | `ssh.test(hostId)` | 以 `BatchMode=yes` 执行免密测试 | 未信任或指纹变化时阻断；不等待密码。 |
 | `ssh.connect(hostId)` | 通过 PTY 启动 `/usr/bin/ssh <alias>` | 只接受已验证的 Host ID；输入和输出不写入日志。 |

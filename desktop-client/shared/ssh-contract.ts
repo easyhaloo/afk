@@ -2,6 +2,8 @@ export type SshHostSource = "system" | "managed";
 
 export type SshExternalTerminalId = "iterm2" | "warp" | "ghostty" | "cmux" | "terminal";
 
+export type SshJumpHostType = "none" | "openssh" | "jumpserver";
+
 export type SshHostStatus =
   | "ready"
   | "untrusted"
@@ -19,6 +21,8 @@ export type SshHost = {
   user?: string;
   identityFile?: string;
   proxyJump?: string;
+  jumpHostType?: SshJumpHostType;
+  jumpHost?: string;
   source: SshHostSource;
   configPath: string;
   status: SshHostStatus;
@@ -66,7 +70,14 @@ export type ManagedSshHostInput = {
   user?: string;
   identityFile?: string;
   proxyJump?: string;
+  jumpHostType?: SshJumpHostType;
+  jumpHost?: string;
   remoteWorkspace?: string;
+};
+
+export type SshHostUpdateRequest = {
+  hostId: string;
+  input: ManagedSshHostInput;
 };
 
 export type SshListResult = {

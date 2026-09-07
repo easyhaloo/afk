@@ -1,0 +1,122 @@
+.backlog-page {
+  width: min(100%, 1240px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.backlog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.backlog-heading-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.backlog-heading-actions select {
+  background: var(--surface-elevated, #fff);
+  border: 1px solid var(--border-subtle, #d4d4d8);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.backlog-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.backlog-alert.error {
+  background: color-mix(in srgb, #ef4444 10%, var(--surface-elevated, #fff));
+  color: #991b1b;
+}
+.backlog-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.backlog-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle, #d4d4d8);
+  border-radius: 8px;
+  background: var(--surface-elevated, #fff);
+}
+.backlog-search input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  font-size: 13px;
+  background: transparent;
+}
+.backlog-toolbar select {
+  background: var(--surface-elevated, #fff);
+  border: 1px solid var(--border-subtle, #d4d4d8);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.backlog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.backlog-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-elevated, #fff);
+  border: 1px solid var(--border-subtle, #e4e4e7);
+}
+.backlog-row header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+.backlog-row header small {
+  color: var(--text-muted, #71717a);
+  font-family: var(--font-mono, monospace);
+}
+.backlog-row p {
+  margin: 0;
+  color: var(--text-muted, #52525b);
+  font-size: 12px;
+}
+.backlog-tags {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.backlog-tags li {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #6366f1 12%, transparent);
+  color: #4338ca;
+}
+.backlog-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-muted, #71717a);
+  border: 1px dashed var(--border-subtle, #d4d4d8);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.backlog-empty b {
+  color: var(--text-strong, #18181b);
+}

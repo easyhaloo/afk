@@ -74,7 +74,7 @@ TUI built with React + Ink. Components live in `src/components/` (planned).
 - `pnpm --filter afk-control-electron build:main` — compile `electron/` to `dist-electron/` (required before E2E).
 - `pnpm --filter afk-control-electron e2e` — Playwright `_electron.launch()` boots the real Electron window against the Vite dev server; `tests/e2e/fixtures/fake-afk.mjs` intercepts the CLI subprocess on `PATH` so the tests run without GitHub / GitLab auth.
 
-The E2E suite must always boot its own Vite — never `reuseExistingServer`, because a stale Vite from a different checkout will serve the wrong source.
+The E2E suite must always boot its own Vite — never `reuseExistingServer`, because a stale Vite from a different checkout will serve the wrong source. Linux CI uses `xvfb-run` to provide a display server; see `.github/workflows/ci.yml` job `desktop-e2e`.
 
 ## Skill Development
 

@@ -70,4 +70,64 @@ describe("backlog-cache", () => {
     invalidateBacklogCache();
     expect(readBacklogCache("k1")).toBeNull();
   });
+
+  it("invalidates again on subsequent calls without throwing", () => {
+    writeBacklogCache("k1", { items: [stubItem("1")], fetchedAt: Date.now() });
+    invalidateBacklogCache();
+    expect(() => invalidateBacklogCache()).not.toThrow();
+    expect(readBacklogCache("k1")).toBeNull();
+  });
+
+  it("uses the supplied timestamp when checking cache freshness via the now option", async () => {
+    const fetcher = vi.fn(async () => [stubItem("1")]);
+    writeBacklogCache("k1", { items: [stubItem("cached")], fetchedAt: 1_000 });
+
+    // Inside TTL (1000 + 29999 < 30000 since 'now=31000'): fresh, no fetch.
+    expect(await fetchBacklogList("k1", fetcher, { now: 30_999 })).toEqual([stubItem("cached")]);
+    expect(fetcher).not.toHaveBeenCalled();
+
+    // At the boundary the entry is considered stale and the fetcher runs.
+    expect(await fetchBacklogList("k1", fetcher, { now: 31_000 })).toEqual([stubItem("1")]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets the in-flight promise so a fresh fetch after reset hits its own fetcher", async () => {
+    let resolveFirst!: (value: BacklogItem[]) => void;
+    const firstFetcher = vi.fn(() => new Promise<BacklogItem[]>((resolve) => { resolveFirst = resolve; }));
+
+    // First call kicks off an in-flight request that we never resolve here.
+    const inflight = fetchBacklogList("k1", firstFetcher);
+    expect(firstFetcher).toHaveBeenCalledTimes(1);
+
+    // A second concurrent call shares the in-flight promise.
+    const shared = fetchBacklogList("k1", firstFetcher);
+    expect(firstFetcher).toHaveBeenCalledTimes(1);
+
+    // Reset clears the in-flight tracking; the pending request is still in memory
+    // but a new fetch must NOT piggyback on it.
+    resetBacklogCache();
+
+    const thirdFetcher = vi.fn(async () => [stubItem("3")]);
+    const third = fetchBacklogList("k1", thirdFetcher);
+    expect(thirdFetcher).toHaveBeenCalledTimes(1);
+    await expect(third).resolves.toEqual([stubItem("3")]);
+
+    // Resolve the original pending fetch; it must not overwrite the cache that
+    // the third call already wrote.
+    resolveFirst([stubItem("1")]);
+    await expect(inflight).resolves.toEqual([stubItem("1")]);
+    await expect(shared).resolves.toEqual([stubItem("1")]);
+    expect(readBacklogCache("k1")?.items).toEqual([stubItem("3")]);
+  });
+
+  it("ignores stale resolved results after a manual invalidation", async () => {
+    const fetcher = vi.fn(async () => [stubItem("1")]);
+    await fetchBacklogList("k1", fetcher);
+    expect(readBacklogCache("k1")?.items).toEqual([stubItem("1")]);
+
+    invalidateBacklogCache();
+    await expect(fetchBacklogList("k1", fetcher)).resolves.toEqual([stubItem("1")]);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(readBacklogCache("k1")?.items).toEqual([stubItem("1")]);
+  });
 });

@@ -36,6 +36,26 @@ describe("Backlog page filter", () => {
     filterBacklogItems(items, "x", "all");
     expect(items).toEqual(snapshot);
   });
+
+  it("treats whitespace-only queries as no query", () => {
+    expect(filterBacklogItems(items, "   ", "all")).toEqual(items);
+  });
+
+  it("matches queries case-insensitively for title and tags", () => {
+    expect(filterBacklogItems(items, "KG", "all")).toEqual([items[1]]);
+    expect(filterBacklogItems(items, "URGENT", "all")).toEqual([items[1]]);
+    expect(filterBacklogItems(items, "BILLING", "all")).toEqual([items[0]]);
+  });
+
+  it("returns an empty array when the input is empty regardless of state", () => {
+    expect(filterBacklogItems([], "anything", "all")).toEqual([]);
+    expect(filterBacklogItems([], "anything", "in_progress")).toEqual([]);
+  });
+
+  it("matches the id field in the search", () => {
+    expect(filterBacklogItems(items, "1", "all")).toEqual([items[0]]);
+    expect(filterBacklogItems(items, "3", "all")).toEqual([items[2]]);
+  });
 });
 
 describe("Backlog page state labels", () => {

@@ -4,9 +4,9 @@
 
 **Goal:** Allow AFK-managed SSH hosts to use Chinese display names while storing them outside OpenSSH config and connecting with structured real host parameters.
 
-**Architecture:** Keep the existing OpenSSH config adapter read-only for system hosts. Add a JSON-backed AFK managed-host adapter under `~/.config/afk/ssh-hosts.json`; its stable IDs, display aliases, and connection fields are independent of OpenSSH aliases. Replace command, PTY, external-terminal, service, IPC composition, and renderer contracts so managed hosts pass a structured `SshConnectionTarget` while system hosts retain their existing OpenSSH alias behavior.
+**Architecture:** Keep the existing OpenSSH config adapter read-only for system hosts. Add a schema-aware YAML-backed AFK managed-host store under Electron `userData/ssh-hosts.yml`; its stable IDs, display aliases, and connection fields are independent of OpenSSH aliases. Replace command, PTY, external-terminal, service, IPC composition, and renderer contracts so managed hosts pass a structured `SshConnectionTarget` while system hosts retain their existing OpenSSH alias behavior.
 
-**Tech Stack:** TypeScript, Electron IPC, React, Vitest, `node:fs`, JSON persistence, argv-based OpenSSH commands.
+**Tech Stack:** TypeScript, Electron IPC, React, Vitest, `node:fs`, schema-aware YAML persistence, argv-based OpenSSH commands.
 
 ---
 
@@ -27,7 +27,7 @@
 - [ ] **Step 4: Run the focused tests and confirm they pass.**
   Re-run the same Vitest command; all validation and contract tests should pass.
 
-### Task 2: Add the AFK managed-host JSON adapter
+### Task 2: Add the AFK managed-host YAML store
 
 **Files:**
 - Create: `desktop-client/electron/adapters/ssh-managed-host-adapter.ts`
@@ -35,12 +35,12 @@
 - Test: `desktop-client/tests/electron/ssh-managed-host-adapter.test.ts`
 - Test: `desktop-client/tests/electron/ssh-config-adapter.test.ts`
 
-- [ ] **Step 1: Write failing adapter tests for JSON persistence.**
+- [ ] **Step 1: Write failing adapter tests for YAML persistence.**
   Cover an empty store, adding `kg演示`, round-tripping it after a new adapter instance, stable `managed:<id>` persistence, update by ID without changing the ID, duplicate display-name rejection, removal, `0600` writes, and no writes to `~/.ssh/afk_hosts` or `~/.ssh/config`.
 - [ ] **Step 2: Run the new adapter test and confirm it fails because the adapter does not exist.**
   Run `pnpm exec vitest run --config vitest.config.ts tests/electron/ssh-managed-host-adapter.test.ts`; expected failure is module/function missing.
-- [ ] **Step 3: Implement the JSON adapter with atomic writes.**
-  Store `{ version: 1, hosts: [...] }` at `path.join(home, ".config", "afk", "ssh-hosts.json")`; generate a cryptographically random stable ID only for new records, preserve IDs on update, return `SshHost` DTOs with `configPath: "~/.config/afk/ssh-hosts.json"`, and use a temp file plus rename with mode `0600`.
+- [ ] **Step 3: Implement the YAML store with atomic writes.**
+  Store `{ version: 1, hosts: [...] }` with the repository YAML parser at Electron `userData/ssh-hosts.yml`; generate a cryptographically random stable ID only for new records, preserve IDs on update, return `SshHost` DTOs with a managed-data config path, and use a temp file plus rename with mode `0600`.
 - [ ] **Step 4: Restrict the existing OpenSSH config adapter to system reads in production.**
   Preserve its parser and system-host diagnostics, but expose a `listSystemHosts()` entry point that reads only `~/.ssh/config`; leave legacy test helpers intact where needed until service composition is switched.
 - [ ] **Step 5: Run both adapter test files and confirm they pass.**
@@ -78,13 +78,13 @@
 - Test: `desktop-client/tests/electron/ssh-ipc-contract.test.ts`
 
 - [ ] **Step 1: Add failing service tests for managed targets.**
-  Assert list merges system hosts and JSON-managed hosts, managed hosts never call `commands.resolve()` or `ssh -G`, fingerprint/test/connect/deploy use `hostname`/`port`/`user`, and credential lookup uses the real target rather than a display alias.
+  Assert list merges system hosts and YAML-managed hosts, managed hosts never call `commands.resolve()` or `ssh -G`, fingerprint/test/connect/deploy use `hostname`/`port`/`user`, and credential lookup uses the real target rather than a display alias.
 - [ ] **Step 2: Run the focused service and IPC tests and confirm they fail.**
   Run `pnpm exec vitest run --config vitest.config.ts tests/electron/ssh-service.test.ts tests/electron/ssh-ipc-contract.test.ts`; expected failures are missing managed adapter composition and old alias calls.
 - [ ] **Step 3: Update service dependencies and target resolution.**
   Replace alias resolution for managed hosts with direct `SshConnectionTarget` construction; retain `commands.resolve(alias)` only for `source === "system"`. Use the stable managed ID for credential and cache keys, invalidate list/status caches after managed writes, and pass the structured target to PTY/external adapters.
 - [ ] **Step 4: Compose system and managed adapters in IPC registration.**
-  Instantiate the read-only system config adapter and JSON managed-host adapter under `~/.config/afk/ssh-hosts.json`; combine their list results and route add/update/remove only to the managed adapter while preserving system-host cleanup behavior as an explicit separate operation.
+  Instantiate the read-only system config adapter and YAML managed-host store under Electron `userData/ssh-hosts.yml`; combine their list results and route add/update/remove only to the managed store while preserving system-host cleanup behavior as an explicit separate operation.
 - [ ] **Step 5: Run the focused service and IPC tests and confirm they pass.**
   Re-run the two focused files and verify no managed path invokes `ssh -G`.
 
@@ -114,7 +114,7 @@
 - Verify: `desktop-client/package.json`
 
 - [ ] **Step 1: Update architecture documentation.**
-  Document that managed hosts live in `~/.config/afk/ssh-hosts.json`, system hosts come from `~/.ssh/config`, and managed connections use structured real targets rather than OpenSSH aliases.
+  Document that managed hosts live in Electron `userData/ssh-hosts.yml`, system hosts come from `~/.ssh/config`, and managed connections use structured real targets rather than OpenSSH aliases.
 - [ ] **Step 2: Run all focused SSH tests.**
   Run `pnpm exec vitest run --config vitest.config.ts tests/electron/ssh-managed-host-adapter.test.ts tests/electron/ssh-config-adapter.test.ts tests/electron/ssh-command-adapter.test.ts tests/electron/ssh-pty-adapter.test.ts tests/electron/external-terminal-adapter.test.ts tests/electron/ssh-service.test.ts tests/electron/ssh-ipc-contract.test.ts tests/electron/ssh-validation.test.ts tests/ssh-page.test.ts`.
 - [ ] **Step 3: Run typecheck and build.**

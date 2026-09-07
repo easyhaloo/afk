@@ -95,7 +95,7 @@ describe("SSH external terminal IPC contract", () => {
     const sender = { senderFrame: { url: "http://localhost:5174" } };
 
     await expect(Promise.resolve().then(() => handler(sender, "invalid", { alias: "build-box", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机 ID 无效");
-    await expect(Promise.resolve().then(() => handler(sender, "managed:build-box", { alias: "bad alias", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机别名无效");
+    await expect(Promise.resolve().then(() => handler(sender, "managed:build-box", { alias: "bad\0alias", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机别名无效");
   });
 
   it("accepts Chinese managed-host display names at the IPC boundary", async () => {

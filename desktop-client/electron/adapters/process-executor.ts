@@ -30,12 +30,26 @@ function diagnosticEnvironment() {
   return { ...process.env, PATH: diagnosticPath() };
 }
 
-export async function exec(command: string, args: string[], cwd?: string) {
+export async function exec(command: string, args: string[], cwd?: string, input?: string) {
   try {
-    const { stdout, stderr } = await run(command, args, { cwd, env: diagnosticEnvironment(), timeout: 8_000, maxBuffer: 2_000_000 });
+    const { stdout, stderr } = await run(command, args, {
+      cwd,
+      env: diagnosticEnvironment(),
+      timeout: 8_000,
+      maxBuffer: 2_000_000,
+      ...(input !== undefined ? { input } : {}),
+    });
     return { ok: true, stdout: String(stdout).trim(), stderr: String(stderr).trim() } as const;
   } catch (error) {
-    return { ok: false, stdout: "", stderr: error instanceof Error ? error.message : String(error) } as const;
+    // Non-zero exit: execFile rejects with an Error whose stdout/stderr
+    // carry the captured output (including our JSON failure envelope).
+    const stdout = (error as { stdout?: string }).stdout ?? "";
+    const stderr = (error as { stderr?: string }).stderr ?? "";
+    return {
+      ok: false,
+      stdout: typeof stdout === "string" ? stdout.trim() : "",
+      stderr: typeof stderr === "string" ? stderr.trim() : (error instanceof Error ? error.message : String(error)),
+    } as const;
   }
 }
 

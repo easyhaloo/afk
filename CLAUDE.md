@@ -13,6 +13,7 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 | Command | Purpose |
 |---------|---------|
 | `afk backlog` | Backlog management and inspection only |
+| `afk backlog --json` | Emit structured JSON envelopes on stdout (used by the AFK Control desktop client) |
 | `afk run --backlog-id <id>` | Execute one backlog item |
 | `afk loop` | Complete implementation → QA → merge pipeline |
 | `afk qa --backlog-id <id>` | Standalone QA retry/diagnostic entry point |
@@ -64,6 +65,16 @@ TUI built with React + Ink. Components live in `src/components/` (planned).
 3. Test with `pnpm test` (vitest)
 4. For TUI testing, see [docs/TESTING.md](docs/TESTING.md)
 5. **Documentation sync**: CLI command changes (signature, flags, behavior) or skill modifications must update the corresponding docs — `README.md`, `CLAUDE.md` command table, skill docs, or related `docs/` files. Keep docs in lockstep with code.
+
+### desktop-client end-to-end
+
+`desktop-client/` ships a Playwright Electron suite in addition to its vitest unit tests:
+
+- `pnpm --filter afk-control-electron test` — vitest, covers shared contracts, IPC handlers, services, component-level E2E with react-test-renderer.
+- `pnpm --filter afk-control-electron build:main` — compile `electron/` to `dist-electron/` (required before E2E).
+- `pnpm --filter afk-control-electron e2e` — Playwright `_electron.launch()` boots the real Electron window against the Vite dev server; `tests/e2e/fixtures/fake-afk.mjs` intercepts the CLI subprocess on `PATH` so the tests run without GitHub / GitLab auth.
+
+The E2E suite must always boot its own Vite — never `reuseExistingServer`, because a stale Vite from a different checkout will serve the wrong source. Linux CI uses `xvfb-run` to provide a display server; see `.github/workflows/ci.yml` job `desktop-e2e`.
 
 ## Skill Development
 

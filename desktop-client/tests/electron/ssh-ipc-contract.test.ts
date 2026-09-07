@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   exposedApi: undefined as unknown,
   invoke: vi.fn().mockResolvedValue(undefined),
   listHosts: vi.fn().mockResolvedValue({ hosts: [], diagnostics: [] }),
+  addHost: vi.fn().mockResolvedValue({ id: "managed:stable-1", alias: "kg演示" }),
   updateHost: vi.fn().mockResolvedValue({ id: "managed:build-box", alias: "build-box" }),
   deployKey: vi.fn().mockResolvedValue({ id: "session-deploy" }),
   openExternal: vi.fn().mockResolvedValue({ terminal: "iterm2" }),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("electron", () => ({
+  app: { getPath: () => "/tmp/afk-user-data" },
   BrowserWindow: { getAllWindows: () => [] },
   clipboard: { writeText: vi.fn() },
   safeStorage: {
@@ -43,6 +45,7 @@ vi.mock("../../electron/services/ssh-service", () => ({
     mocks.serviceDependencies = dependencies;
     return {
       listHosts: mocks.listHosts,
+      addHost: mocks.addHost,
       updateHost: mocks.updateHost,
       deployKey: mocks.deployKey,
       openExternal: mocks.openExternal,
@@ -93,6 +96,15 @@ describe("SSH external terminal IPC contract", () => {
 
     await expect(Promise.resolve().then(() => handler(sender, "invalid", { alias: "build-box", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机 ID 无效");
     await expect(Promise.resolve().then(() => handler(sender, "managed:build-box", { alias: "bad alias", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机别名无效");
+  });
+
+  it("accepts Chinese managed-host display names at the IPC boundary", async () => {
+    const handler = mocks.handlers.get(IPC_CHANNELS.sshAdd)!;
+    const input = { alias: "kg演示", hostname: "172.16.0.241", port: 22, user: "root" };
+    const sender = { senderFrame: { url: "http://localhost:5174" } };
+
+    await expect(handler(sender, input)).resolves.toBeDefined();
+    expect(mocks.addHost).toHaveBeenCalledWith(input);
   });
 
   it("injects the created credential service into the SSH service", () => {

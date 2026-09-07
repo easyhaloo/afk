@@ -4,6 +4,23 @@ export type SshExternalTerminalId = "iterm2" | "warp" | "ghostty" | "cmux" | "te
 
 export type SshJumpHostType = "none" | "openssh" | "jumpserver";
 
+export type SshConnectionTarget = {
+  hostname: string;
+  port: number;
+  user?: string;
+  identityFile?: string;
+  proxyJump?: string;
+};
+
+export function sshConnectionArgs(target: SshConnectionTarget) {
+  const args: string[] = ["-p", String(target.port)];
+  if (target.user) args.push("-l", target.user);
+  if (target.identityFile) args.push("-i", target.identityFile);
+  if (target.proxyJump) args.push("-J", target.proxyJump);
+  args.push("--", target.hostname);
+  return args;
+}
+
 export type SshHostStatus =
   | "ready"
   | "untrusted"
@@ -73,6 +90,10 @@ export type ManagedSshHostInput = {
   jumpHostType?: SshJumpHostType;
   jumpHost?: string;
   remoteWorkspace?: string;
+};
+
+export type ManagedSshHostRecord = ManagedSshHostInput & {
+  id: string;
 };
 
 export type SshHostUpdateRequest = {

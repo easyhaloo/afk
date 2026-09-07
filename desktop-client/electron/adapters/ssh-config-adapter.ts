@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ManagedSshHostInput, SshDiagnostic, SshHost, SshJumpHostType, SshListResult } from "../../shared/ssh-contract";
+import type { ManagedSshHostInput, ManagedSshHostRecord, SshDiagnostic, SshHost, SshJumpHostType, SshListResult } from "../../shared/ssh-contract";
 import { validateSshHostInput } from "../security/ssh-validation";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
@@ -8,6 +8,12 @@ type ExecResult = { ok: boolean; stdout: string; stderr: string };
 type SshConfigAdapterOptions = {
   home: string;
   exec: (command: string, args: string[]) => Promise<ExecResult>;
+  managedStore?: {
+    list: () => Promise<ManagedSshHostRecord[]>;
+    upsert: (input: ManagedSshHostInput) => Promise<ManagedSshHostRecord>;
+    update: (id: string, input: ManagedSshHostInput) => Promise<ManagedSshHostRecord>;
+    remove: (id: string) => Promise<boolean>;
+  };
   fileSystem?: Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "stat" | "writeFile">;
 };
 
@@ -144,6 +150,24 @@ function hostFromBlock(block: ConfigBlock, source: "system" | "managed", configP
   };
 }
 
+function hostFromManagedRecord(record: ManagedSshHostRecord, configPath: string): SshHost {
+  return {
+    id: record.id,
+    alias: record.alias,
+    hostname: record.hostname,
+    port: record.port ?? 22,
+    user: record.user,
+    identityFile: record.identityFile,
+    proxyJump: record.proxyJump,
+    jumpHostType: record.jumpHostType,
+    jumpHost: record.jumpHost,
+    source: "managed",
+    configPath,
+    status: "untrusted",
+    remoteWorkspace: record.remoteWorkspace,
+  };
+}
+
 function managedBlock(input: ManagedSshHostInput) {
   const lines = [`Host ${input.alias}`, `  HostName ${input.hostname}`, `  Port ${input.port ?? 22}`];
   if (input.user) lines.push(`  User ${input.user}`);
@@ -190,11 +214,11 @@ async function atomicWrite(fileSystem: NonNullable<SshConfigAdapterOptions["file
   try { await fileSystem.rename(temporary, file); } catch (error) { await fileSystem.rm(temporary, { force: true }); throw error; }
 }
 
-export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfigAdapterOptions) {
+export function createSshConfigAdapter({ home, exec, managedStore, fileSystem = fs }: SshConfigAdapterOptions) {
   const configPath = userConfigPath(home);
   const managedPath = managedConfigPath(home);
   const displayConfigPath = "~/.ssh/config";
-  const displayManagedPath = "~/.ssh/afk_hosts";
+  const displayManagedPath = managedStore ? "AFK 应用数据/ssh-hosts.yml" : "~/.ssh/afk_hosts";
   const configCache = new Map<string, ConfigCacheEntry>();
   let cacheGeneration = 0;
   let listHostsInFlight: Promise<SshListResult> | null = null;
@@ -255,15 +279,19 @@ export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfi
   }
 
   async function loadHosts(generation: number): Promise<SshListResult> {
-    const [systemParsed, managedParsed] = await Promise.all([
+    const [systemParsed, managedRecords, legacyManagedParsed] = await Promise.all([
       readParsedConfig(configPath, "system", displayConfigPath, generation),
-      readParsedConfig(managedPath, "managed", displayManagedPath, generation),
+      managedStore ? managedStore.list() : Promise.resolve([]),
+      readParsedConfig(managedPath, "managed", managedStore ? "~/.ssh/afk_hosts" : displayManagedPath, generation),
     ]);
-    const hosts = [...systemParsed.blocks.map((block) => hostFromBlock(block, "system", displayConfigPath)), ...managedParsed.blocks.map((block) => hostFromBlock(block, "managed", displayManagedPath))];
+    const managedHosts = managedStore ? managedRecords.map((record) => hostFromManagedRecord(record, displayManagedPath)) : legacyManagedParsed.blocks.map((block) => hostFromBlock(block, "managed", displayManagedPath));
+    const legacyHosts = managedStore ? legacyManagedParsed.blocks.map((block) => hostFromBlock(block, "managed", "~/.ssh/afk_hosts")) : [];
+    const hosts = [...systemParsed.blocks.map((block) => hostFromBlock(block, "system", displayConfigPath)), ...managedHosts, ...legacyHosts];
     const seen = new Set<string>();
     const unique = hosts.filter((host) => { if (seen.has(host.id)) return false; seen.add(host.id); return true; });
-    const diagnostics = [...systemParsed.diagnostics, ...managedParsed.diagnostics];
+    const diagnostics = [...systemParsed.diagnostics, ...legacyManagedParsed.diagnostics];
     for (const host of unique) {
+      if (host.source === "managed") continue;
       const resolved = await exec("ssh", ["-G", host.alias]);
       if (!resolved.ok) diagnostics.push({ code: "ssh.resolve-failed", severity: "warning", message: `无法解析 SSH 主机 ${host.alias}`, path: host.configPath, hostAlias: host.alias });
     }
@@ -283,6 +311,7 @@ export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfi
 
   async function upsertManagedHost(value: ManagedSshHostInput) {
     const input = validateSshHostInput(value);
+    if (managedStore) return hostFromManagedRecord(await managedStore.upsert(input), displayManagedPath);
     await ensureSshDirectory();
     await ensureInclude();
     const raw = await readOrEmpty(fileSystem, managedPath);
@@ -296,6 +325,7 @@ export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfi
   }
 
   async function updateManagedHost(id: string, value: ManagedSshHostInput) {
+    if (managedStore) return hostFromManagedRecord(await managedStore.update(id, value), displayManagedPath);
     if (!id.startsWith("managed:")) throw new Error("只能编辑 AFK 管理的 SSH 主机");
     const oldAlias = id.slice("managed:".length);
     if (!isConcreteAlias(oldAlias)) throw new Error("SSH 主机 ID 无效");
@@ -315,6 +345,7 @@ export function createSshConfigAdapter({ home, exec, fileSystem = fs }: SshConfi
   }
 
   async function removeManagedHost(id: string) {
+    if (managedStore) return managedStore.remove(id);
     if (!id.startsWith("managed:")) throw new Error("只能删除 AFK 管理的 SSH 主机");
     const alias = id.slice("managed:".length);
     if (!isConcreteAlias(alias)) throw new Error("SSH 主机 ID 无效");

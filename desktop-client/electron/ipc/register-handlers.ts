@@ -1,10 +1,11 @@
-import { BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
 import { createSshConfigAdapter } from "../adapters/ssh-config-adapter";
+import { createSshManagedHostStore } from "../adapters/ssh-managed-host-store";
 import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter";
 import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter";
 import { isAfkTmuxSession, listAfkTmux } from "../adapters/resource-adapter";
@@ -17,6 +18,7 @@ import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { resolveWorkspace } from "../services/workspace-service";
 import { homedir } from "node:os";
+import path from "node:path";
 
 function validSession(value: string) {
   return /^[A-Za-z0-9_.:-]{1,100}$/.test(value);
@@ -27,6 +29,7 @@ function broadcast(channel: string, ...args: unknown[]) {
 }
 
 const home = homedir();
+const sshManagedHostStore = createSshManagedHostStore({ file: path.join(app.getPath("userData"), "ssh-hosts.yml") });
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
 const sshCredentialService = createSshCredentialService({ home, safeStorage });
 const commands = createSshCommandAdapter({ exec });
@@ -41,7 +44,7 @@ const knownHosts = createKnownHostsAdapter({
 });
 const sshService = createSshService({
   home,
-  config: createSshConfigAdapter({ home, exec }),
+  config: createSshConfigAdapter({ home, exec, managedStore: sshManagedHostStore }),
   commands,
   knownHosts,
   credentialService: sshCredentialService,

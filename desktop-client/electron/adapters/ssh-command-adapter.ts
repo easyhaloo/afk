@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import type { SshFingerprint } from "../../shared/ssh-contract";
+import type { SshConnectionTarget, SshFingerprint } from "../../shared/ssh-contract";
+import { sshConnectionArgs } from "../../shared/ssh-contract";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
 
@@ -75,15 +76,17 @@ export function createSshCommandAdapter({ exec }: SshCommandAdapterOptions) {
       if (!result.ok) throw new Error("SSH 密钥无法加载到 ssh-agent");
       return true;
     },
-    async testBatch(alias: string) {
-      const result = await exec("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", alias, "true"]);
+    async testBatch(target: SshConnectionTarget | string) {
+      const args = typeof target === "string" ? ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", target, "true"] : ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8", ...sshConnectionArgs(target), "true"];
+      const result = await exec("ssh", args);
       return result.ok ? { ok: true, code: "ready" as const } : { ok: false, code: batchCode(result.stderr) };
     },
     keygenArgs(identityFile: string) {
       return ["-t", "ed25519", "-f", identityFile, "-C", "afk-managed"];
     },
-    deployArgs(alias: string, publicKeyPath: string) {
-      return ["-i", publicKeyPath, alias];
+    deployArgs(target: SshConnectionTarget | string, publicKeyPath: string) {
+      if (typeof target === "string") return ["-i", publicKeyPath, target];
+      return ["-i", publicKeyPath, ...sshConnectionArgs(target)];
     },
   };
 }

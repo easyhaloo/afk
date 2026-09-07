@@ -11,6 +11,10 @@ describe("SSH input validation", () => {
     });
   });
 
+  it("accepts Chinese AFK display names", () => {
+    expect(validateSshHostInput({ alias: "kg演示", hostname: "172.16.0.241" })).toMatchObject({ alias: "kg演示", hostname: "172.16.0.241" });
+  });
+
   it("accepts a JumpServer host selection and requires its alias", () => {
     expect(validateSshHostInput({
       alias: "private-app",

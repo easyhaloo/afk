@@ -1,6 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { SshExternalTerminalId } from "../../shared/ssh-contract";
+import type { SshConnectionTarget, SshExternalTerminalId } from "../../shared/ssh-contract";
+import { sshConnectionArgs } from "../../shared/ssh-contract";
 
 export type ExternalTerminalName = "iTerm2" | "Warp" | "Ghostty" | "cmux" | "Terminal.app";
 
@@ -67,6 +68,34 @@ const WARP_SCRIPT = `on run argv
   end tell
 end run`;
 
+const STRUCTURED_TERMINAL_SCRIPT = `on run argv
+  set sshCommand to item 1 of argv
+  tell application "Terminal"
+    activate
+    do script sshCommand
+  end tell
+end run`;
+
+const STRUCTURED_ITERM2_SCRIPT = `on run argv
+  set sshCommand to item 1 of argv
+  tell application "iTerm2"
+    activate
+    create window with default profile command sshCommand
+  end tell
+end run`;
+
+const STRUCTURED_WARP_SCRIPT = `on run argv
+  set sshCommand to item 1 of argv
+  tell application "Warp"
+    activate
+  end tell
+  tell application "System Events"
+    keystroke "t" using {command down}
+    keystroke sshCommand
+    key code 36
+  end tell
+end run`;
+
 function shellQuote(value: string) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
@@ -101,13 +130,25 @@ export function createExternalTerminalAdapter(options: ExternalTerminalAdapterOp
   const isApplicationInstalled = options.isApplicationInstalled ?? createLaunchServicesApplicationDetector(execFile);
 
   return {
-    async open(alias: string, requestedTerminalId?: SshExternalTerminalId): Promise<ExternalTerminalName> {
+    async open(targetOrAlias: SshConnectionTarget | string, displayAliasOrTerminalId?: string | SshExternalTerminalId, requestedTerminalId?: SshExternalTerminalId): Promise<ExternalTerminalName> {
       if (platform !== "darwin") throw new Error("外部终端仅支持 macOS");
-      let terminalId = requestedTerminalId;
+      const structured = typeof targetOrAlias !== "string";
+      const alias = structured ? String(displayAliasOrTerminalId || targetOrAlias.hostname) : targetOrAlias;
+      const requested = structured ? requestedTerminalId : displayAliasOrTerminalId as SshExternalTerminalId | undefined;
+      let terminalId = requested;
       if (!terminalId) terminalId = await isApplicationInstalled(TERMINAL_BUNDLE_IDS.iterm2) ? "iterm2" : "terminal";
       else if (!await isApplicationInstalled(TERMINAL_BUNDLE_IDS[terminalId])) throw new Error(`${TERMINAL_LABELS[terminalId]} 未安装`);
       try {
-        if (terminalId === "ghostty") {
+        if (structured && terminalId === "ghostty") {
+          await execFile("/usr/bin/open", ["-na", "Ghostty.app", "--args", "-e", "/usr/bin/ssh", ...sshConnectionArgs(targetOrAlias)]);
+        } else if (structured && terminalId === "cmux") {
+          const command = ["/usr/bin/ssh", ...sshConnectionArgs(targetOrAlias)].map(shellQuote).join(" ");
+          await execFile(CMUX_CLI, ["new-workspace", "--command", command]);
+        } else if (structured) {
+          const command = ["/usr/bin/ssh", ...sshConnectionArgs(targetOrAlias)].map(shellQuote).join(" ");
+          const script = terminalId === "iterm2" ? STRUCTURED_ITERM2_SCRIPT : terminalId === "warp" ? STRUCTURED_WARP_SCRIPT : STRUCTURED_TERMINAL_SCRIPT;
+          await execFile("/usr/bin/osascript", ["-e", script, "--", command]);
+        } else if (terminalId === "ghostty") {
           await execFile("/usr/bin/open", ["-na", "Ghostty.app", "--args", "-e", "/usr/bin/ssh", "--", alias]);
         } else if (terminalId === "cmux") {
           await execFile(CMUX_CLI, ["new-workspace", "--command", `/usr/bin/ssh -- ${shellQuote(alias)}`]);

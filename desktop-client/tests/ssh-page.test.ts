@@ -157,9 +157,8 @@ function createSshPageHarness(listImplementation: () => Promise<SshListResult> =
     credentialSet: credentials.set,
     credentialRemove: credentials.remove,
   };
-  const confirm = vi.fn(() => false);
-  vi.stubGlobal("window", { afkDesktop: { ssh: api }, confirm });
-  return { api, connect, openExternal, list, confirm, credentials };
+  vi.stubGlobal("window", { afkDesktop: { ssh: api } });
+  return { api, connect, openExternal, list, credentials };
 }
 
 async function renderSshPage(onSession = vi.fn(), listImplementation?: () => Promise<SshListResult>) {
@@ -172,17 +171,57 @@ async function renderSshPage(onSession = vi.fn(), listImplementation?: () => Pro
   return { ...harness, renderer: renderer!, onSession };
 }
 
+describe("SSH passwordless test loading", () => {
+  it("keeps loading feedback on the test action instead of spinning the refresh button", async () => {
+    const testRequest = deferred<void>();
+    const refreshRequest = deferred<SshListResult>();
+    const { renderer, api, list } = await renderSshPage();
+    api.test.mockImplementation(() => testRequest.promise);
+    list.mockImplementationOnce(() => refreshRequest.promise);
+
+    const testButton = () => renderer.root.findByProps({ className: "ssh-test-action" });
+    const refreshButton = () => renderer.root.findByProps({ "aria-label": "刷新 SSH 主机" });
+
+    await act(async () => {
+      testButton().props.onClick();
+      await flushReactUpdates();
+    });
+    expect(textContent(testButton())).toContain("测试中");
+    expect(testButton().findByProps({ className: "spin" })).toBeDefined();
+    expect(refreshButton().findAllByProps({ className: "spin" })).toHaveLength(0);
+
+    await act(async () => {
+      testRequest.resolve();
+      await flushReactUpdates();
+    });
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(textContent(testButton())).toContain("测试中");
+    expect(refreshButton().findAllByProps({ className: "spin" })).toHaveLength(0);
+
+    await act(async () => {
+      refreshRequest.resolve({ hosts, diagnostics: [] });
+      await flushReactUpdates();
+    });
+    expect(textContent(testButton())).toBe("测试免密");
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+});
+
 describe("SSH connection modes", () => {
   it("offers cleanup for unreachable system hosts without exposing deletion for reachable system hosts", async () => {
     const unreachable = { ...hosts[0], id: "system:dead", alias: "dead", status: "unreachable" as const };
-    const { renderer, api, confirm, list } = await renderSshPage(vi.fn(), async () => ({ hosts: [hosts[0], unreachable], diagnostics: [] }));
-    confirm.mockReturnValue(true);
+    const { renderer, api, list } = await renderSshPage(vi.fn(), async () => ({ hosts: [hosts[0], unreachable], diagnostics: [] }));
 
     expect(renderer.root.findAllByProps({ "aria-label": "删除 SSH 主机 prod" })).toHaveLength(0);
     const cleanupButton = renderer.root.findByProps({ "aria-label": "清理不可达 SSH 主机 dead" });
     await act(async () => { cleanupButton.props.onClick({ stopPropagation: vi.fn() }); await flushReactUpdates(); });
 
-    expect(confirm).toHaveBeenCalledWith("从 ~/.ssh/config 清理不可达 SSH 主机“dead”？");
+    expect(renderer.root.findByProps({ role: "dialog", "aria-label": "清理不可达 SSH 主机 dead" })).toBeDefined();
+    expect(api.remove).not.toHaveBeenCalled();
+    const confirmButton = renderer.root.findByProps({ "aria-label": "确认清理不可达 SSH 主机 dead" });
+    await act(async () => { confirmButton.props.onClick(); await flushReactUpdates(); });
+
     expect(api.remove).toHaveBeenCalledWith(unreachable.id);
     expect(list).toHaveBeenNthCalledWith(2, { forceRefresh: true });
     act(() => { renderer.unmount(); });
@@ -476,12 +515,14 @@ describe("SSH connection modes", () => {
 
   it("invalidates and force-refreshes after removing a managed host", async () => {
     const { renderer, list, api } = await renderSshPage();
-    const pageWindow = globalThis.window as unknown as { confirm: ReturnType<typeof vi.fn> };
-    pageWindow.confirm.mockReturnValue(true);
     const removeButton = renderer.root.findByProps({ "aria-label": "删除 SSH 主机 stage" });
 
     await act(async () => { removeButton.props.onClick(); await flushReactUpdates(); });
-    expect(pageWindow.confirm).toHaveBeenCalledWith("删除 AFK SSH 主机“stage”？");
+    expect(renderer.root.findByProps({ role: "dialog", "aria-label": "删除 SSH 主机 stage" })).toBeDefined();
+    expect(api.remove).not.toHaveBeenCalled();
+    const confirmButton = renderer.root.findByProps({ "aria-label": "确认删除 SSH 主机 stage" });
+    await act(async () => { confirmButton.props.onClick(); await flushReactUpdates(); });
+
     expect(api.remove).toHaveBeenCalledWith(hosts[1].id);
     expect(list).toHaveBeenNthCalledWith(2, { forceRefresh: true });
     act(() => { renderer.unmount(); });
@@ -527,8 +568,8 @@ describe("SSH host creation", () => {
     await act(async () => { addButton.props.onClick(); await flushReactUpdates(); });
     const dialog = renderer.root.findByProps({ role: "dialog" });
     const findInput = (placeholder: string) => dialog.findByProps({ placeholder });
-    await act(async () => { findInput("production-web").props.onChange({ target: { value: "private-app" } }); });
-    await act(async () => { findInput("203.0.113.10").props.onChange({ target: { value: "172.16.0.241" } }); });
+    await act(async () => { findInput("例如：kg演示").props.onChange({ target: { value: "private-app" } }); });
+    await act(async () => { findInput("172.16.0.241").props.onChange({ target: { value: "172.16.0.241" } }); });
     await act(async () => { dialog.findByProps({ "aria-label": "选择跳板机类型" }).props.onClick(); await flushReactUpdates(); });
     await act(async () => { dialog.findByProps({ role: "listbox", "aria-label": "选择跳板机类型" }).findAllByProps({ role: "option" })[2].props.onPointerDown({ preventDefault: vi.fn(), stopPropagation: vi.fn() }); await flushReactUpdates(); });
     await act(async () => { dialog.findByProps({ "aria-label": "选择跳板机" }).props.onClick(); await flushReactUpdates(); });
@@ -543,7 +584,7 @@ describe("SSH host creation", () => {
 
   it("saves an optional deployment password while adding a host", async () => {
     const { renderer, api, credentials } = await renderSshPage();
-    const addedHost = { ...hosts[1], id: "managed:new", alias: "new-host", hostname: "192.0.2.10", source: "managed" as const };
+    const addedHost = { ...hosts[1], id: "managed:new", alias: "kg演示", hostname: "192.0.2.10", source: "managed" as const };
     api.add.mockResolvedValue(addedHost);
 
     const addButton = renderer.root.findAllByType("button").find((button) => textContent(button).includes("添加主机"))!;
@@ -554,8 +595,8 @@ describe("SSH host creation", () => {
 
     const dialog = renderer.root.findByProps({ role: "dialog" });
     const findInput = (placeholder: string) => dialog.findByProps({ placeholder });
-    await act(async () => { findInput("production-web").props.onChange({ target: { value: "new-host" } }); await flushReactUpdates(); });
-    await act(async () => { findInput("203.0.113.10").props.onChange({ target: { value: "192.0.2.10" } }); await flushReactUpdates(); });
+    await act(async () => { findInput("例如：kg演示").props.onChange({ target: { value: "kg演示" } }); await flushReactUpdates(); });
+    await act(async () => { findInput("172.16.0.241").props.onChange({ target: { value: "192.0.2.10" } }); await flushReactUpdates(); });
     await act(async () => { findInput("deploy").props.onChange({ target: { value: "deployer" } }); await flushReactUpdates(); });
     await act(async () => { dialog.findByProps({ type: "password" }).props.onChange({ target: { value: "new-host-password" } }); await flushReactUpdates(); });
 
@@ -564,7 +605,7 @@ describe("SSH host creation", () => {
       await flushReactUpdates();
     });
 
-    expect(api.add).toHaveBeenCalledWith({ alias: "new-host", hostname: "192.0.2.10", port: 22, user: "deployer" });
+    expect(api.add).toHaveBeenCalledWith({ alias: "kg演示", hostname: "192.0.2.10", port: 22, user: "deployer" });
     expect(credentials.set).toHaveBeenCalledWith({ hostId: addedHost.id, password: "new-host-password" });
     expect(renderer.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
     act(() => { renderer.unmount(); });

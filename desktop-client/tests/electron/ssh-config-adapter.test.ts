@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createSshConfigAdapter } from "../../electron/adapters/ssh-config-adapter";
+import { createSshManagedHostStore } from "../../electron/adapters/ssh-managed-host-store";
 
 async function createHome(config: string, managed = "") {
   const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-"));
@@ -52,6 +53,21 @@ function createControlledFileSystem(files: Map<string, ControlledConfigFile>) {
 }
 
 describe("SSH config adapter", () => {
+  it("stores managed hosts outside OpenSSH configuration", async () => {
+    const { home, sshDir } = await createHome("Host system-box\n  HostName system.example.test\n");
+    const managedFile = path.join(home, "afk-data", "ssh-hosts.yml");
+    const store = createSshManagedHostStore({ file: managedFile, createId: () => "managed:stable-1" });
+    const adapter = createSshConfigAdapter({ home, managedStore: store, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
+
+    const saved = await adapter.upsertManagedHost({ alias: "kg演示", hostname: "172.16.0.241", port: 22, user: "root" });
+
+    expect(saved).toMatchObject({ id: "managed:stable-1", alias: "kg演示", hostname: "172.16.0.241", configPath: "AFK 应用数据/ssh-hosts.yml" });
+    await expect(readFile(path.join(sshDir, "config"), "utf8")).resolves.not.toContain("afk_hosts");
+    await expect(readFile(path.join(sshDir, "afk_hosts"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(managedFile, "utf8")).resolves.toContain("kg演示");
+    await expect(adapter.listHosts()).resolves.toMatchObject({ hosts: expect.arrayContaining([expect.objectContaining({ id: "managed:stable-1", alias: "kg演示", hostname: "172.16.0.241" })]) });
+  });
+
   it("updates a managed host and moves its block when the alias changes", async () => {
     const { home } = await createHome("", "Host old-name\n  HostName old.example.test\n  Port 22\n\nHost untouched\n  HostName untouched.example.test\n");
     const adapter = createSshConfigAdapter({ home, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });

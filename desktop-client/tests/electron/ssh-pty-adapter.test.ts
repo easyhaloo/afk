@@ -48,6 +48,18 @@ describe("SSH PTY adapter", () => {
     expect(events).toEqual(["prepare", "spawn", "spawn"]);
   });
 
+  it("connects a managed host by IP while retaining the display name in the session", () => {
+    const calls: Array<[string, string[]]> = [];
+    const adapter = createSshPtyAdapter({
+      spawn: ((command, args) => { calls.push([command, args]); return fakeProcess(2); }) as never,
+    });
+
+    const session = adapter.connect("managed:stable-1", { hostname: "172.16.0.241", port: 22, user: "root" }, "kg演示");
+
+    expect(calls).toEqual([["/usr/bin/ssh", ["-p", "22", "-l", "root", "--", "172.16.0.241"]]]);
+    expect(session).toMatchObject({ alias: "kg演示", title: "SSH · kg演示" });
+  });
+
   it("chains ssh-add after successful key generation", () => {
     const calls: Array<[string, string[]]> = [];
     const first = fakeProcess(1);

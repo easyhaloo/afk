@@ -3,6 +3,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 import * as pty from "node-pty";
 import type { SshSession } from "../../shared/ssh-contract";
+import type { SshConnectionTarget } from "../../shared/ssh-contract";
+import { sshConnectionArgs } from "../../shared/ssh-contract";
 
 type PtyProcess = {
   pid: number;
@@ -116,17 +118,21 @@ export function createSshPtyAdapter(options: SshPtyAdapterOptions = {}) {
   }
 
   return {
-    connect(hostId: string, alias: string) {
+    connect(hostId: string, targetOrAlias: SshConnectionTarget | string, displayAlias?: string) {
+      const target = typeof targetOrAlias === "string" ? undefined : targetOrAlias;
+      const alias = displayAlias || (typeof targetOrAlias === "string" ? targetOrAlias : targetOrAlias.hostname);
       const id = sessionId();
-      return open("/usr/bin/ssh", [alias], { id, hostId, alias, kind: "ssh", title: `SSH · ${alias}`, state: "opening" });
+      return open("/usr/bin/ssh", target ? sshConnectionArgs(target) : [alias], { id, hostId, alias, kind: "ssh", title: `SSH · ${alias}`, state: "opening" });
     },
     generateKey(identityFile: string) {
       const id = sessionId();
       return open("/usr/bin/ssh-keygen", ["-t", "ed25519", "-f", identityFile, "-C", "afk-managed"], { id, hostId: "local", alias: "ssh-keygen", kind: "keygen", title: "生成 AFK Ed25519 密钥", state: "opening" }, { command: "/usr/bin/ssh-add", args: ["--apple-use-keychain", identityFile] });
     },
-    deployKey(hostId: string, alias: string, remoteCommand: string, password?: string) {
+    deployKey(hostId: string, targetOrAlias: SshConnectionTarget | string, remoteCommand: string, password?: string, displayAlias?: string) {
+      const target = typeof targetOrAlias === "string" ? undefined : targetOrAlias;
+      const alias = displayAlias || (typeof targetOrAlias === "string" ? targetOrAlias : targetOrAlias.hostname);
       const id = sessionId();
-      return open("/usr/bin/ssh", [alias, remoteCommand], { id, hostId, alias, kind: "deploy", title: `部署公钥 · ${alias}`, state: "opening" }, undefined, password);
+      return open("/usr/bin/ssh", [...(target ? sshConnectionArgs(target) : [alias]), remoteCommand], { id, hostId, alias, kind: "deploy", title: `部署公钥 · ${alias}`, state: "opening" }, undefined, password);
     },
     input(sessionIdValue: string, data: string) {
       const item = sessions.get(sessionIdValue);

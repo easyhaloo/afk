@@ -59,7 +59,20 @@ export async function createGitLabTracker(projectId?: string, cwd?: string): Pro
   return new GitLabClient({ url: auth.url, token: auth.token, projectId: project });
 }
 
-export async function createTracker(projectId?: string, cwd?: string): Promise<TrackerProvider> {
+export type TrackerPlatform = 'github' | 'gitlab';
+
+function asTrackerPlatform(value: unknown): TrackerPlatform | undefined {
+  return value === 'github' || value === 'gitlab' ? value : undefined;
+}
+
+export async function createTracker(
+  projectId?: string,
+  cwd?: string,
+  platform?: TrackerPlatform,
+): Promise<TrackerProvider> {
+  const override = asTrackerPlatform(platform);
+  if (override === 'github') return createGitHubTracker(projectId, cwd);
+  if (override === 'gitlab') return createGitLabTracker(projectId, cwd);
   const detected = await resolveTrackerProject(cwd);
   return detected.platform === 'github'
     ? createGitHubTracker(projectId, cwd)
@@ -70,15 +83,17 @@ export async function createWorkflowProviders(
   projectId?: string,
   cwd = process.cwd(),
   options?: ProviderBundleOptions,
+  platform?: TrackerPlatform,
 ): Promise<ProviderBundle> {
-  const tracker = await createTracker(projectId, cwd);
+  const tracker = await createTracker(projectId, cwd, platform);
   return createProviderBundle(tracker, cwd, options);
 }
 
 export async function createManagementProviders(
   projectId?: string,
   cwd = process.cwd(),
+  platform?: TrackerPlatform,
 ): Promise<ManagementProviderBundle> {
-  const tracker = await createTracker(projectId, cwd);
+  const tracker = await createTracker(projectId, cwd, platform);
   return createManagementProviderBundle(tracker, cwd);
 }

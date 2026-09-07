@@ -1,4 +1,7 @@
 import { BacklogServiceError } from "./backlog-error";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type {
   BacklogCreateInput,
   BacklogItem,
@@ -15,6 +18,7 @@ export type BacklogExecFn = (
   command: string,
   args: string[],
   cwd: string,
+  input?: string,
 ) => Promise<BacklogExecResult>;
 
 export type BacklogServiceDeps = {
@@ -59,7 +63,7 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
     listCache.clear();
   }
 
-  async function runJson<T>(args: string[], workspace: string, kind: string): Promise<T> {
+  async function runJson<T>(args: string[], workspace: string, kind: string, stdin?: string): Promise<T> {
     const afkPath = await deps.resolveAfk();
     if (!afkPath) {
       throw new BacklogServiceError("auth", "afk CLI 未在 PATH 中发现；请安装或设置 PATH", {
@@ -67,7 +71,7 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
       });
     }
     const cwd = deps.resolveWorkspace(workspace);
-    const result = await runWithTimeout(afkPath, [...args, "--json"], cwd, timeoutMs);
+    const result = await runWithTimeout(afkPath, [...args, "--json"], cwd, timeoutMs, stdin);
     if (!result.ok && !result.stdout) {
       // Subprocess died before emitting JSON — likely spawn / timeout / signal.
       throw new BacklogServiceError("unknown", result.stderr || "afk 子进程退出但未输出 JSON");
@@ -89,11 +93,11 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
     return envelope.data;
   }
 
-  async function runWithTimeout(cmd: string, args: string[], cwd: string, ms: number): Promise<BacklogExecResult> {
+  async function runWithTimeout(cmd: string, args: string[], cwd: string, ms: number, stdin?: string): Promise<BacklogExecResult> {
     let timer: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
-        exec(cmd, args, cwd),
+        exec(cmd, args, cwd, stdin),
         new Promise<BacklogExecResult>((_, reject) => {
           timer = setTimeout(() => reject(new BacklogServiceError("unknown", `afk 子进程超时（${ms}ms）`)), ms);
         }),
@@ -114,8 +118,8 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
     return args;
   }
 
-  function buildCreateArgs(input: BacklogCreateInput): string[] {
-    const args = ["backlog", "create", input.title, "--description-file", "/dev/stdin"];
+  function buildCreateArgs(input: BacklogCreateInput, descriptionFile: string): string[] {
+    const args = ["backlog", "create", input.title, "--description-file", descriptionFile];
     if (input.parentId) args.push("--parent", input.parentId);
     if (input.baseBacklogId) args.push("--base-backlog", input.baseBacklogId);
     if (input.dependsOn) for (const dep of input.dependsOn) args.push("--depends-on", dep);
@@ -150,9 +154,19 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
     async create(workspace: string, input: BacklogCreateInput): Promise<BacklogItem> {
       if (!input.title?.trim()) throw new BacklogServiceError("validation", "backlog title is required");
       if (!input.description?.trim()) throw new BacklogServiceError("validation", "backlog description is required");
-      const item = await runJson<BacklogItem>(buildCreateArgs(input), workspace, "backlog.create");
-      invalidateListCache();
-      return item;
+      // Write description to a per-call temp file rather than piping stdin:
+      // execFile doesn't reliably deliver `options.input` on every Node
+      // version, and Electron's main process has no real stdin to inherit.
+      const tmpDir = await mkdtemp(path.join(tmpdir(), "afk-backlog-"));
+      const descriptionFile = path.join(tmpDir, "description.md");
+      try {
+        await writeFile(descriptionFile, input.description, "utf8");
+        const item = await runJson<BacklogItem>(buildCreateArgs(input, descriptionFile), workspace, "backlog.create");
+        invalidateListCache();
+        return item;
+      } finally {
+        await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
+      }
     },
 
     async addTag(workspace: string, id: string, tag: string): Promise<BacklogItem> {

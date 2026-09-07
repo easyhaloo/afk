@@ -61,8 +61,8 @@ const backlogService = createBacklogService({
     return candidate && candidate.startsWith("/") ? candidate : "";
   },
   resolveWorkspace,
-  exec: async (command, args, cwd) => {
-    const result = await exec(command, args, cwd);
+  exec: async (command, args, cwd, stdin) => {
+    const result = await exec(command, args, cwd, stdin);
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
   },
 });

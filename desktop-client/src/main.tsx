@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity, Archive, Bot, Boxes, Braces, Check, ChevronDown, ChevronRight, CircleCheck, CircleDashed,
-  Clock3, Command, Container, FolderOpen, LayoutList, Minus, Move, Plus, RefreshCw, ChevronLeft,
+  ClipboardList, Clock3, Command, Container, FolderOpen, LayoutList, Minus, Move, Plus, RefreshCw, ChevronLeft,
   Send, Settings2, Sparkles, Terminal, TerminalSquare, TriangleAlert, Workflow, X,
 } from "lucide-react";
 import "./styles.css";
@@ -23,13 +23,14 @@ import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH, CANVAS_WORLD_HEIGHT, CANVAS_WORL
 import { Empty } from "./components/EmptyState";
 import { Settings } from "./features/settings/SettingsPage";
 import { SshHostsPage } from "./features/ssh/SshHostsPage";
+import { BacklogPage } from "./features/backlog/BacklogPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
 import type { SshSession } from "../shared/ssh-contract";
 
 type Phase = "ready" | "active" | "verify" | "attention";
 type RecordStatus = "queued" | "running" | "waiting_confirmation" | "completed" | "failed";
-type View = "queue" | "board" | "workflows" | "agents" | "containers" | "events" | "ssh" | "settings";
+type View = "queue" | "board" | "workflows" | "agents" | "containers" | "events" | "ssh" | "backlog" | "settings";
 
 const label: Record<Phase, string> = {
   ready: "待执行",
@@ -231,6 +232,7 @@ function App() {
     ["agents", "Agent", Activity],
     ["containers", "环境", Container],
     ["ssh", "SSH 主机", Terminal],
+    ["backlog", "Backlog", ClipboardList],
   ];
   const activeNav = view === "board" ? "queue" : view;
   const title = view === "settings" ? "设置" : nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
@@ -292,6 +294,7 @@ function App() {
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
           {view === "containers" ? <Environments snapshot={snapshot} onTerminal={openSession} /> : null}
           {view === "ssh" ? <SshHostsPage onSession={openSshSession} /> : null}
+          {view === "backlog" ? <BacklogPage workspace={workspace || snapshot?.workspace.root || ""} /> : null}
           {view === "workflows" ? <Workflows snapshot={snapshot} onSave={saveWorkflowConfig} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}

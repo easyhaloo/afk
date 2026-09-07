@@ -599,6 +599,7 @@ describe("SSH host creation", () => {
     await act(async () => { findInput("172.16.0.241").props.onChange({ target: { value: "192.0.2.10" } }); await flushReactUpdates(); });
     await act(async () => { findInput("deploy").props.onChange({ target: { value: "deployer" } }); await flushReactUpdates(); });
     await act(async () => { dialog.findByProps({ type: "password" }).props.onChange({ target: { value: "new-host-password" } }); await flushReactUpdates(); });
+    expect(dialog.findByProps({ type: "password" }).props.value).toBe("new-host-password");
 
     await act(async () => {
       dialog.props.onSubmit({ preventDefault: vi.fn() });

@@ -443,3 +443,204 @@ describe("BacklogPage lifecycle", () => {
     act(() => { second.renderer.unmount(); });
   });
 });
+
+describe("BacklogPage write operations", () => {
+  function findModal(renderer: ReturnType<typeof create>): ReactTestInstance {
+    return renderer.root.findByProps({ role: "dialog", "aria-modal": "true" });
+  }
+
+  function findCreateButton(renderer: ReturnType<typeof create>): ReactTestInstance {
+    return renderer.root.findByProps({ "aria-label": "新建 Backlog" });
+  }
+
+  function fillCreateForm(renderer: ReturnType<typeof create>, input: { title?: string; description?: string; executionMode?: "afk" | "hitl"; tags?: string }) {
+    const modal = findModal(renderer);
+    const inputs = modal.findAllByType("input").filter((node) => typeof node.props.onChange === "function" && Object.prototype.hasOwnProperty.call(node.props, "value"));
+    if (input.title !== undefined) {
+      const titleInput = inputs.find((node) => node.props.placeholder === "登录态切换")!;
+      titleInput.props.onChange({ target: { value: input.title } });
+    }
+    if (input.description !== undefined) {
+      const textarea = modal.findByType("textarea");
+      textarea.props.onChange({ target: { value: input.description } });
+    }
+    if (input.executionMode !== undefined) {
+      const select = modal.findByProps({ value: input.executionMode === "afk" ? "afk" : "hitl" });
+      select.props.onChange({ currentTarget: { value: input.executionMode } });
+    }
+    if (input.tags !== undefined) {
+      const tagInput = inputs.find((node) => node.props.placeholder === "billing, urgent")!;
+      tagInput.props.onChange({ target: { value: input.tags } });
+    }
+  }
+
+  it("opens the create modal when the 新建 Backlog button is clicked", async () => {
+    const { renderer } = await renderBacklogPage();
+    expect(renderer.root.findAllByProps({ role: "dialog", "aria-modal": "true" })).toHaveLength(0);
+
+    await act(async () => { findCreateButton(renderer).props.onClick(); await flushReactUpdates(); });
+
+    expect(renderer.root.findAllByProps({ role: "dialog", "aria-modal": "true" })).toHaveLength(1);
+    expect(textContent(renderer.root.findByProps({ id: "backlog-create-title" }))).toBe("新建 Backlog");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("closes the modal on Cancel button click without calling api.create", async () => {
+    const { renderer, api } = await renderBacklogPage();
+    await act(async () => { findCreateButton(renderer).props.onClick(); await flushReactUpdates(); });
+    expect(api.create).not.toHaveBeenCalled();
+
+    await act(async () => { findModal(renderer).findByProps({ "aria-label": "关闭" }).props.onClick(); await flushReactUpdates(); });
+    expect(renderer.root.findAllByProps({ role: "dialog", "aria-modal": "true" })).toHaveLength(0);
+    expect(api.create).not.toHaveBeenCalled();
+    act(() => { renderer.unmount(); });
+  });
+
+  it("closes the modal when the backdrop is clicked", async () => {
+    const { renderer } = await renderBacklogPage();
+    await act(async () => { findCreateButton(renderer).props.onClick(); await flushReactUpdates(); });
+    const backdrop = renderer.root.findByProps({ className: "backlog-modal-backdrop" });
+
+    await act(async () => { backdrop.props.onClick({ target: backdrop, currentTarget: backdrop }); await flushReactUpdates(); });
+    expect(renderer.root.findAllByProps({ role: "dialog", "aria-modal": "true" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("submits the form, calls api.create with workspace as first arg, and force-refreshes on success", async () => {
+    const newItem: BacklogItem = { id: "4", title: "新功能", description: "实现某个新功能", dependsOn: [], state: "ready", executionMode: "afk", tags: ["urgent", "billing"], branchName: "afk/backlog-4", providerRef: "stub:4" };
+    const { renderer, api } = await renderBacklogPage("/workspace-create");
+    api.create.mockResolvedValueOnce(newItem);
+    api.list.mockResolvedValueOnce([newItem, ...items]);
+
+    await act(async () => { findCreateButton(renderer).props.onClick(); await flushReactUpdates(); });
+    await act(async () => {
+      fillCreateForm(renderer, { title: "新功能", description: "实现某个新功能", tags: "urgent, billing" });
+      await flushReactUpdates();
+    });
+
+    await act(async () => {
+      findModal(renderer).props.onSubmit({ preventDefault: vi.fn() });
+      await flushReactUpdates();
+    });
+
+    expect(api.create).toHaveBeenCalledWith(
+      "/workspace-create",
+      expect.objectContaining({ title: "新功能", description: "实现某个新功能", tags: ["urgent", "billing"], executionMode: "afk" }),
+    );
+    expect(api.list).toHaveBeenCalledTimes(2); // initial + force-refresh
+    expect(renderer.root.findAllByProps({ role: "dialog", "aria-modal": "true" })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ className: "backlog-row" }).some((row) => textContent(row).includes("新功能"))).toBe(true);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("passes the platform override through to api.create when the page-level selector is set", async () => {
+    const newItem: BacklogItem = { id: "4", title: "gh", description: "x", dependsOn: [], state: "ready", executionMode: "afk", tags: [], branchName: "afk/backlog-4", providerRef: "stub:4" };
+    const { renderer, api } = await renderBacklogPage();
+    api.create.mockResolvedValueOnce(newItem);
+
+    await act(async () => {
+      renderer.root.findByProps({ "aria-label": "选择 Provider" }).props.onChange({ currentTarget: { value: "github" } });
+      await flushReactUpdates();
+    });
+    await act(async () => { findCreateButton(renderer).props.onClick(); await flushReactUpdates(); });
+    await act(async () => {
+      fillCreateForm(renderer, { title: "gh", description: "x" });
+      await flushReactUpdates();
+    });
+    await act(async () => {
+      findModal(renderer).props.onSubmit({ preventDefault: vi.fn() });
+      await flushReactUpdates();
+    });
+
+    expect(api.create).toHaveBeenCalledWith("/repo", expect.objectContaining({ platform: "github" }));
+    act(() => { renderer.unmount(); });
+  });
+
+  it("surfaces create errors inside the modal without closing it", async () => {
+    const { renderer, api } = await renderBacklogPage();
+    api.create.mockRejectedValueOnce(new Error("GitHub 403 — token 失效"));
+
+    await act(async () => { findCreateButton(renderer).props.onClick(); await flushReactUpdates(); });
+    await act(async () => {
+      fillCreateForm(renderer, { title: "boom", description: "fails" });
+      await flushReactUpdates();
+    });
+    await act(async () => {
+      findModal(renderer).props.onSubmit({ preventDefault: vi.fn() });
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findAllByProps({ role: "dialog", "aria-modal": "true" })).toHaveLength(1);
+    expect(textContent(renderer.root.findByProps({ role: "alert" }))).toContain("GitHub 403");
+    expect(api.list).toHaveBeenCalledTimes(1); // no force-refresh on failure
+    act(() => { renderer.unmount(); });
+  });
+
+  it("removes a tag when its chip's × button is clicked", async () => {
+    const updatedItem: BacklogItem = { ...items[0], tags: [] };
+    const { renderer, api } = await renderBacklogPage();
+    api.removeTag.mockResolvedValueOnce(updatedItem);
+    api.list.mockResolvedValueOnce([updatedItem, items[1], items[2]]);
+
+    const rowWithBilling = renderer.root.findAll((node) => node.props.className?.includes("backlog-row"))
+      .find((row) => textContent(row).includes("登录态切换"))!;
+    const removeButton = rowWithBilling.findByProps({ "aria-label": "移除标签 billing" });
+
+    await act(async () => { removeButton.props.onClick(); await flushReactUpdates(); });
+
+    expect(api.removeTag).toHaveBeenCalledWith("/repo", "1", "billing");
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(renderer.root.findAllByProps({ "aria-label": "移除标签 billing" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("adds a tag via the inline form per row", async () => {
+    const updatedItem: BacklogItem = { ...items[0], tags: ["billing", "reviewed"] };
+    const { renderer, api } = await renderBacklogPage();
+    api.addTag.mockResolvedValueOnce(updatedItem);
+    api.list.mockResolvedValueOnce([updatedItem, items[1], items[2]]);
+
+    const row = renderer.root.findAll((node) => node.props.className?.includes("backlog-row"))
+      .find((r) => textContent(r).includes("登录态切换"))!;
+    const tagInput = row.findByProps({ "aria-label": "为 登录态切换 添加标签" });
+
+    await act(async () => {
+      tagInput.props.onChange({ target: { value: "reviewed" } });
+      await flushReactUpdates();
+    });
+    await act(async () => {
+      row.findByProps({ className: "backlog-tag-add" }).props.onSubmit({ preventDefault: vi.fn() });
+      await flushReactUpdates();
+    });
+
+    expect(api.addTag).toHaveBeenCalledWith("/repo", "1", "reviewed");
+    expect(api.list).toHaveBeenCalledTimes(2);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("disables tag controls while a tag op is in flight", async () => {
+    const pending = deferred<BacklogItem>();
+    const { renderer, api } = await renderBacklogPage();
+    api.removeTag.mockReturnValueOnce(pending.promise);
+
+    const row = renderer.root.findAll((node) => node.props.className?.includes("backlog-row"))
+      .find((r) => textContent(r).includes("登录态切换"))!;
+    const removeButton = row.findByProps({ "aria-label": "移除标签 billing" });
+    const tagInput = row.findByProps({ "aria-label": "为 登录态切换 添加标签" });
+
+    await act(async () => { removeButton.props.onClick(); await flushReactUpdates(); });
+
+    expect(removeButton.props.disabled).toBe(true);
+    expect(tagInput.props.disabled).toBe(true);
+
+    await act(async () => {
+      pending.resolve({ ...items[0], tags: [] });
+      await pending.promise;
+      await flushReactUpdates();
+    });
+    const reloaded = renderer.root.findAll((node) => node.props.className?.includes("backlog-row"))
+      .find((r) => textContent(r).includes("登录态切换"))!;
+    expect(reloaded.findByProps({ "aria-label": "为 登录态切换 添加标签" }).props.disabled).toBe(false);
+    act(() => { renderer.unmount(); });
+  });
+});

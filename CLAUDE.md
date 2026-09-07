@@ -13,6 +13,7 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 | Command | Purpose |
 |---------|---------|
 | `afk backlog` | Backlog management and inspection only |
+| `afk backlog --json` | Emit structured JSON envelopes on stdout (used by the AFK Control desktop client) |
 | `afk run --backlog-id <id>` | Execute one backlog item |
 | `afk loop` | Complete implementation → QA → merge pipeline |
 | `afk qa --backlog-id <id>` | Standalone QA retry/diagnostic entry point |

@@ -11,7 +11,7 @@
  */
 import { test as base, _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 import path from "node:path";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const HERE = __dirname;
@@ -19,12 +19,19 @@ export const FIXTURE_DIR = path.resolve(HERE, "../fixtures");
 export const FAKE_AFK = path.join(FIXTURE_DIR, "afk");
 export const RENDERER_URL = "http://localhost:5174";
 // fake-afk persists its in-memory store here so writes from one subprocess
-// invocation survive into the next. Reset to "{}" between specs for isolation.
+// invocation survive into the next. Delete before each test for isolation.
 export const FAKE_AFK_STORE = path.join(tmpdir(), "afk-backlog-e2e-store.json");
+// Per-spec scratch HOME so the SSH page sees a deterministic, empty
+// ~/.ssh/config regardless of the developer's real environment.
+export const E2E_HOME = path.join(tmpdir(), "afk-control-e2e-home");
 
 function resetStore() {
-  // Delete the file so the next fake-afk invocation re-seeds itself.
   if (existsSync(FAKE_AFK_STORE)) rmSync(FAKE_AFK_STORE);
+}
+
+function resetHome() {
+  if (existsSync(E2E_HOME)) rmSync(E2E_HOME, { recursive: true, force: true });
+  mkdirSync(path.join(E2E_HOME, ".ssh"), { recursive: true });
 }
 
 export type Fixtures = {
@@ -35,11 +42,16 @@ export type Fixtures = {
 export const test = base.extend<Fixtures>({
   electronApp: async ({}, use) => {
     resetStore();
+    resetHome();
     const app = await electron.launch({
       args: ["."],
       env: {
         ...process.env,
         ELECTRON_RENDERER_URL: RENDERER_URL,
+        // Override HOME so SSH adapters read from our scratch directory
+        // instead of the developer's real ~/.ssh/config.
+        HOME: E2E_HOME,
+        USERPROFILE: E2E_HOME,
         // Prepend the fixture dir so the fake-afk script wins `which afk`.
         PATH: `${FIXTURE_DIR}${path.delimiter}${process.env.PATH ?? ""}`,
         FAKE_AFK_STORE,
@@ -62,3 +74,6 @@ export const test = base.extend<Fixtures>({
 });
 
 export const expect = test.expect;
+
+// Helpers exported for SSH page specs.
+export { E2E_HOME as E2E_HOME_PATH, resetHome, mkdirSync, chmodSync, writeFileSync };

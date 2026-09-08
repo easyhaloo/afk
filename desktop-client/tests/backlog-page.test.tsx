@@ -13,6 +13,7 @@ import {
   filterBacklogItems,
 } from "../src/features/backlog/backlog-filter";
 import type { BacklogItem } from "../shared/backlog-contract";
+import type { BacklogRunSummary } from "../shared/backlog-contract";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { document?: unknown }).document = {
@@ -51,6 +52,8 @@ type BacklogApi = {
   list: ReturnType<typeof vi.fn>;
   show: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
+  start: ReturnType<typeof vi.fn>;
+  runs: ReturnType<typeof vi.fn>;
   addTag: ReturnType<typeof vi.fn>;
   removeTag: ReturnType<typeof vi.fn>;
 };
@@ -63,6 +66,8 @@ function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[
     list,
     show: vi.fn(),
     create: vi.fn(),
+    start: vi.fn(),
+    runs: vi.fn(async () => []),
     addTag: vi.fn(),
     removeTag: vi.fn(),
   };
@@ -200,6 +205,42 @@ describe("BacklogPage loading states", () => {
 
     expect(refreshButton.props.disabled).toBe(false);
     expect(renderer.root.findAllByProps({ className: "backlog-row" })).toHaveLength(items.length);
+    act(() => { renderer.unmount(); });
+  });
+});
+
+describe("BacklogPage execution", () => {
+  it("hydrates an existing run from the bridge on initial load", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    api.runs.mockResolvedValueOnce([{ id: "desktop-1-run", backlogId: "1", status: "running", startedAt: "2026-09-08T10:00:00.000Z", pid: process.pid }]);
+    act(() => { renderer.root.findByProps({ "aria-label": "刷新 Backlog" }).props.onClick(); });
+    await act(async () => { await flushReactUpdates(); });
+
+    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("运行状态：运行中");
+    expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("starts a ready backlog item and shows its local run handle", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    const run: BacklogRunSummary = {
+      id: "desktop-1-run",
+      backlogId: "1",
+      status: "running",
+      startedAt: "2026-09-08T10:00:00.000Z",
+      pid: 1234,
+    };
+    api.start.mockResolvedValueOnce(run);
+
+    const row = renderer.root.findAllByProps({ className: "backlog-row" })[0];
+    await act(async () => {
+      row.findByProps({ className: "backlog-run-button" }).props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(api.start).toHaveBeenCalledWith("/repo", { backlogId: "1" });
+    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("PID 1234");
+    expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
     act(() => { renderer.unmount(); });
   });
 });

@@ -1,15 +1,16 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { View } from '../types';
+import type { LoadedTuiView, TuiViewId } from '../../plugins/types';
 
 interface Props {
-  view?: View;
+  view?: TuiViewId;
   detail?: boolean;
   canOpen?: boolean;
   canAttach?: boolean;
+  pluginViews?: readonly LoadedTuiView[];
 }
 
-export function HelpDialog({ view = 'tasks', detail = false, canOpen = false, canAttach = false }: Props) {
+export function HelpDialog({ view = 'tasks', detail = false, canOpen = false, canAttach = false, pluginViews = [] }: Props) {
   const providerView = view !== 'tasks';
 
   return (
@@ -18,6 +19,10 @@ export function HelpDialog({ view = 'tasks', detail = false, canOpen = false, ca
       <Text color="gray">view switch:</Text>
       <Text color="white">  1 - tasks     2 - backlogs</Text>
       <Text color="white">  3 - projects  4 - board</Text>
+      {pluginViews.length > 0 && <>
+        <Text color="gray">plugins:</Text>
+        {pluginViews.map(pluginView => <Text key={pluginView.id} color="white">  {pluginView.shortcut} - {pluginView.title}</Text>)}
+      </>}
       {!detail && <>
         <Box marginTop={1}><Text color="gray">navigate:</Text></Box>
         <Text color="white">  ↑↓ - move     g/G - top/bottom</Text>

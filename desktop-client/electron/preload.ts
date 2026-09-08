@@ -5,6 +5,7 @@ import type { DesktopApi } from "../shared/ipc-contract";
 // local while the shared contract remains the source of renderer/main types.
 const IPC_CHANNELS = {
   copyText: "afk:copy-text",
+  openExternal: "afk:open-external",
   chooseWorkspace: "afk:choose-workspace",
   snapshot: "afk:snapshot",
   appearance: "afk:appearance",
@@ -39,6 +40,7 @@ const IPC_CHANNELS = {
 
 const api: DesktopApi = {
   copyText: (text) => ipcRenderer.invoke(IPC_CHANNELS.copyText, text),
+  openExternal: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternal, url),
   chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),
   snapshot: (workspace) => ipcRenderer.invoke(IPC_CHANNELS.snapshot, workspace),
   appearance: () => ipcRenderer.invoke(IPC_CHANNELS.appearance),

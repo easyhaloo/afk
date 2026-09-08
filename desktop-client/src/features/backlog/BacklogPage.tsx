@@ -20,7 +20,9 @@ import {
   filterBacklogItems,
   type SourceFilter,
 } from "./backlog-filter";
+import { SelectMenu } from "../../components/SelectMenu";
 import "./backlog.css";
+import { BacklogDetailDrawer } from "./BacklogDetailDrawer";
 
 export { backlogStateLabel, filterBacklogItems, BACKLOG_STATE_LABELS } from "./backlog-filter";
 export type { SourceFilter } from "./backlog-filter";
@@ -68,6 +70,9 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
 
   const [tagBusyFor, setTagBusyFor] = useState("");
   const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({});
+  const [detailItem, setDetailItem] = useState<BacklogItem | null>(null);
+  const [detailBusy, setDetailBusy] = useState(false);
+  const [detailError, setDetailError] = useState("");
 
   const createModalRef = useRef<HTMLFormElement>(null);
 
@@ -191,6 +196,34 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
     }
   }, [load, workspace]);
 
+  const openDetails = useCallback(async (item: BacklogItem) => {
+    setDetailItem(item);
+    setDetailBusy(true);
+    setDetailError("");
+    try {
+      const detail = await window.afkDesktop.backlog.show(workspace, item.id);
+      if (mountedRef.current) setDetailItem(detail);
+    } catch (cause) {
+      if (mountedRef.current) setDetailError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (mountedRef.current) setDetailBusy(false);
+    }
+  }, [workspace]);
+
+  const closeDetails = useCallback(() => {
+    if (detailBusy) return;
+    setDetailItem(null);
+    setDetailError("");
+  }, [detailBusy]);
+
+  const openExternal = useCallback(async (url: string) => {
+    try {
+      await window.afkDesktop.openExternal(url);
+    } catch (cause) {
+      if (mountedRef.current) setDetailError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+
   const filtered = useMemo(() => filterBacklogItems(items, query, state), [items, query, state]);
 
   return (
@@ -202,9 +235,7 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
           <span>读取 GitHub / GitLab 上由 AFK 管理的工作项；本机不持有凭据，由 afk CLI 完成 Provider 调用。</span>
         </div>
         <div className="backlog-heading-actions">
-          <select aria-label="选择 Provider" value={platform} onChange={(event) => { invalidateBacklogCache(); setPlatform(event.currentTarget.value as "auto" | BacklogPlatform); }} disabled={busy}>
-            {platformOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
+          <SelectMenu label="选择 Provider" value={platform} options={platformOptions} onChange={(value) => { invalidateBacklogCache(); setPlatform(value); }} disabled={busy} />
           <button className="icon-button" onClick={() => setCreateOpen(true)} disabled={busy} aria-label="新建 Backlog">
             <Plus size={16} />
           </button>
@@ -216,13 +247,11 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
       {error ? <div className="backlog-alert error" role="alert"><CircleAlert size={15} />{error}<button onClick={() => setError("")} aria-label="关闭错误"><X size={14} /></button></div> : null}
       <section className="backlog-toolbar">
         <label className="backlog-search"><Search size={15} /><input aria-label="搜索 Backlog" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、ID 或标签" /></label>
-        <select aria-label="筛选状态" value={state} onChange={(event) => setState(event.currentTarget.value as SourceFilter)} disabled={busy}>
-          {sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
+        <SelectMenu label="筛选状态" value={state} options={sourceOptions} onChange={setState} disabled={busy} />
       </section>
       <section className="backlog-list">
         {filtered.length ? filtered.map((item) => (
-          <article className="backlog-row" key={item.id}>
+          <article className={`backlog-row${detailItem?.id === item.id ? " selected" : ""}`} key={item.id} onClick={() => { void openDetails(item); }}>
             <header>
               <b>{item.title}</b>
               <small>#{item.id}</small>
@@ -233,12 +262,12 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
                 {item.tags.map((tag) => (
                   <li key={tag}>
                     <span>{tag}</span>
-                    <button type="button" className="backlog-tag-remove" aria-label={`移除标签 ${tag}`} disabled={tagBusyFor === item.id} onClick={() => { void removeTag(item.id, tag); }}>×</button>
+                    <button type="button" className="backlog-tag-remove" aria-label={`移除标签 ${tag}`} disabled={tagBusyFor === item.id} onClick={(event) => { event?.stopPropagation?.(); void removeTag(item.id, tag); }}>×</button>
                   </li>
                 ))}
               </ul>
             ) : null}
-            <form className="backlog-tag-add" onSubmit={(event) => { event.preventDefault(); void addTag(item.id, tagDrafts[item.id] ?? ""); }}>
+            <form className="backlog-tag-add" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); void addTag(item.id, tagDrafts[item.id] ?? ""); }}>
               <input
                 value={tagDrafts[item.id] ?? ""}
                 onChange={(event) => setTagDrafts((prev) => ({ ...prev, [item.id]: event.target.value }))}
@@ -255,6 +284,7 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
           </div>
         )}
       </section>
+      <BacklogDetailDrawer item={detailItem} busy={detailBusy} error={detailError} onClose={closeDetails} onOpenExternal={(url) => { void openExternal(url); }} />
       {createOpen ? (
         <div className="backlog-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeCreateModal(); }}>
           <form
@@ -281,9 +311,7 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
             <label className="backlog-modal-field">标题<input required value={createForm.title} onChange={(event) => setCreateForm((prev) => ({ ...prev, title: event.target.value }))} placeholder="登录态切换" /></label>
             <label className="backlog-modal-field">描述<textarea required rows={4} value={createForm.description} onChange={(event) => setCreateForm((prev) => ({ ...prev, description: event.target.value }))} placeholder="描述这个 backlog 的目标、验收标准与依赖" /></label>
             <div className="backlog-modal-row">
-              <label className="backlog-modal-field">执行模式<select value={createForm.executionMode ?? "afk"} onChange={(event) => setCreateForm((prev) => ({ ...prev, executionMode: event.currentTarget.value as BacklogExecutionMode }))}>
-                {executionModeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select></label>
+              <label className="backlog-modal-field">执行模式<SelectMenu label="执行模式" value={createForm.executionMode ?? "afk"} options={executionModeOptions} onChange={(value) => setCreateForm((prev) => ({ ...prev, executionMode: value }))} /></label>
               <label className="backlog-modal-field">Platform{platform === "auto" ? <small>（继承顶部选择器，自动探测）</small> : <small>（继承 {platform}）</small>}</label>
             </div>
             <label className="backlog-modal-field">标签（用逗号分隔）<input value={(createForm.tags ?? []).join(", ")} onChange={(event) => setCreateForm((prev) => ({ ...prev, tags: event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean) }))} placeholder="billing, urgent" /></label>

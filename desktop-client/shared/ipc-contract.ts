@@ -123,6 +123,7 @@ export type Snapshot = {
 
 export type DesktopApi = {
   copyText: (text: string) => Promise<boolean>;
+  openExternal: (url: string) => Promise<boolean>;
   chooseWorkspace: () => Promise<string | null>;
   snapshot: (workspace: string) => Promise<Snapshot>;
   appearance: () => Promise<AppearancePreferences>;
@@ -161,6 +162,7 @@ export type DesktopApi = {
 
 export const IPC_CHANNELS = {
   copyText: "afk:copy-text",
+  openExternal: "afk:open-external",
   chooseWorkspace: "afk:choose-workspace",
   snapshot: "afk:snapshot",
   appearance: "afk:appearance",

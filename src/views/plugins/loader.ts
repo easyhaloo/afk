@@ -1,67 +1,109 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { load } from 'js-yaml';
-import type { Plugin, PluginManifest } from './types';
-import type { View } from '../ui/core/types';
+import { fileLogger } from '../../infrastructure/io/index';
+import type { LoadedTuiView, TuiPlugin } from './types';
+import { isTuiPlugin } from './types';
 
-const PLUGINS_CONFIG = path.join(os.homedir(), '.afk', 'plugins.yml');
-
-interface PluginsConfig {
-  plugins: Array<{
-    id: string;
-    enabled?: boolean;
-  }>;
+interface PluginConfigEntry {
+  id: string;
+  enabled?: boolean;
 }
 
-function parseYaml(raw: string): PluginsConfig {
-  const content = raw.replace(/!!null\b\s*/g, '');
-  try {
-    return load(content) as PluginsConfig;
-  } catch {
-    return { plugins: [] };
-  }
+export interface LoadTuiViewsOptions {
+  homeDir?: string;
+  resolveEntry?: (homeDir: string, pluginId: string) => string;
+  warn?: (message: string, error?: unknown) => void;
 }
 
-export function loadPluginRegistry(): Array<{ id: string; enabled: boolean }> {
+const BUILTIN_SHORTCUTS = new Set(['1', '2', '3', '4', 'a', 'b', 'g', 'o', 'q', 'r', '/', '?']);
+
+function defaultResolveEntry(homeDir: string, pluginId: string): string {
+  return join(homeDir, '.afk', 'plugins', pluginId, 'dist', 'index.js');
+}
+
+function readPluginConfig(path: string, warn: (message: string, error?: unknown) => void): PluginConfigEntry[] {
+  if (!existsSync(path)) return [];
   try {
-    if (!fs.existsSync(PLUGINS_CONFIG)) {
-      return [];
-    }
-    const raw = fs.readFileSync(PLUGINS_CONFIG, 'utf-8');
-    const config = parseYaml(raw);
-    return (config.plugins || []).map(p => ({
-      id: p.id,
-      enabled: p.enabled !== false,
-    }));
-  } catch {
+    const parsed = load(readFileSync(path, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as { plugins?: unknown }).plugins)) return [];
+    return (parsed as { plugins: unknown[] }).plugins.flatMap(entry => {
+      if (!entry || typeof entry !== 'object') return [];
+      const candidate = entry as { id?: unknown; enabled?: unknown };
+      if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) return [];
+      return [{ id: candidate.id.trim(), enabled: candidate.enabled === false ? false : true }];
+    });
+  } catch (error) {
+    warn(`Failed to parse TUI plugin configuration: ${path}`, error);
     return [];
   }
 }
 
-export async function loadPlugin(id: string, mainPath: string): Promise<Plugin | null> {
+async function importPlugin(
+  pluginId: string,
+  homeDir: string,
+  resolveEntry: (homeDir: string, pluginId: string) => string,
+  warn: (message: string, error?: unknown) => void,
+): Promise<TuiPlugin | null> {
+  const entry = resolveEntry(homeDir, pluginId);
+  if (!existsSync(entry)) {
+    warn(`Skipping missing TUI plugin entry: ${pluginId}`);
+    return null;
+  }
   try {
-    const resolved = await import(mainPath);
-    const mod = resolved.default ?? resolved;
-    if (!mod.id || !mod.views) return null;
-    return mod as Plugin;
-  } catch {
+    const module = await import(pathToFileURL(entry).href);
+    const candidate = module.default ?? module.plugin;
+    if (!isTuiPlugin(candidate)) {
+      warn(`Skipping malformed TUI plugin: ${pluginId}`);
+      return null;
+    }
+    return candidate;
+  } catch (error) {
+    warn(`Failed to load TUI plugin: ${pluginId}`, error);
     return null;
   }
 }
 
-export async function loadAllPlugins(): Promise<View[]> {
-  const registry = loadPluginRegistry();
-  const enabledPlugins = registry.filter(p => p.enabled);
-  if (enabledPlugins.length === 0) return [];
+export async function loadTuiViews(options: LoadTuiViewsOptions = {}): Promise<LoadedTuiView[]> {
+  const homeDir = options.homeDir ?? homedir();
+  const resolveEntry = options.resolveEntry ?? defaultResolveEntry;
+  const warn = options.warn ?? ((message, error) => fileLogger.warn({ err: error }, message));
+  const entries = readPluginConfig(join(homeDir, '.afk', 'plugins.yml'), warn);
+  const accepted: LoadedTuiView[] = [];
+  const usedIds = new Set<string>(['tasks', 'backlogs', 'projects', 'board']);
+  const usedShortcuts = new Set(BUILTIN_SHORTCUTS);
+  const seenPlugins = new Set<string>();
 
-  const views: View[] = [];
-  for (const { id } of enabledPlugins) {
-    const mainPath = path.join(os.homedir(), '.afk', 'plugins', id, 'dist', 'index.js');
-    const plugin = await loadPlugin(id, mainPath);
-    if (plugin) {
-      views.push(...plugin.views);
+  for (const entry of entries) {
+    if (entry.enabled === false || seenPlugins.has(entry.id)) continue;
+    seenPlugins.add(entry.id);
+    const plugin = await importPlugin(entry.id, homeDir, resolveEntry, warn);
+    if (!plugin) continue;
+
+    for (const view of plugin.views) {
+      const id = `plugin:${plugin.id}:${view.id}` as LoadedTuiView['id'];
+      const shortcut = view.shortcut.trim();
+      if (usedIds.has(id)) {
+        warn(`Skipping duplicate TUI plugin view: ${id}`);
+        continue;
+      }
+      if (usedShortcuts.has(shortcut)) {
+        warn(`Skipping conflicting TUI plugin shortcut: ${plugin.id}:${view.id}`);
+        continue;
+      }
+      usedIds.add(id);
+      usedShortcuts.add(shortcut);
+      accepted.push({
+        id,
+        pluginId: plugin.id,
+        title: view.title.trim(),
+        shortcut,
+        render: view.render,
+      });
     }
   }
-  return views;
+
+  return accepted;
 }

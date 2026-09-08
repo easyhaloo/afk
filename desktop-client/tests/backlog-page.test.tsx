@@ -53,6 +53,7 @@ type BacklogApi = {
   create: ReturnType<typeof vi.fn>;
   addTag: ReturnType<typeof vi.fn>;
   removeTag: ReturnType<typeof vi.fn>;
+  openExternal: ReturnType<typeof vi.fn>;
 };
 
 function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[]> = async () => items): {
@@ -65,8 +66,9 @@ function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[
     create: vi.fn(),
     addTag: vi.fn(),
     removeTag: vi.fn(),
+    openExternal: vi.fn(async () => true),
   };
-  vi.stubGlobal("window", { afkDesktop: { backlog: api } });
+  vi.stubGlobal("window", { afkDesktop: { openExternal: api.openExternal, backlog: api } });
   return { api };
 }
 
@@ -167,6 +169,55 @@ describe("BacklogPage initial render", () => {
     expect(rows[1].findAllByProps({ className: "backlog-tags" })).toHaveLength(1);
     expect(textContent(rows[1].findByProps({ className: "backlog-tags" }))).toContain("urgent");
     expect(rows[2].findAllByProps({ className: "backlog-tags" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+  });
+});
+
+describe("BacklogPage detail drawer", () => {
+  it("loads the canonical item when a row is selected and closes the preview", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    const detail = {
+      ...items[0],
+      description: "切换登录态并保留当前工作区。",
+      webUrl: "https://github.com/example/issues/1",
+    };
+    api.show.mockResolvedValue(detail);
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(api.show).toHaveBeenCalledWith("/repo", "1");
+    expect(textContent(renderer.root.findByProps({ role: "dialog" }))).toContain("切换登录态并保留当前工作区。");
+    expect(renderer.root.findByProps({ "aria-label": "在浏览器中打开" })).toBeTruthy();
+
+    await act(async () => {
+      renderer.root.findByProps({ "aria-label": "在浏览器中打开" }).props.onClick();
+      await flushReactUpdates();
+    });
+    expect(api.openExternal).toHaveBeenCalledWith("https://github.com/example/issues/1");
+
+    await act(async () => {
+      renderer.root.findByProps({ "aria-label": "关闭详情" }).props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("hides the external browser action when the item has no web URL", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    api.show.mockResolvedValue(items[0]);
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findAllByProps({ "aria-label": "在浏览器中打开" })).toHaveLength(0);
+    expect(textContent(renderer.root.findByProps({ role: "dialog" }))).toContain("该工作项没有可用的外部链接。");
     act(() => { renderer.unmount(); });
   });
 });

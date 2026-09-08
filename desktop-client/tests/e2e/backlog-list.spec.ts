@@ -29,7 +29,17 @@ test.describe("BacklogPage list", () => {
   test("shows the platform selector defaulting to auto", async ({ page }) => {
     const platformSelect = page.getByLabel("选择 Provider");
     await expect(platformSelect).toBeVisible();
-    await expect(platformSelect).toHaveValue("auto");
+    await expect(platformSelect).toHaveAttribute("value", "auto");
+  });
+
+  test("opens a right-side detail preview for a backlog row", async ({ page }) => {
+    await page.locator(".backlog-row").first().click();
+    const drawer = page.getByRole("dialog", { name: "登录态切换" });
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toContainText("切换登录态并保留当前工作区。");
+    await expect(drawer.getByRole("button", { name: "在浏览器中打开" })).toBeVisible();
+    await drawer.getByRole("button", { name: "关闭详情" }).click();
+    await expect(page.getByRole("dialog", { name: "登录态切换" })).toHaveCount(0);
   });
 
   test("filters rows by query string", async ({ page }) => {
@@ -39,8 +49,9 @@ test.describe("BacklogPage list", () => {
     await expect(page.locator(".backlog-row").first()).toContainText("kg 演示");
   });
 
-  test("filters rows by state via the state select", async ({ page }) => {
-    await page.getByLabel("筛选状态").selectOption("done");
+  test("filters rows by state via the custom state menu", async ({ page }) => {
+    await page.getByLabel("筛选状态").click();
+    await page.getByRole("option", { name: "已完成" }).click();
     await expect(page.locator(".backlog-row")).toHaveCount(1);
     await expect(page.locator(".backlog-row").first()).toContainText("支付回调");
   });

@@ -61,6 +61,21 @@ export type BacklogCreateInput = {
   platform?: BacklogPlatform;
 };
 
+export type BacklogRunStartInput = {
+  backlogId: string;
+  template?: string;
+};
+
+export type BacklogRunSummary = {
+  id: string;
+  backlogId: string;
+  status: "starting" | "running" | "completed" | "failed";
+  startedAt: string;
+  template?: string;
+  pid?: number;
+  error?: string;
+};
+
 export type BacklogErrorCode =
   | "auth"
   | "not_found"
@@ -151,6 +166,20 @@ export function parseBacklogCreateInput(input: unknown): BacklogCreateInput {
     result.tags = candidate.tags as string[];
   }
   if ("platform" in candidate) result.platform = parseBacklogPlatform(candidate.platform);
+  return result;
+}
+
+export function parseBacklogRunStartInput(input: unknown): BacklogRunStartInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog run input must be an object");
+  const candidate = input as Record<string, unknown>;
+  const keys = Object.keys(candidate);
+  if (keys.some((key) => key !== "backlogId" && key !== "template")) throw new Error("backlog run input has unknown fields");
+  if (typeof candidate.backlogId !== "string" || !candidate.backlogId.trim()) throw new Error("backlog run input: backlogId is required");
+  const result: BacklogRunStartInput = { backlogId: candidate.backlogId.trim() };
+  if (candidate.template !== undefined) {
+    if (typeof candidate.template !== "string" || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(candidate.template)) throw new Error("backlog run input: template is invalid");
+    result.template = candidate.template;
+  }
   return result;
 }
 

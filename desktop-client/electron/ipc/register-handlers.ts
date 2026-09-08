@@ -143,6 +143,13 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.sshGenerateKey, (event) => { assertTrustedSender(event); return sshService.generateKey(); });
   ipcMain.handle(IPC_CHANNELS.sshDeployKey, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.deployKey(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshTest, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.testHost(validateSshHostId(hostId)); });
+  ipcMain.handle(IPC_CHANNELS.sshUpload, async (event, hostId: unknown) => {
+    assertTrustedSender(event);
+    const id = validateSshHostId(hostId);
+    const selection = await dialog.showOpenDialog({ title: "选择要上传的文件", properties: ["openFile"] });
+    if (selection.canceled || !selection.filePaths[0]) return null;
+    return sshService.uploadFile(id, selection.filePaths[0]);
+  });
   ipcMain.handle(IPC_CHANNELS.sshConnect, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.connect(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshOpenExternal, (event, hostId: unknown, terminal: unknown) => { assertTrustedSender(event); return sshService.openExternal(validateSshHostId(hostId), terminal === undefined ? "iterm2" : validateSshExternalTerminalId(terminal)); });
   ipcMain.handle(IPC_CHANNELS.sshCredentialHas, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.hasCredential(validateSshHostId(hostId)); });

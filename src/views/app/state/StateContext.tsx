@@ -6,7 +6,6 @@ import type { AppState, ViewState, ViewType, ViewContext } from './initialState'
 import { initialState } from './initialState';
 import type { AppAction } from '../actions/types';
 import type { BuiltinView, TuiViewId } from '../../plugins/types';
-import { isBuiltinView } from '../../plugins/types';
 
 const BUILTIN_VIEWS = new Set<BuiltinView>(['tasks', 'backlogs', 'projects', 'board']);
 

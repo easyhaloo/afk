@@ -18,7 +18,7 @@ export interface LoadTuiViewsOptions {
   warn?: (message: string, error?: unknown) => void;
 }
 
-const BUILTIN_SHORTCUTS = new Set(['1', '2', '3', '4', 'a', 'b', 'g', 'o', 'q', 'r', '/', '?']);
+const BUILTIN_SHORTCUTS = new Set(['1', '2', '3', '4', 'a', 'A', 'b', 'g', 'G', 'o', 'q', 'r', '/', '?']);
 
 function defaultResolveEntry(homeDir: string, pluginId: string): string {
   return join(homeDir, '.afk', 'plugins', pluginId, 'dist', 'index.js');
@@ -32,7 +32,7 @@ function readPluginConfig(path: string, warn: (message: string, error?: unknown)
     return (parsed as { plugins: unknown[] }).plugins.flatMap(entry => {
       if (!entry || typeof entry !== 'object') return [];
       const candidate = entry as { id?: unknown; enabled?: unknown };
-      if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) return [];
+      if (typeof candidate.id !== 'string' || !/^[A-Za-z0-9._-]+$/.test(candidate.id)) return [];
       return [{ id: candidate.id.trim(), enabled: candidate.enabled === false ? false : true }];
     });
   } catch (error) {
@@ -59,6 +59,10 @@ async function importPlugin(
       warn(`Skipping malformed TUI plugin: ${pluginId}`);
       return null;
     }
+    if (candidate.id !== pluginId) {
+      warn(`Skipping TUI plugin with mismatched id: ${pluginId}`);
+      return null;
+    }
     return candidate;
   } catch (error) {
     warn(`Failed to load TUI plugin: ${pluginId}`, error);
@@ -77,8 +81,9 @@ export async function loadTuiViews(options: LoadTuiViewsOptions = {}): Promise<L
   const seenPlugins = new Set<string>();
 
   for (const entry of entries) {
-    if (entry.enabled === false || seenPlugins.has(entry.id)) continue;
+    if (seenPlugins.has(entry.id)) continue;
     seenPlugins.add(entry.id);
+    if (entry.enabled === false) continue;
     const plugin = await importPlugin(entry.id, homeDir, resolveEntry, warn);
     if (!plugin) continue;
 

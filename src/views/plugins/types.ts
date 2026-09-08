@@ -30,23 +30,31 @@ export interface LoadedTuiView {
   readonly render: TuiPluginView['render'];
 }
 
+function isSafeId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9._-]+$/.test(value);
+}
+
+function isShortcut(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.trim() === value
+    && Array.from(value).length === 1
+    && !/\s/.test(value);
+}
+
 export function isTuiPlugin(value: unknown): value is TuiPlugin {
   if (!value || typeof value !== 'object') return false;
   const plugin = value as Partial<TuiPlugin>;
-  return typeof plugin.id === 'string'
-    && plugin.id.trim().length > 0
+  return isSafeId(plugin.id)
     && typeof plugin.name === 'string'
     && plugin.name.trim().length > 0
     && Array.isArray(plugin.views)
     && plugin.views.every(view => {
       if (!view || typeof view !== 'object') return false;
       const candidate = view as Partial<TuiPluginView>;
-      return typeof candidate.id === 'string'
-        && candidate.id.trim().length > 0
+      return isSafeId(candidate.id)
         && typeof candidate.title === 'string'
         && candidate.title.trim().length > 0
-        && typeof candidate.shortcut === 'string'
-        && candidate.shortcut.trim().length > 0
+        && isShortcut(candidate.shortcut)
         && typeof candidate.render === 'function';
     });
 }

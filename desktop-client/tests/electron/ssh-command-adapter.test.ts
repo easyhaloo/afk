@@ -38,4 +38,35 @@ describe("OpenSSH command adapter", () => {
     expect(fingerprint).toMatchObject({ algorithm: "ED25519", value: "SHA256:OHLWq/W56Fd2CoG+J+rQByH3Kf289dFAB/MEwEr+nVw", hostname: "build.example.test", port: 22 });
     expect(fingerprint).not.toHaveProperty("key");
   });
+
+  it("builds a parameterized scp upload for a direct target", async () => {
+    const calls: Array<[string, string[]]> = [];
+    const adapter = createSshCommandAdapter({
+      exec: async (command, args) => {
+        calls.push([command, args]);
+        return { ok: true, stdout: "", stderr: "" };
+      },
+    });
+
+    await adapter.upload("/tmp/release notes.txt", { hostname: "build.example.test", port: 2222, user: "deploy", identityFile: "/Users/test/.ssh/id_ed25519", proxyJump: "bastion" }, "/srv/releases/");
+
+    expect(calls).toEqual([[
+      "scp",
+      ["-P", "2222", "-i", "/Users/test/.ssh/id_ed25519", "-J", "bastion", "--", "/tmp/release notes.txt", "deploy@build.example.test:/srv/releases/"],
+    ]]);
+  });
+
+  it("uploads through an OpenSSH alias without treating the alias as a shell command", async () => {
+    const calls: Array<[string, string[]]> = [];
+    const adapter = createSshCommandAdapter({
+      exec: async (command, args) => {
+        calls.push([command, args]);
+        return { ok: true, stdout: "", stderr: "" };
+      },
+    });
+
+    await adapter.upload("/tmp/archive.tar.gz", "build-box", "~/uploads/");
+
+    expect(calls).toEqual([["scp", ["--", "/tmp/archive.tar.gz", "build-box:~/uploads/"]]]);
+  });
 });

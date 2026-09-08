@@ -140,6 +140,7 @@ export type DesktopApi = {
     generateKey: () => Promise<{ publicKeyPath: string; session: SshSession }>;
     deployKey: (hostId: string) => Promise<SshSession>;
     test: (hostId: string) => Promise<SshTestResult>;
+    upload: (hostId: string) => Promise<SshUploadResult | null>;
     connect: (hostId: string) => Promise<SshSession>;
     openExternal: (hostId: string, terminal?: SshExternalTerminalId) => Promise<SshExternalTerminalResult>;
     credentialHas: (hostId: string) => Promise<boolean>;
@@ -178,6 +179,7 @@ export const IPC_CHANNELS = {
   sshGenerateKey: "afk:ssh-generate-key",
   sshDeployKey: "afk:ssh-deploy-key",
   sshTest: "afk:ssh-test",
+  sshUpload: "afk:ssh-upload",
   sshConnect: "afk:ssh-connect",
   sshOpenExternal: "afk:ssh-open-external",
   sshCredentialHas: "afk:ssh-credential-has",
@@ -205,6 +207,7 @@ import type {
   SshSession,
   SshTestResult,
   SshTrustRequest,
+  SshUploadResult,
 } from "./ssh-contract";
 import type {
   BacklogCreateInput,

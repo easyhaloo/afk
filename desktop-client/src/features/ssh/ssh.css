@@ -95,6 +95,7 @@
 .ssh-test-action { width: 100%; min-width: 0; }
 .ssh-connect-action { min-width: 96px; padding-inline: 16px; }
 .ssh-trust-action, .ssh-deploy-action { min-width: 120px; }
+.ssh-upload-action { min-width: 120px; }
 .ssh-terminal-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 7px; }
 .ssh-terminal-picker-control { position: relative; min-width: 0; }
 .ssh-terminal-trigger { display: flex; width: 100%; min-height: 36px; align-items: center; justify-content: space-between; gap: 10px; border-color: var(--afk-border); border-radius: 9px; padding: 4px 10px; background: var(--afk-panel); color: var(--afk-text); font: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }

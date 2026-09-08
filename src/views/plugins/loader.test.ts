@@ -35,6 +35,9 @@ describe('TUI plugin contract', () => {
   it('rejects malformed plugin metadata and views', () => {
     expect(isTuiPlugin({ id: '', name: 'Example', views: [] })).toBe(false);
     expect(isTuiPlugin({ id: 'example', name: 'Example', views: [{ id: 'status' }] })).toBe(false);
+    expect(isTuiPlugin({ id: '../example', name: 'Example', views: [] })).toBe(false);
+    expect(isTuiPlugin({ id: 'example', name: 'Example', views: [{ id: 'bad:id', title: 'Bad', shortcut: 'z', render: () => null }] })).toBe(false);
+    expect(isTuiPlugin({ id: 'example', name: 'Example', views: [{ id: 'status', title: 'Status', shortcut: 'zz', render: () => null }] })).toBe(false);
     expect(isTuiPlugin({ id: 'example', name: 'Example', views: 'status' })).toBe(false);
     expect(isTuiPlugin(null)).toBe(false);
   });
@@ -89,6 +92,41 @@ describe('TUI plugin contract', () => {
         { id: 'plugin:first:one', shortcut: 'z' },
         { id: 'plugin:second:one', shortcut: 'y' },
       ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the first duplicate config entry even when later entries enable it', async () => {
+    const root = makePluginHome({
+      config: 'plugins:\n  - id: duplicate\n    enabled: false\n  - id: duplicate\n    enabled: true\n',
+      plugins: {
+        duplicate: `export default { id: 'duplicate', name: 'Duplicate', views: [{ id: 'status', title: 'Status', shortcut: 'z', render: () => null }] }`,
+      },
+    });
+    try {
+      await expect(loadTuiViews({ homeDir: root, resolveEntry: fixtureEntry })).resolves.toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('isolates import failures and mismatched plugin identities', async () => {
+    const root = makePluginHome({
+      config: 'plugins:\n  - id: broken\n  - id: mismatched\n  - id: valid\n',
+      plugins: {
+        broken: `throw new Error('load failed')`,
+        mismatched: `export default { id: 'other', name: 'Other', views: [] }`,
+        valid: `export default { id: 'valid', name: 'Valid', views: [{ id: 'status', title: 'Status', shortcut: 'z', render: () => null }] }`,
+      },
+    });
+    const warn = vi.fn();
+    try {
+      await expect(loadTuiViews({ homeDir: root, resolveEntry: fixtureEntry, warn })).resolves.toMatchObject([
+        { id: 'plugin:valid:status' },
+      ]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('broken'), expect.any(Error));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('mismatched'));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

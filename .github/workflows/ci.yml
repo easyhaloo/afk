@@ -54,8 +54,7 @@ jobs:
 
       - name: Build native dependencies
         run: |
-          pnpm --dir desktop-client rebuild node-pty --reporter=append-only
-          pnpm --dir desktop-client rebuild esbuild --reporter=append-only
+          pnpm --dir desktop-client rebuild electron node-pty esbuild --pending --reporter=append-only
 
       - name: Typecheck
         working-directory: desktop-client
@@ -107,8 +106,7 @@ jobs:
 
       - name: Build native dependencies
         run: |
-          pnpm --dir desktop-client rebuild node-pty --reporter=append-only
-          pnpm --dir desktop-client rebuild esbuild --reporter=append-only
+          pnpm --dir desktop-client rebuild electron node-pty esbuild --pending --reporter=append-only
 
       - name: Typecheck + build main
         working-directory: desktop-client

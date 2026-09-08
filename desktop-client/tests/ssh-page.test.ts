@@ -148,6 +148,7 @@ function createSshPageHarness(listImplementation: () => Promise<SshListResult> =
     generateKey: vi.fn(),
     deployKey: vi.fn(),
     test: vi.fn(),
+    upload: vi.fn(async () => ({ fileName: "release.txt", remoteDirectory: "~/" })),
     input: vi.fn(),
     resize: vi.fn(),
     close: vi.fn(),
@@ -205,6 +206,35 @@ describe("SSH passwordless test loading", () => {
     expect(textContent(testButton())).toBe("测试免密");
     act(() => { renderer.unmount(); });
     vi.unstubAllGlobals();
+  });
+});
+
+describe("SSH SCP uploads", () => {
+  it("uploads a file for the selected ready host and reports the result", async () => {
+    const { renderer, api } = await renderSshPage();
+    const uploadButton = renderer.root.findByProps({ className: "ssh-upload-action" });
+
+    await act(async () => {
+      uploadButton.props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(api.upload).toHaveBeenCalledWith(hosts[0].id);
+    expect(textContent(renderer.root.findByProps({ role: "status" }))).toContain("已上传 release.txt");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("disables file uploads for hosts that are not ready", async () => {
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts, diagnostics: [] }));
+    const untrustedRow = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))[1];
+
+    await act(async () => {
+      untrustedRow.props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findByProps({ className: "ssh-upload-action" }).props.disabled).toBe(true);
+    act(() => { renderer.unmount(); });
   });
 });
 

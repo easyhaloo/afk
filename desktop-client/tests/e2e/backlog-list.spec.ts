@@ -32,6 +32,70 @@ test.describe("BacklogPage list", () => {
     await expect(platformSelect).toHaveAttribute("value", "auto");
   });
 
+  test("keeps backlog controls compact and consistently sized", async ({ page }) => {
+    const platform = page.getByRole("button", { name: "选择 Provider" });
+    const create = page.getByRole("button", { name: "新建 Backlog" });
+    const refresh = page.getByRole("button", { name: "刷新 Backlog" });
+    const search = page.locator(".backlog-search");
+    const state = page.getByLabel("筛选状态");
+
+    const controls = await Promise.all([platform, create, refresh, search, state].map(async (locator) => {
+      const box = await locator.boundingBox();
+      if (!box) throw new Error("Backlog control is not visible");
+      return box;
+    }));
+
+    expect(controls[0].height).toBe(controls[1].height);
+    expect(controls[1].height).toBe(controls[2].height);
+    expect(controls[3].height).toBe(controls[4].height);
+    expect(controls[0].height).toBeLessThanOrEqual(34);
+    expect(controls[0].width).toBeLessThanOrEqual(150);
+
+    await platform.click();
+    const popover = page.getByRole("listbox", { name: "选择 Provider" });
+    const menuBox = await popover.boundingBox();
+    const triggerBox = await platform.boundingBox();
+    if (!menuBox || !triggerBox) throw new Error("Provider menu is not visible");
+    expect(Math.abs(menuBox.width - triggerBox.width)).toBeLessThanOrEqual(2);
+
+    const optionBoxes = await page.getByRole("option").evaluateAll((options) => options.map((option) => option.getBoundingClientRect().height));
+    expect(Math.max(...optionBoxes)).toBeLessThanOrEqual(34);
+  });
+
+  test("uses the application green palette for backlog controls", async ({ page }) => {
+    const platform = page.getByRole("button", { name: "选择 Provider" });
+    await platform.click();
+
+    const colors = await page.evaluate(() => {
+      const normalize = (color: string) => {
+        const probe = document.createElement("span");
+        probe.style.color = color;
+        document.body.appendChild(probe);
+        const normalized = getComputedStyle(probe).color;
+        probe.remove();
+        return normalized;
+      };
+      const root = getComputedStyle(document.documentElement);
+      const trigger = getComputedStyle(document.querySelector<HTMLElement>('.select-menu-trigger[aria-label="选择 Provider"]')!);
+      const popover = getComputedStyle(document.querySelector<HTMLElement>('.select-menu-popover[aria-label="选择 Provider"]')!);
+      const tag = getComputedStyle(document.querySelector<HTMLElement>(".backlog-tags li")!);
+      return {
+        run: normalize(root.getPropertyValue("--run").trim()),
+        line: normalize(root.getPropertyValue("--line").trim()),
+        ink: normalize(root.getPropertyValue("--ink").trim()),
+        triggerBorder: trigger.borderTopColor,
+        triggerText: trigger.color,
+        popoverBorder: popover.borderTopColor,
+        tagText: tag.color,
+      };
+    });
+
+    expect(colors.triggerBorder).toBe(colors.run);
+    expect(colors.triggerText).toBe(colors.ink);
+    expect(colors.popoverBorder).toBe(colors.line);
+    expect(colors.tagText).toBe(colors.run);
+  });
+
   test("opens a right-side detail preview for a backlog row", async ({ page }) => {
     await page.locator(".backlog-row").first().click();
     const drawer = page.getByRole("dialog", { name: "登录态切换" });

@@ -71,8 +71,13 @@ describeE2E('external TUI plugins', () => {
     processHandle.write('z');
     await new Promise(resolve => setTimeout(resolve, 500));
     const text = stripVTControlCharacters(output.join(''));
+    output.length = 0;
+    processHandle.write('1');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const builtInText = stripVTControlCharacters(output.join(''));
     processHandle.write('q');
 
     expect(text).toContain('EXTERNAL PLUGIN ACTIVE');
+    expect(builtInText).toContain('1 tasks');
   });
 });

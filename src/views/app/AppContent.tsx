@@ -164,7 +164,7 @@ export function AppContent({
       actions.toggleDebug();
       return;
     }
-    if (input === '/') {
+    if (input === '/' && isBuiltinView(currentView)) {
       actions.enableSearch();
       return;
     }
@@ -211,13 +211,18 @@ export function AppContent({
       return;
     }
 
-    if (!isDetailMode) {
+    if (!isDetailMode && !state.showHelp) {
       const matchedPlugin = pluginViews.find(plugin => plugin.shortcut === input);
       if (matchedPlugin) {
         actions.switchView(matchedPlugin.id);
         return;
       }
     }
+
+    if (input === '1') { actions.switchView('tasks'); return; }
+    if (input === '2') { actions.switchView('backlogs'); return; }
+    if (input === '3') { actions.switchView('projects'); return; }
+    if (input === '4') { actions.switchView('board'); return; }
 
     if (!isBuiltinView(currentView)) return;
 
@@ -240,10 +245,6 @@ export function AppContent({
       if (key.shift && input === 'G') { selectTarget('bottom'); return; }
     }
 
-    if (input === '1') actions.switchView('tasks');
-    if (input === '2') actions.switchView('backlogs');
-    if (input === '3') actions.switchView('projects');
-    if (input === '4') actions.switchView('board');
     if (key.downArrow) {
       actions.selectionDown(items.length);
       maybeLoadMoreProjects();
@@ -287,7 +288,7 @@ export function AppContent({
       {pluginView ? (
         <PluginViewBoundary
           view={pluginView}
-          context={{ cwd, workspace, notify: message => dispatch({ type: 'notification:show', payload: { type: 'info', message } }) } satisfies TuiPluginContext}
+          context={{ cwd, workspace, notify: message => actions.notify(message) } satisfies TuiPluginContext}
         />
       ) : (
         <Body

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { LoadedTuiView, TuiViewId } from '../../plugins/types';
+import { isBuiltinView } from '../../plugins/types';
 
 interface Props {
   view?: TuiViewId;
@@ -11,7 +12,8 @@ interface Props {
 }
 
 export function HelpDialog({ view = 'tasks', detail = false, canOpen = false, canAttach = false, pluginViews = [] }: Props) {
-  const providerView = view !== 'tasks';
+  const builtinView = isBuiltinView(view);
+  const providerView = builtinView && view !== 'tasks';
 
   return (
     <Box position="absolute" top={3} left={8} right={8} bottom={3} borderStyle="round" borderColor="white" backgroundColor="black" flexDirection="column" padding={1}>
@@ -23,14 +25,14 @@ export function HelpDialog({ view = 'tasks', detail = false, canOpen = false, ca
         <Text color="gray">plugins:</Text>
         {pluginViews.map(pluginView => <Text key={pluginView.id} color="white">  {pluginView.shortcut} - {pluginView.title}</Text>)}
       </>}
-      {!detail && <>
+      {!detail && builtinView && <>
         <Box marginTop={1}><Text color="gray">navigate:</Text></Box>
         <Text color="white">  ↑↓ - move     g/G - top/bottom</Text>
       </>}
       <Text color="gray">actions:</Text>
       {detail && <Text color="white">  b/ESC back</Text>}
-      {!detail && <Text color="white">  Enter - detail</Text>}
-      {!detail && <Text color="white">  r - refresh</Text>}
+      {!detail && builtinView && <Text color="white">  Enter - detail</Text>}
+      {!detail && builtinView && <Text color="white">  r - refresh</Text>}
       {providerView && canOpen && <Text color="white">  o - open provider URL</Text>}
       {view === 'tasks' && canOpen && <Text color="white">  o - open task diagnostics</Text>}
       {view === 'tasks' && canAttach && <Text color="white">  a - attach interactive task</Text>}

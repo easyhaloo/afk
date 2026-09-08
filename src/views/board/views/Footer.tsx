@@ -3,6 +3,7 @@ import { Box, Text, useStdout } from 'ink';
 import { getShortPath, getGitBranch, formatPathLabel } from '../footer-helpers';
 import { truncateByVisualWidth, visualWidth } from '../utils';
 import type { LoadedTuiView, TuiViewId } from '../../plugins/types';
+import { isBuiltinView } from '../../plugins/types';
 
 interface Props {
   view?: TuiViewId;
@@ -43,12 +44,15 @@ export function Footer({ view = 'tasks', detail = false, search = false, canOpen
   const pluginHints = pluginViews.length > 0
     ? ` · ${pluginViews.map(pluginView => `${pluginView.shortcut} ${pluginView.title}`).join(' · ')}`
     : '';
+  const pluginView = !isBuiltinView(view);
   const shortcuts = search
     ? `esc finish search${debugHint} · ? help`
     : detail
     ? `b/ESC back${openHint}${attachHint}${debugHint} · ? help`
+    : pluginView
+      ? `b/ESC back${debugHint} · ? help${pluginHints}`
     : view === 'board'
-      ? `←→ lanes · ↑↓ cards · enter detail${openHint} · ${search ? 'esc finish search' : '/ search'}${debugHint} · ? help`
+      ? `←→ lanes · ↑↓ cards · enter detail${openHint} · / search${debugHint} · ? help${pluginHints}`
     : `↑↓ move · enter detail${openHint} · ${search ? 'esc finish search' : '/ search'}${debugHint} · ? help${pluginHints}`;
   const columns = stdout.columns || process.stdout.columns || 80;
   const visiblePath = fitFooterPath(pathInfo, columns, shortcuts);

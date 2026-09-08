@@ -154,6 +154,8 @@ export type DesktopApi = {
     list: (workspace: string, options?: BacklogListOptions) => Promise<BacklogItem[]>;
     show: (workspace: string, id: string) => Promise<BacklogItem>;
     create: (workspace: string, input: BacklogCreateInput) => Promise<BacklogItem>;
+    start: (workspace: string, input: BacklogRunStartInput) => Promise<BacklogRunSummary>;
+    runs: (workspace: string, backlogId?: string) => Promise<BacklogRunSummary[]>;
     addTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
     removeTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
   };
@@ -189,6 +191,8 @@ export const IPC_CHANNELS = {
   backlogList: "afk:backlog-list",
   backlogShow: "afk:backlog-show",
   backlogCreate: "afk:backlog-create",
+  backlogStart: "afk:backlog-start",
+  backlogRuns: "afk:backlog-runs",
   backlogTagAdd: "afk:backlog-tag-add",
   backlogTagRemove: "afk:backlog-tag-remove",
 } as const;
@@ -208,6 +212,8 @@ import type {
   BacklogCreateInput,
   BacklogItem,
   BacklogListOptions,
+  BacklogRunStartInput,
+  BacklogRunSummary,
 } from "./backlog-contract";
 
 export type SshExternalTerminalResult = {

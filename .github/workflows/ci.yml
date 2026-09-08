@@ -37,47 +37,37 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Cache node-gyp headers
         uses: actions/cache@v4
         with:
           path: ~/.cache/node-gyp
-          key: node-gyp-${{ runner.os }}-node20-${{ hashFiles('pnpm-lock.yaml') }}
+          key: node-gyp-${{ runner.os }}-node22-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            node-gyp-${{ runner.os }}-node20-
+            node-gyp-${{ runner.os }}-node22-
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile --ignore-scripts --reporter=append-only
+        working-directory: desktop-client
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
 
       - name: Build native dependencies
         run: |
-          pnpm rebuild node-pty --reporter=append-only
-          pnpm rebuild esbuild --reporter=append-only
-
-      - name: Fix permissions
-        run: node scripts/fix-permissions.mjs
-
-      - name: Architecture guard
-        run: pnpm run architecture:check
+          pnpm --dir desktop-client rebuild node-pty --reporter=append-only
+          pnpm --dir desktop-client rebuild esbuild --reporter=append-only
 
       - name: Typecheck
-        run: pnpm run typecheck
+        working-directory: desktop-client
+        run: pnpm typecheck
 
       - name: Build
-        run: pnpm run build
+        working-directory: desktop-client
+        run: pnpm build
 
       - name: Test
-        run: pnpm test
-
-      - name: Desktop Electron verification
         working-directory: desktop-client
-        run: |
-          pnpm install --no-frozen-lockfile --ignore-scripts --reporter=append-only
-          pnpm typecheck
-          pnpm test
-          pnpm build
+        run: pnpm test
 
   desktop-e2e:
     name: Desktop E2E (Electron + Playwright)
@@ -99,7 +89,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       # Playwright's Electron driver needs a display server. Linux runners
@@ -111,20 +101,14 @@ jobs:
             xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
             libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2
 
-      - name: Install root dependencies
-        run: pnpm install --no-frozen-lockfile --ignore-scripts --reporter=append-only
+      - name: Install desktop-client dependencies
+        working-directory: desktop-client
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
 
       - name: Build native dependencies
         run: |
-          pnpm rebuild node-pty --reporter=append-only
-          pnpm rebuild esbuild --reporter=append-only
-
-      - name: Fix permissions
-        run: node scripts/fix-permissions.mjs
-
-      - name: Install desktop-client dependencies
-        working-directory: desktop-client
-        run: pnpm install --no-frozen-lockfile --ignore-scripts --reporter=append-only
+          pnpm --dir desktop-client rebuild node-pty --reporter=append-only
+          pnpm --dir desktop-client rebuild esbuild --reporter=append-only
 
       - name: Typecheck + build main
         working-directory: desktop-client

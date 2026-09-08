@@ -92,6 +92,31 @@
   color: var(--text-muted, #52525b);
   font-size: 12px;
 }
+.backlog-run-status {
+  color: var(--accent, #4f46e5) !important;
+}
+.backlog-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.backlog-run-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent, #6366f1) 35%, var(--border-subtle, #d4d4d8));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent, #6366f1) 8%, var(--surface-elevated, #fff));
+  color: var(--accent, #4338ca);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.backlog-run-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .backlog-tags {
   list-style: none;
   padding: 0;

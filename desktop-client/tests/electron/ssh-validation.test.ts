@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertAllowedSshPath, validateSshHostInput } from "../../electron/security/ssh-validation";
+import { assertAllowedSshPath, validateSshHostInput, validateSshUploadLocalPath, validateSshUploadRemoteDirectory } from "../../electron/security/ssh-validation";
 
 describe("SSH input validation", () => {
   it("accepts a normal host and applies the default port", () => {
@@ -42,5 +42,12 @@ describe("SSH input validation", () => {
   it("only permits identity files inside the SSH directory", () => {
     expect(assertAllowedSshPath("~/.ssh/id_ed25519_afk", "/Users/tester")).toBe("/Users/tester/.ssh/id_ed25519_afk");
     expect(() => assertAllowedSshPath("/tmp/private-key", "/Users/tester")).toThrow("SSH 密钥路径必须位于用户 SSH 目录");
+  });
+
+  it("validates upload paths without allowing control characters", () => {
+    expect(validateSshUploadLocalPath(" /tmp/release notes.txt ")).toBe("/tmp/release notes.txt");
+    expect(validateSshUploadRemoteDirectory("/srv/releases")).toBe("/srv/releases/");
+    expect(() => validateSshUploadLocalPath("/tmp/file\nname")).toThrow("SSH 上传文件路径无效");
+    expect(() => validateSshUploadRemoteDirectory("~/uploads\r")).toThrow("SSH 远程目录无效");
   });
 });

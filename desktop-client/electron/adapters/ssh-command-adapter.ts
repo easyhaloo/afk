@@ -59,6 +59,11 @@ function batchCode(stderr: string) {
   return "unreachable" as const;
 }
 
+function scpDestination(target: SshConnectionTarget | string, remotePath: string) {
+  if (typeof target === "string") return `${target}:${remotePath}`;
+  return `${target.user ? `${target.user}@` : ""}${target.hostname}:${remotePath}`;
+}
+
 export function createSshCommandAdapter({ exec }: SshCommandAdapterOptions) {
   return {
     async resolve(alias: string) {
@@ -87,6 +92,14 @@ export function createSshCommandAdapter({ exec }: SshCommandAdapterOptions) {
     deployArgs(target: SshConnectionTarget | string, publicKeyPath: string) {
       if (typeof target === "string") return ["-i", publicKeyPath, target];
       return ["-i", publicKeyPath, ...sshConnectionArgs(target)];
+    },
+    async upload(localPath: string, target: SshConnectionTarget | string, remotePath: string) {
+      const args = typeof target === "string"
+        ? ["--", localPath, scpDestination(target, remotePath)]
+        : ["-P", String(target.port), ...(target.identityFile ? ["-i", target.identityFile] : []), ...(target.proxyJump ? ["-J", target.proxyJump] : []), "--", localPath, scpDestination(target, remotePath)];
+      const result = await exec("scp", args);
+      if (!result.ok) throw new Error(result.stderr.trim() || "SCP 文件上传失败");
+      return true;
     },
   };
 }

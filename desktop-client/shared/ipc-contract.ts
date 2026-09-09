@@ -123,6 +123,7 @@ export type Snapshot = {
 
 export type DesktopApi = {
   copyText: (text: string) => Promise<boolean>;
+  openExternal: (url: string) => Promise<boolean>;
   chooseWorkspace: () => Promise<string | null>;
   snapshot: (workspace: string) => Promise<Snapshot>;
   appearance: () => Promise<AppearancePreferences>;
@@ -139,6 +140,7 @@ export type DesktopApi = {
     generateKey: () => Promise<{ publicKeyPath: string; session: SshSession }>;
     deployKey: (hostId: string) => Promise<SshSession>;
     test: (hostId: string) => Promise<SshTestResult>;
+    upload: (hostId: string) => Promise<SshUploadResult | null>;
     connect: (hostId: string) => Promise<SshSession>;
     openExternal: (hostId: string, terminal?: SshExternalTerminalId) => Promise<SshExternalTerminalResult>;
     credentialHas: (hostId: string) => Promise<boolean>;
@@ -163,6 +165,7 @@ export type DesktopApi = {
 
 export const IPC_CHANNELS = {
   copyText: "afk:copy-text",
+  openExternal: "afk:open-external",
   chooseWorkspace: "afk:choose-workspace",
   snapshot: "afk:snapshot",
   appearance: "afk:appearance",
@@ -178,6 +181,7 @@ export const IPC_CHANNELS = {
   sshGenerateKey: "afk:ssh-generate-key",
   sshDeployKey: "afk:ssh-deploy-key",
   sshTest: "afk:ssh-test",
+  sshUpload: "afk:ssh-upload",
   sshConnect: "afk:ssh-connect",
   sshOpenExternal: "afk:ssh-open-external",
   sshCredentialHas: "afk:ssh-credential-has",
@@ -207,6 +211,7 @@ import type {
   SshSession,
   SshTestResult,
   SshTrustRequest,
+  SshUploadResult,
 } from "./ssh-contract";
 import type {
   BacklogCreateInput,

@@ -35,6 +35,7 @@ without crashing React.
 | `ssh.add(input)` | 原子写入 Electron `userData/ssh-hosts.yml`，不修改 OpenSSH 配置 | AFK 显示名称可使用中文；地址、端口、路径和跳板机引用在主进程校验；连接时使用结构化参数。 |
 | `ssh.trust(request)` | 二次扫描并写入 `~/.ssh/known_hosts` | 候选指纹与二次扫描不一致时拒绝写入。 |
 | `ssh.test(hostId)` | 以 `BatchMode=yes` 执行免密测试 | 未信任或指纹变化时阻断；不等待密码。 |
+| `ssh.upload(hostId)` | 使用原生文件选择器选择文件，并通过参数化 `scp` 上传到远程工作目录 | 仅允许可信且可连接主机；本地文件、远程目录和所有命令参数在主进程校验，不拼接 shell 命令。 |
 | `ssh.connect(hostId)` | 通过 PTY 启动 `/usr/bin/ssh` 并传入托管主机的真实地址参数 | 托管主机不依赖 OpenSSH `Host` alias；系统配置主机保留原有 alias 兼容路径；输入和输出不写入日志。 |
 | `ssh.generateKey()` / `ssh.deployKey(hostId)` | 通过 PTY 调用 `ssh-keygen` 或结构化 OpenSSH 部署命令 | 私钥口令和远程密码由终端直接处理，AFK 不持久化。 |
 

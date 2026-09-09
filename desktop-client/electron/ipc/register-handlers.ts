@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
 import { parseBacklogCreateInput, parseBacklogListOptions, parseBacklogRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
@@ -20,6 +20,7 @@ import { createClipboardService } from "../services/clipboard-service";
 import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
+import { createExternalUrlService } from "../services/external-url-service";
 import { resolveWorkspace } from "../services/workspace-service";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -35,6 +36,7 @@ function broadcast(channel: string, ...args: unknown[]) {
 const home = homedir();
 const sshManagedHostStore = createSshManagedHostStore({ file: path.join(app.getPath("userData"), "ssh-hosts.yml") });
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
+const externalUrlService = createExternalUrlService({ openExternal: (url) => shell.openExternal(url) });
 const sshCredentialService = createSshCredentialService({ home, safeStorage });
 const commands = createSshCommandAdapter({ exec });
 const knownHosts = createKnownHostsAdapter({
@@ -106,6 +108,11 @@ function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
 
 export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.copyText, (event, text: unknown) => { assertTrustedSender(event); return clipboardService.copyText(text); });
+  ipcMain.handle(IPC_CHANNELS.openExternal, (event, url: unknown) => {
+    assertTrustedSender(event);
+    if (typeof url !== "string" || !url.trim()) throw new Error("外部地址无效");
+    return externalUrlService.open(url);
+  });
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);
     const selected = await dialog.showOpenDialog({ title: "选择 AFK 工作区", properties: ["openDirectory"] });
@@ -149,6 +156,13 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.sshGenerateKey, (event) => { assertTrustedSender(event); return sshService.generateKey(); });
   ipcMain.handle(IPC_CHANNELS.sshDeployKey, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.deployKey(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshTest, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.testHost(validateSshHostId(hostId)); });
+  ipcMain.handle(IPC_CHANNELS.sshUpload, async (event, hostId: unknown) => {
+    assertTrustedSender(event);
+    const id = validateSshHostId(hostId);
+    const selection = await dialog.showOpenDialog({ title: "选择要上传的文件", properties: ["openFile"] });
+    if (selection.canceled || !selection.filePaths[0]) return null;
+    return sshService.uploadFile(id, selection.filePaths[0]);
+  });
   ipcMain.handle(IPC_CHANNELS.sshConnect, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.connect(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshOpenExternal, (event, hostId: unknown, terminal: unknown) => { assertTrustedSender(event); return sshService.openExternal(validateSshHostId(hostId), terminal === undefined ? "iterm2" : validateSshExternalTerminalId(terminal)); });
   ipcMain.handle(IPC_CHANNELS.sshCredentialHas, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.hasCredential(validateSshHostId(hostId)); });

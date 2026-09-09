@@ -56,8 +56,9 @@
 }
 .select-menu-trigger:hover,
 .select-menu-trigger.open,
+.select-menu-trigger[aria-expanded="true"],
 .select-menu-trigger:focus-visible {
-  border-color: var(--backlog-accent);
+  border: 1px solid var(--backlog-accent) !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--backlog-accent) 10%, transparent);
   outline: none;
 }
@@ -97,7 +98,7 @@
 }
 .select-menu-option:hover,
 .select-menu-option:focus-visible,
-.select-menu-option.selected { background: color-mix(in srgb, var(--backlog-accent) 10%, transparent); outline: none; }
+.select-menu-option.selected { background: color-mix(in srgb, var(--backlog-accent) 10%, transparent); color: var(--backlog-accent); outline: none; }
 .backlog-alert {
   display: flex;
   align-items: center;
@@ -254,7 +255,7 @@
   z-index: 20;
   display: grid;
   place-items: center;
-  background: rgba(25, 25, 35, 0.2);
+  background: rgba(45, 51, 46, 0.2);
 }
 .backlog-modal {
   display: grid;
@@ -262,11 +263,11 @@
   max-height: calc(100vh - 30px);
   gap: 12px;
   overflow-y: auto;
-  border: 1px solid var(--border-subtle, #d4d4d8);
+  border: 1px solid var(--backlog-border);
   border-radius: 13px;
   padding: 18px;
-  background: var(--surface-elevated, #fff);
-  box-shadow: 0 18px 50px rgba(30, 30, 50, 0.18);
+  background: var(--backlog-surface);
+  box-shadow: 0 18px 50px rgba(46, 51, 47, 0.18);
 }
 .backlog-modal header,
 .backlog-modal footer {
@@ -278,29 +279,29 @@
 .backlog-modal h2 {
   margin: 0;
   font-size: 17px;
-  color: var(--text-strong, #18181b);
+  color: var(--backlog-text);
 }
 .backlog-modal-field {
   display: grid;
   gap: 5px;
   font-size: 12px;
-  color: var(--text-muted, #52525b);
+  color: var(--backlog-muted);
 }
 .backlog-modal-field input,
 .backlog-modal-field textarea {
   min-height: var(--backlog-control-height);
   box-sizing: border-box;
-  border: 1px solid var(--border-subtle, #d4d4d8);
+  border: 1px solid var(--backlog-border);
   border-radius: 7px;
   padding: 0 9px;
-  background: var(--surface-elevated, #fff);
-  color: var(--text-strong, #18181b);
+  background: var(--backlog-surface);
+  color: var(--backlog-text);
   font: inherit;
   outline: none;
 }
 .backlog-modal-field input:focus-visible,
 .backlog-modal-field textarea:focus-visible {
-  border-color: var(--accent, #6366f1);
+  border-color: var(--backlog-accent);
 }
 .backlog-modal-field .select-menu { width: 100%; }
 

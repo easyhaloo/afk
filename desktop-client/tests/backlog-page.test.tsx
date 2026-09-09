@@ -127,6 +127,13 @@ describe("backlog filter (pure)", () => {
 });
 
 describe("BacklogPage initial render", () => {
+  it("does not render a page-level refresh button", async () => {
+    const { renderer } = await renderBacklogPage();
+
+    expect(renderer.root.findAllByProps({ "aria-label": "刷新 Backlog" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+  });
+
   it("invokes the bridge list with the supplied workspace and no platform override by default", async () => {
     const { api, renderer } = await renderBacklogPage("/repo");
 
@@ -229,11 +236,11 @@ describe("BacklogPage loading states", () => {
 
     const platformSelect = renderer.root.findByProps({ "aria-label": "选择 Provider" });
     const stateSelect = renderer.root.findByProps({ "aria-label": "筛选状态" });
-    const refreshButton = renderer.root.findByProps({ "aria-label": "刷新 Backlog" });
+    const createButton = renderer.root.findByProps({ "aria-label": "新建 Backlog" });
 
     expect(platformSelect.props.disabled).toBe(true);
     expect(stateSelect.props.disabled).toBe(true);
-    expect(refreshButton.props.disabled).toBe(true);
+    expect(createButton.props.disabled).toBe(true);
     expect(textContent(renderer.root.findByProps({ className: "backlog-empty" }))).toContain("正在读取 Backlog");
     expect(api.list).toHaveBeenCalledTimes(1);
 
@@ -241,15 +248,17 @@ describe("BacklogPage loading states", () => {
       pending.resolve(items);
       await flushReactUpdates();
     });
-    expect(refreshButton.props.disabled).toBe(false);
+    expect(createButton.props.disabled).toBe(false);
     act(() => { renderer.unmount(); });
   });
 
   it("re-enables controls once the initial load resolves", async () => {
     const { renderer } = await renderBacklogPage();
-    const refreshButton = renderer.root.findByProps({ "aria-label": "刷新 Backlog" });
+    const platformSelect = renderer.root.findByProps({ "aria-label": "选择 Provider" });
+    const createButton = renderer.root.findByProps({ "aria-label": "新建 Backlog" });
 
-    expect(refreshButton.props.disabled).toBe(false);
+    expect(platformSelect.props.disabled).toBe(false);
+    expect(createButton.props.disabled).toBe(false);
     expect(renderer.root.findAllByProps({ className: "backlog-row" })).toHaveLength(items.length);
     act(() => { renderer.unmount(); });
   });
@@ -279,7 +288,7 @@ describe("BacklogPage error states", () => {
 
     api.list.mockResolvedValueOnce(items);
     await act(async () => {
-      renderer.root.findByProps({ "aria-label": "刷新 Backlog" }).props.onClick();
+      renderer.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 }));
       await flushReactUpdates();
     });
 
@@ -412,12 +421,12 @@ describe("BacklogPage refresh and cache", () => {
     act(() => { renderer.unmount(); });
   });
 
-  it("force-refreshes from the bridge when the refresh button is clicked", async () => {
+  it("force-refreshes from the bridge when the global refresh version changes", async () => {
     const { renderer, api } = await renderBacklogPage();
     expect(api.list).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      renderer.root.findByProps({ "aria-label": "刷新 Backlog" }).props.onClick();
+      renderer.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 }));
       await flushReactUpdates();
     });
 
@@ -443,7 +452,7 @@ describe("BacklogPage refresh and cache", () => {
     expect(api.list).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      renderer!.root.findByProps({ "aria-label": "刷新 Backlog" }).props.onClick();
+      renderer!.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 }));
       await flushReactUpdates();
     });
     expect(api.list).toHaveBeenCalledTimes(2);

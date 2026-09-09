@@ -1,4 +1,6 @@
 import { test, expect } from "./_helpers/launch";
+import { readFileSync, writeFileSync } from "node:fs";
+import { FAKE_AFK_STORE } from "./_helpers/launch";
 
 test.describe("BacklogPage list", () => {
   test.beforeEach(async ({ page }) => {
@@ -32,22 +34,45 @@ test.describe("BacklogPage list", () => {
     await expect(platformSelect).toHaveAttribute("value", "auto");
   });
 
+  test("refreshes backlog data through the global header action", async ({ page }) => {
+    await expect(page.locator(".backlog-row")).toHaveCount(3);
+    const store = JSON.parse(readFileSync(FAKE_AFK_STORE, "utf8"));
+    store.items.unshift({
+      id: "4",
+      title: "全局刷新后的工作项",
+      dependsOn: [],
+      state: "ready",
+      executionMode: "afk",
+      tags: [],
+      branchName: "afk/backlog-4",
+      providerRef: "stub:4",
+    });
+    store.nextId = 5;
+    writeFileSync(FAKE_AFK_STORE, JSON.stringify(store), "utf8");
+
+    await page.getByRole("button", { name: "刷新页面" }).click();
+
+    await expect(page.locator(".backlog-row")).toHaveCount(4);
+    await expect(page.locator(".backlog-row").first()).toContainText("全局刷新后的工作项");
+  });
+
   test("keeps backlog controls compact and consistently sized", async ({ page }) => {
     const platform = page.getByRole("button", { name: "选择 Provider" });
     const create = page.getByRole("button", { name: "新建 Backlog" });
-    const refresh = page.getByRole("button", { name: "刷新 Backlog" });
     const search = page.locator(".backlog-search");
     const state = page.getByLabel("筛选状态");
 
-    const controls = await Promise.all([platform, create, refresh, search, state].map(async (locator) => {
+    await expect(page.getByRole("button", { name: "刷新 Backlog" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "刷新页面" })).toBeVisible();
+
+    const controls = await Promise.all([platform, create, search, state].map(async (locator) => {
       const box = await locator.boundingBox();
       if (!box) throw new Error("Backlog control is not visible");
       return box;
     }));
 
     expect(controls[0].height).toBe(controls[1].height);
-    expect(controls[1].height).toBe(controls[2].height);
-    expect(controls[3].height).toBe(controls[4].height);
+    expect(controls[2].height).toBe(controls[3].height);
     expect(controls[0].height).toBeLessThanOrEqual(34);
     expect(controls[0].width).toBeLessThanOrEqual(150);
 
@@ -90,7 +115,7 @@ test.describe("BacklogPage list", () => {
       };
     });
 
-    expect(colors.triggerBorder).toBe(colors.run);
+    await expect.poll(async () => page.locator('.select-menu-trigger[aria-label="选择 Provider"]').evaluate((element) => getComputedStyle(element).borderTopColor)).toBe(colors.run);
     expect(colors.triggerText).toBe(colors.ink);
     expect(colors.popoverBorder).toBe(colors.line);
     expect(colors.tagText).toBe(colors.run);

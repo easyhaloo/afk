@@ -248,6 +248,12 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
     if (!cached || !isSshHostCacheFresh(cached)) void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timeoutId = setTimeout(() => setNotice(""), 3000);
+    return () => clearTimeout(timeoutId);
+  }, [notice]);
+
   const closeForm = useCallback(() => {
     setFormOpen(false);
     setEditingHostId("");

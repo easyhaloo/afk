@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleAlert, Plus, RefreshCw, Search, X } from "lucide-react";
+import { CircleAlert, Plus, Search, X } from "lucide-react";
 import type {
   BacklogCreateInput,
   BacklogExecutionMode,
@@ -51,9 +51,9 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 
 const EMPTY_CREATE_FORM: BacklogCreateInput = { title: "", description: "", executionMode: "afk", tags: [] };
 
-type BacklogPageProps = { workspace: string };
+type BacklogPageProps = { workspace: string; refreshVersion?: number };
 
-export function BacklogPage({ workspace }: BacklogPageProps) {
+export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps) {
   const cached = useMemo(() => readBacklogCache(workspace), []);
   const [items, setItems] = useState<BacklogItem[]>(cached?.items ?? []);
   const [state, setState] = useState<SourceFilter>("all");
@@ -63,6 +63,7 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
   const [error, setError] = useState("");
   const mountedRef = useRef(true);
   const loadGenerationRef = useRef(0);
+  const handledRefreshVersionRef = useRef(refreshVersion);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<BacklogCreateInput>(EMPTY_CREATE_FORM);
@@ -108,8 +109,11 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
   }, [platform, workspace]);
 
   useEffect(() => {
-    void load();
-  }, [load, workspace]);
+    const force = handledRefreshVersionRef.current !== refreshVersion;
+    handledRefreshVersionRef.current = refreshVersion;
+    if (force) invalidateBacklogCache();
+    void load({ force });
+  }, [load, refreshVersion]);
 
   useEffect(() => () => { resetBacklogCache(); }, []);
 
@@ -238,9 +242,6 @@ export function BacklogPage({ workspace }: BacklogPageProps) {
           <SelectMenu label="选择 Provider" value={platform} options={platformOptions} onChange={(value) => { invalidateBacklogCache(); setPlatform(value); }} disabled={busy} />
           <button className="icon-button" onClick={() => setCreateOpen(true)} disabled={busy} aria-label="新建 Backlog">
             <Plus size={16} />
-          </button>
-          <button className="icon-button" onClick={() => { invalidateBacklogCache(); void load({ force: true }); }} disabled={busy} aria-label="刷新 Backlog">
-            <RefreshCw size={16} className={busy ? "spin" : ""} />
           </button>
         </div>
       </header>

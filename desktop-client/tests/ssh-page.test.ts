@@ -238,6 +238,32 @@ describe("SSH SCP uploads", () => {
   });
 });
 
+describe("SSH operation notices", () => {
+  it("automatically hides a success notice after three seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const { renderer } = await renderSshPage();
+      const uploadButton = renderer.root.findByProps({ className: "ssh-upload-action" });
+
+      await act(async () => {
+        uploadButton.props.onClick();
+        await flushReactUpdates();
+      });
+      expect(renderer.root.findByProps({ role: "status" })).toBeDefined();
+
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+        await flushReactUpdates();
+      });
+
+      expect(renderer.root.findAllByProps({ role: "status" })).toHaveLength(0);
+      act(() => { renderer.unmount(); });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("SSH connection modes", () => {
   it("offers cleanup for unreachable system hosts without exposing deletion for reachable system hosts", async () => {
     const unreachable = { ...hosts[0], id: "system:dead", alias: "dead", status: "unreachable" as const };

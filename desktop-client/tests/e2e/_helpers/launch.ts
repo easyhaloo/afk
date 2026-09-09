@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 const HERE = __dirname;
 export const FIXTURE_DIR = path.resolve(HERE, "../fixtures");
 export const FAKE_AFK = path.join(FIXTURE_DIR, "afk");
-export const RENDERER_URL = "http://localhost:5174";
+export const RENDERER_URL = `http://localhost:${process.env.AFK_E2E_PORT ?? "5174"}`;
 // fake-afk persists its in-memory store here so writes from one subprocess
 // invocation survive into the next. Delete before each test for isolation.
 export const FAKE_AFK_STORE = path.join(tmpdir(), "afk-backlog-e2e-store.json");
@@ -55,7 +55,7 @@ export const test = base.extend<Fixtures>({
     resetStore();
     await resetHome();
     const app = await electron.launch({
-      args: ["."],
+      args: [".", `--user-data-dir=${path.join(E2E_HOME, "electron-data")}`],
       env: {
         ...process.env,
         ELECTRON_RENDERER_URL: RENDERER_URL,

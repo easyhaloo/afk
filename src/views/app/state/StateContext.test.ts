@@ -36,4 +36,22 @@ describe('appReducer navigation', () => {
       scrollOffset: 0,
     });
   });
+
+  it('accepts an explicitly allowed plugin view and rejects unknown views', () => {
+    const pluginView = 'plugin:example:status';
+    const allowedViews = new Set(['tasks', 'backlogs', 'projects', 'board', pluginView]);
+
+    const nextState = appReducer(
+      initialState,
+      { type: 'navigate:switch', payload: { view: pluginView } },
+      allowedViews,
+    );
+    expect(nextState.viewStack.at(-1)?.view).toBe(pluginView);
+
+    expect(appReducer(
+      initialState,
+      { type: 'navigate:switch', payload: { view: 'plugin:unknown:status' } },
+      allowedViews,
+    )).toEqual(initialState);
+  });
 });

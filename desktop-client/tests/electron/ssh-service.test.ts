@@ -23,6 +23,7 @@ function dependencies() {
       loadIdentity: async () => true,
       keygenArgs: () => [],
       deployArgs: () => [],
+      upload: async () => true,
     },
     knownHosts: {
       isTrusted: async () => false,
@@ -51,6 +52,76 @@ function dependencies() {
 }
 
 describe("SSH service", () => {
+  it("uploads a selected file to the managed host workspace after verifying its fingerprint", async () => {
+    const deps = dependencies();
+    const upload = vi.fn(deps.commands.upload);
+    deps.commands.upload = upload;
+    deps.knownHosts.isTrusted = async () => true;
+    const directory = await mkdtemp(path.join(tmpdir(), "afk-ssh-upload-"));
+    const localPath = path.join(directory, "release notes.txt");
+    await writeFile(localPath, "release");
+    const service = createSshService(deps);
+
+    await expect(service.uploadFile(host.id, localPath)).resolves.toEqual({ fileName: "release notes.txt", remoteDirectory: "~/" });
+
+    expect(upload).toHaveBeenCalledWith(localPath, host.alias, "~/");
+  });
+
+  it("uses the configured remote workspace for SCP uploads", async () => {
+    const deps = dependencies();
+    const configuredHost = { ...directHost, remoteWorkspace: "/srv/releases" };
+    const upload = vi.fn(deps.commands.upload);
+    deps.commands.upload = upload;
+    deps.config.listHosts = async () => ({ hosts: [configuredHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    const directory = await mkdtemp(path.join(tmpdir(), "afk-ssh-upload-"));
+    const localPath = path.join(directory, "release.tar.gz");
+    await writeFile(localPath, "release");
+    const service = createSshService(deps);
+
+    await expect(service.uploadFile(configuredHost.id, localPath)).resolves.toMatchObject({ remoteDirectory: "/srv/releases/" });
+    expect(upload).toHaveBeenCalledWith(localPath, expect.objectContaining({ hostname: directHost.hostname }), "/srv/releases/");
+  });
+
+  it("falls back to the remote home directory when the workspace is blank", async () => {
+    const deps = dependencies();
+    const configuredHost = { ...host, remoteWorkspace: "  " };
+    const upload = vi.fn(deps.commands.upload);
+    deps.commands.upload = upload;
+    deps.config.listHosts = async () => ({ hosts: [configuredHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    const directory = await mkdtemp(path.join(tmpdir(), "afk-ssh-upload-"));
+    const localPath = path.join(directory, "release.txt");
+    await writeFile(localPath, "release");
+    const service = createSshService(deps);
+
+    await expect(service.uploadFile(configuredHost.id, localPath)).resolves.toMatchObject({ remoteDirectory: "~/" });
+    expect(upload).toHaveBeenCalledWith(localPath, host.alias, "~/");
+  });
+
+  it("rejects uploads before invoking scp when the host is not trusted", async () => {
+    const deps = dependencies();
+    const upload = vi.fn(deps.commands.upload);
+    deps.commands.upload = upload;
+    const directory = await mkdtemp(path.join(tmpdir(), "afk-ssh-upload-"));
+    const localPath = path.join(directory, "release.txt");
+    await writeFile(localPath, "release");
+    const service = createSshService(deps);
+
+    await expect(service.uploadFile(host.id, localPath)).rejects.toThrow("SSH 主机尚未信任，已阻止文件上传");
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing upload files", async () => {
+    const deps = dependencies();
+    const upload = vi.fn(deps.commands.upload);
+    deps.commands.upload = upload;
+    const service = createSshService(deps);
+
+    await expect(service.uploadFile(host.id, "/tmp/afk-file-that-does-not-exist.txt")).rejects.toThrow("SSH 上传文件不存在或不是普通文件");
+    expect(upload).not.toHaveBeenCalled();
+  });
+
   it("connects a managed host directly without resolving its display alias", async () => {
     const deps = dependencies();
     deps.config.listHosts = async () => ({ hosts: [directHost], diagnostics: [] });

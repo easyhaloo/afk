@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const port = process.env.AFK_E2E_PORT ?? "5174";
+
 /**
  * Playwright + Electron end-to-end config for AFK Control.
  *
@@ -23,8 +25,8 @@ export default defineConfig({
   },
   projects: [{ name: "electron", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "pnpm vite --port 5174 --strictPort",
-    url: "http://localhost:5174",
+    command: `pnpm vite --port ${port} --strictPort`,
+    url: `http://localhost:${port}`,
     // The renderer source lives in this worktree; never reuse a stale Vite
     // from a different checkout (e.g. the main repo) that happens to be
     // bound to 5174 — that would serve the wrong main.tsx.

@@ -69,3 +69,13 @@ export function validateSshResize(cols: unknown, rows: unknown) {
   if (typeof cols !== "number" || !Number.isInteger(cols) || cols < 1 || cols > 500 || typeof rows !== "number" || !Number.isInteger(rows) || rows < 1 || rows > 300) throw new Error("SSH 终端尺寸无效");
   return { cols, rows };
 }
+
+export function validateSshUploadLocalPath(value: unknown) {
+  if (typeof value !== "string" || !value.trim() || value.includes("\0") || value.includes("\r") || value.includes("\n") || Buffer.byteLength(value, "utf8") > 4096) throw new Error("SSH 上传文件路径无效");
+  return path.resolve(value.trim());
+}
+
+export function validateSshUploadRemoteDirectory(value: unknown) {
+  if (typeof value !== "string" || !value.trim() || value.includes("\0") || value.includes("\r") || value.includes("\n") || Buffer.byteLength(value, "utf8") > 4096) throw new Error("SSH 远程目录无效");
+  return value.trim().endsWith("/") ? value.trim() : `${value.trim()}/`;
+}

@@ -2,14 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { getShortPath, getGitBranch, formatPathLabel } from '../footer-helpers';
 import { truncateByVisualWidth, visualWidth } from '../utils';
-import type { View } from '../types';
+import type { LoadedTuiView, TuiViewId } from '../../plugins/types';
+import { isBuiltinView } from '../../plugins/types';
 
 interface Props {
-  view?: View;
+  view?: TuiViewId;
   detail?: boolean;
   search?: boolean;
   canOpen?: boolean;
   canAttach?: boolean;
+  pluginViews?: readonly LoadedTuiView[];
 }
 
 /** Keep the asynchronous path label from consuming the footer's one-line shortcut row. */
@@ -19,7 +21,7 @@ export function fitFooterPath(pathInfo: string, columns: number, shortcuts: stri
   return truncateByVisualWidth(pathInfo, available);
 }
 
-export function Footer({ view = 'tasks', detail = false, search = false, canOpen = false, canAttach = false }: Props) {
+export function Footer({ view = 'tasks', detail = false, search = false, canOpen = false, canAttach = false, pluginViews = [] }: Props) {
   const [pathInfo, setPathInfo] = useState('');
   const { stdout } = useStdout();
 
@@ -39,13 +41,19 @@ export function Footer({ view = 'tasks', detail = false, search = false, canOpen
   const openHint = canOpen ? ' · o open' : '';
   const attachHint = view === 'tasks' && detail && canAttach ? ' · a attach (interactive)' : '';
   const debugHint = ' · ctrl+d debug';
+  const pluginHints = pluginViews.length > 0
+    ? ` · ${pluginViews.map(pluginView => `${pluginView.shortcut} ${pluginView.title}`).join(' · ')}`
+    : '';
+  const pluginView = !isBuiltinView(view);
   const shortcuts = search
     ? `esc finish search${debugHint} · ? help`
     : detail
     ? `b/ESC back${openHint}${attachHint}${debugHint} · ? help`
+    : pluginView
+      ? `b/ESC back${debugHint} · ? help${pluginHints}`
     : view === 'board'
-      ? `←→ lanes · ↑↓ cards · enter detail${openHint} · ${search ? 'esc finish search' : '/ search'}${debugHint} · ? help`
-    : `↑↓ move · enter detail${openHint} · ${search ? 'esc finish search' : '/ search'}${debugHint} · ? help`;
+      ? `←→ lanes · ↑↓ cards · enter detail${openHint} · / search${debugHint} · ? help${pluginHints}`
+    : `↑↓ move · enter detail${openHint} · ${search ? 'esc finish search' : '/ search'}${debugHint} · ? help${pluginHints}`;
   const columns = stdout.columns || process.stdout.columns || 80;
   const visiblePath = fitFooterPath(pathInfo, columns, shortcuts);
 

@@ -11,10 +11,9 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { IsolateManager, isolateGc } from '../isolate';
-import { defineModule } from './_registry';
 import type { LifecycleContext } from '../workflows/lifecycle';
 
-export default defineModule(() => ({
+export default () => ({
   name: 'isolate',
 
   async onBeforeAgent(ctx: LifecycleContext): Promise<void> {
@@ -74,4 +73,4 @@ export default defineModule(() => ({
       // Best-effort
     }
   },
-}));
+});

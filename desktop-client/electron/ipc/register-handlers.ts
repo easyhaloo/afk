@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
-import { parseBacklogCreateInput, parseBacklogListOptions, type BacklogPlatform } from "../../shared/backlog-contract";
+import { parseBacklogCreateInput, parseBacklogListOptions, parseBacklogRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
@@ -14,6 +14,8 @@ import { assertTrustedSender } from "../security/sender-guard";
 import { validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 import { readAppearance, saveAppearance } from "../services/appearance-service";
 import { createBacklogService } from "../services/backlog-service";
+import { createBacklogExecutionService } from "../services/backlog-execution-service";
+import { createBacklogRunStore } from "../services/backlog-run-store";
 import { createClipboardService } from "../services/clipboard-service";
 import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
@@ -67,6 +69,17 @@ const backlogService = createBacklogService({
     const result = await exec(command, args, cwd, stdin);
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
   },
+});
+const backlogExecutionService = createBacklogExecutionService({
+  resolveAfk: async () => {
+    const result = await exec("/usr/bin/which", ["afk"]);
+    if (!result.ok) return "";
+    const candidate = result.stdout.split("\n")[0]?.trim() ?? "";
+    return candidate && candidate.startsWith("/") ? candidate : "";
+  },
+  resolveWorkspace,
+  getBacklog: (workspace, id) => backlogService.show(workspace, id),
+  store: createBacklogRunStore({ resolveWorkspace }),
 });
 
 function fingerprintInput(value: unknown): SshFingerprint {
@@ -186,6 +199,17 @@ export function registerIpcHandlers() {
     assertTrustedSender(event);
     if (typeof workspace !== "string") throw new Error("backlog.create: workspace 必须是字符串");
     return backlogService.create(workspace, parseBacklogCreateInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogStart, (event, workspace: unknown, input: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.start: workspace 必须是字符串");
+    return backlogExecutionService.start(workspace, parseBacklogRunStartInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogRuns, (event, workspace: unknown, backlogId: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.runs: workspace 必须是字符串");
+    if (backlogId !== undefined && (typeof backlogId !== "string" || !backlogId)) throw new Error("backlog.runs: backlogId 必须是字符串");
+    return backlogExecutionService.list(workspace, backlogId as string | undefined);
   });
   ipcMain.handle(IPC_CHANNELS.backlogTagAdd, (event, workspace: unknown, id: unknown, tag: unknown) => {
     assertTrustedSender(event);

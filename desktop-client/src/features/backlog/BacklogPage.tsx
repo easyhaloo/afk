@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleAlert, Plus, Search, X } from "lucide-react";
+import { CircleAlert, Play, Plus, Search, X } from "lucide-react";
 import type {
   BacklogCreateInput,
   BacklogExecutionMode,
   BacklogItem,
   BacklogListOptions,
   BacklogPlatform,
+  BacklogRunSummary,
   BacklogState,
 } from "../../../shared/backlog-contract";
 import {
@@ -74,6 +75,8 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
   const [detailItem, setDetailItem] = useState<BacklogItem | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [runBusyFor, setRunBusyFor] = useState("");
+  const [runs, setRuns] = useState<Record<string, BacklogRunSummary>>({});
 
   const createModalRef = useRef<HTMLFormElement>(null);
 
@@ -95,12 +98,16 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
     }
     try {
       const options: BacklogListOptions | undefined = platform === "auto" ? undefined : { platform };
-      const data = await fetchBacklogList(workspace, () => {
-        const opts = options ? { ...options } : undefined;
-        return window.afkDesktop.backlog.list(workspace, opts);
-      }, force ? { now: Date.now() + BACKLOG_FORCE_REFRESH } : {});
+      const [data, persistedRuns] = await Promise.all([
+        fetchBacklogList(workspace, () => {
+          const opts = options ? { ...options } : undefined;
+          return window.afkDesktop.backlog.list(workspace, opts);
+        }, force ? { now: Date.now() + BACKLOG_FORCE_REFRESH } : {}),
+        window.afkDesktop.backlog.runs(workspace),
+      ]);
       if (!isCurrentRequest()) return;
       setItems(data);
+      setRuns(Object.fromEntries(persistedRuns.map((run) => [run.backlogId, run])));
     } catch (cause) {
       if (isCurrentRequest()) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -228,6 +235,20 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
     }
   }, []);
 
+  const startRun = useCallback(async (item: BacklogItem) => {
+    setRunBusyFor(item.id);
+    setError("");
+    try {
+      const run = await window.afkDesktop.backlog.start(workspace, { backlogId: item.id });
+      if (!mountedRef.current) return;
+      setRuns((previous) => ({ ...previous, [item.id]: run }));
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (mountedRef.current) setRunBusyFor("");
+    }
+  }, [workspace]);
   const filtered = useMemo(() => filterBacklogItems(items, query, state), [items, query, state]);
 
   return (
@@ -254,10 +275,24 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
         {filtered.length ? filtered.map((item) => (
           <article className={`backlog-row${detailItem?.id === item.id ? " selected" : ""}`} key={item.id} onClick={() => { void openDetails(item); }}>
             <header>
-              <b>{item.title}</b>
-              <small>#{item.id}</small>
+              <div className="backlog-row-heading">
+                <b>{item.title}</b>
+                <small>#{item.id}</small>
+              </div>
+              <button
+                type="button"
+                className="backlog-run-button"
+                onClick={(event) => { event?.stopPropagation?.(); void startRun(item); }}
+                disabled={runBusyFor === item.id || item.state !== "ready" || runs[item.id]?.status === "running"}
+                aria-label={runBusyFor === item.id ? "启动中" : runs[item.id]?.status === "running" ? "运行中" : runs[item.id]?.status === "failed" ? "重新执行" : "开始执行"}
+                title={runBusyFor === item.id ? "启动中" : runs[item.id]?.status === "running" ? "运行中" : runs[item.id]?.status === "failed" ? "重新执行" : "开始执行"}
+              >
+                <Play size={12} fill="currentColor" aria-hidden="true" />
+                <span className="backlog-run-button-label">{runBusyFor === item.id ? "启动中" : runs[item.id]?.status === "running" ? "运行中" : runs[item.id]?.status === "failed" ? "重新执行" : "开始执行"}</span>
+              </button>
             </header>
             <p>{backlogStateLabel(item.state)} · {item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}</p>
+            {runs[item.id] ? <p className="backlog-run-status">运行状态：{runs[item.id].status === "running" ? "运行中" : runs[item.id].status === "completed" ? "已完成" : "失败"} · PID {runs[item.id].pid ?? "—"}</p> : null}
             {item.tags.length ? (
               <ul className="backlog-tags">
                 {item.tags.map((tag) => (

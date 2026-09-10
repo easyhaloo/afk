@@ -4,13 +4,14 @@ import type { BacklogItem, BacklogRunStartInput, BacklogRunSummary } from "../..
 import type { createBacklogRunStore } from "./backlog-run-store";
 
 type SpawnedProcess = Pick<ChildProcess, "pid" | "once" | "unref">;
+type BacklogSpawnOptions = { cwd: string; detached: boolean; stdio: "ignore"; env?: NodeJS.ProcessEnv };
 
 export type BacklogExecutionServiceDeps = {
   resolveAfk: () => Promise<string>;
   resolveWorkspace: (input: string) => string;
   getBacklog: (workspace: string, id: string) => Promise<BacklogItem>;
   store: ReturnType<typeof createBacklogRunStore>;
-  spawn?: (command: string, args: string[], options: { cwd: string; detached: boolean; stdio: "ignore" }) => SpawnedProcess;
+  spawn?: (command: string, args: string[], options: BacklogSpawnOptions) => SpawnedProcess;
   now?: () => Date;
 };
 
@@ -43,7 +44,7 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
     const startedAt = now().toISOString();
     const runId = `desktop-${input.backlogId}-${randomUUID()}`;
     const args = buildBacklogRunArgs(input);
-    const child = spawn(afkPath, args, { cwd: root, detached: true, stdio: "ignore" });
+    const child = spawn(afkPath, args, { cwd: root, detached: true, stdio: "ignore", env: { ...process.env, PWD: root } });
     const summary: BacklogRunSummary = {
       id: runId,
       backlogId: input.backlogId,

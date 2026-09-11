@@ -258,6 +258,39 @@ export function registerBacklogCommands(program: Command): void {
       }
     });
 
+  backlog
+    .command('create')
+    .description('Create one provider-backed backlog item')
+    .argument('<title>', 'Backlog title')
+    .option('--description-file <path>', 'Markdown description file (defaults to stdin)')
+    .option('--parent <id>', 'Parent backlog ID')
+    .option('-d, --depends-on <id>', 'Backlog ID that must complete first', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--mode <mode>', `Execution mode (${modes.join('|')})`, 'afk')
+    .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--project <project>', 'Provider project/repository')
+    .action(async (title: string, options) => {
+      try {
+        if (!modes.includes(options.mode)) throw new Error(`invalid execution mode: ${options.mode}`);
+        const description = await readDescription(options.descriptionFile);
+        if (!description.trim()) throw new Error('empty backlog description. Provide --description-file or pipe Markdown through stdin.');
+        const item = await createBacklog(await providerFor(options.project), {
+          title,
+          description,
+          parentId: options.parent,
+          dependsOn: options.dependsOn,
+          executionMode: options.mode,
+          tags: options.tag,
+        });
+        if (!item.webUrl) throw new Error(`provider did not return a URL for created backlog ${item.id}`);
+        success(`Created backlog ${item.id}: ${item.title}`);
+        detail(`url: ${item.webUrl}`);
+        if (item.parentId) detail(`parent: ${item.parentId}`);
+        if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
+      } catch (error) {
+        handleCommandError(error);
+      }
+    });
+
   const tag = backlog.command('tag').description('Manage business tags on a backlog item');
   tag.command('add')
     .description('Add a business tag')

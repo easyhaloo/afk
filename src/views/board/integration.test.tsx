@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../domain/backlog/index';
+import type { BacklogItem } from '../../lib/core/backlog';
 import { BoardView } from './board/BoardView';
 import { loadBacklogViewModels } from './data/backlog-adapter';
 
@@ -31,11 +31,9 @@ describe('backlog board integration', () => {
       <BoardView backlogs={backlogs} selectedIndex={0} scrollOffset={0} viewportHeight={10} width={120} />,
     );
 
-    expect(output).toContain('flow');
-    expect(output).toContain('◌');
-    expect(output).toContain('◇');
-    expect(output).toContain('#42');
-    expect(output).toContain('Verify release');
+    expect(output).toContain('verification');
+    expect(output).toContain('hitl');
+    expect(output).toContain('backlog 42');
     expect(claim).not.toHaveBeenCalled();
     expect(transition).not.toHaveBeenCalled();
     expect(addTag).not.toHaveBeenCalled();

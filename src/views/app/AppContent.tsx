@@ -1,16 +1,26 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, useInput } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { useState as useAppState, createActions } from './hooks';
-import { Body, DebugOverlay, Footer, Header, HelpDialog, Notification, getBodyViewportHeight } from '../board/views/index';
-import { getTaskSelectionIndex } from '../board/task-cockpit';
+import { initRegistry } from '../board/registry/init';
+import {
+  TaskListView,
+  BacklogListView,
+  ProjectListView,
+  BoardView,
+  DetailScreen,
+  HelpDialog,
+  DebugOverlay,
+  Header,
+  Footer,
+  Notification,
+} from '../board/views/index';
+import { getListViewportHeight } from '../board/layout';
 import type { Task, Project } from '../../types/board';
-import type { Branch, Commit, Tag } from '../../domain/tracker/types';
+import type { Branch, Commit, Tag } from '../../lib/core/tracker/types';
 import type { BacklogViewModel } from '../board/data/backlog-adapter';
 import type { View } from '../board/types';
-import { getBoardColumns, getBoardSelectionTarget, groupBacklogsByState } from '../board/board/model';
-import { PluginViewBoundary } from '../plugins/PluginViewBoundary';
-import type { LoadedTuiView, TuiPluginContext } from '../plugins/types';
-import { isBuiltinView } from '../plugins/types';
+
+initRegistry();
 
 interface Props {
   tasks: Task[];
@@ -28,9 +38,6 @@ interface Props {
   onAttachSession?: (task: Task) => void;
   onOpenTaskDiagnostics?: (task: Task) => void;
   onViewChange?: (view: View) => void;
-  pluginViews?: readonly LoadedTuiView[];
-  cwd?: string;
-  workspace?: string;
 }
 
 export function AppContent({
@@ -49,13 +56,9 @@ export function AppContent({
   onAttachSession,
   onOpenTaskDiagnostics,
   onViewChange,
-  pluginViews = [],
-  cwd = process.cwd(),
-  workspace,
 }: Props) {
   const { state, dispatch, currentView, currentContext, isDetailMode } = useAppState();
   const actions = createActions({ state, dispatch, currentView, currentContext, isDetailMode });
-  const pluginView = pluginViews.find(view => view.id === currentView);
   const [dimensions, setDimensions] = useState({ width: process.stdout.columns || 80, height: process.stdout.rows || 24 });
 
   useEffect(() => {
@@ -74,14 +77,11 @@ export function AppContent({
   const tasksRef = useRef<Task[]>([]);
   const backlogsRef = useRef<BacklogViewModel[]>([]);
   const projectsRef = useRef<Project[]>([]);
-  const previousTasksRef = useRef<Task[]>(tasks);
-  const selectedTaskRunIdRef = useRef<string | undefined>(undefined);
   tasksRef.current = tasks;
   backlogsRef.current = backlogs;
   projectsRef.current = projects;
 
   const getItems = (): Array<Task | BacklogViewModel | Project> => {
-    if (!isBuiltinView(currentView)) return [];
     const raw = currentView === 'tasks'
       ? tasksRef.current
       : currentView === 'backlogs' || currentView === 'board'
@@ -101,35 +101,19 @@ export function AppContent({
 
   const items = getItems();
   const selectedItem = () => items[state.selectedIndex];
-  const viewportHeight = getBodyViewportHeight(dimensions.height, state.isSearchMode);
+  const viewportHeight = getListViewportHeight(dimensions.height, { header: 1, context: 1, footer: 1, spacer: 1 });
   const maxIndex = Math.max(0, items.length - 1);
 
   useEffect(() => {
-    if (currentView !== 'tasks') return;
-    const taskItems = items as Task[];
-    if (previousTasksRef.current !== tasks) {
-      const nextIndex = getTaskSelectionIndex(taskItems, selectedTaskRunIdRef.current, state.selectedIndex);
-      if (nextIndex !== state.selectedIndex) {
-        dispatch({ type: 'selection:move', payload: { index: nextIndex, scrollOffset: 0 } });
-      }
-      selectedTaskRunIdRef.current = taskItems[nextIndex]?.runId;
-      previousTasksRef.current = tasks;
-      return;
-    }
-    selectedTaskRunIdRef.current = taskItems[state.selectedIndex]?.runId;
-  }, [currentView, dispatch, items, state.selectedIndex, tasks]);
-
-  useEffect(() => {
-    if (!isBuiltinView(currentView) || currentView === 'board') return;
     const offset = state.selectedIndex < state.scrollOffset
       ? state.selectedIndex
-        : state.selectedIndex >= state.scrollOffset + viewportHeight
+      : state.selectedIndex >= state.scrollOffset + viewportHeight
         ? Math.min(state.selectedIndex - viewportHeight + 1, maxIndex)
         : state.scrollOffset;
     if (offset !== state.scrollOffset) {
       dispatch({ type: 'selection:move', payload: { index: state.selectedIndex, scrollOffset: offset } });
     }
-  }, [currentView, state.selectedIndex, state.scrollOffset, viewportHeight, maxIndex, dispatch]);
+  }, [state.selectedIndex, state.scrollOffset, viewportHeight, maxIndex, dispatch]);
 
   useEffect(() => {
     if (isDetailMode && currentView === 'projects') {
@@ -144,27 +128,16 @@ export function AppContent({
     }
   }, [currentView, projectHasMore, state.selectedIndex, items.length, onFetchMoreProjects]);
 
-  const selectedForActions = selectedItem();
-  const canOpen = currentView === 'tasks'
-    ? Boolean((selectedForActions as Task | undefined)?.diagnosticPath && onOpenTaskDiagnostics)
-    : currentView === 'projects'
-      ? Boolean((selectedForActions as Project | undefined)?.web_url)
-      : Boolean((selectedForActions as BacklogViewModel | undefined)?.webUrl);
-  const canAttach = currentView === 'tasks'
-    && Boolean(onAttachSession)
-    && (selectedForActions as Task | undefined)?.executionMode === 'interactive'
-    && Boolean((selectedForActions as Task | undefined)?.session);
-
   useInput((input, key) => {
     if (input === '?') {
       actions.toggleHelp();
       return;
     }
-    if (key.ctrl && (input === 'd' || input === 'D' || input === '\x04')) {
+    if (input === 'D' || input === 'd') {
       actions.toggleDebug();
       return;
     }
-    if (input === '/' && isBuiltinView(currentView)) {
+    if (input === '/') {
       actions.enableSearch();
       return;
     }
@@ -177,13 +150,10 @@ export function AppContent({
       }
       return;
     }
-    if (input === 'q') {
-      process.exit(0);
-      return;
-    }
-    if (key.escape) {
+    if (key.escape || input === 'q') {
       if (state.showHelp) actions.toggleHelp();
       else if (isDetailMode) actions.viewList();
+      else if (input === 'q') process.exit(0);
       else if (state.viewStack.length > 1) actions.goBack();
       return;
     }
@@ -210,41 +180,10 @@ export function AppContent({
       if (state.viewStack.length > 1) actions.goBack();
       return;
     }
-
-    if (!isDetailMode && !state.showHelp) {
-      const matchedPlugin = pluginViews.find(plugin => plugin.shortcut === input);
-      if (matchedPlugin) {
-        actions.switchView(matchedPlugin.id);
-        return;
-      }
-    }
-
-    if (input === '1') { actions.switchView('tasks'); return; }
-    if (input === '2') { actions.switchView('backlogs'); return; }
-    if (input === '3') { actions.switchView('projects'); return; }
-    if (input === '4') { actions.switchView('board'); return; }
-
-    if (!isBuiltinView(currentView)) return;
-
-    if (currentView === 'board') {
-      const boardItems = items as BacklogViewModel[];
-      const columns = getBoardColumns(groupBacklogsByState(boardItems));
-      const currentId = boardItems[state.selectedIndex]?.id;
-      const selectTarget = (direction: 'up' | 'down' | 'left' | 'right' | 'top' | 'bottom') => {
-        const targetId = getBoardSelectionTarget(columns, currentId, direction);
-        if (!targetId) return;
-        const index = boardItems.findIndex(item => item.id === targetId);
-        if (index >= 0) dispatch({ type: 'selection:move', payload: { index, scrollOffset: 0 } });
-      };
-
-      if (key.upArrow) { selectTarget('up'); return; }
-      if (key.downArrow) { selectTarget('down'); return; }
-      if (key.leftArrow) { selectTarget('left'); return; }
-      if (key.rightArrow) { selectTarget('right'); return; }
-      if (input === 'g') { selectTarget('top'); return; }
-      if (key.shift && input === 'G') { selectTarget('bottom'); return; }
-    }
-
+    if (input === '1') actions.switchView('tasks');
+    if (input === '2') actions.switchView('backlogs');
+    if (input === '3') actions.switchView('projects');
+    if (input === '4') actions.switchView('board');
     if (key.downArrow) {
       actions.selectionDown(items.length);
       maybeLoadMoreProjects();
@@ -274,44 +213,37 @@ export function AppContent({
   });
 
   return (
-      <Box flexDirection="column" height={dimensions.height} overflow="hidden">
-      <Header
-        view={currentView}
-        tasksCount={tasks.length}
-        backlogsCount={backlogs.length}
-        projectsCount={projects.length}
-        runningCount={tasks.filter(task => task.status === 'active').length}
-        attentionCount={tasks.filter(task => task.status === 'stale' || Boolean(task.errorSummary)).length}
-        width={dimensions.width}
-        pluginViews={pluginViews}
-      />
-      {pluginView ? (
-        <PluginViewBoundary
-          view={pluginView}
-          context={{ cwd, workspace, notify: message => actions.notify(message) } satisfies TuiPluginContext}
+    <Box flexDirection="column" height={dimensions.height}>
+      {isDetailMode ? (
+        <DetailScreen
+          item={selectedItem()}
+          view={currentView}
+          height={Math.max(1, dimensions.height - 1)}
+          width={dimensions.width}
+          branches={projectBranches}
+          tags={projectTags}
+          commits={projectCommits}
         />
       ) : (
-        <Body
-          view={currentView}
-          detail={isDetailMode}
-          search={state.isSearchMode}
-          searchQuery={state.searchQuery}
-          tasks={currentView === 'tasks' ? items as Task[] : []}
-          backlogs={currentView === 'backlogs' || currentView === 'board' ? items as BacklogViewModel[] : []}
-          projects={currentView === 'projects' ? items as Project[] : []}
-          selectedIndex={state.selectedIndex}
-          scrollOffset={state.scrollOffset}
-          height={dimensions.height}
-          width={dimensions.width}
-          projectBranches={projectBranches}
-          projectTags={projectTags}
-          projectCommits={projectCommits}
-          projectHasMore={projectHasMore}
-        />
+        <>
+          <Header view={currentView} tasksCount={tasks.length} backlogsCount={backlogs.length} projectsCount={projects.length} />
+          <Box height={1} flexShrink={0} paddingX={2}>
+            {state.isSearchMode
+              ? <Text color="cyan">filter · /{state.searchQuery}_ · {items.length} matches</Text>
+              : <Text dimColor>enter detail · / search</Text>}
+          </Box>
+          <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2}>
+            {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
+            {currentView === 'backlogs' && <BacklogListView backlogs={items as BacklogViewModel[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
+            {currentView === 'projects' && <ProjectListView projects={items as Project[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
+            {currentView === 'board' && <BoardView backlogs={items as BacklogViewModel[]} selectedIndex={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
+            {currentView === 'projects' && projectHasMore && <Box position="absolute" right={2} bottom={0}><Text dimColor>↓ more available</Text></Box>}
+          </Box>
+        </>
       )}
-      <Footer view={currentView} detail={isDetailMode} search={isDetailMode ? false : state.isSearchMode} canOpen={canOpen} canAttach={canAttach} pluginViews={pluginViews} />
+      <Footer view={currentView} detail={isDetailMode} search={isDetailMode ? false : state.isSearchMode} />
       <Notification notification={state.notification} animation={state.notifAnimation} />
-      {state.showHelp && <HelpDialog view={currentView} detail={isDetailMode} canOpen={canOpen} canAttach={canAttach} pluginViews={pluginViews} />}
+      {state.showHelp && <HelpDialog view={currentView} detail={isDetailMode} />}
       {state.debugMode && <DebugOverlay logs={state.debugLog} />}
     </Box>
   );

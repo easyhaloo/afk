@@ -1,59 +1,75 @@
-# Skill Guide
+# SKILL-GUIDE Checklist
 
-## Quality
+## Quality Checklist
 
-- `name` matches the directory, uses lowercase `a-z`, `0-9`, and single hyphens, and has a clear responsibility.
-- `description` is concise, identifies what the skill does and when it applies, and does not contain unnecessary workflow detail.
-- `SKILL.md` is focused on behavior and constraints rather than procedural decoration.
-- The skill has one clear responsibility and a precise boundary with related skills.
-- Domain-specific terminology, values, contracts, and invariants are preserved when required for correct execution.
-- Specialized or substantial domain knowledge is placed in `references/` rather than duplicated in `SKILL.md`.
-- Instructions are actionable and unambiguous; avoid vague advice and arbitrary thresholds.
-- Examples and commands are not embedded merely to explain intent; use scripts or references when executable detail is genuinely required.
-- `references/hard-checks.md`, when present, contains only agent-facing prohibitions and escalation rules, not recovery playbooks.
-- The skill directory remains self-contained and does not depend on undocumented files outside its boundary.
+- [ ] `name` matches directory, lowercase, no consecutive hyphens
+- [ ] `description` ≤ 1024 characters, includes trigger keywords
+- [ ] Steps reflect actual workflow shape; no formulaic decoration
+- [ ] Caveats are concrete (specific failure, not "be careful")
+- [ ] No example code or command snippets
+- [ ] `SKILL.md` under 500 lines
+- [ ] Single responsibility — one skill does one thing
+- [ ] Domain-specific terms and values preserved
 
-## Design
+## Reasoning Chain
 
-### Responsibility
+When checking or creating skills, use explicit reasoning:
 
-The skill must answer:
+```
+1. Read the requirement. What does it actually require?
+2. Find evidence. Where in the skill is the relevant content?
+3. Reason. Does this pass? What could be wrong?
+4. Mark. Then mark pass/fail — not before.
+5. Self-reflect. Could this be a false positive?
+```
 
-- What problem does it solve?
-- What is inside its boundary?
-- What is explicitly outside its boundary?
-- What input does it require?
-- What result should it produce?
+**Never skip the reasoning step.** Blind confirmation produces false
+positives. Trace through each item explicitly.
 
-### Evidence
+## Constraint Rules
 
-When creating or improving a skill, inspect the existing implementation, relevant references, related skills, and repository conventions before changing the design.
+- **LLM-first design**: concise keywords, structured sections, no prose walls
+- **Concise description**: description is the **only trigger carrier** — startup loads it for matching, body loads only after activation. Binary judgment, "does X, not Y". Never duplicate trigger logic in body.
+- **Body minimization**: detail in references/, SKILL.md is the index
+- **Abstraction over explanation**: keyword-driven, trust model priors.
 
-Judge the skill from evidence rather than from formatting alone. Preserve behavior that is required by the domain, and remove duplication or generic instructions that do not materially improve execution.
+  **Knowledge determination:** LLM knows (1) training data + (2) current context.
+  ```
+  Decision rule:
+    In training data → Abstract (LLM knows it)
+    Only in skill file → PRESERVE (LLM knows it only from context)
+  ```
+  - Training data has it → abstract (e.g., `git commit`, `jest`)
+  - Only in skill file → PRESERVE (e.g., a provider-specific artifact format)
+- **Domain knowledge separation**: specialized knowledge in references/
+- **Fail-closed on unclear state**: stop if precondition not met
+- **No ambiguous language**: no "consider", "maybe", "if appropriate"
+- **Explicit output location**: `/tmp/` for transient, skill dir for durable
+- **No example code or commands**: intent over syntax
+- **Self-contained**: directory boundary is absolute, no out-of-bounds reads
 
-### Instructions
+## Directory Structure
 
-Prefer concise, descriptive guidance over rigid step-by-step SOPs. Describe the behavior the agent must achieve, the constraints it must respect, and the conditions under which it should stop, ask, verify, or continue.
+```
+skill-name/
+├── SKILL.md          # Required
+├── scripts/          # Optional: executable code
+├── references/       # Optional: REFERENCE.md, FORMS.md, domain docs
+├── assets/           # Optional: templates, images, data files
+└── ...
+```
 
-Do not encode arbitrary attempt counts, mandatory questions, or implementation mechanisms unless they are required by the domain.
+## Body Structure
 
-### Knowledge
+```
+**Goal:** input → output contract.
 
-Separate general model knowledge from repository-specific or domain-specific knowledge. Preserve knowledge that the agent cannot reliably infer from context, and move substantial specialized knowledge into references.
+## Steps
 
-### Safety
+Numbered, imperative. Steps reflect actual workflow shape — not every
+step needs explicit Precondition/Output labeling.
 
-Fail closed when a required precondition or critical fact cannot be established. Do not silently invent missing information, override local hard checks, or cross the skill's directory boundary.
+## Caveats
 
-## Validation
-
-Before considering a skill complete, verify that:
-
-1. Its responsibility and trigger are clear.
-2. Its instructions are sufficient to execute the intended behavior.
-3. Related skills do not duplicate or contradict its responsibility.
-4. References and `SKILL.md` are consistent.
-5. Required domain knowledge and constraints are preserved.
-6. No known validation issue remains unresolved.
-
-> **Principle:** Optimize for correct agent behavior, not checklist compliance. The checklist is evidence for review, not a substitute for understanding the skill.
+Concrete failure modes — specific, not vague.
+```

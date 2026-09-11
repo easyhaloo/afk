@@ -16,30 +16,34 @@ AFK TUI 基于 React + Ink 构建，采用分层测试策略。
 
 ## 1. 单元测试（推荐起步）
 
-**目标**：纯逻辑、状态机、TUI 插件加载和配置解析
+**目标**：纯逻辑、状态机、事件分发器、注册表
 
 **工具**：vitest（已配置）
 
 **模式**：直接实例化类，调用方法，断言结果
 
 ```typescript
-// src/views/plugins/loader.test.ts
-const views = await loadTuiViews({ homeDir: fixtureHome, resolveEntry: fixtureEntry });
-expect(views[0]).toMatchObject({
-  id: 'plugin:example:status',
-  shortcut: 'z',
+// src/lib/ui/core/Keyboard.test.ts
+import { KeyboardDispatcher } from './Keyboard';
+
+it('dispatches escape to global handler', () => {
+  const dispatcher = new KeyboardDispatcher();
+  const handler = vi.fn();
+  dispatcher.registerGlobal('escape', handler);
+  dispatcher.dispatch({ key: 'escape', input: '', ctrl: false, shift: false, meta: false });
+  expect(handler).toHaveBeenCalled();
 });
 ```
 
 **适用场景**：
-- TUI 插件发现和清单校验
+- `KeyboardDispatcher`、`ViewRegistry` 等核心类
 - reducer / state machine
 - 配置解析、schema 验证
 - Zod schema 解析
 
 **运行**：
 ```bash
-pnpm vitest run src/views/plugins src/views/app/state
+pnpm dlx vitest --run src/lib/ui/core/
 ```
 
 ---

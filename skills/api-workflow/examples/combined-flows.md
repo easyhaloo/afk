@@ -1,107 +1,135 @@
 # Combined Flow Examples
 
-Illustrative combinations of reusable workflow patterns. These examples show composition, not mandatory API shapes, authentication choices, file layouts, or artifact names. Derive the actual workflow from the target application and its test infrastructure.
+Real-world scenarios combining multiple patterns.
 
 ---
 
 ## Example 1: E-commerce Order Flow
 
-**Patterns:** auth → create resource → asynchronous completion → verification
+**Patterns:** auth-login → crud-resource → poll-until-complete
 
-**Scenario:** Authenticate, create an order, wait for payment processing, and verify the completed state.
+**Scenario:** User logs in, creates an order, waits for payment, verifies completion.
 
-**Possible flow:**
-1. Establish the required test identity
-2. Create the order
-3. Trigger or await payment processing
-4. Poll or await the application's completion signal
-5. Verify authoritative order state
+**Steps:**
+1. Login to get token
+2. Create order with products
+3. Simulate payment (if applicable)
+4. Poll order status until PAID
+5. Verify order state
 
 ---
 
 ## Example 2: User Registration → KYC → Loan Application
 
-**Patterns:** registration/auth → conditional state → asynchronous completion
+**Patterns:** auth-login → conditional-flow → poll-until-complete
 
-**Scenario:** Register a user, process KYC, evaluate eligibility, and continue only when the application's state allows it.
+**Scenario:** Register user, check KYC status, apply for loan based on eligibility.
 
-**Possible flow:**
-1. Establish the user identity
-2. Submit registration/KYC data
-3. Wait for the application's KYC completion signal
-4. Read the authoritative eligibility state
-5. Apply for a loan only when permitted
+**Steps:**
+1. Register or login user
+2. Submit KYC documents
+3. Poll KYC status until APPROVED
+4. Check eligibility
+5. If eligible: apply for loan
 
 ---
 
 ## Example 3: Checkout Flow (Hybrid)
 
-**Patterns:** API setup → browser action → API verification
+**Patterns:** api-setup → browser-action → api-verify
 
-**Scenario:** Prepare a cart through an API, complete checkout in the browser, then verify the resulting order through an authoritative API.
+**Scenario:** API creates cart, user completes checkout in browser, verify order via API.
 
-**Possible flow:**
-1. API: create or prepare cart
-2. Browser: review cart and complete checkout
-3. Browser: submit the final action
-4. API: verify the resulting order state
+**Steps:**
+1. API: Create cart with items
+2. Browser: User reviews cart and enters payment
+3. Browser: User clicks "Pay"
+4. API: Verify order was created and paid
 
 ---
 
 ## Example 4: Payment Webhook Verification
 
-**Patterns:** trigger → asynchronous callback → state verification → negative case
+**Patterns:** verify-webhook → expect-api-error
 
-**Scenario:** Trigger payment, observe the callback, verify state transition, then verify duplicate handling.
+**Scenario:** Place order, trigger payment, verify webhook received, test error handling.
 
-**Possible flow:**
+**Steps:**
 1. Create order
 2. Trigger payment
-3. Await the application's webhook processing signal
-4. Verify authoritative order state
-5. Exercise the duplicate case and verify the expected error
+3. Poll webhook status until received
+4. Verify order status updated
+5. Try duplicate payment (should fail)
 
 ---
 
-## Example 5: Authenticated UI Test with Scripted Session State
+## Example 5: Authenticated UI Test with storage-state
 
-**Pattern:** scripted authentication → browser verification
+**Patterns:** storage-state (API setup) → browser-verify
 
-**Scenario:** Establish a browser-compatible authenticated state using the application's supported scripted mechanism, then verify protected pages.
+**Mode:** `storage-state`
 
-The concrete mechanism, state-file location, and setup artifacts must come from the target project and the applicable authentication reference/template.
+**Scenario:** API login, save auth state, open browser and verify protected pages.
 
----
+**Generated artifacts:** `fixtures/browser-session.ts` (storage-state), `setup/auth-api.setup.ts`, `playwright/.auth/` (gitignored), `.env.example`
 
-## Example 6: SSO-Protected App with an Interactive Local Session
-
-**Pattern:** existing browser session → browser verification
-
-**Scenario:** A developer has authenticated interactively, including MFA, in a dedicated local browser session. The test attaches to that session only when the repository and environment explicitly support this approach.
-
-The CDP endpoint, profile ownership, lifecycle, and cleanup rules must come from the applicable authentication reference. Do not assume that an existing browser session is available.
+**Steps:**
+1. Setup: API login → save state to `playwright/.auth/user.json`
+2. Test: load state → open browser → verify dashboard/profile pages
+3. State file is gitignored; expires when server session expires
 
 ---
 
-## Example 7: Reuse an Existing Browser Session
+## Example 6: SSO-Protected App (local dev via localhost-cdp)
 
-**Pattern:** existing authenticated browser context → browser verification
+**Patterns:** localhost-cdp → browser-verify
 
-**Scenario:** Reuse a test-owned authenticated browser context to verify protected application behavior.
+**Mode:** `localhost-cdp`
 
-The session acquisition mechanism is environment-specific. Prefer repository-supported fixtures and do not expose or persist personal browser credentials.
+**Scenario:** App uses SSO with MFA. Developer starts a dedicated Chrome
+with `--remote-debugging-port=9222`, completes SSO + MFA manually once,
+and leaves it running. Tests attach over CDP and reuse the live session.
+
+**Generated artifacts:** `fixtures/browser-session.ts` (localhost-cdp), `browser-auth-runbook.md`, `.env.example`
+
+**Steps:**
+1. One-time: launch Chrome with `--user-data-dir=~/.afk-browser-profile --remote-debugging-port=9222`
+2. In the launched Chrome, complete SSO + MFA manually
+3. Set `CDP_ENDPOINT=http://127.0.0.1:9222`
+4. Test: fixture connects over CDP, uses existing context, creates a fresh page, verifies UI
+5. Only the test-owned page is closed; external browser and pre-existing tabs are untouched
+
+---
+
+## Example 7: Reuse Existing Browser Session via CDP
+
+**Patterns:** localhost-cdp → browser-verify
+
+**Mode:** `localhost-cdp`
+
+**Scenario:** Developer has already logged in manually in a Chromium window started with `--remote-debugging-port`. Tests attach to the existing session.
+
+**Generated artifacts:** `fixtures/browser-session.ts` (localhost-cdp), `browser-auth-runbook.md`, `.env.example`
+
+**Steps:**
+1. Start Chromium: `google-chrome --user-data-dir=/tmp/profile --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1`
+2. Log in manually in the browser
+3. Set `CDP_ENDPOINT=http://127.0.0.1:9222`
+4. Test: fixture connects over CDP, uses existing context, creates a new page, verifies UI
+5. Only the test-owned page is closed; external browser and pre-existing tabs are untouched
 
 ---
 
 ## Pattern Combination Cheat Sheet
 
-| Scenario | Example composition |
-|----------|---------------------|
-| Order flow | auth + create + async + verify |
-| User flow | auth + conditional + async + verify |
-| Checkout | API setup + browser action + API verify |
-| Webhook | trigger + callback + state verify + error |
-| File processing | browser trigger + async + browser/API verify |
-| Eligibility | conditional + expected error |
-| Authenticated UI | supported auth mechanism + browser verify |
-| SSO/MFA UI | interactive local session + browser verify |
+| Scenario | Patterns |
+|----------|----------|
+| Order flow | auth-login + crud + poll |
+| User flow | auth-login + conditional + poll |
+| Checkout | api-setup + browser-action + api-verify |
+| Webhook | verify-webhook + error-validation |
+| File processing | browser-trigger + poll + browser-verify |
+| Eligibility | conditional-flow + expect-error |
+| Auth UI (API login) | storage-state + browser-verify |
+| Auth UI (SSO/MFA) | localhost-cdp + browser-verify |
+| Auth UI (CDP reuse) | localhost-cdp + browser-verify |

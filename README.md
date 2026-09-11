@@ -13,7 +13,7 @@ Cross-platform issue tracking automation (GitLab/GitHub) powered by Claude AI ag
 ## Features
 
 - **Cross-platform** — Unified GitLab and GitHub CLI (issues, MRs/PRs)
-- **Skills Suite** — Claude Code skills covering the full development lifecycle plus quality governance
+- **Skills Suite** — 19 Claude Code skills covering the full development lifecycle
 - **TUI Dashboard** — Interactive issue tracking dashboard
 - **Background Automation** — tmux-based workflow scheduler
 - **TDD Integration** — Built-in test-driven development methodology
@@ -32,7 +32,7 @@ See [Getting Started Guide](docs/GETTING-STARTED.md) for detailed setup.
 
 ## Install Claude Code Plugin (Optional)
 
-AFK provides a full Claude Code skill suite that can be integrated as a plugin (**v1.0.6**).
+AFK provides a full Claude Code skill suite that can be integrated as a plugin.
 
 ### Method 1: In Claude Code Session (Recommended)
 
@@ -89,11 +89,14 @@ Run `/afk-grill-me` in Claude Code to confirm skills are loaded.
 ## CLI Commands
 
 ```bash
-# Backlog Management
-afk backlog init
-afk backlog list --mode afk
-afk backlog show --id <id>
-afk backlog create "Title" --description-file ./backlog.md --parent <id> --depends-on <id> --tag feature
+# Issue Management
+afk issue get <id>
+afk issue list --label "stage::ready-for-implement"
+afk issue create "Title" --label "feature"
+afk issue edit <id> --label "bug"
+afk issue comment <id> "message"
+afk issue link <src> <project>:<iid>     # cross-project link
+afk issue run <iid> --project <repo>      # cross-project workflow
 
 # MR/PR Operations
 afk mr create "feat: add login" --source feat/login --target main
@@ -144,7 +147,6 @@ Full command reference: `afk --help`
 | `/afk-hand-off` | Work handoff | Transfer task to another developer |
 | `/afk-scheduler` | Background scheduling | Multiple issues with dependency-aware execution |
 | `/afk-skill-craft` | Skill authoring | Create, diagnose, or refactor skills |
-| `/software-complexity-governance` | Complexity governance | Metrics, smells, module/service boundaries, anti-CP reuse |
 | `/api-workflow` | API testing | Multi-step API chains with browser testing |
 | `/md-to-pdf` | Markdown to PDF | Export docs with Mermaid diagrams |
 | `/reasoning-guard` | Reasoning guard | Multi-turn reasoning degradation in coding agents |

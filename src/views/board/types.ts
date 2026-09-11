@@ -1,6 +1,5 @@
-import type { TuiViewId } from '../plugins/types';
-
-export type View = TuiViewId;
+// View type - union of all registered view names
+export type View = 'tasks' | 'backlogs' | 'projects' | 'board';
 
 export type DetailView = 'list' | 'detail';
 
@@ -13,7 +12,7 @@ export interface Notification {
 
 // View context - carries data with a view state
 export interface ViewContext {
-  project?: import('../../domain/tracker/types').Project;
+  project?: import('../../lib/core/tracker/types').Project;
   scrollOffset?: number;
   selectedIndex?: number;
 }

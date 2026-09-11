@@ -1,34 +1,26 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box } from 'ink';
 import { AppContent } from './AppContent';
+import { initRegistry } from '../board/registry/init';
 import type { Task } from '../../types/board';
 import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter';
 import type { View } from '../board/types';
 import { StateProvider } from './state/StateContext';
-import { TmuxClient } from '../../infrastructure/tmux/tmux';
-import { createManagementProviders } from '../../application/tracker-provider-factory';
+import { TmuxClient } from '../../lib/core/tmux/tmux';
+import { createManagementProviderBundle } from '../../lib/client-factory';
 import { useData } from '../board/data/useData';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
 import { SplashScreen } from '../board/components/SplashScreen';
-import { openInBrowser } from '../../shared/browser';
-import { loadTuiViews } from '../plugins/loader';
-import type { LoadedTuiView } from '../plugins/types';
+import { openInBrowser } from '../../lib/cli-utils';
+
+initRegistry();
 
 /** Compose the read-only dashboard with runtime session data. */
 export function DashboardEntry() {
   const { phases, isReady } = useLoadingPhases();
-  const [showApp, setShowApp] = useState(process.env.AFK_SKIP_SPLASH === '1');
+  const [showApp, setShowApp] = useState(false);
   const [currentView, setCurrentView] = useState<View>('tasks');
   const [management, setManagement] = useState<TuiManagementProviderBundle | null>(null);
-  const [pluginViews, setPluginViews] = useState<readonly LoadedTuiView[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void loadTuiViews().then(views => {
-      if (!cancelled) setPluginViews(views);
-    });
-    return () => { cancelled = true; };
-  }, []);
 
   useEffect(() => {
     if (isReady) setShowApp(true);
@@ -37,7 +29,7 @@ export function DashboardEntry() {
   useEffect(() => {
     if (!isReady) return;
     let cancelled = false;
-    void createManagementProviders(process.env.AFK_PROJECT, process.cwd())
+    void createManagementProviderBundle(process.env.AFK_PROJECT, process.cwd())
       .then(bundle => {
         if (!cancelled) {
           setManagement({ backlog: { list: options => bundle.backlog.list(options) } });
@@ -71,7 +63,7 @@ export function DashboardEntry() {
 
   return (
     <Box flexDirection="column">
-      <StateProvider allowedViews={new Set(pluginViews.map(view => view.id))}>
+      <StateProvider>
         <AppContent
           tasks={data.tasks}
           backlogs={data.backlogs}
@@ -88,9 +80,6 @@ export function DashboardEntry() {
           onAttachSession={attachSession}
           onOpenTaskDiagnostics={openTaskDiagnostics}
           onViewChange={setCurrentView}
-          pluginViews={pluginViews}
-          cwd={process.cwd()}
-          workspace={process.env.AFK_PROJECT}
         />
       </StateProvider>
     </Box>

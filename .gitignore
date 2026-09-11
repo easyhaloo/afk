@@ -40,23 +40,7 @@ coverage/
 # Redis dump
 dump.rdb
 
-# Git worktrees and Claude Code local state
+# Git worktrees
 .worktrees/
 .playwright-mcp/
 .claude/
-
-# Local dev artifacts
-.playwright-cli/
-.superpowers/
-design-demos/
-dt-mdp-llm-research.json
-dt-mdp-llm-research.md
-llm-app-design-methodology.json
-llm-app-design-methodology.md
-anthropic_context_article.md
-
-# Desktop Electron generated output
-desktop-client/dist-electron/
-desktop-client/release/
-desktop-client/test-artifacts/
-.dev/

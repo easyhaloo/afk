@@ -21,3 +21,8 @@ For work under `desktop-client/`, use the following organization:
   package must have independent typecheck, build, and test CI checks.
 - Treat `dist/`, `dist-electron/`, `release/`, and test screenshots as build
   output, not source.
+
+## Desktop UI Design Standards
+
+For UI work under `desktop-client/`, follow
+[`docs/DESKTOP-DESIGN-STANDARDS.md`](docs/DESKTOP-DESIGN-STANDARDS.md).

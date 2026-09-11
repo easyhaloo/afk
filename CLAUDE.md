@@ -65,6 +65,11 @@ TUI built with React + Ink. Components live in `src/components/` (planned).
 4. For TUI testing, see [docs/TESTING.md](docs/TESTING.md)
 5. **Documentation sync**: CLI command changes (signature, flags, behavior) or skill modifications must update the corresponding docs — `README.md`, `CLAUDE.md` command table, skill docs, or related `docs/` files. Keep docs in lockstep with code.
 
+## Desktop UI Design Standards
+
+All UI changes under `desktop-client/` must follow
+[docs/DESKTOP-DESIGN-STANDARDS.md](docs/DESKTOP-DESIGN-STANDARDS.md).
+
 ## Skill Development
 
 When modifying or creating skills, always work in the project's `skills/` directory:

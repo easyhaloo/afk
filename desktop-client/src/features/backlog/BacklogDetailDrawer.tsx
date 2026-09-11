@@ -3,7 +3,6 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import type { BacklogItem } from "../../../shared/backlog-contract";
 import { backlogStateLabel } from "./backlog-filter";
-import { MarkdownContent } from "./MarkdownContent";
 
 type BacklogDetailDrawerProps = {
   item: BacklogItem | null;
@@ -52,7 +51,7 @@ export function BacklogDetailDrawer({ item, busy, error, onClose, onOpenExternal
             </div>
             <section className="backlog-detail-section">
               <span className="backlog-detail-section-title">描述</span>
-              <MarkdownContent source={item.description || "暂无描述"} />
+              <p className="backlog-detail-description">{item.description || "暂无描述"}</p>
             </section>
             <section className="backlog-detail-grid" aria-label="工作项元数据">
               <DetailValue icon={<Hash size={13} />} label="Provider 引用" value={item.providerRef || "—"} />

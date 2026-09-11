@@ -63,9 +63,6 @@
   outline: none;
 }
 .select-menu-trigger:disabled { opacity: .55; cursor: not-allowed; }
-.select-menu-trigger.centered { position: relative; justify-content: center; }
-.select-menu-trigger.centered > span { text-align: center; }
-.select-menu-trigger.centered > svg { position: absolute; right: 9px; }
 .select-menu-popover {
   position: absolute;
   z-index: 30;
@@ -102,9 +99,6 @@
 .select-menu-option:hover,
 .select-menu-option:focus-visible,
 .select-menu-option.selected { background: color-mix(in srgb, var(--backlog-accent) 10%, transparent); color: var(--backlog-accent); outline: none; }
-.select-menu-option.centered { position: relative; justify-content: center; }
-.select-menu-option.centered > span { text-align: center; }
-.select-menu-option.centered > svg { position: absolute; right: 8px; }
 .backlog-alert {
   display: flex;
   align-items: center;
@@ -385,39 +379,7 @@
 .backlog-detail-mode { color: var(--backlog-muted); font-size: 12px; }
 .backlog-detail-section { display: grid; gap: 8px; }
 .backlog-detail-section-title { color: var(--backlog-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.markdown-content { color: var(--backlog-text); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
-.markdown-content > :first-child { margin-top: 0; }
-.markdown-content > :last-child { margin-bottom: 0; }
-.markdown-content h1,
-.markdown-content h2,
-.markdown-content h3,
-.markdown-content h4,
-.markdown-content h5,
-.markdown-content h6 { color: var(--backlog-text); line-height: 1.35; }
-.markdown-content h1 { font-size: 20px; }
-.markdown-content h2 { font-size: 18px; }
-.markdown-content h3 { font-size: 16px; }
-.markdown-content p { margin: 0 0 12px; }
-.markdown-content ul,
-.markdown-content ol { margin: 0 0 12px; padding-left: 22px; }
-.markdown-content li + li { margin-top: 4px; }
-.markdown-content li.task-list-item { list-style: none; margin-left: -22px; }
-.markdown-content input[type="checkbox"] { width: 13px; height: 13px; margin: 0 7px 0 0; vertical-align: -2px; accent-color: var(--backlog-accent); }
-.markdown-content blockquote { margin: 0 0 12px; padding: 2px 12px; border-left: 3px solid var(--backlog-accent); color: var(--backlog-muted); background: color-mix(in srgb, var(--backlog-accent) 6%, transparent); }
-.markdown-content a { color: var(--backlog-accent); text-decoration: underline; text-underline-offset: 2px; }
-.markdown-content code { padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, var(--backlog-border) 48%, transparent); color: var(--backlog-text); font-family: var(--font-mono, monospace); font-size: .9em; }
-.markdown-content pre { margin: 0 0 12px; overflow-x: auto; padding: 11px 12px; border: 1px solid var(--backlog-border); border-radius: 8px; background: color-mix(in srgb, var(--backlog-border) 25%, var(--backlog-surface)); }
-.markdown-content pre code { padding: 0; background: transparent; font-size: 12px; }
-.markdown-content table { display: block; max-width: 100%; margin: 0 0 12px; overflow-x: auto; border-collapse: collapse; }
-.markdown-content th,
-.markdown-content td { padding: 6px 9px; border: 1px solid var(--backlog-border); text-align: left; }
-.markdown-content th { background: color-mix(in srgb, var(--backlog-border) 25%, var(--backlog-surface)); }
-.markdown-mermaid { max-width: 100%; margin: 4px 0 12px; overflow-x: auto; padding: 10px; border: 1px solid var(--backlog-border); border-radius: 8px; background: var(--backlog-surface); }
-.markdown-mermaid-svg { min-width: max-content; text-align: center; }
-.markdown-mermaid-svg svg { display: inline-block; max-width: none; height: auto; }
-.markdown-mermaid-fallback { color: var(--backlog-muted); font-size: 12px; }
-.markdown-mermaid-fallback span { display: block; margin-bottom: 8px; }
-.markdown-mermaid-fallback pre { margin: 0; }
+.backlog-detail-description { margin: 0; color: var(--backlog-text); font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
 .backlog-detail-grid { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--backlog-border); border-radius: 11px; background: var(--backlog-border); }
 .backlog-detail-value { display: grid; gap: 6px; padding: 12px; background: var(--backlog-surface); }
 .backlog-detail-label { display: flex; align-items: center; gap: 5px; color: var(--backlog-muted); font-size: 11px; }

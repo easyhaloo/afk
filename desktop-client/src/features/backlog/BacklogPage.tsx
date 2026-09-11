@@ -260,7 +260,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
           <span>读取 GitHub / GitLab 上由 AFK 管理的工作项；本机不持有凭据，由 afk CLI 完成 Provider 调用。</span>
         </div>
         <div className="backlog-heading-actions">
-          <SelectMenu label="选择 Provider" value={platform} options={platformOptions} onChange={(value) => { invalidateBacklogCache(); setPlatform(value); }} disabled={busy} align="center" />
+          <SelectMenu label="选择 Provider" value={platform} options={platformOptions} onChange={(value) => { invalidateBacklogCache(); setPlatform(value); }} disabled={busy} />
           <button className="icon-button" onClick={() => setCreateOpen(true)} disabled={busy} aria-label="新建 Backlog">
             <Plus size={16} />
           </button>

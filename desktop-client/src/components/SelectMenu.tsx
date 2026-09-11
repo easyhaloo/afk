@@ -9,10 +9,9 @@ type SelectMenuProps<T extends string> = {
   options: SelectMenuOption<T>[];
   onChange: (value: T) => void;
   disabled?: boolean;
-  align?: "start" | "center";
 };
 
-export function SelectMenu<T extends string>({ label, value, options, onChange, disabled = false, align = "start" }: SelectMenuProps<T>) {
+export function SelectMenu<T extends string>({ label, value, options, onChange, disabled = false }: SelectMenuProps<T>) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const selected = options.find((option) => option.value === value) ?? options[0];
@@ -37,7 +36,7 @@ export function SelectMenu<T extends string>({ label, value, options, onChange, 
     <div className="select-menu" ref={menuRef}>
       <button
         type="button"
-        className={`select-menu-trigger${open ? " open" : ""}${align === "center" ? " centered" : ""}`}
+        className={`select-menu-trigger${open ? " open" : ""}`}
         aria-label={label}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -57,7 +56,7 @@ export function SelectMenu<T extends string>({ label, value, options, onChange, 
               type="button"
               role="option"
               aria-selected={option.value === value}
-              className={`select-menu-option${option.value === value ? " selected" : ""}${align === "center" ? " centered" : ""}`}
+              className={`select-menu-option${option.value === value ? " selected" : ""}`}
               onClick={() => { onChange(option.value); setOpen(false); }}
             >
               <span>{option.label}</span>

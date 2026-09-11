@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -19,11 +19,21 @@ async function temporaryUserDataDirectory() {
 describe("workspace preference service", () => {
   it("persists and restores the selected workspace for packaged launches", async () => {
     const userDataDirectory = await temporaryUserDataDirectory();
-    const workspace = "/Users/example/project";
+    const workspace = path.join(userDataDirectory, "project");
+    await mkdir(workspace);
 
     await saveWorkspacePreference(userDataDirectory, workspace);
 
     await expect(readWorkspacePreference(userDataDirectory)).resolves.toBe(workspace);
+  });
+
+  it("ignores a persisted workspace that no longer exists", async () => {
+    const userDataDirectory = await temporaryUserDataDirectory();
+    const deletedWorkspace = path.join(userDataDirectory, "deleted-worktree");
+
+    await saveWorkspacePreference(userDataDirectory, deletedWorkspace);
+
+    await expect(readWorkspacePreference(userDataDirectory)).resolves.toBeUndefined();
   });
 
   it("ignores malformed preference files", async () => {

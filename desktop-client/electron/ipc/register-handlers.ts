@@ -21,6 +21,7 @@ import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { createExternalUrlService } from "../services/external-url-service";
+import { saveWorkspacePreference } from "../services/workspace-preference-service";
 import { resolveWorkspace } from "../services/workspace-service";
 import { homedir } from "node:os";
 import path from "node:path";

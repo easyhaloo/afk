@@ -10,7 +10,9 @@ function preferencePath(userDataDirectory: string) {
 export async function readWorkspacePreference(userDataDirectory: string): Promise<string | undefined> {
   try {
     const value: unknown = JSON.parse(await fs.readFile(preferencePath(userDataDirectory), "utf8"));
-    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+    if (typeof value !== "string" || !value.trim()) return undefined;
+    const workspace = value.trim();
+    return (await fs.stat(workspace)).isDirectory() ? workspace : undefined;
   } catch {
     return undefined;
   }

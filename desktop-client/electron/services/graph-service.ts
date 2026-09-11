@@ -2,10 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-type WorkflowGraphFormat = 'json' | 'archify-json';
-type WorkflowGraphGenerateRequest = { readonly workspace: string; readonly templateId: string; readonly format?: WorkflowGraphFormat };
-type WorkflowGraphStatus = { readonly state: 'missing' | 'generating' | 'trusted' | 'stale' | 'rejected'; readonly templateId: string; readonly inputHash?: string; readonly trustedInputHash?: string; readonly graph?: unknown; readonly diagnostics: readonly { readonly severity: 'info' | 'warning' | 'error'; readonly code: string; readonly message: string }[] };
-type WorkflowGraphGenerateResult = { readonly status: WorkflowGraphStatus; readonly outputPath?: string };
+import type { WorkflowGraphGenerateRequest, WorkflowGraphGenerateResult, WorkflowGraphStatus } from '../../shared/ipc-contract';
 
 const run = promisify(execFile);
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

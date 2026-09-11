@@ -107,6 +107,34 @@ export type AppearancePreferences = {
   theme: "light" | "graphite";
 };
 
+export type WorkflowGraphFormat = "json" | "archify-json";
+
+export type WorkflowGraphDiagnostic = {
+  severity: "info" | "warning" | "error";
+  code: string;
+  message: string;
+};
+
+export type WorkflowGraphStatus = {
+  state: "missing" | "generating" | "trusted" | "stale" | "rejected";
+  templateId: string;
+  inputHash?: string;
+  trustedInputHash?: string;
+  graph?: unknown;
+  diagnostics: WorkflowGraphDiagnostic[];
+};
+
+export type WorkflowGraphGenerateRequest = {
+  workspace: string;
+  templateId: string;
+  format?: WorkflowGraphFormat;
+};
+
+export type WorkflowGraphGenerateResult = {
+  status: WorkflowGraphStatus;
+  outputPath?: string;
+};
+
 export type Snapshot = {
   workspace: { root: string; afkDirectoryPresent: boolean; eventCount: number };
   afk: { available: boolean; executable: string; summary: string };
@@ -129,6 +157,8 @@ export type DesktopApi = {
   appearance: () => Promise<AppearancePreferences>;
   saveAppearance: (appearance: AppearancePreferences) => Promise<AppearancePreferences>;
   saveWorkflow: (workspace: string, workflow: WorkflowConfigSummary) => Promise<WorkflowConfigSummary>;
+  graphStatus: (workspace: string, templateId: string) => Promise<WorkflowGraphStatus>;
+  graphGenerate: (request: WorkflowGraphGenerateRequest) => Promise<WorkflowGraphGenerateResult>;
   tmuxPane: (workspace: string, session: string) => Promise<string>;
   tmuxSend: (workspace: string, session: string, line: string) => Promise<boolean>;
   ssh: {
@@ -171,6 +201,8 @@ export const IPC_CHANNELS = {
   appearance: "afk:appearance",
   appearanceSave: "afk:appearance-save",
   workflowSave: "afk:workflow-save",
+  graphStatus: "afk:graph-status",
+  graphGenerate: "afk:graph-generate",
   tmuxPane: "afk:tmux-pane",
   tmuxSend: "afk:tmux-send",
   sshList: "afk:ssh-list",

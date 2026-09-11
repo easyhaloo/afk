@@ -21,10 +21,12 @@ import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { createExternalUrlService } from "../services/external-url-service";
+import { WorkflowGraphService } from "../services/graph-service";
 import { saveWorkspacePreference } from "../services/workspace-preference-service";
 import { resolveWorkspace } from "../services/workspace-service";
 import { homedir } from "node:os";
 import path from "node:path";
+import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation";
 
 function validSession(value: string) {
   return /^[A-Za-z0-9_.:-]{1,100}$/.test(value);
@@ -82,6 +84,7 @@ const backlogExecutionService = createBacklogExecutionService({
   getBacklog: (workspace, id) => backlogService.show(workspace, id),
   store: createBacklogRunStore({ resolveWorkspace }),
 });
+const workflowGraphService = new WorkflowGraphService();
 
 function fingerprintInput(value: unknown): SshFingerprint {
   if (!value || typeof value !== "object") throw new Error("SSH 指纹参数无效");
@@ -187,6 +190,15 @@ export function registerIpcHandlers() {
     return sshService.resize(validateSshSessionId(input.sessionId), size.cols, size.rows);
   });
   ipcMain.handle(IPC_CHANNELS.sshClose, (event, sessionId: unknown) => { assertTrustedSender(event); return sshService.close(validateSshSessionId(sessionId)); });
+
+  ipcMain.handle(IPC_CHANNELS.graphStatus, (event, workspace: unknown, templateId: unknown) => {
+    assertTrustedSender(event);
+    return workflowGraphService.status(validateWorkflowGraphWorkspace(workspace), validateWorkflowGraphTemplateId(templateId));
+  });
+  ipcMain.handle(IPC_CHANNELS.graphGenerate, (event, request: unknown) => {
+    assertTrustedSender(event);
+    return workflowGraphService.generate(parseWorkflowGraphGenerateRequest(request));
+  });
 
   ipcMain.handle(IPC_CHANNELS.backlogList, (event, workspace: unknown, options: unknown) => {
     assertTrustedSender(event);

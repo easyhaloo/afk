@@ -52,6 +52,9 @@
 :root[data-afk-theme="graphite"] .settings-section b { color: var(--afk-text); }
 :root[data-afk-theme="graphite"] .nav-item:hover,
 :root[data-afk-theme="graphite"] .nav-item.active { background: var(--afk-panel-subtle); }
+:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected,
+:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected b { color: #303136; }
+:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected span { color: #5f6068; }
 
 .control-page {
   width: min(100%, 1180px);

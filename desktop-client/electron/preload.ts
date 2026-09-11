@@ -11,6 +11,8 @@ const IPC_CHANNELS = {
   appearance: "afk:appearance",
   appearanceSave: "afk:appearance-save",
   workflowSave: "afk:workflow-save",
+  graphStatus: "afk:graph-status",
+  graphGenerate: "afk:graph-generate",
   tmuxPane: "afk:tmux-pane",
   tmuxSend: "afk:tmux-send",
   sshList: "afk:ssh-list",
@@ -49,6 +51,8 @@ const api: DesktopApi = {
   appearance: () => ipcRenderer.invoke(IPC_CHANNELS.appearance),
   saveAppearance: (appearance) => ipcRenderer.invoke(IPC_CHANNELS.appearanceSave, appearance),
   saveWorkflow: (workspace, workflow) => ipcRenderer.invoke(IPC_CHANNELS.workflowSave, workspace, workflow),
+  graphStatus: (workspace, templateId) => ipcRenderer.invoke(IPC_CHANNELS.graphStatus, workspace, templateId),
+  graphGenerate: (request) => ipcRenderer.invoke(IPC_CHANNELS.graphGenerate, request),
   tmuxPane: (workspace, session) => ipcRenderer.invoke(IPC_CHANNELS.tmuxPane, workspace, session),
   tmuxSend: (workspace, session, line) => ipcRenderer.invoke(IPC_CHANNELS.tmuxSend, workspace, session, line),
   ssh: {

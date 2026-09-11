@@ -390,8 +390,15 @@ export class LoopRunner {
     logger.info({ iid, session, projectName }, 'implement chain starting');
 
     const backlog = await this.providers.backlog.get(iid);
-    const parent = backlog.parentId ? await this.providers.backlog.get(backlog.parentId) : undefined;
-    const baseBranch = parent?.branchName ?? getWorkflowConfig().targetBranch ?? 'main';
+    const targetBranch = getWorkflowConfig().targetBranch ?? 'main';
+    // parentId is organizational only. A stacked branch must opt in through
+    // baseBacklogId; once that base is done its changes are already on target.
+    const executionBase = backlog.baseBacklogId
+      ? await this.providers.backlog.get(backlog.baseBacklogId)
+      : undefined;
+    const baseBranch = executionBase && executionBase.state !== 'done'
+      ? executionBase.branchName
+      : targetBranch;
 
     try {
       const resolvedExt = await this.resolveModules(iid);

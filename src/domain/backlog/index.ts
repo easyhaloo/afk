@@ -15,7 +15,10 @@ export interface BacklogItem {
   id: string;
   title: string;
   description?: string;
+  /** Organizational grouping only; it never selects a git base branch. */
   parentId?: string;
+  /** Optional backlog whose unmerged branch is the explicit execution base. */
+  baseBacklogId?: string;
   dependsOn: string[];
   state: BacklogState;
   executionMode: BacklogExecutionMode;
@@ -31,6 +34,7 @@ export interface BacklogCreateInput {
   title: string;
   description: string;
   parentId?: string;
+  baseBacklogId?: string;
   dependsOn?: string[];
   executionMode?: BacklogExecutionMode;
   tags?: string[];
@@ -123,6 +127,7 @@ export class InMemoryBacklogProvider implements BacklogProvider {
       title,
       description: input.description,
       parentId: input.parentId,
+      baseBacklogId: input.baseBacklogId,
       dependsOn: [...new Set(input.dependsOn ?? [])],
       state: 'ready',
       executionMode: input.executionMode ?? 'afk',

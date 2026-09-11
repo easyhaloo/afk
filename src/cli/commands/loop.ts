@@ -78,6 +78,7 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
     statusIntervalMs,
     shutdownTimeoutMs,
     maxIterations: options.maxIterations,
+    backlogIds: options.backlogId,
     ext: options.ext,
     extParams: options.extParam,
     moduleTriggers: loopConfig.moduleTriggers,
@@ -86,7 +87,7 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
     agentRuntime,
   });
 
-  printStartup(maxConcurrent, pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, loopConfig.moduleTriggers, agentProvider);
+  printStartup(maxConcurrent, pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, loopConfig.moduleTriggers, agentProvider, options.backlogId);
   const shutdown = async (signal: string) => {
     warning(`Received ${signal}, draining in-flight work...`);
     try { await runner.stop(); } catch (error) { logger.error({ err: error }, 'error during loop shutdown'); }
@@ -99,7 +100,7 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
   process.exit(0);
 }
 
-function printStartup(maxConcurrent: number, pollIntervalMs: number, statusIntervalMs: number, shutdownTimeoutMs: number, maxIterations: number | undefined, moduleTriggers: Record<string, string[]>, agentProvider: string): void {
+function printStartup(maxConcurrent: number, pollIntervalMs: number, statusIntervalMs: number, shutdownTimeoutMs: number, maxIterations: number | undefined, moduleTriggers: Record<string, string[]>, agentProvider: string, backlogIds?: string[]): void {
   console.log(chalk.bold('\n🔁 AFK Loop started\n'));
   console.log(chalk.gray('  Configuration:'));
   console.log(chalk.gray(`    max-concurrent:    ${maxConcurrent}`));
@@ -108,6 +109,7 @@ function printStartup(maxConcurrent: number, pollIntervalMs: number, statusInter
   console.log(chalk.gray(`    shutdown-timeout:  ${shutdownTimeoutMs / 1000}s`));
   console.log(chalk.gray(`    agent:             ${agentProvider}`));
   if (maxIterations !== undefined) console.log(chalk.gray(`    max-iterations:    ${maxIterations}`));
+  if (backlogIds?.length) console.log(chalk.gray(`    backlog-scope:     ${backlogIds.join(', ')}`));
   if (Object.keys(moduleTriggers).length > 0) {
     const triggers = Object.entries(moduleTriggers).map(([trigger, modules]) => `${trigger}=${modules.join(',')}`).join('; ');
     console.log(chalk.gray(`    module-triggers:   ${triggers}`));

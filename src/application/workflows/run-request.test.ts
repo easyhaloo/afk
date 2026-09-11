@@ -21,6 +21,14 @@ describe('resolveWorkflowRequest', () => {
     });
   });
 
+  it('uses a configured workflow template unless the CLI overrides it', () => {
+    const configured = resolveWorkflowRequest({ backlogId: '42' }, { template: 'afk-control-workflow' });
+    const overridden = resolveWorkflowRequest({ backlogId: '42', template: 'pre-merge-qa-verification' }, { template: 'afk-control-workflow' });
+
+    expect(configured.template).toBe('afk-control-workflow');
+    expect(overridden.template).toBe('pre-merge-qa-verification');
+  });
+
   it('derives a branch from a string backlog ID', () => {
     const request = resolveWorkflowRequest({ backlogId: 'product/auth/login' }, {});
     expect(request.branchStrategy).toEqual({ type: 'named', branch: 'afk/backlog-product-auth-login' });

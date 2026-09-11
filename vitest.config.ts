@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // Vite's builtin-module list predates node:sqlite; leave it to the Node 22+ runtime.
+  ssr: { external: ['node:sqlite'] },
   test: {
     environment: 'node',
     testTimeout: 30000,

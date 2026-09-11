@@ -89,33 +89,6 @@ function formatReworkContext(rework: import('../domain/backlog/index').ReworkRec
   return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
-/**
- * Signal-driven workflow runner.
- *
- * Two-phase design:
- *   Phase 1 (Implement): run implement step -> wait goal_complete
- *   Phase 2 (Verify):   run verify step -> wait goal_complete with QA payload
- *   autoWrapup:         push implementation branch, transition verification, cleanup worktree
- *
- * Each phase is a loop: send goal -> poll for the completion signal OR the
- * context threshold (statusline token usage). On context_high the session is
- * interrupted, the agent's summary is captured to a doc + issue comment, and
- * the session is relaunched with the summary injected - until the phase
- * completes or the handoff budget runs out.
- *
- * Context detection is done by the RUNNER, not the agent: the agent cannot
- * reliably sense its own context limit (Claude Code's TUI warnings are
- * rendering-layer only, and the compaction system message arrives too late),
- * so we poll `<worktree>/.afk/claude-status.json` token usage (written by the
- * statusline tee on every turn) against `contextHighTokens`.
- *
- * The handoff cluster (negotiate summary -> persist doc -> post comment ->
- * relaunch or terminate) lives behind the {@link HandoffCoordinator} seam;
- * the runner only decides WHEN to hand off (context_high, budget exhausted)
- * and routes the outcome. The hard-timeout {@link Watchdog} is a separate
- * module shared by both.
- */
-
 export interface RunnerOptions {
   /** Canonical backlog ID. */
   backlogId: string;
@@ -613,7 +586,7 @@ export class WorkflowRunner {
     // Claude is still returning from the previous one, losing that prompt.
     const needsDedicatedSandbox = ctx.executionMode === 'interactive' || branchHandle.path !== ctx.primaryWtPath;
     const sandbox = needsDedicatedSandbox
-      ? await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode })
+      ? await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode, workspaceRoot: this.repoRoot, runtimeRunId: this.runtimeRunId })
       : this.sandbox!;
     if (sandbox !== this.sandbox) {
       this.stepSandboxes.push(sandbox);
@@ -774,6 +747,8 @@ export class WorkflowRunner {
       branch: targetBranch,
       tmux: this.tmux,
       executionMode: this.executionMode,
+      workspaceRoot: this.repoRoot,
+      runtimeRunId: this.runtimeRunId,
     });
     this.resourceScope?.registerSandbox(this.sandbox);
     logger.info({ iid, session, worktree: wt.path, sandboxId: this.sandbox.id }, 'sandbox created');

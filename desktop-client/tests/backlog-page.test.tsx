@@ -190,7 +190,7 @@ describe("BacklogPage detail drawer", () => {
     const { api, renderer } = await renderBacklogPage();
     const detail = {
       ...items[0],
-      description: "切换登录态并保留当前工作区。",
+      description: "## 验收标准\n\n- [x] **marker** exists",
       webUrl: "https://github.com/example/issues/1",
     };
     api.show.mockResolvedValue(detail);
@@ -201,7 +201,11 @@ describe("BacklogPage detail drawer", () => {
     });
 
     expect(api.show).toHaveBeenCalledWith("/repo", "1");
-    expect(textContent(renderer.root.findByProps({ role: "dialog" }))).toContain("切换登录态并保留当前工作区。");
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    const description = dialog.findByProps({ className: "backlog-detail-description" });
+    expect(description.findByType("h2").children.join("")).toBe("验收标准");
+    expect(description.findByType("strong").children.join("")).toBe("marker");
+    expect(description.findByType("input").props.checked).toBe(true);
     expect(renderer.root.findByProps({ "aria-label": "在浏览器中打开" })).toBeTruthy();
 
     await act(async () => {

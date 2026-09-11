@@ -1,5 +1,7 @@
 import { app, BrowserWindow } from "electron";
+import path from "node:path";
 import { registerIpcHandlers } from "./ipc/register-handlers";
+import { readWorkspacePreference } from "./services/workspace-preference-service";
 import { createMainWindow } from "./window/main-window";
 
 /** Electron bootstrap: lifecycle and module composition only. */
@@ -16,11 +18,13 @@ if (!hasSingleInstanceLock) {
   });
 
   app.whenReady().then(async () => {
-  registerIpcHandlers();
-  await createMainWindow();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
-  });
+    const workspace = await readWorkspacePreference(app.getPath("userData"));
+    if (workspace) process.env.AFK_WORKSPACE = workspace;
+    registerIpcHandlers();
+    await createMainWindow();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
+    });
   });
 }
 

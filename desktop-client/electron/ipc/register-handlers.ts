@@ -21,6 +21,7 @@ import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { createExternalUrlService } from "../services/external-url-service";
+import { saveWorkspacePreference } from "../services/workspace-preference-service";
 import { resolveWorkspace } from "../services/workspace-service";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -116,7 +117,10 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);
     const selected = await dialog.showOpenDialog({ title: "选择 AFK 工作区", properties: ["openDirectory"] });
-    return selected.canceled ? null : selected.filePaths[0] || null;
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    const workspace = await saveWorkspacePreference(app.getPath("userData"), selected.filePaths[0]);
+    process.env.AFK_WORKSPACE = workspace;
+    return workspace;
   });
   ipcMain.handle(IPC_CHANNELS.snapshot, (event, workspace: string) => { assertTrustedSender(event); return snapshot(workspace); });
   ipcMain.handle(IPC_CHANNELS.appearance, (event) => { assertTrustedSender(event); return readAppearance(); });

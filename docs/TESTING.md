@@ -16,34 +16,30 @@ AFK TUI is built with React + Ink and uses a layered testing strategy.
 
 ## 1. Unit Tests (Recommended Starting Point)
 
-**Goal**: Pure logic, state machines, event dispatchers, registries
+**Goal**: Pure logic, state machines, plugin loading, and configuration parsing
 
 **Tool**: vitest (pre-configured)
 
 **Pattern**: Instantiate classes directly, call methods, assert results
 
 ```typescript
-// src/lib/ui/core/Keyboard.test.ts
-import { KeyboardDispatcher } from './Keyboard';
-
-it('dispatches escape to global handler', () => {
-  const dispatcher = new KeyboardDispatcher();
-  const handler = vi.fn();
-  dispatcher.registerGlobal('escape', handler);
-  dispatcher.dispatch({ key: 'escape', input: '', ctrl: false, shift: false, meta: false });
-  expect(handler).toHaveBeenCalled();
+// src/views/plugins/loader.test.ts
+const views = await loadTuiViews({ homeDir: fixtureHome, resolveEntry: fixtureEntry });
+expect(views[0]).toMatchObject({
+  id: 'plugin:example:status',
+  shortcut: 'z',
 });
 ```
 
 **Use cases**:
-- Core classes like `KeyboardDispatcher`, `ViewRegistry`
+- TUI plugin discovery and manifest validation
 - Reducers / state machines
 - Config parsing, schema validation
 - Zod schema parsing
 
 **Run**:
 ```bash
-pnpm dlx vitest --run src/lib/ui/core/
+pnpm vitest run src/views/plugins src/views/app/state
 ```
 
 ---

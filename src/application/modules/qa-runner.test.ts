@@ -286,11 +286,10 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
   });
 
-  it('targets and auto-merges a child backlog into its parent branch', async () => {
+  it('targets and auto-merges an organizational child backlog into the configured target branch', async () => {
     const f = fixture();
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10' };
-    const parent = { ...child, id: '10', title: 'parent', parentId: undefined, branchName: 'afk/backlog-10' };
-    f.providers.backlog.get.mockImplementation(async (id: string) => id === '10' ? parent : child);
+    f.providers.backlog.get.mockResolvedValue(child);
     f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
     const mergeBranch = vi.fn(async () => {});
     const runner = new QARunner(f.providers, config, {
@@ -303,9 +302,28 @@ describe('QARunner execution boundary', () => {
     const result = await runner.process('60');
 
     expect(result).toMatchObject({ success: true, autoMerged: true });
-    expect(mergeBranch).toHaveBeenCalledWith(process.cwd(), 'afk/backlog-10', 'afk/backlog-60');
-    expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'afk/backlog-10' }));
+    expect(mergeBranch).toHaveBeenCalledWith(process.cwd(), 'main', 'afk/backlog-60');
+    expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'main' }));
     expect(f.providers.changes.merge).toHaveBeenCalledWith('pr-60');
     expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'done', expect.anything());
+  });
+
+  it('uses an explicit unmerged execution base for QA verification and merge target', async () => {
+    const f = fixture();
+    const child = { ...(await f.providers.backlog.get('60')), parentId: '10', baseBacklogId: '11' };
+    const executionBase = { ...child, id: '11', title: 'stack base', parentId: undefined, baseBacklogId: undefined, state: 'verification', branchName: 'afk/backlog-11' };
+    f.providers.backlog.get.mockImplementation(async (id: string) => id === '11' ? executionBase : child);
+    const mergeBranch = vi.fn(async () => {});
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch,
+    });
+
+    await expect(runner.process('60')).resolves.toMatchObject({ success: true, autoMerged: true });
+
+    expect(mergeBranch).toHaveBeenCalledWith(process.cwd(), 'afk/backlog-11', 'afk/backlog-60');
+    expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'afk/backlog-11' }));
   });
 });

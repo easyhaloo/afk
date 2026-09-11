@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box } from 'ink';
 import { AppContent } from './AppContent';
-import { initRegistry } from '../board/registry/init';
 import type { Task } from '../../types/board';
 import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter';
 import type { View } from '../board/types';
@@ -12,8 +11,8 @@ import { useData } from '../board/data/useData';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
 import { SplashScreen } from '../board/components/SplashScreen';
 import { openInBrowser } from '../../shared/browser';
-
-initRegistry();
+import { loadTuiViews } from '../plugins/loader';
+import type { LoadedTuiView } from '../plugins/types';
 
 /** Compose the read-only dashboard with runtime session data. */
 export function DashboardEntry() {
@@ -21,6 +20,15 @@ export function DashboardEntry() {
   const [showApp, setShowApp] = useState(process.env.AFK_SKIP_SPLASH === '1');
   const [currentView, setCurrentView] = useState<View>('tasks');
   const [management, setManagement] = useState<TuiManagementProviderBundle | null>(null);
+  const [pluginViews, setPluginViews] = useState<readonly LoadedTuiView[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadTuiViews().then(views => {
+      if (!cancelled) setPluginViews(views);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (isReady) setShowApp(true);
@@ -63,7 +71,7 @@ export function DashboardEntry() {
 
   return (
     <Box flexDirection="column">
-      <StateProvider>
+      <StateProvider allowedViews={new Set(pluginViews.map(view => view.id))}>
         <AppContent
           tasks={data.tasks}
           backlogs={data.backlogs}
@@ -80,6 +88,9 @@ export function DashboardEntry() {
           onAttachSession={attachSession}
           onOpenTaskDiagnostics={openTaskDiagnostics}
           onViewChange={setCurrentView}
+          pluginViews={pluginViews}
+          cwd={process.cwd()}
+          workspace={process.env.AFK_PROJECT}
         />
       </StateProvider>
     </Box>

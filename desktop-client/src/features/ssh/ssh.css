@@ -1,0 +1,162 @@
+.ssh-page { width: min(100%, 1240px); }
+.ssh-heading { align-items: center; }
+.ssh-heading-actions, .ssh-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ssh-heading-actions { justify-content: flex-end; }
+.ssh-action-button { display: inline-flex; box-sizing: border-box; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 10px; font: inherit; font-size: calc(10px * var(--afk-scale)); font-weight: 700; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease, color .16s ease, transform .12s ease; }
+.ssh-action-button-sm { min-height: 28px; padding: 0 9px; }
+.ssh-action-button-md { min-height: 38px; padding: 0 12px; }
+.ssh-action-button-primary { border-color: var(--afk-accent); background: var(--afk-accent); color: #fff; box-shadow: 0 5px 12px color-mix(in srgb, var(--afk-accent) 22%, transparent); }
+.ssh-action-button-primary:hover { border-color: var(--afk-accent); background: color-mix(in srgb, var(--afk-accent) 88%, #000); box-shadow: 0 8px 16px color-mix(in srgb, var(--afk-accent) 28%, transparent); }
+.ssh-action-button-secondary { border-color: var(--afk-border); background: var(--afk-panel); color: var(--afk-text); box-shadow: 0 2px 7px rgba(37, 43, 55, .04), inset 0 1px rgba(255, 255, 255, .7); }
+.ssh-action-button-secondary:hover { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); box-shadow: 0 4px 10px rgba(37, 43, 55, .07); }
+.ssh-action-button-danger { border-color: #efcaca; background: #fff6f6; color: #b84b4b; }
+.ssh-action-button-danger:hover { border-color: #e2a7a7; background: #fff0f0; }
+.ssh-action-button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 18%, transparent); }
+.ssh-action-button-danger:focus-visible { box-shadow: 0 0 0 3px rgba(184, 75, 75, .18); }
+.ssh-action-button:active { transform: translateY(1px); }
+.ssh-action-button:disabled { cursor: not-allowed; opacity: .5; box-shadow: none; }
+.ssh-alert { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; border: 1px solid var(--afk-border); border-radius: 8px; padding: 9px 11px; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); }
+.ssh-alert button { margin-left: auto; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.ssh-alert.error { border-color: #edcaca; background: #fff8f8; color: #a44e4e; }
+.ssh-alert.success { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
+.ssh-action-status { margin: 10px 0 0; color: var(--afk-accent); font-size: calc(10px * var(--afk-scale)); }
+.ssh-diagnostics { display: grid; gap: 0; margin-bottom: 10px; border: 1px solid #e6d7b8; border-radius: 8px; padding: 0; background: #fcfaf4; color: #765f37; font-size: calc(11px * var(--afk-scale)); }
+.ssh-diagnostics-toggle { display: flex; width: 100%; min-height: 36px; align-items: center; border: 0; padding: 0 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ssh-diagnostics-toggle:focus-visible { outline: none; border-radius: 5px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 18%, transparent); }
+.ssh-diagnostics-heading { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; }
+.ssh-diagnostics-heading-copy { display: flex; align-items: center; gap: 7px; }
+.ssh-diagnostics-heading-copy > span { font-size: calc(12px * var(--afk-scale)); font-weight: 650; }
+.ssh-diagnostics-total { color: inherit; font-size: calc(10px * var(--afk-scale)); font-weight: 650; }
+.ssh-diagnostics-chevron { flex: 0 0 auto; transition: transform .16s ease; }
+.ssh-diagnostics-toggle[aria-expanded="true"] .ssh-diagnostics-chevron { transform: rotate(180deg); }
+.ssh-diagnostic-list { display: grid; max-height: 180px; gap: 6px; overflow-y: auto; margin: 0 10px 10px; padding: 0 2px 0 0; list-style: none; }
+.ssh-diagnostic-group { display: grid; gap: 6px; min-width: 0; border: 1px solid #e6d7b8; border-radius: 7px; padding: 8px 9px; background: rgba(255,255,255,.38); color: #765f37; }
+.ssh-diagnostic-group.info { border-color: #d2dfe0; background: #f6f9f9; color: #557174; }
+.ssh-diagnostic-group.warning { border-color: #e6d7b8; background: #fffdf8; color: #765f37; }
+.ssh-diagnostic-group.error { border-color: #e5caca; background: #fff8f8; color: #925858; }
+.ssh-diagnostic-group-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.ssh-diagnostic-group-header strong { color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); }
+.ssh-diagnostic-severity, .ssh-diagnostic-count { display: inline-flex; align-items: center; min-height: 19px; border-radius: 999px; padding: 0 6px; font-size: calc(9px * var(--afk-scale)); font-weight: 650; }
+.ssh-diagnostic-severity { border: 1px solid currentColor; }
+.ssh-diagnostic-count { background: rgba(80,80,80,.08); color: inherit; }
+.ssh-diagnostic-path { overflow-wrap: anywhere; color: inherit; font-family: "SF Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
+.ssh-diagnostic-message { overflow-wrap: anywhere; margin: 0; color: inherit; line-height: 1.45; }
+.ssh-diagnostic-hosts { color: inherit; }
+.ssh-diagnostic-hosts summary { width: fit-content; color: inherit; cursor: pointer; font-size: calc(10px * var(--afk-scale)); }
+.ssh-diagnostic-host-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.ssh-diagnostic-host { max-width: 100%; overflow-wrap: anywhere; border: 1px solid currentColor; border-radius: 999px; padding: 2px 7px; color: inherit; font-family: "SF Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
+.ssh-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+.ssh-search { display: flex; min-height: 30px; flex: 1; align-items: center; gap: 7px; border: 1px solid var(--afk-border); border-radius: 7px; padding: 0 9px; background: var(--afk-panel); color: var(--afk-muted); }
+.ssh-search input { border: 0; outline: 0; background: transparent; color: var(--afk-text); font: inherit; font-size: calc(11px * var(--afk-scale)); }
+.ssh-search input { width: 100%; }
+.ssh-toolbar .ssh-form-picker { flex: 0 0 132px; }
+.ssh-toolbar .ssh-form-picker-trigger { min-height: 30px; padding: 0 8px; font-size: calc(10px * var(--afk-scale)); }
+.ssh-toolbar .icon-button, .ssh-modal .icon-button { width: 28px; height: 28px; }
+.ssh-toolbar .ssh-form-picker-options { bottom: auto; top: calc(100% + 7px); }
+.ssh-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 13px; align-items: start; }
+.ssh-host-list, .ssh-details { overflow: hidden; border: 1px solid var(--afk-border); border-radius: 11px; background: var(--afk-panel); }
+.ssh-host-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: stretch; min-height: 68px; border-bottom: 1px solid var(--afk-border); background: transparent; }
+.ssh-host-row:last-child { border-bottom: 0; }
+.ssh-host-row:hover, .ssh-host-row.selected { background: var(--afk-panel-subtle); }
+.ssh-host-row.selected { box-shadow: inset 3px 0 var(--afk-accent); }
+.ssh-host-select { display: grid; width: 100%; grid-template-columns: 30px minmax(0, 1fr) auto auto; align-items: center; gap: 9px; min-height: 68px; border: 0; padding: 0 4px 0 13px; background: transparent; color: var(--afk-text); font: inherit; text-align: left; cursor: pointer; }
+.ssh-host-select:focus-visible { outline: none; box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--afk-accent) 18%, transparent); }
+.ssh-host-delete { align-self: center; width: 28px; min-height: 28px; margin-right: 5px; border-radius: 8px; padding: 0; opacity: 0; pointer-events: none; transition: opacity .14s ease, background .14s ease, border-color .14s ease, color .14s ease; }
+.ssh-host-row:hover .ssh-host-delete, .ssh-host-row.selected .ssh-host-delete, .ssh-host-row:focus-within .ssh-host-delete { opacity: 1; pointer-events: auto; }
+.ssh-host-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; background: var(--afk-accent-soft); color: var(--afk-accent); }
+.ssh-host-copy { display: grid; min-width: 0; gap: 4px; }
+.ssh-host-copy b, .ssh-host-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssh-host-copy b { font-size: calc(12px * var(--afk-scale)); }
+.ssh-host-copy small, .ssh-source { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.ssh-source { white-space: nowrap; }
+.ssh-status { display: inline-flex; min-height: 21px; align-items: center; border: 1px solid var(--afk-border); border-radius: 999px; padding: 0 7px; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); white-space: nowrap; }
+.ssh-status.ready { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
+.ssh-status.identity-changed, .ssh-status.invalid { border-color: #ecc5c5; background: #fff5f5; color: #ae4d4d; }
+.ssh-status.untrusted { border-color: #eadbb9; background: #fffbf2; color: #92733a; }
+.ssh-empty, .ssh-details.empty { display: grid; min-height: 280px; place-items: center; align-content: center; gap: 9px; padding: 30px; color: var(--afk-muted); text-align: center; }
+.ssh-empty svg, .ssh-details.empty svg { color: var(--afk-accent); }
+.ssh-empty b { color: var(--afk-text); }
+.ssh-details { padding: 17px; }
+.ssh-details > header { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 15px; border-bottom: 1px solid var(--afk-border); }
+.ssh-details-heading-copy { min-width: 0; flex: 1; }
+.ssh-details header small { display: block; color: var(--afk-accent); font-size: calc(9px * var(--afk-scale)); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.ssh-details h2 { overflow: hidden; overflow-wrap: anywhere; margin: 4px 0 4px; color: var(--afk-text); font-size: calc(19px * var(--afk-scale)); text-overflow: ellipsis; word-break: break-word; }
+.ssh-details-heading-copy > span { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.ssh-details dl { display: grid; gap: 0; margin: 0; }
+.ssh-details dl div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 9px; border-bottom: 1px solid var(--afk-border); padding: 10px 0; }
+.ssh-details dt { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.ssh-details dd { overflow: hidden; margin: 0; color: var(--afk-text); font-size: calc(10px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.ssh-details dd.fingerprint { color: var(--afk-accent); font-family: "SF Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
+.ssh-actions { align-items: stretch; margin-top: 15px; }
+.ssh-detail-action-groups { display: grid; min-width: 0; flex: 1 1 100%; gap: 8px; }
+.ssh-auxiliary-actions { display: flex; min-width: 0; gap: 7px; }
+.ssh-auxiliary-actions .ssh-action-button { min-width: 120px; }
+.ssh-connection-actions { display: grid; min-width: 0; align-items: stretch; }
+.ssh-test-action { width: 100%; min-width: 0; }
+.ssh-connect-action { min-width: 96px; padding-inline: 16px; }
+.ssh-trust-action, .ssh-deploy-action { min-width: 120px; }
+.ssh-upload-action { min-width: 120px; }
+.ssh-terminal-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 7px; }
+.ssh-terminal-picker-control { position: relative; min-width: 0; }
+.ssh-terminal-trigger { display: flex; width: 100%; min-height: 36px; align-items: center; justify-content: space-between; gap: 10px; border-color: var(--afk-border); border-radius: 9px; padding: 4px 10px; background: var(--afk-panel); color: var(--afk-text); font: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+.ssh-terminal-trigger:hover, .ssh-terminal-trigger:focus-visible, .ssh-terminal-trigger[aria-expanded="true"] { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 10%, transparent); }
+.ssh-terminal-trigger:disabled { cursor: not-allowed; opacity: .5; }
+.ssh-terminal-trigger-copy, .ssh-terminal-option-copy { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.ssh-terminal-option-copy { flex: 1 1 auto; }
+.ssh-terminal-trigger-copy > span:last-child, .ssh-terminal-option-copy > span:last-child { display: grid; min-width: 0; gap: 2px; }
+.ssh-terminal-icon { display: grid; flex: 0 0 auto; place-items: center; width: 26px; height: 26px; border-radius: 7px; background: var(--afk-panel-subtle); color: var(--afk-muted); }
+.ssh-terminal-icon-selected { width: 25px; height: 25px; background: var(--afk-accent-soft); color: var(--afk-accent); }
+.ssh-terminal-option-icon { display: grid; min-width: 26px; visibility: visible; opacity: 1; background: var(--afk-accent-soft); color: var(--afk-accent); }
+.ssh-terminal-chevron-open { transform: rotate(180deg); }
+.ssh-terminal-trigger small, .ssh-terminal-options small { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); line-height: 1.2; }
+.ssh-terminal-trigger b, .ssh-terminal-options b { overflow: hidden; font-size: calc(11px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.ssh-terminal-options { box-sizing: border-box; position: absolute; z-index: 5; left: 0; right: auto; bottom: calc(100% + 9px); display: grid; width: min(262px, 100%); max-width: calc(100vw - 36px); gap: 2px; overflow: hidden; border: 1px solid var(--afk-border); border-radius: 13px; padding: 6px; background: var(--afk-panel); box-shadow: 0 16px 36px rgba(25, 25, 35, .2); }
+.ssh-terminal-options button { display: flex; min-width: 0; min-height: 38px; align-items: center; justify-content: space-between; gap: 8px; border: 0; border-radius: 8px; padding: 5px 7px; background: transparent; color: var(--afk-text); font: inherit; text-align: left; cursor: pointer; transition: background .14s ease, color .14s ease; }
+.ssh-terminal-options button:hover, .ssh-terminal-options button[data-highlighted="true"], .ssh-terminal-options button[aria-selected="true"] { background: var(--afk-accent-soft); color: var(--afk-accent); }
+.ssh-terminal-options button[aria-selected="true"] .ssh-terminal-icon { background: var(--afk-panel); color: var(--afk-accent); }
+.ssh-terminal-options button svg { flex: 0 0 auto; }
+.ssh-modal-backdrop { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; background: rgba(25,25,35,.2); }
+.ssh-modal { display: grid; width: min(460px, calc(100vw - 30px)); max-height: calc(100vh - 30px); gap: 13px; overflow-y: auto; border: 1px solid var(--afk-border); border-radius: 13px; padding: 18px; background: var(--afk-panel); box-shadow: 0 18px 50px rgba(30,30,50,.18); }
+.ssh-modal header, .ssh-modal footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ssh-modal header { padding-bottom: 4px; }
+.ssh-modal header small { color: var(--afk-accent); font-size: calc(9px * var(--afk-scale)); }
+.ssh-modal h2 { margin: 3px 0 0; color: var(--afk-text); font-size: calc(19px * var(--afk-scale)); }
+.ssh-modal label { display: grid; gap: 6px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.ssh-modal input { min-height: 34px; border: 1px solid var(--afk-border); border-radius: 7px; padding: 0 9px; background: var(--afk-panel-subtle); color: var(--afk-text); font: inherit; }
+.ssh-confirm-backdrop { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(18, 20, 28, .32); backdrop-filter: blur(5px); animation: ssh-confirm-backdrop-in .16s ease-out; }
+.ssh-confirm-dialog { display: grid; width: min(420px, 100%); grid-template-columns: auto minmax(0, 1fr); gap: 14px; border: 1px solid var(--afk-border); border-radius: 16px; padding: 20px; background: var(--afk-panel); box-shadow: 0 24px 70px rgba(25, 25, 35, .24); animation: ssh-confirm-dialog-in .18s ease-out; }
+.ssh-confirm-dialog:focus-visible { outline: none; }
+.ssh-confirm-icon { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid color-mix(in srgb, var(--afk-danger) 30%, var(--afk-border)); border-radius: 11px; background: color-mix(in srgb, var(--afk-danger) 12%, transparent); color: var(--afk-danger); }
+.ssh-confirm-copy { min-width: 0; }
+.ssh-confirm-copy small { color: var(--afk-danger); font-size: calc(9px * var(--afk-scale)); font-weight: 700; letter-spacing: .04em; }
+.ssh-confirm-copy h2 { margin: 4px 0 8px; color: var(--afk-text); font-size: calc(17px * var(--afk-scale)); line-height: 1.3; }
+.ssh-confirm-copy p { margin: 0; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); line-height: 1.65; }
+.ssh-confirm-actions { display: flex; grid-column: 1 / -1; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+@keyframes ssh-confirm-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ssh-confirm-dialog-in { from { opacity: 0; transform: translateY(7px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.ssh-form-picker { position: relative; min-width: 0; }
+.ssh-form-picker-trigger { display: flex; width: 100%; min-height: 30px; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--afk-border); border-radius: 7px; padding: 0 8px; background: var(--afk-panel-subtle); color: var(--afk-text); font: inherit; text-align: left; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+.ssh-form-picker-trigger:hover, .ssh-form-picker-trigger:focus-visible, .ssh-form-picker-trigger[aria-expanded="true"] { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 10%, transparent); }
+.ssh-form-picker-trigger:disabled { cursor: not-allowed; opacity: .5; }
+.ssh-form-picker-trigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssh-form-picker-chevron-open { transform: rotate(180deg); }
+.ssh-form-picker-options { position: absolute; z-index: 6; right: 0; bottom: calc(100% + 7px); display: grid; width: min(100%, 420px); min-width: 250px; gap: 2px; overflow: hidden; border: 1px solid var(--afk-border); border-radius: 10px; padding: 5px; background: var(--afk-panel); box-shadow: 0 14px 30px rgba(25, 25, 35, .2); }
+.ssh-form-picker-options button { display: flex; min-width: 0; min-height: 38px; align-items: center; justify-content: space-between; gap: 10px; border: 0; border-radius: 7px; padding: 5px 7px; background: transparent; color: var(--afk-text); font: inherit; text-align: left; cursor: pointer; }
+.ssh-form-picker-options button:hover, .ssh-form-picker-options button[data-highlighted="true"], .ssh-form-picker-options button[aria-selected="true"] { background: var(--afk-accent-soft); color: var(--afk-accent); }
+.ssh-form-picker-options button > span { display: grid; min-width: 0; gap: 2px; }
+.ssh-form-picker-options b { overflow: hidden; font-size: calc(10px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.ssh-form-picker-options small { overflow: hidden; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.ssh-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 850px) { .ssh-layout { grid-template-columns: 1fr; } .ssh-details { order: -1; } }
+@media (max-width: 560px) { .ssh-trust-action, .ssh-deploy-action, .ssh-detail-action-groups, .ssh-connection-actions { flex: 1 1 100%; min-width: 0; } .ssh-auxiliary-actions, .ssh-auxiliary-actions .ssh-action-button { width: 100%; min-width: 0; } .ssh-terminal-picker { grid-template-columns: minmax(0, 1fr) auto; } }
+@media (max-width: 620px) { .ssh-heading { display: block; } .ssh-heading-actions { justify-content: flex-start; margin-top: 14px; } .ssh-toolbar { flex-wrap: wrap; } .ssh-search { flex-basis: 100%; } .ssh-host-select { grid-template-columns: 30px minmax(0, 1fr) auto; } .ssh-source { display: none; } }
+@media (max-width: 420px) { .ssh-confirm-dialog { grid-template-columns: 1fr; gap: 10px; padding: 17px; } .ssh-confirm-icon { width: 34px; height: 34px; border-radius: 10px; } .ssh-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; } .ssh-confirm-actions .ssh-action-button { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .ssh-confirm-backdrop, .ssh-confirm-dialog { animation: none; } }
+:root[data-afk-theme="graphite"] .ssh-status.identity-changed, :root[data-afk-theme="graphite"] .ssh-status.invalid { border-color: #7e5b5d; background: #3a292b; color: #f0c6c8; }
+:root[data-afk-theme="graphite"] .ssh-diagnostics { border-color: #5b5547; background: #302f2b; color: #d0c5a8; }
+:root[data-afk-theme="graphite"] .ssh-diagnostic-group.info { border-color: #4f5f60; background: #2d3535; color: #a9c0c0; }
+:root[data-afk-theme="graphite"] .ssh-diagnostic-group.warning { border-color: #5b5547; background: #39362d; color: #d0c5a8; }
+:root[data-afk-theme="graphite"] .ssh-diagnostic-group.error { border-color: #60494a; background: #392e2f; color: #d3aaaa; }
+:root[data-afk-theme="graphite"] .ssh-action-button-danger { border-color: #765456; background: #3a2b2e; color: #f0c3c5; }
+:root[data-afk-theme="graphite"] .ssh-confirm-icon { border-color: #765456; background: #3a2b2e; color: #f0c3c5; }
+:root[data-afk-theme="graphite"] .ssh-confirm-copy small { color: #f0c3c5; }

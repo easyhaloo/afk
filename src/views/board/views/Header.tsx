@@ -1,26 +1,27 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { View } from '../types';
+import type { BuiltinView, LoadedTuiView, TuiViewId } from '../../plugins/types';
 
 interface Props {
-  view: View;
+  view: TuiViewId;
   tasksCount: number;
   backlogsCount: number;
   projectsCount: number;
   runningCount?: number;
   attentionCount?: number;
   width?: number;
+  pluginViews?: readonly LoadedTuiView[];
 }
 
-export function Header({ view, tasksCount, backlogsCount, projectsCount, runningCount, attentionCount, width }: Props) {
+export function Header({ view, tasksCount, backlogsCount, projectsCount, runningCount, attentionCount, width, pluginViews = [] }: Props) {
   const compact = (width || process.stdout.columns || 80) < 100;
-  const counts: Record<View, number> = {
+  const counts: Record<BuiltinView, number> = {
     tasks: tasksCount,
     backlogs: backlogsCount,
     projects: projectsCount,
     board: backlogsCount,
   };
-  const tabs: ReadonlyArray<readonly [string, View]> = [
+  const tabs: ReadonlyArray<readonly [string, BuiltinView]> = [
     ['1', 'tasks'],
     ['2', 'backlogs'],
     ['3', 'projects'],
@@ -51,6 +52,14 @@ export function Header({ view, tasksCount, backlogsCount, projectsCount, running
               </React.Fragment>
             );
           })}
+          {pluginViews.map(pluginView => (
+            <React.Fragment key={pluginView.id}>
+              <Text color="gray"> │ </Text>
+              <Text bold={view === pluginView.id} color={view === pluginView.id ? 'cyan' : 'white'}>
+                {pluginView.shortcut} {pluginView.title}
+              </Text>
+            </React.Fragment>
+          ))}
         </Text>
       </Box>
     </Box>

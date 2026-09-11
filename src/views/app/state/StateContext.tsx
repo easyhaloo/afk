@@ -1,10 +1,13 @@
 /**
  * State Context - provides app state and dispatch
  */
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useRef } from 'react';
 import type { AppState, ViewState, ViewType, ViewContext } from './initialState';
 import { initialState } from './initialState';
 import type { AppAction } from '../actions/types';
+import type { BuiltinView, TuiViewId } from '../../plugins/types';
+
+const BUILTIN_VIEWS = new Set<BuiltinView>(['tasks', 'backlogs', 'projects', 'board']);
 
 /**
  * Navigation policy - declarative mapping from action to state changes
@@ -21,7 +24,11 @@ const navigationPolicy: Record<string, {
   'search:enable': { setDetailView: null },
 };
 
-export function appReducer(state: AppState, action: AppAction): AppState {
+export function appReducer(
+  state: AppState,
+  action: AppAction,
+  allowedViews: ReadonlySet<string> = BUILTIN_VIEWS,
+): AppState {
   switch (action.type) {
     case 'dispatch': {
       const nav = navigationPolicy[action.payload?.type];
@@ -83,8 +90,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
     // Navigation
     case 'navigate:switch': {
-      const view = action.payload?.view as ViewType;
-      if (!view) return state;
+      const rawView = action.payload?.view;
+      if (typeof rawView !== 'string' || !allowedViews.has(rawView)) return state;
+      const view = rawView as TuiViewId;
       const top = state.viewStack[state.viewStack.length - 1];
       if (top?.view === view) return state;
       return {
@@ -152,8 +160,19 @@ export interface StateContextValue {
 
 const StateContext = createContext<StateContextValue | null>(null);
 
-export function StateProvider({ children }: { children: React.ReactNode }) {
-  const [state, baseDispatch] = useReducer(appReducer, initialState);
+export function StateProvider({ children, allowedViews }: { children: React.ReactNode; allowedViews?: ReadonlySet<string> }) {
+  const allowedViewsRef = useRef<ReadonlySet<string>>(new Set([
+    ...BUILTIN_VIEWS,
+    ...(allowedViews ?? []),
+  ]));
+  allowedViewsRef.current = new Set([
+    ...BUILTIN_VIEWS,
+    ...(allowedViews ?? []),
+  ]);
+  const [state, baseDispatch] = useReducer(
+    (currentState: AppState, action: AppAction) => appReducer(currentState, action, allowedViewsRef.current),
+    initialState,
+  );
 
   const dispatch = useCallback((action: AppAction) => {
     baseDispatch(action);

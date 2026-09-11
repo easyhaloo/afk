@@ -148,6 +148,7 @@ function createSshPageHarness(listImplementation: () => Promise<SshListResult> =
     generateKey: vi.fn(),
     deployKey: vi.fn(),
     test: vi.fn(),
+    upload: vi.fn(async () => ({ fileName: "release.txt", remoteDirectory: "~/" })),
     input: vi.fn(),
     resize: vi.fn(),
     close: vi.fn(),
@@ -205,6 +206,61 @@ describe("SSH passwordless test loading", () => {
     expect(textContent(testButton())).toBe("测试免密");
     act(() => { renderer.unmount(); });
     vi.unstubAllGlobals();
+  });
+});
+
+describe("SSH SCP uploads", () => {
+  it("uploads a file for the selected ready host and reports the result", async () => {
+    const { renderer, api } = await renderSshPage();
+    const uploadButton = renderer.root.findByProps({ className: "ssh-upload-action" });
+
+    await act(async () => {
+      uploadButton.props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(api.upload).toHaveBeenCalledWith(hosts[0].id);
+    expect(textContent(renderer.root.findByProps({ role: "status" }))).toContain("已上传 release.txt");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("disables file uploads for hosts that are not ready", async () => {
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts, diagnostics: [] }));
+    const untrustedRow = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))[1];
+
+    await act(async () => {
+      untrustedRow.props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findByProps({ className: "ssh-upload-action" }).props.disabled).toBe(true);
+    act(() => { renderer.unmount(); });
+  });
+});
+
+describe("SSH operation notices", () => {
+  it("automatically hides a success notice after three seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const { renderer } = await renderSshPage();
+      const uploadButton = renderer.root.findByProps({ className: "ssh-upload-action" });
+
+      await act(async () => {
+        uploadButton.props.onClick();
+        await flushReactUpdates();
+      });
+      expect(renderer.root.findByProps({ role: "status" })).toBeDefined();
+
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+        await flushReactUpdates();
+      });
+
+      expect(renderer.root.findAllByProps({ role: "status" })).toHaveLength(0);
+      act(() => { renderer.unmount(); });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -599,6 +655,7 @@ describe("SSH host creation", () => {
     await act(async () => { findInput("172.16.0.241").props.onChange({ target: { value: "192.0.2.10" } }); await flushReactUpdates(); });
     await act(async () => { findInput("deploy").props.onChange({ target: { value: "deployer" } }); await flushReactUpdates(); });
     await act(async () => { dialog.findByProps({ type: "password" }).props.onChange({ target: { value: "new-host-password" } }); await flushReactUpdates(); });
+    expect(dialog.findByProps({ type: "password" }).props.value).toBe("new-host-password");
 
     await act(async () => {
       dialog.props.onSubmit({ preventDefault: vi.fn() });

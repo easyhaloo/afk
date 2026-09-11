@@ -1,5 +1,6 @@
-// View type - union of all registered view names
-export type View = 'tasks' | 'backlogs' | 'projects' | 'board';
+import type { TuiViewId } from '../plugins/types';
+
+export type View = TuiViewId;
 
 export type DetailView = 'list' | 'detail';
 

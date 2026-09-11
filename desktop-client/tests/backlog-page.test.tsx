@@ -13,6 +13,7 @@ import {
   filterBacklogItems,
 } from "../src/features/backlog/backlog-filter";
 import type { BacklogItem } from "../shared/backlog-contract";
+import type { BacklogRunSummary } from "../shared/backlog-contract";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { document?: unknown }).document = {
@@ -51,8 +52,11 @@ type BacklogApi = {
   list: ReturnType<typeof vi.fn>;
   show: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
+  start: ReturnType<typeof vi.fn>;
+  runs: ReturnType<typeof vi.fn>;
   addTag: ReturnType<typeof vi.fn>;
   removeTag: ReturnType<typeof vi.fn>;
+  openExternal: ReturnType<typeof vi.fn>;
 };
 
 function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[]> = async () => items): {
@@ -63,10 +67,13 @@ function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[
     list,
     show: vi.fn(),
     create: vi.fn(),
+    start: vi.fn(),
+    runs: vi.fn(async () => []),
     addTag: vi.fn(),
     removeTag: vi.fn(),
+    openExternal: vi.fn(async () => true),
   };
-  vi.stubGlobal("window", { afkDesktop: { backlog: api } });
+  vi.stubGlobal("window", { afkDesktop: { openExternal: api.openExternal, backlog: api } });
   return { api };
 }
 
@@ -125,6 +132,13 @@ describe("backlog filter (pure)", () => {
 });
 
 describe("BacklogPage initial render", () => {
+  it("does not render a page-level refresh button", async () => {
+    const { renderer } = await renderBacklogPage();
+
+    expect(renderer.root.findAllByProps({ "aria-label": "刷新 Backlog" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+  });
+
   it("invokes the bridge list with the supplied workspace and no platform override by default", async () => {
     const { api, renderer } = await renderBacklogPage("/repo");
 
@@ -171,6 +185,55 @@ describe("BacklogPage initial render", () => {
   });
 });
 
+describe("BacklogPage detail drawer", () => {
+  it("loads the canonical item when a row is selected and closes the preview", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    const detail = {
+      ...items[0],
+      description: "切换登录态并保留当前工作区。",
+      webUrl: "https://github.com/example/issues/1",
+    };
+    api.show.mockResolvedValue(detail);
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(api.show).toHaveBeenCalledWith("/repo", "1");
+    expect(textContent(renderer.root.findByProps({ role: "dialog" }))).toContain("切换登录态并保留当前工作区。");
+    expect(renderer.root.findByProps({ "aria-label": "在浏览器中打开" })).toBeTruthy();
+
+    await act(async () => {
+      renderer.root.findByProps({ "aria-label": "在浏览器中打开" }).props.onClick();
+      await flushReactUpdates();
+    });
+    expect(api.openExternal).toHaveBeenCalledWith("https://github.com/example/issues/1");
+
+    await act(async () => {
+      renderer.root.findByProps({ "aria-label": "关闭详情" }).props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("hides the external browser action when the item has no web URL", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    api.show.mockResolvedValue(items[0]);
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findAllByProps({ "aria-label": "在浏览器中打开" })).toHaveLength(0);
+    expect(textContent(renderer.root.findByProps({ role: "dialog" }))).toContain("该工作项没有可用的外部链接。");
+    act(() => { renderer.unmount(); });
+  });
+});
+
 describe("BacklogPage loading states", () => {
   it("disables controls and keeps the loading placeholder while the first list request is in flight", async () => {
     const pending = deferred<BacklogItem[]>();
@@ -178,11 +241,11 @@ describe("BacklogPage loading states", () => {
 
     const platformSelect = renderer.root.findByProps({ "aria-label": "选择 Provider" });
     const stateSelect = renderer.root.findByProps({ "aria-label": "筛选状态" });
-    const refreshButton = renderer.root.findByProps({ "aria-label": "刷新 Backlog" });
+    const createButton = renderer.root.findByProps({ "aria-label": "新建 Backlog" });
 
     expect(platformSelect.props.disabled).toBe(true);
     expect(stateSelect.props.disabled).toBe(true);
-    expect(refreshButton.props.disabled).toBe(true);
+    expect(createButton.props.disabled).toBe(true);
     expect(textContent(renderer.root.findByProps({ className: "backlog-empty" }))).toContain("正在读取 Backlog");
     expect(api.list).toHaveBeenCalledTimes(1);
 
@@ -190,16 +253,84 @@ describe("BacklogPage loading states", () => {
       pending.resolve(items);
       await flushReactUpdates();
     });
-    expect(refreshButton.props.disabled).toBe(false);
+    expect(createButton.props.disabled).toBe(false);
     act(() => { renderer.unmount(); });
   });
 
   it("re-enables controls once the initial load resolves", async () => {
     const { renderer } = await renderBacklogPage();
-    const refreshButton = renderer.root.findByProps({ "aria-label": "刷新 Backlog" });
+    const platformSelect = renderer.root.findByProps({ "aria-label": "选择 Provider" });
+    const createButton = renderer.root.findByProps({ "aria-label": "新建 Backlog" });
 
-    expect(refreshButton.props.disabled).toBe(false);
+    expect(platformSelect.props.disabled).toBe(false);
+    expect(createButton.props.disabled).toBe(false);
     expect(renderer.root.findAllByProps({ className: "backlog-row" })).toHaveLength(items.length);
+    act(() => { renderer.unmount(); });
+  });
+});
+
+describe("BacklogPage execution", () => {
+  it("renders the run action in the row header with an accessible label", async () => {
+    const { renderer } = await renderBacklogPage();
+    const row = renderer.root.findAllByProps({ className: "backlog-row" })[0];
+    const header = row.findByType("header");
+    const runButton = header.findByProps({ className: "backlog-run-button" });
+
+    expect(header.findAllByProps({ className: "backlog-row-heading" })).toHaveLength(1);
+    expect(runButton.props["aria-label"]).toBe("开始执行");
+    expect(runButton.props.title).toBe("开始执行");
+    expect(row.findAllByProps({ className: "backlog-row-actions" })).toHaveLength(0);
+    renderer.unmount();
+  });
+
+  it("keeps the run action from opening the row detail drawer", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    const run = { id: "desktop-1-run", backlogId: "1", status: "running", startedAt: "2026-09-08T10:00:00.000Z", pid: 1234 } as const;
+    api.start.mockResolvedValueOnce(run);
+    const stopPropagation = vi.fn();
+    const button = renderer.root.findAllByProps({ className: "backlog-run-button" })[0];
+
+    await act(async () => {
+      button.props.onClick({ stopPropagation });
+      await flushReactUpdates();
+    });
+
+    expect(stopPropagation).toHaveBeenCalledTimes(1);
+    expect(api.show).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
+  it("hydrates an existing run from the bridge on initial load", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    api.runs.mockResolvedValueOnce([{ id: "desktop-1-run", backlogId: "1", status: "running", startedAt: "2026-09-08T10:00:00.000Z", pid: process.pid }]);
+    act(() => { renderer.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 })); });
+    await act(async () => { await flushReactUpdates(); });
+
+    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("运行状态：运行中");
+    expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("starts a ready backlog item and shows its local run handle", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    const run: BacklogRunSummary = {
+      id: "desktop-1-run",
+      backlogId: "1",
+      status: "running",
+      startedAt: "2026-09-08T10:00:00.000Z",
+      pid: 1234,
+    };
+    api.start.mockResolvedValueOnce(run);
+
+    const row = renderer.root.findAllByProps({ className: "backlog-row" })[0];
+    await act(async () => {
+      row.findByProps({ className: "backlog-run-button" }).props.onClick({ stopPropagation: vi.fn() });
+      await flushReactUpdates();
+    });
+
+    expect(api.start).toHaveBeenCalledWith("/repo", { backlogId: "1" });
+    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("PID 1234");
+    expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
     act(() => { renderer.unmount(); });
   });
 });
@@ -228,7 +359,7 @@ describe("BacklogPage error states", () => {
 
     api.list.mockResolvedValueOnce(items);
     await act(async () => {
-      renderer.root.findByProps({ "aria-label": "刷新 Backlog" }).props.onClick();
+      renderer.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 }));
       await flushReactUpdates();
     });
 
@@ -361,12 +492,12 @@ describe("BacklogPage refresh and cache", () => {
     act(() => { renderer.unmount(); });
   });
 
-  it("force-refreshes from the bridge when the refresh button is clicked", async () => {
+  it("force-refreshes from the bridge when the global refresh version changes", async () => {
     const { renderer, api } = await renderBacklogPage();
     expect(api.list).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      renderer.root.findByProps({ "aria-label": "刷新 Backlog" }).props.onClick();
+      renderer.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 }));
       await flushReactUpdates();
     });
 
@@ -392,7 +523,7 @@ describe("BacklogPage refresh and cache", () => {
     expect(api.list).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      renderer!.root.findByProps({ "aria-label": "刷新 Backlog" }).props.onClick();
+      renderer!.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 }));
       await flushReactUpdates();
     });
     expect(api.list).toHaveBeenCalledTimes(2);

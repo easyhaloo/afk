@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { ManagedSshHostInput, SshExternalTerminalId, SshJumpHostType } from "../../shared/ssh-contract";
 
-const ALIAS_PATTERN = /^[\p{L}\p{N}_.-]{1,100}$/u;
+const OPENSSH_ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 const HOSTNAME_PATTERN = /^\S{1,253}$/u;
 
 function requiredString(value: unknown, message: string) {
@@ -9,17 +9,11 @@ function requiredString(value: unknown, message: string) {
   return value.trim();
 }
 
-function displayName(value: unknown) {
-  const name = requiredString(value, "SSH 主机别名无效");
-  if (!ALIAS_PATTERN.test(name) || name === "." || name === "..") throw new Error("SSH 主机别名无效");
-  if ([...name].length > 100) throw new Error("SSH 主机名称过长");
-  return name;
-}
-
 export function validateSshHostInput(value: unknown): ManagedSshHostInput {
   if (!value || typeof value !== "object") throw new Error("SSH 主机参数无效");
   const input = value as Record<string, unknown>;
-  const alias = displayName(input.alias);
+  const alias = requiredString(input.alias, "SSH 主机别名无效");
+  if ([...alias].length > 100) throw new Error("SSH 主机名称过长");
   const hostname = requiredString(input.hostname, "SSH 主机地址无效");
   if (!HOSTNAME_PATTERN.test(hostname) || hostname.startsWith("-")) throw new Error("SSH 主机地址无效");
   const port = input.port === undefined ? 22 : input.port;
@@ -31,7 +25,7 @@ export function validateSshHostInput(value: unknown): ManagedSshHostInput {
   const jumpHostType = requestedJumpHostType || (legacyProxyJump ? "openssh" : undefined);
   const requestedJumpHost = optional("jumpHost");
   const jumpHost = jumpHostType === "openssh" ? requestedJumpHost || legacyProxyJump : jumpHostType === "jumpserver" ? requestedJumpHost : undefined;
-  if (jumpHostType && (!jumpHost || !ALIAS_PATTERN.test(jumpHost) || jumpHost === "." || jumpHost === "..")) throw new Error(jumpHost ? "跳板机别名无效" : "跳板机别名不能为空");
+  if (jumpHostType && (!jumpHost || !OPENSSH_ALIAS_PATTERN.test(jumpHost) || jumpHost === "." || jumpHost === "..")) throw new Error(jumpHost ? "跳板机别名无效" : "跳板机别名不能为空");
   return {
     alias,
     hostname,
@@ -74,4 +68,14 @@ export function validateSshSessionId(value: unknown) {
 export function validateSshResize(cols: unknown, rows: unknown) {
   if (typeof cols !== "number" || !Number.isInteger(cols) || cols < 1 || cols > 500 || typeof rows !== "number" || !Number.isInteger(rows) || rows < 1 || rows > 300) throw new Error("SSH 终端尺寸无效");
   return { cols, rows };
+}
+
+export function validateSshUploadLocalPath(value: unknown) {
+  if (typeof value !== "string" || !value.trim() || value.includes("\0") || value.includes("\r") || value.includes("\n") || Buffer.byteLength(value, "utf8") > 4096) throw new Error("SSH 上传文件路径无效");
+  return path.resolve(value.trim());
+}
+
+export function validateSshUploadRemoteDirectory(value: unknown) {
+  if (typeof value !== "string" || !value.trim() || value.includes("\0") || value.includes("\r") || value.includes("\n") || Buffer.byteLength(value, "utf8") > 4096) throw new Error("SSH 远程目录无效");
+  return value.trim().endsWith("/") ? value.trim() : `${value.trim()}/`;
 }

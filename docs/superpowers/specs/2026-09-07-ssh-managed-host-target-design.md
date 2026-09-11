@@ -33,8 +33,9 @@ OpenSSH `Host` 别名。AFK 托管主机由 AFK 保存和管理，OpenSSH 只在
 
 - 新增或编辑 AFK 托管主机不写入 `~/.ssh/afk_hosts`，也不维护
   `~/.ssh/config` 的 AFK `Include`。
-- AFK 托管配置保存到 AFK 自己的配置文件；该文件只保存非敏感的主机
-  参数和稳定 ID。部署密码继续由系统安全存储管理。
+- AFK 托管配置保存到 Electron `userData/ssh-hosts.yml`；该文件只保存
+  非敏感的主机参数和稳定 ID，并使用仓库统一的 schema-aware YAML 读写。
+  部署密码继续由系统安全存储管理。
 - 系统来源主机仍可从用户现有 `~/.ssh/config` 读取，作为只读外部配置。
   系统来源主机的 OpenSSH alias 仅用于兼容既有配置，不影响 AFK 托管主机。
 - 不自动迁移或删除用户已有的 `~/.ssh/config`、`~/.ssh/afk_hosts` 内容。
@@ -71,7 +72,8 @@ OpenSSH `Host` 别名。AFK 托管主机由 AFK 保存和管理，OpenSSH 只在
 
 - 校验：中文名称可通过；NUL、空名称和超长名称被拒绝；OpenSSH alias
   限制不再应用于 AFK 显示名称。
-- 配置：托管配置不写入 `~/.ssh/afk_hosts`，重启后可读回中文名称，
+- 配置：托管配置不写入 `~/.ssh/afk_hosts`，重启后可从
+  `userData/ssh-hosts.yml` 读回中文名称，
   稳定 ID 和凭据目标保持不变。
 - 命令适配器：指纹扫描、免密测试、PTY、外部终端和部署均接收真实
   hostname，并生成正确 argv。

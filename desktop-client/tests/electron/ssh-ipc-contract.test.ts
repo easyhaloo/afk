@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   addHost: vi.fn().mockResolvedValue({ id: "managed:stable-1", alias: "kg演示" }),
   updateHost: vi.fn().mockResolvedValue({ id: "managed:build-box", alias: "build-box" }),
   deployKey: vi.fn().mockResolvedValue({ id: "session-deploy" }),
+  uploadFile: vi.fn().mockResolvedValue({ fileName: "release.txt", remoteDirectory: "~/" }),
   openExternal: vi.fn().mockResolvedValue({ terminal: "iterm2" }),
   credentialHas: vi.fn().mockResolvedValue(false),
   credentialSet: vi.fn().mockResolvedValue(true),
@@ -48,6 +49,7 @@ vi.mock("../../electron/services/ssh-service", () => ({
       addHost: mocks.addHost,
       updateHost: mocks.updateHost,
       deployKey: mocks.deployKey,
+      uploadFile: mocks.uploadFile,
       openExternal: mocks.openExternal,
       hasCredential: mocks.credentialHas,
       setCredential: mocks.credentialSet,
@@ -95,7 +97,7 @@ describe("SSH external terminal IPC contract", () => {
     const sender = { senderFrame: { url: "http://localhost:5174" } };
 
     await expect(Promise.resolve().then(() => handler(sender, "invalid", { alias: "build-box", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机 ID 无效");
-    await expect(Promise.resolve().then(() => handler(sender, "managed:build-box", { alias: "bad alias", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机别名无效");
+    await expect(Promise.resolve().then(() => handler(sender, "managed:build-box", { alias: "bad\0alias", hostname: "build.example.test", port: 22 }))).rejects.toThrow("SSH 主机别名无效");
   });
 
   it("accepts Chinese managed-host display names at the IPC boundary", async () => {
@@ -187,6 +189,42 @@ describe("SSH external terminal IPC contract", () => {
     await expect(Promise.resolve().then(() => handler(sender, { forceRefresh: "true" }))).rejects.toThrow("SSH 列表参数无效");
     await expect(Promise.resolve().then(() => handler(sender, { forceRefresh: true, unexpected: false }))).rejects.toThrow("SSH 列表参数无效");
     expect(mocks.listHosts).not.toHaveBeenCalledWith({ forceRefresh: true });
+  });
+});
+
+describe("SSH SCP upload IPC contract", () => {
+  it("registers the upload channel and exposes the fixed bridge method", () => {
+    expect(IPC_CHANNELS.sshUpload).toBe("afk:ssh-upload");
+    expect(mocks.handlers.has(IPC_CHANNELS.sshUpload)).toBe(true);
+    expect((mocks.exposedApi as { ssh: Record<string, unknown> }).ssh.upload).toBeTypeOf("function");
+  });
+
+  it("rejects an untrusted sender before opening the file picker", async () => {
+    const handler = mocks.handlers.get(IPC_CHANNELS.sshUpload)!;
+    const { dialog } = await import("electron");
+
+    await expect(handler({ senderFrame: { url: "https://attacker.example" } }, "invalid")).rejects.toThrow("拒绝来自非 AFK Control renderer 的 IPC 请求");
+    expect(vi.mocked(dialog.showOpenDialog)).not.toHaveBeenCalled();
+  });
+
+  it("returns null for a canceled picker and forwards the selected file", async () => {
+    const handler = mocks.handlers.get(IPC_CHANNELS.sshUpload)!;
+    const api = mocks.exposedApi as { ssh: { upload: (hostId: string) => Promise<unknown> } };
+    const { dialog } = await import("electron");
+    const picker = vi.mocked(dialog.showOpenDialog);
+    const sender = { senderFrame: { url: "http://localhost:5174" } };
+    mocks.uploadFile.mockClear();
+    mocks.invoke.mockClear();
+
+    picker.mockResolvedValueOnce({ canceled: true, filePaths: [] } as never);
+    await expect(handler(sender, "managed:build-box")).resolves.toBeNull();
+    expect(mocks.uploadFile).not.toHaveBeenCalled();
+
+    picker.mockResolvedValueOnce({ canceled: false, filePaths: ["/tmp/release.txt"] } as never);
+    await expect(handler(sender, "managed:build-box")).resolves.toEqual({ fileName: "release.txt", remoteDirectory: "~/" });
+    expect(mocks.uploadFile).toHaveBeenCalledWith("managed:build-box", "/tmp/release.txt");
+    await api.ssh.upload("managed:build-box");
+    expect(mocks.invoke).toHaveBeenCalledWith(IPC_CHANNELS.sshUpload, "managed:build-box");
   });
 });
 

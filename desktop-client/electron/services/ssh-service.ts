@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ManagedSshHostInput, SshConnectionTarget, SshExternalTerminalId, SshFingerprint, SshHost, SshListResult, SshSession, SshTestResult, SshTrustRequest } from "../../shared/ssh-contract";
 import type { ExternalTerminalName } from "../adapters/external-terminal-adapter";
-import { assertAllowedSshPath, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
+import { assertAllowedSshPath, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId, validateSshUploadLocalPath, validateSshUploadRemoteDirectory } from "../security/ssh-validation";
 import type { SshCredentialTarget } from "./ssh-credential-service";
 
 type ServiceDependencies = {
@@ -21,6 +21,7 @@ type ServiceDependencies = {
     loadIdentity: (identityFile: string) => Promise<boolean>;
     keygenArgs: (identityFile: string) => string[];
     deployArgs: (target: SshConnectionTarget | string, publicKeyPath: string) => string[];
+    upload: (localPath: string, target: SshConnectionTarget | string, remoteDirectory: string) => Promise<boolean>;
   };
   knownHosts: {
     isTrusted: (target: { hostname: string; port: number }, fingerprint: SshFingerprint) => Promise<boolean>;
@@ -327,6 +328,29 @@ export function createSshService(deps: ServiceDependencies) {
     }
   }
 
+  async function uploadFile(hostId: string, localPath: string) {
+    const startedAt = now();
+    const host = await findHost(hostId);
+    const selectedPath = validateSshUploadLocalPath(localPath);
+    const remoteDirectory = validateSshUploadRemoteDirectory(host.remoteWorkspace?.trim() || "~/");
+    const stat = await fs.stat(selectedPath).catch(() => undefined);
+    if (!stat?.isFile()) throw new Error("SSH 上传文件不存在或不是普通文件");
+    const target = await resolveFingerprintTarget(host);
+    const fingerprint = await deps.commands.scanFingerprint(target);
+    if (!await deps.knownHosts.isTrusted(target, fingerprint)) {
+      audit(deps, "upload", "untrusted", host.id, startedAt);
+      throw new Error("SSH 主机尚未信任，已阻止文件上传");
+    }
+    try {
+      await deps.commands.upload(selectedPath, connectionArgument(host), remoteDirectory);
+      audit(deps, "upload", "uploaded", host.id, startedAt);
+      return { fileName: path.basename(selectedPath), remoteDirectory };
+    } catch (error) {
+      audit(deps, "upload", "failed", host.id, startedAt);
+      throw error;
+    }
+  }
+
   async function hasCredential(hostId: string) {
     const host = await findHost(hostId);
     if (!deps.credentialService) return false;
@@ -400,6 +424,7 @@ export function createSshService(deps: ServiceDependencies) {
     testHost,
     generateKey,
     deployKey,
+    uploadFile,
     hasCredential,
     setCredential,
     removeCredential,

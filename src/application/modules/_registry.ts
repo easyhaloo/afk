@@ -9,6 +9,7 @@
  */
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { load } from 'js-yaml';
 import type { LifecycleModule, ModuleFactory } from '../workflows/lifecycle';
 
 // Module registry: maps module name → factory function.
@@ -19,59 +20,30 @@ const MODULE_LOADERS: Record<string, () => Promise<ModuleFactory>> = {
   'project-resolver': () => import('./project-resolver').then(m => m.default),
 };
 
-const _registry = new Map<string, ModuleFactory>();
-
-async function ensureModule(name: string): Promise<void> {
-  if (_registry.has(name)) return;
-  const loader = MODULE_LOADERS[name];
-  if (!loader) throw new Error(`Unknown module: ${name}. Available: ${Object.keys(MODULE_LOADERS).join(', ')}`);
-  const factory = await loader();
-  _registry.set(name, factory);
-}
-
-export function defineModule(factory: ModuleFactory): ModuleFactory {
-  const mod = factory();
-  if (_registry.has(mod.name)) throw new Error(`Duplicate module name: ${mod.name}`);
-  _registry.set(mod.name, factory);
-  return factory;
+function validateModuleNames(names: string[]): string[] {
+  const unique = [...new Set(names)];
+  for (const name of unique) {
+    if (!MODULE_LOADERS[name]) throw new Error(`Unknown module: ${name}. Available: ${Object.keys(MODULE_LOADERS).join(', ')}`);
+  }
+  return unique;
 }
 
 export async function resolveModuleNames(cliExt?: string[]): Promise<string[]> {
-  const seen = new Set<string>();
-  if (cliExt && cliExt.length > 0) {
-    for (const name of cliExt) {
-      await ensureModule(name);
-      seen.add(name);
-    }
-    return [...seen];
-  }
-
   const configNames = loadConfigModules();
-  if (configNames.length > 0) {
-    for (const name of configNames) {
-      await ensureModule(name);
-      seen.add(name);
-    }
-    return [...seen];
-  }
-
-  const env = process.env.AFK_MODULES;
-  if (env) {
-    for (const name of env.split(',').map(s => s.trim()).filter(Boolean)) {
-      await ensureModule(name);
-      seen.add(name);
-    }
-    return [...seen];
-  }
-  return [];
+  const names = cliExt?.length
+    ? cliExt
+    : configNames.length
+      ? configNames
+      : (process.env.AFK_MODULES ?? '').split(',').map(name => name.trim()).filter(Boolean);
+  return validateModuleNames(names);
 }
 
 const CORE_MODULE_NAMES = ['project-resolver'];
 
 export async function loadModules(cliExt?: string[]): Promise<LifecycleModule[]> {
-  for (const name of CORE_MODULE_NAMES) await ensureModule(name);
   const optInNames = await resolveModuleNames(cliExt);
-  return [...CORE_MODULE_NAMES, ...optInNames].map(name => _registry.get(name)!());
+  const factories = await Promise.all(validateModuleNames([...CORE_MODULE_NAMES, ...optInNames]).map(name => MODULE_LOADERS[name]()));
+  return factories.map(factory => factory());
 }
 
 export type ModuleParamValue = string;
@@ -103,26 +75,10 @@ function loadConfigModules(): string[] {
   if (!existsSync(configPath)) return [];
 
   try {
-    const raw = readFileSync(configPath, 'utf-8');
-    const lines = raw.split('\n').map(l => l.trim());
-    let inModules = false;
-    const modules: string[] = [];
-
-    for (const line of lines) {
-      if (line === 'workflow:') { inModules = false; continue; }
-      if (line === 'modules:' && inModules === false) { inModules = true; continue; }
-      if (inModules) {
-        if (line.startsWith('- ')) modules.push(line.slice(2).trim());
-        else if (line.startsWith('-') || line.startsWith('#')) continue;
-        else inModules = false;
-      }
-    }
-    return modules;
+    const config = load(readFileSync(configPath, 'utf-8')) as { workflow?: { modules?: unknown } } | null;
+    const modules = config?.workflow?.modules;
+    return Array.isArray(modules) ? modules.filter((name): name is string => typeof name === 'string').map(name => name.trim()).filter(Boolean) : [];
   } catch {
     return [];
   }
-}
-
-export function _resetRegistry(): void {
-  _registry.clear();
 }

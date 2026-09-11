@@ -122,6 +122,11 @@ export type SshResizeRequest = {
   rows: number;
 };
 
+export type SshUploadResult = {
+  fileName: string;
+  remoteDirectory: string;
+};
+
 export function sshHostStatusPriority(status: SshHostStatus) {
   return ["invalid", "identity-changed", "untrusted", "key-missing", "auth-required", "unreachable", "ready"].indexOf(status);
 }

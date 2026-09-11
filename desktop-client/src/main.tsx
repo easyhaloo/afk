@@ -109,6 +109,7 @@ function App() {
   const [replayRun, setReplayRun] = useState("");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [appearance, setAppearance] = useState<AppearancePreferences>(defaultAppearance);
   const freshTimer = useRef<number | null>(null);
   const refreshInFlight = useRef(false);
@@ -137,6 +138,7 @@ function App() {
       setReplayRun((current) => next.events.some((item) => item.source === current) ? current : next.events[0]?.source ?? "");
       if (!session && next.sessions[0]) setSession(next.sessions[0].name);
       setLastCheckedAt(Date.now());
+      setRefreshVersion((current) => current + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -284,7 +286,7 @@ function App() {
       <section className="content-shell">
         <header className="topbar">
           <div className="topbar-context"><div className="breadcrumb"><span>AFK</span><b>›</b><strong>{title}</strong></div>{view === "queue" || view === "board" ? <div className="run-view-switcher header-run-mode" aria-label="运行视图切换"><button className={runMode === "queue" ? "active" : ""} onClick={() => { setRunMode("queue"); setView("queue"); }}><LayoutList size={14} />队列</button><button className={runMode === "board" ? "active" : ""} onClick={() => { setRunMode("board"); setView("board"); }}><Workflow size={14} />看板</button></div> : null}{view === "agents" ? <AgentHeaderSummary available={availableRuntimeCount} total={runtimeTotal} unavailable={unavailableRuntimeCount} /> : null}</div>
-          <div className="top-actions"><button className="command" onClick={() => setCommandOpen((current) => !current)}><Command size={15} />命令 <kbd>⌘ K</kbd></button><button className="icon-button" onClick={() => void refresh()}><RefreshCw size={16} className={loading ? "spin" : ""} /></button></div>
+          <div className="top-actions"><button className="command" onClick={() => setCommandOpen((current) => !current)}><Command size={15} />命令 <kbd>⌘ K</kbd></button><button className="icon-button" onClick={() => void refresh()} aria-label="刷新页面"><RefreshCw size={16} className={loading ? "spin" : ""} /></button></div>
         </header>
         {commandOpen ? <div className="command-sheet"><header><span>命令</span><button onClick={() => setCommandOpen(false)}><X size={14} /></button></header><button onClick={() => { void refresh(); setCommandOpen(false); }}><RefreshCw size={14} />重新读取</button><button onClick={() => { setView("board"); setCommandOpen(false); }}><Workflow size={14} />打开看板</button><button onClick={() => { void selectWorkspace(); setCommandOpen(false); }}><FolderOpen size={14} />选择工作区</button></div> : null}
         {error ? <div className="error-banner"><X size={15} />{error}</div> : null}
@@ -294,7 +296,7 @@ function App() {
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
           {view === "containers" ? <Environments snapshot={snapshot} onTerminal={openSession} /> : null}
           {view === "ssh" ? <SshHostsPage onSession={openSshSession} /> : null}
-          {view === "backlog" ? <BacklogPage workspace={workspace || snapshot?.workspace.root || ""} /> : null}
+          {view === "backlog" ? <BacklogPage workspace={workspace || snapshot?.workspace.root || ""} refreshVersion={refreshVersion} /> : null}
           {view === "workflows" ? <Workflows snapshot={snapshot} onSave={saveWorkflowConfig} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}

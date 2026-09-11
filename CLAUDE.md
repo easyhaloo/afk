@@ -28,6 +28,21 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 | `afk kanban` | Kanban board of issues |
 | `afk debug` | Debug loop (reproduce → verify) |
 
+## Desktop Client
+
+From the repository root, use the `Makefile` for common desktop-client commands:
+
+```makefile
+make desktop-dev        # build + restart (always uses latest code)
+make desktop-build      # typecheck + compile
+make desktop-test       # vitest unit tests
+make desktop-e2e        # build:main + Playwright e2e
+make desktop-package-mac  # package .app to release/
+make desktop-verify-mac   # restart-packaged-mac verification
+```
+
+Alternatively, `pnpm --filter afk-control-electron <cmd>` from `desktop-client/`.
+
 The CLI is a breaking backlog hard cutover. `issue`, `tracker`, `mr`, and
 `workflow` execution commands and their old argument forms are removed; there
 are no compatibility aliases. Provider labels are internal adapter metadata.
@@ -36,21 +51,29 @@ are no compatibility aliases. Provider labels are internal adapter metadata.
 
 ```
 src/
-├── commands/          # CLI command implementations ( commander )
-├── lib/
-│   ├── ui/core/       # TUI core: View, Registry, Keyboard
-│   ├── core/          # GitLab, GitHub, Tracker, IO abstractions
-│   └── plugins/       # Skill loader
-└── index.ts           # Entry point
+├── cli/                # CLI command implementations
+├── domain/             # Domain models and provider contracts
+├── application/        # Workflow, module, and runtime orchestration
+├── infrastructure/     # Git, tracker, tmux, IO adapters
+├── views/              # React + Ink TUI
+│   ├── app/            # Dashboard composition and state
+│   ├── board/          # Built-in views and navigation
+│   └── plugins/        # External TUI plugin contract and loader
+└── index.ts            # Entry point
 ```
 
-### TUI Core (`src/lib/ui/core/`)
+### External TUI Plugins
 
-- **View** — Interface for TUI panels; each View has `id`, `shortcut`, `render()`
-- **ViewRegistry** — Manages View registration and active state; sorts by priority
-- **KeyboardDispatcher** — Routes keyboard events to global handlers or active View
+Trusted local plugins are discovered from `~/.afk/plugins.yml` and loaded from
+`~/.afk/plugins/<id>/dist/index.js` when enabled. A plugin exports a default
+object or named `plugin` object with `id`, `name`, and `views`; each view has an
+`id`, `title`, `shortcut`, and `render(context)` function. View IDs are
+namespaced as `plugin:<plugin-id>:<view-id>`.
 
-TUI built with React + Ink. Components live in `src/components/` (planned).
+Built-in views and shortcuts always win conflicts. Invalid or failing plugins
+are skipped without preventing TUI startup. These plugins are trusted local
+code and run with the same account permissions as AFK; the loader does not
+provide a sandbox.
 
 ## Related Projects
 

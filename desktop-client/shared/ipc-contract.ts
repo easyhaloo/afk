@@ -123,6 +123,7 @@ export type Snapshot = {
 
 export type DesktopApi = {
   copyText: (text: string) => Promise<boolean>;
+  openExternal: (url: string) => Promise<boolean>;
   chooseWorkspace: () => Promise<string | null>;
   snapshot: (workspace: string) => Promise<Snapshot>;
   appearance: () => Promise<AppearancePreferences>;
@@ -139,6 +140,7 @@ export type DesktopApi = {
     generateKey: () => Promise<{ publicKeyPath: string; session: SshSession }>;
     deployKey: (hostId: string) => Promise<SshSession>;
     test: (hostId: string) => Promise<SshTestResult>;
+    upload: (hostId: string) => Promise<SshUploadResult | null>;
     connect: (hostId: string) => Promise<SshSession>;
     openExternal: (hostId: string, terminal?: SshExternalTerminalId) => Promise<SshExternalTerminalResult>;
     credentialHas: (hostId: string) => Promise<boolean>;
@@ -154,6 +156,8 @@ export type DesktopApi = {
     list: (workspace: string, options?: BacklogListOptions) => Promise<BacklogItem[]>;
     show: (workspace: string, id: string) => Promise<BacklogItem>;
     create: (workspace: string, input: BacklogCreateInput) => Promise<BacklogItem>;
+    start: (workspace: string, input: BacklogRunStartInput) => Promise<BacklogRunSummary>;
+    runs: (workspace: string, backlogId?: string) => Promise<BacklogRunSummary[]>;
     addTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
     removeTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
   };
@@ -161,6 +165,7 @@ export type DesktopApi = {
 
 export const IPC_CHANNELS = {
   copyText: "afk:copy-text",
+  openExternal: "afk:open-external",
   chooseWorkspace: "afk:choose-workspace",
   snapshot: "afk:snapshot",
   appearance: "afk:appearance",
@@ -176,6 +181,7 @@ export const IPC_CHANNELS = {
   sshGenerateKey: "afk:ssh-generate-key",
   sshDeployKey: "afk:ssh-deploy-key",
   sshTest: "afk:ssh-test",
+  sshUpload: "afk:ssh-upload",
   sshConnect: "afk:ssh-connect",
   sshOpenExternal: "afk:ssh-open-external",
   sshCredentialHas: "afk:ssh-credential-has",
@@ -189,6 +195,8 @@ export const IPC_CHANNELS = {
   backlogList: "afk:backlog-list",
   backlogShow: "afk:backlog-show",
   backlogCreate: "afk:backlog-create",
+  backlogStart: "afk:backlog-start",
+  backlogRuns: "afk:backlog-runs",
   backlogTagAdd: "afk:backlog-tag-add",
   backlogTagRemove: "afk:backlog-tag-remove",
 } as const;
@@ -203,11 +211,14 @@ import type {
   SshSession,
   SshTestResult,
   SshTrustRequest,
+  SshUploadResult,
 } from "./ssh-contract";
 import type {
   BacklogCreateInput,
   BacklogItem,
   BacklogListOptions,
+  BacklogRunStartInput,
+  BacklogRunSummary,
 } from "./backlog-contract";
 
 export type SshExternalTerminalResult = {

@@ -5,6 +5,7 @@ import type { DesktopApi } from "../shared/ipc-contract";
 // local while the shared contract remains the source of renderer/main types.
 const IPC_CHANNELS = {
   copyText: "afk:copy-text",
+  openExternal: "afk:open-external",
   chooseWorkspace: "afk:choose-workspace",
   snapshot: "afk:snapshot",
   appearance: "afk:appearance",
@@ -20,6 +21,7 @@ const IPC_CHANNELS = {
   sshGenerateKey: "afk:ssh-generate-key",
   sshDeployKey: "afk:ssh-deploy-key",
   sshTest: "afk:ssh-test",
+  sshUpload: "afk:ssh-upload",
   sshConnect: "afk:ssh-connect",
   sshOpenExternal: "afk:ssh-open-external",
   sshCredentialHas: "afk:ssh-credential-has",
@@ -33,12 +35,15 @@ const IPC_CHANNELS = {
   backlogList: "afk:backlog-list",
   backlogShow: "afk:backlog-show",
   backlogCreate: "afk:backlog-create",
+  backlogStart: "afk:backlog-start",
+  backlogRuns: "afk:backlog-runs",
   backlogTagAdd: "afk:backlog-tag-add",
   backlogTagRemove: "afk:backlog-tag-remove",
 } as const;
 
 const api: DesktopApi = {
   copyText: (text) => ipcRenderer.invoke(IPC_CHANNELS.copyText, text),
+  openExternal: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternal, url),
   chooseWorkspace: () => ipcRenderer.invoke(IPC_CHANNELS.chooseWorkspace),
   snapshot: (workspace) => ipcRenderer.invoke(IPC_CHANNELS.snapshot, workspace),
   appearance: () => ipcRenderer.invoke(IPC_CHANNELS.appearance),
@@ -55,6 +60,7 @@ const api: DesktopApi = {
     generateKey: () => ipcRenderer.invoke(IPC_CHANNELS.sshGenerateKey),
     deployKey: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshDeployKey, hostId),
     test: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshTest, hostId),
+    upload: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshUpload, hostId),
     connect: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshConnect, hostId),
     openExternal: (hostId, terminal) => terminal ? ipcRenderer.invoke(IPC_CHANNELS.sshOpenExternal, hostId, terminal) : ipcRenderer.invoke(IPC_CHANNELS.sshOpenExternal, hostId),
     credentialHas: (hostId) => ipcRenderer.invoke(IPC_CHANNELS.sshCredentialHas, hostId),
@@ -80,6 +86,10 @@ const api: DesktopApi = {
       : ipcRenderer.invoke(IPC_CHANNELS.backlogList, workspace, options),
     show: (workspace, id) => ipcRenderer.invoke(IPC_CHANNELS.backlogShow, workspace, id),
     create: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogCreate, workspace, input),
+    start: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogStart, workspace, input),
+    runs: (workspace, backlogId) => backlogId === undefined
+      ? ipcRenderer.invoke(IPC_CHANNELS.backlogRuns, workspace)
+      : ipcRenderer.invoke(IPC_CHANNELS.backlogRuns, workspace, backlogId),
     addTag: (workspace, id, tag) => ipcRenderer.invoke(IPC_CHANNELS.backlogTagAdd, workspace, id, tag),
     removeTag: (workspace, id, tag) => ipcRenderer.invoke(IPC_CHANNELS.backlogTagRemove, workspace, id, tag),
   },

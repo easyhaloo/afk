@@ -1,7 +1,7 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
-import { parseBacklogCreateInput, parseBacklogListOptions, type BacklogPlatform } from "../../shared/backlog-contract";
+import { parseBacklogCreateInput, parseBacklogListOptions, parseBacklogRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
@@ -14,10 +14,14 @@ import { assertTrustedSender } from "../security/sender-guard";
 import { validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 import { readAppearance, saveAppearance } from "../services/appearance-service";
 import { createBacklogService } from "../services/backlog-service";
+import { createBacklogExecutionService } from "../services/backlog-execution-service";
+import { createBacklogRunStore } from "../services/backlog-run-store";
 import { createClipboardService } from "../services/clipboard-service";
 import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
+import { createExternalUrlService } from "../services/external-url-service";
+import { saveWorkspacePreference } from "../services/workspace-preference-service";
 import { resolveWorkspace } from "../services/workspace-service";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -33,6 +37,7 @@ function broadcast(channel: string, ...args: unknown[]) {
 const home = homedir();
 const sshManagedHostStore = createSshManagedHostStore({ file: path.join(app.getPath("userData"), "ssh-hosts.yml") });
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
+const externalUrlService = createExternalUrlService({ openExternal: (url) => shell.openExternal(url) });
 const sshCredentialService = createSshCredentialService({ home, safeStorage });
 const commands = createSshCommandAdapter({ exec });
 const knownHosts = createKnownHostsAdapter({
@@ -66,6 +71,17 @@ const backlogService = createBacklogService({
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
   },
 });
+const backlogExecutionService = createBacklogExecutionService({
+  resolveAfk: async () => {
+    const result = await exec("/usr/bin/which", ["afk"]);
+    if (!result.ok) return "";
+    const candidate = result.stdout.split("\n")[0]?.trim() ?? "";
+    return candidate && candidate.startsWith("/") ? candidate : "";
+  },
+  resolveWorkspace,
+  getBacklog: (workspace, id) => backlogService.show(workspace, id),
+  store: createBacklogRunStore({ resolveWorkspace }),
+});
 
 function fingerprintInput(value: unknown): SshFingerprint {
   if (!value || typeof value !== "object") throw new Error("SSH 指纹参数无效");
@@ -93,10 +109,18 @@ function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
 
 export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.copyText, (event, text: unknown) => { assertTrustedSender(event); return clipboardService.copyText(text); });
+  ipcMain.handle(IPC_CHANNELS.openExternal, (event, url: unknown) => {
+    assertTrustedSender(event);
+    if (typeof url !== "string" || !url.trim()) throw new Error("外部地址无效");
+    return externalUrlService.open(url);
+  });
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);
     const selected = await dialog.showOpenDialog({ title: "选择 AFK 工作区", properties: ["openDirectory"] });
-    return selected.canceled ? null : selected.filePaths[0] || null;
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    const workspace = await saveWorkspacePreference(app.getPath("userData"), selected.filePaths[0]);
+    process.env.AFK_WORKSPACE = workspace;
+    return workspace;
   });
   ipcMain.handle(IPC_CHANNELS.snapshot, (event, workspace: string) => { assertTrustedSender(event); return snapshot(workspace); });
   ipcMain.handle(IPC_CHANNELS.appearance, (event) => { assertTrustedSender(event); return readAppearance(); });
@@ -136,6 +160,13 @@ export function registerIpcHandlers() {
   ipcMain.handle(IPC_CHANNELS.sshGenerateKey, (event) => { assertTrustedSender(event); return sshService.generateKey(); });
   ipcMain.handle(IPC_CHANNELS.sshDeployKey, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.deployKey(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshTest, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.testHost(validateSshHostId(hostId)); });
+  ipcMain.handle(IPC_CHANNELS.sshUpload, async (event, hostId: unknown) => {
+    assertTrustedSender(event);
+    const id = validateSshHostId(hostId);
+    const selection = await dialog.showOpenDialog({ title: "选择要上传的文件", properties: ["openFile"] });
+    if (selection.canceled || !selection.filePaths[0]) return null;
+    return sshService.uploadFile(id, selection.filePaths[0]);
+  });
   ipcMain.handle(IPC_CHANNELS.sshConnect, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.connect(validateSshHostId(hostId)); });
   ipcMain.handle(IPC_CHANNELS.sshOpenExternal, (event, hostId: unknown, terminal: unknown) => { assertTrustedSender(event); return sshService.openExternal(validateSshHostId(hostId), terminal === undefined ? "iterm2" : validateSshExternalTerminalId(terminal)); });
   ipcMain.handle(IPC_CHANNELS.sshCredentialHas, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.hasCredential(validateSshHostId(hostId)); });
@@ -172,6 +203,17 @@ export function registerIpcHandlers() {
     assertTrustedSender(event);
     if (typeof workspace !== "string") throw new Error("backlog.create: workspace 必须是字符串");
     return backlogService.create(workspace, parseBacklogCreateInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogStart, (event, workspace: unknown, input: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.start: workspace 必须是字符串");
+    return backlogExecutionService.start(workspace, parseBacklogRunStartInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogRuns, (event, workspace: unknown, backlogId: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.runs: workspace 必须是字符串");
+    if (backlogId !== undefined && (typeof backlogId !== "string" || !backlogId)) throw new Error("backlog.runs: backlogId 必须是字符串");
+    return backlogExecutionService.list(workspace, backlogId as string | undefined);
   });
   ipcMain.handle(IPC_CHANNELS.backlogTagAdd, (event, workspace: unknown, id: unknown, tag: unknown) => {
     assertTrustedSender(event);

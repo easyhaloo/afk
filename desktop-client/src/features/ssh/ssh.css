@@ -55,14 +55,15 @@
 .ssh-toolbar .ssh-form-picker-options { bottom: auto; top: calc(100% + 7px); }
 .ssh-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 13px; align-items: start; }
 .ssh-host-list, .ssh-details { overflow: hidden; border: 1px solid var(--afk-border); border-radius: 11px; background: var(--afk-panel); }
-.ssh-host-row { display: grid; grid-template-columns: minmax(0, 1fr) 34px; align-items: stretch; min-height: 68px; border-bottom: 1px solid var(--afk-border); background: transparent; }
+.ssh-host-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; min-height: 68px; border-bottom: 1px solid var(--afk-border); background: transparent; }
 .ssh-host-row:last-child { border-bottom: 0; }
 .ssh-host-row:hover, .ssh-host-row.selected { background: var(--afk-panel-subtle); }
 .ssh-host-row.selected { box-shadow: inset 3px 0 var(--afk-accent); }
 .ssh-host-select { display: grid; width: 100%; grid-template-columns: 30px minmax(0, 1fr) auto auto; align-items: center; gap: 9px; min-height: 68px; border: 0; padding: 0 4px 0 13px; background: transparent; color: var(--afk-text); font: inherit; text-align: left; cursor: pointer; }
 .ssh-host-select:focus-visible { outline: none; box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--afk-accent) 18%, transparent); }
-.ssh-host-delete { align-self: center; width: 28px; min-height: 28px; margin-right: 5px; border-radius: 8px; padding: 0; opacity: 0; pointer-events: none; transition: opacity .14s ease, background .14s ease, border-color .14s ease, color .14s ease; }
-.ssh-host-row:hover .ssh-host-delete, .ssh-host-row.selected .ssh-host-delete, .ssh-host-row:focus-within .ssh-host-delete { opacity: 1; pointer-events: auto; }
+.ssh-host-delete { position: absolute; z-index: 1; top: 5px; right: 5px; width: 24px; min-height: 24px; border-color: transparent; border-radius: 50%; padding: 0; background: transparent; color: var(--afk-muted); opacity: 0; pointer-events: none; box-shadow: none; transition: opacity .14s ease, background .14s ease, border-color .14s ease, color .14s ease; }
+.ssh-host-delete:hover:not(:disabled) { border-color: transparent; background: var(--afk-panel-subtle); color: var(--afk-text); box-shadow: none; }
+.ssh-host-row:hover .ssh-host-delete, .ssh-host-row:focus-within .ssh-host-delete { opacity: 1; pointer-events: auto; }
 .ssh-host-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; background: var(--afk-accent-soft); color: var(--afk-accent); }
 .ssh-host-copy { display: grid; min-width: 0; gap: 4px; }
 .ssh-host-copy b, .ssh-host-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { BacklogPage } from "../src/features/backlog/BacklogPage";
@@ -274,6 +275,12 @@ describe("BacklogPage loading states", () => {
 });
 
 describe("BacklogPage execution", () => {
+  it("uses the compact 22px run control dimensions", () => {
+    const css = readFileSync(new URL("../src/features/backlog/backlog.css", import.meta.url), "utf8");
+
+    expect(css).toMatch(/\.backlog-run-button\s*\{[\s\S]*width: 22px;[\s\S]*height: 22px;[\s\S]*flex: 0 0 22px;/);
+  });
+
   it("renders the run action in the row header with an accessible label", async () => {
     const { renderer } = await renderBacklogPage();
     const row = renderer.root.findAllByProps({ className: "backlog-row" })[0];

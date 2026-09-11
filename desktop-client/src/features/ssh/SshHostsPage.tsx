@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppWindowMac, Check, ChevronDown, CircleAlert, Command, Copy, Ghost, KeyRound, Link2, PanelsTopLeft, Plus, RefreshCw, Search, Server, ShieldCheck, SquareTerminal, Trash2, Upload, X, Zap, type LucideIcon } from "lucide-react";
+import { AppWindowMac, Check, ChevronDown, CircleAlert, Command, Copy, Ghost, KeyRound, Link2, PanelsTopLeft, Plus, RefreshCw, Search, Server, ShieldCheck, SquareTerminal, Upload, X, Zap, type LucideIcon } from "lucide-react";
 import type { ManagedSshHostInput, SshDiagnostic, SshExternalTerminalId, SshHost, SshHostSource, SshHostStatus, SshJumpHostType, SshSession } from "../../../shared/ssh-contract";
 import { groupSshDiagnostics, type GroupedSshDiagnostic } from "./ssh-diagnostics";
 import { fetchSshHostList, invalidateSshHostCache, isSshHostCacheFresh, readSshHostCache } from "./ssh-host-cache";
@@ -193,7 +193,7 @@ function SshHostRow({ host, selected, busy, onSelect, onEdit, onRemove }: { host
       <span className={`ssh-status ${host.status}`}>{statusLabels[host.status]}</span>
       <span className="ssh-source">{sourceLabels[host.source]}</span>
     </button>
-    {canRemove ? <SshActionButton type="button" size="sm" variant="danger" className="ssh-host-delete" aria-label={removeLabel} title={host.source === "managed" ? "删除主机" : "清理不可达配置"} onClick={(event) => { event?.stopPropagation(); onRemove(host); }} disabled={!!busy}><Trash2 size={15} aria-hidden="true" /></SshActionButton> : null}
+    {canRemove ? <SshActionButton type="button" size="sm" variant="danger" className="ssh-host-delete" aria-label={removeLabel} title={host.source === "managed" ? "删除主机" : "清理不可达配置"} onClick={(event) => { event?.stopPropagation(); onRemove(host); }} disabled={!!busy}><X size={15} aria-hidden="true" /></SshActionButton> : null}
   </div>;
 }
 

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
+import { X } from "lucide-react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { filterSshHosts, SshHostsPage, sshDiagnosticTypeLabel } from "../src/features/ssh/SshHostsPage";
 import { resetSshHostCache, writeSshHostCache } from "../src/features/ssh/ssh-host-cache";
@@ -265,6 +267,21 @@ describe("SSH operation notices", () => {
 });
 
 describe("SSH connection modes", () => {
+  it("uses a hover-revealed top-right X control for removable hosts", async () => {
+    const css = readFileSync(new URL("../src/features/ssh/ssh.css", import.meta.url), "utf8");
+
+    expect(css).toMatch(/\.ssh-host-row\s*\{[\s\S]*position: relative;[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(css).toMatch(/\.ssh-host-delete\s*\{[\s\S]*position: absolute;[\s\S]*top: [^;]+;[\s\S]*right: [^;]+;/);
+    expect(css).toMatch(/\.ssh-host-row:hover \.ssh-host-delete/);
+    expect(css).toMatch(/\.ssh-host-row:focus-within \.ssh-host-delete/);
+    expect(css).toMatch(/\.ssh-host-delete:hover:not\(:disabled\)\s*\{[\s\S]*background: var\(--afk-panel-subtle\);/);
+
+    const { renderer } = await renderSshPage();
+    const deleteButton = renderer.root.findByProps({ "aria-label": "删除 SSH 主机 stage" });
+    expect(deleteButton.findByType(X)).toBeDefined();
+    act(() => { renderer.unmount(); });
+  });
+
   it("offers cleanup for unreachable system hosts without exposing deletion for reachable system hosts", async () => {
     const unreachable = { ...hosts[0], id: "system:dead", alias: "dead", status: "unreachable" as const };
     const { renderer, api, list } = await renderSshPage(vi.fn(), async () => ({ hosts: [hosts[0], unreachable], diagnostics: [] }));

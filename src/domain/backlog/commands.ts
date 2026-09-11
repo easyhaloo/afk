@@ -1,4 +1,5 @@
 import type {
+  BacklogCreateInput,
   BacklogListOptions,
   BacklogManagementProvider,
   BacklogItem,
@@ -12,6 +13,10 @@ export async function listBacklogs(provider: BacklogManagementProvider, options:
 
 export async function showBacklog(provider: BacklogManagementProvider, id: string): Promise<BacklogItem> {
   return provider.get(id);
+}
+
+export async function createBacklog(provider: BacklogManagementProvider, input: BacklogCreateInput): Promise<BacklogItem> {
+  return provider.create(input);
 }
 
 export async function initializeBacklog(provider: BacklogManagementProvider): Promise<void> {

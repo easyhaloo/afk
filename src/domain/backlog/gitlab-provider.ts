@@ -1,4 +1,4 @@
-import type { BacklogClaim, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index';
+import type { BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index';
 import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-adapter';
 import type { TrackerProvider } from '../tracker/types';
 
@@ -15,6 +15,7 @@ export class GitLabBacklogProvider implements BacklogProvider {
 
   get(id: string): Promise<BacklogItem> { return this.implementation.get(id); }
   list(options?: BacklogListOptions): Promise<BacklogItem[]> { return this.implementation.list(options); }
+  create(input: BacklogCreateInput): Promise<BacklogItem> { return this.implementation.create(input); }
   claim(id: string, owner: string): Promise<BacklogClaim | null> { return this.implementation.claim(id, owner); }
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> { return this.implementation.transition(id, state, details); }
   setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> { return this.implementation.setExecutionMode(id, mode); }

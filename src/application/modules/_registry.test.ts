@@ -1,9 +1,21 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { parseModuleParams, _resetRegistry } from './_registry';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { describe, it, expect, vi } from 'vitest';
+import { parseModuleParams, resolveModuleNames } from './_registry';
 
 describe('Module Registry', () => {
-  beforeEach(() => {
-    _resetRegistry();
+  it('reads modules from valid inline YAML', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'afk-modules-'));
+    mkdirSync(join(directory, '.afk'));
+    writeFileSync(join(directory, '.afk', 'config.yml'), 'workflow: { modules: [isolate] }\n');
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(directory);
+    try {
+      await expect(resolveModuleNames()).resolves.toEqual(['isolate']);
+    } finally {
+      cwd.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   describe('parseModuleParams', () => {

@@ -89,14 +89,11 @@ ln -s /path/to/afk/skills/* ~/.claude/skills/
 ## CLI 命令
 
 ```bash
-# Issue 管理
-afk issue get <id>
-afk issue list --label "stage::ready-for-implement"
-afk issue create "标题" --label "feature"
-afk issue edit <id> --label "bug"
-afk issue comment <id> "消息"
-afk issue link <src> <project>:<iid>     # 跨项目链接
-afk issue run <iid> --project <repo>      # 跨项目工作流
+# Backlog 管理
+afk backlog init
+afk backlog list --mode afk
+afk backlog show --id <id>
+afk backlog create "标题" --description-file ./backlog.md --parent <id> --depends-on <id> --tag feature
 
 # MR/PR 操作
 afk mr create "feat: add login" --source feat/login --target main

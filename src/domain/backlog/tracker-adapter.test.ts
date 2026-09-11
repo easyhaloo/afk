@@ -19,14 +19,68 @@ function tracker(issue: any): TrackerProvider {
 }
 
 describe('TrackerBacklogProvider', () => {
+  it('creates a child backlog with metadata, provider links, and concrete URLs in its body', async () => {
+    const parent = { id: 7, title: 'PRD', description: '', labels: [], state: 'opened', url: 'https://example/7', projectId: 'org/repo' };
+    const dependency = { id: 6, title: 'Foundation', description: '', labels: [], state: 'opened', url: 'https://example/6', projectId: 'org/repo' };
+    const created = { id: 42, title: 'Child', description: '', labels: [], state: 'opened', url: 'https://example/42', projectId: 'org/repo' };
+    const t = tracker(created);
+    t.getIssue = vi.fn(async id => ({ [6]: dependency, [7]: parent, [42]: created }[id]!));
+    t.createIssue = vi.fn(async input => {
+      created.title = input.title;
+      created.description = input.description ?? '';
+      created.labels = input.labels ?? [];
+      return 42;
+    });
+    t.updateIssue = vi.fn(async (_id, updates) => { created.description = updates.description ?? created.description; });
+    t.linkIssues = vi.fn(async () => {});
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.create({
+      title: 'Child', description: '## Context\n\nImplement the capability.', parentId: '7', dependsOn: ['6'], tags: ['feature'],
+    })).resolves.toMatchObject({ id: '42', parentId: '7', dependsOn: ['6'], webUrl: 'https://example/42' });
+
+    expect(t.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+      labels: ['stage::ready-for-issues', 'mode::afk', 'feature', 'parent::7', 'depends-on::6'],
+      description: expect.stringContaining('[#7](https://example/7)'),
+    }));
+    expect(t.linkIssues).toHaveBeenCalledWith(42, 6, 'blocked_by');
+    expect(t.updateIssue).toHaveBeenCalledWith(42, expect.objectContaining({
+      description: expect.stringContaining('[#42](https://example/42)'),
+    }));
+    expect(created.description).toContain('[#6](https://example/6)');
+  });
+
+  it('provisions tracker-native metadata before creating a backlog', async () => {
+    const created = { id: 42, title: 'Item', description: '', labels: [], state: 'opened', url: 'https://example/42', projectId: 'org/repo' };
+    const t = tracker(created);
+    const ensureBacklogMetadata = vi.fn(async () => {});
+    t.ensureBacklogMetadata = ensureBacklogMetadata;
+    t.createIssue = vi.fn(async input => {
+      created.title = input.title;
+      created.description = input.description ?? '';
+      created.labels = input.labels ?? [];
+      return 42;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.create({ title: 'Item', description: '## Acceptance Criteria\n- [ ] works -- test -- true' });
+
+    expect(ensureBacklogMetadata).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ name: 'stage::ready-for-issues' }),
+      expect.objectContaining({ name: 'mode::afk' }),
+    ]));
+    expect(ensureBacklogMetadata.mock.invocationCallOrder[0])
+      .toBeLessThan((t.createIssue as any).mock.invocationCallOrder[0]);
+  });
+
   it('maps labels and relationship metadata to canonical backlog fields', async () => {
     const issue = {
-      id: 42, title: 'Child', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'parent::10', 'depends-on::9'],
+      id: 42, title: 'Child', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'parent::10', 'base::8', 'depends-on::9'],
       state: 'opened', url: 'https://example/42', projectId: 'org/repo',
     };
     const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
     await expect(provider.get('42')).resolves.toMatchObject({
-      id: '42', parentId: '10', dependsOn: ['9'], state: 'ready', executionMode: 'afk', branchName: 'afk/backlog-42',
+      id: '42', parentId: '10', baseBacklogId: '8', dependsOn: ['9'], state: 'ready', executionMode: 'afk', branchName: 'afk/backlog-42',
       webUrl: 'https://example/42',
     });
   });

@@ -11,10 +11,9 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { IsolateManager, isolateGc } from '../isolate';
-import { defineModule } from './_registry';
 import type { LifecycleContext } from '../workflows/lifecycle';
 
-export default defineModule(() => ({
+export default () => ({
   name: 'isolate',
 
   async onBeforeAgent(ctx: LifecycleContext): Promise<void> {
@@ -33,6 +32,8 @@ export default defineModule(() => ({
         join(isolateDir, 'isolate.json'),
         JSON.stringify({
           available: true,
+          isolateName: info.isolateName,
+          composeProjectName: `isolate-${info.isolateName}`,
           services: info.services.map(s => ({
             name: s.name,
             host: s.host,
@@ -57,7 +58,7 @@ export default defineModule(() => ({
 
   async onAfterAgent(ctx: LifecycleContext): Promise<void> {
     try {
-      const im = new IsolateManager(ctx.worktreePath);
+      const im = new IsolateManager(ctx.worktreePath, { workspaceRoot: ctx.repoRoot });
       await im.discard();
     } catch {
       // Best-effort cleanup
@@ -72,4 +73,4 @@ export default defineModule(() => ({
       // Best-effort
     }
   },
-}));
+});

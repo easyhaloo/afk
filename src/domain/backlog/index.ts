@@ -15,7 +15,10 @@ export interface BacklogItem {
   id: string;
   title: string;
   description?: string;
+  /** Organizational grouping only; it never selects a git base branch. */
   parentId?: string;
+  /** Optional backlog whose unmerged branch is the explicit execution base. */
+  baseBacklogId?: string;
   dependsOn: string[];
   state: BacklogState;
   executionMode: BacklogExecutionMode;
@@ -25,6 +28,16 @@ export interface BacklogItem {
   providerRef: string;
   /** Optional provider URL for read-only navigation (for example, opening in a browser). */
   webUrl?: string;
+}
+
+export interface BacklogCreateInput {
+  title: string;
+  description: string;
+  parentId?: string;
+  baseBacklogId?: string;
+  dependsOn?: string[];
+  executionMode?: BacklogExecutionMode;
+  tags?: string[];
 }
 
 export interface BacklogListOptions {
@@ -41,6 +54,7 @@ export interface BacklogListOptions {
 export interface BacklogManagementProvider {
   get(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
+  create(input: BacklogCreateInput): Promise<BacklogItem>;
   addTag(id: string, tag: string): Promise<void>;
   removeTag(id: string, tag: string): Promise<void>;
   initialize(): Promise<void>;
@@ -59,6 +73,7 @@ export interface BacklogProvider {
   readonly capabilities?: import('./initialization').BacklogProviderCapabilities;
   get(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
+  create(input: BacklogCreateInput): Promise<BacklogItem>;
   claim(id: string, owner: string): Promise<BacklogClaim | null>;
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void>;
   setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void>;
@@ -101,6 +116,27 @@ export class InMemoryBacklogProvider implements BacklogProvider {
       .filter(item => options.parentId === undefined || item.parentId === options.parentId)
       .filter(item => options.tag === undefined || item.tags.includes(options.tag))
       .map(item => ({ ...item, dependsOn: [...item.dependsOn], tags: [...item.tags] }));
+  }
+
+  async create(input: BacklogCreateInput): Promise<BacklogItem> {
+    const title = input.title.trim();
+    if (!title) throw new Error('backlog title must not be empty');
+    const id = String(Math.max(0, ...[...this.items.keys()].map(value => Number(value)).filter(Number.isSafeInteger)) + 1);
+    const item: BacklogItem = {
+      id,
+      title,
+      description: input.description,
+      parentId: input.parentId,
+      baseBacklogId: input.baseBacklogId,
+      dependsOn: [...new Set(input.dependsOn ?? [])],
+      state: 'ready',
+      executionMode: input.executionMode ?? 'afk',
+      tags: [...new Set((input.tags ?? []).map(validateBusinessTag))],
+      branchName: deriveBacklogBranchName(id),
+      providerRef: `in-memory:${id}`,
+    };
+    this.items.set(id, item);
+    return { ...item, dependsOn: [...item.dependsOn], tags: [...item.tags] };
   }
 
   async claim(id: string, owner: string): Promise<BacklogClaim | null> {

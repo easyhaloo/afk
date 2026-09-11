@@ -132,6 +132,7 @@ export interface TrackedMR {
 }
 
 import type { ACItem, AcceptanceCriteria } from './ac-types';
+import type { BacklogMetadataLabel } from '../backlog/initialization';
 
 /**
  * TrackerProvider interface — unified for GitLab and GitHub
@@ -151,6 +152,8 @@ export interface TrackerProvider {
   addComment(id: number, body: string): Promise<void>;
   listIssueComments(id: number): Promise<TrackerIssueComment[]>;
   updateIssueComment(id: number, commentId: string, body: string): Promise<void>;
+  /** Optionally provision provider-native labels required by AFK backlog metadata. */
+  ensureBacklogMetadata?(labels: readonly BacklogMetadataLabel[]): Promise<void>;
   /**
    * Link source issue to target issue. For cross-project links, pass
    * `targetProjectId` (GitLab path or GitHub owner/repo). Without it, both

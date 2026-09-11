@@ -37,6 +37,7 @@ import {
   type WorktreeInfo,
 } from '../types';
 import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types';
+import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../../application/runtime/resource-registry';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',
@@ -63,6 +64,8 @@ export class LocalSandbox implements Sandbox {
   private readonly tmux: TmuxClient;
   private readonly sessionName: string;
   private readonly branch?: string;
+  private readonly workspaceRoot: string;
+  private readonly runtimeRunId?: string;
   private _closed = false;
   private sessionCreated = false;
 
@@ -72,6 +75,8 @@ export class LocalSandbox implements Sandbox {
     sessionName: string;
     branch?: string;
     tmux?: TmuxClient;
+    workspaceRoot?: string;
+    runtimeRunId?: string;
   }) {
     this.id = opts.id;
     this.worktreePath = opts.worktreePath;
@@ -79,6 +84,8 @@ export class LocalSandbox implements Sandbox {
     this.tmux = opts.tmux as TmuxClient;
     this.sessionName = opts.sessionName;
     this.branch = opts.branch;
+    this.workspaceRoot = opts.workspaceRoot ?? workspaceRootForWorktree(opts.worktreePath);
+    this.runtimeRunId = opts.runtimeRunId;
   }
 
   async startAgent(options: AgentStartOptions): Promise<AgentExecution> {
@@ -111,6 +118,16 @@ export class LocalSandbox implements Sandbox {
       });
       await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
       this.sessionCreated = true;
+      getAfkResourceRegistry().register({
+        workspacePath: this.workspaceRoot,
+        runId: this.runtimeRunId,
+        worktreePath: this.worktreePath,
+        kind: 'tmux',
+        origin: 'local-sandbox',
+        name: this.sessionName,
+        detail: 'interactive tmux session',
+        metadata: { branch: this.branch, generation: options.generation },
+      });
     }
 
     // Interactive mode (default): use tmux session to drive the agent.
@@ -134,6 +151,13 @@ export class LocalSandbox implements Sandbox {
     try {
       await this.tmux.killSession(this.sessionName);
     } catch { /* ignore if session already gone */ }
+    getAfkResourceRegistry().markClosed({
+      workspacePath: this.workspaceRoot,
+      worktreePath: this.worktreePath,
+      kind: 'tmux',
+      origin: 'local-sandbox',
+      name: this.sessionName,
+    });
     try {
       await this.tmux.closeSession();
     } catch { /* ignore */ }
@@ -418,6 +442,8 @@ export class LocalSandboxProvider implements SandboxProvider {
       sessionName: session,
       branch,
       tmux,
+      workspaceRoot: options.workspaceRoot,
+      runtimeRunId: options.runtimeRunId,
     });
   }
 }

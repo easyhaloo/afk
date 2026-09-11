@@ -6,6 +6,7 @@ export const INTERNAL_LABEL_PREFIXES = [
   'stage::',
   'mode::',
   'parent::',
+  'base::',
   'depends-on::',
   'depends_on::',
 ] as const;

@@ -21,6 +21,7 @@ import type {
   LabelDelta,
 } from '../../domain/tracker/types';
 import { extractAC } from '../../domain/tracker/ac';
+import type { BacklogMetadataLabel } from '../../domain/backlog/initialization';
 import { logger } from '../io/index';
 
 /**
@@ -126,6 +127,31 @@ export class GitHubClient implements TrackerProvider {
       labels: options.labels,
     });
     return data.number;
+  }
+
+  /** Create AFK lifecycle labels when absent, without overwriting repository-owned metadata. */
+  async ensureBacklogMetadata(labels: readonly BacklogMetadataLabel[]): Promise<void> {
+    const oct = this.client;
+    const { owner, repo } = this.getOwnerRepo();
+    for (const label of labels) {
+      try {
+        await oct.issues.getLabel({ owner, repo, name: label.name });
+      } catch (error) {
+        if (statusCode(error) !== 404) throw error;
+        try {
+          await oct.issues.createLabel({
+            owner,
+            repo,
+            name: label.name,
+            color: label.color,
+            description: label.description,
+          });
+        } catch (createError) {
+          // A concurrent AFK process can create the same label after our GET.
+          if (statusCode(createError) !== 422) throw createError;
+        }
+      }
+    }
   }
 
   async updateIssue(id: number, updates: UpdateIssueOptions): Promise<void> {
@@ -450,4 +476,11 @@ export class GitHubClient implements TrackerProvider {
     // TODO: implement GitHub release asset upload
     return '';
   }
+}
+
+function statusCode(error: unknown): number | undefined {
+  return typeof error === 'object' && error !== null && 'status' in error
+    && typeof (error as { status?: unknown }).status === 'number'
+    ? (error as { status: number }).status
+    : undefined;
 }

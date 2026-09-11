@@ -100,6 +100,8 @@ export class ContainerSandboxProvider implements SandboxProvider {
       extraEnv,
       hostClaudeConfigDir,
       hostClaudeConfigFile,
+      workspaceRoot: options.workspaceRoot,
+      runtimeRunId: options.runtimeRunId,
     });
     sandbox.bindProvider(this.provider);
     await sandbox.createContainer();

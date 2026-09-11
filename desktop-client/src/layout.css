@@ -1,0 +1,103 @@
+/* AFK Control layout-stability pass: the outer shell never reflows when a view, picker, inspector or terminal changes state. */
+:root { background: #f7f7fa; }
+body { height: 100vh; min-height: 0; overflow: hidden; }
+
+.app-shell {
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sidebar {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.content-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.topbar {
+  flex: 0 0 49px;
+}
+
+.workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 10px 12px 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.workspace::-webkit-scrollbar,
+.inspector::-webkit-scrollbar,
+.terminal-sheet pre::-webkit-scrollbar { width: 8px; height: 8px; }
+.workspace::-webkit-scrollbar-thumb,
+.inspector::-webkit-scrollbar-thumb,
+.terminal-sheet pre::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 99px; background: #d5d5dd; background-clip: padding-box; }
+
+.view-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #fff 86%, rgba(255,255,255,.93));
+}
+
+.error-banner {
+  position: absolute;
+  top: 61px;
+  right: 28px;
+  left: 28px;
+  z-index: 30;
+  margin: 0;
+  box-shadow: 0 10px 26px rgba(111,42,42,.1);
+}
+
+.board {
+  min-height: min-content;
+  padding-bottom: 4px;
+  overflow: visible;
+}
+
+.replay-minimal {
+  width: min(100%, 960px);
+  margin-bottom: 18px;
+}
+
+.replay-minimal .replay-stream {
+  padding-top: 12px;
+  padding-bottom: 16px;
+}
+
+.environment-grid article,
+.table-panel,
+.board-column,
+.replay-minimal {
+  box-shadow: 0 1px 2px rgba(30,29,45,.02);
+}
+
+.board-card,
+.event-row,
+.replay-minimal .replay-event,
+.agent-runtime,
+.env-row {
+  transition: background-color 160ms cubic-bezier(.23,1,.32,1), border-color 160ms cubic-bezier(.23,1,.32,1), box-shadow 160ms cubic-bezier(.23,1,.32,1);
+}
+
+button { transition: background-color 160ms cubic-bezier(.23,1,.32,1), border-color 160ms cubic-bezier(.23,1,.32,1), box-shadow 160ms cubic-bezier(.23,1,.32,1), color 160ms cubic-bezier(.23,1,.32,1), transform 120ms cubic-bezier(.23,1,.32,1); }
+button:active { transform: scale(.985); }
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .board-card,
+  .event-row,
+  .replay-minimal .replay-event,
+  .agent-runtime,
+  .env-row { transition: none; }
+}

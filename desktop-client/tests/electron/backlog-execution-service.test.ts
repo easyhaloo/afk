@@ -46,7 +46,7 @@ describe("backlog execution service", () => {
     expect(spawn).toHaveBeenCalledWith(
       "/usr/local/bin/afk",
       ["run", "--backlog-id", "42", "--template", "feature-delivery"],
-      expect.objectContaining({ cwd: "/repo" }),
+      expect.objectContaining({ cwd: "/repo", env: expect.objectContaining({ PWD: "/repo" }) }),
     );
     expect(child.unref).toHaveBeenCalledOnce();
     expect(result).toMatchObject({

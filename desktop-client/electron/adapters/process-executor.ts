@@ -26,15 +26,19 @@ function diagnosticPath() {
   return entries.join(path.delimiter);
 }
 
-function diagnosticEnvironment() {
-  return { ...process.env, PATH: diagnosticPath() };
+function diagnosticEnvironment(cwd?: string) {
+  return {
+    ...process.env,
+    PATH: diagnosticPath(),
+    ...(cwd ? { PWD: cwd } : {}),
+  };
 }
 
 export async function exec(command: string, args: string[], cwd?: string, input?: string) {
   try {
     const { stdout, stderr } = await run(command, args, {
       cwd,
-      env: diagnosticEnvironment(),
+      env: diagnosticEnvironment(cwd),
       timeout: 8_000,
       maxBuffer: 2_000_000,
       ...(input !== undefined ? { input } : {}),

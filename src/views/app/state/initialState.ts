@@ -1,7 +1,6 @@
-import type { Project } from '../../../domain/tracker/types';
-import type { TuiViewId } from '../../plugins/types';
+import type { Project } from '../../../lib/core/tracker/types';
 
-export type ViewType = TuiViewId;
+export type ViewType = 'tasks' | 'backlogs' | 'projects' | 'board';
 export type DetailMode = 'list' | 'detail';
 export type NotificationType = 'info' | 'success' | 'warning' | 'error';
 

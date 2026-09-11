@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Task } from '../../../types/board';
 import type { View } from '../types';
-import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types';
-import { fileLogger } from '../../../infrastructure/io/index';
+import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
+import { fileLogger } from '../../../lib/io';
 import {
   fetchTasks,
   fetchProjectDetail,
@@ -23,26 +23,9 @@ import {
   type BacklogViewModel,
   type TuiManagementProviderBundle,
 } from './backlog-adapter';
-import { projectDetailKey } from './fetcher';
 
 const PER_PAGE = 50;
 const DETAIL_TTL_MS = 60_000;
-const TASK_REFRESH_INTERVAL_MS = 1_000;
-
-export function startTaskPolling(
-  reload: () => Promise<unknown> | void,
-  intervalMs = TASK_REFRESH_INTERVAL_MS,
-): () => void {
-  let pending = false;
-  const timer = setInterval(() => {
-    if (pending) return;
-    pending = true;
-    void Promise.resolve(reload()).catch(() => undefined).finally(() => {
-      pending = false;
-    });
-  }, intervalMs);
-  return () => clearInterval(timer);
-}
 
 /** Keep the provider call separately testable from React lifecycle code. */
 export function loadDashboardBacklogs(
@@ -69,8 +52,8 @@ export function useData(
   const [projectHasMore, setProjectHasMore] = useState(false);
 
   const projectPage = useRef(1);
-  const detailCacheRef = useRef<Map<string, { at: number; data: Awaited<ReturnType<typeof fetchProjectDetail>> }>>(new Map());
-  const detailInFlightRef = useRef<Map<string, Promise<Awaited<ReturnType<typeof fetchProjectDetail>>>>>(new Map());
+  const detailCacheRef = useRef<Map<number, { at: number; data: Awaited<ReturnType<typeof fetchProjectDetail>> }>>(new Map());
+  const detailInFlightRef = useRef<Map<number, Promise<Awaited<ReturnType<typeof fetchProjectDetail>>>>>(new Map());
 
   const reloadTasks = useCallback(async () => {
     const data = await fetchTasks();
@@ -79,11 +62,9 @@ export function useData(
   }, []);
 
   useEffect(() => {
-    const refresh = () => reloadTasks().catch(err => {
+    void reloadTasks().catch(err => {
       fileLogger.warn({ err }, 'failed to load runtime dashboard data');
     });
-    void refresh();
-    return startTaskPolling(refresh);
   }, [reloadTasks]);
 
   const refreshBacklogs = useCallback(async () => {
@@ -126,40 +107,39 @@ export function useData(
   }, [currentView, projects.length]);
 
   const loadProjectDetail = useCallback(async (project: Project) => {
-    const cacheKey = projectDetailKey(project);
-    const memCached = detailCacheRef.current.get(cacheKey);
+    const memCached = detailCacheRef.current.get(project.id);
     if (memCached && Date.now() - memCached.at < DETAIL_TTL_MS) {
       setProjectBranches(memCached.data.branches);
       setProjectTags(memCached.data.tags);
       setProjectCommits(memCached.data.commits);
       return;
     }
-    const diskCached = readDetail(cacheKey);
+    const diskCached = readDetail(project.id);
     if (diskCached) {
       setProjectBranches(diskCached.branches as Branch[]);
       setProjectTags(diskCached.tags as Tag[]);
       setProjectCommits(diskCached.commits as Commit[]);
-      detailCacheRef.current.set(cacheKey, { at: Date.now(), data: diskCached });
+      detailCacheRef.current.set(project.id, { at: Date.now(), data: diskCached });
       return;
     }
-    let request = detailInFlightRef.current.get(cacheKey);
+    let request = detailInFlightRef.current.get(project.id);
     if (!request) {
-      request = fetchProjectDetail(project);
-      detailInFlightRef.current.set(cacheKey, request);
+      request = fetchProjectDetail(project.id);
+      detailInFlightRef.current.set(project.id, request);
     }
     try {
       const detail = await request;
-      detailCacheRef.current.set(cacheKey, { at: Date.now(), data: detail });
-      writeDetail(cacheKey, detail.branches, detail.tags, detail.commits);
+      detailCacheRef.current.set(project.id, { at: Date.now(), data: detail });
+      writeDetail(project.id, detail.branches, detail.tags, detail.commits);
       setProjectBranches(detail.branches);
       setProjectTags(detail.tags);
       setProjectCommits(detail.commits);
     } catch (err) {
       // Detail data is supplementary; an unavailable provider must not bring
       // down the interactive dashboard or leave an unhandled rejection.
-      fileLogger.warn({ err, projectId: project.id, platform: project.platform }, 'failed to load project detail');
+      fileLogger.warn({ err, projectId: project.id }, 'failed to load project detail');
     } finally {
-      detailInFlightRef.current.delete(cacheKey);
+      detailInFlightRef.current.delete(project.id);
     }
   }, []);
 

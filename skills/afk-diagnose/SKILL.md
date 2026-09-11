@@ -1,70 +1,102 @@
 ---
 name: afk-diagnose
-description: Diagnose a specific failure by reproducing it, analyzing code and documentation, establishing an evidence-backed root cause, and verifying the smallest safe fix.
+description: >-
+  Use when a specific, reproducible failure is provided (command, curl,
+  or sequence) and root-cause diagnosis + fix verification is needed.
+  Executes in current session with human confirmation at each step.
 disable-model-invocation: false
-disallowed-tools: >-
-  Bash(git push -f) Bash(git merge*) Bash(git reset --hard*)
-  Bash(git branch -D*) Bash(docker rm -f*) Bash(rm -rf*)
 ---
 
 # Diagnose
 
-> **Diagnosis:** Investigate a reproducible failure by building an evidence-backed causal explanation before changing the system. Reproduce the failure when possible, inspect the actual error, trace the relevant execution path, and use code, documentation, configuration, tests, and runtime evidence to distinguish facts from hypotheses. Do not treat a plausible explanation as a root cause. Once the causal failure is established, propose the smallest corrective change, obtain confirmation before modifying the system, and verify the original failure path after the change. If verification fails, use the new evidence to reassess the diagnosis rather than repeating the same fix.
+**Goal:** Root cause identified → fix applied → original input passes.
+**Mode:** HITL — proposes hypotheses, traces code, suggests fixes;
+human decides the investigation direction.
+**Contract:** trigger + actual output → verified fix.
 
-## References
+## Core Loop
 
-Before starting diagnosis, inspect all relevant documents under `references/`. Treat their rules and constraints as part of the diagnostic contract throughout the investigation.
+Step 1: Reproduce — run trigger, record error.
+Step 2: Hypothesize — list 3-5 possible causes from code analysis.
+Step 3: Investigate — trace code path, narrow to root cause.
+Step 4: Propose Fix — show what to change and why; wait for confirmation.
+Step 5: Verify — re-run original trigger.
+Step 6: Loop / Done — pass → record root cause. Fail → loop to Step 2.
 
-References may define hard checks, safety constraints, environment-specific rules, diagnostic procedures, or verification requirements. Do not ignore or silently override them. If a reference conflicts with the current diagnosis or proposed action, stop and resolve the conflict before proceeding.
+## Steps
 
-## Diagnose
+### Step 0 — Load hard checks (mandatory)
 
-### Reproduce
+Read `references/hard-checks.md` before starting. Stop immediately if
+any hard check is violated.
 
-Run the original trigger without modification whenever possible. Capture the actual command or sequence, input, output, exit status, relevant environment, and runtime state. If reproduction is impossible, record why and clearly distinguish direct evidence from inferred evidence.
+**Output:** hard-checks loaded.
 
-Do not alter the trigger merely to make it pass.
+### Step 1 — Reproduce
 
-### Investigate
+Run the provided trigger exactly as given. Capture: exact command or
+sequence, full output (stdout + stderr), exit code.
 
-Inspect the relevant codebase, documentation, configuration, dependencies, tests, logs, and runtime behavior before forming or prioritizing explanations. Trace the failure from symptom through the relevant execution path toward its cause.
+**Rule:** Do not modify the command before running it.
 
-Form hypotheses only when the available evidence does not establish the cause directly. Prioritize explanations that are supported by evidence and can be efficiently verified. Do not require an arbitrary number of hypotheses and do not ask the user to choose an investigation path unless the decision cannot be determined from available evidence.
+**Output:** captured output and exit code.
 
-### Establish Root Cause
+### Step 2 — Hypothesize
 
-A root cause must explain the observed failure through an evidence-supported causal relationship. Do not label a plausible cause as confirmed merely because a change appears to improve the symptom.
+List 3-5 possible causes with evidence (file:line or log excerpt).
 
-Separate:
+**Rule:** Do not write code in this step. Present the list and ask
+which direction to investigate first.
 
-- **Observed facts** — directly established by code, logs, tests, documentation, or runtime behavior.
-- **Hypotheses** — possible explanations not yet verified.
-- **Root cause** — the causal explanation supported by sufficient evidence.
-- **Uncertainty** — relevant questions that remain unresolved.
+**Output:** hypothesis list.
 
-When multiple independent explanations remain plausible, continue targeted investigation rather than guessing.
+### Step 3 — Investigate
 
-### Propose and Apply Fix
+Follow the chosen hypothesis: read relevant code files, trace call chain
+from entry point to failure point, identify specific line or condition.
 
-Once the root cause is established, propose the smallest sufficient change and explain what will change, why it addresses the cause, and any relevant side effects. Obtain user confirmation before modifying the system.
+State root cause explicitly when confirmed: "Root cause: file:line —
+why this causes the failure".
 
-Preserve unrelated working changes. Do not use destructive operations as a shortcut; follow the applicable reference constraints and request confirmation when required.
+**Output:** root cause identified or continue investigating.
 
-### Verify
+### Step 4 — Propose Fix
 
-Re-run the original failure trigger whenever possible and verify the expected behavior, not merely a different successful command. Inspect relevant tests or checks when they provide additional confidence.
+Describe: what will change (file, function, condition), why this fixes
+the root cause, what the side effects are if any.
 
-A fix is not verified because the code looks correct or because another test passes. The original failure must be resolved, or the verification gap must be explicitly reported.
+Wait for user confirmation. Do not proceed without it.
 
-If the original failure remains or a regression appears, treat the result as new evidence, reassess the causal model, and continue from investigation rather than repeating the same fix.
+**Output:** proposed fix.
 
-## Output
+### Step 5 — Verify
 
-Report the final diagnosis concisely:
+Apply the fix, then re-run the original trigger.
 
-- Root cause and supporting evidence
-- Change applied and why
-- Verification performed and result
-- Remaining uncertainty or verification gaps
+- **Exit 0 + expected output** → verified. Record root cause.
+- **Still failing** → loop back to Step 2 with the new evidence.
 
-> **Principles:** Evidence before assumptions. Diagnose before fixing. Root cause requires causal evidence. Prefer the smallest sufficient change. Verify the original failure. Never repeat a failed approach without new evidence.
+**Rule:** If the original trigger still fails, the bug is not fixed —
+"looks right" is not evidence.
+
+**Output:** verified pass/fail.
+
+### Step 6 — Done / Loop
+
+**Done:** Original trigger passes. Summarize root cause, what was
+changed, how it was verified.
+
+**Loop:** Trigger still fails. Add new evidence and continue from Step 2.
+
+## Script Interface
+
+Use `afk debug` subcommands: reproduce, hypothesize, investigate,
+propose, verify, status, reset. State files: `.debug/state.json`,
+`.debug/commands.log`.
+
+## Caveats
+
+- MUST NOT propose a fix before identifying the root cause.
+- MUST NOT skip verification — original trigger must pass.
+- MUST NOT run destructive commands without warning and waiting for confirmation.
+- MUST NOT change the trigger before running it.

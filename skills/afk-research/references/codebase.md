@@ -1,29 +1,27 @@
 # Codebase Research
 
-Investigate the source of truth that lives inside the repository.
+Investigate source of truth that lives inside the repository.
 
 ## Core principle
 
-For repository-specific behavior, the codebase is the primary source of truth. Model knowledge and documentation provide expectations or context; confirm important claims against the implementation, tests, configuration, and runtime behavior.
+Code is the ground truth. Model knowledge is prior — use it to form
+expectations, then confirm or disprove against what the code actually does.
 
 ## Investigation pattern
 
-1. **Frame** — define the specific question and expected behavior.
-2. **Navigate** — inspect the relevant implementation, dependencies, configuration, tests, and documentation.
-3. **Trace** — follow the actual execution or dependency path when behavior spans multiple components.
-4. **Confirm or disconfirm** — determine whether the evidence supports the expectation.
-5. **Record surprises** — contradictions between expectation, documentation, and implementation are findings that should be reported.
+1. **Expect** — state what you expect the code to do, based on model knowledge
+2. **Navigate** — read the relevant code
+3. **Confirm or disconfirm** — does the code match your expectation?
+4. **If surprised** — this is the finding worth reporting
 
-## Parallel investigation
 
-When independent code paths or perspectives can answer the question separately, assign them to different agents. Prefer complementary investigations such as implementation, tests, architecture, or dependency analysis rather than duplicating the same search.
+## Depth guide
 
-Each agent should report concrete evidence, relevant file or symbol locations, and unresolved uncertainty. Agent agreement is not proof; reconcile findings against the repository evidence.
+**Survey:** confirm the expectation with minimal evidence, then stop.
 
-## Evidence depth
+**Investigate:** explore multiple paths until confident the mental model matches reality.
 
-Use enough evidence to establish the claim. A simple fact may need only a focused inspection; behavior involving multiple components requires tracing the relevant paths and validating with tests or runtime evidence when available.
+## When to pivot to Web
 
-## Pivot to Web
-
-If the repository cannot establish the required fact, especially for external behavior, ecosystem conventions, upstream library behavior, or current information, pivot to `web-research.md` and treat external authoritative sources as the new source of truth.
+If the code doesn't answer the question (e.g., "is this a common pattern?")
+then the source of truth shifted to external knowledge → reference web-research.md.

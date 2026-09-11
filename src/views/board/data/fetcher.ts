@@ -1,9 +1,9 @@
 import { Task } from '../../../types/board';
-import { TaskRuntimeManager, type ActiveTaskRuntimeRecord } from '../../../application/runtime/task-runtime';
-import { createGitHubTracker, createGitLabTracker } from '../../../application/tracker-provider-factory';
-import { resolveGitLabProject } from '../../../infrastructure/tracker/resolver';
-import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types';
-import { fileLogger } from '../../../infrastructure/io/index';
+import { TaskRuntimeManager, type ActiveTaskRuntimeRecord } from '../../../lib/runtime/task-runtime';
+import { createGitLabClient } from '../../../lib/client-factory';
+import { detectGitLabProject } from '../../../lib/core/tracker/detect';
+import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
+import { fileLogger } from '../../../lib/io';
 
 const runtimeManager = new TaskRuntimeManager();
 
@@ -34,15 +34,17 @@ export function toRuntimeTask(runtime: ActiveTaskRuntimeRecord): Task {
     worktree: runtime.worktree,
     diagnosticPath: runtime.diagnosticPath,
     errorSummary: runtime.errorSummary,
-    activities: runtime.activities?.map(activity => ({ ...activity, at: new Date(activity.at) })),
   };
 }
 
-/** Fetch all accessible GitLab projects through the GitLab project provider. */
+/**
+ * Fetch all accessible GitLab projects (unaffected by git remote).
+ * Always uses GitLab with membership=true to get all projects user can access.
+ */
 export async function fetchGitLabProjects(options: { page?: number; perPage?: number } = {}): Promise<{ projects: Project[]; hasMore: boolean }> {
   let projectId: string | null = null;
   try {
-    projectId = await resolveGitLabProject();
+    projectId = await detectGitLabProject();
   } catch {
     // No git remote — caller can pass --project or pick from the projects list
     projectId = null;
@@ -53,7 +55,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
   let url = process.env.GITLAB_URL || 'https://gitlab.com';
 
   if (!token) {
-    const glab = await import('../../../infrastructure/gitlab/glab-config').then(m => m.getGlabToken(url));
+    const glab = await import('../../../lib/core/gitlab/glab-config').then(m => m.getGlabToken(url));
     if (glab) {
       token = glab.token;
       url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
@@ -66,7 +68,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
 
   // Use projectId if available, otherwise fallback to first accessible project
   const effectiveProjectId = projectId || 'glab';
-  const client = new (await import('../../../infrastructure/gitlab/index')).GitLabClient({
+  const client = new (await import('../../../lib/core/gitlab/index')).GitLabClient({
     url,
     token,
     projectId: effectiveProjectId,
@@ -76,50 +78,23 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
   return { projects, hasMore: projects.length === (options.perPage || 50) };
 }
 
-export async function fetchGitHubProjects(options: { page?: number; perPage?: number } = {}): Promise<{ projects: Project[]; hasMore: boolean }> {
-  const client = await createGitHubTracker();
-  const projects = await client.listProjects({ page: options.page, perPage: options.perPage || 50 });
-  return { projects, hasMore: projects.length === (options.perPage || 50) };
-}
-
-export function mergeProjects(projects: Project[]): Project[] {
-  const unique = new Map<string, Project>();
-  for (const project of projects) {
-    const platform = project.platform || 'gitlab';
-    unique.set(`${platform}:${project.path_with_namespace}`, { ...project, platform });
-  }
-  return [...unique.values()];
-}
-
-export function projectDetailKey(project: Project): string {
-  return `${project.platform || 'gitlab'}:${project.id}`;
-}
-
 export async function fetchProjects(options: { page?: number; perPage?: number } = {}): Promise<{ projects: Project[]; hasMore: boolean }> {
-  const [gitlab, github] = await Promise.all([
-    fetchGitLabProjects(options).catch(error => {
-      fileLogger.warn({ err: error }, 'GitLab projects unavailable');
-      return { projects: [], hasMore: false };
-    }),
-    fetchGitHubProjects(options).catch(error => {
-      fileLogger.warn({ err: error }, 'GitHub projects unavailable');
-      return { projects: [], hasMore: false };
-    }),
-  ]);
-  return {
-    projects: mergeProjects([...gitlab.projects, ...github.projects]),
-    hasMore: gitlab.hasMore || github.hasMore,
-  };
+  // Always fetch all GitLab projects (unaffected by current git remote)
+  // This allows viewing all accessible projects even when running from a GitHub repo
+  try {
+    return await fetchGitLabProjects(options);
+  } catch (error) {
+    fileLogger.error({ err: error }, 'failed to fetch GitLab projects');
+    return { projects: [], hasMore: false };
+  }
 }
 
-export async function fetchProjectDetail(project: Project): Promise<{ branches: Branch[]; tags: Tag[]; commits: Commit[] }> {
-  const client = project.platform === 'github'
-    ? await createGitHubTracker(project.path_with_namespace)
-    : await createGitLabTracker(String(project.id));
+export async function fetchProjectDetail(projectId: number): Promise<{ branches: Branch[]; tags: Tag[]; commits: Commit[] }> {
+  const client = await createGitLabClient();
   const [branches, tags, commits] = await Promise.all([
-    client.getBranches(project.id),
-    client.getTags(project.id),
-    client.getRecentCommits(project.id, 5),
+    client.getBranches(projectId),
+    client.getTags(projectId),
+    client.getRecentCommits(projectId, 5),
   ]);
   return { branches, tags, commits };
 }

@@ -5,10 +5,7 @@
  * previously hardcoded in source or in constants.ts.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { getWorkflowConfig, getSchedulerConfig, loadWorkflowConfig } from '../src/infrastructure/config/manager';
+import { getWorkflowConfig, getSchedulerConfig } from '../src/lib/core/config/manager';
 
 describe('WorkflowConfig env var loading', () => {
   const ORIGINAL = process.env;
@@ -24,13 +21,13 @@ describe('WorkflowConfig env var loading', () => {
   });
 
   async function freshConfig() {
-    const { getWorkflowConfig: get } = await import('../src/infrastructure/config/manager');
+    const { getWorkflowConfig: get } = await import('../src/lib/core/config/manager');
     return get();
   }
 
   it('defaults when no env vars set', async () => {
     const cfg = await freshConfig();
-    expect(cfg.agentDefault).toBe('claude-code');
+    expect(cfg.agentDefault).toBe('claude');
     expect(cfg.tmuxSession).toBe('afk');
     expect(cfg.workflowHardTimeout).toBe(7200 * 1000);
     expect(cfg.completionTimeout).toBe(7200 * 1000);
@@ -130,7 +127,7 @@ describe('SchedulerConfig env var loading', () => {
   });
 
   async function freshSchedulerConfig() {
-    const { getSchedulerConfig: get } = await import('../src/infrastructure/config/manager');
+    const { getSchedulerConfig: get } = await import('../src/lib/core/config/manager');
     return get();
   }
 
@@ -174,55 +171,5 @@ describe('SchedulerConfig env var loading', () => {
     process.env.AFK_SCHEDULER_UPDATE_DASHBOARD = 'false';
     const cfg = await freshSchedulerConfig();
     expect(cfg.updateDashboard).toBe(false);
-  });
-});
-
-describe('structured project configuration', () => {
-  it('loads agents.codex from YAML and uses environment only for missing values', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'afk-config-'));
-    try {
-      await mkdir(join(root, '.afk'));
-      await writeFile(join(root, '.afk', 'config.yml'), [
-        'agentDefault: codex',
-        'agents:',
-        '  codex:',
-        '    transport: app-server',
-        '    provider: custom',
-        '    appServer:',
-        '      endpoint: unix:///tmp/codex.sock',
-        '      startupTimeout: 12s',
-      ].join('\n'));
-
-      const cfg = loadWorkflowConfig(root, {
-        AFK_AGENT_DEFAULT: 'claude-code',
-        AFK_CODEX_TRANSPORT: 'exec',
-        AFK_CODEX_AUTH: 'api',
-        AFK_CODEX_PROVIDER: 'openai',
-      });
-
-      expect(cfg.agentDefault).toBe('codex');
-      expect(cfg.agents.codex).toEqual({
-        transport: 'app-server',
-        auth: 'api',
-        provider: 'custom',
-        appServer: {
-          endpoint: 'unix:///tmp/codex.sock',
-          startupTimeoutMs: 12_000,
-        },
-      });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects invalid Codex enum values before provider creation', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'afk-config-invalid-'));
-    try {
-      await mkdir(join(root, '.afk'));
-      await writeFile(join(root, '.afk', 'config.yml'), 'agents:\n  codex:\n    transport: remote\n');
-      expect(() => loadWorkflowConfig(root, {})).toThrow(/transport/i);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
   });
 });

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { getRowColumns } from '../layout';
-import { getExecutionModeColor, getExecutionModeIcon, getStatusColor, getStatusIcon } from './display';
 
 function isFullWidthCodePoint(codePoint: number): boolean {
   return (
@@ -51,9 +50,7 @@ export interface OperationalRowProps {
   mode: string;
   id: string | number;
   title: string;
-  summary?: string;
-  summaryColor?: string;
-  summaryParts?: Array<{ text: string; color?: string }>;
+  summary: string;
 }
 
 export function OperationalRow({
@@ -65,16 +62,10 @@ export function OperationalRow({
   id,
   title,
   summary,
-  summaryColor,
-  summaryParts,
 }: OperationalRowProps) {
-  const { summary: wideEnoughForSummary, metadataWidth } = getRowColumns(width);
-  const summaryText = summaryParts?.map(part => part.text).join('') ?? summary ?? '';
-  const showSummary = wideEnoughForSummary && Boolean(summaryText);
+  const { summary: showSummary, metadataWidth } = getRowColumns(width);
   const marker = selected ? '▶ ' : '  ';
-  const statusIcon = getStatusIcon(status);
-  const modeIcon = getExecutionModeIcon(mode);
-  const prefix = `${marker}${statusIcon} #${id}${modeIcon ? ` ${modeIcon}` : ''} `;
+  const prefix = `${marker}[${status}] (${mode}) #${id} `;
   const summaryPrefix = showSummary ? ' · ' : '';
   const titleWidth = Math.max(
     0,
@@ -85,18 +76,11 @@ export function OperationalRow({
     <Box width={width} height={1} overflow="hidden">
       <Text wrap="truncate">
         <Text wrap="truncate">{marker}</Text>
-        <Text wrap="truncate" color={selected ? 'white' : statusColor || getStatusColor(status)}>{statusIcon}</Text>
+        <Text wrap="truncate" color={statusColor}>[{status}]</Text>
+        <Text wrap="truncate" dimColor> ({mode})</Text>
         <Text wrap="truncate" bold> #{id} </Text>
-        {modeIcon && <Text wrap="truncate" color={getExecutionModeColor(mode)}>{modeIcon} </Text>}
         <Text wrap="truncate">{truncateToAllocation(title, titleWidth)}</Text>
-        {showSummary && (
-          <Text wrap="truncate" color={summaryColor} dimColor={!summaryColor}>
-            {summaryPrefix}
-            {summaryParts
-              ? summaryParts.map((part, index) => <Text key={`${part.text}-${index}`} color={part.color} dimColor={!part.color}>{part.text}</Text>)
-              : truncateToAllocation(summaryText, metadataWidth)}
-          </Text>
-        )}
+        {showSummary && <Text wrap="truncate" dimColor>{summaryPrefix}{truncateToAllocation(summary, metadataWidth)}</Text>}
       </Text>
     </Box>
   );

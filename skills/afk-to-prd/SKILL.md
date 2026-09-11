@@ -2,9 +2,10 @@
 name: afk-to-prd
 disable-model-invocation: true
 description: >-
-  Synthesize aligned requirements into a PRD and, after approval, create its
-  root AFK backlog record. Produces problem, users, bounded contexts, user
-  stories, decisions, risks, non-goals, and the canonical backlog ID and URL.
+  Synthesize aligned requirements into a provider-neutral PRD for publication
+  and later external backlog decomposition. Produces problem, users, bounded
+  contexts, user stories, decisions, risks, and non-goals without creating
+  provider records or invoking AFK execution commands.
 disallowed-tools: >-
   Bash(git push -f) Bash(git reset --hard*)
   Bash(git branch -D*)
@@ -12,13 +13,13 @@ disallowed-tools: >-
 
 # PRD
 
-**Goal:** Synthesize an alignment record into an approved PRD artifact and
-create its root AFK backlog record. Synthesis, not discovery.
+**Goal:** Synthesize an alignment record into a PRD artifact that an external
+backlog/decomposition system can consume. Synthesis, not discovery.
 **Mode:** HITL-gated — drafting is agent-driven; publication requires explicit
 approval.
-**Contract:** sufficient alignment input → approved `PRD.md` artifact → root
-backlog created by `afk backlog create`. The returned canonical backlog ID and
-URL are the parent reference for downstream `/afk-to-issues` work.
+**Contract:** sufficient alignment input → approved `PRD.md` artifact. The
+artifact is handed to the external backlog provider; it is not published as
+an issue and does not carry provider labels.
 
 ## Preconditions
 
@@ -38,16 +39,18 @@ This phase exposes gaps rather than resolving them:
 - Carry unresolved questions into **Open Risks** verbatim.
 - Record contradictions as a Key Decision with both positions and the
   resolution rationale; do not silently overwrite the older statement.
-- If revising a PRD after child backlogs exist, update the PRD in place and
-  identify every downstream item affected. Do not create duplicate roots.
+- If revising a PRD after a backlog manifest exists, update the PRD in place
+  and identify every downstream item affected so the external provider can
+  re-synchronize it.
 
 ## End state
 
-This skill ends after the caller approves the PRD draft, the approved file is
-written to the requested artifact location (for example `/tmp/PRD-<slug>.md`),
-and AFK creates the root backlog. Return and record both its canonical ID and
-concrete URL. No task decomposition, branch creation, agent execution, or QA
-is authorized.
+This skill ends after the caller approves the PRD draft and the approved file
+is written to the requested artifact location (for example
+`/tmp/PRD-<slug>.md`). No task decomposition, backlog creation, branch
+creation, agent execution, QA, or provider metadata updates are authorized.
+The caller explicitly invokes the external decomposition/provider workflow or
+the AFK execution commands separately.
 
 ## Steps
 
@@ -73,8 +76,8 @@ Always read `references/prd-template.md` before drafting. Include:
 - Non-Goals
 
 Observable Behaviors must be user-visible, bounded, and falsifiable. Do not
-put test commands or evidence types in the PRD; those are added when
-`/afk-to-issues` decomposes stories into executable child backlogs.
+put test commands or evidence types in the PRD; those are added when the
+external backlog system decomposes stories into executable items.
 
 For each significant technical choice, check whether an ADR is warranted.
 If it is irreversible and expensive to change, create or reference a proposed
@@ -83,30 +86,16 @@ ADR in `docs/adr/ADR-NNNN.md` according to `references/adr-process.md`.
 Draft to `/tmp/PRD-<slug>.md` (or the caller's requested path). Do not publish
 or hand off until approval.
 
-### Step 3 — HITL approval and root backlog creation
+### Step 3 — HITL approval gate
 
 Ask the caller to choose one outcome:
 
-- **Approve** — write the approved PRD artifact, then create its root backlog.
+- **Approve** — write the approved PRD artifact and end.
 - **Revise** — incorporate specific feedback, then return to Step 2.
 - **Drill deeper** — re-check alignment or architecture, then re-draft.
 - **Add open question** — add the gap to Open Risks and return to this gate.
 
-Do not perform any external mutation before an explicit approval. After
-approval, invoke AFK only, never a provider API or `gh`/`glab` command:
-
-```bash
-afk backlog create "PRD: <short title>" \
-  --description-file /tmp/PRD-<slug>.md \
-  --mode hitl \
-  --tag prd
-```
-
-Read the command output and record both `Created backlog <id>` and `url:`.
-Return them to the caller as `rootBacklogId` and `rootBacklogUrl`. The root is
-organizational and remains `hitl`; `/afk-to-issues` creates its executable
-children with `--parent <rootBacklogId>`. Never parse or invent a provider
-URL: use the concrete URL returned by AFK.
+Do not perform any external mutation before an explicit approval.
 
 ## Caveats
 
@@ -115,9 +104,9 @@ URL: use the concrete URL returned by AFK.
 - Do not skip approval.
 - Keep decided items under Key Decisions and undecided items under Open Risks.
 - Do not include provider-specific labels, numeric issue IDs, branch names, or
-  execution state in the PRD body. The AFK CLI adds its own metadata.
-- Do not invoke `afk run`, `afk loop`, or `afk qa` from this synthesis skill.
-- Never create the root before approval or call provider APIs directly.
+  execution state in the PRD.
+- Do not invoke `afk backlog`, `afk run`, `afk loop`, or `afk qa` from this
+  synthesis skill; those commands operate on already-created backlog items.
 
 ## References
 

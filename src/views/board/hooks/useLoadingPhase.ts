@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { LOADING_PHASES } from '../registry/loading';
+import { LoadingPhaseRegistry } from '../registry/loading';
 
 export interface LoadingPhase {
   key: string;
@@ -33,7 +33,8 @@ export function useLoadingPhases() {
   }, []);
 
   useEffect(() => {
-    const descriptors = LOADING_PHASES;
+    const registry = LoadingPhaseRegistry.getInstance();
+    const descriptors = registry.getAll();
 
     // Initialize phases (all invisible initially except first)
     setPhases(descriptors.map((d, i) => ({

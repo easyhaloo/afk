@@ -1,7 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import type { Notification } from '../../../lib/ui/core/types';
+
 interface Props {
-  notification: { message: string } | null;
+  notification: Notification | null;
   animation: 'hidden' | 'slide-in' | 'visible' | 'slide-out';
 }
 

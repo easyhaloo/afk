@@ -1,7 +1,6 @@
-import { openInBrowser } from '../../../shared/browser';
+import { openInBrowser } from '../../../lib/cli-utils';
 import type { BacklogViewModel } from '../../board/data/backlog-adapter';
 import type { StateContextValue } from '../state/StateContext';
-import type { TuiViewId } from '../../plugins/types';
 
 export type UrlOpener = (url: string) => Promise<void>;
 
@@ -25,7 +24,7 @@ export function createActions(ctx: StateContextValue) {
 
   return {
     goBack: () => dispatch({ type: 'dispatch', payload: { type: 'navigate:back' } }),
-    switchView: (view: TuiViewId) => dispatch({ type: 'navigate:switch', payload: { view } }),
+    switchView: (view: string) => dispatch({ type: 'navigate:switch', payload: { view } }),
     viewDetail: () => dispatch({ type: 'navigate:goto-detail' }),
     viewList: () => dispatch({ type: 'navigate:goto-list' }),
     enableSearch: () => {

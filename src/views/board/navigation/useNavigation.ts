@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { ViewRegistry } from '../registry';
 import type { View, ViewState, ViewContext } from '../types';
 import { navigationPolicy, type ActionType } from './policy';
-import { fileLogger } from '../../../infrastructure/io/index';
+import { fileLogger } from '../../../lib/io';
 
 // Default initial view state
 const DEFAULT_VIEW_STATE: ViewState = { view: 'tasks', context: {} };
-const VIEWS = new Set<View>(['tasks', 'backlogs', 'projects', 'board']);
 
 /**
  * Action dispatch result - returned when an action triggers navigation
@@ -60,7 +60,7 @@ export function useNavigation() {
         setSelectedIndex(0);
         setScrollOffset(0);
       }
-    } else if (VIEWS.has(policy.target)) {
+    } else if (ViewRegistry.getInstance().has(policy.target)) {
       // Push to target view with computed context
       const context = policy.context
         ? policy.context(pendingAction.action, prevStateRef.current, pendingAction.result)
@@ -78,7 +78,7 @@ export function useNavigation() {
    * Push a new view onto the stack with optional context
    */
   const pushView = useCallback((view: View, context: ViewContext = {}): void => {
-    if (!VIEWS.has(view)) {
+    if (!ViewRegistry.getInstance().has(view)) {
       fileLogger.warn({ view }, 'view is not registered');
       return;
     }
@@ -107,7 +107,7 @@ export function useNavigation() {
    * Navigate to a specific view
    */
   const switchView = useCallback((view: View, context: ViewContext = {}): void => {
-    if (!VIEWS.has(view)) {
+    if (!ViewRegistry.getInstance().has(view)) {
       fileLogger.warn({ view }, 'view is not registered');
       return;
     }

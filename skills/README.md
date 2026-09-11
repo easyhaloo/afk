@@ -27,8 +27,8 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | Skill | Trigger | Description |
 |-------|---------|-------------|
 | [afk-qa](./afk-qa/) | `/afk-qa` | Skill evaluation and testing |
-| [afk-to-prd](./afk-to-prd/) | `/afk-to-prd` | Publish PRD and create its root backlog |
-| [afk-to-issues](./afk-to-issues/) | `/afk-to-issues` | Decompose PRD and create linked child backlogs |
+| [afk-to-prd](./afk-to-prd/) | `/afk-to-prd` | Publish results to PRD document |
+| [afk-to-issues](./afk-to-issues/) | `/afk-to-issues` | Produce a provider-neutral backlog manifest from findings |
 | [md-to-pdf](./md-to-pdf/) | `/md-to-pdf` | Convert Markdown to PDF |
 
 ## Testing Skills
@@ -43,12 +43,6 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 |-------|---------|-------------|
 | [afk-diagnose](./afk-diagnose/) | `/afk-diagnose` | Diagnostic workflow for complex failures |
 | [reasoning-watchdog](./reasoning-watchdog/) | `/reasoning-watchdog` | Hook-based reasoning quality monitoring |
-
-## Quality & Governance Skills
-
-| Skill | Trigger | Description |
-|-------|---------|-------------|
-| [software-complexity-governance](./software-complexity-governance/) | complexity / 圈复杂度 / 代码异味 | Measure complexity, map smells, recommend refactorings and gates |
 
 ---
 

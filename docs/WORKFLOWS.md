@@ -7,81 +7,7 @@
 
 AFK executes backlog items prepared outside the runner. A backlog item may be a GitHub/GitLab issue today, but the runner depends only on `BacklogProvider`, `BranchProvider`, and `ChangeProvider`.
 
-The loop atomically claims a canonical `ready` or `rework` item, verifies parent/dependency constraints, reuses its `afk/backlog-<id>` branch, runs the selected template, pushes the implementation branch, and queues QA. A complete implementation-stage AC failure is corrected in the same run and worktree up to `AFK_MAX_SELF_ITERATIONS` (default 2). QA first synchronizes the latest baseline branch, merges the implementation branch into a disposable verification branch, runs integration tests, commits and pushes the result, then creates a mergeable change request. A root backlog enters `merge_ready + hitl` for human approval into `main`; a child backlog is automatically merged into its parent branch.
-
-Integration QA is cross-process, so a diagnosable QA `FAIL` creates a persistent, append-only `ReworkRecord` in the provider Issue (GitHub comment or GitLab note), sets `rework + afk`, and lets the next AFK run repair the original branch with the record injected into its implementation prompt. QA PASS resolves exactly that open record. An ambiguous result, conflict, timeout, agent failure, or exhausted AC self-correction loop becomes `blocked + hitl`.
-
-### Agent provider selection
-
-Claude Code remains the default agent provider. Select Codex explicitly when
-testing or running a Codex-backed chain:
-
-```bash
-afk run --backlog-id 123 --agent codex --execution-mode batch
-afk qa --backlog-id 123 --agent codex --mode batch
-afk loop --agent codex --max-iterations 1
-```
-
-AFK resolves `codex` directly from `PATH`; it does not install or wrap the
-binary. In batch mode AFK writes the provider-neutral execution prompt to
-stdin and parses Codex JSONL output. A loop uses the selected provider for
-both implementation and QA, and the Tasks projection and runtime diagnostics
-record `agentProvider: codex` for each phase.
-
-#### Codex runtime selection
-
-The same Codex runtime options are available on `afk run`, `afk loop`, and
-`afk qa`:
-
-```bash
---agent-transport auto|exec|app-server
---agent-auth auto|chatgpt|api
---agent-provider <model-provider>
---agent-profile <host-profile>
---agent-app-server stdio://|unix://PATH|ws://HOST:PORT|wss://HOST:PORT
---agent-app-server-auth-env <environment-variable>
-```
-
-Resolution is deterministic: command-line overrides win over `.afk/config.yml`,
-then host Codex diagnostics fill `auto` values. `auto` transport selects
-`app-server` only when an endpoint is explicitly configured; otherwise it
-selects `exec`. Explicit provider values are passed to both the readiness
-probes and the selected execution transport. A profile is exec-only: AFK
-applies it to the live exec probe and final exec process, but never passes it
-to `codex doctor` or `codex app-server`. Selecting app-server together with a
-profile is rejected before execution. AFK never reads or copies raw Codex
-credentials.
-
-`stdio://` starts a new host `codex app-server` process and is supported only
-by the local sandbox. `unix://`, `ws://`, and `wss://` connect directly to a
-configured server; WebSocket bearer tokens are read from the named environment
-variable and are never persisted. AFK cannot attach to the private stdio
-process owned by the Codex desktop UI, but a process it starts uses the same
-host Codex configuration and login cache.
-
-Before Loop polls or claims a backlog, exec mode runs redacted
-`codex doctor --json` plus a bounded, ephemeral, read-only model call so a
-cached but rejected API key cannot pass readiness. All app-server modes,
-including spawned stdio, perform the JSON-RPC handshake and a bounded read-only
-live turn through the selected endpoint; opening a socket alone is not
-considered ready. The default startup timeout is 30 seconds; connection setup
-uses the same limit and actively terminates a socket that never opens. Failures use fixed messages (`CLI_NOT_FOUND`,
-`AUTH_INVALID`, `PROVIDER_INVALID`, or `ENDPOINT_UNREACHABLE`) and create no
-backlog claim.
-
-Codex-specific Tasks diagnostics expose only transport, auth mode, provider
-name, endpoint kind, and app-server thread ID. To recover from readiness failure, repair the
-selected host Codex login/provider or endpoint, verify `codex doctor --json`,
-then rerun the same AFK command. A real opt-in matrix is available with:
-
-```bash
-npm run test:e2e:codex -- --transport exec
-npm run test:e2e:codex -- --transport app-server
-```
-
-An explicit E2E invocation exits nonzero on readiness or workflow failure; it
-never reports a skip. A successful root backlog finishes as
-`merge_ready + hitl` and prints both the backlog and merge-request URLs.
+The loop claims a canonical `ready` item atomically, verifies parent/dependency constraints, derives `afk/backlog-<id>`, runs the selected template, pushes a change request, and queues QA. QA merges only on explicit `goal_complete` payload `{ kind: "qa", result: "PASS" }`; otherwise the provider transitions the item to `blocked` and `hitl`.
 
 ## Overview
 
@@ -109,8 +35,8 @@ tmux attach -t afk-issue-123
 # 4. Run acceptance criteria checks
 afk qa --backlog-id 123
 
-# 5. QA creates the merge request after baseline sync and integration tests
-# Root backlogs wait for human approval; child backlogs merge into their parent branch.
+# 5. Create merge request if passed
+# MR publication and QA queueing are typed system steps in issue-implementation
 
 # 6. Cleanup worktree
 afk worktree cleanup --iid 123
@@ -123,10 +49,10 @@ afk worktree cleanup --iid 123
 afk loop --max-concurrent 3 --poll-interval 60
 
 # Scheduler automatically:
-# 1. Polls for backlog items with state=ready|rework and mode=afk
+# 1. Polls for issues with stage::ready-for-implement
 # 2. Validates preconditions (AC, base label, no blockers)
 # 3. Launches workflows up to max-concurrent limit
-# 4. Runs QA against the latest baseline, then creates a mergeable MR
+# 4. Monitors completion and creates MRs
 ```
 
 ### Workflow Phases
@@ -143,28 +69,22 @@ flowchart TD
 
     F -->|goal_complete| G["AC Validation Phase: /goal verify AC"]
     F -->|"token >= threshold"| H["Context Handoff: interrupt -> summarize -> kill session -> restart -> inject summary to continue"]
-    F -->|timeout| Z2["Timeout: state=blocked, executionMode=hitl, retain diagnostics"]
+    F -->|timeout| Z2["Timeout: comment + mode::hitl, retain worktree"]
 
-    G -->|AC FAIL with full diagnosis| E
-    G -->|goal_complete PASS| I["QA: fetch latest baseline, merge feature, run integration tests"]
-    I -->|QA FAIL with full diagnosis| R["Append ReworkRecord; rework + afk; next run uses original branch"]
-    I --> J["Commit + push verification branch, create mergeable MR"]
-    J -->|root backlog| K["merge_ready + hitl: human merges to main"]
-    J -->|child backlog| L["Auto-merge to parent branch → done"]
+    G -->|ac_result| I["MR/PR Creation: push branch, link Closes iid"]
     G -->|"token >= threshold"| H
     G -->|timeout| Z2
 
     H --> E
     H -.->|"Budget exhausted / Restart failed"| Z3["Termination Handoff: handoff::active, manual recovery"]
 
-    K --> M["Cleanup worktree"]
-    L --> M
+    I --> J["Cleanup: stage::qa, delete worktree"]
 
     classDef success fill:#d4edda,stroke:#28a745
     classDef fail fill:#f8d7da,stroke:#dc3545
     classDef process fill:#e1f5ff,stroke:#0066cc
 
-    class I,J,K,L,M success
+    class I,J success
     class Z1,Z2,Z3 fail
     class A,C,D,E,F,G,H process
 ```
@@ -198,9 +118,9 @@ graph TD
 Issues declare dependencies via labels:
 
 ```
-Backlog #10: parent=prd-1, state=ready, mode=afk
-Backlog #11: parent=prd-1, dependsOn=[10], state=ready, mode=afk
-Backlog #12: parent=prd-1, dependsOn=[10, 11], state=ready, mode=afk
+Issue #10: base::prd-1, stage::ready-for-implement
+Issue #11: base::prd-1, blocks-10, stage::ready-for-implement
+Issue #12: base::prd-1, blocks-10, blocks-11, stage::ready-for-implement
 ```
 
 ```mermaid
@@ -253,7 +173,7 @@ stateDiagram-v2
     PENDING: PENDING - Initial state, waiting for dependencies
     QUEUED: QUEUED - Ready, in priority queue
     RUNNING: RUNNING - Workflow executing
-    COMPLETED: COMPLETED - QA passed; root may await human merge
+    COMPLETED: COMPLETED - Success, MR created
     FAILED: FAILED - AC check failed or error
     BLOCKED: BLOCKED - Unresolvable dependency or timeout
 
@@ -496,10 +416,10 @@ When context approaches its limit, the workflow **automatically interrupts the c
 graph TD
     Fail[Workflow Failure] --> Type{Failure Type}
 
-    Type -->|Timeout| Timeout["state=blocked, mode=hitl, retain diagnostics"]
-    Type -->|Test Failure| TestFail["state=blocked, mode=hitl, retain test output"]
-    Type -->|Blocked| Blocked["state=blocked, mode=hitl, record reason"]
-    Type -->|Git Conflict| Conflict["state=blocked, mode=hitl, retain worktree"]
+    Type -->|Timeout| Timeout["Label: stage::timeout, retain worktree, log to scheduler"]
+    Type -->|Test Failure| TestFail["Label: stage::failed, Signal: goal_failed, retain test output"]
+    Type -->|Blocked| Blocked["Label: stage::blocked, Signal: blocked, comment with reason"]
+    Type -->|Git Conflict| Conflict["Label: stage::conflict, retain worktree, comment notification"]
     Type -->|API Rate Limit| RateLimit["Exponential backoff, retry after cooldown, log to scheduler"]
 
     classDef error fill:#f8d7da,stroke:#dc3545

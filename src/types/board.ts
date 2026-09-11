@@ -1,14 +1,3 @@
-export type TaskActivityKind = 'agent' | 'tool' | 'test' | 'state' | 'qa' | 'error';
-
-export interface TaskActivity {
-  id: string;
-  taskRunId: string;
-  at: Date;
-  kind: TaskActivityKind;
-  message: string;
-  detail?: string;
-}
-
 export interface Task {
   /** Canonical backlog ID; intentionally not a tracker-specific issue number. */
   iid: string;
@@ -27,12 +16,10 @@ export interface Task {
   worktree?: string;
   diagnosticPath?: string;
   errorSummary?: string;
-  activities?: TaskActivity[];
 }
 
 export interface Project {
   id: number;
-  platform?: 'github' | 'gitlab';
   name: string;
   path_with_namespace: string;
   description?: string;

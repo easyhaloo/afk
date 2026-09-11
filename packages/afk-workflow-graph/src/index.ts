@@ -1,0 +1,30 @@
+export {
+  graphSchemaVersion,
+  type DiagnosticSeverity,
+  type GraphDiagnostic,
+  type GraphDiagnosticCode,
+  type GraphEdge,
+  type GraphEdgeKind,
+  type GraphKind,
+  type GraphNode,
+  type GraphReceipt,
+  type GraphSnapshot,
+  type GraphStep,
+  type GraphStepKind,
+  type GraphTrack,
+  type GraphTrackKind,
+  type OrthogonalRoute,
+  type Point,
+  type Rect,
+  type RouteSegment,
+  type WorkflowCondition,
+  type WorkflowGraphDefinition,
+  type WorkflowGraphPreferences,
+} from './ir.js';
+export { projectWorkflow, type WorkflowTemplateSummary } from './project.js';
+export { normalizeDefinition, type NormalizationResult } from './normalize.js';
+export { layoutWorkflow, workflowNodeSize } from './layout.js';
+export { routeBetween, routeEdges } from './routing.js';
+export { validateSnapshot } from './validate.js';
+export { createReceipt } from './receipt.js';
+export { toArchifyWorkflow, type ArchifyWorkflowDocument } from './archify.js';

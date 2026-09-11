@@ -28,6 +28,21 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 | `afk kanban` | Kanban board of issues |
 | `afk debug` | Debug loop (reproduce → verify) |
 
+## Desktop Client
+
+From the repository root, use the `Makefile` for common desktop-client commands:
+
+```makefile
+make desktop-dev        # build + restart (always uses latest code)
+make desktop-build      # typecheck + compile
+make desktop-test       # vitest unit tests
+make desktop-e2e        # build:main + Playwright e2e
+make desktop-package-mac  # package .app to release/
+make desktop-verify-mac   # restart-packaged-mac verification
+```
+
+Alternatively, `pnpm --filter afk-control-electron <cmd>` from `desktop-client/`.
+
 The CLI is a breaking backlog hard cutover. `issue`, `tracker`, `mr`, and
 `workflow` execution commands and their old argument forms are removed; there
 are no compatibility aliases. Provider labels are internal adapter metadata.

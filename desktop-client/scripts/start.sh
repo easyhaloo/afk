@@ -10,10 +10,9 @@ PACKAGED_PROCESS_PATTERN='AFK Control.app/Contents/MacOS/AFK Control'
 
 mkdir -p "$STATE_DIR"
 
-if pgrep -f "$PACKAGED_PROCESS_PATTERN" >/dev/null 2>&1; then
-  echo "AFK Control desktop service is already running; reusing the existing instance."
-  exit 0
-fi
+pkill -f "$PACKAGED_PROCESS_PATTERN" >/dev/null 2>&1 || true
+rm -f "$PID_FILE"
+sleep 0.5
 
 if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   if curl --silent --show-error --fail --max-time 2 "http://localhost:$PORT/" >/dev/null 2>&1; then

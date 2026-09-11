@@ -8,8 +8,8 @@
   "scripts": {
     "dev:main": "tsc -p tsconfig.electron.json --watch",
     "dev:raw": "concurrently -k \"pnpm dev:main\" \"vite --port 5174\" \"wait-on tcp:5174 file:dist-electron/electron/main.js && ELECTRON_RENDERER_URL=http://localhost:5174 electron .\"",
-    "dev": "bash scripts/start-idempotent.sh",
-    "start": "bash scripts/start-idempotent.sh",
+    "dev": "bash scripts/start.sh",
+    "start": "bash scripts/start.sh",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "e2e": "playwright test --config=playwright.config.ts",

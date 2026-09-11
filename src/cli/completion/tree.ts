@@ -8,6 +8,7 @@ import { registerQACommands } from '../commands/qa';
 import { registerLoopCommands } from '../commands/loop';
 import { registerBacklogCommands } from '../commands/backlog';
 import { registerRunCommands } from '../commands/run';
+import { registerGraphCommands } from '../commands/graph';
 
 export function buildCompletionTree(): Command {
   const program = new Command();
@@ -21,5 +22,6 @@ export function buildCompletionTree(): Command {
   registerLoopCommands(program);
   registerBacklogCommands(program);
   registerRunCommands(program);
+  registerGraphCommands(program);
   return program;
 }

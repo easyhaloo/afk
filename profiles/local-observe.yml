@@ -1,0 +1,19 @@
+profile: local-observe
+requiredCapabilities:
+  - event-store
+  - evidence-store
+  - tracer
+  - metrics
+  - workspace
+  - agent-runtime
+  - verification
+  - policy
+plugins:
+  - event-store-jsonl
+  - evidence-local-encrypted
+  - tracer-console
+  - metrics-console
+  - workspace-git-worktree
+  - agent-codex
+  - verifier-shell
+  - policy-human-root-merge

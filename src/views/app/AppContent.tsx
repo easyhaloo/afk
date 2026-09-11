@@ -36,6 +36,7 @@ interface Props {
   onFetchMoreProjects: () => void;
   onInvalidateDetailCache: () => void;
   onAttachSession?: (task: Task) => void;
+  onOpenTaskDiagnostics?: (task: Task) => void;
   onViewChange?: (view: View) => void;
 }
 
@@ -53,6 +54,7 @@ export function AppContent({
   onFetchMoreProjects,
   onInvalidateDetailCache,
   onAttachSession,
+  onOpenTaskDiagnostics,
   onViewChange,
 }: Props) {
   const { state, dispatch, currentView, currentContext, isDetailMode } = useAppState();
@@ -158,6 +160,10 @@ export function AppContent({
     if (isDetailMode) {
       const item = selectedItem();
       if (input === 'o') {
+        if (currentView === 'tasks' && item && onOpenTaskDiagnostics) {
+          onOpenTaskDiagnostics(item as Task);
+          return;
+        }
         if (currentView === 'backlogs' || currentView === 'board') void actions.openBacklog(item as BacklogViewModel);
         else if (currentView === 'projects') {
           const project = item as Project;
@@ -166,7 +172,7 @@ export function AppContent({
         }
         return;
       }
-      if (input === 'a' && currentView === 'tasks' && item && onAttachSession) onAttachSession(item as Task);
+      if (input === 'a' && currentView === 'tasks' && item && (item as Task).executionMode === 'interactive' && onAttachSession) onAttachSession(item as Task);
       if (input === 'b') actions.viewList();
       return;
     }
@@ -192,7 +198,8 @@ export function AppContent({
     }
     if (input === 'o') {
       const item = selectedItem();
-      if (currentView === 'backlogs' || currentView === 'board') void actions.openBacklog(item as BacklogViewModel);
+      if (currentView === 'tasks' && item && onOpenTaskDiagnostics) onOpenTaskDiagnostics(item as Task);
+      else if (currentView === 'backlogs' || currentView === 'board') void actions.openBacklog(item as BacklogViewModel);
       else if (currentView === 'projects') {
         const project = item as Project;
         if (project?.web_url) void actions.openInBrowser(project.web_url, project.name);
@@ -201,7 +208,7 @@ export function AppContent({
     }
     if ((input === 'a' || input === 'A') && currentView === 'tasks' && onAttachSession) {
       const task = selectedItem() as Task;
-      if (task) onAttachSession(task);
+      if (task?.executionMode === 'interactive') onAttachSession(task);
     }
   });
 

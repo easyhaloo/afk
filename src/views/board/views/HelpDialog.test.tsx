@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { HelpDialog } from './HelpDialog';
 
 describe('HelpDialog', () => {
-  it('documents task-list actions without provider open', () => {
+  it('documents task runtime actions without provider open', () => {
     const output = renderToString(<Box height={24}><HelpDialog /></Box>);
 
     expect(output).toContain('1 - tasks');
@@ -13,7 +13,8 @@ describe('HelpDialog', () => {
     expect(output).toContain('4 - board');
     expect(output).toContain('Enter - detail');
     expect(output).toContain('r - refresh');
-    expect(output).toContain('a - attach selected task');
+    expect(output).toContain('a - attach interactive task');
+    expect(output).toContain('o - open task diagnostics');
     expect(output).not.toContain('o - open provider URL');
     expect(output).not.toContain('sessions');
     expect(output).not.toContain('kill');

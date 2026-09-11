@@ -1,0 +1,16 @@
+directories:
+  output: release
+  buildResources: build
+appId: im.afk.control
+productName: AFK Control
+files:
+  - filter:
+      - dist/**
+      - dist-electron/**
+      - package.json
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dir
+  minimumSystemVersion: '12.0'
+electronVersion: 35.7.5

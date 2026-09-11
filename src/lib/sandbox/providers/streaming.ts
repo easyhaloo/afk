@@ -84,7 +84,10 @@ export class StreamingAgentExecution implements AgentExecution {
       cwd: this.command.cwd ?? this.worktreePath,
       env: { ...process.env, ...this.command.env },
       stdio: ['pipe', 'pipe', 'pipe'],
-      detached: false,
+      // A provider command may be a shell wrapper (Claude's macOS shim is one)
+      // and can spawn a real agent child. Put the whole tree in one process
+      // group so timeout/interrupt cleanup cannot leave the agent orphaned.
+      detached: process.platform !== 'win32',
     });
 
     // Send prompt via stdin
@@ -345,7 +348,7 @@ export class StreamingAgentExecution implements AgentExecution {
   async interrupt(_reason: InterruptReason): Promise<void> {
     if (this.done) return;
     try {
-      this.proc?.kill('SIGINT');
+      this.signalProcess('SIGINT');
       this.interruptAcked = true;
       this.done = true;
     } catch {
@@ -358,13 +361,13 @@ export class StreamingAgentExecution implements AgentExecution {
     if (this.done) return;
     this.done = true;
     try {
-      this.proc?.kill('SIGKILL');
+      this.signalProcess('SIGKILL');
     } catch { /* ignore */ }
   }
 
   async captureOutput(_options?: CaptureOptions): Promise<string> {
-    // Batch mode stdout is not buffered — no capturable pane output
-    return '';
+    // Keep the bounded stream tail available to the runtime diagnostics store.
+    return [this.stdoutTail, this.stderrBuffer].filter(Boolean).join('\n');
   }
 
   async captureSession(): Promise<SessionSnapshot | undefined> {
@@ -391,7 +394,21 @@ export class StreamingAgentExecution implements AgentExecution {
   private terminateProcess(): void {
     if (this.exitCode !== undefined) return;
     try {
-      this.proc?.kill('SIGKILL');
+      this.signalProcess('SIGKILL');
     } catch { /* process already exited */ }
+  }
+
+  private signalProcess(signal: NodeJS.Signals): void {
+    const pid = this.proc?.pid;
+    if (!pid) return;
+    if (process.platform !== 'win32') {
+      try {
+        process.kill(-pid, signal);
+        return;
+      } catch {
+        // Fall back to the direct child when the group has already exited.
+      }
+    }
+    this.proc?.kill(signal);
   }
 }

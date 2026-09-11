@@ -5,7 +5,7 @@
  *   config → detect platform → connect tracker → load data → ready
  */
 import { LoadingPhaseRegistry } from './loading';
-import { fetchTasks, fetchSessions } from '../data/fetcher';
+import { fetchTasks } from '../data/fetcher';
 
 export function registerAllLoadingPhases(): void {
   const registry = LoadingPhaseRegistry.getInstance();
@@ -60,17 +60,6 @@ export function registerAllLoadingPhases(): void {
       const { active, completed } = await fetchTasks();
       setDetail('tasks', `${active.length} active, ${completed.length} done`);
       return `${active.length} active, ${completed.length} done`;
-    },
-  });
-
-  registry.register({
-    key: 'sessions',
-    label: 'Loading sessions...',
-    icon: '○',
-    fetch: async (setDetail) => {
-      const sessions = await fetchSessions();
-      setDetail('sessions', `${sessions.length} sessions`);
-      return `${sessions.length} sessions`;
     },
   });
 

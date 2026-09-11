@@ -7,7 +7,7 @@ export interface LoadingPhase {
   icon: string;
   done: boolean;
   error?: string;
-  detail?: string;  // e.g., "owner/repo", "3 tasks", "2 sessions"
+  detail?: string;  // e.g., "owner/repo", "3 active tasks"
   visible: boolean; // phase is currently shown (for smooth transitions)
 }
 

@@ -827,3 +827,12 @@ button:active { transform: scale(.992); }
   .agent-panel .agent-runtime:nth-child(odd) { border-right: 0; }
   .agent-panel .agent-runtime:nth-last-child(2) { border-bottom: 1px solid #efeff3; }
 }
+
+/* Header view controls follow the selected appearance accent. */
+.topbar .header-run-mode {
+  border-color: var(--afk-accent-border);
+  background: var(--afk-panel-subtle);
+}
+.topbar .header-run-mode button { color: var(--afk-muted); }
+.topbar .header-run-mode button:hover { color: var(--afk-accent); }
+.topbar .header-run-mode button.active { background: var(--afk-accent-soft); color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent-border); }

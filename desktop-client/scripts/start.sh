@@ -10,28 +10,63 @@ PACKAGED_PROCESS_PATTERN='AFK Control.app/Contents/MacOS/AFK Control'
 
 mkdir -p "$STATE_DIR"
 
-pkill -f "$PACKAGED_PROCESS_PATTERN" >/dev/null 2>&1 || true
-rm -f "$PID_FILE"
-sleep 0.5
+# Kill a process and all of its descendants (depth-first, TERM).
+kill_tree() {
+  local pid="$1" kid
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+  kill -0 "$pid" 2>/dev/null || return 0
+  for kid in $(pgrep -P "$pid" 2>/dev/null || true); do
+    kill_tree "$kid"
+  done
+  kill -TERM "$pid" 2>/dev/null || true
+}
 
-if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  if curl --silent --show-error --fail --max-time 2 "http://localhost:$PORT/" >/dev/null 2>&1; then
-    echo "AFK Control dev service is already serving http://localhost:$PORT/."
-    exit 0
-  fi
-  echo "Port $PORT is already occupied by another service; refusing to start a duplicate." >&2
-  exit 1
-fi
+# True when the process belongs to this project: its cwd or command line
+# references PROJECT_DIR. Guards against killing an unrelated service.
+is_project_process() {
+  local pid="$1" cwd cmd
+  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+  [[ -n "$cwd" && "$cwd" == "$PROJECT_DIR"* ]] && return 0
+  cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+  [[ "$cmd" == *"$PROJECT_DIR"* ]]
+}
+
+# --- 1. Tear down any previous dev stack -----------------------------------
+pkill -f "$PACKAGED_PROCESS_PATTERN" >/dev/null 2>&1 || true
 
 if [[ -f "$PID_FILE" ]]; then
   pid="$(cat "$PID_FILE")"
   if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-    echo "AFK Control dev service is already running (pid $pid, http://localhost:$PORT)."
-    exit 0
+    echo "Stopping previous AFK Control dev service (pid $pid)..."
+    kill_tree "$pid"
   fi
   rm -f "$PID_FILE"
 fi
 
+if command -v lsof >/dev/null 2>&1; then
+  for pid in $(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true); do
+    kill -0 "$pid" 2>/dev/null || continue
+    if is_project_process "$pid"; then
+      echo "Stopping stale listener on port $PORT (pid $pid)..."
+      kill_tree "$pid"
+    else
+      echo "Port $PORT is occupied by another service (pid $pid); refusing to kill it." >&2
+      exit 1
+    fi
+  done
+
+  # --- 2. Wait for the port to be released before replacing it -------------
+  for _ in {1..40}; do
+    lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 || break
+    sleep 0.25
+  done
+  if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "Port $PORT still held after shutdown; refusing to start a duplicate." >&2
+    exit 1
+  fi
+fi
+
+# --- 3. Start fresh --------------------------------------------------------
 cd "$PROJECT_DIR"
 nohup bash -c 'exec pnpm dev:raw' >"$LOG_FILE" 2>&1 < /dev/null &
 service_pid=$!

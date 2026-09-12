@@ -1,10 +1,14 @@
 import { test, expect } from "./_helpers/launch";
-import { readFileSync, writeFileSync } from "node:fs";
-import { FAKE_AFK_STORE } from "./_helpers/launch";
 
 test.describe("BacklogPage list", () => {
   test.beforeEach(async ({ page }) => {
     await page.locator(".primary-nav button", { hasText: "Backlog" }).click();
+  });
+
+  test("keeps the page header without global actions", async ({ page }) => {
+    await expect(page.locator(".topbar")).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新页面" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /命令/ })).toHaveCount(0);
   });
 
   test("renders the three fixture rows with localized state and execution mode", async ({ page }) => {
@@ -34,28 +38,6 @@ test.describe("BacklogPage list", () => {
     await expect(platformSelect).toHaveAttribute("value", "auto");
   });
 
-  test("refreshes backlog data through the global header action", async ({ page }) => {
-    await expect(page.locator(".backlog-row")).toHaveCount(3);
-    const store = JSON.parse(readFileSync(FAKE_AFK_STORE, "utf8"));
-    store.items.unshift({
-      id: "4",
-      title: "全局刷新后的工作项",
-      dependsOn: [],
-      state: "ready",
-      executionMode: "afk",
-      tags: [],
-      branchName: "afk/backlog-4",
-      providerRef: "stub:4",
-    });
-    store.nextId = 5;
-    writeFileSync(FAKE_AFK_STORE, JSON.stringify(store), "utf8");
-
-    await page.getByRole("button", { name: "刷新页面" }).click();
-
-    await expect(page.locator(".backlog-row")).toHaveCount(4);
-    await expect(page.locator(".backlog-row").first()).toContainText("全局刷新后的工作项");
-  });
-
   test("keeps backlog controls compact and consistently sized", async ({ page }) => {
     const platform = page.getByRole("button", { name: "选择 Provider" });
     const create = page.getByRole("button", { name: "新建 Backlog" });
@@ -63,7 +45,6 @@ test.describe("BacklogPage list", () => {
     const state = page.getByLabel("筛选状态");
 
     await expect(page.getByRole("button", { name: "刷新 Backlog" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "刷新页面" })).toBeVisible();
 
     const controls = await Promise.all([platform, create, search, state].map(async (locator) => {
       const box = await locator.boundingBox();

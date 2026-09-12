@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity, Archive, Bot, Boxes, Braces, Check, ChevronDown, ChevronRight, CircleCheck, CircleDashed,
-  ClipboardList, Clock3, Command, Container, FolderOpen, LayoutList, Minus, Move, Plus, RefreshCw, ChevronLeft,
+  ClipboardList, Clock3, Container, FolderOpen, LayoutList, Minus, Move, Plus, RefreshCw, ChevronLeft,
   Send, Settings2, Sparkles, Terminal, TerminalSquare, TriangleAlert, Workflow, X,
 } from "lucide-react";
 import "./styles.css";
@@ -104,7 +104,6 @@ function App() {
   const [terminal, setTerminal] = useState<SshTerminalState>({ open: false, pane: "", mode: "tmux" });
   const [line, setLine] = useState("");
   const [confirmed, setConfirmed] = useState(false);
-  const [commandOpen, setCommandOpen] = useState(false);
   const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
   const [replayRun, setReplayRun] = useState("");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
@@ -286,9 +285,7 @@ function App() {
       <section className="content-shell">
         <header className="topbar">
           <div className="topbar-context"><div className="breadcrumb"><span>AFK</span><b>›</b><strong>{title}</strong></div>{view === "queue" || view === "board" ? <div className="run-view-switcher header-run-mode" aria-label="运行视图切换"><button className={runMode === "queue" ? "active" : ""} onClick={() => { setRunMode("queue"); setView("queue"); }}><LayoutList size={14} />队列</button><button className={runMode === "board" ? "active" : ""} onClick={() => { setRunMode("board"); setView("board"); }}><Workflow size={14} />看板</button></div> : null}{view === "agents" ? <AgentHeaderSummary available={availableRuntimeCount} total={runtimeTotal} unavailable={unavailableRuntimeCount} /> : null}</div>
-          <div className="top-actions"><button className="command" onClick={() => setCommandOpen((current) => !current)}><Command size={15} />命令 <kbd>⌘ K</kbd></button><button className="icon-button" onClick={() => void refresh()} aria-label="刷新页面"><RefreshCw size={16} className={loading ? "spin" : ""} /></button></div>
         </header>
-        {commandOpen ? <div className="command-sheet"><header><span>命令</span><button onClick={() => setCommandOpen(false)}><X size={14} /></button></header><button onClick={() => { void refresh(); setCommandOpen(false); }}><RefreshCw size={14} />重新读取</button><button onClick={() => { setView("board"); setCommandOpen(false); }}><Workflow size={14} />打开看板</button><button onClick={() => { void selectWorkspace(); setCommandOpen(false); }}><FolderOpen size={14} />选择工作区</button></div> : null}
         {error ? <div className="error-banner"><X size={15} />{error}</div> : null}
         <div className="workspace">
           {view === "queue" ? <Queue events={events} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
@@ -437,9 +434,9 @@ function Workflows({ snapshot, onSave }: { snapshot: Snapshot | null; onSave: (w
 
 function WorkflowLibrary({ templates, activeTemplateName, onOpen, onCreate }: { templates: WorkflowTemplateSummary[]; activeTemplateName?: string; workflowRuns: WorkflowRunSummary[]; onOpen: (template: WorkflowTemplateSummary) => void; onCreate: () => void }) {
   return <section className="workflow-library" aria-label="工作流列表">
-    <header className="workflow-library-heading"><div><p>WORKFLOWS</p><h1>工作流</h1><span>选择一个模板，在画布中查看或配置其执行链路。</span></div><button className="workflow-create" onClick={onCreate}><Plus size={14} />新建</button></header>
+    <header className="workflow-library-heading"><div><p>WORKFLOWS</p><h1>工作流</h1><span>选择一个模板，在画布中查看或配置其执行链路。</span></div><button className="workflow-create" onClick={onCreate} aria-label="新建工作流" title="新建工作流"><Plus size={16} aria-hidden="true" /></button></header>
     <div className="workflow-library-grid">{templates.map(template => { const active = template.id === activeTemplateName; const agentSteps = template.steps.filter(step => step.kind === "agent").length; return <button key={template.id} className={"workflow-library-card" + (active ? " active" : "")} onClick={() => onOpen(template)}><span className="workflow-library-source">{workflowSourceLabel(template.source)}</span><div className="workflow-library-copy"><b>{template.name}</b><p>{template.description}</p></div><div className="workflow-library-meta"><span>{template.steps.length} 步 · {agentSteps} Agent</span>{active ? <em>当前</em> : <ChevronRight size={15} />}</div></button>; })}</div>
-    {!templates.length ? <div className="workflow-library-empty"><b>尚未发现工作流模板</b><span>新建后会在项目 .afk/workflows 目录创建可执行模板。</span><button className="workflow-create" onClick={onCreate}><Plus size={14} />新建</button></div> : null}
+    {!templates.length ? <div className="workflow-library-empty"><b>尚未发现工作流模板</b><span>新建后会在项目 .afk/workflows 目录创建可执行模板。</span><button className="workflow-create" onClick={onCreate} aria-label="新建工作流" title="新建工作流"><Plus size={16} aria-hidden="true" /></button></div> : null}
   </section>;
 }
 

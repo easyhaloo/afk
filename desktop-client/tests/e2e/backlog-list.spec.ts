@@ -57,6 +57,13 @@ test.describe("BacklogPage list", () => {
     expect(controls[0].height).toBeLessThanOrEqual(34);
     expect(controls[0].width).toBeLessThanOrEqual(150);
 
+    const providerAlignment = await platform.evaluate((button) => {
+      const buttonBox = button.getBoundingClientRect();
+      const labelBox = button.querySelector("span")!.getBoundingClientRect();
+      return Math.abs((buttonBox.left + buttonBox.width / 2) - (labelBox.left + labelBox.width / 2));
+    });
+    expect(providerAlignment).toBeLessThanOrEqual(1);
+
     await platform.click();
     const popover = page.getByRole("listbox", { name: "选择 Provider" });
     const menuBox = await popover.boundingBox();
@@ -66,6 +73,7 @@ test.describe("BacklogPage list", () => {
 
     const optionBoxes = await page.getByRole("option").evaluateAll((options) => options.map((option) => option.getBoundingClientRect().height));
     expect(Math.max(...optionBoxes)).toBeLessThanOrEqual(34);
+    await expect(page.getByRole("option").first()).toHaveCSS("text-align", "left");
   });
 
   test("uses the application green palette for backlog controls", async ({ page }) => {

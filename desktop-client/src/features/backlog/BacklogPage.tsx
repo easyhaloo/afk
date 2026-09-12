@@ -291,7 +291,13 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
                 <span className="backlog-run-button-label">{runBusyFor === item.id ? "启动中" : runs[item.id]?.status === "running" ? "运行中" : runs[item.id]?.status === "failed" ? "重新执行" : "开始执行"}</span>
               </button>
             </header>
-            <p>{backlogStateLabel(item.state)} · {item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}</p>
+            <div className="backlog-item-metadata">
+              <span className={`backlog-state-label backlog-state-${item.state}`}>
+                <i aria-hidden="true" />
+                {backlogStateLabel(item.state)}
+              </span>
+              <span className="backlog-mode-label">{item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}</span>
+            </div>
             {runs[item.id] ? <p className="backlog-run-status">运行状态：{runs[item.id].status === "running" ? "运行中" : runs[item.id].status === "completed" ? "已完成" : "失败"} · PID {runs[item.id].pid ?? "—"}</p> : null}
             {item.tags.length ? (
               <ul className="backlog-tags">

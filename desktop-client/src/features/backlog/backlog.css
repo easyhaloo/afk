@@ -27,6 +27,14 @@
   align-items: center;
 }
 .backlog-heading-actions .select-menu { width: 120px; min-width: 120px; }
+.backlog-heading-actions .select-menu-trigger {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) 14px;
+  gap: 0;
+}
+.backlog-heading-actions .select-menu-trigger::before { content: ""; }
+.backlog-heading-actions .select-menu-trigger > span { min-width: 0; text-align: center; }
+.backlog-heading-actions .select-menu-trigger > svg { justify-self: end; }
 .backlog-heading-actions .icon-button {
   width: var(--backlog-control-height);
   height: var(--backlog-control-height);
@@ -181,6 +189,66 @@
   margin: 0;
   color: var(--backlog-muted);
   font-size: 12px;
+}
+.backlog-item-metadata {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.backlog-state-label,
+.backlog-mode-label {
+  display: inline-flex;
+  min-height: 22px;
+  box-sizing: border-box;
+  align-items: center;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.backlog-state-label {
+  gap: 6px;
+  padding: 0 9px;
+  font-weight: 600;
+}
+.backlog-state-label i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .78;
+}
+.backlog-mode-label {
+  padding: 0 9px;
+  border: 1px solid var(--backlog-border);
+  background: var(--backlog-surface);
+  color: var(--backlog-muted);
+  font-weight: 500;
+}
+.backlog-state-ready {
+  background: color-mix(in srgb, var(--ready) 14%, var(--backlog-surface));
+  color: color-mix(in srgb, var(--ready) 72%, var(--backlog-text));
+}
+.backlog-state-in_progress,
+.backlog-state-rework {
+  background: var(--run-soft);
+  color: var(--run);
+}
+.backlog-state-verification,
+.backlog-state-merge_ready {
+  background: var(--verify-soft);
+  color: var(--verify);
+}
+.backlog-state-blocked {
+  background: var(--attention-soft);
+  color: var(--attention);
+}
+.backlog-state-done {
+  background: color-mix(in srgb, var(--run-soft) 72%, var(--backlog-surface));
+  color: color-mix(in srgb, var(--run) 82%, var(--backlog-text));
 }
 .backlog-run-status { color: var(--backlog-accent) !important; }
 .backlog-row-heading {

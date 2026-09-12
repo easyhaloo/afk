@@ -162,14 +162,20 @@ describe("BacklogPage initial render", () => {
   it("renders one row per item with localized state and execution mode", async () => {
     const { renderer } = await renderBacklogPage();
     const rows = renderer.root.findAllByProps({ className: "backlog-row" });
+    const readyMetadata = rows[0].findByProps({ className: "backlog-item-metadata" });
+    const readyState = readyMetadata.findByProps({ className: "backlog-state-label backlog-state-ready" });
+    const readyMode = readyMetadata.findByProps({ className: "backlog-mode-label" });
+    const doneMetadata = rows[2].findByProps({ className: "backlog-item-metadata" });
+    const doneState = doneMetadata.findByProps({ className: "backlog-state-label backlog-state-done" });
 
     expect(rows).toHaveLength(items.length);
     expect(textContent(rows[0])).toContain("登录态切换");
-    expect(textContent(rows[0])).toContain("待处理");
-    expect(textContent(rows[0])).toContain("AFK 自动");
+    expect(textContent(readyState)).toBe("待处理");
+    expect(readyState.findAllByType("i")).toHaveLength(1);
+    expect(textContent(readyMode)).toBe("AFK 自动");
     expect(textContent(rows[2])).toContain("支付回调");
-    expect(textContent(rows[2])).toContain("已完成");
-    expect(textContent(rows[2])).toContain("HITL 人工");
+    expect(textContent(doneState)).toBe("已完成");
+    expect(textContent(doneMetadata.findByProps({ className: "backlog-mode-label" }))).toBe("HITL 人工");
     act(() => { renderer.unmount(); });
   });
 

@@ -365,7 +365,7 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
     void run("remove", async () => { await window.afkDesktop.ssh.remove(host.id); }, "操作已完成", true);
   };
   return <section className="control-page ssh-page" aria-label="SSH 主机管理">
-    <header className="control-page-heading ssh-heading"><div><p>本地基础设施</p><h1>SSH 主机</h1><span>复用系统 OpenSSH 配置，在不托管私钥和密码的前提下管理远程连接。</span></div><div className="ssh-heading-actions"><SshActionButton size="sm" variant="secondary" onClick={generate} disabled={!!busy}><KeyRound size={15} />生成 AFK 密钥</SshActionButton><SshActionButton ref={addHostButtonRef} size="sm" variant="primary" onClick={openAddForm}><Plus size={15} />添加主机</SshActionButton></div></header>
+    <header className="control-page-heading ssh-heading"><div><p>本地基础设施</p><h1>SSH 主机</h1><span>复用系统 OpenSSH 配置，在不托管私钥和密码的前提下管理远程连接。</span></div><div className="ssh-heading-actions"><SshActionButton size="sm" variant="secondary" className="ssh-icon-action" onClick={generate} disabled={!!busy} aria-label="生成 AFK 密钥" title="生成 AFK 密钥"><KeyRound size={15} aria-hidden="true" /></SshActionButton><SshActionButton ref={addHostButtonRef} size="sm" variant="primary" className="ssh-icon-action" onClick={openAddForm} aria-label="添加 SSH 主机" title="添加 SSH 主机"><Plus size={16} aria-hidden="true" /></SshActionButton></div></header>
     {error ? <div className="ssh-alert error" role="alert"><CircleAlert size={15} />{error}<button onClick={() => setError("")} aria-label="关闭错误"><X size={14} /></button></div> : null}
     {notice ? <div className="ssh-alert success" role="status"><Check size={15} />{notice}</div> : null}
     {diagnostics.length ? <SshDiagnostics diagnostics={groupedDiagnostics} total={diagnostics.length} /> : null}

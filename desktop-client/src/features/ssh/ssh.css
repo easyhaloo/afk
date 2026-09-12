@@ -4,6 +4,7 @@
 .ssh-heading-actions { justify-content: flex-end; }
 .ssh-action-button { display: inline-flex; box-sizing: border-box; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; border-radius: 10px; font: inherit; font-size: calc(10px * var(--afk-scale)); font-weight: 700; cursor: pointer; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease, color .16s ease, transform .12s ease; }
 .ssh-action-button-sm { min-height: 28px; padding: 0 9px; }
+.ssh-icon-action { width: 30px; height: 30px; min-height: 30px; padding: 0; }
 .ssh-action-button-md { min-height: 38px; padding: 0 12px; }
 .ssh-action-button-primary { border-color: var(--afk-accent); background: var(--afk-accent); color: #fff; box-shadow: 0 5px 12px color-mix(in srgb, var(--afk-accent) 22%, transparent); }
 .ssh-action-button-primary:hover { border-color: var(--afk-accent); background: color-mix(in srgb, var(--afk-accent) 88%, #000); box-shadow: 0 8px 16px color-mix(in srgb, var(--afk-accent) 28%, transparent); }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
-import { X } from "lucide-react";
+import { KeyRound, Plus, X } from "lucide-react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { filterSshHosts, SshHostsPage, sshDiagnosticTypeLabel } from "../src/features/ssh/SshHostsPage";
 import { resetSshHostCache, writeSshHostCache } from "../src/features/ssh/ssh-host-cache";
@@ -604,10 +604,25 @@ describe("SSH connection modes", () => {
 });
 
 describe("SSH host creation", () => {
+  it("uses icon-only header actions with accessible labels", async () => {
+    const { renderer } = await renderSshPage();
+    const addButton = renderer.root.findByProps({ "aria-label": "添加 SSH 主机" });
+    const generateButton = renderer.root.findByProps({ "aria-label": "生成 AFK 密钥" });
+
+    expect(textContent(addButton)).toBe("");
+    expect(textContent(generateButton)).toBe("");
+    expect(addButton.props.title).toBe("添加 SSH 主机");
+    expect(generateButton.props.title).toBe("生成 AFK 密钥");
+    expect(addButton.findByType(Plus)).toBeDefined();
+    expect(generateButton.findByType(KeyRound)).toBeDefined();
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
   it("offers optional jump host type and configured JumpServer choices", async () => {
     const jumpServer = { ...hosts[0], id: "system:fangcloud-jumpserver", alias: "fangcloud-jumpserver", hostname: "dev-jumpserver.fangcloud.net", port: 2222, user: "shenggangshu" };
     const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: [hosts[0], jumpServer], diagnostics: [] }));
-    const addButton = renderer.root.findAllByType("button").find((button) => textContent(button).includes("添加主机"))!;
+    const addButton = renderer.root.findByProps({ "aria-label": "添加 SSH 主机" });
 
     await act(async () => { addButton.props.onClick(); await flushReactUpdates(); });
 
@@ -636,7 +651,7 @@ describe("SSH host creation", () => {
     const jumpServer = { ...hosts[0], id: "system:fangcloud-jumpserver", alias: "fangcloud-jumpserver", hostname: "dev-jumpserver.fangcloud.net", port: 2222, user: "shenggangshu" };
     const { renderer, api } = await renderSshPage(vi.fn(), async () => ({ hosts: [hosts[0], jumpServer], diagnostics: [] }));
     api.add.mockResolvedValue({ ...hosts[1], id: "managed:private-app", alias: "private-app", hostname: "172.16.0.241" });
-    const addButton = renderer.root.findAllByType("button").find((button) => textContent(button).includes("添加主机"))!;
+    const addButton = renderer.root.findByProps({ "aria-label": "添加 SSH 主机" });
 
     await act(async () => { addButton.props.onClick(); await flushReactUpdates(); });
     const dialog = renderer.root.findByProps({ role: "dialog" });
@@ -660,7 +675,7 @@ describe("SSH host creation", () => {
     const addedHost = { ...hosts[1], id: "managed:new", alias: "kg演示", hostname: "192.0.2.10", source: "managed" as const };
     api.add.mockResolvedValue(addedHost);
 
-    const addButton = renderer.root.findAllByType("button").find((button) => textContent(button).includes("添加主机"))!;
+    const addButton = renderer.root.findByProps({ "aria-label": "添加 SSH 主机" });
     await act(async () => {
       addButton.props.onClick();
       await flushReactUpdates();

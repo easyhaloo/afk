@@ -9,6 +9,10 @@ package-lock.json
 dist/
 *.tsbuildinfo
 
+# Electron release artifacts
+desktop-client/release/
+desktop-client/dist-electron/
+
 # Environment files
 .env
 .env.local

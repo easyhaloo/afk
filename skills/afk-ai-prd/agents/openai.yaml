@@ -1,0 +1,3 @@
+interface:
+  display_name: "AI-Friendly PRD"
+  short_description: "Create and self-check Markdown PRDs"

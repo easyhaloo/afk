@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AFK Dashboard Prototype</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #14161a;
+      --panel: #1b1e24;
+      --panel-2: #20242b;
+      --line: #343a44;
+      --muted: #8b94a4;
+      --text: #e6e9ee;
+      --cyan: #63d9e8;
+      --green: #6cda8a;
+      --yellow: #f0c667;
+      --red: #f07986;
+      --magenta: #d58be4;
+      --blue: #7fa7f5;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .shell { min-height: 100vh; display: grid; grid-template-rows: 50px 1fr 34px; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--line); background: #101216; }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: .02em; }
+    .brand-mark { width: 20px; height: 20px; border: 2px solid var(--cyan); display: grid; place-items: center; color: var(--cyan); font-size: 11px; }
+    .top-status { color: var(--muted); font-size: 12px; }
+    .top-status strong { color: var(--green); font-weight: 600; }
+    .workspace { min-height: 0; }
+    .main { min-width: 0; display: grid; grid-template-rows: 44px 42px 1fr; }
+    .tabs { display: flex; align-items: center; gap: 6px; padding: 0 22px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    .tab { border: 0; background: transparent; padding: 7px 11px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--text); border-bottom-color: var(--cyan); }
+    .tab .count { color: var(--muted); margin-left: 5px; }
+    .context { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 22px; border-bottom: 1px solid var(--line); }
+    .context-title { font-weight: 700; white-space: nowrap; }
+    .context-meta { display: flex; align-items: center; gap: 12px; color: var(--muted); min-width: 0; }
+    .search { width: min(300px, 38vw); border: 1px solid var(--line); background: #121419; color: var(--text); padding: 6px 9px; outline: none; }
+    .search:focus { border-color: var(--cyan); }
+    .list-wrap { overflow: auto; padding: 14px 22px 18px; }
+    .list-head, .row { display: grid; grid-template-columns: 22px 104px 60px minmax(220px, 1fr) minmax(170px, 30%); gap: 10px; align-items: center; }
+    .list-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; padding: 0 10px 8px; border-bottom: 1px solid var(--line); }
+    .row { width: 100%; text-align: left; border: 0; border-bottom: 1px solid #292e37; background: transparent; padding: 12px 10px; cursor: pointer; }
+    .row:hover { background: #20252d; }
+    .row.selected { background: #26343b; box-shadow: inset 3px 0 0 var(--cyan); }
+    .marker { color: var(--muted); }
+    .selected .marker { color: var(--cyan); }
+    .state, .mode { font-size: 12px; white-space: nowrap; }
+    .state.ready { color: var(--cyan); }
+    .state.in_progress { color: var(--yellow); }
+    .state.verification { color: var(--magenta); }
+    .state.blocked { color: var(--red); }
+    .state.done { color: var(--green); }
+    .mode { color: var(--blue); }
+    .mode.hitl { color: var(--magenta); }
+    .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .title strong { font-weight: 600; }
+    .id { color: var(--muted); }
+    .summary { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .inspector { display: none; background: var(--panel); padding: 32px max(22px, 8vw); overflow: auto; min-height: 0; }
+    .workspace.detail-mode .main { display: none; }
+    .workspace.detail-mode .inspector { display: block; height: 100%; }
+    .inspector h2 { margin: 0 0 5px; font-size: 17px; line-height: 1.3; }
+    .eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: .1em; font-size: 11px; margin-bottom: 12px; }
+    .badge-row { display: flex; gap: 8px; margin: 14px 0 20px; }
+    .badge { padding: 3px 7px; border: 1px solid currentColor; font-size: 11px; }
+    .field-group { border-top: 1px solid var(--line); padding: 14px 0; }
+    .field { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 12px; margin: 7px 0; }
+    .field label { color: var(--muted); }
+    .field span { overflow-wrap: anywhere; }
+    .description { color: #c2c8d2; white-space: pre-wrap; }
+    .actions { display: flex; gap: 8px; margin-top: 15px; }
+    .action { border: 1px solid var(--line); background: #171a1f; padding: 7px 10px; cursor: pointer; }
+    .action:hover { border-color: var(--cyan); color: var(--cyan); }
+    .footer { display: flex; align-items: center; justify-content: space-between; padding: 0 22px; color: var(--muted); border-top: 1px solid var(--line); background: #101216; font-size: 12px; }
+    .footer kbd { color: var(--text); border: 1px solid var(--line); padding: 1px 4px; margin-right: 3px; }
+    .empty { padding: 60px 10px; color: var(--muted); text-align: center; }
+    .detail-view { display: grid; grid-template-rows: 44px 1fr; min-height: 0; height: 100%; }
+    .detail-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    .detail-toolbar button { border: 1px solid var(--line); background: transparent; padding: 6px 10px; cursor: pointer; }
+    .detail-toolbar button:hover { border-color: var(--cyan); color: var(--cyan); }
+    .detail-content { max-width: 920px; width: 100%; }
+    .detail-content h2 { max-width: 760px; }
+    .detail-content .description { max-width: 760px; line-height: 1.7; }
+    .detail-pane { padding-top: 28px; }
+    @media (max-width: 720px) {
+      .shell { grid-template-rows: 48px 1fr 42px; }
+      .topbar, .tabs, .context, .list-wrap, .inspector, .footer { padding-left: 14px; padding-right: 14px; }
+      .tabs { overflow-x: auto; }
+      .context { align-items: flex-start; flex-direction: column; padding-top: 10px; padding-bottom: 10px; height: auto; }
+      .main { grid-template-rows: 44px auto 1fr; }
+      .search { width: 100%; }
+      .list-head { display: none; }
+      .row { grid-template-columns: 20px 84px 52px minmax(0, 1fr); gap: 7px; padding: 11px 4px; }
+      .summary { display: none; }
+      .footer { font-size: 11px; }
+      .footer .path { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">›</span><span>AFK Dashboard</span></div>
+      <div class="top-status">provider: <strong>github</strong> · read-only · branch <span>refactor/workflow-runtime-boundaries</span></div>
+    </header>
+    <section class="workspace">
+      <main class="main">
+        <nav class="tabs" aria-label="Views">
+          <button class="tab" data-view="tasks">1 Tasks <span class="count">0</span></button>
+          <button class="tab active" data-view="backlogs">2 Backlogs <span class="count">33</span></button>
+          <button class="tab" data-view="projects">3 Projects <span class="count">25</span></button>
+          <button class="tab" data-view="board">4 Board <span class="count">33</span></button>
+        </nav>
+        <div class="context">
+          <div class="context-title" id="context-title">Backlogs <span style="color:var(--muted);font-weight:400">/ 33 items</span></div>
+          <div class="context-meta"><span id="context-hint">select a backlog to inspect relationships</span><button class="action" id="enter-detail">enter detail ↵</button><input id="search" class="search" placeholder="/ search backlogs" /></div>
+        </div>
+        <section class="list-wrap">
+          <div class="list-head"><span></span><span>State</span><span>Mode</span><span>Backlog</span><span>Relationships</span></div>
+          <div id="rows"></div>
+        </section>
+      </main>
+      <aside class="inspector" id="inspector"></aside>
+    </section>
+    <footer class="footer"><span class="path">~/llm/afk · refactor/workflow-runtime-boundaries</span><span id="footer-hints"><kbd>↑↓</kbd>move <kbd>enter</kbd>detail <kbd>o</kbd>open <kbd>/</kbd>search <kbd>?</kbd>help</span></footer>
+  </div>
+  <script>
+    const backlogs = [
+      { id: 42, state: 'ready', mode: 'hitl', title: 'Add explicit split-panel layout: list + preview', parent: 'base::direct', depends: '—', tags: 'ui, layout', branch: 'backlog/42', description: 'Render the selected backlog in a stable inspector without mutating provider state.', url: 'https://github.com/easyhaloo/afk/issues/42' },
+      { id: 41, state: 'verification', mode: 'hitl', title: 'Render issue descriptions as markdown', parent: 'base::direct', depends: '39', tags: 'ui, markdown', branch: 'backlog/41', description: 'Keep markdown readable in detail view and prevent raw text from overflowing rows.', url: 'https://github.com/easyhaloo/afk/issues/41' },
+      { id: 40, state: 'verification', mode: 'hitl', title: 'Reduce per-row metadata density in BacklogListView', parent: 'base::direct', depends: '—', tags: 'ui, density', branch: 'backlog/40', description: 'Move relationships, tags and provider details into the inspector.', url: 'https://github.com/easyhaloo/afk/issues/40' },
+      { id: 39, state: 'verification', mode: 'hitl', title: 'Fix CJK and full-width character truncation', parent: 'base::direct', depends: '—', tags: 'ui, text', branch: 'backlog/39', description: 'Use display-width aware truncation for Chinese and mixed-width content.', url: 'https://github.com/easyhaloo/afk/issues/39' },
+      { id: 38, state: 'done', mode: 'afk', title: 'TEST: multiline description rendering', parent: 'base::direct', depends: '—', tags: 'test', branch: 'backlog/38', description: 'line one\nline two\nline three', url: 'https://github.com/easyhaloo/afk/issues/38' },
+      { id: 36, state: 'ready', mode: 'afk', title: 'Test multi-label backlog', parent: 'prd-33', depends: '—', tags: 'test, labels', branch: 'backlog/36', description: 'Validate labels are metadata only and do not define lifecycle semantics.', url: 'https://github.com/easyhaloo/afk/issues/36' },
+      { id: 35, state: 'verification', mode: 'hitl', title: 'Dashboard footer: show path and git branch', parent: 'prd-33', depends: '—', tags: 'ui', branch: 'backlog/35', description: 'Keep repository context visible without consuming a full title row.', url: 'https://github.com/easyhaloo/afk/issues/35' }
+    ];
+    const tasks = [
+      { id: 7, state: 'active', mode: 'afk', title: 'Implement provider claim lock', session: 'afk-7', branch: 'backlog/7', progress: '68%', description: 'AFK session currently executing the provider claim flow.', url: 'https://github.com/easyhaloo/afk/actions' },
+      { id: 5, state: 'active', mode: 'hitl', title: 'Review TUI layout proposal', session: 'human-5', branch: 'backlog/5', progress: '32%', description: 'Manual review required before the read-only TUI redesign starts.', url: 'https://github.com/easyhaloo/afk/issues/5' },
+      { id: 2, state: 'paused', mode: 'afk', title: 'Refresh project provider cache', session: 'afk-2', branch: 'backlog/2', progress: '—', description: 'Waiting for provider metadata to become available.', url: 'https://github.com/easyhaloo/afk/actions' }
+    ];
+    const projects = [
+      { id: 9233, state: 'active', mode: 'gitlab', title: 'llm-wiki', branch: 'main', description: '360 llm wiki', url: 'https://gitlab.example.com/llm-wiki' },
+      { id: 7938, state: 'active', mode: 'github', title: 'skills-group', branch: 'main', description: 'Skills architecture and shared automation', url: 'https://github.com/example/skills-group' },
+      { id: 7774, state: 'active', mode: 'github', title: 'mcp-factory', branch: 'refactor/providers', description: 'MCP service factory', url: 'https://github.com/example/mcp-factory' },
+      { id: 6765, state: 'archived', mode: 'linear', title: 'one-hub', branch: 'main', description: 'Model token accounting platform', url: 'https://linear.app/example/project/one-hub' }
+    ];
+    const board = backlogs.filter(item => ['ready', 'in_progress', 'verification', 'blocked'].includes(item.state));
+    const data = { tasks, backlogs, projects, board };
+    const viewMeta = {
+      tasks: { label: 'Tasks', count: tasks.length, placeholder: '/ search tasks', hint: 'running sessions and attachable worktrees', columns: ['Status', 'Mode', 'Session', 'Progress'] },
+      backlogs: { label: 'Backlogs', count: 33, placeholder: '/ search backlogs', hint: 'select a backlog to inspect relationships', columns: ['State', 'Mode', 'Backlog', 'Relationships'] },
+      projects: { label: 'Projects', count: 25, placeholder: '/ search projects', hint: 'provider projects and current branches', columns: ['Status', 'Provider', 'Project', 'Branch'] },
+      board: { label: 'Board', count: board.length, placeholder: '/ search board', hint: 'execution states grouped in one operational view', columns: ['State', 'Mode', 'Backlog', 'Relationships'] }
+    };
+    let selected = 0;
+    let view = 'backlogs';
+    let detailMode = false;
+    const stateLabel = s => s.replace('_', ' ');
+    const rows = document.getElementById('rows');
+    const inspector = document.getElementById('inspector');
+    const workspace = document.querySelector('.workspace');
+    const footerHints = document.getElementById('footer-hints');
+    function renderRows() {
+      if (detailMode) return;
+      const activeItems = data[view];
+      const q = document.getElementById('search').value.toLowerCase();
+      const visible = activeItems.filter(item => `${item.id} ${item.title} ${item.state} ${item.mode} ${item.tags || ''} ${item.description || ''}`.toLowerCase().includes(q));
+      document.querySelector('.list-head').innerHTML = '<span></span>' + viewMeta[view].columns.map(column => `<span>${column}</span>`).join('');
+      if (!visible.length) { rows.innerHTML = `<div class="empty">no matching ${viewMeta[view].label.toLowerCase()}</div>`; return; }
+      rows.innerHTML = visible.map(item => {
+        const index = activeItems.indexOf(item);
+        const isSelected = index === selected;
+        const secondary = view === 'tasks' ? `${item.session} · ${item.progress} · ${item.branch}` : view === 'projects' ? `${item.branch} · ${item.description}` : `${item.parent} · depends ${item.depends} · ${item.tags}`;
+        const modeLabel = view === 'projects' ? item.mode : item.mode;
+        return `<button class="row ${isSelected ? 'selected' : ''}" data-index="${index}"><span class="marker">${isSelected ? '▶' : '·'}</span><span class="state ${item.state}">${stateLabel(item.state)}</span><span class="mode ${item.mode}">${modeLabel}</span><span class="title"><span class="id">#${item.id}</span> <strong>${item.title}</strong></span><span class="summary">${secondary}</span></button>`;
+      }).join('');
+      rows.querySelectorAll('.row').forEach(row => row.addEventListener('click', () => { selected = Number(row.dataset.index); renderRows(); renderInspector(); }));
+    }
+    function renderInspector() {
+      const item = data[view][selected];
+      if (!item) { inspector.innerHTML = '<div class="empty">nothing selected</div>'; return; }
+      const fields = view === 'tasks'
+        ? [['session', item.session], ['progress', item.progress], ['branch', item.branch]]
+        : view === 'projects'
+          ? [['provider', item.mode], ['branch', item.branch]]
+          : [['parent', item.parent], ['depends on', item.depends], ['branch', item.branch], ['tags', item.tags]];
+      inspector.innerHTML = `<div class="detail-view"><div class="detail-toolbar"><span><span class="eyebrow" style="display:inline;margin:0">${viewMeta[view].label} / detail</span></span><button id="back-to-list">← back to ${viewMeta[view].label.toLowerCase()}</button></div><div class="detail-pane"><div class="detail-content"><div class="eyebrow">selected ${view === 'board' ? 'backlog' : view.slice(0, -1)}</div><h2>#${item.id} ${item.title}</h2><div class="badge-row"><span class="badge state ${item.state}">${stateLabel(item.state)}</span><span class="badge mode ${item.mode}">${item.mode}</span></div><div class="field-group">${fields.map(([label, value]) => `<div class="field"><label>${label}</label><span>${value || '—'}</span></div>`).join('')}</div><div class="field-group"><div class="eyebrow">description</div><div class="description">${item.description || 'no description'}</div></div><div class="actions"><button class="action" onclick="window.open('${item.url}', '_blank')">o open provider</button><button class="action" onclick="alert('Read-only prototype: no state mutation')">read-only</button></div></div></div></div>`;
+      inspector.querySelector('#back-to-list').addEventListener('click', exitDetail);
+    }
+    function enterDetail() { detailMode = true; workspace.classList.add('detail-mode'); footerHints.innerHTML = '<kbd>esc</kbd>back <kbd>o</kbd>open provider <kbd>?</kbd>help'; renderInspector(); }
+    function exitDetail() { detailMode = false; workspace.classList.remove('detail-mode'); footerHints.innerHTML = '<kbd>↑↓</kbd>move <kbd>enter</kbd>detail <kbd>o</kbd>open <kbd>/</kbd>search <kbd>?</kbd>help'; renderRows(); }
+    document.getElementById('enter-detail').addEventListener('click', enterDetail);
+    document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { if (detailMode) exitDetail(); document.querySelectorAll('.tab').forEach(t => t.classList.remove('active')); tab.classList.add('active'); view = tab.dataset.view; selected = 0; document.getElementById('search').value = ''; document.getElementById('search').placeholder = viewMeta[view].placeholder; document.getElementById('context-title').innerHTML = `${viewMeta[view].label} <span style="color:var(--muted);font-weight:400">/ ${viewMeta[view].count} items</span>`; document.getElementById('context-hint').textContent = viewMeta[view].hint; renderRows(); renderInspector(); }));
+    document.getElementById('search').addEventListener('input', renderRows);
+    document.addEventListener('keydown', event => { const activeItems = data[view]; if (detailMode && event.key === 'Escape') { exitDetail(); return; } if (detailMode) return; if (event.key === 'ArrowDown') { selected = Math.min(activeItems.length - 1, selected + 1); renderRows(); renderInspector(); } if (event.key === 'ArrowUp') { selected = Math.max(0, selected - 1); renderRows(); renderInspector(); } if (event.key === 'Enter') enterDetail(); if (event.key === '/') { event.preventDefault(); document.getElementById('search').focus(); } });
+    renderRows(); renderInspector();
+  </script>
+</body>
+</html>

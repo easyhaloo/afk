@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Backlog 状态标签原型 C</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #ecece8; }
+    body { display: grid; place-items: center; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; }
+    .prototype { position: relative; width: 1440px; height: 920px; overflow: hidden; background: #fff; }
+    .prototype > img { display: block; width: 1440px; height: 920px; object-fit: fill; }
+    .provider-mask { position: absolute; left: 1258px; top: 143px; width: 70px; height: 25px; background: #fff; }
+    .provider-label { position: absolute; left: 1252px; top: 143px; width: 120px; height: 25px; display: grid; place-items: center; color: #747a73; font-size: 13px; font-weight: 500; }
+    .metadata { position: absolute; left: 284px; height: 26px; min-width: 210px; display: flex; align-items: center; background: #fff; }
+    .row-1 { top: 303px; }.row-2 { top: 435px; }.row-3 { top: 566px; }.row-4 { top: 697px; }.row-5 { top: 827px; }
+    .group { height: 24px; display: inline-flex; align-items: stretch; overflow: hidden; border: 1px solid #dfe2dc; border-radius: 999px; background: #fff; white-space: nowrap; font-size: 12px; line-height: 1; }
+    .state, .mode { display: inline-flex; align-items: center; }
+    .state { gap: 6px; padding: 0 9px; font-weight: 600; }
+    .state::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; opacity: .78; }
+    .mode { padding: 0 10px; border-left: 1px solid rgba(100,110,102,.12); color: #747a73; font-weight: 500; }
+    .state-ready { background: #eff1ed; color: #69716a; }
+    .state-progress { background: #e4eee6; color: #516f5b; }
+    .state-blocked { background: #f4e8db; color: #8a6139; }
+  </style>
+</head>
+<body>
+  <main class="prototype" aria-label="Backlog 状态与模式组合标签原型">
+    <img src="file:///var/folders/4l/0z5r80vx6mgdbw6n7z0l3v2wkc3wq1/T/codex-clipboard-05885c11-8709-419e-b059-7569738e44b7.png" alt="AFK Control Backlog 页面" />
+    <div class="provider-mask"></div><div class="provider-label">自动探测</div>
+    <div class="metadata row-1"><span class="group"><span class="state state-progress">进行中</span><span class="mode">AFK 自动</span></span></div>
+    <div class="metadata row-2"><span class="group"><span class="state state-ready">待处理</span><span class="mode">HITL 人工</span></span></div>
+    <div class="metadata row-3"><span class="group"><span class="state state-ready">待处理</span><span class="mode">AFK 自动</span></span></div>
+    <div class="metadata row-4"><span class="group"><span class="state state-blocked">阻塞</span><span class="mode">HITL 人工</span></span></div>
+    <div class="metadata row-5"><span class="group"><span class="state state-ready">待处理</span><span class="mode">HITL 人工</span></span></div>
+  </main>
+</body>
+</html>

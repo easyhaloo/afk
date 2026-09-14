@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AFK Control · 工作流编辑交互原型</title>
+  <style>
+    :root {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+      color: #2d302c;
+      background: #f4f5f2;
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body { width: 1600px; height: 1000px; margin: 0; overflow: hidden; background: #f4f5f2; }
+    button { border: 0; font: inherit; cursor: pointer; }
+    .window { display: grid; width: 100%; height: 100%; grid-template-rows: 32px 1fr; background: #fff; }
+    .titlebar { position: relative; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #dfe1dc; background: #f2f3f1; color: #4b4e49; font-size: 13px; font-weight: 650; }
+    .traffic { position: absolute; left: 10px; display: flex; gap: 9px; }
+    .traffic i { width: 13px; height: 13px; border-radius: 50%; }
+    .traffic i:nth-child(1) { background: #ff5e57; }
+    .traffic i:nth-child(2) { background: #ffbd2e; }
+    .traffic i:nth-child(3) { background: #28c840; }
+    .app { display: grid; min-height: 0; grid-template-columns: 238px minmax(0, 1fr); }
+    .sidebar { display: flex; min-height: 0; flex-direction: column; padding: 22px 12px 14px; border-right: 1px solid #e6e7e2; background: #fafbf8; }
+    .brand { display: grid; grid-template-columns: 30px 1fr; align-items: center; gap: 9px; padding: 0 15px 32px; }
+    .brand-mark { display: grid; width: 27px; height: 27px; place-items: center; color: #fff; font-size: 11px; font-weight: 800; background: #4b4e57; clip-path: polygon(50% 0, 100% 100%, 68% 100%, 50% 60%, 32% 100%, 0 100%); }
+    .brand b { display: block; font-size: 12px; letter-spacing: .13em; }
+    .brand small { color: #a4a6a1; font-family: ui-monospace, monospace; font-size: 7px; letter-spacing: .11em; }
+    .new-run { display: flex; height: 44px; align-items: center; gap: 12px; padding: 0 14px; border: 1px solid #daddd6; border-radius: 10px; background: #fff; color: #30332f; box-shadow: 0 2px 8px rgba(35, 38, 33, .035); font-size: 12px; font-weight: 650; }
+    .chain { position: relative; width: 18px; height: 18px; }
+    .chain::before, .chain::after { content: ""; position: absolute; width: 7px; height: 7px; border: 2px solid #628679; border-radius: 2px; }
+    .chain::before { left: 1px; top: 1px; }
+    .chain::after { right: 1px; bottom: 1px; }
+    .nav { display: grid; gap: 5px; margin-top: 17px; }
+    .nav button { display: flex; height: 42px; align-items: center; gap: 12px; padding: 0 13px; border-radius: 9px; background: transparent; color: #6f726c; text-align: left; }
+    .nav button.active { position: relative; background: #e9efe8; color: #bd7919; font-weight: 650; }
+    .nav button.active::before { content: ""; position: absolute; left: -12px; width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: #c88926; }
+    .nav-icon { width: 19px; color: #777c75; text-align: center; font-size: 16px; }
+    .project-label { display: flex; align-items: center; justify-content: space-between; margin: 28px 11px 9px; color: #92958f; font-size: 9px; font-weight: 650; }
+    .project { padding: 12px 14px; border-radius: 9px; background: #f0f1ee; }
+    .project b, .project small { display: block; }
+    .project b { font-size: 12px; }
+    .project small { margin-top: 4px; color: #999c96; font-size: 9px; }
+    .project-status { display: flex; align-items: center; gap: 7px; margin-top: 14px; color: #999c96; font-size: 9px; }
+    .project-status i { width: 7px; height: 7px; border: 1px solid #c6cbc3; border-radius: 50%; background: #fff; }
+    .settings { display: flex; height: 36px; align-items: center; gap: 10px; margin-top: auto; padding: 0 13px; border-top: 1px solid #e8e9e5; color: #777a74; font-size: 10px; }
+    .main { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
+    .globalbar { display: flex; height: 54px; flex: 0 0 54px; align-items: center; padding: 0 30px; border-bottom: 1px solid #e6e7e2; color: #92958e; font-size: 10px; }
+    .globalbar strong { margin-left: 12px; color: #30332f; font-size: 14px; }
+    .studio { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+    .studio-head { display: grid; height: 76px; flex: 0 0 76px; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; padding: 0 25px; border-bottom: 1px solid #e5e6e1; }
+    .back { display: flex; align-items: center; gap: 5px; background: transparent; color: #747872; font-size: 10px; }
+    .title small, .title b { display: block; }
+    .title small { color: #92958e; font-family: ui-monospace, monospace; font-size: 7px; letter-spacing: .08em; }
+    .title b { margin-top: 4px; font-size: 13px; }
+    .actions { display: flex; align-items: center; gap: 9px; }
+    .status { display: inline-flex; height: 23px; align-items: center; padding: 0 9px; border: 1px solid #e8d5aa; border-radius: 999px; background: #fff8e8; color: #8d641f; font-family: ui-monospace, monospace; font-size: 8px; font-weight: 650; }
+    .save { height: 34px; padding: 0 15px; border-radius: 7px; background: #4d6297; color: #fff; font-size: 10px; font-weight: 700; box-shadow: 0 2px 5px rgba(54, 71, 112, .18); }
+    .canvas-panel { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; background: #f6f7f5; }
+    .canvas-head { position: relative; display: flex; height: 48px; flex: 0 0 48px; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid #e6e7e2; background: #fff; }
+    .canvas-head b { font-size: 11px; }
+    .add-wrap { position: relative; }
+    .add-button { display: grid; width: 31px; height: 31px; place-items: center; border: 1px solid #d9dcd5; border-radius: 8px; background: #fff; color: #62665f; font-size: 21px; font-weight: 300; box-shadow: 0 2px 7px rgba(39, 43, 36, .05); }
+    .add-button.active { border-color: #aebcda; background: #edf0f8; color: #4d6297; }
+    .add-menu { position: absolute; z-index: 20; top: 39px; right: 0; width: 250px; padding: 7px; border: 1px solid #dfe1dc; border-radius: 11px; background: #fff; box-shadow: 0 16px 34px rgba(28, 32, 27, .14); }
+    .add-menu::before { content: ""; position: absolute; top: -5px; right: 11px; width: 9px; height: 9px; border-top: 1px solid #dfe1dc; border-left: 1px solid #dfe1dc; background: #fff; transform: rotate(45deg); }
+    .menu-label { padding: 6px 8px 8px; color: #959891; font-family: ui-monospace, monospace; font-size: 7px; letter-spacing: .09em; }
+    .add-option { display: grid; width: 100%; grid-template-columns: 34px minmax(0, 1fr) 12px; gap: 9px; align-items: center; padding: 10px 9px; border-radius: 8px; background: transparent; color: #353833; text-align: left; }
+    .add-option:hover { background: #f3f5f1; }
+    .option-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 8px; background: #edf6f3; color: #438779; font-size: 15px; }
+    .add-option.qa .option-icon { background: #fff3e6; color: #ae7330; }
+    .add-option b, .add-option small { display: block; }
+    .add-option b { font-size: 10px; }
+    .add-option small { margin-top: 3px; color: #8b8e87; font-size: 8px; line-height: 1.35; }
+    .add-option em { color: #aaada7; font-size: 14px; font-style: normal; }
+    .stage { position: relative; min-height: 0; flex: 1; overflow: hidden; cursor: grab; background: #f6f7f5; }
+    .stage.dragging { cursor: grabbing; }
+    .world { position: absolute; left: 0; top: 0; width: 1500px; height: 650px; transform-origin: 0 0; }
+    .phase { position: absolute; top: 155px; color: #77a096; font-family: ui-monospace, monospace; font-size: 8px; font-weight: 700; letter-spacing: .08em; }
+    .track { position: absolute; left: 220px; top: 168px; width: 960px; height: 210px; border: 1px dashed #cad8d2; border-radius: 8px; background: rgba(237, 244, 241, .34); }
+    .track span { position: absolute; top: 11px; left: 15px; color: #789089; font-family: ui-monospace, monospace; font-size: 8px; font-weight: 700; letter-spacing: .08em; }
+    svg.edges { position: absolute; inset: 0; width: 1500px; height: 650px; overflow: visible; pointer-events: none; }
+    .edge { fill: none; stroke: #aabdb6; stroke-width: 1.3; marker-end: url(#arrow); }
+    .edge.active { stroke: #4b9286; stroke-width: 1.5; }
+    .node { position: absolute; display: grid; width: 164px; height: 94px; grid-template-columns: 25px minmax(0, 1fr) 7px; gap: 9px; align-items: start; padding: 13px 12px; border: 1px solid #d9dcd6; border-radius: 9px; background: #fff; color: #2e312d; text-align: left; box-shadow: 0 2px 8px rgba(35, 39, 33, .035); cursor: grab; user-select: none; }
+    .node:hover { border-color: #9daccc; box-shadow: 0 6px 16px rgba(35, 44, 67, .09); }
+    .node.selected { border-color: #5f74a5; box-shadow: 0 0 0 1px #5f74a5, 0 7px 17px rgba(42, 54, 84, .10); }
+    .node.dragging { z-index: 9; cursor: grabbing; transform: translateY(-2px) scale(1.015); box-shadow: 0 14px 28px rgba(36, 44, 63, .16); }
+    .node-index { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 6px; background: #eef1f7; color: #5b6f9d; font-family: ui-monospace, monospace; font-size: 7px; }
+    .node.agent .node-index { background: #ebf5f2; color: #4c887b; }
+    .node.qa .node-index { background: #fff2e4; color: #a96d2d; }
+    .node b, .node small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .node b { padding-top: 2px; font-size: 11px; }
+    .node small { margin-top: 6px; color: #898c85; font-family: ui-monospace, monospace; font-size: 7px; }
+    .node-dot { width: 6px; height: 6px; margin-top: 6px; border-radius: 50%; background: #7a8fb9; }
+    .node.agent .node-dot { background: #5c9b8d; }
+    .node.qa .node-dot { background: #c48948; }
+    .inspector { position: absolute; z-index: 12; top: 16px; right: 16px; bottom: 16px; display: flex; width: 304px; flex-direction: column; overflow: hidden; border: 1px solid #dcdfd9; border-radius: 12px; background: rgba(255,255,255,.97); box-shadow: 0 14px 34px rgba(31, 35, 29, .12); }
+    .inspector-head { display: grid; min-height: 62px; grid-template-columns: 26px 1fr 22px; gap: 10px; align-items: center; padding: 0 13px; border-bottom: 1px solid #e7e8e4; }
+    .inspector-head > span { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 6px; background: #eff1ee; color: #72766e; font-family: ui-monospace, monospace; font-size: 8px; }
+    .inspector-head small, .inspector-head b { display: block; }
+    .inspector-head small { color: #92958e; font-family: ui-monospace, monospace; font-size: 7px; }
+    .inspector-head b { margin-top: 3px; font-size: 11px; }
+    .inspector-intro { padding: 10px 13px; border-bottom: 1px solid #e8e9e5; color: #898c85; font-size: 8px; line-height: 1.5; }
+    .fields { display: grid; gap: 13px; padding: 14px; }
+    .field span { display: block; margin-bottom: 6px; color: #777b74; font-size: 8px; font-weight: 650; }
+    .input { display: flex; height: 35px; align-items: center; justify-content: space-between; padding: 0 10px; border: 1px solid #dfe1dc; border-radius: 7px; color: #424640; font-size: 9px; }
+    .inspector-foot { display: flex; align-items: center; gap: 7px; margin-top: auto; padding: 11px 13px; border-top: 1px solid #e7e8e4; background: #fafbf8; }
+    .secondary { height: 31px; padding: 0 11px; border: 1px solid #dde0da; border-radius: 7px; background: #fff; color: #70746d; font-size: 9px; }
+    .primary { height: 31px; padding: 0 12px; border-radius: 7px; background: #4d6297; color: #fff; font-size: 9px; font-weight: 700; }
+    .controls { position: absolute; z-index: 15; right: 334px; bottom: 16px; display: flex; align-items: center; gap: 1px; padding: 3px; border: 1px solid #dcdfd9; border-radius: 9px; background: #fff; box-shadow: 0 5px 16px rgba(34, 38, 32, .09); }
+    .controls button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; background: transparent; color: #777b74; font-size: 15px; }
+    .controls button:hover { background: #edf0f8; color: #4d6297; }
+    .zoom { min-width: 43px; color: #858981; font-family: ui-monospace, monospace; font-size: 8px; text-align: center; }
+    .hint { position: absolute; z-index: 10; left: 18px; bottom: 18px; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #dfe2dc; border-radius: 8px; background: rgba(255,255,255,.88); color: #7c8079; font-size: 8px; box-shadow: 0 3px 10px rgba(37, 41, 35, .05); backdrop-filter: blur(8px); }
+    .hint i { width: 6px; height: 6px; border-radius: 50%; background: #5a9488; }
+    .canvas-foot { display: flex; height: 31px; flex: 0 0 31px; align-items: center; justify-content: space-between; padding: 0 20px; border-top: 1px solid #e5e6e1; background: #fff; color: #949790; font-family: ui-monospace, monospace; font-size: 7px; }
+  </style>
+</head>
+<body>
+  <main class="window">
+    <div class="titlebar"><span class="traffic"><i></i><i></i><i></i></span>AFK Control</div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">A</span><div><b>AFK / CONTROL</b><small>LOCAL OPERATIONS</small></div></div>
+        <button class="new-run"><span class="chain"></span>新建运行</button>
+        <nav class="nav">
+          <button><span class="nav-icon">⌁</span>工作项</button>
+          <button class="active"><span class="nav-icon">⌘</span>工作流</button>
+          <button><span class="nav-icon">▣</span>记录</button>
+          <button><span class="nav-icon">⌁</span>Agent</button>
+          <button><span class="nav-icon">◇</span>环境</button>
+          <button><span class="nav-icon">›_</span>SSH 主机</button>
+          <button><span class="nav-icon">▤</span>Backlog</button>
+        </nav>
+        <div class="project-label"><span>项目</span><span>＋</span></div>
+        <div class="project"><b>▱ &nbsp;afk</b><small>.afk 已发现</small><span class="project-status"><i></i>等待本地运行状态</span></div>
+        <div class="settings">☷ &nbsp; 设置</div>
+      </aside>
+      <section class="main">
+        <header class="globalbar">AFK <span style="margin:0 10px">›</span><strong>工作流</strong></header>
+        <section class="studio">
+          <header class="studio-head">
+            <button class="back">‹ &nbsp;工作流</button>
+            <div class="title"><small>AFK 内置</small><b>Issue 实现</b></div>
+            <div class="actions"><span class="status">未保存</span><button class="save">保存</button></div>
+          </header>
+          <section class="canvas-panel">
+            <header class="canvas-head">
+              <b>执行画布</b>
+              <div class="add-wrap">
+                <button class="add-button active" aria-label="添加工作流步骤">＋</button>
+                <div class="add-menu">
+                  <div class="menu-label">添加工作流步骤</div>
+                  <button class="add-option"><span class="option-icon">A</span><span><b>Agent 步骤</b><small>执行实现、分析或自动化任务</small></span><em>›</em></button>
+                  <button class="add-option qa"><span class="option-icon">✓</span><span><b>QA 步骤</b><small>验证结果并输出验收证据</small></span><em>›</em></button>
+                </div>
+              </div>
+            </header>
+            <div class="stage" id="stage">
+              <div class="world" id="world">
+                <span class="phase" style="left:255px">阶段 01</span><span class="phase" style="left:466px">阶段 02</span><span class="phase" style="left:656px">阶段 03</span><span class="phase" style="left:846px">阶段 04</span>
+                <div class="track"><span>系统编排步骤</span></div>
+                <svg class="edges" viewBox="0 0 1500 650"><defs><marker id="arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L0,7 L6,3.5 z" fill="#aabdb6" /></marker></defs><path class="edge" d="M234 287 H270"/><path class="edge active" d="M434 287 H480"/><path class="edge" d="M644 287 H670"/><path class="edge" d="M834 287 H860"/></svg>
+                <button class="node selected" data-x="70" data-y="240" style="left:70px;top:240px"><span class="node-index">00</span><span><b>开始</b><small>Issue 实现</small></span><i class="node-dot"></i></button>
+                <button class="node agent" data-x="270" data-y="240" style="left:270px;top:240px"><span class="node-index">01</span><span><b>implement</b><small>implementer</small></span><i class="node-dot"></i></button>
+                <button class="node agent" data-x="480" data-y="240" style="left:480px;top:240px"><span class="node-index">02</span><span><b>verify-ac</b><small>verifier</small></span><i class="node-dot"></i></button>
+                <button class="node" data-x="670" data-y="240" style="left:670px;top:240px"><span class="node-index">03</span><span><b>publish</b><small>publish-change</small></span><i class="node-dot"></i></button>
+                <button class="node qa" data-x="860" data-y="240" style="left:860px;top:240px"><span class="node-index">04</span><span><b>queue-qa</b><small>queue-qa</small></span><i class="node-dot"></i></button>
+              </div>
+              <aside class="inspector">
+                <header class="inspector-head"><span>00</span><div><small>工作流配置</small><b>开始</b></div><span style="background:transparent">›</span></header>
+                <div class="inspector-intro">Issue 实现</div>
+                <div class="fields"><label class="field"><span>默认 Agent</span><div class="input">claude-code <b>⌄</b></div></label><label class="field"><span>tmux 会话</span><div class="input">afk</div></label><label class="field"><span>目标分支</span><div class="input">main</div></label><label class="field"><span>基准分支</span><div class="input">main</div></label><label class="field"><span>最大重试</span><div class="input">2</div></label></div>
+                <footer class="inspector-foot"><button class="secondary">还原</button><button class="primary">保存</button></footer>
+              </aside>
+              <div class="controls"><button id="fit" title="自动整理">↻</button><button id="zoomOut">−</button><span class="zoom" id="zoomText">100%</span><button id="zoomIn">＋</button><button id="reset">✣</button></div>
+              <div class="hint"><i></i>滚轮缩放 · 拖动画布 · 所有节点均可移动</div>
+            </div>
+            <footer class="canvas-foot"><span>模板：issue-implementation</span><span>模板步骤 4</span></footer>
+          </section>
+        </section>
+      </section>
+    </div>
+  </main>
+  <script>
+    const stage = document.getElementById('stage');
+    const world = document.getElementById('world');
+    const zoomText = document.getElementById('zoomText');
+    let viewport = { x: 25, y: -2, scale: 1 };
+    let drag = null;
+    const render = () => { world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`; zoomText.textContent = `${Math.round(viewport.scale * 100)}%`; };
+    const zoomAt = (nextScale, clientX, clientY) => {
+      const rect = stage.getBoundingClientRect();
+      const px = clientX - rect.left; const py = clientY - rect.top;
+      const wx = (px - viewport.x) / viewport.scale; const wy = (py - viewport.y) / viewport.scale;
+      viewport.x = px - wx * nextScale; viewport.y = py - wy * nextScale; viewport.scale = nextScale; render();
+    };
+    stage.addEventListener('wheel', event => { event.preventDefault(); zoomAt(Math.max(.7, Math.min(1.35, viewport.scale + (event.deltaY < 0 ? .08 : -.08))), event.clientX, event.clientY); }, { passive: false });
+    stage.addEventListener('pointerdown', event => {
+      const node = event.target.closest('.node');
+      if (node) { drag = { node, startX: event.clientX, startY: event.clientY, x: Number(node.dataset.x), y: Number(node.dataset.y) }; node.classList.add('dragging'); }
+      else { drag = { pan: true, startX: event.clientX, startY: event.clientY, x: viewport.x, y: viewport.y }; stage.classList.add('dragging'); }
+      stage.setPointerCapture(event.pointerId);
+    });
+    stage.addEventListener('pointermove', event => {
+      if (!drag) return;
+      if (drag.pan) { viewport.x = drag.x + event.clientX - drag.startX; viewport.y = drag.y + event.clientY - drag.startY; render(); return; }
+      const x = drag.x + (event.clientX - drag.startX) / viewport.scale; const y = drag.y + (event.clientY - drag.startY) / viewport.scale;
+      drag.node.dataset.x = x; drag.node.dataset.y = y; drag.node.style.left = `${x}px`; drag.node.style.top = `${y}px`;
+    });
+    const stopDrag = () => { if (drag?.node) drag.node.classList.remove('dragging'); drag = null; stage.classList.remove('dragging'); };
+    stage.addEventListener('pointerup', stopDrag); stage.addEventListener('pointercancel', stopDrag);
+    document.getElementById('zoomIn').onclick = () => zoomAt(Math.min(1.35, viewport.scale + .1), stage.clientWidth / 2, stage.clientHeight / 2);
+    document.getElementById('zoomOut').onclick = () => zoomAt(Math.max(.7, viewport.scale - .1), stage.clientWidth / 2, stage.clientHeight / 2);
+    document.getElementById('reset').onclick = () => { viewport = { x: 25, y: -2, scale: 1 }; render(); };
+    document.getElementById('fit').onclick = document.getElementById('reset').onclick;
+    render();
+  </script>
+</body>
+</html>

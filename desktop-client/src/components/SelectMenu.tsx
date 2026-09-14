@@ -9,9 +9,10 @@ type SelectMenuProps<T extends string> = {
   options: SelectMenuOption<T>[];
   onChange: (value: T) => void;
   disabled?: boolean;
+  triggerLayout?: "default" | "center";
 };
 
-export function SelectMenu<T extends string>({ label, value, options, onChange, disabled = false }: SelectMenuProps<T>) {
+export function SelectMenu<T extends string>({ label, value, options, onChange, disabled = false, triggerLayout = "default" }: SelectMenuProps<T>) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const selected = options.find((option) => option.value === value) ?? options[0];
@@ -33,7 +34,7 @@ export function SelectMenu<T extends string>({ label, value, options, onChange, 
   }, [open]);
 
   return (
-    <div className="select-menu" ref={menuRef}>
+    <div className={`select-menu${triggerLayout === "center" ? " centered-trigger" : ""}`} ref={menuRef}>
       <button
         type="button"
         className={`select-menu-trigger${open ? " open" : ""}`}

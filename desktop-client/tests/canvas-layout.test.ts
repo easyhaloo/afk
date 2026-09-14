@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasCanvasNodeCollisions, layoutCanvasNodes } from "../src/features/workflows/graph/canvas-layout";
+import { hasCanvasNodeCollisions, layoutCanvasNodes, zoomCanvasViewportAtPoint } from "../src/features/workflows/graph/canvas-layout";
 
 const nodes = (count: number) => Array.from({ length: count }, (_, index) => ({
   id: `agent-${index + 1}`,
@@ -12,6 +12,22 @@ const nodes = (count: number) => Array.from({ length: count }, (_, index) => ({
 }));
 
 describe("custom workflow canvas layout", () => {
+  it("keeps the world point under the pointer stable while zooming", () => {
+    const viewport = { x: 120, y: 80, scale: 1 };
+    const pointer = { x: 420, y: 280 };
+
+    const result = zoomCanvasViewportAtPoint(viewport, pointer, 1.25);
+
+    expect((pointer.x - result.x) / result.scale).toBeCloseTo((pointer.x - viewport.x) / viewport.scale);
+    expect((pointer.y - result.y) / result.scale).toBeCloseTo((pointer.y - viewport.y) / viewport.scale);
+    expect(result.scale).toBe(1.25);
+  });
+
+  it("clamps pointer-centered zoom to the supported range", () => {
+    expect(zoomCanvasViewportAtPoint({ x: 0, y: 0, scale: 1 }, { x: 0, y: 0 }, 2).scale).toBe(1.35);
+    expect(zoomCanvasViewportAtPoint({ x: 0, y: 0, scale: 1 }, { x: 0, y: 0 }, 0.2).scale).toBe(0.7);
+  });
+
   it("places a long workflow in rows without overlapping nodes", () => {
     const result = layoutCanvasNodes(nodes(12));
 

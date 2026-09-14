@@ -55,14 +55,20 @@ test.describe("BacklogPage list", () => {
     expect(controls[0].height).toBe(controls[1].height);
     expect(controls[2].height).toBe(controls[3].height);
     expect(controls[0].height).toBeLessThanOrEqual(34);
-    expect(controls[0].width).toBeLessThanOrEqual(150);
+    expect(controls[0].width).toBe(112);
 
     const providerAlignment = await platform.evaluate((button) => {
       const buttonBox = button.getBoundingClientRect();
       const labelBox = button.querySelector("span")!.getBoundingClientRect();
-      return Math.abs((buttonBox.left + buttonBox.width / 2) - (labelBox.left + labelBox.width / 2));
+      const iconBox = button.querySelector("svg")!.getBoundingClientRect();
+      return {
+        groupCenterDelta: Math.abs((buttonBox.left + buttonBox.width / 2) - (labelBox.left + (iconBox.right - labelBox.left) / 2)),
+        labelIconGap: iconBox.left - labelBox.right,
+      };
     });
-    expect(providerAlignment).toBeLessThanOrEqual(1);
+    expect(providerAlignment.groupCenterDelta).toBeLessThanOrEqual(1);
+    expect(providerAlignment.labelIconGap).toBeGreaterThanOrEqual(6);
+    expect(providerAlignment.labelIconGap).toBeLessThanOrEqual(10);
 
     await platform.click();
     const popover = page.getByRole("listbox", { name: "选择 Provider" });

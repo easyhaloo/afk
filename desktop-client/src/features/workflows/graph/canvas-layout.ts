@@ -6,6 +6,9 @@ export const CANVAS_WORLD_WIDTH = 1500;
 export const CANVAS_WORLD_HEIGHT = 640;
 export const CANVAS_MARGIN = 22;
 
+export type CanvasViewport = { x: number; y: number; scale: number };
+export type CanvasPoint = { x: number; y: number };
+
 const START_X = 220;
 const START_Y = 74;
 const COLUMN_GAP = 190;
@@ -14,6 +17,17 @@ const MAX_COLUMNS = 4;
 
 export function clampCanvasPosition(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+export function zoomCanvasViewportAtPoint(viewport: CanvasViewport, pointer: CanvasPoint, requestedScale: number): CanvasViewport {
+  const scale = clampCanvasPosition(requestedScale, 0.7, 1.35);
+  const worldX = (pointer.x - viewport.x) / viewport.scale;
+  const worldY = (pointer.y - viewport.y) / viewport.scale;
+  return {
+    x: pointer.x - worldX * scale,
+    y: pointer.y - worldY * scale,
+    scale,
+  };
 }
 
 export function layoutCanvasNodes(nodes: readonly CanvasTemplateNode[]): CanvasTemplateNode[] {

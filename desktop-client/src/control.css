@@ -1083,3 +1083,142 @@
   .workflow-editor-node { transition: none; }
   .workflow-edge.linked .workflow-edge-flow { animation: none; opacity: .58; }
 }
+
+.workflow-studio-page {
+  height: 100%;
+  min-height: 0;
+  margin-bottom: 0;
+  overflow: hidden;
+}
+.workspace:has(.workflow-studio-page) {
+  padding-bottom: 0;
+}
+.workflow-studio-shell {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.workflow-studio-canvas {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+}
+.workflow-studio-canvas .workflow-editor-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.workflow-editor-stage.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+.workflow-studio-toolbar .workflow-toolbar-button {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 1px solid var(--afk-border);
+  border-radius: 7px;
+  background: var(--afk-panel);
+  color: var(--afk-muted);
+}
+.workflow-studio-toolbar .workflow-toolbar-button:hover {
+  border-color: var(--afk-accent-border);
+  background: var(--afk-accent-soft);
+  color: var(--afk-accent);
+}
+.workflow-editor-node.dragging {
+  z-index: 7;
+  cursor: grabbing;
+  border-color: var(--afk-accent-border);
+  box-shadow: 0 10px 22px rgba(35, 39, 35, .14);
+  transform: translateY(-2px) scale(1.01);
+}
+.workflow-studio-toolbar {
+  position: relative;
+}
+.workflow-add-menu {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  width: 246px;
+  overflow: hidden;
+  padding: 5px;
+  border: 1px solid var(--afk-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--afk-panel) 96%, transparent);
+  box-shadow: 0 14px 32px rgba(33, 37, 33, .16);
+  backdrop-filter: blur(12px);
+}
+.workflow-studio-toolbar .workflow-add-option {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 14px;
+  gap: 9px;
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--afk-text);
+  text-align: left;
+}
+.workflow-studio-toolbar .workflow-add-option:hover {
+  border-color: transparent;
+  background: var(--afk-subtle);
+  color: var(--afk-text);
+}
+.workflow-add-option-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 7px;
+}
+.workflow-add-option.agent .workflow-add-option-icon { background: #edf6f3; color: #4f7f77; }
+.workflow-add-option.qa .workflow-add-option-icon { background: #f9f2e7; color: #89673d; }
+.workflow-add-option-copy { display: grid; min-width: 0; gap: 3px; }
+.workflow-add-option-copy b { font-size: 10px; font-weight: 680; }
+.workflow-add-option-copy small { color: var(--afk-muted); font-size: 8px; line-height: 1.35; }
+.workflow-add-option > svg { color: var(--afk-muted); }
+:root[data-afk-theme="graphite"] .workflow-editor-node.dragging {
+  border-color: #a8b9df;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, .32);
+}
+:root[data-afk-theme="graphite"] .workflow-add-menu {
+  border-color: #444943;
+  background: rgba(36, 39, 36, .97);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, .34);
+}
+:root[data-afk-theme="graphite"] .workflow-studio-toolbar .workflow-add-option:hover { background: #30332f; }
+:root[data-afk-theme="graphite"] .workflow-add-option.agent .workflow-add-option-icon { background: #273a35; color: #a3d0c7; }
+:root[data-afk-theme="graphite"] .workflow-add-option.qa .workflow-add-option-icon { background: #3d3427; color: #e4bd8e; }
+.workflow-dirty {
+  min-height: 21px;
+  padding: 0 7px;
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  font-weight: 600;
+}
+.workflow-studio-actions .workflow-save,
+.workflow-studio-inspector .workflow-save {
+  border-color: var(--afk-accent);
+  background: var(--afk-accent);
+  color: #fff;
+}
+.workflow-studio-actions .workflow-save:hover:not(:disabled),
+.workflow-studio-inspector .workflow-save:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--afk-accent) 88%, #000);
+  background: color-mix(in srgb, var(--afk-accent) 88%, #000);
+}
+.workflow-studio-inspector .workflow-reset {
+  border-color: var(--afk-border);
+  background: var(--afk-panel);
+  color: var(--afk-muted);
+}
+.workflow-studio-inspector .workflow-reset:hover:not(:disabled) {
+  border-color: var(--afk-accent-border);
+  background: var(--afk-accent-soft);
+  color: var(--afk-accent);
+}

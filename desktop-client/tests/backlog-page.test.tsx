@@ -140,6 +140,16 @@ describe("BacklogPage initial render", () => {
     act(() => { renderer.unmount(); });
   });
 
+  it("uses the same default trigger layout for Provider and status selectors", async () => {
+    const { renderer } = await renderBacklogPage();
+    const providerSelect = renderer.root.findByProps({ "aria-label": "选择 Provider" }).parent;
+    const statusSelect = renderer.root.findByProps({ "aria-label": "筛选状态" }).parent;
+
+    expect(providerSelect?.props.className).toBe("select-menu");
+    expect(statusSelect?.props.className).toBe("select-menu");
+    act(() => { renderer.unmount(); });
+  });
+
   it("invokes the bridge list with the supplied workspace and no platform override by default", async () => {
     const { api, renderer } = await renderBacklogPage("/repo");
 

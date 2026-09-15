@@ -62,13 +62,23 @@ test.describe("BacklogPage list", () => {
       const labelBox = button.querySelector("span")!.getBoundingClientRect();
       const iconBox = button.querySelector("svg")!.getBoundingClientRect();
       return {
-        groupCenterDelta: Math.abs((buttonBox.left + buttonBox.width / 2) - (labelBox.left + (iconBox.right - labelBox.left) / 2)),
+        labelLeftOffset: labelBox.left - buttonBox.left,
+        iconRightOffset: buttonBox.right - iconBox.right,
         labelIconGap: iconBox.left - labelBox.right,
       };
     });
-    expect(providerAlignment.groupCenterDelta).toBeLessThanOrEqual(1);
-    expect(providerAlignment.labelIconGap).toBeGreaterThanOrEqual(6);
-    expect(providerAlignment.labelIconGap).toBeLessThanOrEqual(10);
+    const stateAlignment = await state.evaluate((button) => {
+      const buttonBox = button.getBoundingClientRect();
+      const labelBox = button.querySelector("span")!.getBoundingClientRect();
+      const iconBox = button.querySelector("svg")!.getBoundingClientRect();
+      return {
+        labelLeftOffset: labelBox.left - buttonBox.left,
+        iconRightOffset: buttonBox.right - iconBox.right,
+      };
+    });
+    expect(Math.abs(providerAlignment.labelLeftOffset - stateAlignment.labelLeftOffset)).toBeLessThanOrEqual(1);
+    expect(Math.abs(providerAlignment.iconRightOffset - stateAlignment.iconRightOffset)).toBeLessThanOrEqual(1);
+    expect(providerAlignment.labelIconGap).toBeGreaterThanOrEqual(20);
 
     await platform.click();
     const popover = page.getByRole("listbox", { name: "选择 Provider" });

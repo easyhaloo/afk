@@ -26,7 +26,7 @@
   gap: 7px;
   align-items: center;
 }
-.backlog-heading-actions .select-menu { width: 112px; min-width: 112px; }
+.backlog-heading-actions .select-menu { width: 120px; min-width: 120px; }
 .backlog-heading-actions .icon-button {
   width: var(--backlog-control-height);
   height: var(--backlog-control-height);
@@ -44,12 +44,12 @@
   gap: 8px;
   min-height: 0;
   padding: 0 9px;
-  border: 1px solid var(--backlog-border);
-  border-radius: var(--backlog-control-radius);
-  background: var(--backlog-surface);
-  color: var(--backlog-text);
+  border: 1px solid var(--backlog-border, var(--afk-border, #dfe0da));
+  border-radius: var(--backlog-control-radius, 7px);
+  background: var(--backlog-surface, var(--afk-panel, #fff));
+  color: var(--backlog-text, var(--afk-text, #30332f));
   font: inherit;
-  font-size: var(--backlog-control-font-size);
+  font-size: var(--backlog-control-font-size, 12px);
   line-height: 1;
   cursor: pointer;
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
@@ -76,9 +76,9 @@
   min-width: 0;
   box-sizing: border-box;
   padding: 4px;
-  border: 1px solid var(--backlog-border);
+  border: 1px solid var(--backlog-border, var(--afk-border, #dfe0da));
   border-radius: 8px;
-  background: var(--backlog-surface);
+  background: var(--backlog-surface, var(--afk-panel, #fff));
   box-shadow: 0 10px 26px rgba(46, 51, 47, .12);
 }
 .select-menu-option {
@@ -93,7 +93,7 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--backlog-text);
+  color: var(--backlog-text, var(--afk-text, #30332f));
   font: inherit;
   font-size: 12px;
   line-height: 1;
@@ -155,9 +155,10 @@
   gap: 8px;
 }
 .backlog-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  column-gap: 12px;
+  align-items: stretch;
   padding: 12px 14px;
   border-radius: 10px;
   background: var(--backlog-surface);
@@ -170,6 +171,24 @@
   border-color: color-mix(in srgb, var(--backlog-accent) 48%, var(--backlog-border));
   box-shadow: 0 8px 24px rgba(46, 51, 47, .07);
   transform: translateY(-1px);
+}
+.backlog-mode-mark {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+.backlog-mode-mark.is-afk  { color: var(--run); }
+.backlog-mode-mark.is-hitl { color: var(--attention); }
+.backlog-row-body {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 .backlog-row header {
   display: flex;
@@ -193,21 +212,18 @@
   gap: 6px;
   flex-wrap: wrap;
 }
-.backlog-state-label,
-.backlog-mode-label {
+.backlog-state-label {
   display: inline-flex;
   min-height: 22px;
   box-sizing: border-box;
   align-items: center;
-  border-radius: 999px;
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-}
-.backlog-state-label {
   gap: 6px;
   padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
 .backlog-state-label i {
   width: 6px;
@@ -217,13 +233,27 @@
   background: currentColor;
   opacity: .78;
 }
-.backlog-mode-label {
-  padding: 0 9px;
-  border: 1px solid var(--backlog-border);
-  background: var(--backlog-surface);
-  color: var(--backlog-muted);
-  font-weight: 500;
+.backlog-mode-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
+.backlog-mode-tag::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .78;
+}
+.backlog-mode-tag.is-afk  { color: var(--run); }
+.backlog-mode-tag.is-hitl { color: var(--attention); }
 .backlog-state-ready {
   background: color-mix(in srgb, var(--ready) 14%, var(--backlog-surface));
   color: color-mix(in srgb, var(--ready) 72%, var(--backlog-text));
@@ -297,41 +327,6 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-.backlog-tag-remove {
-  margin: 0;
-  padding: 0 2px;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  color: inherit;
-  font-size: 12px;
-  line-height: 1;
-  opacity: 0;
-  pointer-events: none;
-}
-.backlog-tags li:hover .backlog-tag-remove,
-.backlog-tag-remove:focus-visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-.backlog-tag-add {
-  margin: 4px 0 0;
-}
-.backlog-tag-add input {
-  width: 100%;
-  padding: 3px 8px;
-  border: 1px dashed var(--backlog-border);
-  border-radius: 6px;
-  background: transparent;
-  font-size: 11px;
-  color: var(--backlog-muted);
-  outline: none;
-}
-.backlog-tag-add input:focus-visible {
-  border-style: solid;
-  border-color: var(--backlog-accent);
-  color: var(--backlog-text);
 }
 .backlog-empty {
   padding: 28px 16px;
@@ -440,11 +435,6 @@
 .backlog-status-pill.verification, .backlog-status-pill.merge_ready { background: var(--verify-soft); color: var(--verify); }
 .backlog-status-pill.blocked { background: var(--attention-soft); color: var(--attention); }
 .backlog-status-pill.done { background: color-mix(in srgb, var(--run) 12%, transparent); color: var(--run); }
-.backlog-detail-mode { color: var(--backlog-muted); font-size: 12px; }
-.backlog-detail-status-prefix { color: var(--backlog-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
-.backlog-runtime-panel { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--backlog-border); border-radius: 11px; background: var(--backlog-surface-soft); }
-.backlog-runtime-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--backlog-text); font-size: 12px; }
-.backlog-runtime-summary span { color: var(--backlog-muted); }
 .backlog-detail-section { display: grid; gap: 8px; }
 .backlog-detail-section-title { color: var(--backlog-muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .backlog-detail-description { color: var(--backlog-text); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }

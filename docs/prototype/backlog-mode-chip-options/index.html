@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>Backlog mode chip — variant comparison</title>
+  <style>
+    /* Match the production palette (desktop-client/src/palette.css). */
+    :root {
+      --canvas: #f4f4ef;
+      --surface: #fbfbf8;
+      --surface-raised: #ffffff;
+      --line: #e2e3dc;
+      --line-soft: #ecece7;
+      --ink: #2d332e;
+      --muted: #747a73;
+      --quiet: #a4a8a2;
+      --ready: #a4a9a2;
+      --run: #627f6c;
+      --run-soft: #dbe8de;
+      --verify: #4f8776;
+      --verify-soft: #d9ebe4;
+      --attention: #a37343;
+      --attention-soft: #f3e8db;
+      --backlog-control-height: 30px;
+      --backlog-control-radius: 7px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 28px 36px 64px;
+      background: var(--canvas);
+      color: var(--ink);
+      font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    }
+
+    header.intro {
+      max-width: 1240px;
+      margin: 0 auto 24px;
+    }
+    header.intro h1 { margin: 0 0 6px; font-size: 22px; font-weight: 680; letter-spacing: -.02em; }
+    header.intro p { margin: 0; color: var(--muted); font-size: 12px; max-width: 720px; }
+    header.intro .legend { display: flex; gap: 14px; margin-top: 12px; color: var(--muted); font-size: 11px; }
+    header.intro .legend code { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; font-family: "DM Mono", monospace; }
+
+    main { max-width: 1240px; margin: 0 auto; display: grid; gap: 22px; }
+
+    .variant {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface-raised);
+      box-shadow: 0 1px 2px rgba(46,51,47,.04);
+      overflow: hidden;
+    }
+    .variant header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line-soft);
+      background: linear-gradient(180deg, #fff 86%, rgba(255,255,255,.94));
+    }
+    .variant header h2 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--ink);
+    }
+    .variant header .label-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .variant header .label-badge.shipped { background: var(--line-soft); color: var(--muted); }
+    .variant header .label-badge.recommended { background: var(--run-soft); color: var(--run); }
+    .variant header .label-badge.alt { background: #f0e9dc; color: #846234; }
+    .variant header .label-badge.minimal { background: #e9eef5; color: #5d6f8a; }
+    .variant header .desc { color: var(--muted); font-size: 11px; max-width: 540px; }
+
+    .variant .row-list { padding: 4px 0; }
+
+    /* Each row mirrors the production backlog row layout exactly. */
+    .bl-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .bl-row:last-child { border-bottom: 0; }
+    .bl-row:hover { background: #f9faf7; }
+    .bl-row .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .bl-row .top b { font-size: 13px; font-weight: 600; }
+    .bl-row .top small { color: var(--muted); font-family: "DM Mono", monospace; font-size: 11px; }
+    .bl-row .run-btn {
+      display: inline-grid;
+      width: 22px; height: 22px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--run);
+      color: #fff;
+    }
+
+    /* State pill: identical to production, sits to the left of the mode variant. */
+    .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .state-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 22px;
+      padding: 0 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .state-pill i {
+      width: 6px; height: 6px;
+      flex: 0 0 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: .78;
+    }
+    .state-pill.ready     { background: color-mix(in srgb, var(--ready) 14%, var(--surface-raised)); color: color-mix(in srgb, var(--ready) 72%, var(--ink)); }
+    .state-pill.in_progress { background: var(--run-soft); color: var(--run); }
+    .state-pill.done      { background: color-mix(in srgb, var(--run-soft) 72%, var(--surface-raised)); color: color-mix(in srgb, var(--run) 82%, var(--ink)); }
+
+    /* ---------- Variant 1: shipped (icon + soft-bg chip) ---------- */
+    .v-shipped {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 22px;
+      padding: 0 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .v-shipped svg { width: 12px; height: 12px; flex: 0 0 12px; }
+    .v-shipped.is-afk  { background: var(--run-soft); color: var(--run); }
+    .v-shipped.is-hitl { background: var(--attention-soft); color: var(--attention); }
+
+    /* ---------- Variant 2: dot + text, no background (recommended) ---------- */
+    .v-dot {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 22px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .v-dot::before {
+      content: "";
+      width: 6px; height: 6px;
+      flex: 0 0 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: .78;
+    }
+    .v-dot.is-afk  { color: var(--run); }
+    .v-dot.is-hitl { color: var(--attention); }
+
+    /* ---------- Variant 3: monospace abbreviation pill ---------- */
+    .v-mono {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 0 7px;
+      border-radius: 999px;
+      font-family: "DM Mono", monospace;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: .04em;
+    }
+    .v-mono.is-afk  { background: var(--run-soft); color: var(--run); }
+    .v-mono.is-hitl { background: var(--attention-soft); color: var(--attention); }
+
+    /* ---------- Variant 4: inline separator text, no chip ---------- */
+    .v-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 22px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .v-inline .lead {
+      width: 5px; height: 5px;
+      flex: 0 0 5px;
+      border-radius: 50%;
+    }
+    .v-inline.is-afk .lead  { background: var(--run); }
+    .v-inline.is-hitl .lead { background: var(--attention); }
+
+    /* ---------- Variant 7: left-side icon marker (robot / hand) ---------- */
+    .v-icon-mark .bl-row {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      column-gap: 14px;
+      align-items: center;
+    }
+    .v-icon-mark .bl-row .mode-mark {
+      grid-column: 1;
+      grid-row: 1 / span 2;
+      display: grid;
+      place-self: center;
+      place-items: center;
+    }
+    .v-icon-mark .bl-row.is-afk  .mode-mark { color: var(--run); }
+    .v-icon-mark .bl-row.is-hitl .mode-mark { color: var(--attention); }
+    .v-icon-mark .bl-row .mode-mark svg { width: 16px; height: 16px; }
+    .v-icon-mark .bl-row .row-body {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+    .v-icon-mark .bl-row .top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .v-icon-mark .bl-row .run-btn { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
+
+    /* ---------- Variant 5: left-edge colored bar (geometric) ---------- */
+    .v-bar .bl-row {
+      border-left: 3px solid transparent;
+      padding-left: 15px;
+    }
+    .v-bar .bl-row.is-afk  { border-left-color: var(--run); }
+    .v-bar .bl-row.is-hitl { border-left-color: var(--attention); }
+    .v-bar .meta .mode-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 22px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .v-bar .meta .mode-tag .swatch {
+      width: 8px; height: 8px;
+      border-radius: 2px;
+    }
+    .v-bar .bl-row.is-afk  .mode-tag .swatch { background: var(--run); }
+    .v-bar .bl-row.is-hitl .mode-tag .swatch { background: var(--attention); }
+
+    /* ---------- Variant 6: title tint (semantic fusion) ---------- */
+    .v-tint .bl-row .top b {
+      transition: color 140ms ease;
+    }
+    .v-tint .bl-row.is-afk  .top b { color: var(--run); }
+    .v-tint .bl-row.is-hitl .top b { color: var(--attention); }
+    .v-tint .meta .mode-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 22px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .v-tint .meta .mode-tag i {
+      width: 6px; height: 6px;
+      flex: 0 0 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: .55;
+    }
+    .v-tint .bl-row.is-afk  .mode-tag { color: var(--run); }
+    .v-tint .bl-row.is-hitl .mode-tag { color: var(--attention); }
+
+    .inspect-note {
+      padding: 10px 18px 14px;
+      color: var(--muted);
+      font-size: 11px;
+      border-top: 1px dashed var(--line-soft);
+      background: #fbfbf8;
+    }
+
+    /* Comparison strip: row vs row, identical metadata aside from the mode chip. */
+    .compare {
+      max-width: 1240px;
+      margin: 22px auto 0;
+      padding: 14px 18px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface-raised);
+    }
+    .compare h3 { margin: 0 0 10px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink); }
+    .compare table { width: 100%; border-collapse: collapse; }
+    .compare th, .compare td { padding: 8px 6px; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: middle; }
+    .compare th { color: var(--muted); font-weight: 500; font-size: 11px; letter-spacing: .04em; }
+    .compare td.label { color: var(--muted); font-size: 11px; }
+    .compare td.scale-note { color: var(--quiet); font-size: 11px; }
+  </style>
+</head>
+<body>
+  <header class="intro">
+    <h1>Backlog 执行模式 chip — 变体对比</h1>
+    <p>同一个 3 行 backlog 数据，分别用四种 chip 表达方式渲染。基于桌面端 <code>palette.css</code> 的真实颜色 token，与 <code>BacklogPage</code> 当前使用的 <code>--run-soft</code> / <code>--attention-soft</code> 一致。</p>
+    <div class="legend">
+      <span>状态: <code>--run-soft #dbe8de</code></span>
+      <span>模式 AFK: <code>--run-soft #dbe8de</code></span>
+      <span>模式 HITL: <code>--attention-soft #f3e8db</code></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Variant 1: shipped -->
+    <section class="variant">
+      <header>
+        <div>
+          <h2>Variant 1 · 已发布 <span class="label-badge shipped">shipped</span></h2>
+          <div class="desc">软色背景 chip + 12px lucide 图标（Bot / Hand）。视觉权重与 state pill 等高。</div>
+        </div>
+      </header>
+      <div class="row-list">
+        <article class="bl-row">
+          <div class="top"><b>登录态切换</b><small>#1</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill ready"><i></i>待处理</span>
+            <span class="v-shipped is-afk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row">
+          <div class="top"><b>kg 演示</b><small>#2</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill in_progress"><i></i>进行中</span>
+            <span class="v-shipped is-afk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row">
+          <div class="top"><b>支付回调</b><small>#3</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill done"><i></i>已完成</span>
+            <span class="v-shipped is-hitl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>HITL 人工</span>
+          </div>
+        </article>
+      </div>
+      <div class="inspect-note">问题：chip 软色块与左侧 state pill 等权重，眼睛把它们当成两个并列状态；icon + 文字信息重复。</div>
+    </section>
+
+    <!-- Variant 2: dot + text (recommended) -->
+    <section class="variant">
+      <header>
+        <div>
+          <h2>Variant 2 · dot + 文字 <span class="label-badge recommended">recommended</span></h2>
+          <div class="desc">复用 state pill 的 dot 节奏（6px 圆点 + 6px gap + 22px 行高），去背景去图标，只保留文字色与 dot 色。读起来跟 state pill 同层。</div>
+        </div>
+      </header>
+      <div class="row-list">
+        <article class="bl-row">
+          <div class="top"><b>登录态切换</b><small>#1</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill ready"><i></i>待处理</span>
+            <span class="v-dot is-afk">AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row">
+          <div class="top"><b>kg 演示</b><small>#2</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill in_progress"><i></i>进行中</span>
+            <span class="v-dot is-afk">AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row">
+          <div class="top"><b>支付回调</b><small>#3</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill done"><i></i>已完成</span>
+            <span class="v-dot is-hitl">HITL 人工</span>
+          </div>
+        </article>
+      </div>
+      <div class="inspect-note">视觉一致性最高：state pill 和 mode 共用一套 dot+文字语汇；颜色仍区分 AFK/HITL，但靠文字色而非背景，权重自然低一档。</div>
+    </section>
+
+    <!-- Variant 3: monospace abbreviation -->
+    <section class="variant">
+      <header>
+        <div>
+          <h2>Variant 3 · 等宽缩写 <span class="label-badge alt">alt</span></h2>
+          <div class="desc">像 <code>.workflow-run-status</code> 的小尺寸 pill：9px DM Mono + 软色背景，两字母缩写。极紧凑，但需记忆 AFK/HITL。</div>
+        </div>
+      </header>
+      <div class="row-list">
+        <article class="bl-row">
+          <div class="top"><b>登录态切换</b><small>#1</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill ready"><i></i>待处理</span>
+            <span class="v-mono is-afk">AFK</span>
+          </div>
+        </article>
+        <article class="bl-row">
+          <div class="top"><b>kg 演示</b><small>#2</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill in_progress"><i></i>进行中</span>
+            <span class="v-mono is-afk">AFK</span>
+          </div>
+        </article>
+        <article class="bl-row">
+          <div class="top"><b>支付回调</b><small>#3</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill done"><i></i>已完成</span>
+            <span class="v-mono is-hitl">HITL</span>
+          </div>
+        </article>
+      </div>
+      <div class="inspect-note">优点：尺寸最小，让列表更紧凑；缺点：脱离上下文时不可读（缩写得查），且与中文界面调性不一致。</div>
+    </section>
+
+    <!-- Variant 4: inline text only -->
+    <section class="variant">
+      <header>
+        <div>
+          <h2>Variant 4 · 内联文字 <span class="label-badge minimal">minimal</span></h2>
+          <div class="desc">无 chip、无背景；5px 小圆点 + muted 文字。最少视觉重量，但 mode 与 state 区分弱，需 hover 才知道是 HITL。</div>
+        </div>
+      </header>
+      <div class="row-list">
+        <article class="bl-row">
+          <div class="top"><b>登录态切换</b><small>#1</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill ready"><i></i>待处理</span>
+            <span class="v-inline is-afk"><span class="lead"></span>AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row">
+          <div class="top"><b>kg 演示</b><small>#2</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill in_progress"><i></i>进行中</span>
+            <span class="v-inline is-afk"><span class="lead"></span>AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row">
+          <div class="top"><b>支付回调</b><small>#3</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill done"><i></i>已完成</span>
+            <span class="v-inline is-hitl"><span class="lead"></span>HITL 人工</span>
+          </div>
+        </article>
+      </div>
+      <div class="inspect-note">最极简；与 state pill 的视觉等级接近 1:1，靠文字色差（muted vs run）区分，HITL 时容易与已完成（done，run-soft）混淆。</div>
+    </section>
+
+    <!-- Variant 5: left-edge colored bar -->
+    <section class="variant v-bar">
+      <header>
+        <div>
+          <h2>Variant 5 · 左侧色条 <span class="label-badge alt">geometric</span></h2>
+          <div class="desc">行左侧 3px 竖向色条（AFK=run、HITL=attention）；metadata 行保留一个低饱和的小方块作为辅助标签。零 chip，纯几何编码。</div>
+        </div>
+      </header>
+      <div class="row-list">
+        <article class="bl-row is-afk">
+          <div class="top"><b>登录态切换</b><small>#1</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill ready"><i></i>待处理</span>
+            <span class="mode-tag"><span class="swatch"></span>AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row is-afk">
+          <div class="top"><b>kg 演示</b><small>#2</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill in_progress"><i></i>进行中</span>
+            <span class="mode-tag"><span class="swatch"></span>AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row is-hitl">
+          <div class="top"><b>支付回调</b><small>#3</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill done"><i></i>已完成</span>
+            <span class="mode-tag"><span class="swatch"></span>HITL 人工</span>
+          </div>
+        </article>
+      </div>
+      <div class="inspect-note">几何路线：色条传达 mode，metadata 行里只剩极小的方块文字。问题是 HITL 多时整个列表左边都是琥珀色，情绪偏警示。</div>
+    </section>
+
+    <!-- Variant 6: title tint -->
+    <section class="variant v-tint">
+      <header>
+        <div>
+          <h2>Variant 6 · 标题着色 <span class="label-badge alt">semantic fusion</span></h2>
+          <div class="desc">让标题文字承载 mode（AFK=run-green、HITL=attention-amber）；metadata 行保留一个轻量 dot+文字作为确认。标题色本身就是信号源。</div>
+        </div>
+      </header>
+      <div class="row-list">
+        <article class="bl-row is-afk">
+          <div class="top"><b>登录态切换</b><small>#1</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill ready"><i></i>待处理</span>
+            <span class="mode-tag"><i></i>AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row is-afk">
+          <div class="top"><b>kg 演示</b><small>#2</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill in_progress"><i></i>进行中</span>
+            <span class="mode-tag"><i></i>AFK 自动</span>
+          </div>
+        </article>
+        <article class="bl-row is-hitl">
+          <div class="top"><b>支付回调</b><small>#3</small><span class="run-btn">▶</span></div>
+          <div class="meta">
+            <span class="state-pill done"><i></i>已完成</span>
+            <span class="mode-tag"><i></i>HITL 人工</span>
+          </div>
+        </article>
+      </div>
+      <div class="inspect-note">融合路线：标题色 = mode 色，列表整体偏色一眼可分。但 HITL 的琥珀跟「已完成 done（run-soft）」同时出现时色彩节奏会乱。</div>
+    </section>
+
+    <!-- Variant 7: left-side icon marker -->
+    <section class="variant v-icon-mark">
+      <header>
+        <div>
+          <h2>Variant 7 · 左侧图标标记 <span class="label-badge alt">icon-led</span></h2>
+          <div class="desc">行最左侧放 16px 着色图标（AFK=Bot，HITL=Hand），无外框背景，靠图标本身的颜色承载 mode。metadata 行保留轻量 dot+文字作为确认。</div>
+        </div>
+      </header>
+      <div class="row-list">
+        <article class="bl-row is-afk">
+          <span class="mode-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          </span>
+          <div class="row-body">
+            <div class="top"><b>登录态切换</b><small>#1</small></div>
+            <div class="meta">
+              <span class="state-pill ready"><i></i>待处理</span>
+              <span class="mode-tag"><i></i>AFK 自动</span>
+            </div>
+          </div>
+          <span class="run-btn">▶</span>
+        </article>
+        <article class="bl-row is-afk">
+          <span class="mode-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          </span>
+          <div class="row-body">
+            <div class="top"><b>kg 演示</b><small>#2</small></div>
+            <div class="meta">
+              <span class="state-pill in_progress"><i></i>进行中</span>
+              <span class="mode-tag"><i></i>AFK 自动</span>
+            </div>
+          </div>
+          <span class="run-btn">▶</span>
+        </article>
+        <article class="bl-row is-hitl">
+          <span class="mode-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+          </span>
+          <div class="row-body">
+            <div class="top"><b>支付回调</b><small>#3</small></div>
+            <div class="meta">
+              <span class="state-pill done"><i></i>已完成</span>
+              <span class="mode-tag"><i></i>HITL 人工</span>
+            </div>
+          </div>
+          <span class="run-btn">▶</span>
+        </article>
+      </div>
+      <div class="inspect-note">锚点路线（去框版）：眼睛扫列表时图标先抓注意。去掉外框背景后视觉更轻，但 mode 表达只剩图标颜色 + 文字一行，HITL 列表偏色比有框时弱。</div>
+    </section>
+  </main>
+
+  <section class="compare">
+    <h3>横向对比 — 同一行的 metadata 行</h3>
+    <table>
+      <thead>
+        <tr><th>变体</th><th>登录态切换（ready · AFK）</th><th>支付回调（done · HITL）</th><th>视觉权重</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="label">V1 已发布（chip+icon）</td>
+          <td>
+            <div class="meta">
+              <span class="state-pill ready"><i></i>待处理</span>
+              <span class="v-shipped is-afk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>AFK 自动</span>
+            </div>
+          </td>
+          <td>
+            <div class="meta">
+              <span class="state-pill done"><i></i>已完成</span>
+              <span class="v-shipped is-hitl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>HITL 人工</span>
+            </div>
+          </td>
+          <td class="scale-note">高 — 与 state pill 等权</td>
+        </tr>
+        <tr>
+          <td class="label">V2 dot+文字（推荐）</td>
+          <td>
+            <div class="meta">
+              <span class="state-pill ready"><i></i>待处理</span>
+              <span class="v-dot is-afk">AFK 自动</span>
+            </div>
+          </td>
+          <td>
+            <div class="meta">
+              <span class="state-pill done"><i></i>已完成</span>
+              <span class="v-dot is-hitl">HITL 人工</span>
+            </div>
+          </td>
+          <td class="scale-note">中 — 同构但无背景</td>
+        </tr>
+        <tr>
+          <td class="label">V3 等宽缩写</td>
+          <td>
+            <div class="meta">
+              <span class="state-pill ready"><i></i>待处理</span>
+              <span class="v-mono is-afk">AFK</span>
+            </div>
+          </td>
+          <td>
+            <div class="meta">
+              <span class="state-pill done"><i></i>已完成</span>
+              <span class="v-mono is-hitl">HITL</span>
+            </div>
+          </td>
+          <td class="scale-note">低 — 极小尺寸</td>
+        </tr>
+        <tr>
+          <td class="label">V4 内联文字</td>
+          <td>
+            <div class="meta">
+              <span class="state-pill ready"><i></i>待处理</span>
+              <span class="v-inline is-afk"><span class="lead"></span>AFK 自动</span>
+            </div>
+          </td>
+          <td>
+            <div class="meta">
+              <span class="state-pill done"><i></i>已完成</span>
+              <span class="v-inline is-hitl"><span class="lead"></span>HITL 人工</span>
+            </div>
+          </td>
+          <td class="scale-note">最低 — 几乎融入正文</td>
+        </tr>
+        <tr>
+          <td class="label">V5 左侧色条</td>
+          <td>
+            <div class="meta v-bar-cell" style="border-left: 3px solid var(--run); padding-left: 8px;">
+              <span class="state-pill ready"><i></i>待处理</span>
+              <span class="mode-tag" style="display:inline-flex;align-items:center;gap:6px;min-height:22px;font-size:12px;color:var(--muted);"><span style="width:8px;height:8px;border-radius:2px;background:var(--run);"></span>AFK 自动</span>
+            </div>
+          </td>
+          <td>
+            <div class="meta v-bar-cell" style="border-left: 3px solid var(--attention); padding-left: 8px;">
+              <span class="state-pill done"><i></i>已完成</span>
+              <span class="mode-tag" style="display:inline-flex;align-items:center;gap:6px;min-height:22px;font-size:12px;color:var(--muted);"><span style="width:8px;height:8px;border-radius:2px;background:var(--attention);"></span>HITL 人工</span>
+            </div>
+          </td>
+          <td class="scale-note">几何 — 行级编码</td>
+        </tr>
+        <tr>
+          <td class="label">V6 标题着色</td>
+          <td>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <div style="font-size:13px;font-weight:600;color:var(--run);">登录态切换 <small style="color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;font-weight:400;">#1</small></div>
+              <div class="meta">
+                <span class="state-pill ready"><i></i>待处理</span>
+                <span class="mode-tag" style="display:inline-flex;align-items:center;gap:6px;min-height:22px;font-size:12px;color:var(--run);"><i style="width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.55;display:inline-block;"></i>AFK 自动</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <div style="font-size:13px;font-weight:600;color:var(--attention);">支付回调 <small style="color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;font-weight:400;">#3</small></div>
+              <div class="meta">
+                <span class="state-pill done"><i></i>已完成</span>
+                <span class="mode-tag" style="display:inline-flex;align-items:center;gap:6px;min-height:22px;font-size:12px;color:var(--attention);"><i style="width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.55;display:inline-block;"></i>HITL 人工</span>
+              </div>
+            </div>
+          </td>
+          <td class="scale-note">融合 — 标题色 = mode</td>
+        </tr>
+        <tr>
+          <td class="label">V7 左侧图标（去框）</td>
+          <td>
+            <div style="display:grid;grid-template-columns:18px 1fr;column-gap:10px;align-items:center;">
+              <span style="display:grid;color:var(--run);">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+              </span>
+              <div class="meta">
+                <span class="state-pill ready"><i></i>待处理</span>
+                <span class="mode-tag" style="display:inline-flex;align-items:center;gap:6px;min-height:22px;font-size:12px;color:var(--run);"><i style="width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.55;display:inline-block;"></i>AFK 自动</span>
+              </div>
+            </div>
+          </td>
+          <td>
+            <div style="display:grid;grid-template-columns:18px 1fr;column-gap:10px;align-items:center;">
+              <span style="display:grid;color:var(--attention);">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+              </span>
+              <div class="meta">
+                <span class="state-pill done"><i></i>已完成</span>
+                <span class="mode-tag" style="display:inline-flex;align-items:center;gap:6px;min-height:22px;font-size:12px;color:var(--attention);"><i style="width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.55;display:inline-block;"></i>HITL 人工</span>
+              </div>
+            </div>
+          </td>
+          <td class="scale-note">锚点 — 行首图标（去框）</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</body>
+</html>

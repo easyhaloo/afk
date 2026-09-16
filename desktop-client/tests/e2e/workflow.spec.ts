@@ -116,4 +116,59 @@ test.describe("Workflow studio", () => {
     await expect(menu.getByRole("menuitem", { name: "添加 Agent 步骤" })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "添加 QA 步骤" })).toBeVisible();
   });
+
+  test("keeps workflow inspector select menus opaque above the following fields", async ({ page }) => {
+    await page.getByRole("button", { name: "工作流" }).click();
+    await page.locator(".workflow-library-card").first().click();
+    await page.locator(".workflow-editor-node").filter({ hasText: "开始" }).click();
+
+    const trigger = page.getByRole("button", { name: "默认 Agent" });
+    await trigger.click();
+
+    const menu = page.getByRole("listbox", { name: "默认 Agent" });
+    await expect(menu).toBeVisible();
+    await expect(menu).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await expect(menu).toHaveCSS("border-top-width", "1px");
+    await expect(menu.locator('[role="option"]')).toHaveCount(6);
+  });
+
+  test("uses compact workflow library controls and a quiet current-template status", async ({ page }) => {
+    await page.getByRole("button", { name: "工作流" }).click();
+
+    const createButton = page.getByRole("button", { name: "新建工作流" });
+    const createBox = await createButton.boundingBox();
+    if (!createBox) throw new Error("workflow create control is not measurable");
+    expect(createBox.width).toBeLessThanOrEqual(30);
+    expect(createBox.height).toBeLessThanOrEqual(30);
+
+    let activeCard = page.locator(".workflow-library-card.active");
+    if (await activeCard.count() === 0) {
+      await page.locator(".workflow-library-card").first().click();
+      await page.getByRole("button", { name: "保存", exact: true }).first().click();
+      await page.getByRole("button", { name: "工作流", exact: true }).last().click();
+      activeCard = page.locator(".workflow-library-card.active");
+    }
+
+    await expect(activeCard.locator(".workflow-library-card-status")).toHaveText("当前模板");
+    await expect(activeCard.locator(".workflow-library-card-status")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  });
+
+  test("uses compact studio controls and inline node state labels", async ({ page }) => {
+    await page.getByRole("button", { name: "工作流" }).click();
+    await page.locator(".workflow-library-card").first().click();
+
+    const saveButton = page.getByRole("button", { name: "保存", exact: true }).first();
+    const addButton = page.getByRole("button", { name: "添加工作流步骤" });
+    const saveBox = await saveButton.boundingBox();
+    const addBox = await addButton.boundingBox();
+    if (!saveBox || !addBox) throw new Error("workflow controls are not measurable");
+    expect(saveBox.height).toBeLessThanOrEqual(28);
+    expect(addBox.width).toBeLessThanOrEqual(28);
+    expect(addBox.height).toBeLessThanOrEqual(28);
+
+    const nodeStatus = page.locator(".workflow-editor-node .workflow-node-status").first();
+    await expect(nodeStatus).toBeVisible();
+    await expect(nodeStatus).toHaveText(/就绪|运行中|已完成|待执行/);
+    await expect(nodeStatus).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  });
 });

@@ -1,4 +1,4 @@
-import { ExternalLink, GitBranch, Hash, LoaderCircle, Tags, X } from "lucide-react";
+import { Bot, ExternalLink, GitBranch, Hand, Hash, LoaderCircle, Tags, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import type { BacklogRuntimeSummary } from "../../../shared/backlog-contract";
@@ -50,7 +50,12 @@ export function BacklogDetailDrawer({ summary, busy, error, onClose, onOpenExter
             <div className="backlog-detail-status-row">
               <span className="backlog-detail-status-prefix">Backlog</span>
               <span className={`backlog-status-pill ${item.state}`}>{backlogStateLabel(item.state)}</span>
-              <span className="backlog-detail-mode">{item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}</span>
+              <span className={`backlog-mode-mark is-${item.executionMode}`} aria-label={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"} title={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}>
+                {item.executionMode === "afk" ? <Bot size={14} aria-hidden="true" /> : <Hand size={14} aria-hidden="true" />}
+              </span>
+              <span className={`backlog-mode-tag is-${item.executionMode}`}>
+                {item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}
+              </span>
             </div>
             <section className="backlog-runtime-panel" aria-label="执行状态">
               <span className="backlog-detail-section-title">运行</span>

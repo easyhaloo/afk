@@ -11,7 +11,7 @@ test.describe("BacklogPage list", () => {
     await expect(page.getByRole("button", { name: /命令/ })).toHaveCount(0);
   });
 
-  test("renders the three fixture rows with localized state and execution mode", async ({ page }) => {
+  test("renders the three fixture rows with localized state and a leading mode icon", async ({ page }) => {
     await expect(page.locator(".backlog-page")).toBeVisible();
 
     await expect(page.getByRole("heading", { name: "Provider Backlog" })).toBeVisible();
@@ -21,15 +21,15 @@ test.describe("BacklogPage list", () => {
 
     await expect(rows.nth(0)).toContainText("登录态切换");
     await expect(rows.nth(0)).toContainText("待处理");
-    await expect(rows.nth(0)).toContainText("AFK 自动");
+    await expect(rows.nth(0).locator(".backlog-mode-mark")).toHaveAttribute("aria-label", "AFK 自动");
 
     await expect(rows.nth(1)).toContainText("kg 演示");
     await expect(rows.nth(1)).toContainText("进行中");
-    await expect(rows.nth(1)).toContainText("AFK 自动");
+    await expect(rows.nth(1).locator(".backlog-mode-mark")).toHaveAttribute("aria-label", "AFK 自动");
 
     await expect(rows.nth(2)).toContainText("支付回调");
     await expect(rows.nth(2)).toContainText("已完成");
-    await expect(rows.nth(2)).toContainText("HITL 人工");
+    await expect(rows.nth(2).locator(".backlog-mode-mark")).toHaveAttribute("aria-label", "HITL 人工");
   });
 
   test("shows the platform selector defaulting to auto", async ({ page }) => {
@@ -55,7 +55,7 @@ test.describe("BacklogPage list", () => {
     expect(controls[0].height).toBe(controls[1].height);
     expect(controls[2].height).toBe(controls[3].height);
     expect(controls[0].height).toBeLessThanOrEqual(34);
-    expect(controls[0].width).toBe(112);
+    expect(controls[0].width).toBe(120);
 
     const providerAlignment = await platform.evaluate((button) => {
       const buttonBox = button.getBoundingClientRect();
@@ -148,5 +148,61 @@ test.describe("BacklogPage list", () => {
     await page.getByRole("option", { name: "已完成" }).click();
     await expect(page.locator(".backlog-row")).toHaveCount(1);
     await expect(page.locator(".backlog-row").first()).toContainText("支付回调");
+  });
+
+  test("renders the execution mode as a leading icon mark only", async ({ page }) => {
+    const rows = page.locator(".backlog-row");
+    const afkMark = rows.nth(0).locator(".backlog-mode-mark");
+    const hitlMark = rows.nth(2).locator(".backlog-mode-mark");
+
+    await expect(afkMark).toHaveClass(/is-afk/);
+    await expect(afkMark.locator("svg")).toHaveCount(1);
+    await expect(rows.nth(0).locator(".backlog-mode-tag")).toHaveCount(0);
+
+    await expect(hitlMark).toHaveClass(/is-hitl/);
+    await expect(hitlMark.locator("svg")).toHaveCount(1);
+    await expect(rows.nth(2).locator(".backlog-mode-tag")).toHaveCount(0);
+
+    const colors = await page.evaluate(() => {
+      const resolveColor = (name: string) => {
+        const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        const probe = document.createElement("span");
+        probe.style.color = value;
+        document.body.appendChild(probe);
+        const normalized = getComputedStyle(probe).color;
+        probe.remove();
+        return normalized;
+      };
+      const readMark = (index: number) => {
+        const rowList = document.querySelectorAll<HTMLElement>(".backlog-row");
+        const mark = rowList[index]?.querySelector<HTMLElement>(".backlog-mode-mark");
+        if (!mark) throw new Error(`missing mode mark at row ${index}`);
+        const style = getComputedStyle(mark);
+        return { color: style.color };
+      };
+      return {
+        run: resolveColor("--run"),
+        attention: resolveColor("--attention"),
+        afk: readMark(0),
+        hitl: readMark(2),
+      };
+    });
+
+    expect(colors.afk.color).toBe(colors.run);
+    expect(colors.hitl.color).toBe(colors.attention);
+    expect(colors.afk.color).not.toBe(colors.hitl.color);
+  });
+
+  test("shows the leading mode mark plus a tag inside the detail drawer", async ({ page }) => {
+    await page.locator(".backlog-row").first().click();
+    const drawer = page.getByRole("dialog", { name: "登录态切换" });
+    await expect(drawer).toBeVisible();
+
+    const mark = drawer.locator(".backlog-mode-mark");
+    const tag = drawer.locator(".backlog-mode-tag");
+    await expect(mark).toHaveClass(/is-afk/);
+    await expect(mark.locator("svg")).toHaveCount(1);
+    await expect(tag).toHaveClass(/is-afk/);
+    await expect(tag).toContainText("AFK 自动");
   });
 });

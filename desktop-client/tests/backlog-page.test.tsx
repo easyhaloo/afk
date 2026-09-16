@@ -13,7 +13,8 @@ import {
   backlogStateLabel,
   filterBacklogItems,
 } from "../src/features/backlog/backlog-filter";
-import type { BacklogItem, BacklogRunSummary, BacklogRuntimeSummary } from "../shared/backlog-contract";
+import type { BacklogItem } from "../shared/backlog-contract";
+import type { BacklogRunSummary } from "../shared/backlog-contract";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { document?: unknown }).document = {
@@ -54,9 +55,6 @@ type BacklogApi = {
   create: ReturnType<typeof vi.fn>;
   start: ReturnType<typeof vi.fn>;
   runs: ReturnType<typeof vi.fn>;
-  summary: ReturnType<typeof vi.fn>;
-  addTag: ReturnType<typeof vi.fn>;
-  removeTag: ReturnType<typeof vi.fn>;
   openExternal: ReturnType<typeof vi.fn>;
 };
 
@@ -70,13 +68,6 @@ function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[
     create: vi.fn(),
     start: vi.fn(),
     runs: vi.fn(async () => []),
-    summary: vi.fn(async (_workspace: string, backlogId: string) => {
-      const backlog = items.find((item) => item.id === backlogId);
-      if (!backlog) throw new Error(`missing backlog ${backlogId}`);
-      return { backlogId, backlog } satisfies BacklogRuntimeSummary;
-    }),
-    addTag: vi.fn(),
-    removeTag: vi.fn(),
     openExternal: vi.fn(async () => true),
   };
   vi.stubGlobal("window", { afkDesktop: { openExternal: api.openExternal, backlog: api } });
@@ -174,12 +165,12 @@ describe("BacklogPage initial render", () => {
     act(() => { renderer.unmount(); });
   });
 
-  it("renders one row per item with localized state and execution mode", async () => {
+  it("renders one row per item with localized state and a leading mode icon", async () => {
     const { renderer } = await renderBacklogPage();
     const rows = renderer.root.findAllByProps({ className: "backlog-row" });
     const readyMetadata = rows[0].findByProps({ className: "backlog-item-metadata" });
     const readyState = readyMetadata.findByProps({ className: "backlog-state-label backlog-state-ready" });
-    const readyMode = readyMetadata.findByProps({ className: "backlog-mode-label" });
+    const readyMode = rows[0].findByProps({ className: "backlog-mode-mark is-afk" });
     const doneMetadata = rows[2].findByProps({ className: "backlog-item-metadata" });
     const doneState = doneMetadata.findByProps({ className: "backlog-state-label backlog-state-done" });
 
@@ -187,10 +178,10 @@ describe("BacklogPage initial render", () => {
     expect(textContent(rows[0])).toContain("登录态切换");
     expect(textContent(readyState)).toBe("待处理");
     expect(readyState.findAllByType("i")).toHaveLength(1);
-    expect(textContent(readyMode)).toBe("AFK 自动");
+    expect(readyMode.findAllByType("svg")).toHaveLength(1);
     expect(textContent(rows[2])).toContain("支付回调");
     expect(textContent(doneState)).toBe("已完成");
-    expect(textContent(doneMetadata.findByProps({ className: "backlog-mode-label" }))).toBe("HITL 人工");
+    expect(rows[2].findByProps({ className: "backlog-mode-mark is-hitl" }).findAllByType("svg")).toHaveLength(1);
     act(() => { renderer.unmount(); });
   });
 
@@ -215,14 +206,14 @@ describe("BacklogPage detail drawer", () => {
       description: "## 验收标准\n\n- [x] **marker** exists",
       webUrl: "https://github.com/example/issues/1",
     };
-    api.summary.mockResolvedValue({ backlogId: "1", backlog: detail });
+    api.show.mockResolvedValue(detail);
 
     await act(async () => {
       renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
       await flushReactUpdates();
     });
 
-    expect(api.summary).toHaveBeenCalledWith("/repo", "1");
+    expect(api.show).toHaveBeenCalledWith("/repo", "1");
     const dialog = renderer.root.findByProps({ role: "dialog" });
     const description = dialog.findByProps({ className: "backlog-detail-description" });
     expect(description.findByType("h2").children.join("")).toBe("验收标准");
@@ -247,7 +238,7 @@ describe("BacklogPage detail drawer", () => {
 
   it("hides the external browser action when the item has no web URL", async () => {
     const { api, renderer } = await renderBacklogPage();
-    api.summary.mockResolvedValue({ backlogId: "1", backlog: items[0] });
+    api.show.mockResolvedValue(items[0]);
 
     await act(async () => {
       renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
@@ -256,50 +247,6 @@ describe("BacklogPage detail drawer", () => {
 
     expect(renderer.root.findAllByProps({ "aria-label": "在浏览器中打开" })).toHaveLength(0);
     expect(textContent(renderer.root.findByProps({ role: "dialog" }))).toContain("该工作项没有可用的外部链接。");
-    act(() => { renderer.unmount(); });
-  });
-
-  it("keeps the newest selected backlog when detail requests resolve out of order", async () => {
-    const { api, renderer } = await renderBacklogPage();
-    const first = deferred<BacklogRuntimeSummary>();
-    const second = deferred<BacklogRuntimeSummary>();
-    api.summary.mockImplementation((_workspace: string, backlogId: string) => backlogId === "1" ? first.promise : second.promise);
-
-    await act(async () => {
-      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
-      renderer.root.findAllByProps({ className: "backlog-row" })[1].props.onClick();
-      second.resolve({ backlogId: "2", backlog: { ...items[1], description: "second detail" } });
-      await flushReactUpdates();
-    });
-    await act(async () => {
-      first.resolve({ backlogId: "1", backlog: { ...items[0], description: "late first detail" } });
-      await flushReactUpdates();
-    });
-
-    const dialog = renderer.root.findByProps({ role: "dialog" });
-    expect(textContent(dialog)).toContain("kg 演示");
-    expect(textContent(dialog)).toContain("second detail");
-    expect(textContent(dialog)).not.toContain("late first detail");
-    act(() => { renderer.unmount(); });
-  });
-
-  it("shows backlog lifecycle and runtime phase as separate statuses", async () => {
-    const { api, renderer } = await renderBacklogPage();
-    const verificationItem = { ...items[0], state: "verification" as const };
-    api.summary.mockResolvedValue({
-      backlogId: "1",
-      backlog: verificationItem,
-      runtime: { runId: "run-1", status: "running", phase: "verifying", heartbeatAt: "2026-09-16T00:00:00.000Z" },
-    });
-
-    await act(async () => {
-      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
-      await flushReactUpdates();
-    });
-
-    const dialogText = textContent(renderer.root.findByProps({ role: "dialog" }));
-    expect(dialogText).toContain("Backlog验证中");
-    expect(dialogText).toContain("运行验证执行中运行中");
     act(() => { renderer.unmount(); });
   });
 });
@@ -378,15 +325,11 @@ describe("BacklogPage execution", () => {
 
   it("hydrates an existing run from the bridge on initial load", async () => {
     const { api, renderer } = await renderBacklogPage();
-    api.summary.mockImplementation(async (_workspace: string, backlogId: string) => ({
-      backlogId,
-      backlog: items.find((item) => item.id === backlogId)!,
-      ...(backlogId === "1" ? { runtime: { runId: "run-1", status: "running" as const, phase: "verifying" as const, heartbeatAt: "2026-09-16T00:00:00.000Z" } } : {}),
-    }));
+    api.runs.mockResolvedValueOnce([{ id: "desktop-1-run", backlogId: "1", status: "running", startedAt: "2026-09-08T10:00:00.000Z", pid: process.pid }]);
     act(() => { renderer.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 })); });
     await act(async () => { await flushReactUpdates(); });
 
-    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("运行：验证执行中 · 运行中");
+    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("运行状态：运行中");
     expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
     act(() => { renderer.unmount(); });
   });
@@ -401,7 +344,6 @@ describe("BacklogPage execution", () => {
       pid: 1234,
     };
     api.start.mockResolvedValueOnce(run);
-    api.summary.mockResolvedValueOnce({ backlogId: "1", backlog: items[0], activeRun: run });
 
     const row = renderer.root.findAllByProps({ className: "backlog-row" })[0];
     await act(async () => {
@@ -410,21 +352,8 @@ describe("BacklogPage execution", () => {
     });
 
     expect(api.start).toHaveBeenCalledWith("/repo", { backlogId: "1" });
-    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("启动进程：启动中 · PID 1234");
+    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("PID 1234");
     expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
-    act(() => { renderer.unmount(); });
-  });
-
-  it("allows AFK rework items to restart and disables ready HITL items", async () => {
-    const retryableItems: BacklogItem[] = [
-      { ...items[0], id: "4", state: "rework", providerRef: "stub:4" },
-      { ...items[0], id: "5", executionMode: "hitl", providerRef: "stub:5" },
-    ];
-    const { renderer } = await renderBacklogPage("/repo", async () => retryableItems);
-    const buttons = renderer.root.findAllByProps({ className: "backlog-run-button" });
-
-    expect(buttons[0].props.disabled).toBe(false);
-    expect(buttons[1].props.disabled).toBe(true);
     act(() => { renderer.unmount(); });
   });
 });
@@ -798,74 +727,6 @@ describe("BacklogPage write operations", () => {
     expect(renderer.root.findAllByProps({ role: "dialog", "aria-modal": "true" })).toHaveLength(1);
     expect(textContent(renderer.root.findByProps({ role: "alert" }))).toContain("GitHub 403");
     expect(api.list).toHaveBeenCalledTimes(1); // no force-refresh on failure
-    act(() => { renderer.unmount(); });
-  });
-
-  it("removes a tag when its chip's × button is clicked", async () => {
-    const updatedItem: BacklogItem = { ...items[0], tags: [] };
-    const { renderer, api } = await renderBacklogPage();
-    api.removeTag.mockResolvedValueOnce(updatedItem);
-    api.list.mockResolvedValueOnce([updatedItem, items[1], items[2]]);
-
-    const rowWithBilling = renderer.root.findAll((node) => node.props.className?.includes("backlog-row"))
-      .find((row) => textContent(row).includes("登录态切换"))!;
-    const removeButton = rowWithBilling.findByProps({ "aria-label": "移除标签 billing" });
-
-    await act(async () => { removeButton.props.onClick(); await flushReactUpdates(); });
-
-    expect(api.removeTag).toHaveBeenCalledWith("/repo", "1", "billing");
-    expect(api.list).toHaveBeenCalledTimes(2);
-    expect(renderer.root.findAllByProps({ "aria-label": "移除标签 billing" })).toHaveLength(0);
-    act(() => { renderer.unmount(); });
-  });
-
-  it("adds a tag via the inline form per row", async () => {
-    const updatedItem: BacklogItem = { ...items[0], tags: ["billing", "reviewed"] };
-    const { renderer, api } = await renderBacklogPage();
-    api.addTag.mockResolvedValueOnce(updatedItem);
-    api.list.mockResolvedValueOnce([updatedItem, items[1], items[2]]);
-
-    const row = renderer.root.findAll((node) => node.props.className?.includes("backlog-row"))
-      .find((r) => textContent(r).includes("登录态切换"))!;
-    const tagInput = row.findByProps({ "aria-label": "为 登录态切换 添加标签" });
-
-    await act(async () => {
-      tagInput.props.onChange({ target: { value: "reviewed" } });
-      await flushReactUpdates();
-    });
-    await act(async () => {
-      row.findByProps({ className: "backlog-tag-add" }).props.onSubmit({ preventDefault: vi.fn() });
-      await flushReactUpdates();
-    });
-
-    expect(api.addTag).toHaveBeenCalledWith("/repo", "1", "reviewed");
-    expect(api.list).toHaveBeenCalledTimes(2);
-    act(() => { renderer.unmount(); });
-  });
-
-  it("disables tag controls while a tag op is in flight", async () => {
-    const pending = deferred<BacklogItem>();
-    const { renderer, api } = await renderBacklogPage();
-    api.removeTag.mockReturnValueOnce(pending.promise);
-
-    const row = renderer.root.findAll((node) => node.props.className?.includes("backlog-row"))
-      .find((r) => textContent(r).includes("登录态切换"))!;
-    const removeButton = row.findByProps({ "aria-label": "移除标签 billing" });
-    const tagInput = row.findByProps({ "aria-label": "为 登录态切换 添加标签" });
-
-    await act(async () => { removeButton.props.onClick(); await flushReactUpdates(); });
-
-    expect(removeButton.props.disabled).toBe(true);
-    expect(tagInput.props.disabled).toBe(true);
-
-    await act(async () => {
-      pending.resolve({ ...items[0], tags: [] });
-      await pending.promise;
-      await flushReactUpdates();
-    });
-    const reloaded = renderer.root.findAll((node) => node.props.className?.includes("backlog-row"))
-      .find((r) => textContent(r).includes("登录态切换"))!;
-    expect(reloaded.findByProps({ "aria-label": "为 登录态切换 添加标签" }).props.disabled).toBe(false);
     act(() => { renderer.unmount(); });
   });
 });

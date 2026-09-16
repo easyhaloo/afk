@@ -1,6 +1,10 @@
 import type { Command } from 'commander';
 
-type RegisterFn = (p: Command) => void;
+export interface CommandRegistrationContext {
+  argv?: readonly string[];
+}
+
+export type RegisterFn = (p: Command, context?: CommandRegistrationContext) => void;
 
 export interface CommandEntry {
   /** Command name(s) that route to this loader. Hidden aliases (e.g. __complete) go here too. */
@@ -29,5 +33,6 @@ export const COMMANDS: CommandEntry[] = [
   { names: ['qa'], loader: () => import('./commands/qa.js').then(m => m.registerQACommands) },
   { names: ['loop'], loader: () => import('./commands/loop.js').then(m => m.registerLoopCommands) },
   { names: ['observe'], loader: () => import('./commands/observe.js').then(m => m.registerObserveCommands) },
+  { names: ['graph'], loader: () => import('./commands/graph.js').then(m => m.registerGraphCommands) },
   { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },
 ];

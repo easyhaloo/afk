@@ -16,6 +16,7 @@ import {
 import type { BacklogCreateInput, BacklogItem, BacklogState } from '../../domain/backlog';
 import type { BacklogExecutionMode } from '../../domain/backlog';
 import { handleCommandError, success, warning, detail } from '../cli-utils';
+import type { CommandRegistrationContext } from '../command-registry';
 import {
   classifyError,
   emitFailure,
@@ -31,6 +32,23 @@ function asPlatform(value: unknown): TrackerPlatform | undefined {
 
 function providerFor(project?: string, platform?: unknown): Promise<BacklogManagementProvider> {
   return createManagementProviders(project, undefined, asPlatform(platform)).then(bundle => bundle.backlog);
+}
+
+function isHelpError(error: { code?: string; exitCode?: number }): boolean {
+  return error.exitCode === 0 || error.code === 'commander.help' || error.code === 'commander.helpDisplayed';
+}
+
+function hasBacklogJsonArgs(argv: readonly string[]): boolean {
+  return argv.includes('--json') && argv.includes('backlog');
+}
+
+function configureBacklogJsonErrors(command: Command, kind: string, argv: readonly string[]): void {
+  command.exitOverride(error => {
+    if (hasBacklogJsonArgs(argv) && !isHelpError(error)) {
+      emitFailure(kind, 'validation', error.message);
+    }
+    throw error;
+  });
 }
 
 function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
@@ -76,7 +94,10 @@ export async function runBacklogList(
     if (items.length === 0) { warning('No backlog items found'); return; }
     for (const item of items) printItem(item);
   } catch (error) {
-    if (options.json) emitFailure(kind, classifyError(error), (error as Error).message);
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
     throw error;
   }
 }
@@ -96,7 +117,10 @@ export async function runBacklogShow(
     }
     printItem(item);
   } catch (error) {
-    if (options.json) emitFailure(kind, classifyError(error), (error as Error).message);
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
     throw error;
   }
 }
@@ -134,7 +158,10 @@ export async function runBacklogCreate(
     if (item.baseBacklogId) detail(`execution-base: ${item.baseBacklogId}`);
     if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
   } catch (error) {
-    if (options.json) emitFailure(kind, classifyError(error), (error as Error).message);
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
     throw error;
   }
 }
@@ -157,7 +184,10 @@ export async function runBacklogTagAdd(
     }
     success(`Tag added to backlog ${id}`);
   } catch (error) {
-    if (options.json) emitFailure(kind, classifyError(error), (error as Error).message);
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
     throw error;
   }
 }
@@ -180,12 +210,26 @@ export async function runBacklogTagRemove(
     }
     success(`Tag removed from backlog ${id}`);
   } catch (error) {
-    if (options.json) emitFailure(kind, classifyError(error), (error as Error).message);
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
     throw error;
   }
 }
 
-export function registerBacklogCommands(program: Command): void {
+export function registerBacklogCommands(program: Command, context: CommandRegistrationContext = {}): void {
+  const argv = context.argv ?? process.argv;
+  const inheritedOutput = program.configureOutput();
+  const inheritedOutputError = inheritedOutput.outputError;
+  program.configureOutput({
+    outputError: (message, write) => {
+      if (!hasBacklogJsonArgs(argv)) {
+        if (inheritedOutputError) inheritedOutputError(message, write);
+        else write(message);
+      }
+    },
+  });
   const backlog = program.command('backlog').description('Manage and inspect backlog items (read/manage only)');
 
   backlog.command('init')
@@ -207,7 +251,13 @@ export function registerBacklogCommands(program: Command): void {
         }
         await initializeBacklog(provider);
         success('Backlog provider initialized');
-      } catch (error) { handleCommandError(error); }
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.init', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
     });
 
   backlog.command('list')
@@ -222,7 +272,13 @@ export function registerBacklogCommands(program: Command): void {
     .action(async options => {
       try {
         await runBacklogList(await providerFor(options.project, options.platform), options);
-      } catch (error) { handleCommandError(error); }
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.list', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
     });
 
   backlog.command('show')
@@ -234,7 +290,13 @@ export function registerBacklogCommands(program: Command): void {
     .action(async options => {
       try {
         await runBacklogShow(await providerFor(options.project, options.platform), options.id, options);
-      } catch (error) { handleCommandError(error); }
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.show', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
     });
 
   backlog
@@ -254,39 +316,10 @@ export function registerBacklogCommands(program: Command): void {
       try {
         await runBacklogCreate(await providerFor(options.project, options.platform), { title, ...options });
       } catch (error) {
-        handleCommandError(error);
-      }
-    });
-
-  backlog
-    .command('create')
-    .description('Create one provider-backed backlog item')
-    .argument('<title>', 'Backlog title')
-    .option('--description-file <path>', 'Markdown description file (defaults to stdin)')
-    .option('--parent <id>', 'Parent backlog ID')
-    .option('-d, --depends-on <id>', 'Backlog ID that must complete first', (value: string, previous: string[]) => [...previous, value], [])
-    .option('--mode <mode>', `Execution mode (${modes.join('|')})`, 'afk')
-    .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])
-    .option('--project <project>', 'Provider project/repository')
-    .action(async (title: string, options) => {
-      try {
-        if (!modes.includes(options.mode)) throw new Error(`invalid execution mode: ${options.mode}`);
-        const description = await readDescription(options.descriptionFile);
-        if (!description.trim()) throw new Error('empty backlog description. Provide --description-file or pipe Markdown through stdin.');
-        const item = await createBacklog(await providerFor(options.project), {
-          title,
-          description,
-          parentId: options.parent,
-          dependsOn: options.dependsOn,
-          executionMode: options.mode,
-          tags: options.tag,
-        });
-        if (!item.webUrl) throw new Error(`provider did not return a URL for created backlog ${item.id}`);
-        success(`Created backlog ${item.id}: ${item.title}`);
-        detail(`url: ${item.webUrl}`);
-        if (item.parentId) detail(`parent: ${item.parentId}`);
-        if (item.dependsOn.length) detail(`depends-on: ${item.dependsOn.join(', ')}`);
-      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.create', classifyError(error), (error as Error).message);
+          return;
+        }
         handleCommandError(error);
       }
     });
@@ -302,7 +335,13 @@ export function registerBacklogCommands(program: Command): void {
     .action(async options => {
       try {
         await runBacklogTagAdd(await providerFor(options.project, options.platform), options.id, options.tag, options);
-      } catch (error) { handleCommandError(error); }
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.tag.add', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
     });
 
   tag.command('remove')
@@ -315,8 +354,21 @@ export function registerBacklogCommands(program: Command): void {
     .action(async options => {
       try {
         await runBacklogTagRemove(await providerFor(options.project, options.platform), options.id, options.tag, options);
-      } catch (error) { handleCommandError(error); }
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.tag.remove', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
     });
+
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'init')!, 'backlog.init', argv);
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'list')!, 'backlog.list', argv);
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'show')!, 'backlog.show', argv);
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'create')!, 'backlog.create', argv);
+  configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'add')!, 'backlog.tag.add', argv);
+  configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'remove')!, 'backlog.tag.remove', argv);
 
   backlog.action(() => backlog.outputHelp());
 }

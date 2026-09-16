@@ -283,7 +283,8 @@ describe('WorkflowRunner backlog provider mode', () => {
 
     await subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main', executionMode: 'batch' });
     expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
-      backlogId: '42', phase: 'implementing', executionMode: 'batch', status: 'running',
+      backlogId: '42', workspace: process.cwd(), providerRef: 'github:org/repo#42',
+      phase: 'implementing', executionMode: 'batch', status: 'running',
     }));
     expect(runtime.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ status: 'blocked' }));
   });

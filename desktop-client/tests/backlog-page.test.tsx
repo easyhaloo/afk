@@ -13,8 +13,7 @@ import {
   backlogStateLabel,
   filterBacklogItems,
 } from "../src/features/backlog/backlog-filter";
-import type { BacklogItem } from "../shared/backlog-contract";
-import type { BacklogRunSummary } from "../shared/backlog-contract";
+import type { BacklogItem, BacklogRunSummary, BacklogRuntimeSummary } from "../shared/backlog-contract";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { document?: unknown }).document = {
@@ -55,6 +54,7 @@ type BacklogApi = {
   create: ReturnType<typeof vi.fn>;
   start: ReturnType<typeof vi.fn>;
   runs: ReturnType<typeof vi.fn>;
+  summary: ReturnType<typeof vi.fn>;
   addTag: ReturnType<typeof vi.fn>;
   removeTag: ReturnType<typeof vi.fn>;
   openExternal: ReturnType<typeof vi.fn>;
@@ -70,6 +70,11 @@ function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[
     create: vi.fn(),
     start: vi.fn(),
     runs: vi.fn(async () => []),
+    summary: vi.fn(async (_workspace: string, backlogId: string) => {
+      const backlog = items.find((item) => item.id === backlogId);
+      if (!backlog) throw new Error(`missing backlog ${backlogId}`);
+      return { backlogId, backlog } satisfies BacklogRuntimeSummary;
+    }),
     addTag: vi.fn(),
     removeTag: vi.fn(),
     openExternal: vi.fn(async () => true),
@@ -210,14 +215,14 @@ describe("BacklogPage detail drawer", () => {
       description: "## 验收标准\n\n- [x] **marker** exists",
       webUrl: "https://github.com/example/issues/1",
     };
-    api.show.mockResolvedValue(detail);
+    api.summary.mockResolvedValue({ backlogId: "1", backlog: detail });
 
     await act(async () => {
       renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
       await flushReactUpdates();
     });
 
-    expect(api.show).toHaveBeenCalledWith("/repo", "1");
+    expect(api.summary).toHaveBeenCalledWith("/repo", "1");
     const dialog = renderer.root.findByProps({ role: "dialog" });
     const description = dialog.findByProps({ className: "backlog-detail-description" });
     expect(description.findByType("h2").children.join("")).toBe("验收标准");
@@ -242,7 +247,7 @@ describe("BacklogPage detail drawer", () => {
 
   it("hides the external browser action when the item has no web URL", async () => {
     const { api, renderer } = await renderBacklogPage();
-    api.show.mockResolvedValue(items[0]);
+    api.summary.mockResolvedValue({ backlogId: "1", backlog: items[0] });
 
     await act(async () => {
       renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
@@ -251,6 +256,50 @@ describe("BacklogPage detail drawer", () => {
 
     expect(renderer.root.findAllByProps({ "aria-label": "在浏览器中打开" })).toHaveLength(0);
     expect(textContent(renderer.root.findByProps({ role: "dialog" }))).toContain("该工作项没有可用的外部链接。");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("keeps the newest selected backlog when detail requests resolve out of order", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    const first = deferred<BacklogRuntimeSummary>();
+    const second = deferred<BacklogRuntimeSummary>();
+    api.summary.mockImplementation((_workspace: string, backlogId: string) => backlogId === "1" ? first.promise : second.promise);
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      renderer.root.findAllByProps({ className: "backlog-row" })[1].props.onClick();
+      second.resolve({ backlogId: "2", backlog: { ...items[1], description: "second detail" } });
+      await flushReactUpdates();
+    });
+    await act(async () => {
+      first.resolve({ backlogId: "1", backlog: { ...items[0], description: "late first detail" } });
+      await flushReactUpdates();
+    });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    expect(textContent(dialog)).toContain("kg 演示");
+    expect(textContent(dialog)).toContain("second detail");
+    expect(textContent(dialog)).not.toContain("late first detail");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("shows backlog lifecycle and runtime phase as separate statuses", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    const verificationItem = { ...items[0], state: "verification" as const };
+    api.summary.mockResolvedValue({
+      backlogId: "1",
+      backlog: verificationItem,
+      runtime: { runId: "run-1", status: "running", phase: "verifying", heartbeatAt: "2026-09-16T00:00:00.000Z" },
+    });
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      await flushReactUpdates();
+    });
+
+    const dialogText = textContent(renderer.root.findByProps({ role: "dialog" }));
+    expect(dialogText).toContain("Backlog验证中");
+    expect(dialogText).toContain("运行验证执行中运行中");
     act(() => { renderer.unmount(); });
   });
 });
@@ -329,11 +378,15 @@ describe("BacklogPage execution", () => {
 
   it("hydrates an existing run from the bridge on initial load", async () => {
     const { api, renderer } = await renderBacklogPage();
-    api.runs.mockResolvedValueOnce([{ id: "desktop-1-run", backlogId: "1", status: "running", startedAt: "2026-09-08T10:00:00.000Z", pid: process.pid }]);
+    api.summary.mockImplementation(async (_workspace: string, backlogId: string) => ({
+      backlogId,
+      backlog: items.find((item) => item.id === backlogId)!,
+      ...(backlogId === "1" ? { runtime: { runId: "run-1", status: "running" as const, phase: "verifying" as const, heartbeatAt: "2026-09-16T00:00:00.000Z" } } : {}),
+    }));
     act(() => { renderer.update(createElement(BacklogPage, { workspace: "/repo", refreshVersion: 1 })); });
     await act(async () => { await flushReactUpdates(); });
 
-    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("运行状态：运行中");
+    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("运行：验证执行中 · 运行中");
     expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
     act(() => { renderer.unmount(); });
   });
@@ -348,6 +401,7 @@ describe("BacklogPage execution", () => {
       pid: 1234,
     };
     api.start.mockResolvedValueOnce(run);
+    api.summary.mockResolvedValueOnce({ backlogId: "1", backlog: items[0], activeRun: run });
 
     const row = renderer.root.findAllByProps({ className: "backlog-row" })[0];
     await act(async () => {
@@ -356,8 +410,21 @@ describe("BacklogPage execution", () => {
     });
 
     expect(api.start).toHaveBeenCalledWith("/repo", { backlogId: "1" });
-    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("PID 1234");
+    expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("启动进程：启动中 · PID 1234");
     expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
+    act(() => { renderer.unmount(); });
+  });
+
+  it("allows AFK rework items to restart and disables ready HITL items", async () => {
+    const retryableItems: BacklogItem[] = [
+      { ...items[0], id: "4", state: "rework", providerRef: "stub:4" },
+      { ...items[0], id: "5", executionMode: "hitl", providerRef: "stub:5" },
+    ];
+    const { renderer } = await renderBacklogPage("/repo", async () => retryableItems);
+    const buttons = renderer.root.findAllByProps({ className: "backlog-run-button" });
+
+    expect(buttons[0].props.disabled).toBe(false);
+    expect(buttons[1].props.disabled).toBe(true);
     act(() => { renderer.unmount(); });
   });
 });

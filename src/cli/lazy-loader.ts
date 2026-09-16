@@ -12,7 +12,7 @@ export async function lazyLoad(cmd: string, extraArgs: string[]) {
       const register = await entry.loader();
       const program = new Command();
       program.name('afk').version('0.1.0').exitOverride();
-      register(program);
+      register(program, { argv: ['node', 'afk', cmd, ...extraArgs] });
 
       // Parse on the command that owns the remaining args. Commander 12
       // routes multi-level subcommands poorly from a synthetic argv on the

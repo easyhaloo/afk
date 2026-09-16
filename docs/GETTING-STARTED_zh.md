@@ -66,83 +66,62 @@ AFK 会自动检测平台：
 
 ## 基本使用
 
-### Issue 操作
+### Backlog 操作
 
 ```bash
-# 查看 issue 详情
-afk issue get 123
+# 查看 Backlog 详情
+afk backlog show --id 123
 
-# 列出 issues
-afk issue list --label "stage::ready-for-implement"
+# 列出可执行 Backlog
+afk backlog list --state ready --mode afk
 
-# 创建 issue
-afk issue create "Add user login" --label "feature"
+# 创建 Backlog
+afk backlog create "Add user login" --description-file ./description.md --tag feature
 
-# 添加评论
-afk issue comment 123 "Working on this"
+# 使用相同业务 ID 执行和验证
+afk run --backlog-id 123
+afk qa --backlog-id 123
 ```
 
-### 跨项目操作
+### Provider 选择
 
-`--project <repo>` flag 让 `afk issue` 命令指向 cwd 以外的项目。同 repo 可省略前缀，跨 repo 时用 `<project>:<iid>` 语法链接：
+AFK 默认从当前仓库探测 Provider；需要时可显式选择：
 
 ```bash
-# 在 repo B 目录里操作 repo A 的 issue
-afk issue get 42 --project group/repo-a
-
-# 跨项目 link（从 B 链接到 A 的 #42）
-afk issue link 100 group/repo-a:42 --project group/repo-b
-
-# 一键启动跨项目工作流（ProjectResolverModule 会先 chdir 到目标 repo）
-afk issue run 42 --project group/repo-a
+afk backlog list --platform github
+afk backlog show --id 42 --platform gitlab
 ```
 
-无需配置 `GITLAB_PROJECT_ID` 等环境变量；项目解析走 `git remote > --project > 自动检测` 优先级。
-
-### MR/PR 操作
-
-```bash
-# 创建 MR/PR
-afk mr create "feat: add login" --source feat/login --target main
-
-# 查看 MR/PR
-afk mr get 456
-
-# 合并 MR/PR
-afk mr merge 456 --delete-source-branch
-
-# 批准 MR/PR
-afk mr approve 456
-```
+Provider 分配规范 Backlog ID；变更单创建与合并由类型化工作流步骤完成，不再提供独立 MR 公共命令。
 
 ### 完整工作流示例
 
-从 issue 到合并的完整流程：
+从 Backlog 到合并的完整流程：
 
 ```bash
-# 1. 发现待实现的 issue
-afk issue list --label "stage::ready-for-implement"
+# 1. 发现待实现 Backlog
+afk backlog list --state ready --mode afk
 
-# 2. 启动工作流（创建 worktree + tmux session）
-afk workflow run --iid 123 --base-branch main
+# 2. 使用稳定业务 ID 执行
+afk run --backlog-id 123
 
-# 3. 在 tmux session 中，Claude 会自动执行 /afk-implement
-# 监控进度（可选）
-tmux attach -t afk-issue-123
+# 3. 分别观察 Backlog 生命周期与 runtime 状态
+afk
 
-# 4. 工作流完成后自动创建 MR/PR 并清理 worktree
+# 4. 必要时独立运行 QA
+afk qa --backlog-id 123
 ```
 
 ## 自动化调度
 
-让 AFK 自动处理所有就绪的 issues：
+让 AFK 自动处理所有可执行 Backlog：
 
 ```bash
-# 启动调度器
-afk scheduler start --max-concurrent 3 --poll-interval 60
+# 启动实现 → QA → 合并循环
+afk loop --max-concurrent 3 --poll-interval 60
 
 # 调度器会自动：
-# - 每 60 秒轮询新的 ready issues
+# - 每 60 秒轮询 ready/rework Backlog
 # - 最多同时处理 3 个 issues
 # - 验证前置条件（AC、base label、无阻塞）
 # - 创建 worktree 和 tmux session

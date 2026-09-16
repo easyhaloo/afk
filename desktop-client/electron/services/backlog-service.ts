@@ -38,13 +38,42 @@ export type BacklogServiceOptions = {
 type CacheEntry = { value: BacklogItem[]; expiresAt: number };
 
 type JsonSuccess<T> = { ok: true; kind: string; data: T };
-type JsonFailure = { ok: false; kind: string; error: { code: BacklogItem["state"] | string; message: string; details?: Record<string, unknown> } };
+type JsonFailure = { ok: false; kind: string; error: { code: string; message: string; details?: Record<string, unknown> } };
 type JsonEnvelope<T> = JsonSuccess<T> | JsonFailure;
 
 const PLATFORMS = new Set<BacklogPlatform>(["github", "gitlab"]);
 
 function asPlatform(value: unknown): BacklogPlatform | undefined {
   return typeof value === "string" && PLATFORMS.has(value as BacklogPlatform) ? (value as BacklogPlatform) : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJsonEnvelope<T>(raw: string, expectedKind: string): JsonEnvelope<T> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new BacklogServiceError("provider", `afk 返回的不是合法 JSON：${raw.slice(0, 200)}`);
+  }
+  if (!isRecord(parsed) || typeof parsed.ok !== "boolean" || typeof parsed.kind !== "string") {
+    throw new BacklogServiceError("provider", `afk 返回了无效的 ${expectedKind} JSON envelope`);
+  }
+  if (parsed.kind !== expectedKind) {
+    throw new BacklogServiceError("provider", `afk 返回了错误的 JSON kind：${parsed.kind}`);
+  }
+  if (parsed.ok) {
+    if (!Object.prototype.hasOwnProperty.call(parsed, "data") || parsed.data === undefined) {
+      throw new BacklogServiceError("provider", `afk 返回的 ${expectedKind} envelope 缺少 data`);
+    }
+    return parsed as JsonSuccess<T>;
+  }
+  if (!isRecord(parsed.error) || typeof parsed.error.code !== "string" || typeof parsed.error.message !== "string") {
+    throw new BacklogServiceError("provider", `afk 返回的 ${expectedKind} failure envelope 无效`);
+  }
+  return parsed as JsonFailure;
 }
 
 export function createBacklogService(deps: BacklogServiceDeps, options: BacklogServiceOptions = {}) {
@@ -76,14 +105,9 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
       // Subprocess died before emitting JSON — likely spawn / timeout / signal.
       throw new BacklogServiceError("unknown", result.stderr || "afk 子进程退出但未输出 JSON");
     }
-    let envelope: JsonEnvelope<T>;
-    try {
-      envelope = JSON.parse(result.stdout) as JsonEnvelope<T>;
-    } catch (cause) {
-      throw new BacklogServiceError("unknown", `afk 返回的不是合法 JSON：${result.stdout.slice(0, 200)}`);
-    }
+    const envelope = parseJsonEnvelope<T>(result.stdout, kind);
     if (!envelope.ok) {
-      const code = (envelope.error.code ?? "unknown") as BacklogItem["state"] extends infer _ ? string : string;
+      const code = envelope.error.code;
       throw new BacklogServiceError(
         code === "auth" || code === "not_found" || code === "validation" || code === "provider" ? code : "unknown",
         envelope.error.message,

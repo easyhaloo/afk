@@ -53,5 +53,7 @@ describe('runtime task data', () => {
     const task = toRuntimeTask(runtime);
 
     expect(task.activities).toEqual([{ id: 'event-1', taskRunId: 'run-42', at: new Date(at), kind: 'tool', message: 'edited ListView.tsx' }]);
+    expect(task.backlogId).toBe('42');
+    expect(task.iid).toBe('42');
   });
 });

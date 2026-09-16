@@ -1,5 +1,5 @@
 import React from 'react';
-import { Task } from '../../../types/board';
+import { getTaskBacklogId, Task } from '../../../types/board';
 import { ListView, normalizeRowText } from './ListView';
 import { formatRelativeTime } from '../utils';
 import { OperationalRow } from './OperationalRow';
@@ -29,6 +29,7 @@ export function TaskListView({ tasks, selected, scrollOffset, viewportHeight, wi
           : '–';
         const summary = [
           `phase ${task.phase}`,
+          `run ${task.runStatus ?? task.status}`,
           `${task.executionMode}/${task.sandboxProvider}`,
           `session ${normalizeRowText(task.session || '') || '–'}`,
           `branch ${normalizeRowText(task.branch || '') || '–'}`,
@@ -43,7 +44,7 @@ export function TaskListView({ tasks, selected, scrollOffset, viewportHeight, wi
             status={task.status}
             statusColor={isSelected ? 'white' : 'gray'}
             mode={task.executionMode}
-            id={task.iid}
+            id={getTaskBacklogId(task)}
             title={normalizeRowText(task.title || task.branch || '') || 'untitled task'}
             summary={summary}
           />

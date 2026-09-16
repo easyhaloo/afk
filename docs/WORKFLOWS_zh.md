@@ -3,45 +3,41 @@
 ## 概述
 
 AFK 实现三种主要工作流模式：
-1. **Issue → 实现 → MR 流水线**：手动或自动化 issue 处理
+1. **Backlog → 实现 → 变更单流水线**：手动或自动化工作项处理
 2. **调度器工作流**：后台依赖感知执行
 3. **Skills 工作流**：TDD 方法论集成
 
-## Issue → 实现 → MR 流水线
+## Backlog → 实现 → 变更单流水线
 
-从 issue 发现到合并请求的端到端工作流。
+从 Backlog 发现到合并请求的端到端工作流。
 
 ### 手动执行
 
 ```bash
-# 1. Discover ready issues
-afk issue list --label "stage::ready-for-implement"
+# 1. 查看可执行 Backlog
+afk backlog list --state ready --mode afk
 
-# 2. Launch workflow for specific issue
-afk workflow launch --iid 123 --base main --timeout 7200
+# 2. 执行指定 Backlog
+afk run --backlog-id 123
 
-# 3. Monitor progress (workflow runs in tmux session)
-tmux attach -t afk-issue-123
+# 3. 观察 Backlog 与 runtime
+afk
 
-# 4. Run acceptance criteria checks
-afk workflow run-ac --iid 123 --session afk-issue-123 --worktree /tmp/afk-worktrees/issue-123
+# 4. 独立执行 QA
+afk qa --backlog-id 123
 
-# 5. Create merge request if passed
-afk workflow create-mr --iid 123 --worktree /tmp/afk-worktrees/issue-123
-
-# 6. Cleanup worktree
-afk worktree cleanup --iid 123
+# 分支名由业务 ID 派生为 afk/backlog-123
 ```
 
 ### 自动执行（调度器）
 
 ```bash
 # Start scheduler daemon
-afk scheduler start --max-concurrent 3 --poll-interval 60
+afk loop start --daemon --max-concurrent 3
 
 # Scheduler automatically:
-# 1. Polls for issues with stage::ready-for-implement
-# 2. Validates preconditions (AC, base label, no blockers)
+# 1. 轮询 ready/rework Backlog
+# 2. 校验 AC、父子关系、依赖、executionMode 和 baseBacklogId
 # 3. Launches workflows up to max-concurrent limit
 # 4. Monitors completion and creates MRs
 ```
@@ -50,17 +46,17 @@ afk scheduler start --max-concurrent 3 --poll-interval 60
 
 ```mermaid
 flowchart TD
-    A["Issue 发现: 轮询 GitLab/GitHub, 按标签过滤"] --> B{"前置条件验证"}
-    B -->|"AC 存在, Base 标签, 无阻塞"| C["Worktree 创建: afk-issue-iid"]
-    B -->|失败| Z1["标签: blocked, 跳过"]
+    A["Backlog 发现: 读取 Provider 工作项"] --> B{"前置条件验证"}
+    B -->|"AC 存在, 依赖完成, 可执行"| C["Worktree 创建: afk/backlog-id 分支"]
+    B -->|失败| Z1["Backlog blocked + hitl"]
 
-    C --> D["Tmux 会话管理: afk-issue-iid, 启动 Claude Code + watchdog"]
-    D --> E["实现阶段: /goal 实现 issue, 遵循 TDD 方法论"]
+    C --> D["Runtime 启动: runId + backlogId, agent + watchdog"]
+    D --> E["实现阶段: 实现 Backlog, 遵循 TDD 方法论"]
     E --> F["Runner 轮询: 信号文件 + statusline token 用量 (每 2s)"]
 
     F -->|goal_complete| G["AC 验证阶段: /goal 验证 AC"]
     F -->|"token ≥ 阈值"| H["上下文交接: 打断 → 总结 → 杀会话 → 重启 → 注入总结继续"]
-    F -->|timeout| Z2["超时: 评论 + mode::hitl, 保留 worktree"]
+    F -->|timeout| Z2["超时: Backlog 阻塞 + HITL, 保留 worktree"]
 
     G -->|ac_result| I["MR/PR 创建: push 分支, 关联 Closes iid"]
     G -->|"token ≥ 阈值"| H
@@ -69,7 +65,7 @@ flowchart TD
     H --> E
     H -.->|"预算耗尽/重启失败"| Z3["终止式交接: handoff::active, 人工恢复"]
 
-    I --> J["清理: stage::qa, 删除 worktree"]
+    I --> J["清理: Backlog 进入 verification, 删除 worktree"]
 
     classDef success fill:#d4edda,stroke:#28a745
     classDef fail fill:#f8d7da,stroke:#dc3545
@@ -88,7 +84,7 @@ flowchart TD
 
 ```mermaid
 graph TD
-    Sched["调度器服务: 轮询 60s, 最大并发 3, 状态 Redis/内存"] --> Dep["依赖图: 解析 blocks-iid 标签, 构建 DAG, 拓扑排序"]
+    Sched["调度器服务: 轮询 60s, 最大并发 3"] --> Dep["依赖图: 读取 Backlog dependsOn, 构建 DAG, 拓扑排序"]
 
     Dep --> Queue["任务队列: 优先级调度 high/medium/low"]
 
@@ -106,12 +102,12 @@ graph TD
 
 ### 依赖解析
 
-Issues 通过标签声明依赖：
+Backlog 通过结构化字段声明依赖：
 
 ```
-Issue #10: base::prd-1, stage::ready-for-implement
-Issue #11: base::prd-1, blocks-10, stage::ready-for-implement
-Issue #12: base::prd-1, blocks-10, blocks-11, stage::ready-for-implement
+Backlog #10: dependsOn: [], baseBacklogId: null
+Backlog #11: dependsOn: ["10"], baseBacklogId: null
+Backlog #12: dependsOn: ["10", "11"], baseBacklogId: "11"
 ```
 
 ```mermaid
@@ -287,7 +283,7 @@ stateDiagram-v2
 **红色阶段：**
 ```bash
 # /afk-implement 首先创建失败测试
-$ afk workflow launch --iid 123
+$ afk run --backlog-id 123
 # Claude 编写测试
 $ npm test
 # ❌ 测试失败（预期）
@@ -407,10 +403,10 @@ interface Signal {
 graph TD
     Fail[工作流失败] --> Type{失败类型}
 
-    Type -->|超时| Timeout["标签: stage::timeout, 保留 worktree, 记录到 scheduler"]
-    Type -->|测试失败| TestFail["标签: stage::failed, Signal: goal_failed, 保留测试输出"]
-    Type -->|阻塞| Blocked["标签: stage::blocked, Signal: blocked, 评论说明原因"]
-    Type -->|Git 冲突| Conflict["标签: stage::conflict, 保留 worktree, 评论通知"]
+    Type -->|超时| Timeout["Backlog 阻塞 + HITL, 保留 worktree"]
+    Type -->|测试失败| TestFail["Backlog 返工, 保留测试输出"]
+    Type -->|阻塞| Blocked["Backlog 阻塞 + HITL, 记录原因"]
+    Type -->|Git 冲突| Conflict["Backlog 阻塞 + HITL, 保留 worktree"]
     Type -->|API 速率限制| RateLimit["指数退避, 冷却后重试, 记录到 scheduler"]
 
     classDef error fill:#f8d7da,stroke:#dc3545
@@ -423,18 +419,18 @@ graph TD
 flowchart TD
     Issue[发现问题] --> Type{问题类型}
 
-    Type -->|孤立 worktrees| Orphan["检测无活动 tmux: afk worktree list-orphaned"]
+    Type -->|孤立 worktrees| Orphan["检查 runtime worktree 与诊断信息"]
     Orphan --> Confirm{用户确认?}
-    Confirm -->|是| Prune[afk worktree prune]
+    Confirm -->|是| Prune["使用 git 移除 worktree"]
     Confirm -->|否| Wait[等待手动处理]
 
-    Type -->|过期 tmux| Expired["tmux ls, grep afk-issue"]
-    Expired --> Kill["tmux kill-session -t afk-issue-N"]
+    Type -->|Runtime stale| Expired["afk 显示心跳失联"]
+    Expired --> Kill["检查诊断目录后再人工终止"]
 
-    Type -->|卡住调度器| Stuck[afk scheduler status]
-    Stuck --> Pause[afk scheduler pause]
-    Pause --> Manual["afk scheduler mark-complete"]
-    Manual --> Resume[afk scheduler resume]
+    Type -->|卡住调度器| Stuck[afk loop status]
+    Stuck --> Pause[afk loop stop]
+    Pause --> Manual["检查 Backlog 状态与 runtime 诊断"]
+    Manual --> Resume[afk loop start --daemon]
 
     classDef detect fill:#e1f5ff
     classDef action fill:#d4edda
@@ -445,34 +441,31 @@ flowchart TD
 **孤立的 worktrees：**
 ```bash
 # 检测无活动 tmux 会话的 worktrees
-afk worktree list-orphaned
+git worktree list
 
 # 带确认的清理
-afk worktree prune
+git worktree remove <path>
 ```
 
 **过期的 tmux 会话：**
 ```bash
-# 列出所有 afk 会话
-tmux ls | grep afk-issue
-
-# 杀死特定过期会话
-tmux kill-session -t afk-issue-123
+# 查看规范 runtime 心跳与诊断
+afk
 ```
 
 **卡住的调度器：**
 ```bash
 # 检查调度器状态
-afk scheduler status
+afk loop status
 
 # 暂停以防止新启动
-afk scheduler pause
+afk loop stop
 
 # 手动完成卡住的任务
-afk scheduler mark-complete --iid 123
+afk backlog show --id 123
 
 # 恢复
-afk scheduler resume
+afk loop start --daemon
 ```
 
 ## 性能考虑

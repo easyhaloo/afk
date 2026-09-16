@@ -16,20 +16,28 @@ AFK is a CLI tool for managing autonomous development workflows, particularly fo
 | `afk run --backlog-id <id>` | Execute one backlog item |
 | `afk loop` | Complete implementation → QA → merge pipeline |
 | `afk qa --backlog-id <id>` | Standalone QA retry/diagnostic entry point |
-| `afk loop` | Continuous integration loop |
-| `afk qa` | QA verification on merged code |
 | `afk signal` | Structured signal file management |
-| `afk worktree` | Git worktree management with state tracking |
 | `afk tmux` | Tmux session management |
 | `afk isolate` | DB service isolation per worktree |
-| `afk escalate` | File GitLab issue and launch workflow |
-| `afk board` | Interactive TUI dashboard |
+| `afk` | Interactive TUI dashboard |
 | `afk kanban` | Kanban board of issues |
 | `afk debug` | Debug loop (reproduce → verify) |
 
 The CLI is a breaking backlog hard cutover. `issue`, `tracker`, `mr`, and
 `workflow` execution commands and their old argument forms are removed; there
 are no compatibility aliases. Provider labels are internal adapter metadata.
+
+## Canonical Work Identity
+
+- `BacklogItem.id` is the business identity and is passed as `--backlog-id`.
+- `Run.workItemId`, runtime `backlogId`, TUI `backlogId`, and Desktop
+  `BacklogRuntimeSummary.backlogId` must equal that ID.
+- `runId` identifies one attempt only.
+- `parentId` groups work, `dependsOn` orders work, and `baseBacklogId` chooses
+  the Git execution base; these fields are not interchangeable.
+- `.afk/backlog-runs.json` is Desktop launch metadata. Canonical runtime files
+  and events own execution status and diagnostics; stale runtime does not
+  change Provider Backlog state.
 
 ## Architecture
 

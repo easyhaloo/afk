@@ -52,7 +52,11 @@ export interface BoardCardProps {
 
 export function BoardCard({ backlog, selected, width }: BoardCardProps) {
   const stateColor = backlogStateColor(backlog.state);
-  const title = truncateByWidth(backlog.title, Math.max(1, width - 2));
+  const runtimeSummary = [backlog.phase, backlog.progress].filter(Boolean).join(' · ');
+  const title = truncateByWidth(
+    runtimeSummary ? `${runtimeSummary} · ${backlog.title}` : backlog.title,
+    Math.max(1, width - 2),
+  );
 
   return (
     <Box width={width} height={2} overflow="hidden" flexDirection="column">
@@ -61,6 +65,7 @@ export function BoardCard({ backlog, selected, width }: BoardCardProps) {
         <Text color={stateColor}>{getStatusIcon(backlog.state)}</Text>
         <Text bold> #{backlog.id}</Text>
         <Text color={getExecutionModeColor(backlog.executionMode)}> {getExecutionModeIcon(backlog.executionMode)}</Text>
+        <Text dimColor> · {backlog.state} · {backlog.runStatus ?? 'no-runtime'}</Text>
       </Text>
       <Text wrap="truncate" bold={selected}>{title}</Text>
     </Box>

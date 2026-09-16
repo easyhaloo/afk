@@ -32,7 +32,7 @@ All checks are mandatory. Stop immediately if any fails.
 3. **All dependencies are complete.** Use the provider's `dependsOn` field;
    every referenced backlog must be `done`. If a dependency is unresolved,
    stop without attempting execution.
-4. **The item is runnable.** Confirm `state: ready`, `executionMode: afk`,
+4. **The item is runnable.** Confirm `state: ready | rework`, `executionMode: afk`,
    and no `parentId` that makes this a grouping backlog. Claiming is atomic;
    a lost claim means another worker owns the item, so stop.
 
@@ -78,6 +78,11 @@ Run Preconditions block against the backlog. Fail-fast on any violation.
 Invoke `afk run --backlog-id <id>`. The command claims the item through the
 provider, executes the implementation workflow, and returns when it reaches
 verification/merge-ready or a terminal failure.
+
+The provided ID is the Provider Backlog business identity. Runtime `backlogId`
+and `Run.workItemId` must preserve it exactly; `runId` is a separate execution
+attempt identifier. `parentId` and `dependsOn` must not be used as the Git base;
+only an explicit `baseBacklogId` may select stacked execution lineage.
 
 ### Step 3 — Methodology load (mandatory, before any code)
 

@@ -19,6 +19,23 @@ const backlog: BacklogViewModel = {
 };
 
 describe('DetailScreen', () => {
+  it('shows terminal run status independently from the legacy display status', () => {
+    const output = renderToString(
+      <DetailScreen
+        item={{
+          iid: '42', backlogId: '42', runId: 'run-42', title: 'Blocked run', status: 'active', runStatus: 'blocked',
+          phase: 'verifying', executionMode: 'batch', sandboxProvider: 'local', agentProvider: 'claude-code',
+        }}
+        view="tasks"
+        height={20}
+        width={100}
+      />,
+    );
+
+    expect(output).toContain('status · blocked');
+    expect(output).not.toContain('status · active');
+  });
+
   it('renders grouped backlog metadata and markdown description', () => {
     const output = renderToString(
       <DetailScreen item={backlog} view="backlogs" height={24} width={80} />,

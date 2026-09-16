@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { Task } from '../../../types/board';
+import { getTaskBacklogId, Task } from '../../../types/board';
 import { ListView } from './ListView';
 import { formatRelativeTime } from '../utils';
 
@@ -19,12 +19,12 @@ export function CompletedListView({ tasks, selected, scrollOffset, viewportHeigh
       scrollOffset={scrollOffset}
       viewportHeight={viewportHeight}
       emptyMessage="ℹ  no completed tasks"
-      getKey={(task) => task.iid}
+      getKey={getTaskBacklogId}
       render={(task, index, isSelected) => {
         const color = isSelected ? 'white' : 'gray';
         return (
           <Box
-            key={task.iid}
+            key={getTaskBacklogId(task)}
             width="100%"
             overflow="hidden"
             flexDirection="row"
@@ -33,9 +33,9 @@ export function CompletedListView({ tasks, selected, scrollOffset, viewportHeigh
             paddingX={1}
           >
             <Text color="white">✔ </Text>
-            <Text color={color} bold> #{task.iid} </Text>
+            <Text color={color} bold> #{getTaskBacklogId(task)} </Text>
             <Text color={color}>{task.title || task.branch}</Text>
-            <Text dimColor>  ─ 100% · {task.startedAt ? formatRelativeTime(task.startedAt) : '–'}</Text>
+            <Text dimColor>  ─ {task.runStatus ?? 'completed'} · {task.phase} · {task.progress || '100%'} · {task.startedAt ? formatRelativeTime(task.startedAt) : '–'}</Text>
           </Box>
         );
       }}

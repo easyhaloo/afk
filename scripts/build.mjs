@@ -3,12 +3,14 @@
  */
 import { build } from 'esbuild';
 import { globSync } from 'glob';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { extname, resolve, dirname } from 'path';
 
 const entryPoints = globSync('src/**/*.{ts,tsx}', {
-  ignore: ['src/**/*.d.ts', 'src/**/*.test.ts', 'src/**/*.spec.ts']
+  ignore: ['src/commands/**', 'src/**/*.d.ts', 'src/**/*.test.ts', 'src/**/*.spec.ts']
 });
+
+rmSync(resolve('dist', 'commands'), { recursive: true, force: true });
 
 // Plugin to fix ESM imports after build
 const fixESMPlugin = {

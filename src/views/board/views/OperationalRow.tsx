@@ -48,6 +48,7 @@ export interface OperationalRowProps {
   status: string;
   statusColor: string;
   mode: string;
+  runtimeStatus?: string;
   id: string | number;
   title: string;
   summary: string;
@@ -59,6 +60,7 @@ export function OperationalRow({
   status,
   statusColor,
   mode,
+  runtimeStatus,
   id,
   title,
   summary,
@@ -78,6 +80,7 @@ export function OperationalRow({
         <Text wrap="truncate">{marker}</Text>
         <Text wrap="truncate" color={statusColor}>[{status}]</Text>
         <Text wrap="truncate" dimColor> ({mode})</Text>
+        {runtimeStatus && <Text wrap="truncate" dimColor> [{runtimeStatus}]</Text>}
         <Text wrap="truncate" bold> #{id} </Text>
         <Text wrap="truncate">{truncateToAllocation(title, titleWidth)}</Text>
         {showSummary && <Text wrap="truncate" dimColor>{summaryPrefix}{truncateToAllocation(summary, metadataWidth)}</Text>}

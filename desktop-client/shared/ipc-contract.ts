@@ -188,6 +188,7 @@ export type DesktopApi = {
     create: (workspace: string, input: BacklogCreateInput) => Promise<BacklogItem>;
     start: (workspace: string, input: BacklogRunStartInput) => Promise<BacklogRunSummary>;
     runs: (workspace: string, backlogId?: string) => Promise<BacklogRunSummary[]>;
+    summary: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
     addTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
     removeTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
   };
@@ -231,6 +232,7 @@ export const IPC_CHANNELS = {
   backlogRuns: "afk:backlog-runs",
   backlogTagAdd: "afk:backlog-tag-add",
   backlogTagRemove: "afk:backlog-tag-remove",
+  backlogSummary: "afk:backlog-summary",
 } as const;
 import type {
   ManagedSshHostInput,
@@ -251,6 +253,7 @@ import type {
   BacklogListOptions,
   BacklogRunStartInput,
   BacklogRunSummary,
+  BacklogRuntimeSummary,
 } from "./backlog-contract";
 
 export type SshExternalTerminalResult = {

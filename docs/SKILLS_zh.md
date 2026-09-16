@@ -220,7 +220,7 @@ feat(auth): add user model      — 最终提交
 2. **执行调研** — HITL 模式：展示发现，询问继续/转向。AFK 模式：阅读、提交进度
 3. **综合总结** — 撰写 RESEARCH.md：背景、发现、影响、待解问题
 4. **用户审查** — 确认发现是否满足需求
-5. **保存文档** — 写入磁盘，可选发布到 issue（stage::research 标签）
+5. **保存文档** — 写入磁盘，可选关联到 provider Backlog 工作项
 
 **设计决策：**
 
@@ -252,7 +252,7 @@ feat(auth): add user model      — 最终提交
 **作用：** 独立验证自主构建输出，检查 AC，决定是否合并到 prd/<N>
 
 **触发场景：**
-- MR/PR 标记为 `stage::qa`
+- Backlog 状态为 `verification`
 - 目标分支是 `prd/<N>`（非 main）
 - 关联 issue 包含 machine-checkable AC
 
@@ -287,7 +287,7 @@ afk/issue-<iid> ──→ prd/<N> ──→ main
 **合并顺序 gate：**
 MR/PR 描述包含 `## Merge Order` 列出所有 `blocked_by` issues：
 - 所有阻塞已合并 → 继续
-- 任何阻塞未合并 → 不合并，留在 stage::qa
+- 任何阻塞未解决 → 不合并，Backlog 保持 `verification` 或 `blocked`
 
 **Flaky 检查处理：**
 - 重试无代码变更但失败 → 标记为 flaky，继续（不能静默重试到绿）
@@ -314,7 +314,7 @@ MR/PR 描述包含 `## Merge Order` 列出所有 `blocked_by` issues：
 1. **前置检查** — 确认 CONTEXT.md 存在（需求已对齐）
 2. **创建 spike 分支** — `git checkout -b spike/<slug>`
 3. **最小化实现** — 只实现通过所有层的最薄片段，跳过边界情况、错误处理、测试
-4. **创建草稿 MR/PR** — `afk mr create "Spike: ..." --draft`
+4. **创建草稿 MR/PR** — 使用配置的 provider UI/CLI 创建草稿变更请求
 5. **报告发现** — 什么可行、什么意外、对 PRD 的影响
 6. **用户决策** — 何时 spike 已回答开放问题
 
@@ -515,7 +515,7 @@ tests/api-workflow/
 1. **验证对齐记录** — 可选读代码验证 bounded contexts 和架构决策
 2. **起草 PRD** — 使用 `references/prd-template.md` 模板，包含：Problem Statement、Users & Jobs、Bounded Contexts、User Stories、Key Decisions、Open Risks、Non-Goals
 3. **门控确认** — 用户批准后才发布
-4. **发布** — 创建 `stage::prd` 标签的 issue
+4. **发布** — 创建包含 PRD 链接和业务标签的 Backlog 工作项
 
 **设计决策：**
 
@@ -544,12 +544,12 @@ tests/api-workflow/
 **工作流程：**
 1. **选择模式** — PRD Mode（有 PRD）或 Direct Mode（自由文本）
 2. **读代码推理验证方式** — 为每个验收标准推断 `evidence_type`（test/curl/log/manual）
-3. **切片** — 按垂直/水平策略将需求切分为独立 issues
+3. **切片** — 按垂直/水平策略将需求切分为独立 Backlog
 4. **隔离分析** — 判断是否需要 `need::isolate`（数据库变更、中间件配置等）
-5. **草拟** — 填充 issue 模板全部字段
+5. **草拟** — 填充 Backlog manifest 全部字段
 6. **自检** — 在沙箱中运行每个 `check_command`，确认非零退出
 7. **门控** — 展示所有草稿 + DAG + 标签方案，等待批准
-8. **创建** — 批准后使用 `afk issue create` 创建，使用 `afk issue link` 建立 DAG
+8. **交接** — 批准后输出 provider-neutral manifest，由外部 Backlog 系统解析 ID 和关系
 
 **设计决策：**
 
@@ -562,7 +562,7 @@ tests/api-workflow/
 
 **与其他 skills 协作：**
 - **前置** ← **afk-to-prd** 的输出（PRD Mode）
-- **输出** → tracker issues → **afk-implement** 或 **afk-scheduler**
+- **输出** → Provider Backlog → **afk-implement** 或 **afk-scheduler**
 
 ---
 
@@ -639,11 +639,11 @@ tests/api-workflow/
 **作用：** 后台调度器 — 基于 `blocked_by` 依赖 DAG，自动按波次启动多个 issues 的实现会话
 
 **触发场景：**
-- 多个 `mode::afk` issues 需要按依赖顺序执行
+- 多个 AFK Backlog 工作项需要按依赖顺序执行
 - 需要自动调度和监控后台实现会话
 
 **工作流程：**
-1. **构建 DAG** — 扫描所有 `mode::afk` + `stage::ready-for-issues` issues
+1. **构建 DAG** — 读取 `executionMode: afk`、`state: ready` 且具有 `dependsOn` 的 Backlog
 2. **计算波次** — 拓扑排序：无阻塞的放入 Wave 1，阻塞解除后放入后续波次
 3. **启动门控** — 手动模式：展示波次计划，确认后启动；自动模式：幂等扫描，立即启动
 4. **执行波次** — 每 60 秒轮询 MR 状态，波次内所有 MR 合并后进入下一波
@@ -660,7 +660,7 @@ tests/api-workflow/
 - 只启动未被启动的 issues，不重复
 
 **与其他 skills 协作：**
-- **调用** → `afk workflow run` — 启动每个 issue 的实现会话
+- **调用** → `afk run --backlog-id <id>` — 启动每个 Backlog 工作项的实现
 - **输出** → 合并的 MRs → 人工审查
 
 ---
@@ -712,7 +712,7 @@ tests/api-workflow/
 - 自动修复常见问题
 
 **关键原则：**
-- 抽象 LLM 已知的概念，保留领域特定词汇（`mode::afk` 等）
+- 抽象 LLM 已知的概念，保留 canonical 词汇，如 `backlogId`、`dependsOn` 和 `executionMode`
 - 不做公式化装饰，每个步骤按实际工作流形状描述
 - 使用显式推理链，不要盲目确认
 
@@ -830,8 +830,8 @@ description: "Understand how an existing system works, or evaluate feasibility o
 ### 5. 跨平台兼容
 使用统一命令，自动适配 GitLab/GitHub：
 ```bash
-afk mr create "Title"  # 自动检测平台
-afk issue get 123      # GitLab iid 或 GitHub number
+afk backlog show --id 123
+afk run --backlog-id 123
 ```
 
 参见：[ARCHITECTURE.md](ARCHITECTURE.md) 了解跨平台抽象层设计

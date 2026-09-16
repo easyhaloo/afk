@@ -66,83 +66,64 @@ AFK automatically detects the platform:
 
 ## Basic Usage
 
-### Issue Operations
+### Backlog Operations
 
 ```bash
-# View issue details
-afk issue get 123
+# View Backlog details
+afk backlog show --id 123
 
-# List issues
-afk issue list --label "stage::ready-for-implement"
+# List runnable Backlog items
+afk backlog list --state ready --mode afk
 
-# Create an issue
-afk issue create "Add user login" --label "feature"
+# Create a Backlog item
+afk backlog create "Add user login" --description-file ./description.md --tag feature
 
-# Add a comment
-afk issue comment 123 "Working on this"
+# Execute and verify the same business ID
+afk run --backlog-id 123
+afk qa --backlog-id 123
 ```
 
-### Cross-Project Operations
+### Provider Selection
 
-The `--project <repo>` flag lets `afk issue` commands target projects outside of cwd. For the same repo you can omit the prefix; for cross-repo use the `<project>:<iid>` syntax:
+AFK normally detects the provider from the current repository. Backlog
+management commands can explicitly select a supported provider when needed:
 
 ```bash
-# Operate on repo A's issue from within repo B's directory
-afk issue get 42 --project group/repo-a
-
-# Cross-project link (link to A's #42 from B)
-afk issue link 100 group/repo-a:42 --project group/repo-b
-
-# One-click cross-project workflow (ProjectResolverModule will chdir to target repo first)
-afk issue run 42 --project group/repo-a
+afk backlog list --platform github
+afk backlog show --id 42 --platform gitlab
 ```
 
-No need to configure `GITLAB_PROJECT_ID` or other environment variables; project resolution follows the priority: `git remote > --project > auto-detection`.
-
-### MR/PR Operations
-
-```bash
-# Create an MR/PR
-afk mr create "feat: add login" --source feat/login --target main
-
-# View an MR/PR
-afk mr get 456
-
-# Merge an MR/PR
-afk mr merge 456 --delete-source-branch
-
-# Approve an MR/PR
-afk mr approve 456
-```
+The provider owns the canonical Backlog ID. AFK creates and merges change
+requests as typed workflow steps rather than through a separate public MR command.
 
 ### Full Workflow Example
 
-End-to-end flow from issue to merge:
+End-to-end flow from Backlog item to merge:
 
 ```bash
-# 1. Find issues ready for implementation
-afk issue list --label "stage::ready-for-implement"
+# 1. Find ready Backlog items
+afk backlog list --state ready --mode afk
 
-# 2. Start a workflow (creates worktree + tmux session)
-afk workflow run --iid 123 --base-branch main
+# 2. Execute one item using its stable business ID
+afk run --backlog-id 123
 
-# 3. In the tmux session, Claude will automatically run /afk-implement
-# Monitor progress (optional)
-tmux attach -t afk-issue-123
+# 3. Monitor Backlog lifecycle and runtime state independently
+afk
 
-# 4. Workflow auto-creates MR/PR and cleans up worktree on completion
+# 4. Run standalone QA when needed
+afk qa --backlog-id 123
 ```
 
 ## Automated Scheduling
 
-Let AFK automatically handle all ready issues:
+Let AFK automatically handle runnable Backlog items:
 
 ```bash
-# Start the scheduler
-afk scheduler start --max-concurrent 3 --poll-interval 60
+# Start the implementation → QA → merge loop
+afk loop --max-concurrent 3 --poll-interval 60
 
 # The scheduler will automatically:
-# - Poll for new ready issues every 60 seconds
+# - Poll for ready/rework Backlog items every 60 seconds
 # - Process up to 3 issues concurrently
 # - Verify preconditions (AC, base label, no blockers)
 # - Create worktrees and tmux sessions

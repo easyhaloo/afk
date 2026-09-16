@@ -6,7 +6,7 @@ import type {
   BacklogItem,
   BacklogListOptions,
   BacklogPlatform,
-  BacklogRunSummary,
+  BacklogRuntimeSummary,
   BacklogState,
 } from "../../../shared/backlog-contract";
 import {
@@ -54,6 +54,36 @@ const EMPTY_CREATE_FORM: BacklogCreateInput = { title: "", description: "", exec
 
 type BacklogPageProps = { workspace: string; refreshVersion?: number };
 
+function runtimeStatusLabel(status: NonNullable<BacklogRuntimeSummary["runtime"]>["status"]): string {
+  return status === "running" ? "运行中" : status === "stale" ? "运行失联" : status === "completed" ? "已完成" : status === "blocked" ? "已阻塞" : "失败";
+}
+
+function runtimePhaseLabel(phase: NonNullable<BacklogRuntimeSummary["runtime"]>["phase"]): string {
+  return phase === "verifying" ? "验证执行中" : "实现执行中";
+}
+
+function summaryIsActive(summary: BacklogRuntimeSummary | undefined): boolean {
+  return summary?.runtime?.status === "running"
+    || summary?.runtime?.status === "stale"
+    || summary?.activeRun?.status === "starting"
+    || summary?.activeRun?.status === "running";
+}
+
+function summaryHasFailed(summary: BacklogRuntimeSummary | undefined): boolean {
+  return summary?.runtime?.status === "failed" || summary?.activeRun?.status === "failed";
+}
+
+function BacklogRuntimeStatus({ summary }: { summary?: BacklogRuntimeSummary }) {
+  if (summary?.runtime) {
+    return <p className={`backlog-run-status runtime-${summary.runtime.status}`}>运行：{runtimePhaseLabel(summary.runtime.phase)} · {runtimeStatusLabel(summary.runtime.status)}{summary.runtime.progress ? ` · ${summary.runtime.progress}` : ""}</p>;
+  }
+  if (summary?.activeRun) {
+    const processLabel = summary.activeRun.status === "running" || summary.activeRun.status === "starting" ? "启动中" : summary.activeRun.status === "completed" ? "进程已退出" : "启动失败";
+    return <p className="backlog-run-status">启动进程：{processLabel} · PID {summary.activeRun.pid ?? "—"}</p>;
+  }
+  return null;
+}
+
 export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps) {
   const cached = useMemo(() => readBacklogCache(workspace), []);
   const [items, setItems] = useState<BacklogItem[]>(cached?.items ?? []);
@@ -64,6 +94,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
   const [error, setError] = useState("");
   const mountedRef = useRef(true);
   const loadGenerationRef = useRef(0);
+  const detailGenerationRef = useRef(0);
   const handledRefreshVersionRef = useRef(refreshVersion);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -72,11 +103,11 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
 
   const [tagBusyFor, setTagBusyFor] = useState("");
   const [tagDrafts, setTagDrafts] = useState<Record<string, string>>({});
-  const [detailItem, setDetailItem] = useState<BacklogItem | null>(null);
+  const [detailSummary, setDetailSummary] = useState<BacklogRuntimeSummary | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [runBusyFor, setRunBusyFor] = useState("");
-  const [runs, setRuns] = useState<Record<string, BacklogRunSummary>>({});
+  const [summaries, setSummaries] = useState<Record<string, BacklogRuntimeSummary>>({});
 
   const createModalRef = useRef<HTMLFormElement>(null);
 
@@ -98,16 +129,20 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
     }
     try {
       const options: BacklogListOptions | undefined = platform === "auto" ? undefined : { platform };
-      const [data, persistedRuns] = await Promise.all([
-        fetchBacklogList(workspace, () => {
-          const opts = options ? { ...options } : undefined;
-          return window.afkDesktop.backlog.list(workspace, opts);
-        }, force ? { now: Date.now() + BACKLOG_FORCE_REFRESH } : {}),
-        window.afkDesktop.backlog.runs(workspace),
-      ]);
+      const data = await fetchBacklogList(workspace, () => {
+        const opts = options ? { ...options } : undefined;
+        return window.afkDesktop.backlog.list(workspace, opts);
+      }, force ? { now: Date.now() + BACKLOG_FORCE_REFRESH } : {});
+      const loadedSummaries = await Promise.all(data.map(async (item) => {
+        try {
+          return await window.afkDesktop.backlog.summary(workspace, item.id);
+        } catch {
+          return { backlogId: item.id, backlog: item } satisfies BacklogRuntimeSummary;
+        }
+      }));
       if (!isCurrentRequest()) return;
       setItems(data);
-      setRuns(Object.fromEntries(persistedRuns.map((run) => [run.backlogId, run])));
+      setSummaries(Object.fromEntries(loadedSummaries.map((summary) => [summary.backlogId, summary])));
     } catch (cause) {
       if (isCurrentRequest()) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -208,22 +243,28 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
   }, [load, workspace]);
 
   const openDetails = useCallback(async (item: BacklogItem) => {
-    setDetailItem(item);
+    const generation = ++detailGenerationRef.current;
+    const isCurrentRequest = () => mountedRef.current && detailGenerationRef.current === generation;
+    setDetailSummary(summaries[item.id] ?? { backlogId: item.id, backlog: item });
     setDetailBusy(true);
     setDetailError("");
     try {
-      const detail = await window.afkDesktop.backlog.show(workspace, item.id);
-      if (mountedRef.current) setDetailItem(detail);
+      const summary = await window.afkDesktop.backlog.summary(workspace, item.id);
+      if (isCurrentRequest()) {
+        setDetailSummary(summary);
+        setSummaries((previous) => ({ ...previous, [item.id]: summary }));
+      }
     } catch (cause) {
-      if (mountedRef.current) setDetailError(cause instanceof Error ? cause.message : String(cause));
+      if (isCurrentRequest()) setDetailError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      if (mountedRef.current) setDetailBusy(false);
+      if (isCurrentRequest()) setDetailBusy(false);
     }
-  }, [workspace]);
+  }, [summaries, workspace]);
 
   const closeDetails = useCallback(() => {
     if (detailBusy) return;
-    setDetailItem(null);
+    detailGenerationRef.current += 1;
+    setDetailSummary(null);
     setDetailError("");
   }, [detailBusy]);
 
@@ -239,16 +280,19 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
     setRunBusyFor(item.id);
     setError("");
     try {
-      const run = await window.afkDesktop.backlog.start(workspace, { backlogId: item.id });
+      await window.afkDesktop.backlog.start(workspace, { backlogId: item.id });
       if (!mountedRef.current) return;
-      setRuns((previous) => ({ ...previous, [item.id]: run }));
+      const summary = await window.afkDesktop.backlog.summary(workspace, item.id);
+      if (!mountedRef.current) return;
+      setSummaries((previous) => ({ ...previous, [item.id]: summary }));
+      if (detailSummary?.backlogId === item.id) setDetailSummary(summary);
     } catch (cause) {
       if (!mountedRef.current) return;
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (mountedRef.current) setRunBusyFor("");
     }
-  }, [workspace]);
+  }, [detailSummary?.backlogId, workspace]);
   const filtered = useMemo(() => filterBacklogItems(items, query, state), [items, query, state]);
 
   return (
@@ -273,7 +317,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
       </section>
       <section className="backlog-list">
         {filtered.length ? filtered.map((item) => (
-          <article className={`backlog-row${detailItem?.id === item.id ? " selected" : ""}`} key={item.id} onClick={() => { void openDetails(item); }}>
+          <article className={`backlog-row${detailSummary?.backlogId === item.id ? " selected" : ""}`} key={item.id} onClick={() => { void openDetails(item); }}>
             <header>
               <div className="backlog-row-heading">
                 <b>{item.title}</b>
@@ -283,12 +327,12 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
                 type="button"
                 className="backlog-run-button"
                 onClick={(event) => { event?.stopPropagation?.(); void startRun(item); }}
-                disabled={runBusyFor === item.id || item.state !== "ready" || runs[item.id]?.status === "running"}
-                aria-label={runBusyFor === item.id ? "启动中" : runs[item.id]?.status === "running" ? "运行中" : runs[item.id]?.status === "failed" ? "重新执行" : "开始执行"}
-                title={runBusyFor === item.id ? "启动中" : runs[item.id]?.status === "running" ? "运行中" : runs[item.id]?.status === "failed" ? "重新执行" : "开始执行"}
+                disabled={runBusyFor === item.id || item.executionMode !== "afk" || (item.state !== "ready" && item.state !== "rework") || summaryIsActive(summaries[item.id])}
+                aria-label={runBusyFor === item.id ? "启动中" : summaryIsActive(summaries[item.id]) ? "运行中" : summaryHasFailed(summaries[item.id]) ? "重新执行" : "开始执行"}
+                title={runBusyFor === item.id ? "启动中" : summaryIsActive(summaries[item.id]) ? "运行中" : summaryHasFailed(summaries[item.id]) ? "重新执行" : "开始执行"}
               >
                 <Play size={12} fill="currentColor" aria-hidden="true" />
-                <span className="backlog-run-button-label">{runBusyFor === item.id ? "启动中" : runs[item.id]?.status === "running" ? "运行中" : runs[item.id]?.status === "failed" ? "重新执行" : "开始执行"}</span>
+                <span className="backlog-run-button-label">{runBusyFor === item.id ? "启动中" : summaryIsActive(summaries[item.id]) ? "运行中" : summaryHasFailed(summaries[item.id]) ? "重新执行" : "开始执行"}</span>
               </button>
             </header>
             <div className="backlog-item-metadata">
@@ -298,7 +342,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
               </span>
               <span className="backlog-mode-label">{item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}</span>
             </div>
-            {runs[item.id] ? <p className="backlog-run-status">运行状态：{runs[item.id].status === "running" ? "运行中" : runs[item.id].status === "completed" ? "已完成" : "失败"} · PID {runs[item.id].pid ?? "—"}</p> : null}
+            <BacklogRuntimeStatus summary={summaries[item.id]} />
             {item.tags.length ? (
               <ul className="backlog-tags">
                 {item.tags.map((tag) => (
@@ -326,7 +370,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
           </div>
         )}
       </section>
-      <BacklogDetailDrawer item={detailItem} busy={detailBusy} error={detailError} onClose={closeDetails} onOpenExternal={(url) => { void openExternal(url); }} />
+      <BacklogDetailDrawer summary={detailSummary} busy={detailBusy} error={detailError} onClose={closeDetails} onOpenExternal={(url) => { void openExternal(url); }} />
       {createOpen ? (
         <div className="backlog-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeCreateModal(); }}>
           <form

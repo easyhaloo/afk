@@ -13,7 +13,7 @@ single source of truth for the supported surface:
 | `afk run --backlog-id <id>` | Execute one claimed item |
 | `afk loop` | Repeated execution followed by QA and merge |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
-| `afk signal`, `afk tmux`, `afk board`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
+| `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
 There are no aliases for removed command groups. Provider metadata labels are
 an adapter detail and never part of this CLI contract.
@@ -38,20 +38,44 @@ tag updates, and the state/mode updates needed by QA. It has no `claim()` at
 the type or runtime boundary. The execution bundle is the only path that
 exposes claiming and runnable checks.
 
+## Work-item and execution identity
+
+The Provider Backlog is the business source of truth. Its `BacklogItem.id` is
+carried unchanged through `afk run --backlog-id <id>`, `Run.workItemId`,
+`TaskRuntimeRecord.backlogId`, TUI projections, and Desktop summaries.
+`runId` identifies one execution attempt and must never replace the Backlog ID.
+
+Relationships have separate meanings: `parentId` is organizational grouping,
+`dependsOn` controls scheduling, and `baseBacklogId` selects an explicit Git
+execution base. Neither parent nor dependency edges implicitly select a branch.
+
 ## Backlog lifecycle
 
 ```text
-ready --claim--> in_progress --> verification --> merge_ready --> done
+ready/rework --claim--> in_progress --> verification --> merge_ready --> done
    \                         \
     \                         +--> blocked (execution mode: hitl)
      +--> blocked (conflict, failure, timeout, or expired lease)
 ```
 
-An item is runnable only when it is in `ready`, uses the `afk` execution mode,
+An item is runnable only when it is in `ready` or `rework`, uses the `afk` execution mode,
 has no child items, and all `dependsOn` items are `done`. `parentId` groups
 child items; a parent itself is never runnable. Any automation failure,
 conflict, timeout, or uncertain lease recovery transitions the item to
 `blocked` and routes it to `hitl`.
+
+## Runtime and Desktop projections
+
+Canonical runtime files under `~/.afk/runtime/tasks` own execution-attempt
+status, phase, heartbeat, progress, and diagnostics. A heartbeat older than the
+freshness threshold is displayed as runtime `stale`; it does not mutate the
+Provider Backlog lifecycle state.
+
+Desktop's workspace-local `.afk/backlog-runs.json` contains process launch
+metadata only. It may report a PID or launch error, but it cannot infer
+`verification`, `blocked`, or `done`. Desktop joins Backlog, launch metadata,
+and canonical runtime records by exact `backlogId`; missing or malformed runtime
+data leaves the Backlog visible with an explicit no-runtime state.
 
 ## Claim boundary and local fallback
 

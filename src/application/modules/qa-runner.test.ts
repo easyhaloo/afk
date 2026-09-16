@@ -202,7 +202,8 @@ describe('QARunner execution boundary', () => {
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
     expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
-      backlogId: '60', phase: 'verifying', executionMode: 'batch', status: 'running',
+      backlogId: '60', workspace: process.cwd(), providerRef: '60',
+      phase: 'verifying', executionMode: 'batch', status: 'running',
       agentProvider: 'codex', agentTransport: 'app-server', agentAuth: 'chatgpt', agentModelProvider: 'openai',
     }));
     expect(runtime.heartbeat).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({

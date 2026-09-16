@@ -20,6 +20,24 @@ const backlog: BacklogViewModel = {
 };
 
 describe('BoardCard', () => {
+  it('prioritizes phase and progress before the title at narrow widths', () => {
+    const output = renderToString(
+      <BoardCard backlog={{ ...backlog, phase: 'verifying', progress: '50%' }} selected width={28} />,
+    );
+
+    expect(output).toContain('verifying');
+    expect(output).toContain('50%');
+  });
+
+  it('shows backlog lifecycle and runtime status independently', () => {
+    const output = renderToString(<BoardCard backlog={{ ...backlog, state: 'blocked', runStatus: 'stale', phase: 'verifying', progress: '50%' }} selected width={100} />);
+
+    expect(output).toContain('blocked');
+    expect(output).toContain('stale');
+    expect(output).toContain('verifying');
+    expect(output).toContain('50%');
+  });
+
   it('renders only identity, mode, and title on the card', () => {
     const output = renderToString(<BoardCard backlog={backlog} selected width={80} />);
 

@@ -12,11 +12,11 @@ The loop claims a canonical `ready` item atomically, verifies parent/dependency 
 ## Overview
 
 AFK implements three primary workflow patterns:
-1. **Issue → Implementation → MR Pipeline**: Manual or automated issue handling
+1. **Backlog → Implementation → Change Pipeline**: Manual or automated work-item handling
 2. **Scheduler Workflow**: Background dependency-aware execution
 3. **Skills Workflow**: TDD methodology integration
 
-## Issue → Implementation → MR Pipeline
+## Backlog → Implementation → Change Pipeline
 
 End-to-end workflow from issue discovery to merge request.
 
@@ -29,8 +29,8 @@ afk backlog list --state ready --mode afk
 # 2. Execute one externally-created backlog item
 afk run --backlog-id 123
 
-# 3. Monitor progress (workflow runs in tmux session)
-tmux attach -t afk-issue-123
+# 3. Monitor Backlog and runtime state
+afk
 
 # 4. Run acceptance criteria checks
 afk qa --backlog-id 123
@@ -38,8 +38,7 @@ afk qa --backlog-id 123
 # 5. Create merge request if passed
 # MR publication and QA queueing are typed system steps in issue-implementation
 
-# 6. Cleanup worktree
-afk worktree cleanup --iid 123
+# Branch identity is derived as afk/backlog-123.
 ```
 
 ### Automated Execution (Scheduler)
@@ -49,8 +48,8 @@ afk worktree cleanup --iid 123
 afk loop --max-concurrent 3 --poll-interval 60
 
 # Scheduler automatically:
-# 1. Polls for issues with stage::ready-for-implement
-# 2. Validates preconditions (AC, base label, no blockers)
+# 1. Lists runnable Backlog items in ready/rework state
+# 2. Validates AC, parent/dependency, execution-mode, and baseBacklogId preconditions
 # 3. Launches workflows up to max-concurrent limit
 # 4. Monitors completion and creates MRs
 ```
@@ -59,17 +58,17 @@ afk loop --max-concurrent 3 --poll-interval 60
 
 ```mermaid
 flowchart TD
-    A["Issue Discovery: Poll GitLab/GitHub, filter by label"] --> B{"Precondition Validation"}
-    B -->|"AC exists, Base label, No blockers"| C["Worktree Creation: afk-issue-iid"]
-    B -->|Failure| Z1["Label: blocked, skip"]
+    A["Backlog Discovery: list provider work items"] --> B{"Precondition Validation"}
+    B -->|"AC exists, dependencies done, runnable"| C["Worktree Creation: afk/backlog-id branch"]
+    B -->|Failure| Z1["Backlog blocked + hitl"]
 
-    C --> D["Tmux Session Management: afk-issue-iid, start Claude Code + watchdog"]
-    D --> E["Implementation Phase: /goal implement issue, follow TDD methodology"]
+    C --> D["Runtime start: runId + backlogId, agent + watchdog"]
+    D --> E["Implementation Phase: implement Backlog item, follow TDD methodology"]
     E --> F["Runner Polling: Signal file + statusline token usage (every 2s)"]
 
     F -->|goal_complete| G["AC Validation Phase: /goal verify AC"]
     F -->|"token >= threshold"| H["Context Handoff: interrupt -> summarize -> kill session -> restart -> inject summary to continue"]
-    F -->|timeout| Z2["Timeout: comment + mode::hitl, retain worktree"]
+    F -->|timeout| Z2["Timeout: Backlog blocked + HITL, retain worktree"]
 
     G -->|ac_result| I["MR/PR Creation: push branch, link Closes iid"]
     G -->|"token >= threshold"| H
@@ -78,7 +77,7 @@ flowchart TD
     H --> E
     H -.->|"Budget exhausted / Restart failed"| Z3["Termination Handoff: handoff::active, manual recovery"]
 
-    I --> J["Cleanup: stage::qa, delete worktree"]
+    I --> J["Cleanup: Backlog verification, delete worktree"]
 
     classDef success fill:#d4edda,stroke:#28a745
     classDef fail fill:#f8d7da,stroke:#dc3545
@@ -97,7 +96,7 @@ Dependency-aware background execution system.
 
 ```mermaid
 graph TD
-    Sched["Scheduler Service: Poll 60s, max concurrent 3, state Redis/memory"] --> Dep["Dependency Graph: Parse blocks-iid labels, build DAG, topological sort"]
+    Sched["Scheduler Service: Poll 60s, max concurrent 3"] --> Dep["Dependency Graph: Read Backlog dependsOn, build DAG, topological sort"]
 
     Dep --> Queue["Task Queue: Priority scheduling high/medium/low"]
 
@@ -115,12 +114,12 @@ graph TD
 
 ### Dependency Resolution
 
-Issues declare dependencies via labels:
+Backlog items declare dependencies through provider-neutral fields:
 
 ```
-Issue #10: base::prd-1, stage::ready-for-implement
-Issue #11: base::prd-1, blocks-10, stage::ready-for-implement
-Issue #12: base::prd-1, blocks-10, blocks-11, stage::ready-for-implement
+Backlog #10: dependsOn: [], baseBacklogId: null
+Backlog #11: dependsOn: ["10"], baseBacklogId: null
+Backlog #12: dependsOn: ["10", "11"], baseBacklogId: "11"
 ```
 
 ```mermaid
@@ -296,7 +295,7 @@ stateDiagram-v2
 **Red Phase:**
 ```bash
 # /afk-implement first creates failing test
-$ afk workflow run --iid 123
+$ afk run --backlog-id 123
 # Claude writes tests
 $ npm test
 # ❌ Tests fail (expected)
@@ -416,10 +415,10 @@ When context approaches its limit, the workflow **automatically interrupts the c
 graph TD
     Fail[Workflow Failure] --> Type{Failure Type}
 
-    Type -->|Timeout| Timeout["Label: stage::timeout, retain worktree, log to scheduler"]
-    Type -->|Test Failure| TestFail["Label: stage::failed, Signal: goal_failed, retain test output"]
-    Type -->|Blocked| Blocked["Label: stage::blocked, Signal: blocked, comment with reason"]
-    Type -->|Git Conflict| Conflict["Label: stage::conflict, retain worktree, comment notification"]
+    Type -->|Timeout| Timeout["Backlog blocked + HITL, retain worktree"]
+    Type -->|Test Failure| TestFail["Backlog rework, retain test output"]
+    Type -->|Blocked| Blocked["Backlog blocked + HITL, record reason"]
+    Type -->|Git Conflict| Conflict["Backlog blocked + HITL, retain worktree"]
     Type -->|API Rate Limit| RateLimit["Exponential backoff, retry after cooldown, log to scheduler"]
 
     classDef error fill:#f8d7da,stroke:#dc3545
@@ -432,18 +431,18 @@ graph TD
 flowchart TD
     Issue[Issue Detected] --> Type{Problem Type}
 
-    Type -->|Orphaned worktrees| Orphan["Detect no active tmux: afk worktree list-orphaned"]
+    Type -->|Orphaned worktrees| Orphan["Inspect runtime worktree and diagnostics"]
     Orphan --> Confirm{User confirmation?}
-    Confirm -->|Yes| Prune[afk worktree prune]
+    Confirm -->|Yes| Prune["Remove worktree with git"]
     Confirm -->|No| Wait[Wait for manual handling]
 
-    Type -->|Expired tmux| Expired["tmux ls, grep afk-issue"]
-    Expired --> Kill["tmux kill-session -t afk-issue-N"]
+    Type -->|Stale runtime| Expired["afk: runtime heartbeat is stale"]
+    Expired --> Kill["Inspect run diagnostics before manual termination"]
 
-    Type -->|Stuck scheduler| Stuck[afk scheduler status]
-    Stuck --> Pause[afk scheduler pause]
-    Pause --> Manual["afk scheduler mark-complete"]
-    Manual --> Resume[afk scheduler resume]
+    Type -->|Stuck scheduler| Stuck[afk loop status]
+    Stuck --> Pause[afk loop stop]
+    Pause --> Manual["Review Backlog state and runtime diagnostics"]
+    Manual --> Resume[afk loop start --daemon]
 
     classDef detect fill:#e1f5ff
     classDef action fill:#d4edda
@@ -454,34 +453,31 @@ flowchart TD
 **Orphaned worktrees:**
 ```bash
 # Detect worktrees with no active tmux session
-afk worktree list-orphaned
+git worktree list
 
 # Cleanup with confirmation
-afk worktree prune
+git worktree remove <path>
 ```
 
 **Expired tmux sessions:**
 ```bash
-# List all afk sessions
-tmux ls | grep afk-issue
-
-# Kill specific expired session
-tmux kill-session -t afk-issue-123
+# Inspect canonical runtime heartbeat and diagnostics
+afk
 ```
 
 **Stuck scheduler:**
 ```bash
 # Check scheduler status
-afk scheduler status
+afk loop status
 
 # Pause to prevent new launches
-afk scheduler pause
+afk loop stop
 
 # Manually complete stuck task
-afk scheduler mark-complete --iid 123
+afk backlog show --id 123
 
 # Resume
-afk scheduler resume
+afk loop start --daemon
 ```
 
 ## Performance Considerations

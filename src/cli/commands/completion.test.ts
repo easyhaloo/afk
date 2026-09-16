@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { Command } from 'commander';
 import { registerCompletionCommands } from './completion';
+import { buildCompletionTree } from '../completion/tree';
 
 function run(args: string[]): { stdout: string; exitCode: number | undefined } {
   const program = new Command();
@@ -25,6 +26,16 @@ function run(args: string[]): { stdout: string; exitCode: number | undefined } {
 }
 
 describe('registerCompletionCommands', () => {
+  it('includes every public nested command needed by shell completion', () => {
+    const program = buildCompletionTree();
+    const names = program.commands.map(command => command.name());
+
+    expect(names).toEqual(expect.arrayContaining(['backlog', 'run', 'qa', 'loop', 'observe']));
+    const backlog = program.commands.find(command => command.name() === 'backlog');
+    expect(backlog?.commands.filter(command => command.name() === 'create')).toHaveLength(1);
+    expect(backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name())).toEqual(['add', 'remove']);
+  });
+
   it('completion zsh prints a #compdef afk script', () => {
     const { stdout } = run(['completion', 'zsh']);
     expect(stdout).toContain('#compdef afk');

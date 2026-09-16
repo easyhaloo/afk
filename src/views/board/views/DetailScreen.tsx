@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Task, Project } from '../../../types/board';
+import { getTaskBacklogId, type Task, type Project } from '../../../types/board';
 import type { Branch, Commit, Tag } from '../../../lib/core/tracker/types';
 import type { BacklogViewModel } from '../data/backlog-adapter';
 import { parseMarkdownLine } from '../utils';
@@ -26,7 +26,7 @@ export function DetailScreen({ item, view, height, width, branches = [], tags = 
   }
 
   const title = view === 'tasks'
-    ? `task #${(item as Task).iid} · ${(item as Task).title}`
+    ? `task #${getTaskBacklogId(item as Task)} · ${(item as Task).title}`
     : view === 'projects'
       ? `project · ${(item as Project).name}`
       : `${view === 'board' ? 'board' : 'backlog'} · ${(item as BacklogViewModel).title}`;
@@ -62,9 +62,10 @@ function Field({ name, value, color = 'white' }: { name: string; value: string |
 function TaskDetail({ item }: { item: Task }) {
   return (
     <Group title="runtime">
+      <Field name="backlog" value={getTaskBacklogId(item)} />
       <Field name="run" value={item.runId} />
       <Field name="phase" value={item.phase} />
-      <Field name="status" value={item.status} />
+      <Field name="status" value={item.runStatus ?? item.status} />
       <Field name="execution mode" value={item.executionMode} />
       <Field name="sandbox" value={item.sandboxProvider} />
       <Field name="agent" value={item.agentProvider} />

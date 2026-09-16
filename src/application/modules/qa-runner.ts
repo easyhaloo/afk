@@ -290,6 +290,8 @@ export class QARunner {
       await this.runtimeManager.start({
         runId,
         backlogId: backlog.id,
+        workspace: this.projectRoot,
+        providerRef: backlog.providerRef,
         title: backlog.title,
         phase: 'verifying',
         status: 'running',

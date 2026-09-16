@@ -23,7 +23,7 @@ export function BacklogRow({ backlog, selected, width }: BacklogRowProps) {
     `parent ${normalizeRowText(backlog.parentId || '') || '-'}`,
     `depends ${backlog.dependsOn.length}`,
     backlog.tags.map(normalizeRowText).filter(Boolean).join(', ') || '-',
-  ].join(' · ');
+  ].filter(Boolean).join(' · ');
 
   return (
     <OperationalRow
@@ -32,6 +32,7 @@ export function BacklogRow({ backlog, selected, width }: BacklogRowProps) {
       status={backlog.state}
       statusColor={selected ? 'white' : backlogStateColor(backlog.state)}
       mode={backlog.executionMode}
+      runtimeStatus={[backlog.runStatus ?? 'no-runtime', backlog.phase, backlog.progress].filter(Boolean).join('/')}
       id={backlog.id}
       title={`backlog ${backlog.id} · ${normalizeRowText(backlog.title)}`}
       summary={summary}

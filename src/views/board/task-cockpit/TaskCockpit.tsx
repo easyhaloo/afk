@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Task, TaskActivity } from '../../../types/board';
+import { getTaskBacklogId, type Task, type TaskActivity } from '../../../types/board';
 import { formatRelativeTime, truncateByVisualWidth } from '../utils';
 import { getExecutionModeColor, getExecutionModeIcon, getStatusColor, getStatusIcon } from '../views/display';
 import { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, truncateTaskText } from './model';
@@ -64,7 +64,7 @@ export function TaskCockpit({ tasks, selectedIndex, viewportHeight, width, termi
           <Text wrap="truncate" color={statusColor} bold>{getStatusIcon(status)} {status} · {phase}</Text>
         </Box>
         <Box height={1} flexShrink={0} overflow="hidden">
-          <Text wrap="truncate" bold color="white">#{focused.iid} {truncateTaskText(focused.title, Math.max(1, mainWidth - 4))}</Text>
+          <Text wrap="truncate" bold color="white">#{getTaskBacklogId(focused)} {truncateTaskText(focused.title, Math.max(1, mainWidth - 4))}</Text>
         </Box>
         {runtimeContext.length > 0 && (
           <Box height={1} flexShrink={0} overflow="hidden">
@@ -163,7 +163,7 @@ function TaskQueue({ tasks, focusedRunId, width, height }: { tasks: Task[]; focu
       {tasks.map(task => (
           <Box key={task.runId} flexDirection="column" height={2} overflow="hidden">
             <Text wrap="truncate" color={task.runId === focusedRunId ? 'cyan' : task.status === 'stale' ? 'red' : 'white'} bold={task.runId === focusedRunId}>
-              {task.runId === focusedRunId ? '▶' : getStatusIcon(task.status === 'stale' ? 'stale' : 'active')} #{task.iid}
+              {task.runId === focusedRunId ? '▶' : getStatusIcon(task.status === 'stale' ? 'stale' : 'active')} #{getTaskBacklogId(task)}
             </Text>
             <Text wrap="truncate" dimColor>{truncateByVisualWidth(task.title, Math.max(1, width - 3))}</Text>
           </Box>

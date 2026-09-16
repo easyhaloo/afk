@@ -9,8 +9,8 @@
  * When a command is invoked with `--json`, the action handler MUST emit
  * exactly one envelope on stdout, never human-formatted text. All human
  * output (chalk colors, hints, context) goes to stderr in non-JSON mode
- * only. Failure exits with code 1 so callers can detect transport-level
- * problems (no JSON on stdout) versus protocol-level failures.
+ * only. Failure sets exit code 1 after writing the envelope so callers can
+ * detect protocol-level failures without truncating stdout.
  */
 
 export type ErrorCode =
@@ -48,14 +48,14 @@ export function emitFailure(
   code: ErrorCode,
   message: string,
   details?: Record<string, unknown>,
-): never {
+): void {
   const envelope: JsonFailure = {
     ok: false,
     kind,
     error: details ? { code, message, details } : { code, message },
   };
   process.stdout.write(JSON.stringify(envelope));
-  process.exit(1);
+  process.exitCode = 1;
 }
 
 /**

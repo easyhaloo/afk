@@ -75,14 +75,19 @@ export class TaskService {
         if (decoded) {
           const worktree = worktreeMap.get(decoded.issueId);
           return {
-            iid: decoded.issueId,
+            runId: `legacy-${decoded.platform}-${decoded.projectId}-${decoded.issueId}`,
+            backlogId: String(decoded.issueId),
+            iid: String(decoded.issueId),
             title: `Issue #${decoded.issueId}`,
+            phase: 'implementing' as const,
+            executionMode: 'batch' as const,
+            sandboxProvider: 'local',
+            agentProvider: 'legacy',
             branch: worktree?.branch || decoded.projectId,
             session: s.name,
             status: 'active' as const,
             progress: '0%',
             startedAt: s.created ? new Date(parseInt(s.created) * 1000) : undefined,
-            platform: decoded.platform,
             worktree: worktree?.path,
           };
         }
@@ -93,8 +98,14 @@ export class TaskService {
         const iid = parseInt(parts[1]) || 0;
         const worktree = worktreeMap.get(iid);
         return {
-          iid,
+          runId: `legacy-${iid}-${s.name}`,
+          backlogId: String(iid),
+          iid: String(iid),
           title: `Issue #${iid}`,
+          phase: 'implementing' as const,
+          executionMode: 'batch' as const,
+          sandboxProvider: 'local',
+          agentProvider: 'legacy',
           branch: worktree?.branch || parts.slice(2).join('-') || 'main',
           session: s.name,
           status: 'active' as const,
@@ -107,13 +118,18 @@ export class TaskService {
 
   async createTaskFromIssue(issue: any, options: any): Promise<Task> {
     return {
-      iid: issue.iid,
+      runId: `legacy-${issue.iid}-${options.session ?? 'pending'}`,
+      backlogId: String(issue.iid),
+      iid: String(issue.iid),
       title: issue.title,
+      phase: 'implementing',
+      executionMode: 'batch',
+      sandboxProvider: 'local',
+      agentProvider: 'legacy',
       branch: options.branch,
       session: options.session,
-      status: 'pending',
+      status: 'active',
       progress: '0%',
-      platform: options.platform,
       worktree: options.worktree,
     };
   }

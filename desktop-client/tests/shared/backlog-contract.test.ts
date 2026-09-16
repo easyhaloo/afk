@@ -11,6 +11,7 @@ import {
   parseBacklogListOptions,
   parseBacklogCreateInput,
   parseBacklogPlatform,
+  parseBacklogRuntimeSummary,
 } from "../../shared/backlog-contract";
 
 describe("Backlog shared contract", () => {
@@ -71,5 +72,23 @@ describe("Backlog shared contract", () => {
   it("BacklogError round-trips through JSON", () => {
     const error: BacklogError = { code: "auth", message: "missing token", details: { hint: "GITHUB_TOKEN" } };
     expect(JSON.parse(JSON.stringify(error))).toEqual(error);
+  });
+
+  it("parses a runtime summary with optional run sources", () => {
+    const summary = parseBacklogRuntimeSummary({
+      backlogId: "42",
+      backlog: { id: "42", title: "demo", dependsOn: [], state: "ready", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" },
+      runtime: { runId: "run-42", status: "running", phase: "implementing", heartbeatAt: "2026-09-15T00:00:00.000Z" },
+    });
+    expect(summary.runtime?.status).toBe("running");
+    expect(summary.activeRun).toBeUndefined();
+  });
+
+  it("rejects unknown fields, mismatched IDs, and invalid runtime states", () => {
+    const backlog = { id: "42", title: "demo", dependsOn: [], state: "ready", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" };
+    expect(() => parseBacklogRuntimeSummary({ backlogId: "42", backlog, extra: true })).toThrow(/unknown/i);
+    expect(() => parseBacklogRuntimeSummary({ backlogId: "43", backlog })).toThrow(/match/i);
+    expect(() => parseBacklogRuntimeSummary({ backlogId: "42", backlog, activeRun: { id: "run", backlogId: "43", status: "running", startedAt: "now" } })).toThrow(/activeRun/i);
+    expect(() => parseBacklogRuntimeSummary({ backlogId: "42", backlog, runtime: { runId: "run", status: "pending", phase: "implementing", heartbeatAt: "now" } })).toThrow(/status/i);
   });
 });

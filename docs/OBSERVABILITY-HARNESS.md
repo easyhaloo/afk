@@ -7,7 +7,7 @@
 | 能力 | 当前状态 | 说明 |
 | --- | --- | --- |
 | 纯领域 `WorkItem` / `Run` / `RunEvent` / reducer | 已实现 | `src/core/` 无文件、网络、GitHub、Pino 或 Commander 依赖。 |
-| 显式执行基线策略 | 已实现 | `parent`、`dependsOn` 与 `baseWorkItemId` 在 core 模型中职责分离。现有 backlog 语义修复仍须独立合并。 |
+| 显式执行基线策略 | 已实现 | `parentId`、`dependsOn` 与 `baseBacklogId/baseWorkItemId` 在 Backlog 与 core 投影中职责分离。 |
 | JSONL 事件存储 | 已实现 | 单 run 顺序、hash chain、fsync 追加、重启校验与读取。初期只保证单 workspace 进程内序列化。 |
 | 本地加密 EvidenceStore | 已实现 | AES-256-GCM、内容哈希、文本 secret redaction；尚未在 legacy runner 中自动捕获正文。 |
 | Workflow / QA 双写 | 已实现 | `AFK_HARNESS_MODE=observe` 时记录 claim、workspace、step、failure、PR/MR 与 merge/human-gate 事实。 |
@@ -29,6 +29,12 @@ node dist/index.js run --backlog-id 123 --execution-mode batch
 ```
 
 `WorkflowRunner` 与 `QARunner` 会继续使用既有 provider、runtime JSON、Pino 与 tracker 状态机；同时在 `AFK_EVENT_STORE_DIR` 追加每个 run 的 JSONL 审计流。由于本阶段是 dual-write，事件存储失败只会被记录为错误，**不会**阻断 legacy 流程。Coordinator 接管后会将对外写入和自动合并改为 fail-closed。
+
+Provider Backlog owns business identity and lifecycle. `BacklogItem.id` is
+recorded as `Run.workItemId` and runtime/event `backlogId`; `runId` identifies
+only one attempt. Runtime heartbeat freshness is diagnostic: `stale` never
+changes the Provider Backlog state. Desktop launch records in
+`.afk/backlog-runs.json` are not execution or business-state evidence.
 
 | 环境变量 | 默认值 | 用途 |
 | --- | --- | --- |
@@ -80,7 +86,7 @@ node dist/index.js observe explain <run-id>
 2. 将 JSONL store 接入 LeasePort/fencing，覆盖多 worker、崩溃重启、重复回调和 event append 故障注入。
 3. 接入 OTLP traces、logs 与 metrics；将 `afk.observability.coverage_ratio`、event append latency、run stale、lease expiry、approval aging 设为 SLO。
 4. 实现受控 `confirm-merge`：先经 ChangePort 验证外部 PR/MR 已合并且目标正确，再追加 `HumanGateSatisfied` 与 terminal `done` event。
-5. 将 `parent` / `dependsOn` / `baseBacklogId` 的现有 backlog 修复以独立 PR 合并，并让 Workflow/QA 统一调用 core `ExecutionBasePolicy`。
+5. 持续让 Workflow/QA 通过 core `ExecutionBasePolicy` 使用 `baseBacklogId`，不得用 `parentId` 或 `dependsOn` 推断 Git 基线。
 6. 执行隔离 GitHub/GitLab 真实 E2E：Issue → claim → agent → QA → PR/MR → human merge → dependency unlock → timeline → dry-run replay。
 
 在以上门禁完成前，observe 模式的事件流可用于诊断、对账和 golden trace 比较，但不能成为自动合并、状态恢复或外部副作用授权的唯一依据。

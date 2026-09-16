@@ -2,8 +2,6 @@
 /**
  * Thin CLI dispatcher — lazy-loads only the command that is invoked.
  */
-import { resolve } from 'path';
-
 const cmd = process.argv[2];
 const extraArgs = process.argv.slice(3);
 
@@ -20,7 +18,7 @@ async function main() {
 
   // No args: launch TUI directly (preserve stdin TTY for Ink)
   if (process.argv.length <= 2) {
-    const { startDashboard } = await import('./commands/board-entry.js');
+    const { startDashboard } = await import('./cli/commands/board-entry.js');
     await startDashboard();
     return;
   }
@@ -33,13 +31,22 @@ async function main() {
   }
 
   // All other commands: lazy-load via dynamic import
-  const { lazyLoad } = await import('./lazy-loader.js');
+  const { lazyLoad } = await import('./cli/lazy-loader.js');
   await lazyLoad(cmd, extraArgs);
 }
 
 main().catch(err => {
   const code = (err as { code?: string }).code;
   if (code === 'commander.help' || code === 'commander.helpDisplayed') {
+    return;
+  }
+  if (
+    typeof code === 'string'
+    && code.startsWith('commander.')
+    && process.argv.includes('backlog')
+    && process.argv.includes('--json')
+  ) {
+    process.exitCode = (err as { exitCode?: number }).exitCode ?? 1;
     return;
   }
   // Invalid option arguments: commander already printed the error message —

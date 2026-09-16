@@ -12,7 +12,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
 | `afk loop` | 连续执行、QA 与合并 |
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
-| `afk signal`、`afk tmux`、`afk board`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
+| `afk`（TUI）、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
 
 已移除的命令组没有别名。provider 的元数据标签属于 adapter 内部实现，
 不是 CLI 契约。

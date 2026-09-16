@@ -89,41 +89,30 @@ Run `/afk-grill-me` in Claude Code to confirm skills are loaded.
 ## CLI Commands
 
 ```bash
-# Issue Management
-afk issue get <id>
-afk issue list --label "stage::ready-for-implement"
-afk issue create "Title" --label "feature"
-afk issue edit <id> --label "bug"
-afk issue comment <id> "message"
-afk issue link <src> <project>:<iid>     # cross-project link
-afk issue run <iid> --project <repo>      # cross-project workflow
+# Backlog Management
+afk backlog show --id <id>
+afk backlog list --state ready --mode afk
+afk backlog create "Title" --description-file ./description.md --tag feature
+afk backlog tag add --id <id> --tag bug
+afk backlog tag remove --id <id> --tag bug
 
-# MR/PR Operations
-afk mr create "feat: add login" --source feat/login --target main
-afk mr merge <id> --delete-source-branch
-afk mr approve <id>
-afk mr close <id>
-afk mr reopen <id>
-
-# Workflow & Automation
-afk board                             # Interactive TUI panel
-afk kanban                            # Kanban board
-afk workflow run --iid <id>           # Issue → MR pipeline
-afk loop start                        # Continuous integration loop
-afk scheduler start --max-concurrent 3 # Background scheduler
-afk qa run                            # QA verification
+# Execution & Automation
+afk                                  # Interactive TUI panel
+afk kanban                           # Kanban board
+afk run --backlog-id <id>            # Execute one Backlog item
+afk run --backlog-id <id> --project <repo>
+afk qa --backlog-id <id>             # Standalone QA
+afk loop start --daemon --max-concurrent 3
 
 # Infrastructure
-afk worktree create <iid>             # Git worktree management
-afk tmux create-session               # Tmux session management
-afk isolate up                        # DB service isolation
+afk tmux create-session --name <name> --dir <path>
+afk isolate up
 
-# Debug & Escalation
-afk debug reproduce <cmd>             # Debug loop
-afk escalate create "title"           # File GitLab issue
+# Debug
+afk debug reproduce <cmd>
 
 # Signal Management
-afk signal goal-complete               # Workflow signal communication
+afk signal goal-complete --summary "<summary>"
 ```
 
 Full command reference: `afk --help`

@@ -4,6 +4,7 @@ import type { BacklogExecutionMode, BacklogState } from './index';
 export const BACKLOG_METADATA = {
   stateLabels: {
     ready: 'stage::ready-for-issues',
+    rework: 'stage::rework',
     in_progress: 'stage::afk-in-progress',
     verification: 'stage::qa',
     merge_ready: 'stage::merge-ready',

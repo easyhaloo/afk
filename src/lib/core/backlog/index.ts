@@ -1,4 +1,4 @@
-export type BacklogState = 'ready' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
+export type BacklogState = 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
 export type BacklogExecutionMode = 'afk' | 'hitl';
 import { randomUUID } from 'node:crypto';
 export type { BacklogClaim, ClaimLease } from './claim';

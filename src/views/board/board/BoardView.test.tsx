@@ -46,6 +46,15 @@ describe('BoardView', () => {
     expect(output).toContain('parent 10 · depends 1');
   });
 
+  it('shows backlog state separately from a missing runtime', () => {
+    const output = renderToString(
+      <BacklogRow backlog={{ ...backlog, state: 'blocked' }} selected width={120} />,
+    );
+
+    expect(output).toContain('[blocked]');
+    expect(output).toContain('[no-runtime]');
+  });
+
   it('keeps a project title visible when its branch is very long', () => {
     const output = renderToString(
       <ProjectListView

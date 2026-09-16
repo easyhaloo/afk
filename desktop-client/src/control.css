@@ -854,7 +854,6 @@
 .workflow-studio-inspector .workflow-field > span,
 .workflow-studio-inspector .workflow-readonly > span { color: #7c7f78; font-size: 8px; font-weight: 550; }
 .workflow-studio-inspector .workflow-field input,
-.workflow-studio-inspector .workflow-field select,
 .workflow-studio-inspector .workflow-field textarea {
   width: 100%;
   border: 1px solid #dfe0da;
@@ -866,18 +865,30 @@
   font-size: 9px;
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
-.workflow-studio-inspector .workflow-field input,
-.workflow-studio-inspector .workflow-field select { min-height: 32px; padding: 0 9px; }
-.workflow-studio-inspector .workflow-field select { cursor: pointer; }
+.workflow-studio-inspector .workflow-field input { min-height: 32px; padding: 0 9px; }
+.workflow-studio-inspector .workflow-field .select-menu { width: 100%; min-width: 0; }
+.workflow-studio-inspector .workflow-field .select-menu-trigger {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 9px;
+  border-color: #dfe0da;
+  background: #fff;
+  color: #30332f;
+  font-family: var(--afk-font);
+  font-size: 9px;
+}
+.workflow-studio-inspector .workflow-field .select-menu-trigger:hover,
+.workflow-studio-inspector .workflow-field .select-menu-trigger.open,
+.workflow-studio-inspector .workflow-field .select-menu-trigger:focus-visible {
+  border-color: #7180a5;
+  box-shadow: 0 0 0 3px rgba(112, 128, 165, .14);
+}
 .workflow-studio-inspector .workflow-field textarea { min-height: 78px; padding: 8px 9px; line-height: 1.45; resize: vertical; }
 .workflow-studio-inspector .workflow-field input:hover,
-.workflow-studio-inspector .workflow-field select:hover,
 .workflow-studio-inspector .workflow-field textarea:hover { border-color: #c8cbc3; }
 .workflow-studio-inspector .workflow-field input:focus,
-.workflow-studio-inspector .workflow-field select:focus,
 .workflow-studio-inspector .workflow-field textarea:focus { border-color: #7180a5; box-shadow: 0 0 0 3px rgba(112, 128, 165, .14); }
 .workflow-studio-inspector .workflow-field input:disabled,
-.workflow-studio-inspector .workflow-field select:disabled,
 .workflow-studio-inspector .workflow-field textarea:disabled { cursor: not-allowed; background: #f4f4f1; color: #9b9d96; }
 .workflow-studio-inspector .workflow-readonly { min-height: 34px; padding: 6px 0; }
 .workflow-studio-inspector footer { gap: 6px; padding: 10px 12px; background: #fafaf8; }
@@ -924,11 +935,13 @@
 :root[data-afk-theme="graphite"] .workflow-inspector-collapse { color: #adb0a7; }
 :root[data-afk-theme="graphite"] .workflow-inspector-collapse:hover { border-color: #4a4e48; background: #30332f; color: #e4e6df; }
 :root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field input,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field select,
 :root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field textarea { border-color: #464a44; background: #20221f; color: #e6e8e1; }
+:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-trigger { border-color: #464a44; background: #20221f; color: #e6e8e1; }
 :root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field input:hover,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field select:hover,
 :root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field textarea:hover { border-color: #656b63; }
+:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-trigger:hover,
+:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-trigger.open,
+:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-trigger:focus-visible { border-color: #656b63; box-shadow: 0 0 0 3px rgba(101, 107, 99, .2); }
 :root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-reset { border-color: #464a44; background: #282a27; color: #b9bcb3; }
 :root[data-afk-theme="graphite"] .workflow-inspector-trigger { border-color: #464a44; background: rgba(36, 38, 36, .96); color: #d9ddd3; }
 @media (max-width: 720px) { .workflow-editor-stage .workflow-studio-inspector { top: 10px; right: 10px; bottom: 10px; width: min(304px, calc(100% - 20px)); } .workflow-inspector-trigger { top: 10px; right: 10px; } }

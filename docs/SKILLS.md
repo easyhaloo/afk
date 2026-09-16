@@ -220,7 +220,7 @@ Load different documents based on task type:
 2. **Execute Research** — HITL mode: show findings, ask to continue/pivot. AFK mode: read, commit progress
 3. **Synthesize Summary** — Write RESEARCH.md: background, findings, impact, open questions
 4. **User Review** — Confirm findings meet requirements
-5. **Save Document** — Write to disk, optionally post to issue (stage::research tag)
+5. **Save Document** — Write to disk, optionally attach the result to the provider Backlog item
 
 **Design Decisions:**
 
@@ -252,7 +252,7 @@ Load different documents based on task type:
 **Purpose:** Independently verify autonomous build output, check AC, decide whether to merge to prd/<N>
 
 **Triggering Scenarios:**
-- MR/PR marked as `stage::qa`
+- Backlog state is `verification`
 - Target branch is `prd/<N>` (not main)
 - Associated issue contains machine-checkable AC
 
@@ -287,7 +287,7 @@ afk/issue-<iid> ──→ prd/<N> ──→ main
 **Merge Order Gate:**
 MR/PR description contains `## Merge Order` listing all `blocked_by` issues:
 - All blockers merged → Continue
-- Any blocker unmerged → Don't merge, stay in stage::qa
+- Any blocker unresolved → Don't merge, keep the Backlog item in `verification` or `blocked`
 
 **Flaky Check Handling:**
 - Retry with no code changes but still fails → Mark as flaky, continue (can't silently retry to green)
@@ -314,7 +314,7 @@ MR/PR description contains `## Merge Order` listing all `blocked_by` issues:
 1. **Prerequisite Check** — Confirm CONTEXT.md exists (requirements aligned)
 2. **Create Spike Branch** — `git checkout -b spike/<slug>`
 3. **Minimal Implementation** — Only implement the thinnest slice passing all layers, skip edge cases, error handling, tests
-4. **Create Draft MR/PR** — `afk mr create "Spike: ..." --draft`
+4. **Create Draft MR/PR** — Use the configured provider UI/CLI to create a draft change request
 5. **Report Findings** — What works, what surprises, impact on PRD
 6. **User Decision** — When spike has answered open questions
 
@@ -515,7 +515,7 @@ tests/api-workflow/
 1. **Verify Alignment Records** — Optional: read code to verify bounded contexts and architecture decisions
 2. **Draft PRD** — Use `references/prd-template.md` template, includes: Problem Statement, Users & Jobs, Bounded Contexts, User Stories, Key Decisions, Open Risks, Non-Goals
 3. **Gate Confirmation** — User approves before publishing
-4. **Publish** — Create issue with `stage::prd` tag
+4. **Publish** — Create a Backlog item with the PRD link and relevant business tags
 
 **Design Decisions:**
 
@@ -544,12 +544,12 @@ tests/api-workflow/
 **Workflow:**
 1. **Select Mode** — PRD Mode (has PRD) or Direct Mode (free text)
 2. **Read Code Infer Verification Method** — Infer `evidence_type` for each acceptance criteria (test/curl/log/manual)
-3. **Slice** — Split requirements into independent issues using vertical/horizontal strategy
+3. **Slice** — Split requirements into independent Backlog items using vertical/horizontal strategy
 4. **Isolation Analysis** — Determine if `need::isolate` needed (database changes, middleware config, etc.)
-5. **Draft** — Fill all issue template fields
+5. **Draft** — Fill all Backlog manifest fields
 6. **Self-check** — Run each `check_command` in sandbox, confirm non-zero exit
 7. **Gate** — Present all drafts + DAG + labeling scheme, wait for approval
-8. **Create** — After approval, use `afk issue create` to create, use `afk issue link` to establish DAG
+8. **Handoff** — After approval, emit the provider-neutral manifest; the external Backlog system resolves IDs and relationships
 
 **Design Decisions:**
 
@@ -562,7 +562,7 @@ tests/api-workflow/
 
 **Collaboration with Other Skills:**
 - **Prerequisite** ← **afk-to-prd** output (PRD Mode)
-- **Output** → tracker issues → **afk-implement** or **afk-scheduler**
+- **Output** → Provider Backlog items → **afk-implement** or **afk-scheduler**
 
 ---
 
@@ -639,11 +639,11 @@ tests/api-workflow/
 **Purpose:** Background scheduler — Based on `blocked_by` dependency DAG, automatically launches multiple issue implementation sessions in waves
 
 **Triggering Scenarios:**
-- Multiple `mode::afk` issues need execution in dependency order
+- Multiple AFK Backlog items need execution in dependency order
 - Need automatic scheduling and monitoring of background implementation sessions
 
 **Workflow:**
-1. **Build DAG** — Scan all `mode::afk` + `stage::ready-for-issues` issues
+1. **Build DAG** — Read Backlog items with `executionMode: afk`, `state: ready`, and `dependsOn`
 2. **Calculate Waves** — Topological sort: unblocked goes into Wave 1, subsequent waves after blocks clear
 3. **Launch Gate** — Manual mode: show wave plan, confirm before launch; Auto mode: idempotent scan, launch immediately
 4. **Execute Waves** — Poll MR status every 60 seconds, wave proceeds to next after all MRs in wave are merged
@@ -660,7 +660,7 @@ tests/api-workflow/
 - Only launches issues not already launched, no duplicates
 
 **Collaboration with Other Skills:**
-- **Calls** → `afk workflow run` — Launch implementation session for each issue
+- **Calls** → `afk run --backlog-id <id>` — Launch implementation for each Backlog item
 - **Output** → Merged MRs → Human review
 
 ---
@@ -712,7 +712,7 @@ tests/api-workflow/
 - Auto-fix common issues
 
 **Key Principles:**
-- Abstract concepts the LLM already knows, preserve domain-specific vocabulary (`mode::afk`, etc.)
+- Abstract concepts the LLM already knows; preserve canonical vocabulary such as `backlogId`, `dependsOn`, and `executionMode`
 - No formulaic decoration, describe each step in actual workflow shape
 - Use explicit reasoning chains, don't blindly confirm
 
@@ -830,8 +830,8 @@ Built-in best practices, reducing cognitive load:
 ### 5. Cross-platform Compatibility
 Unified commands, auto-adapt to GitLab/GitHub:
 ```bash
-afk mr create "Title"  # Auto-detect platform
-afk issue get 123      # GitLab iid or GitHub number
+afk backlog show --id 123
+afk run --backlog-id 123
 ```
 
 See: [ARCHITECTURE.md](ARCHITECTURE.md) for cross-platform abstraction layer design

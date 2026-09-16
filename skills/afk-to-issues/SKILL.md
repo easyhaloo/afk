@@ -66,6 +66,7 @@ Emit one manifest entry per item with these provider-neutral fields:
 - title: <short imperative title>
   description: <context and intended outcome>
   parentId: <provider backlog id or null>
+  baseBacklogId: <provider backlog id used as the Git base, or null>
   dependsOn: [<provider backlog ids>]
   executionMode: afk | hitl
   tags: [<business tags>]
@@ -76,12 +77,17 @@ Emit one manifest entry per item with these provider-neutral fields:
   outOfScope: [<explicit non-goals>]
 ```
 
-`parentId` and `dependsOn` are references supplied by the external provider;
+`parentId`, `dependsOn`, and `baseBacklogId` are references supplied by the external provider;
 use stable temporary references in a draft and have the provider resolve them
-to IDs. Parents are organizational and are not runnable. Every dependency
+to IDs. Parents are organizational and are not runnable. Dependencies control
+scheduling. Only `baseBacklogId` selects an unmerged Git execution base. Every dependency
 must be complete before an `afk` item can be claimed. The provider assigns
 the canonical ID and initial state; do not invent state labels in this
 manifest.
+
+That canonical ID is later passed unchanged as `afk run --backlog-id <id>`.
+Each execution receives a separate `runId`; never use a run ID as a manifest
+relationship or work-item identity.
 
 ## Steps
 

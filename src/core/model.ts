@@ -2,6 +2,7 @@ export type WorkState =
   | 'ready'
   | 'claimed'
   | 'implementing'
+  | 'rework'
   | 'verifying'
   | 'merge_ready'
   | 'done'

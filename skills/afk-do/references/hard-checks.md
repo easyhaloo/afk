@@ -432,8 +432,8 @@ execution record mentioning "HC-7 violated".
    cd .worktrees/backlog-{backlogId}
    git config --local afk.retry-count
    
-   # Check the provider-neutral backlog execution record (CORRECT)
-   afk backlog show {backlogId} --json | jq -r '.execution.retryCount'
+   # Inspect the canonical Backlog record (runtime retry details are diagnostic data)
+   afk backlog show --id {backlogId} --json | jq -r '.data.id'
    ```
 
 2. **Migrate retry count to the backlog execution record**
@@ -457,8 +457,8 @@ execution record mentioning "HC-7 violated".
    # Recreate worktree
    git worktree add .worktrees/backlog-{backlogId} afk/backlog-{backlogId}
    
-   # Retry count should still be in the provider-neutral execution record
-   afk backlog show {backlogId} --json | jq -r '.execution.retryCount'
+   # The canonical Backlog record should still be available
+   afk backlog show --id {backlogId} --json | jq -r '.data.id'
    ```
 
 4. **Resume AFK**

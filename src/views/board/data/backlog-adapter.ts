@@ -2,6 +2,7 @@ import type {
   BacklogItem,
   BacklogListOptions,
 } from '../../../lib/core/backlog';
+import type { Task } from '../../../types/board';
 
 /**
  * Capability boundary exposed to the TUI. Keep this structural type narrow so
@@ -34,6 +35,10 @@ export interface BacklogViewModel {
   branchName: string;
   providerRef: string;
   webUrl?: string;
+  runId?: string;
+  runStatus?: Task['runStatus'];
+  phase?: Task['phase'];
+  progress?: string;
 }
 
 /** Convert a canonical backlog item into an immutable-enough TUI read model. */

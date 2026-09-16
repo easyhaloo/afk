@@ -1,31 +1,52 @@
 import { Task } from '../../../types/board';
-import { TaskRuntimeManager, type ActiveTaskRuntimeRecord } from '../../../lib/runtime/task-runtime';
+import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecord } from '../../../application/runtime/task-runtime';
+import type { BacklogItem } from '../../../lib/core/backlog';
 import { createGitLabClient } from '../../../lib/client-factory';
 import { detectGitLabProject } from '../../../lib/core/tracker/detect';
 import type { Project, Branch, Tag, Commit } from '../../../lib/core/tracker/types';
 import { fileLogger } from '../../../lib/io';
+import { projectWorkItems } from './work-item-projection';
 
 const runtimeManager = new TaskRuntimeManager();
 
-export async function fetchTasks(manager: TaskRuntimeManager = runtimeManager): Promise<{ active: Task[]; completed: Task[] }> {
-  const data = await manager.listActive();
+export async function fetchTasks(
+  manager: TaskRuntimeManager = runtimeManager,
+  backlogs: readonly Pick<BacklogItem, 'id' | 'title' | 'state' | 'providerRef'>[] = [],
+): Promise<{ active: Task[]; completed: Task[] }> {
+  const [active, archive] = await Promise.all([manager.listActive(), manager.listArchive()]);
+  const projections = projectWorkItems({ backlogs, active, archive, workspace: process.cwd() });
+  const tasks = projections
+    .filter((projection): projection is typeof projection & { runtime: TaskRuntimeRecord | ActiveTaskRuntimeRecord } => projection.runtime !== undefined)
+    .map(projection => toRuntimeTask(projection.runtime, {
+      backlogState: projection.backlogState,
+      runStatus: projection.runStatus,
+      title: projection.backlog?.title,
+    }));
   return {
-    active: data.map(toRuntimeTask),
-    completed: [],
+    active: tasks.filter(task => task.runStatus === 'running' || task.runStatus === 'stale'),
+    completed: tasks.filter(task => task.runStatus !== 'running' && task.runStatus !== 'stale'),
   };
 }
 
 /** Convert the local runtime projection into the narrow TUI task view model. */
-export function toRuntimeTask(runtime: ActiveTaskRuntimeRecord): Task {
+export function toRuntimeTask(
+  runtime: TaskRuntimeRecord | ActiveTaskRuntimeRecord,
+  context: Partial<Pick<Task, 'backlogState' | 'runStatus' | 'title'>> = {},
+): Task {
+  const runStatus = context.runStatus ?? (runtime.status === 'stale' ? 'stale' : runtime.status);
   return {
+    backlogId: runtime.backlogId,
     iid: runtime.backlogId,
     runId: runtime.runId,
-    title: runtime.title ?? `Backlog ${runtime.backlogId}`,
+    title: context.title ?? runtime.title ?? `Backlog ${runtime.backlogId}`,
     phase: runtime.phase,
     executionMode: runtime.executionMode,
     sandboxProvider: runtime.sandboxProvider,
     agentProvider: runtime.agentProvider,
     status: runtime.status === 'stale' ? 'stale' : 'active',
+    backlogState: context.backlogState,
+    runStatus,
+    activities: runtime.activities?.map(activity => ({ ...activity, at: new Date(activity.at) })),
     branch: runtime.branch,
     session: runtime.session,
     progress: runtime.progress,
@@ -35,6 +56,20 @@ export function toRuntimeTask(runtime: ActiveTaskRuntimeRecord): Task {
     diagnosticPath: runtime.diagnosticPath,
     errorSummary: runtime.errorSummary,
   };
+}
+
+export function mergeProjects(projects: Project[]): Project[] {
+  const seen = new Set<string>();
+  return projects.filter(project => {
+    const key = `${(project as Project & { platform?: string }).platform ?? 'unknown'}:${project.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function projectDetailKey(project: Project & { platform?: string }): string {
+  return `${project.platform ?? 'unknown'}:${project.id}`;
 }
 
 /**

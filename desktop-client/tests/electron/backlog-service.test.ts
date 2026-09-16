@@ -35,17 +35,24 @@ describe("backlog service: list", () => {
       stderr: "",
     });
     const service = createBacklogService(deps);
-    const items = await service.list("/workspace", { state: "ready", tag: "billing", platform: "github" });
+    const items = await service.list("/workspace", {
+      state: "ready",
+      executionMode: "hitl",
+      parentId: "epic-7",
+      tag: "billing",
+      platform: "github",
+    });
     expect(items).toEqual([stubItem("1"), stubItem("2")]);
     const argv = execMock.mock.calls[0][1] as string[];
-    expect(argv).toContain("--json");
-    expect(argv).toContain("--state");
-    expect(argv).toContain("ready");
-    expect(argv).toContain("--tag");
-    expect(argv).toContain("billing");
-    expect(argv).toContain("--platform");
-    expect(argv).toContain("github");
-    expect(argv[argv.length - 1]).toBe("--json");
+    expect(argv).toEqual([
+      "backlog", "list",
+      "--state", "ready",
+      "--mode", "hitl",
+      "--parent", "epic-7",
+      "--tag", "billing",
+      "--platform", "github",
+      "--json",
+    ]);
   });
 
   it("parses the JSON failure envelope and throws BacklogServiceError", async () => {
@@ -58,6 +65,19 @@ describe("backlog service: list", () => {
     const service = createBacklogService(deps);
     await expect(service.list("/workspace")).rejects.toBeInstanceOf(BacklogServiceError);
     await expect(service.list("/workspace")).rejects.toMatchObject({ code: "auth" });
+  });
+
+  it.each([
+    { label: "non-object", payload: "[]" },
+    { label: "missing kind", payload: JSON.stringify({ ok: true, data: [] }) },
+    { label: "missing success data", payload: JSON.stringify({ ok: true, kind: "backlog.list" }) },
+    { label: "missing failure error", payload: JSON.stringify({ ok: false, kind: "backlog.list" }) },
+    { label: "missing failure message", payload: JSON.stringify({ ok: false, kind: "backlog.list", error: { code: "provider" } }) },
+  ])("rejects malformed $label envelopes as BacklogServiceError", async ({ payload }) => {
+    const { deps, execMock } = makeDeps();
+    execMock.mockResolvedValueOnce({ ok: true, stdout: payload, stderr: "" });
+    const service = createBacklogService(deps);
+    await expect(service.list("/workspace")).rejects.toMatchObject({ code: "provider" });
   });
 
   it("falls back to 'unknown' when stdout is empty and stderr carries the failure", async () => {
@@ -175,22 +195,38 @@ describe("backlog service: show / create / addTag / removeTag", () => {
     const item = await service.show("/workspace", "42");
     expect(item.id).toBe("42");
     const argv = execMock.mock.calls[0][1] as string[];
-    expect(argv).toContain("show");
-    expect(argv).toContain("--id");
-    expect(argv).toContain("42");
-    expect(argv).toContain("--json");
+    expect(argv).toEqual(["backlog", "show", "--id", "42", "--json"]);
   });
 
-  it("create forwards title + description and parses the new item", async () => {
+  it("create assembles every supported relationship, mode, tag, and platform flag", async () => {
     const { deps, execMock } = makeDeps();
     execMock.mockResolvedValueOnce({ ok: true, stdout: JSON.stringify({ ok: true, kind: "backlog.create", data: stubItem("new") }), stderr: "" });
     const service = createBacklogService(deps);
-    const item = await service.create("/workspace", { title: "fresh", description: "demo", tags: ["billing"] });
+    const item = await service.create("/workspace", {
+      title: "fresh",
+      description: "demo",
+      parentId: "epic-7",
+      baseBacklogId: "base-3",
+      dependsOn: ["dep-1", "dep-2"],
+      executionMode: "hitl",
+      tags: ["billing", "urgent"],
+      platform: "gitlab",
+    });
     expect(item.id).toBe("new");
     const argv = execMock.mock.calls[0][1] as string[];
-    expect(argv[argv.length - 1]).toBe("--json");
-    expect(argv).toContain("--tag");
-    expect(argv).toContain("billing");
+    expect(argv).toEqual([
+      "backlog", "create", "fresh",
+      "--description-file", expect.stringMatching(/afk-backlog-.*\/description\.md$/),
+      "--parent", "epic-7",
+      "--base-backlog", "base-3",
+      "--depends-on", "dep-1",
+      "--depends-on", "dep-2",
+      "--mode", "hitl",
+      "--tag", "billing",
+      "--tag", "urgent",
+      "--platform", "gitlab",
+      "--json",
+    ]);
   });
 
   it("addTag forwards --tag and returns the updated item", async () => {
@@ -200,10 +236,7 @@ describe("backlog service: show / create / addTag / removeTag", () => {
     const item = await service.addTag("/workspace", "1", "x");
     expect(item.tags).toEqual(["x"]);
     const argv = execMock.mock.calls[0][1] as string[];
-    expect(argv).toContain("tag");
-    expect(argv).toContain("add");
-    expect(argv).toContain("--tag");
-    expect(argv).toContain("x");
+    expect(argv).toEqual(["backlog", "tag", "add", "--id", "1", "--tag", "x", "--json"]);
   });
 
   it("removeTag forwards --tag and returns the updated item", async () => {
@@ -213,6 +246,6 @@ describe("backlog service: show / create / addTag / removeTag", () => {
     const item = await service.removeTag("/workspace", "1", "x");
     expect(item.tags).toEqual([]);
     const argv = execMock.mock.calls[0][1] as string[];
-    expect(argv).toContain("remove");
+    expect(argv).toEqual(["backlog", "tag", "remove", "--id", "1", "--tag", "x", "--json"]);
   });
 });

@@ -392,11 +392,11 @@ export class WorkflowRunner {
     this.sandboxProviderName = options.sandboxProvider ?? 'local';
     this.agentProviderName = options.agentProvider ?? 'claude-code';
     this.executionMode = options.executionMode ?? 'batch';
+    this.repoRoot = options.repoRoot ?? process.cwd();
     await this.startRuntime(options.backlogId, session);
     try {
     // Bind all git/worktree operations to the explicit project root. This
     // deliberately avoids process.chdir(), which is process-global state.
-    this.repoRoot = options.repoRoot ?? process.cwd();
     this.systemActionsRan = false;
     this.primaryHandle = undefined;
     this.acFeedback = undefined;
@@ -1189,6 +1189,8 @@ export class WorkflowRunner {
       await this.runtimeManager.start({
         runId: this.runtimeRunId,
         backlogId,
+        workspace: this.repoRoot,
+        providerRef: this.activeBacklog?.providerRef,
         title: this.activeBacklog?.title,
         phase: 'implementing',
         status: 'running',

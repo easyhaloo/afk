@@ -24,6 +24,24 @@ describe("backlog execution service", () => {
     ]);
   });
 
+  it("allows a rework backlog to start a new execution attempt", async () => {
+    const values = new Map<string, BacklogRunSummary[]>();
+    const store = {
+      load: vi.fn(async (workspace: string) => values.get(workspace) ?? []),
+      save: vi.fn(async (workspace: string, runs: BacklogRunSummary[]) => { values.set(workspace, runs); }),
+    };
+    const child = { pid: 1234, once: vi.fn(), unref: vi.fn() };
+    const service = createBacklogExecutionService({
+      resolveAfk: async () => "/usr/local/bin/afk",
+      resolveWorkspace: value => value,
+      getBacklog: async () => ({ id: "42", title: "返工项", dependsOn: [], state: "rework", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" }),
+      store,
+      spawn: vi.fn(() => child),
+    });
+
+    await expect(service.start("/repo", { backlogId: "42" })).resolves.toMatchObject({ backlogId: "42", status: "running" });
+  });
+
   it("starts one run and returns a desktop run handle", async () => {
     const child = {
       pid: process.pid,
@@ -70,7 +88,21 @@ describe("backlog execution service", () => {
       spawn,
     });
 
-    await expect(service.start("/repo", { backlogId: "42" })).rejects.toThrow("只有 ready 项可以启动");
+    await expect(service.start("/repo", { backlogId: "42" })).rejects.toThrow("只有 ready/rework 项可以启动");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("rejects HITL items even when their lifecycle state is ready", async () => {
+    const spawn = vi.fn();
+    const service = createBacklogExecutionService({
+      resolveAfk: async () => "/usr/local/bin/afk",
+      resolveWorkspace: (workspace) => workspace,
+      getBacklog: async () => ({ id: "42", title: "人工项", dependsOn: [], state: "ready", executionMode: "hitl", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" }),
+      store: createMemoryStore(),
+      spawn,
+    });
+
+    await expect(service.start("/repo", { backlogId: "42" })).rejects.toThrow("只有 AFK 自动项可以启动");
     expect(spawn).not.toHaveBeenCalled();
   });
 });

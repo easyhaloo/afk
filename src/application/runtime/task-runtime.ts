@@ -20,6 +20,8 @@ export interface TaskRuntimeActivity {
 export interface TaskRuntimeRecord {
   runId: string;
   backlogId: string;
+  workspace?: string;
+  providerRef?: string;
   title?: string;
   phase: TaskRuntimePhase;
   status: TaskRuntimeStatus;
@@ -286,6 +288,21 @@ export class TaskRuntimeManager {
       status: now - Date.parse(record.heartbeatAt) > this.staleAfterMs ? 'stale' : 'running',
     }));
   }
+
+  listArchive(): Promise<TaskRuntimeRecord[]> {
+    return this.store.listArchive();
+  }
+
+  async listByBacklogId(backlogId: string, now = Date.now()): Promise<{
+    active: ActiveTaskRuntimeRecord[];
+    archive: TaskRuntimeRecord[];
+  }> {
+    const [active, archive] = await Promise.all([this.listActive(now), this.store.listArchive()]);
+    return {
+      active: active.filter(record => record.backlogId === backlogId),
+      archive: archive.filter(record => record.backlogId === backlogId),
+    };
+  }
 }
 
 function isTaskRuntimeRecord(value: unknown): value is TaskRuntimeRecord {
@@ -302,8 +319,12 @@ function isTaskRuntimeRecord(value: unknown): value is TaskRuntimeRecord {
     && (record.agentAuth === undefined || ['chatgpt', 'api', 'unknown'].includes(record.agentAuth))
     && (record.agentModelProvider === undefined || typeof record.agentModelProvider === 'string')
     && (record.agentThreadId === undefined || typeof record.agentThreadId === 'string')
+    && (record.workspace === undefined || typeof record.workspace === 'string')
+    && (record.providerRef === undefined || typeof record.providerRef === 'string')
     && typeof record.startedAt === 'string'
-    && typeof record.heartbeatAt === 'string';
+    && Number.isFinite(Date.parse(record.startedAt))
+    && typeof record.heartbeatAt === 'string'
+    && Number.isFinite(Date.parse(record.heartbeatAt));
 }
 
 function isTaskRuntimeActivity(value: unknown): value is TaskRuntimeActivity {

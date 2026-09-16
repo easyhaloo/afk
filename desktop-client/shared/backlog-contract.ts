@@ -76,6 +76,26 @@ export type BacklogRunSummary = {
   error?: string;
 };
 
+export type BacklogRuntimeStatus = "running" | "stale" | "completed" | "blocked" | "failed";
+
+export type BacklogRuntimeProjection = {
+  runId: string;
+  status: BacklogRuntimeStatus;
+  phase: "implementing" | "verifying";
+  progress?: string;
+  branch?: string;
+  worktree?: string;
+  diagnosticPath?: string;
+  heartbeatAt: string;
+};
+
+export type BacklogRuntimeSummary = {
+  backlogId: string;
+  backlog: BacklogItem;
+  activeRun?: BacklogRunSummary;
+  runtime?: BacklogRuntimeProjection;
+};
+
 export type BacklogErrorCode =
   | "auth"
   | "not_found"
@@ -181,6 +201,70 @@ export function parseBacklogRunStartInput(input: unknown): BacklogRunStartInput 
     result.template = candidate.template;
   }
   return result;
+}
+
+export function parseBacklogRuntimeSummary(input: unknown): BacklogRuntimeSummary {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog runtime summary must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["backlogId", "backlog", "activeRun", "runtime"], "backlog runtime summary");
+  if (typeof candidate.backlogId !== "string" || !candidate.backlogId) throw new Error("backlog runtime summary: backlogId is required");
+  const backlog = parseBacklogItem(candidate.backlog);
+  if (backlog.id !== candidate.backlogId) throw new Error("backlog runtime summary: backlogId does not match backlog.id");
+  const activeRun = candidate.activeRun === undefined ? undefined : parseBacklogRunSummary(candidate.activeRun);
+  if (activeRun && activeRun.backlogId !== candidate.backlogId) throw new Error("backlog runtime summary: activeRun.backlogId does not match backlogId");
+  return {
+    backlogId: candidate.backlogId,
+    backlog,
+    ...(activeRun === undefined ? {} : { activeRun }),
+    ...(candidate.runtime === undefined ? {} : { runtime: parseBacklogRuntimeProjection(candidate.runtime) }),
+  };
+}
+
+function parseBacklogItem(input: unknown): BacklogItem {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog runtime summary: backlog is invalid");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["id", "title", "description", "parentId", "baseBacklogId", "dependsOn", "state", "executionMode", "tags", "branchName", "providerRef", "webUrl"], "backlog item");
+  if (typeof candidate.id !== "string" || typeof candidate.title !== "string" || typeof candidate.branchName !== "string" || typeof candidate.providerRef !== "string" || !isBacklogState(candidate.state) || !isBacklogExecutionMode(candidate.executionMode)) throw new Error("backlog item has invalid identity or enum fields");
+  if (!Array.isArray(candidate.dependsOn) || candidate.dependsOn.some(value => typeof value !== "string")) throw new Error("backlog item: dependsOn is invalid");
+  if (!Array.isArray(candidate.tags) || candidate.tags.some(value => typeof value !== "string")) throw new Error("backlog item: tags is invalid");
+  for (const key of ["description", "parentId", "baseBacklogId", "branchName", "providerRef", "webUrl"] as const) {
+    if (candidate[key] !== undefined && typeof candidate[key] !== "string") throw new Error(`backlog item: ${key} is invalid`);
+  }
+  return candidate as unknown as BacklogItem;
+}
+
+function parseBacklogRunSummary(input: unknown): BacklogRunSummary {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog runtime summary: activeRun is invalid");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["id", "backlogId", "status", "startedAt", "template", "pid", "error"], "backlog run summary");
+  if (typeof candidate.id !== "string" || typeof candidate.backlogId !== "string" || typeof candidate.startedAt !== "string") throw new Error("backlog run summary has invalid identity fields");
+  if (!["starting", "running", "completed", "failed"].includes(candidate.status as string)) throw new Error("backlog run summary has invalid status");
+  if (candidate.template !== undefined && typeof candidate.template !== "string") throw new Error("backlog run summary: template is invalid");
+  if (candidate.pid !== undefined && typeof candidate.pid !== "number") throw new Error("backlog run summary: pid is invalid");
+  if (candidate.error !== undefined && typeof candidate.error !== "string") throw new Error("backlog run summary: error is invalid");
+  return candidate as unknown as BacklogRunSummary;
+}
+
+function parseBacklogRuntimeProjection(input: unknown): BacklogRuntimeProjection {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog runtime summary: runtime is invalid");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["runId", "status", "phase", "progress", "branch", "worktree", "diagnosticPath", "heartbeatAt"], "runtime projection");
+  if (typeof candidate.runId !== "string" || typeof candidate.heartbeatAt !== "string") throw new Error("runtime projection has invalid identity fields");
+  if (!["running", "stale", "completed", "blocked", "failed"].includes(candidate.status as string)) throw new Error("runtime projection has invalid status");
+  if (candidate.phase !== "implementing" && candidate.phase !== "verifying") throw new Error("runtime projection has invalid phase");
+  for (const key of ["progress", "branch", "worktree", "diagnosticPath"] as const) {
+    if (candidate[key] !== undefined && typeof candidate[key] !== "string") throw new Error(`runtime projection: ${key} is invalid`);
+  }
+  return candidate as unknown as BacklogRuntimeProjection;
+}
+
+function isBacklogExecutionMode(value: unknown): value is BacklogExecutionMode {
+  return typeof value === "string" && (BACKLOG_EXECUTION_MODES as readonly string[]).includes(value);
+}
+
+function assertExactKeys(candidate: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  const allowedSet = new Set(allowed);
+  for (const key of Object.keys(candidate)) if (!allowedSet.has(key)) throw new Error(`${label} has unknown field: ${key}`);
 }
 
 export function parseBacklogPlatform(value: unknown): BacklogPlatform | undefined {

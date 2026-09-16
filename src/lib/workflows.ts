@@ -1071,6 +1071,8 @@ export class WorkflowRunner {
       await this.runtimeManager.start({
         runId: this.runtimeRunId,
         backlogId,
+        workspace: this.repoRoot,
+        providerRef: this.activeBacklog?.providerRef,
         title: this.activeBacklog?.title,
         phase: 'implementing',
         status: 'running',

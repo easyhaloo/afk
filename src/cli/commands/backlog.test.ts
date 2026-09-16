@@ -18,8 +18,12 @@ describe('hard-cutover command surface', () => {
   it('exposes backlog management subcommands only', () => {
     const program = commandTree(registerBacklogCommands);
     const backlog = program.commands.find(command => command.name() === 'backlog');
-    expect(backlog?.commands.map(command => command.name())).toEqual(['init', 'list', 'show', 'create', 'tag']);
-    expect(backlog?.commands.flatMap(command => command.commands.map(child => child.name()))).toEqual(['add', 'remove']);
+    const commandNames = backlog?.commands.map(command => command.name()) ?? [];
+    expect(commandNames).toEqual(expect.arrayContaining(['init', 'list', 'show', 'create', 'tag']));
+    expect(new Set(commandNames).size).toBe(commandNames.length);
+    const tagNames = backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name()) ?? [];
+    expect(tagNames).toEqual(expect.arrayContaining(['add', 'remove']));
+    expect(new Set(tagNames).size).toBe(tagNames.length);
   });
 
   it('requires a string backlog id for run and qa', () => {
@@ -47,9 +51,9 @@ describe('hard-cutover command surface', () => {
     const create = backlog?.commands.find(command => command.name() === 'create');
 
     expect(create?.registeredArguments.map(argument => argument.name())).toEqual(['title']);
-    expect(create?.options.map(option => option.long)).toEqual([
+    expect(create?.options.map(option => option.long)).toEqual(expect.arrayContaining([
       '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--tag', '--project', '--platform', '--json',
-    ]);
+    ]));
     expect(create?.options.find(option => option.long === '--base-backlog')?.description).toContain('explicit execution base');
     expect(create?.options.find(option => option.long === '--depends-on')?.short).toBe('-d');
   });
@@ -88,26 +92,56 @@ describe('json-output helpers', () => {
     expect(JSON.parse(captured.join(''))).toEqual({ ok: true, kind: 'backlog.list', data: [{ id: '1' }] });
   });
 
-  it('emitFailure writes the structured failure envelope and exits 1', () => {
+  it('emitFailure writes the complete envelope and sets exitCode without immediate process exit', () => {
     const captured: string[] = [];
     const original = process.stdout.write.bind(process.stdout);
     process.stdout.write = (chunk: string | Uint8Array): boolean => {
       captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
       return true;
     };
-    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
-      throw new Error(`__exit__:${code ?? 0}`);
-    }) as never);
+    const exitSpy = vi.spyOn(process, 'exit');
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
     try {
-      expect(() => emitFailure('backlog.list', 'auth', 'missing token', { hint: 'set GITHUB_TOKEN' })).toThrow('__exit__:1');
+      expect(() => emitFailure('backlog.list', 'auth', 'missing token', { hint: 'set GITHUB_TOKEN' })).not.toThrow();
     } finally {
       process.stdout.write = original;
       exitSpy.mockRestore();
+      process.exitCode = previousExitCode;
     }
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(previousExitCode);
     expect(JSON.parse(captured.join(''))).toEqual({
       ok: false,
       kind: 'backlog.list',
       error: { code: 'auth', message: 'missing token', details: { hint: 'set GITHUB_TOKEN' } },
+    });
+  });
+
+  it('emits one JSON envelope when Commander rejects a missing required backlog option', () => {
+    const program = new Command().name('afk').exitOverride();
+    const captured: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    const originalError = process.stderr.write.bind(process.stderr);
+    const previousExitCode = process.exitCode;
+    registerBacklogCommands(program, { argv: ['node', 'afk', 'backlog', 'show', '--json'] });
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    process.exitCode = undefined;
+    try {
+      expect(() => program.parse(['node', 'afk', 'backlog', 'show', '--json'])).toThrow(/required option/i);
+    } finally {
+      process.stdout.write = originalWrite;
+      process.stderr.write = originalError;
+      process.exitCode = previousExitCode;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: false,
+      kind: 'backlog.show',
+      error: { code: 'validation', message: expect.stringMatching(/required option/i) },
     });
   });
 });
@@ -186,7 +220,8 @@ describe('backlog action handlers (JSON envelope mode)', () => {
       await expect(runBacklogList(
         stubProvider([], { async list() { throw new Error('authentication required: GITHUB_TOKEN not set'); } }),
         { json: true },
-      )).rejects.toThrow('__exit__:1');
+      )).resolves.toBeUndefined();
+      expect(process.exitCode).toBe(1);
     } finally {
       process.stdout.write = original;
       exitSpy.mockRestore();

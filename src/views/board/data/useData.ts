@@ -23,6 +23,7 @@ import {
   type BacklogViewModel,
   type TuiManagementProviderBundle,
 } from './backlog-adapter';
+import type { TaskRuntimeManager } from '../../../application/runtime/task-runtime';
 
 const PER_PAGE = 50;
 const DETAIL_TTL_MS = 60_000;
@@ -32,6 +33,31 @@ export function loadDashboardBacklogs(
   management: TuiManagementProviderBundle,
 ): Promise<BacklogViewModel[]> {
   return loadBacklogViewModels(management);
+}
+
+export async function loadDashboardTasks(
+  backlogs: readonly BacklogViewModel[],
+  manager?: TaskRuntimeManager,
+): Promise<Awaited<ReturnType<typeof fetchTasks>>> {
+  return fetchTasks(manager, backlogs);
+}
+
+export function projectBacklogRuntime(backlogs: BacklogViewModel[], tasks: Task[]): BacklogViewModel[] {
+  const taskByBacklogId = new Map(
+    tasks
+      .filter((task): task is Task & { backlogId: string } => typeof task.backlogId === 'string' && task.backlogId.length > 0)
+      .map(task => [task.backlogId, task]),
+  );
+  return backlogs.map(backlog => {
+    const task = taskByBacklogId.get(backlog.id);
+    return {
+      ...backlog,
+      runId: task?.runId,
+      runStatus: task?.runStatus,
+      phase: task?.phase,
+      progress: task?.progress,
+    };
+  });
 }
 
 /**
@@ -54,9 +80,11 @@ export function useData(
   const projectPage = useRef(1);
   const detailCacheRef = useRef<Map<number, { at: number; data: Awaited<ReturnType<typeof fetchProjectDetail>> }>>(new Map());
   const detailInFlightRef = useRef<Map<number, Promise<Awaited<ReturnType<typeof fetchProjectDetail>>>>>(new Map());
+  const backlogsRef = useRef<BacklogViewModel[]>([]);
+  backlogsRef.current = backlogs;
 
-  const reloadTasks = useCallback(async () => {
-    const data = await fetchTasks();
+  const reloadTasks = useCallback(async (backlogRows = backlogsRef.current) => {
+    const data = await loadDashboardTasks(backlogRows);
     setTasks(data.active);
     return data;
   }, []);
@@ -74,12 +102,20 @@ export function useData(
       const rows = await loadDashboardBacklogs(management);
       setBacklogs(rows);
       writeBacklogList('all', rows, false);
+      try {
+        const data = await reloadTasks(rows);
+        const projectedRows = projectBacklogRuntime(rows, [...data.active, ...data.completed]);
+        setBacklogs(projectedRows);
+        writeBacklogList('all', projectedRows, false);
+      } catch (err) {
+        fileLogger.warn({ err }, 'failed to reproject runtime dashboard data');
+      }
     } catch (err) {
       fileLogger.error({ err }, 'failed to list backlogs');
     } finally {
       setLoading(false);
     }
-  }, [management]);
+  }, [management, reloadTasks]);
 
   useEffect(() => {
     if (currentView !== 'backlogs' && currentView !== 'board') return;

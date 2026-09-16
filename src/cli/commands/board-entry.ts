@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Direct entry point for afk board — renders App without Commander overhead.
- * Run via: node dist/commands/board-entry.js
+ * Run via: node dist/cli/commands/board-entry.js
  */
 import { render } from 'ink';
 import React from 'react';

@@ -20,6 +20,8 @@ function record(overrides: Partial<TaskRuntimeRecord> = {}): TaskRuntimeRecord {
     sandboxProvider: 'local',
     executionMode: 'batch',
     agentProvider: 'claude-code',
+    workspace: '/workspace/org-repo',
+    providerRef: 'github:org/repo#42',
     session: 'afk-42',
     worktree: '/tmp/afk-42',
     branch: 'afk/backlog-42',
@@ -30,6 +32,18 @@ function record(overrides: Partial<TaskRuntimeRecord> = {}): TaskRuntimeRecord {
 }
 
 describe('TaskRuntimeStore', () => {
+  it('drops persisted records with malformed runtime timestamps', async () => {
+    const store = await storeFixture();
+    await store.start(record());
+    const [filename] = await readdir(store.activePath);
+    const path = join(store.activePath, filename!);
+    const persisted = JSON.parse(await readFile(path, 'utf8'));
+    persisted.heartbeatAt = 'not-a-date';
+    await writeFile(path, JSON.stringify(persisted));
+
+    await expect(store.listActive()).resolves.toEqual([]);
+  });
+
   it('preserves the task while filtering malformed persisted activities', async () => {
     const store = await storeFixture();
     await store.start(record());
@@ -175,6 +189,21 @@ describe('TaskRuntimeStore', () => {
 });
 
 describe('TaskRuntimeManager', () => {
+  it('queries active and archived runs by exact backlog ID', async () => {
+    const store = await storeFixture();
+    const manager = new TaskRuntimeManager(store);
+    const older = '2026-08-09T10:00:00.000Z';
+    const newer = '2026-08-09T10:01:00.000Z';
+    await manager.start(record({ runId: 'active-42', backlogId: '42', startedAt: older, heartbeatAt: older }));
+    await manager.start(record({ runId: 'active-420', backlogId: '420', startedAt: newer, heartbeatAt: newer }));
+    await manager.finish('active-42', { status: 'completed' });
+
+    await expect(manager.listByBacklogId('42', Date.parse(newer))).resolves.toEqual({
+      active: [],
+      archive: [expect.objectContaining({ runId: 'active-42', backlogId: '42', status: 'completed' })],
+    });
+  });
+
   it('marks an old heartbeat as stale without dropping the runtime record', async () => {
     const store = await storeFixture();
     const manager = new TaskRuntimeManager(store, { staleAfterMs: 1_000 });

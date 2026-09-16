@@ -1,6 +1,17 @@
+import type { BacklogState } from '../lib/core/backlog';
+import type { TaskRuntimeActivity, TaskRuntimeStatus } from '../application/runtime/task-runtime';
+
+export type TaskActivity = Omit<TaskRuntimeActivity, 'at'> & { at: Date };
+
+export function getTaskBacklogId(task: Pick<Task, 'backlogId'>): string {
+  return task.backlogId || 'unknown';
+}
+
 export interface Task {
-  /** Canonical backlog ID; intentionally not a tracker-specific issue number. */
-  iid: string;
+  /** Canonical identity used to join runtime records to backlog items. */
+  backlogId: string;
+  /** Deprecated compatibility alias for backlogId. */
+  iid?: string;
   runId: string;
   title: string;
   phase: 'implementing' | 'verifying';
@@ -10,6 +21,9 @@ export interface Task {
   branch?: string;
   session?: string;
   status: 'active' | 'stale';
+  backlogState?: BacklogState;
+  runStatus?: TaskRuntimeStatus | 'stale';
+  activities?: TaskActivity[];
   progress?: string;
   startedAt?: Date;
   heartbeatAt?: Date;

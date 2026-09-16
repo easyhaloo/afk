@@ -41,6 +41,7 @@ const IPC_CHANNELS = {
   backlogRuns: "afk:backlog-runs",
   backlogTagAdd: "afk:backlog-tag-add",
   backlogTagRemove: "afk:backlog-tag-remove",
+  backlogSummary: "afk:backlog-summary",
 } as const;
 
 const api: DesktopApi = {
@@ -94,6 +95,7 @@ const api: DesktopApi = {
     runs: (workspace, backlogId) => backlogId === undefined
       ? ipcRenderer.invoke(IPC_CHANNELS.backlogRuns, workspace)
       : ipcRenderer.invoke(IPC_CHANNELS.backlogRuns, workspace, backlogId),
+    summary: (workspace, backlogId) => ipcRenderer.invoke(IPC_CHANNELS.backlogSummary, workspace, backlogId),
     addTag: (workspace, id, tag) => ipcRenderer.invoke(IPC_CHANNELS.backlogTagAdd, workspace, id, tag),
     removeTag: (workspace, id, tag) => ipcRenderer.invoke(IPC_CHANNELS.backlogTagRemove, workspace, id, tag),
   },

@@ -16,6 +16,7 @@ import { readAppearance, saveAppearance } from "../services/appearance-service";
 import { createBacklogService } from "../services/backlog-service";
 import { createBacklogExecutionService } from "../services/backlog-execution-service";
 import { createBacklogRunStore } from "../services/backlog-run-store";
+import { createBacklogRuntimeService } from "../services/backlog-runtime-service";
 import { createClipboardService } from "../services/clipboard-service";
 import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
@@ -83,6 +84,11 @@ const backlogExecutionService = createBacklogExecutionService({
   resolveWorkspace,
   getBacklog: (workspace, id) => backlogService.show(workspace, id),
   store: createBacklogRunStore({ resolveWorkspace }),
+});
+const backlogRuntimeService = createBacklogRuntimeService({
+  resolveWorkspace,
+  getBacklog: (workspace, id) => backlogService.show(workspace, id),
+  runStore: createBacklogRunStore({ resolveWorkspace }),
 });
 const workflowGraphService = new WorkflowGraphService();
 
@@ -226,6 +232,12 @@ export function registerIpcHandlers() {
     if (typeof workspace !== "string") throw new Error("backlog.runs: workspace 必须是字符串");
     if (backlogId !== undefined && (typeof backlogId !== "string" || !backlogId)) throw new Error("backlog.runs: backlogId 必须是字符串");
     return backlogExecutionService.list(workspace, backlogId as string | undefined);
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogSummary, (event, workspace: unknown, backlogId: unknown) => {
+    assertTrustedSender(event);
+    if (typeof workspace !== "string") throw new Error("backlog.summary: workspace 必须是字符串");
+    if (typeof backlogId !== "string" || !backlogId) throw new Error("backlog.summary: backlogId 必须是字符串");
+    return backlogRuntimeService.summary(workspace, backlogId);
   });
   ipcMain.handle(IPC_CHANNELS.backlogTagAdd, (event, workspace: unknown, id: unknown, tag: unknown) => {
     assertTrustedSender(event);

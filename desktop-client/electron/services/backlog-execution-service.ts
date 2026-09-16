@@ -35,7 +35,8 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
 
   async function start(workspace: string, input: BacklogRunStartInput): Promise<BacklogRunSummary> {
     const backlog = await deps.getBacklog(workspace, input.backlogId);
-    if (backlog.state !== "ready") throw new Error(`Backlog ${input.backlogId} 当前状态为 ${backlog.state}，只有 ready 项可以启动`);
+    if (backlog.state !== "ready" && backlog.state !== "rework") throw new Error(`Backlog ${input.backlogId} 当前状态为 ${backlog.state}，只有 ready/rework 项可以启动`);
+    if (backlog.executionMode !== "afk") throw new Error(`Backlog ${input.backlogId} 当前模式为 ${backlog.executionMode}，只有 AFK 自动项可以启动`);
     const existing = (await list(workspace, input.backlogId)).find((run) => run.status === "running");
     if (existing) return existing;
     const afkPath = await deps.resolveAfk();

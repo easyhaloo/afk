@@ -12,6 +12,7 @@ export interface LoopStartOptions extends AgentRuntimeCommandOptions {
   extParam?: string[];
   agent?: string;
   backlogId?: string[];
+  template?: string;
 }
 
 interface LoopOptionDefinition {
@@ -29,6 +30,7 @@ export const LOOP_START_OPTIONS: readonly LoopOptionDefinition[] = [
   { flags: '-t, --shutdown-timeout <seconds>', description: 'Max wait for in-flight on SIGTERM', numeric: true },
   { flags: '-m, --max-iterations <n>', description: 'Stop after N successful completions (testing)', numeric: true },
   { flags: '--backlog-id <id>', description: 'Restrict execution to one or more backlog IDs (repeatable)', repeatable: true },
+  { flags: '--template <name>', description: 'Workflow template name' },
   { flags: '--ext <modules...>', description: 'Lifecycle modules to activate (e.g., isolate)' },
   { flags: '--ext-param <params...>', description: 'Module parameters (e.g., isolate.auto=true)' },
   { flags: '--agent <name>', description: 'Agent provider' },

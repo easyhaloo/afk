@@ -1,10 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
-import { registerBacklogCommands, runBacklogList, runBacklogShow, runBacklogCreate, runBacklogTagAdd, runBacklogTagRemove } from './backlog';
+import {
+  registerBacklogCommands,
+  runBacklogConfirmMerge,
+  runBacklogCreate,
+  runBacklogInterrupt,
+  runBacklogList,
+  runBacklogRetry,
+  runBacklogShow,
+  runBacklogTagAdd,
+  runBacklogTagRemove,
+} from './backlog';
 import { registerRunCommands } from './run';
 import { registerQACommands } from './qa';
 import { registerLoopCommands } from './loop';
-import type { BacklogItem, BacklogManagementProvider } from '../../domain/backlog';
+import type { BacklogItem, QABacklogProvider } from '../../domain/backlog';
 import { emitSuccess, emitFailure } from '../json-output';
 
 function commandTree(register: (program: Command) => void): Command {
@@ -19,7 +29,9 @@ describe('hard-cutover command surface', () => {
     const program = commandTree(registerBacklogCommands);
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const commandNames = backlog?.commands.map(command => command.name()) ?? [];
-    expect(commandNames).toEqual(expect.arrayContaining(['init', 'list', 'show', 'create', 'tag']));
+    expect(commandNames).toEqual(expect.arrayContaining([
+      'init', 'list', 'show', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
+    ]));
     expect(new Set(commandNames).size).toBe(commandNames.length);
     const tagNames = backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name()) ?? [];
     expect(tagNames).toEqual(expect.arrayContaining(['add', 'remove']));
@@ -62,11 +74,18 @@ describe('hard-cutover command surface', () => {
     const program = commandTree(registerBacklogCommands);
     const backlog = program.commands.find(command => command.name() === 'backlog');
     expect(backlog).toBeDefined();
-    for (const name of ['list', 'show', 'init']) {
+    for (const name of ['list', 'show', 'init', 'interrupt', 'retry', 'confirm-merge']) {
       const command = backlog!.commands.find(cmd => cmd.name() === name);
       expect(command?.options.some(option => option.long === '--json'), `${name} --json`).toBe(true);
       expect(command?.options.some(option => option.long === '--platform'), `${name} --platform`).toBe(true);
     }
+    for (const name of ['interrupt', 'retry']) {
+      const command = backlog!.commands.find(cmd => cmd.name() === name);
+      expect(command?.options.some(option => option.long === '--id' && option.required), `${name} --id`).toBe(true);
+      expect(command?.options.some(option => option.long === '--reason' && option.required), `${name} --reason`).toBe(true);
+    }
+    const confirmMerge = backlog!.commands.find(cmd => cmd.name() === 'confirm-merge');
+    expect(confirmMerge?.options.some(option => option.long === '--id' && option.required)).toBe(true);
     const tagAdd = backlog!.commands.find(cmd => cmd.name() === 'tag')!.commands.find(cmd => cmd.name() === 'add');
     const tagRemove = backlog!.commands.find(cmd => cmd.name() === 'tag')!.commands.find(cmd => cmd.name() === 'remove');
     expect(tagAdd?.options.some(option => option.long === '--json')).toBe(true);
@@ -146,7 +165,7 @@ describe('json-output helpers', () => {
   });
 });
 
-function stubProvider(items: BacklogItem[], overrides: Partial<BacklogManagementProvider> = {}): BacklogManagementProvider {
+function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider> = {}): QABacklogProvider {
   return {
     async list() { return items; },
     async get(id: string) {
@@ -177,6 +196,33 @@ function stubProvider(items: BacklogItem[], overrides: Partial<BacklogManagement
       item.tags = item.tags.filter(existing => existing !== tag);
     },
     async initialize() { /* noop */ },
+    async transition(id, state) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.state = state;
+      if (state === 'blocked') item.executionMode = 'hitl';
+    },
+    async setExecutionMode(id, mode) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.executionMode = mode;
+    },
+    async createRework(id, input) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.state = 'rework';
+      item.executionMode = 'afk';
+      return {
+        ...input,
+        version: 1,
+        id: 'r1',
+        attempt: 1,
+        status: 'open',
+        createdAt: '2026-09-17T00:00:00.000Z',
+      };
+    },
+    async getActiveRework() { return undefined; },
+    async resolveRework() { /* noop */ },
     ...overrides,
   };
 }
@@ -303,5 +349,156 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.ok).toBe(true);
     expect(envelope.kind).toBe('backlog.tag.remove');
     expect(envelope.data.tags).not.toContain('urgent');
+  });
+
+  it('runBacklogInterrupt emits the blocked hitl backlog', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogInterrupt(
+        stubProvider([{ ...stubItem, state: 'in_progress', executionMode: 'afk' }]),
+        '42',
+        'operator stop',
+        { json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.interrupt',
+      data: { id: '42', state: 'blocked', executionMode: 'hitl' },
+    });
+  });
+
+  it('runBacklogRetry emits the rework afk backlog', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRetry(
+        stubProvider([{ ...stubItem, state: 'blocked', executionMode: 'hitl' }]),
+        '42',
+        'operator retry',
+        { json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.retry',
+      data: { id: '42', state: 'rework', executionMode: 'afk' },
+    });
+  });
+
+  it('runBacklogConfirmMerge emits the completed root backlog', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const item = { ...stubItem, state: 'merge_ready' as const, executionMode: 'hitl' as const };
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'open', sourceBranch: item.branchName, targetBranch: 'main' }),
+      merge: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: item.branchName, targetBranch: 'main' }),
+    };
+    try {
+      await runBacklogConfirmMerge(stubProvider([item]), changes, '42', 'main', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.confirm-merge',
+      data: { id: '42', state: 'done' },
+    });
+  });
+
+  it('classifies lifecycle domain failures as validation JSON errors', async () => {
+    const cases = [
+      {
+        kind: 'backlog.interrupt',
+        run: () => runBacklogInterrupt(stubProvider([{ ...stubItem, state: 'ready' }]), '42', 'stop', { json: true }),
+      },
+      {
+        kind: 'backlog.retry',
+        run: () => runBacklogRetry(stubProvider([{ ...stubItem, state: 'blocked', executionMode: 'afk' }]), '42', 'retry', { json: true }),
+      },
+      {
+        kind: 'backlog.confirm-merge',
+        run: () => runBacklogConfirmMerge(
+          stubProvider([{ ...stubItem, state: 'merge_ready', executionMode: 'hitl', parentId: '7' }]),
+          { findForBacklog: vi.fn(), merge: vi.fn(), get: vi.fn() },
+          '42',
+          'main',
+          { json: true },
+        ),
+      },
+      {
+        kind: 'backlog.confirm-merge',
+        run: () => runBacklogConfirmMerge(
+          stubProvider([{ ...stubItem, state: 'merge_ready', executionMode: 'hitl' }]),
+          { findForBacklog: vi.fn().mockResolvedValue(null), merge: vi.fn(), get: vi.fn() },
+          '42',
+          'main',
+          { json: true },
+        ),
+      },
+      {
+        kind: 'backlog.confirm-merge',
+        run: () => runBacklogConfirmMerge(
+          stubProvider([{ ...stubItem, state: 'merge_ready', executionMode: 'hitl' }]),
+          { findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'closed', sourceBranch: stubItem.branchName, targetBranch: 'main' }), merge: vi.fn(), get: vi.fn() },
+          '42',
+          'main',
+          { json: true },
+        ),
+      },
+      {
+        kind: 'backlog.confirm-merge',
+        run: () => runBacklogConfirmMerge(
+          stubProvider([{ ...stubItem, state: 'merge_ready', executionMode: 'hitl' }]),
+          {
+            findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'open', sourceBranch: stubItem.branchName, targetBranch: 'main' }),
+            merge: vi.fn(),
+            get: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'open', sourceBranch: stubItem.branchName, targetBranch: 'main' }),
+          },
+          '42',
+          'main',
+          { json: true },
+        ),
+      },
+    ];
+    const original = process.stdout.write.bind(process.stdout);
+    const previousExitCode = process.exitCode;
+    try {
+      for (const testCase of cases) {
+        const captured: string[] = [];
+        process.stdout.write = (chunk: string | Uint8Array): boolean => {
+          captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+          return true;
+        };
+        process.exitCode = undefined;
+        await testCase.run();
+        expect(JSON.parse(captured.join(''))).toMatchObject({
+          ok: false,
+          kind: testCase.kind,
+          error: { code: 'validation' },
+        });
+      }
+    } finally {
+      process.stdout.write = original;
+      process.exitCode = previousExitCode;
+    }
   });
 });

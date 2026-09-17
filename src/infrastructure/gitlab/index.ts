@@ -155,6 +155,7 @@ export class GitLabClient implements TrackerProvider {
 
   async getMR(id: number): Promise<TrackedMR> {
     const mr = await this.client.MergeRequests.show(this.projectId, id) as any;
+    const mergeStatus = mr.detailed_merge_status ?? mr.merge_status;
     return {
       id: mr.iid,
       platform: 'gitlab',
@@ -162,6 +163,11 @@ export class GitLabClient implements TrackerProvider {
       state: mr.state === 'merged' ? 'merged' : mr.state === 'opened' ? 'opened' : 'closed',
       sourceBranch: mr.source_branch,
       targetBranch: mr.target_branch,
+      mergeable: mergeStatus === 'mergeable' || mergeStatus === 'can_be_merged'
+        ? true
+        : typeof mergeStatus === 'string' && !['checking', 'unchecked', 'preparing', 'approvals_syncing'].includes(mergeStatus)
+          ? false
+          : undefined,
       url: mr.web_url,
       projectId: String(this.projectId),
       pipeline: mr.head_pipeline ? { status: mr.head_pipeline.status } : undefined,
@@ -169,13 +175,12 @@ export class GitLabClient implements TrackerProvider {
   }
 
   async listMRs(options: ListMROptions = {}): Promise<TrackedMR[]> {
-    // GitLab MR state doesn't support 'all', filter to 'opened' | 'closed'
-    const state = options.state === 'all' ? 'opened' : (options.state || 'opened');
-    const mrs = await this.client.MergeRequests.all({
-      projectId: this.projectId,
-      state,
-      perPage: options.perPage || 20,
-    }) as any[];
+    const states = options.state === 'all' ? ['opened', 'closed', 'merged'] as const : [options.state || 'opened'] as const;
+    const mrs = (await Promise.all(states.map(state => this.client.MergeRequests.all({
+        projectId: this.projectId,
+        state,
+        perPage: options.perPage || 20,
+      }) as Promise<any[]>))).flat();
     return mrs.map(mr => ({
       id: mr.iid,
       platform: 'gitlab' as const,

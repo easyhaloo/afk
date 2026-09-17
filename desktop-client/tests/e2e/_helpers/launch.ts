@@ -11,7 +11,7 @@
  */
 import { test as base, _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 import path from "node:path";
-import { existsSync, mkdirSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const HERE = __dirname;
@@ -24,6 +24,7 @@ export const FAKE_AFK_STORE = path.join(tmpdir(), "afk-backlog-e2e-store.json");
 // Per-spec scratch HOME so the SSH page sees a deterministic, empty
 // ~/.ssh/config regardless of the developer's real environment.
 export const E2E_HOME = path.join(tmpdir(), "afk-control-e2e-home");
+const E2E_RUN_STORE = path.resolve(HERE, "../../../../.afk/backlog-runs.json");
 
 function resetStore() {
   if (existsSync(FAKE_AFK_STORE)) rmSync(FAKE_AFK_STORE);
@@ -54,6 +55,7 @@ export const test = base.extend<Fixtures>({
   electronApp: async ({}, use) => {
     resetStore();
     await resetHome();
+    const previousRunStore = existsSync(E2E_RUN_STORE) ? readFileSync(E2E_RUN_STORE, "utf8") : null;
     const app = await electron.launch({
       args: [".", `--user-data-dir=${path.join(E2E_HOME, "electron-data")}`],
       env: {
@@ -74,12 +76,18 @@ export const test = base.extend<Fixtures>({
     if (process.env.FAKE_AFK_DEBUG === "1") {
       app.process().stderr?.on("data", (chunk) => process.stderr.write(`[electron stderr] ${chunk}`));
     }
-    await use(app);
-    await app.close();
+    try {
+      await use(app);
+    } finally {
+      await app.close();
+      if (previousRunStore === null) rmSync(E2E_RUN_STORE, { force: true });
+      else writeFileSync(E2E_RUN_STORE, previousRunStore, "utf8");
+    }
   },
   page: async ({ electronApp }, use) => {
     const page = await electronApp.firstWindow();
     await page.waitForLoadState("domcontentloaded");
+    await page.getByRole("button", { name: /\.afk 已发现/ }).waitFor();
     await use(page);
   },
 });

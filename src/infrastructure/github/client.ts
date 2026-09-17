@@ -258,6 +258,7 @@ export class GitHubClient implements TrackerProvider {
       state,
       sourceBranch: data.head.ref,
       targetBranch: data.base.ref,
+      mergeable: data.mergeable ?? undefined,
       url: data.html_url,
       projectId: this.projectId,
     };

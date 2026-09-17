@@ -17,12 +17,15 @@ describe('loop options', () => {
       'isolate',
       '--ext-param',
       'isolate.auto=true',
+      '--template',
+      'custom-workflow',
     ]);
 
     expect(command.opts()).toMatchObject({
       maxConcurrent: 4,
       ext: ['isolate'],
       extParam: ['isolate.auto=true'],
+      template: 'custom-workflow',
     });
   });
 

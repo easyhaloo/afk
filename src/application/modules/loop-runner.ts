@@ -24,6 +24,8 @@ export interface LoopRunnerOptions {
   maxIterations?: number;
   /** Optional exact backlog scope for bounded runs such as real E2E verification. */
   backlogIds?: readonly string[];
+  /** Workflow template passed to each implementation run. */
+  template?: string;
   /** Factory for WorkflowRunner — overridable for tests. */
   workflowRunnerFactory?: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
   /** Factory for QARunner — overridable for tests. */
@@ -75,6 +77,7 @@ interface InternalOptions {
   shutdownTimeoutMs: number;
   maxIterations: number | undefined;
   backlogIds: ReadonlySet<string> | undefined;
+  template: string | undefined;
   workflowRunnerFactory: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
   qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => QARunner;
   pidFilePath: string;
@@ -164,6 +167,7 @@ export class LoopRunner {
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULTS.shutdownTimeoutMs,
       maxIterations: options.maxIterations,
       backlogIds: options.backlogIds ? new Set(options.backlogIds.map(String)) : undefined,
+      template: options.template,
       workflowRunnerFactory: options.workflowRunnerFactory ?? ((p, cfg, runtime) => new WorkflowRunner(p, { config: cfg, agentRuntime: runtime })),
       qaRunnerFactory: options.qaRunnerFactory ?? ((p, cfg, runtime) => new QARunner(p, cfg, { agentRuntime: runtime })),
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
@@ -413,6 +417,7 @@ export class LoopRunner {
         ext: resolvedExt,
         extParams: this.opts.extParams,
         backlogId: String(iid),
+        template: this.opts.template,
         executionMode: 'batch',
         agentProvider: this.opts.agentProvider,
       });

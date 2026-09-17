@@ -38,6 +38,10 @@ const IPC_CHANNELS = {
   backlogShow: "afk:backlog-show",
   backlogCreate: "afk:backlog-create",
   backlogStart: "afk:backlog-start",
+  backlogStop: "afk:backlog-stop",
+  backlogRecover: "afk:backlog-recover",
+  backlogRetry: "afk:backlog-retry",
+  backlogConfirmMerge: "afk:backlog-confirm-merge",
   backlogRuns: "afk:backlog-runs",
   backlogTagAdd: "afk:backlog-tag-add",
   backlogTagRemove: "afk:backlog-tag-remove",
@@ -92,6 +96,10 @@ const api: DesktopApi = {
     show: (workspace, id) => ipcRenderer.invoke(IPC_CHANNELS.backlogShow, workspace, id),
     create: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogCreate, workspace, input),
     start: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogStart, workspace, input),
+    stop: (workspace, backlogId) => ipcRenderer.invoke(IPC_CHANNELS.backlogStop, workspace, backlogId),
+    recover: (workspace, backlogId) => ipcRenderer.invoke(IPC_CHANNELS.backlogRecover, workspace, backlogId),
+    retry: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogRetry, workspace, input),
+    confirmMerge: (workspace, backlogId) => ipcRenderer.invoke(IPC_CHANNELS.backlogConfirmMerge, workspace, backlogId),
     runs: (workspace, backlogId) => backlogId === undefined
       ? ipcRenderer.invoke(IPC_CHANNELS.backlogRuns, workspace)
       : ipcRenderer.invoke(IPC_CHANNELS.backlogRuns, workspace, backlogId),

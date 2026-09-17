@@ -38,7 +38,6 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
     │         ↓
     └──→ /afk-qa ────────→ 验证 & 合并
 
-/afk-pipeline ───────→ 阶段路由（导航到正确 skill）
 /afk-scheduler ──────→ 多 issues 依赖感知调度
 /afk-branch-migrate ─→ 跨分支代码迁移
 /md-to-pdf ──────────→ Markdown 转 PDF
@@ -566,47 +565,7 @@ tests/api-workflow/
 
 ---
 
-### 13. afk-pipeline
-
-**作用：** 阶段路由 — 当用户不确定用哪个 skill 时，根据当前工作阶段推荐合适的 skill
-
-**触发场景：**
-- 用户不确定应该调用哪个 skill
-- 用户询问生命周期概览
-
-**工作流程：**
-1. **识别用户手头有什么** — 想法？文档？issue？MR？
-2. **匹配路由表** — 根据用户当前状态推荐对应 skill
-3. **展示管道图** — 可选展示完整流程视图
-
-**路由表：**
-
-| 用户有... | 推荐调用 |
-|-----------|---------|
-| 想法/功能，未写任何东西 | `/afk-grill-me` |
-| 已有 bounded context/架构文档/代码审计 | `/afk-grill-me-context` |
-| 有技术风险的想法 | `/afk-prototype` |
-| 对齐记录（访谈/草稿/需求） | `/afk-to-prd` |
-| 已批准的 PRD | `/afk-to-issues` |
-| 需要实现的 tracker issue | `/afk-implement <iid>` |
-| 多个 issue 需要编排 | `/afk-scheduler` |
-| 当前会话的特定任务 | `/afk-do "<task>"` |
-| MR 需要验证 | `/afk-qa <mr-url>` |
-| 可重现的失败 | `/afk-diagnose` |
-| 会话状态快照/恢复 | `/afk-hand-off` |
-
-**设计决策：**
-
-**为什么不做自动路由？**
-- 用户意图可能模糊，多个匹配时需要人工判断
-- 避免 skill 被错误调用
-
-**与其他 skills 协作：**
-- **引用所有 skills** — 纯路由，不执行任何 skill
-
----
-
-### 14. afk-branch-migrate
+### 13. afk-branch-migrate
 
 **作用：** 跨分支代码迁移 — 在差异较大的分支间选择性摘取代码
 
@@ -634,7 +593,7 @@ tests/api-workflow/
 
 ---
 
-### 15. afk-scheduler
+### 14. afk-scheduler
 
 **作用：** 后台调度器 — 基于 `blocked_by` 依赖 DAG，自动按波次启动多个 issues 的实现会话
 
@@ -665,7 +624,7 @@ tests/api-workflow/
 
 ---
 
-### 16. md-to-pdf
+### 15. md-to-pdf
 
 **作用：** 将 Markdown 文档（含 Mermaid 图、表格、中英文混排）转换为精美的 A4 PDF
 
@@ -689,7 +648,7 @@ tests/api-workflow/
 
 ---
 
-### 17. afk-skill-craft
+### 16. afk-skill-craft
 
 **作用：** 创建新 SKILL.md、诊断现有 skill 质量问题、或重构对齐 SKILL-GUIDE 标准
 
@@ -722,7 +681,7 @@ tests/api-workflow/
 
 ---
 
-### 18. reasoning-guard
+### 17. reasoning-guard
 
 **作用：** 会话内推理路径看护 — 检测编码 agent 在多轮对话中的推理退化，注入纠正提示
 
@@ -752,7 +711,7 @@ tests/api-workflow/
 
 ---
 
-### 19. reasoning-watchdog
+### 18. reasoning-watchdog
 
 **作用：** 基于 hooks 的自动推理路径看护 — 安装 PostToolUse/PreToolUse/SessionEnd hooks 到 Claude Code，自动检测并拦截推理退化
 
@@ -801,7 +760,6 @@ Claude Code session
 - **afk-to-issues** — 拆解为 issues
 - **afk-implement** — TDD 实现
 - **afk-qa** — 独立验证
-- **afk-pipeline** — 阶段路由
 - **afk-branch-migrate** — 跨分支迁移
 - **afk-scheduler** — 后台调度
 - **md-to-pdf** — 文档转换

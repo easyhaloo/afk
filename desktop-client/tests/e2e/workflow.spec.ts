@@ -114,7 +114,7 @@ test.describe("Workflow studio", () => {
     await trigger.click();
     const menu = page.getByRole("menu", { name: "添加工作流步骤" });
     await expect(menu.getByRole("menuitem", { name: "添加 Agent 步骤" })).toBeVisible();
-    await expect(menu.getByRole("menuitem", { name: "添加 QA 步骤" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "添加审查 Agent" })).toBeVisible();
   });
 
   test("keeps workflow inspector select menus opaque above the following fields", async ({ page }) => {

@@ -66,6 +66,10 @@ export type BacklogRunStartInput = {
   template?: string;
 };
 
+export type BacklogRunRetryInput = BacklogRunStartInput & {
+  reason: string;
+};
+
 export type BacklogRunSummary = {
   id: string;
   backlogId: string;
@@ -194,13 +198,28 @@ export function parseBacklogRunStartInput(input: unknown): BacklogRunStartInput 
   const candidate = input as Record<string, unknown>;
   const keys = Object.keys(candidate);
   if (keys.some((key) => key !== "backlogId" && key !== "template")) throw new Error("backlog run input has unknown fields");
-  if (typeof candidate.backlogId !== "string" || !candidate.backlogId.trim()) throw new Error("backlog run input: backlogId is required");
-  const result: BacklogRunStartInput = { backlogId: candidate.backlogId.trim() };
+  const result: BacklogRunStartInput = { backlogId: parseBacklogId(candidate.backlogId) };
   if (candidate.template !== undefined) {
     if (typeof candidate.template !== "string" || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(candidate.template)) throw new Error("backlog run input: template is invalid");
     result.template = candidate.template;
   }
   return result;
+}
+
+export function parseBacklogRunRetryInput(input: unknown): BacklogRunRetryInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog retry input must be an object");
+  const candidate = input as Record<string, unknown>;
+  if (Object.keys(candidate).some((key) => key !== "backlogId" && key !== "template" && key !== "reason")) throw new Error("backlog retry input has unknown fields");
+  const start = parseBacklogRunStartInput({ backlogId: candidate.backlogId, ...(candidate.template === undefined ? {} : { template: candidate.template }) });
+  if (typeof candidate.reason !== "string" || !candidate.reason.trim() || /[\x00-\x1f\x7f]/.test(candidate.reason) || candidate.reason.length > 1000) throw new Error("backlog retry input: reason is invalid");
+  return { ...start, reason: candidate.reason.trim() };
+}
+
+export function parseBacklogId(input: unknown): string {
+  if (typeof input !== "string") throw new Error("backlogId must be a string");
+  const value = input.trim();
+  if (!value || value.length > 200 || /[\x00-\x1f\x7f]/.test(value)) throw new Error("backlogId is invalid");
+  return value;
 }
 
 export function parseBacklogRuntimeSummary(input: unknown): BacklogRuntimeSummary {

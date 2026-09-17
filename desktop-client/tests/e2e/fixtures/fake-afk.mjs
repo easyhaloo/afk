@@ -5,17 +5,21 @@
  * process spawns this binary via the standard `which afk` lookup, so the
  * BacklogService never sees a difference between this and the real CLI.
  *
- * Subset of the real `afk backlog` surface:
+ * Subset of the real `afk` surface:
+ *   - graph workflow <template> --project <workspace> --format json --validate
+ *   - loop --backlog-id <id> --max-iterations 1 [--template <name>]
  *   - list [--state] [--mode] [--parent] [--tag] [--platform] --json
  *   - show --id <id> [--platform] --json
  *   - create <title> --description-file /dev/stdin [...] --json
+ *   - confirm-merge --id <id> --json
  *   - tag add|remove --id <id> --tag <tag> --json
  *
  * Each command emits a JSON envelope (success or failure) on stdout,
  * matching the real CLI's `--json` protocol. A tiny shared in-memory store
  * persists writes between calls in the same Electron session.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 
 // Verbose tracing for E2E debugging — flip to true to dump every call.
@@ -66,6 +70,7 @@ const SEED_STORE = {
     { id: "3", title: "支付回调", dependsOn: [], state: "done", executionMode: "hitl", tags: [], branchName: "afk/backlog-3", providerRef: "stub:3" },
   ],
   nextId: 4,
+  history: [],
 };
 
 function loadStore() {
@@ -136,7 +141,54 @@ function readDescription() {
 }
 const descriptionText = readDescription();
 
-if (subcommand === "list") {
+if (args[0] === "graph" && args[1] === "workflow") {
+  const template = args[2];
+  const project = flag("--project") ?? process.cwd();
+  const directory = path.join(project, ".afk", "cache", "archify", "workflow", template, "e2e");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(path.join(directory, "graph.json"), JSON.stringify({ nodes: [], edges: [] }), "utf8");
+  writeFileSync(path.join(directory, "receipt.json"), JSON.stringify({ inputHash: "e2e" }), "utf8");
+  process.stdout.write(JSON.stringify({ cache: { directory } }));
+}
+else if (args[0] === "loop") {
+  const id = flag("--backlog-id");
+  const runtimeRoot = path.join(process.env.HOME ?? process.cwd(), ".afk", "runtime", "tasks");
+  const activePath = path.join(runtimeRoot, "active", `e2e-${id}.json`);
+  const archivePath = path.join(runtimeRoot, "archive", `e2e-${id}.json`);
+  const startedAt = new Date().toISOString();
+  const update = (state, executionMode, phase, status) => {
+    const store = loadStore();
+    const item = store.items.find((entry) => entry.id === id);
+    if (!item) fail("loop", "not_found", `no item ${id}`);
+    item.state = state;
+    item.executionMode = executionMode;
+    store.history ??= [];
+    store.history.push({ backlogId: id, state, phase });
+    saveStore(store);
+    mkdirSync(path.dirname(activePath), { recursive: true });
+    mkdirSync(path.dirname(archivePath), { recursive: true });
+    const runtime = {
+      backlogId: id,
+      runId: `e2e-${id}`,
+      status,
+      phase,
+      progress: state,
+      heartbeatAt: new Date().toISOString(),
+      startedAt,
+      workspace: process.cwd(),
+      providerRef: item.providerRef,
+      branch: item.branchName,
+    };
+    writeFileSync(status === "running" ? activePath : archivePath, JSON.stringify(runtime), "utf8");
+    if (status !== "running" && existsSync(activePath)) rmSync(activePath);
+  };
+  update("in_progress", "afk", "implementing", "running");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  update("verification", "afk", "verifying", "running");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  update("merge_ready", "hitl", "verifying", "completed");
+}
+else if (subcommand === "list") {
   if (process.env.FAKE_AFK_FAIL_LIST === "1") {
     fail("backlog.list", "provider", "FAKE_AFK_FAIL_LIST is set");
   }
@@ -181,6 +233,20 @@ else if (subcommand === "create") {
     return newItem;
   });
   ok("backlog.create", item);
+}
+else if (subcommand === "confirm-merge") {
+  const id = flag("--id");
+  const item = mutate((store) => {
+    const target = store.items.find((entry) => entry.id === id);
+    if (!target) return null;
+    target.state = "done";
+    target.executionMode = "hitl";
+    store.history ??= [];
+    store.history.push({ backlogId: id, state: "done" });
+    return target;
+  });
+  if (!item) fail("backlog.confirm-merge", "not_found", `no item ${id}`);
+  else ok("backlog.confirm-merge", item);
 }
 else if (subcommand === "tag") {
   const sub2 = args[args.indexOf("tag") + 1];

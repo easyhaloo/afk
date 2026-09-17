@@ -37,7 +37,7 @@ export class WorkflowGraphService {
     const localCli = path.resolve(request.workspace, 'node_modules', '.bin', 'afk');
     const cli = existsSync(localCli) ? localCli : (process.env.AFK_CLI ?? 'afk');
     try {
-      const args = ['graph', 'workflow', request.templateId, '--project', request.workspace, '--format', format];
+      const args = ['graph', 'workflow', request.templateId, '--project', request.workspace, '--format', format, '--validate'];
       const { stdout } = await run(cli, args, { cwd: request.workspace, timeout: 30_000, maxBuffer: 8_000_000 });
       const payload = JSON.parse(String(stdout)) as { cache?: { directory?: string } };
       const status = await this.status(request.workspace, request.templateId);

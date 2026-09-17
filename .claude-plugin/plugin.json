@@ -1,7 +1,7 @@
 {
   "name": "afk",
   "version": "1.0.9",
-  "description": "AFK CLI skill suite — requirements interview, implementation, research, pipeline, and hand-off workflows for afk-cli projects.",
+  "description": "AFK CLI skill suite — requirements interview, implementation, research, QA, and hand-off workflows for afk-cli projects.",
   "author": {
     "name": "easyhaloo",
     "url": "https://github.com/easyhaloo"

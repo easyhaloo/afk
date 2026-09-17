@@ -79,6 +79,7 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
     shutdownTimeoutMs,
     maxIterations: options.maxIterations,
     backlogIds: options.backlogId,
+    template: options.template,
     ext: options.ext,
     extParams: options.extParam,
     moduleTriggers: loopConfig.moduleTriggers,

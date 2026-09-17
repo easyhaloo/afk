@@ -11,6 +11,7 @@ import {
   parseBacklogListOptions,
   parseBacklogCreateInput,
   parseBacklogPlatform,
+  parseBacklogRunRetryInput,
   parseBacklogRuntimeSummary,
 } from "../../shared/backlog-contract";
 
@@ -60,6 +61,17 @@ describe("Backlog shared contract", () => {
   it("parseBacklogCreateInput rejects empty title and description", () => {
     expect(() => parseBacklogCreateInput({ title: "", description: "x" })).toThrow(/title/i);
     expect(() => parseBacklogCreateInput({ title: "x", description: "" })).toThrow(/description/i);
+  });
+
+  it("strictly parses retry inputs", () => {
+    expect(parseBacklogRunRetryInput({ backlogId: " feature/auth ", reason: " fixed ", template: "feature-delivery" })).toEqual({
+      backlogId: "feature/auth",
+      reason: "fixed",
+      template: "feature-delivery",
+    });
+    expect(() => parseBacklogRunRetryInput({ backlogId: "42", reason: "" })).toThrow(/reason/i);
+    expect(() => parseBacklogRunRetryInput({ backlogId: "42", reason: "fixed", command: "rm -rf /" })).toThrow(/unknown/i);
+    expect(() => parseBacklogRunRetryInput({ backlogId: "42\n--help", reason: "fixed" })).toThrow(/backlogId/i);
   });
 
   it("parseBacklogPlatform only accepts github or gitlab", () => {

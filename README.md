@@ -131,7 +131,6 @@ Full command reference: `afk --help`
 | `/afk-implement` | TDD implementation | Clear implementation target |
 | `/afk-qa` | Independent verification | MR/PR ready to merge |
 | `/afk-diagnose` | Quick fix | Specific, reproducible failure |
-| `/afk-pipeline` | Phase routing | Unsure which skill to use |
 | `/afk-branch-migrate` | Cross-branch migration | Cherry-pick between divergent branches |
 | `/afk-hand-off` | Work handoff | Transfer task to another developer |
 | `/afk-scheduler` | Background scheduling | Multiple issues with dependency-aware execution |

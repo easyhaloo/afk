@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
-import { parseBacklogCreateInput, parseBacklogListOptions, parseBacklogRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
+import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
@@ -31,6 +31,11 @@ import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, val
 
 function validSession(value: string) {
   return /^[A-Za-z0-9_.:-]{1,100}$/.test(value);
+}
+
+function backlogWorkspace(value: unknown, operation: string): string {
+  if (typeof value !== "string" || !value.trim() || !path.isAbsolute(value.trim()) || value.includes("\0")) throw new Error(`${operation}: workspace 必须是绝对路径`);
+  return resolveWorkspace(value.trim());
 }
 
 function broadcast(channel: string, ...args: unknown[]) {
@@ -74,6 +79,13 @@ const backlogService = createBacklogService({
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
   },
 });
+const backlogRunStore = createBacklogRunStore({ resolveWorkspace });
+const backlogRuntimeService = createBacklogRuntimeService({
+  resolveWorkspace,
+  getBacklog: (workspace, id) => backlogService.show(workspace, id),
+  runStore: backlogRunStore,
+});
+const workflowGraphService = new WorkflowGraphService();
 const backlogExecutionService = createBacklogExecutionService({
   resolveAfk: async () => {
     const result = await exec("/usr/bin/which", ["afk"]);
@@ -83,14 +95,15 @@ const backlogExecutionService = createBacklogExecutionService({
   },
   resolveWorkspace,
   getBacklog: (workspace, id) => backlogService.show(workspace, id),
-  store: createBacklogRunStore({ resolveWorkspace }),
+  getSummary: (workspace, id) => backlogRuntimeService.summary(workspace, id),
+  validateTemplate: async (workspace, template) => (await workflowGraphService.generate({ workspace: resolveWorkspace(workspace), templateId: template, format: "json" })).status.state !== "rejected",
+  invalidateBacklogList: backlogService.invalidateListCache,
+  store: backlogRunStore,
+  exec: async (command, args, cwd) => {
+    const result = await exec(command, args, cwd);
+    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
+  },
 });
-const backlogRuntimeService = createBacklogRuntimeService({
-  resolveWorkspace,
-  getBacklog: (workspace, id) => backlogService.show(workspace, id),
-  runStore: createBacklogRunStore({ resolveWorkspace }),
-});
-const workflowGraphService = new WorkflowGraphService();
 
 function fingerprintInput(value: unknown): SshFingerprint {
   if (!value || typeof value !== "object") throw new Error("SSH 指纹参数无效");
@@ -208,49 +221,62 @@ export function registerIpcHandlers() {
 
   ipcMain.handle(IPC_CHANNELS.backlogList, (event, workspace: unknown, options: unknown) => {
     assertTrustedSender(event);
-    if (typeof workspace !== "string") throw new Error("backlog.list: workspace 必须是字符串");
-    return backlogService.list(workspace, parseBacklogListOptions(options));
+    return backlogService.list(backlogWorkspace(workspace, "backlog.list"), parseBacklogListOptions(options));
   });
   ipcMain.handle(IPC_CHANNELS.backlogShow, (event, workspace: unknown, id: unknown) => {
     assertTrustedSender(event);
-    if (typeof workspace !== "string") throw new Error("backlog.show: workspace 必须是字符串");
+    const root = backlogWorkspace(workspace, "backlog.show");
     if (typeof id !== "string" || !id) throw new Error("backlog.show: id 必须是字符串");
-    return backlogService.show(workspace, id);
+    return backlogService.show(root, id);
   });
   ipcMain.handle(IPC_CHANNELS.backlogCreate, (event, workspace: unknown, input: unknown) => {
     assertTrustedSender(event);
-    if (typeof workspace !== "string") throw new Error("backlog.create: workspace 必须是字符串");
-    return backlogService.create(workspace, parseBacklogCreateInput(input));
+    return backlogService.create(backlogWorkspace(workspace, "backlog.create"), parseBacklogCreateInput(input));
   });
   ipcMain.handle(IPC_CHANNELS.backlogStart, (event, workspace: unknown, input: unknown) => {
     assertTrustedSender(event);
-    if (typeof workspace !== "string") throw new Error("backlog.start: workspace 必须是字符串");
-    return backlogExecutionService.start(workspace, parseBacklogRunStartInput(input));
+    return backlogExecutionService.start(backlogWorkspace(workspace, "backlog.start"), parseBacklogRunStartInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogStop, (event, workspace: unknown, backlogId: unknown) => {
+    assertTrustedSender(event);
+    return backlogExecutionService.stop(backlogWorkspace(workspace, "backlog.stop"), parseBacklogId(backlogId));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogRecover, (event, workspace: unknown, backlogId: unknown) => {
+    assertTrustedSender(event);
+    return backlogExecutionService.recover(backlogWorkspace(workspace, "backlog.recover"), parseBacklogId(backlogId));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogRetry, (event, workspace: unknown, input: unknown) => {
+    assertTrustedSender(event);
+    return backlogExecutionService.retry(backlogWorkspace(workspace, "backlog.retry"), parseBacklogRunRetryInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.backlogConfirmMerge, (event, workspace: unknown, backlogId: unknown) => {
+    assertTrustedSender(event);
+    return backlogExecutionService.confirmMerge(backlogWorkspace(workspace, "backlog.confirmMerge"), parseBacklogId(backlogId));
   });
   ipcMain.handle(IPC_CHANNELS.backlogRuns, (event, workspace: unknown, backlogId: unknown) => {
     assertTrustedSender(event);
-    if (typeof workspace !== "string") throw new Error("backlog.runs: workspace 必须是字符串");
+    const root = backlogWorkspace(workspace, "backlog.runs");
     if (backlogId !== undefined && (typeof backlogId !== "string" || !backlogId)) throw new Error("backlog.runs: backlogId 必须是字符串");
-    return backlogExecutionService.list(workspace, backlogId as string | undefined);
+    return backlogExecutionService.list(root, backlogId as string | undefined);
   });
   ipcMain.handle(IPC_CHANNELS.backlogSummary, (event, workspace: unknown, backlogId: unknown) => {
     assertTrustedSender(event);
-    if (typeof workspace !== "string") throw new Error("backlog.summary: workspace 必须是字符串");
+    const root = backlogWorkspace(workspace, "backlog.summary");
     if (typeof backlogId !== "string" || !backlogId) throw new Error("backlog.summary: backlogId 必须是字符串");
-    return backlogRuntimeService.summary(workspace, backlogId);
+    return backlogRuntimeService.summary(root, backlogId);
   });
   ipcMain.handle(IPC_CHANNELS.backlogTagAdd, (event, workspace: unknown, id: unknown, tag: unknown) => {
     assertTrustedSender(event);
-    if (typeof workspace !== "string") throw new Error("backlog.tag.add: workspace 必须是字符串");
+    const root = backlogWorkspace(workspace, "backlog.tag.add");
     if (typeof id !== "string" || !id) throw new Error("backlog.tag.add: id 必须是字符串");
     if (typeof tag !== "string" || !tag) throw new Error("backlog.tag.add: tag 必须是字符串");
-    return backlogService.addTag(workspace, id, tag);
+    return backlogService.addTag(root, id, tag);
   });
   ipcMain.handle(IPC_CHANNELS.backlogTagRemove, (event, workspace: unknown, id: unknown, tag: unknown) => {
     assertTrustedSender(event);
-    if (typeof workspace !== "string") throw new Error("backlog.tag.remove: workspace 必须是字符串");
+    const root = backlogWorkspace(workspace, "backlog.tag.remove");
     if (typeof id !== "string" || !id) throw new Error("backlog.tag.remove: id 必须是字符串");
     if (typeof tag !== "string" || !tag) throw new Error("backlog.tag.remove: tag 必须是字符串");
-    return backlogService.removeTag(workspace, id, tag);
+    return backlogService.removeTag(root, id, tag);
   });
 }

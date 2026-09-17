@@ -5,6 +5,7 @@ export interface ChangeRequest {
   state: 'open' | 'merged' | 'closed';
   sourceBranch: string;
   targetBranch: string;
+  mergeable?: boolean;
   url?: string;
 }
 

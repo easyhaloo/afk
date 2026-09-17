@@ -18,7 +18,6 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | Skill | Trigger | Description |
 |-------|---------|-------------|
 | [afk-implement](./afk-implement/) | `/afk-implement` | Spec → code → verify implementation workflow |
-| [afk-pipeline](./afk-pipeline/) | `/afk-pipeline` | Pipeline orchestration and scheduling |
 | [afk-scheduler](./afk-scheduler/) | `/afk-scheduler` | Task scheduling and queue management |
 | [afk-prototype](./afk-prototype/) | `/afk-prototype` | Prototype development workflow |
 

@@ -38,7 +38,6 @@ User Request
     │         ↓
     └──→ /afk-qa ────────→ Verify & Merge
 
-/afk-pipeline ───────→ Stage Routing (navigate to correct skill)
 /afk-scheduler ──────→ Multi-issue Dependency-aware Scheduling
 /afk-branch-migrate ─→ Cross-branch Code Migration
 /md-to-pdf ──────────→ Markdown to PDF
@@ -566,47 +565,7 @@ tests/api-workflow/
 
 ---
 
-### 13. afk-pipeline
-
-**Purpose:** Stage routing — When user is unsure which skill to use, recommend appropriate skill based on current work stage
-
-**Triggering Scenarios:**
-- User unsure which skill to invoke
-- User asks about lifecycle overview
-
-**Workflow:**
-1. **Identify What User Has** — Idea? Document? Issue? MR?
-2. **Match Routing Table** — Recommend corresponding skill based on user's current state
-3. **Show Pipeline Diagram** — Optional: show complete flow view
-
-**Routing Table:**
-
-| User has... | Recommended Invocation |
-|-----------|---------|
-| Idea/feature, nothing written | `/afk-grill-me` |
-| Existing bounded context/architecture doc/code audit | `/afk-grill-me-context` |
-| Idea with technical risk | `/afk-prototype` |
-| Alignment records (interview/draft/requirements) | `/afk-to-prd` |
-| Approved PRD | `/afk-to-issues` |
-| Tracker issue needing implementation | `/afk-implement <iid>` |
-| Multiple issues needing orchestration | `/afk-scheduler` |
-| Specific task in current session | `/afk-do "<task>"` |
-| MR needing verification | `/afk-qa <mr-url>` |
-| Reproducible failure | `/afk-diagnose` |
-| Session state snapshot/recovery | `/afk-hand-off` |
-
-**Design Decisions:**
-
-**Why not auto-routing?**
-- User intent may be ambiguous, multiple matches need human judgment
-- Avoid skill being called incorrectly
-
-**Collaboration with Other Skills:**
-- **References all skills** — Pure routing, doesn't execute any skill
-
----
-
-### 14. afk-branch-migrate
+### 13. afk-branch-migrate
 
 **Purpose:** Cross-branch code migration — Selectively extract code between branches with significant differences
 
@@ -634,7 +593,7 @@ tests/api-workflow/
 
 ---
 
-### 15. afk-scheduler
+### 14. afk-scheduler
 
 **Purpose:** Background scheduler — Based on `blocked_by` dependency DAG, automatically launches multiple issue implementation sessions in waves
 
@@ -665,7 +624,7 @@ tests/api-workflow/
 
 ---
 
-### 16. md-to-pdf
+### 15. md-to-pdf
 
 **Purpose:** Convert Markdown documents (including Mermaid diagrams, tables, mixed Chinese/English) to beautifully formatted A4 PDF
 
@@ -689,7 +648,7 @@ tests/api-workflow/
 
 ---
 
-### 17. afk-skill-craft
+### 16. afk-skill-craft
 
 **Purpose:** Create new SKILL.md, diagnose existing skill quality issues, or refactor to align with SKILL-GUIDE standards
 
@@ -722,7 +681,7 @@ tests/api-workflow/
 
 ---
 
-### 18. reasoning-guard
+### 17. reasoning-guard
 
 **Purpose:** In-session reasoning path guardian — Detect coding agent reasoning degradation in multi-turn conversations, inject corrective prompts
 
@@ -752,7 +711,7 @@ tests/api-workflow/
 
 ---
 
-### 19. reasoning-watchdog
+### 18. reasoning-watchdog
 
 **Purpose:** Hooks-based automatic reasoning path guardian — Install PostToolUse/PreToolUse/SessionEnd hooks into Claude Code, automatically detect and intercept reasoning degradation
 
@@ -801,7 +760,6 @@ Each skill solves one category of problems, avoiding feature overlap:
 - **afk-to-issues** — Break down into issues
 - **afk-implement** — TDD implementation
 - **afk-qa** — Independent verification
-- **afk-pipeline** — Stage routing
 - **afk-branch-migrate** — Cross-branch migration
 - **afk-scheduler** — Background scheduling
 - **md-to-pdf** — Document conversion

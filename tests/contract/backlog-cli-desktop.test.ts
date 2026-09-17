@@ -50,7 +50,7 @@ function makeDesktopService() {
 
 async function publicCommandTree(): Promise<Command> {
   const program = new Command().name('afk').exitOverride();
-  for (const name of ['backlog', 'run']) {
+  for (const name of ['backlog', 'run', 'loop']) {
     const entry = COMMANDS.find(candidate => candidate.names.includes(name));
     expect(entry).toBeDefined();
     (await entry!.loader())(program);
@@ -178,14 +178,14 @@ describe('Backlog public CLI/Desktop compatibility regression', () => {
     expectDesktopFlagsMatchPublicCommand(desktopArgs[3], addTag);
   });
 
-  it('keeps Desktop run assembly aligned with the public run command', async () => {
+  it('keeps Desktop run assembly aligned with the public scoped loop command', async () => {
     const program = await publicCommandTree();
-    const run = program.commands.find(command => command.name() === 'run');
+    const loop = program.commands.find(command => command.name() === 'loop');
     const args = buildBacklogRunArgs({ backlogId: 'feature/auth', template: 'feature-delivery' });
 
-    expect(args).toEqual(['run', '--backlog-id', 'feature/auth', '--template', 'feature-delivery']);
-    expect(flags(args)).toEqual(['--backlog-id', '--template']);
-    expect(optionNames(run)).toEqual(expect.arrayContaining(flags(args)));
+    expect(args).toEqual(['loop', '--backlog-id', 'feature/auth', '--max-iterations', '1', '--template', 'feature-delivery']);
+    expect(flags(args)).toEqual(['--backlog-id', '--max-iterations', '--template']);
+    expect(optionNames(loop)).toEqual(expect.arrayContaining(flags(args)));
   });
 
   it.each([

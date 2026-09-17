@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
-import { BacklogPage } from "../src/features/backlog/BacklogPage";
+import { BacklogPage, getBacklogPrimaryAction } from "../src/features/backlog/BacklogPage";
+import { workflowNodeDisplayLabel } from "../src/main";
 import {
   readBacklogCache,
   resetBacklogCache,
@@ -55,6 +56,10 @@ type BacklogApi = {
   summary: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
   start: ReturnType<typeof vi.fn>;
+  stop: ReturnType<typeof vi.fn>;
+  recover: ReturnType<typeof vi.fn>;
+  retry: ReturnType<typeof vi.fn>;
+  confirmMerge: ReturnType<typeof vi.fn>;
   runs: ReturnType<typeof vi.fn>;
   openExternal: ReturnType<typeof vi.fn>;
 };
@@ -69,6 +74,10 @@ function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[
     summary: vi.fn(),
     create: vi.fn(),
     start: vi.fn(),
+    stop: vi.fn(),
+    recover: vi.fn(),
+    retry: vi.fn(),
+    confirmMerge: vi.fn(),
     runs: vi.fn(async () => []),
     openExternal: vi.fn(async () => true),
   };
@@ -232,11 +241,13 @@ describe("BacklogPage detail drawer", () => {
     expect(dialog.findAllByProps({ className: "backlog-detail-status-prefix" })).toHaveLength(0);
     expect(dialog.findAllByProps({ className: "backlog-mode-mark is-afk" })).toHaveLength(0);
     expect(dialog.findAllByProps({ className: "backlog-mode-tag is-afk" })).toHaveLength(1);
-    expect(dialog.findAllByProps({ "aria-label": "执行状态" })).toHaveLength(0);
+    expect(dialog.findAllByProps({ "aria-label": "Provider 状态" })).toHaveLength(1);
+    expect(dialog.findAllByProps({ "aria-label": "执行状态" })).toHaveLength(1);
+    expect(dialog.findAllByProps({ "aria-label": "本地进程" })).toHaveLength(1);
     expect(textContent(dialog)).not.toContain("暂无规范化运行记录");
     expect(textContent(dialog)).not.toContain("父工作项");
     expect(textContent(dialog)).not.toContain("执行基线");
-    expect(textContent(dialog)).not.toContain("依赖");
+    expect(textContent(dialog)).toContain("依赖无");
     expect(renderer.root.findByProps({ "aria-label": "在浏览器中打开" })).toBeTruthy();
 
     await act(async () => {
@@ -312,9 +323,9 @@ describe("BacklogPage detail drawer", () => {
 
     const dialog = renderer.root.findByProps({ role: "dialog" });
     expect(dialog.findAllByProps({ "aria-label": "执行状态" })).toHaveLength(1);
-    expect(textContent(dialog)).toContain("实现执行中");
+    expect(textContent(dialog)).toContain("执行状态运行中");
+    expect(textContent(dialog)).toContain("阶段实现");
     expect(textContent(dialog)).toContain("正在执行测试");
-    expect(textContent(dialog)).toContain("Run IDrun-1");
     act(() => { renderer.unmount(); });
   });
 
@@ -339,7 +350,7 @@ describe("BacklogPage detail drawer", () => {
 
     const dialog = renderer.root.findByProps({ role: "dialog" });
     expect(dialog.findAllByProps({ "aria-label": "执行状态" })).toHaveLength(1);
-    expect(textContent(dialog)).toContain("启动进程运行中");
+    expect(textContent(dialog)).toContain("本地进程运行中");
     expect(textContent(dialog)).toContain("PID1234");
     expect(textContent(dialog)).not.toContain("进程状态");
     act(() => { renderer.unmount(); });
@@ -382,6 +393,25 @@ describe("BacklogPage loading states", () => {
 });
 
 describe("BacklogPage execution", () => {
+  it("selects exactly one primary action from provider, runtime, and local process state", () => {
+    const ready = items[0];
+    const activeRun: BacklogRunSummary = { id: "run-1", backlogId: ready.id, status: "running", startedAt: "2026-09-17T08:00:00.000Z", pid: 1234 };
+    expect(getBacklogPrimaryAction(ready)).toBe("start");
+    expect(getBacklogPrimaryAction(ready, { backlogId: ready.id, backlog: ready, activeRun })).toBe("view-run");
+    expect(getBacklogPrimaryAction({ ...ready, state: "in_progress" }, { backlogId: ready.id, backlog: { ...ready, state: "in_progress" }, activeRun })).toBe("stop");
+    expect(getBacklogPrimaryAction({ ...ready, state: "verification" }, { backlogId: ready.id, backlog: { ...ready, state: "verification" }, runtime: { runId: "runtime-1", status: "running", phase: "verifying", heartbeatAt: "2026-09-17T08:00:00.000Z" } })).toBe("view-run");
+    expect(getBacklogPrimaryAction({ ...ready, state: "in_progress" }, { backlogId: ready.id, backlog: { ...ready, state: "in_progress" }, runtime: { runId: "runtime-1", status: "stale", phase: "implementing", heartbeatAt: "2026-09-17T07:00:00.000Z" } })).toBe("recover");
+    expect(getBacklogPrimaryAction({ ...ready, state: "blocked", executionMode: "hitl" })).toBe("retry");
+    expect(getBacklogPrimaryAction({ ...ready, state: "merge_ready", executionMode: "hitl" })).toBe("confirm-merge");
+    expect(getBacklogPrimaryAction({ ...ready, parentId: "parent-1", state: "merge_ready", executionMode: "hitl" })).toBe("view");
+    expect(getBacklogPrimaryAction({ ...ready, state: "done", executionMode: "hitl" })).toBe("view-result");
+  });
+
+  it("labels custom qa nodes as review agents without changing their type", () => {
+    expect(workflowNodeDisplayLabel("qa", "QA 1")).toBe("审查 Agent");
+    expect(workflowNodeDisplayLabel("agent", "Agent 1")).toBe("Agent 1");
+  });
+
   it("uses the compact 22px run control dimensions", () => {
     const css = readFileSync(new URL("../src/features/backlog/backlog.css", import.meta.url), "utf8");
 
@@ -401,10 +431,9 @@ describe("BacklogPage execution", () => {
     renderer.unmount();
   });
 
-  it("keeps the run action from opening the row detail drawer", async () => {
+  it("opens a lightweight start confirmation without opening the detail drawer", async () => {
     const { api, renderer } = await renderBacklogPage();
     const run = { id: "desktop-1-run", backlogId: "1", status: "running", startedAt: "2026-09-08T10:00:00.000Z", pid: 1234 } as const;
-    api.start.mockResolvedValueOnce(run);
     const stopPropagation = vi.fn();
     const button = renderer.root.findAllByProps({ className: "backlog-run-button" })[0];
 
@@ -414,7 +443,11 @@ describe("BacklogPage execution", () => {
     });
 
     expect(stopPropagation).toHaveBeenCalledTimes(1);
-    expect(api.show).not.toHaveBeenCalled();
+    expect(api.start).not.toHaveBeenCalled();
+    const confirmation = renderer.root.findByProps({ "aria-label": "确认执行 Backlog 1" });
+    expect(textContent(confirmation)).toContain("#1 登录态切换");
+    expect(textContent(confirmation)).toContain("默认 Agent");
+    expect(textContent(confirmation)).toContain("模板来源");
     renderer.unmount();
   });
 
@@ -425,12 +458,22 @@ describe("BacklogPage execution", () => {
     await act(async () => { await flushReactUpdates(); });
 
     expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("运行状态：运行中");
-    expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
+    expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props["aria-label"]).toBe("查看运行");
     act(() => { renderer.unmount(); });
   });
 
-  it("starts a ready backlog item and shows its local run handle", async () => {
-    const { api, renderer } = await renderBacklogPage();
+  it("starts a ready backlog with the selected template from the confirmation", async () => {
+    const { api } = createBacklogPageHarness();
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(BacklogPage, {
+        workspace: "/repo",
+        templates: [{ id: "feature-delivery", name: "交付工作流", description: "实现并审查", source: "project", steps: [{ id: "implement", role: "implementer", kind: "agent", provider: "codex", dependsOn: [] }, { id: "review", role: "reviewer", kind: "agent", provider: "codex", dependsOn: ["implement"] }] }],
+        defaultTemplate: "feature-delivery",
+        defaultAgent: "codex",
+      }));
+      await flushReactUpdates();
+    });
     const run: BacklogRunSummary = {
       id: "desktop-1-run",
       backlogId: "1",
@@ -445,10 +488,51 @@ describe("BacklogPage execution", () => {
       row.findByProps({ className: "backlog-run-button" }).props.onClick({ stopPropagation: vi.fn() });
       await flushReactUpdates();
     });
+    expect(api.start).not.toHaveBeenCalled();
+    expect(textContent(renderer.root.findByProps({ "aria-label": "确认执行 Backlog 1" }))).toContain("实现 → 审查");
 
-    expect(api.start).toHaveBeenCalledWith("/repo", { backlogId: "1" });
+    await act(async () => {
+      renderer.root.findByProps({ "aria-label": "启动 Backlog 1" }).props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(api.start).toHaveBeenCalledWith("/repo", { backlogId: "1", template: "feature-delivery" });
     expect(textContent(renderer.root.findAllByProps({ className: "backlog-row" })[0])).toContain("PID 1234");
-    expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props.disabled).toBe(true);
+    expect(renderer.root.findAllByProps({ className: "backlog-run-button" })[0].props["aria-label"]).toBe("查看运行");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("retries a blocked HITL backlog with the selected template and repair reason", async () => {
+    const blocked = { ...items[0], state: "blocked", executionMode: "hitl" } as const;
+    const { api } = createBacklogPageHarness(async () => [blocked]);
+    api.retry.mockResolvedValueOnce({ id: "retry-1", backlogId: blocked.id, status: "running", startedAt: "2026-09-17T08:00:00.000Z", template: "feature-delivery", pid: 4321 });
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(BacklogPage, {
+        workspace: "/repo",
+        templates: [{ id: "feature-delivery", name: "交付工作流", description: "实现并审查", source: "project", steps: [] }],
+        defaultTemplate: "feature-delivery",
+        defaultAgent: "codex",
+      }));
+      await flushReactUpdates();
+    });
+
+    await act(async () => {
+      renderer.root.findByProps({ className: "backlog-run-button" }).props.onClick({ stopPropagation: vi.fn() });
+      await flushReactUpdates();
+    });
+    expect(textContent(renderer.root.findByProps({ "aria-label": "确认执行 Backlog 1" }))).toContain("修复说明");
+
+    await act(async () => {
+      renderer.root.findByProps({ "aria-label": "启动 Backlog 1" }).props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(api.retry).toHaveBeenCalledWith("/repo", {
+      backlogId: "1",
+      template: "feature-delivery",
+      reason: "已完成人工修复，重新执行",
+    });
     act(() => { renderer.unmount(); });
   });
 });

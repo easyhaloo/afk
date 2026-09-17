@@ -6,15 +6,20 @@ import {
 } from '../../application/tracker-provider-factory';
 import {
   addBacklogTag,
+  confirmBacklogMerge,
   createBacklog,
   initializeBacklog,
+  interruptBacklog,
   listBacklogs,
   removeBacklogTag,
+  retryBacklog,
   showBacklog,
+  type BacklogChangeProvider,
   type BacklogManagementProvider,
 } from '../../domain/backlog/commands';
-import type { BacklogCreateInput, BacklogItem, BacklogState } from '../../domain/backlog';
+import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '../../domain/backlog';
 import type { BacklogExecutionMode } from '../../domain/backlog';
+import { getWorkflowConfig } from '../../infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../cli-utils';
 import type { CommandRegistrationContext } from '../command-registry';
 import {
@@ -218,6 +223,56 @@ export async function runBacklogTagRemove(
   }
 }
 
+export async function runBacklogInterrupt(
+  provider: QABacklogProvider,
+  id: string,
+  reason: string,
+  options: JsonMode = {},
+): Promise<void> {
+  await runLifecycleAction('backlog.interrupt', options, () => interruptBacklog(provider, id, reason), `Backlog ${id} interrupted`);
+}
+
+export async function runBacklogRetry(
+  provider: QABacklogProvider,
+  id: string,
+  reason: string,
+  options: JsonMode = {},
+): Promise<void> {
+  await runLifecycleAction('backlog.retry', options, () => retryBacklog(provider, id, reason), `Backlog ${id} queued for rework`);
+}
+
+export async function runBacklogConfirmMerge(
+  provider: QABacklogProvider,
+  changes: BacklogChangeProvider,
+  id: string,
+  expectedTargetBranch: string,
+  options: JsonMode = {},
+): Promise<void> {
+  await runLifecycleAction('backlog.confirm-merge', options, () => confirmBacklogMerge(provider, changes, id, expectedTargetBranch), `Backlog ${id} merged and completed`);
+}
+
+async function runLifecycleAction(
+  kind: string,
+  options: JsonMode,
+  action: () => Promise<BacklogItem>,
+  message: string,
+): Promise<void> {
+  try {
+    const item = await action();
+    if (options.json) {
+      emitSuccess<BacklogItem>(kind, item);
+      return;
+    }
+    success(message);
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
 export function registerBacklogCommands(program: Command, context: CommandRegistrationContext = {}): void {
   const argv = context.argv ?? process.argv;
   const inheritedOutput = program.configureOutput();
@@ -324,6 +379,65 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       }
     });
 
+  backlog.command('interrupt')
+    .description('Stop active execution and hand the backlog to an operator')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--reason <text>', 'Interruption reason')
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
+        await runBacklogInterrupt(providers.backlog, options.id, options.reason, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.interrupt', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  backlog.command('retry')
+    .description('Return blocked operator-owned work to autonomous rework')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--reason <text>', 'Retry reason')
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
+        await runBacklogRetry(providers.backlog, options.id, options.reason, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.retry', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  backlog.command('confirm-merge')
+    .description('Merge an approved root backlog change and mark it done')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
+        await runBacklogConfirmMerge(providers.backlog, providers.changes, options.id, getWorkflowConfig().targetBranch, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.confirm-merge', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
   const tag = backlog.command('tag').description('Manage business tags on a backlog item');
   tag.command('add')
     .description('Add a business tag')
@@ -367,6 +481,9 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'list')!, 'backlog.list', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'show')!, 'backlog.show', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'create')!, 'backlog.create', argv);
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'interrupt')!, 'backlog.interrupt', argv);
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'retry')!, 'backlog.retry', argv);
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'confirm-merge')!, 'backlog.confirm-merge', argv);
   configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'add')!, 'backlog.tag.add', argv);
   configureBacklogJsonErrors(tag.commands.find(command => command.name() === 'remove')!, 'backlog.tag.remove', argv);
 

@@ -12,7 +12,7 @@ test.describe("Select close behavior", () => {
 
     await platform.click();
     await expect(popover).toBeVisible();
-    await page.locator("h1").first().click();
+    await page.locator(".backlog-heading > div").first().click();
     await expect(popover).toHaveCount(0);
   });
 

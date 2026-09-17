@@ -25,7 +25,7 @@ export default defineConfig({
   },
   projects: [{ name: "electron", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `pnpm vite --port ${port} --strictPort`,
+    command: `./node_modules/.bin/vite --port ${port} --strictPort`,
     url: `http://localhost:${port}`,
     // The renderer source lives in this worktree; never reuse a stale Vite
     // from a different checkout (e.g. the main repo) that happens to be

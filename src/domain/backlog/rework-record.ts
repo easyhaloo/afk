@@ -1,4 +1,4 @@
-export type ReworkSource = 'qa';
+export type ReworkSource = 'qa' | 'operator';
 export type ReworkStatus = 'open' | 'resolved' | 'superseded';
 
 export interface ReworkCriterion {
@@ -53,7 +53,7 @@ export function parseReworkRecord(comment: { id: string; body: string }): Parsed
     const value = JSON.parse(payload[1]) as Partial<ReworkRecord>;
     if (
       value.version !== 1 || value.id !== marker[1] || !Number.isInteger(value.attempt) || value.attempt! < 1 ||
-      !isStatus(value.status) || value.source !== 'qa' || !nonEmpty(value.summary) || !Array.isArray(value.failedCriteria) ||
+      !isStatus(value.status) || !isSource(value.source) || !nonEmpty(value.summary) || !Array.isArray(value.failedCriteria) ||
       !Array.isArray(value.requiredChecks) || !nonEmpty(value.createdAt)
     ) return undefined;
     return { commentId: comment.id, record: value as ReworkRecord };
@@ -70,4 +70,5 @@ export function latestOpenRework(comments: Array<{ id: string; body: string }>):
 }
 
 function nonEmpty(value: unknown): value is string { return typeof value === 'string' && value.trim().length > 0; }
+function isSource(value: unknown): value is ReworkSource { return value === 'qa' || value === 'operator'; }
 function isStatus(value: unknown): value is ReworkStatus { return value === 'open' || value === 'resolved' || value === 'superseded'; }

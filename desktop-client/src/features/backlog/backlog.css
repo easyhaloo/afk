@@ -243,15 +243,6 @@
   line-height: 1;
   white-space: nowrap;
 }
-.backlog-mode-tag::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: .78;
-}
 .backlog-mode-tag.is-afk  { color: var(--run); }
 .backlog-mode-tag.is-hitl { color: var(--attention); }
 .backlog-state-ready {
@@ -422,13 +413,15 @@
 .backlog-drawer-header { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
 .backlog-drawer-header h2 { margin: 5px 0 5px; color: var(--backlog-text); font-size: 22px; line-height: 1.2; }
 .backlog-drawer-header small { color: var(--backlog-muted); font-family: var(--font-mono, monospace); }
+.backlog-detail-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.backlog-detail-summary > [aria-hidden="true"] { color: var(--backlog-border-strong); }
+.backlog-detail-summary .backlog-mode-tag { gap: 5px; }
 .backlog-eyebrow { color: var(--backlog-accent); font-size: 10px; font-weight: 700; letter-spacing: .12em; }
 .backlog-detail-loading,
 .backlog-detail-error { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 10px; font-size: 13px; }
 .backlog-detail-loading { color: var(--backlog-muted); background: color-mix(in srgb, var(--backlog-accent) 8%, transparent); }
 .backlog-detail-error { color: var(--attention); background: color-mix(in srgb, var(--attention) 12%, var(--backlog-surface)); }
 .backlog-detail-content { display: flex; flex-direction: column; gap: 22px; }
-.backlog-detail-status-row { display: flex; align-items: center; gap: 8px; }
 .backlog-status-pill { padding: 4px 9px; border-radius: 999px; background: color-mix(in srgb, var(--backlog-accent) 12%, transparent); color: var(--backlog-accent); font-size: 11px; font-weight: 700; }
 .backlog-status-pill.ready { background: color-mix(in srgb, var(--ready) 18%, transparent); color: var(--ready); }
 .backlog-status-pill.in_progress, .backlog-status-pill.rework { background: var(--run-soft); color: var(--run); }

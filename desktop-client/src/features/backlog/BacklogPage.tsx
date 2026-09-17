@@ -6,6 +6,7 @@ import type {
   BacklogItem,
   BacklogListOptions,
   BacklogPlatform,
+  BacklogRuntimeSummary,
   BacklogRunSummary,
   BacklogState,
 } from "../../../shared/backlog-contract";
@@ -70,7 +71,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
   const [createForm, setCreateForm] = useState<BacklogCreateInput>(EMPTY_CREATE_FORM);
   const [createBusy, setCreateBusy] = useState(false);
 
-  const [detailItem, setDetailItem] = useState<BacklogItem | null>(null);
+  const [detailSummary, setDetailSummary] = useState<BacklogRuntimeSummary | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [runBusyFor, setRunBusyFor] = useState("");
@@ -171,12 +172,12 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
   }, [createForm, load, platform, workspace]);
 
   const openDetails = useCallback(async (item: BacklogItem) => {
-    setDetailItem(item);
+    setDetailSummary({ backlogId: item.id, backlog: item });
     setDetailBusy(true);
     setDetailError("");
     try {
-      const detail = await window.afkDesktop.backlog.show(workspace, item.id);
-      if (mountedRef.current) setDetailItem(detail);
+      const summary = await window.afkDesktop.backlog.summary(workspace, item.id);
+      if (mountedRef.current) setDetailSummary(summary);
     } catch (cause) {
       if (mountedRef.current) setDetailError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -186,7 +187,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
 
   const closeDetails = useCallback(() => {
     if (detailBusy) return;
-    setDetailItem(null);
+    setDetailSummary(null);
     setDetailError("");
   }, [detailBusy]);
 
@@ -219,7 +220,6 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
       <header className="control-page-heading backlog-heading">
         <div>
           <p>任务项</p>
-          <h1>Provider Backlog</h1>
           <span>读取 GitHub / GitLab 上由 AFK 管理的工作项；本机不持有凭据，由 afk CLI 完成 Provider 调用。</span>
         </div>
         <div className="backlog-heading-actions">
@@ -236,7 +236,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
       </section>
       <section className="backlog-list">
         {filtered.length ? filtered.map((item) => (
-          <article className={`backlog-row${detailItem?.id === item.id ? " selected" : ""}`} key={item.id} onClick={() => { void openDetails(item); }}>
+          <article className={`backlog-row${detailSummary?.backlogId === item.id ? " selected" : ""}`} key={item.id} onClick={() => { void openDetails(item); }}>
             <span className={`backlog-mode-mark is-${item.executionMode}`} aria-label={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"} title={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}>
               {item.executionMode === "afk" ? <Bot size={16} aria-hidden="true" /> : <Hand size={16} aria-hidden="true" />}
             </span>
@@ -283,7 +283,7 @@ export function BacklogPage({ workspace, refreshVersion = 0 }: BacklogPageProps)
           </div>
         )}
       </section>
-      <BacklogDetailDrawer item={detailItem} busy={detailBusy} error={detailError} onClose={closeDetails} onOpenExternal={(url) => { void openExternal(url); }} />
+      <BacklogDetailDrawer summary={detailSummary} busy={detailBusy} error={detailError} onClose={closeDetails} onOpenExternal={(url) => { void openExternal(url); }} />
       {createOpen ? (
         <div className="backlog-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeCreateModal(); }}>
           <form

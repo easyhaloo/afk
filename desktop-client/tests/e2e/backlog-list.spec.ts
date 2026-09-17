@@ -14,7 +14,7 @@ test.describe("BacklogPage list", () => {
   test("renders the three fixture rows with localized state and a leading mode icon", async ({ page }) => {
     await expect(page.locator(".backlog-page")).toBeVisible();
 
-    await expect(page.getByRole("heading", { name: "Provider Backlog" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Provider Backlog" })).toHaveCount(0);
 
     const rows = page.locator(".backlog-row");
     await expect(rows).toHaveCount(3);
@@ -193,16 +193,18 @@ test.describe("BacklogPage list", () => {
     expect(colors.afk.color).not.toBe(colors.hitl.color);
   });
 
-  test("shows the leading mode mark plus a tag inside the detail drawer", async ({ page }) => {
+  test("shows one combined mode tag inside the detail drawer", async ({ page }) => {
     await page.locator(".backlog-row").first().click();
     const drawer = page.getByRole("dialog", { name: "登录态切换" });
     await expect(drawer).toBeVisible();
 
     const mark = drawer.locator(".backlog-mode-mark");
     const tag = drawer.locator(".backlog-mode-tag");
-    await expect(mark).toHaveClass(/is-afk/);
-    await expect(mark.locator("svg")).toHaveCount(1);
+    await expect(mark).toHaveCount(0);
+    await expect(tag).toHaveCount(1);
     await expect(tag).toHaveClass(/is-afk/);
+    await expect(tag.locator("svg")).toHaveCount(1);
     await expect(tag).toContainText("AFK 自动");
+    await expect(drawer.getByText("暂无规范化运行记录。", { exact: true })).toHaveCount(0);
   });
 });

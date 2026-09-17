@@ -52,6 +52,7 @@ function deferred<T>() {
 type BacklogApi = {
   list: ReturnType<typeof vi.fn>;
   show: ReturnType<typeof vi.fn>;
+  summary: ReturnType<typeof vi.fn>;
   create: ReturnType<typeof vi.fn>;
   start: ReturnType<typeof vi.fn>;
   runs: ReturnType<typeof vi.fn>;
@@ -65,6 +66,7 @@ function createBacklogPageHarness(listImplementation: () => Promise<BacklogItem[
   const api: BacklogApi = {
     list,
     show: vi.fn(),
+    summary: vi.fn(),
     create: vi.fn(),
     start: vi.fn(),
     runs: vi.fn(async () => []),
@@ -129,6 +131,14 @@ describe("backlog filter (pure)", () => {
 });
 
 describe("BacklogPage initial render", () => {
+  it("does not render the redundant Provider Backlog heading", async () => {
+    const { renderer } = await renderBacklogPage();
+
+    expect(renderer.root.findAllByType("h1")).toHaveLength(0);
+    expect(textContent(renderer.root.findByProps({ className: "control-page-heading backlog-heading" }))).not.toContain("Provider Backlog");
+    act(() => { renderer.unmount(); });
+  });
+
   it("does not render a page-level refresh button", async () => {
     const { renderer } = await renderBacklogPage();
 
@@ -206,19 +216,27 @@ describe("BacklogPage detail drawer", () => {
       description: "## 验收标准\n\n- [x] **marker** exists",
       webUrl: "https://github.com/example/issues/1",
     };
-    api.show.mockResolvedValue(detail);
+    api.summary.mockResolvedValue({ backlogId: detail.id, backlog: detail });
 
     await act(async () => {
       renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
       await flushReactUpdates();
     });
 
-    expect(api.show).toHaveBeenCalledWith("/repo", "1");
+    expect(api.summary).toHaveBeenCalledWith("/repo", "1");
     const dialog = renderer.root.findByProps({ role: "dialog" });
     const description = dialog.findByProps({ className: "backlog-detail-description" });
     expect(description.findByType("h2").children.join("")).toBe("验收标准");
     expect(description.findByType("strong").children.join("")).toBe("marker");
     expect(description.findByType("input").props.checked).toBe(true);
+    expect(dialog.findAllByProps({ className: "backlog-detail-status-prefix" })).toHaveLength(0);
+    expect(dialog.findAllByProps({ className: "backlog-mode-mark is-afk" })).toHaveLength(0);
+    expect(dialog.findAllByProps({ className: "backlog-mode-tag is-afk" })).toHaveLength(1);
+    expect(dialog.findAllByProps({ "aria-label": "执行状态" })).toHaveLength(0);
+    expect(textContent(dialog)).not.toContain("暂无规范化运行记录");
+    expect(textContent(dialog)).not.toContain("父工作项");
+    expect(textContent(dialog)).not.toContain("执行基线");
+    expect(textContent(dialog)).not.toContain("依赖");
     expect(renderer.root.findByProps({ "aria-label": "在浏览器中打开" })).toBeTruthy();
 
     await act(async () => {
@@ -238,7 +256,7 @@ describe("BacklogPage detail drawer", () => {
 
   it("hides the external browser action when the item has no web URL", async () => {
     const { api, renderer } = await renderBacklogPage();
-    api.show.mockResolvedValue(items[0]);
+    api.summary.mockResolvedValue({ backlogId: items[0].id, backlog: items[0] });
 
     await act(async () => {
       renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
@@ -247,6 +265,83 @@ describe("BacklogPage detail drawer", () => {
 
     expect(renderer.root.findAllByProps({ "aria-label": "在浏览器中打开" })).toHaveLength(0);
     expect(textContent(renderer.root.findByProps({ role: "dialog" }))).toContain("该工作项没有可用的外部链接。");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("shows optional metadata only when values are present", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    const detail = {
+      ...items[0],
+      parentId: "parent-1",
+      baseBacklogId: "base-1",
+      dependsOn: ["dep-1"],
+    };
+    api.summary.mockResolvedValue({ backlogId: detail.id, backlog: detail });
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      await flushReactUpdates();
+    });
+
+    const dialogText = textContent(renderer.root.findByProps({ role: "dialog" }));
+    expect(dialogText).toContain("父工作项#parent-1");
+    expect(dialogText).toContain("执行基线#base-1");
+    expect(dialogText).toContain("标签billing");
+    expect(dialogText).toContain("依赖#dep-1");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("shows runtime status and diagnostics when runtime data exists", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    api.summary.mockResolvedValue({
+      backlogId: "1",
+      backlog: items[0],
+      runtime: {
+        runId: "run-1",
+        status: "running",
+        phase: "implementing",
+        heartbeatAt: "2026-09-16T12:00:00.000Z",
+        progress: "正在执行测试",
+      },
+    });
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      await flushReactUpdates();
+    });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    expect(dialog.findAllByProps({ "aria-label": "执行状态" })).toHaveLength(1);
+    expect(textContent(dialog)).toContain("实现执行中");
+    expect(textContent(dialog)).toContain("正在执行测试");
+    expect(textContent(dialog)).toContain("Run IDrun-1");
+    act(() => { renderer.unmount(); });
+  });
+
+  it("shows the runtime section when only an active run exists", async () => {
+    const { api, renderer } = await renderBacklogPage();
+    api.summary.mockResolvedValue({
+      backlogId: "1",
+      backlog: items[0],
+      activeRun: {
+        id: "desktop-run-1",
+        backlogId: "1",
+        status: "running",
+        startedAt: "2026-09-16T12:00:00.000Z",
+        pid: 1234,
+      },
+    });
+
+    await act(async () => {
+      renderer.root.findAllByProps({ className: "backlog-row" })[0].props.onClick();
+      await flushReactUpdates();
+    });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    expect(dialog.findAllByProps({ "aria-label": "执行状态" })).toHaveLength(1);
+    expect(textContent(dialog)).toContain("启动进程运行中");
+    expect(textContent(dialog)).toContain("PID1234");
+    expect(textContent(dialog)).not.toContain("进程状态");
     act(() => { renderer.unmount(); });
   });
 });

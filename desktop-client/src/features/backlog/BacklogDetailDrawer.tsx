@@ -17,6 +17,12 @@ function DetailValue({ icon, label, value }: { icon: ReactNode; label: string; v
   return <div className="backlog-detail-value"><span className="backlog-detail-label">{icon}{label}</span><strong>{value}</strong></div>;
 }
 
+type DetailEntry = {
+  icon: ReactNode;
+  label: string;
+  value: ReactNode;
+};
+
 export function BacklogDetailDrawer({ summary, busy, error, onClose, onOpenExternal }: BacklogDetailDrawerProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const item = summary?.backlog ?? null;
@@ -32,6 +38,15 @@ export function BacklogDetailDrawer({ summary, busy, error, onClose, onOpenExter
   }, [item, onClose]);
 
   if (!item) return null;
+  const hasRuntime = Boolean(summary?.runtime || summary?.activeRun);
+  const metadata: DetailEntry[] = [];
+  if (item.providerRef) metadata.push({ icon: <Hash size={13} />, label: "Provider 引用", value: item.providerRef });
+  if (item.branchName) metadata.push({ icon: <GitBranch size={13} />, label: "分支", value: item.branchName });
+  if (item.parentId) metadata.push({ icon: <Hash size={13} />, label: "父工作项", value: `#${item.parentId}` });
+  if (item.baseBacklogId) metadata.push({ icon: <GitBranch size={13} />, label: "执行基线", value: `#${item.baseBacklogId}` });
+  if (item.tags.length) metadata.push({ icon: <Tags size={13} />, label: "标签", value: item.tags.join("、") });
+  if (item.dependsOn.length) metadata.push({ icon: <Hash size={13} />, label: "依赖", value: item.dependsOn.map((id) => `#${id}`).join("、") });
+
   return (
     <div className="backlog-drawer-layer" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="backlog-drawer" role="dialog" aria-modal="true" aria-labelledby="backlog-detail-title">
@@ -39,7 +54,15 @@ export function BacklogDetailDrawer({ summary, busy, error, onClose, onOpenExter
           <div>
             <span className="backlog-eyebrow">BACKLOG DETAIL</span>
             <h2 id="backlog-detail-title">{item.title}</h2>
-            <small>#{item.id}</small>
+            <div className="backlog-detail-summary">
+              <small>#{item.id}</small>
+              <span aria-hidden="true">·</span>
+              <span className={`backlog-status-pill ${item.state}`}>{backlogStateLabel(item.state)}</span>
+              <span className={`backlog-mode-tag is-${item.executionMode}`}>
+                {item.executionMode === "afk" ? <Bot size={14} aria-hidden="true" /> : <Hand size={14} aria-hidden="true" />}
+                {item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}
+              </span>
+            </div>
           </div>
           <button ref={closeButtonRef} type="button" className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={17} /></button>
         </header>
@@ -47,39 +70,33 @@ export function BacklogDetailDrawer({ summary, busy, error, onClose, onOpenExter
         {error ? <div className="backlog-detail-error" role="alert">{error}</div> : null}
         {!busy && !error ? (
           <div className="backlog-detail-content">
-            <div className="backlog-detail-status-row">
-              <span className="backlog-detail-status-prefix">Backlog</span>
-              <span className={`backlog-status-pill ${item.state}`}>{backlogStateLabel(item.state)}</span>
-              <span className={`backlog-mode-mark is-${item.executionMode}`} aria-label={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"} title={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}>
-                {item.executionMode === "afk" ? <Bot size={14} aria-hidden="true" /> : <Hand size={14} aria-hidden="true" />}
-              </span>
-              <span className={`backlog-mode-tag is-${item.executionMode}`}>
-                {item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}
-              </span>
-            </div>
-            <section className="backlog-runtime-panel" aria-label="执行状态">
-              <span className="backlog-detail-section-title">运行</span>
-              {summary?.runtime ? (
-                <div className="backlog-runtime-summary">
-                  <strong>{summary.runtime.phase === "verifying" ? "验证执行中" : "实现执行中"}</strong>
-                  <span>{summary.runtime.status === "running" ? "运行中" : summary.runtime.status === "stale" ? "运行失联" : summary.runtime.status === "completed" ? "已完成" : summary.runtime.status === "blocked" ? "已阻塞" : "失败"}</span>
-                </div>
-              ) : <p className="backlog-detail-muted">暂无规范化运行记录。</p>}
-            </section>
+            {hasRuntime ? (
+              <section className="backlog-runtime-panel" aria-label="执行状态">
+                <span className="backlog-detail-section-title">运行</span>
+                {summary?.runtime ? (
+                  <div className="backlog-runtime-summary">
+                    <strong>{summary.runtime.phase === "verifying" ? "验证执行中" : "实现执行中"}</strong>
+                    <span>{summary.runtime.status === "running" ? "运行中" : summary.runtime.status === "stale" ? "运行失联" : summary.runtime.status === "completed" ? "已完成" : summary.runtime.status === "blocked" ? "已阻塞" : "失败"}</span>
+                  </div>
+                ) : summary?.activeRun ? (
+                  <div className="backlog-runtime-summary">
+                    <strong>启动进程</strong>
+                    <span>{summary.activeRun.status === "starting" ? "启动中" : summary.activeRun.status === "running" ? "运行中" : summary.activeRun.status === "completed" ? "已完成" : "失败"}</span>
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
             <section className="backlog-detail-section">
               <span className="backlog-detail-section-title">描述</span>
               <div className="backlog-detail-description">
                 <MarkdownContent source={item.description || "暂无描述"} />
               </div>
             </section>
-            <section className="backlog-detail-grid" aria-label="工作项元数据">
-              <DetailValue icon={<Hash size={13} />} label="Provider 引用" value={item.providerRef || "—"} />
-              <DetailValue icon={<GitBranch size={13} />} label="分支" value={item.branchName || "—"} />
-              <DetailValue icon={<Hash size={13} />} label="父工作项" value={item.parentId ? `#${item.parentId}` : "—"} />
-              <DetailValue icon={<GitBranch size={13} />} label="执行基线" value={item.baseBacklogId ? `#${item.baseBacklogId}` : "默认目标分支"} />
-              <DetailValue icon={<Tags size={13} />} label="标签" value={item.tags.length ? item.tags.join("、") : "无标签"} />
-              <DetailValue icon={<Hash size={13} />} label="依赖" value={item.dependsOn.length ? item.dependsOn.map((id) => `#${id}`).join("、") : "无依赖"} />
-            </section>
+            {metadata.length ? (
+              <section className="backlog-detail-grid" aria-label="工作项元数据">
+                {metadata.map((entry) => <DetailValue key={entry.label} icon={entry.icon} label={entry.label} value={entry.value} />)}
+              </section>
+            ) : null}
             {summary?.runtime ? (
               <section className="backlog-detail-grid" aria-label="运行诊断">
                 <DetailValue icon={<Hash size={13} />} label="Run ID" value={summary.runtime.runId} />
@@ -93,7 +110,6 @@ export function BacklogDetailDrawer({ summary, busy, error, onClose, onOpenExter
             {summary?.activeRun ? (
               <section className="backlog-detail-grid" aria-label="启动进程">
                 <DetailValue icon={<Hash size={13} />} label="启动记录" value={summary.activeRun.id} />
-                <DetailValue icon={<Hash size={13} />} label="进程状态" value={summary.activeRun.status} />
                 <DetailValue icon={<Hash size={13} />} label="PID" value={summary.activeRun.pid ?? "—"} />
                 <DetailValue icon={<Hash size={13} />} label="启动错误" value={summary.activeRun.error || "—"} />
               </section>

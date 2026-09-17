@@ -23,7 +23,8 @@ export class TrackerChangeProvider implements ChangeProvider {
 
   async findForBacklog(backlog: BacklogItem): Promise<ChangeRequest | null> {
     const changes = await this.tracker.listMRs({ state: 'all' });
-    const change = changes.find(candidate => candidate.sourceBranch === backlog.branchName);
+    const change = changes.find(candidate => candidate.sourceBranch === `${backlog.branchName}-qa`)
+      ?? changes.find(candidate => candidate.sourceBranch === backlog.branchName);
     return change ? this.get(String(change.id)) : null;
   }
 

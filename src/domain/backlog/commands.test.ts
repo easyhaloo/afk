@@ -114,6 +114,21 @@ describe('backlog commands', () => {
     expect(provider.transition).toHaveBeenCalledWith(item.id, 'done', { changeId: 'mr-9' });
   });
 
+  it('accepts the QA verification branch created for a root backlog', async () => {
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const verificationBranch = `${item.branchName}-qa`;
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'open', sourceBranch: verificationBranch, targetBranch: 'main' }),
+      merge: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: verificationBranch, targetBranch: 'main' }),
+    };
+
+    await expect(confirmBacklogMerge(provider, changes, item.id, 'main')).resolves.toMatchObject({ state: 'done' });
+    expect(changes.merge).toHaveBeenCalledWith('mr-9');
+    expect(provider.transition).toHaveBeenCalledWith(item.id, 'done', { changeId: 'mr-9' });
+  });
+
   it('refuses to finish when the change is not confirmed merged', async () => {
     const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
     const provider = lifecycleProvider(item);

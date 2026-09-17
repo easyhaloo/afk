@@ -18,7 +18,7 @@
  * matching the real CLI's `--json` protocol. A tiny shared in-memory store
  * persists writes between calls in the same Electron session.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -94,7 +94,9 @@ function loadStore() {
 function saveStore(store) {
   if (!STORE_PATH) return;
   try {
-    writeFileSync(STORE_PATH, JSON.stringify(store), "utf8");
+    const temporary = `${STORE_PATH}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(store), "utf8");
+    renameSync(temporary, STORE_PATH);
   } catch {
     // best-effort
   }
@@ -192,18 +194,18 @@ else if (subcommand === "list") {
   if (process.env.FAKE_AFK_FAIL_LIST === "1") {
     fail("backlog.list", "provider", "FAKE_AFK_FAIL_LIST is set");
   }
-  const data = mutate((store) => filterBy(store, {
+  const data = filterBy(loadStore(), {
     state: flag("--state"),
     mode: flag("--mode"),
     parent: flag("--parent"),
     tag: flag("--tag"),
     platform: flag("--platform"),
-  }));
+  });
   ok("backlog.list", data);
 }
 else if (subcommand === "show") {
   const id = flag("--id");
-  const item = mutate((store) => store.items.find((i) => i.id === id));
+  const item = loadStore().items.find((entry) => entry.id === id);
   if (!item) fail("backlog.show", "not_found", `no item ${id}`);
   else ok("backlog.show", item);
 }

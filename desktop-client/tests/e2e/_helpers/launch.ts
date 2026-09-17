@@ -11,20 +11,20 @@
  */
 import { test as base, _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 import path from "node:path";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const HERE = __dirname;
+const E2E_TMPDIR = realpathSync(tmpdir());
 export const FIXTURE_DIR = path.resolve(HERE, "../fixtures");
 export const FAKE_AFK = path.join(FIXTURE_DIR, "afk");
 export const RENDERER_URL = `http://localhost:${process.env.AFK_E2E_PORT ?? "5174"}`;
 // fake-afk persists its in-memory store here so writes from one subprocess
 // invocation survive into the next. Delete before each test for isolation.
-export const FAKE_AFK_STORE = path.join(tmpdir(), "afk-backlog-e2e-store.json");
+export const FAKE_AFK_STORE = path.join(E2E_TMPDIR, "afk-backlog-e2e-store.json");
 // Per-spec scratch HOME so the SSH page sees a deterministic, empty
 // ~/.ssh/config regardless of the developer's real environment.
-export const E2E_HOME = path.join(tmpdir(), "afk-control-e2e-home");
-const E2E_RUN_STORE = path.resolve(HERE, "../../../../.afk/backlog-runs.json");
+export const E2E_HOME = path.join(E2E_TMPDIR, "afk-control-e2e-home");
 
 function resetStore() {
   if (existsSync(FAKE_AFK_STORE)) rmSync(FAKE_AFK_STORE);
@@ -46,6 +46,12 @@ async function resetHome() {
   }
 }
 
+function createWorkspace() {
+  const workspace = mkdtempSync(path.join(E2E_TMPDIR, "afk-control-e2e-workspace-"));
+  mkdirSync(path.join(workspace, ".afk"));
+  return workspace;
+}
+
 export type Fixtures = {
   electronApp: ElectronApplication;
   page: Page;
@@ -55,9 +61,10 @@ export const test = base.extend<Fixtures>({
   electronApp: async ({}, use) => {
     resetStore();
     await resetHome();
-    const previousRunStore = existsSync(E2E_RUN_STORE) ? readFileSync(E2E_RUN_STORE, "utf8") : null;
+    const workspace = createWorkspace();
+    const userDataDirectory = mkdtempSync(path.join(E2E_HOME, "electron-data-"));
     const app = await electron.launch({
-      args: [".", `--user-data-dir=${path.join(E2E_HOME, "electron-data")}`],
+      args: [".", `--user-data-dir=${userDataDirectory}`],
       env: {
         ...process.env,
         ELECTRON_RENDERER_URL: RENDERER_URL,
@@ -65,6 +72,7 @@ export const test = base.extend<Fixtures>({
         // instead of the developer's real ~/.ssh/config.
         HOME: E2E_HOME,
         USERPROFILE: E2E_HOME,
+        AFK_WORKSPACE: workspace,
         // Prepend the fixture dir so the fake-afk script wins `which afk`.
         PATH: `${FIXTURE_DIR}${path.delimiter}${process.env.PATH ?? ""}`,
         FAKE_AFK_STORE,
@@ -80,8 +88,7 @@ export const test = base.extend<Fixtures>({
       await use(app);
     } finally {
       await app.close();
-      if (previousRunStore === null) rmSync(E2E_RUN_STORE, { force: true });
-      else writeFileSync(E2E_RUN_STORE, previousRunStore, "utf8");
+      rmSync(workspace, { recursive: true, force: true });
     }
   },
   page: async ({ electronApp }, use) => {

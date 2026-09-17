@@ -88,7 +88,10 @@ export async function confirmBacklogMerge(
   }
   const change = await changes.findForBacklog(item);
   if (!change) throw new Error(`backlog ${id} must have an associated change`);
-  if (change.sourceBranch !== item.branchName) throw new Error(`associated change ${change.id} must use source branch ${item.branchName}`);
+  const verificationBranch = `${item.branchName}-qa`;
+  if (change.sourceBranch !== verificationBranch && change.sourceBranch !== item.branchName) {
+    throw new Error(`associated change ${change.id} must use source branch ${verificationBranch} or ${item.branchName}`);
+  }
   if (change.targetBranch !== expectedTargetBranch) throw new Error(`associated change ${change.id} must target ${expectedTargetBranch}`);
   if (change.state === 'closed') throw new Error(`associated change ${change.id} must be open or merged`);
   if (change.state === 'open' && change.mergeable === false) throw new Error(`associated change ${change.id} must be mergeable`);

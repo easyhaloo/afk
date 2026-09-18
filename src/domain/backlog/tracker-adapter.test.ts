@@ -8,7 +8,10 @@ function tracker(issue: any): TrackerProvider {
     platform: 'github', projectId: 'org/repo',
     getIssue: vi.fn(async () => ({ ...issue })),
     listIssues: vi.fn(async () => [{ ...issue }]),
-    updateIssue: vi.fn(async (_id, updates) => { issue.labels = updates.labels ?? issue.labels; }),
+    updateIssue: vi.fn(async (_id, updates) => {
+      issue.labels = updates.labels ?? issue.labels;
+      if (updates.state === 'closed') issue.state = 'closed';
+    }),
     updateLabels: vi.fn(async (_id, delta) => {
       issue.labels = [
         ...issue.labels.filter((label: string) => !delta.remove.includes(label)),
@@ -109,6 +112,7 @@ describe('TrackerBacklogProvider', () => {
       remove: ['stage::ready-for-issues'],
     });
     expect(t.updateIssue).not.toHaveBeenCalled();
+    expect(issue.state).toBe('opened');
   });
 
   it('does not write labels when the requested workflow state is already present', async () => {
@@ -119,6 +123,35 @@ describe('TrackerBacklogProvider', () => {
     await provider.transition('42', 'verification');
 
     expect(t.updateLabels).not.toHaveBeenCalled();
+  });
+
+  it('updates workflow labels and closes the tracker issue when transitioning to done', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk', 'team::api'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.transition('42', 'done');
+
+    expect(t.updateLabels).toHaveBeenCalledWith(42, {
+      add: ['stage::done'],
+      remove: ['stage::qa'],
+    });
+    expect(t.updateIssue).toHaveBeenCalledWith(42, { state: 'closed' });
+    expect(issue.state).toBe('closed');
+  });
+
+  it('maps a closed issue with a stale ready label to done', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'closed', url: '', projectId: '' };
+    const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
+
+    await expect(provider.get('42')).resolves.toMatchObject({ state: 'done' });
+  });
+
+  it('maps a merged issue with a stale ready label to done', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'merged', url: '', projectId: '' };
+    const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
+
+    await expect(provider.get('42')).resolves.toMatchObject({ state: 'done' });
   });
 
   it('returns null when a second claim observes in-progress state', async () => {

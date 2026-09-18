@@ -8,7 +8,10 @@ function tracker(issue: any): TrackerProvider {
     platform: 'github', projectId: 'org/repo',
     getIssue: vi.fn(async () => ({ ...issue })),
     listIssues: vi.fn(async () => [{ ...issue }]),
-    updateIssue: vi.fn(async (_id, updates) => { issue.labels = updates.labels ?? issue.labels; }),
+    updateIssue: vi.fn(async (_id, updates) => {
+      issue.labels = updates.labels ?? issue.labels;
+      if (updates.state === 'closed') issue.state = 'closed';
+    }),
   } as unknown as TrackerProvider;
 }
 
@@ -31,6 +34,19 @@ describe('TrackerBacklogProvider', () => {
     const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
     await provider.transition('42', 'blocked', { reason: 'timeout' });
     expect(t.updateIssue).toHaveBeenCalledWith(42, { labels: ['team::api', 'stage::blocked', 'mode::hitl'] });
+    expect(t.updateIssue).not.toHaveBeenCalledWith(42, { state: 'closed' });
+  });
+
+  it('updates workflow labels and closes the tracker issue when transitioning to done', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::verification', 'mode::afk', 'team::api'], state: 'opened', url: '', projectId: '' };
+    const t = tracker(issue);
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.transition('42', 'done');
+
+    expect(t.updateIssue).toHaveBeenCalledWith(42, { labels: ['team::api', 'stage::done'] });
+    expect(t.updateIssue).toHaveBeenCalledWith(42, { state: 'closed' });
+    expect(issue.state).toBe('closed');
   });
 
   it('returns null when a second claim observes in-progress state', async () => {
@@ -76,6 +92,20 @@ describe('TrackerBacklogProvider', () => {
     const issue = { id: 9, title: 'Dependency', description: '', labels: [], state: 'closed', url: '', projectId: '' };
     const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
     await expect(provider.get('9')).resolves.toMatchObject({ state: 'done' });
+  });
+
+  it('maps a closed issue with a stale workflow label to done', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'closed', url: '', projectId: '' };
+    const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
+
+    await expect(provider.get('42')).resolves.toMatchObject({ state: 'done' });
+  });
+
+  it('maps a merged issue with a stale workflow label to done', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'merged', url: '', projectId: '' };
+    const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
+
+    await expect(provider.get('42')).resolves.toMatchObject({ state: 'done' });
   });
 
   it('exposes business tags while hiding provider workflow metadata', async () => {

@@ -85,6 +85,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const labels = [...retained, STATE_LABELS[state]];
     if (state === 'blocked') labels.push(MODE_LABELS.hitl);
     await this.tracker.updateIssue(issueId, { labels: [...new Set(labels)] });
+    if (state === 'done') await this.tracker.updateIssue(issueId, { state: 'closed' });
   }
 
   async setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> {
@@ -185,7 +186,7 @@ function toBacklogItem(issue: TrackedIssue): BacklogItem {
     .filter(label => /^depends-on::[^:]+$/.test(label) || /^depends_on::[^:]+$/.test(label))
     .map(label => label.split('::')[1]);
   const labeledState = Object.entries(STATE_LABELS).find(([, label]) => issue.labels.includes(label))?.[0] as BacklogState | undefined;
-  const state = labeledState ?? (issue.state === 'closed' || issue.state === 'merged' ? 'done' : 'ready');
+  const state = issue.state === 'closed' || issue.state === 'merged' ? 'done' : labeledState ?? 'ready';
   const executionMode: BacklogExecutionMode = issue.labels.includes(MODE_LABELS.hitl) ? 'hitl' : 'afk';
   return {
     id: String(issue.id), title: issue.title, description: issue.description,

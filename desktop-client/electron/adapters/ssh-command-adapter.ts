@@ -71,8 +71,11 @@ export function createSshCommandAdapter({ exec }: SshCommandAdapterOptions) {
       if (!result.ok) throw new Error("SSH 配置解析失败");
       return parseResolved(result.stdout);
     },
-    async scanFingerprint(target: { hostname: string; port: number }) {
-      const result = await exec("ssh-keyscan", ["-T", "8", "-p", String(target.port), target.hostname]);
+    async scanFingerprint(target: { hostname: string; port: number; proxyJump?: string }) {
+      const args = ["-T", "8", "-p", String(target.port)];
+      if (target.proxyJump) args.push("-J", target.proxyJump);
+      args.push(target.hostname);
+      const result = await exec("ssh-keyscan", args);
       if (!result.ok) throw new Error("SSH 主机指纹扫描失败");
       return fingerprintFromKeyLine(firstKeyLine(result.stdout), target.hostname, target.port);
     },

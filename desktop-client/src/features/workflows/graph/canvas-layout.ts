@@ -42,6 +42,12 @@ export function layoutCanvasNodes(nodes: readonly CanvasTemplateNode[]): CanvasT
   }));
 }
 
+export function insertCanvasNodeAfter(nodes: readonly CanvasTemplateNode[], selectedId: string, next: CanvasTemplateNode): CanvasTemplateNode[] {
+  const selectedIndex = selectedId === "start" ? -1 : nodes.findIndex((node) => node.id === selectedId);
+  const insertIndex = selectedId === "start" ? 0 : selectedIndex >= 0 ? selectedIndex + 1 : nodes.length;
+  return [...nodes.slice(0, insertIndex), next, ...nodes.slice(insertIndex)];
+}
+
 export function canvasNodesOverlap(left: CanvasTemplateNode, right: CanvasTemplateNode) {
   return left.x < right.x + CANVAS_NODE_WIDTH
     && left.x + CANVAS_NODE_WIDTH > right.x

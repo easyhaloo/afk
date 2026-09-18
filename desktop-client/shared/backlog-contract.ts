@@ -26,9 +26,42 @@ export type BacklogExecutionMode = typeof BACKLOG_EXECUTION_MODES[number];
 
 export const BACKLOG_PLATFORMS = ["github", "gitlab"] as const;
 export type BacklogPlatform = typeof BACKLOG_PLATFORMS[number];
+export type WorkItemId = string;
+
+export type ProviderProjectRef = {
+  platform: BacklogPlatform;
+  projectKey: string;
+  providerProjectId?: string;
+  name: string;
+  defaultBranch?: string;
+  webUrl?: string;
+};
+
+export type GlobalWorkItem = {
+  id: WorkItemId;
+  issueNumber: number;
+  project: ProviderProjectRef;
+  title: string;
+  description?: string;
+  managed: boolean;
+  executionEligible: boolean;
+  state: BacklogState;
+  executionMode: BacklogExecutionMode;
+  parentId?: WorkItemId;
+  dependsOn: WorkItemId[];
+  tags: string[];
+  branchName: string;
+  providerRef: string;
+  webUrl?: string;
+};
 
 export type BacklogItem = {
   id: string;
+  workItemId?: WorkItemId;
+  issueNumber?: number;
+  project?: ProviderProjectRef;
+  managed?: boolean;
+  executionEligible?: boolean;
   title: string;
   description?: string;
   parentId?: string;
@@ -222,6 +255,74 @@ export function parseBacklogId(input: unknown): string {
   return value;
 }
 
+export function formatWorkItemId(input: { platform: BacklogPlatform; projectKey: string; issueNumber: number }): WorkItemId {
+  const platform = parseRequiredBacklogPlatform(input.platform, "work item ID");
+  const projectKey = parseProjectKey(input.projectKey, "work item ID");
+  const issueNumber = parseIssueNumber(input.issueNumber, "work item ID");
+  return `${platform}:${projectKey}#${issueNumber}`;
+}
+
+export function parseWorkItemId(input: unknown): WorkItemId {
+  if (typeof input !== "string" || input.trim() !== input) throw new Error("work item ID must be a canonical string");
+  const match = /^([^:]+):([^#]+)#([1-9]\d*)$/.exec(input);
+  if (!match) throw new Error("work item ID must use platform:projectKey#issueNumber");
+  const id = formatWorkItemId({
+    platform: parseRequiredBacklogPlatform(match[1], "work item ID"),
+    projectKey: match[2],
+    issueNumber: Number(match[3]),
+  });
+  if (id !== input) throw new Error("work item ID is not canonical");
+  return id;
+}
+
+export function parseProviderProjectRef(input: unknown): ProviderProjectRef {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("provider project must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["platform", "projectKey", "providerProjectId", "name", "defaultBranch", "webUrl"], "provider project");
+  const project: ProviderProjectRef = {
+    platform: parseRequiredBacklogPlatform(candidate.platform, "provider project"),
+    projectKey: parseProjectKey(candidate.projectKey, "provider project"),
+    name: parseRequiredString(candidate.name, "provider project: name"),
+  };
+  for (const key of ["providerProjectId", "defaultBranch", "webUrl"] as const) {
+    if (candidate[key] !== undefined) project[key] = parseRequiredString(candidate[key], `provider project: ${key}`);
+  }
+  return project;
+}
+
+export function parseGlobalWorkItem(input: unknown): GlobalWorkItem {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("global work item must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["id", "issueNumber", "project", "title", "description", "managed", "executionEligible", "state", "executionMode", "parentId", "dependsOn", "tags", "branchName", "providerRef", "webUrl"], "global work item");
+  const id = parseWorkItemId(candidate.id);
+  const issueNumber = parseIssueNumber(candidate.issueNumber, "global work item");
+  const project = parseProviderProjectRef(candidate.project);
+  assertWorkItemIdentityMatches(id, issueNumber, project, "global work item");
+  if (typeof candidate.managed !== "boolean" || typeof candidate.executionEligible !== "boolean") throw new Error("global work item: managed and executionEligible must be booleans");
+  if (candidate.executionEligible && !candidate.managed) throw new Error("global work item: unmanaged items cannot be execution eligible");
+  if (!isBacklogState(candidate.state) || !isBacklogExecutionMode(candidate.executionMode)) throw new Error("global work item has invalid lifecycle fields");
+  if (!Array.isArray(candidate.dependsOn)) throw new Error("global work item: dependsOn must be an array");
+  if (!Array.isArray(candidate.tags) || candidate.tags.some(value => typeof value !== "string")) throw new Error("global work item: tags is invalid");
+  const result: GlobalWorkItem = {
+    id,
+    issueNumber,
+    project,
+    title: parseRequiredString(candidate.title, "global work item: title"),
+    managed: candidate.managed,
+    executionEligible: candidate.executionEligible,
+    state: candidate.state,
+    executionMode: candidate.executionMode,
+    dependsOn: candidate.dependsOn.map(parseWorkItemId),
+    tags: candidate.tags as string[],
+    branchName: parseRequiredString(candidate.branchName, "global work item: branchName"),
+    providerRef: parseRequiredString(candidate.providerRef, "global work item: providerRef"),
+  };
+  if (candidate.description !== undefined) result.description = parseRequiredString(candidate.description, "global work item: description", true);
+  if (candidate.parentId !== undefined) result.parentId = parseWorkItemId(candidate.parentId);
+  if (candidate.webUrl !== undefined) result.webUrl = parseRequiredString(candidate.webUrl, "global work item: webUrl");
+  return result;
+}
+
 export function parseBacklogRuntimeSummary(input: unknown): BacklogRuntimeSummary {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog runtime summary must be an object");
   const candidate = input as Record<string, unknown>;
@@ -242,12 +343,22 @@ export function parseBacklogRuntimeSummary(input: unknown): BacklogRuntimeSummar
 function parseBacklogItem(input: unknown): BacklogItem {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog runtime summary: backlog is invalid");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "title", "description", "parentId", "baseBacklogId", "dependsOn", "state", "executionMode", "tags", "branchName", "providerRef", "webUrl"], "backlog item");
+  assertExactKeys(candidate, ["id", "workItemId", "issueNumber", "project", "managed", "executionEligible", "title", "description", "parentId", "baseBacklogId", "dependsOn", "state", "executionMode", "tags", "branchName", "providerRef", "webUrl"], "backlog item");
   if (typeof candidate.id !== "string" || typeof candidate.title !== "string" || typeof candidate.branchName !== "string" || typeof candidate.providerRef !== "string" || !isBacklogState(candidate.state) || !isBacklogExecutionMode(candidate.executionMode)) throw new Error("backlog item has invalid identity or enum fields");
   if (!Array.isArray(candidate.dependsOn) || candidate.dependsOn.some(value => typeof value !== "string")) throw new Error("backlog item: dependsOn is invalid");
   if (!Array.isArray(candidate.tags) || candidate.tags.some(value => typeof value !== "string")) throw new Error("backlog item: tags is invalid");
   for (const key of ["description", "parentId", "baseBacklogId", "branchName", "providerRef", "webUrl"] as const) {
     if (candidate[key] !== undefined && typeof candidate[key] !== "string") throw new Error(`backlog item: ${key} is invalid`);
+  }
+  const globalFields = ["workItemId", "issueNumber", "project", "managed", "executionEligible"] as const;
+  if (globalFields.some(key => candidate[key] !== undefined)) {
+    if (globalFields.some(key => candidate[key] === undefined)) throw new Error("backlog item: global identity fields must be provided together");
+    const workItemId = parseWorkItemId(candidate.workItemId);
+    const issueNumber = parseIssueNumber(candidate.issueNumber, "backlog item");
+    const project = parseProviderProjectRef(candidate.project);
+    assertWorkItemIdentityMatches(workItemId, issueNumber, project, "backlog item");
+    if (typeof candidate.managed !== "boolean" || typeof candidate.executionEligible !== "boolean") throw new Error("backlog item: managed and executionEligible must be booleans");
+    if (candidate.executionEligible && !candidate.managed) throw new Error("backlog item: unmanaged items cannot be execution eligible");
   }
   return candidate as unknown as BacklogItem;
 }
@@ -300,4 +411,29 @@ export function isBacklogState(value: unknown): value is BacklogState {
 
 export function isBacklogPlatform(value: unknown): value is BacklogPlatform {
   return typeof value === "string" && (BACKLOG_PLATFORMS as readonly string[]).includes(value);
+}
+
+function parseRequiredBacklogPlatform(value: unknown, label: string): BacklogPlatform {
+  if (!isBacklogPlatform(value)) throw new Error(`${label}: platform must be one of: ${BACKLOG_PLATFORMS.join(", ")}`);
+  return value;
+}
+
+function parseProjectKey(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value || value.trim() !== value || /[:#\s\x00-\x1f\x7f]/.test(value) || value.split("/").some(segment => segment === "." || segment === "..")) throw new Error(`${label}: projectKey is invalid`);
+  return value;
+}
+
+function parseIssueNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) throw new Error(`${label}: issueNumber must be a positive safe integer`);
+  return value;
+}
+
+function parseRequiredString(value: unknown, label: string, allowEmpty = false): string {
+  if (typeof value !== "string" || (!allowEmpty && !value.trim()) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function assertWorkItemIdentityMatches(id: WorkItemId, issueNumber: number, project: ProviderProjectRef, label: string): void {
+  const expected = formatWorkItemId({ platform: project.platform, projectKey: project.projectKey, issueNumber });
+  if (id !== expected) throw new Error(`${label}: global identity does not match project and issue number`);
 }

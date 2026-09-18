@@ -16,7 +16,7 @@ type ServiceDependencies = {
   };
   commands: {
     resolve: (alias: string) => Promise<{ hostname?: string; port?: number; user?: string; identityFile?: string; proxyJump?: string }>;
-    scanFingerprint: (target: { hostname: string; port: number }) => Promise<SshFingerprint>;
+    scanFingerprint: (target: { hostname: string; port: number; proxyJump?: string }) => Promise<SshFingerprint>;
     testBatch: (target: SshConnectionTarget | string) => Promise<{ ok: boolean; code: SshTestResult["code"] }>;
     loadIdentity: (identityFile: string) => Promise<boolean>;
     keygenArgs: (identityFile: string) => string[];
@@ -95,6 +95,23 @@ export function createSshService(deps: ServiceDependencies) {
   let cacheGeneration = 0;
   const resolvedTargetCache = new Map<string, CacheEntry<ResolvedTarget>>();
   const hostStatusCache = new Map<string, CacheEntry<SshHost>>();
+  type ResolvedAliasInfo = Awaited<ReturnType<typeof deps.commands.resolve>>;
+  // Cache ssh -G results per alias so repeated deploy/list/external-terminal flows
+  // for the same host don't re-invoke ssh -G. Failed resolutions are evicted so a
+  // fixed ssh config is retried on the next call.
+  const aliasResolveCache = new Map<string, Promise<ResolvedAliasInfo>>();
+
+  function cachedResolve(alias: string): Promise<ResolvedAliasInfo> {
+    let promise = aliasResolveCache.get(alias);
+    if (!promise) {
+      promise = deps.commands.resolve(alias).catch((error) => {
+        aliasResolveCache.delete(alias);
+        throw error;
+      });
+      aliasResolveCache.set(alias, promise);
+    }
+    return promise;
+  }
 
   function hostDefinitionCacheKey(host: SshHost) {
     return JSON.stringify([host.id, host.alias, host.hostname, host.port, host.user, host.identityFile, host.proxyJump, host.jumpHostType, host.jumpHost, host.remoteWorkspace]);
@@ -109,7 +126,21 @@ export function createSshService(deps: ServiceDependencies) {
   }
 
   async function resolveCredentialTarget(host: SshHost): Promise<SshCredentialTarget> {
-    const resolved = isDirectManagedHost(host) ? host : await deps.commands.resolve(legacyConnectionAlias(host));
+    if (isDirectManagedHost(host)) {
+      return {
+        hostname: host.hostname,
+        port: host.port,
+        ...(host.user ? { user: host.user } : {}),
+      };
+    }
+    let aliasForResolve: string;
+    if (host.jumpHostType === "jumpserver") {
+      if (!host.jumpHost) throw new Error("JumpServer 跳板机未配置");
+      aliasForResolve = host.jumpHost;
+    } else {
+      aliasForResolve = host.alias;
+    }
+    const resolved = await cachedResolve(aliasForResolve);
     return {
       hostname: resolved.hostname || host.hostname,
       port: resolved.port ?? host.port,
@@ -120,7 +151,14 @@ export function createSshService(deps: ServiceDependencies) {
   async function resolveFingerprintTarget(host: SshHost): Promise<ResolvedTarget> {
     if (isDirectManagedHost(host)) return connectionTarget(host);
     if (host.source === "managed" && host.jumpHostType !== "jumpserver") return { hostname: host.hostname, port: host.port, user: host.user };
-    const resolved = await deps.commands.resolve(legacyConnectionAlias(host));
+    let aliasForResolve: string;
+    if (host.jumpHostType === "jumpserver") {
+      if (!host.jumpHost) throw new Error("JumpServer 跳板机未配置");
+      aliasForResolve = host.jumpHost;
+    } else {
+      aliasForResolve = host.alias;
+    }
+    const resolved = await cachedResolve(aliasForResolve);
     return { hostname: resolved.hostname || host.hostname, port: resolved.port ?? host.port, user: resolved.user || host.user, identityFile: resolved.identityFile, proxyJump: resolved.proxyJump };
   }
 
@@ -132,10 +170,7 @@ export function createSshService(deps: ServiceDependencies) {
   }
 
   function connectionArgument(host: SshHost): SshConnectionTarget | string {
-    return isDirectManagedHost(host) ? connectionTarget(host) : legacyConnectionAlias(host);
-  }
-
-  function legacyConnectionAlias(host: SshHost) {
+    if (isDirectManagedHost(host)) return connectionTarget(host);
     if (host.jumpHostType === "jumpserver") {
       if (!host.jumpHost) throw new Error("JumpServer 跳板机未配置");
       return host.jumpHost;
@@ -143,11 +178,74 @@ export function createSshService(deps: ServiceDependencies) {
     return host.alias;
   }
 
+  // Resolves which private key to deploy as a public key:
+  //   1. host.identityFile (explicit override, highest priority)
+  //   2. Alias-resolved IdentityFile from ssh -G (reuses user's existing keys)
+  //   3. AFK default key (~/.ssh/id_ed25519_afk)
+  // The alias-resolved value is supplied by the caller so we never invoke ssh -G twice
+  // for the same host during a single deploy.
+  function resolveDeployIdentity(host: SshHost, aliasIdentityFile?: string): string {
+    if (host.identityFile) return assertAllowedSshPath(host.identityFile, home);
+    if (aliasIdentityFile) return assertAllowedSshPath(aliasIdentityFile, home);
+    return assertAllowedSshPath(path.join(home, ".ssh", "id_ed25519_afk"), home);
+  }
+
+  // One-shot resolver for deployKey: returns credential lookup target and any
+  // alias-resolved identity/proxyJump so we don't pay for a second ssh -G call.
+  async function resolveDeploymentContext(host: SshHost): Promise<{
+    credential: SshCredentialTarget;
+    identityFile?: string;
+    proxyJump?: string;
+  }> {
+    // Direct managed host: credential comes from host fields. Probe `ssh -G <alias>`
+    // only when host.identityFile is empty, so direct hosts that already specify
+    // a key don't pay an extra shell round-trip.
+    if (isDirectManagedHost(host)) {
+      let aliasIdentityFile: string | undefined;
+      if (!host.identityFile && host.alias) {
+        try {
+          const resolved = await cachedResolve(host.alias);
+          aliasIdentityFile = resolved.identityFile;
+        } catch {
+          // alias unknown to ssh — keep host.identityFile / AFK default
+        }
+      }
+      return {
+        credential: {
+          hostname: host.hostname,
+          port: host.port,
+          ...(host.user ? { user: host.user } : {}),
+        },
+        identityFile: host.identityFile || aliasIdentityFile,
+        proxyJump: host.proxyJump,
+      };
+    }
+    // Non-direct host: ssh -G gives us credential + identityFile + proxyJump in one call.
+    let aliasForResolve: string;
+    if (host.jumpHostType === "jumpserver") {
+      if (!host.jumpHost) throw new Error("JumpServer 跳板机未配置");
+      aliasForResolve = host.jumpHost;
+    } else {
+      aliasForResolve = host.alias;
+    }
+    const resolved = await cachedResolve(aliasForResolve);
+    return {
+      credential: {
+        hostname: resolved.hostname || host.hostname,
+        port: resolved.port ?? host.port,
+        ...(resolved.user || host.user ? { user: resolved.user || host.user } : {}),
+      },
+      identityFile: resolved.identityFile,
+      proxyJump: resolved.proxyJump,
+    };
+  }
+
   function invalidateListCache() {
     cacheGeneration += 1;
     listInFlight = undefined;
     resolvedTargetCache.clear();
     hostStatusCache.clear();
+    aliasResolveCache.clear();
   }
 
   async function findHost(hostId: string) {
@@ -168,7 +266,7 @@ export function createSshService(deps: ServiceDependencies) {
       if (!forceRefresh && cachedTarget && cachedTarget.expiresAt > Date.now()) target = cachedTarget.value;
       if (!target) {
         if (typeof argument === "string") {
-          const resolved = await deps.commands.resolve(argument);
+          const resolved = await cachedResolve(argument);
           target = { hostname: resolved.hostname || host.hostname, port: resolved.port || host.port, user: resolved.user, identityFile: resolved.identityFile, proxyJump: resolved.proxyJump };
         } else {
           target = argument;
@@ -306,19 +404,19 @@ export function createSshService(deps: ServiceDependencies) {
     const startedAt = now();
     const host = await findHost(hostId);
     if (host.jumpHostType === "jumpserver") throw new Error("JumpServer 资产不支持通过 AFK 自动部署公钥，请在目标终端内操作");
-    const target = await resolveCredentialTarget(host);
-    const fingerprint = await deps.commands.scanFingerprint(target);
-    if (!await deps.knownHosts.isTrusted(target, fingerprint)) {
+    const context = await resolveDeploymentContext(host);
+    const fingerprintTarget = { hostname: context.credential.hostname, port: context.credential.port, ...(context.proxyJump ? { proxyJump: context.proxyJump } : {}) };
+    const fingerprint = await deps.commands.scanFingerprint(fingerprintTarget);
+    if (!await deps.knownHosts.isTrusted(context.credential, fingerprint)) {
       audit(deps, "deploy-key", "untrusted", host.id, startedAt);
       throw new Error("SSH 主机尚未信任，已阻止公钥部署");
     }
-    const configuredIdentity = host.identityFile || path.join(home, ".ssh", "id_ed25519_afk");
-    const identityFile = assertAllowedSshPath(configuredIdentity, home);
+    const identityFile = resolveDeployIdentity(host, context.identityFile);
     const publicKey = await fs.readFile(`${identityFile}.pub`, "utf8").catch(() => "");
-    if (!publicKey.trim()) throw new Error("SSH 公钥不存在，请先生成或配置 IdentityFile");
+    if (!publicKey.trim()) throw new Error(`SSH 公钥不存在：${identityFile}.pub；请先生成对应密钥`);
     const encoded = Buffer.from(publicKey.trim(), "utf8").toString("base64");
     const remoteCommand = `umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; key=$(printf '%s' ${encoded} | (base64 -d 2>/dev/null || base64 -D)); grep -qxF "$key" ~/.ssh/authorized_keys || printf '%s\\n' "$key" >> ~/.ssh/authorized_keys; chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys`;
-    let password = await deps.credentialService?.get(host.id, target);
+    let password = await deps.credentialService?.get(host.id, context.credential);
     try {
       const session = deps.pty.deployKey(host.id, connectionArgument(host), remoteCommand, password, host.alias);
       audit(deps, "deploy-key", "started", host.id, startedAt);
@@ -382,7 +480,7 @@ export function createSshService(deps: ServiceDependencies) {
     const host = await findHost(hostId);
     const argument = connectionArgument(host);
     const resolvedTarget = host.source === "managed" && !isDirectManagedHost(host)
-      ? await deps.commands.resolve(String(argument))
+      ? await cachedResolve(String(argument))
       : await resolveFingerprintTarget(host);
     const target: ResolvedTarget = { hostname: resolvedTarget.hostname || host.hostname, port: resolvedTarget.port || host.port, user: resolvedTarget.user, identityFile: resolvedTarget.identityFile, proxyJump: resolvedTarget.proxyJump };
     const fingerprint = await deps.commands.scanFingerprint(target);

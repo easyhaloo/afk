@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
-import { KeyRound, Plus, X } from "lucide-react";
+import { Copy, KeyRound, Plus, X } from "lucide-react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { filterSshHosts, SshHostsPage, sshDiagnosticTypeLabel } from "../src/features/ssh/SshHostsPage";
 import { resetSshHostCache, writeSshHostCache } from "../src/features/ssh/ssh-host-cache";
@@ -53,6 +53,28 @@ describe("SSH diagnostic panel", () => {
 
     expect(toggle.props["aria-expanded"]).toBe(true);
     expect(renderer.root.findByProps({ className: "ssh-diagnostic-list" })).toBeDefined();
+    expect(renderer.root.findByProps({ className: "ssh-toolbar" }).findByProps({ className: "ssh-diagnostics" })).toBeDefined();
+    act(() => { renderer.unmount(); });
+  });
+});
+
+describe("SSH host duplication", () => {
+  it("opens a prefilled add form with a unique copied alias", async () => {
+    const copiedHost = { ...hosts[1], id: "managed:stage-copy", alias: "stage-copy" };
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: [...hosts, copiedHost], diagnostics: [] }));
+    const copyButton = renderer.root.findByProps({ "aria-label": "复制 SSH 主机 stage" });
+
+    expect(copyButton.findByType(Copy)).toBeDefined();
+    await act(async () => {
+      copyButton.props.onClick({ stopPropagation: vi.fn() });
+      await flushReactUpdates();
+    });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    expect(dialog.findByProps({ children: "复制 SSH 主机" })).toBeDefined();
+    expect(dialog.findByProps({ value: "stage-copy-2" })).toBeDefined();
+    expect(dialog.findByProps({ value: "staging.example.test" })).toBeDefined();
+    expect(dialog.findByProps({ type: "password" }).props.value).toBe("");
     act(() => { renderer.unmount(); });
   });
 });

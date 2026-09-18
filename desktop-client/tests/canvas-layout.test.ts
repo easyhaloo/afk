@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasCanvasNodeCollisions, layoutCanvasNodes, zoomCanvasViewportAtPoint } from "../src/features/workflows/graph/canvas-layout";
+import { hasCanvasNodeCollisions, insertCanvasNodeAfter, layoutCanvasNodes, zoomCanvasViewportAtPoint } from "../src/features/workflows/graph/canvas-layout";
 
 const nodes = (count: number) => Array.from({ length: count }, (_, index) => ({
   id: `agent-${index + 1}`,
@@ -40,6 +40,27 @@ describe("custom workflow canvas layout", () => {
     const first = layoutCanvasNodes(nodes(8));
     const second = layoutCanvasNodes(nodes(8));
     expect(second.map(node => ({ id: node.id, x: node.x, y: node.y }))).toEqual(first.map(node => ({ id: node.id, x: node.x, y: node.y })));
+  });
+
+  it("inserts a new node immediately after the selected node", () => {
+    const existing = nodes(3);
+    const next = { ...nodes(1)[0], id: "qa-1", template: "qa" as const, label: "审查 Agent" };
+
+    expect(insertCanvasNodeAfter(existing, "agent-2", next).map((node) => node.id)).toEqual(["agent-1", "agent-2", "qa-1", "agent-3"]);
+  });
+
+  it("inserts at the beginning when the workflow start is selected", () => {
+    const existing = nodes(2);
+    const next = { ...nodes(1)[0], id: "qa-1", template: "qa" as const, label: "审查 Agent" };
+
+    expect(insertCanvasNodeAfter(existing, "start", next).map((node) => node.id)).toEqual(["qa-1", "agent-1", "agent-2"]);
+  });
+
+  it("appends when the selected node is not in the custom workflow", () => {
+    const existing = nodes(2);
+    const next = { ...nodes(1)[0], id: "qa-1", template: "qa" as const, label: "审查 Agent" };
+
+    expect(insertCanvasNodeAfter(existing, "step-built-in", next).map((node) => node.id)).toEqual(["agent-1", "agent-2", "qa-1"]);
   });
 
   it("recognizes persisted collisions", () => {

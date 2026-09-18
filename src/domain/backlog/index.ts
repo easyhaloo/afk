@@ -7,12 +7,21 @@ export type { BacklogProviderCapabilities } from './initialization';
 export { BACKLOG_METADATA } from './initialization';
 export type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record';
 export { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags';
+export type { GlobalWorkItem, ProviderProjectRef, WorkItemId, WorkItemIdentityParts, WorkItemPlatform } from '../work-item/types';
+export { encodeWorkItemIdForPath, formatWorkItemId, parseWorkItemId, WORK_ITEM_PLATFORMS } from '../work-item/identity';
 import type { BacklogClaim } from './claim';
 import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record';
+import type { ProviderProjectRef, WorkItemId } from '../work-item/types';
 import { validateBusinessTag } from './tags';
 
 export interface BacklogItem {
   id: string;
+  /** Canonical global identity supplied by provider inventory APIs. */
+  workItemId?: WorkItemId;
+  issueNumber?: number;
+  project?: ProviderProjectRef;
+  managed?: boolean;
+  executionEligible?: boolean;
   title: string;
   description?: string;
   /** Organizational grouping only; it never selects a git base branch. */

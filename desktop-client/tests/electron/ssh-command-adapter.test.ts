@@ -39,6 +39,20 @@ describe("OpenSSH command adapter", () => {
     expect(fingerprint).not.toHaveProperty("key");
   });
 
+  it("routes ssh-keyscan through a ProxyJump when the target is behind a jump host", async () => {
+    const calls: Array<[string, string[]]> = [];
+    const adapter = createSshCommandAdapter({
+      exec: async (command, args) => {
+        calls.push([command, args]);
+        return { ok: true, stdout: "internal.example.test ssh-ed25519 AAAAsecret\n", stderr: "" };
+      },
+    });
+
+    await adapter.scanFingerprint({ hostname: "internal.example.test", port: 22, proxyJump: "fangcloud-jumpserver" });
+
+    expect(calls).toEqual([["ssh-keyscan", ["-T", "8", "-p", "22", "-J", "fangcloud-jumpserver", "internal.example.test"]]]);
+  });
+
   it("builds a parameterized scp upload for a direct target", async () => {
     const calls: Array<[string, string[]]> = [];
     const adapter = createSshCommandAdapter({

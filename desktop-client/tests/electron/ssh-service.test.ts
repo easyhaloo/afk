@@ -361,6 +361,135 @@ describe("SSH service", () => {
     expect(deployCalls).toBe(0);
   });
 
+  it("deploys the alias IdentityFile from ~/.ssh/config when host.identityFile is empty", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-deploy-alias-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    const systemPub = "ssh-ed25519 AAAASYSTEM system-key\n";
+    await writeFile(path.join(home, ".ssh", "id_ed25519.pub"), systemPub);
+    const deps = dependencies();
+    let deployedRemoteCommand: string | undefined;
+    deps.home = home;
+    deps.config.listHosts = async () => ({ hosts: [directHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    deps.commands.resolve = async () => ({ hostname: directHost.hostname, port: directHost.port, identityFile: "~/.ssh/id_ed25519" });
+    deps.pty.deployKey = (_hostId, _targetOrAlias, remoteCommand) => {
+      deployedRemoteCommand = remoteCommand;
+      return { id: "session-deploy", hostId: directHost.id, alias: directHost.alias, kind: "deploy", title: directHost.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await service.deployKey(directHost.id);
+
+    const expectedEncoded = Buffer.from(systemPub.trim(), "utf8").toString("base64");
+    expect(deployedRemoteCommand).toContain(expectedEncoded);
+  });
+
+  it("falls back to the AFK default key when the alias has no IdentityFile", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-deploy-fallback-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    const afkPub = "ssh-ed25519 AAAATEST afk";
+    await writeFile(path.join(home, ".ssh", "id_ed25519_afk.pub"), afkPub);
+    const deps = dependencies();
+    let deployedRemoteCommand: string | undefined;
+    deps.home = home;
+    deps.config.listHosts = async () => ({ hosts: [directHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    deps.commands.resolve = async () => ({ hostname: directHost.hostname, port: directHost.port });
+    deps.pty.deployKey = (_hostId, _targetOrAlias, remoteCommand) => {
+      deployedRemoteCommand = remoteCommand;
+      return { id: "session-deploy", hostId: directHost.id, alias: directHost.alias, kind: "deploy", title: directHost.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await service.deployKey(directHost.id);
+
+    const expectedEncoded = Buffer.from(afkPub, "utf8").toString("base64");
+    expect(deployedRemoteCommand).toContain(expectedEncoded);
+  });
+
+  it("falls back to the AFK default key when alias resolution fails", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-deploy-resolve-fail-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    const afkPub = "ssh-ed25519 AAAATEST afk";
+    await writeFile(path.join(home, ".ssh", "id_ed25519_afk.pub"), afkPub);
+    const deps = dependencies();
+    let deployedRemoteCommand: string | undefined;
+    deps.home = home;
+    deps.config.listHosts = async () => ({ hosts: [directHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    deps.commands.resolve = async () => { throw new Error("ssh -G failed"); };
+    deps.pty.deployKey = (_hostId, _targetOrAlias, remoteCommand) => {
+      deployedRemoteCommand = remoteCommand;
+      return { id: "session-deploy", hostId: directHost.id, alias: directHost.alias, kind: "deploy", title: directHost.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await service.deployKey(directHost.id);
+
+    const expectedEncoded = Buffer.from(afkPub, "utf8").toString("base64");
+    expect(deployedRemoteCommand).toContain(expectedEncoded);
+  });
+
+  it("prefers the explicit host.identityFile over the alias-resolved IdentityFile", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-deploy-explicit-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    const explicitPub = "ssh-ed25519 AAAAEXPLICIT user";
+    await writeFile(path.join(home, ".ssh", "id_work.pub"), explicitPub);
+    const configuredHost = { ...directHost, identityFile: "~/.ssh/id_work" };
+    const deps = dependencies();
+    let deployedRemoteCommand: string | undefined;
+    deps.home = home;
+    deps.config.listHosts = async () => ({ hosts: [configuredHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    deps.commands.resolve = async () => ({ hostname: configuredHost.hostname, port: configuredHost.port, identityFile: "~/.ssh/id_ed25519" });
+    deps.pty.deployKey = (_hostId, _targetOrAlias, remoteCommand) => {
+      deployedRemoteCommand = remoteCommand;
+      return { id: "session-deploy", hostId: configuredHost.id, alias: configuredHost.alias, kind: "deploy", title: configuredHost.alias, state: "opening" };
+    };
+    const service = createSshService(deps);
+
+    await service.deployKey(configuredHost.id);
+
+    const expectedEncoded = Buffer.from(explicitPub, "utf8").toString("base64");
+    expect(deployedRemoteCommand).toContain(expectedEncoded);
+  });
+
+  it("rejects deploy with the missing public key path when no candidate is readable", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-deploy-missing-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    const deps = dependencies();
+    deps.home = home;
+    deps.config.listHosts = async () => ({ hosts: [directHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    deps.commands.resolve = async () => ({ hostname: directHost.hostname, port: directHost.port });
+    deps.pty.deployKey = vi.fn();
+    const service = createSshService(deps);
+
+    await expect(service.deployKey(directHost.id)).rejects.toThrow(/SSH 公钥不存在.*id_ed25519_afk\.pub/);
+    expect(deps.pty.deployKey).not.toHaveBeenCalled();
+  });
+
+  it("invokes ssh -G at most once per deploy even when both credential and identity need it", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-deploy-once-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    await writeFile(path.join(home, ".ssh", "id_ed25519.pub"), "ssh-ed25519 AAAA system");
+    const deps = dependencies();
+    let resolveCalls = 0;
+    deps.home = home;
+    deps.config.listHosts = async () => ({ hosts: [directHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    deps.commands.resolve = async () => {
+      resolveCalls += 1;
+      return { hostname: directHost.hostname, port: directHost.port, identityFile: "~/.ssh/id_ed25519" };
+    };
+    deps.pty.deployKey = () => ({ id: "session-deploy", hostId: directHost.id, alias: directHost.alias, kind: "deploy", title: directHost.alias, state: "opening" });
+    const service = createSshService(deps);
+
+    await service.deployKey(directHost.id);
+
+    expect(resolveCalls).toBe(1);
+  });
+
   it("reuses host status within the cache TTL", async () => {
     const deps = dependencies();
     let configCalls = 0;

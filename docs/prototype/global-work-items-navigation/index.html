@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AFK Control — 全局工作项导航原型</title>
+  <style>
+    :root {
+      --accent: #6657df;
+      --accent-soft: #f0eeff;
+      --accent-border: #d9d4fb;
+      --canvas: #f6f6f8;
+      --panel: #ffffff;
+      --panel-subtle: #fafafd;
+      --sidebar: #fbfbfd;
+      --text: #30313a;
+      --muted: #7e808c;
+      --quiet: #a8a9b2;
+      --border: #e6e6eb;
+      --border-strong: #d9d9e1;
+      --green: #3d8567;
+      --green-soft: #e8f5ee;
+      --amber: #9b6b28;
+      --amber-soft: #faf0df;
+      --red: #a64b55;
+      --red-soft: #fbeaec;
+      --blue: #416e9e;
+      --blue-soft: #eaf2fb;
+      --shadow: 0 16px 45px rgba(35, 33, 65, .11);
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 13px;
+    }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    .icon { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .icon.small { width: 13px; height: 13px; }
+
+    .app { display: grid; grid-template-columns: 224px minmax(0, 1fr); height: 100vh; }
+    .sidebar {
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      padding: 14px 11px 12px;
+      border-right: 1px solid var(--border);
+      background: var(--sidebar);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 8px; }
+    .brand-mark { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 9px; background: var(--accent); color: #fff; font: 700 13px var(--mono); box-shadow: 0 7px 16px rgba(102, 87, 223, .22); }
+    .brand-copy strong { display: block; font-size: 12px; letter-spacing: .04em; }
+    .brand-copy small { display: block; margin-top: 2px; color: var(--quiet); font: 8px var(--mono); letter-spacing: .09em; }
+
+    .create-button {
+      display: flex;
+      width: 100%; height: 34px;
+      align-items: center; justify-content: center; gap: 8px;
+      margin: 9px 0 14px;
+      border: 1px solid var(--accent-border); border-radius: 8px;
+      background: var(--accent-soft); color: var(--accent);
+      font-weight: 650; cursor: pointer;
+    }
+    .create-button:hover { border-color: var(--accent); }
+
+    .nav-scroll { min-height: 0; overflow: auto; }
+    .nav-group { padding: 0 3px 10px; }
+    .nav-group + .nav-group { padding-top: 10px; border-top: 1px solid var(--border); }
+    .nav-label { margin: 0 8px 5px; color: var(--quiet); font: 8px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .nav-item {
+      display: flex; width: 100%; height: 34px;
+      align-items: center; gap: 10px;
+      padding: 0 10px; border: 0; border-radius: 7px;
+      background: transparent; color: #656772; cursor: pointer; text-align: left;
+    }
+    .nav-item:hover { background: #f2f2f6; color: var(--text); }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+    .nav-item .count { min-width: 22px; margin-left: auto; padding: 1px 6px; border-radius: 999px; background: #ededf2; color: #898a94; font: 9px var(--mono); text-align: center; }
+    .nav-item.active .count { background: #fff; color: var(--accent); }
+    .sidebar-foot { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border); }
+    .identity { display: flex; gap: 9px; align-items: center; padding: 9px 8px 3px; }
+    .avatar { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; background: #ebeaf1; color: #777986; font-size: 10px; font-weight: 700; }
+    .identity b { display: block; font-size: 10px; }
+    .identity small { display: block; margin-top: 2px; color: var(--quiet); font-size: 8px; }
+
+    .main { display: grid; grid-template-rows: 52px minmax(0, 1fr); min-width: 0; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.88); backdrop-filter: blur(12px); }
+    .breadcrumbs { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+    .breadcrumbs b { color: var(--text); font-weight: 620; }
+    .top-actions { display: flex; align-items: center; gap: 7px; }
+    .icon-button { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--muted); cursor: pointer; }
+    .icon-button:hover { border-color: var(--accent-border); color: var(--accent); }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #4da67b; box-shadow: 0 0 0 3px #e7f4ed; }
+    .sync-state { display: flex; align-items: center; gap: 7px; margin-right: 5px; color: var(--muted); font-size: 10px; }
+
+    .viewport { min-height: 0; overflow: auto; padding: 22px 25px 32px; }
+    .page { display: none; max-width: 1280px; margin: 0 auto; }
+    .page.active { display: block; }
+    .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+    .eyebrow { margin: 0 0 5px; color: var(--accent); font: 8px var(--mono); font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 23px; letter-spacing: -.035em; }
+    .subtitle { max-width: 700px; margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .header-stats { display: flex; gap: 18px; }
+    .header-stat { text-align: right; }
+    .header-stat b { display: block; font: 650 16px var(--mono); }
+    .header-stat small { color: var(--muted); font-size: 9px; }
+
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 13px; }
+    .summary-card { padding: 13px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+    .summary-card .top { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 9px; }
+    .summary-card .top span { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 7px; background: var(--panel-subtle); }
+    .summary-card b { display: block; margin-top: 9px; font: 650 20px var(--mono); }
+    .summary-card small { color: var(--muted); font-size: 9px; }
+
+    .panel { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); box-shadow: 0 1px 2px rgba(30,29,45,.025); overflow: hidden; }
+    .toolbar { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--panel-subtle); }
+    .search { display: flex; min-width: 270px; flex: 1; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--muted); }
+    .search input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 11px; }
+    .filter { height: 32px; padding: 0 26px 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: #666873; font-size: 10px; cursor: pointer; }
+    .view-switch { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 7px; background: #fff; }
+    .view-switch button { display: grid; width: 26px; height: 26px; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--quiet); cursor: pointer; }
+    .view-switch button.active { background: var(--accent-soft); color: var(--accent); }
+
+    .table-head, .work-row { display: grid; grid-template-columns: minmax(280px, 2.1fr) 125px 150px 110px 115px 32px; gap: 12px; align-items: center; }
+    .table-head { min-height: 34px; padding: 0 15px; border-bottom: 1px solid var(--border); color: var(--quiet); font: 8px var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+    .work-row { min-height: 73px; padding: 10px 15px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .15s ease; }
+    .work-row:last-child { border-bottom: 0; }
+    .work-row:hover, .work-row.selected { background: #fafaff; }
+    .work-row.selected { box-shadow: inset 3px 0 0 var(--accent); }
+    .work-title { min-width: 0; }
+    .work-title .id { color: var(--quiet); font: 9px var(--mono); }
+    .work-title b { display: block; overflow: hidden; margin: 3px 0 4px; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .work-title p { overflow: hidden; margin: 0; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .pill { display: inline-flex; align-items: center; gap: 5px; min-height: 21px; padding: 0 8px; border-radius: 999px; font-size: 9px; font-weight: 650; white-space: nowrap; }
+    .pill::before { width: 5px; height: 5px; border-radius: 50%; background: currentColor; content: ""; opacity: .8; }
+    .pill.ready { background: var(--blue-soft); color: var(--blue); }
+    .pill.running { background: var(--green-soft); color: var(--green); }
+    .pill.planning { background: var(--amber-soft); color: var(--amber); }
+    .pill.blocked { background: var(--red-soft); color: var(--red); }
+    .pill.done { background: #eef0ef; color: #69716d; }
+    .source-stack { display: flex; align-items: center; }
+    .source-logo { display: grid; width: 23px; height: 23px; place-items: center; margin-left: -4px; border: 2px solid #fff; border-radius: 7px; background: #f0f0f4; color: #555762; font: 700 8px var(--mono); }
+    .source-logo:first-child { margin-left: 0; }
+    .source-logo.gitlab { background: #fff0e8; color: #b95b26; }
+    .source-logo.local { background: var(--accent-soft); color: var(--accent); }
+    .source-more { margin-left: 5px; color: var(--muted); font: 9px var(--mono); }
+    .resource-cell { display: flex; align-items: center; gap: 7px; color: #60626d; font-size: 10px; }
+    .resource-cell.zero { color: var(--quiet); }
+    .updated { color: var(--muted); font-size: 9px; }
+    .row-arrow { color: var(--quiet); }
+
+    .empty-screen { display: grid; min-height: 470px; place-items: center; border: 1px dashed var(--border-strong); border-radius: 12px; background: rgba(255,255,255,.45); text-align: center; }
+    .empty-icon { display: grid; width: 50px; height: 50px; place-items: center; margin: 0 auto 13px; border-radius: 14px; background: var(--accent-soft); color: var(--accent); }
+    .empty-screen h2 { margin: 0 0 7px; font-size: 16px; }
+    .empty-screen p { max-width: 430px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+
+    .runs-table .table-head, .run-row { grid-template-columns: minmax(260px, 1.8fr) 120px 140px minmax(210px, 1fr) 100px 32px; }
+    .run-row { display: grid; min-height: 68px; grid-template-columns: minmax(260px, 1.8fr) 120px 140px minmax(210px, 1fr) 100px 32px; gap: 12px; align-items: center; padding: 9px 15px; border-bottom: 1px solid var(--border); cursor: pointer; }
+    .run-row:hover { background: #fafaff; }
+    .run-name b { display: block; margin-bottom: 4px; font-size: 11px; }
+    .run-name small { color: var(--quiet); font: 8px var(--mono); }
+    .progress { height: 5px; overflow: hidden; border-radius: 99px; background: #ededf1; }
+    .progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+    .progress-label { display: flex; justify-content: space-between; margin-top: 5px; color: var(--muted); font-size: 8px; }
+    .path { overflow: hidden; color: var(--muted); font: 8px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+
+    .drawer-backdrop { position: fixed; inset: 0; z-index: 10; display: none; background: rgba(32,31,44,.18); }
+    .drawer-backdrop.open { display: block; }
+    .drawer { position: absolute; top: 0; right: 0; display: flex; width: min(560px, 92vw); height: 100%; flex-direction: column; border-left: 1px solid var(--border); background: var(--panel); box-shadow: var(--shadow); animation: slide-in .18s ease-out; }
+    @keyframes slide-in { from { transform: translateX(18px); opacity: .5; } }
+    .drawer-header { display: flex; gap: 12px; align-items: flex-start; padding: 20px 20px 16px; border-bottom: 1px solid var(--border); }
+    .drawer-header .grow { min-width: 0; flex: 1; }
+    .drawer-header small { color: var(--accent); font: 8px var(--mono); }
+    .drawer-header h2 { margin: 5px 0 4px; font-size: 18px; letter-spacing: -.025em; }
+    .drawer-header p { margin: 0; color: var(--muted); font-size: 10px; }
+    .drawer-actions { display: flex; gap: 7px; }
+    .primary-button, .secondary-button { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; gap: 7px; padding: 0 12px; border-radius: 7px; cursor: pointer; font-size: 10px; font-weight: 650; }
+    .primary-button { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+    .primary-button:hover { background: #5848d0; }
+    .secondary-button { border: 1px solid var(--border); background: #fff; color: #656772; }
+    .drawer-tabs { display: flex; gap: 20px; min-height: 42px; padding: 0 20px; border-bottom: 1px solid var(--border); }
+    .drawer-tabs button { position: relative; border: 0; background: none; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .drawer-tabs button.active { color: var(--accent); font-weight: 650; }
+    .drawer-tabs button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); content: ""; }
+    .drawer-body { min-height: 0; flex: 1; overflow: auto; padding: 17px 20px 24px; }
+    .detail-section { margin-bottom: 18px; }
+    .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .section-title h3 { margin: 0; font-size: 10px; letter-spacing: .02em; }
+    .section-title small { color: var(--muted); font-size: 8px; }
+    .description { margin: 0; color: #60626c; font-size: 11px; line-height: 1.7; }
+    .source-card, .repo-card, .plan-card { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-subtle); }
+    .source-card + .source-card, .repo-card + .repo-card, .plan-card + .plan-card { margin-top: 6px; }
+    .card-icon { display: grid; width: 29px; height: 29px; flex: 0 0 29px; place-items: center; border-radius: 8px; background: #eeeef3; color: #62646d; font: 700 8px var(--mono); }
+    .card-icon.gl { background: #fff0e8; color: #ba5c27; }
+    .card-icon.repo { background: var(--blue-soft); color: var(--blue); }
+    .card-copy { min-width: 0; flex: 1; }
+    .card-copy b { display: block; overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .card-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); font: 8px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .role { padding: 3px 7px; border-radius: 5px; background: #fff; color: var(--muted); font-size: 8px; }
+    .drawer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 13px 20px; border-top: 1px solid var(--border); background: var(--panel-subtle); }
+    .drawer-footer small { max-width: 300px; color: var(--muted); font: 8px/1.45 var(--mono); }
+
+    .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; padding: 24px; background: rgba(33,32,45,.34); }
+    .modal-backdrop.open { display: grid; }
+    .modal { width: min(630px, 94vw); overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: 0 24px 65px rgba(27,25,49,.2); }
+    .modal > header { display: flex; align-items: flex-start; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+    .modal h2 { margin: 0; font-size: 16px; }
+    .modal header p { margin: 5px 0 0; color: var(--muted); font-size: 10px; }
+    .modal-body { padding: 17px 20px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field { display: grid; gap: 6px; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { color: var(--muted); font-size: 9px; }
+    .field input, .field select { width: 100%; height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text); font-size: 10px; outline: 0; }
+    .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .workspace-preview { display: grid; grid-template-columns: 24px 1fr; gap: 9px; margin-top: 14px; padding: 11px; border: 1px solid var(--accent-border); border-radius: 8px; background: var(--accent-soft); }
+    .workspace-preview svg { margin-top: 1px; color: var(--accent); }
+    .workspace-preview b { display: block; font-size: 9px; }
+    .workspace-preview code { display: block; overflow: hidden; margin-top: 4px; color: #6055a4; font: 8px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .repo-checks { display: grid; gap: 6px; margin-top: 8px; }
+    .repo-check { display: flex; align-items: center; gap: 9px; min-height: 38px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; }
+    .repo-check input { accent-color: var(--accent); }
+    .repo-check div { min-width: 0; flex: 1; }
+    .repo-check b { display: block; font-size: 9px; }
+    .repo-check small { display: block; margin-top: 2px; color: var(--muted); font: 8px var(--mono); }
+    .modal footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--panel-subtle); }
+
+    .toast { position: fixed; right: 22px; bottom: 22px; z-index: 40; display: none; align-items: center; gap: 10px; min-width: 300px; padding: 12px 14px; border: 1px solid #cce6d8; border-radius: 9px; background: #f4fbf7; color: #396d55; box-shadow: var(--shadow); font-size: 10px; }
+    .toast.open { display: flex; animation: toast-in .2s ease-out; }
+    @keyframes toast-in { from { transform: translateY(8px); opacity: 0; } }
+
+    @media (max-width: 1020px) {
+      .app { grid-template-columns: 190px minmax(0, 1fr); }
+      .table-head, .work-row { grid-template-columns: minmax(250px, 2fr) 110px 130px 90px 32px; }
+      .table-head > :nth-child(5), .work-row > :nth-child(5) { display: none; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    /* Align the prototype with the existing AFK Control visual system. */
+    :root {
+      --accent: #627f6c;
+      --accent-soft: #e8eee7;
+      --accent-border: #bdcbbf;
+      --canvas: #f4f4ef;
+      --panel: #ffffff;
+      --panel-subtle: #fbfbf8;
+      --sidebar: #f7f7f4;
+      --text: #2d332e;
+      --muted: #747a73;
+      --quiet: #a4a8a2;
+      --border: #e2e3dc;
+      --border-strong: #d7d9d2;
+      --green: #627f6c;
+      --green-soft: #dbe8de;
+      --amber: #a37343;
+      --amber-soft: #f3e8db;
+      --red: #9b5550;
+      --red-soft: #f5e7e4;
+      --blue: #4f8776;
+      --blue-soft: #d9ebe4;
+      --shadow: 0 18px 50px rgba(46, 51, 47, .18);
+    }
+    body { background: var(--canvas); }
+    .app { grid-template-columns: 240px minmax(0, 1fr); }
+    .sidebar { padding: 18px 10px 12px; background: var(--sidebar); }
+    .brand { height: auto; padding: 0 10px 13px; opacity: .84; }
+    .brand-mark {
+      width: 22px; height: 22px; border-radius: 0;
+      background: #344238; color: #fff; font-size: 9px;
+      clip-path: polygon(50% 0,100% 100%,69% 100%,50% 60%,31% 100%,0 100%);
+      box-shadow: none;
+    }
+    .brand-copy strong { font-size: 10px; letter-spacing: .085em; }
+    .brand-copy small { margin-top: 2px; color: #999e98; font-size: 7px; letter-spacing: .11em; }
+    .create-button {
+      height: 42px; justify-content: flex-start; gap: 9px;
+      margin: 0 0 13px; padding: 0 11px;
+      border-color: #daddd8; border-radius: 10px;
+      background: #fff; color: #303830; font-size: 12px;
+      box-shadow: 0 1px 1px rgba(35,43,37,.035);
+    }
+    .create-button svg { color: var(--accent); }
+    .create-button:hover { border-color: var(--accent-border); background: #f1f5f0; transform: translateY(-1px); box-shadow: 0 6px 15px rgba(63,82,67,.08); }
+    .nav-scroll { scrollbar-width: thin; }
+    .nav-group { padding: 0 0 11px; }
+    .nav-group + .nav-group { padding-top: 12px; border-top-color: #e8e9e3; }
+    .nav-label { margin: 0 9px 6px; color: #999e98; font-size: 8px; font-weight: 650; letter-spacing: .1em; }
+    .nav-item {
+      position: relative; min-height: 40px; height: 40px;
+      padding: 0 10px; border-radius: 9px;
+      color: #696f68; font-size: 11px;
+      transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+    .nav-item::before {
+      position: absolute; left: -10px; width: 2px; height: 16px;
+      border-radius: 0 2px 2px 0; background: var(--accent);
+      content: ""; opacity: 0; transform: scaleY(.3);
+      transition: opacity 160ms ease, transform 180ms cubic-bezier(.23,1,.32,1);
+    }
+    .nav-item:hover { background: #eff1ed; color: var(--text); transform: translateX(1px); }
+    .nav-item.active { background: var(--accent-soft); color: #354438; }
+    .nav-item.active::before { opacity: 1; transform: scaleY(1); }
+    .nav-item .count { min-width: 19px; padding: 2px 5px; background: #dde5df; color: #55705e; font-size: 7px; }
+    .nav-item.active .count { background: #d8e4da; color: #4d6a55; }
+    .sidebar-foot { border-top-color: #e8e9e3; }
+    .avatar { background: #e3e7e1; color: #5d695f; }
+
+    .main { grid-template-rows: 49px minmax(0, 1fr); background: var(--panel); }
+    .topbar { height: 49px; padding: 0 18px; border-color: var(--border); background: rgba(251,251,248,.94); }
+    .breadcrumbs { color: #92978f; font-size: 10px; }
+    .breadcrumbs b { color: #393f39; font-size: 12px; }
+    .sync-state { color: var(--muted); }
+    .status-dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(98,127,108,.12); }
+    .icon-button { border-color: var(--border); border-radius: 8px; background: #fff; color: #5f665f; }
+    .icon-button:hover { border-color: #cbd5cc; background: #f6f7f3; color: #405247; }
+    .viewport { padding: 0 44px 56px; background: var(--panel); }
+    .page { max-width: 1240px; }
+    .page-header { min-height: 105px; margin: 0 0 14px; padding: 28px 0 19px; border-bottom: 1px solid #ecece7; }
+    .eyebrow { color: var(--accent); }
+    h1 { font-size: 25px; }
+    .subtitle { color: var(--muted); font-size: 10px; }
+    .header-stat b { color: var(--text); }
+    .header-stat small { color: var(--muted); }
+
+    .summary-grid { gap: 10px; margin: 0 0 14px; }
+    .summary-card { min-height: 96px; padding: 14px; border-color: var(--border); border-radius: 11px; box-shadow: 0 1px 2px rgba(46,51,47,.025); }
+    .summary-card .top span { background: #f2f4ef; color: #637167; }
+    .summary-card b { color: var(--text); }
+    .panel { border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+    .toolbar { min-height: 58px; padding: 14px 0; border-color: var(--border); background: transparent; }
+    .search, .filter { height: 30px; border-color: var(--border); border-radius: 7px; background: var(--panel); }
+    .search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(98,127,108,.1); }
+    .view-switch { border-color: var(--border); background: var(--panel); }
+    .view-switch button.active { background: var(--accent-soft); color: var(--accent); }
+    .table-head { min-height: 30px; padding: 0 14px; border: 0; color: var(--quiet); }
+    #work-list, #runs-list { display: grid; gap: 8px; }
+    .work-row, .run-row {
+      min-height: 74px; padding: 11px 14px;
+      border: 1px solid var(--border); border-radius: 10px;
+      background: var(--panel);
+      transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+    }
+    .work-row:last-child, .run-row:last-child { border-bottom: 1px solid var(--border); }
+    .work-row:hover, .work-row.selected, .run-row:hover {
+      border-color: #b9cbbd; background: #f7f9f6;
+      box-shadow: 0 8px 24px rgba(46,51,47,.07); transform: translateY(-1px);
+    }
+    .work-row.selected { box-shadow: inset 2px 0 0 var(--accent), 0 8px 24px rgba(46,51,47,.07); }
+    .work-title .id { color: var(--muted); }
+    .work-title b { color: var(--text); }
+    .pill.ready { background: color-mix(in srgb, var(--ready, #a4a9a2) 14%, #fff); color: #727a73; }
+    .pill.running { background: var(--green-soft); color: var(--green); }
+    .pill.planning, .pill.blocked { background: var(--amber-soft); color: var(--amber); }
+    .source-logo { border-color: #fff; background: #eff0eb; color: #59625a; }
+    .source-logo.gitlab { background: #f3e8db; color: #946337; }
+    .source-logo.local { background: var(--accent-soft); color: var(--accent); }
+    .progress span { background: var(--accent); }
+
+    .drawer-backdrop { background: rgba(45,51,46,.28); backdrop-filter: blur(2px); }
+    .drawer { width: min(500px, 100vw); border-color: var(--border); box-shadow: -18px 0 42px rgba(46,51,47,.15); }
+    .drawer-header { padding: 26px 24px 19px; }
+    .drawer-header small { color: var(--accent); }
+    .drawer-header h2 { font-size: 22px; line-height: 1.2; }
+    .drawer-tabs { padding: 0 24px; }
+    .drawer-tabs button.active { color: var(--accent); }
+    .drawer-tabs button.active::after { background: var(--accent); }
+    .drawer-body { padding: 20px 24px 28px; }
+    .source-card, .repo-card, .plan-card { border-color: var(--border); background: var(--panel-subtle); }
+    .card-icon.repo { background: var(--accent-soft); color: var(--accent); }
+    .drawer-footer { padding: 13px 24px; border-color: var(--border); background: var(--panel-subtle); }
+    .primary-button { border-color: var(--accent); background: var(--accent); }
+    .primary-button:hover { background: #526c5a; }
+    .secondary-button { border-color: var(--border); color: #5f665f; }
+    .modal-backdrop { background: rgba(45,51,46,.2); }
+    .modal { width: min(560px, calc(100vw - 30px)); border-color: var(--border); border-radius: 13px; box-shadow: var(--shadow); }
+    .modal > header, .modal footer { border-color: var(--border); }
+    .field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(98,127,108,.1); }
+    .workspace-preview { border-color: #cbd7cd; background: #f2f6f1; }
+    .workspace-preview svg { color: var(--accent); }
+    .workspace-preview code { color: #526c5a; }
+    .repo-check input { width: 14px; height: 14px; flex: 0 0 14px; margin: 0; padding: 0; accent-color: var(--accent); box-shadow: none; }
+    .repo-check input:focus { box-shadow: none; }
+    .toast { border-color: #c9d9cd; background: #f3f8f4; color: #4c6755; }
+
+    @media (max-width: 1240px) { .viewport { padding-right: 28px; padding-left: 28px; } }
+    @media (max-width: 1020px) { .app { grid-template-columns: 190px minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 15h4l2 3h4l2-3h4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></symbol>
+    <symbol id="i-flow" viewBox="0 0 24 24"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="15" width="6" height="6" rx="1"/><path d="M9 6h4a4 4 0 0 1 4 4v5"/></symbol>
+    <symbol id="i-agent" viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="12" rx="3"/><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4"/></symbol>
+    <symbol id="i-repo" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H7a2 2 0 0 1-2-2z"/><path d="M5 17a2 2 0 0 1 2-2h12M9 4v11"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4zM4 7v10l8 4 8-4V7M12 11v10"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1.2 1.2M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1.2-1.2"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  </svg>
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">A</span><div class="brand-copy"><strong>AFK / CONTROL</strong><small>LOCAL OPERATIONS</small></div></div>
+      <button class="create-button" id="create-work-item"><svg class="icon"><use href="#i-plus" /></svg>创建工作项</button>
+      <div class="nav-scroll">
+        <section class="nav-group">
+          <p class="nav-label">工作</p>
+          <button class="nav-item active" data-page="work-items"><svg class="icon"><use href="#i-inbox" /></svg>工作项<span class="count">18</span></button>
+          <button class="nav-item" data-page="runs"><svg class="icon"><use href="#i-play" /></svg>运行中心<span class="count" id="run-count">3</span></button>
+        </section>
+        <section class="nav-group">
+          <p class="nav-label">自动化</p>
+          <button class="nav-item" data-page="workflows"><svg class="icon"><use href="#i-flow" /></svg>工作流</button>
+          <button class="nav-item" data-page="agents"><svg class="icon"><use href="#i-agent" /></svg>Agents</button>
+        </section>
+        <section class="nav-group">
+          <p class="nav-label">资源</p>
+          <button class="nav-item" data-page="repositories"><svg class="icon"><use href="#i-repo" /></svg>代码仓库<span class="count">137</span></button>
+          <button class="nav-item" data-page="environments"><svg class="icon"><use href="#i-box" /></svg>执行环境</button>
+          <button class="nav-item" data-page="ssh"><svg class="icon"><use href="#i-terminal" /></svg>SSH 主机</button>
+        </section>
+        <section class="nav-group">
+          <p class="nav-label">系统</p>
+          <button class="nav-item" data-page="activity"><svg class="icon"><use href="#i-history" /></svg>活动记录</button>
+          <button class="nav-item" data-page="settings"><svg class="icon"><use href="#i-settings" /></svg>设置</button>
+        </section>
+      </div>
+      <div class="sidebar-foot">
+        <div class="identity"><span class="avatar">SS</span><div><b>Shenggang Shu</b><small>GitHub + 2 GitLab 已连接</small></div></div>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="topbar">
+        <div class="breadcrumbs"><span>AFK Control</span><span>/</span><b id="current-title">工作项</b></div>
+        <div class="top-actions"><span class="sync-state"><i class="status-dot"></i>所有来源已同步</span><button class="icon-button" aria-label="通知"><svg class="icon"><use href="#i-bell" /></svg></button></div>
+      </header>
+
+      <div class="viewport">
+        <main class="page active" id="page-work-items">
+          <header class="page-header">
+            <div><p class="eyebrow">Global Work Items</p><h1>工作项</h1><p class="subtitle">独立于目录和代码仓库的任务中心。一个工作项可来自多个外部系统，并关联零个、一个或多个仓库共同完成。</p></div>
+            <div class="header-stats"><div class="header-stat"><b>18</b><small>全部工作项</small></div><div class="header-stat"><b>5</b><small>可开始执行</small></div></div>
+          </header>
+
+          <section class="summary-grid">
+            <article class="summary-card"><div class="top">待规划<span><svg class="icon"><use href="#i-inbox" /></svg></span></div><b>6</b><small>需要补充目标或执行计划</small></article>
+            <article class="summary-card"><div class="top">可执行<span><svg class="icon"><use href="#i-play" /></svg></span></div><b>5</b><small>资源与工作流已经就绪</small></article>
+            <article class="summary-card"><div class="top">运行中<span><svg class="icon"><use href="#i-flow" /></svg></span></div><b>3</b><small>正在隔离任务空间中处理</small></article>
+            <article class="summary-card"><div class="top">受阻<span><svg class="icon"><use href="#i-history" /></svg></span></div><b>2</b><small>等待权限或人工输入</small></article>
+          </section>
+
+          <section class="panel">
+            <div class="toolbar">
+              <label class="search"><svg class="icon small"><use href="#i-search" /></svg><input id="work-search" placeholder="搜索标题、来源、标签或关联资源" /></label>
+              <select class="filter" aria-label="状态"><option>全部状态</option><option>待规划</option><option>可执行</option><option>运行中</option><option>受阻</option></select>
+              <select class="filter" aria-label="来源"><option>全部来源</option><option>本地创建</option><option>GitHub</option><option>GitLab</option></select>
+              <div class="view-switch"><button class="active" aria-label="列表视图"><svg class="icon small"><use href="#i-list" /></svg></button><button aria-label="网格视图"><svg class="icon small"><use href="#i-grid" /></svg></button></div>
+            </div>
+            <div class="table-head"><span>工作项</span><span>状态</span><span>外部来源</span><span>关联资源</span><span>最近更新</span><span></span></div>
+            <div id="work-list">
+              <article class="work-row" data-item="payment" data-search="支付链路重构 github gitlab checkout backend web infrastructure 多仓库">
+                <div class="work-title"><span class="id">WI-2026-018</span><b>支付链路重构与灰度切换</b><p>统一新旧支付协议，完成服务端、Web 控制台和部署配置协同改造</p></div>
+                <div><span class="pill ready">可执行</span></div>
+                <div class="source-stack"><span class="source-logo">GH</span><span class="source-logo gitlab">GL</span><span class="source-more">+1</span></div>
+                <div class="resource-cell"><svg class="icon small"><use href="#i-repo" /></svg>3 个仓库</div>
+                <div class="updated">12 分钟前</div>
+                <svg class="icon row-arrow"><use href="#i-chevron" /></svg>
+              </article>
+              <article class="work-row" data-item="auth" data-search="统一登录态切换 github identity web">
+                <div class="work-title"><span class="id">WI-2026-017</span><b>统一登录态切换</b><p>修复桌面端与 Web 端账户切换后凭据状态不一致的问题</p></div>
+                <div><span class="pill running">运行中</span></div>
+                <div class="source-stack"><span class="source-logo">GH</span></div>
+                <div class="resource-cell"><svg class="icon small"><use href="#i-repo" /></svg>2 个仓库</div>
+                <div class="updated">28 分钟前</div>
+                <svg class="icon row-arrow"><use href="#i-chevron" /></svg>
+              </article>
+              <article class="work-row" data-item="release" data-search="发布流程审计 本地创建 文档 无仓库">
+                <div class="work-title"><span class="id">WI-2026-016</span><b>发布流程权限审计</b><p>梳理生产发布角色、审批节点和紧急回滚职责</p></div>
+                <div><span class="pill planning">待规划</span></div>
+                <div class="source-stack"><span class="source-logo local">AFK</span></div>
+                <div class="resource-cell zero"><svg class="icon small"><use href="#i-repo" /></svg>无代码仓库</div>
+                <div class="updated">1 小时前</div>
+                <svg class="icon row-arrow"><use href="#i-chevron" /></svg>
+              </article>
+              <article class="work-row" data-item="billing" data-search="账单对账异常 gitlab billing service data pipeline">
+                <div class="work-title"><span class="id">WI-2026-015</span><b>账单对账异常排查</b><p>核对 9 月账单差异并补充自动化检查与异常告警</p></div>
+                <div><span class="pill blocked">受阻</span></div>
+                <div class="source-stack"><span class="source-logo gitlab">GL</span><span class="source-more">+2</span></div>
+                <div class="resource-cell"><svg class="icon small"><use href="#i-repo" /></svg>2 个仓库</div>
+                <div class="updated">3 小时前</div>
+                <svg class="icon row-arrow"><use href="#i-chevron" /></svg>
+              </article>
+              <article class="work-row" data-item="docs" data-search="桌面端使用手册 本地创建 文档 无仓库">
+                <div class="work-title"><span class="id">WI-2026-014</span><b>完善桌面端使用手册</b><p>更新任务创建、运行隔离和故障诊断章节</p></div>
+                <div><span class="pill ready">可执行</span></div>
+                <div class="source-stack"><span class="source-logo local">AFK</span></div>
+                <div class="resource-cell zero"><svg class="icon small"><use href="#i-repo" /></svg>无代码仓库</div>
+                <div class="updated">昨天</div>
+                <svg class="icon row-arrow"><use href="#i-chevron" /></svg>
+              </article>
+            </div>
+          </section>
+        </main>
+
+        <main class="page" id="page-runs">
+          <header class="page-header"><div><p class="eyebrow">Execution Center</p><h1>运行中心</h1><p class="subtitle">统一查看所有工作项的执行实例。运行目录由系统管理，不依赖用户当前打开的文件夹。</p></div><div class="header-stats"><div class="header-stat"><b id="active-run-stat">3</b><small>活跃运行</small></div><div class="header-stat"><b>24</b><small>今日完成</small></div></div></header>
+          <section class="panel runs-table">
+            <div class="toolbar"><label class="search"><svg class="icon small"><use href="#i-search" /></svg><input placeholder="搜索工作项或运行 ID" /></label><select class="filter"><option>活跃运行</option><option>全部运行</option><option>失败</option><option>已完成</option></select></div>
+            <div class="table-head"><span>工作项 / 运行</span><span>状态</span><span>工作流</span><span>进度</span><span>隔离目录</span><span></span></div>
+            <div id="runs-list">
+              <article class="run-row"><div class="run-name"><b>统一登录态切换</b><small>RUN-017-03 · WI-2026-017</small></div><span class="pill running">执行中</span><span>标准研发流程</span><div><div class="progress"><span style="width:64%"></span></div><div class="progress-label"><span>实现</span><span>64%</span></div></div><span class="path">~/.loop-workspace/WI-2026-017/</span><svg class="icon row-arrow"><use href="#i-chevron" /></svg></article>
+              <article class="run-row"><div class="run-name"><b>数据同步性能基线</b><small>RUN-013-07 · WI-2026-013</small></div><span class="pill planning">等待输入</span><span>性能诊断</span><div><div class="progress"><span style="width:42%"></span></div><div class="progress-label"><span>验证</span><span>42%</span></div></div><span class="path">~/.loop-workspace/WI-2026-013/</span><svg class="icon row-arrow"><use href="#i-chevron" /></svg></article>
+              <article class="run-row"><div class="run-name"><b>文档索引自动更新</b><small>RUN-012-02 · WI-2026-012</small></div><span class="pill blocked">失败</span><span>文档维护</span><div><div class="progress"><span style="width:78%;background:#a64b55"></span></div><div class="progress-label"><span>发布</span><span>78%</span></div></div><span class="path">~/.loop-workspace/WI-2026-012/</span><svg class="icon row-arrow"><use href="#i-chevron" /></svg></article>
+            </div>
+          </section>
+        </main>
+
+        <main class="page" id="page-repositories">
+          <header class="page-header"><div><p class="eyebrow">Resource Catalog</p><h1>代码仓库</h1><p class="subtitle">代码仓库是可被工作项引用的资源目录，不是工作项的归属容器。这里负责连接状态、权限和默认检出策略。</p></div><div class="header-stats"><div class="header-stat"><b>137</b><small>可访问仓库</small></div><div class="header-stat"><b>3</b><small>Provider</small></div></div></header>
+          <section class="panel">
+            <div class="toolbar"><label class="search"><svg class="icon small"><use href="#i-search" /></svg><input placeholder="搜索仓库、组织或 Provider" /></label><select class="filter"><option>全部 Provider</option><option>GitHub</option><option>GitLab</option></select></div>
+            <div class="table-head" style="grid-template-columns:2fr 1fr 1fr 1fr 32px"><span>仓库</span><span>Provider</span><span>被工作项引用</span><span>同步状态</span><span></span></div>
+            <div>
+              <article class="work-row" style="grid-template-columns:2fr 1fr 1fr 1fr 32px"><div class="work-title"><span class="id">github.com/acme</span><b>checkout-service</b><p>支付订单和交易编排服务</p></div><span>GitHub</span><span>4 个工作项</span><span class="pill running">已同步</span><svg class="icon row-arrow"><use href="#i-chevron" /></svg></article>
+              <article class="work-row" style="grid-template-columns:2fr 1fr 1fr 1fr 32px"><div class="work-title"><span class="id">gitlab.example.com/platform</span><b>merchant-console</b><p>商户 Web 管理控制台</p></div><span>GitLab</span><span>7 个工作项</span><span class="pill running">已同步</span><svg class="icon row-arrow"><use href="#i-chevron" /></svg></article>
+              <article class="work-row" style="grid-template-columns:2fr 1fr 1fr 1fr 32px"><div class="work-title"><span class="id">github.com/acme</span><b>deployment-config</b><p>部署、灰度和基础设施配置</p></div><span>GitHub</span><span>3 个工作项</span><span class="pill running">已同步</span><svg class="icon row-arrow"><use href="#i-chevron" /></svg></article>
+            </div>
+          </section>
+        </main>
+
+        <main class="page" id="page-workflows"><header class="page-header"><div><p class="eyebrow">Automation</p><h1>工作流</h1><p class="subtitle">定义可复用的任务执行步骤，由工作项在运行时选择。</p></div></header><div class="empty-screen"><div><span class="empty-icon"><svg class="icon"><use href="#i-flow" /></svg></span><h2>工作流保持独立配置</h2><p>工作流不会隶属于代码仓库，可根据工作项类型和执行目标复用。</p></div></div></main>
+        <main class="page" id="page-agents"><header class="page-header"><div><p class="eyebrow">Automation</p><h1>Agents</h1><p class="subtitle">管理执行工作项时可用的 Agent 能力与状态。</p></div></header><div class="empty-screen"><div><span class="empty-icon"><svg class="icon"><use href="#i-agent" /></svg></span><h2>Agent 能力中心</h2><p>配置模型、工具权限和执行能力，不与具体目录绑定。</p></div></div></main>
+        <main class="page" id="page-environments"><header class="page-header"><div><p class="eyebrow">Resources</p><h1>执行环境</h1><p class="subtitle">管理本地、容器和远程环境，供运行实例按需选择。</p></div></header><div class="empty-screen"><div><span class="empty-icon"><svg class="icon"><use href="#i-box" /></svg></span><h2>执行环境资源池</h2><p>每次运行仍然落在任务专属目录，环境只提供算力和依赖。</p></div></div></main>
+        <main class="page" id="page-ssh"><header class="page-header"><div><p class="eyebrow">Resources</p><h1>SSH 主机</h1><p class="subtitle">连接可用于远程执行和诊断的主机。</p></div></header><div class="empty-screen"><div><span class="empty-icon"><svg class="icon"><use href="#i-terminal" /></svg></span><h2>远程主机连接</h2><p>主机是执行资源，不作为工作项或项目的导航层级。</p></div></div></main>
+        <main class="page" id="page-activity"><header class="page-header"><div><p class="eyebrow">System</p><h1>活动记录</h1><p class="subtitle">记录工作项、运行、资源和配置的关键操作。</p></div></header><div class="empty-screen"><div><span class="empty-icon"><svg class="icon"><use href="#i-history" /></svg></span><h2>统一活动时间线</h2><p>按对象类型筛选审计记录，而不是把记录拆散到多个项目目录。</p></div></div></main>
+        <main class="page" id="page-settings"><header class="page-header"><div><p class="eyebrow">System</p><h1>设置</h1><p class="subtitle">管理 Provider、默认运行目录、外观和系统行为。</p></div></header><div class="empty-screen"><div><span class="empty-icon"><svg class="icon"><use href="#i-settings" /></svg></span><h2>全局设置</h2><p>默认运行根目录：<code>~/.loop-workspace/</code></p></div></div></main>
+      </div>
+    </section>
+  </div>
+
+  <div class="drawer-backdrop" id="detail-backdrop">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+      <header class="drawer-header">
+        <div class="grow"><small>WI-2026-018 · 可执行</small><h2 id="detail-title">支付链路重构与灰度切换</h2><p>负责人：Shenggang Shu · 优先级 P1 · 更新于 12 分钟前</p></div>
+        <div class="drawer-actions"><button class="icon-button" id="close-detail" aria-label="关闭详情"><svg class="icon"><use href="#i-close" /></svg></button></div>
+      </header>
+      <div class="drawer-tabs"><button class="active">概览</button><button>执行计划</button><button>运行记录</button></div>
+      <div class="drawer-body">
+        <section class="detail-section"><div class="section-title"><h3>目标</h3></div><p class="description">统一新旧支付协议，完成服务端、Web 控制台与基础设施配置协同改造；通过灰度流量验证后切换默认支付链路。</p></section>
+        <section class="detail-section">
+          <div class="section-title"><h3>外部来源</h3><small>3 个引用，不决定工作项归属</small></div>
+          <div class="source-card"><span class="card-icon">GH</span><div class="card-copy"><b>acme/checkout-service #482</b><small>支持新版支付协议和双写</small></div><span class="role">主要需求</span></div>
+          <div class="source-card"><span class="card-icon gl">GL</span><div class="card-copy"><b>platform/merchant-console #91</b><small>灰度开关和商户配置界面</small></div><span class="role">关联 Issue</span></div>
+          <div class="source-card"><span class="card-icon">GH</span><div class="card-copy"><b>acme/deployment-config #37</b><small>生产灰度和回滚配置</small></div><span class="role">关联 Issue</span></div>
+        </section>
+        <section class="detail-section">
+          <div class="section-title"><h3>关联资源</h3><small>运行时独立检出</small></div>
+          <div class="repo-card"><span class="card-icon repo"><svg class="icon small"><use href="#i-repo" /></svg></span><div class="card-copy"><b>checkout-service</b><small>repositories/checkout-service · main</small></div><span class="role">主要仓库</span></div>
+          <div class="repo-card"><span class="card-icon repo"><svg class="icon small"><use href="#i-repo" /></svg></span><div class="card-copy"><b>merchant-console</b><small>repositories/merchant-console · develop</small></div><span class="role">协作仓库</span></div>
+          <div class="repo-card"><span class="card-icon repo"><svg class="icon small"><use href="#i-repo" /></svg></span><div class="card-copy"><b>deployment-config</b><small>repositories/deployment-config · main</small></div><span class="role">配置仓库</span></div>
+        </section>
+        <section class="detail-section">
+          <div class="section-title"><h3>执行计划</h3></div>
+          <div class="plan-card"><span class="card-icon">01</span><div class="card-copy"><b>分析跨仓库影响范围</b><small>Agent · 读取三个仓库和外部 Issue</small></div></div>
+          <div class="plan-card"><span class="card-icon">02</span><div class="card-copy"><b>并行实现与集成验证</b><small>Agent × 3 · 仓库级分支隔离</small></div></div>
+          <div class="plan-card"><span class="card-icon">03</span><div class="card-copy"><b>灰度检查与人工确认</b><small>QA Agent + HITL Gate</small></div></div>
+        </section>
+      </div>
+      <footer class="drawer-footer"><small>运行会创建 `~/.loop-workspace/WI-2026-018/`，不会使用当前打开目录。</small><button class="primary-button" id="start-run"><svg class="icon small"><use href="#i-play" /></svg>开始执行</button></footer>
+    </aside>
+  </div>
+
+  <div class="modal-backdrop" id="run-modal">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+      <header><div><h2 id="run-modal-title">开始执行工作项</h2><p>确认工作流和本次运行需要检出的资源。</p></div><button class="icon-button" id="close-run-modal" aria-label="关闭"><svg class="icon"><use href="#i-close" /></svg></button></header>
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="field"><label for="workflow">执行工作流</label><select id="workflow"><option>标准研发流程</option><option>快速修复</option><option>调研与方案设计</option></select></div>
+          <div class="field"><label for="environment">执行环境</label><select id="environment"><option>本地隔离环境</option><option>Docker Sandbox</option><option>远程开发机</option></select></div>
+          <div class="field full"><label>本次运行使用的代码仓库</label><div class="repo-checks">
+            <label class="repo-check"><input type="checkbox" checked /><div><b>checkout-service</b><small>main → repositories/checkout-service</small></div><span class="role">主要</span></label>
+            <label class="repo-check"><input type="checkbox" checked /><div><b>merchant-console</b><small>develop → repositories/merchant-console</small></div><span class="role">协作</span></label>
+            <label class="repo-check"><input type="checkbox" checked /><div><b>deployment-config</b><small>main → repositories/deployment-config</small></div><span class="role">配置</span></label>
+          </div>
+        </div>
+        <div class="workspace-preview"><svg class="icon"><use href="#i-folder" /></svg><div><b>系统将创建独立任务空间</b><code>~/.loop-workspace/WI-2026-018/{repositories,runtime,artifacts,logs,diagnostics}</code></div></div>
+      </div>
+      <footer><button class="secondary-button" id="cancel-run">取消</button><button class="primary-button" id="confirm-run"><svg class="icon small"><use href="#i-play" /></svg>创建运行</button></footer>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" id="create-modal">
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="create-modal-title">
+      <header><div><h2 id="create-modal-title">创建工作项</h2><p>工作项无需选择工作区或代码仓库。</p></div><button class="icon-button" id="close-create-modal" aria-label="关闭"><svg class="icon"><use href="#i-close" /></svg></button></header>
+      <div class="modal-body"><div class="form-grid"><div class="field full"><label>标题</label><input placeholder="输入需要完成的目标" /></div><div class="field full"><label>描述</label><input placeholder="描述背景、结果和验收标准" /></div><div class="field"><label>来源</label><select><option>本地创建</option><option>从 GitHub / GitLab 导入</option></select></div><div class="field"><label>优先级</label><select><option>P2</option><option>P1</option><option>P3</option></select></div></div><div class="workspace-preview"><svg class="icon"><use href="#i-link" /></svg><div><b>创建后再按需关联资源</b><code>外部 Issue、代码仓库、文档和执行环境均为可选关联</code></div></div></div>
+      <footer><button class="secondary-button" id="cancel-create">取消</button><button class="primary-button">创建工作项</button></footer>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"><svg class="icon"><use href="#i-check" /></svg><div><b>运行已创建</b><br><span>正在准备 3 个仓库的独立检出目录。</span></div></div>
+
+  <script>
+    const pageTitles = {
+      "work-items": "工作项", runs: "运行中心", workflows: "工作流", agents: "Agents",
+      repositories: "代码仓库", environments: "执行环境", ssh: "SSH 主机", activity: "活动记录", settings: "设置"
+    };
+    const navItems = [...document.querySelectorAll(".nav-item")];
+    const pages = [...document.querySelectorAll(".page")];
+    const showPage = (name) => {
+      navItems.forEach(item => item.classList.toggle("active", item.dataset.page === name));
+      pages.forEach(page => page.classList.toggle("active", page.id === `page-${name}`));
+      document.getElementById("current-title").textContent = pageTitles[name];
+      document.querySelector(".viewport").scrollTop = 0;
+    };
+    navItems.forEach(item => item.addEventListener("click", () => showPage(item.dataset.page)));
+
+    const detailBackdrop = document.getElementById("detail-backdrop");
+    const runModal = document.getElementById("run-modal");
+    const createModal = document.getElementById("create-modal");
+    document.querySelector('[data-item="payment"]').addEventListener("click", event => {
+      document.querySelectorAll(".work-row").forEach(row => row.classList.remove("selected"));
+      event.currentTarget.classList.add("selected");
+      detailBackdrop.classList.add("open");
+    });
+    document.querySelectorAll('.work-row:not([data-item="payment"])').forEach(row => row.addEventListener("click", () => {
+      document.querySelectorAll(".work-row").forEach(item => item.classList.remove("selected"));
+      row.classList.add("selected");
+    }));
+    document.getElementById("close-detail").addEventListener("click", () => detailBackdrop.classList.remove("open"));
+    detailBackdrop.addEventListener("click", event => { if (event.target === detailBackdrop) detailBackdrop.classList.remove("open"); });
+    document.getElementById("start-run").addEventListener("click", () => runModal.classList.add("open"));
+    ["close-run-modal", "cancel-run"].forEach(id => document.getElementById(id).addEventListener("click", () => runModal.classList.remove("open")));
+    runModal.addEventListener("click", event => { if (event.target === runModal) runModal.classList.remove("open"); });
+
+    document.getElementById("confirm-run").addEventListener("click", () => {
+      runModal.classList.remove("open");
+      detailBackdrop.classList.remove("open");
+      const newRun = document.createElement("article");
+      newRun.className = "run-row";
+      newRun.innerHTML = '<div class="run-name"><b>支付链路重构与灰度切换</b><small>RUN-018-01 · WI-2026-018</small></div><span class="pill running">准备中</span><span>标准研发流程</span><div><div class="progress"><span style="width:8%"></span></div><div class="progress-label"><span>检出资源</span><span>8%</span></div></div><span class="path">~/.loop-workspace/WI-2026-018/</span><svg class="icon row-arrow"><use href="#i-chevron" /></svg>';
+      document.getElementById("runs-list").prepend(newRun);
+      document.getElementById("run-count").textContent = "4";
+      document.getElementById("active-run-stat").textContent = "4";
+      showPage("runs");
+      const toast = document.getElementById("toast");
+      toast.classList.add("open");
+      setTimeout(() => toast.classList.remove("open"), 3500);
+    });
+
+    document.getElementById("create-work-item").addEventListener("click", () => createModal.classList.add("open"));
+    ["close-create-modal", "cancel-create"].forEach(id => document.getElementById(id).addEventListener("click", () => createModal.classList.remove("open")));
+    createModal.addEventListener("click", event => { if (event.target === createModal) createModal.classList.remove("open"); });
+
+    document.getElementById("work-search").addEventListener("input", event => {
+      const query = event.target.value.trim().toLowerCase();
+      document.querySelectorAll("#work-list .work-row").forEach(row => {
+        row.style.display = !query || row.dataset.search.toLowerCase().includes(query) || row.textContent.toLowerCase().includes(query) ? "grid" : "none";
+      });
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      detailBackdrop.classList.remove("open");
+      runModal.classList.remove("open");
+      createModal.classList.remove("open");
+    });
+  </script>
+</body>
+</html>

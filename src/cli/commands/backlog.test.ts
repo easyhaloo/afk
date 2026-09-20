@@ -5,6 +5,7 @@ import {
   runBacklogConfirmMerge,
   runBacklogCreate,
   runBacklogInterrupt,
+  runBacklogInventory,
   runBacklogList,
   runBacklogRetry,
   runBacklogShow,
@@ -15,6 +16,7 @@ import { registerRunCommands } from './run';
 import { registerQACommands } from './qa';
 import { registerLoopCommands } from './loop';
 import type { BacklogItem, QABacklogProvider } from '../../domain/backlog';
+import type { ProviderCatalog } from '../../application/work-items/types';
 import { emitSuccess, emitFailure } from '../json-output';
 
 function commandTree(register: (program: Command) => void): Command {
@@ -30,12 +32,25 @@ describe('hard-cutover command surface', () => {
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const commandNames = backlog?.commands.map(command => command.name()) ?? [];
     expect(commandNames).toEqual(expect.arrayContaining([
-      'init', 'list', 'show', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
+      'init', 'inventory', 'list', 'show', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
     ]));
     expect(new Set(commandNames).size).toBe(commandNames.length);
     const tagNames = backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name()) ?? [];
     expect(tagNames).toEqual(expect.arrayContaining(['add', 'remove']));
     expect(new Set(tagNames).size).toBe(tagNames.length);
+  });
+
+  it('exposes global inventory filters without changing backlog list options', () => {
+    const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog')!;
+    const inventory = backlog.commands.find(command => command.name() === 'inventory')!;
+    const list = backlog.commands.find(command => command.name() === 'list')!;
+
+    expect(inventory.options.map(option => option.long)).toEqual(expect.arrayContaining([
+      '--platform', '--state', '--mode', '--tag', '--project', '--json',
+    ]));
+    expect(list.options.some(option => option.long === '--parent')).toBe(true);
+    expect(list.options.map(option => option.long)).not.toContain('--all-projects');
   });
 
   it('requires a string backlog id for run and qa', () => {
@@ -92,6 +107,114 @@ describe('hard-cutover command surface', () => {
     expect(tagAdd?.options.some(option => option.long === '--platform')).toBe(true);
     expect(tagRemove?.options.some(option => option.long === '--json')).toBe(true);
     expect(tagRemove?.options.some(option => option.long === '--platform')).toBe(true);
+  });
+});
+
+describe('backlog inventory command', () => {
+  const managedLabels = ['stage::ready-for-issues', 'mode::afk', 'team::api'];
+
+  function inventoryCatalog(): ProviderCatalog {
+    return {
+      platform: 'github',
+      scopeKey: 'github.com',
+      async listProjects() {
+        return [
+          { platform: 'github', projectKey: 'acme/api', name: 'api' },
+          { platform: 'github', projectKey: 'acme/web', name: 'web' },
+        ];
+      },
+      async listIssues(project) {
+        if (project.projectKey === 'acme/api') {
+          return [
+            { issueNumber: 1, title: 'matching', labels: managedLabels, state: 'opened' },
+            { issueNumber: 2, title: 'wrong mode', labels: ['stage::ready-for-issues', 'mode::hitl', 'team::api'], state: 'opened' },
+          ];
+        }
+        return [{ issueNumber: 1, title: 'wrong project', labels: managedLabels, state: 'opened' }];
+      },
+    };
+  }
+
+  it('emits the backlog.inventory envelope with combined filters', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogInventory(
+        platform => {
+          expect(platform).toBe('github');
+          return [inventoryCatalog()];
+        },
+        { platform: 'github', state: 'ready', mode: 'afk', tag: 'team::api', project: 'acme/api', json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.inventory',
+      data: {
+        complete: true,
+        projects: [{ projectKey: 'acme/api' }],
+        diagnostics: [],
+        items: [{ id: 'github:acme/api#1', title: 'matching' }],
+      },
+    });
+  });
+
+  it('emits a successful empty inventory', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogInventory(() => [{
+        platform: 'github',
+        scopeKey: 'github.com',
+        async listProjects() { return []; },
+        async listIssues() { return []; },
+      }], { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+
+    expect(JSON.parse(captured.join(''))).toEqual({
+      ok: true,
+      kind: 'backlog.inventory',
+      data: { items: [], projects: [], diagnostics: [], complete: true },
+    });
+  });
+
+  it('emits an auth failure when catalog credentials are missing', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    const previousExitCode = process.exitCode;
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    process.exitCode = undefined;
+    try {
+      await runBacklogInventory(() => {
+        throw new Error('GitHub authentication is required. Set GITHUB_TOKEN.');
+      }, { platform: 'github', json: true });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.stdout.write = original;
+      process.exitCode = previousExitCode;
+    }
+
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: false,
+      kind: 'backlog.inventory',
+      error: { code: 'auth' },
+    });
   });
 });
 

@@ -10,7 +10,7 @@ pnpm start
 pnpm package:mac
 ```
 
-`pnpm start` 是幂等的开发服务入口：重复执行时会复用已运行的 `5174` 服务，不会创建重复的 Vite、watch 或 Electron 实例。Electron 主进程同时启用单实例锁，重复打开只会聚焦已有窗口。
+`pnpm dev` 会在前台运行 Vite、主进程 watch 和 Electron，终端退出时同步停止整套开发进程。`pnpm start` 是后台幂等入口：重复执行时会复用已运行的 `5174` 服务，不会创建重复的 Vite、watch 或 Electron 实例。Electron 主进程同时启用单实例锁，重复打开只会聚焦已有窗口。
 
 默认工作区为开发环境中 Electron 客户端的父目录；也可以在界面内选择任意 AFK 工作区。客户端不会将渲染器提供的任意字符串直接交给 shell 执行。
 

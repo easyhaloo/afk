@@ -1,3 +1,9 @@
 packages:
   - packages/*
   - desktop-client
+allowBuilds:
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  node-pty: true
+  puppeteer: true

@@ -73,6 +73,19 @@ const SEED_STORE = {
   history: [],
 };
 
+const INVENTORY = {
+  items: [
+    { id: "github:acme/api#1", issueNumber: 1, project: { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main", webUrl: "https://github.com/acme/api" }, title: "API 登录态切换", description: "跨仓库 API 工作项。", managed: true, executionEligible: true, state: "ready", executionMode: "afk", dependsOn: [], tags: ["billing"], branchName: "afk/backlog-1", providerRef: "github:acme/api#1", webUrl: "https://github.com/acme/api/issues/1" },
+    { id: "github:acme/web#1", issueNumber: 1, project: { platform: "github", projectKey: "acme/web", name: "web", defaultBranch: "main", webUrl: "https://github.com/acme/web" }, title: "Web 登录页调整", description: "同号但属于另一个仓库。", managed: false, executionEligible: false, state: "ready", executionMode: "hitl", dependsOn: [], tags: ["frontend"], branchName: "afk/backlog-1", providerRef: "github:acme/web#1", webUrl: "https://github.com/acme/web/issues/1" },
+  ],
+  projects: [
+    { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main", webUrl: "https://github.com/acme/api" },
+    { platform: "github", projectKey: "acme/web", name: "web", defaultBranch: "main", webUrl: "https://github.com/acme/web" },
+  ],
+  diagnostics: [],
+  complete: true,
+};
+
 function loadStore() {
   if (!STORE_PATH) return structuredClone(SEED_STORE);
   if (!existsSync(STORE_PATH)) {
@@ -189,6 +202,22 @@ else if (args[0] === "loop") {
   update("verification", "afk", "verifying", "running");
   await new Promise((resolve) => setTimeout(resolve, 100));
   update("merge_ready", "hitl", "verifying", "completed");
+}
+else if (subcommand === "inventory") {
+  if (process.env.FAKE_AFK_FAIL_INVENTORY === "1") fail("backlog.inventory", "provider", "FAKE_AFK_FAIL_INVENTORY is set");
+  const platform = flag("--platform");
+  const project = flag("--project");
+  const state = flag("--state");
+  const mode = flag("--mode");
+  const tag = flag("--tag");
+  const items = INVENTORY.items.filter(item =>
+    (!platform || platform === "all" || item.project.platform === platform)
+    && (!project || item.project.projectKey === project)
+    && (!state || item.state === state)
+    && (!mode || item.executionMode === mode)
+    && (!tag || item.tags.includes(tag))
+  );
+  ok("backlog.inventory", { ...INVENTORY, items });
 }
 else if (subcommand === "list") {
   if (process.env.FAKE_AFK_FAIL_LIST === "1") {

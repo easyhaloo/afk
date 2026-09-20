@@ -178,7 +178,7 @@ describe("SSH service", () => {
     await expect(service.listHosts()).resolves.toMatchObject({ hosts: [expect.objectContaining({ status: "ready" })] });
     await service.connect(jumpServerHost.id);
 
-    expect(resolvedAliases).toEqual(["fangcloud-jumpserver", "test:fangcloud-jumpserver", "fangcloud-jumpserver"]);
+    expect(resolvedAliases).toEqual(["fangcloud-jumpserver", "test:fangcloud-jumpserver"]);
     expect(connectedAlias).toBe("fangcloud-jumpserver");
   });
 
@@ -264,7 +264,7 @@ describe("SSH service", () => {
       ["set", host.id, "stored-secret", target],
       ["remove", host.id],
     ]);
-    expect(resolveCalls).toBe(2);
+    expect(resolveCalls).toBe(1);
   });
 
   it("removes a credential even when the host target cannot be resolved", async () => {
@@ -488,6 +488,32 @@ describe("SSH service", () => {
     await service.deployKey(directHost.id);
 
     expect(resolveCalls).toBe(1);
+  });
+
+  it("shares ssh -G results across deploys for the same alias until force refresh", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-alias-cache-"));
+    await mkdir(path.join(home, ".ssh"), { recursive: true });
+    await writeFile(path.join(home, ".ssh", "id_ed25519.pub"), "ssh-ed25519 AAAA system");
+    const deps = dependencies();
+    let resolveCalls = 0;
+    deps.home = home;
+    deps.config.listHosts = async () => ({ hosts: [directHost], diagnostics: [] });
+    deps.knownHosts.isTrusted = async () => true;
+    deps.commands.resolve = async () => {
+      resolveCalls += 1;
+      return { hostname: directHost.hostname, port: directHost.port, identityFile: "~/.ssh/id_ed25519" };
+    };
+    deps.pty.deployKey = () => ({ id: "session-deploy", hostId: directHost.id, alias: directHost.alias, kind: "deploy", title: directHost.alias, state: "opening" });
+    const service = createSshService(deps);
+
+    await service.deployKey(directHost.id);
+    await service.deployKey(directHost.id);
+    expect(resolveCalls).toBe(1);
+
+    await service.deployKey(directHost.id);
+    await service.listHosts({ forceRefresh: true });
+    await service.deployKey(directHost.id);
+    expect(resolveCalls).toBe(2);
   });
 
   it("reuses host status within the cache TTL", async () => {
@@ -811,7 +837,7 @@ describe("SSH service", () => {
     await service.listHosts();
     currentHost = { ...host, hostname: "configured-two.example.test", port: 2202 };
     resolvedTarget = { hostname: "actual-two.example.test", port: 2203 };
-    const result = await service.listHosts();
+    const result = await service.listHosts({ forceRefresh: true });
 
     expect(result.hosts[0]).toMatchObject({ hostname: "actual-two.example.test", port: 2203 });
   });

@@ -7,13 +7,14 @@
   "type": "commonjs",
   "scripts": {
     "dev:main": "tsc -p tsconfig.electron.json --watch",
-    "dev:raw": "concurrently -k \"pnpm dev:main\" \"vite --port 5174\" \"wait-on tcp:5174 file:dist-electron/electron/main.js && ELECTRON_RENDERER_URL=http://localhost:5174 electron .\"",
-    "dev": "bash scripts/start.sh",
+    "dev:raw": "concurrently -k \"pnpm run dev:main\" \"vite --port 5174\" \"wait-on tcp:5174 file:dist-electron/electron/main.js && ELECTRON_RENDERER_URL=http://localhost:5174 electron .\"",
+    "dev": "pnpm run dev:raw",
     "start": "bash scripts/start.sh",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "e2e": "playwright test --config=playwright.config.ts",
-    "build:main": "tsc -p tsconfig.electron.json",
+    "build:inventory": "node scripts/build-inventory-runner.mjs",
+    "build:main": "pnpm build:inventory && tsc -p tsconfig.electron.json",
     "build": "pnpm typecheck && pnpm build:main && vite build",
     "package:mac": "pnpm build && electron-builder --mac --dir",
     "verify:mac": "bash scripts/restart-packaged-mac.sh"
@@ -28,6 +29,7 @@
       "assets/**",
       "dist/**",
       "dist-electron/**",
+      "dist-electron/cli/**",
       "package.json"
     ],
     "icon": "assets/afk-control.png",

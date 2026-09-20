@@ -98,18 +98,19 @@ export function createSshService(deps: ServiceDependencies) {
   type ResolvedAliasInfo = Awaited<ReturnType<typeof deps.commands.resolve>>;
   // Cache ssh -G results per alias so repeated deploy/list/external-terminal flows
   // for the same host don't re-invoke ssh -G. Failed resolutions are evicted so a
-  // fixed ssh config is retried on the next call.
-  const aliasResolveCache = new Map<string, Promise<ResolvedAliasInfo>>();
+  // fixed ssh config is retried on the next call. TTL matches hostStatusTtlMs so the
+  // cache stays consistent with the rest of the status caching layer.
+  const aliasResolveCache = new Map<string, { promise: Promise<ResolvedAliasInfo>; expiresAt: number }>();
 
   function cachedResolve(alias: string): Promise<ResolvedAliasInfo> {
-    let promise = aliasResolveCache.get(alias);
-    if (!promise) {
-      promise = deps.commands.resolve(alias).catch((error) => {
-        aliasResolveCache.delete(alias);
-        throw error;
-      });
-      aliasResolveCache.set(alias, promise);
-    }
+    const now = Date.now();
+    const cached = aliasResolveCache.get(alias);
+    if (cached && cached.expiresAt > now) return cached.promise;
+    const promise = deps.commands.resolve(alias).catch((error) => {
+      aliasResolveCache.delete(alias);
+      throw error;
+    });
+    aliasResolveCache.set(alias, { promise, expiresAt: now + hostStatusTtlMs });
     return promise;
   }
 
@@ -306,12 +307,7 @@ export function createSshService(deps: ServiceDependencies) {
   function listHosts(options?: ListHostsOptions) {
     const forceRefresh = validateListHostsOptions(options).forceRefresh === true;
     if (listInFlight && (listInFlight.forceRefresh || !forceRefresh)) return listInFlight.promise;
-    if (forceRefresh) {
-      cacheGeneration += 1;
-      resolvedTargetCache.clear();
-      hostStatusCache.clear();
-      listInFlight = undefined;
-    }
+    if (forceRefresh) invalidateListCache();
     const generation = cacheGeneration;
     const entry: ListInFlight = { forceRefresh, promise: loadHosts(forceRefresh, generation) };
     listInFlight = entry;

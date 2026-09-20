@@ -75,6 +75,7 @@ export const test = base.extend<Fixtures>({
         AFK_WORKSPACE: workspace,
         // Prepend the fixture dir so the fake-afk script wins `which afk`.
         PATH: `${FIXTURE_DIR}${path.delimiter}${process.env.PATH ?? ""}`,
+        AFK_DESKTOP_CLI: FAKE_AFK,
         FAKE_AFK_STORE,
         // Surface fake-afk stderr in the Playwright runner output for debugging.
         FAKE_AFK_DEBUG: process.env.FAKE_AFK_DEBUG ?? "0",

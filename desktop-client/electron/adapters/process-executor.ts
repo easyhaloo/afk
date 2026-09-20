@@ -34,13 +34,19 @@ function diagnosticEnvironment(cwd?: string) {
   };
 }
 
-export async function exec(command: string, args: string[], cwd?: string, input?: string) {
+export async function exec(
+  command: string,
+  args: string[],
+  cwd?: string,
+  input?: string,
+  options: { timeoutMs?: number; maxBuffer?: number } = {},
+) {
   try {
     const { stdout, stderr } = await run(command, args, {
       cwd,
       env: diagnosticEnvironment(cwd),
-      timeout: 8_000,
-      maxBuffer: 2_000_000,
+      timeout: options.timeoutMs ?? 8_000,
+      maxBuffer: options.maxBuffer ?? 2_000_000,
       ...(input !== undefined ? { input } : {}),
     });
     return { ok: true, stdout: String(stdout).trim(), stderr: String(stderr).trim() } as const;

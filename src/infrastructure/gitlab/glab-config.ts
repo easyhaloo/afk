@@ -15,6 +15,13 @@ export interface GlabConfig {
   hosts: Record<string, GlabHostConfig>;
 }
 
+export interface GlabTokenConfig {
+  host: string;
+  token: string;
+  apiHost: string;
+  apiProtocol: string;
+}
+
 let cachedGlabConfig: GlabConfig | null = null;
 
 /**
@@ -107,6 +114,19 @@ export function getGlabToken(preferredHost?: string): { host: string; token: str
   if (!hostCfg?.token) return null;
 
   return { host, token: hostCfg.token!, apiHost: hostCfg.api_host || host };
+}
+
+export function listGlabTokens(config: GlabConfig | null = readGlabConfig()): GlabTokenConfig[] {
+  if (!config) return [];
+  return Object.entries(config.hosts)
+    .filter((entry): entry is [string, GlabHostConfig & { token: string }] => Boolean(entry[1].token))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([host, hostConfig]) => ({
+      host,
+      token: hostConfig.token,
+      apiHost: hostConfig.api_host || host,
+      apiProtocol: hostConfig.api_protocol || 'https',
+    }));
 }
 
 /**

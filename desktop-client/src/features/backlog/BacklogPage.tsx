@@ -135,6 +135,16 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
   const load = useCallback(async ({ force = false }: { force?: boolean } = {}) => {
     const generation = ++loadGenerationRef.current;
     const isCurrentRequest = () => mountedRef.current && loadGenerationRef.current === generation;
+    if (!workspace.trim()) {
+      if (isCurrentRequest()) {
+        setItems([]);
+        setRuns({});
+        setSummaries({});
+        setError("");
+        setBusy(false);
+      }
+      return;
+    }
     if (isCurrentRequest()) { setBusy(true); setError(""); }
     try {
       const options: BacklogListOptions | undefined = platform === "auto" ? undefined : { platform };
@@ -280,7 +290,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
         <div><p>任务项</p><span>读取 GitHub / GitLab 上由 AFK 管理的工作项；本机不持有凭据，由 afk CLI 完成 Provider 调用。</span></div>
         <div className="backlog-heading-actions">
           <SelectMenu label="选择 Provider" value={platform} options={platformOptions} onChange={(value) => { invalidateBacklogCache(); setPlatform(value); }} disabled={busy} />
-          <button className="icon-button" onClick={() => setCreateOpen(true)} disabled={busy} aria-label="新建 Backlog"><Plus size={16} /></button>
+          <button className="icon-button" onClick={() => setCreateOpen(true)} disabled={busy || !workspace.trim()} aria-label="新建 Backlog"><Plus size={16} /></button>
         </div>
       </header>
       {error ? <div className="backlog-alert error" role="alert"><CircleAlert size={15} />{error}<button onClick={() => setError("")} aria-label="关闭错误"><X size={14} /></button></div> : null}
@@ -318,7 +328,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
               ) : null}
             </article>
           );
-        }) : <div className="backlog-empty"><b>{busy ? "正在读取 Backlog…" : "没有匹配的工作项"}</b><span>Provider Backlog 由 afk CLI 通过 gh / glab 调用；请先安装 CLI 并完成鉴权。</span></div>}
+        }) : <div className="backlog-empty"><b>{busy ? "正在读取 Backlog…" : workspace.trim() ? "没有匹配的工作项" : "请先选择工作区"}</b><span>{workspace.trim() ? "Provider Backlog 由 afk CLI 通过 gh / glab 调用；请先安装 CLI 并完成鉴权。" : "项目 Backlog 依赖本地工作区；全局工作项不受此限制。"}</span></div>}
       </section>
       <BacklogDetailDrawer summary={detailSummary} busy={detailBusy} error={detailError} defaultAgent={defaultAgent} onClose={closeDetails} onOpenExternal={(url) => { void openExternal(url); }} />
       {createOpen ? (

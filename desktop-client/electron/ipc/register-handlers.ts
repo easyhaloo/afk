@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
-import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
+import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, parseWorkItemInventoryOptions, type BacklogPlatform } from "../../shared/backlog-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
@@ -22,11 +22,13 @@ import { createSshCredentialService } from "../services/ssh-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { createExternalUrlService } from "../services/external-url-service";
+import { createWorkItemInventoryService } from "../services/work-item-inventory-service";
 import { WorkflowGraphService } from "../services/graph-service";
 import { saveWorkspacePreference } from "../services/workspace-preference-service";
 import { resolveWorkspace } from "../services/workspace-service";
 import { homedir } from "node:os";
 import path from "node:path";
+import { access } from "node:fs/promises";
 import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation";
 
 function validSession(value: string) {
@@ -76,6 +78,34 @@ const backlogService = createBacklogService({
   resolveWorkspace,
   exec: async (command, args, cwd, stdin) => {
     const result = await exec(command, args, cwd, stdin);
+    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
+  },
+});
+const workItemInventoryService = createWorkItemInventoryService({
+  cwd: app.getPath("userData"),
+  runBundled: app.isPackaged ? async options => {
+    const runner = require(path.join(__dirname, "../../cli/inventory-runner.cjs")) as {
+      runInventory: (value: unknown) => Promise<unknown>;
+    };
+    return runner.runInventory(options);
+  } : undefined,
+  resolveAfk: async () => {
+    if (process.env.AFK_DESKTOP_CLI) return { command: process.env.AFK_DESKTOP_CLI, args: [] };
+    const localEntry = path.resolve(app.getAppPath(), "../dist/index.js");
+    try {
+      await access(localEntry);
+      const node = await exec("/usr/bin/which", ["node"]);
+      const nodePath = node.ok ? node.stdout.split("\n")[0]?.trim() ?? "" : "";
+      if (nodePath.startsWith("/")) return { command: nodePath, args: [localEntry] };
+    } catch {
+      // Fall through to an installed AFK CLI for packaged applications.
+    }
+    const result = await exec("/usr/bin/which", ["afk"]);
+    const candidate = result.ok ? result.stdout.split("\n")[0]?.trim() ?? "" : "";
+    return candidate.startsWith("/") ? { command: candidate, args: [] } : { command: "", args: [] };
+  },
+  exec: async (command, args, cwd) => {
+    const result = await exec(command, args, cwd, undefined, { timeoutMs: 300_000, maxBuffer: 50_000_000 });
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
   },
 });
@@ -135,6 +165,11 @@ export function registerIpcHandlers() {
     assertTrustedSender(event);
     if (typeof url !== "string" || !url.trim()) throw new Error("外部地址无效");
     return externalUrlService.open(url);
+  });
+  ipcMain.handle(IPC_CHANNELS.workItemsList, (event, options: unknown, forceRefresh: unknown) => {
+    assertTrustedSender(event);
+    if (forceRefresh !== undefined && typeof forceRefresh !== "boolean") throw new Error("刷新参数无效");
+    return workItemInventoryService.list(parseWorkItemInventoryOptions(options), forceRefresh === true);
   });
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);

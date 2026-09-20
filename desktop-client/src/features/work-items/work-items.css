@@ -1,0 +1,21 @@
+.work-items-page { position: relative; }
+.work-items-refresh { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid var(--backlog-border); border-radius: 7px; background: var(--backlog-surface); color: var(--backlog-text); }
+.work-items-load-more { display: block; margin: 16px auto; padding: 8px 14px; border: 1px solid var(--backlog-border); border-radius: 7px; background: var(--backlog-surface); color: var(--backlog-text); cursor: pointer; }
+.work-item-diagnostics { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--attention) 34%, var(--backlog-border)); border-radius: 9px; background: color-mix(in srgb, var(--attention) 7%, var(--backlog-surface)); }
+.work-item-diagnostics div { display: flex; gap: 10px; font-size: 12px; }
+.work-item-diagnostics span { color: var(--backlog-muted); }
+.work-item-project { display: flex; align-items: center; gap: 5px; }
+.work-item-managed, .work-item-unmanaged { display: inline-flex; min-height: 22px; align-items: center; padding: 0 7px; border-radius: 999px; font-size: 11px; }
+.work-item-managed { color: var(--run); background: color-mix(in srgb, var(--run) 10%, transparent); }
+.work-item-unmanaged { color: var(--backlog-muted); background: color-mix(in srgb, var(--backlog-muted) 10%, transparent); }
+.work-item-detail { position: fixed; z-index: 40; top: 64px; right: 0; bottom: 0; width: min(420px, 44vw); box-sizing: border-box; padding: 20px; overflow: auto; border-left: 1px solid var(--backlog-border); background: var(--backlog-surface); box-shadow: -16px 0 36px rgba(34, 39, 35, .10); }
+.work-item-detail header { display: flex; align-items: center; justify-content: space-between; }
+.work-item-detail header div { display: grid; gap: 3px; }
+.work-item-detail header small { color: var(--backlog-muted); text-transform: uppercase; }
+.work-item-detail header button { border: 0; background: transparent; color: var(--backlog-muted); }
+.work-item-detail h2 { margin: 22px 0 10px; font-size: 20px; }
+.work-item-detail > p { color: var(--backlog-muted); white-space: pre-wrap; }
+.work-item-detail dl { display: grid; gap: 10px; margin: 20px 0; }
+.work-item-detail dl div { display: grid; gap: 3px; }
+.work-item-detail dt { color: var(--backlog-muted); font-size: 11px; }
+.work-item-detail dd { margin: 0; font-family: var(--font-mono, monospace); font-size: 12px; overflow-wrap: anywhere; }

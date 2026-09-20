@@ -25,13 +25,14 @@ import { SelectMenu } from "./components/SelectMenu";
 import { Settings } from "./features/settings/SettingsPage";
 import { SshHostsPage } from "./features/ssh/SshHostsPage";
 import { BacklogPage } from "./features/backlog/BacklogPage";
+import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
 import type { SshSession } from "../shared/ssh-contract";
 
 type Phase = "ready" | "active" | "verify" | "attention";
 type RecordStatus = "queued" | "running" | "waiting_confirmation" | "completed" | "failed";
-type View = "queue" | "board" | "workflows" | "agents" | "containers" | "events" | "ssh" | "backlog" | "settings";
+type View = "queue" | "board" | "workflows" | "agents" | "containers" | "events" | "ssh" | "backlog" | "projectBacklog" | "settings";
 
 const label: Record<Phase, string> = {
   ready: "待执行",
@@ -93,7 +94,7 @@ function Track({ phase, index, variant = "full", live = false, fresh = false }: 
 }
 
 function App() {
-  const [view, setView] = useState<View>("queue");
+  const [view, setView] = useState<View>("backlog");
   const [runMode, setRunMode] = useState<"queue" | "board">("queue");
   const [workspace, setWorkspace] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -228,13 +229,14 @@ function App() {
   };
 
   const nav: Array<[View, string, typeof LayoutList]> = [
-    ["queue", "工作项", Workflow],
+    ["backlog", "工作项", ClipboardList],
+    ["queue", "运行队列", Workflow],
     ["workflows", "工作流", Boxes],
     ["events", "记录", Archive],
     ["agents", "Agent", Activity],
     ["containers", "环境", Container],
     ["ssh", "SSH 主机", Terminal],
-    ["backlog", "Backlog", ClipboardList],
+    ["projectBacklog", "项目 Backlog", Braces],
   ];
   const activeNav = view === "board" ? "queue" : view;
   const title = view === "settings" ? "设置" : nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
@@ -294,7 +296,8 @@ function App() {
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
           {view === "containers" ? <Environments snapshot={snapshot} onTerminal={openSession} /> : null}
           {view === "ssh" ? <SshHostsPage onSession={openSshSession} /> : null}
-          {view === "backlog" ? <BacklogPage workspace={workspace || snapshot?.workspace.root || ""} refreshVersion={refreshVersion} templates={snapshot?.workflowTemplates} defaultTemplate={snapshot?.workflow.templateName} defaultAgent={snapshot?.workflow.agentDefault} /> : null}
+          {view === "backlog" ? <WorkItemsPage /> : null}
+          {view === "projectBacklog" ? <BacklogPage workspace={workspace || snapshot?.workspace.root || ""} refreshVersion={refreshVersion} templates={snapshot?.workflowTemplates} defaultTemplate={snapshot?.workflow.templateName} defaultAgent={snapshot?.workflow.agentDefault} /> : null}
           {view === "workflows" ? <Workflows snapshot={snapshot} onSave={saveWorkflowConfig} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}

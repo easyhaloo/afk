@@ -55,6 +55,29 @@ export type GlobalWorkItem = {
   webUrl?: string;
 };
 
+export type WorkItemInventoryOptions = {
+  platform?: BacklogPlatform | "all";
+  state?: BacklogState;
+  executionMode?: BacklogExecutionMode;
+  tag?: string;
+  project?: string;
+};
+
+export type WorkItemInventoryDiagnostic = {
+  platform: BacklogPlatform;
+  projectKey?: string;
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+
+export type WorkItemInventoryResult = {
+  items: GlobalWorkItem[];
+  projects: ProviderProjectRef[];
+  diagnostics: WorkItemInventoryDiagnostic[];
+  complete: boolean;
+};
+
 export type BacklogItem = {
   id: string;
   workItemId?: WorkItemId;
@@ -317,10 +340,61 @@ export function parseGlobalWorkItem(input: unknown): GlobalWorkItem {
     branchName: parseRequiredString(candidate.branchName, "global work item: branchName"),
     providerRef: parseRequiredString(candidate.providerRef, "global work item: providerRef"),
   };
-  if (candidate.description !== undefined) result.description = parseRequiredString(candidate.description, "global work item: description", true);
+  if (candidate.description !== undefined) result.description = parseMultilineString(candidate.description, "global work item: description");
   if (candidate.parentId !== undefined) result.parentId = parseWorkItemId(candidate.parentId);
   if (candidate.webUrl !== undefined) result.webUrl = parseRequiredString(candidate.webUrl, "global work item: webUrl");
   return result;
+}
+
+export function parseWorkItemInventoryOptions(input: unknown): WorkItemInventoryOptions {
+  if (input === undefined || input === null) return {};
+  if (typeof input !== "object" || Array.isArray(input)) throw new Error("work item inventory options must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["platform", "state", "executionMode", "tag", "project"], "work item inventory options");
+  const result: WorkItemInventoryOptions = {};
+  if (candidate.platform !== undefined) {
+    if (candidate.platform !== "all" && !isBacklogPlatform(candidate.platform)) throw new Error("work item inventory options: invalid platform");
+    result.platform = candidate.platform;
+  }
+  if (candidate.state !== undefined) {
+    if (!isBacklogState(candidate.state)) throw new Error("work item inventory options: invalid state");
+    result.state = candidate.state;
+  }
+  if (candidate.executionMode !== undefined) {
+    if (!isBacklogExecutionMode(candidate.executionMode)) throw new Error("work item inventory options: invalid execution mode");
+    result.executionMode = candidate.executionMode;
+  }
+  for (const key of ["tag", "project"] as const) {
+    if (candidate[key] !== undefined) result[key] = parseRequiredString(candidate[key], `work item inventory options: ${key}`);
+  }
+  return result;
+}
+
+export function parseWorkItemInventoryResult(input: unknown): WorkItemInventoryResult {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item inventory result must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["items", "projects", "diagnostics", "complete"], "work item inventory result");
+  if (!Array.isArray(candidate.items) || !Array.isArray(candidate.projects) || !Array.isArray(candidate.diagnostics)) throw new Error("work item inventory result arrays are invalid");
+  if (typeof candidate.complete !== "boolean") throw new Error("work item inventory result: complete must be boolean");
+  const diagnostics = candidate.diagnostics.map((value): WorkItemInventoryDiagnostic => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("work item inventory diagnostic must be an object");
+    const diagnostic = value as Record<string, unknown>;
+    assertExactKeys(diagnostic, ["platform", "projectKey", "code", "message", "retryable"], "work item inventory diagnostic");
+    if (!isBacklogPlatform(diagnostic.platform) || typeof diagnostic.retryable !== "boolean") throw new Error("work item inventory diagnostic has invalid fields");
+    return {
+      platform: diagnostic.platform,
+      ...(diagnostic.projectKey === undefined ? {} : { projectKey: parseProjectKey(diagnostic.projectKey, "work item inventory diagnostic") }),
+      code: parseRequiredString(diagnostic.code, "work item inventory diagnostic: code"),
+      message: parseRequiredString(diagnostic.message, "work item inventory diagnostic: message"),
+      retryable: diagnostic.retryable,
+    };
+  });
+  return {
+    items: candidate.items.map(parseGlobalWorkItem),
+    projects: candidate.projects.map(parseProviderProjectRef),
+    diagnostics,
+    complete: candidate.complete,
+  };
 }
 
 export function parseBacklogRuntimeSummary(input: unknown): BacklogRuntimeSummary {
@@ -430,6 +504,11 @@ function parseIssueNumber(value: unknown, label: string): number {
 
 function parseRequiredString(value: unknown, label: string, allowEmpty = false): string {
   if (typeof value !== "string" || (!allowEmpty && !value.trim()) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function parseMultilineString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.includes("\0")) throw new Error(`${label} is invalid`);
   return value;
 }
 

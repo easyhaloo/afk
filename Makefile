@@ -1,5 +1,8 @@
 .PHONY: desktop-dev desktop-build desktop-test desktop-e2e desktop-package-mac desktop-verify-mac
 
+# Use a login shell so pnpm (added to PATH by ~/.zshenv) is on PATH for make.
+SHELL := /bin/zsh -l -c
+
 desktop-dev:
 	pnpm --filter afk-control-electron dev
 

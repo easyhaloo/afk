@@ -68,7 +68,7 @@ fi
 
 # --- 3. Start fresh --------------------------------------------------------
 cd "$PROJECT_DIR"
-nohup bash -c 'exec pnpm dev:raw' >"$LOG_FILE" 2>&1 < /dev/null &
+nohup bash -c 'exec pnpm run dev:raw' >"$LOG_FILE" 2>&1 < /dev/null &
 service_pid=$!
 printf '%s\n' "$service_pid" >"$PID_FILE"
 

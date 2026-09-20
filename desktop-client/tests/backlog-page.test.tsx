@@ -174,6 +174,15 @@ describe("BacklogPage initial render", () => {
     act(() => { renderer.unmount(); });
   });
 
+  it("does not invoke workspace backlog APIs until a workspace is selected", async () => {
+    const { api, renderer } = await renderBacklogPage("");
+
+    expect(api.list).not.toHaveBeenCalled();
+    expect(api.runs).not.toHaveBeenCalled();
+    expect(textContent(renderer.root.findByProps({ className: "backlog-empty" }))).toContain("请先选择工作区");
+    act(() => { renderer.unmount(); });
+  });
+
   it("shows the empty state when the provider returns no items", async () => {
     const { renderer } = await renderBacklogPage("/repo", async () => []);
     const empty = renderer.root.findByProps({ className: "backlog-empty" });

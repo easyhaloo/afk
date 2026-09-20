@@ -16,4 +16,16 @@ describe("process executor", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   });
+
+  it("allows long-running callers to override timeout and output limits", async () => {
+    const result = await exec(
+      process.execPath,
+      ["-e", "setTimeout(() => process.stdout.write('done'), 25)"],
+      undefined,
+      undefined,
+      { timeoutMs: 1_000, maxBuffer: 10_000 },
+    );
+
+    expect(result).toMatchObject({ ok: true, stdout: "done" });
+  });
 });

@@ -13,6 +13,7 @@ import {
   parseBacklogPlatform,
   parseBacklogRunRetryInput,
   parseBacklogRuntimeSummary,
+  parseWorkItemInventoryResult,
 } from "../../shared/backlog-contract";
 
 describe("Backlog shared contract", () => {
@@ -102,5 +103,17 @@ describe("Backlog shared contract", () => {
     expect(() => parseBacklogRuntimeSummary({ backlogId: "43", backlog })).toThrow(/match/i);
     expect(() => parseBacklogRuntimeSummary({ backlogId: "42", backlog, activeRun: { id: "run", backlogId: "43", status: "running", startedAt: "now" } })).toThrow(/activeRun/i);
     expect(() => parseBacklogRuntimeSummary({ backlogId: "42", backlog, runtime: { runId: "run", status: "pending", phase: "implementing", heartbeatAt: "now" } })).toThrow(/status/i);
+  });
+
+  it("strictly parses a global work-item inventory", () => {
+    const result = parseWorkItemInventoryResult({
+      items: [{ id: "github:acme/api#1", issueNumber: 1, project: { platform: "github", projectKey: "acme/api", name: "api" }, title: "demo", description: "## Goal\n\n- keep markdown", managed: true, executionEligible: true, state: "ready", executionMode: "afk", dependsOn: [], tags: [], branchName: "afk/backlog-1", providerRef: "github:acme/api#1" }],
+      projects: [{ platform: "github", projectKey: "acme/api", name: "api" }],
+      diagnostics: [],
+      complete: true,
+    });
+    expect(result.items[0].id).toBe("github:acme/api#1");
+    expect(result.items[0].description).toContain("\n");
+    expect(() => parseWorkItemInventoryResult({ ...result, workspace: "/repo" })).toThrow(/unknown/i);
   });
 });

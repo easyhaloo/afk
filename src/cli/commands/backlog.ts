@@ -1,9 +1,19 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import {
+  createGlobalWorkItemCatalogs,
   createManagementProviders,
+  type GlobalTrackerPlatform,
   type TrackerPlatform,
 } from '../../application/tracker-provider-factory';
+import {
+  collectGlobalWorkItemInventory,
+  filterGlobalWorkItemInventory,
+} from '../../application/work-items/inventory';
+import type {
+  GlobalWorkItemInventoryResult,
+  ProviderCatalog,
+} from '../../application/work-items/types';
 import {
   addBacklogTag,
   confirmBacklogMerge,
@@ -30,6 +40,7 @@ import {
 
 const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];
+const inventoryPlatforms: GlobalTrackerPlatform[] = ['github', 'gitlab', 'all'];
 
 function asPlatform(value: unknown): TrackerPlatform | undefined {
   return value === 'github' || value === 'gitlab' ? value : undefined;
@@ -67,6 +78,59 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
 }
 
 export type JsonMode = { json?: boolean };
+
+export interface BacklogInventoryOptions extends JsonMode {
+  platform?: string;
+  state?: string;
+  mode?: string;
+  tag?: string;
+  project?: string;
+}
+
+export async function runBacklogInventory(
+  catalogFactory: (platform: GlobalTrackerPlatform) => ProviderCatalog[],
+  options: BacklogInventoryOptions = {},
+): Promise<void> {
+  const kind = 'backlog.inventory';
+  try {
+    const platform = options.platform ?? 'all';
+    if (!inventoryPlatforms.includes(platform as GlobalTrackerPlatform)) {
+      throw new Error(`invalid inventory platform: ${platform}`);
+    }
+    if (options.state && !states.includes(options.state as BacklogState)) {
+      throw new Error(`invalid backlog state: ${options.state}`);
+    }
+    if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
+      throw new Error(`invalid execution mode: ${options.mode}`);
+    }
+    const result = filterGlobalWorkItemInventory(
+      await collectGlobalWorkItemInventory(catalogFactory(platform as GlobalTrackerPlatform)),
+      {
+        state: options.state as BacklogState | undefined,
+        mode: options.mode as BacklogExecutionMode | undefined,
+        tag: options.tag,
+        project: options.project,
+      },
+    );
+    if (options.json) {
+      emitSuccess<GlobalWorkItemInventoryResult>(kind, result);
+      return;
+    }
+    if (result.items.length === 0) {
+      warning('No work items found');
+      return;
+    }
+    for (const item of result.items) {
+      console.log(`${chalk.bold(item.id)}  ${item.title}`);
+    }
+  } catch (error) {
+    if (options.json) {
+      emitFailure(kind, classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
 
 /**
  * Action helper for `backlog list`. Emits the success envelope when
@@ -315,6 +379,26 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       }
     });
 
+  backlog.command('inventory')
+    .description('Inventory issues across all credential-accessible projects')
+    .option('--platform <platform>', 'Provider scope (github|gitlab|all)', 'all')
+    .option('--state <state>', `Filter by state (${states.join('|')})`)
+    .option('--mode <mode>', `Filter by execution mode (${modes.join('|')})`)
+    .option('--tag <tag>', 'Filter by business tag')
+    .option('--project <project>', 'Filter by canonical provider project key')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        await runBacklogInventory(createGlobalWorkItemCatalogs, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.inventory', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
   backlog.command('list')
     .description('List backlog items')
     .option('--state <state>', `Filter by state (${states.join('|')})`)
@@ -478,6 +562,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'init')!, 'backlog.init', argv);
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'inventory')!, 'backlog.inventory', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'list')!, 'backlog.list', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'show')!, 'backlog.show', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'create')!, 'backlog.create', argv);

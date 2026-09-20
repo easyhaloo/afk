@@ -196,6 +196,9 @@ export type DesktopApi = {
     addTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
     removeTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
   };
+  workItems: {
+    list: (options?: WorkItemInventoryOptions, forceRefresh?: boolean) => Promise<WorkItemInventoryResult>;
+  };
 };
 
 export const IPC_CHANNELS = {
@@ -241,6 +244,7 @@ export const IPC_CHANNELS = {
   backlogTagAdd: "afk:backlog-tag-add",
   backlogTagRemove: "afk:backlog-tag-remove",
   backlogSummary: "afk:backlog-summary",
+  workItemsList: "afk:work-items-list",
 } as const;
 import type {
   ManagedSshHostInput,
@@ -263,6 +267,8 @@ import type {
   BacklogRunRetryInput,
   BacklogRunSummary,
   BacklogRuntimeSummary,
+  WorkItemInventoryOptions,
+  WorkItemInventoryResult,
 } from "./backlog-contract";
 
 export type SshExternalTerminalResult = {

@@ -201,3 +201,23 @@
 .ssh-synced-mini-row:hover { background: var(--afk-panel-subtle); }
 .ssh-synced-mini-row .alias { font-weight: 600; }
 .ssh-synced-mini-row .host { color: var(--afk-muted); font-family: var(--afk-mono); font-size: 11px; }
+
+/* Mode toggle in dialog */
+.ssh-form-mode-toggle { display: inline-flex; gap: 4px; padding: 4px; background: var(--afk-panel-subtle); border-radius: 8px; border: 1px solid var(--afk-border); }
+.ssh-form-mode-toggle button { padding: 6px 12px; border: none; background: transparent; border-radius: 6px; color: var(--afk-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
+.ssh-form-mode-toggle button.active { background: var(--afk-panel); color: var(--afk-text); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+
+/* Bastion preview panel */
+.ssh-bastion-preview { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--afk-accent-border); background: var(--afk-accent-soft); border-radius: 8px; }
+.ssh-bastion-preview-header { display: flex; justify-content: space-between; align-items: center; }
+.ssh-bastion-preview-header b { color: var(--run); font-size: 13px; }
+.ssh-bastion-linux-only { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--afk-text); cursor: pointer; }
+.ssh-bastion-preview-table { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow-y: auto; padding: 6px; background: var(--afk-panel); border-radius: 6px; border: 1px solid var(--afk-border); }
+.ssh-bastion-preview-row { display: grid; grid-template-columns: 18px minmax(0, 1.4fr) minmax(0, 1.6fr) auto; gap: 10px; align-items: center; padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 4px; }
+.ssh-bastion-preview-row:hover { background: var(--afk-panel-subtle); }
+.ssh-bastion-preview-row .alias { font-weight: 600; color: var(--afk-text); }
+.ssh-bastion-preview-row .host { color: var(--afk-muted); font-family: var(--afk-mono); font-size: 11px; }
+.ssh-bastion-preview-row .platform { padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: 600; }
+.ssh-bastion-preview-row .platform.linux { background: var(--run-soft); color: var(--run); }
+.ssh-bastion-preview-row .platform.windows { background: #fff5f0; color: #b84b4b; }
+.ssh-preview-note { font-size: 11px; color: var(--afk-muted); }

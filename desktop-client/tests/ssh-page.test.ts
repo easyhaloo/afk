@@ -881,3 +881,152 @@ describe("SSH bastion integration", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("SSH bastion add dialog", () => {
+  it("opens the bastion form when clicking 添加堡垒机 button", async () => {
+    const { renderer } = await renderSshPage();
+    const bastionButton = renderer.root.findByProps({ "aria-label": "添加堡垒机" });
+
+    await act(async () => { bastionButton.props.onClick(); await flushReactUpdates(); });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    // Dialog should show "添加堡垒机" title via h2 element
+    expect(dialog.findByType("h2").props.children).toBe("添加堡垒机");
+    // SSH form fields should not be visible in bastion mode
+    expect(dialog.findAllByProps({ placeholder: "例如：kg演示" })).toHaveLength(0);
+    // Bastion fields should be visible
+    expect(dialog.findAllByProps({ placeholder: "dev-jumpserver.fangcloud.net" })).toHaveLength(1);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("toggles between SSH and bastion modes in the dialog", async () => {
+    const { renderer } = await renderSshPage();
+    const bastionButton = renderer.root.findByProps({ "aria-label": "添加堡垒机" });
+
+    await act(async () => { bastionButton.props.onClick(); await flushReactUpdates(); });
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+
+    // Initially in bastion mode — bastion fields visible
+    expect(dialog.findAllByProps({ placeholder: "dev-jumpserver.fangcloud.net" })).toHaveLength(1);
+
+    // Switch to SSH mode
+    const sshToggle = dialog.findAllByType("button").find((b) => textContent(b) === "添加 SSH 主机")!;
+    await act(async () => { sshToggle.props.onClick(); await flushReactUpdates(); });
+
+    // SSH fields now visible
+    expect(dialog.findAllByProps({ placeholder: "例如：kg演示" })).toHaveLength(1);
+    // Bastion fields hidden
+    expect(dialog.findAllByProps({ placeholder: "dev-jumpserver.fangcloud.net" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("calls addBastion on Test Connection and shows preview with Linux assets pre-selected", async () => {
+    const { renderer, jumpserver } = await renderSshPage();
+    jumpserver.addBastion.mockResolvedValue({
+      bastion: { id: "managed:bastion-1", alias: "test-bastion", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "test", syncFilter: { linuxOnly: true } },
+      assetPreview: [
+        { name: "linux-host-1", address: "10.0.1.1", platform: "Linux" },
+        { name: "windows-host-1", address: "10.0.1.2", platform: "Windows" },
+      ],
+    });
+
+    const bastionButton = renderer.root.findByProps({ "aria-label": "添加堡垒机" });
+    await act(async () => { bastionButton.props.onClick(); await flushReactUpdates(); });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    const findInput = (placeholder: string) => dialog.findAllByProps({ placeholder })[0];
+
+    await act(async () => { findInput("dev-jumpserver.fangcloud.net").props.onChange({ target: { value: "jms.example.com" } }); await flushReactUpdates(); });
+    await act(async () => { findInput("wangwendi").props.onChange({ target: { value: "admin" } }); await flushReactUpdates(); });
+    await act(async () => {
+      const testBtn = dialog.findAllByType("button").find((b) => textContent(b).includes("Test Connection"))!;
+      testBtn.props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(jumpserver.addBastion).toHaveBeenCalledWith(expect.objectContaining({ hostname: "jms.example.com", user: "admin" }));
+    // Preview should be visible
+    expect(dialog.findAllByProps({ className: "ssh-bastion-preview" })).toHaveLength(1);
+    // Linux asset should be pre-selected (bastionLinuxOnly defaults to true)
+    expect(dialog.findAllByProps({ className: "ssh-bastion-preview-row" })).toHaveLength(2);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("toggling an asset checkbox removes it from the selected set", async () => {
+    const { renderer, jumpserver } = await renderSshPage();
+    jumpserver.addBastion.mockResolvedValue({
+      bastion: { id: "managed:bastion-1", alias: "test-bastion", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "test", syncFilter: { linuxOnly: true } },
+      assetPreview: [
+        { name: "linux-host-1", address: "10.0.1.1", platform: "Linux" },
+        { name: "linux-host-2", address: "10.0.1.2", platform: "Linux" },
+      ],
+    });
+
+    const bastionButton = renderer.root.findByProps({ "aria-label": "添加堡垒机" });
+    await act(async () => { bastionButton.props.onClick(); await flushReactUpdates(); });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    const findInput = (placeholder: string) => dialog.findAllByProps({ placeholder })[0];
+    await act(async () => { findInput("dev-jumpserver.fangcloud.net").props.onChange({ target: { value: "jms.example.com" } }); await flushReactUpdates(); });
+    await act(async () => { findInput("wangwendi").props.onChange({ target: { value: "admin" } }); await flushReactUpdates(); });
+    await act(async () => {
+      const testBtn = dialog.findAllByType("button").find((b) => textContent(b).includes("Test Connection"))!;
+      testBtn.props.onClick();
+      await flushReactUpdates();
+    });
+
+    // Both Linux assets selected by default
+    const syncBtn = dialog.findAllByType("button").find((b) => textContent(b).includes("Sync"))!;
+    expect(textContent(syncBtn)).toContain("2");
+
+    // Deselect one - click the checkbox input inside the row
+    const firstRow = dialog.findAllByProps({ className: "ssh-bastion-preview-row" })[0];
+    const checkbox = firstRow.findByType("input");
+    await act(async () => { checkbox.props.onChange(); await flushReactUpdates(); });
+
+    const syncBtnAfter = dialog.findAllByType("button").find((b) => textContent(b).includes("Sync"))!;
+    expect(textContent(syncBtnAfter)).toContain("1");
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("clicking Sync calls syncAssets with selected names and closes the dialog on success", async () => {
+    const { renderer, jumpserver, list } = await renderSshPage();
+    jumpserver.addBastion.mockResolvedValue({
+      bastion: { id: "managed:bastion-new", alias: "test-bastion", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "test", syncFilter: { linuxOnly: true } },
+      assetPreview: [{ name: "linux-host-1", address: "10.0.1.1", platform: "Linux" }],
+    });
+    jumpserver.syncAssets.mockResolvedValue({ bastionId: "managed:bastion-new", assetsDiscovered: 1, assetsCreated: 1, assetsSkipped: 0, skippedReasons: [], createdAssetIds: ["managed:asset-1"], syncedAt: new Date().toISOString() });
+
+    const bastionButton = renderer.root.findByProps({ "aria-label": "添加堡垒机" });
+    await act(async () => { bastionButton.props.onClick(); await flushReactUpdates(); });
+
+    const dialog = renderer.root.findByProps({ role: "dialog" });
+    const findInput = (placeholder: string) => dialog.findAllByProps({ placeholder })[0];
+    await act(async () => { findInput("dev-jumpserver.fangcloud.net").props.onChange({ target: { value: "jms.example.com" } }); await flushReactUpdates(); });
+    await act(async () => { findInput("wangwendi").props.onChange({ target: { value: "admin" } }); await flushReactUpdates(); });
+    await act(async () => {
+      const testBtn = dialog.findAllByType("button").find((b) => textContent(b).includes("Test Connection"))!;
+      testBtn.props.onClick();
+      await flushReactUpdates();
+    });
+
+    await act(async () => {
+      const syncBtn = dialog.findAllByType("button").find((b) => textContent(b).includes("Sync"))!;
+      syncBtn.props.onClick();
+      await flushReactUpdates();
+    });
+
+    expect(jumpserver.syncAssets).toHaveBeenCalledWith(expect.objectContaining({
+      bastionId: "managed:bastion-new",
+      selectedNames: ["linux-host-1"],
+      linuxOnly: true,
+    }));
+    expect(list).toHaveBeenCalledWith({ forceRefresh: true });
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+});

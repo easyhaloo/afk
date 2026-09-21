@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppWindowMac, Check, ChevronDown, CircleAlert, Command, Copy, Ghost, KeyRound, Link2, PanelsTopLeft, Plus, RefreshCw, Search, Server, ShieldCheck, SquareTerminal, Upload, X, Zap, type LucideIcon } from "lucide-react";
-import type { ManagedSshHostInput, SshBastion, SshDiagnostic, SshExternalTerminalId, SshHost, SshHostSource, SshHostStatus, SshJumpHostType, SshSession } from "../../../shared/ssh-contract";
+import type { ManagedSshHostInput, SshBastion, SshBastionAssetPreview, SshBastionSyncResult, SshDiagnostic, SshExternalTerminalId, SshHost, SshHostSource, SshHostStatus, SshJumpHostType, SshSession } from "../../../shared/ssh-contract";
 import { groupSshDiagnostics, type GroupedSshDiagnostic } from "./ssh-diagnostics";
 import { fetchSshHostList, invalidateSshHostCache, isSshHostCacheFresh, readSshHostCache } from "./ssh-host-cache";
+import { AddBastionDialog } from "./AddBastionDialog";
 import { JumpserverBastionCard } from "./JumpserverBastionCard";
 import { JumpserverDetail } from "./JumpserverDetail";
 import { SshActionButton } from "./SshActionButton";
@@ -120,7 +121,7 @@ function SshTerminalPicker({ value, disabled, onChange }: { value: SshTerminalId
 
 type SshFormPickerOption = { value: string; label: string; description?: string };
 
-function SshFormPicker({ id, ariaLabel, value, options, placeholder, required, disabled = false, onChange }: { id: string; ariaLabel: string; value: string; options: SshFormPickerOption[]; placeholder: string; required?: boolean; disabled?: boolean; onChange: (value: string) => void }) {
+export function SshFormPicker({ id, ariaLabel, value, options, placeholder, required, disabled = false, onChange }: { id: string; ariaLabel: string; value: string; options: SshFormPickerOption[]; placeholder: string; required?: boolean; disabled?: boolean; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -235,6 +236,22 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
   const [syncLogs, setSyncLogs] = useState<Record<string, import("../../../shared/ssh-contract").SshBastionSyncLogEntry[]>>({});
   const [bastionFilter, setBastionFilter] = useState<BastionFilter>("all");
   const [pendingBastionRemoval, setPendingBastionRemoval] = useState<SshBastion | null>(null);
+  const [addBastionOpen, setAddBastionOpen] = useState(false);
+  const [bastionAddAlias, setBastionAddAlias] = useState("");
+  const [bastionAddHost, setBastionAddHost] = useState("");
+  const [bastionAddPort, setBastionAddPort] = useState(2222);
+  const [bastionAddUser, setBastionAddUser] = useState("");
+  const [bastionAddPassword, setBastionAddPassword] = useState("");
+  const [bastionAddOtp, setBastionAddOtp] = useState("");
+  const [bastionAddLinuxOnly, setBastionAddLinuxOnly] = useState(true);
+  const [bastionTestState, setBastionTestState] = useState<"idle" | "testing" | "preview" | "error">("idle");
+  const [bastionTestError, setBastionTestError] = useState("");
+  const [bastionPreview, setBastionPreview] = useState<SshBastionAssetPreview[]>([]);
+  const [bastionCurrentBastionId, setBastionCurrentBastionId] = useState("");
+  const [bastionSelectedNames, setBastionSelectedNames] = useState<Set<string>>(new Set());
+  const [bastionSyncing, setBastionSyncing] = useState(false);
+  const [bastionSyncError, setBastionSyncError] = useState("");
+  const [bastionSyncResult, setBastionSyncResult] = useState<SshBastionSyncResult | undefined>();
   const modalRef = useRef<HTMLFormElement>(null);
   const addHostButtonRef = useRef<HTMLButtonElement>(null);
   const mountedRef = useRef(false);
@@ -288,6 +305,7 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
     setEditingHostId("");
     setCopyingHostId("");
     setAddPassword("");
+    setAddBastionOpen(false);
     addHostButtonRef.current?.focus();
   }, []);
 
@@ -297,6 +315,14 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
     setForm({ alias: "", hostname: "", port: 22, user: "", jumpHostType: "none" });
     setAddPassword("");
     setFormOpen(true);
+    setAddBastionOpen(false);
+    setBastionAddAlias(""); setBastionAddHost(""); setBastionAddPort(2222);
+    setBastionAddUser(""); setBastionAddPassword(""); setBastionAddOtp("");
+    setBastionAddLinuxOnly(true);
+    setBastionTestState("idle"); setBastionTestError("");
+    setBastionPreview([]); setBastionSelectedNames(new Set());
+    setBastionSyncing(false); setBastionSyncError(""); setBastionSyncResult(undefined);
+    setBastionCurrentBastionId("");
   }, []);
 
   const openEditForm = useCallback((host: SshHost) => {
@@ -457,12 +483,76 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
     }, "堡垒机已删除", true);
   };
 
+  const openAddBastionForm = useCallback(() => {
+    setEditingHostId("");
+    setCopyingHostId("");
+    setForm({ alias: "", hostname: "", port: 22, user: "", jumpHostType: "none" });
+    setAddPassword("");
+    setFormOpen(true);
+    setAddBastionOpen(true);
+    setBastionAddAlias(""); setBastionAddHost(""); setBastionAddPort(2222);
+    setBastionAddUser(""); setBastionAddPassword(""); setBastionAddOtp("");
+    setBastionAddLinuxOnly(true);
+    setBastionTestState("idle"); setBastionTestError("");
+    setBastionPreview([]); setBastionSelectedNames(new Set());
+    setBastionSyncing(false); setBastionSyncError(""); setBastionSyncResult(undefined);
+    setBastionCurrentBastionId("");
+  }, []);
+
+  const testBastion = useCallback(async () => {
+    setBastionTestState("testing"); setBastionTestError("");
+    try {
+      const result = await window.afkDesktop.jumpserver.addBastion({
+        alias: bastionAddAlias || bastionAddHost,
+        hostname: bastionAddHost,
+        port: bastionAddPort,
+        user: bastionAddUser,
+        password: bastionAddPassword,
+        otpSecret: bastionAddOtp || undefined,
+        linuxOnly: bastionAddLinuxOnly,
+      });
+      setBastionCurrentBastionId(result.bastion.id);
+      setBastionPreview(result.assetPreview);
+      const linuxAssets = result.assetPreview.filter((a) => a.platform.toLowerCase().startsWith("linux"));
+      setBastionSelectedNames(new Set(linuxAssets.map((a) => a.name)));
+      setBastionTestState("preview");
+    } catch (cause) {
+      setBastionTestError(cause instanceof Error ? cause.message : String(cause));
+      setBastionTestState("error");
+    }
+  }, [bastionAddAlias, bastionAddHost, bastionAddPort, bastionAddUser, bastionAddPassword, bastionAddOtp, bastionAddLinuxOnly]);
+
+  const toggleBastionAsset = useCallback((name: string) => {
+    setBastionSelectedNames((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      return next;
+    });
+  }, []);
+
+  const syncBastion = useCallback(async () => {
+    setBastionSyncing(true); setBastionSyncError("");
+    try {
+      const result = await window.afkDesktop.jumpserver.syncAssets({
+        bastionId: bastionCurrentBastionId,
+        selectedNames: Array.from(bastionSelectedNames),
+        linuxOnly: bastionAddLinuxOnly,
+      });
+      setBastionSyncResult(result);
+      await load({ forceRefresh: true });
+    } catch (cause) {
+      setBastionSyncError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBastionSyncing(false);
+    }
+  }, [bastionCurrentBastionId, bastionSelectedNames, bastionAddLinuxOnly, load]);
+
   const bastionStatusFor = (bastionId: string): "healthy" | "auth-expired" | "unreachable" | "syncing" | "stale" => {
     const summary = bastionSyncSummary(bastions.find((b) => b.id === bastionId)!);
     return summary.status;
   };
   return <section className="control-page ssh-page" aria-label="SSH 主机管理">
-    <header className="control-page-heading ssh-heading"><div><p>本地基础设施</p><h1>SSH 主机</h1><span>复用系统 OpenSSH 配置，在不托管私钥和密码的前提下管理远程连接。</span></div><div className="ssh-heading-actions"><SshActionButton size="sm" variant="secondary" className="ssh-icon-action" onClick={generate} disabled={!!busy} aria-label="生成 AFK 密钥" title="生成 AFK 密钥"><KeyRound size={15} aria-hidden="true" /></SshActionButton><SshActionButton ref={addHostButtonRef} size="sm" variant="primary" className="ssh-icon-action" onClick={openAddForm} aria-label="添加 SSH 主机" title="添加 SSH 主机"><Plus size={16} aria-hidden="true" /></SshActionButton></div></header>
+    <header className="control-page-heading ssh-heading"><div><p>本地基础设施</p><h1>SSH 主机</h1><span>复用系统 OpenSSH 配置，在不托管私钥和密码的前提下管理远程连接。</span></div><div className="ssh-heading-actions"><SshActionButton size="sm" variant="secondary" className="ssh-icon-action" onClick={generate} disabled={!!busy} aria-label="生成 AFK 密钥" title="生成 AFK 密钥"><KeyRound size={15} aria-hidden="true" /></SshActionButton><SshActionButton ref={addHostButtonRef} size="sm" variant="primary" className="ssh-icon-action" onClick={openAddForm} aria-label="添加 SSH 主机" title="添加 SSH 主机"><Plus size={16} aria-hidden="true" /></SshActionButton><SshActionButton size="sm" variant="secondary" onClick={openAddBastionForm} aria-label="添加堡垒机" title="添加堡垒机"><Server size={15} aria-hidden="true" /><span>添加堡垒机</span></SshActionButton></div></header>
     {error ? <div className="ssh-alert error" role="alert"><CircleAlert size={15} />{error}<button onClick={() => setError("")} aria-label="关闭错误"><X size={14} /></button></div> : null}
     {notice ? <div className="ssh-alert success" role="status"><Check size={15} />{notice}</div> : null}
     <section className="ssh-toolbar"><label className="ssh-search"><Search size={15} /><input aria-label="搜索 SSH 主机" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索别名、地址或用户" /></label><SshFormPicker id="ssh-source-filter" ariaLabel="来源筛选" value={source} options={[{ value: "all", label: "全部来源" }, { value: "system", label: "系统配置" }, { value: "managed", label: "AFK 管理" }]} placeholder="全部来源" disabled={!!busy} onChange={(value) => setSource(value as SourceFilter)} /><SshFormPicker id="ssh-status-filter" ariaLabel="状态筛选" value={status} options={[{ value: "all", label: "全部状态" }, ...Object.entries(statusLabels).map(([value, label]) => ({ value, label }))]} placeholder="全部状态" disabled={!!busy} onChange={(value) => setStatus(value as StatusFilter)} /><SshFormPicker id="ssh-bastion-filter" ariaLabel="堡垒机筛选" value={bastionFilter} options={[{ value: "all", label: "全部" }, { value: "bastion", label: "仅堡垒机" }, { value: "direct", label: "仅直连" }]} placeholder="全部" disabled={!!busy} onChange={(value) => setBastionFilter(value as BastionFilter)} />{diagnostics.length ? <SshDiagnostics diagnostics={groupedDiagnostics} total={diagnostics.length} /> : null}<button className="icon-button" onClick={() => void load({ forceRefresh: true })} disabled={!!busy} aria-label="刷新 SSH 主机"><RefreshCw size={16} className={busy === "list" ? "spin" : ""} /></button></section>
@@ -519,7 +609,46 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
         bastionManaged={selectedHostIsBastionManaged}
       />
     )}</section>
-    {formOpen ? <div className="ssh-modal-backdrop"><form ref={modalRef} className="ssh-modal" role="dialog" aria-modal="true" aria-labelledby="ssh-host-form-title" onKeyDown={(event) => { if (event.key !== "Tab") return; const focusableElements = getFocusableElements(event.currentTarget); if (!focusableElements.length) return; const firstFocusable = focusableElements[0]; const lastFocusable = focusableElements[focusableElements.length - 1]; if (event.shiftKey && document.activeElement === firstFocusable) { event.preventDefault(); lastFocusable.focus(); } else if (!event.shiftKey && document.activeElement === lastFocusable) { event.preventDefault(); firstFocusable.focus(); } }} onSubmit={(event) => { event.preventDefault(); void saveHost(); }}><header><div><small>AFK 管理</small><h2 id="ssh-host-form-title">{editingHostId ? "编辑 SSH 主机" : copyingHostId ? "复制 SSH 主机" : "添加 SSH 主机"}</h2></div><button type="button" className="icon-button" onClick={closeForm} aria-label="关闭"><X size={16} /></button></header><label>显示名称<input required value={form.alias} onChange={(event) => setForm({ ...form, alias: event.target.value })} placeholder="例如：kg演示" /></label><label>主机地址或 IP<input required value={form.hostname} onChange={(event) => setForm({ ...form, hostname: event.target.value })} placeholder="172.16.0.241" /></label><div className="ssh-form-row"><label>端口<input type="number" min="1" max="65535" value={form.port} onChange={(event) => setForm({ ...form, port: Number(event.target.value) })} /></label><label>用户<input value={form.user || ""} onChange={(event) => setForm({ ...form, user: event.target.value })} placeholder="deploy" /></label></div>{!editingHostId ? <label>部署密码（可选）<input type="password" autoComplete="new-password" aria-label="添加主机部署密码" value={addPassword} onChange={(event) => setAddPassword(event.target.value)} placeholder="用于首次部署公钥，保存到系统安全存储" /></label> : null}<label>已有私钥路径（可选）<input value={form.identityFile || ""} onChange={(event) => setForm({ ...form, identityFile: event.target.value || undefined })} placeholder="~/.ssh/id_ed25519" /><small>留空则解析 ~/.ssh/config 中该别名的 IdentityFile，再降级到 AFK 默认密钥</small></label><label>上传目录（可选）<input value={form.remoteWorkspace || ""} onChange={(event) => setForm({ ...form, remoteWorkspace: event.target.value || undefined })} placeholder="例如：~/uploads" /></label><label>跳板机类型（可选）<SshFormPicker id="ssh-jump-host-type" ariaLabel="选择跳板机类型" value={form.jumpHostType || "none"} options={Object.entries(jumpHostTypeLabels).map(([value, label]) => ({ value, label }))} placeholder="请选择跳板机类型" onChange={(value) => { const jumpHostType = value as SshJumpHostType; setForm({ ...form, jumpHostType, jumpHost: jumpHostType === "none" ? undefined : form.jumpHost }); }} /></label>{form.jumpHostType && form.jumpHostType !== "none" ? <label>{jumpHostTypeLabels[form.jumpHostType]}（可选）<SshFormPicker id="ssh-jump-host" ariaLabel="选择跳板机" value={form.jumpHost || ""} options={jumpHostCandidates.map((host) => ({ value: host.alias, label: host.alias, description: `${host.user ? `${host.user}@` : ""}${host.hostname}:${host.port}` }))} placeholder="请选择已配置的 SSH 主机" required onChange={(value) => setForm({ ...form, jumpHost: value || "" })} /></label> : null}<footer><SshActionButton size="md" variant="secondary" type="button" onClick={closeForm}>取消</SshActionButton><SshActionButton size="md" variant="primary" type="submit" disabled={busy === "add" || busy === "update"}>{busy === "add" || busy === "update" ? "保存中…" : editingHostId ? "保存修改" : "保存主机"}</SshActionButton></footer></form></div> : null}
+    {formOpen ? <AddBastionDialog
+      open={formOpen}
+      initialMode={addBastionOpen ? "bastion" : "ssh"}
+      onClose={closeForm}
+      sshForm={form}
+      sshEditingId={editingHostId}
+      sshAddPassword={addPassword}
+      jumpHostCandidates={jumpHostCandidates}
+      onSshFormChange={setForm}
+      onSshPasswordChange={setAddPassword}
+      onSshSubmit={saveHost}
+      bastionAlias={bastionAddAlias}
+      bastionHost={bastionAddHost}
+      bastionPort={bastionAddPort}
+      bastionUser={bastionAddUser}
+      bastionPassword={bastionAddPassword}
+      bastionOtp={bastionAddOtp}
+      bastionLinuxOnly={bastionAddLinuxOnly}
+      onBastionFieldChange={(field, value) => {
+        if (field === "alias") setBastionAddAlias(value as string);
+        else if (field === "host") setBastionAddHost(value as string);
+        else if (field === "port") setBastionAddPort(value as number);
+        else if (field === "user") setBastionAddUser(value as string);
+        else if (field === "password") setBastionAddPassword(value as string);
+        else if (field === "otp") setBastionAddOtp(value as string);
+        else if (field === "linuxOnly") setBastionAddLinuxOnly(value as boolean);
+      }}
+      bastionTestState={bastionTestState}
+      bastionTestError={bastionTestError}
+      bastionPreview={bastionPreview}
+      bastionSelectedNames={bastionSelectedNames}
+      bastionSyncing={bastionSyncing}
+      bastionSyncError={bastionSyncError}
+      bastionSyncResult={bastionSyncResult}
+      onBastionTest={testBastion}
+      onBastionToggleAsset={toggleBastionAsset}
+      onBastionSync={syncBastion}
+      onBastionClearError={() => { setBastionTestState("idle"); setBastionTestError(""); }}
+      busy={!!busy}
+    /> : null}
     {pendingRemoval ? <SshConfirmDialog title={removalTitle} description={removalDescription} confirmLabel={pendingRemoval.source === "managed" ? "确认删除" : "确认清理"} confirmAriaLabel={pendingRemoval.source === "managed" ? `确认删除 SSH 主机 ${pendingRemoval.alias}` : `确认清理不可达 SSH 主机 ${pendingRemoval.alias}`} onConfirm={confirmRemoval} onCancel={() => setPendingRemoval(null)} /> : null}
     {pendingBastionRemoval ? <SshConfirmDialog title={`删除堡垒机 ${pendingBastionRemoval.alias}`} description={`确定要删除堡垒机“${pendingBastionRemoval.alias}”吗？这将同时删除该堡垒机同步的所有资产。`} confirmLabel="确认删除" confirmAriaLabel={`确认删除堡垒机 ${pendingBastionRemoval.alias}`} onConfirm={confirmBastionRemoval} onCancel={() => setPendingBastionRemoval(null)} /> : null}
   </section>;

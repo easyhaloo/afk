@@ -19,6 +19,7 @@ export async function createMainWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webSecurity: true,
     },
   });
   installNavigationGuard(window.webContents);

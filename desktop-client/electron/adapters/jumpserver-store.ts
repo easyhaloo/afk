@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
+import { createKeyedMutex } from "../lib/async-mutex";
+import { writeYamlFileAtomic } from "../lib/secure-store";
 
 export type BastionInput = {
   alias: string;
@@ -65,17 +67,7 @@ async function writeDocument(
   file: string,
   document: StoreDocument,
 ) {
-  await fileSystem.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await fileSystem.writeFile(temporary, dumpYaml(document, { noRefs: true, lineWidth: -1 }), { encoding: "utf8", mode: 0o600 });
-    await fileSystem.chmod(temporary, 0o600);
-    await fileSystem.rename(temporary, file);
-    await fileSystem.chmod(file, 0o600);
-  } catch (error) {
-    await fileSystem.rm(temporary, { force: true }).catch(() => undefined);
-    throw error;
-  }
+  await writeYamlFileAtomic(file, document, fileSystem);
 }
 
 export function createJumpserverStore({
@@ -83,25 +75,7 @@ export function createJumpserverStore({
   fileSystem = fs,
   createId = () => `managed:${randomUUID()}`,
 }: JumpserverStoreOptions) {
-  // Per-bastion mutex: serializes concurrent writes on the same bastion id.
-  const bastionMutexes = new Map<string, Promise<void>>();
-
-  async function withBastionMutex<T>(bastionId: string, operation: () => Promise<T>): Promise<T> {
-    const previous = bastionMutexes.get(bastionId) ?? Promise.resolve();
-    let release: (() => void) | undefined;
-    const mutex = previous.then(async () => {
-      try {
-        return await operation();
-      } finally {
-        if (release) release();
-      }
-    });
-    const cleanup = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    bastionMutexes.set(bastionId, Promise.race([mutex.then(() => cleanup), cleanup.then(() => undefined)]).then(() => undefined));
-    return mutex;
-  }
+  const keyedMutex = createKeyedMutex<void>();
 
   async function list(): Promise<BastionRecord[]> {
     return (await readDocument(fileSystem, file)).bastions;
@@ -118,7 +92,7 @@ export function createJumpserverStore({
   }
 
   async function upsert(input: BastionInput): Promise<BastionRecord> {
-    return withBastionMutex(input.alias, async () => {
+    return keyedMutex.run(input.alias, async () => {
       const document = await readDocument(fileSystem, file);
       const existing = document.bastions.find((b) => b.alias === input.alias);
       const record: BastionRecord = { ...input, id: existing?.id || createId() };
@@ -131,7 +105,7 @@ export function createJumpserverStore({
   }
 
   async function update(id: string, partial: Partial<BastionInput>): Promise<BastionRecord> {
-    return withBastionMutex(id, async () => {
+    return keyedMutex.run(id, async () => {
       const document = await readDocument(fileSystem, file);
       const existing = document.bastions.find((b) => b.id === id);
       if (!existing) throw new Error("堡垒机不存在");
@@ -145,7 +119,7 @@ export function createJumpserverStore({
   }
 
   async function remove(id: string): Promise<boolean> {
-    return withBastionMutex(id, async () => {
+    return keyedMutex.run(id, async () => {
       const document = await readDocument(fileSystem, file);
       if (!document.bastions.some((b) => b.id === id)) return false;
       const bastions = document.bastions.filter((b) => b.id !== id);

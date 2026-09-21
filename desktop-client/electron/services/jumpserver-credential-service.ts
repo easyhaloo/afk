@@ -1,6 +1,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import { createMutex } from "../lib/async-mutex";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "jumpserver-credentials.json");
 const MAX_PASSWORD_BYTES = 4096;
@@ -83,14 +84,15 @@ function isDocument(value: unknown): value is CredentialDocument {
   return Object.values(input.credentials as Record<string, unknown>).every(isCredentialRecord);
 }
 
-function sameTarget(left: JumpserverCredentialTarget, right: JumpserverCredentialTarget) {
+// ponytail: predicate naming convention
+export function isSameTarget(left: JumpserverCredentialTarget, right: JumpserverCredentialTarget) {
   return left.hostname === right.hostname && left.port === right.port && left.user === right.user;
 }
 
-export function createJumpserverCredentialService({ home, safeStorage, fileSystem = fs }: JumpserverCredentialServiceDependencies) {
+export function createJumpserverCredentialStore({ home, safeStorage, fileSystem = fs }: JumpserverCredentialServiceDependencies) {
   const file = path.join(home, CREDENTIAL_FILE);
   const directory = path.dirname(file);
-  let mutationQueue = Promise.resolve();
+  const mutex = createMutex<void>();
 
   function assertAvailable() {
     if (!safeStorage.isEncryptionAvailable()) throw unavailable();
@@ -130,24 +132,18 @@ export function createJumpserverCredentialService({ home, safeStorage, fileSyste
     }
   }
 
-  function mutate<T>(operation: () => Promise<T>) {
-    const next = mutationQueue.then(operation, operation);
-    mutationQueue = next.then(() => undefined, () => undefined);
-    return next;
-  }
-
   async function has(bastionId: string, target: JumpserverCredentialTarget) {
     const expectedTarget = normalizeTarget(target);
     const document = await readDocument();
     const entry = document.credentials[bastionId];
-    return isCredentialRecord(entry) && sameTarget(entry.bastionTarget, expectedTarget);
+    return isCredentialRecord(entry) && isSameTarget(entry.bastionTarget, expectedTarget);
   }
 
   async function get(bastionId: string, target: JumpserverCredentialTarget) {
     const expectedTarget = normalizeTarget(target);
     const document = await readDocument();
     const entry = document.credentials[bastionId];
-    if (!isCredentialRecord(entry) || !sameTarget(entry.bastionTarget, expectedTarget)) return undefined;
+    if (!isCredentialRecord(entry) || !isSameTarget(entry.bastionTarget, expectedTarget)) return undefined;
     try {
       const password = safeStorage.decryptString(Buffer.from(entry.encrypted, "base64"));
       validatePassword(password);
@@ -169,7 +165,7 @@ export function createJumpserverCredentialService({ home, safeStorage, fileSyste
     validatePassword(password);
     if (otpSecret !== undefined && otpSecret !== "") validateOtpSecret(otpSecret);
     const expectedTarget = normalizeTarget(target);
-    return mutate(async () => {
+    return mutex.run(async () => {
       assertAvailable();
       const document = await readDocument();
       let encrypted: Buffer;
@@ -193,7 +189,7 @@ export function createJumpserverCredentialService({ home, safeStorage, fileSyste
   }
 
   async function remove(bastionId: string) {
-    return mutate(async () => {
+    return mutex.run(async () => {
       const document = await readDocument();
       if (!Object.prototype.hasOwnProperty.call(document.credentials, bastionId)) return false;
       delete document.credentials[bastionId];
@@ -204,3 +200,4 @@ export function createJumpserverCredentialService({ home, safeStorage, fileSyste
 
   return { has, get, set, remove };
 }
+

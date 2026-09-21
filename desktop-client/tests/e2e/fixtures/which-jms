@@ -1,0 +1,3 @@
+#!/bin/bash
+# Resolves 'jms' to the mock fixture when running E2E
+exec "$(dirname "$0")/jms" "$@"

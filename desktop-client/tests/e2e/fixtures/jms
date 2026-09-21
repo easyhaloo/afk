@@ -1,0 +1,72 @@
+#!/bin/bash
+# Mock jms for E2E tests. Accepts these subcommands:
+#   jms config list                    → prints server list with default marker
+#   jms config add <alias>             → reads host/user/password from stdin, prints success
+#   jms config remove <alias>          → prints success
+#   jms ls <server>                    → prints asset table (3 Linux + 1 Windows)
+#   jms exec <asset>@<server> '<cmd>'  → prints 'true'
+#   which jms                          → returns this script's own path
+
+set -e
+
+cmd="$1"
+shift || true
+
+case "$cmd" in
+  config)
+    sub="$1"; shift || true
+    case "$sub" in
+      list)
+        cat <<'EOF'
+  ALIAS                HOST                            USERNAME
+* dev                  https://dev-jumpserver.local    wangwendi
+  staging              https://staging-jumpserver.local wangwendi
+EOF
+        ;;
+      add)
+        # jms config add prompts: Host, Username, Password, Password (confirm)
+        # Read 4 lines from stdin (or just accept the input)
+        read -r host
+        read -r user
+        read -r pw
+        read -r pw2
+        echo "✓ Server added: $1 (host=$host, user=$user)"
+        ;;
+      remove)
+        echo "✓ Server removed: $1"
+        ;;
+      *)
+        echo "mock-jms: unknown config subcommand: $sub" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  ls)
+    # Output matches real `jms ls` format: header, separator, rows, total count
+    cat <<'EOF'
+[INFO] Logging in to https://dev-jumpserver.local as 'wangwendi' ...
+[INFO] Login successful.
+
+Name                          Address              Platform  Type
+--------------------------------------------------------------------------------
+e2e-asset-1                    10.99.1.1             Linux     Linux
+e2e-asset-2                    10.99.1.2             Linux     Linux
+e2e-asset-3                    10.99.1.3             Linux     Linux
+e2e-windows-asset              10.99.2.1             Windows   Windows
+
+Total: 4 asset(s)
+EOF
+    ;;
+  exec)
+    # Probe command — return 'true' if ok
+    echo "true"
+    ;;
+  which)
+    # Called as `which jms` — return this script's path
+    echo "$(cd "$(dirname "$0")" && pwd)/jms"
+    ;;
+  *)
+    echo "mock-jms: unknown command: $cmd" >&2
+    exit 1
+    ;;
+esac

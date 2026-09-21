@@ -200,6 +200,16 @@ export type DesktopApi = {
     list: (options?: WorkItemInventoryOptions, forceRefresh?: boolean) => Promise<WorkItemInventoryResult>;
     start: (input: WorkItemRunStartInput) => Promise<WorkItemRunStartResult>;
   };
+  jumpserver: {
+    testConnection: (input: JumpserverTestConnectionInput) => Promise<JumpserverTestConnectionResult>;
+    addBastion: (input: JumpserverAddBastionInput) => Promise<JumpserverAddBastionResult>;
+    listAssets: (bastionId: string) => Promise<SshBastionAssetPreview[]>;
+    previewAssets: (input: { hostname: string; port: number; user: string; password: string; otpSecret?: string }) => Promise<SshBastionAssetPreview[]>;
+    syncAssets: (input: JumpserverSyncAssetsInput) => Promise<SshBastionSyncResult>;
+    removeBastion: (bastionId: string) => Promise<JumpserverRemoveBastionResult>;
+    listBastions: () => Promise<SshBastion[]>;
+    getSyncLog: (bastionId: string) => Promise<SshBastionSyncLogEntry[]>;
+  };
 };
 
 export const IPC_CHANNELS = {
@@ -247,9 +257,21 @@ export const IPC_CHANNELS = {
   backlogSummary: "afk:backlog-summary",
   workItemsList: "afk:work-items-list",
   workItemsStart: "afk:work-items-start",
+  jumpserverTestConnection: "afk:jumpserver-test-connection",
+  jumpserverAddBastion: "afk:jumpserver-add-bastion",
+  jumpserverListAssets: "afk:jumpserver-list-assets",
+  jumpserverPreviewAssets: "afk:jumpserver-preview-assets",
+  jumpserverSyncAssets: "afk:jumpserver-sync-assets",
+  jumpserverRemoveBastion: "afk:jumpserver-remove-bastion",
+  jumpserverListBastions: "afk:jumpserver-list-bastions",
+  jumpserverGetSyncLog: "afk:jumpserver-get-sync-log",
 } as const;
 import type {
   ManagedSshHostInput,
+  SshBastion,
+  SshBastionAssetPreview,
+  SshBastionSyncLogEntry,
+  SshBastionSyncResult,
   SshFingerprint,
   SshExternalTerminalId,
   SshHost,
@@ -286,4 +308,42 @@ export type SshListOptions = {
 export type SshCredentialSetInput = {
   hostId: string;
   password: string;
+};
+
+export type JumpserverTestConnectionInput = {
+  hostname: string;
+  port: number;
+  user: string;
+  password: string;
+  otpSecret?: string;
+};
+
+export type JumpserverTestConnectionResult =
+  | { ok: true; assets: SshBastionAssetPreview[] }
+  | { ok: false; error: string };
+
+export type JumpserverAddBastionInput = {
+  alias: string;
+  hostname: string;
+  port: number;
+  user: string;
+  password: string;
+  otpSecret?: string;
+  linuxOnly?: boolean;
+};
+
+export type JumpserverAddBastionResult = {
+  bastion: SshBastion;
+  assetPreview: SshBastionAssetPreview[];
+};
+
+export type JumpserverSyncAssetsInput = {
+  bastionId: string;
+  selectedNames?: string[];
+  linuxOnly?: boolean;
+};
+
+export type JumpserverRemoveBastionResult = {
+  ok: true;
+  removedAssetCount: number;
 };

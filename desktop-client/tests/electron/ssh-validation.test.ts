@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertAllowedSshPath, validateSshHostInput, validateSshUploadLocalPath, validateSshUploadRemoteDirectory } from "../../electron/security/ssh-validation";
+import { assertAllowedSshPath, validateSshHostInput, validateSshUploadLocalPath, validateSshUploadRemoteDirectory, validateJumpserverBastionInput, validateJumpserverSyncOptions, validateJumpserverBastionId } from "../../electron/security/ssh-validation";
 
 describe("SSH input validation", () => {
   it("accepts a normal host and applies the default port", () => {
@@ -49,5 +49,90 @@ describe("SSH input validation", () => {
     expect(validateSshUploadRemoteDirectory("/srv/releases")).toBe("/srv/releases/");
     expect(() => validateSshUploadLocalPath("/tmp/file\nname")).toThrow("SSH 上传文件路径无效");
     expect(() => validateSshUploadRemoteDirectory("~/uploads\r")).toThrow("SSH 远程目录无效");
+  });
+});
+
+describe("JumpServer validation", () => {
+  it("accepts valid full input and returns normalized object", () => {
+    expect(validateJumpserverBastionInput({
+      alias: "fangcloud-jumpserver",
+      hostname: "jumpserver.example.test",
+      port: 2222,
+      user: "admin",
+      otpSecret: "JBSWY3DPEHPK3PXP",
+    })).toEqual({
+      alias: "fangcloud-jumpserver",
+      hostname: "jumpserver.example.test",
+      port: 2222,
+      user: "admin",
+      otpSecret: "JBSWY3DPEHPK3PXP",
+    });
+  });
+
+  it("applies default port 2222 when missing", () => {
+    expect(validateJumpserverBastionInput({
+      alias: "fangcloud-jumpserver",
+      hostname: "jumpserver.example.test",
+      user: "admin",
+    })).toMatchObject({ port: 2222 });
+  });
+
+  it("coerces string port to number", () => {
+    expect(validateJumpserverBastionInput({
+      alias: "fangcloud-jumpserver",
+      hostname: "jumpserver.example.test",
+      port: "3333",
+      user: "admin",
+    })).toMatchObject({ port: 3333 });
+  });
+
+  it("throws on invalid port values", () => {
+    expect(() => validateJumpserverBastionInput({ alias: "js", hostname: "js.test", port: 0, user: "u" })).toThrow("JumpServer 堡垒机端口无效");
+    expect(() => validateJumpserverBastionInput({ alias: "js", hostname: "js.test", port: 65536, user: "u" })).toThrow("JumpServer 堡垒机端口无效");
+    expect(() => validateJumpserverBastionInput({ alias: "js", hostname: "js.test", port: NaN, user: "u" })).toThrow("JumpServer 堡垒机端口无效");
+  });
+
+  it("throws when required fields are missing", () => {
+    expect(() => validateJumpserverBastionInput({ hostname: "js.test", user: "u" })).toThrow("JumpServer 堡垒机别名无效");
+    expect(() => validateJumpserverBastionInput({ alias: "js", user: "u" })).toThrow("JumpServer 堡垒机地址无效");
+    expect(() => validateJumpserverBastionInput({ alias: "js", hostname: "js.test" })).toThrow("JumpServer 堡垒机用户无效");
+  });
+
+  it("throws on invalid alias with slash", () => {
+    expect(() => validateJumpserverBastionInput({ alias: "js/prod", hostname: "js.test", user: "u" })).toThrow("JumpServer 堡垒机别名无效");
+  });
+
+  it("throws on invalid hostname with whitespace", () => {
+    expect(() => validateJumpserverBastionInput({ alias: "js", hostname: "js test", user: "u" })).toThrow("JumpServer 堡垒机地址无效");
+  });
+
+  it("otpSecret is optional and validates type", () => {
+    expect(validateJumpserverBastionInput({ alias: "js", hostname: "js.test", user: "u" }).otpSecret).toBeUndefined();
+    expect(() => validateJumpserverBastionInput({ alias: "js", hostname: "js.test", user: "u", otpSecret: 12345 })).toThrow("JumpServer 堡垒机 OTP 密钥无效");
+  });
+
+  it("returns empty object for undefined or non-object sync options", () => {
+    expect(validateJumpserverSyncOptions(undefined)).toEqual({});
+    expect(validateJumpserverSyncOptions(null)).toEqual({});
+    expect(validateJumpserverSyncOptions("string")).toEqual({});
+  });
+
+  it("throws on invalid selectedNames in sync options", () => {
+    expect(() => validateJumpserverSyncOptions({ selectedNames: "all" })).toThrow("JumpServer 同步选项 selectedNames 无效");
+    expect(() => validateJumpserverSyncOptions({ selectedNames: ["a", 2] })).toThrow("JumpServer 同步选项 selectedNames 无效");
+  });
+
+  it("throws on invalid linuxOnly in sync options", () => {
+    expect(() => validateJumpserverSyncOptions({ linuxOnly: "true" })).toThrow("JumpServer 同步选项 linuxOnly 无效");
+  });
+
+  it("validateJumpserverBastionId throws on invalid input", () => {
+    expect(() => validateJumpserverBastionId("")).toThrow("JumpServer 堡垒机 ID 无效");
+    expect(() => validateJumpserverBastionId(123)).toThrow("JumpServer 堡垒机 ID 无效");
+    expect(() => validateJumpserverBastionId(null)).toThrow("JumpServer 堡垒机 ID 无效");
+  });
+
+  it("validateJumpserverBastionId returns string id as-is", () => {
+    expect(validateJumpserverBastionId("managed:abc123")).toBe("managed:abc123");
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createJumpserverCredentialService } from "../../electron/services/jumpserver-credential-service";
+import { createJumpserverCredentialStore } from "../../electron/services/jumpserver-credential-service";
 
 function dependencies() {
   const files = new Map<string, string>();
@@ -48,7 +48,7 @@ describe("Jumpserver credential service", () => {
 
   it("round-trips encryption and decryption of password", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await service.set("bastion:one", "p@ssword", targetOne);
 
@@ -60,7 +60,7 @@ describe("Jumpserver credential service", () => {
 
   it("round-trips encryption and decryption of password with OTP secret", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await service.set("bastion:one", "p@ssword", targetOne, "JBSWY3DPEHPK3PXP");
 
@@ -72,7 +72,7 @@ describe("Jumpserver credential service", () => {
 
   it("round-trips without OTP (otpEncrypted undefined)", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await service.set("bastion:one", "p@ssword", targetOne);
 
@@ -83,7 +83,7 @@ describe("Jumpserver credential service", () => {
 
   it("writes atomically with chmod 0o600 and isolates bastion entries", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await service.set("bastion:one", "first", targetOne);
     await service.set("bastion:two", "second", targetTwo);
@@ -98,7 +98,7 @@ describe("Jumpserver credential service", () => {
 
   it("serializes concurrent writes so both credentials survive", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await Promise.all([
       service.set("bastion:one", "first", targetOne),
@@ -111,7 +111,7 @@ describe("Jumpserver credential service", () => {
 
   it("sameTarget requires hostname, port, and user to all match", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await service.set("bastion:one", "pwd", targetOne);
 
@@ -123,7 +123,7 @@ describe("Jumpserver credential service", () => {
 
   it("has returns false when target differs even if entry exists", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await service.set("bastion:one", "pwd", targetOne);
 
@@ -133,14 +133,14 @@ describe("Jumpserver credential service", () => {
 
   it("set with empty password throws", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await expect(service.set("bastion:one", "", targetOne)).rejects.toThrow("JumpServer 凭据参数无效");
   });
 
   it("set with embedded null, carriage return, or newline in password throws", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await expect(service.set("bastion:one", "bad\0password", targetOne)).rejects.toThrow("JumpServer 凭据参数无效");
     await expect(service.set("bastion:one", "bad\rpassword", targetOne)).rejects.toThrow("JumpServer 凭据参数无效");
@@ -149,14 +149,14 @@ describe("Jumpserver credential service", () => {
 
   it("set with password exceeding 4096 bytes throws", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await expect(service.set("bastion:one", "x".repeat(4097), targetOne)).rejects.toThrow("JumpServer 凭据参数无效");
   });
 
   it("empty OTP secret is treated as not provided", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await service.set("bastion:one", "pwd", targetOne, "");
 
@@ -167,7 +167,7 @@ describe("Jumpserver credential service", () => {
 
   it("remove deletes the entry", async () => {
     const deps = dependencies();
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await service.set("bastion:one", "pwd", targetOne);
     expect(await service.has("bastion:one", targetOne)).toBe(true);
@@ -182,7 +182,7 @@ describe("Jumpserver credential service", () => {
     const deps = dependencies();
     const file = "/home/test/.config/afk/jumpserver-credentials.json";
     deps.files.set(file, "{ broken json }");
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await expect(service.has("bastion:one", targetOne)).rejects.toThrow("JumpServer 凭据文件损坏");
     await expect(service.get("bastion:one", targetOne)).rejects.toThrow("JumpServer 凭据文件损坏");
@@ -191,7 +191,7 @@ describe("Jumpserver credential service", () => {
   it("missing safeStorage throws 不可用", async () => {
     const deps = dependencies();
     deps.safeStorage.isEncryptionAvailable.mockReturnValue(false);
-    const service = createJumpserverCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
 
     await expect(service.set("bastion:one", "pwd", targetOne)).rejects.toThrow("JumpServer 凭据安全存储不可用");
     await expect(service.get("bastion:one", targetOne)).rejects.toThrow("JumpServer 凭据安全存储不可用");

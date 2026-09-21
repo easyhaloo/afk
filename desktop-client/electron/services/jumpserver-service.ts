@@ -3,7 +3,7 @@ import type { ManagedSshHostRecord } from "../../shared/ssh-contract";
 import type { BastionInput, BastionRecord } from "../adapters/jumpserver-store";
 import { createJumpserverStore } from "../adapters/jumpserver-store";
 import { JUMPSERVER_BINARY_ERROR, createJumpserverCli } from "../adapters/jumpserver-cli";
-import { createJumpserverCredentialService } from "./jumpserver-credential-service";
+import { createJumpserverCredentialStore } from "./jumpserver-credential-service";
 
 // Must match OPENSSH_ALIAS_PATTERN in ../security/ssh-validation.ts
 const ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
@@ -42,7 +42,7 @@ export type SshBastionSyncLogEntry = {
 type JumpserverServiceDeps = {
   home: string;
   bastionStore?: ReturnType<typeof createJumpserverStore>;
-  credentialService?: ReturnType<typeof createJumpserverCredentialService>;
+  credentialService?: ReturnType<typeof createJumpserverCredentialStore>;
   cli?: ReturnType<typeof createJumpserverCli>;
   managedHostStore?: ReturnType<typeof import("../adapters/ssh-managed-host-store").createSshManagedHostStore>;
   listManagedHosts?: () => Promise<{ hosts: ManagedSshHostRecord[] }>;
@@ -56,7 +56,7 @@ export function createJumpserverService(deps: JumpserverServiceDeps) {
     createJumpserverStore({ file: path.join(home, ".config", "afk", "jumpserver-bastions.yml") });
   const credentialService =
     deps.credentialService ??
-    createJumpserverCredentialService({ home, safeStorage: { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => "" } });
+    createJumpserverCredentialStore({ home, safeStorage: { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => "" } });
   const cli = deps.cli ?? createJumpserverCli();
 
   // In-memory sync log ring buffer: 50 entries per bastion, newest first.

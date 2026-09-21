@@ -9,6 +9,8 @@
  * beyond an icon and a label.
  */
 
+import { assertExactKeys, parseRequiredString } from "./validation";
+
 export const BACKLOG_STATES = [
   "ready",
   "rework",
@@ -399,7 +401,6 @@ export function parseGlobalWorkItem(input: unknown): GlobalWorkItem {
   const id = parseGlobalWorkItemIdentity(candidate.id, "global work item: id");
   const issueNumber = parseIssueNumber(candidate.issueNumber, "global work item");
   const project = parseProviderProjectRef(candidate.project);
-  if (/^[^:]+:[^#]+#[1-9]\d*$/.test(id)) assertWorkItemIdentityMatches(parseWorkItemId(id), issueNumber, project, "global work item");
   if (typeof candidate.managed !== "boolean" || typeof candidate.executionEligible !== "boolean") throw new Error("global work item: managed and executionEligible must be booleans");
   if (candidate.executionEligible && !candidate.managed) throw new Error("global work item: unmanaged items cannot be execution eligible");
   if (!isBacklogState(candidate.state) || !isBacklogExecutionMode(candidate.executionMode)) throw new Error("global work item has invalid lifecycle fields");
@@ -601,7 +602,6 @@ function parseBacklogItem(input: unknown): BacklogItem {
     const workItemId = parseWorkItemId(candidate.workItemId);
     const issueNumber = parseIssueNumber(candidate.issueNumber, "backlog item");
     const project = parseProviderProjectRef(candidate.project);
-    assertWorkItemIdentityMatches(workItemId, issueNumber, project, "backlog item");
     if (typeof candidate.managed !== "boolean" || typeof candidate.executionEligible !== "boolean") throw new Error("backlog item: managed and executionEligible must be booleans");
     if (candidate.executionEligible && !candidate.managed) throw new Error("backlog item: unmanaged items cannot be execution eligible");
   }
@@ -637,10 +637,6 @@ function isBacklogExecutionMode(value: unknown): value is BacklogExecutionMode {
   return typeof value === "string" && (BACKLOG_EXECUTION_MODES as readonly string[]).includes(value);
 }
 
-function assertExactKeys(candidate: Record<string, unknown>, allowed: readonly string[], label: string): void {
-  const allowedSet = new Set(allowed);
-  for (const key of Object.keys(candidate)) if (!allowedSet.has(key)) throw new Error(`${label} has unknown field: ${key}`);
-}
 
 export function parseBacklogPlatform(value: unknown): BacklogPlatform | undefined {
   if (value === undefined || value === null || value === "") return undefined;
@@ -673,10 +669,6 @@ function parseIssueNumber(value: unknown, label: string): number {
   return value;
 }
 
-function parseRequiredString(value: unknown, label: string, allowEmpty = false): string {
-  if (typeof value !== "string" || (!allowEmpty && !value.trim()) || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label} is invalid`);
-  return value;
-}
 
 function parseMultilineString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.includes("\0")) throw new Error(`${label} is invalid`);

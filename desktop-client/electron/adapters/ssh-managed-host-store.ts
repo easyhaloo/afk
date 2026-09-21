@@ -4,6 +4,8 @@ import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import type { ManagedSshHostInput, ManagedSshHostRecord } from "../../shared/ssh-contract";
 import { validateSshHostInput, validateSshHostId } from "../security/ssh-validation";
+import { createMutex } from "../lib/async-mutex";
+import { writeYamlFileAtomic } from "../lib/secure-store";
 
 type FileSystem = Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "writeFile">;
 
@@ -50,28 +52,16 @@ async function readDocument(fileSystem: FileSystem, file: string): Promise<Store
   }
 }
 
-async function writeDocument(fileSystem: FileSystem, file: string, document: StoreDocument) {
-  await fileSystem.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    await fileSystem.writeFile(temporary, dumpYaml(document, { noRefs: true, lineWidth: -1 }), { encoding: "utf8", mode: 0o600 });
-    await fileSystem.chmod(temporary, 0o600);
-    await fileSystem.rename(temporary, file);
-    await fileSystem.chmod(file, 0o600);
-  } catch (error) {
-    await fileSystem.rm(temporary, { force: true }).catch(() => undefined);
-    throw error;
-  }
+async function writeDocument(
+  fileSystem: Pick<typeof fs, "chmod" | "mkdir" | "rename" | "rm" | "writeFile">,
+  file: string,
+  document: StoreDocument,
+) {
+  await writeYamlFileAtomic(file, document, fileSystem);
 }
 
 export function createSshManagedHostStore({ file, fileSystem = fs, createId = () => `managed:${randomUUID()}` }: StoreOptions) {
-  let mutationQueue = Promise.resolve();
-
-  function mutate<T>(operation: () => Promise<T>) {
-    const next = mutationQueue.then(operation, operation);
-    mutationQueue = next.then(() => undefined, () => undefined);
-    return next;
-  }
+  const mutex = createMutex<void>();
 
   async function list() {
     return (await readDocument(fileSystem, file)).hosts;
@@ -79,7 +69,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
 
   async function upsert(value: ManagedSshHostInput) {
     const input = validateSshHostInput(value);
-    return mutate(async () => {
+    return mutex.run(async () => {
       const document = await readDocument(fileSystem, file);
       const existing = document.hosts.find((item) => item.alias === input.alias);
       const record = { ...input, id: existing?.id || createId() };
@@ -92,7 +82,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
   async function update(id: string, value: ManagedSshHostInput) {
     const hostId = validateSshHostId(id);
     const input = validateSshHostInput(value);
-    return mutate(async () => {
+    return mutex.run(async () => {
       const document = await readDocument(fileSystem, file);
       if (!document.hosts.some((item) => item.id === hostId)) throw new Error("SSH 主机不存在");
       if (document.hosts.some((item) => item.id !== hostId && item.alias === input.alias)) throw new Error("SSH 主机名称已存在");
@@ -104,7 +94,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
 
   async function remove(id: string) {
     const hostId = validateSshHostId(id);
-    return mutate(async () => {
+    return mutex.run(async () => {
       const document = await readDocument(fileSystem, file);
       const hosts = document.hosts.filter((item) => item.id !== hostId);
       if (hosts.length === document.hosts.length) return false;

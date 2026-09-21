@@ -130,3 +130,38 @@ export type SshUploadResult = {
 export function sshHostStatusPriority(status: SshHostStatus) {
   return ["invalid", "identity-changed", "untrusted", "key-missing", "auth-required", "unreachable", "ready"].indexOf(status);
 }
+
+export type SshBastion = {
+  id: string;
+  alias: string;
+  hostname: string;
+  port: number;
+  user: string;
+  jmsServerAlias: string;
+  syncFilter: { linuxOnly: boolean };
+  lastSyncedAt?: string;
+  lastSyncAssetCount?: number;
+  lastSyncSkippedCount?: number;
+};
+
+export type SshBastionAssetPreview = {
+  name: string;
+  address: string;
+  platform: string;
+};
+
+export type SshBastionSyncResult = {
+  bastionId: string;
+  assetsDiscovered: number;
+  assetsCreated: number;
+  assetsSkipped: number;
+  skippedReasons: Array<{ name: string; reason: string }>;
+  createdAssetIds: string[];
+  syncedAt: string;
+};
+
+export type SshBastionSyncLogEntry = {
+  at: string;          // ISO timestamp
+  level: "info" | "warn" | "error";
+  message: string;
+};

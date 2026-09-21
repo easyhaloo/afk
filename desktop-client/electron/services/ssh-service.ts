@@ -528,5 +528,6 @@ export function createSshService(deps: ServiceDependencies) {
     resize,
     close,
     sshDirectory: path.join(home, ".ssh"),
+    invalidateListCache,
   };
 }

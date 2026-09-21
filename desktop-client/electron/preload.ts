@@ -48,6 +48,14 @@ const IPC_CHANNELS = {
   backlogSummary: "afk:backlog-summary",
   workItemsList: "afk:work-items-list",
   workItemsStart: "afk:work-items-start",
+  jumpserverTestConnection: "afk:jumpserver-test-connection",
+  jumpserverAddBastion: "afk:jumpserver-add-bastion",
+  jumpserverListAssets: "afk:jumpserver-list-assets",
+  jumpserverPreviewAssets: "afk:jumpserver-preview-assets",
+  jumpserverSyncAssets: "afk:jumpserver-sync-assets",
+  jumpserverRemoveBastion: "afk:jumpserver-remove-bastion",
+  jumpserverListBastions: "afk:jumpserver-list-bastions",
+  jumpserverGetSyncLog: "afk:jumpserver-get-sync-log",
 } as const;
 
 const api: DesktopApi = {
@@ -116,6 +124,16 @@ const api: DesktopApi = {
         ? ipcRenderer.invoke(IPC_CHANNELS.workItemsList)
         : ipcRenderer.invoke(IPC_CHANNELS.workItemsList, options),
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.workItemsStart, input),
+  },
+  jumpserver: {
+    testConnection: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverTestConnection, input),
+    addBastion: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverAddBastion, input),
+    listAssets: (bastionId) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverListAssets, { bastionId }),
+    previewAssets: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverPreviewAssets, input),
+    syncAssets: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverSyncAssets, input),
+    removeBastion: (bastionId) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverRemoveBastion, { bastionId }),
+    listBastions: () => ipcRenderer.invoke(IPC_CHANNELS.jumpserverListBastions),
+    getSyncLog: (bastionId) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverGetSyncLog, { bastionId }),
   },
 };
 

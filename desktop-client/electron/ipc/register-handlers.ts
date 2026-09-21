@@ -11,7 +11,7 @@ import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter";
 import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter";
 import { isAfkTmuxSession, listAfkTmux } from "../adapters/resource-adapter";
 import { assertTrustedSender } from "../security/sender-guard";
-import { validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
+import { validateJumpserverBastionId, validateJumpserverBastionInput, validateJumpserverSyncOptions, validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 import { readAppearance, saveAppearance } from "../services/appearance-service";
 import { createBacklogService } from "../services/backlog-service";
 import { createBacklogExecutionService } from "../services/backlog-execution-service";
@@ -185,7 +185,8 @@ function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
   return { hostId, password: input.password };
 }
 
-export function registerIpcHandlers() {
+export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) {
+  const { jumpserverService } = deps;
   workItemInventorySyncService.start();
   if (typeof app.once === "function") app.once("before-quit", () => workItemInventorySyncService.stop());
   ipcMain.handle(IPC_CHANNELS.copyText, (event, text: unknown) => { assertTrustedSender(event); return clipboardService.copyText(text); });
@@ -276,6 +277,76 @@ export function registerIpcHandlers() {
     return sshService.resize(validateSshSessionId(input.sessionId), size.cols, size.rows);
   });
   ipcMain.handle(IPC_CHANNELS.sshClose, (event, sessionId: unknown) => { assertTrustedSender(event); return sshService.close(validateSshSessionId(sessionId)); });
+
+  ipcMain.handle(IPC_CHANNELS.jumpserverTestConnection, (event, input: unknown) => {
+    assertTrustedSender(event);
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 测试连接参数无效");
+    const obj = input as Record<string, unknown>;
+    if (typeof obj.hostname !== "string" || !obj.hostname) throw new Error("堡垒机地址无效");
+    if (typeof obj.port !== "number" || obj.port < 1 || obj.port > 65535) throw new Error("堡垒机端口无效");
+    if (typeof obj.user !== "string" || !obj.user) throw new Error("堡垒机用户无效");
+    if (typeof obj.password !== "string" || !obj.password) throw new Error("堡垒机密码无效");
+    return (jumpserverService as { testConnection: (input: unknown) => unknown }).testConnection({
+      hostname: obj.hostname,
+      port: obj.port,
+      user: obj.user,
+      password: obj.password,
+      otpSecret: typeof obj.otpSecret === "string" ? obj.otpSecret : undefined,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.jumpserverAddBastion, (event, input: unknown) => {
+    assertTrustedSender(event);
+    return (jumpserverService as { addBastion: (input: unknown) => unknown }).addBastion(validateJumpserverBastionInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.jumpserverListAssets, (event, input: unknown) => {
+    assertTrustedSender(event);
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 资产列表参数无效");
+    const obj = input as Record<string, unknown>;
+    const bastionId = validateJumpserverBastionId(obj.bastionId);
+    return (jumpserverService as { listAssets: (bastionId: string) => unknown }).listAssets(bastionId);
+  });
+  ipcMain.handle(IPC_CHANNELS.jumpserverPreviewAssets, (event, input: unknown) => {
+    assertTrustedSender(event);
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 资产预览参数无效");
+    const obj = input as Record<string, unknown>;
+    if (typeof obj.hostname !== "string" || !obj.hostname) throw new Error("堡垒机地址无效");
+    if (typeof obj.port !== "number" || obj.port < 1 || obj.port > 65535) throw new Error("堡垒机端口无效");
+    if (typeof obj.user !== "string" || !obj.user) throw new Error("堡垒机用户无效");
+    if (typeof obj.password !== "string" || !obj.password) throw new Error("堡垒机密码无效");
+    return (jumpserverService as { previewAssets: (input: unknown) => unknown }).previewAssets({
+      hostname: obj.hostname,
+      port: obj.port,
+      user: obj.user,
+      password: obj.password,
+      otpSecret: typeof obj.otpSecret === "string" ? obj.otpSecret : undefined,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.jumpserverSyncAssets, (event, input: unknown) => {
+    assertTrustedSender(event);
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 资产同步参数无效");
+    const obj = input as Record<string, unknown>;
+    const bastionId = validateJumpserverBastionId(obj.bastionId);
+    const opts = validateJumpserverSyncOptions(obj);
+    return (jumpserverService as { syncAssets: (bastionId: string, opts: unknown) => unknown }).syncAssets(bastionId, opts);
+  });
+  ipcMain.handle(IPC_CHANNELS.jumpserverRemoveBastion, (event, input: unknown) => {
+    assertTrustedSender(event);
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 移除堡垒机参数无效");
+    const obj = input as Record<string, unknown>;
+    const bastionId = validateJumpserverBastionId(obj.bastionId);
+    return (jumpserverService as { removeBastion: (bastionId: string) => unknown }).removeBastion(bastionId);
+  });
+  ipcMain.handle(IPC_CHANNELS.jumpserverListBastions, (event) => {
+    assertTrustedSender(event);
+    return (jumpserverService as { listBastions: () => unknown }).listBastions();
+  });
+  ipcMain.handle(IPC_CHANNELS.jumpserverGetSyncLog, (event, input: unknown) => {
+    assertTrustedSender(event);
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 同步日志参数无效");
+    const obj = input as Record<string, unknown>;
+    const bastionId = validateJumpserverBastionId(obj.bastionId);
+    return (jumpserverService as { getSyncLog: (bastionId: string) => unknown }).getSyncLog(bastionId);
+  });
 
   ipcMain.handle(IPC_CHANNELS.graphStatus, (event, workspace: unknown, templateId: unknown) => {
     assertTrustedSender(event);

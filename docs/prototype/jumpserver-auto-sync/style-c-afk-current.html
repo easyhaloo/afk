@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html data-afk-theme="graphite">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AFK Control — SSH Hosts</title>
+<style>
+/* ===== GRAPHITE DARK TOKENS ===== */
+:root {
+  --afk-accent: #6d5dfc;
+  --afk-accent-soft: #f0eeff;
+  --afk-accent-border: #d7d1fb;
+  --afk-page-bg: #202126;
+  --afk-panel: #2a2b31;
+  --afk-panel-subtle: #24252b;
+  --afk-text: #f0f0f3;
+  --afk-muted: #adaeb8;
+  --afk-border: #3d3e47;
+  --afk-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  --run: #627f6c;
+  --run-soft: #dbe8de;
+  --attention: #a37343;
+  --attention-soft: #f3e8db;
+  --verify: #4f8776;
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+body {
+  font-family: var(--afk-font);
+  font-size: 13px;
+  background: var(--afk-page-bg);
+  color: var(--afk-text);
+  line-height: 1.5;
+}
+
+button {
+  font-family: var(--afk-font);
+  cursor: pointer;
+  border: none;
+  outline: none;
+  transition: background 170ms, border-color 170ms, color 170ms, box-shadow 170ms;
+}
+button:active { transform: scale(0.992); }
+input, select {
+  font-family: var(--afk-font);
+  outline: none;
+}
+
+/* ===== STANDARD SELECT STYLING ===== */
+select {
+  background: var(--afk-panel);
+  color: var(--afk-text);
+  border: 1px solid var(--afk-border);
+  border-radius: 4px;
+  padding: 5px 28px 5px 10px;
+  font-family: var(--afk-font);
+  font-size: 12px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23adaeb8%22%20stroke-width%3D%222.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%209%2012%2015%2018%209%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+  transition: border-color .15s;
+}
+select:hover { border-color: #5d5e68; }
+select:focus { outline: none; border-color: var(--afk-accent); box-shadow: 0 0 0 2px rgba(109,93,252,.18); }
+
+/* ===== APP SHELL ===== */
+.app-shell {
+  display: grid;
+  grid-template-columns: 174px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ===== SIDEBAR ===== */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px 12px;
+  background: var(--afk-panel);
+  border-right: 1px solid var(--afk-border);
+  gap: 4px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px 14px;
+  border-bottom: 1px solid var(--afk-border);
+  margin-bottom: 10px;
+}
+.brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--run);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.brand-mark svg { width: 14px; height: 14px; color: white; }
+.brand-text strong { display: block; font-size: 10px; font-weight: 650; letter-spacing: .08em; color: var(--afk-text); }
+.brand-text small { display: block; font-size: 7px; color: var(--afk-muted); margin-top: 1px; }
+
+.primary-nav { display: grid; gap: 3px; }
+.nav-label { padding: 0 9px; font-size: 7px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: #666774; line-height: 20px; }
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--afk-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 160ms, color 160ms;
+}
+.nav-item::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  width: 2px;
+  height: 16px;
+  border-radius: 0 2px 2px 0;
+  background: var(--afk-accent);
+  opacity: 0;
+  transform: scaleY(0.3);
+  transition: opacity 160ms, transform 180ms cubic-bezier(.23,1,.32,1);
+}
+.nav-item:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.nav-item.active { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.nav-item.active::before { opacity: 1; transform: scaleY(1); }
+.nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+.nav-item em { margin-left: auto; min-width: 18px; padding: 1px 5px; border-radius: 999px; background: var(--afk-panel-subtle); color: var(--afk-muted); font-size: 7px; font-style: normal; }
+
+/* ===== TOPBAR ===== */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--afk-border);
+  background: var(--afk-panel);
+}
+.topbar-context { display: flex; align-items: center; gap: 14px; }
+.topbar-context strong { font-size: 12px; font-weight: 600; }
+.breadcrumb { display: flex; align-items: center; gap: 8px; color: var(--afk-muted); font-size: 10px; }
+.breadcrumb svg { width: 12px; height: 12px; }
+
+/* ===== PAGE TABS ===== */
+.page-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 10px 20px 0;
+  background: var(--afk-panel);
+  border-bottom: 1px solid var(--afk-border);
+}
+.page-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 13px;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--afk-muted);
+  font-size: 10px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-bottom: none;
+  position: relative;
+  bottom: -1px;
+}
+.page-tab:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.page-tab.active { background: var(--afk-page-bg); color: var(--afk-accent); border-color: var(--afk-border); border-bottom-color: var(--afk-page-bg); }
+
+/* ===== WORKSPACE ===== */
+.workspace { padding: 18px 24px 56px; overflow-y: auto; }
+
+/* ===== CONTROL PAGE ===== */
+.control-page { width: min(100%, 1180px); margin: 0 auto; color: var(--afk-text); font-size: 13px; }
+
+.control-page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 0 20px;
+}
+.control-page-heading p { margin: 0 0 6px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: 9px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
+.control-page-heading h1 { margin: 0; font-size: 25px; letter-spacing: -.03em; font-weight: 700; }
+.control-page-heading span { display: block; max-width: 640px; margin-top: 6px; color: var(--afk-muted); font-size: 11px; line-height: 1.6; }
+
+.page-section { display: none; }
+.page-section.active { display: block; }
+
+/* ===== TOOLBAR ===== */
+.toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--afk-border);
+  border-radius: 7px;
+  background: var(--afk-panel);
+  color: var(--afk-muted);
+}
+.search-box svg { width: 13px; height: 13px; flex-shrink: 0; }
+.search-box input { background: transparent; border: none; color: var(--afk-text); font-size: 11px; width: 180px; }
+.search-box input::placeholder { color: var(--afk-muted); }
+
+.toolbar select {
+  min-height: 28px;
+  padding: 4px 28px 4px 10px;
+  font-size: 11px;
+}
+
+/* ===== UNIFIED HOST LIST LAYOUT ===== */
+.ssh-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+
+/* ===== HOST TABLE ===== */
+.table-panel { border: 1px solid var(--afk-border); border-radius: 12px; background: var(--afk-panel); overflow: hidden; }
+.table-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 50px; padding: 0 16px; border-bottom: 1px solid var(--afk-border); }
+.table-panel > header b { font-size: 12px; }
+.table-panel > header span { color: var(--afk-muted); font-size: 10px; }
+
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+thead tr { border-bottom: 1px solid var(--afk-border); background: var(--afk-panel-subtle); }
+thead th { padding: 10px 14px; text-align: left; font-size: 9px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--afk-muted); font-family: "DM Mono", monospace; white-space: nowrap; }
+
+/* ===== GROUP HEADERS ===== */
+tr.group-header {
+  background: var(--afk-panel-subtle);
+  border-bottom: 1px solid var(--afk-border);
+  cursor: pointer;
+}
+tr.group-header td {
+  padding: 10px 14px 10px 14px;
+  font-size: 11px;
+  vertical-align: middle;
+}
+tr.group-header .gh-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--afk-text);
+}
+tr.group-header .gh-meta {
+  font-family: "DM Mono", monospace;
+  font-size: 9px;
+  color: var(--run);
+}
+tr.group-header .gh-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+tr.group-header.bastion-group {
+  border-left: 3px solid var(--afk-accent);
+}
+tr.group-header.direct-group {
+  border-left: 3px solid #5d5e68;
+}
+tr.group-header:hover { background: var(--afk-panel); }
+tr.group-header .chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--afk-muted);
+  transition: transform .2s;
+  flex-shrink: 0;
+}
+tr.group-header.collapsed .chevron { transform: rotate(-90deg); }
+tr.group-header .gh-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-family: "DM Mono", monospace;
+  font-weight: 600;
+  border: 1px solid;
+}
+tr.group-header .gh-badge.jumpserver { border-color: var(--run); background: var(--run-soft); color: var(--run); }
+tr.group-header .gh-badge.direct { border-color: var(--afk-border); background: var(--afk-panel); color: var(--afk-muted); }
+
+/* ===== ASSET ROWS (nested under bastion) ===== */
+tr.asset-row {
+  border-bottom: 1px solid var(--afk-border);
+  transition: background 150ms;
+  cursor: pointer;
+}
+tr.asset-row:last-child { border-bottom: none; }
+tr.asset-row:hover { background: var(--afk-panel-subtle); }
+tr.asset-row.selected { background: var(--afk-panel-subtle); border-left: 2px solid var(--afk-accent); }
+tr.asset-row td {
+  padding: 10px 14px 10px 38px;
+  font-size: 11px;
+  vertical-align: middle;
+  color: var(--afk-muted);
+  border-left: 1px solid var(--afk-border);
+}
+tr.asset-row td:first-child { border-left: none; }
+tr.asset-row .td-name { font-weight: 500; color: var(--afk-text); }
+
+/* ===== TOP-LEVEL HOST ROWS (bastion, direct hosts) ===== */
+tbody tr.host-row { border-bottom: 1px solid var(--afk-border); transition: background 150ms; cursor: pointer; }
+tbody tr.host-row:last-child { border-bottom: none; }
+tbody tr.host-row:hover { background: var(--afk-panel-subtle); }
+tbody tr.host-row.selected { background: var(--afk-panel-subtle); border-left: 2px solid var(--afk-accent); }
+tbody tr.host-row td { padding: 11px 14px; font-size: 11px; vertical-align: middle; }
+tbody tr.host-row td.td-name { font-weight: 500; }
+tbody tr.host-row td.td-mono { font-family: "DM Mono", monospace; font-size: 10px; color: var(--afk-muted); }
+tbody tr.host-row td.td-actions { display: flex; gap: 4px; }
+
+/* ===== BADGES ===== */
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-family: "DM Mono", monospace;
+  font-weight: 600;
+  border: 1px solid;
+}
+.type-badge.direct { border-color: var(--afk-border); background: var(--afk-panel-subtle); color: var(--afk-muted); }
+.type-badge.jumpserver { border-color: var(--run); background: var(--run-soft); color: var(--run); }
+.type-badge.openssh { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-family: "DM Mono", monospace;
+  font-weight: 600;
+}
+.source-badge.managed { background: var(--afk-accent-soft); color: var(--afk-accent); }
+.source-badge.system { background: var(--afk-panel-subtle); color: var(--afk-muted); border: 1px solid var(--afk-border); }
+
+.synced-from { font-family: "DM Mono", monospace; font-size: 9px; color: var(--afk-muted); }
+.synced-from .bastion-ref { color: var(--run); }
+
+.platform-icon { width: 12px; height: 12px; vertical-align: middle; margin-right: 3px; }
+.td-platform { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px; background: var(--afk-panel-subtle); color: var(--afk-muted); font-size: 9px; font-family: "DM Mono", monospace; }
+.td-platform.linux { background: #dbe8de; color: #4b6754; }
+.td-platform.windows { background: #f3e8db; color: #8c6339; }
+
+/* ===== BUTTONS ===== */
+.btn-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--afk-border); border-radius: 7px; background: var(--afk-panel); color: var(--afk-muted); font-size: 13px; }
+.btn-icon:hover { background: var(--afk-panel-subtle); color: var(--afk-text); border-color: #555566; }
+.btn-icon.danger:hover { border-color: #b05555; color: #e08080; background: #2c2020; }
+.btn-icon svg { width: 14px; height: 14px; }
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--afk-accent-border);
+  border-radius: 8px;
+  background: var(--afk-accent-soft);
+  color: var(--afk-accent);
+  font-size: 10px;
+  font-weight: 650;
+}
+.btn-primary:hover { border-color: var(--afk-accent); background: var(--afk-accent); color: white; }
+.btn-primary svg { width: 13px; height: 13px; }
+.btn-primary.indigo { background: var(--afk-accent); border-color: var(--afk-accent); color: white; }
+.btn-primary.indigo:hover { background: #5a4de0; border-color: #5a4de0; }
+
+.btn-ghost { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 9px; border: 1px solid var(--afk-border); border-radius: 7px; background: var(--afk-panel); color: var(--afk-muted); font-size: 10px; }
+.btn-ghost:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.btn-ghost.danger:hover { border-color: #b05555; color: #e08080; background: #2c2020; }
+.btn-ghost-sm { min-height: 26px; padding: 0 8px; font-size: 9px; }
+
+.footer-bar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0 0; }
+.footer-bar span { color: var(--afk-muted); font-size: 10px; font-family: "DM Mono", monospace; }
+
+/* ===== DETAIL PANEL ===== */
+.ssh-details {
+  border: 1px solid var(--afk-border);
+  border-radius: 12px;
+  background: var(--afk-panel);
+  overflow: hidden;
+  position: sticky;
+  top: 18px;
+}
+.ssh-details.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 200px; color: var(--afk-muted); font-size: 11px; }
+.ssh-details.empty svg { width: 22px; height: 22px; opacity: 0.5; }
+
+.detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--afk-border); background: var(--afk-panel-subtle); }
+.detail-heading-copy small { display: block; font-size: 8px; font-family: "DM Mono", monospace; color: var(--afk-muted); margin-bottom: 3px; }
+.detail-heading-copy h2 { font-size: 14px; font-weight: 600; }
+.detail-heading-copy span { font-family: "DM Mono", monospace; font-size: 10px; color: var(--afk-muted); margin-top: 2px; display: block; }
+
+.detail-status { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 0 7px; border-radius: 999px; font-size: 8px; font-family: "DM Mono", monospace; font-weight: 600; border: 1px solid; flex-shrink: 0; margin-top: 4px; }
+.detail-status.ready { border-color: var(--run); background: var(--run-soft); color: var(--run); }
+.detail-status.untrusted { border-color: var(--attention); background: var(--attention-soft); color: var(--attention); }
+.detail-status.auth-required { border-color: var(--afk-border); background: var(--afk-panel-subtle); color: var(--afk-muted); }
+
+.detail-body { padding: 14px 16px; }
+.detail-dl { display: grid; gap: 0; }
+.detail-dl-item { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 0; padding: 6px 0; border-bottom: 1px solid var(--afk-border); }
+.detail-dl-item:last-child { border-bottom: none; }
+.detail-dl-item dt { font-size: 9px; font-family: "DM Mono", monospace; color: var(--afk-muted); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; padding-top: 2px; }
+.detail-dl-item dd { font-size: 11px; font-family: "DM Mono", monospace; color: var(--afk-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ===== DETAIL SYNC SECTION (bastion only) ===== */
+.detail-sync-section { margin: 0 16px 14px; border: 1px solid var(--afk-border); border-radius: 10px; background: var(--afk-panel-subtle); overflow: hidden; }
+.detail-sync-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--afk-border); }
+.detail-sync-header b { font-size: 10px; font-weight: 600; }
+.detail-sync-meta { display: flex; align-items: center; gap: 6px; font-size: 9px; color: var(--run); font-family: "DM Mono", monospace; }
+.detail-sync-actions { display: flex; gap: 4px; }
+.detail-sync-body { padding: 10px 14px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.detail-sync-stat small { display: block; font-size: 8px; font-family: "DM Mono", monospace; color: var(--afk-muted); margin-bottom: 2px; }
+.detail-sync-stat b { font-size: 12px; font-weight: 600; }
+
+.sync-log { border-top: 1px solid var(--afk-border); padding: 10px 14px; background: var(--afk-panel-subtle); }
+.sync-log-title { font-size: 9px; color: var(--afk-muted); font-family: "DM Mono", monospace; margin-bottom: 6px; }
+.sync-log-entries { display: flex; flex-direction: column; gap: 3px; }
+.log-entry { display: flex; gap: 8px; font-family: "DM Mono", monospace; font-size: 8px; color: var(--afk-muted); }
+.log-entry .ts { color: #555566; flex-shrink: 0; }
+.log-entry.ok .msg { color: var(--run); }
+.log-entry.err .msg { color: #e08080; }
+
+/* ===== DETAIL ACTIONS ===== */
+.detail-actions-bar { padding: 12px 16px; border-top: 1px solid var(--afk-border); display: flex; gap: 6px; flex-wrap: wrap; }
+.detail-actions-bar .btn-ghost-sm { min-height: 28px; padding: 0 8px; font-size: 9px; }
+.detail-action-primary { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+/* ===== MODAL ===== */
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(10, 10, 14, 0.7); z-index: 100; align-items: center; justify-content: center; padding: 20px; }
+.modal-overlay.active { display: flex; }
+.modal { width: min(100%, 640px); max-height: 90vh; display: flex; flex-direction: column; border: 1px solid var(--afk-border); border-radius: 14px; background: var(--afk-panel); box-shadow: 0 24px 60px rgba(0,0,0,0.4); overflow: hidden; }
+.modal-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 56px; padding: 0 18px; border-bottom: 1px solid var(--afk-border); flex-shrink: 0; }
+.modal-header b { font-size: 14px; font-weight: 600; }
+.modal-close { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; background: transparent; color: var(--afk-muted); font-size: 16px; }
+.modal-close:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
+
+.modal-body { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+.modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--afk-border); background: var(--afk-panel-subtle); flex-shrink: 0; }
+
+/* ===== FORM ===== */
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.form-field { display: grid; gap: 5px; }
+.form-field.full { grid-column: 1 / -1; }
+.form-field label { font-size: 10px; font-weight: 600; color: var(--afk-muted); }
+.form-field input, .form-field select {
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--afk-border);
+  border-radius: 7px;
+  background: var(--afk-panel-subtle);
+  color: var(--afk-text);
+  font-size: 11px;
+  font-family: "DM Mono", monospace;
+}
+.form-field input::placeholder { color: #666677; }
+.form-hint { font-size: 9px; color: var(--afk-muted); margin-top: 2px; }
+
+/* ===== PREVIEW PANEL ===== */
+.preview-panel { border: 1px solid var(--afk-border); border-radius: 10px; background: var(--afk-panel-subtle); overflow: hidden; }
+.preview-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--afk-border); }
+.preview-header b { font-size: 11px; }
+.preview-header span { color: var(--run); font-family: "DM Mono", monospace; font-size: 9px; display: flex; align-items: center; gap: 4px; }
+.preview-filter { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--afk-border); }
+.preview-filter input { flex: 1; background: transparent; border: none; color: var(--afk-text); font-size: 10px; }
+.preview-filter input::placeholder { color: var(--afk-muted); }
+.toggle-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 8px; border: 1px solid var(--afk-border); border-radius: 999px; background: var(--afk-panel); color: var(--afk-muted); font-size: 9px; }
+.toggle-btn.active { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
+.preview-scroll { max-height: 220px; overflow-y: auto; }
+.preview-row { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--afk-border); font-size: 10px; transition: background 150ms; }
+.preview-row:last-child { border-bottom: none; }
+.preview-row:hover { background: var(--afk-panel); }
+.preview-row input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--afk-accent); }
+.preview-row .asset-name { flex: 1; font-weight: 500; }
+.preview-row .asset-ip { font-family: "DM Mono", monospace; color: var(--afk-muted); font-size: 9px; }
+.preview-row .asset-platform { padding: 1px 6px; border-radius: 4px; font-size: 8px; font-family: "DM Mono", monospace; }
+.preview-row .asset-platform.linux { background: #dbe8de; color: #4b6754; }
+.preview-row .asset-platform.windows { background: #f3e8db; color: #8c6339; }
+
+.success-banner { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; background: var(--run-soft); border: 1px solid var(--run); color: var(--run); font-size: 11px; }
+.success-banner svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+/* ===== ERROR STATES ===== */
+.error-banner { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; border: 1px solid; margin-bottom: 14px; font-size: 11px; }
+.error-banner.network { background: #f8e0de; border-color: #b05555; color: #e08080; }
+.error-banner.auth { background: var(--attention-soft); border-color: var(--attention); color: var(--attention); }
+.error-banner.warning { background: var(--attention-soft); border-color: var(--attention); color: var(--attention); }
+.error-banner-icon { font-size: 16px; flex-shrink: 0; }
+.error-banner-text { flex: 1; }
+.error-banner-text b { display: block; font-weight: 600; margin-bottom: 2px; }
+.error-banner-text span { opacity: 0.8; font-size: 10px; }
+
+.scenario-toggle { display: flex; gap: 6px; margin-bottom: 14px; }
+.scenario-btn { min-height: 26px; padding: 0 10px; border: 1px solid var(--afk-border); border-radius: 7px; background: var(--afk-panel); color: var(--afk-muted); font-size: 9px; font-weight: 600; }
+.scenario-btn.active { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
+.scenario-btn:hover:not(.active) { background: var(--afk-panel-subtle); color: var(--afk-text); }
+
+.bastion-card { border: 1px solid var(--afk-border); border-radius: 12px; background: var(--afk-panel); overflow: hidden; transition: border-color 180ms; }
+.bastion-card:hover { border-color: #555566; }
+.bastion-card-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; border-bottom: 1px solid var(--afk-border); background: var(--afk-panel-subtle); }
+.bastion-card-title { display: flex; align-items: center; gap: 10px; }
+.bastion-card-title b { font-size: 13px; font-weight: 600; }
+.bastion-badge { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 0 7px; border: 1px solid var(--run); border-radius: 999px; background: var(--run-soft); color: var(--run); font-family: "DM Mono", monospace; font-size: 8px; font-weight: 600; }
+.bastion-badge.warning { border-color: var(--attention); background: var(--attention-soft); color: var(--attention); }
+.bastion-badge.error { border-color: #b05555; background: #f8e0de; color: #b05555; }
+.bastion-card-actions { display: flex; gap: 6px; }
+.bastion-card-body { padding: 14px 16px; }
+.prop-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.prop-item small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; margin-bottom: 3px; }
+.prop-item b { display: block; font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.status-panel { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--afk-border); }
+.status-item { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-right: 1px solid var(--afk-border); }
+.status-item:last-child { border-right: none; }
+.status-item small { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; }
+.status-item b { font-size: 12px; font-weight: 600; }
+.status-item b.ok { color: var(--run); }
+.status-item b.warn { color: var(--attention); }
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 900px) {
+  .app-shell { grid-template-columns: 60px minmax(0, 1fr); }
+  .brand-text { display: none; }
+  .nav-item span { display: none; }
+  .nav-item { justify-content: center; padding: 0; }
+  .ssh-layout { grid-template-columns: 1fr; }
+  .ssh-details { position: static; }
+  .prop-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .status-panel { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .status-item:nth-child(3) { border-right: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <strong>AFK Control</strong>
+        <small>autonomous dev</small>
+      </div>
+    </div>
+    <nav class="primary-nav">
+      <div class="nav-label">Workspace</div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span>Backlog</span>
+        <em>3</em>
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+        <span>Work Items</span>
+        <em>2</em>
+      </div>
+      <div class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 8h2M7 11h4"/></svg>
+        <span>SSH Hosts</span>
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>
+        <span>Settings</span>
+      </div>
+    </nav>
+  </aside>
+
+  <!-- MAIN -->
+  <main style="display:flex;flex-direction:column;min-height:100vh;">
+
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="topbar-context">
+        <div class="breadcrumb">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          SSH Hosts
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="btn-ghost btn-ghost-sm">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Sync All
+        </button>
+      </div>
+    </div>
+
+    <!-- PAGE TABS -->
+    <div class="page-tabs">
+      <button class="page-tab active" onclick="showTab('list')">1. List View</button>
+      <button class="page-tab" onclick="showTab('add')">2. Add Host</button>
+      <button class="page-tab" onclick="showTab('detail')">3. Sync Detail</button>
+      <button class="page-tab" onclick="showTab('error')">4. Error States</button>
+    </div>
+
+    <!-- WORKSPACE -->
+    <div class="workspace">
+
+      <!-- ========== TAB 1: LIST VIEW ========== -->
+      <div id="tab-list" class="page-section active">
+        <div class="control-page">
+          <div class="control-page-heading">
+            <div>
+              <p>Infrastructure</p>
+              <h1>SSH Hosts</h1>
+              <span>Unified view of system and managed SSH hosts. Bastion-synced hosts are marked with their source bastion.</span>
+            </div>
+          </div>
+
+          <!-- TOOLBAR with native select dropdowns -->
+          <div class="toolbar">
+            <div class="search-box">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input type="text" placeholder="Search hosts..." oninput="filterHosts(this.value)">
+            </div>
+            <select id="source-filter" onchange="updateSourceFilter(this.value)">
+              <option value="all">全部来源</option>
+              <option value="system">System</option>
+              <option value="managed">Managed</option>
+            </select>
+            <select id="bastion-filter" onchange="updateBastionFilter(this.value)">
+              <option value="all">堡垒机: 全部</option>
+              <option value="bastion">仅堡垒机</option>
+              <option value="direct">仅直连</option>
+            </select>
+          </div>
+
+          <!-- UNIFIED HOST LIST + DETAIL PANEL -->
+          <div class="ssh-layout">
+            <!-- LEFT: GROUPED HOST TABLE -->
+            <div>
+              <div class="table-panel">
+                <div class="table-scroll">
+                  <table>
+                    <tbody id="hosts-tbody">
+
+                      <!-- BASTION GROUP HEADER -->
+                      <tr class="group-header bastion-group" data-group="bastion" onclick="toggleGroup('bastion'); selectBastion(this);" style="cursor:pointer;">
+                        <td colspan="5">
+                          <div style="display:flex;align-items:center;gap:8px;">
+                            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            <span class="gh-name">dev-jumpserver-wangwendi</span>
+                            <span class="gh-badge jumpserver">JumpServer</span>
+                            <span class="gh-meta">wangwendi@dev-jumpserver.fangcloud.net:2222</span>
+                            <span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">healthy</span>
+                          </div>
+                        </td>
+                      </tr>
+
+                      <!-- ASSETS UNDER BASTION -->
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">aidoc</td>
+                        <td class="td-mono">root@172.16.79.225</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">aidoc-worker2</td>
+                        <td class="td-mono">root@172.16.79.226</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">bisheng</td>
+                        <td class="td-mono">root@47.83.27.252</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">coze</td>
+                        <td class="td-mono">root@172.16.92.54</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">dev-lsp</td>
+                        <td class="td-mono">root@172.16.206.229</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">group-demo-ai知识库</td>
+                        <td class="td-mono">root@172.16.0.241</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">llm-wiki</td>
+                        <td class="td-mono">root@172.16.206.239</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">opensandbox</td>
+                        <td class="td-mono">root@172.16.79.251</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">tmp-wwd-ck8-onebox</td>
+                        <td class="td-mono">root@172.16.79.248</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+                      <tr class="asset-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')">
+                        <td class="td-name">拱墅区数智人demo</td>
+                        <td class="td-mono">root@172.16.206.232</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--run);">↻ synced</span></td>
+                      </tr>
+
+                      <!-- DIRECT HOSTS GROUP HEADER -->
+                      <tr class="group-header direct-group" data-group="direct" onclick="toggleGroup('direct')">
+                        <td colspan="5">
+                          <div style="display:flex;align-items:center;gap:8px;">
+                            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            <span class="gh-name">Direct Hosts</span>
+                          </div>
+                        </td>
+                      </tr>
+
+                      <!-- aidoc-private: OpenSSH ProxyJump -->
+                      <tr class="host-row" data-type="openssh" data-source="managed" data-bastion="" onclick="selectHost(this, 'openssh')">
+                        <td class="td-name">aidoc-private</td>
+                        <td class="td-mono">root@10.39.152.217</td>
+                        <td><span class="type-badge openssh">代理</span></td>
+                        <td><span class="source-badge managed">Managed</span></td>
+                        <td class="td-actions">
+                          <button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
+                          <button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>
+                        </td>
+                      </tr>
+
+                      <!-- kg-demo: System host, untrusted -->
+                      <tr class="host-row" data-type="direct" data-source="system" data-bastion="" onclick="selectHost(this, 'system')">
+                        <td class="td-name">kg-demo</td>
+                        <td class="td-mono">root@172.16.99.81</td>
+                        <td><span class="type-badge direct">Direct</span></td>
+                        <td><span class="source-badge system">System</span></td>
+                        <td class="td-actions">
+                          <button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>
+                          <button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button>
+                        </td>
+                      </tr>
+
+                    </tbody>
+                  </table>
+                </div>
+                <div class="footer-bar" style="padding:12px 16px 0;">
+                  <span>12 hosts</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- RIGHT: DETAIL PANEL -->
+            <div id="detail-panel">
+              <!-- Dynamic detail panel content set by JS -->
+            </div>
+          </div><!-- /ssh-layout -->
+
+        </div>
+      </div>
+
+      <!-- ========== TAB 2: ADD HOST ========== -->
+      <div id="tab-add" class="page-section">
+        <div class="control-page">
+          <div class="control-page-heading">
+            <div>
+              <p>Infrastructure</p>
+              <h1 id="add-host-title">添加 SSH 主机</h1>
+              <span id="add-host-desc">Configure a new SSH host. If a jump host type is selected, this host will be routed through that bastion.</span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button class="btn-ghost btn-ghost-sm" id="add-mode-toggle" onclick="toggleAddMode()">+ 添加堡垒机</button>
+            </div>
+          </div>
+
+          <div style="max-width:640px;">
+            <div class="modal-overlay active" style="position:static;background:transparent;align-items:stretch;justify-content:stretch;padding:0;">
+              <div style="display:flex;flex-direction:column;gap:0;">
+
+                <!-- DEFAULT: Add SSH Host form -->
+                <div id="add-ssh-form" class="preview-panel">
+                  <div class="form-grid" style="padding:18px 18px 0;">
+                    <div class="form-field"><label>显示名称</label><input type="text" placeholder="例如：kg演示" value="aidoc"></div>
+                    <div class="form-field"><label>主机地址或 IP</label><input type="text" placeholder="172.16.0.241" value="172.16.79.225"></div>
+                    <div class="form-field"><label>端口</label><input type="text" placeholder="22" value="22"></div>
+                    <div class="form-field"><label>用户</label><input type="text" placeholder="deploy" value="root"></div>
+                    <div class="form-field full"><label>部署密码（可选）</label><input type="password" placeholder="用于首次部署公钥，保存到系统安全存储" value=""></div>
+                    <div class="form-field full"><label>已有私钥路径（可选）</label><input type="text" placeholder="~/.ssh/id_ed25519" value=""><small class="form-hint">留空则解析 ~/.ssh/config 中该别名的 IdentityFile，再降级到 AFK 默认密钥</small></div>
+                    <div class="form-field full"><label>上传目录（可选）</label><input type="text" placeholder="例如：~/uploads" value=""></div>
+                    <div class="form-field full"><label>跳板机类型（可选）</label>
+                      <select>
+                        <option value="none">不使用跳板机</option>
+                        <option value="openssh">OpenSSH ProxyJump</option>
+                        <option value="jumpserver" selected>JumpServer</option>
+                      </select>
+                    </div>
+                    <div class="form-field full"><label>选择已配置的 SSH 主机（可选）</label>
+                      <select>
+                        <option value="">— 选择堡垒机 —</option>
+                        <option value="dev-jumpserver-wangwendi" selected>dev-jumpserver-wangwendi</option>
+                      </select>
+                      <small class="form-hint">选择后，AFK 将通过该堡垒机连接到此主机</small>
+                    </div>
+                  </div>
+                  <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 18px;">
+                    <button class="btn-ghost" onclick="showTab('list')">取消</button>
+                    <button class="btn-primary" onclick="showTab('list')">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                      保存主机
+                    </button>
+                  </div>
+                </div>
+
+                <!-- BASTION MODE: Add Bastion form -->
+                <div id="add-bastion-form" style="display:none;">
+                  <div class="preview-panel">
+                    <div class="form-grid" style="padding:18px 18px 0;">
+                      <div class="form-field"><label>显示名称</label><input type="text" placeholder="例如：prod-jumpserver" value="dev-jumpserver-wangwendi"></div>
+                      <div class="form-field"><label>JUMPSERVER URL</label><input type="text" placeholder="https://jumpserver.example.com" value="https://dev-jumpserver.fangcloud.net"></div>
+                      <div class="form-field"><label>PORT</label><input type="text" placeholder="2222" value="2222"></div>
+                      <div class="form-field"><label>USERNAME</label><input type="text" placeholder="your username" value="wangwendi"></div>
+                      <div class="form-field full"><label>PASSWORD / TOKEN</label><input type="password" placeholder="Enter password or API token" value="••••••••••"></div>
+                    </div>
+                    <div style="padding:0 18px 18px;">
+                      <button class="btn-primary indigo" style="width:100%;margin-top:14px;justify-content:center;min-height:36px;" onclick="showBastionPreview()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                        Test Connection &amp; Preview Assets
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- PREVIEW (hidden initially) -->
+                  <div id="bastion-asset-preview" class="preview-panel" style="margin-top:14px;display:none;">
+                    <div class="preview-header">
+                      <b>Discovered Assets</b>
+                      <span>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+                        Login OK &middot; 30 assets discovered
+                      </span>
+                    </div>
+                    <div class="preview-filter">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                      <input type="text" placeholder="Filter assets...">
+                      <button class="toggle-btn linux-only active" onclick="this.classList.toggle('active')">Linux only</button>
+                    </div>
+                    <div class="preview-scroll">
+                      <label class="preview-row"><input type="checkbox" checked><span class="asset-name">bisheng</span><span class="asset-ip">47.83.27.252</span><span class="asset-platform linux">Linux</span></label>
+                      <label class="preview-row"><input type="checkbox" checked><span class="asset-name">aidoc</span><span class="asset-ip">172.16.79.225</span><span class="asset-platform linux">Linux</span></label>
+                      <label class="preview-row"><input type="checkbox" checked><span class="asset-name">aidoc-worker2</span><span class="asset-ip">172.16.79.226</span><span class="asset-platform linux">Linux</span></label>
+                      <label class="preview-row"><input type="checkbox" checked><span class="asset-name">coze</span><span class="asset-ip">172.16.92.54</span><span class="asset-platform linux">Linux</span></label>
+                      <label class="preview-row"><input type="checkbox" checked><span class="asset-name">dev-lsp</span><span class="asset-ip">172.16.206.229</span><span class="asset-platform linux">Linux</span></label>
+                      <label class="preview-row"><input type="checkbox" checked><span class="asset-name">group-demo-ai知识库</span><span class="asset-ip">172.16.0.241</span><span class="asset-platform linux">Linux</span></label>
+                      <label class="preview-row"><input type="checkbox" checked><span class="asset-name">llm-wiki</span><span class="asset-ip">172.16.206.239</span><span class="asset-platform linux">Linux</span></label>
+                      <label class="preview-row"><input type="checkbox" checked><span class="asset-name">opensandbox</span><span class="asset-ip">172.16.79.251</span><span class="asset-platform linux">Linux</span></label>
+                      <label class="preview-row" style="justify-content:flex-end;padding:8px 14px;color:var(--afk-muted);font-size:9px;">+ 22 more assets</label>
+                      <label class="preview-row" style="opacity:0.5;"><input type="checkbox" disabled><span class="asset-name">i-23wevejyi</span><span class="asset-ip">—</span><span class="asset-platform windows">Windows</span></label>
+                      <label class="preview-row" style="justify-content:flex-end;padding:8px 14px;color:var(--afk-muted);font-size:9px;">+ 13 more Windows assets (skipped)</label>
+                    </div>
+                    <div style="padding:10px 14px;border-top:1px solid var(--afk-border);display:flex;justify-content:space-between;align-items:center;">
+                      <span style="font-size:10px;color:var(--afk-muted);">16 of 30 assets selected &middot; <span style="color:var(--attention);">14 Windows skipped</span></span>
+                    </div>
+                  </div>
+
+                  <!-- SUCCESS BANNER (shown after sync) -->
+                  <div id="bastion-success-banner" class="success-banner" style="margin-top:14px;display:none;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span><strong>Imported 16 Linux hosts as managed.</strong> The bastion itself is now in your list.</span>
+                  </div>
+
+                  <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">
+                    <button class="btn-ghost" onclick="showTab('list')">取消</button>
+                    <button class="btn-primary indigo" id="bastion-sync-btn" onclick="doBastionSync()">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                      Sync
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== TAB 3: SYNC DETAIL ========== -->
+      <div id="tab-detail" class="page-section">
+        <div class="control-page">
+          <div class="control-page-heading">
+            <div>
+              <p>Infrastructure</p>
+              <h1>Sync Detail</h1>
+              <span>Standalone bastion sync view — same content as the detail panel when a bastion is selected.</span>
+            </div>
+          </div>
+
+          <!-- BASTION CARD EXPANDED -->
+          <div class="bastion-card">
+            <div class="bastion-card-header">
+              <div class="bastion-card-title">
+                <b>dev-jumpserver-wangwendi</b>
+                <span class="bastion-badge">
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+                  healthy
+                </span>
+              </div>
+              <div class="bastion-card-actions">
+                <button class="btn-icon" title="Refresh Assets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>
+                <button class="btn-icon" title="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                <button class="btn-icon danger" title="Remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+              </div>
+            </div>
+            <div class="bastion-card-body">
+              <div class="prop-grid">
+                <div class="prop-item"><small>HOST</small><b style="font-family:'DM Mono',monospace;font-size:10px;">dev-jumpserver.fangcloud.net</b></div>
+                <div class="prop-item"><small>PORT</small><b style="font-family:'DM Mono',monospace;font-size:10px;">2222</b></div>
+                <div class="prop-item"><small>USER</small><b style="font-family:'DM Mono',monospace;font-size:10px;">wangwendi</b></div>
+                <div class="prop-item"><small>CONFIG SOURCE</small><b style="font-family:'DM Mono',monospace;font-size:10px;">AFK Managed</b></div>
+                <div class="prop-item"><small>IDENTITY FILE</small><b style="font-family:'DM Mono',monospace;font-size:10px;">~/.ssh/id_ed25519_afk</b></div>
+                <div class="prop-item"><small>PROXY JUMP</small><b style="font-family:'DM Mono',monospace;font-size:10px;">—</b></div>
+              </div>
+            </div>
+
+            <!-- SYNC STATUS PANEL -->
+            <div style="border-top:1px solid var(--afk-border);padding:12px 16px;display:flex;align-items:center;gap:16px;">
+              <div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--run);font-family:'DM Mono',monospace;">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+                healthy &middot; last synced 2 min ago
+              </div>
+              <div style="font-size:10px;color:var(--afk-muted);font-family:'DM Mono',monospace;">30 assets (16 Linux, 14 Windows)</div>
+              <div style="margin-left:auto;display:flex;gap:4px;">
+                <button class="btn-primary" style="min-height:28px;padding:0 10px;font-size:9px;">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                  Refresh Assets
+                </button>
+                <button class="btn-ghost btn-ghost-sm">Edit Bastion</button>
+                <button class="btn-ghost btn-ghost-sm danger">Remove Bastion</button>
+              </div>
+            </div>
+
+            <!-- SYNC LOG -->
+            <div class="sync-log">
+              <div class="sync-log-title">RECENT SYNC LOG</div>
+              <div class="sync-log-entries">
+                <div class="log-entry ok"><span class="ts">14:32:01</span><span class="msg">Session cookie refreshed — auth valid for 58m</span></div>
+                <div class="log-entry ok"><span class="ts">14:32:00</span><span class="msg">CSRF token renewed</span></div>
+                <div class="log-entry ok"><span class="ts">14:31:58</span><span class="msg">Asset list fetched — 30 assets found</span></div>
+                <div class="log-entry ok"><span class="ts">14:31:57</span><span class="msg">Connected to dev-jumpserver.fangcloud.net:2222</span></div>
+                <div class="log-entry ok"><span class="ts">14:31:55</span><span class="msg">Authentication successful for wangwendi</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ASSETS FROM THIS BASTION -->
+          <div class="table-panel" style="margin-top:14px;">
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Host</th>
+                    <th>Source</th>
+                    <th>Synced From</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">aidoc</td><td class="td-mono">root@172.16.79.225</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">aidoc-worker2</td><td class="td-mono">root@172.16.79.226</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">bisheng</td><td class="td-mono">root@47.83.27.252</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">coze</td><td class="td-mono">root@172.16.92.54</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">dev-lsp</td><td class="td-mono">root@172.16.206.229</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">group-demo-ai知识库</td><td class="td-mono">root@172.16.0.241</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">llm-wiki</td><td class="td-mono">root@172.16.206.239</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">opensandbox</td><td class="td-mono">root@172.16.79.251</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  <tr class="host-row" data-type="direct" data-source="managed" data-bastion="dev-jumpserver-wangwendi" onclick="selectHost(this, 'managed')" style="cursor:pointer;"><td class="td-name">tmp-wwd-ck8-onebox</td><td class="td-mono">root@172.16.79.248</td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger" title="Delete" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr></tbody>
+              </table>
+            </div>
+            <div class="footer-bar" style="padding:12px 16px 0;">
+              <span>Showing 9 of 16 Linux assets from this bastion &middot; 14 Windows assets skipped</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== TAB 4: ERROR STATES ========== -->
+      <div id="tab-error" class="page-section">
+        <div class="control-page">
+          <div class="control-page-heading">
+            <div>
+              <p>Infrastructure</p>
+              <h1>Error &amp; Anomaly States</h1>
+              <span>How the SSH Hosts page surfaces sync failures, auth expiry, and platform warnings.</span>
+            </div>
+          </div>
+
+          <!-- SCENARIO TOGGLE -->
+          <div class="scenario-toggle">
+            <button class="scenario-btn active" id="scenario-network" onclick="showScenario('network')">Network Error</button>
+            <button class="scenario-btn" id="scenario-auth" onclick="showScenario('auth')">Auth Expired</button>
+            <button class="scenario-btn" id="scenario-windows" onclick="showScenario('windows')">Windows Warning</button>
+            <button class="scenario-btn" id="scenario-trust" onclick="showScenario('trust')">Trust Required</button>
+          </div>
+
+          <!-- NETWORK ERROR SCENARIO -->
+          <div id="scenario-panel-network">
+            <div class="error-banner network">
+              <div class="error-banner-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              </div>
+              <div class="error-banner-text">
+                <b>Connection refused — 3 retries failed</b>
+                <span>Could not reach dev-jumpserver.fangcloud.net:2222. Check network connectivity and bastion availability.</span>
+              </div>
+              <button class="btn-primary" style="min-height:28px;flex-shrink:0;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                Retry
+              </button>
+            </div>
+
+            <!-- Table with error state row for bastion -->
+            <div class="table-panel">
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>Name</th><th>Host</th><th>Type</th><th>Source</th><th>Synced From</th><th></th></tr></thead>
+                  <tbody>
+                    <tr style="border-left:2px solid #b05555;">
+                      <td class="td-name" style="color:#e08080;">dev-jumpserver-wangwendi</td>
+                      <td class="td-mono" style="color:#e08080;">wangwendi@dev-jumpserver.fangcloud.net:2222</td>
+                      <td><span class="type-badge jumpserver">堡垒机</span></td>
+                      <td><span class="source-badge managed">Managed</span></td>
+                      <td><span class="synced-from">—</span></td>
+                      <td class="td-actions"><button class="btn-icon" title="Retry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button></td>
+                    </tr>
+                    <tr><td class="td-name">aidoc</td><td class="td-mono">root@172.16.79.225</td><td><span class="type-badge direct">Direct</span></td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="footer-bar" style="padding:12px 16px 0;">
+                <span style="color:#e08080;">Bastion unreachable — 10 hosts may be offline</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- AUTH EXPIRED SCENARIO -->
+          <div id="scenario-panel-auth" style="display:none;">
+            <div class="error-banner auth">
+              <div class="error-banner-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+              </div>
+              <div class="error-banner-text">
+                <b>Session expired — please re-authenticate</b>
+                <span>JumpServer session cookie and CSRF token have expired. Re-authenticate to continue syncing.</span>
+              </div>
+              <button class="btn-primary" style="min-height:28px;flex-shrink:0;background:var(--attention);border-color:var(--attention);color:white;">
+                Re-authenticate
+              </button>
+            </div>
+            <div class="table-panel">
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>Name</th><th>Host</th><th>Type</th><th>Source</th><th>Synced From</th><th></th></tr></thead>
+                  <tbody>
+                    <tr style="border-left:2px solid var(--attention);">
+                      <td class="td-name">dev-jumpserver-wangwendi</td>
+                      <td class="td-mono">wangwendi@dev-jumpserver.fangcloud.net:2222</td>
+                      <td><span class="type-badge jumpserver">堡垒机</span></td>
+                      <td><span class="source-badge managed">Managed</span></td>
+                      <td><span class="synced-from">—</span></td>
+                      <td class="td-actions"><button class="btn-icon" title="Re-authenticate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></button></td>
+                    </tr>
+                    <tr><td class="td-name">aidoc</td><td class="td-mono">root@172.16.79.225</td><td><span class="type-badge direct">Direct</span></td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="footer-bar" style="padding:12px 16px 0;">
+                <span style="color:var(--attention);">Auth expired — 30 hosts stale &middot; last sync 62 min ago</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- WINDOWS WARNING SCENARIO -->
+          <div id="scenario-panel-windows" style="display:none;">
+            <div class="error-banner warning">
+              <div class="error-banner-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              </div>
+              <div class="error-banner-text">
+                <b>14 Windows assets skipped — AFK only handles SSH</b>
+                <span>AFK does not support Windows RDP connections. Windows hosts are listed here for reference only.</span>
+              </div>
+            </div>
+            <div class="table-panel">
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>Name</th><th>Host</th><th>Type</th><th>Source</th><th>Synced From</th><th></th></tr></thead>
+                  <tbody>
+                    <tr><td class="td-name">aidoc</td><td class="td-mono">root@172.16.79.225</td><td><span class="type-badge direct">Direct</span></td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                    <tr style="opacity:0.5;"><td class="td-name">i-23wevejyi</td><td class="td-mono">—</td><td><span class="td-platform windows" style="display:inline-flex;padding:2px 7px;border-radius:4px;background:#f3e8db;color:#8c6339;font-size:9px;font-family:'DM Mono',monospace;"><svg class="platform-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Windows</span></td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" style="opacity:0.3;" title="Not supported"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button></td></tr>
+                    <tr style="opacity:0.5;"><td class="td-name">i-bp12teimcjm9g31k0qh9</td><td class="td-mono">—</td><td><span class="td-platform windows" style="display:inline-flex;padding:2px 7px;border-radius:4px;background:#f3e8db;color:#8c6339;font-size:9px;font-family:'DM Mono',monospace;"><svg class="platform-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>Windows</span></td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon" style="opacity:0.3;" title="Not supported"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="footer-bar" style="padding:12px 16px 0;">
+                <span style="color:var(--attention);">14 Windows assets — AFK SSH not supported</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- TRUST REQUIRED SCENARIO -->
+          <div id="scenario-panel-trust" style="display:none;">
+            <div class="error-banner warning">
+              <div class="error-banner-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div class="error-banner-text">
+                <b>Host key not trusted — trust required before connecting</b>
+                <span>AFK recorded a new host key for 47.83.27.252. Trust it to enable passwordless SSH.</span>
+              </div>
+              <button class="btn-primary" style="min-height:28px;flex-shrink:0;">Trust &amp; Deploy Key</button>
+            </div>
+            <div class="table-panel">
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>Name</th><th>Host</th><th>Type</th><th>Source</th><th>Synced From</th><th></th></tr></thead>
+                  <tbody>
+                    <tr style="border-left:2px solid var(--attention);"><td class="td-name">bisheng</td><td class="td-mono">root@47.83.27.252</td><td><span class="type-badge direct">Direct</span></td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-primary" style="min-height:26px;padding:0 8px;font-size:9px;">Trust</button></td></tr>
+                    <tr><td class="td-name">aidoc</td><td class="td-mono">root@172.16.79.225</td><td><span class="type-badge direct">Direct</span></td><td><span class="source-badge managed">Managed</span></td><td><span class="synced-from"><span class="bastion-ref">↻ dev-jumpserver-wangwendi</span></span></td><td class="td-actions"><button class="btn-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button><button class="btn-icon danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg></button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="footer-bar" style="padding:12px 16px 0;">
+                <span>1 host needs trust — others are ready</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div><!-- /workspace -->
+  </main>
+</div><!-- /app-shell -->
+
+<script>
+function showTab(id) {
+  document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.page-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  if (event && event.target) event.target.classList.add('active');
+}
+
+function showScenario(name) {
+  document.querySelectorAll('[id^="scenario-panel-"]').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.scenario-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('scenario-panel-' + name).style.display = 'block';
+  document.getElementById('scenario-' + name).classList.add('active');
+}
+
+/* ===== GROUP TOGGLE ===== */
+var collapsedGroups = {};
+function toggleGroup(name) {
+  collapsedGroups[name] = !collapsedGroups[name];
+  const header = document.querySelector('.group-header[data-group="' + name + '"]');
+  header.classList.toggle('collapsed', collapsedGroups[name]);
+  const rows = document.querySelectorAll('[data-bastion], .host-row[data-bastion=""]');
+  rows.forEach(function(row) {
+    if (name === 'bastion' && row.classList.contains('asset-row')) {
+      row.style.display = collapsedGroups[name] ? 'none' : '';
+    }
+    if (name === 'direct' && row.classList.contains('host-row') && row.dataset.bastion === '') {
+      row.style.display = collapsedGroups[name] ? 'none' : '';
+    }
+  });
+}
+
+/* ===== TOOLBAR FILTER ===== */
+function updateSourceFilter(value) {
+  var rows = document.querySelectorAll('.asset-row, .host-row');
+  rows.forEach(function(row) {
+    if (value === 'all') { row.style.display = ''; return; }
+    row.style.display = row.dataset.source === value ? '' : 'none';
+  });
+}
+
+function updateBastionFilter(value) {
+  var bastionGroup = document.querySelector('.group-header[data-group="bastion"]');
+  var directGroup = document.querySelector('.group-header[data-group="direct"]');
+  var assetRows = document.querySelectorAll('.asset-row');
+  var directRows = document.querySelectorAll('.host-row[data-bastion=""]');
+
+  if (value === 'all') {
+    bastionGroup.style.display = '';
+    directGroup.style.display = '';
+    assetRows.forEach(function(r) { r.style.display = ''; });
+    directRows.forEach(function(r) { r.style.display = ''; });
+  } else if (value === 'bastion') {
+    bastionGroup.style.display = '';
+    directGroup.style.display = 'none';
+    assetRows.forEach(function(r) { r.style.display = ''; });
+    directRows.forEach(function(r) { r.style.display = 'none'; });
+  } else if (value === 'direct') {
+    bastionGroup.style.display = 'none';
+    directGroup.style.display = '';
+    assetRows.forEach(function(r) { r.style.display = 'none'; });
+    directRows.forEach(function(r) { r.style.display = ''; });
+  }
+}
+
+function filterHosts(q) {
+  var lower = q.toLowerCase();
+  document.querySelectorAll('.asset-row, .host-row').forEach(function(row) {
+    var text = row.textContent.toLowerCase();
+    row.style.display = text.includes(lower) ? '' : 'none';
+  });
+}
+
+/* ===== SELECT BASTION (group header click) ===== */
+function selectBastion(row) {
+  document.querySelectorAll('.asset-row, .host-row, .group-header').forEach(function(r) { r.classList.remove('selected'); });
+  row.classList.add('selected');
+  var panel = document.getElementById('detail-panel');
+  panel.innerHTML = '<div class="ssh-details">' +
+    '<div class="detail-header">' +
+      '<div class="detail-heading-copy">' +
+        '<small>JumpServer</small>' +
+        '<h2>dev-jumpserver-wangwendi</h2>' +
+        '<span>wangwendi@dev-jumpserver.fangcloud.net:2222</span>' +
+      '</div>' +
+      '<span class="detail-status ready">✓ healthy</span>' +
+    '</div>' +
+    '<div class="detail-body" style="padding:14px 16px 0;">' +
+      '<dl class="detail-dl">' +
+        '<div class="detail-dl-item"><dt>ConfigSource</dt><dd>AFK Managed</dd></div>' +
+        '<div class="detail-dl-item"><dt>HostName</dt><dd>dev-jumpserver.fangcloud.net</dd></div>' +
+        '<div class="detail-dl-item"><dt>IdentityFile</dt><dd>~/.ssh/id_ed25519_afk</dd></div>' +
+        '<div class="detail-dl-item"><dt>UploadDir</dt><dd>—</dd></div>' +
+        '<div class="detail-dl-item"><dt>ProxyJump</dt><dd>—</dd></div>' +
+      '</dl>' +
+    '</div>' +
+    '<div class="detail-sync-section" style="margin:0 16px 14px;">' +
+      '<div class="detail-sync-header">' +
+        '<b>Sync Status</b>' +
+        '<div class="detail-sync-meta">' +
+          '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>' +
+          '✓ healthy &middot; last synced 2 min ago' +
+        '</div>' +
+      '</div>' +
+      '<div class="detail-sync-body">' +
+        '<div class="detail-sync-stat"><small>ASSETS</small><b>30</b></div>' +
+        '<div class="detail-sync-stat"><small>LINUX</small><b>16</b></div>' +
+        '<div class="detail-sync-stat"><small>WINDOWS</small><b>14</b></div>' +
+        '<div class="detail-sync-stat"><small>LAST SYNC</small><b>2 min ago</b></div>' +
+      '</div>' +
+      '<div style="padding:10px 14px 0;display:flex;gap:4px;flex-wrap:wrap;">' +
+        '<button class="btn-primary indigo" style="min-height:32px;padding:0 14px;font-size:10px;border-radius:4px;">' +
+          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>' +
+          '↻ Refresh Assets' +
+        '</button>' +
+        '<button class="btn-ghost" style="min-height:32px;padding:0 12px;font-size:10px;border-radius:4px;">Edit Bastion</button>' +
+        '<button class="btn-ghost danger" style="min-height:32px;padding:0 12px;font-size:10px;border-radius:4px;">Remove Bastion</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="sync-log">' +
+      '<div class="sync-log-title">RECENT SYNC LOG</div>' +
+      '<div class="sync-log-entries">' +
+        '<div class="log-entry ok"><span class="ts">14:32:18</span><span class="msg">login as wangwendi → OK</span></div>' +
+        '<div class="log-entry ok"><span class="ts">14:32:19</span><span class="msg">list assets → 30 returned</span></div>' +
+        '<div class="log-entry ok"><span class="ts">14:32:19</span><span class="msg">imported 16 Linux hosts</span></div>' +
+        '<div class="log-entry ok"><span class="ts">14:32:19</span><span class="msg">skipped 14 Windows hosts (filter)</span></div>' +
+        '<div class="log-entry ok"><span class="ts">14:32:20</span><span class="msg">bastion entry written to ssh-hosts.yml</span></div>' +
+      '</div>' +
+    '</div>' +
+    '<div style="padding:12px 16px 16px;">' +
+      '<div style="font-size:9px;font-family:\'DM Mono\',monospace;color:var(--afk-muted);margin-bottom:8px;">↻ SYNCED ASSETS (10 of 16 Linux)</div>' +
+      '<div style="display:flex;flex-direction:column;gap:1px;">' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[0], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">aidoc</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.79.225</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[1], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">aidoc-worker2</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.79.226</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[2], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">bisheng</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@47.83.27.252</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[3], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">coze</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.92.54</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[4], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">dev-lsp</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.206.229</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[5], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">group-demo-ai知识库</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.0.241</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[6], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">llm-wiki</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.206.239</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[7], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">opensandbox</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.79.251</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[8], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">tmp-wwd-ck8-onebox</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.79.248</span>' +
+        '</div>' +
+        '<div onclick="selectHost(document.querySelectorAll(\'.asset-row\')[9], \'managed\')" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:var(--afk-panel-subtle);cursor:pointer;font-size:10px;transition:background 150ms;" onmouseover="this.style.background=\'var(--afk-border)\'" onmouseout="this.style.background=\'var(--afk-panel-subtle)\'">' +
+          '<span style="color:var(--run);font-family:\'DM Mono\',monospace;">●</span><span style="flex:1;font-weight:500;">拱墅区数智人demo</span><span style="font-family:\'DM Mono\',monospace;color:var(--afk-muted);">root@172.16.206.232</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+/* ===== SELECT HOST ===== */
+function selectHost(row, kind) {
+  document.querySelectorAll('.asset-row, .host-row, .group-header').forEach(function(r) { r.classList.remove('selected'); });
+  row.classList.add('selected');
+  var name = row.querySelector('.td-name').textContent;
+  var hostCell = row.querySelector('.td-mono') ? row.querySelector('.td-mono').textContent : '';
+  var typeBadge = row.querySelector('.type-badge') ? row.querySelector('.type-badge').textContent.trim() : '';
+  var sourceBadge = row.querySelector('.source-badge') ? row.querySelector('.source-badge').textContent.trim() : '';
+  var bastionRef = row.dataset.bastion || '';
+  var type = row.dataset.type;
+  var panel = document.getElementById('detail-panel');
+
+  if (kind === 'bastion' || type === 'jumpserver') {
+    selectBastion(row);
+  } else if (kind === 'managed') {
+    // Bastion-synced asset: no delete, no copy, show managed-by note
+    panel.innerHTML = '<div class="ssh-details">' +
+      '<div class="detail-header">' +
+        '<div class="detail-heading-copy">' +
+          '<small>Managed</small>' +
+          '<h2>' + name + '</h2>' +
+          '<span>' + hostCell + '</span>' +
+        '</div>' +
+        '<span class="detail-status ready">✓ ready</span>' +
+      '</div>' +
+      '<div class="detail-body">' +
+        '<dl class="detail-dl">' +
+          '<div class="detail-dl-item"><dt>ConfigSource</dt><dd>AFK Managed</dd></div>' +
+          '<div class="detail-dl-item"><dt>HostName</dt><dd>' + (hostCell.split('@')[1] || hostCell) + '</dd></div>' +
+          '<div class="detail-dl-item"><dt>IdentityFile</dt><dd>~/.ssh/id_ed25519_afk</dd></div>' +
+          '<div class="detail-dl-item"><dt>UploadDir</dt><dd>—</dd></div>' +
+          '<div class="detail-dl-item"><dt>ProxyJump</dt><dd style="color:var(--afk-accent);">' + bastionRef + '</dd></div>' +
+        '</dl>' +
+      '</div>' +
+      '<div style="margin:0 16px 12px;padding:10px 12px;background:var(--attention-soft);border:1px solid var(--attention);border-radius:8px;font-size:10px;color:var(--attention);line-height:1.5;">' +
+        '⚠ This host is managed by bastion <strong>' + bastionRef + '</strong>. To remove it, refresh the bastion sync or remove the bastion itself. Public key auth is handled by the bastion — no per-host deploy needed.' +
+      '</div>' +
+      '<div class="detail-actions-bar">' +
+        '<button class="btn-ghost btn-ghost-sm">Test</button>' +
+        '<button class="btn-ghost btn-ghost-sm">Trust</button>' +
+        '<div class="detail-action-primary">' +
+          '<button class="btn-primary indigo" style="min-height:30px;padding:0 14px;font-size:10px;border-radius:4px;">' +
+            '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>' +
+            'Connect' +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  } else if (kind === 'direct' || kind === 'system') {
+    panel.innerHTML = '<div class="ssh-details"><div class="detail-header"><div class="detail-heading-copy"><small>' + sourceBadge + '</small><h2>' + name + '</h2><span>' + hostCell + '</span></div><span class="detail-status ready">ready</span></div><div class="detail-body"><dl class="detail-dl"><div class="detail-dl-item"><dt>ConfigSource</dt><dd>' + (sourceBadge === 'System' ? '~/.ssh/config' : 'AFK Managed') + '</dd></div><div class="detail-dl-item"><dt>HostName</dt><dd>' + (hostCell.split('@')[1] || hostCell) + '</dd></div><div class="detail-dl-item"><dt>IdentityFile</dt><dd>~/.ssh/id_ed25519_afk</dd></div><div class="detail-dl-item"><dt>UploadDir</dt><dd>—</dd></div><div class="detail-dl-item"><dt>ProxyJump</dt><dd>' + (bastionRef ? bastionRef : '—') + '</dd></div></dl></div><div class="detail-actions-bar"><button class="btn-ghost btn-ghost-sm">Test</button><button class="btn-ghost btn-ghost-sm">Deploy Key</button><button class="btn-ghost btn-ghost-sm">Trust</button><div class="detail-action-primary"><button class="btn-primary indigo" style="min-height:30px;padding:0 14px;font-size:10px;border-radius:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>Connect</button></div></div></div>';
+  } else if (kind === 'openssh') {
+    panel.innerHTML = '<div class="ssh-details"><div class="detail-header"><div class="detail-heading-copy"><small>' + sourceBadge + '</small><h2>' + name + '</h2><span>' + hostCell + '</span></div><span class="detail-status ready">ready</span></div><div class="detail-body"><dl class="detail-dl"><div class="detail-dl-item"><dt>ConfigSource</dt><dd>AFK Managed</dd></div><div class="detail-dl-item"><dt>HostName</dt><dd>10.39.152.217</dd></div><div class="detail-dl-item"><dt>IdentityFile</dt><dd>~/.ssh/id_ed25519_afk</dd></div><div class="detail-dl-item"><dt>UploadDir</dt><dd>—</dd></div><div class="detail-dl-item"><dt>ProxyJump</dt><dd style="color:var(--afk-accent);">aidoc-private → dev-jumpserver-wangwendi</dd></div></dl></div><div class="detail-actions-bar"><button class="btn-ghost btn-ghost-sm">Test</button><button class="btn-ghost btn-ghost-sm">Deploy Key</button><button class="btn-ghost btn-ghost-sm">Trust</button><div class="detail-action-primary"><button class="btn-primary indigo" style="min-height:30px;padding:0 14px;font-size:10px;border-radius:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>Connect</button></div></div></div>';
+  }
+}
+
+var addMode = 'ssh';
+function toggleAddMode() {
+  var sshForm = document.getElementById('add-ssh-form');
+  var bastionForm = document.getElementById('add-bastion-form');
+  var title = document.getElementById('add-host-title');
+  var desc = document.getElementById('add-host-desc');
+  var toggle = document.getElementById('add-mode-toggle');
+  if (addMode === 'ssh') {
+    addMode = 'bastion';
+    sshForm.style.display = 'none';
+    bastionForm.style.display = 'block';
+    title.textContent = '添加堡垒机';
+    desc.textContent = "Connect a JumpServer instance to auto-sync accessible hosts into AFK's SSH host registry.";
+    toggle.textContent = '+ 添加 SSH 主机';
+  } else {
+    addMode = 'ssh';
+    sshForm.style.display = 'block';
+    bastionForm.style.display = 'none';
+    title.textContent = '添加 SSH 主机';
+    desc.textContent = 'Configure a new SSH host. If a jump host type is selected, this host will be routed through that bastion.';
+    toggle.textContent = '+ 添加堡垒机';
+  }
+}
+
+function showBastionPreview() {
+  document.getElementById('bastion-asset-preview').style.display = 'block';
+}
+
+function doBastionSync() {
+  document.getElementById('bastion-success-banner').style.display = 'flex';
+  document.getElementById('bastion-sync-btn').style.display = 'none';
+}
+
+// Initialize with bastion header selected
+window.addEventListener('load', function() {
+  var bastionRow = document.querySelector('.group-header.bastion-group');
+  if (bastionRow) {
+    selectBastion(bastionRow);
+  }
+});
+</script>
+</body>
+</html>

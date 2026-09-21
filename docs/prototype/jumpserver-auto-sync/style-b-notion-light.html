@@ -1,0 +1,1854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AFK · SSH Hosts</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-panel: #ffffff;
+  --bg-page: #f7f7f5;
+  --bg-sidebar: #fbfbfa;
+  --fg-primary: #37352f;
+  --fg-muted: #787774;
+  --fg-quiet: #9b9a97;
+  --accent-blue: #2383e2;
+  --accent-green: #0f7b0f;
+  --accent-red: #d44c47;
+  --accent-yellow: #cb912f;
+  --accent-teal: #00897b;
+  --highlight-sel: #e9e5e3;
+  --highlight-hover: #f1f1ef;
+  --border: #e9e9e7;
+  --shadow: 0 1px 2px rgba(0,0,0,.04);
+  --radius: 6px;
+  --font: Inter,-apple-system,"Segoe UI","PingFang SC",sans-serif;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg-page);
+  color: var(--fg-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* ── Tab Bar ── */
+.tab-bar {
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 20px 0;
+  display: flex;
+  gap: 4px;
+}
+.tab {
+  padding: 6px 14px 8px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border-radius: var(--radius) var(--radius) 0 0;
+  border: 1px solid transparent;
+  border-bottom: none;
+  user-select: none;
+}
+.tab:hover { color: var(--fg-primary); background: var(--highlight-hover); }
+.tab.active {
+  color: var(--fg-primary);
+  background: var(--bg-page);
+  border-color: var(--border);
+  font-weight: 500;
+}
+
+/* ── App Shell ── */
+.app-shell {
+  display: flex;
+  min-height: calc(100vh - 40px);
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  padding: 12px 8px;
+}
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  color: var(--fg-muted);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.sidebar-item:hover { background: var(--highlight-hover); color: var(--fg-primary); }
+.sidebar-item.active { background: var(--highlight-sel); color: var(--fg-primary); font-weight: 500; }
+.sidebar-item .icon { font-size: 15px; }
+
+/* ── Main Content ── */
+.main-content {
+  flex: 1;
+  padding: 28px 36px;
+  overflow-y: auto;
+}
+
+/* ── Page Header ── */
+.breadcrumb {
+  font-size: 12.5px;
+  color: var(--fg-quiet);
+  margin-bottom: 4px;
+}
+.page-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+/* ── Toolbar ── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 20px;
+  flex-wrap: wrap;
+}
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-size: 13px;
+  color: var(--fg-quiet);
+}
+.search-box input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--fg-primary);
+  width: 180px;
+  font-family: var(--font);
+}
+
+/* ── Standard Select ── */
+select {
+  background: #ffffff;
+  color: #37352f;
+  border: 1px solid #e9e9e7;
+  border-radius: 6px;
+  padding: 6px 28px 6px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23787774%22%20d%3D%22M2%204%20l4%204%204-4%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+  transition: border-color .15s;
+}
+select:hover { border-color: #c8c8c5; }
+select:focus { outline: none; border-color: #2383e2; box-shadow: 0 0 0 2px rgba(35,131,226,.12); }
+
+/* ── Card ── */
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+.card-subtitle {
+  font-size: 12px;
+  color: var(--fg-quiet);
+  margin-top: 2px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.badge-ok { background: #e6f4ea; color: var(--accent-green); }
+.badge-err { background: #fce8e8; color: var(--accent-red); }
+.badge-warn { background: #fef3e2; color: var(--accent-yellow); }
+
+/* ── Property Rows ── */
+.prop-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13.5px;
+}
+.prop-label {
+  color: var(--fg-quiet);
+  width: 90px;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.prop-value { color: var(--fg-primary); }
+.prop-value.mono { font-family: "SF Mono","Fira Code",monospace; font-size: 12.5px; }
+
+/* ── Host Group List ── */
+.host-list { }
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: #f7f7f5;
+  border-left: 3px solid #2383e2;
+  border-radius: 4px;
+  margin-bottom: 2px;
+  cursor: pointer;
+  font-size: 13.5px;
+  color: var(--fg-primary);
+  user-select: none;
+}
+.group-header.direct {
+  border-left-color: #c8c8c5;
+}
+.group-header:hover { background: #f1f1ef; }
+.group-header.selected { background: #e9f2fb; }
+.group-chevron {
+  font-size: 10px;
+  color: var(--fg-muted);
+  transition: transform .15s;
+  width: 14px;
+  text-align: center;
+}
+.group-chevron.collapsed { transform: rotate(-90deg); }
+.group-name {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.group-meta {
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-right: 4px;
+}
+.group-sync-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-family: var(--font);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.group-sync-btn:hover { background: var(--highlight-hover); color: var(--fg-primary); }
+
+.asset-rows {
+  padding-left: 28px;
+  border-left: 1px solid #e9e9e7;
+  margin-left: 14px;
+  margin-bottom: 8px;
+}
+.asset-rows.collapsed { display: none; }
+
+.asset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+.asset-row:hover { background: var(--highlight-hover); color: var(--fg-primary); }
+.asset-row.selected { background: #e9f2fb; color: var(--fg-primary); }
+.asset-row:hover .asset-actions,
+.asset-row.selected .asset-actions { opacity: 1; }
+.asset-name-cell { flex: 1; }
+.asset-host-cell {
+  font-family: "SF Mono","Fira Code",monospace;
+  font-size: 11.5px;
+  color: var(--fg-quiet);
+  width: 160px;
+}
+.asset-type-cell { width: 110px; }
+.asset-status-cell { width: 80px; }
+.asset-sync-cell { width: 80px; font-size: 11.5px; color: var(--fg-quiet); }
+.asset-actions { opacity: 0; display: flex; gap: 3px; align-items: center; transition: opacity .1s; }
+
+/* ── Status Dot ── */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-green);
+}
+.status-dot.offline { background: var(--fg-quiet); }
+.status-dot.warn { background: var(--accent-yellow); }
+
+/* ── Type Badges ── */
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.type-direct { background: var(--highlight-sel); color: var(--fg-muted); }
+.type-jumpserver { background: #e0f2f1; color: var(--accent-teal); }
+.type-openssh { background: #e8f4fd; color: var(--accent-blue); }
+
+/* ── Synced-from badge ── */
+.sync-from {
+  font-size: 11.5px;
+  color: var(--fg-quiet);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.sync-from-none { color: var(--fg-quiet); font-size: 12px; }
+
+/* ── Action Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 11px;
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  font-family: var(--font);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background .1s;
+}
+.btn-sm { padding: 3px 8px; font-size: 12px; }
+.btn-ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--fg-muted);
+}
+.btn-ghost:hover { background: var(--highlight-hover); color: var(--fg-primary); }
+.btn-primary {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}
+.btn-primary:hover { background: #1a6fc9; }
+.btn-outline {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--fg-muted);
+}
+.btn-outline:hover { background: var(--highlight-hover); color: var(--fg-primary); }
+.btn-danger {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--accent-red);
+}
+.btn-danger:hover { background: #fce8e8; }
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--fg-quiet);
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: 15px;
+}
+.btn-icon:hover { background: var(--highlight-hover); color: var(--fg-primary); }
+.row-actions { display: flex; gap: 4px; align-items: center; }
+
+/* ── Add Button ── */
+.add-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 13.5px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  font-family: var(--font);
+  width: 100%;
+  margin: 10px 0 20px;
+}
+.add-btn:hover { background: var(--highlight-hover); color: var(--fg-primary); border-color: var(--fg-quiet); }
+
+/* ── Footer ── */
+.footer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  font-size: 12.5px;
+  color: var(--fg-quiet);
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.footer-actions { display: flex; gap: 8px; }
+
+/* ── Detail Panel ── */
+.detail-panel {
+  width: 340px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  padding: 24px 20px;
+  overflow-y: auto;
+  display: none;
+}
+.detail-panel.open { display: block; }
+.detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.detail-alias {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  margin-bottom: 4px;
+}
+.detail-host {
+  font-family: "SF Mono","Fira Code",monospace;
+  font-size: 12px;
+  color: var(--fg-muted);
+  margin-bottom: 6px;
+}
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.detail-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.detail-section-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-quiet);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-bottom: 10px;
+}
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--accent-green);
+  margin-bottom: 8px;
+}
+.sync-asset-count {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  margin-bottom: 12px;
+}
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--bg-panel);
+  border-radius: 10px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.12);
+  width: 600px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 600;
+}
+.modal-body { padding: 20px 22px; }
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Form ── */
+.form-group { margin-bottom: 14px; }
+.form-label {
+  display: block;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+.form-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  font-family: var(--font);
+  color: var(--fg-primary);
+  background: var(--bg-panel);
+  outline: none;
+  transition: border-color .15s;
+}
+.form-input:focus { border-color: var(--accent-blue); }
+/* Style selects inside forms the same as standalone selects */
+.form-input[type="select"],
+.form-input select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2212%22%20height%3D%2212%22%20viewBox%3D%220%200%2012%2012%22%3E%3Cpath%20fill%3D%22%23787774%22%20d%3D%22M2%204%20l4%204%204-4%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+  padding-right: 28px;
+  cursor: pointer;
+}
+.form-row { display: flex; gap: 12px; }
+.form-row .form-group { flex: 1; }
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.form-check input { cursor: pointer; }
+
+/* ── Preview Panel ── */
+.preview-panel {
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-top: 16px;
+}
+.preview-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--accent-green);
+  margin-bottom: 12px;
+}
+.preview-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.preview-table { font-size: 12.5px; }
+.preview-table th {
+  text-align: left;
+  padding: 4px 6px;
+  color: var(--fg-quiet);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+.preview-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--bg-page);
+}
+.preview-note {
+  font-size: 11.5px;
+  color: var(--fg-quiet);
+  margin-top: 8px;
+  font-style: italic;
+}
+
+/* ── Tab Content ── */
+.tab-content { display: none; }
+.tab-content.active { display: flex; }
+
+/* ── Segmented Control ── */
+.seg-control {
+  display: flex;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px;
+  margin-bottom: 14px;
+  gap: 2px;
+}
+.seg {
+  flex: 1;
+  padding: 5px 8px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  user-select: none;
+}
+.seg:hover { background: var(--highlight-hover); color: var(--fg-primary); }
+.seg.active { background: var(--bg-panel); color: var(--fg-primary); font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+
+/* ── Divider ── */
+.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* ── Section Title ── */
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin: 20px 0 10px;
+}
+
+/* ── Pill ── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 12px;
+  background: var(--highlight-sel);
+  color: var(--fg-muted);
+}
+
+/* ── Checkbox table ── */
+.check-col { width: 28px; }
+
+/* ── Mode Toggle ── */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.mode-toggle-label {
+  font-size: 12px;
+  color: var(--fg-quiet);
+}
+
+/* ── Success Banner ── */
+.success-banner {
+  background: #e6f4ea;
+  border: 1px solid #b7dfbd;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--accent-green);
+  margin-bottom: 14px;
+  display: none;
+}
+.success-banner.show { display: block; }
+
+/* ── Sync Log ── */
+.sync-log {
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-family: "SF Mono","Fira Code",monospace;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  margin-top: 10px;
+}
+.log-line { padding: 2px 0; }
+.log-line .ts { color: var(--fg-quiet); margin-right: 8px; }
+.log-line.ok { color: var(--accent-green); }
+.log-line.skip { color: var(--accent-yellow); }
+
+/* ── Error States ── */
+.error-banner {
+  background: #fce8e8;
+  border: 1px solid #f5c6c5;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  font-size: 13.5px;
+  color: var(--accent-red);
+  margin-bottom: 12px;
+}
+.error-banner .title { font-weight: 600; margin-bottom: 2px; }
+.error-banner .detail { font-size: 12.5px; color: var(--fg-muted); }
+.warn-banner {
+  background: #fef3e2;
+  border: 1px solid #fdecc5;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  font-size: 13.5px;
+  color: var(--accent-yellow);
+  margin-bottom: 12px;
+}
+.warn-banner .title { font-weight: 600; margin-bottom: 2px; }
+.warn-banner .detail { font-size: 12.5px; color: var(--fg-muted); }
+
+/* ── Asset list in bastion detail ── */
+.asset-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.asset-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--bg-page);
+}
+.asset-item:last-child { border-bottom: none; }
+.asset-item:hover { background: var(--highlight-hover); }
+.asset-name { flex: 1; color: var(--fg-primary); }
+.asset-host { font-family: "SF Mono","Fira Code",monospace; font-size: 11.5px; color: var(--fg-muted); }
+
+/* ── Bastion filter chip row in list header ── */
+.list-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 8px;
+  font-size: 12px;
+  color: var(--fg-quiet);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.list-header-row span { flex: 1; }
+.list-header-row .col-name { flex: 1; padding-left: 14px; }
+.list-header-row .col-host { width: 160px; }
+.list-header-row .col-type { width: 110px; }
+.list-header-row .col-status { width: 80px; }
+.list-header-row .col-sync { width: 80px; }
+.list-header-row .col-actions { width: 80px; }
+
+/* ── Direct Hosts group header ── */
+.direct-hosts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  background: #f7f7f5;
+  border-left: 3px solid #c8c8c5;
+  border-radius: 4px;
+  margin-top: 8px;
+  margin-bottom: 2px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  user-select: none;
+}
+.direct-hosts-header:hover { background: #f1f1ef; }
+.direct-hosts-sync-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-family: var(--font);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.direct-hosts-sync-btn:hover { background: var(--highlight-hover); color: var(--fg-primary); }
+</style>
+</head>
+<body>
+
+<!-- Tab Bar -->
+<div class="tab-bar">
+  <div class="tab active" onclick="switchTab(1)">1. List</div>
+  <div class="tab" onclick="switchTab(2)">2. Add</div>
+  <div class="tab" onclick="switchTab(3)">3. Detail</div>
+  <div class="tab" onclick="switchTab(4)">4. Error</div>
+</div>
+
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-item"><span class="icon">📋</span> Backlog</div>
+    <div class="sidebar-item"><span class="icon">⚡</span> Work Items</div>
+    <div class="sidebar-item active"><span class="icon">🖥</span> SSH Hosts</div>
+    <div class="sidebar-item"><span class="icon">⚙</span> Settings</div>
+  </div>
+
+  <!-- ── TAB 1: UNIFIED LIST VIEW ── -->
+  <div id="tab1" class="tab-content active">
+    <div class="main-content" style="flex:1;">
+      <div class="breadcrumb">Workspace › SSH Hosts</div>
+      <div class="page-title">SSH Hosts</div>
+
+      <!-- Toolbar: now uses real <select> elements -->
+      <div class="toolbar">
+        <div class="search-box">
+          🔍 <input type="text" placeholder="Search hosts..." id="search-input" oninput="filterHosts()">
+        </div>
+        <select id="filter-source" onchange="filterHosts()">
+          <option value="all">全部来源</option>
+          <option value="managed">AFK 管理</option>
+          <option value="system">系统配置</option>
+        </select>
+        <select id="filter-status" onchange="filterHosts()">
+          <option value="all">全部状态</option>
+          <option value="ready">✓ ready</option>
+          <option value="untrusted">⚠ untrusted</option>
+          <option value="offline">✕ offline</option>
+        </select>
+        <select id="filter-bastion" onchange="filterHosts()">
+          <option value="all">全部</option>
+          <option value="bastion-only">仅堡垒机</option>
+          <option value="direct-only">仅直连</option>
+        </select>
+      </div>
+
+      <button class="add-btn" onclick="switchTab(2)">＋ Add Host</button>
+
+      <!-- Grouped Host List -->
+      <div class="host-list" id="host-list">
+
+        <!-- Column header row -->
+        <div class="list-header-row">
+          <span></span>
+          <span class="col-name">Name</span>
+          <span class="col-host">Host</span>
+          <span class="col-type">Type</span>
+          <span class="col-status">Status</span>
+          <span class="col-sync">Synced</span>
+          <span class="col-actions"></span>
+        </div>
+
+        <!-- ── BASTION GROUP: dev-jumpserver-wangwendi ── -->
+        <div class="group-header" id="group-bastion" onclick="toggleGroup('bastion'); selectBastion();" data-filter="bastion">
+          <span class="group-chevron" id="chevron-bastion">▼</span>
+          <span class="group-name">dev-jumpserver-wangwendi</span>
+          <span class="group-meta">JumpServer · wangwendi@dev-jumpserver.fangcloud.net:2222</span>
+          <span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ healthy</span>
+        </div>
+        <div id="assets-bastion" class="asset-rows">
+          <div class="asset-row" onclick="selectHost('aidoc')" id="row-aidoc" data-host="aidoc" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">aidoc</span>
+            <span class="asset-host-cell">root@172.16.79.225:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('aidoc-worker2')" id="row-aidoc-worker2" data-host="aidoc-worker2" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">aidoc-worker2</span>
+            <span class="asset-host-cell">root@172.16.79.226:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('bisheng')" id="row-bisheng" data-host="bisheng" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">bisheng</span>
+            <span class="asset-host-cell">root@47.83.27.252:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('coze')" id="row-coze" data-host="coze" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">coze</span>
+            <span class="asset-host-cell">root@172.16.92.54:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('dev-lsp')" id="row-dev-lsp" data-host="dev-lsp" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">dev-lsp</span>
+            <span class="asset-host-cell">root@172.16.206.229:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('group-demo')" id="row-group-demo" data-host="group-demo" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">group-demo-ai知识库</span>
+            <span class="asset-host-cell">root@172.16.0.241:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('llm-wiki')" id="row-llm-wiki" data-host="llm-wiki" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">llm-wiki</span>
+            <span class="asset-host-cell">root@172.16.206.239:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('opensandbox')" id="row-opensandbox" data-host="opensandbox" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">opensandbox</span>
+            <span class="asset-host-cell">root@172.16.79.251:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('tmp-wwd')" id="row-tmp-wwd" data-host="tmp-wwd" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">tmp-wwd-ck8-onebox</span>
+            <span class="asset-host-cell">root@172.16.79.248:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('gongshu-demo')" id="row-gongshu-demo" data-host="gongshu-demo" data-bastion="true" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">拱墅区数智人demo</span>
+            <span class="asset-host-cell">root@172.16.206.232:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">↻ synced</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button></span>
+          </div>
+        </div>
+
+        <!-- ── DIRECT HOSTS GROUP ── -->
+        <div class="direct-hosts-header" onclick="toggleDirectHosts()" id="direct-hosts-header">
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span id="direct-chevron" style="font-size:10px;color:var(--fg-muted);">▼</span>
+            <span>Direct Hosts</span>
+          </span>
+        </div>
+        <div id="direct-host-rows" class="asset-rows" style="padding-left:28px;border-left:1px solid #e9e9e7;margin-left:14px;margin-bottom:8px;">
+          <div class="asset-row" onclick="selectHost('aidoc-private')" id="row-aidoc-private" data-host="aidoc-private" data-bastion="false" data-status="ready">
+            <span class="status-dot"></span>
+            <span class="asset-name-cell">aidoc-private</span>
+            <span class="asset-host-cell">root@10.39.152.217:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-openssh">🔀 OpenSSH ProxyJump</span></span>
+            <span class="asset-status-cell"><span class="badge badge-ok" style="font-size:11px;padding:1px 7px;">✓ ready</span></span>
+            <span class="asset-sync-cell">—</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button><button class="btn-icon" onclick="event.stopPropagation()">✕</button></span>
+          </div>
+          <div class="asset-row" onclick="selectHost('kg-demo')" id="row-kg-demo" data-host="kg-demo" data-bastion="false" data-status="offline">
+            <span class="status-dot offline"></span>
+            <span class="asset-name-cell">kg-demo</span>
+            <span class="asset-host-cell">root@172.16.99.81:22</span>
+            <span class="asset-type-cell"><span class="type-badge type-direct">● Direct</span></span>
+            <span class="asset-status-cell"><span class="badge badge-warn" style="font-size:11px;padding:1px 7px;">⚠ untrusted</span></span>
+            <span class="asset-sync-cell">—</span>
+            <span class="asset-actions"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation()">Copy</button><button class="btn-icon" onclick="event.stopPropagation()">✕</button></span>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="footer-bar">
+        <div id="host-count">Showing 12 hosts</div>
+        <div class="footer-actions">
+          <button class="btn btn-outline btn-sm" onclick="syncAllBastions()">Sync All Bastions</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── RIGHT-SIDE DETAIL PANEL ── -->
+    <div class="detail-panel open" id="detail-panel">
+      <!-- Bastion selected -->
+      <div id="detail-bastion">
+        <div class="detail-header">
+          <div>
+            <div class="detail-alias">dev-jumpserver-wangwendi</div>
+            <div class="detail-host">wangwendi@dev-jumpserver.fangcloud.net:2222</div>
+            <span class="type-badge type-jumpserver">🏰 堡垒机</span>
+            <span class="badge badge-ok" style="margin-left:6px;">✓ online</span>
+          </div>
+          <button class="btn-icon" onclick="document.getElementById('detail-panel').classList.remove('open')">✕</button>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ConfigSource</span>
+          <span class="prop-value">managed</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">HostName</span>
+          <span class="prop-value mono">dev-jumpserver.fangcloud.net</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">IdentityFile</span>
+          <span class="prop-value mono">~/.ssh/id_fangcloud</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">UploadDir</span>
+          <span class="prop-value mono">/opt/afk/keys</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ProxyJump</span>
+          <span class="prop-value">—</span>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-title">Sync</div>
+          <div class="sync-status">✓ healthy · last synced 2 min ago</div>
+          <div class="sync-asset-count">30 assets (16 Linux, 14 Windows)</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="btn btn-primary btn-sm">Refresh Assets</button>
+            <button class="btn btn-ghost btn-sm">Edit Bastion</button>
+            <button class="btn btn-danger btn-sm">Remove Bastion</button>
+          </div>
+          <div class="sync-log">
+            <div class="log-line ok"><span class="ts">14:32:01</span>✓ Login OK · session established</div>
+            <div class="log-line ok"><span class="ts">14:32:02</span>✓ List assets · 30 returned</div>
+            <div class="log-line ok"><span class="ts">14:32:03</span>✓ Imported 16 Linux hosts</div>
+            <div class="log-line skip"><span class="ts">14:32:03</span>⚠ Skipped 14 Windows hosts</div>
+            <div class="log-line ok"><span class="ts">14:32:04</span>✓ Written to ~/.afk/ssh-hosts.yaml</div>
+          </div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-section-title">Assets from this bastion (16 Linux)</div>
+          <div class="asset-list">
+            <div class="asset-item"><span class="asset-name">aidoc</span><span class="asset-host">172.16.79.225</span></div>
+            <div class="asset-item"><span class="asset-name">aidoc-worker2</span><span class="asset-host">172.16.79.226</span></div>
+            <div class="asset-item"><span class="asset-name">bisheng</span><span class="asset-host">47.83.27.252</span></div>
+            <div class="asset-item"><span class="asset-name">coze</span><span class="asset-host">172.16.92.54</span></div>
+            <div class="asset-item"><span class="asset-name">dev-lsp</span><span class="asset-host">172.16.206.229</span></div>
+            <div class="asset-item"><span class="asset-name">group-demo-ai知识库</span><span class="asset-host">172.16.0.241</span></div>
+            <div class="asset-item"><span class="asset-name">llm-wiki</span><span class="asset-host">172.16.206.239</span></div>
+            <div class="asset-item"><span class="asset-name">opensandbox</span><span class="asset-host">172.16.79.251</span></div>
+            <div class="asset-item"><span class="asset-name">tmp-wwd-ck8-onebox</span><span class="asset-host">172.16.79.248</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bastion-synced host detail (for assets under a bastion, e.g. aidoc, bisheng) -->
+      <div id="detail-bastion-asset" style="display:none;">
+        <div class="detail-header">
+          <div>
+            <div class="detail-alias" id="bastion-asset-alias">bisheng</div>
+            <div class="detail-host" id="bastion-asset-host">root@47.83.27.252:22</div>
+            <span class="type-badge type-direct">● Direct</span>
+            <span class="badge badge-ok" id="bastion-asset-status" style="margin-left:6px;">✓ online</span>
+          </div>
+          <button class="btn-icon" onclick="document.getElementById('detail-panel').classList.remove('open')">✕</button>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ConfigSource</span>
+          <span class="prop-value">managed</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">HostName</span>
+          <span class="prop-value mono" id="bastion-asset-hostname">47.83.27.252</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">IdentityFile</span>
+          <span class="prop-value mono">~/.ssh/id_fangcloud</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">UploadDir</span>
+          <span class="prop-value mono">/opt/afk/keys</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ProxyJump</span>
+          <span class="prop-value" id="bastion-asset-proxyjump">dev-jumpserver-wangwendi</span>
+        </div>
+        <div class="detail-actions">
+          <button class="btn btn-primary btn-sm">Connect</button>
+          <button class="btn btn-ghost btn-sm">Test</button>
+          <button class="btn btn-ghost btn-sm">Trust</button>
+        </div>
+        <div class="detail-section">
+          <div class="bastion-managed-note" style="background:#f7f7f5;border:1px solid #e9e9e7;border-radius:6px;padding:10px 12px;font-size:12.5px;color:var(--fg-muted);line-height:1.5;">
+            This host is managed by bastion <strong>dev-jumpserver-wangwendi</strong>. To remove it, refresh the bastion sync or remove the bastion itself. Public key auth is handled by the bastion — no per-host deploy needed.
+          </div>
+        </div>
+      </div>
+
+      <!-- Direct host (bisheng) detail -->
+      <div id="detail-direct" style="display:none;">
+        <div class="detail-header">
+          <div>
+            <div class="detail-alias">bisheng</div>
+            <div class="detail-host">root@47.83.27.252:22</div>
+            <span class="type-badge type-direct">● Direct</span>
+            <span class="badge badge-ok" style="margin-left:6px;">✓ online</span>
+          </div>
+          <button class="btn-icon" onclick="document.getElementById('detail-panel').classList.remove('open')">✕</button>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ConfigSource</span>
+          <span class="prop-value">managed</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">HostName</span>
+          <span class="prop-value mono">47.83.27.252</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">IdentityFile</span>
+          <span class="prop-value mono">~/.ssh/id_fangcloud</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">UploadDir</span>
+          <span class="prop-value mono">/opt/afk/keys</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ProxyJump</span>
+          <span class="prop-value">—</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Synced via</span>
+          <span class="prop-value" style="font-size:12.5px;">↻ dev-jumpserver-wangwendi</span>
+        </div>
+        <div class="detail-actions">
+          <button class="btn btn-ghost btn-sm">Trust</button>
+          <button class="btn btn-ghost btn-sm">Test</button>
+          <button class="btn btn-ghost btn-sm">Deploy</button>
+          <button class="btn btn-ghost btn-sm">Upload</button>
+          <button class="btn btn-primary btn-sm">Connect</button>
+        </div>
+      </div>
+
+      <!-- OpenSSH ProxyJump host detail -->
+      <div id="detail-openssh" style="display:none;">
+        <div class="detail-header">
+          <div>
+            <div class="detail-alias">aidoc-private</div>
+            <div class="detail-host">root@10.39.152.217:22</div>
+            <span class="type-badge type-openssh">🔀 OpenSSH ProxyJump</span>
+            <span class="badge badge-ok" style="margin-left:6px;">✓ online</span>
+          </div>
+          <button class="btn-icon" onclick="document.getElementById('detail-panel').classList.remove('open')">✕</button>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ConfigSource</span>
+          <span class="prop-value">managed</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">HostName</span>
+          <span class="prop-value mono">10.39.152.217</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">IdentityFile</span>
+          <span class="prop-value mono">~/.ssh/id_fangcloud</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">UploadDir</span>
+          <span class="prop-value mono">/opt/afk/keys</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ProxyJump</span>
+          <span class="prop-value" style="font-size:12.5px;">aidoc-private → aidoc-via-jumpserver</span>
+        </div>
+        <div class="detail-actions">
+          <button class="btn btn-ghost btn-sm">Trust</button>
+          <button class="btn btn-ghost btn-sm">Test</button>
+          <button class="btn btn-ghost btn-sm">Deploy</button>
+          <button class="btn btn-ghost btn-sm">Upload</button>
+          <button class="btn btn-primary btn-sm">Connect</button>
+        </div>
+      </div>
+
+      <!-- kg-demo untrusted -->
+      <div id="detail-kg-demo" style="display:none;">
+        <div class="detail-header">
+          <div>
+            <div class="detail-alias">kg-demo</div>
+            <div class="detail-host">root@172.16.99.81:22</div>
+            <span class="type-badge type-direct">● Direct</span>
+            <span class="badge badge-warn" style="margin-left:6px;">⚠ untrusted</span>
+          </div>
+          <button class="btn-icon" onclick="document.getElementById('detail-panel').classList.remove('open')">✕</button>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">ConfigSource</span>
+          <span class="prop-value">system</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">HostName</span>
+          <span class="prop-value mono">172.16.99.81</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">IdentityFile</span>
+          <span class="prop-value mono">~/.ssh/id_fangcloud</span>
+        </div>
+        <div class="detail-actions">
+          <button class="btn btn-ghost btn-sm">Trust</button>
+          <button class="btn btn-ghost btn-sm">Test</button>
+          <button class="btn btn-ghost btn-sm">Upload</button>
+          <button class="btn btn-primary btn-sm" disabled style="opacity:0.5;">Connect</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB 2: ADD HOST / BASTION ── -->
+  <div id="tab2" class="tab-content">
+    <div class="main-content" style="display:flex;align-items:flex-start;justify-content:center;padding-top:40px;">
+      <div class="modal" style="width:580px;">
+        <div class="modal-header">
+          <span id="modal-title">添加 SSH 主机</span>
+          <button class="btn-icon" onclick="switchTab(1)">✕</button>
+        </div>
+        <div class="modal-body">
+          <!-- Mode toggle: native <select> -->
+          <div class="mode-toggle">
+            <span class="mode-toggle-label">添加类型:</span>
+            <select class="mode-select" id="add-mode" onchange="toggleAddMode()">
+              <option value="host">SSH 主机</option>
+              <option value="bastion">堡垒机</option>
+            </select>
+          </div>
+
+          <!-- Success banner (for after-sync) -->
+          <div class="success-banner" id="success-banner">
+            ✓ Imported 16 Linux hosts as managed. The bastion itself is now in your list.
+          </div>
+
+          <!-- SSH Host form -->
+          <div id="form-host">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Display name</label>
+                <input class="form-input" type="text" placeholder="e.g. dev-server">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Host</label>
+                <input class="form-input" type="text" placeholder="e.g. 192.168.1.100">
+              </div>
+              <div class="form-group" style="flex:0 0 80px;">
+                <label class="form-label">Port</label>
+                <input class="form-input" type="text" value="22">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Username</label>
+                <input class="form-input" type="text" placeholder="e.g. root">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Jump Host Type</label>
+                <select class="form-input" id="jump-type-select">
+                  <option value="none">不使用跳板机 (Direct)</option>
+                  <option value="jumpserver">JumpServer 堡垒机</option>
+                  <option value="openssh">OpenSSH ProxyJump</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row" id="jump-host-selector">
+              <div class="form-group">
+                <label class="form-label">Jump Host</label>
+                <select class="form-input" id="jump-host-select">
+                  <option value="">选择已配置的 SSH 主机...</option>
+                  <option value="dev-jumpserver-wangwendi">dev-jumpserver-wangwendi</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Terminal</label>
+                <select class="form-input" id="terminal-select">
+                  <option value="kitty">Kitty</option>
+                  <option value="iterm">iTerm2</option>
+                  <option value="alacritty">Alacritty</option>
+                  <option value="系统默认">系统默认</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bastion form -->
+          <div id="form-bastion" style="display:none;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Display name</label>
+                <input class="form-input" type="text" value="dev-jumpserver-wangwendi">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Host URL</label>
+                <input class="form-input" type="text" value="https://dev-jumpserver.fangcloud.net">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Port</label>
+                <input class="form-input" type="text" value="2222">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Username</label>
+                <input class="form-input" type="text" value="wangwendi">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Password</label>
+                <input class="form-input" type="password" placeholder="••••••••">
+              </div>
+            </div>
+            <label class="form-check">
+              <input type="checkbox"> Enable OTP / 2FA
+            </label>
+            <div style="margin-top:14px;">
+              <button class="btn btn-primary" style="width:100%;" onclick="showPreview()">Test Connection &amp; Preview Assets</button>
+            </div>
+
+            <!-- Preview panel (shown after test) -->
+            <div class="preview-panel" id="bastion-preview" style="display:none;">
+              <div class="preview-status">✓ Login OK · 30 assets discovered</div>
+              <div class="preview-filter">
+                <select class="form-input" style="width:auto;padding:3px 8px;font-size:12px;" onchange="updatePreviewFilter(this.value)">
+                  <option value="linux">Linux only</option>
+                  <option value="all">All platforms</option>
+                  <option value="windows">Windows only</option>
+                </select>
+                <span id="preview-count">Linux only (16)</span>
+              </div>
+              <table class="preview-table" style="width:100%;">
+                <thead>
+                  <tr>
+                    <th class="check-col"><input type="checkbox" checked></th>
+                    <th>Name</th>
+                    <th>Address</th>
+                    <th>Platform</th>
+                  </tr>
+                </thead>
+                <tbody id="preview-tbody">
+                  <tr><td><input type="checkbox" checked></td><td>bisheng</td><td class="mono">47.83.27.252</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>aidoc</td><td class="mono">172.16.79.225</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>aidoc-worker2</td><td class="mono">172.16.79.226</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>coze</td><td class="mono">172.16.92.54</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>dev-lsp</td><td class="mono">172.16.206.229</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>group-demo-ai知识库</td><td class="mono">172.16.0.241</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>llm-wiki</td><td class="mono">172.16.206.239</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>opensandbox</td><td class="mono">172.16.79.251</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>tmp-wwd-ck8-onebox</td><td class="mono">172.16.79.248</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>wpsV7-new</td><td class="mono">172.16.99.83</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>arm</td><td class="mono">172.16.99.80</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>cad_hc</td><td class="mono">172.16.99.63</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>拱墅区数智人demo</td><td class="mono">172.16.206.232</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>test_oos</td><td class="mono">172.16.99.86</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>test_sharepoint</td><td class="mono">172.16.99.85</td><td>🐧 Linux</td></tr>
+                  <tr><td><input type="checkbox" checked></td><td>i-bp1b1r9kxhfhu5qzt5pq</td><td class="mono">172.16.0.183</td><td>🐧 Linux</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-01</td><td class="mono">172.16.99.50</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-02</td><td class="mono">172.16.99.51</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-03</td><td class="mono">172.16.99.52</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-04</td><td class="mono">172.16.99.53</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-05</td><td class="mono">172.16.99.54</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-06</td><td class="mono">172.16.99.55</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-07</td><td class="mono">172.16.99.56</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-08</td><td class="mono">172.16.99.57</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-09</td><td class="mono">172.16.99.58</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-10</td><td class="mono">172.16.99.59</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-11</td><td class="mono">172.16.99.60</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-12</td><td class="mono">172.16.99.61</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-13</td><td class="mono">172.16.99.62</td><td>🪟 Windows</td></tr>
+                  <tr style="display:none;"><td><input type="checkbox"></td><td>win-host-14</td><td class="mono">172.16.99.63</td><td>🪟 Windows</td></tr>
+                </tbody>
+              </table>
+              <div class="preview-note">14 Windows assets filtered by default · select "All platforms" to include them</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="switchTab(1)">Cancel</button>
+          <button class="btn btn-primary" id="modal-confirm" onclick="handleModalConfirm()">Add Host</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB 3: BASTION DETAIL PAGE ── -->
+  <div id="tab3" class="tab-content">
+    <div class="main-content">
+      <div class="breadcrumb">Workspace › SSH Hosts › dev-jumpserver-wangwendi</div>
+      <div class="page-title">dev-jumpserver-wangwendi</div>
+
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:-32px;margin-bottom:16px;">
+        <button class="btn btn-ghost btn-sm">Refresh</button>
+        <button class="btn btn-ghost btn-sm">Edit</button>
+        <button class="btn btn-danger btn-sm">Remove Bastion</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Connection</div>
+          </div>
+          <span class="badge badge-ok">✓ healthy · 2 min ago</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Host</span>
+          <span class="prop-value mono">dev-jumpserver.fangcloud.net</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Port</span>
+          <span class="prop-value mono">2222</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">User</span>
+          <span class="prop-value">wangwendi</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Auth method</span>
+          <span class="prop-value">Password + OTP</span>
+        </div>
+        <hr class="divider">
+        <div style="display:flex;flex-wrap:wrap;gap:0;">
+          <div class="status-item" style="display:flex;align-items:baseline;gap:6px;padding:5px 16px 5px 0;font-size:13px;"><span class="slabel" style="color:var(--fg-quiet);">Connection</span><span style="color:var(--accent-green);font-weight:500;">✓ OK</span></div>
+          <div class="status-item" style="display:flex;align-items:baseline;gap:6px;padding:5px 16px 5px 0;font-size:13px;"><span class="slabel" style="color:var(--fg-quiet);">Asset count</span><span style="color:var(--fg-primary);font-weight:500;">30 (16 Linux, 14 Windows)</span></div>
+          <div class="status-item" style="display:flex;align-items:baseline;gap:6px;padding:5px 16px 5px 0;font-size:13px;"><span class="slabel" style="color:var(--fg-quiet);">Sync errors</span><span style="color:var(--accent-green);font-weight:500;">0</span></div>
+        </div>
+        <div class="sync-log">
+          <div class="log-line ok"><span class="ts">14:32:01</span>✓ Login OK · session established</div>
+          <div class="log-line ok"><span class="ts">14:32:02</span>✓ List assets · 30 returned</div>
+          <div class="log-line ok"><span class="ts">14:32:03</span>✓ Imported 16 Linux hosts</div>
+          <div class="log-line skip"><span class="ts">14:32:03</span>⚠ Skipped 14 Windows hosts</div>
+          <div class="log-line ok"><span class="ts">14:32:04</span>✓ Written to ~/.afk/ssh-hosts.yaml</div>
+        </div>
+      </div>
+
+      <div class="section-title">Synced Hosts — Linux (16)</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Host</th>
+            <th>Platform</th>
+            <th>User</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>aidoc</td><td class="mono">root@172.16.79.225:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>aidoc-worker2</td><td class="mono">root@172.16.79.226:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>bisheng</td><td class="mono">root@47.83.27.252:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>coze</td><td class="mono">root@172.16.92.54:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>dev-lsp</td><td class="mono">root@172.16.206.229:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>group-demo-ai知识库</td><td class="mono">root@172.16.0.241:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>llm-wiki</td><td class="mono">root@172.16.206.239:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>opensandbox</td><td class="mono">root@172.16.79.251:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>tmp-wwd-ck8-onebox</td><td class="mono">root@172.16.79.248:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>wpsV7-new</td><td class="mono">root@172.16.99.83:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>arm</td><td class="mono">root@172.16.99.80:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>cad_hc</td><td class="mono">root@172.16.99.63:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>拱墅区数智人demo</td><td class="mono">root@172.16.206.232:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>test_oos</td><td class="mono">root@172.16.99.86:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>test_sharepoint</td><td class="mono">root@172.16.99.85:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+          <tr><td>i-bp1b1r9kxhfhu5qzt5pq</td><td class="mono">root@172.16.0.183:22</td><td class="platform-linux">🐧 Linux</td><td>root</td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button><button class="btn btn-ghost btn-sm">Trust</button><button class="btn btn-primary btn-sm">Connect</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── TAB 4: ERROR STATES ── -->
+  <div id="tab4" class="tab-content">
+    <div class="main-content">
+      <div class="breadcrumb">Workspace › SSH Hosts › dev-jumpserver-wangwendi</div>
+      <div class="page-title">dev-jumpserver-wangwendi</div>
+
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:-32px;margin-bottom:16px;">
+        <button class="btn btn-ghost btn-sm">Refresh</button>
+        <button class="btn btn-ghost btn-sm">Edit</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Sync Status</div>
+          </div>
+          <div class="seg-control" style="margin:0;">
+            <div class="seg active" onclick="showScenario(1,this)">Network error</div>
+            <div class="seg" onclick="showScenario(2,this)">Auth expired</div>
+            <div class="seg" onclick="showScenario(3,this)">Windows warning</div>
+          </div>
+        </div>
+
+        <!-- Scenario 1: Network error -->
+        <div id="scenario1">
+          <div class="error-banner">
+            <div class="title">✗ Connection refused</div>
+            <div class="detail">3 retries failed · check host address and port</div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Host</span>
+            <span class="prop-value mono">dev-jumpserver.fangcloud.net</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Port</span>
+            <span class="prop-value mono">2222</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Last sync</span>
+            <span class="prop-value" style="color:var(--accent-red);">Failed 5 min ago</span>
+          </div>
+          <div style="margin-top:14px;">
+            <button class="btn btn-primary btn-sm">Retry</button>
+            <button class="btn btn-ghost btn-sm">Edit host</button>
+          </div>
+        </div>
+
+        <!-- Scenario 2: Auth expired -->
+        <div id="scenario2" style="display:none;">
+          <div class="error-banner" style="background:#fef3e2;border-color:#fdecc5;">
+            <div class="title" style="color:var(--accent-yellow);">🔒 Session expired</div>
+            <div class="detail">please re-authenticate · your session has timed out</div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Host</span>
+            <span class="prop-value mono">dev-jumpserver.fangcloud.net</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Auth expires</span>
+            <span class="prop-value" style="color:var(--accent-yellow);">Expired 12 min ago</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Last sync</span>
+            <span class="prop-value">Sep 21 09:18 (30 assets)</span>
+          </div>
+          <div style="margin-top:14px;">
+            <button class="btn btn-primary btn-sm">Re-authenticate</button>
+            <button class="btn btn-ghost btn-sm">Edit credentials</button>
+          </div>
+        </div>
+
+        <!-- Scenario 3: Windows warning -->
+        <div id="scenario3" style="display:none;">
+          <div class="warn-banner">
+            <div class="title">⚠ 14 Windows assets skipped</div>
+            <div class="detail">AFK only handles SSH connections on Linux hosts</div>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Linux synced</span>
+            <span class="prop-value">16 assets</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Windows skipped</span>
+            <span class="prop-value" style="color:var(--accent-yellow);">14 assets</span>
+          </div>
+          <div class="prop-row">
+            <span class="prop-label">Last sync</span>
+            <span class="prop-value">Sep 21 14:32 (healthy)</span>
+          </div>
+          <div style="margin-top:14px;">
+            <button class="btn btn-primary btn-sm">Include anyway?</button>
+            <button class="btn btn-ghost btn-sm">Change filter</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">All Synced Hosts</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th style="width:10px;"></th>
+            <th>Name</th>
+            <th>Host</th>
+            <th>Type</th>
+            <th>Source</th>
+            <th>Synced from</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="status-dot warn"></span></td><td><strong>dev-jumpserver-wangwendi</strong></td><td class="mono">wangwendi@dev-jumpserver.fangcloud.net:2222</td><td><span class="type-badge type-jumpserver">🏰 堡垒机</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from-none">—</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">⋯</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>aidoc</td><td class="mono">root@172.16.79.225:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>aidoc-worker2</td><td class="mono">root@172.16.79.226:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>bisheng</td><td class="mono">root@47.83.27.252:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>coze</td><td class="mono">root@172.16.92.54:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>dev-lsp</td><td class="mono">root@172.16.206.229:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>group-demo-ai知识库</td><td class="mono">root@172.16.0.241:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>llm-wiki</td><td class="mono">root@172.16.206.239:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>opensandbox</td><td class="mono">root@172.16.79.251:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>tmp-wwd-ck8-onebox</td><td class="mono">root@172.16.79.248:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from">↻ dev-jumpserver-wangwendi</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot"></span></td><td>aidoc-private</td><td class="mono">root@10.39.152.217:22</td><td><span class="type-badge type-openssh">🔀 OpenSSH ProxyJump</span></td><td><span class="pill">Managed</span></td><td><span class="sync-from-none">—</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+          <tr><td><span class="status-dot offline"></span></td><td>kg-demo</td><td class="mono">root@172.16.99.81:22</td><td><span class="type-badge type-direct">● Direct</span></td><td><span class="pill">System</span></td><td><span class="sync-from-none">—</span></td><td class="row-actions"><button class="btn btn-ghost btn-sm">Copy</button></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──
+var bastionCollapsed = false;
+var directHostsCollapsed = false;
+var selectedHostId = null;
+
+// ── Tab switching ──
+function switchTab(n) {
+  document.querySelectorAll('.tab').forEach(function(t,i){
+    t.classList.toggle('active', i+1===n);
+  });
+  document.querySelectorAll('.tab-content').forEach(function(c,i){
+    c.classList.toggle('active', i+1===n);
+  });
+}
+
+function showScenario(n, el) {
+  document.querySelectorAll('.seg').forEach(function(s){ s.classList.remove('active'); });
+  el.classList.add('active');
+  document.getElementById('scenario1').style.display = n===1 ? 'block' : 'none';
+  document.getElementById('scenario2').style.display = n===2 ? 'block' : 'none';
+  document.getElementById('scenario3').style.display = n===3 ? 'block' : 'none';
+}
+
+// ── Group toggle ──
+function toggleGroup(id) {
+  var assets = document.getElementById('assets-' + id);
+  var chevron = document.getElementById('chevron-' + id);
+  if (!assets) return;
+  bastionCollapsed = !bastionCollapsed;
+  assets.classList.toggle('collapsed', bastionCollapsed);
+  if (chevron) chevron.classList.toggle('collapsed', bastionCollapsed);
+}
+
+function toggleDirectHosts() {
+  var rows = document.getElementById('direct-host-rows');
+  var chevron = document.getElementById('direct-chevron');
+  if (!rows) return;
+  directHostsCollapsed = !directHostsCollapsed;
+  rows.classList.toggle('collapsed', directHostsCollapsed);
+  if (chevron) chevron.style.transform = directHostsCollapsed ? 'rotate(-90deg)' : '';
+}
+
+// ── Bastion host data map ──
+var bastionHostData = {
+  'aidoc':         { alias: 'aidoc',         host: 'root@172.16.79.225:22',    hostname: '172.16.79.225',   status: 'ok',   bastion: 'dev-jumpserver-wangwendi' },
+  'aidoc-worker2': { alias: 'aidoc-worker2', host: 'root@172.16.79.226:22',   hostname: '172.16.79.226',   status: 'ok',   bastion: 'dev-jumpserver-wangwendi' },
+  'bisheng':       { alias: 'bisheng',       host: 'root@47.83.27.252:22',    hostname: '47.83.27.252',    status: 'ok',   bastion: 'dev-jumpserver-wangwendi' },
+  'coze':          { alias: 'coze',          host: 'root@172.16.92.54:22',    hostname: '172.16.92.54',    status: 'ok',   bastion: 'dev-jumpserver-wangwendi' },
+  'dev-lsp':       { alias: 'dev-lsp',       host: 'root@172.16.206.229:22',  hostname: '172.16.206.229', status: 'ok',   bastion: 'dev-jumpserver-wangwendi' },
+  'group-demo':    { alias: 'group-demo-ai知识库', host: 'root@172.16.0.241:22', hostname: '172.16.0.241', status: 'ok',  bastion: 'dev-jumpserver-wangwendi' },
+  'llm-wiki':      { alias: 'llm-wiki',      host: 'root@172.16.206.239:22',  hostname: '172.16.206.239', status: 'ok',   bastion: 'dev-jumpserver-wangwendi' },
+  'opensandbox':   { alias: 'opensandbox',   host: 'root@172.16.79.251:22',   hostname: '172.16.79.251',   status: 'ok',   bastion: 'dev-jumpserver-wangwendi' },
+  'tmp-wwd':       { alias: 'tmp-wwd-ck8-onebox', host: 'root@172.16.79.248:22', hostname: '172.16.79.248', status: 'ok', bastion: 'dev-jumpserver-wangwendi' },
+  'gongshu-demo':  { alias: '拱墅区数智人demo', host: 'root@172.16.206.232:22', hostname: '172.16.206.232', status: 'ok', bastion: 'dev-jumpserver-wangwendi' }
+};
+
+// ── Select host / show detail ──
+function selectHost(id) {
+  // Clear row selection
+  document.querySelectorAll('.asset-row').forEach(function(r){ r.classList.remove('selected'); });
+  document.querySelectorAll('.group-header').forEach(function(r){ r.classList.remove('selected'); });
+  var row = document.getElementById('row-' + id);
+  if (row) row.classList.add('selected');
+
+  // Show detail panel
+  var panel = document.getElementById('detail-panel');
+  panel.classList.add('open');
+
+  // Hide all detail sections
+  document.getElementById('detail-bastion').style.display = 'none';
+  document.getElementById('detail-direct').style.display = 'none';
+  document.getElementById('detail-openssh').style.display = 'none';
+  document.getElementById('detail-kg-demo').style.display = 'none';
+  document.getElementById('detail-bastion-asset').style.display = 'none';
+
+  // Route to appropriate detail
+  if (id === 'kg-demo') {
+    document.getElementById('detail-kg-demo').style.display = 'block';
+  } else if (id === 'aidoc-private') {
+    document.getElementById('detail-openssh').style.display = 'block';
+  } else if (id === 'bastion') {
+    document.getElementById('detail-bastion').style.display = 'block';
+  } else if (bastionHostData[id]) {
+    // Bastion-synced asset: populate and show bastion-asset detail
+    var data = bastionHostData[id];
+    document.getElementById('bastion-asset-alias').textContent = data.alias;
+    document.getElementById('bastion-asset-host').textContent = data.host;
+    document.getElementById('bastion-asset-hostname').textContent = data.hostname;
+    document.getElementById('bastion-asset-proxyjump').textContent = data.bastion;
+    var statusBadge = document.getElementById('bastion-asset-status');
+    if (data.status === 'ok') {
+      statusBadge.className = 'badge badge-ok';
+      statusBadge.style.marginLeft = '6px';
+      statusBadge.textContent = '✓ online';
+    }
+    document.getElementById('detail-bastion-asset').style.display = 'block';
+  } else {
+    document.getElementById('detail-direct').style.display = 'block';
+  }
+}
+
+// ── Select bastion group header ──
+function selectBastion() {
+  // Clear row selection
+  document.querySelectorAll('.asset-row').forEach(function(r){ r.classList.remove('selected'); });
+  document.querySelectorAll('.group-header').forEach(function(r){ r.classList.remove('selected'); });
+  document.getElementById('group-bastion').classList.add('selected');
+
+  // Show detail panel with bastion detail
+  var panel = document.getElementById('detail-panel');
+  panel.classList.add('open');
+
+  document.getElementById('detail-bastion').style.display = 'none';
+  document.getElementById('detail-direct').style.display = 'none';
+  document.getElementById('detail-openssh').style.display = 'none';
+  document.getElementById('detail-kg-demo').style.display = 'none';
+  document.getElementById('detail-bastion-asset').style.display = 'none';
+  document.getElementById('detail-bastion').style.display = 'block';
+}
+
+// ── Filter hosts ──
+function filterHosts() {
+  var search = document.getElementById('search-input').value.toLowerCase();
+  var source = document.getElementById('filter-source').value;
+  var status = document.getElementById('filter-status').value;
+  var bastionFilter = document.getElementById('filter-bastion').value;
+
+  // Bastion group visibility
+  var bastionGroup = document.getElementById('group-bastion');
+  var bastionAssets = document.getElementById('assets-bastion');
+  var directHeader = document.getElementById('direct-hosts-header');
+  var directAssets = document.getElementById('direct-host-rows');
+
+  var showBastionGroup = bastionFilter === 'all' || bastionFilter === 'bastion-only';
+  var showDirectGroup = bastionFilter === 'all' || bastionFilter === 'direct-only';
+
+  if (bastionGroup) bastionGroup.style.display = showBastionGroup ? '' : 'none';
+  if (bastionAssets) bastionAssets.style.display = (showBastionGroup && !bastionCollapsed) ? '' : 'none';
+  if (directHeader) directHeader.style.display = showDirectGroup ? '' : 'none';
+  if (directAssets) directAssets.style.display = (showDirectGroup && !directHostsCollapsed) ? '' : 'none';
+
+  // Filter asset rows
+  var assetRows = document.querySelectorAll('.asset-row');
+  var visibleCount = 0;
+  assetRows.forEach(function(row) {
+    var name = row.querySelector('.asset-name-cell').textContent.toLowerCase();
+    var hostStatus = row.getAttribute('data-status');
+    var isBastion = row.getAttribute('data-bastion') === 'true';
+    var rowBastionFilter = isBastion ? 'bastion' : 'direct';
+
+    var matchesSearch = name.indexOf(search) > -1;
+    var matchesStatus = status === 'all' || hostStatus === status;
+    var matchesBastion = bastionFilter === 'all' || bastionFilter === rowBastionFilter;
+    var matchesSource = true; // source filter would need data attributes on rows
+
+    var show = matchesSearch && matchesStatus && matchesBastion && matchesSource;
+    row.style.display = show ? '' : 'none';
+    if (show) visibleCount++;
+  });
+
+  var countEl = document.getElementById('host-count');
+  if (countEl) countEl.textContent = 'Showing ' + visibleCount + ' hosts';
+}
+
+// ── Sync actions ──
+function syncBastion(id) {
+  alert('Syncing bastion ' + id + '...');
+}
+
+function syncDirectHosts() {
+  alert('Syncing all direct hosts...');
+}
+
+function syncAllBastions() {
+  alert('Syncing all bastions...');
+}
+
+// ── Add dialog ──
+function toggleAddMode() {
+  var mode = document.getElementById('add-mode').value;
+  document.getElementById('modal-title').textContent = mode === 'bastion' ? '添加堡垒机' : '添加 SSH 主机';
+  document.getElementById('form-host').style.display = mode === 'host' ? 'block' : 'none';
+  document.getElementById('form-bastion').style.display = mode === 'bastion' ? 'block' : 'none';
+  document.getElementById('modal-confirm').textContent = mode === 'bastion' ? 'Sync ✓' : 'Add Host';
+  document.getElementById('success-banner').classList.remove('show');
+  document.getElementById('bastion-preview').style.display = 'none';
+}
+
+function showPreview() {
+  document.getElementById('bastion-preview').style.display = 'block';
+}
+
+function updatePreviewFilter(value) {
+  var rows = document.getElementById('preview-tbody').querySelectorAll('tr');
+  var linuxCount = 0, winCount = 0;
+  rows.forEach(function(r){
+    var isLinux = r.querySelector('td:last-child').textContent.indexOf('Linux') > -1;
+    var isWin = r.querySelector('td:last-child').textContent.indexOf('Windows') > -1;
+    if (isLinux) linuxCount++;
+    if (isWin) winCount++;
+    if (value === 'linux') {
+      r.style.display = isLinux ? '' : 'none';
+    } else if (value === 'windows') {
+      r.style.display = isWin ? '' : 'none';
+    } else {
+      r.style.display = '';
+    }
+  });
+  var countEl = document.getElementById('preview-count');
+  if (value === 'linux') countEl.textContent = 'Linux only (' + linuxCount + ')';
+  else if (value === 'windows') countEl.textContent = 'Windows only (' + winCount + ')';
+  else countEl.textContent = 'All (' + (linuxCount + winCount) + ')';
+}
+
+function handleModalConfirm() {
+  var mode = document.getElementById('add-mode').value;
+  if (mode === 'bastion') {
+    document.getElementById('success-banner').classList.add('show');
+    document.getElementById('modal-confirm').textContent = 'Done ✓';
+    document.getElementById('modal-confirm').onclick = function(){ switchTab(1); };
+  } else {
+    switchTab(1);
+  }
+}
+</script>
+
+</body>
+</html>

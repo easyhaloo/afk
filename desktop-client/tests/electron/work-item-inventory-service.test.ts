@@ -119,4 +119,82 @@ describe("work item inventory service", () => {
     expect((await service.list()).items).toHaveLength(1);
     expect(exec).toHaveBeenCalledTimes(2);
   });
+
+  it("returns a persisted snapshot without waiting for the remote provider", async () => {
+    const store = {
+      read: vi.fn(async () => ({ options: {}, inventory, syncedAt: new Date().toISOString() })),
+      write: vi.fn(),
+      clear: vi.fn(),
+    };
+    const exec = vi.fn();
+    const service = createWorkItemInventoryService({
+      resolveAfk: async () => ({ command: "/usr/local/bin/afk", args: [] }),
+      cwd: "/tmp/afk-control",
+      exec,
+      store,
+    });
+
+    await expect(service.list()).resolves.toEqual(inventory);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("projects a complete local snapshot for provider filters", async () => {
+    const store = {
+      read: vi.fn(async (options: { platform?: string }) => options.platform
+        ? null
+        : {
+          options: {},
+          inventory: {
+            ...inventory,
+            items: [
+              inventory.items[0],
+              { ...inventory.items[0], id: "gitlab:corp/tools#2", project: { platform: "gitlab", projectKey: "corp/tools", name: "tools" } },
+            ],
+            projects: [
+              inventory.projects[0],
+              { platform: "gitlab", projectKey: "corp/tools", name: "tools" },
+            ],
+          },
+          syncedAt: new Date().toISOString(),
+        }),
+      write: vi.fn(),
+      clear: vi.fn(),
+    };
+    const service = createWorkItemInventoryService({
+      resolveAfk: async () => ({ command: "/usr/local/bin/afk", args: [] }),
+      cwd: "/tmp/afk-control",
+      exec: vi.fn(),
+      store,
+    });
+
+    const result = await service.list({ platform: "gitlab" });
+
+    expect(result.items.map(item => item.id)).toEqual(["gitlab:corp/tools#2"]);
+    expect(store.read).toHaveBeenCalledWith({});
+  });
+
+  it("refreshes stale snapshots in the background", async () => {
+    const fresh = { ...inventory, items: [] };
+    const store = {
+      read: vi.fn(async () => ({ options: {}, inventory, syncedAt: "2020-01-01T00:00:00.000Z" })),
+      write: vi.fn(),
+      clear: vi.fn(),
+    };
+    const exec = vi.fn(async () => ({
+      ok: true,
+      stdout: JSON.stringify({ ok: true, kind: "backlog.inventory", data: fresh }),
+      stderr: "",
+    }));
+    const service = createWorkItemInventoryService({
+      resolveAfk: async () => ({ command: "/usr/local/bin/afk", args: [] }),
+      cwd: "/tmp/afk-control",
+      exec,
+      store,
+      staleAfterMs: 1,
+    });
+
+    await expect(service.list()).resolves.toEqual(inventory);
+    await vi.waitFor(() => expect(exec).toHaveBeenCalledTimes(1));
+    expect(store.write).toHaveBeenCalledTimes(1);
+  });
 });

@@ -37,9 +37,61 @@ export type ProviderProjectRef = {
   webUrl?: string;
 };
 
+export type WorkItemSourceRef = {
+  id: string;
+  type: "github_issue" | "gitlab_issue" | "external" | "local";
+  title: string;
+  reference: string;
+  role?: string;
+  platform?: BacklogPlatform;
+  projectKey?: string;
+  issueNumber?: number;
+  webUrl?: string;
+};
+
+export type WorkItemRepositoryRef = ProviderProjectRef & {
+  id?: string;
+  role?: string;
+  checkoutPath?: string;
+};
+
+export type WorkItemExecutionStep = {
+  id: string;
+  title: string;
+  detail?: string;
+  status?: "pending" | "running" | "completed" | "blocked";
+};
+
+export type WorkItemRunRecord = {
+  id: string;
+  status: "starting" | "running" | "completed" | "failed";
+  startedAt: string;
+  completedAt?: string;
+  workflow?: string;
+  workspacePath?: string;
+  pid?: number;
+  error?: string;
+};
+
+export type WorkItemRunStartInput = {
+  workItemId: WorkItemId;
+  repositories: WorkItemRepositoryRef[];
+  workflow?: string;
+  environment?: "local";
+};
+
+export type WorkItemRunStartResult = {
+  runId: string;
+  workspace: {
+    root: string;
+  };
+};
+
 export type GlobalWorkItem = {
   id: WorkItemId;
+  /** @deprecated Compatibility projection for issue-backed inventory entries. */
   issueNumber: number;
+  /** @deprecated Compatibility projection for issue-backed inventory entries. */
   project: ProviderProjectRef;
   title: string;
   description?: string;
@@ -53,6 +105,13 @@ export type GlobalWorkItem = {
   branchName: string;
   providerRef: string;
   webUrl?: string;
+  sources?: WorkItemSourceRef[];
+  repositories?: WorkItemRepositoryRef[];
+  executionPlan?: WorkItemExecutionStep[];
+  runs?: WorkItemRunRecord[];
+  owner?: string;
+  priority?: "P0" | "P1" | "P2" | "P3";
+  updatedAt?: string;
 };
 
 export type WorkItemInventoryOptions = {
@@ -271,6 +330,26 @@ export function parseBacklogRunRetryInput(input: unknown): BacklogRunRetryInput 
   return { ...start, reason: candidate.reason.trim() };
 }
 
+export function parseWorkItemRunStartInput(input: unknown): WorkItemRunStartInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item run input must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["workItemId", "repositories", "workflow", "environment"], "work item run input");
+  if (!Array.isArray(candidate.repositories)) throw new Error("work item run input: repositories must be an array");
+  const result: WorkItemRunStartInput = {
+    workItemId: parseGlobalWorkItemIdentity(candidate.workItemId, "work item run input: workItemId"),
+    repositories: candidate.repositories.map(parseWorkItemRepository),
+  };
+  if (candidate.workflow !== undefined) {
+    if (typeof candidate.workflow !== "string" || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(candidate.workflow)) throw new Error("work item run input: workflow is invalid");
+    result.workflow = candidate.workflow;
+  }
+  if (candidate.environment !== undefined) {
+    if (candidate.environment !== "local") throw new Error("work item run input: environment is invalid");
+    result.environment = "local";
+  }
+  return result;
+}
+
 export function parseBacklogId(input: unknown): string {
   if (typeof input !== "string") throw new Error("backlogId must be a string");
   const value = input.trim();
@@ -316,11 +395,11 @@ export function parseProviderProjectRef(input: unknown): ProviderProjectRef {
 export function parseGlobalWorkItem(input: unknown): GlobalWorkItem {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("global work item must be an object");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "issueNumber", "project", "title", "description", "managed", "executionEligible", "state", "executionMode", "parentId", "dependsOn", "tags", "branchName", "providerRef", "webUrl"], "global work item");
-  const id = parseWorkItemId(candidate.id);
+  assertExactKeys(candidate, ["id", "issueNumber", "project", "title", "description", "managed", "executionEligible", "state", "executionMode", "parentId", "dependsOn", "tags", "branchName", "providerRef", "webUrl", "sources", "repositories", "executionPlan", "runs", "owner", "priority", "updatedAt"], "global work item");
+  const id = parseGlobalWorkItemIdentity(candidate.id, "global work item: id");
   const issueNumber = parseIssueNumber(candidate.issueNumber, "global work item");
   const project = parseProviderProjectRef(candidate.project);
-  assertWorkItemIdentityMatches(id, issueNumber, project, "global work item");
+  if (/^[^:]+:[^#]+#[1-9]\d*$/.test(id)) assertWorkItemIdentityMatches(parseWorkItemId(id), issueNumber, project, "global work item");
   if (typeof candidate.managed !== "boolean" || typeof candidate.executionEligible !== "boolean") throw new Error("global work item: managed and executionEligible must be booleans");
   if (candidate.executionEligible && !candidate.managed) throw new Error("global work item: unmanaged items cannot be execution eligible");
   if (!isBacklogState(candidate.state) || !isBacklogExecutionMode(candidate.executionMode)) throw new Error("global work item has invalid lifecycle fields");
@@ -335,15 +414,107 @@ export function parseGlobalWorkItem(input: unknown): GlobalWorkItem {
     executionEligible: candidate.executionEligible,
     state: candidate.state,
     executionMode: candidate.executionMode,
-    dependsOn: candidate.dependsOn.map(parseWorkItemId),
+    dependsOn: candidate.dependsOn.map(value => parseGlobalWorkItemIdentity(value, "global work item: dependsOn")),
     tags: candidate.tags as string[],
     branchName: parseRequiredString(candidate.branchName, "global work item: branchName"),
     providerRef: parseRequiredString(candidate.providerRef, "global work item: providerRef"),
   };
   if (candidate.description !== undefined) result.description = parseMultilineString(candidate.description, "global work item: description");
-  if (candidate.parentId !== undefined) result.parentId = parseWorkItemId(candidate.parentId);
+  if (candidate.parentId !== undefined) result.parentId = parseGlobalWorkItemIdentity(candidate.parentId, "global work item: parentId");
   if (candidate.webUrl !== undefined) result.webUrl = parseRequiredString(candidate.webUrl, "global work item: webUrl");
+  if (candidate.sources !== undefined) result.sources = parseWorkItemArray(candidate.sources, parseWorkItemSource, "global work item: sources");
+  if (candidate.repositories !== undefined) result.repositories = parseWorkItemArray(candidate.repositories, parseWorkItemRepository, "global work item: repositories");
+  if (candidate.executionPlan !== undefined) result.executionPlan = parseWorkItemArray(candidate.executionPlan, parseWorkItemExecutionStep, "global work item: executionPlan");
+  if (candidate.runs !== undefined) result.runs = parseWorkItemArray(candidate.runs, parseWorkItemRunRecord, "global work item: runs");
+  if (candidate.owner !== undefined) result.owner = parseRequiredString(candidate.owner, "global work item: owner");
+  if (candidate.priority !== undefined) {
+    if (typeof candidate.priority !== "string" || !["P0", "P1", "P2", "P3"].includes(candidate.priority)) throw new Error("global work item: priority is invalid");
+    result.priority = candidate.priority as GlobalWorkItem["priority"];
+  }
+  if (candidate.updatedAt !== undefined) result.updatedAt = parseRequiredString(candidate.updatedAt, "global work item: updatedAt");
   return result;
+}
+
+function parseGlobalWorkItemIdentity(input: unknown, label: string): WorkItemId {
+  if (typeof input !== "string" || input.trim() !== input || !input || input.length > 160 || /[\x00-\x1f\x7f]/.test(input)) throw new Error(`${label} is invalid`);
+  if (/^[^:]+:[^#]+#[1-9]\d*$/.test(input)) return parseWorkItemId(input);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(input) || input.includes("..")) throw new Error(`${label} is invalid`);
+  return input;
+}
+
+function parseWorkItemArray<T>(input: unknown, parser: (value: unknown) => T, label: string): T[] {
+  if (!Array.isArray(input)) throw new Error(`${label} must be an array`);
+  return input.map(parser);
+}
+
+function parseWorkItemSource(input: unknown): WorkItemSourceRef {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item source must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["id", "type", "title", "reference", "role", "platform", "projectKey", "issueNumber", "webUrl"], "work item source");
+  if (typeof candidate.type !== "string" || !["github_issue", "gitlab_issue", "external", "local"].includes(candidate.type)) throw new Error("work item source: type is invalid");
+  const result: WorkItemSourceRef = {
+    id: parseRequiredString(candidate.id, "work item source: id"),
+    type: candidate.type as WorkItemSourceRef["type"],
+    title: parseRequiredString(candidate.title, "work item source: title"),
+    reference: parseRequiredString(candidate.reference, "work item source: reference"),
+  };
+  if (candidate.role !== undefined) result.role = parseRequiredString(candidate.role, "work item source: role");
+  if (candidate.platform !== undefined) result.platform = parseRequiredBacklogPlatform(candidate.platform, "work item source");
+  if (candidate.projectKey !== undefined) result.projectKey = parseProjectKey(candidate.projectKey, "work item source");
+  if (candidate.issueNumber !== undefined) result.issueNumber = parseIssueNumber(candidate.issueNumber, "work item source");
+  if (candidate.webUrl !== undefined) result.webUrl = parseRequiredString(candidate.webUrl, "work item source: webUrl");
+  return result;
+}
+
+function parseWorkItemRepository(input: unknown): WorkItemRepositoryRef {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item repository must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["id", "platform", "projectKey", "providerProjectId", "name", "defaultBranch", "webUrl", "role", "checkoutPath"], "work item repository");
+  const project = parseProviderProjectRef({
+    platform: candidate.platform,
+    projectKey: candidate.projectKey,
+    providerProjectId: candidate.providerProjectId,
+    name: candidate.name,
+    defaultBranch: candidate.defaultBranch,
+    webUrl: candidate.webUrl,
+  });
+  return {
+    ...project,
+    ...(candidate.id === undefined ? {} : { id: parseRequiredString(candidate.id, "work item repository: id") }),
+    ...(candidate.role === undefined ? {} : { role: parseRequiredString(candidate.role, "work item repository: role") }),
+    ...(candidate.checkoutPath === undefined ? {} : { checkoutPath: parseRequiredString(candidate.checkoutPath, "work item repository: checkoutPath") }),
+  };
+}
+
+function parseWorkItemExecutionStep(input: unknown): WorkItemExecutionStep {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item execution step must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["id", "title", "detail", "status"], "work item execution step");
+  if (candidate.status !== undefined && (typeof candidate.status !== "string" || !["pending", "running", "completed", "blocked"].includes(candidate.status))) throw new Error("work item execution step: status is invalid");
+  return {
+    id: parseRequiredString(candidate.id, "work item execution step: id"),
+    title: parseRequiredString(candidate.title, "work item execution step: title"),
+    ...(candidate.detail === undefined ? {} : { detail: parseRequiredString(candidate.detail, "work item execution step: detail") }),
+    ...(candidate.status === undefined ? {} : { status: candidate.status as WorkItemExecutionStep["status"] }),
+  };
+}
+
+function parseWorkItemRunRecord(input: unknown): WorkItemRunRecord {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item run record must be an object");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["id", "status", "startedAt", "completedAt", "workflow", "workspacePath", "pid", "error"], "work item run record");
+  if (typeof candidate.status !== "string" || !["starting", "running", "completed", "failed"].includes(candidate.status)) throw new Error("work item run record: status is invalid");
+  if (candidate.pid !== undefined && (typeof candidate.pid !== "number" || !Number.isInteger(candidate.pid) || candidate.pid <= 0)) throw new Error("work item run record: pid is invalid");
+  return {
+    id: parseRequiredString(candidate.id, "work item run record: id"),
+    status: candidate.status as WorkItemRunRecord["status"],
+    startedAt: parseRequiredString(candidate.startedAt, "work item run record: startedAt"),
+    ...(candidate.completedAt === undefined ? {} : { completedAt: parseRequiredString(candidate.completedAt, "work item run record: completedAt") }),
+    ...(candidate.workflow === undefined ? {} : { workflow: parseRequiredString(candidate.workflow, "work item run record: workflow") }),
+    ...(candidate.workspacePath === undefined ? {} : { workspacePath: parseRequiredString(candidate.workspacePath, "work item run record: workspacePath") }),
+    ...(candidate.pid === undefined ? {} : { pid: candidate.pid }),
+    ...(candidate.error === undefined ? {} : { error: parseRequiredString(candidate.error, "work item run record: error") }),
+  };
 }
 
 export function parseWorkItemInventoryOptions(input: unknown): WorkItemInventoryOptions {

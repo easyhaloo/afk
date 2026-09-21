@@ -42,6 +42,34 @@ describe("SelectMenu", () => {
     expect(onChange).toHaveBeenCalledWith("done");
   });
 
+  it("keeps the pinned option while filtering a searchable menu", () => {
+    let renderer!: ReturnType<typeof create>;
+    act(() => {
+      renderer = create(createElement(SelectMenu, {
+        label: "选择仓库",
+        value: "all",
+        options: [
+          { value: "all", label: "全部 Issue 来源", triggerLabel: "全部" },
+          { value: "github:acme/api", label: "acme/api" },
+          { value: "github:acme/web", label: "acme/web" },
+        ],
+        onChange: vi.fn(),
+        variant: "filter",
+        triggerPrefix: "Issue",
+        search: { label: "搜索 Issue 来源", pinnedValue: "all", emptyMessage: "没有匹配的 Issue 来源" },
+      }));
+    });
+
+    act(() => { renderer.root.findByProps({ "aria-label": "选择仓库" }).props.onClick(); });
+    act(() => { renderer.root.findByProps({ "aria-label": "搜索 Issue 来源" }).props.onChange({ target: { value: "web" } }); });
+
+    expect(renderer.root.findAllByProps({ role: "option" }).map(option => option.props.title)).toEqual(["全部 Issue 来源", "acme/web"]);
+
+    act(() => { renderer.root.findByProps({ "aria-label": "搜索 Issue 来源" }).props.onChange({ target: { value: "missing" } }); });
+    expect(renderer.root.findAllByProps({ role: "option" }).map(option => option.props.title)).toEqual(["全部 Issue 来源"]);
+    expect(renderer.root.findByProps({ className: "select-menu-empty" }).children).toContain("没有匹配的 Issue 来源");
+  });
+
   it("uses the shared select menu for workflow inspector option fields", () => {
     const onTemplatePatch = vi.fn();
     const template: CanvasTemplateNode = {

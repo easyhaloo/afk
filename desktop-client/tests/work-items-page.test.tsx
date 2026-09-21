@@ -21,6 +21,12 @@ function selectProvider(renderer: ReturnType<typeof create>, name: string) {
   renderer.root.findByProps({ "aria-label": "选择 Provider" }).props.onChange({ currentTarget: { value: name } });
 }
 
+function findButton(renderer: ReturnType<typeof create>, label: string): ReactTestInstance {
+  const button = renderer.root.findAllByType("button").find(node => textContent(node).includes(label));
+  if (!button) throw new Error(`button not found: ${label}`);
+  return button;
+}
+
 const result: WorkItemInventoryResult = {
   items: [
     { id: "github:acme/api#1", issueNumber: 1, project: { platform: "github", projectKey: "acme/api", name: "api" }, title: "API issue", managed: true, executionEligible: true, state: "ready", executionMode: "afk", dependsOn: [], tags: [], branchName: "afk/backlog-1", providerRef: "github:acme/api#1" },
@@ -29,6 +35,67 @@ const result: WorkItemInventoryResult = {
   projects: [
     { platform: "github", projectKey: "acme/api", name: "api" },
     { platform: "github", projectKey: "acme/web", name: "web" },
+  ],
+  diagnostics: [],
+  complete: true,
+};
+
+const multiResourceResult: WorkItemInventoryResult = {
+  items: [
+    {
+      id: "WI-2026-018",
+      issueNumber: 184,
+      project: { platform: "github", projectKey: "acme/checkout-service", name: "checkout-service", defaultBranch: "main" },
+      title: "支付链路重构与灰度切换",
+      description: "统一新旧支付协议，由服务端、控制台和部署配置三个仓库协同完成。",
+      managed: true,
+      executionEligible: true,
+      state: "ready",
+      executionMode: "afk",
+      dependsOn: [],
+      tags: ["payments", "multi-repo"],
+      branchName: "afk/WI-2026-018",
+      providerRef: "work-item:WI-2026-018",
+      sources: [
+        {
+          id: "github:acme/checkout-service#184",
+          type: "github_issue",
+          title: "支付 API 兼容改造",
+          reference: "acme/checkout-service#184",
+          role: "主要需求",
+          platform: "github",
+          projectKey: "acme/checkout-service",
+          issueNumber: 184,
+          webUrl: "https://github.com/acme/checkout-service/issues/184",
+        },
+        {
+          id: "gitlab:gitlab.example.com/acme/merchant-console#52",
+          type: "gitlab_issue",
+          title: "控制台灰度开关",
+          reference: "acme/merchant-console#52",
+          role: "协作需求",
+          platform: "gitlab",
+          projectKey: "acme/merchant-console",
+          issueNumber: 52,
+          webUrl: "https://gitlab.example.com/acme/merchant-console/-/issues/52",
+        },
+      ],
+      repositories: [
+        { id: "repo-checkout", platform: "github", projectKey: "acme/checkout-service", name: "checkout-service", defaultBranch: "main", role: "主要仓库", checkoutPath: "repositories/checkout-service" },
+        { id: "repo-console", platform: "gitlab", projectKey: "acme/merchant-console", name: "merchant-console", defaultBranch: "develop", role: "协作仓库", checkoutPath: "repositories/merchant-console" },
+        { id: "repo-config", platform: "gitlab", projectKey: "acme/deployment-config", name: "deployment-config", defaultBranch: "main", role: "配置仓库", checkoutPath: "repositories/deployment-config" },
+      ],
+      executionPlan: [
+        { id: "analyze", title: "分析跨仓库影响范围", detail: "读取两个外部 Issue 和三个关联仓库", status: "pending" },
+      ],
+      priority: "P1",
+      updatedAt: "2026-09-20T08:00:00.000Z",
+    },
+  ],
+  projects: [
+    { platform: "github", projectKey: "acme/checkout-service", name: "checkout-service", defaultBranch: "main" },
+    { platform: "gitlab", projectKey: "acme/merchant-console", name: "merchant-console", defaultBranch: "develop" },
+    { platform: "gitlab", projectKey: "acme/deployment-config", name: "deployment-config", defaultBranch: "main" },
   ],
   diagnostics: [],
   complete: true,
@@ -52,6 +119,76 @@ describe("WorkItemsPage", () => {
     expect(textContent(rows[1])).toContain("acme/web");
     expect(textContent(rows[0])).toContain("#1");
     expect(textContent(rows[1])).toContain("#1");
+    act(() => renderer!.unmount());
+  });
+
+  it("renders multiple external sources and repositories on one independent work item", async () => {
+    const list = vi.fn(async () => multiResourceResult);
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(WorkItemsPage));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(list).toHaveBeenCalledWith(undefined);
+    await act(async () => {
+      renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick();
+    });
+
+    const detail = renderer!.root.findByProps({ "aria-label": "工作项 WI-2026-018" });
+    const detailText = textContent(detail);
+    expect(detailText).toContain("支付 API 兼容改造");
+    expect(detailText).toContain("控制台灰度开关");
+    expect(detailText).toContain("checkout-service");
+    expect(detailText).toContain("merchant-console");
+    expect(detailText).toContain("deployment-config");
+    act(() => renderer!.unmount());
+  });
+
+  it("keeps an explicitly repository-free work item independent from its compatibility issue projection", async () => {
+    const repositoryFreeResult: WorkItemInventoryResult = {
+      ...multiResourceResult,
+      items: [{ ...multiResourceResult.items[0], id: "WI-2026-019", title: "发布流程权限审计", repositories: [] }],
+    };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => repositoryFreeResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(WorkItemsPage));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+
+    const executionDialog = renderer!.root.findAllByProps({ role: "dialog" }).find(node => textContent(node).includes("开始执行工作项"));
+    expect(executionDialog).toBeDefined();
+    expect(textContent(executionDialog!)).toContain("本工作项不需要代码仓库");
+    act(() => renderer!.unmount());
+  });
+
+  it("previews the task-isolated loop workspace before execution starts", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => multiResourceResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(WorkItemsPage));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick();
+    });
+    await act(async () => {
+      findButton(renderer!, "开始执行").props.onClick();
+    });
+
+    const executionDialog = renderer!.root.findAllByProps({ role: "dialog" }).find(node => textContent(node).includes("开始执行工作项"));
+    expect(executionDialog).toBeDefined();
+    expect(textContent(executionDialog!)).toContain("~/.loop-workspace/WI-2026-018/");
+    expect(textContent(executionDialog!)).toContain("repositories/checkout-service");
+    expect(textContent(executionDialog!)).toContain("repositories/merchant-console");
+    expect(textContent(executionDialog!)).toContain("repositories/deployment-config");
     act(() => renderer!.unmount());
   });
 
@@ -136,8 +273,11 @@ describe("WorkItemsPage", () => {
     await act(async () => { renderer = create(createElement(WorkItemsPage)); });
 
     expect(renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })).toHaveLength(50);
+    expect(textContent(renderer!.root.findByProps({ className: "work-items-load-more" }))).toContain("还有 155 个");
+    expect(textContent(renderer!.root.findByProps({ className: "work-items-load-more" }))).toContain("继续加载");
     await act(async () => { renderer!.root.findByProps({ "aria-label": "显示更多工作项" }).props.onClick(); });
     expect(renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })).toHaveLength(100);
+    expect(textContent(renderer!.root.findByProps({ className: "work-items-load-more" }))).toContain("还有 105 个");
 
     await act(async () => { renderer!.root.findByProps({ "aria-label": "搜索工作项" }).props.onChange({ target: { value: "Issue 205" } }); });
     const rows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
@@ -152,6 +292,42 @@ describe("WorkItemsPage", () => {
     const projectRows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
     expect(projectRows).toHaveLength(1);
     expect(textContent(projectRows[0])).toContain("Issue 205");
+    act(() => renderer!.unmount());
+  });
+
+  it("uses flowing filter menus with searchable Issue sources", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => result) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    expect(renderer!.root.findByProps({ className: "backlog-toolbar work-items-toolbar" })).toBeTruthy();
+    expect(renderer!.root.findAllByProps({ className: "select-menu filter-trigger" })).toHaveLength(2);
+
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "选择仓库" }).props.onClick(); });
+    expect(renderer!.root.findByProps({ "aria-label": "搜索 Issue 来源" })).toBeTruthy();
+    act(() => renderer!.unmount());
+  });
+
+  it("uses platform SVG icons instead of provider text in source summaries", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => result) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    const sourceContext = renderer!.root.findAllByProps({ className: "work-item-source-summary" })[0];
+    if (!sourceContext) throw new Error("source summary not found");
+    expect(sourceContext.findByProps({ "aria-label": "GitHub" })).toBeTruthy();
+    expect(textContent(sourceContext)).not.toContain("GitHub Issue");
+    expect(textContent(sourceContext)).toContain("acme/api #1");
+    act(() => renderer!.unmount());
+  });
+
+  it("does not repeat the work item ID in the list row", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => result) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    const row = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0];
+    expect(textContent(row)).not.toContain("github:acme/api#1");
     act(() => renderer!.unmount());
   });
 });

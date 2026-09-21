@@ -96,7 +96,7 @@ test.describe("BacklogPage list", () => {
     const platform = page.getByRole("button", { name: "选择 Provider" });
     await platform.click();
 
-    const colors = await page.evaluate(() => {
+    const themeColors = await page.evaluate(() => {
       const normalize = (color: string) => {
         const probe = document.createElement("span");
         probe.style.color = color;
@@ -106,24 +106,25 @@ test.describe("BacklogPage list", () => {
         return normalized;
       };
       const root = getComputedStyle(document.documentElement);
-      const trigger = getComputedStyle(document.querySelector<HTMLElement>('.select-menu-trigger[aria-label="选择 Provider"]')!);
-      const popover = getComputedStyle(document.querySelector<HTMLElement>('.select-menu-popover[aria-label="选择 Provider"]')!);
-      const tag = getComputedStyle(document.querySelector<HTMLElement>(".backlog-tags li")!);
       return {
         run: normalize(root.getPropertyValue("--run").trim()),
         line: normalize(root.getPropertyValue("--line").trim()),
         ink: normalize(root.getPropertyValue("--ink").trim()),
-        triggerBorder: trigger.borderTopColor,
-        triggerText: trigger.color,
-        popoverBorder: popover.borderTopColor,
-        tagText: tag.color,
       };
     });
+    const trigger = page.locator('.select-menu-trigger[aria-label="选择 Provider"]');
+    const popover = page.getByRole("listbox", { name: "选择 Provider" });
+    const tag = page.locator(".backlog-tags li").first();
+    const [triggerText, popoverBorder, tagText] = await Promise.all([
+      trigger.evaluate((element) => getComputedStyle(element).color),
+      popover.evaluate((element) => getComputedStyle(element).borderTopColor),
+      tag.evaluate((element) => getComputedStyle(element).color),
+    ]);
 
-    await expect.poll(async () => page.locator('.select-menu-trigger[aria-label="选择 Provider"]').evaluate((element) => getComputedStyle(element).borderTopColor)).toBe(colors.run);
-    expect(colors.triggerText).toBe(colors.ink);
-    expect(colors.popoverBorder).toBe(colors.line);
-    expect(colors.tagText).toBe(colors.run);
+    await expect.poll(async () => trigger.evaluate((element) => getComputedStyle(element).borderTopColor)).toBe(themeColors.run);
+    expect(triggerText).toBe(themeColors.ink);
+    expect(popoverBorder).toBe(themeColors.line);
+    expect(tagText).toBe(themeColors.run);
   });
 
   test("opens a right-side detail preview for a backlog row", async ({ page }) => {

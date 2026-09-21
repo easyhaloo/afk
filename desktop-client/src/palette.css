@@ -216,7 +216,29 @@ button:active { transform: scale(.992); }
 .quick-run svg { color: var(--run); }
 .quick-run:hover { border-color: #bdcbbf; background: #f1f5f0; transform: translateY(-1px); box-shadow: 0 6px 15px rgba(63,82,67,.08); }
 .quick-run:active { transform: translateY(0) scale(.988); }
-.primary-nav { display: grid; gap: 3px; margin-top: 13px; }
+.primary-nav { display: grid; gap: 15px; margin-top: 13px; }
+.nav-group { display: grid; gap: 3px; }
+.primary-nav .nav-label {
+  min-height: 15px;
+  margin: 0;
+  padding: 0 9px;
+  color: #a0a59f;
+  font-family: "DM Mono", monospace;
+  font-size: 7px;
+  font-weight: 650;
+  letter-spacing: .12em;
+  line-height: 15px;
+  text-transform: uppercase;
+}
+.nav-group-label {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .nav-item {
   position: relative;
   min-height: 40px;

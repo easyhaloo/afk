@@ -47,6 +47,7 @@ const IPC_CHANNELS = {
   backlogTagRemove: "afk:backlog-tag-remove",
   backlogSummary: "afk:backlog-summary",
   workItemsList: "afk:work-items-list",
+  workItemsStart: "afk:work-items-start",
 } as const;
 
 const api: DesktopApi = {
@@ -114,6 +115,7 @@ const api: DesktopApi = {
       : options === undefined
         ? ipcRenderer.invoke(IPC_CHANNELS.workItemsList)
         : ipcRenderer.invoke(IPC_CHANNELS.workItemsList, options),
+    start: (input) => ipcRenderer.invoke(IPC_CHANNELS.workItemsStart, input),
   },
 };
 

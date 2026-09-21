@@ -95,7 +95,7 @@ export const test = base.extend<Fixtures>({
   page: async ({ electronApp }, use) => {
     const page = await electronApp.firstWindow();
     await page.waitForLoadState("domcontentloaded");
-    await page.getByRole("button", { name: /\.afk 已发现/ }).waitFor();
+    await page.locator(".primary-nav").getByRole("button", { name: "工作项" }).waitFor();
     await use(page);
   },
 });

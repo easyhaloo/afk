@@ -18,7 +18,7 @@
  * matching the real CLI's `--json` protocol. A tiny shared in-memory store
  * persists writes between calls in the same Electron session.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -205,6 +205,9 @@ else if (args[0] === "loop") {
 }
 else if (subcommand === "inventory") {
   if (process.env.FAKE_AFK_FAIL_INVENTORY === "1") fail("backlog.inventory", "provider", "FAKE_AFK_FAIL_INVENTORY is set");
+  if (process.env.FAKE_AFK_INVENTORY_CALLS) appendFileSync(process.env.FAKE_AFK_INVENTORY_CALLS, `${Date.now()}\n`, "utf8");
+  const delayMs = Number(process.env.FAKE_AFK_INVENTORY_DELAY_MS ?? "0");
+  if (Number.isFinite(delayMs) && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   const platform = flag("--platform");
   const project = flag("--project");
   const state = flag("--state");

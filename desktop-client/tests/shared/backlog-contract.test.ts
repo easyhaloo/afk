@@ -13,6 +13,7 @@ import {
   parseBacklogPlatform,
   parseBacklogRunRetryInput,
   parseBacklogRuntimeSummary,
+  parseWorkItemRunStartInput,
   parseWorkItemInventoryResult,
 } from "../../shared/backlog-contract";
 
@@ -73,6 +74,22 @@ describe("Backlog shared contract", () => {
     expect(() => parseBacklogRunRetryInput({ backlogId: "42", reason: "" })).toThrow(/reason/i);
     expect(() => parseBacklogRunRetryInput({ backlogId: "42", reason: "fixed", command: "rm -rf /" })).toThrow(/unknown/i);
     expect(() => parseBacklogRunRetryInput({ backlogId: "42\n--help", reason: "fixed" })).toThrow(/backlogId/i);
+  });
+
+  it("strictly parses workspace-independent work item run inputs", () => {
+    expect(parseWorkItemRunStartInput({
+      workItemId: "WI-2026-018",
+      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", role: "primary" }],
+      workflow: "standard-development",
+      environment: "local",
+    })).toEqual({
+      workItemId: "WI-2026-018",
+      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", role: "primary" }],
+      workflow: "standard-development",
+      environment: "local",
+    });
+    expect(() => parseWorkItemRunStartInput({ workItemId: "../task", repositories: [] })).toThrow(/workItemId/i);
+    expect(() => parseWorkItemRunStartInput({ workItemId: "WI-1", repositories: [], workspace: "/tmp/repo" })).toThrow(/unknown/i);
   });
 
   it("parseBacklogPlatform only accepts github or gitlab", () => {

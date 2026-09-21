@@ -139,6 +139,38 @@
 .capability-grid .unavailable { opacity: .54; }
 
 .settings-page { max-width: 900px; }
+.repository-page { max-width: 960px; }
+.provider-icon { display: inline-block; flex: 0 0 auto; object-fit: contain; vertical-align: -3px; }
+.repository-refresh {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  margin-top: 3px;
+  border: 1px solid var(--afk-border);
+  border-radius: 8px;
+  background: var(--afk-panel);
+  color: var(--afk-muted);
+}
+.repository-refresh:hover:not(:disabled) { border-color: var(--afk-border-strong); background: var(--afk-panel-subtle); color: var(--afk-text); }
+.repository-refresh:disabled { cursor: default; opacity: .6; }
+.repository-error { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; padding: 10px 12px; border: 1px solid #e5c6c4; border-radius: 9px; background: #fff7f6; color: #9b4d49; font-size: calc(10px * var(--afk-scale)); }
+.repository-list { overflow: hidden; border: 1px solid var(--afk-border); border-radius: 12px; background: var(--afk-panel); }
+.repository-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) 32px; gap: 12px; align-items: center; min-height: 61px; padding: 0 14px; border-bottom: 1px solid var(--afk-border); }
+.repository-row:last-child { border-bottom: 0; }
+.repository-provider { display: inline-flex; align-items: center; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); font-weight: 650; text-transform: uppercase; }
+.repository-provider .provider-icon { width: 15px; height: 15px; }
+.repository-row div { min-width: 0; }
+.repository-row b, .repository-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-row b { color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); }
+.repository-row small { margin-top: 4px; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
+.repository-row > button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; background: transparent; color: var(--afk-muted); }
+.repository-row > button:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.repository-empty { padding: 34px 18px; text-align: center; }
+.repository-empty b, .repository-empty span { display: block; }
+.repository-empty b { color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
+.repository-empty span { margin-top: 6px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
 .settings-section { padding-bottom: 0; }
 .settings-section > header { display: block; min-height: auto; }
 .setting-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 15px 17px 17px; }
@@ -393,8 +425,8 @@
   .quick-run svg, .nav-item svg, .local-action svg { flex: 0 0 auto; }
   .nav-item { min-height: 38px; }
   .nav-item::before { left: -7px; }
-  .nav-item em, .sidebar-projects { display: none; }
-  .primary-nav { width: 42px; }
+  .nav-item em, .sidebar-projects, .primary-nav .nav-label { display: none; }
+  .primary-nav { width: 42px; gap: 8px; }
   .sidebar-bottom { width: 42px; margin-top: auto; padding-top: 9px; }
   .topbar { padding-right: 12px; padding-left: 12px; }
   .command { gap: 0; width: 31px; justify-content: center; padding: 0; font-size: 0; }

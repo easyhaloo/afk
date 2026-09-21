@@ -12,6 +12,7 @@ import type {
   BacklogRuntimeSummary,
 } from "../../../shared/backlog-contract";
 import type { WorkflowTemplateSummary } from "../../../shared/ipc-contract";
+import { ProviderIcon } from "../../components/ProviderIcon";
 import { SelectMenu } from "../../components/SelectMenu";
 import { BacklogDetailDrawer } from "./BacklogDetailDrawer";
 import { fetchBacklogList, invalidateBacklogCache, readBacklogCache, resetBacklogCache } from "./backlog-cache";
@@ -36,10 +37,10 @@ const sourceOptions: Array<{ value: SourceFilter; label: string }> = [
   ...Object.entries(BACKLOG_STATE_LABELS).map(([value, label]) => ({ value: value as SourceFilter, label })),
 ];
 
-const platformOptions: Array<{ value: "auto" | BacklogPlatform; label: string }> = [
+const platformOptions: Array<{ value: "auto" | BacklogPlatform; label: string; icon?: "github" | "gitlab"; triggerLabel?: string }> = [
   { value: "auto", label: "自动探测" },
-  { value: "github", label: "GitHub" },
-  { value: "gitlab", label: "GitLab" },
+  { value: "github", label: "GitHub", icon: "github", triggerLabel: "" },
+  { value: "gitlab", label: "GitLab", icon: "gitlab", triggerLabel: "" },
 ];
 
 const executionModeOptions: Array<{ value: BacklogExecutionMode; label: string }> = [
@@ -287,7 +288,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
   return (
     <section className="control-page backlog-page" aria-label="Provider Backlog">
       <header className="control-page-heading backlog-heading">
-        <div><p>任务项</p><span>读取 GitHub / GitLab 上由 AFK 管理的工作项；本机不持有凭据，由 afk CLI 完成 Provider 调用。</span></div>
+        <div><p>任务项</p><span>读取 <ProviderIcon provider="github" size={12} /> / <ProviderIcon provider="gitlab" size={12} /> 上由 AFK 管理的工作项；本机不持有凭据，由 afk CLI 完成 Provider 调用。</span></div>
         <div className="backlog-heading-actions">
           <SelectMenu label="选择 Provider" value={platform} options={platformOptions} onChange={(value) => { invalidateBacklogCache(); setPlatform(value); }} disabled={busy} />
           <button className="icon-button" onClick={() => setCreateOpen(true)} disabled={busy || !workspace.trim()} aria-label="新建 Backlog"><Plus size={16} /></button>

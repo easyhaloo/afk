@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
-import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, parseWorkItemInventoryOptions, type BacklogPlatform } from "../../shared/backlog-contract";
+import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, parseWorkItemInventoryOptions, parseWorkItemRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
@@ -23,6 +23,11 @@ import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { createExternalUrlService } from "../services/external-url-service";
 import { createWorkItemInventoryService } from "../services/work-item-inventory-service";
+import { createWorkItemInventoryStore } from "../services/work-item-inventory-store";
+import { createWorkItemInventorySyncService } from "../services/work-item-inventory-sync-service";
+import { createWorkItemExecutionService } from "../services/work-item-execution-service";
+import { createWorkItemRunStore } from "../services/work-item-run-store";
+import { createExecutionWorkspaceService } from "../services/execution-workspace-service";
 import { WorkflowGraphService } from "../services/graph-service";
 import { saveWorkspacePreference } from "../services/workspace-preference-service";
 import { resolveWorkspace } from "../services/workspace-service";
@@ -83,6 +88,7 @@ const backlogService = createBacklogService({
 });
 const workItemInventoryService = createWorkItemInventoryService({
   cwd: app.getPath("userData"),
+  store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
   runBundled: app.isPackaged ? async options => {
     const runner = require(path.join(__dirname, "../../cli/inventory-runner.cjs")) as {
       runInventory: (value: unknown) => Promise<unknown>;
@@ -108,6 +114,26 @@ const workItemInventoryService = createWorkItemInventoryService({
     const result = await exec(command, args, cwd, undefined, { timeoutMs: 300_000, maxBuffer: 50_000_000 });
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
   },
+});
+const workItemInventorySyncService = createWorkItemInventorySyncService({
+  sync: () => workItemInventoryService.sync(),
+});
+const executionWorkspaceService = createExecutionWorkspaceService();
+const workItemRunStore = createWorkItemRunStore({ resolveWorkspace });
+const workItemExecutionService = createWorkItemExecutionService({
+  getWorkItem: async (workItemId) => {
+    const item = (await workItemInventoryService.list()).items.find(candidate => candidate.id === workItemId);
+    if (!item) throw new Error(`工作项 ${workItemId} 不存在或当前账号无权访问`);
+    return item;
+  },
+  resolveAfk: async () => {
+    const result = await exec("/usr/bin/which", ["afk"]);
+    if (!result.ok) return "";
+    const candidate = result.stdout.split("\n")[0]?.trim() ?? "";
+    return candidate && candidate.startsWith("/") ? candidate : "";
+  },
+  workspace: executionWorkspaceService,
+  runStore: workItemRunStore,
 });
 const backlogRunStore = createBacklogRunStore({ resolveWorkspace });
 const backlogRuntimeService = createBacklogRuntimeService({
@@ -160,6 +186,8 @@ function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
 }
 
 export function registerIpcHandlers() {
+  workItemInventorySyncService.start();
+  if (typeof app.once === "function") app.once("before-quit", () => workItemInventorySyncService.stop());
   ipcMain.handle(IPC_CHANNELS.copyText, (event, text: unknown) => { assertTrustedSender(event); return clipboardService.copyText(text); });
   ipcMain.handle(IPC_CHANNELS.openExternal, (event, url: unknown) => {
     assertTrustedSender(event);
@@ -170,6 +198,10 @@ export function registerIpcHandlers() {
     assertTrustedSender(event);
     if (forceRefresh !== undefined && typeof forceRefresh !== "boolean") throw new Error("刷新参数无效");
     return workItemInventoryService.list(parseWorkItemInventoryOptions(options), forceRefresh === true);
+  });
+  ipcMain.handle(IPC_CHANNELS.workItemsStart, (event, input: unknown) => {
+    assertTrustedSender(event);
+    return workItemExecutionService.start(parseWorkItemRunStartInput(input));
   });
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);

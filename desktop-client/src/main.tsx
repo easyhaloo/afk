@@ -21,6 +21,7 @@ import { presentationSnapshot } from "./mock-data";
 import { normalizeWorkflowSteps, workflowStepLayout } from "./features/workflows/graph/normalize";
 import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH, CANVAS_WORLD_HEIGHT, CANVAS_WORLD_WIDTH, clampCanvasPosition, hasCanvasNodeCollisions, insertCanvasNodeAfter, layoutCanvasNodes, zoomCanvasViewportAtPoint } from "./features/workflows/graph/canvas-layout";
 import { Empty } from "./components/EmptyState";
+import { ProviderIcon } from "./components/ProviderIcon";
 import { SelectMenu } from "./components/SelectMenu";
 import { Settings } from "./features/settings/SettingsPage";
 import { SshHostsPage } from "./features/ssh/SshHostsPage";
@@ -28,11 +29,13 @@ import { BacklogPage } from "./features/backlog/BacklogPage";
 import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
+import type { ProviderProjectRef } from "../shared/backlog-contract";
 import type { SshSession } from "../shared/ssh-contract";
 
 type Phase = "ready" | "active" | "verify" | "attention";
 type RecordStatus = "queued" | "running" | "waiting_confirmation" | "completed" | "failed";
-type View = "queue" | "board" | "workflows" | "agents" | "containers" | "events" | "ssh" | "backlog" | "projectBacklog" | "settings";
+type View = "queue" | "board" | "workflows" | "agents" | "repositories" | "containers" | "events" | "ssh" | "backlog" | "projectBacklog" | "settings";
+type NavigationItem = [View, string, typeof LayoutList];
 
 const label: Record<Phase, string> = {
   ready: "待执行",
@@ -98,7 +101,6 @@ function App() {
   const [runMode, setRunMode] = useState<"queue" | "board">("queue");
   const [workspace, setWorkspace] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [isDemo, setIsDemo] = useState(false);
   const [selected, setSelected] = useState<RuntimeEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,7 +112,6 @@ function App() {
   const [replayRun, setReplayRun] = useState("");
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
-  const [refreshVersion, setRefreshVersion] = useState(0);
   const [appearance, setAppearance] = useState<AppearancePreferences>(defaultAppearance);
   const freshTimer = useRef<number | null>(null);
   const refreshInFlight = useRef(false);
@@ -124,8 +125,7 @@ function App() {
     setError(null);
     try {
       const liveSnapshot = await window.afkDesktop.snapshot(target);
-      const { snapshot: next, demo } = presentationSnapshot(liveSnapshot);
-      setIsDemo(demo);
+      const { snapshot: next } = presentationSnapshot(liveSnapshot);
       const priorIds = new Set(snapshot?.events.map((item) => item.id) ?? []);
       const addedIds = snapshot ? next.events.filter((item) => !priorIds.has(item.id)).map((item) => item.id) : [];
       setSnapshot(next);
@@ -139,7 +139,6 @@ function App() {
       setReplayRun((current) => next.events.some((item) => item.source === current) ? current : next.events[0]?.source ?? "");
       if (!session && next.sessions[0]) setSession(next.sessions[0].name);
       setLastCheckedAt(Date.now());
-      setRefreshVersion((current) => current + 1);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -179,11 +178,6 @@ function App() {
     (snapshot?.events ?? []).forEach((event) => value[phaseOf(event)].push(event));
     return value;
   }, [snapshot]);
-
-  const selectWorkspace = async () => {
-    const directory = await window.afkDesktop.chooseWorkspace();
-    if (directory) await refresh(directory);
-  };
 
   const openSession = async (name: string) => {
     activeSshSessionId.current = null;
@@ -228,18 +222,15 @@ function App() {
     }
   };
 
-  const nav: Array<[View, string, typeof LayoutList]> = [
-    ["backlog", "工作项", ClipboardList],
-    ["queue", "运行队列", Workflow],
-    ["workflows", "工作流", Boxes],
-    ["events", "记录", Archive],
-    ["agents", "Agent", Activity],
-    ["containers", "环境", Container],
-    ["ssh", "SSH 主机", Terminal],
-    ["projectBacklog", "项目 Backlog", Braces],
+  const navGroups: Array<{ label: string; title: string; items: NavigationItem[] }> = [
+    { label: "Work", title: "工作", items: [["backlog", "工作项", ClipboardList], ["queue", "运行中心", Workflow]] },
+    { label: "Automation", title: "自动化", items: [["workflows", "工作流", Boxes], ["agents", "Agents", Activity]] },
+    { label: "Resources", title: "资源", items: [["repositories", "代码仓库", FolderOpen], ["containers", "执行环境", Container], ["ssh", "SSH 主机", Terminal], ["projectBacklog", "本地 Backlog", Braces]] },
+    { label: "System", title: "系统", items: [["events", "活动记录", Archive], ["settings", "设置", Settings2]] },
   ];
+  const nav = navGroups.flatMap((group) => group.items);
   const activeNav = view === "board" ? "queue" : view;
-  const title = view === "settings" ? "设置" : nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
+  const title = nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
   const events = snapshot?.events ?? [];
   const runtimes = snapshot?.agentRuntimes ?? [];
   const availableRuntimeCount = runtimes.filter((runtime) => runtime.available).length;
@@ -261,9 +252,8 @@ function App() {
   };
   const saveWorkflowConfig = async (workflow: WorkflowConfigSummary) => {
     const saved = await window.afkDesktop.saveWorkflow(workspace, workflow);
-    const { snapshot: refreshed, demo } = presentationSnapshot(await window.afkDesktop.snapshot(workspace));
+    const { snapshot: refreshed } = presentationSnapshot(await window.afkDesktop.snapshot(workspace));
     const customTemplate = workflow.templateName === "afk-control-workflow" && workflow.canvasNodes.length ? { id: "afk-control-workflow", name: "自定义工作流", description: "由 AFK Control 管理的项目级可执行模板。", source: "managed" as const, steps: workflow.canvasNodes.map((node, index) => ({ id: node.id, role: node.template === "qa" ? "reviewer" : "implementer", kind: "agent" as const, provider: node.provider, dependsOn: index ? [workflow.canvasNodes[index - 1].id] : [] })) } : undefined;
-    setIsDemo(demo);
     setSnapshot(customTemplate ? { ...refreshed, workflow: saved, workflowTemplates: [...refreshed.workflowTemplates.filter(template => template.id !== customTemplate.id), customTemplate] } : refreshed);
     setWorkspace(refreshed.workspace.root);
     return saved;
@@ -274,15 +264,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">A</span><strong>AFK <b>/</b> CONTROL</strong><small>LOCAL OPERATIONS</small></div>
         <button className="quick-run" onClick={() => { setRunMode("queue"); setView("queue"); }}><Workflow size={18} />新建运行</button>
-        <nav className="primary-nav">{nav.map(([key, text, Icon]) => <button key={key} className={activeNav === key ? "nav-item active" : "nav-item"} onClick={() => { if (key === "queue") setRunMode("queue"); activateView(key); }}><Icon size={16} />{text}{key === "agents" && runtimes.length ? <em className="healthy-badge">{availableRuntimeCount}/{runtimeTotal}</em> : null}</button>)}</nav>
-        <section className="sidebar-projects" aria-label="项目">
-          <div className="sidebar-section-title"><span>项目</span><button onClick={() => void selectWorkspace()} aria-label="选择工作区">+</button></div>
-          <button className="project-row" onClick={() => void selectWorkspace()}><FolderOpen size={17} /><span><b>{snapshot?.workspace.root.split("/").pop() ?? "选择工作区"}</b><small>{snapshot?.workspace.afkDirectoryPresent ? ".afk 已发现" : "选择 AFK 工作区"}</small></span></button>
-          <button className="project-activity" onClick={() => { setRunMode("board"); setView("board"); }}><i className={events.length ? "activity-pulse" : ""} /><span>{isDemo ? "演示数据" : events.length ? "本地运行正常" : "等待本地运行状态"}</span></button>
-        </section>
-        <div className="sidebar-bottom">
-          <button className={view === "settings" ? "local-action settings-entry active" : "local-action settings-entry"} onClick={() => activateView("settings")}><Settings2 size={15} />设置</button>
-        </div>
+        <nav className="primary-nav" aria-label="主导航">{navGroups.map((group) => <section className="nav-group" aria-label={group.label} key={group.label}><span className="nav-label">{group.title}</span><span className="nav-group-label">{group.label}</span>{group.items.map(([key, text, Icon]) => <button key={key} className={activeNav === key ? "nav-item active" : "nav-item"} aria-current={activeNav === key ? "page" : undefined} title={text} onClick={() => { if (key === "queue") setRunMode("queue"); activateView(key); }}><Icon size={16} aria-hidden="true" />{text}{key === "agents" && runtimes.length ? <em className="healthy-badge">{availableRuntimeCount}/{runtimeTotal}</em> : null}</button>)}</section>)}</nav>
       </aside>
 
       <section className="content-shell">
@@ -294,10 +276,11 @@ function App() {
           {view === "queue" ? <Queue events={events} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "board" ? <Board groups={groups} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
+          {view === "repositories" ? <Repositories /> : null}
           {view === "containers" ? <Environments snapshot={snapshot} onTerminal={openSession} /> : null}
           {view === "ssh" ? <SshHostsPage onSession={openSshSession} /> : null}
           {view === "backlog" ? <WorkItemsPage /> : null}
-          {view === "projectBacklog" ? <BacklogPage workspace={workspace || snapshot?.workspace.root || ""} refreshVersion={refreshVersion} templates={snapshot?.workflowTemplates} defaultTemplate={snapshot?.workflow.templateName} defaultAgent={snapshot?.workflow.agentDefault} /> : null}
+          {view === "projectBacklog" ? <BacklogPage workspace={workspace} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} /> : null}
           {view === "workflows" ? <Workflows snapshot={snapshot} onSave={saveWorkflowConfig} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}
@@ -356,7 +339,34 @@ function AgentHeaderSummary({ available, total, unavailable }: { available: numb
 function Agents({ snapshot, loading, onRefresh }: { snapshot: Snapshot | null; loading: boolean; lastCheckedAt: number | null; onRefresh: () => void }) {
   const runtimes = snapshot?.agentRuntimes ?? [];
   const statusLabel: Record<AgentRuntime["status"], string> = { available: "可执行", missing: "未发现", error: "检测失败" };
-  return <section className="table-panel agent-panel"><header><span>本机 Agent 工具</span><button className={`runtime-refresh${loading ? " checking" : ""}`} disabled={loading} onClick={onRefresh}><Settings2 size={15} className={loading ? "spin" : ""} />{loading ? "检查中…" : "重新检查"}</button></header><div className="agent-list">{runtimes.length ? runtimes.map((runtime) => <article className={`agent-runtime ${runtime.status}`} key={runtime.id}><RuntimeProductIcon id={runtime.id} /><RuntimeStatusIcon status={runtime.status} label={statusLabel[runtime.status]} /><div className="runtime-identity"><b>{runtime.label}</b><small title={runtime.executable || runtime.command}>{runtime.executable || runtime.command}</small></div><span className="runtime-summary" title={runtime.summary}>{runtime.summary}</span><strong title={`发现来源：${runtime.installation.source}`}>{statusLabel[runtime.status]}</strong></article>) : <p className="agent-empty"><b>{loading ? "正在检测本机工具…" : "尚未检测 Agent 工具"}</b><br />检查 AFK CLI provider：Claude Code、Codex、Cursor Agent、Pi、OpenCode 与 GitHub Copilot。</p>}</div></section>;
+  return <section className="table-panel agent-panel"><header><span>本机 Agent 工具</span><button className={`runtime-refresh${loading ? " checking" : ""}`} disabled={loading} onClick={onRefresh}><Settings2 size={15} className={loading ? "spin" : ""} />{loading ? "检查中…" : "重新检查"}</button></header><div className="agent-list">{runtimes.length ? runtimes.map((runtime) => <article className={`agent-runtime ${runtime.status}`} key={runtime.id}><RuntimeProductIcon id={runtime.id} /><RuntimeStatusIcon status={runtime.status} label={statusLabel[runtime.status]} /><div className="runtime-identity"><b>{runtime.label}</b><small title={runtime.executable || runtime.command}>{runtime.executable || runtime.command}</small></div><span className="runtime-summary" title={runtime.summary}>{runtime.summary}</span><strong title={`发现来源：${runtime.installation.source}`}>{statusLabel[runtime.status]}</strong></article>) : <p className="agent-empty"><b>{loading ? "正在检测本机工具…" : "尚未检测 Agent 工具"}</b><br />检查 AFK CLI provider：Claude Code、Codex、Cursor Agent、Pi、OpenCode 与 <ProviderIcon provider="github" size={12} /> Copilot。</p>}</div></section>;
+}
+
+function Repositories() {
+  const [projects, setProjects] = useState<ProviderProjectRef[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = async (forceRefresh = false) => {
+    setLoading(true);
+    setError("");
+    try {
+      const inventory = await window.afkDesktop.workItems.list(undefined, forceRefresh);
+      setProjects(inventory.projects);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  return <section className="control-page repository-page" aria-label="代码仓库">
+    <header className="control-page-heading"><div><p>Resources</p><h1>代码仓库</h1><span>展示已授权 Provider 中可访问的仓库，作为工作项可关联的独立资源，不依赖当前选择目录。</span></div><button className="repository-refresh" type="button" aria-label="刷新代码仓库" title="刷新代码仓库" disabled={loading} onClick={() => void load(true)}><RefreshCw size={14} className={loading ? "spin" : ""} /></button></header>
+    {error ? <div className="repository-error"><TriangleAlert size={15} />{error}</div> : null}
+    <div className="repository-list">{projects.length ? projects.map((project) => <article className="repository-row" key={`${project.platform}:${project.projectKey}`}><span className="repository-provider">{project.platform === "github" || project.platform === "gitlab" ? <ProviderIcon provider={project.platform} size={15} /> : project.platform}</span><div><b>{project.projectKey}</b><small>{project.defaultBranch ? `默认分支 · ${project.defaultBranch}` : project.name}</small></div>{project.webUrl ? <button type="button" aria-label={`打开代码仓库 ${project.projectKey}`} title="在浏览器中打开" onClick={() => void window.afkDesktop.openExternal(project.webUrl!)}><FolderOpen size={15} /></button> : null}</article>) : <div className="repository-empty"><b>{loading ? "正在读取代码仓库…" : "没有可访问的代码仓库"}</b><span>{loading ? "正在从已授权 Provider 获取仓库列表。" : <>请检查 <ProviderIcon provider="github" size={12} /> / <ProviderIcon provider="gitlab" size={12} /> 鉴权配置。</>}</span></div>}</div>
+  </section>;
 }
 
 function Environments({ snapshot, onTerminal }: { snapshot: Snapshot | null; onTerminal: (name: string) => void }) {

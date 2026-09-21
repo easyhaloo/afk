@@ -4,11 +4,17 @@ import path from "node:path";
 import type { ProviderProjectRef, WorkItemId } from "../../shared/backlog-contract";
 import { parseWorkItemId } from "../../shared/backlog-contract";
 
+export type ExecutionWorkspaceRepository = {
+  project: ProviderProjectRef;
+  path: string;
+};
+
 export type ExecutionWorkspaceMetadata = {
   taskId: WorkItemId;
-  sourceProject: ProviderProjectRef;
   root: string;
-  checkout: string;
+  repositoriesRoot: string;
+  repositories: ExecutionWorkspaceRepository[];
+  artifacts: string;
   runtime: string;
   logs: string;
   diagnostics: string;
@@ -27,10 +33,42 @@ function defaultBaseDirectory(): string {
 }
 
 function taskDirectoryName(taskId: WorkItemId): string {
-  const canonical = parseWorkItemId(taskId);
-  const encoded = encodeURIComponent(canonical);
-  if (!encoded || encoded === "." || encoded === "..") throw new Error("task ID produces an invalid workspace directory");
-  return encoded;
+  const canonical = normalizeTaskId(taskId);
+  const segments = canonical.split(/[:/#]+/).filter(Boolean);
+  if (!segments.length) throw new Error("task ID produces an invalid workspace directory");
+  const segmentPattern = /^[A-Za-z0-9._-]+$/;
+  for (const segment of segments) {
+    if (segment === "." || segment === ".." || !segmentPattern.test(segment)) {
+      throw new Error(`task ID produces an invalid workspace segment: ${segment}`);
+    }
+  }
+  return segments.join(path.sep);
+}
+
+function normalizeTaskId(taskId: WorkItemId): WorkItemId {
+  if (typeof taskId !== "string" || taskId.trim() !== taskId || taskId.length > 160) throw new Error("task ID is invalid");
+  try {
+    return parseWorkItemId(taskId);
+  } catch {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(taskId) || taskId.includes("..")) throw new Error("task ID is invalid");
+    return taskId;
+  }
+}
+
+function repositoryDirectoryNames(projects: readonly ProviderProjectRef[]): string[] {
+  const used = new Set<string>();
+  return projects.map((project) => {
+    const preferred = project.name || project.projectKey.split("/").at(-1) || "repository";
+    const base = preferred
+      .normalize("NFKC")
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/^[.-]+|[.-]+$/g, "") || "repository";
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) candidate = `${base}-${suffix++}`;
+    used.add(candidate);
+    return candidate;
+  });
 }
 
 function metadataPath(root: string): string {
@@ -45,17 +83,25 @@ export function createExecutionWorkspaceService(options: ExecutionWorkspaceServi
     return path.join(baseDirectory, taskDirectoryName(taskId));
   }
 
-  async function allocate(taskId: WorkItemId, sourceProject: ProviderProjectRef): Promise<ExecutionWorkspaceMetadata> {
-    const canonicalTaskId = parseWorkItemId(taskId);
+  async function allocate(taskId: WorkItemId, projects: readonly ProviderProjectRef[] = []): Promise<ExecutionWorkspaceMetadata> {
+    const canonicalTaskId = normalizeTaskId(taskId);
     const root = rootFor(canonicalTaskId);
-    const checkout = path.join(root, "checkout");
+    const repositoriesRoot = path.join(root, "repositories");
+    const directoryNames = repositoryDirectoryNames(projects);
+    const repositories = projects.map((project, index) => ({
+      project,
+      path: path.join(repositoriesRoot, directoryNames[index]),
+    }));
+    const artifacts = path.join(root, "artifacts");
     const runtime = path.join(root, "runtime");
     const logs = path.join(root, "logs");
     const diagnostics = path.join(root, "diagnostics");
     const metadataFile = metadataPath(root);
 
     await mkdir(baseDirectory, { recursive: true });
-    await mkdir(checkout, { recursive: true });
+    await mkdir(repositoriesRoot, { recursive: true });
+    await Promise.all(repositories.map(repository => mkdir(repository.path, { recursive: true })));
+    await mkdir(artifacts, { recursive: true });
     await mkdir(runtime, { recursive: true });
     await mkdir(logs, { recursive: true });
     await mkdir(diagnostics, { recursive: true });
@@ -73,9 +119,10 @@ export function createExecutionWorkspaceService(options: ExecutionWorkspaceServi
 
     const metadata: ExecutionWorkspaceMetadata = {
       taskId: canonicalTaskId,
-      sourceProject,
       root,
-      checkout,
+      repositoriesRoot,
+      repositories,
+      artifacts,
       runtime,
       logs,
       diagnostics,

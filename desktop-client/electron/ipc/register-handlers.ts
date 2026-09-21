@@ -36,6 +36,37 @@ import path from "node:path";
 import { access } from "node:fs/promises";
 import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation";
 
+function registerHandler<Schema extends (value: unknown) => unknown>(
+  channel: string,
+  schema: Schema,
+  fn: (input: ReturnType<Schema>) => unknown,
+) {
+  ipcMain.handle(channel, async (event, input: unknown) => {
+    assertTrustedSender(event);
+    try {
+      return await fn(schema(input) as ReturnType<Schema>);
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+  });
+}
+
+function registerHandlerMulti<Schemas extends [(value: unknown) => unknown, ...Array<(value: unknown) => unknown>]>(
+  channel: string,
+  argSchemas: Schemas,
+  fn: (...args: { [K in keyof Schemas]: ReturnType<Schemas[K]> }) => unknown,
+) {
+  ipcMain.handle(channel, async (event, ...args: unknown[]) => {
+    assertTrustedSender(event);
+    try {
+      const validated = args.map((arg, i) => argSchemas[i](arg) as ReturnType<Schemas[typeof i]>) as { [K in keyof Schemas]: ReturnType<Schemas[K]> };
+      return await fn(...validated);
+    } catch (error) {
+      throw error instanceof Error ? error : new Error(String(error));
+    }
+  });
+}
+
 function validSession(value: string) {
   return /^[A-Za-z0-9_.:-]{1,100}$/.test(value);
 }
@@ -189,21 +220,16 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   const { jumpserverService } = deps;
   workItemInventorySyncService.start();
   if (typeof app.once === "function") app.once("before-quit", () => workItemInventorySyncService.stop());
-  ipcMain.handle(IPC_CHANNELS.copyText, (event, text: unknown) => { assertTrustedSender(event); return clipboardService.copyText(text); });
-  ipcMain.handle(IPC_CHANNELS.openExternal, (event, url: unknown) => {
-    assertTrustedSender(event);
+  registerHandler(IPC_CHANNELS.copyText, (v: unknown) => v, (text) => clipboardService.copyText(text as string));
+  registerHandler(IPC_CHANNELS.openExternal, (url: unknown) => {
     if (typeof url !== "string" || !url.trim()) throw new Error("外部地址无效");
-    return externalUrlService.open(url);
-  });
-  ipcMain.handle(IPC_CHANNELS.workItemsList, (event, options: unknown, forceRefresh: unknown) => {
-    assertTrustedSender(event);
-    if (forceRefresh !== undefined && typeof forceRefresh !== "boolean") throw new Error("刷新参数无效");
-    return workItemInventoryService.list(parseWorkItemInventoryOptions(options), forceRefresh === true);
-  });
-  ipcMain.handle(IPC_CHANNELS.workItemsStart, (event, input: unknown) => {
-    assertTrustedSender(event);
-    return workItemExecutionService.start(parseWorkItemRunStartInput(input));
-  });
+    return url;
+  }, (url) => externalUrlService.open(url));
+  registerHandlerMulti(IPC_CHANNELS.workItemsList, [
+    (v) => parseWorkItemInventoryOptions(v),
+    (v) => { if (v !== undefined && typeof v !== "boolean") throw new Error("刷新参数无效"); return v as boolean | undefined; },
+  ], (options, forceRefresh) => workItemInventoryService.list(options, forceRefresh === true));
+  registerHandler(IPC_CHANNELS.workItemsStart, parseWorkItemRunStartInput, (input) => workItemExecutionService.start(input));
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);
     const selected = await dialog.showOpenDialog({ title: "选择 AFK 工作区", properties: ["openDirectory"] });
@@ -212,209 +238,165 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     process.env.AFK_WORKSPACE = workspace;
     return workspace;
   });
-  ipcMain.handle(IPC_CHANNELS.snapshot, (event, workspace: string) => { assertTrustedSender(event); return snapshot(workspace); });
-  ipcMain.handle(IPC_CHANNELS.appearance, (event) => { assertTrustedSender(event); return readAppearance(); });
-  ipcMain.handle(IPC_CHANNELS.appearanceSave, (event, appearance: unknown) => { assertTrustedSender(event); return saveAppearance(appearance); });
-  ipcMain.handle(IPC_CHANNELS.workflowSave, (event, workspace: string, workflow: unknown) => { assertTrustedSender(event); return saveWorkflowConfig(workspace, workflow); });
-  ipcMain.handle(IPC_CHANNELS.tmuxPane, async (event, workspace: string, name: string) => {
-    assertTrustedSender(event);
+  registerHandler(IPC_CHANNELS.snapshot, (v: unknown) => backlogWorkspace(v, "snapshot"), (workspace) => snapshot(workspace));
+  registerHandler(IPC_CHANNELS.appearance, (v: unknown) => v, () => readAppearance());
+  registerHandler(IPC_CHANNELS.appearanceSave, (v: unknown) => v, (appearance) => saveAppearance(appearance));
+  registerHandlerMulti(IPC_CHANNELS.workflowSave, [
+    (v) => backlogWorkspace(v, "workflowSave"),
+    (v) => v,
+  ], (workspace, workflow) => saveWorkflowConfig(workspace, workflow));
+  registerHandlerMulti(IPC_CHANNELS.tmuxPane, [
+    (v) => backlogWorkspace(v, "tmuxPane"),
+    (v) => { if (typeof v !== "string" || !validSession(v)) throw new Error("tmux 会话名称无效"); return v; },
+  ], async (workspace, name) => {
     const root = resolveWorkspace(workspace);
-    if (!validSession(name) || !isAfkTmuxSession(root, name) || !(await listAfkTmux(root)).some((item) => item.name === name)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
+    if (!isAfkTmuxSession(root, name) || !(await listAfkTmux(root)).some((item) => item.name === name)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
     const result = await exec("tmux", ["capture-pane", "-p", "-t", name, "-S", "-160"]);
     if (!result.ok) throw new Error(result.stderr);
     return result.stdout;
   });
-  ipcMain.handle(IPC_CHANNELS.tmuxSend, async (event, workspace: string, name: string, line: string) => {
-    assertTrustedSender(event);
+  registerHandlerMulti(IPC_CHANNELS.tmuxSend, [
+    (v) => backlogWorkspace(v, "tmuxSend"),
+    (v) => { if (typeof v !== "string" || !validSession(v)) throw new Error("tmux 会话名称无效"); return v; },
+    (v) => { if (typeof v !== "string" || !v.trim() || v.length > 4_000 || v.includes("\0")) throw new Error("接管输入为空或超过安全长度"); return v; },
+  ], async (workspace, name, line) => {
     const root = resolveWorkspace(workspace);
-    if (!validSession(name) || !isAfkTmuxSession(root, name) || !(await listAfkTmux(root)).some((item) => item.name === name)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
-    if (!line.trim() || line.length > 4_000 || line.includes("\0")) throw new Error("接管输入为空或超过安全长度");
+    if (!isAfkTmuxSession(root, name) || !(await listAfkTmux(root)).some((item) => item.name === name)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
     const result = await exec("tmux", ["send-keys", "-t", name, line, "Enter"]);
     if (!result.ok) throw new Error(result.stderr);
     return true;
   });
-  ipcMain.handle(IPC_CHANNELS.sshList, (event, options: unknown) => {
-    assertTrustedSender(event);
-    const validated = sshListOptions(options);
-    return validated === undefined ? sshService.listHosts() : sshService.listHosts(validated);
-  });
-  ipcMain.handle(IPC_CHANNELS.sshAdd, (event, input: unknown) => { assertTrustedSender(event); return sshService.addHost(validateSshHostInput(input)); });
-  ipcMain.handle(IPC_CHANNELS.sshUpdate, (event, hostId: unknown, input: unknown) => { assertTrustedSender(event); return sshService.updateHost(validateSshHostId(hostId), validateSshHostInput(input)); });
-  ipcMain.handle(IPC_CHANNELS.sshRemove, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.removeHost(validateSshHostId(hostId)); });
-  ipcMain.handle(IPC_CHANNELS.sshTrust, (event, request: unknown) => {
-    assertTrustedSender(event);
-    if (!request || typeof request !== "object") throw new Error("SSH 信任参数无效");
-    const input = request as Record<string, unknown>;
-    return sshService.trustFingerprint({ hostId: validateSshHostId(input.hostId), fingerprint: fingerprintInput(input.fingerprint) });
-  });
-  ipcMain.handle(IPC_CHANNELS.sshGenerateKey, (event) => { assertTrustedSender(event); return sshService.generateKey(); });
-  ipcMain.handle(IPC_CHANNELS.sshDeployKey, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.deployKey(validateSshHostId(hostId)); });
-  ipcMain.handle(IPC_CHANNELS.sshTest, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.testHost(validateSshHostId(hostId)); });
-  ipcMain.handle(IPC_CHANNELS.sshUpload, async (event, hostId: unknown) => {
-    assertTrustedSender(event);
-    const id = validateSshHostId(hostId);
+  registerHandler(IPC_CHANNELS.sshList, sshListOptions, (opts) => opts === undefined ? sshService.listHosts() : sshService.listHosts(opts));
+  registerHandler(IPC_CHANNELS.sshAdd, validateSshHostInput, (input) => sshService.addHost(input));
+  registerHandlerMulti(IPC_CHANNELS.sshUpdate, [validateSshHostId, validateSshHostInput], (hostId, input) => sshService.updateHost(hostId, input));
+  registerHandler(IPC_CHANNELS.sshRemove, validateSshHostId, (id) => sshService.removeHost(id));
+  registerHandler(IPC_CHANNELS.sshTrust, (v: unknown) => {
+    if (!v || typeof v !== "object") throw new Error("SSH 信任参数无效");
+    const input = v as Record<string, unknown>;
+    return { hostId: validateSshHostId(input.hostId), fingerprint: fingerprintInput(input.fingerprint) };
+  }, (validated) => sshService.trustFingerprint(validated));
+  registerHandler(IPC_CHANNELS.sshGenerateKey, (v: unknown) => v, () => sshService.generateKey());
+  registerHandler(IPC_CHANNELS.sshDeployKey, validateSshHostId, (id) => sshService.deployKey(id));
+  registerHandler(IPC_CHANNELS.sshTest, validateSshHostId, (id) => sshService.testHost(id));
+  registerHandler(IPC_CHANNELS.sshUpload, validateSshHostId, async (id) => {
     const selection = await dialog.showOpenDialog({ title: "选择要上传的文件", properties: ["openFile"] });
     if (selection.canceled || !selection.filePaths[0]) return null;
     return sshService.uploadFile(id, selection.filePaths[0]);
   });
-  ipcMain.handle(IPC_CHANNELS.sshConnect, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.connect(validateSshHostId(hostId)); });
-  ipcMain.handle(IPC_CHANNELS.sshOpenExternal, (event, hostId: unknown, terminal: unknown) => { assertTrustedSender(event); return sshService.openExternal(validateSshHostId(hostId), terminal === undefined ? "iterm2" : validateSshExternalTerminalId(terminal)); });
-  ipcMain.handle(IPC_CHANNELS.sshCredentialHas, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.hasCredential(validateSshHostId(hostId)); });
-  ipcMain.handle(IPC_CHANNELS.sshCredentialSet, (event, input: unknown) => { assertTrustedSender(event); const validated = sshCredentialSetInput(input); return sshService.setCredential(validated.hostId, validated.password); });
-  ipcMain.handle(IPC_CHANNELS.sshCredentialRemove, (event, hostId: unknown) => { assertTrustedSender(event); return sshService.removeCredential(validateSshHostId(hostId)); });
-  ipcMain.handle(IPC_CHANNELS.sshInput, (event, request: unknown) => {
-    assertTrustedSender(event);
-    if (!request || typeof request !== "object") throw new Error("SSH 输入参数无效");
-    const input = request as Record<string, unknown>;
+  registerHandler(IPC_CHANNELS.sshConnect, validateSshHostId, (id) => sshService.connect(id));
+  registerHandlerMulti(IPC_CHANNELS.sshOpenExternal, [validateSshHostId, (v) => v === undefined ? "iterm2" : validateSshExternalTerminalId(v)], (hostId, terminal) => sshService.openExternal(hostId, terminal));
+  registerHandler(IPC_CHANNELS.sshCredentialHas, validateSshHostId, (id) => sshService.hasCredential(id));
+  registerHandler(IPC_CHANNELS.sshCredentialSet, sshCredentialSetInput, (validated) => sshService.setCredential(validated.hostId, validated.password));
+  registerHandler(IPC_CHANNELS.sshCredentialRemove, validateSshHostId, (id) => sshService.removeCredential(id));
+  registerHandler(IPC_CHANNELS.sshInput, (v: unknown) => {
+    if (!v || typeof v !== "object") throw new Error("SSH 输入参数无效");
+    const input = v as Record<string, unknown>;
     if (typeof input.data !== "string") throw new Error("SSH 输入参数无效");
-    return sshService.input(validateSshSessionId(input.sessionId), input.data);
-  });
-  ipcMain.handle(IPC_CHANNELS.sshResize, (event, request: unknown) => {
-    assertTrustedSender(event);
-    if (!request || typeof request !== "object") throw new Error("SSH 尺寸参数无效");
-    const input = request as Record<string, unknown>;
+    return { sessionId: validateSshSessionId(input.sessionId), data: input.data };
+  }, (validated) => sshService.input(validated.sessionId, validated.data));
+  registerHandler(IPC_CHANNELS.sshResize, (v: unknown) => {
+    if (!v || typeof v !== "object") throw new Error("SSH 尺寸参数无效");
+    const input = v as Record<string, unknown>;
     const size = validateSshResize(input.cols, input.rows);
-    return sshService.resize(validateSshSessionId(input.sessionId), size.cols, size.rows);
-  });
-  ipcMain.handle(IPC_CHANNELS.sshClose, (event, sessionId: unknown) => { assertTrustedSender(event); return sshService.close(validateSshSessionId(sessionId)); });
+    return { sessionId: validateSshSessionId(input.sessionId), size };
+  }, (validated) => sshService.resize(validated.sessionId, validated.size.cols, validated.size.rows));
+  registerHandler(IPC_CHANNELS.sshClose, validateSshSessionId, (sessionId) => sshService.close(sessionId));
 
-  ipcMain.handle(IPC_CHANNELS.jumpserverTestConnection, (event, input: unknown) => {
-    assertTrustedSender(event);
-    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 测试连接参数无效");
-    const obj = input as Record<string, unknown>;
+  registerHandler(IPC_CHANNELS.jumpserverTestConnection, (v: unknown) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 测试连接参数无效");
+    const obj = v as Record<string, unknown>;
     if (typeof obj.hostname !== "string" || !obj.hostname) throw new Error("堡垒机地址无效");
     if (typeof obj.port !== "number" || obj.port < 1 || obj.port > 65535) throw new Error("堡垒机端口无效");
     if (typeof obj.user !== "string" || !obj.user) throw new Error("堡垒机用户无效");
     if (typeof obj.password !== "string" || !obj.password) throw new Error("堡垒机密码无效");
-    return (jumpserverService as { testConnection: (input: unknown) => unknown }).testConnection({
-      hostname: obj.hostname,
-      port: obj.port,
-      user: obj.user,
-      password: obj.password,
-      otpSecret: typeof obj.otpSecret === "string" ? obj.otpSecret : undefined,
-    });
-  });
-  ipcMain.handle(IPC_CHANNELS.jumpserverAddBastion, (event, input: unknown) => {
-    assertTrustedSender(event);
-    return (jumpserverService as { addBastion: (input: unknown) => unknown }).addBastion(validateJumpserverBastionInput(input));
-  });
-  ipcMain.handle(IPC_CHANNELS.jumpserverListAssets, (event, input: unknown) => {
-    assertTrustedSender(event);
-    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 资产列表参数无效");
-    const obj = input as Record<string, unknown>;
-    const bastionId = validateJumpserverBastionId(obj.bastionId);
-    return (jumpserverService as { listAssets: (bastionId: string) => unknown }).listAssets(bastionId);
-  });
-  ipcMain.handle(IPC_CHANNELS.jumpserverPreviewAssets, (event, input: unknown) => {
-    assertTrustedSender(event);
-    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 资产预览参数无效");
-    const obj = input as Record<string, unknown>;
+    return { hostname: obj.hostname, port: obj.port, user: obj.user, password: obj.password, otpSecret: typeof obj.otpSecret === "string" ? obj.otpSecret : undefined };
+  }, (input) => (jumpserverService as { testConnection: (input: unknown) => unknown }).testConnection(input));
+  registerHandler(IPC_CHANNELS.jumpserverAddBastion, validateJumpserverBastionInput, (input) => (jumpserverService as { addBastion: (input: unknown) => unknown }).addBastion(input));
+  registerHandler(IPC_CHANNELS.jumpserverListAssets, (v: unknown) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 资产列表参数无效");
+    const obj = v as Record<string, unknown>;
+    return validateJumpserverBastionId(obj.bastionId);
+  }, (bastionId) => (jumpserverService as { listAssets: (bastionId: string) => unknown }).listAssets(bastionId));
+  registerHandler(IPC_CHANNELS.jumpserverPreviewAssets, (v: unknown) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 资产预览参数无效");
+    const obj = v as Record<string, unknown>;
     if (typeof obj.hostname !== "string" || !obj.hostname) throw new Error("堡垒机地址无效");
     if (typeof obj.port !== "number" || obj.port < 1 || obj.port > 65535) throw new Error("堡垒机端口无效");
     if (typeof obj.user !== "string" || !obj.user) throw new Error("堡垒机用户无效");
     if (typeof obj.password !== "string" || !obj.password) throw new Error("堡垒机密码无效");
-    return (jumpserverService as { previewAssets: (input: unknown) => unknown }).previewAssets({
-      hostname: obj.hostname,
-      port: obj.port,
-      user: obj.user,
-      password: obj.password,
-      otpSecret: typeof obj.otpSecret === "string" ? obj.otpSecret : undefined,
-    });
-  });
-  ipcMain.handle(IPC_CHANNELS.jumpserverSyncAssets, (event, input: unknown) => {
-    assertTrustedSender(event);
-    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 资产同步参数无效");
-    const obj = input as Record<string, unknown>;
-    const bastionId = validateJumpserverBastionId(obj.bastionId);
-    const opts = validateJumpserverSyncOptions(obj);
-    return (jumpserverService as { syncAssets: (bastionId: string, opts: unknown) => unknown }).syncAssets(bastionId, opts);
-  });
-  ipcMain.handle(IPC_CHANNELS.jumpserverRemoveBastion, (event, input: unknown) => {
-    assertTrustedSender(event);
-    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 移除堡垒机参数无效");
-    const obj = input as Record<string, unknown>;
-    const bastionId = validateJumpserverBastionId(obj.bastionId);
-    return (jumpserverService as { removeBastion: (bastionId: string) => unknown }).removeBastion(bastionId);
-  });
-  ipcMain.handle(IPC_CHANNELS.jumpserverListBastions, (event) => {
-    assertTrustedSender(event);
-    return (jumpserverService as { listBastions: () => unknown }).listBastions();
-  });
-  ipcMain.handle(IPC_CHANNELS.jumpserverGetSyncLog, (event, input: unknown) => {
-    assertTrustedSender(event);
-    if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("JumpServer 同步日志参数无效");
-    const obj = input as Record<string, unknown>;
-    const bastionId = validateJumpserverBastionId(obj.bastionId);
-    return (jumpserverService as { getSyncLog: (bastionId: string) => unknown }).getSyncLog(bastionId);
-  });
+    return { hostname: obj.hostname, port: obj.port, user: obj.user, password: obj.password, otpSecret: typeof obj.otpSecret === "string" ? obj.otpSecret : undefined };
+  }, (input) => (jumpserverService as { previewAssets: (input: unknown) => unknown }).previewAssets(input));
+  registerHandler(IPC_CHANNELS.jumpserverSyncAssets, (v: unknown) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 资产同步参数无效");
+    const obj = v as Record<string, unknown>;
+    return { bastionId: validateJumpserverBastionId(obj.bastionId), opts: validateJumpserverSyncOptions(obj) };
+  }, (validated) => (jumpserverService as { syncAssets: (bastionId: string, opts: unknown) => unknown }).syncAssets(validated.bastionId, validated.opts));
+  registerHandler(IPC_CHANNELS.jumpserverRemoveBastion, (v: unknown) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 移除堡垒机参数无效");
+    const obj = v as Record<string, unknown>;
+    return validateJumpserverBastionId(obj.bastionId);
+  }, (bastionId) => (jumpserverService as { removeBastion: (bastionId: string) => unknown }).removeBastion(bastionId));
+  registerHandler(IPC_CHANNELS.jumpserverListBastions, (v: unknown) => v, () => (jumpserverService as { listBastions: () => unknown }).listBastions());
+  registerHandler(IPC_CHANNELS.jumpserverGetSyncLog, (v: unknown) => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 同步日志参数无效");
+    const obj = v as Record<string, unknown>;
+    return validateJumpserverBastionId(obj.bastionId);
+  }, (bastionId) => (jumpserverService as { getSyncLog: (bastionId: string) => unknown }).getSyncLog(bastionId));
 
-  ipcMain.handle(IPC_CHANNELS.graphStatus, (event, workspace: unknown, templateId: unknown) => {
-    assertTrustedSender(event);
-    return workflowGraphService.status(validateWorkflowGraphWorkspace(workspace), validateWorkflowGraphTemplateId(templateId));
-  });
-  ipcMain.handle(IPC_CHANNELS.graphGenerate, (event, request: unknown) => {
-    assertTrustedSender(event);
-    return workflowGraphService.generate(parseWorkflowGraphGenerateRequest(request));
-  });
+  registerHandlerMulti(IPC_CHANNELS.graphStatus, [
+    (v) => validateWorkflowGraphWorkspace(v),
+    (v) => validateWorkflowGraphTemplateId(v),
+  ], ([workspace, templateId]) => workflowGraphService.status(workspace, templateId));
+  registerHandler(IPC_CHANNELS.graphGenerate, parseWorkflowGraphGenerateRequest, (request) => workflowGraphService.generate(request));
 
-  ipcMain.handle(IPC_CHANNELS.backlogList, (event, workspace: unknown, options: unknown) => {
-    assertTrustedSender(event);
-    return backlogService.list(backlogWorkspace(workspace, "backlog.list"), parseBacklogListOptions(options));
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogShow, (event, workspace: unknown, id: unknown) => {
-    assertTrustedSender(event);
-    const root = backlogWorkspace(workspace, "backlog.show");
-    if (typeof id !== "string" || !id) throw new Error("backlog.show: id 必须是字符串");
-    return backlogService.show(root, id);
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogCreate, (event, workspace: unknown, input: unknown) => {
-    assertTrustedSender(event);
-    return backlogService.create(backlogWorkspace(workspace, "backlog.create"), parseBacklogCreateInput(input));
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogStart, (event, workspace: unknown, input: unknown) => {
-    assertTrustedSender(event);
-    return backlogExecutionService.start(backlogWorkspace(workspace, "backlog.start"), parseBacklogRunStartInput(input));
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogStop, (event, workspace: unknown, backlogId: unknown) => {
-    assertTrustedSender(event);
-    return backlogExecutionService.stop(backlogWorkspace(workspace, "backlog.stop"), parseBacklogId(backlogId));
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogRecover, (event, workspace: unknown, backlogId: unknown) => {
-    assertTrustedSender(event);
-    return backlogExecutionService.recover(backlogWorkspace(workspace, "backlog.recover"), parseBacklogId(backlogId));
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogRetry, (event, workspace: unknown, input: unknown) => {
-    assertTrustedSender(event);
-    return backlogExecutionService.retry(backlogWorkspace(workspace, "backlog.retry"), parseBacklogRunRetryInput(input));
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogConfirmMerge, (event, workspace: unknown, backlogId: unknown) => {
-    assertTrustedSender(event);
-    return backlogExecutionService.confirmMerge(backlogWorkspace(workspace, "backlog.confirmMerge"), parseBacklogId(backlogId));
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogRuns, (event, workspace: unknown, backlogId: unknown) => {
-    assertTrustedSender(event);
-    const root = backlogWorkspace(workspace, "backlog.runs");
-    if (backlogId !== undefined && (typeof backlogId !== "string" || !backlogId)) throw new Error("backlog.runs: backlogId 必须是字符串");
-    return backlogExecutionService.list(root, backlogId as string | undefined);
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogSummary, (event, workspace: unknown, backlogId: unknown) => {
-    assertTrustedSender(event);
-    const root = backlogWorkspace(workspace, "backlog.summary");
-    if (typeof backlogId !== "string" || !backlogId) throw new Error("backlog.summary: backlogId 必须是字符串");
-    return backlogRuntimeService.summary(root, backlogId);
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogTagAdd, (event, workspace: unknown, id: unknown, tag: unknown) => {
-    assertTrustedSender(event);
-    const root = backlogWorkspace(workspace, "backlog.tag.add");
-    if (typeof id !== "string" || !id) throw new Error("backlog.tag.add: id 必须是字符串");
-    if (typeof tag !== "string" || !tag) throw new Error("backlog.tag.add: tag 必须是字符串");
-    return backlogService.addTag(root, id, tag);
-  });
-  ipcMain.handle(IPC_CHANNELS.backlogTagRemove, (event, workspace: unknown, id: unknown, tag: unknown) => {
-    assertTrustedSender(event);
-    const root = backlogWorkspace(workspace, "backlog.tag.remove");
-    if (typeof id !== "string" || !id) throw new Error("backlog.tag.remove: id 必须是字符串");
-    if (typeof tag !== "string" || !tag) throw new Error("backlog.tag.remove: tag 必须是字符串");
-    return backlogService.removeTag(root, id, tag);
-  });
+  registerHandlerMulti(IPC_CHANNELS.backlogList, [
+    (v) => backlogWorkspace(v, "backlog.list"),
+    (v) => parseBacklogListOptions(v),
+  ], ([workspace, options]) => backlogService.list(workspace, options));
+  registerHandlerMulti(IPC_CHANNELS.backlogShow, [
+    (v) => backlogWorkspace(v, "backlog.show"),
+    (v) => { if (typeof v !== "string" || !v) throw new Error("backlog.show: id 必须是字符串"); return v; },
+  ], ([workspace, id]) => backlogService.show(workspace, id));
+  registerHandlerMulti(IPC_CHANNELS.backlogCreate, [
+    (v) => backlogWorkspace(v, "backlog.create"),
+    parseBacklogCreateInput,
+  ], ([workspace, input]) => backlogService.create(workspace, input));
+  registerHandlerMulti(IPC_CHANNELS.backlogStart, [
+    (v) => backlogWorkspace(v, "backlog.start"),
+    parseBacklogRunStartInput,
+  ], ([workspace, input]) => backlogExecutionService.start(workspace, input));
+  registerHandlerMulti(IPC_CHANNELS.backlogStop, [
+    (v) => backlogWorkspace(v, "backlog.stop"),
+    parseBacklogId,
+  ], ([workspace, backlogId]) => backlogExecutionService.stop(workspace, backlogId));
+  registerHandlerMulti(IPC_CHANNELS.backlogRecover, [
+    (v) => backlogWorkspace(v, "backlog.recover"),
+    parseBacklogId,
+  ], ([workspace, backlogId]) => backlogExecutionService.recover(workspace, backlogId));
+  registerHandlerMulti(IPC_CHANNELS.backlogRetry, [
+    (v) => backlogWorkspace(v, "backlog.retry"),
+    parseBacklogRunRetryInput,
+  ], ([workspace, input]) => backlogExecutionService.retry(workspace, input));
+  registerHandlerMulti(IPC_CHANNELS.backlogConfirmMerge, [
+    (v) => backlogWorkspace(v, "backlog.confirmMerge"),
+    parseBacklogId,
+  ], ([workspace, backlogId]) => backlogExecutionService.confirmMerge(workspace, backlogId));
+  registerHandlerMulti(IPC_CHANNELS.backlogRuns, [
+    (v) => backlogWorkspace(v, "backlog.runs"),
+    (v) => { if (v !== undefined && (typeof v !== "string" || !v)) throw new Error("backlog.runs: backlogId 必须是字符串"); return v as string | undefined; },
+  ], ([workspace, backlogId]) => backlogExecutionService.list(workspace, backlogId));
+  registerHandlerMulti(IPC_CHANNELS.backlogSummary, [
+    (v) => backlogWorkspace(v, "backlog.summary"),
+    (v) => { if (typeof v !== "string" || !v) throw new Error("backlog.summary: backlogId 必须是字符串"); return v; },
+  ], ([workspace, backlogId]) => backlogRuntimeService.summary(workspace, backlogId));
+  registerHandlerMulti(IPC_CHANNELS.backlogTagAdd, [
+    (v) => backlogWorkspace(v, "backlog.tag.add"),
+    (v) => { if (typeof v !== "string" || !v) throw new Error("backlog.tag.add: id 必须是字符串"); return v; },
+    (v) => { if (typeof v !== "string" || !v) throw new Error("backlog.tag.add: tag 必须是字符串"); return v; },
+  ], ([workspace, id, tag]) => backlogService.addTag(workspace, id, tag));
+  registerHandlerMulti(IPC_CHANNELS.backlogTagRemove, [
+    (v) => backlogWorkspace(v, "backlog.tag.remove"),
+    (v) => { if (typeof v !== "string" || !v) throw new Error("backlog.tag.remove: id 必须是字符串"); return v; },
+    (v) => { if (typeof v !== "string" || !v) throw new Error("backlog.tag.remove: tag 必须是字符串"); return v; },
+  ], ([workspace, id, tag]) => backlogService.removeTag(workspace, id, tag));
 }

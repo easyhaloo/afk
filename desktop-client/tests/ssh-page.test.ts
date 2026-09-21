@@ -151,7 +151,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function createSshPageHarness(listImplementation: () => Promise<SshListResult> = async () => ({ hosts, diagnostics: [] })) {
+function createSshPageHarness(listImplementation: () => Promise<SshListResult> = async () => ({ hosts, diagnostics: [] }), listBastionsImplementation: () => Promise<import("../shared/ssh-contract").SshBastion[]> = async () => []) {
   const savedCredentials = new Set<string>();
   const connect = vi.fn(async () => ({ id: "session-1", hostId: hosts[0].id, alias: hosts[0].alias, state: "open" as const, output: "" }));
   const openExternal = vi.fn(async () => ({ terminal: "iterm2" }));
@@ -182,12 +182,22 @@ function createSshPageHarness(listImplementation: () => Promise<SshListResult> =
     credentialSet: credentials.set,
     credentialRemove: credentials.remove,
   };
-  vi.stubGlobal("window", { afkDesktop: { ssh: api } });
-  return { api, connect, openExternal, list, credentials };
+  const jumpserver = {
+    testConnection: vi.fn(),
+    addBastion: vi.fn(),
+    listAssets: vi.fn(async () => []),
+    previewAssets: vi.fn(async () => []),
+    syncAssets: vi.fn(async () => ({ bastionId: "bastion-1", assetsDiscovered: 2, assetsCreated: 2, assetsSkipped: 0, skippedReasons: [], createdAssetIds: ["a1", "a2"], syncedAt: new Date().toISOString() })),
+    removeBastion: vi.fn(async () => ({ ok: true, removedAssetCount: 0 })),
+    listBastions: vi.fn(listBastionsImplementation),
+    getSyncLog: vi.fn(async () => []),
+  };
+  vi.stubGlobal("window", { afkDesktop: { ssh: api, jumpserver } });
+  return { api, connect, openExternal, list, credentials, jumpserver };
 }
 
-async function renderSshPage(onSession = vi.fn(), listImplementation?: () => Promise<SshListResult>) {
-  const harness = createSshPageHarness(listImplementation);
+async function renderSshPage(onSession = vi.fn(), listImplementation?: () => Promise<SshListResult>, listBastionsImplementation?: () => Promise<import("../shared/ssh-contract").SshBastion[]>) {
+  const harness = createSshPageHarness(listImplementation, listBastionsImplementation);
   let renderer: ReturnType<typeof create>;
   await act(async () => {
     renderer = create(createElement(SshHostsPage, { onSession }));
@@ -747,6 +757,126 @@ describe("SSH deployment actions", () => {
     await act(async () => { deployButton.props.onClick(); await flushReactUpdates(); });
     expect(api.deployKey).toHaveBeenCalledWith(authHost.id);
     expect(onSession).toHaveBeenCalledWith(deploySession);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("SSH bastion integration", () => {
+  it("renders bastion group header with synced assets", async () => {
+    const bastion = { id: "bastion-1", alias: "fangcloud", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "fangcloud", syncFilter: { linuxOnly: true }, lastSyncedAt: new Date().toISOString(), lastSyncAssetCount: 2 };
+    const syncedHosts = [
+      { id: "managed:asset-1", alias: "web-1", hostname: "10.0.1.1", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "ready" as const, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud" },
+      { id: "managed:asset-2", alias: "web-2", hostname: "10.0.1.2", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "ready" as const, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud" },
+    ];
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: syncedHosts, diagnostics: [] }), async () => [bastion]);
+
+    expect(renderer.root.findAllByProps({ className: "ssh-bastion-group" })).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ className: "ssh-bastion-section" })).toHaveLength(1);
+    expect(renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))).toHaveLength(2);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("collapses bastion section when chevron is clicked", async () => {
+    const bastion = { id: "bastion-1", alias: "fangcloud", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "fangcloud", syncFilter: { linuxOnly: true }, lastSyncedAt: new Date().toISOString() };
+    const syncedHosts = [
+      { id: "managed:asset-1", alias: "web-1", hostname: "10.0.1.1", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "ready" as const, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud" },
+    ];
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: syncedHosts, diagnostics: [] }), async () => [bastion]);
+
+    const bastionCard = renderer.root.findByProps({ className: "ssh-bastion-group" });
+    expect(bastionCard.props["aria-expanded"]).toBe(true);
+    expect(renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))).toHaveLength(1);
+
+    const chevron = renderer.root.findByProps({ className: "ssh-bastion-chevron-btn" });
+    await act(async () => { chevron.props.onClick({ stopPropagation: vi.fn() }); await flushReactUpdates(); });
+    expect(renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("shows JumpserverDetail when bastion is selected", async () => {
+    const bastion = { id: "bastion-1", alias: "fangcloud", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "fangcloud", syncFilter: { linuxOnly: true }, lastSyncedAt: new Date().toISOString() };
+    const syncedHosts = [
+      { id: "managed:asset-1", alias: "web-1", hostname: "10.0.1.1", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "ready" as const, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud" },
+    ];
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: syncedHosts, diagnostics: [] }), async () => [bastion]);
+
+    const bastionCard = renderer.root.findByProps({ className: "ssh-bastion-group" });
+    await act(async () => { bastionCard.props.onClick(); await flushReactUpdates(); });
+
+    expect(renderer.root.findAllByProps({ className: "ssh-detail-sync-stats" })).toHaveLength(1);
+    // Within the detail panel, no host-management buttons should appear
+    const detail = renderer.root.findByProps({ "aria-label": `${bastion.alias} 堡垒机详情` });
+    expect(detail.findAll((node) => node.props["aria-label"]?.includes("删除 SSH 主机"))).toHaveLength(0);
+    expect(detail.findAllByProps({ className: "ssh-deploy-action" })).toHaveLength(0);
+    expect(detail.findAllByProps({ className: "ssh-upload-action" })).toHaveLength(0);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("shows bastion-managed notice for synced asset in detail panel", async () => {
+    const bastion = { id: "bastion-1", alias: "fangcloud", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "fangcloud", syncFilter: { linuxOnly: true }, lastSyncedAt: new Date().toISOString() };
+    const syncedHosts = [
+      { id: "managed:asset-1", alias: "web-1", hostname: "10.0.1.1", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "ready" as const, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud" },
+    ];
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: syncedHosts, diagnostics: [] }), async () => [bastion]);
+
+    const assetRow = renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))[0];
+    await act(async () => { assetRow.props.onClick(); await flushReactUpdates(); });
+
+    expect(renderer.root.findAllByProps({ className: "ssh-bastion-managed-notice" })).toHaveLength(1);
+    // Within the detail panel, no host-management buttons should appear
+    const detail = renderer.root.findByProps({ "aria-label": "web-1 SSH 详情" });
+    expect(detail.findAll((node) => node.props["aria-label"]?.includes("删除 SSH 主机"))).toHaveLength(0);
+    expect(detail.findAllByProps({ className: "ssh-deploy-action" })).toHaveLength(0);
+    expect(detail.findAllByProps({ className: "ssh-upload-action" })).toHaveLength(0);
+    expect(detail.findAllByProps({ className: "ssh-connect-action" })).toHaveLength(1);
+    expect(detail.findAllByProps({ className: "ssh-test-action" })).toHaveLength(1);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("filters host list by bastion filter chip", async () => {
+    const bastion = { id: "bastion-1", alias: "fangcloud", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "fangcloud", syncFilter: { linuxOnly: true }, lastSyncedAt: new Date().toISOString() };
+    const allHosts = [
+      { id: "system:prod", alias: "prod", hostname: "10.0.0.1", port: 22, source: "system" as const, configPath: "~/.ssh/config", status: "ready" as const },
+      { id: "managed:asset-1", alias: "web-1", hostname: "10.0.1.1", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "ready" as const, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud" },
+    ];
+    const { renderer } = await renderSshPage(vi.fn(), async () => ({ hosts: allHosts, diagnostics: [] }), async () => [bastion]);
+
+    const filterTrigger = renderer.root.findByProps({ "aria-label": "堡垒机筛选" });
+    await act(async () => { filterTrigger.props.onClick(); await flushReactUpdates(); });
+    const filterOptions = renderer.root.findByProps({ role: "listbox", "aria-label": "堡垒机筛选" }).findAllByProps({ role: "option" });
+    const bastionOnlyOption = filterOptions.find((o) => textContent(o).includes("仅堡垒机"))!;
+    await act(async () => { bastionOnlyOption.props.onPointerDown({ preventDefault: vi.fn(), stopPropagation: vi.fn() }); await flushReactUpdates(); });
+
+    expect(renderer.root.findAllByProps({ className: "ssh-bastion-group" })).toHaveLength(1);
+    expect(renderer.root.findAll((node) => node.props.className?.includes("ssh-host-row"))).toHaveLength(1);
+    act(() => { renderer.unmount(); });
+    vi.unstubAllGlobals();
+  });
+
+  it("removes bastion after confirmation and refreshes the list", async () => {
+    const bastion = { id: "bastion-1", alias: "fangcloud", hostname: "jms.example.com", port: 2222, user: "admin", jmsServerAlias: "fangcloud", syncFilter: { linuxOnly: true }, lastSyncedAt: new Date().toISOString() };
+    const syncedHosts = [
+      { id: "managed:asset-1", alias: "web-1", hostname: "10.0.1.1", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "ready" as const, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud" },
+    ];
+    const { renderer, jumpserver, list } = await renderSshPage(vi.fn(), async () => ({ hosts: syncedHosts, diagnostics: [] }), async () => [bastion]);
+
+    const bastionCard = renderer.root.findByProps({ className: "ssh-bastion-group" });
+    await act(async () => { bastionCard.props.onClick(); await flushReactUpdates(); });
+
+    const deleteButton = renderer.root.findAllByType("button").find((b) => textContent(b).includes("删除堡垒机"))!;
+    await act(async () => { deleteButton.props.onClick(); await flushReactUpdates(); });
+
+    expect(renderer.root.findByProps({ role: "dialog" })).toBeDefined();
+    const confirmButton = renderer.root.findByProps({ "aria-label": `确认删除堡垒机 ${bastion.alias}` });
+    await act(async () => { confirmButton.props.onClick(); await flushReactUpdates(); });
+
+    expect(jumpserver.removeBastion).toHaveBeenCalledWith(bastion.id);
+    expect(list).toHaveBeenCalled();
     act(() => { renderer.unmount(); });
     vi.unstubAllGlobals();
   });

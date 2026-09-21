@@ -95,7 +95,7 @@ export function validateJumpserverBastionInput(value: unknown): JumpserverBastio
   if (!OPENSSH_ALIAS_PATTERN.test(alias)) throw new Error("JumpServer 堡垒机别名无效");
   const hostname = requiredString(input.hostname, "JumpServer 堡垒机地址无效");
   if (!HOSTNAME_PATTERN.test(hostname)) throw new Error("JumpServer 堡垒机地址无效");
-  let port = input.port === undefined ? 2222 : input.port;
+  let port: number = input.port === undefined ? 2222 : (input.port as number);
   if (typeof port !== "number") {
     port = Number(port);
     if (Number.isNaN(port)) throw new Error("JumpServer 堡垒机端口无效");

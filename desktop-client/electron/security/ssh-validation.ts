@@ -79,3 +79,62 @@ export function validateSshUploadRemoteDirectory(value: unknown) {
   if (typeof value !== "string" || !value.trim() || value.includes("\0") || value.includes("\r") || value.includes("\n") || Buffer.byteLength(value, "utf8") > 4096) throw new Error("SSH 远程目录无效");
   return value.trim().endsWith("/") ? value.trim() : `${value.trim()}/`;
 }
+
+export interface JumpserverBastionInput {
+  alias: string;
+  hostname: string;
+  port: number;
+  user: string;
+  otpSecret?: string;
+}
+
+export function validateJumpserverBastionInput(value: unknown): JumpserverBastionInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("JumpServer 堡垒机参数无效");
+  const input = value as Record<string, unknown>;
+  const alias = requiredString(input.alias, "JumpServer 堡垒机别名无效");
+  if (!OPENSSH_ALIAS_PATTERN.test(alias)) throw new Error("JumpServer 堡垒机别名无效");
+  const hostname = requiredString(input.hostname, "JumpServer 堡垒机地址无效");
+  if (!HOSTNAME_PATTERN.test(hostname)) throw new Error("JumpServer 堡垒机地址无效");
+  let port = input.port === undefined ? 2222 : input.port;
+  if (typeof port !== "number") {
+    port = Number(port);
+    if (Number.isNaN(port)) throw new Error("JumpServer 堡垒机端口无效");
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("JumpServer 堡垒机端口无效");
+  const user = requiredString(input.user, "JumpServer 堡垒机用户无效");
+  if (input.otpSecret !== undefined && typeof input.otpSecret !== "string") throw new Error("JumpServer 堡垒机 OTP 密钥无效");
+  return {
+    alias,
+    hostname,
+    port,
+    user,
+    otpSecret: input.otpSecret as string | undefined,
+  };
+}
+
+export interface JumpserverSyncOptions {
+  selectedNames?: string[];
+  linuxOnly?: boolean;
+}
+
+export function validateJumpserverSyncOptions(value: unknown): JumpserverSyncOptions {
+  if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) return {};
+  const input = value as Record<string, unknown>;
+  if (input.selectedNames !== undefined) {
+    if (!Array.isArray(input.selectedNames) || input.selectedNames.some((v) => typeof v !== "string")) {
+      throw new Error("JumpServer 同步选项 selectedNames 无效");
+    }
+  }
+  if (input.linuxOnly !== undefined) {
+    if (typeof input.linuxOnly !== "boolean") throw new Error("JumpServer 同步选项 linuxOnly 无效");
+  }
+  return {
+    selectedNames: input.selectedNames as string[] | undefined,
+    linuxOnly: input.linuxOnly as boolean | undefined,
+  };
+}
+
+export function validateJumpserverBastionId(value: unknown): string {
+  const id = requiredString(value, "JumpServer 堡垒机 ID 无效");
+  return id;
+}

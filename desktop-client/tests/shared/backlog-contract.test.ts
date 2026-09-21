@@ -79,12 +79,12 @@ describe("Backlog shared contract", () => {
   it("strictly parses workspace-independent work item run inputs", () => {
     expect(parseWorkItemRunStartInput({
       workItemId: "WI-2026-018",
-      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", role: "primary" }],
+      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", role: "primary", baseBranch: "main" }],
       workflow: "standard-development",
       environment: "local",
     })).toEqual({
       workItemId: "WI-2026-018",
-      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", role: "primary" }],
+      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", role: "primary", baseBranch: "main" }],
       workflow: "standard-development",
       environment: "local",
     });

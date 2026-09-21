@@ -53,6 +53,8 @@ export type WorkItemRepositoryRef = ProviderProjectRef & {
   id?: string;
   role?: string;
   checkoutPath?: string;
+  /** Derived: defaultBranch || "main" */
+  baseBranch: string;
 };
 
 export type WorkItemExecutionStep = {
@@ -469,7 +471,7 @@ function parseWorkItemSource(input: unknown): WorkItemSourceRef {
 function parseWorkItemRepository(input: unknown): WorkItemRepositoryRef {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item repository must be an object");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "platform", "projectKey", "providerProjectId", "name", "defaultBranch", "webUrl", "role", "checkoutPath"], "work item repository");
+  assertExactKeys(candidate, ["id", "platform", "projectKey", "providerProjectId", "name", "defaultBranch", "webUrl", "role", "checkoutPath", "baseBranch"], "work item repository");
   const project = parseProviderProjectRef({
     platform: candidate.platform,
     projectKey: candidate.projectKey,
@@ -483,6 +485,7 @@ function parseWorkItemRepository(input: unknown): WorkItemRepositoryRef {
     ...(candidate.id === undefined ? {} : { id: parseRequiredString(candidate.id, "work item repository: id") }),
     ...(candidate.role === undefined ? {} : { role: parseRequiredString(candidate.role, "work item repository: role") }),
     ...(candidate.checkoutPath === undefined ? {} : { checkoutPath: parseRequiredString(candidate.checkoutPath, "work item repository: checkoutPath") }),
+    baseBranch: typeof candidate.baseBranch === "string" ? candidate.baseBranch : (project.defaultBranch || "main"),
   };
 }
 

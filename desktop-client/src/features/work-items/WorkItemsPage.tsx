@@ -66,7 +66,11 @@ function itemRepositories(item: GlobalWorkItem): WorkItemRepositoryRef[] {
 }
 
 function executionRepositories(item: GlobalWorkItem): WorkItemRepositoryRef[] {
-  return item.repositories === undefined ? [item.project] : item.repositories;
+  if (item.repositories !== undefined) return item.repositories;
+  return [{
+    ...item.project,
+    baseBranch: item.project.defaultBranch || "main",
+  }];
 }
 
 function workspacePath(item: GlobalWorkItem): string {
@@ -190,7 +194,12 @@ export function WorkItemsPage() {
   const startRun = async () => {
     if (!selected) return;
     const repositories = availableExecutionRepositories.filter(repository => selectedRepositoryKeys.includes(repository.id ?? `${repository.platform}:${repository.projectKey}`));
-    const input: WorkItemRunStartInput = { workItemId: selected.id, repositories, workflow: "standard-development", environment: "local" };
+    const runRepositories = repositories.map(repository => ({
+      ...repository,
+      baseBranch: repository.defaultBranch || "main",
+      checkoutPath: repository.checkoutPath ?? `repositories/${repository.name}`,
+    }));
+    const input: WorkItemRunStartInput = { workItemId: selected.id, repositories: runRepositories, workflow: "standard-development", environment: "local" };
     setStartingRun(true);
     setRunError("");
     try {

@@ -1,31 +1,56 @@
-# Jev Agent Guard
+# Native Jev SDK
 
-The Skill includes a dependency-free Jev client at
-`scripts/jev-client.mjs`. It can be imported directly by internal scripts and
-uses Node.js 18+ `fetch`; no npm dependency is required.
+The guard uses TypeSafe's official JavaScript SDK instead of a custom HTTP
+transport:
 
-## Client contract
+- Package: `@typesafe-ai/sdk`
+- Minimum Node.js: 20
+- Credential: `TYPESAFE_API_KEY`
+- Client: `TypeSafeClient`
+- Primitives: `choice`, `noul`, and `score`
 
-- `createJevClient(options)` creates a client.
-- `client.ask({ state, questions, metadata })` sends one batched typed request.
-- `client.choice({ state, prompt, options })` asks a typed choice question.
-- `client.noul({ state, prompt })` asks a typed yes/no-style question.
-- `redact(value)` removes common bearer tokens, secrets, and private keys before transmission.
+Install the dependency from this Skill directory before running the scripts.
+The Skill's local `package.json` pins the official SDK dependency; it is not a
+dependency of the AFK application.
 
-Configuration is environment-only by default:
+## Direct use from an internal script
 
-- `TYPESAFE_API_KEY`: required for live requests
-- `TYPESAFE_ENDPOINT`: optional endpoint override
-- `JEV_MODEL`: optional model override, default `jev-latest`
+Import `scripts/jev-client.mjs` and call `askJev`, `decideChoice`,
+`decideNoul`, or `decideScore`. The facade only creates typed questions and
+calls `TypeSafeClient.systemOne`; it does not implement HTTP, retries, response
+parsing, or authentication.
 
-The client does not make policy decisions. Callers must apply local policy,
-redact input, batch related questions, and treat provider errors as
-non-approval. Do not send credentials, complete environment files, or
-unrelated private source.
+The native SDK reads `TYPESAFE_API_KEY` from the process environment. Never
+write the key to a repository file, command argument, audit record, or log.
 
-## Direct CLI bridge
+## CLI bridge input
 
-`scripts/jev.mjs` accepts a JSON document from stdin or `--input`. The document
-contains `state`, `questions`, and optional `metadata`, and the response is
-JSON. It is intended for adapters and diagnostics; the guard should prefer
-local rules and call it only for ambiguous, high-value judgments.
+The `scripts/jev.mjs` bridge reads JSON from stdin or `--input`:
+
+```json
+{
+  "state": { "task": "repair the login timeout" },
+  "questions": {
+    "route": {
+      "type": "choice",
+      "instructions": "Which workflow should handle this task?",
+      "criteria": {
+        "debug": "The task needs root-cause debugging.",
+        "implementation": "The task needs a feature implementation.",
+        "review": "The task needs a code review."
+      }
+    }
+  }
+}
+```
+
+For internal callers, prefer constructing questions with the official SDK
+helpers rather than hand-writing serialized question objects. Batch related
+questions in one `systemOne` request and call Jev only when local rules cannot
+resolve the decision.
+
+## Error and fallback behavior
+
+A missing key, SDK error, timeout, or malformed provider response is not an
+approval. High-risk actions must fail closed; ordinary actions must fall back
+to the host's native permission flow.

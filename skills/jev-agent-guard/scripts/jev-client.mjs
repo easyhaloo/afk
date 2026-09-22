@@ -1,110 +1,83 @@
 #!/usr/bin/env node
 /**
- * Minimal, dependency-free TypeSafe Jev client for this skill.
+ * Native TypeSafe SDK facade for the Jev Agent Guard skill.
  *
- * It is intentionally a transport client, not a policy engine. Callers must
- * redact secrets and apply local policy before asking Jev for a judgment.
+ * This file deliberately contains no HTTP implementation. Install the skill's
+ * package.json first, then import the official @typesafe-ai/sdk package.
  */
+import { choice, noul, score, TypeSafeClient } from '@typesafe-ai/sdk';
 
-const DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
-const DEFAULT_MODEL = 'jev-latest';
+export { choice, noul, score, TypeSafeClient };
 
-export class JevError extends Error {
+export class JevClientError extends Error {
   constructor(message, options = {}) {
     super(message);
-    this.name = 'JevError';
+    this.name = 'JevClientError';
     this.code = options.code ?? 'jev_error';
-    this.status = options.status;
-    this.retryable = options.retryable ?? false;
+    this.cause = options.cause;
   }
-}
-
-export class JevClient {
-  constructor(options = {}) {
-    this.apiKey = options.apiKey ?? process.env.TYPESAFE_API_KEY;
-    this.endpoint = options.endpoint ?? process.env.TYPESAFE_ENDPOINT ?? DEFAULT_ENDPOINT;
-    this.model = options.model ?? process.env.JEV_MODEL ?? DEFAULT_MODEL;
-    this.timeoutMs = options.timeoutMs ?? 4000;
-    this.fetch = options.fetch ?? globalThis.fetch;
-    if (typeof this.fetch !== 'function') {
-      throw new JevError('A fetch implementation is required', { code: 'fetch_unavailable' });
-    }
-  }
-
-  get configured() {
-    return Boolean(this.apiKey);
-  }
-
-  async ask({ state = {}, questions = [], metadata = {} } = {}) {
-    if (!this.apiKey) throw new JevError('TYPESAFE_API_KEY is not configured', { code: 'missing_api_key' });
-    if (!Array.isArray(questions) || questions.length === 0) {
-      throw new JevError('At least one typed question is required', { code: 'invalid_questions' });
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    try {
-      const response = await this.fetch(this.endpoint, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${this.apiKey}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ model: this.model, state, questions, metadata }),
-        signal: controller.signal,
-      });
-      const text = await response.text();
-      let body;
-      try { body = text ? JSON.parse(text) : {}; } catch {
-        throw new JevError('Jev returned invalid JSON', { code: 'invalid_response', status: response.status });
-      }
-      if (!response.ok) {
-        throw new JevError(body?.error?.message ?? `Jev request failed with HTTP ${response.status}`, {
-          code: response.status === 429 || response.status >= 500 ? 'provider_retryable' : 'provider_error',
-          status: response.status,
-          retryable: response.status === 429 || response.status >= 500,
-        });
-      }
-      return body;
-    } catch (error) {
-      if (error?.name === 'AbortError') {
-        throw new JevError(`Jev request timed out after ${this.timeoutMs}ms`, { code: 'timeout', retryable: true });
-      }
-      if (error instanceof JevError) throw error;
-      throw new JevError(error?.message ?? String(error), { code: 'network_error', retryable: true });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async choice({ state, prompt, options, metadata } = {}) {
-    if (!Array.isArray(options) || options.length < 2) {
-      throw new JevError('choice requires at least two options', { code: 'invalid_options' });
-    }
-    return this.ask({
-      state,
-      metadata,
-      questions: [{ type: 'choice', prompt, options }],
-    });
-  }
-
-  async noul({ state, prompt, metadata } = {}) {
-    return this.ask({
-      state,
-      metadata,
-      questions: [{ type: 'noul', prompt }],
-    });
-  }
-}
-
-export function redact(value) {
-  const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
-  return text
-    .replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1[REDACTED]')
-    .replace(/((?:token|secret|password|passwd|api[_-]?key|authorization)\s*[:=]\s*)[^\s,}]+/gi, '$1[REDACTED]')
-    .replace(/-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g, '[REDACTED_PRIVATE_KEY]');
 }
 
 export function createJevClient(options = {}) {
-  return new JevClient(options);
+  if (!process.env.TYPESAFE_API_KEY && !options.apiKey) {
+    throw new JevClientError('TYPESAFE_API_KEY is not configured', { code: 'missing_api_key' });
+  }
+
+  // The native SDK reads TYPESAFE_API_KEY from the environment. Pass only
+  // documented client options supplied by the caller; never log credentials.
+  return new TypeSafeClient(options);
+}
+
+export async function askJev({ state, questions, client, options } = {}) {
+  if (!questions || typeof questions !== 'object' || Array.isArray(questions)) {
+    throw new JevClientError('questions must be an object created with choice/noul/score helpers', {
+      code: 'invalid_questions',
+    });
+  }
+
+  const activeClient = client ?? createJevClient(options);
+  try {
+    return await activeClient.systemOne({ state, questions });
+  } catch (error) {
+    throw new JevClientError(error?.message ?? String(error), {
+      code: error?.code ?? 'provider_error',
+      cause: error,
+    });
+  }
+}
+
+export async function decideChoice({ state, name = 'decision', prompt, options, client, clientOptions } = {}) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    throw new JevClientError('options must be a keyed object of choice criteria', { code: 'invalid_options' });
+  }
+  const response = await askJev({
+    state,
+    client,
+    options: clientOptions,
+    questions: { [name]: choice(prompt, options) },
+  });
+  return response.answers[name];
+}
+
+export async function decideNoul({ state, name = 'decision', prompt, client, clientOptions } = {}) {
+  const response = await askJev({
+    state,
+    client,
+    options: clientOptions,
+    questions: { [name]: noul(prompt) },
+  });
+  return response.answers[name];
+}
+
+export async function decideScore({ state, name = 'decision', prompt, levels, client, clientOptions } = {}) {
+  if (!Array.isArray(levels) || levels.length < 2) {
+    throw new JevClientError('levels must contain at least two score criteria', { code: 'invalid_levels' });
+  }
+  const response = await askJev({
+    state,
+    client,
+    options: clientOptions,
+    questions: { [name]: score(prompt, levels) },
+  });
+  return response.answers[name];
 }

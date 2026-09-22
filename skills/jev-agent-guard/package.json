@@ -1,0 +1,11 @@
+{
+  "name": "@afk/jev-agent-guard-runtime",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
+  }
+}

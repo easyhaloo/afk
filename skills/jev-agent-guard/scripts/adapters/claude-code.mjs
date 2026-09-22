@@ -2,41 +2,82 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const root = process.cwd();
-const SCRIPT_DIR = path.join(root, 'skills', 'jev-agent-guard', 'scripts');
+const repoRoot = process.cwd();
+const claudeSettingsPath = path.join(repoRoot, '.claude', 'settings.json');
+const codexConfigPath = path.join(repoRoot, '.codex', 'config.toml');
+const opencodeConfigPath = path.join(repoRoot, '.opencode', 'config.json');
 
-function ensureAdapter(host) {
-  const file = path.join(SCRIPT_DIR, 'adapters', `${host}.mjs`);
-  if (!fs.existsSync(file)) {
-    throw new Error(`Missing adapter: ${file}`);
+function readJson(filePath, fallback = {}) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return fallback;
   }
-  return file;
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function writeToml(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, value, 'utf8');
+}
+
+function ensureClaudeHook() {
+  const settings = readJson(claudeSettingsPath, { hooks: {} });
+  const hooks = settings.hooks ?? {};
+  const list = hooks.PreToolUse ?? [];
+  const command = 'node skills/jev-agent-guard/scripts/adapters/claude-code.mjs pre-tool';
+  const exists = list.some(item => item && typeof item.command === 'string' && item.command.includes('claude-code.mjs'));
+  if (!exists) {
+    list.push({ type: 'command', command });
+    hooks.PreToolUse = list;
+    settings.hooks = hooks;
+    writeJson(claudeSettingsPath, settings);
+    console.log(`Updated ${claudeSettingsPath}`);
+  } else {
+    console.log(`Claude settings already contain the Jev guard hook.`);
+  }
+}
+
+function ensureCodexHook() {
+  const lines = [
+    '[hooks]',
+    'pre_tool = "node skills/jev-agent-guard/scripts/adapters/codex.mjs pre-tool"',
+    '',
+  ].join('\n');
+  fs.mkdirSync(path.dirname(codexConfigPath), { recursive: true });
+  const current = fs.existsSync(codexConfigPath) ? fs.readFileSync(codexConfigPath, 'utf8') : '';
+  if (!current.includes('jev-agent-guard')) {
+    fs.writeFileSync(codexConfigPath, current.trim() ? `${current.trim()}\n\n${lines}` : lines, 'utf8');
+    console.log(`Updated ${codexConfigPath}`);
+  } else {
+    console.log(`Codex config already contains the Jev guard hook.`);
+  }
+}
+
+function ensureOpenCodePlugin() {
+  const settings = readJson(opencodeConfigPath, { plugins: [] });
+  const plugins = Array.isArray(settings.plugins) ? settings.plugins : [];
+  const entry = { name: 'jev-agent-guard', command: 'node skills/jev-agent-guard/scripts/adapters/opencode.mjs' };
+  if (!plugins.some(item => item && item.name === 'jev-agent-guard')) {
+    plugins.push(entry);
+    settings.plugins = plugins;
+    writeJson(opencodeConfigPath, settings);
+    console.log(`Updated ${opencodeConfigPath}`);
+  } else {
+    console.log(`OpenCode config already contains the Jev guard plugin.`);
+  }
 }
 
 function main() {
-  const argv = process.argv.slice(2);
-  const host = argv[0] || 'claude-code';
-  const dryRun = argv.includes('--dry-run');
-  const adapter = ensureAdapter(host.replace(/-code$/, '-code'));
-
-  const summary = {
-    host,
-    adapter,
-    dryRun,
-    installTargets: [
-      '.claude/settings.json',
-      '.codex/config.json',
-      '.opencode/config.json',
-    ],
-    action: 'create a minimal host configuration entry for the local agent guard',
-  };
-
-  if (dryRun) {
-    console.log(JSON.stringify(summary, null, 2));
-    return;
-  }
-
-  console.log(JSON.stringify({ ...summary, status: 'ready' }, null, 2));
+  ensureClaudeHook();
+  ensureCodexHook();
+  ensureOpenCodePlugin();
+  console.log('Jev Agent Guard install complete.');
+  console.log('Set TYPESAFE_API_KEY in your shell before using live policy checks.');
 }
 
 main();

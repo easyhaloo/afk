@@ -1,7 +1,6 @@
 # Native Jev SDK
 
-The guard uses TypeSafe's official JavaScript SDK instead of a custom HTTP
-transport:
+The guard uses TypeSafe's official JavaScript SDK:
 
 - Package: `@typesafe-ai/sdk`
 - Minimum Node.js: 20
@@ -10,8 +9,8 @@ transport:
 - Primitives: `choice`, `noul`, and `score`
 
 Install the dependency from this Skill directory before running the scripts.
-The Skill's local `package.json` pins the official SDK dependency; it is not a
-dependency of the AFK application.
+The Skill's local `package.json` keeps the SDK independent from the AFK
+application.
 
 ## Direct use from an internal script
 
@@ -25,7 +24,8 @@ write the key to a repository file, command argument, audit record, or log.
 
 ## CLI bridge input
 
-The `scripts/jev.mjs` bridge reads JSON from stdin or `--input`:
+`scripts/jev.mjs` reads JSON from stdin or `--input`. The bridge converts the
+JSON question specification into native SDK question objects:
 
 ```json
 {
@@ -39,15 +39,23 @@ The `scripts/jev.mjs` bridge reads JSON from stdin or `--input`:
         "implementation": "The task needs a feature implementation.",
         "review": "The task needs a code review."
       }
+    },
+    "risky": {
+      "type": "noul",
+      "instructions": "Could this action expose credentials?"
+    },
+    "severity": {
+      "type": "score",
+      "instructions": "How risky is this action?",
+      "levels": ["safe", "review", "dangerous"]
     }
   }
 }
 ```
 
-For internal callers, prefer constructing questions with the official SDK
-helpers rather than hand-writing serialized question objects. Batch related
-questions in one `systemOne` request and call Jev only when local rules cannot
-resolve the decision.
+Related questions should be batched into one `systemOne` request. The guard
+must apply local policy first and call Jev only for ambiguous, high-value
+semantic decisions.
 
 ## Error and fallback behavior
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
+import { choice, noul, score } from './jev-client.mjs';
 import { askJev } from './jev-client.mjs';
 
 function parseArgs(argv) {
@@ -25,12 +26,31 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+function buildQuestions(specification = {}) {
+  return Object.fromEntries(Object.entries(specification).map(([name, question]) => {
+    if (!question || typeof question !== 'object') throw new Error(`invalid question '${name}'`);
+    const prompt = question.instructions ?? question.prompt;
+    if (typeof prompt !== 'string' || !prompt.trim()) throw new Error(`question '${name}' needs instructions`);
+    switch (question.type) {
+      case 'choice':
+        return [name, choice(prompt, question.criteria ?? question.options ?? {})];
+      case 'noul':
+      case 'boolean':
+        return [name, noul(prompt)];
+      case 'score':
+        return [name, score(prompt, question.criteria ?? question.levels ?? [])];
+      default:
+        throw new Error(`unsupported question type for '${name}': ${question.type}`);
+    }
+  }));
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const input = await readInput(args.input);
   const response = await askJev({
     state: input.state ?? {},
-    questions: input.questions ?? {},
+    questions: buildQuestions(input.questions ?? {}),
     options: args.model ? { model: args.model } : undefined,
   });
   process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);

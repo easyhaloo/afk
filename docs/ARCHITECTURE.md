@@ -1,5 +1,17 @@
 # AFK architecture
 
+## Architecture guard
+
+`pnpm architecture:check` enforces layer direction and disallows generic
+records and legacy client-factory imports. The legacy migration is complete:
+`scripts/architecture-legacy-baseline.json` records zero legacy files, imports,
+and patterns. New legacy files or imports fail the check. Delete the stale
+baseline record when removing an entry.
+
+Layer direction applies to relative imports between non-test files in
+`src/cli`, `src/domain`, `src/application`, `src/infrastructure`,
+`src/shared`, and `src/views`.
+
 ## Scope and command surface
 
 AFK executes backlog items that were already created and decomposed by an

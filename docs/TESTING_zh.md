@@ -23,7 +23,7 @@ AFK TUI 基于 React + Ink 构建，采用分层测试策略。
 **模式**：直接实例化类，调用方法，断言结果
 
 ```typescript
-// src/lib/ui/core/Keyboard.test.ts
+// src/views/shared/Keyboard.test.ts
 import { KeyboardDispatcher } from './Keyboard';
 
 it('dispatches escape to global handler', () => {
@@ -43,7 +43,7 @@ it('dispatches escape to global handler', () => {
 
 **运行**：
 ```bash
-pnpm dlx vitest --run src/lib/ui/core/
+pnpm exec vitest run src/views/shared/
 ```
 
 ---
@@ -203,7 +203,7 @@ pnpm dlx vitest --run tests/e2e/
 ```
 afk/
 ├── src/
-│   ├── lib/ui/core/
+│   ├── views/shared/
 │   │   ├── Keyboard.test.ts      ← 单元测试 (4 tests)
 │   │   └── Registry.test.ts      ← 单元测试 (10 tests)
 │   └── views/board/views/
@@ -229,7 +229,7 @@ source ~/.nvm/nvm.sh && nvm use lts/iron && pnpm dlx vitest --run
 pnpm dlx vitest
 
 # 只跑单元测试
-pnpm dlx vitest --run src/lib/
+pnpm dlx vitest --run src/domain/ src/application/ src/infrastructure/ src/shared/ src/cli/
 
 # 只跑组件测试
 pnpm dlx vitest --run src/views/

@@ -238,6 +238,8 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandler(IPC_CHANNELS.copyText, (v: unknown) => v, (text) => clipboardService.copyText(text as string));
   registerHandler(IPC_CHANNELS.openExternal, (url: unknown) => {
     if (typeof url !== "string" || !url.trim()) throw new Error("外部地址无效");
+    return url;
+  }, (url) => externalUrlService.open(url));
   registerHandlerMulti(IPC_CHANNELS.workItemsList, [
     (v) => parseWorkItemInventoryOptions(v),
     (v) => { if (v !== undefined && typeof v !== "boolean") throw new Error("刷新参数无效"); return v as boolean | undefined; },

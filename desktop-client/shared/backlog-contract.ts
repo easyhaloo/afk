@@ -10,6 +10,10 @@
  */
 
 import { assertExactKeys, parseRequiredString } from "./validation";
+import {
+  validateBaseBranch,
+  validateRunRepositorySelectionSet,
+} from "./work-item-run-validation";
 
 export const BACKLOG_STATES = [
   "ready",
@@ -33,6 +37,7 @@ export type WorkItemId = string;
 export type ProviderProjectRef = {
   platform: BacklogPlatform;
   projectKey: string;
+  providerHost?: string;
   providerProjectId?: string;
   name: string;
   defaultBranch?: string;
@@ -59,6 +64,17 @@ export type WorkItemRepositoryRef = ProviderProjectRef & {
   baseBranch: string;
 };
 
+export type WorkItemRunRepositorySelection = {
+  platform: BacklogPlatform;
+  projectKey: string;
+  providerHost?: string;
+  providerProjectId?: string;
+  name: string;
+  checkoutPath: string;
+  baseBranch: string;
+  role?: string;
+};
+
 export type WorkItemExecutionStep = {
   id: string;
   title: string;
@@ -72,6 +88,8 @@ export type WorkItemRunRecord = {
   startedAt: string;
   completedAt?: string;
   workflow?: string;
+  workingBranch?: string;
+  repositories?: WorkItemRunRepositorySelection[];
   workspacePath?: string;
   pid?: number;
   error?: string;
@@ -79,7 +97,7 @@ export type WorkItemRunRecord = {
 
 export type WorkItemRunStartInput = {
   workItemId: WorkItemId;
-  repositories: WorkItemRepositoryRef[];
+  repositories: WorkItemRunRepositorySelection[];
   workflow?: string;
   environment?: "local";
 };
@@ -341,7 +359,7 @@ export function parseWorkItemRunStartInput(input: unknown): WorkItemRunStartInpu
   if (!Array.isArray(candidate.repositories)) throw new Error("work item run input: repositories must be an array");
   const result: WorkItemRunStartInput = {
     workItemId: parseGlobalWorkItemIdentity(candidate.workItemId, "work item run input: workItemId"),
-    repositories: candidate.repositories.map(parseWorkItemRepository),
+    repositories: validateRunRepositorySelectionSet(candidate.repositories),
   };
   if (candidate.workflow !== undefined) {
     if (typeof candidate.workflow !== "string" || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(candidate.workflow)) throw new Error("work item run input: workflow is invalid");
@@ -384,13 +402,13 @@ export function parseWorkItemId(input: unknown): WorkItemId {
 export function parseProviderProjectRef(input: unknown): ProviderProjectRef {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("provider project must be an object");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["platform", "projectKey", "providerProjectId", "name", "defaultBranch", "webUrl"], "provider project");
+  assertExactKeys(candidate, ["platform", "projectKey", "providerHost", "providerProjectId", "name", "defaultBranch", "webUrl"], "provider project");
   const project: ProviderProjectRef = {
     platform: parseRequiredBacklogPlatform(candidate.platform, "provider project"),
     projectKey: parseProjectKey(candidate.projectKey, "provider project"),
     name: parseRequiredString(candidate.name, "provider project: name"),
   };
-  for (const key of ["providerProjectId", "defaultBranch", "webUrl"] as const) {
+  for (const key of ["providerHost", "providerProjectId", "defaultBranch", "webUrl"] as const) {
     if (candidate[key] !== undefined) project[key] = parseRequiredString(candidate[key], `provider project: ${key}`);
   }
   return project;
@@ -472,10 +490,11 @@ function parseWorkItemSource(input: unknown): WorkItemSourceRef {
 function parseWorkItemRepository(input: unknown): WorkItemRepositoryRef {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item repository must be an object");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "platform", "projectKey", "providerProjectId", "name", "defaultBranch", "webUrl", "role", "checkoutPath", "baseBranch"], "work item repository");
+  assertExactKeys(candidate, ["id", "platform", "projectKey", "providerHost", "providerProjectId", "name", "defaultBranch", "webUrl", "role", "checkoutPath", "baseBranch"], "work item repository");
   const project = parseProviderProjectRef({
     platform: candidate.platform,
     projectKey: candidate.projectKey,
+    providerHost: candidate.providerHost,
     providerProjectId: candidate.providerProjectId,
     name: candidate.name,
     defaultBranch: candidate.defaultBranch,
@@ -503,10 +522,10 @@ function parseWorkItemExecutionStep(input: unknown): WorkItemExecutionStep {
   };
 }
 
-function parseWorkItemRunRecord(input: unknown): WorkItemRunRecord {
+export function parseWorkItemRunRecord(input: unknown): WorkItemRunRecord {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item run record must be an object");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "status", "startedAt", "completedAt", "workflow", "workspacePath", "pid", "error"], "work item run record");
+  assertExactKeys(candidate, ["id", "status", "startedAt", "completedAt", "workflow", "workingBranch", "repositories", "workspacePath", "pid", "error"], "work item run record");
   if (typeof candidate.status !== "string" || !["starting", "running", "completed", "failed"].includes(candidate.status)) throw new Error("work item run record: status is invalid");
   if (candidate.pid !== undefined && (typeof candidate.pid !== "number" || !Number.isInteger(candidate.pid) || candidate.pid <= 0)) throw new Error("work item run record: pid is invalid");
   return {
@@ -515,6 +534,8 @@ function parseWorkItemRunRecord(input: unknown): WorkItemRunRecord {
     startedAt: parseRequiredString(candidate.startedAt, "work item run record: startedAt"),
     ...(candidate.completedAt === undefined ? {} : { completedAt: parseRequiredString(candidate.completedAt, "work item run record: completedAt") }),
     ...(candidate.workflow === undefined ? {} : { workflow: parseRequiredString(candidate.workflow, "work item run record: workflow") }),
+    ...(candidate.workingBranch === undefined ? {} : { workingBranch: validateBaseBranch(candidate.workingBranch, "work item run record: workingBranch") }),
+    ...(candidate.repositories === undefined ? {} : { repositories: validateRunRepositorySelectionSet(candidate.repositories) }),
     ...(candidate.workspacePath === undefined ? {} : { workspacePath: parseRequiredString(candidate.workspacePath, "work item run record: workspacePath") }),
     ...(candidate.pid === undefined ? {} : { pid: candidate.pid }),
     ...(candidate.error === undefined ? {} : { error: parseRequiredString(candidate.error, "work item run record: error") }),

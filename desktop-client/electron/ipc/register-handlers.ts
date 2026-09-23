@@ -26,7 +26,10 @@ import { createWorkItemInventoryService } from "../services/work-item-inventory-
 import { createWorkItemInventoryStore } from "../services/work-item-inventory-store";
 import { createWorkItemInventorySyncService } from "../services/work-item-inventory-sync-service";
 import { createWorkItemExecutionService } from "../services/work-item-execution-service";
+import { createWorkItemExecutionManifestStore } from "../services/work-item-execution-manifest-store";
 import { createWorkItemRunStore } from "../services/work-item-run-store";
+import { createWorkItemRunHistoryService } from "../services/work-item-run-history-service";
+import { resolveWorkItemCli } from "../services/work-item-cli-service";
 import { createExecutionWorkspaceService } from "../services/execution-workspace-service";
 import { WorkflowGraphService } from "../services/graph-service";
 import { saveWorkspacePreference } from "../services/workspace-preference-service";
@@ -151,6 +154,7 @@ const workItemInventorySyncService = createWorkItemInventorySyncService({
 });
 const executionWorkspaceService = createExecutionWorkspaceService();
 const workItemRunStore = createWorkItemRunStore({ resolveWorkspace });
+const workItemRunHistoryService = createWorkItemRunHistoryService({ workspace: executionWorkspaceService, runStore: workItemRunStore });
 const workItemExecutionService = createWorkItemExecutionService({
   getWorkItem: async (workItemId) => {
     const item = (await workItemInventoryService.list()).items.find(candidate => candidate.id === workItemId);
@@ -158,12 +162,23 @@ const workItemExecutionService = createWorkItemExecutionService({
     return item;
   },
   resolveAfk: async () => {
-    const result = await exec("/usr/bin/which", ["afk"]);
-    if (!result.ok) return "";
-    const candidate = result.stdout.split("\n")[0]?.trim() ?? "";
-    return candidate && candidate.startsWith("/") ? candidate : "";
+    return resolveWorkItemCli({
+      appPath: app.getAppPath(),
+      packaged: app.isPackaged,
+      configuredCli: process.env.AFK_DESKTOP_CLI,
+      exists: async file => access(file).then(() => true, () => false),
+      which: async () => {
+        const result = await exec("/usr/bin/which", ["afk"]);
+        return result.ok ? result.stdout.split("\n")[0]?.trim() ?? "" : "";
+      },
+      help: async command => {
+        const result = await exec(command, ["run", "--help"], undefined, undefined, { timeoutMs: 10_000 });
+        return { ok: result.ok, stdout: result.stdout };
+      },
+    });
   },
   workspace: executionWorkspaceService,
+  manifestStore: createWorkItemExecutionManifestStore(),
   runStore: workItemRunStore,
 });
 const backlogRunStore = createBacklogRunStore({ resolveWorkspace });
@@ -223,12 +238,10 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandler(IPC_CHANNELS.copyText, (v: unknown) => v, (text) => clipboardService.copyText(text as string));
   registerHandler(IPC_CHANNELS.openExternal, (url: unknown) => {
     if (typeof url !== "string" || !url.trim()) throw new Error("外部地址无效");
-    return url;
-  }, (url) => externalUrlService.open(url));
   registerHandlerMulti(IPC_CHANNELS.workItemsList, [
     (v) => parseWorkItemInventoryOptions(v),
     (v) => { if (v !== undefined && typeof v !== "boolean") throw new Error("刷新参数无效"); return v as boolean | undefined; },
-  ], (options, forceRefresh) => workItemInventoryService.list(options, forceRefresh === true));
+  ], (options, forceRefresh) => workItemInventoryService.list(options, forceRefresh === true).then(inventory => workItemRunHistoryService.merge(inventory)));
   registerHandler(IPC_CHANNELS.workItemsStart, parseWorkItemRunStartInput, (input) => workItemExecutionService.start(input));
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);

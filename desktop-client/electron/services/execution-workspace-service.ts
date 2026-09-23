@@ -1,8 +1,10 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import type { ProviderProjectRef, WorkItemId } from "../../shared/backlog-contract";
 import { parseWorkItemId } from "../../shared/backlog-contract";
+import { planRepositoryCheckoutPaths } from "../../shared/work-item-run-validation";
 
 export type ExecutionWorkspaceRepository = {
   project: ProviderProjectRef;
@@ -55,24 +57,34 @@ function normalizeTaskId(taskId: WorkItemId): WorkItemId {
   }
 }
 
-function repositoryDirectoryNames(projects: readonly ProviderProjectRef[]): string[] {
-  const used = new Set<string>();
-  return projects.map((project) => {
-    const preferred = project.name || project.projectKey.split("/").at(-1) || "repository";
-    const base = preferred
-      .normalize("NFKC")
-      .replace(/[^A-Za-z0-9._-]+/g, "-")
-      .replace(/^[.-]+|[.-]+$/g, "") || "repository";
-    let candidate = base;
-    let suffix = 2;
-    while (used.has(candidate)) candidate = `${base}-${suffix++}`;
-    used.add(candidate);
-    return candidate;
-  });
-}
-
 function metadataPath(root: string): string {
   return path.join(root, "workspace.json");
+}
+
+const metadataWrites = new Map<string, Promise<void>>();
+
+async function withMetadataWrite<T>(file: string, operation: () => Promise<T>): Promise<T> {
+  const previous = metadataWrites.get(file) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>(resolve => { release = resolve; });
+  metadataWrites.set(file, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (metadataWrites.get(file) === current) metadataWrites.delete(file);
+  }
+}
+
+async function writeMetadata(file: string, metadata: ExecutionWorkspaceMetadata): Promise<void> {
+  const temporaryFile = `${file}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryFile, `${JSON.stringify(metadata, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    await rename(temporaryFile, file);
+  } finally {
+    await rm(temporaryFile, { force: true });
+  }
 }
 
 export function createExecutionWorkspaceService(options: ExecutionWorkspaceServiceOptions = {}) {
@@ -83,14 +95,14 @@ export function createExecutionWorkspaceService(options: ExecutionWorkspaceServi
     return path.join(baseDirectory, taskDirectoryName(taskId));
   }
 
-  async function allocate(taskId: WorkItemId, projects: readonly ProviderProjectRef[] = []): Promise<ExecutionWorkspaceMetadata> {
+  async function allocate(taskId: WorkItemId, projects: readonly (ProviderProjectRef & { checkoutPath?: string })[] = []): Promise<ExecutionWorkspaceMetadata> {
     const canonicalTaskId = normalizeTaskId(taskId);
     const root = rootFor(canonicalTaskId);
     const repositoriesRoot = path.join(root, "repositories");
-    const directoryNames = repositoryDirectoryNames(projects);
+    const checkoutPaths = planRepositoryCheckoutPaths(projects);
     const repositories = projects.map((project, index) => ({
       project,
-      path: path.join(repositoriesRoot, directoryNames[index]),
+      path: path.join(root, ...checkoutPaths[index].split("/")),
     }));
     const artifacts = path.join(root, "artifacts");
     const runtime = path.join(root, "runtime");
@@ -106,33 +118,30 @@ export function createExecutionWorkspaceService(options: ExecutionWorkspaceServi
     await mkdir(logs, { recursive: true });
     await mkdir(diagnostics, { recursive: true });
 
-    try {
-      const existing = JSON.parse(await readFile(metadataFile, "utf8")) as ExecutionWorkspaceMetadata;
-      if (existing.taskId !== canonicalTaskId) throw new Error(`workspace metadata does not match ${canonicalTaskId}`);
-      return existing;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        if (error instanceof SyntaxError) throw new Error(`workspace metadata is invalid: ${metadataFile}`);
-        throw error;
+    return withMetadataWrite(metadataFile, async () => {
+      const existing = await read(canonicalTaskId);
+      if (existing) {
+        if (existing.taskId !== canonicalTaskId) throw new Error(`workspace metadata does not match ${canonicalTaskId}`);
+        const next = { ...existing, repositories };
+        await writeMetadata(metadataFile, next);
+        return next;
       }
-    }
 
-    const metadata: ExecutionWorkspaceMetadata = {
-      taskId: canonicalTaskId,
-      root,
-      repositoriesRoot,
-      repositories,
-      artifacts,
-      runtime,
-      logs,
-      diagnostics,
-      createdAt: now().toISOString(),
-      cleanupStatus: "active",
-    };
-    await writeFile(metadataFile, `${JSON.stringify(metadata, null, 2)}\n`, { encoding: "utf8", flag: "wx" }).catch(async (error: NodeJS.ErrnoException) => {
-      if (error.code !== "EEXIST") throw error;
+      const metadata: ExecutionWorkspaceMetadata = {
+        taskId: canonicalTaskId,
+        root,
+        repositoriesRoot,
+        repositories,
+        artifacts,
+        runtime,
+        logs,
+        diagnostics,
+        createdAt: now().toISOString(),
+        cleanupStatus: "active",
+      };
+      await writeMetadata(metadataFile, metadata);
+      return metadata;
     });
-    return JSON.parse(await readFile(metadataFile, "utf8")) as ExecutionWorkspaceMetadata;
   }
 
   async function read(taskId: WorkItemId): Promise<ExecutionWorkspaceMetadata | null> {
@@ -146,20 +155,25 @@ export function createExecutionWorkspaceService(options: ExecutionWorkspaceServi
     }
   }
 
-  async function updateRun(taskId: WorkItemId, runId: string | undefined): Promise<ExecutionWorkspaceMetadata> {
-    const current = await read(taskId);
-    if (!current) throw new Error(`execution workspace does not exist for ${taskId}`);
-    const next = { ...current, ...(runId ? { currentRunId: runId } : { currentRunId: undefined }) };
-    await writeFile(metadataPath(current.root), `${JSON.stringify(next, null, 2)}\n`, "utf8");
-    return next;
+  async function updateRun(taskId: WorkItemId, runId: string | undefined, expectedCurrentRunId?: string): Promise<ExecutionWorkspaceMetadata> {
+    return withMetadataWrite(metadataPath(rootFor(taskId)), async () => {
+      const current = await read(taskId);
+      if (!current) throw new Error(`execution workspace does not exist for ${taskId}`);
+      if (expectedCurrentRunId !== undefined && current.currentRunId !== expectedCurrentRunId) return current;
+      const next = { ...current, ...(runId ? { currentRunId: runId } : { currentRunId: undefined }) };
+      await writeMetadata(metadataPath(current.root), next);
+      return next;
+    });
   }
 
   async function markCleaned(taskId: WorkItemId): Promise<ExecutionWorkspaceMetadata> {
-    const current = await read(taskId);
-    if (!current) throw new Error(`execution workspace does not exist for ${taskId}`);
-    const next = { ...current, cleanupStatus: "cleaned" as const };
-    await writeFile(metadataPath(current.root), `${JSON.stringify(next, null, 2)}\n`, "utf8");
-    return next;
+    return withMetadataWrite(metadataPath(rootFor(taskId)), async () => {
+      const current = await read(taskId);
+      if (!current) throw new Error(`execution workspace does not exist for ${taskId}`);
+      const next = { ...current, cleanupStatus: "cleaned" as const };
+      await writeMetadata(metadataPath(current.root), next);
+      return next;
+    });
   }
 
   return { baseDirectory, allocate, read, updateRun, markCleaned };

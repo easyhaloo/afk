@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { WorkItemRunRecord } from "../../shared/backlog-contract";
+import { parseWorkItemRunRecord, type WorkItemRunRecord } from "../../shared/backlog-contract";
 
 const RUN_STORE_FILE = "work-item-runs.json";
 
@@ -9,8 +10,21 @@ export type WorkItemRunStoreDeps = {
 };
 
 export function createWorkItemRunStore(deps: WorkItemRunStoreDeps) {
+  const writes = new Map<string, Promise<void>>();
+
   function filePath(workspace: string): string {
     return path.join(deps.resolveWorkspace(workspace), ".afk", RUN_STORE_FILE);
+  }
+
+  function serialize<T>(target: string, operation: () => Promise<T>): Promise<T> {
+    const previous = writes.get(target) ?? Promise.resolve();
+    const result = previous.then(operation);
+    const settled = result.then(() => undefined, () => undefined);
+    writes.set(target, settled);
+    void settled.then(() => {
+      if (writes.get(target) === settled) writes.delete(target);
+    });
+    return result;
   }
 
   async function load(workspace: string): Promise<WorkItemRunRecord[]> {
@@ -19,33 +33,56 @@ export function createWorkItemRunStore(deps: WorkItemRunStoreDeps) {
     try {
       const value = JSON.parse(raw) as unknown;
       if (!Array.isArray(value)) return [];
-      return value.filter(isWorkItemRunRecord);
+      const runs: WorkItemRunRecord[] = [];
+      for (const item of value) {
+        try {
+          runs.push(parseWorkItemRunRecord(item));
+        } catch {
+          continue;
+        }
+      }
+      return runs;
     } catch {
       return [];
     }
   }
 
-  async function save(workspace: string, runs: WorkItemRunRecord[]): Promise<void> {
-    const target = filePath(workspace);
+  async function write(target: string, runs: WorkItemRunRecord[]): Promise<void> {
     const directory = path.dirname(target);
-    const temporary = `${target}.${process.pid}.tmp`;
+    const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
     await mkdir(directory, { recursive: true });
     await writeFile(temporary, JSON.stringify(runs, null, 2), "utf8");
     await rename(temporary, target);
   }
 
-  return { load, save };
-}
+  function save(workspace: string, runs: WorkItemRunRecord[]): Promise<void> {
+    const target = filePath(workspace);
+    return serialize(target, async () => {
+      const current = await load(workspace);
+      const currentById = new Map(current.map(run => [run.id, run]));
+      const incomingIds = new Set(runs.map(run => run.id));
+      await write(target, [
+        ...runs.map(run => {
+          const persisted = currentById.get(run.id);
+          if (persisted?.status === "completed" || persisted?.status === "failed") return persisted;
+          if (persisted?.status === "running" && persisted.pid !== undefined && run.pid === undefined) return persisted;
+          return run;
+        }),
+        ...current.filter(run => !incomingIds.has(run.id)),
+      ]);
+    });
+  }
 
-function isWorkItemRunRecord(value: unknown): value is WorkItemRunRecord {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.id === "string"
-    && (candidate.status === "starting" || candidate.status === "running" || candidate.status === "completed" || candidate.status === "failed")
-    && typeof candidate.startedAt === "string"
-    && (candidate.completedAt === undefined || typeof candidate.completedAt === "string")
-    && (candidate.workflow === undefined || typeof candidate.workflow === "string")
-    && (candidate.workspacePath === undefined || typeof candidate.workspacePath === "string")
-    && (candidate.pid === undefined || (typeof candidate.pid === "number" && Number.isInteger(candidate.pid) && candidate.pid > 0))
-    && (candidate.error === undefined || typeof candidate.error === "string");
+  function update(
+    workspace: string,
+    transform: (runs: WorkItemRunRecord[]) => WorkItemRunRecord[] | undefined | Promise<WorkItemRunRecord[] | undefined>,
+  ): Promise<void> {
+    const target = filePath(workspace);
+    return serialize(target, async () => {
+      const next = await transform(await load(workspace));
+      if (next) await write(target, next);
+    });
+  }
+
+  return { load, save, update };
 }

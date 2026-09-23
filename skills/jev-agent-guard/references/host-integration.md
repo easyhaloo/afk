@@ -1,56 +1,55 @@
-# Jev Agent Guard host integration
+# Host integration
 
-The rule set is host-neutral and lives in `rules/semantic.json`.
+Run the one-step installer from the repository root:
 
-Each host adapter must only:
-
-1. Parse its native event.
-2. Produce compact normalized runtime state.
-3. Select an event kind: `before-action`, `after-action`, `context-review`, or `stop`.
-4. Call `semantic-engine.mjs` or import `evaluateSemantic`.
-5. Map the returned decision into the host's native response.
-
-Adapters must not contain semantic policy rules or duplicate Jev questions.
-
-## Normalized state example
-
-```json
-{
-  "event_kind": "before-action",
-  "goal": "Fix the login timeout",
-  "requirements": ["preserve generated files", "run focused validation"],
-  "action": {
-    "kind": "execute",
-    "tool": "shell",
-    "command": "npm test -- session",
-    "path": null
-  },
-  "trajectory": {
-    "same_failure_count": 2,
-    "same_command_count": 3,
-    "recent_progress": false
-  },
-  "context": {
-    "usage_ratio": 0.72,
-    "candidate": null
-  },
-  "validation": {
-    "required": true,
-    "last_passed": false
-  }
-}
+```bash
+export TYPESAFE_API_KEY="your-key"
+node skills/jev-agent-guard/scripts/install.mjs
 ```
 
-## Host mapping
+Preview without changing files:
 
-The adapters should map semantic results as follows:
+```bash
+node skills/jev-agent-guard/scripts/install.mjs --dry-run
+```
 
-- `allow` / `keep` → continue
-- `warn` → continue with a short advisory message
-- `confirm` → host approval flow
-- `deny` / `block` → block the action
-- `redirect` → stop the current path and inject the returned next action
-- `compact` → request or provide compacted context
-- `finish` → allow stop only when local validation checks also pass
+Install one host only:
 
-Host-specific protocol details belong in the adapter, never in the semantic rule file.
+```bash
+node skills/jev-agent-guard/scripts/install.mjs --host=claude-code
+node skills/jev-agent-guard/scripts/install.mjs --host=codex
+node skills/jev-agent-guard/scripts/install.mjs --host=opencode
+```
+
+The installer installs `@typesafe-ai/sdk` in the Skill directory and injects
+only its own entries. It preserves existing host configuration and is
+idempotent.
+
+## Runtime bridge
+
+All adapters accept normalized-or-native JSON on stdin and return the same
+JSON decision contract. They do not contain policy rules; they only normalize
+input, select the semantic rule for the event, and map the result for the host.
+
+Event mapping:
+
+- `before-action` → `action-risk`
+- `after-action` → `trajectory-state`
+- `context-review` → `context-retention`
+- `stop` → `skill-compliance`
+
+Decision mapping:
+
+- `allow` / `keep` / `finish` → exit 0
+- `warn` → continue with advisory output
+- `confirm` / `deny` / `redirect` / `drop` → exit 2
+- Jev unavailable during a pre-action or stop check → fail closed to `confirm`
+
+Claude Code receives PreToolUse, PostToolUse, and Stop entries. Codex receives
+an adapter manifest at `.codex/jev-agent-guard.json`; connect its commands to
+the hook or wrapper API provided by the installed Codex version. OpenCode
+receives a plugin entry and exports `createJevAgentGuardPlugin()` for plugin
+loaders that support factory exports.
+
+Host protocols vary by version. The adapter boundary is stable, but the final
+native response mapping must be verified against the host version in use.

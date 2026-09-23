@@ -75,7 +75,7 @@ export function createJumpserverStore({
   fileSystem = fs,
   createId = () => `managed:${randomUUID()}`,
 }: JumpserverStoreOptions) {
-  const keyedMutex = createKeyedMutex<void>();
+  const keyedMutex = createKeyedMutex();
 
   async function list(): Promise<BastionRecord[]> {
     return (await readDocument(fileSystem, file)).bastions;

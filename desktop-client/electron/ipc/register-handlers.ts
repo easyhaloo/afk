@@ -39,6 +39,12 @@ import path from "node:path";
 import { access } from "node:fs/promises";
 import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation";
 
+type HandlerSchema = (value: unknown) => unknown;
+
+type HandlerArgs<Schemas extends readonly HandlerSchema[]> = {
+  [K in keyof Schemas]: Schemas[K] extends (value: unknown) => infer Result ? Result : never;
+};
+
 function registerHandler<Schema extends (value: unknown) => unknown>(
   channel: string,
   schema: Schema,
@@ -54,16 +60,16 @@ function registerHandler<Schema extends (value: unknown) => unknown>(
   });
 }
 
-function registerHandlerMulti<Schemas extends [(value: unknown) => unknown, ...Array<(value: unknown) => unknown>]>(
+function registerHandlerMulti<Schemas extends [HandlerSchema, ...HandlerSchema[]]>(
   channel: string,
-  argSchemas: Schemas,
-  fn: (...args: { [K in keyof Schemas]: ReturnType<Schemas[K]> }) => unknown,
+  argSchemas: readonly [...Schemas],
+  fn: (args: HandlerArgs<Schemas>) => unknown,
 ) {
   ipcMain.handle(channel, async (event, ...args: unknown[]) => {
     assertTrustedSender(event);
     try {
-      const validated = args.map((arg, i) => argSchemas[i](arg) as ReturnType<Schemas[typeof i]>) as { [K in keyof Schemas]: ReturnType<Schemas[K]> };
-      return await fn(...validated);
+      const validated = args.map((arg, i) => argSchemas[i](arg) as unknown) as HandlerArgs<Schemas>;
+      return await fn(validated);
     } catch (error) {
       throw error instanceof Error ? error : new Error(String(error));
     }
@@ -243,7 +249,7 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandlerMulti(IPC_CHANNELS.workItemsList, [
     (v) => parseWorkItemInventoryOptions(v),
     (v) => { if (v !== undefined && typeof v !== "boolean") throw new Error("刷新参数无效"); return v as boolean | undefined; },
-  ], (options, forceRefresh) => workItemInventoryService.list(options, forceRefresh === true).then(inventory => workItemRunHistoryService.merge(inventory)));
+  ], ([options, forceRefresh]) => workItemInventoryService.list(options, forceRefresh === true).then(inventory => workItemRunHistoryService.merge(inventory)));
   registerHandler(IPC_CHANNELS.workItemsStart, parseWorkItemRunStartInput, (input) => workItemExecutionService.start(input));
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);
@@ -259,11 +265,11 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandlerMulti(IPC_CHANNELS.workflowSave, [
     (v) => backlogWorkspace(v, "workflowSave"),
     (v) => v,
-  ], (workspace, workflow) => saveWorkflowConfig(workspace, workflow));
+  ], ([workspace, workflow]) => saveWorkflowConfig(workspace, workflow));
   registerHandlerMulti(IPC_CHANNELS.tmuxPane, [
     (v) => backlogWorkspace(v, "tmuxPane"),
     (v) => { if (typeof v !== "string" || !validSession(v)) throw new Error("tmux 会话名称无效"); return v; },
-  ], async (workspace, name) => {
+  ], async ([workspace, name]) => {
     const root = resolveWorkspace(workspace);
     if (!isAfkTmuxSession(root, name) || !(await listAfkTmux(root)).some((item) => item.name === name)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
     const result = await exec("tmux", ["capture-pane", "-p", "-t", name, "-S", "-160"]);
@@ -274,7 +280,7 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     (v) => backlogWorkspace(v, "tmuxSend"),
     (v) => { if (typeof v !== "string" || !validSession(v)) throw new Error("tmux 会话名称无效"); return v; },
     (v) => { if (typeof v !== "string" || !v.trim() || v.length > 4_000 || v.includes("\0")) throw new Error("接管输入为空或超过安全长度"); return v; },
-  ], async (workspace, name, line) => {
+  ], async ([workspace, name, line]) => {
     const root = resolveWorkspace(workspace);
     if (!isAfkTmuxSession(root, name) || !(await listAfkTmux(root)).some((item) => item.name === name)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
     const result = await exec("tmux", ["send-keys", "-t", name, line, "Enter"]);
@@ -283,7 +289,7 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   });
   registerHandler(IPC_CHANNELS.sshList, sshListOptions, (opts) => opts === undefined ? sshService.listHosts() : sshService.listHosts(opts));
   registerHandler(IPC_CHANNELS.sshAdd, validateSshHostInput, (input) => sshService.addHost(input));
-  registerHandlerMulti(IPC_CHANNELS.sshUpdate, [validateSshHostId, validateSshHostInput], (hostId, input) => sshService.updateHost(hostId, input));
+  registerHandlerMulti(IPC_CHANNELS.sshUpdate, [validateSshHostId, validateSshHostInput], ([hostId, input]) => sshService.updateHost(hostId, input));
   registerHandler(IPC_CHANNELS.sshRemove, validateSshHostId, (id) => sshService.removeHost(id));
   registerHandler(IPC_CHANNELS.sshTrust, (v: unknown) => {
     if (!v || typeof v !== "object") throw new Error("SSH 信任参数无效");
@@ -299,7 +305,7 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     return sshService.uploadFile(id, selection.filePaths[0]);
   });
   registerHandler(IPC_CHANNELS.sshConnect, validateSshHostId, (id) => sshService.connect(id));
-  registerHandlerMulti(IPC_CHANNELS.sshOpenExternal, [validateSshHostId, (v) => v === undefined ? "iterm2" : validateSshExternalTerminalId(v)], (hostId, terminal) => sshService.openExternal(hostId, terminal));
+  registerHandlerMulti(IPC_CHANNELS.sshOpenExternal, [validateSshHostId, (v) => v === undefined ? "iterm2" : validateSshExternalTerminalId(v)], ([hostId, terminal]) => sshService.openExternal(hostId, terminal));
   registerHandler(IPC_CHANNELS.sshCredentialHas, validateSshHostId, (id) => sshService.hasCredential(id));
   registerHandler(IPC_CHANNELS.sshCredentialSet, sshCredentialSetInput, (validated) => sshService.setCredential(validated.hostId, validated.password));
   registerHandler(IPC_CHANNELS.sshCredentialRemove, validateSshHostId, (id) => sshService.removeCredential(id));

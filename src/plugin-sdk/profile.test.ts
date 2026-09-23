@@ -24,4 +24,23 @@ describe('resolveProfile', () => {
       { id: 'other', apiVersion: 1, provides: ['event-store'], trusted: true },
     ])).toThrow("duplicate 'event-store' providers");
   });
+
+  it('preserves a nested plugin configuration schema in the resolved manifest', () => {
+    const manifest: PluginManifest = {
+      ...eventStore,
+      configSchema: {
+        type: 'object',
+        properties: {
+          endpoint: { type: 'string', description: 'API endpoint' },
+          retries: { type: 'integer', minimum: 0 },
+          options: { type: 'array', items: { type: 'boolean' } },
+        },
+        required: ['endpoint'],
+        additionalProperties: false,
+      },
+    };
+    const resolved = resolveProfile({ id: 'configured', plugins: [manifest.id], requiredCapabilities: ['event-store'] }, [manifest]);
+
+    expect(resolved.manifests[0].configSchema).toEqual(manifest.configSchema);
+  });
 });

@@ -161,6 +161,7 @@ function verify(event: RunEvent, previous?: RunEvent): boolean {
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (!value || typeof value !== 'object') return JSON.stringify(value);
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(',')}}`;
+  const entries: [string, unknown][] = Object.entries(value);
+  entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
+  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
 }

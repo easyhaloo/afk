@@ -32,15 +32,20 @@ interface HeartbeatResource {
   onError?: (error: unknown) => void | Promise<void>;
 }
 
+interface ExternalResource {
+  finish(outcome: { status: RunOutcomeStatus }): Promise<void>;
+}
+
 /** Owns every resource created by one workflow and has one terminalizer. */
 export class RunResourceScope {
   private readonly git?: SimpleGit;
   private readonly options: RunResourceScopeOptions;
   private primary: BranchHandle | undefined;
   private readonly steps: StepResource[] = [];
-  private readonly sandboxes = new Set<Sandbox>();
-  private readonly executions = new Set<AgentExecution>();
+  private readonly sandboxes = new Set<Pick<Sandbox, 'close'>>();
+  private readonly executions = new Set<Pick<AgentExecution, 'kill'>>();
   private readonly heartbeats = new Set<HeartbeatResource>();
+  private readonly externalResources: ExternalResource[] = [];
   private finishPromise: Promise<void> | undefined;
   private finalized = false;
 
@@ -77,8 +82,9 @@ export class RunResourceScope {
     if (typeof strategyOrCleanup === 'function') this.steps.push({ handle, cleanup: strategyOrCleanup });
     else this.steps.push({ handle, strategy: strategyOrCleanup, config: config! });
   }
-  registerSandbox(sandbox: Sandbox): void { this.sandboxes.add(sandbox); }
-  registerExecution(execution: AgentExecution): void { this.executions.add(execution); }
+  registerSandbox(sandbox: Pick<Sandbox, 'close'>): void { this.sandboxes.add(sandbox); }
+  registerExecution(execution: Pick<AgentExecution, 'kill'>): void { this.executions.add(execution); }
+  registerExternalResource(resource: ExternalResource): void { this.externalResources.push(resource); }
 
   registerHeartbeat(heartbeat: () => Promise<void>, intervalMs: number, onError?: (error: unknown) => void | Promise<void>): void {
     if (this.finishPromise) return;
@@ -134,6 +140,7 @@ export class RunResourceScope {
     }
 
     for (const step of [...this.steps].reverse()) await attempt(() => this.cleanupOwned(step));
+    for (const resource of [...this.externalResources].reverse()) await attempt(() => resource.finish(outcome));
     if (outcome.status === 'success' && this.options.managePrimary !== false && this.primary && this.options.branchStrategy && this.options.branchConfig) {
       await attempt(() => this.options.branchStrategy!.cleanup(this.gitForOperations(), this.options.branchConfig!, this.primary!, { force: true }));
     }

@@ -15,7 +15,7 @@ export function registerAllLoadingPhases(): void {
     label: 'Loading configuration...',
     icon: '⚙',
     fetch: async (setDetail) => {
-      const { getGitLabConfig } = await import('../../../lib/core/config/manager');
+      const { getGitLabConfig } = await import('../../../infrastructure/config/manager');
       try {
         const config = getGitLabConfig();
         setDetail('config', `${config.url || 'default'}`);
@@ -32,8 +32,8 @@ export function registerAllLoadingPhases(): void {
     label: 'Detecting platform...',
     icon: '🔍',
     fetch: async (setDetail) => {
-      const { detectPlatform, detectProject } = await import('../../../lib/core/tracker/detect');
-      const { platform, projectId } = await detectProject();
+      const { resolvePlatform, resolveTrackerProject } = await import('../../../infrastructure/tracker/resolver');
+      const { platform, projectId } = await resolveTrackerProject();
       setDetail('detect', `${platform}: ${projectId}`);
       return `${platform}: ${projectId}`;
     },
@@ -44,8 +44,8 @@ export function registerAllLoadingPhases(): void {
     label: 'Connecting to tracker...',
     icon: '🔗',
     fetch: async (setDetail) => {
-      const { createTrackerClient } = await import('../../../lib/client-factory');
-      const tracker = await createTrackerClient();
+      const { createTracker } = await import('../../../application/tracker-provider-factory');
+      const tracker = await createTracker();
       const projects = await tracker.listProjects({ perPage: 1 });
       setDetail('connect', tracker.platform);
       return tracker.platform;

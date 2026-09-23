@@ -5,6 +5,7 @@ import * as os from 'os';
 import { Command } from 'commander';
 import { registerCompletionCommands } from './completion';
 import { buildCompletionTree } from '../completion/tree';
+import { COMMANDS } from '../command-registry';
 
 function run(args: string[]): { stdout: string; exitCode: number | undefined } {
   const program = new Command();
@@ -26,6 +27,12 @@ function run(args: string[]): { stdout: string; exitCode: number | undefined } {
 }
 
 describe('registerCompletionCommands', () => {
+  it('routes both public and hidden completion commands through the canonical CLI module', async () => {
+    const entry = COMMANDS.find(({ names }) => names.includes('completion'));
+    expect(entry?.names).toEqual(['completion', '__complete']);
+    expect(await entry?.loader()).toBe(registerCompletionCommands);
+  });
+
   it('includes every public nested command needed by shell completion', () => {
     const program = buildCompletionTree();
     const names = program.commands.map(command => command.name());

@@ -50,6 +50,17 @@ describe('RunResourceScope', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it('finishes an external resource exactly once across concurrent terminal outcomes', async () => {
+    const external = { finish: vi.fn(async () => {}) };
+    const scope = new RunResourceScope({ repoRoot: '/repo', baseBranch: 'main', git: simpleGit() });
+    scope.registerExternalResource(external);
+
+    await Promise.all([scope.finish({ status: 'success' }), scope.finish({ status: 'failed' })]);
+
+    expect(external.finish).toHaveBeenCalledTimes(1);
+    expect(external.finish).toHaveBeenCalledWith({ status: 'success' });
+  });
+
   it('does not let claim cleanup errors mask a terminal resource error', async () => {
     const branch = strategy();
     const release = vi.fn(async () => { throw new Error('lease release failed'); });

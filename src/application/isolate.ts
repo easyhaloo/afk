@@ -3,7 +3,7 @@ import { promises as fs, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { load } from 'js-yaml';
-import { getAfkResourceRegistry, workspaceRootForWorktree } from './runtime/resource-registry';
+import { getAfkResourceRegistry, workspaceRootForWorktree } from '../infrastructure/runtime/resource-registry';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

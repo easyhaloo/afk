@@ -6,12 +6,12 @@
  * is the per-generation process inside it.
  *
  * Mount contract:
- *   <worktreePath>:/workspace                 (rw — agent writes code here)
+ *   <workspaceRoot>:/workspace                (rw — includes every execution repository)
  *   <afkSessionDir>:/afk/session              (rw — handoff docs, signal files)
  *   <afkResultDir>:/afk/result                (ro from agent POV — output capture)
  *
  * Forbidden mounts (enforced by CliContainerProvider): ~/.ssh, ~/.aws,
- * docker socket, sibling repos.
+ * docker socket, or paths outside the execution workspace.
  *
  * Interrupt escalation chain (per design):
  *   interrupt()   -> SIGINT to container PID (graceful; agent flushes session)
@@ -21,7 +21,7 @@
 
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { isAbsolute, join, relative } from 'path';
 import { clearSignal, readSignal } from '../../io/index';
 import type { Sandbox, SandboxOptions } from '../types';
 import type {
@@ -36,7 +36,7 @@ import type {
 import type { ContainerProvider, ContainerExecResult } from './types';
 import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types';
 import { EnvVarAllowlist } from './env-allowlist';
-import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../../application/runtime/resource-registry';
+import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry';
 
 export class ContainerSandbox implements Sandbox {
   readonly id: string;
@@ -71,10 +71,17 @@ export class ContainerSandbox implements Sandbox {
     this._user = opts.user;
     this._extraEnv = opts.extraEnv ?? {};
     this._extraAllowedEnv = opts.extraAllowedEnv ?? [];
-    this._workdir = opts.workdir ?? '/workspace';
     this._hostClaudeConfigDir = opts.hostClaudeConfigDir;
     this._hostClaudeConfigFile = opts.hostClaudeConfigFile;
     this.workspaceRoot = opts.workspaceRoot ?? workspaceRootForWorktree(opts.worktreePath);
+    const relativeWorktreePath = relative(this.workspaceRoot, this.worktreePath);
+    const parentPrefix = `..${process.platform === 'win32' ? '\\' : '/'}`;
+    if (relativeWorktreePath === '..' || relativeWorktreePath.startsWith(parentPrefix) || isAbsolute(relativeWorktreePath)) {
+      throw new Error(`container worktree must be inside workspace root: ${this.worktreePath}`);
+    }
+    this._workdir = opts.workdir ?? (relativeWorktreePath
+      ? `/workspace/${relativeWorktreePath.replaceAll('\\', '/')}`
+      : '/workspace');
     this.runtimeRunId = opts.runtimeRunId;
   }
 
@@ -196,7 +203,7 @@ export class ContainerSandbox implements Sandbox {
       name: this.containerName,
       user: this._user,
       mounts: [
-        { hostPath: this.worktreePath, containerPath: '/workspace' },
+        { hostPath: this.workspaceRoot, containerPath: '/workspace' },
         { hostPath: afkSessionDir, containerPath: '/afk/session' },
         { hostPath: afkResultDir, containerPath: '/afk/result' },
         ...(this._hostClaudeConfigDir

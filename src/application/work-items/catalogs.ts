@@ -100,6 +100,7 @@ export class GitLabProviderCatalog implements ProviderCatalog {
     return mapPageResult(projects, project => ({
       platform: this.platform,
       projectKey: `${this.scopeKey}/${project.pathWithNamespace}`,
+      providerHost: this.scopeKey,
       providerProjectId: String(project.id),
       name: project.name,
       defaultBranch: project.defaultBranch,
@@ -108,7 +109,10 @@ export class GitLabProviderCatalog implements ProviderCatalog {
   }
 
   async listIssues(project: ProviderProjectRef): Promise<CatalogPageResult<ProviderIssue>> {
-    const projectId = project.providerProjectId ?? project.projectKey.slice(this.scopeKey.length + 1);
+    const projectPrefix = project.providerHost ? `${project.providerHost}/` : '';
+    const projectId = project.providerProjectId ?? (projectPrefix && project.projectKey.startsWith(projectPrefix)
+      ? project.projectKey.slice(projectPrefix.length)
+      : project.projectKey);
     const issues = await collectPages(
       page => this.client.listIssuesPage(projectId, page, this.perPage),
       this.perPage,

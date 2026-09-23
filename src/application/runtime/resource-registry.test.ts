@@ -2,7 +2,8 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AfkResourceRegistry, workspaceRootForWorktree } from './resource-registry';
+import { AfkResourceRegistry, getAfkResourceRegistry, workspaceRootForWorktree } from './resource-registry';
+import { AfkResourceRegistry as InfrastructureRegistry, getAfkResourceRegistry as getInfrastructureRegistry } from '../../infrastructure/runtime/resource-registry';
 
 async function registryFixture() {
   const root = await mkdtemp(join(tmpdir(), 'afk-resources-'));
@@ -10,6 +11,26 @@ async function registryFixture() {
 }
 
 describe('AfkResourceRegistry', () => {
+  it('shares the same registry implementation and singleton across layers', () => {
+    expect(AfkResourceRegistry).toBe(InfrastructureRegistry);
+    expect(getAfkResourceRegistry).toBe(getInfrastructureRegistry);
+  });
+
+  it('retains registered resource metadata when reading it from storage', async () => {
+    const registry = await registryFixture();
+    registry.register({
+      workspacePath: '/repo',
+      worktreePath: '/repo/.worktrees/issue-42',
+      kind: 'tmux',
+      origin: 'local-sandbox',
+      name: 'afk-42',
+      metadata: { branch: 'feature', generation: 2, custom: { enabled: true } },
+    });
+
+    expect(registry.listActive('/repo')[0]?.metadata).toEqual({
+      branch: 'feature', generation: 2, custom: { enabled: true },
+    });
+  });
   it('keeps resources isolated by AFK workspace and records only explicit identities', async () => {
     const registry = await registryFixture();
     registry.register({

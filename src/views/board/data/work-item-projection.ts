@@ -1,4 +1,4 @@
-import type { BacklogItem } from '../../../lib/core/backlog';
+import type { BacklogItem } from '../../../domain/backlog';
 import type {
   ActiveTaskRuntimeRecord,
   TaskRuntimePhase,

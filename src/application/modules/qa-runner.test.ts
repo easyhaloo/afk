@@ -133,6 +133,7 @@ describe('QARunner execution boundary', () => {
     });
     expect(f.sandbox.startAgent).not.toHaveBeenCalled();
     const qaPrompt = f.agentProvider.createExecution.mock.calls[0][0].prompt;
+    expect(qaPrompt).toContain('不要把 commit、push 或创建 MR 作为本次 Agent 的失败条件');
     expect(qaPrompt).toContain('Backlog title: search mode');
     expect(qaPrompt).toContain('Backlog description:\nsupport /s');
     expect(tmux.createSession).not.toHaveBeenCalled();

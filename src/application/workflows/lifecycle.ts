@@ -1,4 +1,5 @@
 import type { ProjectContext } from '../project-context';
+import type { PreparedRepository } from './multi-repository-preparer';
 
 export type LifecyclePhase = 'init' | 'before-agent' | 'after-agent' | 'cleanup';
 export type ModuleParamValue = string | number | boolean | null;
@@ -12,6 +13,7 @@ export interface InitContext {
   originalCwd: string;
   repoRoot?: string;
   projectContext?: ProjectContext;
+  repositories?: readonly PreparedRepository[];
 }
 
 export interface LifecycleContext {
@@ -23,6 +25,7 @@ export interface LifecycleContext {
   repoRoot?: string;
   projectName?: string;
   originalCwd?: string;
+  repositories?: readonly PreparedRepository[];
 }
 
 export interface LifecycleModule {

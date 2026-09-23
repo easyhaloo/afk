@@ -75,4 +75,26 @@ describe('JsonlEventStore', () => {
 
     await expect(store.verify(context.runId)).resolves.toMatchObject({ valid: false, reason: 'integrity_mismatch' });
   });
+
+  it('hashes nested event values independently of object key insertion order', async () => {
+    const firstRoot = await root();
+    const secondRoot = await root();
+    const first = draft('one', 'run.requested');
+    const second: RunEventDraft = {
+      ...first,
+      data: {
+        kind: 'run.requested',
+        run: { status: 'pending', attempt: 1, profileId: 'test', workItemId: '42', id: 'run-1' },
+      },
+    };
+
+    const firstStore = new JsonlEventStore({ root: firstRoot, now: () => new Date('2026-08-23T00:00:01.000Z') });
+    const secondStore = new JsonlEventStore({ root: secondRoot, now: () => new Date('2026-08-23T00:00:01.000Z') });
+    const firstReceipt = await firstStore.append([first]);
+    const secondReceipt = await secondStore.append([second]);
+
+    expect(firstReceipt.lastHash).toBe(secondReceipt.lastHash);
+    await expect(firstStore.verify(context.runId)).resolves.toMatchObject({ valid: true });
+    await expect(secondStore.verify(context.runId)).resolves.toMatchObject({ valid: true });
+  });
 });

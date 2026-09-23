@@ -6,6 +6,7 @@ export type { ParsedWorkItemId, WorkItemId, WorkItemIdentityParts, WorkItemPlatf
 export interface ProviderProjectRef {
   platform: WorkItemPlatform;
   projectKey: string;
+  providerHost?: string;
   providerProjectId?: string;
   name: string;
   defaultBranch?: string;

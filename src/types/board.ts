@@ -1,4 +1,4 @@
-import type { BacklogState } from '../lib/core/backlog';
+import type { BacklogState } from '../domain/backlog';
 import type { TaskRuntimeActivity, TaskRuntimeStatus } from '../application/runtime/task-runtime';
 
 export type TaskActivity = Omit<TaskRuntimeActivity, 'at'> & { at: Date };

@@ -1,7 +1,7 @@
 import type {
   BacklogItem,
   BacklogListOptions,
-} from '../../../lib/core/backlog';
+} from '../../../domain/backlog';
 import type { Task } from '../../../types/board';
 
 /**

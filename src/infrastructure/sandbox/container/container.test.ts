@@ -362,6 +362,39 @@ describe('ContainerSandboxProvider — auto engine detection', () => {
       fs.rmSync(hostClaudeConfigDir, { recursive: true, force: true });
     }
   });
+
+  it('mounts the execution workspace while keeping the primary repository as cwd', async () => {
+    const workspaceRoot = fs.mkdtempSync(join(os.tmpdir(), 'afk-container-workspace-'));
+    const primary = join(workspaceRoot, 'repositories', 'api');
+    const secondary = join(workspaceRoot, 'repositories', 'web');
+    fs.mkdirSync(primary, { recursive: true });
+    fs.mkdirSync(secondary, { recursive: true });
+    let createOptions: ContainerCreateOptions | undefined;
+    const provider: ContainerProvider = {
+      engine: 'docker', binary: 'docker', isAvailable: async () => true,
+      create: async options => {
+        createOptions = options;
+        return { id: 'cid', name: 'cid', engine: 'docker' };
+      },
+      exec: async () => ({ execId: 'exec' }), killExec: async () => {},
+      killContainer: async () => {}, remove: async () => {},
+      inspect: async id => ({ id, name: id, status: 'running' }),
+    };
+    try {
+      const sandbox = await new ContainerSandboxProvider({ provider }).create({
+        worktreePath: primary,
+        workspaceRoot,
+        session: 'multi-repository',
+      });
+
+      expect(createOptions?.mounts).toContainEqual({ hostPath: workspaceRoot, containerPath: '/workspace' });
+      expect(createOptions?.workdir).toBe('/workspace/repositories/api');
+      expect(secondary.startsWith(workspaceRoot)).toBe(true);
+      await sandbox.close();
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('Container sandbox integration — write/read inside bind mount', () => {

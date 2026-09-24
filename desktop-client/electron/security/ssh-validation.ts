@@ -85,7 +85,9 @@ export interface JumpserverBastionInput {
   hostname: string;
   port: number;
   user: string;
+  password: string;
   otpSecret?: string;
+  linuxOnly?: boolean;
 }
 
 export function validateJumpserverBastionInput(value: unknown): JumpserverBastionInput {
@@ -104,13 +106,18 @@ export function validateJumpserverBastionInput(value: unknown): JumpserverBastio
   })();
   if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("JumpServer 堡垒机端口无效");
   const user = requiredString(input.user, "JumpServer 堡垒机用户无效");
+  const password = requiredString(input.password, "JumpServer 堡垒机密码无效");
+  if (password.includes("\0") || password.includes("\r") || password.includes("\n") || Buffer.byteLength(password, "utf8") > 4096) throw new Error("JumpServer 堡垒机密码无效");
   if (input.otpSecret !== undefined && typeof input.otpSecret !== "string") throw new Error("JumpServer 堡垒机 OTP 密钥无效");
+  if (input.linuxOnly !== undefined && typeof input.linuxOnly !== "boolean") throw new Error("JumpServer 堡垒机参数无效");
   return {
     alias,
     hostname,
     port,
     user,
+    password,
     otpSecret: input.otpSecret as string | undefined,
+    linuxOnly: input.linuxOnly as boolean | undefined,
   };
 }
 

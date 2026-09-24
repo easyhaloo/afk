@@ -63,8 +63,7 @@ test.describe("JumpServer bastion auto-sync", () => {
     await expect(bastionCard).toBeVisible({ timeout: 10_000 });
     await expect(bastionCard.locator(".ssh-bastion-copy b")).toContainText("e2e-test");
 
-    // --- Expand the bastion to see synced assets ---
-    await bastionCard.locator(".ssh-bastion-chevron-btn").click();
+    // --- Bastion groups render expanded: synced assets are already visible ---
     const assetRows = page.locator(".ssh-host-row");
     await expect(assetRows).toHaveCount(3); // 3 Linux assets synced
 

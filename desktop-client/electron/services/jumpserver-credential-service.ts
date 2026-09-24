@@ -201,3 +201,35 @@ export function createJumpserverCredentialStore({ home, safeStorage, fileSystem 
   return { has, get, set, remove };
 }
 
+export type JumpserverCredentialService = ReturnType<typeof createJumpserverCredentialStore>;
+
+export function createJumpserverCredentialService({ home, safeStorage, fileSystem }: JumpserverCredentialServiceDependencies): JumpserverCredentialService {
+  if (safeStorage.isEncryptionAvailable()) return createJumpserverCredentialStore({ home, safeStorage, fileSystem });
+
+  // Session-only fallback: keep credentials in process memory so headless
+  // environments (CI, Linux without a keyring) keep working without ever
+  // writing plaintext secrets to disk.
+  const memory = new Map<string, { password: string; otpSecret?: string; target: JumpserverCredentialTarget }>();
+  return {
+    async has(bastionId: string, target: JumpserverCredentialTarget) {
+      const entry = memory.get(bastionId);
+      return entry !== undefined && isSameTarget(entry.target, normalizeTarget(target));
+    },
+    async get(bastionId: string, target: JumpserverCredentialTarget) {
+      const entry = memory.get(bastionId);
+      if (!entry || !isSameTarget(entry.target, normalizeTarget(target))) return undefined;
+      return { password: entry.password, ...(entry.otpSecret ? { otpSecret: entry.otpSecret } : {}) };
+    },
+    async set(bastionId: string, password: string, target: JumpserverCredentialTarget, otpSecret?: string) {
+      if (typeof password !== "string" || !password) throw invalidPassword();
+      validatePassword(password);
+      if (otpSecret !== undefined && otpSecret !== "") validateOtpSecret(otpSecret);
+      memory.set(bastionId, { password, otpSecret, target: normalizeTarget(target) });
+      return true;
+    },
+    async remove(bastionId: string) {
+      return memory.delete(bastionId);
+    },
+  };
+}
+

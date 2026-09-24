@@ -59,12 +59,14 @@ describe("JumpServer validation", () => {
       hostname: "jumpserver.example.test",
       port: 2222,
       user: "admin",
+      password: "s3cret",
       otpSecret: "JBSWY3DPEHPK3PXP",
     })).toEqual({
       alias: "fangcloud-jumpserver",
       hostname: "jumpserver.example.test",
       port: 2222,
       user: "admin",
+      password: "s3cret",
       otpSecret: "JBSWY3DPEHPK3PXP",
     });
   });
@@ -74,6 +76,7 @@ describe("JumpServer validation", () => {
       alias: "fangcloud-jumpserver",
       hostname: "jumpserver.example.test",
       user: "admin",
+      password: "s3cret",
     })).toMatchObject({ port: 2222 });
   });
 
@@ -83,6 +86,7 @@ describe("JumpServer validation", () => {
       hostname: "jumpserver.example.test",
       port: "3333",
       user: "admin",
+      password: "s3cret",
     })).toMatchObject({ port: 3333 });
   });
 
@@ -107,8 +111,8 @@ describe("JumpServer validation", () => {
   });
 
   it("otpSecret is optional and validates type", () => {
-    expect(validateJumpserverBastionInput({ alias: "js", hostname: "js.test", user: "u" }).otpSecret).toBeUndefined();
-    expect(() => validateJumpserverBastionInput({ alias: "js", hostname: "js.test", user: "u", otpSecret: 12345 })).toThrow("JumpServer 堡垒机 OTP 密钥无效");
+    expect(validateJumpserverBastionInput({ alias: "js", hostname: "js.test", user: "u", password: "s3cret" }).otpSecret).toBeUndefined();
+    expect(() => validateJumpserverBastionInput({ alias: "js", hostname: "js.test", user: "u", password: "s3cret", otpSecret: 12345 })).toThrow("JumpServer 堡垒机 OTP 密钥无效");
   });
 
   it("returns empty object for undefined or non-object sync options", () => {

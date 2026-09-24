@@ -129,12 +129,6 @@ const backlogService = createBacklogService({
 const workItemInventoryService = createWorkItemInventoryService({
   cwd: app.getPath("userData"),
   store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
-  runBundled: app.isPackaged ? async options => {
-    const runner = require(path.join(__dirname, "../../cli/inventory-runner.cjs")) as {
-      runInventory: (value: unknown) => Promise<unknown>;
-    };
-    return runner.runInventory(options);
-  } : undefined,
   resolveAfk: async () => {
     if (process.env.AFK_DESKTOP_CLI) return { command: process.env.AFK_DESKTOP_CLI, args: [] };
     const localEntry = path.resolve(app.getAppPath(), "../dist/index.js");

@@ -12,7 +12,6 @@ export type WorkItemInventoryExecResult = { ok: boolean; stdout: string; stderr:
 
 export type WorkItemInventoryServiceDeps = {
   resolveAfk: () => Promise<AfkInvocation>;
-  runBundled?: (options: WorkItemInventoryOptions) => Promise<unknown>;
   cwd: string;
   exec: (command: string, args: string[], cwd: string) => Promise<WorkItemInventoryExecResult>;
   store?: WorkItemInventoryStore;
@@ -120,26 +119,16 @@ export function createWorkItemInventoryService(deps: WorkItemInventoryServiceDep
   }
 
   async function fetchRemote(options: WorkItemInventoryOptions): Promise<WorkItemInventoryResult> {
-    let inventory: WorkItemInventoryResult;
-    if (deps.runBundled) {
-      try {
-        inventory = parseWorkItemInventoryResult(await deps.runBundled(options));
-      } catch (error) {
-        throw toServiceError(error);
-      }
-    } else {
-      const invocation = await deps.resolveAfk();
-      if (!invocation.command) throw new BacklogServiceError("auth", "afk CLI 未在 PATH 中发现");
-      const result = await deps.exec(invocation.command, [...invocation.args, ...inventoryArgs(options)], deps.cwd);
-      if (!result.stdout) throw new BacklogServiceError("unknown", result.stderr || "afk inventory 未返回结果");
-      const envelope = parseEnvelope(result.stdout);
-      if (!envelope.ok) {
-        const code = ["auth", "not_found", "validation", "provider"].includes(envelope.error.code) ? envelope.error.code : "unknown";
-        throw new BacklogServiceError(code as "auth" | "not_found" | "validation" | "provider" | "unknown", envelope.error.message, envelope.error.details);
-      }
-      inventory = parseWorkItemInventoryResult(envelope.data);
+    const invocation = await deps.resolveAfk();
+    if (!invocation.command) throw new BacklogServiceError("auth", "afk CLI 未在 PATH 中发现");
+    const result = await deps.exec(invocation.command, [...invocation.args, ...inventoryArgs(options)], deps.cwd);
+    if (!result.stdout) throw new BacklogServiceError("unknown", result.stderr || "afk inventory 未返回结果");
+    const envelope = parseEnvelope(result.stdout);
+    if (!envelope.ok) {
+      const code = ["auth", "not_found", "validation", "provider"].includes(envelope.error.code) ? envelope.error.code : "unknown";
+      throw new BacklogServiceError(code as "auth" | "not_found" | "validation" | "provider" | "unknown", envelope.error.message, envelope.error.details);
     }
-    return inventory;
+    return parseWorkItemInventoryResult(envelope.data);
   }
 }
 
@@ -155,20 +144,4 @@ function projectInventory(inventory: WorkItemInventoryResult, platform: "github"
     projects: inventory.projects.filter(project => project.platform === platform),
     diagnostics: inventory.diagnostics.filter(diagnostic => diagnostic.platform === platform),
   };
-}
-
-function toServiceError(error: unknown): BacklogServiceError {
-  if (error instanceof BacklogServiceError) return error;
-  const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
-  const code = normalized.includes("authentication") || normalized.includes("token") || normalized.includes("auth login")
-    ? "auth"
-    : normalized.includes("not found") || normalized.includes("404")
-      ? "not_found"
-      : normalized.includes("invalid") || normalized.includes("expected")
-        ? "validation"
-        : normalized.includes("api") || normalized.includes("http")
-          ? "provider"
-          : "unknown";
-  return new BacklogServiceError(code, message);
 }

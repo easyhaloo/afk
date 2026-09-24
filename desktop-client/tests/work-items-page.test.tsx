@@ -3,6 +3,8 @@ import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import { WorkItemsPage } from "../src/features/work-items/WorkItemsPage";
 import type { WorkItemInventoryResult } from "../shared/backlog-contract";
+import githubIcon from "../src/assets/provider-icons/github.svg";
+import gitlabIcon from "../src/assets/provider-icons/gitlab.svg";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -566,6 +568,84 @@ describe("WorkItemsPage", () => {
 
     const row = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0];
     expect(textContent(row)).not.toContain("github:acme/api#1");
+    act(() => renderer!.unmount());
+  });
+
+  it("renders markdown description with headings, checklists and links inside detail panel", async () => {
+    const markdownDescription = "## Goal\n- [ ] step one\n- [x] step two\n[acme/web#42](https://github.com/acme/web/issues/42)";
+    const markdownResult: WorkItemInventoryResult = {
+      ...result,
+      items: [{ ...result.items[0], id: "WI-MD-001", title: "Markdown item", description: markdownDescription }],
+    };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => markdownResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(WorkItemsPage));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0].props.onClick(); });
+
+    const detail = renderer!.root.findByProps({ "aria-label": "工作项 WI-MD-001" });
+    expect(detail.findAllByProps({ className: "markdown-content" })).toHaveLength(1);
+    expect(textContent(detail)).toContain("Goal");
+    expect(textContent(detail)).toContain("step one");
+    expect(textContent(detail)).toContain("step two");
+    expect(textContent(detail)).toContain("acme/web#42");
+    act(() => renderer!.unmount());
+  });
+
+  it("shows placeholder string instead of mounting markdown when description is empty", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => result) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(WorkItemsPage));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0].props.onClick(); });
+
+    const detail = renderer!.root.findByProps({ "aria-label": "工作项 github:acme/api#1" });
+    expect(detail.findAllByProps({ className: "markdown-content" })).toHaveLength(0);
+    expect(textContent(detail)).toContain("该工作项尚未补充目标描述。");
+    act(() => renderer!.unmount());
+  });
+
+  it("shows provider icon next to the work item id in the detail header", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => result) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(WorkItemsPage));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0].props.onClick(); });
+
+    const detail = renderer!.root.findByProps({ "aria-label": "工作项 github:acme/api#1" });
+    const header = detail.findByProps({ className: "work-item-detail-header" });
+    const providerImg = header.findAllByType("img").find(img => img.props.src === githubIcon);
+    expect(providerImg).toBeTruthy();
+    act(() => renderer!.unmount());
+  });
+
+  it("shows gitlab provider icon in detail header for gitlab work items", async () => {
+    const gitlabResult: WorkItemInventoryResult = {
+      ...result,
+      items: [{ ...result.items[0], id: "gitlab:corp/api#1", project: { platform: "gitlab" as const, projectKey: "corp/api", name: "api" }, providerRef: "gitlab:corp/api#1" }],
+    };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => gitlabResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(createElement(WorkItemsPage));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0].props.onClick(); });
+
+    const detail = renderer!.root.findByProps({ "aria-label": "工作项 gitlab:corp/api#1" });
+    const header = detail.findByProps({ className: "work-item-detail-header" });
+    const providerImg = header.findAllByType("img").find(img => img.props.src === gitlabIcon);
+    expect(providerImg).toBeTruthy();
     act(() => renderer!.unmount());
   });
 });

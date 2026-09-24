@@ -9,7 +9,7 @@ describe('extractSpec', () => {
     const backlog = spec.commands.find(c => c.name === 'backlog');
     expect(backlog).toBeDefined();
     expect(backlog!.subcommands.map(c => c.name).sort()).toEqual([
-      'confirm-merge', 'create', 'init', 'interrupt', 'list', 'retry', 'show', 'tag',
+      'confirm-merge', 'create', 'init', 'interrupt', 'inventory', 'list', 'retry', 'show', 'tag',
     ]);
   });
 

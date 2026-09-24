@@ -19,11 +19,19 @@ const MODULE_LOADERS: Record<string, () => Promise<ModuleFactory>> = {
   isolate: () => import('./isolate').then(m => m.default),
   'project-resolver': () => import('./project-resolver').then(m => m.default),
 };
+const registeredModules = new Map<string, ModuleFactory>();
+
+export function defineModule(factory: ModuleFactory): ModuleFactory {
+  const name = factory().name;
+  if (registeredModules.has(name)) throw new Error(`Duplicate module name: ${name}`);
+  registeredModules.set(name, factory);
+  return factory;
+}
 
 function validateModuleNames(names: string[]): string[] {
   const unique = [...new Set(names)];
   for (const name of unique) {
-    if (!MODULE_LOADERS[name]) throw new Error(`Unknown module: ${name}. Available: ${Object.keys(MODULE_LOADERS).join(', ')}`);
+    if (!MODULE_LOADERS[name] && !registeredModules.has(name)) throw new Error(`Unknown module: ${name}. Available: ${[...Object.keys(MODULE_LOADERS), ...registeredModules.keys()].join(', ')}`);
   }
   return unique;
 }
@@ -42,7 +50,7 @@ const CORE_MODULE_NAMES = ['project-resolver'];
 
 export async function loadModules(cliExt?: string[]): Promise<LifecycleModule[]> {
   const optInNames = await resolveModuleNames(cliExt);
-  const factories = await Promise.all(validateModuleNames([...CORE_MODULE_NAMES, ...optInNames]).map(name => MODULE_LOADERS[name]()));
+  const factories = await Promise.all(validateModuleNames([...CORE_MODULE_NAMES, ...optInNames]).map(name => registeredModules.get(name) ?? MODULE_LOADERS[name]()));
   return factories.map(factory => factory());
 }
 

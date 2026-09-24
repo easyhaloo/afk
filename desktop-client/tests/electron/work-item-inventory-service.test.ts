@@ -81,18 +81,15 @@ describe("work item inventory service", () => {
     expect(exec).toHaveBeenCalledTimes(2);
   });
 
-  it("uses the bundled inventory runner when the packaged app has no afk executable", async () => {
-    const runBundled = vi.fn(async () => inventory);
+  it("fails with an auth error when the afk executable cannot be resolved", async () => {
     const exec = vi.fn();
     const service = createWorkItemInventoryService({
       resolveAfk: async () => ({ command: "", args: [] }),
-      runBundled,
       cwd: "/tmp/afk-control",
       exec,
     });
 
-    await expect(service.list({ platform: "github" })).resolves.toEqual(inventory);
-    expect(runBundled).toHaveBeenCalledWith({ platform: "github" });
+    await expect(service.list({ platform: "github" })).rejects.toThrow("afk CLI 未在 PATH 中发现");
     expect(exec).not.toHaveBeenCalled();
   });
 

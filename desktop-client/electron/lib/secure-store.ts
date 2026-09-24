@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 
-type FileSystem = Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "writeFile">;
+type FileSystem = Pick<typeof fs, "chmod" | "mkdir" | "rename" | "rm" | "writeFile">;
 
 /**
  * Reads a JSON file, returning an empty default on ENOENT or parse failure.

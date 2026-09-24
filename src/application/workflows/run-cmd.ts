@@ -2,7 +2,7 @@
  * Shared single-backlog execution entry point used exclusively by `afk run`.
  * It claims before creating workflow resources; loop claims its own items.
  */
-import { WorkflowRunner, type RunnerOptions } from '../workflow-engine';
+import { WorkflowRunner } from '../workflow-engine';
 import { createTracker } from '../tracker-provider-factory';
 import { createProviderBundle } from '../providers';
 import { getWorkflowConfig } from '../../infrastructure/config/manager';
@@ -31,6 +31,7 @@ export interface RunWorkflowCliOpts {
   executionMode?: ExecutionMode;
   branchStrategy?: BranchStrategyConfig;
   template?: string;
+  executionManifestPath?: string;
 }
 
 export interface RunWorkflowCliResult {
@@ -42,9 +43,14 @@ export async function runWorkflowCli(opts: RunWorkflowCliOpts): Promise<RunWorkf
   const cfg = getWorkflowConfig();
   const request = await resolveWorkflowRunRequest(opts, cfg);
   request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
-  const tracker = await createTracker(request.projectName, request.repoRoot);
+  const tracker = await createTracker(
+    request.trackerProjectId ?? request.projectName,
+    request.repoRoot,
+    request.trackerPlatform,
+    request.trackerHost,
+  );
   const providers = createProviderBundle(tracker, request.repoRoot);
   const runner = new WorkflowRunner(providers, { config: cfg, agentRuntime: request.agentRuntime });
-  const result = await runner.run(request as unknown as RunnerOptions);
+  const result = await runner.run(request);
   return { success: result.success, url: result.url };
 }

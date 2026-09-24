@@ -26,13 +26,20 @@ export type JsonSuccess<T> = {
   data: T;
 };
 
+export type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
+export interface JsonFailureDetails {
+  readonly hint?: string;
+  readonly [key: string]: JsonValue | undefined;
+}
+
 export type JsonFailure = {
   ok: false;
   kind: string;
   error: {
     code: ErrorCode;
     message: string;
-    details?: Record<string, unknown>;
+    details?: JsonFailureDetails;
   };
 };
 
@@ -47,7 +54,7 @@ export function emitFailure(
   kind: string,
   code: ErrorCode,
   message: string,
-  details?: Record<string, unknown>,
+  details?: JsonFailureDetails,
 ): void {
   const envelope: JsonFailure = {
     ok: false,

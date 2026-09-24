@@ -27,7 +27,7 @@ function run(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<
 
 export class JumpProjectResolver implements ProjectResolver {
   async resolve(projectName: string): Promise<string> {
-    const candidates = [projectName, projectName.split('/').pop()].filter((value): value is string => Boolean(value));
+    const candidates = [...new Set([projectName, projectName.split('/').pop()].filter((value): value is string => Boolean(value)))];
     for (const candidate of candidates) {
       try {
         const resolved = await run('zsh', ['-i', '-c', `j ${shellQuote(candidate)} && pwd`]);
@@ -42,7 +42,7 @@ export class JumpProjectResolver implements ProjectResolver {
   async clone(projectName: string): Promise<string> {
     const target = join(process.env.HOME ?? '/tmp', 'work', sanitize(projectName));
     await run('gh', ['repo', 'clone', projectName, target]);
-    return join(target, projectName.split('/').pop()!);
+    return target;
   }
 }
 

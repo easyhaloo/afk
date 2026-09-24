@@ -16,7 +16,7 @@ import {
 } from '../board/views/index';
 import { getListViewportHeight } from '../board/layout';
 import type { Task, Project } from '../../types/board';
-import type { Branch, Commit, Tag } from '../../lib/core/tracker/types';
+import type { Branch, Commit, Tag } from '../../domain/tracker/types';
 import type { BacklogViewModel } from '../board/data/backlog-adapter';
 import type { View } from '../board/types';
 
@@ -101,7 +101,7 @@ export function AppContent({
 
   const items = getItems();
   const selectedItem = () => items[state.selectedIndex];
-  const viewportHeight = getListViewportHeight(dimensions.height, { header: 1, context: 1, footer: 1, spacer: 1 });
+  const viewportHeight = getListViewportHeight(dimensions.height, { header: 1, context: state.isSearchMode ? 1 : 0, footer: 1, spacer: 1 });
   const maxIndex = Math.max(0, items.length - 1);
 
   useEffect(() => {
@@ -227,11 +227,11 @@ export function AppContent({
       ) : (
         <>
           <Header view={currentView} tasksCount={tasks.length} backlogsCount={backlogs.length} projectsCount={projects.length} />
-          <Box height={1} flexShrink={0} paddingX={2}>
-            {state.isSearchMode
-              ? <Text color="cyan">filter · /{state.searchQuery}_ · {items.length} matches</Text>
-              : <Text dimColor>enter detail · / search</Text>}
-          </Box>
+          {state.isSearchMode && (
+            <Box height={1} flexShrink={0} paddingX={2}>
+              <Text color="cyan">filter · /{state.searchQuery}_ · {items.length} matches</Text>
+            </Box>
+          )}
           <Box position="relative" flexGrow={1} flexShrink={1} flexDirection="column" paddingX={2}>
             {currentView === 'tasks' && <TaskListView tasks={items as Task[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}
             {currentView === 'backlogs' && <BacklogListView backlogs={items as BacklogViewModel[]} selected={state.selectedIndex} scrollOffset={state.scrollOffset} viewportHeight={viewportHeight} width={dimensions.width} />}

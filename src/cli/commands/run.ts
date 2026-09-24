@@ -21,6 +21,7 @@ export function registerRunCommands(program: Command): void {
     .option('--project <project>', 'Provider project/repository')
     .option('--target-branch <branch>', 'Target branch for the change')
     .option('--base-branch <branch>', 'Base branch for the worktree')
+    .option('--execution-manifest <path>', 'Execution manifest for a multi-repository workspace')
     .option('--max-retries <n>', 'Maximum retry attempts', positiveInt)
     .option('--hard-timeout <ms>', 'Hard timeout in milliseconds', positiveInt)
     .option('--max-handoffs <n>', 'Maximum context-handoff rounds', positiveInt)
@@ -44,6 +45,7 @@ export function registerRunCommands(program: Command): void {
           projectName: options.project,
           targetBranch: options.targetBranch,
           baseBranch: options.baseBranch,
+          executionManifestPath: options.executionManifest,
           maxRetries: options.maxRetries ?? cfg.maxRetries,
           hardTimeoutMs: options.hardTimeout ?? cfg.workflowHardTimeout,
           maxHandoffs: options.maxHandoffs ?? (Math.min(Math.ceil(goalBudget / 1_000_000), 20) || 3),

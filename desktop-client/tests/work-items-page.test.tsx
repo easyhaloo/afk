@@ -83,7 +83,7 @@ const multiResourceResult: WorkItemInventoryResult = {
       repositories: [
         { id: "repo-checkout", platform: "github", projectKey: "acme/checkout-service", name: "checkout-service", defaultBranch: "main", role: "主要仓库", checkoutPath: "repositories/checkout-service" },
         { id: "repo-console", platform: "gitlab", projectKey: "acme/merchant-console", name: "merchant-console", defaultBranch: "develop", role: "协作仓库", checkoutPath: "repositories/merchant-console" },
-        { id: "repo-config", platform: "gitlab", projectKey: "acme/deployment-config", name: "deployment-config", defaultBranch: "main", role: "配置仓库", checkoutPath: "repositories/deployment-config" },
+        { id: "repo-config", platform: "gitlab", projectKey: "acme/deployment-config", name: "deployment-config", role: "配置仓库", checkoutPath: "repositories/deployment-config" },
       ],
       executionPlan: [
         { id: "analyze", title: "分析跨仓库影响范围", detail: "读取两个外部 Issue 和三个关联仓库", status: "pending" },
@@ -147,7 +147,7 @@ describe("WorkItemsPage", () => {
     act(() => renderer!.unmount());
   });
 
-  it("keeps an explicitly repository-free work item independent from its compatibility issue projection", async () => {
+  it("shows an explicitly repository-free work item but disables run creation", async () => {
     const repositoryFreeResult: WorkItemInventoryResult = {
       ...multiResourceResult,
       items: [{ ...multiResourceResult.items[0], id: "WI-2026-019", title: "发布流程权限审计", repositories: [] }],
@@ -164,7 +164,212 @@ describe("WorkItemsPage", () => {
 
     const executionDialog = renderer!.root.findAllByProps({ role: "dialog" }).find(node => textContent(node).includes("开始执行工作项"));
     expect(executionDialog).toBeDefined();
-    expect(textContent(executionDialog!)).toContain("本工作项不需要代码仓库");
+    expect(textContent(executionDialog!)).toContain("本工作项没有可用于运行的代码仓库");
+    expect(findButton(renderer!, "创建运行").props.disabled).toBe(true);
+    act(() => renderer!.unmount());
+  });
+
+  it("selects every repository with its default base branch when the dialog opens", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => multiResourceResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+
+    expect(renderer!.root.findByProps({ "aria-label": "选择仓库：checkout-service" }).props.checked).toBe(true);
+    expect(renderer!.root.findByProps({ "aria-label": "选择仓库：merchant-console" }).props.checked).toBe(true);
+    expect(renderer!.root.findByProps({ "aria-label": "选择仓库：deployment-config" }).props.checked).toBe(true);
+    expect(renderer!.root.findByProps({ "aria-label": "Base 分支：checkout-service" }).props.value).toBe("main");
+    expect(renderer!.root.findByProps({ "aria-label": "Base 分支：merchant-console" }).props.value).toBe("develop");
+    expect(renderer!.root.findByProps({ "aria-label": "Base 分支：deployment-config" }).props.value).toBe("main");
+    act(() => renderer!.unmount());
+  });
+
+  it("submits selected repositories in display order with independent branches and safe checkout paths", async () => {
+    const repositories = [
+      { id: "repo-api", platform: "github" as const, projectKey: "acme/api", providerProjectId: "101", name: "api", defaultBranch: "main", role: "主要仓库", checkoutPath: "repositories/custom-api" },
+      { id: "repo-shared-a", platform: "gitlab" as const, projectKey: "git.corp/acme/shared-a", providerHost: "git.corp", name: "shared repo", defaultBranch: "develop", role: "协作仓库" },
+      { id: "repo-shared-b", platform: "gitlab" as const, projectKey: "acme/shared-b", name: "shared/repo", role: "配置仓库" },
+    ];
+    const inventory: WorkItemInventoryResult = {
+      ...multiResourceResult,
+      items: [{ ...multiResourceResult.items[0], repositories }],
+    };
+    const start = vi.fn(async () => ({ runId: "run-42", workspace: { root: "/tmp/WI-2026-018" } }));
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory), start }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    const executionDialog = renderer!.root.findByProps({ "aria-label": "开始执行工作项" });
+    expect(textContent(executionDialog)).toContain("repositories/shared-repo");
+    expect(textContent(executionDialog)).toContain("repositories/shared-repo-2");
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "Base 分支：api" }).props.onChange({ target: { value: "release/api" } }); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "Base 分支：shared repo" }).props.onChange({ target: { value: "feature/shared" } }); });
+    await act(async () => { findButton(renderer!, "创建运行").props.onClick(); });
+
+    expect(start).toHaveBeenCalledWith({
+      workItemId: "WI-2026-018",
+      environment: "local",
+      repositories: [
+        { platform: "github", projectKey: "acme/api", providerProjectId: "101", name: "api", checkoutPath: "repositories/custom-api", baseBranch: "release/api", role: "主要仓库" },
+        { platform: "gitlab", projectKey: "git.corp/acme/shared-a", providerHost: "git.corp", name: "shared repo", checkoutPath: "repositories/shared-repo", baseBranch: "feature/shared", role: "协作仓库" },
+        { platform: "gitlab", projectKey: "acme/shared-b", name: "shared/repo", checkoutPath: "repositories/shared-repo-2", baseBranch: "main", role: "配置仓库" },
+      ],
+    });
+    expect(textContent(renderer!.root.findByProps({ "aria-label": "工作项 WI-2026-018" }))).toContain("运行已创建：/tmp/WI-2026-018");
+    expect(textContent(renderer!.root.findByProps({ "aria-label": "工作项 WI-2026-018" }))).not.toContain("任务空间已准备");
+    act(() => renderer!.unmount());
+  });
+
+  it("opens with an invalid default branch as editable inline validation", async () => {
+    const inventory: WorkItemInventoryResult = {
+      ...multiResourceResult,
+      items: [{
+        ...multiResourceResult.items[0],
+        repositories: [{ id: "repo-invalid", platform: "github", projectKey: "acme/invalid", name: "invalid", defaultBranch: "bad branch" }],
+      }],
+    };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory), start: vi.fn() }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+
+    const input = renderer!.root.findByProps({ "aria-label": "Base 分支：invalid" });
+    expect(input.props.value).toBe("bad branch");
+    expect(input.props["aria-invalid"]).toBe(true);
+    expect(findButton(renderer!, "创建运行").props.disabled).toBe(true);
+    act(() => renderer!.unmount());
+  });
+
+  it("ignores a stale run success after switching to another work item", async () => {
+    const firstRun = deferred<{ runId: string; workspace: { root: string } }>();
+    const second = {
+      ...multiResourceResult.items[0],
+      id: "WI-2026-020",
+      title: "第二个工作项",
+      repositories: [{ id: "repo-second", platform: "github" as const, projectKey: "acme/second", name: "second", defaultBranch: "trunk" }],
+    };
+    const inventory = { ...multiResourceResult, items: [multiResourceResult.items[0], second] };
+    const start = vi.fn(() => firstRun.promise);
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory), start }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0].props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    await act(async () => { findButton(renderer!, "创建运行").props.onClick(); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "关闭执行配置" }).props.onClick(); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "关闭工作项详情" }).props.onClick(); });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[1].props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    await act(async () => { firstRun.resolve({ runId: "run-old", workspace: { root: "/tmp/old" } }); });
+
+    expect(renderer!.root.findByProps({ "aria-label": "开始执行工作项" })).toBeTruthy();
+    expect(renderer!.root.findByProps({ "aria-label": "Base 分支：second" })).toBeTruthy();
+    expect(textContent(renderer!.root.findByProps({ "aria-label": "工作项 WI-2026-020" }))).not.toContain("/tmp/old");
+    act(() => renderer!.unmount());
+  });
+
+  it("ignores a stale run error after switching to another work item", async () => {
+    const firstRun = deferred<{ runId: string; workspace: { root: string } }>();
+    const second = {
+      ...multiResourceResult.items[0],
+      id: "WI-2026-021",
+      title: "第三个工作项",
+      repositories: [{ id: "repo-third", platform: "github" as const, projectKey: "acme/third", name: "third", defaultBranch: "main" }],
+    };
+    const inventory = { ...multiResourceResult, items: [multiResourceResult.items[0], second] };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory), start: vi.fn(() => firstRun.promise) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0].props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    await act(async () => { findButton(renderer!, "创建运行").props.onClick(); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "关闭执行配置" }).props.onClick(); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "关闭工作项详情" }).props.onClick(); });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[1].props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    await act(async () => { firstRun.reject(new Error("old run failed")); });
+
+    expect(renderer!.root.findByProps({ "aria-label": "开始执行工作项" })).toBeTruthy();
+    expect(renderer!.root.findAllByProps({ className: "work-item-run-error" })).toHaveLength(0);
+    act(() => renderer!.unmount());
+  });
+
+  it("submits only checked repositories", async () => {
+    const start = vi.fn(async () => ({ runId: "run-43", workspace: { root: "/tmp/run-43" } }));
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => multiResourceResult), start }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "选择仓库：merchant-console" }).props.onChange({ target: { checked: false } }); });
+    await act(async () => { findButton(renderer!, "创建运行").props.onClick(); });
+
+    expect(start.mock.calls[0][0].repositories.map(repository => repository.name)).toEqual(["checkout-service", "deployment-config"]);
+    act(() => renderer!.unmount());
+  });
+
+  it("disables creation when no repository is selected", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => multiResourceResult), start: vi.fn() }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    for (const repository of multiResourceResult.items[0].repositories ?? []) {
+      await act(async () => { renderer!.root.findByProps({ "aria-label": `选择仓库：${repository.name}` }).props.onChange({ target: { checked: false } }); });
+    }
+
+    expect(findButton(renderer!, "创建运行").props.disabled).toBe(true);
+    act(() => renderer!.unmount());
+  });
+
+  it("blocks an invalid selected branch but ignores it after that repository is unchecked", async () => {
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => multiResourceResult), start: vi.fn() }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "Base 分支：merchant-console" }).props.onChange({ target: { value: "bad branch" } }); });
+
+    const branchInput = renderer!.root.findByProps({ "aria-label": "Base 分支：merchant-console" });
+    expect(branchInput.props["aria-invalid"]).toBe(true);
+    expect(branchInput.props["aria-describedby"]).toBe("base-branch-error-gitlab-acme-merchant-console");
+    expect(textContent(renderer!.root.findByProps({ id: "base-branch-error-gitlab-acme-merchant-console" }))).toContain("Base 分支格式无效");
+    expect(findButton(renderer!, "创建运行").props.disabled).toBe(true);
+
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "选择仓库：merchant-console" }).props.onChange({ target: { checked: false } }); });
+    expect(findButton(renderer!, "创建运行").props.disabled).toBe(false);
+    act(() => renderer!.unmount());
+  });
+
+  it("resets repository drafts when reopening or switching work items", async () => {
+    const second = {
+      ...multiResourceResult.items[0],
+      id: "WI-2026-020",
+      title: "第二个工作项",
+      repositories: [{ id: "repo-second", platform: "github" as const, projectKey: "acme/second", name: "second", defaultBranch: "trunk" }],
+    };
+    const inventory = { ...multiResourceResult, items: [multiResourceResult.items[0], second] };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory), start: vi.fn() }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0].props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "Base 分支：checkout-service" }).props.onChange({ target: { value: "release/changed" } }); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "选择仓库：merchant-console" }).props.onChange({ target: { checked: false } }); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "关闭执行配置" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    expect(renderer!.root.findByProps({ "aria-label": "Base 分支：checkout-service" }).props.value).toBe("main");
+    expect(renderer!.root.findByProps({ "aria-label": "选择仓库：merchant-console" }).props.checked).toBe(true);
+
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "关闭执行配置" }).props.onClick(); });
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "关闭工作项详情" }).props.onClick(); });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[1].props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    expect(renderer!.root.findByProps({ "aria-label": "Base 分支：second" }).props.value).toBe("trunk");
+    expect(renderer!.root.findAllByProps({ "aria-label": "Base 分支：checkout-service" })).toHaveLength(0);
     act(() => renderer!.unmount());
   });
 
@@ -223,6 +428,39 @@ describe("WorkItemsPage", () => {
 
     expect(list).toHaveBeenNthCalledWith(1, undefined);
     expect(list).toHaveBeenNthCalledWith(2, undefined, true);
+    act(() => renderer!.unmount());
+  });
+
+  it("updates the selected run history from the next inventory snapshot", async () => {
+    const run = { id: "desktop-run-1", status: "running" as const, startedAt: "2026-09-23T00:00:00.000Z", workspacePath: "/tmp/workspace" };
+    const initial: WorkItemInventoryResult = { ...result, items: [{ ...result.items[0], runs: [run] }] };
+    const finished: WorkItemInventoryResult = { ...result, items: [{ ...result.items[0], runs: [{ ...run, status: "completed" as const }] }] };
+    const list = vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(finished);
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0].props.onClick(); });
+    await act(async () => { findButton(renderer!, "运行记录").props.onClick(); });
+    expect(textContent(renderer!.root.findByProps({ "aria-label": `工作项 ${initial.items[0].id}` }))).toContain("执行中");
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "刷新工作项" }).props.onClick(); });
+    expect(textContent(renderer!.root.findByProps({ "aria-label": `工作项 ${initial.items[0].id}` }))).toContain("已完成");
+    expect(list).toHaveBeenCalledTimes(2);
+    act(() => renderer!.unmount());
+  });
+
+  it("loads the new run history immediately after creating a run", async () => {
+    const run = { id: "desktop-run-2", status: "running" as const, startedAt: "2026-09-23T00:00:00.000Z" };
+    const next: WorkItemInventoryResult = { ...multiResourceResult, items: [{ ...multiResourceResult.items[0], runs: [run] }] };
+    const list = vi.fn().mockResolvedValueOnce(multiResourceResult).mockResolvedValue(next);
+    const start = vi.fn(async () => ({ runId: run.id, workspace: { root: "/tmp/workspace" } }));
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list, start }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+    await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
+    await act(async () => { findButton(renderer!, "创建运行").props.onClick(); });
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(textContent(renderer!.root.findByProps({ "aria-label": "工作项 WI-2026-018" }))).toContain(run.id);
     act(() => renderer!.unmount());
   });
 

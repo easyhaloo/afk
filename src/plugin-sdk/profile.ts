@@ -12,12 +12,38 @@ export type Capability =
   | 'change'
   | 'policy';
 
+export type PluginConfigValue = string | number | boolean | null | readonly PluginConfigValue[] | { readonly [key: string]: PluginConfigValue };
+
+export interface PluginConfigSchema {
+  readonly type?: 'null' | 'boolean' | 'object' | 'array' | 'number' | 'integer' | 'string';
+  readonly title?: string;
+  readonly description?: string;
+  readonly properties?: { readonly [name: string]: PluginConfigSchema };
+  readonly required?: readonly string[];
+  readonly additionalProperties?: boolean | PluginConfigSchema;
+  readonly items?: PluginConfigSchema;
+  readonly enum?: readonly PluginConfigValue[];
+  readonly default?: PluginConfigValue;
+  readonly minimum?: number;
+  readonly maximum?: number;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly pattern?: string;
+  readonly format?: string;
+  readonly $ref?: string;
+  readonly $defs?: { readonly [name: string]: PluginConfigSchema };
+  readonly allOf?: readonly PluginConfigSchema[];
+  readonly anyOf?: readonly PluginConfigSchema[];
+  readonly oneOf?: readonly PluginConfigSchema[];
+  readonly not?: PluginConfigSchema;
+}
+
 export interface PluginManifest {
   id: string;
   apiVersion: 1;
   provides: readonly Capability[];
   requires?: readonly Capability[];
-  configSchema?: Readonly<Record<string, unknown>>;
+  configSchema?: PluginConfigSchema;
   trusted: true;
 }
 

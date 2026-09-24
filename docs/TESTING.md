@@ -23,7 +23,7 @@ AFK TUI is built with React + Ink and uses a layered testing strategy.
 **Pattern**: Instantiate classes directly, call methods, assert results
 
 ```typescript
-// src/lib/ui/core/Keyboard.test.ts
+// src/views/shared/Keyboard.test.ts
 import { KeyboardDispatcher } from './Keyboard';
 
 it('dispatches escape to global handler', () => {
@@ -43,7 +43,7 @@ it('dispatches escape to global handler', () => {
 
 **Run**:
 ```bash
-pnpm dlx vitest --run src/lib/ui/core/
+pnpm exec vitest run src/views/shared/
 ```
 
 ---
@@ -203,7 +203,7 @@ pnpm dlx vitest --run tests/e2e/
 ```
 afk/
 ├── src/
-│   ├── lib/ui/core/
+│   ├── views/shared/
 │   │   ├── Keyboard.test.ts      ← Unit tests (4 tests)
 │   │   └── Registry.test.ts      ← Unit tests (10 tests)
 │   └── views/board/views/
@@ -229,7 +229,7 @@ source ~/.nvm/nvm.sh && nvm use lts/iron && pnpm dlx vitest --run
 pnpm dlx vitest
 
 # Unit tests only
-pnpm dlx vitest --run src/lib/
+pnpm dlx vitest --run src/domain/ src/application/ src/infrastructure/ src/shared/ src/cli/
 
 # Component tests only
 pnpm dlx vitest --run src/views/

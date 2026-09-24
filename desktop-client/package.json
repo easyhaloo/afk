@@ -13,8 +13,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "e2e": "playwright test --config=playwright.config.ts",
-    "build:inventory": "node scripts/build-inventory-runner.mjs",
-    "build:main": "pnpm build:inventory && tsc -p tsconfig.electron.json",
+    "build:main": "tsc -p tsconfig.electron.json",
     "build": "pnpm typecheck && pnpm build:main && vite build",
     "package:mac": "pnpm build && electron-builder --mac --dir",
     "verify:mac": "bash scripts/restart-packaged-mac.sh"
@@ -29,7 +28,6 @@
       "assets/**",
       "dist/**",
       "dist-electron/**",
-      "dist-electron/cli/**",
       "package.json"
     ],
     "icon": "assets/afk-control.png",

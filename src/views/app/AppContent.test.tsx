@@ -10,7 +10,7 @@ const originalRows = process.stdout.rows;
 
 function task(index: number): Task {
   return {
-    iid: String(index),
+    backlogId: String(index),
     runId: `run-${index}`,
     title: `Long-running task ${index}`,
     phase: 'implementing',
@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe('AppContent', () => {
-  it('uses the live task cockpit as the default task body', () => {
+  it('uses the task list as the default task body', () => {
     Object.defineProperty(process.stdout, 'columns', { configurable: true, value: 100 });
     Object.defineProperty(process.stdout, 'rows', { configurable: true, value: 16 });
 
@@ -50,8 +50,8 @@ describe('AppContent', () => {
       </StateProvider>,
     );
 
-    expect(output).toContain('recent activity');
-    expect(output).not.toContain('no other tasks');
+    expect(output).toContain('[active] (batch) #1 Long-running task 1');
+    expect(output).not.toContain('recent activity');
   });
 
   it('keeps static list commands in the footer instead of repeating them above the content', () => {

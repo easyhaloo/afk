@@ -17,6 +17,8 @@ export interface TmuxCaptureOptions {
   history?: number;
 }
 
+type SignalReaders = { readSignal: typeof readSignal; readSignalSync: typeof readSignalSync };
+
 /**
  * Tmux client wrapper for session management.
  *
@@ -26,6 +28,8 @@ export interface TmuxCaptureOptions {
 export class TmuxClient {
   private controlMode: ControlModeConnection | null = null;
   private currentSession: string | null = null;
+
+  constructor(private readonly signalReaders: SignalReaders = { readSignal, readSignalSync }) {}
 
   /**
    * Open a Control Mode connection to a session.
@@ -270,7 +274,7 @@ export class TmuxClient {
       return new Promise<Signal | null>((resolve) => {
         const outputHandler = (_pane: string, text: string) => {
           // When we see the signal file written, resolve
-          const signal = readSignalSync(worktreeDir);
+          const signal = this.signalReaders.readSignalSync(worktreeDir);
           if (signal && signal.type === signalType) {
             this.controlMode!.offOutput(outputHandler);
             resolve(signal);
@@ -289,7 +293,7 @@ export class TmuxClient {
     // Fallback: filesystem polling
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      const signal = await readSignal(worktreeDir);
+      const signal = await this.signalReaders.readSignal(worktreeDir);
       if (signal && signal.type === signalType) return signal;
       await this.sleep(2000);
     }
@@ -308,7 +312,7 @@ export class TmuxClient {
   ): Promise<Signal | null> {
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      const signal = await readSignal(worktreeDir);
+      const signal = await this.signalReaders.readSignal(worktreeDir);
       if (signal && signalTypes.includes(signal.type)) return signal;
       await this.sleep(2000);
     }

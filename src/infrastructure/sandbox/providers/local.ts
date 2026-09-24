@@ -37,7 +37,7 @@ import {
   type WorktreeInfo,
 } from '../types';
 import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types';
-import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../../application/runtime/resource-registry';
+import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',

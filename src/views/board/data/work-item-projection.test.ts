@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BacklogItem } from '../../../lib/core/backlog';
+import type { BacklogItem } from '../../../domain/backlog';
 import type { TaskRuntimeRecord } from '../../../application/runtime/task-runtime';
 import { projectWorkItems } from './work-item-projection';
 

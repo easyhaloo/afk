@@ -41,6 +41,7 @@ describe('provider catalogs', () => {
     expect(projects).toEqual([expect.objectContaining({
       platform: 'gitlab',
       projectKey: 'gitlab.corp/platform/api',
+      providerHost: 'gitlab.corp',
       providerProjectId: '21',
     })]);
     expect(issues).toEqual([expect.objectContaining({ issueNumber: 4, state: 'opened' })]);

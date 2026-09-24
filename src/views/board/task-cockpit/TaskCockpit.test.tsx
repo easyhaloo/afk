@@ -5,7 +5,7 @@ import type { Task } from '../../../types/board';
 import { TaskCockpit } from './TaskCockpit';
 
 const activeTask: Task = {
-  iid: '42',
+  backlogId: '42',
   runId: 'run-42',
   title: 'Add /s search mode to the backlog list',
   phase: 'implementing',
@@ -28,7 +28,7 @@ describe('TaskCockpit', () => {
   it('shows focused execution context, structured activity, and the task queue', () => {
     const output = renderToString(
       <TaskCockpit
-        tasks={[activeTask, { ...activeTask, iid: '43', runId: 'run-43', title: 'Verify acceptance criteria', status: 'active' }]}
+        tasks={[activeTask, { ...activeTask, backlogId: '43', runId: 'run-43', title: 'Verify acceptance criteria', status: 'active' }]}
         selectedIndex={0}
         viewportHeight={18}
         width={120}
@@ -51,7 +51,7 @@ describe('TaskCockpit', () => {
   it('collapses the queue on narrow terminals while keeping a queued count', () => {
     const output = renderToString(
       <TaskCockpit
-        tasks={[activeTask, { ...activeTask, iid: '43', runId: 'run-43', title: 'Verify acceptance criteria' }]}
+        tasks={[activeTask, { ...activeTask, backlogId: '43', runId: 'run-43', title: 'Verify acceptance criteria' }]}
         selectedIndex={0}
         viewportHeight={10}
         width={70}
@@ -65,7 +65,7 @@ describe('TaskCockpit', () => {
   it('uses terminal width rather than padded content width for responsive layout', () => {
     const output = renderToString(
       <TaskCockpit
-        tasks={[activeTask, { ...activeTask, iid: '43', runId: 'run-43', title: 'Queued task' }]}
+        tasks={[activeTask, { ...activeTask, backlogId: '43', runId: 'run-43', title: 'Queued task' }]}
         selectedIndex={0}
         viewportHeight={12}
         width={76}
@@ -81,7 +81,7 @@ describe('TaskCockpit', () => {
   it('moves the queue pointer with the focused task', () => {
     const output = renderToString(
       <TaskCockpit
-        tasks={[activeTask, { ...activeTask, iid: '43', runId: 'run-43', title: 'Verify acceptance criteria' }]}
+        tasks={[activeTask, { ...activeTask, backlogId: '43', runId: 'run-43', title: 'Verify acceptance criteria' }]}
         selectedIndex={1}
         viewportHeight={12}
         width={120}
@@ -147,7 +147,7 @@ describe('TaskCockpit', () => {
     const output = renderToString(
       <TaskCockpit
         tasks={[{
-          iid: '44',
+          backlogId: '44',
           runId: 'run-44',
           title: 'Runtime metadata is still loading',
           status: 'active',

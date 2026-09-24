@@ -1,26 +1,44 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
-const root = resolve(new URL('../src/', import.meta.url).pathname);
+function option(name, fallback) {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return fallback;
+  if (!process.argv[index + 1]) throw new Error(`${name} requires a path`);
+  return resolve(process.argv[index + 1]);
+}
+
+const root = option('--root', resolve(new URL('../src/', import.meta.url).pathname));
+const baselinePath = option('--baseline', resolve(new URL('./architecture-legacy-baseline.json', import.meta.url).pathname));
+const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+const legacyFiles = new Set(baseline.legacyFiles);
+const legacyImports = baseline.legacyImports;
+const legacyPatterns = baseline.legacyPatterns;
 const layers = ['cli', 'domain', 'application', 'infrastructure', 'shared', 'views'];
-const forbiddenDirectories = new Set(['lib']);
 const forbiddenPatterns = [
-  { pattern: /Record<string,\s*unknown>/g, message: 'generic Record<string, unknown> used in source' },
-  { pattern: /from ['"]\.\.?\/.*client-factory['"]/g, message: 'legacy client-factory import remains' },
+  { pattern: /Record\s*<\s*string\s*,\s*unknown\s*>/g, message: 'generic Record<string, unknown> used in source' },
+  { pattern: /from\s+['"]\.\.?\/.*client-factory(?:\.js)?['"]/g, message: 'legacy client-factory import remains' },
 ];
 
 const sourceFiles = [];
 const violations = [];
+const observedLegacyFiles = new Set();
+const observedLegacyImports = new Map();
+const observedLegacyPatterns = new Map();
+
+function sourcePath(file) {
+  return relative(root, file).split(sep).join('/');
+}
+
+function isLegacy(file) {
+  return sourcePath(file).startsWith('lib/');
+}
 
 function walk(directory) {
   for (const entry of readdirSync(directory)) {
     const fullPath = join(directory, entry);
     const stat = statSync(fullPath);
     if (stat.isDirectory()) {
-      if (forbiddenDirectories.has(entry)) {
-        violations.push(`${fullPath}: forbidden architecture directory`);
-        continue;
-      }
       walk(fullPath);
       continue;
     }
@@ -77,21 +95,40 @@ function checkFile(fullPath) {
   const source = stripComments(readFileSync(fullPath, 'utf8'));
   const fromLayer = layerOf(fullPath);
   const testFile = isTestFile(fullPath);
+  const filename = sourcePath(fullPath);
+  if (isLegacy(fullPath)) {
+    observedLegacyFiles.add(filename);
+    if (!legacyFiles.has(filename)) violations.push(`${fullPath}: unapproved legacy file: ${filename}`);
+  }
 
   for (const rule of forbiddenPatterns) {
-    if (rule.pattern.test(source)) violations.push(`${fullPath}: ${rule.message}`);
+    const matches = [...source.matchAll(rule.pattern)].length;
+    if (matches && !isLegacy(fullPath)) violations.push(`${fullPath}: ${rule.message}`);
+    if (isLegacy(fullPath) && matches) {
+      const key = `${filename} -> ${rule.message}`;
+      observedLegacyPatterns.set(key, matches);
+      if (matches > (legacyPatterns[key] ?? 0)) violations.push(`${fullPath}: unapproved legacy pattern: ${rule.message}`);
+    }
     rule.pattern.lastIndex = 0;
   }
 
-  const importPattern = /(?:from\s+|import\(\s*)['"]([^'"]+)['"]/g;
+  const importPattern = /(?:from\s+|import\s*(?:\(\s*)?)(['"`])([^'"`]+)\1/g;
   for (const match of source.matchAll(importPattern)) {
-    const specifier = match[1];
+    const specifier = match[2];
+    if (match[1] === '`' && specifier.includes('${')) continue;
     if (!specifier.startsWith('.')) continue;
 
     const resolved = resolveImport(fullPath, specifier);
     if (!resolved) {
       violations.push(`${fullPath}: unresolved relative import '${specifier}'`);
       continue;
+    }
+
+    if (!isLegacy(fullPath) && isLegacy(resolved)) {
+      const key = `${filename} -> ${sourcePath(resolved)}`;
+      const count = (observedLegacyImports.get(key) ?? 0) + 1;
+      observedLegacyImports.set(key, count);
+      if (count > (legacyImports[key] ?? 0)) violations.push(`${fullPath}: unapproved legacy import: ${key}`);
     }
 
     if (testFile) continue;
@@ -110,6 +147,15 @@ if (!existsSync(root)) {
 
 walk(root);
 for (const sourceFile of sourceFiles) checkFile(sourceFile);
+for (const file of legacyFiles) {
+  if (!observedLegacyFiles.has(file)) violations.push(`stale legacy file baseline: ${file}`);
+}
+for (const [key, count] of Object.entries(legacyImports)) {
+  if (observedLegacyImports.get(key) !== count) violations.push(`stale legacy import baseline: ${key}`);
+}
+for (const [key, count] of Object.entries(legacyPatterns)) {
+  if (observedLegacyPatterns.get(key) !== count) violations.push(`stale legacy pattern baseline: ${key}`);
+}
 
 if (violations.length > 0) {
   console.error(`Architecture guard failed with ${violations.length} violation(s):`);
@@ -117,4 +163,4 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(`Architecture guard passed: ${sourceFiles.length} source files checked.`);
+console.log(`Architecture guard passed: ${sourceFiles.length} source files checked; ${observedLegacyFiles.size} legacy files, ${observedLegacyImports.size} imports and ${observedLegacyPatterns.size} patterns quarantined.`);

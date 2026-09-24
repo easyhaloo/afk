@@ -18,6 +18,7 @@ import {
   type GitHubCatalogProject,
 } from './work-items/catalogs';
 import type { ProviderCatalog } from './work-items/types';
+import { normalizeGitLabHost } from '../shared/gitlab-project';
 
 function readGhToken(): string | null {
   try {
@@ -39,15 +40,27 @@ function resolveGitHubToken(): string {
 function resolveGitLabAuth(preferredHost?: string): { url: string; token: string } {
   const envUrl = process.env.GITLAB_URL;
   const envToken = process.env.GITLAB_TOKEN;
-  if (envToken) return { url: envUrl ?? 'https://gitlab.com', token: envToken };
-
-  const glab = getGlabToken(preferredHost);
-  if (!glab) {
-    throw new Error('GitLab authentication is required. Set GITLAB_TOKEN or authenticate with glab auth login.');
+  const requestedHost = preferredHost || envUrl ? normalizeGitLabHost(preferredHost ?? envUrl) : undefined;
+  if (envToken) {
+    const envHost = normalizeGitLabHost(envUrl);
+    if (requestedHost && requestedHost !== envHost) {
+      throw new Error(`GITLAB_TOKEN host ${envHost} does not match requested GitLab host ${requestedHost}`);
+    }
+    return { url: gitLabUrl(envUrl), token: envToken };
   }
 
-  const url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
+  const glab = getGlabToken(requestedHost);
+  if (!glab || (requestedHost && normalizeGitLabHost(glab.host) !== requestedHost)) {
+    throw new Error(`GitLab authentication requires a matching glab token for host ${requestedHost ?? 'default'}`);
+  }
+
+  const url = gitLabUrl(glab.apiHost);
   return { url, token: glab.token };
+}
+
+function gitLabUrl(preferredHost?: string): string {
+  const host = preferredHost ?? 'gitlab.com';
+  return /^https?:\/\//i.test(host) ? host : `https://${host}`;
 }
 
 export async function createGitHubTracker(repo?: string, cwd?: string): Promise<GitHubClient> {
@@ -58,12 +71,12 @@ export async function createGitHubTracker(repo?: string, cwd?: string): Promise<
   return new GitHubClient({ repo: project, auth: resolveGitHubToken() });
 }
 
-export async function createGitLabTracker(projectId?: string, cwd?: string): Promise<GitLabClient> {
+export async function createGitLabTracker(projectId?: string, cwd?: string, preferredHost?: string): Promise<GitLabClient> {
   const project = projectId ?? await resolveGitLabProject(cwd);
   if (!project) {
     throw new Error('Could not determine GitLab project. Pass the project path or run inside a GitLab repository.');
   }
-  const auth = resolveGitLabAuth(process.env.GITLAB_URL);
+  const auth = resolveGitLabAuth(preferredHost);
   return new GitLabClient({ url: auth.url, token: auth.token, projectId: project });
 }
 
@@ -109,14 +122,15 @@ export async function createTracker(
   projectId?: string,
   cwd?: string,
   platform?: TrackerPlatform,
+  preferredHost?: string,
 ): Promise<TrackerProvider> {
   const override = asTrackerPlatform(platform);
   if (override === 'github') return createGitHubTracker(projectId, cwd);
-  if (override === 'gitlab') return createGitLabTracker(projectId, cwd);
+  if (override === 'gitlab') return createGitLabTracker(projectId, cwd, preferredHost);
   const detected = await resolveTrackerProject(cwd);
   return detected.platform === 'github'
     ? createGitHubTracker(projectId, cwd)
-    : createGitLabTracker(projectId, cwd);
+    : createGitLabTracker(projectId, cwd, preferredHost);
 }
 
 export async function createWorkflowProviders(

@@ -316,9 +316,16 @@ export class FilesystemClaimLock {
   private async releaseOperationGate(gatePath: string, gateId: string): Promise<void> {
     const current = (await inspectGate(gatePath))?.gate;
     if (current?.gateId !== gateId) return;
-    // Recovery only moves gates whose local PID is dead. A live owner can
-    // therefore remove only its own gate, never a replacement gate.
-    await rm(gatePath, { recursive: true, force: true });
+    // Move the owned gate out of the contested path before recursive removal.
+    // A new claimant can publish its gate without racing the removal retry.
+    const retiredPath = join(dirname(gatePath), `.operation-gate-released-${randomUUID()}`);
+    try {
+      await rename(gatePath, retiredPath);
+    } catch (error: unknown) {
+      if (isNotFound(error)) return;
+      throw error;
+    }
+    await rm(retiredPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     await syncDirectory(dirname(gatePath));
   }
 }

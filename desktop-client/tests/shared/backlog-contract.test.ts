@@ -13,6 +13,7 @@ import {
   parseBacklogPlatform,
   parseBacklogRunRetryInput,
   parseBacklogRuntimeSummary,
+  parseWorkItemRunRecord,
   parseWorkItemRunStartInput,
   parseWorkItemInventoryResult,
 } from "../../shared/backlog-contract";
@@ -79,17 +80,54 @@ describe("Backlog shared contract", () => {
   it("strictly parses workspace-independent work item run inputs", () => {
     expect(parseWorkItemRunStartInput({
       workItemId: "WI-2026-018",
-      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", role: "primary", baseBranch: "main" }],
+      repositories: [
+        { platform: "github", projectKey: "acme/api", providerProjectId: "101", name: "api", role: "primary", baseBranch: "main", checkoutPath: "repositories/api" },
+        { platform: "gitlab", projectKey: "git.corp/acme/web", providerHost: "git.corp", name: "web", baseBranch: "release/2026.09", checkoutPath: "repositories/web" },
+      ],
       workflow: "standard-development",
       environment: "local",
     })).toEqual({
       workItemId: "WI-2026-018",
-      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", role: "primary", baseBranch: "main" }],
+      repositories: [
+        { platform: "github", projectKey: "acme/api", providerProjectId: "101", name: "api", role: "primary", baseBranch: "main", checkoutPath: "repositories/api" },
+        { platform: "gitlab", projectKey: "git.corp/acme/web", providerHost: "git.corp", name: "web", baseBranch: "release/2026.09", checkoutPath: "repositories/web" },
+      ],
       workflow: "standard-development",
       environment: "local",
     });
     expect(() => parseWorkItemRunStartInput({ workItemId: "../task", repositories: [] })).toThrow(/workItemId/i);
+    expect(() => parseWorkItemRunStartInput({ workItemId: "WI-1", repositories: [] })).toThrow(/repositories/i);
     expect(() => parseWorkItemRunStartInput({ workItemId: "WI-1", repositories: [], workspace: "/tmp/repo" })).toThrow(/unknown/i);
+  });
+
+  it("strictly parses current and legacy work item run records", () => {
+    expect(parseWorkItemRunRecord({
+      id: "desktop-run-1",
+      status: "running",
+      startedAt: "2026-09-22T01:00:00.000Z",
+      workingBranch: "afk/work-item-1",
+      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", checkoutPath: "repositories/api", baseBranch: "main" }],
+      workspacePath: "/tmp/task",
+      pid: 123,
+    })).toMatchObject({ id: "desktop-run-1", status: "running", workingBranch: "afk/work-item-1", pid: 123 });
+    expect(parseWorkItemRunRecord({ id: "legacy-run", status: "failed", startedAt: "2026-09-21T01:00:00.000Z", error: "boom" })).toEqual({
+      id: "legacy-run",
+      status: "failed",
+      startedAt: "2026-09-21T01:00:00.000Z",
+      error: "boom",
+    });
+    expect(() => parseWorkItemRunRecord({ id: "run", status: "running", startedAt: "now", unknown: true })).toThrow(/unknown/i);
+    expect(() => parseWorkItemRunRecord({ id: "", status: "running", startedAt: "now" })).toThrow(/id/i);
+    expect(() => parseWorkItemRunRecord({ id: "run", status: "running", startedAt: "" })).toThrow(/startedAt/i);
+  });
+
+  it("parses repository selections without inventing work-item association context", () => {
+    expect(parseWorkItemRunStartInput({
+      workItemId: "WI-1",
+      repositories: [{ platform: "github", projectKey: "unrelated/repository", name: "unrelated", baseBranch: "main", checkoutPath: "repositories/unrelated" }],
+    }).repositories).toEqual([
+      { platform: "github", projectKey: "unrelated/repository", name: "unrelated", baseBranch: "main", checkoutPath: "repositories/unrelated" },
+    ]);
   });
 
   it("parseBacklogPlatform only accepts github or gitlab", () => {
@@ -124,13 +162,65 @@ describe("Backlog shared contract", () => {
 
   it("strictly parses a global work-item inventory", () => {
     const result = parseWorkItemInventoryResult({
-      items: [{ id: "github:acme/api#1", issueNumber: 1, project: { platform: "github", projectKey: "acme/api", name: "api" }, title: "demo", description: "## Goal\n\n- keep markdown", managed: true, executionEligible: true, state: "ready", executionMode: "afk", dependsOn: [], tags: [], branchName: "afk/backlog-1", providerRef: "github:acme/api#1" }],
+      items: [{
+        id: "github:acme/api#1",
+        issueNumber: 1,
+        project: { platform: "github", projectKey: "acme/api", name: "api" },
+        title: "demo",
+        description: "## Goal\n\n- keep markdown",
+        managed: true,
+        executionEligible: true,
+        state: "ready",
+        executionMode: "afk",
+        dependsOn: [],
+        tags: [],
+        branchName: "afk/backlog-1",
+        providerRef: "github:acme/api#1",
+        runs: [{
+          id: "run-1",
+          status: "running",
+          startedAt: "2026-09-21T00:00:00.000Z",
+          workingBranch: "afk/work-item-1",
+          repositories: [{ platform: "github", projectKey: "acme/api", name: "api", baseBranch: "main", checkoutPath: "repositories/api" }],
+        }],
+      }],
       projects: [{ platform: "github", projectKey: "acme/api", name: "api" }],
       diagnostics: [],
       complete: true,
     });
     expect(result.items[0].id).toBe("github:acme/api#1");
     expect(result.items[0].description).toContain("\n");
+    expect(result.items[0].runs?.[0]).toMatchObject({
+      workingBranch: "afk/work-item-1",
+      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", baseBranch: "main", checkoutPath: "repositories/api" }],
+    });
     expect(() => parseWorkItemInventoryResult({ ...result, workspace: "/repo" })).toThrow(/unknown/i);
+    expect(() => parseWorkItemInventoryResult({
+      ...result,
+      items: [{ ...result.items[0], runs: [{ ...result.items[0].runs?.[0], workingBranch: "bad..branch" }] }],
+    })).toThrow(/workingBranch/i);
+    expect(() => parseWorkItemInventoryResult({
+      ...result,
+      items: [{
+        ...result.items[0],
+        runs: [{
+          ...result.items[0].runs?.[0],
+          repositories: [
+            { platform: "github", projectKey: "acme/api", name: "api", baseBranch: "main", checkoutPath: "repositories/api" },
+            { platform: "github", projectKey: "acme/api", name: "api-copy", baseBranch: "develop", checkoutPath: "repositories/api-copy" },
+          ],
+        }],
+      }],
+    })).toThrow(/duplicate/i);
+    expect(() => parseWorkItemInventoryResult({
+      ...result,
+      items: [{
+        ...result.items[0],
+        runs: [{
+          ...result.items[0].runs?.[0],
+          repositories: [{ platform: "github", projectKey: "acme/api", name: "api", baseBranch: "main", checkoutPath: "../api" }],
+        }],
+      }],
+    })).toThrow(/checkoutPath/i);
   });
 });

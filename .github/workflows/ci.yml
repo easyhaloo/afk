@@ -40,6 +40,9 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Architecture check
+        run: pnpm architecture:check
+
       - name: Cache node-gyp headers
         uses: actions/cache@v4
         with:

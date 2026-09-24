@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { load } from 'js-yaml';
+import { normalizeGitLabHost } from '../../shared/gitlab-project';
 
 export interface GlabHostConfig {
   api_host: string;
@@ -97,13 +98,15 @@ export function getGlabToken(preferredHost?: string): { host: string; token: str
   const cfg = readGlabConfig();
   if (!cfg) return null;
 
-  let host = preferredHost || cfg.host;
-  let hostCfg = cfg.hosts[host];
-
-  if (!hostCfg && host !== cfg.host) {
-    host = cfg.host;
-    hostCfg = cfg.hosts[host];
+  if (preferredHost) {
+    const requestedHost = normalizeGitLabHost(preferredHost);
+    const match = Object.entries(cfg.hosts).find(([host]) => normalizeGitLabHost(host) === requestedHost);
+    if (!match?.[1].token) return null;
+    return { host: match[0], token: match[1].token, apiHost: match[1].api_host || match[0] };
   }
+
+  let host = cfg.host;
+  let hostCfg = cfg.hosts[host];
 
   if (!hostCfg?.token) {
     for (const [h, c] of Object.entries(cfg.hosts)) {

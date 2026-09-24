@@ -23,8 +23,8 @@ export function createMutex<T>(): {
   };
 }
 
-export function createKeyedMutex<T>(): {
-  run: (key: string, op: () => Promise<T>) => Promise<T>;
+export function createKeyedMutex(): {
+  run: <U>(key: string, op: () => Promise<U>) => Promise<U>;
 } {
   const mutexes = new Map<string, Promise<void>>();
   return {

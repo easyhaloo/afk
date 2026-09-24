@@ -12,6 +12,11 @@ import type {
   WorkItemRunStartResult,
   WorkItemSourceRef,
 } from "../../../shared/backlog-contract";
+import {
+  planRepositoryCheckoutPaths,
+  repositorySelectionKey,
+  validateBaseBranch,
+} from "../../../shared/work-item-run-validation";
 import { SelectMenu } from "../../components/SelectMenu";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import "../backlog/backlog.css";
@@ -38,6 +43,7 @@ const runStatusLabels: Record<WorkItemRunRecord["status"], string> = {
 };
 
 type DetailTab = "overview" | "plan" | "runs";
+type RepositoryRunDraft = { selected: boolean; baseBranch: string };
 
 function diagnosticTitle(diagnostic: WorkItemInventoryDiagnostic): string {
   return diagnostic.projectKey ? `${diagnostic.platform} · ${diagnostic.projectKey}` : diagnostic.platform;
@@ -71,6 +77,23 @@ function executionRepositories(item: GlobalWorkItem): WorkItemRepositoryRef[] {
     ...item.project,
     baseBranch: item.project.defaultBranch || "main",
   }];
+}
+
+function repositoryDraftKey(repository: WorkItemRepositoryRef): string {
+  return repositorySelectionKey(repository);
+}
+
+function baseBranchError(value: string): string {
+  try {
+    validateBaseBranch(value);
+    return "";
+  } catch {
+    return "Base 分支格式无效";
+  }
+}
+
+function baseBranchErrorId(repository: WorkItemRepositoryRef): string {
+  return `base-branch-error-${repositoryDraftKey(repository).replace(/[^A-Za-z0-9_-]+/g, "-")}`;
 }
 
 function workspacePath(item: GlobalWorkItem): string {
@@ -115,27 +138,29 @@ export function WorkItemsPage() {
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<"all" | BacklogPlatform>("all");
   const [project, setProject] = useState("all");
-  const [selected, setSelected] = useState<GlobalWorkItem | null>(null);
+  const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
   const [runSetupOpen, setRunSetupOpen] = useState(false);
   const [runNotice, setRunNotice] = useState("");
   const [runError, setRunError] = useState("");
   const [startingRun, setStartingRun] = useState(false);
-  const [selectedRepositoryKeys, setSelectedRepositoryKeys] = useState<string[]>([]);
+  const [repositoryRunDrafts, setRepositoryRunDrafts] = useState<Record<string, RepositoryRunDraft>>({});
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const requestVersion = useRef(0);
+  const runRequestVersion = useRef(0);
+  const selectedWorkItemId = useRef<string | null>(null);
+  const selected = inventory.items.find(item => item.id === selectedItem?.id) ?? selectedItem;
 
-  const load = async (forceRefresh = false) => {
+  const load = async (forceRefresh = false, silent = false) => {
     const version = ++requestVersion.current;
-    setLoading(true);
-    setError("");
+    if (!silent) { setLoading(true); setError(""); }
     try {
       const next = await window.afkDesktop.workItems.list(platform === "all" ? undefined : { platform }, ...(forceRefresh ? [true] : []));
       if (version === requestVersion.current) setInventory(next);
     } catch (cause) {
-      if (version === requestVersion.current) setError(cause instanceof Error ? cause.message : String(cause));
+      if (version === requestVersion.current && !silent) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      if (version === requestVersion.current) setLoading(false);
+      if (version === requestVersion.current && !silent) setLoading(false);
     }
   };
 
@@ -143,6 +168,12 @@ export function WorkItemsPage() {
     void load();
     return () => { requestVersion.current += 1; };
   }, [platform]);
+
+  useEffect(() => {
+    if (detailTab !== "runs" || !selected?.runs?.some(run => run.status === "starting" || run.status === "running")) return;
+    const timer = setInterval(() => { void load(false, true); }, 3000);
+    return () => clearInterval(timer);
+  }, [detailTab, selected?.id, selected?.runs]);
 
   const projectOptions = useMemo(() => [
     { value: "all", label: "全部 Issue 来源", triggerLabel: "全部" },
@@ -171,11 +202,28 @@ export function WorkItemsPage() {
   }, [inventory.items, platform, project, query]);
 
   const openDetails = (item: GlobalWorkItem) => {
+    runRequestVersion.current += 1;
+    selectedWorkItemId.current = item.id;
     setSelected(item);
     setDetailTab("overview");
     setRunSetupOpen(false);
     setRunNotice("");
     setRunError("");
+    setStartingRun(false);
+  };
+
+  const closeDetails = () => {
+    runRequestVersion.current += 1;
+    selectedWorkItemId.current = null;
+    setStartingRun(false);
+    setRunSetupOpen(false);
+    setSelected(null);
+  };
+
+  const closeRunSetup = () => {
+    runRequestVersion.current += 1;
+    setStartingRun(false);
+    setRunSetupOpen(false);
   };
 
   const selectedSources = selected ? itemSources(selected) : [];
@@ -184,32 +232,59 @@ export function WorkItemsPage() {
   const selectedPlan = selected?.executionPlan ?? [];
   const selectedRuns = selected?.runs ?? [];
   const remainingItems = Math.max(0, visibleItems.length - visibleLimit);
+  const selectedExecutionRepositories = availableExecutionRepositories.filter(repository => repositoryRunDrafts[repositoryDraftKey(repository)]?.selected);
+  const selectedCheckoutPaths = planRepositoryCheckoutPaths(selectedExecutionRepositories);
+  const availableCheckoutPaths = planRepositoryCheckoutPaths(availableExecutionRepositories);
+  const selectedCheckoutPathByKey = new Map(selectedExecutionRepositories.map((repository, index) => [repositoryDraftKey(repository), selectedCheckoutPaths[index]]));
+  const availableCheckoutPathByKey = new Map(availableExecutionRepositories.map((repository, index) => [repositoryDraftKey(repository), availableCheckoutPaths[index]]));
+  const hasInvalidSelectedBranch = selectedExecutionRepositories.some(repository => baseBranchError(repositoryRunDrafts[repositoryDraftKey(repository)].baseBranch));
+  const canStartRun = !startingRun && selectedExecutionRepositories.length > 0 && !hasInvalidSelectedBranch;
 
   const openRunSetup = () => {
+    runRequestVersion.current += 1;
     setRunError("");
-    setSelectedRepositoryKeys(availableExecutionRepositories.map(repository => repository.id ?? `${repository.platform}:${repository.projectKey}`));
+    setStartingRun(false);
+    setRepositoryRunDrafts(Object.fromEntries(availableExecutionRepositories.map(repository => [
+      repositoryDraftKey(repository),
+      { selected: true, baseBranch: repository.defaultBranch ?? "main" },
+    ])));
     setRunSetupOpen(true);
   };
 
   const startRun = async () => {
-    if (!selected) return;
-    const repositories = availableExecutionRepositories.filter(repository => selectedRepositoryKeys.includes(repository.id ?? `${repository.platform}:${repository.projectKey}`));
-    const runRepositories = repositories.map(repository => ({
-      ...repository,
-      baseBranch: repository.defaultBranch || "main",
-      checkoutPath: repository.checkoutPath ?? `repositories/${repository.name}`,
-    }));
-    const input: WorkItemRunStartInput = { workItemId: selected.id, repositories: runRepositories, workflow: "standard-development", environment: "local" };
+    if (!selected || !canStartRun) return;
+    const workItemId = selected.id;
+    const currentRequestVersion = ++runRequestVersion.current;
+    const selectedRepositories = [...selectedExecutionRepositories];
+    const checkoutPaths = planRepositoryCheckoutPaths(selectedRepositories);
+    const repositories = selectedRepositories.map((repository, index) => {
+      const key = repositoryDraftKey(repository);
+      return {
+        platform: repository.platform,
+        projectKey: repository.projectKey,
+        ...(repository.providerHost === undefined ? {} : { providerHost: repository.providerHost }),
+        ...(repository.providerProjectId === undefined ? {} : { providerProjectId: repository.providerProjectId }),
+        name: repository.name,
+        checkoutPath: checkoutPaths[index],
+        baseBranch: validateBaseBranch(repositoryRunDrafts[key].baseBranch),
+        ...(repository.role === undefined ? {} : { role: repository.role }),
+      };
+    });
+    const input: WorkItemRunStartInput = { workItemId, repositories, environment: "local" };
     setStartingRun(true);
     setRunError("");
     try {
       const result: WorkItemRunStartResult = await window.afkDesktop.workItems.start(input);
-      setRunNotice(`${result.runId ? "运行已创建" : "任务空间已准备"}：${result.workspace.root}`);
+      if (runRequestVersion.current !== currentRequestVersion || selectedWorkItemId.current !== workItemId) return;
+      setRunNotice(`运行已创建：${result.workspace.root}`);
       setRunSetupOpen(false);
+      setDetailTab("runs");
+      void load(false, true);
     } catch (cause) {
+      if (runRequestVersion.current !== currentRequestVersion || selectedWorkItemId.current !== workItemId) return;
       setRunError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setStartingRun(false);
+      if (runRequestVersion.current === currentRequestVersion && selectedWorkItemId.current === workItemId) setStartingRun(false);
     }
   };
 
@@ -253,11 +328,11 @@ export function WorkItemsPage() {
       {remainingItems > 0 ? <div className="work-items-load-more"><span>还有 {remainingItems} 个</span><button type="button" aria-label="显示更多工作项" onClick={() => setVisibleLimit(limit => limit + pageSize)}>继续加载 <ChevronDown size={13} /></button></div> : null}
 
       {selected ? (
-        <div className="work-item-detail-layer" onMouseDown={event => { if (event.target === event.currentTarget) setSelected(null); }}>
+        <div className="work-item-detail-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeDetails(); }}>
           <aside className="work-item-detail" role="dialog" aria-modal="true" aria-label={`工作项 ${selected.id}`}>
             <header className="work-item-detail-header">
               <div><small>{selected.id} · {selected.executionEligible ? "可执行" : "不可执行"}</small><h2>{selected.title}</h2><p>{[selected.owner ? `负责人：${selected.owner}` : "", selected.priority ? `优先级 ${selected.priority}` : "", selected.updatedAt ? `更新于 ${selected.updatedAt}` : ""].filter(Boolean).join(" · ") || "独立工作项"}</p></div>
-              <button type="button" aria-label="关闭工作项详情" onClick={() => setSelected(null)}><X size={16} /></button>
+              <button type="button" aria-label="关闭工作项详情" onClick={closeDetails}><X size={16} /></button>
             </header>
             <nav className="work-item-detail-tabs" aria-label="工作项详情分区">
               <button type="button" className={detailTab === "overview" ? "active" : ""} aria-pressed={detailTab === "overview"} onClick={() => setDetailTab("overview")}>概览</button>
@@ -304,20 +379,30 @@ export function WorkItemsPage() {
       ) : null}
 
       {selected && runSetupOpen ? (
-        <div className="work-item-run-modal-layer" onMouseDown={event => { if (event.target === event.currentTarget) setRunSetupOpen(false); }}>
+        <div className="work-item-run-modal-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeRunSetup(); }}>
           <section className="work-item-run-modal" role="dialog" aria-modal="true" aria-label="开始执行工作项">
-            <header><div><h2>开始执行工作项</h2><p>确认执行资源和隔离任务空间。</p></div><button type="button" aria-label="关闭执行配置" onClick={() => setRunSetupOpen(false)}><X size={16} /></button></header>
+            <header><div><h2>开始执行工作项</h2><p>确认执行资源和隔离任务空间。</p></div><button type="button" aria-label="关闭执行配置" onClick={closeRunSetup}><X size={16} /></button></header>
             <div className="work-item-run-modal-body">
               <div className="work-item-run-field"><span>执行工作流</span><b><ListChecks size={14} />标准研发流程</b></div>
               <div className="work-item-run-field"><span>执行环境</span><b><Bot size={14} />本地隔离环境</b></div>
               <section className="work-item-run-resources"><div className="work-item-section-heading"><h3>本次运行使用的代码仓库</h3><small>{availableExecutionRepositories.length} 个</small></div>{availableExecutionRepositories.length ? availableExecutionRepositories.map(repository => {
-                const key = repository.id ?? `${repository.platform}:${repository.projectKey}`;
-                return <label key={key}><input type="checkbox" checked={selectedRepositoryKeys.includes(key)} onChange={event => setSelectedRepositoryKeys(current => event.target.checked ? [...current, key] : current.filter(value => value !== key))} /><span><b>{repository.name}</b><small>{repository.defaultBranch ?? "默认分支"} → {repository.checkoutPath ?? `repositories/${repository.name}`}</small></span><em>{repository.role ?? (selected.repositories?.length ? "资源" : "兼容来源仓库")}</em></label>;
-              }) : <WorkItemEmptySection>本工作项不需要代码仓库，也可以启动非代码类工作流。</WorkItemEmptySection>}</section>
+                const key = repositoryDraftKey(repository);
+                const draft = repositoryRunDrafts[key] ?? { selected: false, baseBranch: "" };
+                const branchError = draft.selected ? baseBranchError(draft.baseBranch) : "";
+                const errorId = baseBranchErrorId(repository);
+                const checkoutPath = selectedCheckoutPathByKey.get(key) ?? availableCheckoutPathByKey.get(key);
+                return <div className={`work-item-run-repository${draft.selected ? " selected" : ""}`} key={key}>
+                  <input aria-label={`选择仓库：${repository.name}`} type="checkbox" checked={draft.selected} onChange={event => setRepositoryRunDrafts(current => ({ ...current, [key]: { ...current[key], selected: event.target.checked } }))} />
+                  <span className="work-item-run-repository-copy"><b>{repository.name}</b><small>{repository.projectKey} · {checkoutPath}</small></span>
+                  <em>{repository.role ?? (selected.repositories?.length ? "资源" : "兼容来源仓库")}</em>
+                  <label className="work-item-base-branch"><span>Base 分支</span><input aria-label={`Base 分支：${repository.name}`} aria-invalid={Boolean(branchError)} aria-describedby={branchError ? errorId : undefined} value={draft.baseBranch} onChange={event => setRepositoryRunDrafts(current => ({ ...current, [key]: { ...current[key], baseBranch: event.target.value } }))} /></label>
+                  {branchError ? <small className="work-item-base-branch-error" id={errorId}>{branchError}</small> : null}
+                </div>;
+              }) : <WorkItemEmptySection>本工作项没有可用于运行的代码仓库。</WorkItemEmptySection>}</section>
               <div className="work-item-workspace-preview"><FolderGit2 size={18} /><div><b>系统将创建独立任务空间</b><code>{workspacePath(selected)}{"{repositories,runtime,artifacts,logs,diagnostics}"}</code></div></div>
               {runError ? <div className="work-item-run-error"><ShieldAlert size={14} />{runError}</div> : null}
             </div>
-            <footer><button type="button" className="work-item-secondary-action" disabled={startingRun} onClick={() => setRunSetupOpen(false)}>取消</button><button type="button" className="work-item-primary-action" disabled={startingRun} onClick={() => void startRun()}><Play size={14} />{startingRun ? "正在创建…" : "创建运行"}</button></footer>
+            <footer><button type="button" className="work-item-secondary-action" disabled={startingRun} onClick={closeRunSetup}>取消</button><button type="button" className="work-item-primary-action" disabled={!canStartRun} onClick={() => void startRun()}><Play size={14} />{startingRun ? "正在创建…" : "创建运行"}</button></footer>
           </section>
         </div>
       ) : null}

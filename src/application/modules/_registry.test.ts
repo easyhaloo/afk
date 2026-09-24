@@ -2,9 +2,23 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, it, expect, vi } from 'vitest';
-import { parseModuleParams, resolveModuleNames } from './_registry';
+import { defineModule, loadModules, parseModuleParams, resolveModuleNames } from './_registry';
 
 describe('Module Registry', () => {
+  it('loads registered modules alongside the core module without duplicates', async () => {
+    defineModule(() => ({ name: 'registered-test' }));
+    await expect(resolveModuleNames(['registered-test', 'registered-test'])).resolves.toEqual(['registered-test']);
+    await expect(loadModules(['registered-test', 'registered-test'])).resolves.toEqual([
+      expect.objectContaining({ name: 'project-resolver' }),
+      expect.objectContaining({ name: 'registered-test' }),
+    ]);
+  });
+
+  it('rejects duplicate module registration', () => {
+    defineModule(() => ({ name: 'duplicate-test' }));
+    expect(() => defineModule(() => ({ name: 'duplicate-test' }))).toThrow('Duplicate module name: duplicate-test');
+  });
+
   it('reads modules from valid inline YAML', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'afk-modules-'));
     mkdirSync(join(directory, '.afk'));

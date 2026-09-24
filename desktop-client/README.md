@@ -25,3 +25,5 @@ SSH 主机位于一级导航“SSH 主机”中。客户端读取用户的 `~/.s
 ## 全局工作项本地模型
 
 全局工作项列表在 Electron 主进程中维护一份本地快照，存放于 `app.getPath("userData")/work-item-inventory.json`。页面优先读取已校验的本地快照；无快照时才等待 GitHub/GitLab 远程 inventory。快照超过 5 分钟后，页面先返回旧数据，再由后台异步同步；应用启动时也会启动一次同步，并每 5 分钟执行一次。快照写入采用临时文件替换，远程失败或快照损坏不会阻断页面加载，手动刷新仍会强制访问远程数据源。
+
+工作项执行可从关联资源中选择代码仓库，并分别指定 Base 分支；单次启动在 `~/.loop-workspace/<工作项 ID>/` 下创建一份 manifest 和一个 AFK 运行。运行记录保存在任务空间的 `.afk/work-item-runs.json`，列表会合并本地历史；打开运行记录时，活跃运行会定时刷新。开发环境优先使用仓库根目录 `dist/index.js`（先运行 `pnpm build`）；打包客户端需要在 PATH 中安装支持 `afk run --execution-manifest` 的 CLI，或通过绝对路径 `AFK_DESKTOP_CLI` 指定它。不兼容的 CLI 会在启动前报错，而不会静默忽略多仓库配置。

@@ -29,3 +29,22 @@ describe("process executor", () => {
     expect(result).toMatchObject({ ok: true, stdout: "done" });
   });
 });
+
+describe("process executor stdin", () => {
+  it("writes the input option to the subprocess stdin", async () => {
+    const result = await exec(
+      process.execPath,
+      ["-e", "let data=''; process.stdin.on('data', c => data += c); process.stdin.on('end', () => process.stdout.write(data.toUpperCase()))"],
+      undefined,
+      "hello stdin",
+    );
+
+    expect(result).toMatchObject({ ok: true, stdout: "HELLO STDIN" });
+  });
+
+  it("resolves ok:false instead of hanging when stdin-reading children exit non-zero", async () => {
+    const result = await exec(process.execPath, ["-e", "process.exit(3)"]);
+
+    expect(result.ok).toBe(false);
+  });
+});

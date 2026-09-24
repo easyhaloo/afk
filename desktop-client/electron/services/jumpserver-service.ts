@@ -98,11 +98,9 @@ export function createJumpserverService(deps: JumpserverServiceDeps) {
     const rawAssets = await cli.listAssets(input.alias, { linuxOnly });
     const assetPreview = rawAssets.map((a) => ({ name: a.name, address: a.address, platform: a.platform }));
 
-    // Step 4: store credential
     const target = { hostname: input.hostname, port: input.port, user: input.user };
-    await credentialService.set(input.alias, input.password, target, input.otpSecret);
 
-    // Step 5: upsert bastion record
+    // Step 4: upsert bastion record
     const bastion = await bastionStore.upsert({
       alias: input.alias,
       hostname: input.hostname,
@@ -112,6 +110,9 @@ export function createJumpserverService(deps: JumpserverServiceDeps) {
       syncFilter: { linuxOnly },
       jmsServerAlias: input.alias,
     });
+
+    // Step 5: store credential keyed by the bastion id so syncAssets/removeBastion can find it
+    await credentialService.set(bastion.id, input.password, target, input.otpSecret);
 
     return { bastion, assetPreview };
   }

@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
 
 function diagnosticPath() {
   const home = homedir();
@@ -41,26 +38,58 @@ export async function exec(
   input?: string,
   options: { timeoutMs?: number; maxBuffer?: number } = {},
 ) {
-  try {
-    const { stdout, stderr } = await run(command, args, {
+  const timeoutMs = options.timeoutMs ?? 8_000;
+  const maxBuffer = options.maxBuffer ?? 2_000_000;
+  return new Promise<{ ok: boolean; stdout: string; stderr: string }>((resolve) => {
+    const child = spawn(command, args, {
       cwd,
       env: diagnosticEnvironment(cwd),
-      timeout: options.timeoutMs ?? 8_000,
-      maxBuffer: options.maxBuffer ?? 2_000_000,
-      ...(input !== undefined ? { input } : {}),
+      stdio: ["pipe", "pipe", "pipe"],
     });
-    return { ok: true, stdout: String(stdout).trim(), stderr: String(stderr).trim() } as const;
-  } catch (error) {
-    // Non-zero exit: execFile rejects with an Error whose stdout/stderr
-    // carry the captured output (including our JSON failure envelope).
-    const stdout = (error as { stdout?: string }).stdout ?? "";
-    const stderr = (error as { stderr?: string }).stderr ?? "";
-    return {
-      ok: false,
-      stdout: typeof stdout === "string" ? stdout.trim() : "",
-      stderr: typeof stderr === "string" ? stderr.trim() : (error instanceof Error ? error.message : String(error)),
-    } as const;
-  }
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (ok: boolean, errorText?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({
+        ok,
+        stdout: stdout.trim(),
+        stderr: (errorText !== undefined ? errorText : stderr).trim(),
+      });
+    };
+
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish(false, stderr || `${command} timed out after ${timeoutMs}ms`);
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+      if (stdout.length + stderr.length > maxBuffer) {
+        child.kill("SIGKILL");
+        finish(false, stderr || `${command} output exceeded ${maxBuffer} bytes`);
+      }
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+      if (stdout.length + stderr.length > maxBuffer) {
+        child.kill("SIGKILL");
+        finish(false, stderr || `${command} output exceeded ${maxBuffer} bytes`);
+      }
+    });
+    child.on("error", (error) => finish(false, error.message));
+    child.on("close", (code) => finish(code === 0));
+
+    if (input !== undefined) {
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(input);
+    } else {
+      child.stdin.end();
+    }
+  });
 }
 
 export function firstLine(value: string, fallback: string) {

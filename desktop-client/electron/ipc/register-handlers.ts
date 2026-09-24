@@ -19,6 +19,8 @@ import { createBacklogRunStore } from "../services/backlog-run-store";
 import { createBacklogRuntimeService } from "../services/backlog-runtime-service";
 import { createClipboardService } from "../services/clipboard-service";
 import { createSshCredentialService } from "../services/ssh-credential-service";
+import { createJumpserverService } from "../services/jumpserver-service";
+import { createJumpserverCredentialService } from "../services/jumpserver-credential-service";
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { createExternalUrlService } from "../services/external-url-service";
@@ -81,8 +83,10 @@ function validSession(value: string) {
 }
 
 function backlogWorkspace(value: unknown, operation: string): string {
-  if (typeof value !== "string" || !value.trim() || !path.isAbsolute(value.trim()) || value.includes("\0")) throw new Error(`${operation}: workspace 必须是绝对路径`);
-  return resolveWorkspace(value.trim());
+  if (typeof value !== "string" || value.includes("\0")) throw new Error(`${operation}: workspace 必须是字符串`);
+  const trimmed = value.trim();
+  if (trimmed && !path.isAbsolute(trimmed)) throw new Error(`${operation}: workspace 必须是绝对路径`);
+  return resolveWorkspace(trimmed);
 }
 
 function broadcast(channel: string, ...args: unknown[]) {
@@ -94,6 +98,12 @@ const sshManagedHostStore = createSshManagedHostStore({ file: path.join(app.getP
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
 const externalUrlService = createExternalUrlService({ openExternal: (url) => shell.openExternal(url) });
 const sshCredentialService = createSshCredentialService({ home, safeStorage });
+const defaultJumpserverService = createJumpserverService({
+  home,
+  credentialService: createJumpserverCredentialService({ home, safeStorage }),
+  managedHostStore: sshManagedHostStore,
+  listManagedHosts: async () => ({ hosts: await sshManagedHostStore.list() }),
+});
 const commands = createSshCommandAdapter({ exec });
 const knownHosts = createKnownHostsAdapter({
   home,
@@ -232,7 +242,7 @@ function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
 }
 
 export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) {
-  const { jumpserverService } = deps;
+  const jumpserverService = deps.jumpserverService ?? defaultJumpserverService;
   workItemInventorySyncService.start();
   if (typeof app.once === "function") app.once("before-quit", () => workItemInventorySyncService.stop());
   registerHandler(IPC_CHANNELS.copyText, (v: unknown) => v, (text) => clipboardService.copyText(text as string));

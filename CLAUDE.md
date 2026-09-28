@@ -70,7 +70,8 @@ TUI built with React + Ink. Components live in `src/components/` (planned).
 1. Make changes in `src/`
 2. Run `pnpm build` to compile to `dist/`
 3. Test with `pnpm test` (vitest)
-4. **Documentation sync**: CLI command changes (signature, flags, behavior) or skill modifications must update the corresponding docs — `README.md`, `CLAUDE.md` command table, skill docs, or related `docs/` files. Keep docs in lockstep with code.
+4. For TUI testing, see [docs/TESTING.md](docs/TESTING.md)
+5. **Documentation sync**: CLI command changes (signature, flags, behavior) or skill modifications must update the corresponding docs — `README.md`, `CLAUDE.md` command table, skill docs, or related `docs/` files. Keep docs in lockstep with code.
 
 ## Desktop UI Design Standards
 

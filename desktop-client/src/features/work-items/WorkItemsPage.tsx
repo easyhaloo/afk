@@ -19,6 +19,7 @@ import {
 } from "../../../shared/work-item-run-validation";
 import { SelectMenu } from "../../components/SelectMenu";
 import { ProviderIcon } from "../../components/ProviderIcon";
+import { MarkdownContent } from "../backlog/MarkdownContent";
 import "../backlog/backlog.css";
 import "./work-items.css";
 
@@ -331,7 +332,7 @@ export function WorkItemsPage() {
         <div className="work-item-detail-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeDetails(); }}>
           <aside className="work-item-detail" role="dialog" aria-modal="true" aria-label={`工作项 ${selected.id}`}>
             <header className="work-item-detail-header">
-              <div><small>{selected.id} · {selected.executionEligible ? "可执行" : "不可执行"}</small><h2>{selected.title}</h2><p>{[selected.owner ? `负责人：${selected.owner}` : "", selected.priority ? `优先级 ${selected.priority}` : "", selected.updatedAt ? `更新于 ${selected.updatedAt}` : ""].filter(Boolean).join(" · ") || "独立工作项"}</p></div>
+              <div><small className="work-item-detail-id"><ProviderIcon provider={selected.project.platform ?? selected.sources?.[0]?.platform} size={11} />{selected.issueNumber ? `${selected.project.projectKey} #${selected.issueNumber}` : selected.id} · {selected.executionEligible ? "可执行" : "不可执行"}</small><h2>{selected.title}</h2><p>{[selected.owner ? `负责人：${selected.owner}` : "", selected.priority ? `优先级 ${selected.priority}` : "", selected.updatedAt ? `更新于 ${selected.updatedAt}` : ""].filter(Boolean).join(" · ") || "独立工作项"}</p></div>
               <button type="button" aria-label="关闭工作项详情" onClick={closeDetails}><X size={16} /></button>
             </header>
             <nav className="work-item-detail-tabs" aria-label="工作项详情分区">
@@ -341,7 +342,7 @@ export function WorkItemsPage() {
             </nav>
             <div className="work-item-detail-body">
               {detailTab === "overview" ? <>
-                <section className="work-item-detail-section"><div className="work-item-section-heading"><h3>目标</h3></div><p className="work-item-description">{selected.description || "该工作项尚未补充目标描述。"}</p></section>
+                <section className="work-item-detail-section"><div className="work-item-section-heading"><h3>目标</h3></div><div className="backlog-detail-description work-item-detail-description">{selected.description?.trim() ? <MarkdownContent source={selected.description} /> : "该工作项尚未补充目标描述。"}</div></section>
                 <section className="work-item-detail-section">
                   <div className="work-item-section-heading"><h3>外部来源</h3><small>{selectedSources.length} 个引用，不决定工作项归属</small></div>
                   {selectedSources.length ? selectedSources.map(source => (

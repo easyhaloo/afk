@@ -10,6 +10,7 @@ import { createSshManagedHostStore } from "../adapters/ssh-managed-host-store";
 import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter";
 import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter";
 import { isAfkTmuxSession, listAfkTmux } from "../adapters/resource-adapter";
+import { normalizeTmuxSessionName } from "../../shared/tmux-session";
 import { assertTrustedSender } from "../security/sender-guard";
 import { validateJumpserverBastionId, validateJumpserverBastionInput, validateJumpserverSyncOptions, validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
 import { readAppearance, saveAppearance } from "../services/appearance-service";
@@ -36,6 +37,7 @@ import { createExecutionWorkspaceService } from "../services/execution-workspace
 import { WorkflowGraphService } from "../services/graph-service";
 import { saveWorkspacePreference } from "../services/workspace-preference-service";
 import { resolveWorkspace } from "../services/workspace-service";
+import { projectRunScopeService } from "../services/project-run-scope-service";
 import { homedir } from "node:os";
 import path from "node:path";
 import { access } from "node:fs/promises";
@@ -79,7 +81,7 @@ function registerHandlerMulti<Schemas extends [HandlerSchema, ...HandlerSchema[]
 }
 
 function validSession(value: string) {
-  return /^[A-Za-z0-9_.:-]{1,100}$/.test(value);
+  return /^[A-Za-z0-9_.:#/-]{1,100}$/.test(value);
 }
 
 function backlogWorkspace(value: unknown, operation: string): string {
@@ -275,8 +277,9 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     (v) => { if (typeof v !== "string" || !validSession(v)) throw new Error("tmux 会话名称无效"); return v; },
   ], async ([workspace, name]) => {
     const root = resolveWorkspace(workspace);
-    if (!isAfkTmuxSession(root, name) || !(await listAfkTmux(root)).some((item) => item.name === name)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
-    const result = await exec("tmux", ["capture-pane", "-p", "-t", name, "-S", "-160"]);
+    const resourceWorkspaces = await projectRunScopeService.workspaces(root);
+    if (!isAfkTmuxSession(resourceWorkspaces, name, root) || !(await listAfkTmux(resourceWorkspaces)).some((item) => item.name === name && item.workspace === root)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
+    const result = await exec("tmux", ["capture-pane", "-p", "-t", normalizeTmuxSessionName(name), "-S", "-160"]);
     if (!result.ok) throw new Error(result.stderr);
     return result.stdout;
   });
@@ -286,8 +289,9 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     (v) => { if (typeof v !== "string" || !v.trim() || v.length > 4_000 || v.includes("\0")) throw new Error("接管输入为空或超过安全长度"); return v; },
   ], async ([workspace, name, line]) => {
     const root = resolveWorkspace(workspace);
-    if (!isAfkTmuxSession(root, name) || !(await listAfkTmux(root)).some((item) => item.name === name)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
-    const result = await exec("tmux", ["send-keys", "-t", name, line, "Enter"]);
+    const resourceWorkspaces = await projectRunScopeService.workspaces(root);
+    if (!isAfkTmuxSession(resourceWorkspaces, name, root) || !(await listAfkTmux(resourceWorkspaces)).some((item) => item.name === name && item.workspace === root)) throw new Error("tmux 会话不是当前 AFK 工作区登记的资源，或已不存在");
+    const result = await exec("tmux", ["send-keys", "-t", normalizeTmuxSessionName(name), line, "Enter"]);
     if (!result.ok) throw new Error(result.stderr);
     return true;
   });

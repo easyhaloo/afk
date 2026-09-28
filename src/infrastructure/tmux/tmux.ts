@@ -3,6 +3,9 @@ import { Signal } from '../../domain/schemas';
 import { readSignal, readSignalSync } from '../io/signal';
 import { TIMEOUTS } from '../../shared/constants';
 import { ControlModeConnection } from './control-mode';
+import { normalizeTmuxSessionName } from './session-name';
+
+export { normalizeTmuxSessionName };
 
 export interface TmuxSession {
   name: string;
@@ -37,8 +40,9 @@ export class TmuxClient {
    */
   async openSession(session: string): Promise<void> {
     this.closeSession();
-    this.controlMode = new ControlModeConnection({ session, pauseAfter: 1 });
-    this.currentSession = session;
+    const normalized = normalizeTmuxSessionName(session);
+    this.controlMode = new ControlModeConnection({ session: normalized, pauseAfter: 1 });
+    this.currentSession = normalized;
   }
 
   /**
@@ -69,20 +73,21 @@ export class TmuxClient {
    */
   async createSession(name: string, dir: string, command: string = 'claude --dangerously-skip-permissions'): Promise<TmuxSession> {
     const window = 'main';
+    const session = normalizeTmuxSessionName(name);
     // Kill any existing session first to avoid "duplicate session" errors.
-    await this.killSession(name).catch(() => { /* ignore if not exists */ });
+    await this.killSession(session).catch(() => { /* ignore if not exists */ });
     await this.exec([
       'new-session',
       '-d',
-      '-s', name,
+      '-s', session,
       '-n', window,
       '-c', dir,
       command,
     ]);
     // Bypass the workspace trust dialog by auto-confirming.
     await this.sleep(2000);
-    await this.exec(['send-keys', '-t', `${name}:${window}`, '--', 'Enter']);
-    return { name, window, dir };
+    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', 'Enter']);
+    return { name: session, window, dir };
   }
 
   /**
@@ -90,7 +95,7 @@ export class TmuxClient {
    */
   async hasSession(name: string): Promise<boolean> {
     try {
-      await this.exec(['has-session', '-t', name]);
+      await this.exec(['has-session', '-t', normalizeTmuxSessionName(name)]);
       return true;
     } catch {
       return false;
@@ -117,14 +122,14 @@ export class TmuxClient {
    * Kill tmux session
    */
   async killSession(name: string): Promise<void> {
-    await this.exec(['kill-session', '-t', name]);
+    await this.exec(['kill-session', '-t', normalizeTmuxSessionName(name)]);
   }
 
   /**
    * Create a new window in an existing session with a command
    */
   async newWindow(session: string, command: string): Promise<void> {
-    await this.exec(['new-window', '-t', session, '-d', command]);
+    await this.exec(['new-window', '-t', normalizeTmuxSessionName(session), '-d', command]);
   }
 
   /**
@@ -132,7 +137,7 @@ export class TmuxClient {
    */
   async listWindows(session: string): Promise<string[]> {
     try {
-      const output = await this.exec(['list-windows', '-t', session, '-F', '#{window_name}']);
+      const output = await this.exec(['list-windows', '-t', normalizeTmuxSessionName(session), '-F', '#{window_name}']);
       if (!output) return [];
       return output.split('\n').filter(Boolean);
     } catch {
@@ -160,10 +165,10 @@ export class TmuxClient {
 
     if (this.isInsideTmux()) {
       // Inside tmux: create a new window in the target session (no duplicate attach)
-      await this.newWindow(session, `tmux attach -t ${session}`);
+      await this.newWindow(session, `tmux attach -t ${normalizeTmuxSessionName(session)}`);
     } else {
       // Outside tmux: switch to the session
-      await this.exec(['switch-client', '-t', `${session}:${windows[0]}`]);
+      await this.exec(['switch-client', '-t', `${normalizeTmuxSessionName(session)}:${windows[0]}`]);
     }
     return true;
   }
@@ -174,12 +179,13 @@ export class TmuxClient {
    * Auto-opens Control Mode on first use if not already connected.
    */
   async sendKeys(session: string, window: string, keys: string | string[]): Promise<void> {
-    const target = `${session}:${window}`;
+    const target = `${normalizeTmuxSessionName(session)}:${window}`;
     const keyArray = Array.isArray(keys) ? keys : [keys];
 
     // Auto-open Control Mode if not connected
-    if (!this.controlMode || this.currentSession !== session) {
-      await this.openSession(session);
+    const normalized = normalizeTmuxSessionName(session);
+    if (!this.controlMode || this.currentSession !== normalized) {
+      await this.openSession(normalized);
     }
 
     // Use Control Mode for batched command sending
@@ -195,7 +201,7 @@ export class TmuxClient {
    */
   async capturePane(session: string, window: string, options: TmuxCaptureOptions = {}): Promise<string> {
     const { lines = 50, history = 100 } = options;
-    const target = `${session}:${window}`;
+    const target = `${normalizeTmuxSessionName(session)}:${window}`;
     try {
       const output = await this.exec([
         'capture-pane', '-t', target, '-p', '-S', `-${history}`,
@@ -245,7 +251,7 @@ export class TmuxClient {
     // Type the prompt text directly (which already contains `/goal ` prefix).
     // The text is submitted as a single line
     // (no embedded newlines which would cause premature submission in the TUI).
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', prompt]);
+    await this.exec(['send-keys', '-t', `${normalizeTmuxSessionName(session)}:${window}`, '--', prompt]);
     await this.sleep(500);
 
     // After the agent completes the goal, it reports completion via
@@ -253,9 +259,9 @@ export class TmuxClient {
     //
     // Double-tap C-m to submit: the first Enter can be lost if the TUI is
     // mid-redraw on a long wrapped line; the second is a harmless no-op.
-    await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
+    await this.exec(['send-keys', '-t', `${normalizeTmuxSessionName(session)}:${window}`, 'C-m']);
     await this.sleep(300);
-    await this.exec(['send-keys', '-t', `${session}:${window}`, 'C-m']);
+    await this.exec(['send-keys', '-t', `${normalizeTmuxSessionName(session)}:${window}`, 'C-m']);
   }
 
   /**
@@ -270,7 +276,7 @@ export class TmuxClient {
     timeout: number = 300000
   ): Promise<Signal | null> {
     // Try Control Mode first if connected to this session
-    if (this.controlMode && this.currentSession === session) {
+    if (this.controlMode && this.currentSession === normalizeTmuxSessionName(session)) {
       return new Promise<Signal | null>((resolve) => {
         const outputHandler = (_pane: string, text: string) => {
           // When we see the signal file written, resolve
@@ -325,7 +331,7 @@ export class TmuxClient {
   async waitSessionExit(session: string, timeout: number = TIMEOUTS.TMUX_SESSION_TIMEOUT): Promise<number> {
     return new Promise((resolve, reject) => {
       const proc = spawn('bash', ['-c', `
-        while tmux has-session -t "${session}" 2>/dev/null; do sleep 2; done
+        while tmux has-session -t "${normalizeTmuxSessionName(session)}" 2>/dev/null; do sleep 2; done
         echo "SESSION_EXITED"
       `], { stdio: 'pipe' });
       let stdout = '';

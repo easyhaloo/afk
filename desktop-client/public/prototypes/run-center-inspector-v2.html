@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AFK Control · 运行中心详情原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8f7;
+      --panel: #ffffff;
+      --panel-soft: #fbfcfb;
+      --line: #e5e9e5;
+      --line-strong: #d6ddd6;
+      --text: #303631;
+      --muted: #89918b;
+      --mono: "SF Mono", "DM Mono", "Menlo", monospace;
+      --green: #4e8a72;
+      --green-soft: #edf6f0;
+      --red: #ab7070;
+      --red-soft: #fbf3f3;
+      --accent: #6d5dfc;
+      --shadow: 0 16px 36px rgba(43, 53, 46, .08);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 980px; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
+    button { font: inherit; cursor: pointer; }
+    .app { display: grid; min-height: 100vh; grid-template-columns: 214px minmax(0, 1fr); }
+    .sidebar { padding: 28px 14px; border-right: 1px solid var(--line); background: #fafbfa; }
+    .brand { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 8px; align-items: center; padding: 0 9px 28px; }
+    .brand-mark { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; background: #303631; color: white; font-size: 14px; font-weight: 700; }
+    .brand strong { font-size: 12px; letter-spacing: .08em; }
+    .brand small { grid-column: 2; margin-top: -4px; color: #a0a8a1; font: 8px var(--mono); letter-spacing: .08em; }
+    .new-run { display: flex; width: 100%; align-items: center; gap: 9px; min-height: 39px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); color: var(--text); font-weight: 650; }
+    .nav { display: grid; gap: 4px; margin-top: 25px; }
+    .nav-label { margin: 12px 10px 5px; color: #a0a8a1; font: 8px var(--mono); text-transform: uppercase; }
+    .nav button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 35px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #657068; text-align: left; font-size: 11px; }
+    .nav button.active { background: #edf3ed; color: var(--green); font-weight: 650; }
+    .content { min-width: 0; }
+    .topbar { display: flex; min-height: 59px; align-items: center; justify-content: space-between; padding: 0 27px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.68); }
+    .crumb { color: #9aa39b; font: 10px var(--mono); }
+    .crumb strong { color: var(--text); font-family: inherit; }
+    .view-switch { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+    .view-switch button { display: inline-flex; align-items: center; gap: 6px; min-height: 27px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 10px; }
+    .view-switch button.active { background: #eef5ef; color: var(--green); font-weight: 650; }
+    .workspace { display: grid; min-height: calc(100vh - 59px); grid-template-columns: minmax(0, 1fr) 374px; }
+    .board-wrap { min-width: 0; padding: 28px 24px; }
+    .board-heading { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 22px; }
+    .eyebrow { margin: 0 0 7px; color: var(--green); font: 9px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 25px; letter-spacing: -.04em; }
+    .board-heading p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+    .filters { display: flex; gap: 7px; }
+    .filters button { min-height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: #6c766e; font-size: 9px; }
+    .lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+    .lane { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-soft); }
+    .lane.empty { border-color: transparent; background: transparent; }
+    .lane-head { display: flex; align-items: center; justify-content: space-between; min-height: 39px; padding: 0 11px; border-bottom: 1px solid var(--line); background: var(--panel); color: #9aa39b; font: 9px var(--mono); }
+    .lane.empty .lane-head { border: 1px solid var(--line); border-radius: 9px; background: #fbfcfb; }
+    .lane-label { display: inline-flex; align-items: center; gap: 7px; }
+    .state-icon { display: inline-grid; width: 18px; height: 18px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: #a3aca4; }
+    .state-icon.done { border-color: #b8d2c3; color: var(--green); }
+    .state-icon.fail { border-color: #dec2c2; color: var(--red); }
+    .card { position: relative; display: block; width: calc(100% - 14px); min-height: 151px; margin: 7px; padding: 12px 31px 12px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); text-align: left; box-shadow: 0 1px 2px rgba(43, 53, 46, .025); }
+    .card.selected { border-color: #bbd8c7; box-shadow: inset 2px 0 var(--green); }
+    .card:hover { border-color: #bbd8c7; }
+    .card-source { display: flex; align-items: center; gap: 7px; color: #7b857e; font: 9px var(--mono); }
+    .github { display: inline-grid; width: 16px; height: 16px; place-items: center; border-radius: 50%; background: #20251f; color: white; font: 11px Arial; }
+    .card time { display: block; margin: 5px 0 0 23px; color: #a0a8a1; font: 8px var(--mono); }
+    .card strong { display: block; margin-top: 12px; font-size: 13px; }
+    .card .arrow { position: absolute; top: 50%; right: 10px; color: #91a097; transform: translateY(-50%); }
+    .inspector { min-width: 0; border-left: 1px solid var(--line); background: var(--panel); box-shadow: -10px 0 28px rgba(44, 52, 46, .025); }
+    .inspector-head { display: flex; min-height: 59px; align-items: center; gap: 10px; padding: 0 19px; border-bottom: 1px solid var(--line); color: #68736b; font: 10px var(--mono); }
+    .icon-button { display: inline-grid; width: 29px; height: 29px; place-items: center; padding: 0; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); color: #657068; }
+    .icon-button:hover { border-color: #b8c9bc; background: var(--green-soft); color: var(--green); }
+    .inspector-body { padding: 20px 20px 22px; }
+    .meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: #8a948c; font: 9px var(--mono); }
+    .meta .source { display: inline-flex; align-items: center; gap: 6px; color: #667169; }
+    .inspector h2 { margin: 10px 0 16px; font-size: 21px; letter-spacing: -.035em; }
+    .state-flow { display: flex; align-items: center; gap: 8px; margin-bottom: 19px; color: var(--red); font: 9px var(--mono); }
+    .state-flow.done { color: var(--green); }
+    .state-flow .state-icon { width: 20px; height: 20px; }
+    .state-line { width: 28px; border-top: 1px solid #d9dfd9; }
+    .state-flow .next { color: #a37979; }
+    .state-flow.done .next { color: #789a82; }
+    .info { display: grid; gap: 15px; margin: 0; padding: 17px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .info dt { margin-bottom: 5px; color: #9aa39b; font: 9px var(--mono); }
+    .info dd { display: flex; align-items: center; gap: 7px; margin: 0; color: #4e5951; font-size: 11px; }
+    .workspace-path { min-width: 0; overflow: hidden; color: #5d6960; font: 9px/1.55 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .copy { display: inline-grid; flex: 0 0 auto; width: 23px; height: 23px; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: #89948b; }
+    .copy:hover { border-color: #b8c9bc; color: var(--green); }
+    .section { border-bottom: 1px solid var(--line); }
+    .section summary { display: flex; align-items: center; justify-content: space-between; min-height: 48px; color: #6f7c72; font-size: 10px; list-style: none; cursor: pointer; }
+    .section summary::-webkit-details-marker { display: none; }
+    .summary-label { display: inline-flex; align-items: center; gap: 7px; }
+    .summary-label b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 1px; place-items: center; border: 1px solid #e0e7e0; border-radius: 5px; background: #fafcf9; color: #7f8a80; font: 8px var(--mono); }
+    .summary-meta { color: #a3aaa4; font: 8px var(--mono); }
+    .summary-chevron { color: #a2aaa3; transition: transform .18s ease; }
+    details[open] .summary-chevron { transform: rotate(90deg); }
+    .history-list { position: relative; display: grid; gap: 1px; padding: 2px 0 12px; }
+    .history-list::before { position: absolute; top: 10px; bottom: 19px; left: 6px; width: 1px; background: #e2e8e2; content: ""; }
+    .history-item { position: relative; z-index: 1; display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; align-items: center; min-height: 37px; padding: 6px 8px 6px 0; border: 0; border-left: 2px solid transparent; border-radius: 0 7px 7px 0; background: transparent; color: #526057; text-align: left; }
+    .history-item:hover { background: #fafcf9; }
+    .history-item.selected { border-left-color: var(--green); background: #f1f6f1; }
+    .history-item .state-icon { width: 14px; height: 14px; border-color: #d9e1da; background: var(--panel); font-size: 9px; }
+    .history-item .state-icon.done { border-color: #b8d2c3; }
+    .history-item .state-icon.fail { border-color: #d7c0c0; color: #ad7e7e; }
+    .history-item b, .history-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .history-item b { font-size: 10px; font-weight: 650; }
+    .history-item small { margin-top: 3px; color: #9aa39b; font: 8px var(--mono); }
+    .diagnostic { margin-top: 0; }
+    .json { max-height: 128px; overflow: auto; margin: 0 0 14px; padding: 11px; border-radius: 9px; background: #f6f7f7; color: #69736b; font: 8px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; }
+    .actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 17px; }
+    .primary, .secondary { min-height: 35px; border-radius: 8px; font-size: 10px; font-weight: 650; }
+    .primary { border: 1px solid #343a35; background: #343a35; color: white; }
+    .primary:hover { background: #252b26; }
+    .secondary { padding: 0 12px; border: 1px solid var(--line-strong); background: var(--panel); color: #657068; }
+    .secondary:hover { border-color: #b8c9bc; background: var(--green-soft); color: var(--green); }
+    .toast { position: fixed; right: 24px; bottom: 22px; padding: 10px 13px; border: 1px solid #cfe1d4; border-radius: 8px; background: #eff8f1; color: #4f7d62; font-size: 10px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transform: translateY(6px); transition: .2s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .terminal-modal { position: fixed; inset: 0; z-index: 4; display: grid; place-items: center; padding: 24px; background: rgba(35, 40, 36, .16); opacity: 0; pointer-events: none; transition: opacity .18s ease; }
+    .terminal-modal.show { opacity: 1; pointer-events: auto; }
+    .terminal-panel { width: min(620px, 100%); overflow: hidden; border: 1px solid #d8dfd9; border-radius: 12px; background: #202521; color: #dfe8df; box-shadow: 0 20px 55px rgba(24, 31, 26, .22); transform: translateY(8px); transition: transform .18s ease; }
+    .terminal-modal.show .terminal-panel { transform: translateY(0); }
+    .terminal-head { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 13px; border-bottom: 1px solid #39413b; color: #aeb9ae; font: 9px var(--mono); }
+    .terminal-head strong { color: #edf4ed; font-family: inherit; font-weight: 600; }
+    .terminal-close { display: grid; width: 24px; height: 24px; place-items: center; border: 0; border-radius: 6px; background: transparent; color: #aeb9ae; }
+    .terminal-close:hover { background: #303831; color: white; }
+    .terminal-output { min-height: 190px; max-height: 310px; overflow: auto; margin: 0; padding: 16px; color: #d1dfd1; font: 10px/1.65 var(--mono); white-space: pre-wrap; }
+    .terminal-form { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #39413b; }
+    .terminal-form input { min-width: 0; flex: 1; border: 1px solid #49564b; border-radius: 7px; outline: none; background: #293029; color: #edf4ed; font: 10px var(--mono); }
+    .terminal-form input:focus { border-color: #79a989; }
+    .terminal-form button { min-width: 56px; border: 1px solid #79a989; border-radius: 7px; background: #79a989; color: #1d2920; font-size: 9px; font-weight: 650; }
+    @media (max-width: 1120px) { .workspace { grid-template-columns: minmax(0, 1fr) 330px; } .board-wrap { padding-right: 14px; padding-left: 14px; } .lanes { gap: 7px; } }
+    @media (max-width: 980px) {
+      body { min-width: 0; }
+      .app { grid-template-columns: 64px minmax(0, 1fr); }
+      .sidebar { padding: 20px 8px; }
+      .brand { display: flex; justify-content: center; padding: 0 0 22px; }
+      .brand strong, .brand small, .new-run span, .nav-label { display: none; }
+      .new-run { justify-content: center; padding: 0; }
+      .nav button { justify-content: center; padding: 0; font-size: 0; }
+      .nav button small { display: none; }
+      .workspace { grid-template-columns: minmax(0, 1fr) 320px; }
+      .board-wrap { padding: 20px 13px; }
+      .board-heading { display: block; }
+      .filters { margin-top: 12px; }
+      .lanes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .inspector-body { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">A</span><strong>AFK / CONTROL</strong><small>LOCAL OPERATIONS</small></div>
+      <button class="new-run">⌘ <span>新建运行</span></button>
+      <nav class="nav">
+        <span class="nav-label">Work</span><button>▣　工作项</button><button class="active">⌘　运行中心</button>
+        <span class="nav-label">Automation</span><button>✣　工作流</button><button>⌁　Agents <small>5/6</small></button>
+        <span class="nav-label">Resources</span><button>□　代码仓库</button><button>◇　执行环境</button><button>›_　SSH 主机</button>
+        <span class="nav-label">System</span><button>☷　活动记录</button><button>☼　设置</button>
+      </nav>
+    </aside>
+    <main class="content">
+      <header class="topbar"><div class="crumb">AFK　›　<strong>运行中心</strong></div><div class="view-switch"><button>☷ 队列</button><button class="active">⌘ 看板</button></div></header>
+      <div class="workspace">
+        <section class="board-wrap">
+          <div class="board-heading"><div><p class="eyebrow">RUN CENTER</p><h1>运行看板</h1><p>围绕任务处理运行状态，异常信息保持可操作。</p></div><div class="filters"><button>全部项目⌄</button><button>筛选⌄</button></div></div>
+          <div class="lanes">
+            <section class="lane empty"><div class="lane-head"><span class="lane-label"><span class="state-icon">◌</span></span><span>0</span></div></section>
+            <section class="lane"><div class="lane-head"><span class="lane-label"><span class="state-icon done">✓</span></span><span>1</span></div><button class="card selected" onclick="showToast('已选中 github:easyhaloo/afk #144')"><div class="card-source"><span class="github">●</span>easyhaloo/afk <span>#144</span></div><time>昨天 23:21:07</time><strong>工作项执行完成</strong><span class="arrow">›</span></button></section>
+            <section class="lane empty"><div class="lane-head"><span class="lane-label"><span class="state-icon">◌</span></span><span>0</span></div></section>
+            <section class="lane empty"><div class="lane-head"><span class="lane-label"><span class="state-icon">◌</span></span><span>0</span></div></section>
+          </div>
+        </section>
+        <aside class="inspector">
+          <header class="inspector-head"><button class="icon-button" onclick="toggleInspector()" aria-label="收起详情">⌜</button><span>▣ 详情</span></header>
+          <div class="inspector-body">
+            <div class="meta"><span>昨天 17:23:23</span><span>·</span><span class="source"><span class="github">●</span>easyhaloo/afk　#144</span></div>
+            <h2>工作项执行失败</h2>
+            <div class="state-flow"><span class="state-icon fail">×</span><span>失败</span><span class="state-line"></span><span class="next">可重新运行</span></div>
+            <dl class="info"><div><dt>时间</dt><dd>昨天 17:23:23</dd></div><div><dt>任务空间</dt><dd><span class="workspace-path" title="/Users/shenggangshu/.loop-workspace/github/easyhaloo/afk/144">/Users/shenggangshu/.loop-workspace/github/easyhaloo/afk/144</span><button class="copy" onclick="copyWorkspace()" aria-label="复制任务空间">⧉</button></dd></div></dl>
+            <details class="section" open><summary><span class="summary-label"><span class="summary-chevron">›</span>运行历史 <b>4</b></span><span class="summary-meta">按时间</span></summary><div class="history-list"><button class="history-item" onclick="setHistory('工作项执行完成', '昨天 23:21:07', this)"><span class="state-icon done">✓</span><span><b>工作项执行完成</b><small>昨天 23:21:07</small></span></button><button class="history-item selected" onclick="setHistory('工作项执行失败', '昨天 17:23:23', this)"><span class="state-icon fail">×</span><span><b>工作项执行失败</b><small>昨天 17:23:23</small></span></button><button class="history-item" onclick="setHistory('工作项执行失败', '昨天 16:32:43', this)"><span class="state-icon fail">×</span><span><b>工作项执行失败</b><small>昨天 16:32:43</small></span></button><button class="history-item" onclick="setHistory('工作项执行失败', '昨天 16:14:39', this)"><span class="state-icon fail">×</span><span><b>工作项执行失败</b><small>昨天 16:14:39</small></span></button></div></details>
+            <details class="section diagnostic"><summary><span class="summary-label"><span class="summary-chevron">›</span>诊断信息</span><span>JSON</span></summary><pre class="json">{"id":"desktop-github:easyhaloo/afk#144","status":"failed","workspacePath":".../afk/144","completedAt":"2026-09-24 11:26"}</pre></details>
+            <div class="actions"><button class="primary" onclick="showToast('已加入重新运行队列')">重新运行</button><button class="secondary" onclick="openTerminal()">打开终端</button></div>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <div class="terminal-modal" id="terminalModal" role="dialog" aria-modal="true" aria-label="任务终端">
+    <section class="terminal-panel">
+      <header class="terminal-head"><span><strong>终端</strong>　github:easyhaloo/afk #144</span><button class="terminal-close" onclick="closeTerminal()" aria-label="关闭终端">×</button></header>
+      <pre class="terminal-output" id="terminalOutput">AFK Control terminal preview
+workspace: /Users/shenggangshu/.loop-workspace/github/easyhaloo/afk/144
+
+$ ready</pre>
+      <form class="terminal-form" onsubmit="sendTerminalCommand(event)"><input id="terminalInput" autocomplete="off" placeholder="输入命令，例如 pwd" /><button type="submit">发送</button></form>
+    </section>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const toast = document.getElementById('toast');
+    let toastTimer;
+    function showToast(message) { toast.textContent = message; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 1800); }
+    function copyWorkspace() { navigator.clipboard?.writeText('/Users/shenggangshu/.loop-workspace/github/easyhaloo/afk/144'); showToast('任务空间路径已复制'); }
+    function openTerminal() { document.getElementById('terminalModal').classList.add('show'); document.getElementById('terminalInput').focus(); }
+    function closeTerminal() { document.getElementById('terminalModal').classList.remove('show'); }
+    function sendTerminalCommand(event) { event.preventDefault(); const input = document.getElementById('terminalInput'); const output = document.getElementById('terminalOutput'); const command = input.value.trim(); if (!command) return; const response = command === 'pwd' ? '/Users/shenggangshu/.loop-workspace/github/easyhaloo/afk/144' : command === 'clear' ? '' : `prototype: ${command}\n(仅模拟终端交互)`; output.textContent += `\n\n$ ${command}${response ? `\n${response}` : ''}`; input.value = ''; output.scrollTop = output.scrollHeight; }
+    function setHistory(title, timestamp, button) { const failed = title.includes('失败'); document.querySelector('.inspector h2').textContent = title; document.querySelector('.meta span').textContent = timestamp; document.querySelector('.info dd').textContent = timestamp; const flow = document.querySelector('.state-flow'); const icon = flow.querySelector('.state-icon'); flow.classList.toggle('done', !failed); icon.classList.toggle('fail', failed); icon.classList.toggle('done', !failed); icon.textContent = failed ? '×' : '✓'; flow.querySelector('span:nth-of-type(2)').textContent = failed ? '失败' : '完成'; flow.querySelector('.next').textContent = failed ? '可重新运行' : '可查看结果'; document.querySelectorAll('.history-item').forEach((item) => item.classList.toggle('selected', item === button)); showToast('已切换运行历史'); }
+    function toggleInspector() { showToast('原型：详情面板可收起'); }
+  </script>
+</body>
+</html>

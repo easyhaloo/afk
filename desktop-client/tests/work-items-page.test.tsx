@@ -559,6 +559,56 @@ describe("WorkItemsPage", () => {
     act(() => renderer!.unmount());
   });
 
+  it("renders work item description markdown as headings, checklists, and links", async () => {
+    const inventory = { ...result, items: [{ ...result.items[0], description: "## Goal\n\n- [ ] verify\n\n[Issue](https://github.com/acme/api/issues/1)" }] };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+
+    const detail = renderer!.root.findByProps({ "aria-label": "工作项 github:acme/api#1" });
+    const markdown = detail.findByProps({ className: "markdown-content" });
+    expect(textContent(markdown.findByType("h2"))).toBe("Goal");
+    expect(markdown.findByProps({ type: "checkbox" }).props.checked).toBe(false);
+    expect(markdown.findByType("a").props.href).toBe("https://github.com/acme/api/issues/1");
+    act(() => renderer!.unmount());
+  });
+
+  it("keeps the empty description placeholder without mounting markdown", async () => {
+    const inventory = { ...result, items: [{ ...result.items[0], description: "  " }] };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+    await act(async () => { renderer!.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
+
+    const detail = renderer!.root.findByProps({ "aria-label": "工作项 github:acme/api#1" });
+    expect(textContent(detail)).toContain("该工作项尚未补充目标描述。");
+    expect(detail.findAllByProps({ className: "markdown-content" })).toHaveLength(0);
+    act(() => renderer!.unmount());
+  });
+
+  it("shows the selected GitHub or GitLab provider icon in the detail header", async () => {
+    const gitlabItem = { ...result.items[1], id: "gitlab:corp/web#1", project: { platform: "gitlab" as const, projectKey: "corp/web", name: "web" } };
+    const inventory = { ...result, items: [result.items[0], gitlabItem] };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    const rows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
+    await act(async () => { rows[0].props.onClick(); });
+    const githubHeader = renderer!.root.findByProps({ className: "work-item-detail-header" });
+    expect(githubHeader.findByProps({ "aria-label": "GitHub" })).toBeTruthy();
+    expect(textContent(githubHeader)).toContain("acme/api #1");
+    expect(textContent(githubHeader)).not.toContain("github:acme/api#1");
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "关闭工作项详情" }).props.onClick(); });
+    await act(async () => { rows[1].props.onClick(); });
+    const gitlabHeader = renderer!.root.findByProps({ className: "work-item-detail-header" });
+    expect(gitlabHeader.findByProps({ "aria-label": "GitLab" })).toBeTruthy();
+    expect(textContent(gitlabHeader)).toContain("corp/web #1");
+    expect(textContent(gitlabHeader)).not.toContain("gitlab:corp/web#1");
+    act(() => renderer!.unmount());
+  });
+
   it("does not repeat the work item ID in the list row", async () => {
     vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => result) }, openExternal: vi.fn() } });
     let renderer: ReturnType<typeof create>;

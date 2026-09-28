@@ -151,6 +151,7 @@ export const DEMO_SNAPSHOT: Snapshot = {
       raw: '{"event":"attention_required","runtime":"opencode"}',
     },
   ],
+  workItemRuns: [],
   containers: [
     {
       engine: "docker",
@@ -172,8 +173,8 @@ export const DEMO_SNAPSHOT: Snapshot = {
     },
   ],
   sessions: [
-    { name: "afk-release", windows: "3", attached: true },
-    { name: "afk-quality", windows: "2", attached: false },
+    { name: "afk-release", workspace: "/Users/demo/Projects/afk-release-ops", windows: "3", attached: true },
+    { name: "afk-quality", workspace: "/Users/demo/Projects/afk-release-ops", windows: "2", attached: false },
   ],
 };
 

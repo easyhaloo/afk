@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 /** AFK Control design: quiet local-operations shell; runtime cards are secondary to Timeline evidence and stay concise. */
 import { createRoot } from "react-dom/client";
 import {
-  Activity, Archive, Bot, Boxes, Braces, Check, ChevronDown, ChevronRight, CircleCheck, CircleDashed,
+  Activity, Archive, Bot, Boxes, Braces, Check, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleX,
   ClipboardList, Clock3, Container, FolderOpen, LayoutList, Minus, Move, Plus, RefreshCw, ChevronLeft,
   Send, Settings2, Sparkles, Terminal, TerminalSquare, TriangleAlert, Workflow, X,
 } from "lucide-react";
@@ -29,6 +29,7 @@ import { BacklogPage } from "./features/backlog/BacklogPage";
 import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
+import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
 import type { ProviderProjectRef } from "../shared/backlog-contract";
 import type { SshSession } from "../shared/ssh-contract";
 
@@ -96,6 +97,17 @@ function Track({ phase, index, variant = "full", live = false, fresh = false }: 
   );
 }
 
+function StateGlyph({ phase, size = 15, muted = false }: { phase: RuntimeVisualState; size?: number; muted?: boolean }) {
+  const meta = runtimeStateMeta(phase);
+  const Icon = phase === "active" ? Activity : phase === "verify" ? Check : phase === "failed" ? CircleX : phase === "attention" ? Clock3 : CircleDashed;
+  return <span className={`state-glyph ${phase}${muted ? " muted" : ""}`} title={meta.ariaLabel} aria-label={meta.ariaLabel}><Icon size={size} strokeWidth={phase === "active" ? 2.1 : 1.8} aria-hidden="true" /></span>;
+}
+
+function RuntimeSource({ source }: { source: string }) {
+  const parsed = parseRuntimeSource(source);
+  return <span className="runtime-source" title={source}>{parsed.provider ? <ProviderIcon provider={parsed.provider} size={14} /> : <FolderOpen size={14} aria-hidden="true" />}<span className="runtime-repository">{parsed.repository}</span>{parsed.workItem ? <span className="runtime-work-item">{parsed.workItem}</span> : null}</span>;
+}
+
 function App() {
   const [view, setView] = useState<View>("backlog");
   const [runMode, setRunMode] = useState<"queue" | "board">("queue");
@@ -105,12 +117,13 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState("");
+  const [sessionWorkspace, setSessionWorkspace] = useState("");
   const [terminal, setTerminal] = useState<SshTerminalState>({ open: false, pane: "", mode: "tmux" });
   const [line, setLine] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
   const [replayRun, setReplayRun] = useState("");
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(true);
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
   const [appearance, setAppearance] = useState<AppearancePreferences>(defaultAppearance);
   const freshTimer = useRef<number | null>(null);
@@ -137,7 +150,10 @@ function App() {
       setWorkspace(next.workspace.root);
       setSelected((current) => current ? next.events.find((item) => item.id === current.id) ?? null : null);
       setReplayRun((current) => next.events.some((item) => item.source === current) ? current : next.events[0]?.source ?? "");
-      if (!session && next.sessions[0]) setSession(next.sessions[0].name);
+      if (!session && next.sessions[0]) {
+        setSession(next.sessions[0].name);
+        setSessionWorkspace(next.sessions[0].workspace);
+      }
       setLastCheckedAt(Date.now());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -173,23 +189,51 @@ function App() {
     root.dataset.afkScale = appearance.fontScale;
   }, [appearance]);
 
+  const events = useMemo(() => [
+    ...(snapshot?.events ?? []),
+    ...(snapshot?.workItemRuns ?? []).map((run): RuntimeEvent => ({
+      id: `work-item-run-${run.id}`,
+      timestamp: run.startedAt,
+      source: run.workItemId,
+      status: run.status === "starting" ? "queued" : run.status,
+      result: run.status === "running" ? "工作项正在执行" : run.status === "starting" ? "工作项正在启动" : run.status === "completed" ? "工作项执行完成" : "工作项执行失败",
+      nextStep: `任务空间：${run.workspacePath}`,
+      raw: JSON.stringify(run),
+    })),
+  ], [snapshot]);
+
   const groups = useMemo(() => {
     const value: Record<Phase, RuntimeEvent[]> = { ready: [], active: [], verify: [], attention: [] };
-    (snapshot?.events ?? []).forEach((event) => value[phaseOf(event)].push(event));
+    groupRuntimeEvents(events).forEach((group) => value[phaseOf(group.events[0])].push(group.events[0]));
     return value;
-  }, [snapshot]);
+  }, [events]);
+  const selectedHistory = useMemo(() => {
+    if (!selected) return [];
+    return groupRuntimeEvents(events).find((group) => group.source === selected.source)?.events ?? [selected];
+  }, [events, selected]);
 
-  const openSession = async (name: string) => {
+  const openSession = async (name: string, targetWorkspace = workspace) => {
     activeSshSessionId.current = null;
     setSession(name);
+    setSessionWorkspace(targetWorkspace);
     setConfirmed(false);
     setTerminal({ open: true, pane: "正在读取 tmux 窗格…", mode: "tmux" });
     try {
-      const pane = await window.afkDesktop.tmuxPane(workspace, name);
+      const pane = await window.afkDesktop.tmuxPane(targetWorkspace, name);
       setTerminal({ open: true, pane, mode: "tmux" });
     } catch (cause) {
       setTerminal({ open: true, pane: `无法读取会话：${String(cause)}`, mode: "tmux" });
     }
+  };
+
+  const openEventTerminal = async (event: RuntimeEvent) => {
+    const targetWorkspace = runtimeWorkspacePath(event.nextStep) ?? (sessionWorkspace || workspace);
+    const target = findRuntimeTerminalSession(runtimeWorkspacePath(event.nextStep), snapshot?.sessions ?? [], sessionWorkspace || workspace);
+    if (!target) {
+      setTerminal({ open: true, pane: `无法打开终端\n\n当前运行没有可用的 tmux 会话。\n任务空间：${targetWorkspace}`, mode: "tmux" });
+      return;
+    }
+    await openSession(target.name, target.workspace);
   };
 
   const openSshSession = (sshSession: SshSession, publicKeyPath?: string) => {
@@ -213,8 +257,9 @@ function App() {
   const sendInput = async () => {
     if (!confirmed || !session || !line.trim()) return;
     try {
-      await window.afkDesktop.tmuxSend(workspace, session, line);
-      setTerminal({ open: true, pane: await window.afkDesktop.tmuxPane(workspace, session), mode: "tmux" });
+      const targetWorkspace = sessionWorkspace || workspace;
+      await window.afkDesktop.tmuxSend(targetWorkspace, session, line);
+      setTerminal({ open: true, pane: await window.afkDesktop.tmuxPane(targetWorkspace, session), mode: "tmux" });
       setLine("");
       setConfirmed(false);
     } catch (cause) {
@@ -231,7 +276,6 @@ function App() {
   const nav = navGroups.flatMap((group) => group.items);
   const activeNav = view === "board" ? "queue" : view;
   const title = nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
-  const events = snapshot?.events ?? [];
   const runtimes = snapshot?.agentRuntimes ?? [];
   const availableRuntimeCount = runtimes.filter((runtime) => runtime.available).length;
   const runtimeTotal = runtimes.length || 4;
@@ -272,12 +316,13 @@ function App() {
           <div className="topbar-context"><div className="breadcrumb"><span>AFK</span><b>›</b><strong>{title}</strong></div>{view === "queue" || view === "board" ? <div className="run-view-switcher header-run-mode" aria-label="运行视图切换"><button className={runMode === "queue" ? "active" : ""} onClick={() => { setRunMode("queue"); setView("queue"); }}><LayoutList size={14} />队列</button><button className={runMode === "board" ? "active" : ""} onClick={() => { setRunMode("board"); setView("board"); }}><Workflow size={14} />看板</button></div> : null}{view === "agents" ? <AgentHeaderSummary available={availableRuntimeCount} total={runtimeTotal} unavailable={unavailableRuntimeCount} /> : null}</div>
         </header>
         {error ? <div className="error-banner"><X size={15} />{error}</div> : null}
+        <div className={view === "queue" || view === "board" ? "run-center-layout" : "view-layout"}>
         <div className="workspace">
           {view === "queue" ? <Queue events={events} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "board" ? <Board groups={groups} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
           {view === "repositories" ? <Repositories /> : null}
-          {view === "containers" ? <Environments snapshot={snapshot} onTerminal={openSession} /> : null}
+          {view === "containers" ? <Environments snapshot={snapshot} onTerminal={(name, targetWorkspace) => void openSession(name, targetWorkspace)} /> : null}
           {view === "ssh" ? <SshHostsPage onSession={openSshSession} /> : null}
           {view === "backlog" ? <WorkItemsPage /> : null}
           {view === "projectBacklog" ? <BacklogPage workspace={workspace} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} /> : null}
@@ -285,7 +330,8 @@ function App() {
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}
         </div>
-        {selected && view !== "containers" && view !== "events" && view !== "workflows" && view !== "settings" ? <Inspector event={selected} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onTerminal={() => session && void openSession(session)} /> : null}
+        {selected && (view === "queue" || view === "board") ? <Inspector event={selected} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} /> : null}
+        </div>
       </section>
       {terminal.open ? <TerminalSheet mode={terminal.mode} session={session} pane={terminal.pane} line={line} confirmed={confirmed} sshSession={terminal.sshSession} onClose={closeTerminal} onLine={setLine} onConfirmed={setConfirmed} onSend={() => void sendInput()} onSshInput={(data) => {
         const sshSession = terminal.sshSession;
@@ -301,23 +347,28 @@ function App() {
 }
 
 function Queue({ events, selected, freshIds, onSelect }: { events: RuntimeEvent[]; selected: RuntimeEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeEvent) => void }) {
-  const phases: Phase[] = ["ready", "active", "verify", "attention"];
+  const phases: Phase[] = ["active", "ready", "verify", "attention"];
+  const grouped = groupRuntimeEvents(events);
+  const orderedGroups = phases.flatMap((phase) => grouped.filter((group) => phaseOf(group.events[0]) === phase));
   if (!events.length) return <Empty />;
-  return <section className="queue">{phases.map((phase) => {
-    const rows = events.filter((event) => phaseOf(event) === phase);
-    if (!rows.length) return null;
-    return <div className={`phase-group phase-${phase}`} key={phase}><header><span className={`status-dot ${phase}`} /><b>{label[phase]}</b><small>{rows.length.toString().padStart(2, "0")} 条记录</small></header>{rows.map((event) => <EventRow key={event.id} event={event} fresh={freshIds.has(event.id)} selected={selected?.id === event.id} onSelect={onSelect} />)}</div>;
-  })}</section>;
+  return <section className="queue" aria-label="运行队列"><div className="queue-stream">{orderedGroups.map((group) => { const event = group.events[0]; return <EventRow key={group.source} event={event} historyCount={group.events.length} fresh={freshIds.has(event.id)} selected={selected?.id === event.id} onSelect={onSelect} />; })}</div></section>;
 }
 
-function EventRow({ event, fresh, selected, onSelect }: { event: RuntimeEvent; fresh: boolean; selected: boolean; onSelect: (event: RuntimeEvent) => void }) {
+function EventRow({ event, historyCount, fresh, selected, onSelect }: { event: RuntimeEvent; historyCount: number; fresh: boolean; selected: boolean; onSelect: (event: RuntimeEvent) => void }) {
   const phase = phaseOf(event);
-  return <button className={`event-row ${selected ? "selected" : ""} ${phase}${fresh ? " fresh" : ""}`} onClick={() => onSelect(event)} aria-label={`查看 ${event.source} 的详情`}><span className="event-icon"><Clock3 size={15} /></span><span className="event-copy"><span><b>{event.source}</b><strong>{event.result}</strong></span><small><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time> · {event.nextStep}</small></span><span className="event-detail-affordance">详情 <ChevronRight size={14} /></span></button>;
+  const visualState = eventStatus(event) === "failed" ? "failed" : phase;
+  const state = runtimeStateMeta(visualState);
+  return <button className={`event-row ${selected ? "selected" : ""} ${visualState}${fresh ? " fresh" : ""}`} onClick={() => onSelect(event)} aria-label={`查看${state.ariaLabel}运行 ${event.source} 的详情`}><StateGlyph phase={visualState} /><RuntimeSource source={event.source} /><span className="event-copy"><strong>{event.result}</strong><small>{historyCount > 1 ? `${historyCount} 次运行 · ` : ""}{runtimeWorkspacePath(event.nextStep) ? "最近完成" : event.nextStep}</small></span><time className="event-time" dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time><span className="event-detail-affordance"><ChevronRight size={14} /></span></button>;
 }
 
 function Board({ groups, selected, freshIds, onSelect }: { groups: Record<Phase, RuntimeEvent[]>; selected: RuntimeEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeEvent) => void }) {
-  const phases: Phase[] = ["ready", "active", "verify", "attention"];
-  return <section className="board">{phases.map((phase) => <article className={`board-column ${phase}`} key={phase}><header><span className={`status-dot ${phase}`} /><b>{label[phase]}</b><em>{groups[phase].length}</em></header>{groups[phase].map((event) => <button className={`${selected?.id === event.id ? "board-card selected" : "board-card"}${freshIds.has(event.id) ? " fresh" : ""}`} key={event.id} onClick={() => onSelect(event)}><div><small><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></small><b>{event.source}</b></div><strong>{event.result}</strong><p>→ {event.nextStep}</p><span className="board-detail-affordance">详情 <ChevronRight size={13} /></span></button>)}{!groups[phase].length ? <p className="drop-note">暂无记录</p> : null}</article>)}</section>;
+  const columns: { state: RuntimeVisualState; events: RuntimeEvent[] }[] = [
+    { state: "active", events: groups.active },
+    { state: "verify", events: groups.verify },
+    { state: "attention", events: [...groups.ready, ...groups.attention.filter((event) => eventStatus(event) !== "failed")] },
+    { state: "failed", events: groups.attention.filter((event) => eventStatus(event) === "failed") },
+  ];
+  return <section className="board" aria-label="运行看板">{columns.map(({ state, events }) => <article className={`board-column ${state}${events.length ? "" : " is-empty"}`} key={state}><header aria-label={runtimeStateMeta(state).ariaLabel}><StateGlyph phase={state} size={14} muted={!events.length} /><em>{events.length}</em></header>{groupRuntimeEvents(events).map((group) => { const event = group.events[0]; const visualState = eventStatus(event) === "failed" ? "failed" : phaseOf(event); return <button className={`board-card ${visualState}${selected?.id === event.id ? " selected" : ""}${freshIds.has(event.id) ? " fresh" : ""}`} key={group.source} onClick={() => onSelect(event)} aria-label={`查看${runtimeStateMeta(visualState).ariaLabel}运行 ${event.source} 的详情`}><div><RuntimeSource source={event.source} /><small>{group.events.length > 1 ? `${group.events.length} 次运行 · ` : ""}<time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></small></div><strong>{event.result}</strong>{!runtimeWorkspacePath(event.nextStep) ? <p>{event.nextStep}</p> : null}<span className="board-detail-affordance"><ChevronRight size={13} /></span></button>; })}</article>)}</section>;
 }
 
 function RuntimeProductIcon({ id }: { id: AgentRuntime["id"] }) {
@@ -369,12 +420,12 @@ function Repositories() {
   </section>;
 }
 
-function Environments({ snapshot, onTerminal }: { snapshot: Snapshot | null; onTerminal: (name: string) => void }) {
+function Environments({ snapshot, onTerminal }: { snapshot: Snapshot | null; onTerminal: (name: string, workspace: string) => void }) {
   const containers = snapshot?.containers ?? [];
   const sessions = snapshot?.sessions ?? [];
   return <section className="environment-grid" aria-label="AFK 已登记执行环境">
-    <article><header><Container size={18} /><b>AFK 容器</b><span>{containers.length}</span></header>{containers.length ? containers.map((item) => <div className="env-row" key={`${item.engine}-${item.name}`}><span>{item.engine}</span><b>{item.name}</b><small>{item.image}</small><em>{item.status}</em></div>) : <p>当前工作区没有由 AFK 登记且仍在运行的容器。</p>}</article>
-    <article><header><TerminalSquare size={18} /><b>AFK tmux 会话</b><span>{sessions.length}</span></header>{sessions.length ? sessions.map((item) => <div className="env-row" key={item.name}><span>{item.attached ? "attached" : "detached"}</span><b>{item.name}</b><small>{item.windows} 个窗口</small><button onClick={() => onTerminal(item.name)}>打开终端</button></div>) : <p>当前工作区没有由 AFK 登记且仍可用的 tmux 会话。</p>}</article>
+    <article><header><Container size={18} /><b>AFK 容器</b><span>{containers.length}</span></header>{containers.length ? containers.map((item) => <div className="env-row" key={`${item.engine}-${item.name}`}><span>{item.engine}</span><b>{item.name}</b><small>{item.image}</small><em>{item.status}</em></div>) : <p>当前项目没有由 AFK 登记且仍在运行的容器。</p>}</article>
+    <article><header><TerminalSquare size={18} /><b>AFK tmux 会话</b><span>{sessions.length}</span></header>{sessions.length ? sessions.map((item) => <div className="env-row" key={`${item.workspace}:${item.name}`}><span>{item.attached ? "attached" : "detached"}</span><b>{item.name}</b><small title={item.workspace}>{item.workspace} · {item.windows} 个窗口</small><button onClick={() => onTerminal(item.name, item.workspace)}>打开终端</button></div>) : <p>当前项目没有由 AFK 登记且仍可用的 tmux 会话。</p>}</article>
   </section>;
 }
 
@@ -725,43 +776,31 @@ function RecordDrawer({ event, onClose }: { event: RuntimeEvent; onClose: () => 
   return <aside className="record-drawer" ref={drawerRef} role="complementary" aria-label="记录详情"><header><span>记录详情</span><button className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={16} /></button></header><div className="record-drawer-body"><RecordStatus status={status} /><h2>{event.result}</h2><p className="record-drawer-next">{event.nextStep}</p><dl><div><dt>运行</dt><dd>{event.source}</dd></div><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div></dl><details className="record-debug"><summary><Braces size={15} />调试信息</summary><pre>{event.raw}</pre></details></div></aside>;
 }
 
-function Inspector({ event, fresh, collapsed, onToggle, onTerminal }: { event: RuntimeEvent; fresh: boolean; collapsed: boolean; onToggle: () => void; onTerminal: () => void }) {
+function Inspector({ event, history, fresh, collapsed, onToggle, onSelect, onTerminal }: { event: RuntimeEvent; history: RuntimeEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (event: RuntimeEvent) => void; onTerminal: () => void }) {
   const phase = phaseOf(event);
-  const [panelMounted, setPanelMounted] = useState(!collapsed);
-  const [restoreMounted, setRestoreMounted] = useState(collapsed);
-  const [motion, setMotion] = useState<"open" | "opening" | "closing" | "collapsed">(collapsed ? "collapsed" : "open");
-  const motionTimer = useRef<number | null>(null);
-  const panelRef = useRef<HTMLElement>(null);
-  const restoreRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => () => { if (motionTimer.current) window.clearTimeout(motionTimer.current); }, []);
   useEffect(() => {
     if (collapsed) return;
-    const dismiss = (pointerEvent: PointerEvent) => {
-      if (!(pointerEvent.target instanceof Node)) return;
-      const inPanel = Boolean(panelRef.current?.contains(pointerEvent.target));
-      const inRestore = Boolean(restoreRef.current?.contains(pointerEvent.target));
-      const inTerminal = Boolean(document.querySelector(".terminal-sheet")?.contains(pointerEvent.target));
-      if (!inPanel && !inRestore && !inTerminal) onToggle();
-    };
     const dismissOnEscape = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") onToggle(); };
-    document.addEventListener("pointerdown", dismiss);
     document.addEventListener("keydown", dismissOnEscape);
-    return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", dismissOnEscape); };
+    return () => document.removeEventListener("keydown", dismissOnEscape);
   }, [collapsed, onToggle]);
-  useEffect(() => {
-    if (motionTimer.current) window.clearTimeout(motionTimer.current);
-    if (collapsed) {
-      setMotion("closing");
-      motionTimer.current = window.setTimeout(() => { setPanelMounted(false); setRestoreMounted(true); setMotion("collapsed"); }, 340);
-      return;
-    }
-    setPanelMounted(true);
-    setRestoreMounted(true);
-    setMotion("opening");
-    motionTimer.current = window.setTimeout(() => { setMotion("open"); setRestoreMounted(false); }, 340);
-  }, [collapsed]);
   const cornerIcon = <svg className="inspector-corner-mark" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11.5 3.5H5.6A1.1 1.1 0 0 0 4.5 4.6v6.9" /></svg>;
-  return <>{panelMounted ? <aside className={`inspector inspector-${motion}${fresh ? " fresh" : ""}`} ref={panelRef}><header><button className="inspector-toggle" onClick={onToggle} aria-label="收起详情">{cornerIcon}<span className="inspector-tooltip" role="tooltip">收起详情</span></button><span><i className={`status-dot ${phase}`} />详情</span></header><div className="inspector-surface"><div className="inspector-body"><div className="inspector-title"><small><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time> · {event.source}</small><h2>{event.result}</h2><span>{label[phase]}</span></div><Track phase={phase} index={1} variant="full" live={phase === "active"} fresh={fresh} /><dl><div><dt>来源</dt><dd>{event.source}</dd></div><div><dt>状态</dt><dd>{label[phase]}</dd></div><div><dt>结果</dt><dd>{event.result}</dd></div><div><dt>后续操作</dt><dd>{event.nextStep}</dd></div></dl><section><b>原始 JSON</b><pre>{event.raw}</pre></section><button className="takeover" onClick={onTerminal}><TerminalSquare size={15} />打开终端</button></div></div></aside> : null}{restoreMounted ? <button className={`inspector-restore${motion === "opening" ? " is-retiring" : ""}`} ref={restoreRef} onClick={onToggle} aria-label="展开详情">{cornerIcon}<span className="inspector-tooltip" role="tooltip">展开详情</span></button> : null}</>;
+  const visualState = eventStatus(event) === "failed" ? "failed" : phase;
+  const state = runtimeStateMeta(visualState);
+  const workspacePath = runtimeWorkspacePath(event.nextStep);
+  return <>
+    {!collapsed ? <aside className={`inspector${fresh ? " fresh" : ""}`} aria-label="运行详情">
+      <header><button className="inspector-toggle" onClick={onToggle} aria-label="收起详情">{cornerIcon}<span className="inspector-tooltip" role="tooltip">收起详情</span></button><span><ClipboardList size={13} aria-hidden="true" />详情</span></header>
+      <div className="inspector-surface"><div className="inspector-body">
+        <div className="inspector-title"><small><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time> · <RuntimeSource source={event.source} /></small><h2>{event.result}</h2></div>
+        <div className={`inspector-flow ${visualState}`} aria-label="运行状态"><StateGlyph phase={visualState} size={13} /><span>{state.ariaLabel}</span><span className="inspector-flow-line" /><span>{phase === "active" ? "正在执行" : phase === "verify" ? "最近完成" : "需要处理"}</span></div>
+        <dl><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div>{workspacePath ? <div className="inspector-workspace"><dt>任务空间</dt><dd title={workspacePath}>{workspacePath}</dd></div> : <div className="inspector-workspace"><dt>后续操作</dt><dd>{event.nextStep}</dd></div>}</dl>
+        {history.length > 1 ? <details className="inspector-history"><summary><span className="history-summary-label">运行历史 <b>{history.length}</b></span></summary><div>{history.map((item) => <button type="button" className={item.id === event.id ? "selected" : ""} key={item.id} onClick={() => onSelect(item)}><StateGlyph phase={eventStatus(item) === "failed" ? "failed" : phaseOf(item)} size={13} /><span><b>{item.result}</b><small><time dateTime={item.timestamp} title={item.timestamp}>{displayTimestamp(item.timestamp)}</time></small></span></button>)}</div></details> : null}
+        <details className="inspector-debug"><summary>原始 JSON</summary><pre>{event.raw}</pre></details>
+        <button className="takeover" onClick={onTerminal}><TerminalSquare size={15} />打开终端</button>
+      </div></div>
+    </aside> : null}
+  </>;
 }
 
 if (typeof document !== "undefined") createRoot(document.getElementById("root")!).render(<App />);

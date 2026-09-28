@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { normalizeTmuxSessionName } from './session-name';
 
 export interface ControlModeOptions {
   session: string;
@@ -58,7 +59,7 @@ export class ControlModeConnection {
     this.proc = spawn('tmux', [
       '-CC',
       'attach-session',
-      '-t', session,
+      '-t', normalizeTmuxSessionName(session),
     ], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });

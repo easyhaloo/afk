@@ -135,6 +135,15 @@ export type WorkflowGraphGenerateResult = {
   outputPath?: string;
 };
 
+export type ProjectRun = {
+  id: string;
+  workItemId: string;
+  status: "starting" | "running" | "completed" | "failed";
+  startedAt: string;
+  completedAt?: string;
+  workspacePath: string;
+};
+
 export type Snapshot = {
   workspace: { root: string; afkDirectoryPresent: boolean; eventCount: number };
   afk: { available: boolean; executable: string; summary: string };
@@ -145,8 +154,9 @@ export type Snapshot = {
   loop: LoopStatus;
   agentRuntimes: AgentRuntime[];
   events: RuntimeEvent[];
+  workItemRuns: ProjectRun[];
   containers: Array<{ engine: string; name: string; image: string; status: string }>;
-  sessions: Array<{ name: string; windows: string; attached: boolean }>;
+  sessions: Array<{ name: string; workspace: string; windows: string; attached: boolean }>;
 };
 
 export type DesktopApi = {

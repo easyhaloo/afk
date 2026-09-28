@@ -7,6 +7,7 @@ import { exec, executable, firstLine } from "../adapters/process-executor";
 import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter";
 import { configNumber, configString, parseConfig, type ConfigObject } from "../workflow/config-parser";
 import { detectAgentRuntimes } from "./runtime-service";
+import { projectRunScopeService } from "./project-run-scope-service";
 import { readEvents, resolveWorkspace } from "./workspace-service";
 
 type CliCapability = {
@@ -442,12 +443,14 @@ async function readLoopStatus(): Promise<LoopStatus> {
 
 export async function snapshot(workspace?: string) {
   const root = resolveWorkspace(workspace);
+  const resourceWorkspaces = await projectRunScopeService.workspaces(root);
   const afkPath = await executable("afk");
   const version = afkPath ? await exec(afkPath, ["--version"], root) : { ok: false, stdout: "", stderr: "未在 PATH 中发现 afk" };
-  const [events, containers, sessions, agentRuntimes, workflow, workflowRuns, loop, workflowTemplates] = await Promise.all([
+  const [events, workItemRuns, containers, sessions, agentRuntimes, workflow, workflowRuns, loop, workflowTemplates] = await Promise.all([
     readEvents(root),
-    listAfkContainers(root),
-    listAfkTmux(root),
+    projectRunScopeService.runs(root, resourceWorkspaces),
+    listAfkContainers(resourceWorkspaces),
+    listAfkTmux(resourceWorkspaces),
     detectAgentRuntimes(),
     readWorkflowConfig(root),
     readWorkflowRuns(root),
@@ -456,7 +459,7 @@ export async function snapshot(workspace?: string) {
   ]);
   const afkAvailable = Boolean(afkPath) && version.ok;
   return {
-    workspace: { root, afkDirectoryPresent: existsSync(path.join(root, ".afk")), eventCount: events.length },
+    workspace: { root, afkDirectoryPresent: existsSync(path.join(root, ".afk")), eventCount: events.length + workItemRuns.length },
     afk: { available: afkAvailable, executable: afkPath || "afk", summary: version.ok ? firstLine(version.stdout || version.stderr, "AFK 已就绪") : firstLine(version.stderr, "AFK 未就绪") },
     capabilities: AFK_CAPABILITY_DEFINITIONS.map(item => ({ ...item, available: afkAvailable })),
     workflow,
@@ -465,6 +468,7 @@ export async function snapshot(workspace?: string) {
     loop,
     agentRuntimes,
     events,
+    workItemRuns,
     containers,
     sessions,
   };

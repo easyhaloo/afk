@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import type { ChildProcess, SpawnOptions } from 'child_process';
+import { normalizeTmuxSessionName } from '../../infrastructure/tmux/session-name';
 
 /**
  * Detached spawn that works on both Linux and macOS.
@@ -37,7 +38,7 @@ export class Watchdog {
     this.disarm();
     const shellCmd =
       `sleep ${hardTimeoutMs / 1000} && ` +
-      `tmux kill-session -t "${session}" 2>/dev/null || true; ` +
+      `tmux kill-session -t "${normalizeTmuxSessionName(session)}" 2>/dev/null || true; ` +
       `echo "WATCHDOG:${iid}:${session}:${hardTimeoutMs}" >> "${this.logDir}/watchdog.log"`;
     this.child = spawnDetached('bash', ['-c', shellCmd], { cwd: process.cwd() });
   }

@@ -20,6 +20,7 @@ import { WorktreeManager } from '../../git/index';
 import { TmuxClient } from '../../tmux/tmux';
 import { clearSignal, getTokenUsage, readSignal } from '../../io/index';
 import { StreamingAgentExecution } from './streaming';
+import { normalizeTmuxSessionName } from '../../tmux/session-name';
 import {
   type SandboxProvider,
   type Sandbox,
@@ -82,7 +83,7 @@ export class LocalSandbox implements Sandbox {
     this.worktreePath = opts.worktreePath;
     this.workspacePath = opts.worktreePath; // local: workspace == worktree
     this.tmux = opts.tmux as TmuxClient;
-    this.sessionName = opts.sessionName;
+    this.sessionName = normalizeTmuxSessionName(opts.sessionName);
     this.branch = opts.branch;
     this.workspaceRoot = opts.workspaceRoot ?? workspaceRootForWorktree(opts.worktreePath);
     this.runtimeRunId = opts.runtimeRunId;

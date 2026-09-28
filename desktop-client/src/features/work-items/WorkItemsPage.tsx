@@ -36,6 +36,11 @@ const stateLabels: Record<GlobalWorkItem["state"], string> = {
   blocked: "已阻塞",
 };
 
+const stateFilterOptions: Array<{ value: GlobalWorkItem["state"] | "all"; label: string }> = [
+  { value: "all", label: "全部状态" },
+  ...Object.entries(stateLabels).map(([value, label]) => ({ value: value as GlobalWorkItem["state"], label })),
+];
+
 const runStatusLabels: Record<WorkItemRunRecord["status"], string> = {
   starting: "准备中",
   running: "执行中",
@@ -139,6 +144,7 @@ export function WorkItemsPage() {
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<"all" | BacklogPlatform>("all");
   const [project, setProject] = useState("all");
+  const [stateFilter, setStateFilter] = useState<GlobalWorkItem["state"] | "all">("all");
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
   const [runSetupOpen, setRunSetupOpen] = useState(false);
@@ -185,11 +191,12 @@ export function WorkItemsPage() {
 
   const visibleItems = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return inventory.items.filter(item => {
+    const filtered = inventory.items.filter(item => {
       const sources = itemSources(item);
       const repositories = itemRepositories(item);
       if (platform !== "all" && !sources.some(source => source.platform === platform)) return false;
       if (project !== "all" && !sources.some(source => source.platform && `${source.platform}:${source.projectKey}` === project)) return false;
+      if (stateFilter !== "all" && item.state !== stateFilter) return false;
       const searchable = [
         item.id,
         item.title,
@@ -200,7 +207,12 @@ export function WorkItemsPage() {
       ].join(" ").toLowerCase();
       return !normalized || searchable.includes(normalized);
     });
-  }, [inventory.items, platform, project, query]);
+    return filtered.sort((a, b) => {
+      const aTime = a.updatedAt ?? "";
+      const bTime = b.updatedAt ?? "";
+      return bTime.localeCompare(aTime);
+    });
+  }, [inventory.items, platform, project, stateFilter, query]);
 
   const openDetails = (item: GlobalWorkItem) => {
     runRequestVersion.current += 1;
@@ -302,6 +314,7 @@ export function WorkItemsPage() {
         <label className="backlog-search"><Search size={14} /><input aria-label="搜索工作项" value={query} onChange={event => { setQuery(event.target.value); setVisibleLimit(pageSize); }} placeholder="搜索标题、来源、关联仓库或标签" /></label>
         <SelectMenu label="选择 Provider" value={platform} variant="filter" triggerPrefix="来源" options={[{ value: "all", label: "全部来源平台", triggerLabel: "全部" }, { value: "github", label: "GitHub", icon: "github", triggerLabel: "GitHub" }, { value: "gitlab", label: "GitLab", icon: "gitlab", triggerLabel: "GitLab" }]} onChange={value => { setPlatform(value as "all" | BacklogPlatform); setProject("all"); setVisibleLimit(pageSize); }} />
         <SelectMenu label="选择仓库" value={project} variant="filter" triggerPrefix="Issue" search={{ label: "搜索 Issue 来源", pinnedValue: "all", emptyMessage: "没有匹配的 Issue 来源" }} options={projectOptions} onChange={value => { setProject(value); setVisibleLimit(pageSize); }} />
+        <SelectMenu label="筛选状态" value={stateFilter} variant="filter" options={stateFilterOptions} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
       </div>
 
       <div className="backlog-list">

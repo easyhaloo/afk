@@ -282,7 +282,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
     }
   }, [defaultTemplate, openDetails, runs, templates, workspace]);
 
-  const filtered = useMemo(() => filterBacklogItems(items, query, state), [items, query, state]);
+  const filtered = useMemo(() => filterBacklogItems(items, query, state).sort((a, b) => b.id.localeCompare(a.id)), [items, query, state]);
   const templateOptions = templates.map((template) => ({ value: template.id, label: template.name }));
 
   return (

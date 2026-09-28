@@ -1,9 +1,34 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { askJev, choice, noul, score } from './jev-client.mjs';
 
+const LOG_DIR = path.join(os.homedir(), '.afk', 'jev-agent-guard');
+const LOG_FILE = path.join(LOG_DIR, 'semantic-engine.jsonl');
+
 const RULE_FILE = new URL('../rules/semantic.json', import.meta.url);
+
+function appendLog(entry) {
+  try {
+    fsSync.mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
+    fsSync.chmodSync(LOG_DIR, 0o700);
+    const descriptor = fsSync.openSync(LOG_FILE, 'a', 0o600);
+    try {
+      fsSync.fchmodSync(descriptor, 0o600);
+      fsSync.writeSync(descriptor, `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`);
+    } finally {
+      fsSync.closeSync(descriptor);
+    }
+  } catch {
+    // best effort only
+  }
+}
+
+export function auditRecord(ruleId, result) {
+  return { type: 'evaluate', ruleId, decision: result.decision };
+}
 
 async function loadRules() {
   return JSON.parse(await fs.readFile(RULE_FILE, 'utf8'));
@@ -18,6 +43,19 @@ function buildQuestion(question) {
 
 function questionMap(rule) {
   return Object.fromEntries(Object.entries(rule.questions).map(([name, question]) => [name, buildQuestion(question)]));
+}
+
+function validateAnswers(rule, answers) {
+  if (!answers || typeof answers !== 'object') throw new Error('Malformed Jev answers');
+  for (const [name, question] of Object.entries(rule.questions)) {
+    const answer = answers[name];
+    const valid = question.type === 'noul'
+      ? answer?.type === 'noul' && Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1
+      : question.type === 'choice'
+        ? answer?.type === 'choice' && Object.hasOwn(question.criteria, answer.choice)
+        : answer?.type === 'score' && Number.isFinite(answer.score) && answer.score >= 0 && answer.score <= question.criteria.length - 1;
+    if (!valid) throw new Error(`Malformed Jev answer: ${name}`);
+  }
 }
 
 function severityValue(answer) {
@@ -76,12 +114,14 @@ function semanticDecision(rule, answers) {
   throw new Error(`Unsupported semantic rule: ${rule.id}`);
 }
 
-export async function evaluateSemantic(ruleId, state, clientOptions) {
+export async function evaluateSemantic(ruleId, state, clientOptions, { ask = askJev, log = appendLog } = {}) {
   const config = await loadRules();
   const rule = config.rules.find(item => item.id === ruleId);
   if (!rule) throw new Error(`Unknown semantic rule: ${ruleId}`);
-  const response = await askJev({ state, questions: questionMap(rule), options: clientOptions });
+  const response = await ask({ state, questions: questionMap(rule), options: clientOptions });
+  validateAnswers(rule, response?.answers);
   const result = semanticDecision(rule, response.answers);
+  log(auditRecord(ruleId, result));
   return { ...result, rule: rule.id, answers: response.answers };
 }
 

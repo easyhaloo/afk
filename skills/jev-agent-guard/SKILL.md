@@ -1,49 +1,59 @@
 ---
 name: jev-agent-guard
 description: >-
-  Runtime semantic supervision for agent actions, execution trajectory,
-  context retention, Skill compliance, and evidence-based completion using
-  the official TypeSafe Jev SDK.
+  Globally install Jev checkpoints for Claude Code, Codex, and OpenCode.
+  Recommend relevant Skills, monitor observable execution evidence, and
+  reduce safe tool-output noise without replacing host permissions.
 license: MIT
 compatibility: Requires Node.js 20+, the local @typesafe-ai/sdk dependency, and TYPESAFE_API_KEY for live evaluation.
 metadata:
   author: easyhaloo
-  version: "1.5"
+  version: "2.0"
 ---
 
 # Jev Agent Guard
 
-## One-click install
+## Global installation
 
-From the repository root:
+The installer may be launched from any working directory. Replace the path
+below with the absolute path to this Skill on your machine:
 
 ```bash
 export TYPESAFE_API_KEY="your-key"
-node skills/jev-agent-guard/scripts/install.mjs
+node /path/to/skills/jev-agent-guard/scripts/install.mjs --global
 ```
 
-Use `--dry-run` to preview changes or `--host=claude-code,codex,opencode` to
-select hosts. The installer installs the official SDK locally and adds only
-idempotent, marked entries to host configuration.
+Use `--dry-run` before installing, `--host=claude-code,codex,opencode` to
+select hosts, `doctor` to inspect configuration, and `uninstall` to remove
+only this Skill's host entries. The runtime is copied to a stable user data
+directory and uses user-level hooks/plugins, not a project checkout. The
+uninstaller retains runtime files so other host integrations remain intact.
 
 ## Runtime behavior
 
-Adapters normalize host events and invoke the host-neutral semantic engine:
+Host adapters normalize observable events and use local checks before Jev:
 
-- `before-action` → action risk
-- `after-action` → trajectory state
-- `context-review` → context retention
-- `stop` → Skill compliance
+- prompt → suggest a relevant Skill from bounded metadata; use Jev for
+  ambiguous candidate selection
+- before tool → deny known destructive/credential access locally; ask Jev
+  about bounded network actions when a session budget permits
+- after tool → record limited evidence; ask Jev after repeated failures
+- stop → check an observed Skill contract once, without recursive blocking
+- after compaction → restore a concise active-Skill and evidence checkpoint
+- successful dependency-install output → conservatively reduce model-facing
+  noise on hosts with tested output replacement
 
-The Skill can return `allow`, `confirm`, `deny`, `redirect`, `warn`, `compact`,
-`keep`, `truncate`, `drop`, or `finish`. It never executes a side effect and
-never treats Jev as a substitute for user approval.
+The guard does not inspect private reasoning. It observes host events and
+never treats Jev as a substitute for native user approval. OpenCode has no
+native Stop hook equivalent in this integration, so its Skill completion
+check remains advisory rather than blocking.
 
 ## Safety and privacy
 
-Send only compact, relevant runtime state. Never send API keys, credentials,
-private keys, complete environment files, or unrelated private source. Jev
-unavailability is not approval: pre-action and stop checks fail closed to
-`confirm`.
+Provider requests use an allowlisted, bounded state; complete tool input,
+output, files, and environment are not forwarded. Selected Skill step titles
+and constraints may be included after best-effort secret redaction. Only
+decisions and rule names are written to audit logs. Without Jev, native host
+permissions remain in force; deterministic local denials still apply.
 
 Rules remain in `rules/semantic.json` and contain no host-specific fields.

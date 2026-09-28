@@ -8,9 +8,9 @@ The guard uses TypeSafe's official JavaScript SDK:
 - Client: `TypeSafeClient`
 - Primitives: `choice`, `noul`, and `score`
 
-Install the dependency from this Skill directory before running the scripts.
-The Skill's local `package.json` keeps the SDK independent from the AFK
-application.
+The global installer copies the Skill and installs the pinned dependency into
+the user data directory. For direct development use, install the dependency
+in this Skill directory; it remains independent from the AFK application.
 
 ## Direct use from an internal script
 

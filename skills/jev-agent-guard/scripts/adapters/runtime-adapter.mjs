@@ -1,56 +1,131 @@
 #!/usr/bin/env node
-import fs from 'node:fs/promises';
 import { evaluateSemantic } from '../semantic-engine.mjs';
+import fs from 'node:fs';
+import { decideChoice } from '../jev-client.mjs';
+import { extractContract, findSkill, listSkillMetadata, recommendSkill, skillRoots } from '../skill-catalog.mjs';
+import { consumeBudget, loadLedger, markStopBlocked, recordAction, recordSkill } from '../skill-ledger.mjs';
 
-function parse(raw) { try { return raw?.trim() ? JSON.parse(raw) : {}; } catch { return {}; } }
-function compact(value, max = 4000) {
-  const text = JSON.stringify(value ?? {});
-  return text.length <= max ? value : { summary: text.slice(0, max), truncated: true };
-}
-async function input() { const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk); return parse(Buffer.concat(chunks).toString()); }
-function normalize(payload, host, eventKind) {
-  const action = payload.action ?? {};
+const destructive = /\b(?:git\s+(?:reset\s+--hard|clean\s+-[a-z]*f|push\s+--force)|rm\s+-[a-z]*r[a-z]*f|rm\s+-[a-z]*f[a-z]*r|sudo\b)\b|(?:curl|wget)\b[^|]*\|\s*(?:bash|sh)\b/i;
+const secretAccess = /(?:^|[\s/])(?:\.env(?:\.[^\s/]*)?|\.ssh|\.aws|id_rsa|id_ed25519)(?:[\s/]|$)/i;
+const network = /\b(?:curl|wget|git\s+(?:push|clone)|npm\s+(?:install|exec)|pnpm\s+(?:add|install|dlx)|pip\s+install)\b/i;
+const safeCommand = /^(?:pwd|ls(?:\s+[^;&|]+)?|rg(?:\s+[^;&|]+)?|git\s+status(?:\s+[^;&|]+)?|git\s+diff(?:\s+[^;&|]+)?|cat\s+[^;&|]+)$/i;
+const readTools = new Set(['Read', 'Glob', 'Grep', 'Skill']);
+
+function actionOf(payload) {
+  const input = payload.tool_input ?? payload.action ?? payload.input ?? {};
   return {
-    event_kind: eventKind,
-    session_id: payload.session_id ?? payload.sessionId,
-    goal: payload.goal ?? payload.task?.goal ?? '',
-    requirements: payload.requirements ?? payload.task?.requirements ?? [],
-    action: {
-      kind: action.kind ?? payload.action_kind ?? 'unknown',
-      tool: action.tool ?? payload.tool_name ?? payload.tool ?? 'unknown',
-      command: action.command ?? payload.command ?? payload.cmd ?? '',
-      path: action.path ?? payload.file_path ?? payload.path ?? null,
-      network: Boolean(action.network ?? payload.network),
-      credential_access: Boolean(action.credential_access ?? payload.credential_access)
-    },
-    trajectory: payload.trajectory ?? {},
-    context: payload.context ?? {},
-    validation: payload.validation ?? {},
-    host,
-    raw_summary: compact(payload)
+    tool: String(payload.tool_name ?? payload.tool ?? input.tool ?? 'unknown').slice(0, 80),
+    command: typeof input.command === 'string' ? input.command : typeof payload.command === 'string' ? payload.command : '',
+    localTarget: typeof input.file_path === 'string' ? input.file_path
+      : typeof input.path === 'string' ? input.path : typeof payload.path === 'string' ? payload.path : '',
+    kind: String(input.kind ?? payload.action_kind ?? 'unknown').slice(0, 80),
   };
 }
-function ruleFor(event) {
-  if (event === 'before-action') return 'action-risk';
-  if (event === 'after-action') return 'trajectory-state';
-  if (event === 'context-review') return 'context-retention';
-  if (event === 'stop') return 'skill-compliance';
-  throw new Error(`Unsupported event: ${event}`);
+
+function category(action) {
+  if (destructive.test(action.command) || secretAccess.test(`${action.command} ${action.localTarget}`)) return 'deny';
+  if (readTools.has(action.tool) || safeCommand.test(action.command.trim())) return 'allow';
+  return network.test(action.command) ? 'network' : 'ambiguous';
 }
-export async function runAdapter({ host, event = 'before-action', payload }) {
-  const state = normalize(payload, host, event);
-  try {
-    const result = await evaluateSemantic(ruleFor(event), state);
-    return { schema_version: 1, host, event, ...result, state: undefined };
-  } catch (error) {
-    const failClosed = event === 'before-action' || event === 'stop';
-    return { schema_version: 1, host, event, decision: failClosed ? 'confirm' : 'warn', action: failClosed ? 'request_user_approval' : 'continue', reason: `Jev evaluation unavailable: ${error.message}`, error_code: error.code ?? 'jev_error' };
+
+function normalizedState(payload, host, event, action, risk, ledger) {
+  const activeSkill = ledger?.skill ?? payload.activeSkill ?? payload.active_skill;
+  return {
+    version: 1,
+    host,
+    event_kind: event,
+    session_id: typeof payload.session_id === 'string' ? payload.session_id.slice(0, 100) : undefined,
+    action: { tool: action.tool, kind: action.kind, risk },
+    skill: activeSkill && typeof activeSkill === 'object'
+      ? { name: String(activeSkill.name ?? activeSkill.id ?? '').slice(0, 80),
+        steps: Array.isArray(activeSkill.steps) ? activeSkill.steps.slice(0, 12) : [],
+        constraints: Array.isArray(activeSkill.constraints) ? activeSkill.constraints.slice(0, 12) : [] }
+      : undefined,
+    evidence: ledger?.evidence?.slice(-40),
+  };
+}
+
+function result(decision, reason, host, event, nextStep) {
+  return { schema_version: 1, host, event, decision, reason, ...(nextStep ? { nextStep } : {}) };
+}
+
+export async function runAdapter({ host, event = 'before-action', payload = {}, evaluate = evaluateSemantic, env = process.env, catalog }) {
+  const action = actionOf(payload);
+  const risk = category(action);
+  const projectRoot = String(payload.cwd ?? payload.project_root ?? process.cwd());
+  const key = { host, sessionId: payload.session_id ?? payload.sessionID, projectRoot };
+  if (event === 'resume-context') {
+    const ledger = loadLedger(key, env);
+    if (!ledger?.skill) return result('allow', 'No active Skill context to restore.', host, event);
+    const failures = ledger.evidence.filter(item => !item.success).length;
+    const nextStep = `Active Skill: ${ledger.skill.name}. Required steps: ${ledger.skill.steps.join('; ').slice(0, 800)}. Evidence: ${ledger.evidence.length} tool actions, ${failures} failures.`;
+    return result('advise', 'Restoring compacted Skill state.', host, event, nextStep);
   }
-}
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const event = process.argv[2] ?? 'before-action';
-  const payload = await input();
-  const result = await runAdapter({ host: 'claude-code', event, payload });
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  process.exitCode = ['allow', 'keep', 'warn', 'finish'].includes(result.decision) ? 0 : 2;
+  if (event === 'prompt') {
+    const candidates = catalog ?? listSkillMetadata(skillRoots(host, projectRoot, env));
+    const selected = await recommendSkill(String(payload.prompt ?? ''), candidates, async state => {
+      if (!consumeBudget(key, env)) throw new Error('Jev budget exhausted');
+      const answer = await decideChoice({ state: { terms: state.terms },
+        prompt: 'Which Skill name best matches the task terms?',
+        options: Object.fromEntries(state.candidates.map(candidate => [candidate.name, 'Use this Skill for the task.'])),
+        clientOptions: { timeout: 2500, retry: { maxRetries: 0 } },
+      });
+      return answer.choice;
+    });
+    return selected ? result('advise', 'Skill routing recommendation.', host, event, `Suggested Skill: ${selected}`)
+      : result('allow', 'No relevant Skill was found.', host, event);
+  }
+  if (event === 'after-action') {
+    const input = payload.tool_input ?? payload.action ?? {};
+    const success = payload.outcome?.success ?? (payload.tool_response?.exit_code === undefined &&
+      payload.tool_response?.exitCode === undefined ? !payload.tool_response?.is_error
+        : (payload.tool_response.exit_code ?? payload.tool_response.exitCode) === 0);
+    if (action.tool.toLowerCase() === 'skill' && success) {
+      const name = input.skill ?? input.name;
+      if (typeof name === 'string') {
+        const matched = findSkill(listSkillMetadata(skillRoots(host, projectRoot, env)), name);
+        const contract = matched ? extractContract(fs.readFileSync(matched.file, 'utf8')) : { name, steps: [], constraints: [] };
+        recordSkill(key, contract, env);
+      }
+    } else {
+      const ledger = recordAction(key, { tool: action.tool, success }, env);
+      if (ledger?.failureStreak >= 3 && ledger.failureStreak % 3 === 0 && consumeBudget(key, env)) {
+        try {
+          const semantic = await evaluate('trajectory-state', normalizedState(payload, host, event, action, risk, ledger),
+            { timeout: 2500, retry: { maxRetries: 0 } });
+          return result('advise', semantic.reason, host, event, semantic.action);
+        } catch { return result('advise', 'Jev unavailable after repeated failures.', host, event); }
+      }
+    }
+    return result('allow', 'Evidence checkpoint recorded.', host, event);
+  }
+  if (event === 'before-action') {
+    if (risk === 'deny') return result('deny', 'Local policy blocks destructive or credential-related access.', host, event);
+    if (risk === 'allow') return result('allow', 'Bounded local action; native permissions still apply.', host, event);
+    if (risk !== 'network') return result('advise', 'Unclassified action; retain native permissions.', host, event);
+  } else if (event === 'stop') {
+    const ledger = loadLedger(key, env);
+    if (!ledger?.skill && !payload.activeSkill && !payload.active_skill) return result('allow', 'No active Skill contract was observed.', host, event);
+    if (payload.stop_hook_active || ledger?.stopBlocked) return result('allow', 'Skill stop feedback was already delivered.', host, event);
+  } else if (event !== 'stop') {
+    return result('advise', 'No verifiable evidence for a semantic checkpoint.', host, event);
+  }
+
+  try {
+    if (!consumeBudget(key, env)) return result('advise', 'Jev budget unavailable; retain native permissions.', host, event);
+    const rule = event === 'stop' ? 'skill-compliance' : 'action-risk';
+    const ledger = event === 'stop' ? loadLedger(key, env) : null;
+    const semantic = await evaluate(rule, normalizedState(payload, host, event, action, risk, ledger),
+      { timeout: 2500, retry: { maxRetries: 0 } });
+    if (event === 'stop' && semantic.decision === 'redirect' && ledger?.skill.steps.length && ledger.evidence.length) {
+      markStopBlocked(key, env);
+      return result('deny', semantic.reason, host, event);
+    }
+    const decision = semantic.decision === 'confirm' ? 'needs-user'
+      : semantic.decision === 'deny' ? 'deny'
+        : semantic.decision === 'allow' || semantic.decision === 'finish' ? 'allow' : 'advise';
+    return result(decision, semantic.reason, host, event);
+  } catch {
+    return result('advise', 'Jev unavailable; retain native permissions and evidence checks.', host, event);
+  }
 }

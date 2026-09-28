@@ -51,7 +51,7 @@ async function main() {
   const response = await askJev({
     state: input.state ?? {},
     questions: buildQuestions(input.questions ?? {}),
-    options: args.model ? { model: args.model } : undefined,
+    options: args.model ? { defaultModel: args.model } : undefined,
   });
   process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
 }

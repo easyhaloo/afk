@@ -2,5 +2,40 @@
   "statusLine": {
     "type": "command",
     "command": "(tee '/Users/shenggangshu/llm/afk-pr4-hotfix/.afk/claude-status.json' > /dev/null) && (tee '/Users/shenggangshu/llm/afk/.afk/claude-status.json' > /dev/null) && (tee '/Users/shenggangshu/llm/afk/.worktrees/issue-34/.afk/claude-status.json' > /dev/null) && tee '/Users/shenggangshu/llm/afk/.worktrees/issue-24/.afk/claude-status.json' > /dev/null"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/shenggangshu/llm/afk/skills/jev-agent-guard/scripts/adapters/claude-code.mjs before-action"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/shenggangshu/llm/afk/skills/jev-agent-guard/scripts/adapters/claude-code.mjs after-action"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /Users/shenggangshu/llm/afk/skills/jev-agent-guard/scripts/adapters/claude-code.mjs stop"
+          }
+        ]
+      }
+    ]
   }
 }

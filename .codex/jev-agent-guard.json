@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "command": "node /Users/shenggangshu/llm/afk/skills/jev-agent-guard/scripts/adapters/codex.mjs before-action",
+  "after_action": "node /Users/shenggangshu/llm/afk/skills/jev-agent-guard/scripts/adapters/codex.mjs after-action",
+  "stop": "node /Users/shenggangshu/llm/afk/skills/jev-agent-guard/scripts/adapters/codex.mjs stop"
+}

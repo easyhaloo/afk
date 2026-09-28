@@ -1,0 +1,8 @@
+{
+  "plugins": [
+    {
+      "name": "jev-agent-guard",
+      "entry": "./skills/jev-agent-guard/scripts/adapters/opencode.mjs"
+    }
+  ]
+}

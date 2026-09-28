@@ -668,7 +668,6 @@ Needs sync:
 - `docs/ARCHITECTURE.md`
 - `docs/WORKFLOWS.md`
 - `docs/GETTING-STARTED.md`
-- `docs/TESTING.md`
 - `docs/SKILLS.md`
 
 Documentation must explain:

@@ -668,7 +668,6 @@ Issue
 - `docs/ARCHITECTURE.md`
 - `docs/WORKFLOWS.md`
 - `docs/GETTING-STARTED.md`
-- `docs/TESTING.md`
 - `docs/SKILLS.md`
 
 文档必须说明：

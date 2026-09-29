@@ -68,7 +68,7 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(modalFocusableSelector)).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
 }
 
-export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—", onOpenWorkItem }: BacklogPageProps) {
+export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—", templates = [], onOpenWorkItem }: BacklogPageProps) {
   const cached = useMemo(() => readBacklogCache(workspace), []);
   const [items, setItems] = useState<BacklogItem[]>(cached?.items ?? []);
   const [state, setState] = useState<SourceFilter>("all");
@@ -220,7 +220,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—
     }
   }, [workspace]);
 
-  const filtered = useMemo(() => filterBacklogItems(items, query, state).sort((a, b) => b.id.localeCompare(a.id)), [items, query, state]);
+  const filtered = useMemo(() => filterBacklogItems(items, query, state).sort((a, b) => a.id.localeCompare(b.id)), [items, query, state]);
   const templateOptions = templates.map((template) => ({ value: template.id, label: template.name }));
 
   return (

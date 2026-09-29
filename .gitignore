@@ -51,3 +51,6 @@ dump.rdb
 .worktrees/
 .playwright-mcp/
 .claude/
+
+# Agent runtime state
+.omo/

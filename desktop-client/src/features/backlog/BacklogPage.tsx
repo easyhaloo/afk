@@ -221,7 +221,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—
   }, [workspace]);
 
   const filtered = useMemo(() => filterBacklogItems(items, query, state).sort((a, b) => b.id.localeCompare(a.id)), [items, query, state]);
-  const templateOptions = templates.map((template) => ({ value: template.id, label: template.name }));)
+  const templateOptions = templates.map((template) => ({ value: template.id, label: template.name }));
 
   return (
     <section className="control-page backlog-page" aria-label="Provider Backlog">

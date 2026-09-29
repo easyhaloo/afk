@@ -16,7 +16,8 @@
     "build:main": "tsc -p tsconfig.electron.json",
     "build": "pnpm typecheck && pnpm build:main && vite build",
     "package:mac": "pnpm build && electron-builder --mac --dir",
-    "verify:mac": "bash scripts/restart-packaged-mac.sh"
+    "verify:mac": "bash scripts/restart-packaged-mac.sh",
+    "prepare": "husky"
   },
   "build": {
     "appId": "im.afk.control",
@@ -62,6 +63,7 @@
     "concurrently": "^9.1.2",
     "electron": "^35.0.0",
     "electron-builder": "^26.0.0",
+    "husky": "^9.1.7",
     "react-test-renderer": "19.2.8",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",

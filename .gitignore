@@ -41,6 +41,9 @@ coverage/
 .afk-signal.json
 .afk/
 
+# Desktop client dev artifacts
+desktop-client/.dev/
+
 # Redis dump
 dump.rdb
 

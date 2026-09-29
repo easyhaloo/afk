@@ -539,7 +539,7 @@ describe("WorkItemsPage", () => {
     await act(async () => { renderer = create(createElement(WorkItemsPage)); });
 
     expect(renderer!.root.findByProps({ className: "backlog-toolbar work-items-toolbar" })).toBeTruthy();
-    expect(renderer!.root.findAllByProps({ className: "select-menu filter-trigger" })).toHaveLength(2);
+    expect(renderer!.root.findAllByProps({ className: "select-menu filter-trigger" })).toHaveLength(3);
 
     await act(async () => { renderer!.root.findByProps({ "aria-label": "选择仓库" }).props.onClick(); });
     expect(renderer!.root.findByProps({ "aria-label": "搜索 Issue 来源" })).toBeTruthy();

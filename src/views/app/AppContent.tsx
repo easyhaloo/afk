@@ -19,6 +19,9 @@ import type { Task, Project } from '../../types/board';
 import type { Branch, Commit, Tag } from '../../domain/tracker/types';
 import type { BacklogViewModel } from '../board/data/backlog-adapter';
 import type { View } from '../board/types';
+import { PluginViewBoundary } from '../plugins/PluginViewBoundary';
+import type { LoadedTuiView, TuiPluginContext } from '../plugins/types';
+import { isBuiltinView } from '../plugins/types';
 
 initRegistry();
 
@@ -38,6 +41,9 @@ interface Props {
   onAttachSession?: (task: Task) => void;
   onOpenTaskDiagnostics?: (task: Task) => void;
   onViewChange?: (view: View) => void;
+  pluginViews?: readonly LoadedTuiView[];
+  cwd?: string;
+  workspace?: string;
 }
 
 export function AppContent({
@@ -56,9 +62,13 @@ export function AppContent({
   onAttachSession,
   onOpenTaskDiagnostics,
   onViewChange,
+  pluginViews = [],
+  cwd = process.cwd(),
+  workspace,
 }: Props) {
   const { state, dispatch, currentView, currentContext, isDetailMode } = useAppState();
   const actions = createActions({ state, dispatch, currentView, currentContext, isDetailMode });
+  const pluginView = pluginViews.find(view => view.id === currentView);
   const [dimensions, setDimensions] = useState({ width: process.stdout.columns || 80, height: process.stdout.rows || 24 });
 
   useEffect(() => {
@@ -82,6 +92,7 @@ export function AppContent({
   projectsRef.current = projects;
 
   const getItems = (): Array<Task | BacklogViewModel | Project> => {
+    if (!isBuiltinView(currentView)) return [];
     const raw = currentView === 'tasks'
       ? tasksRef.current
       : currentView === 'backlogs' || currentView === 'board'
@@ -180,6 +191,15 @@ export function AppContent({
       if (state.viewStack.length > 1) actions.goBack();
       return;
     }
+
+    if (!isDetailMode && !state.showHelp) {
+      const matchedPlugin = pluginViews.find(plugin => plugin.shortcut === input);
+      if (matchedPlugin) {
+        actions.switchView(matchedPlugin.id);
+        return;
+      }
+    }
+
     if (input === '1') actions.switchView('tasks');
     if (input === '2') actions.switchView('backlogs');
     if (input === '3') actions.switchView('projects');
@@ -223,6 +243,11 @@ export function AppContent({
           branches={projectBranches}
           tags={projectTags}
           commits={projectCommits}
+        />
+      ) : pluginView ? (
+        <PluginViewBoundary
+          view={pluginView}
+          context={{ cwd, workspace, notify: message => actions.notify(message) } satisfies TuiPluginContext}
         />
       ) : (
         <>

@@ -59,14 +59,16 @@ export class TrackerBacklogProvider implements BacklogProvider {
 
   async get(id: string): Promise<BacklogItem> {
     const issue = await this.tracker.getIssue(this.issueId(id));
-    return this.withChangeRequest(toBacklogItem(issue), issue.labels);
+    const changes = await this.tracker.listMRs({ state: 'all' });
+    return this.withChangeRequest(toBacklogItem(issue), issue.labels, changes);
   }
 
   async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {
     // Read all issues so parent readiness can be derived from every child,
     // including completed children and dependencies.
     const issues = await this.tracker.listIssues({ state: 'all' });
-    const items = (await Promise.all(issues.map(issue => this.withChangeRequest(toBacklogItem(issue), issue.labels)))).filter(item =>
+    const changes = await this.tracker.listMRs({ state: 'all' });
+    const items = (await Promise.all(issues.map(issue => this.withChangeRequest(toBacklogItem(issue), issue.labels, changes)))).filter(item =>
       (options.state === undefined || item.state === options.state) &&
       (options.executionMode === undefined || item.executionMode === options.executionMode) &&
       (options.parentId === undefined || item.parentId === options.parentId) &&
@@ -126,9 +128,8 @@ export class TrackerBacklogProvider implements BacklogProvider {
     if (state === 'done') await this.tracker.updateIssue(issueId, { state: 'closed' });
   }
 
-  private async withChangeRequest(item: BacklogItem, labels: readonly string[]): Promise<BacklogItem> {
+  private async withChangeRequest(item: BacklogItem, labels: readonly string[], changes: Awaited<ReturnType<TrackerProvider['listMRs']>>): Promise<BacklogItem> {
     if (!labels.includes(STATE_LABELS.merge_ready) && !labels.includes(STATE_LABELS.done)) return item;
-    const changes = await this.tracker.listMRs({ state: 'all' });
     const candidate = changes.find(change => change.sourceBranch === `${item.branchName}-qa`)
       ?? changes.find(change => change.sourceBranch === item.branchName);
     if (!candidate) return item;

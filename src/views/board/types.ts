@@ -1,5 +1,5 @@
 // View type - union of all registered view names
-export type View = 'tasks' | 'backlogs' | 'projects' | 'board';
+export type View = 'tasks' | 'backlogs' | 'projects' | 'board' | `plugin:${string}:${string}`;
 
 export type DetailView = 'list' | 'detail';
 

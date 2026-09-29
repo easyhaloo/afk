@@ -5,6 +5,9 @@ import React, { createContext, useContext, useReducer, useCallback } from 'react
 import type { AppState, ViewState, ViewType, ViewContext } from './initialState';
 import { initialState } from './initialState';
 import type { AppAction } from '../actions/types';
+import type { BuiltinView, TuiViewId } from '../../plugins/types';
+
+const BUILTIN_VIEWS = new Set<BuiltinView>(['tasks', 'backlogs', 'projects', 'board']);
 
 /**
  * Navigation policy - declarative mapping from action to state changes
@@ -21,7 +24,11 @@ const navigationPolicy: Record<string, {
   'search:enable': { setDetailView: null },
 };
 
-export function appReducer(state: AppState, action: AppAction): AppState {
+export function appReducer(
+  state: AppState,
+  action: AppAction,
+  allowedViews: ReadonlySet<string> = BUILTIN_VIEWS,
+): AppState {
   switch (action.type) {
     case 'dispatch': {
       const nav = navigationPolicy[action.payload?.type];
@@ -83,8 +90,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
     // Navigation
     case 'navigate:switch': {
-      const view = action.payload?.view as ViewType;
+      const view = action.payload?.view as ViewType | TuiViewId;
       if (!view) return state;
+      if (!allowedViews.has(view)) return state;
       const top = state.viewStack[state.viewStack.length - 1];
       if (top?.view === view) return state;
       return {
@@ -152,12 +160,11 @@ export interface StateContextValue {
 
 const StateContext = createContext<StateContextValue | null>(null);
 
-export function StateProvider({ children }: { children: React.ReactNode }) {
-  const [state, baseDispatch] = useReducer(appReducer, initialState);
-
-  const dispatch = useCallback((action: AppAction) => {
-    baseDispatch(action);
-  }, []);
+export function StateProvider({ children, allowedViews }: { children: React.ReactNode; allowedViews?: ReadonlySet<string> }) {
+  const [state, dispatch] = useReducer(
+    (s: AppState, action: AppAction) => appReducer(s, action, allowedViews),
+    initialState,
+  );
 
   const currentView = state.viewStack[state.viewStack.length - 1]?.view ?? 'tasks';
   const currentContext = state.viewStack[state.viewStack.length - 1]?.context ?? {};

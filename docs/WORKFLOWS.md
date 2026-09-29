@@ -1,5 +1,9 @@
 # AFK Workflows
 
+> Managed desktop work items start and retry only from Work Items. Backlog is for planning; Run Center displays the same audited attempt. The CLI equivalent is `afk execute --work-item-id <provider:owner/repo#number> --execution-manifest <path>` (implementation → independent QA → confirmed PR). The older `afk run` is implementation-only; `afk loop` retains its legacy scheduling flow during migration. Do not start the same item through both paths.
+
+> A root PR remains `awaiting_merge` after QA. After a human merges it, run `afk reconcile --work-item-id <provider:owner/repo#number> --execution-manifest <path> --execution-id <original-attempt-id>` to verify the provider's PR and Issue association and record `done`. If the provider is unavailable, retry reconciliation; do not infer completion from process exit.
+
 > Breaking CLI note: use `afk backlog` for management,
 > `afk run --backlog-id <id>` for one item, `afk loop` for the complete
 > implementation → QA → merge pipeline, and `afk qa --backlog-id <id>` for

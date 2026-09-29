@@ -1,3 +1,5 @@
+import type { ExecutionQueryOptions, ExecutionSummary } from "./execution-contract";
+
 export type RuntimeEvent = {
   id: string;
   timestamp: string;
@@ -209,6 +211,7 @@ export type DesktopApi = {
   workItems: {
     list: (options?: WorkItemInventoryOptions, forceRefresh?: boolean) => Promise<WorkItemInventoryResult>;
     start: (input: WorkItemRunStartInput) => Promise<WorkItemRunStartResult>;
+    executions: (options?: ExecutionQueryOptions) => Promise<{ executions: ExecutionSummary[]; nextCursor?: string }>;
   };
   jumpserver: {
     testConnection: (input: JumpserverTestConnectionInput) => Promise<JumpserverTestConnectionResult>;
@@ -267,6 +270,7 @@ export const IPC_CHANNELS = {
   backlogSummary: "afk:backlog-summary",
   workItemsList: "afk:work-items-list",
   workItemsStart: "afk:work-items-start",
+  workItemsExecutions: "afk:work-items-executions",
   jumpserverTestConnection: "afk:jumpserver-test-connection",
   jumpserverAddBastion: "afk:jumpserver-add-bastion",
   jumpserverListAssets: "afk:jumpserver-list-assets",

@@ -7,15 +7,21 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { toClaudeResponse } from '../scripts/adapters/claude-code.mjs';
 
-test('Claude Code requests native approval without exit code 2', () => {
-  assert.deepEqual(toClaudeResponse({ decision: 'needs-user', reason: 'Review network access' }, 'before-action'), {
-    hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'Review network access' },
-  });
+test('Claude Code leaves native permissions unchanged for Jev network advice', () => {
+  assert.deepEqual(toClaudeResponse({ decision: 'advise', reason: 'Native permissions apply.' }, 'before-action'), {});
+  assert.deepEqual(toClaudeResponse({ decision: 'needs-user', reason: 'Legacy Jev review' }, 'before-action'), {});
 });
 
 test('Claude Code stop block uses native feedback rather than tool denial', () => {
   assert.deepEqual(toClaudeResponse({ decision: 'deny', reason: 'Missing test evidence' }, 'stop'), {
     decision: 'block', reason: 'Missing test evidence',
+  });
+});
+
+test('Claude Code stop feedback includes an actionable Skill step', () => {
+  assert.deepEqual(toClaudeResponse({ decision: 'deny', reason: 'Skill step needs completion.',
+    nextStep: 'Complete Skill step: Run validation.' }, 'stop'), {
+    decision: 'block', reason: 'Skill step needs completion. Next: Complete Skill step: Run validation.',
   });
 });
 

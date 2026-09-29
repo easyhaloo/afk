@@ -2,9 +2,8 @@
 name: afk-qa
 disable-model-invocation: true
 description: >-
-  Use when a backlog change request needs independent verification
-  against its Acceptance Criteria before merge. Verifies AC independently,
-  merges if all pass, and blocks the backlog if not.
+  Use when a backlog item is in verification and needs independent
+  Acceptance Criteria checks before the QA runner publishes its PR/MR.
 disallowed-tools: >-
   Bash(git reset --hard*) Bash(git branch -D*)
 ---
@@ -12,33 +11,35 @@ disallowed-tools: >-
 # QA
 
 **Goal:** independently verify a `verification` backlog item against its
-Acceptance Criteria and merge its provider change only on an explicit pass.
-**Mode:** AFK verification + merge; failures transition the item to
-canonical `blocked` with `executionMode: hitl`.
+Acceptance Criteria. On PASS, the QA runner publishes the provider PR/MR;
+root backlog changes await human merge, while child changes may auto-merge.
+**Mode:** AFK verification; FAIL routes to rework or canonical `blocked`
+with `executionMode: hitl`.
 
 **Architecture:** the provider maps each backlog ID to its implementation
-branch and change request. Branch names, platform IDs, and provider labels
-remain adapter details; this skill operates on the backlog ID only.
+branch. The QA runner integrates the latest baseline, verifies AC, then
+commits and pushes the QA branch before creating the PR/MR. The QA agent
+must not open or merge a change itself.
 
 ## Two merge gates
 
 | Gate | Who | What | When |
 |------|-----|------|------|
-| AFK gate | afk-qa runner | Merge the provider change | After all AC pass |
-| Human gate | Human | Release/integration decision | After all child backlogs are done |
+| AFK gate | QA runner | Create the provider PR/MR; merge child changes | After QA PASS |
+| Human gate | Human | Merge a root backlog PR/MR | After QA PASS |
 
 ## Preconditions
 
-- Backlog is in `verification` and has a provider change request, with
-  `## Acceptance Criteria` using the 3-field `--` format.
-- The provider must expose a target branch/change that is safe to merge;
-  if the change targets a protected release branch directly, STOP.
+- Backlog is in `verification` with a pushed implementation branch and
+  Acceptance Criteria. The PR/MR does not need to exist yet.
+- The configured target branch must be safe to integrate; if it is a
+  protected release branch, STOP.
 
 ## Merge-order gate
 
 Backlog dependencies define merge order. Before approving:
-- **All `dependsOn` backlogs are `done`** → proceed to Step 4.
-- **Any dependency incomplete** → do not merge; leave the item in
+- **All `dependsOn` backlogs are `done`** → proceed to QA.
+- **Any dependency incomplete** → do not publish; leave the item in
   `verification` and report the dependency.
 
 ## Signal vs. noise
@@ -51,17 +52,17 @@ Backlog dependencies define merge order. Before approving:
 
 ## Steps
 
-### Step 1 — Read change request + AC
+### Step 1 — Read implementation branch + AC
 
-Open the provider change request. Read the backlog's AC — the checklist,
+Read the implementation branch and the backlog's AC — the checklist,
 not code-review taste. Confirm its `dependsOn` entries and `verification`
 state through `afk backlog show --id <id>`.
 
 ### Step 2 — Run AC checks fresh
 
 Re-run every AC command/check independently. Do not trust the
-implementing agent's self-report. Prefer the change request's existing CI result over
-re-deriving locally.
+implementing agent's self-report. Use CI evidence when available, but verify
+the AC independently in the QA worktree.
 
 ### Step 3 — Record per-line results
 
@@ -69,37 +70,43 @@ Per AC line: pass/fail + evidence (command output or response snippet).
 If binary evidence was generated, write paths to `.afk/artifacts.txt`
 (one absolute path per line).
 
-### Step 4 — Merge (all pass)
+### Step 4 — Publish on PASS
 
-1. Approve the provider change request.
-2. Ask `ChangeProvider` to merge the change after explicit `goal_complete` payload `kind: qa, result: PASS`.
-3. Let `BacklogProvider` transition the item to `done`.
-4. Discard DB fork if any.
-5. **Check whether all child backlogs of the parent are now `done`** — if so,
-   notify the human release owner.
+1. Return an explicit `goal_complete` payload with `kind: qa, result: PASS`.
+2. The QA runner commits and pushes the QA branch, then creates the PR/MR.
+   Its body is exactly two lines; do not copy the PRD or write a long summary:
+
+   ```text
+   QA: PASS
+   Closes #<backlog-id>
+   ```
+
+3. The runner transitions the backlog to `merge_ready`. A root backlog moves
+   to `executionMode: hitl` for human merge; a child change is merged by the
+   runner and transitions to `done`.
 
 ### Step 5 — Conflict during merge
 
-Post a diagnostic: "Merge conflict detected. Will attempt rebase."
-Rebase on the provider target branch. Text conflict resolved → push, retry
-merge. Semantic conflict → transition the backlog to `blocked` with
-`executionMode: hitl`.
+Report the conflict from QA baseline integration or child merge. Do not
+publish a PR/MR if baseline integration fails. If a child merge fails after
+publication, report the existing PR/MR. The runner routes the backlog to
+`blocked` with `executionMode: hitl`.
 
 ### Step 6 — Any AC fail
 
-Do not merge. Keep the item in `verification` when a rerun is safe; otherwise
-transition it to `blocked` with `executionMode: hitl` and involve a human.
+Do not publish or merge. Return a structured FAIL result with evidence;
+the runner creates a rework record, or routes execution failures to
+`blocked` with `executionMode: hitl`.
 
 ## Final human gate
 
-When all child backlogs under a parent are `done`, a human reviews the
-provider's integration/release change and decides whether to release it.
-Always HITL — no automation bypasses the configured release gate.
+After QA PASS on a root backlog, a human reviews and merges its PR/MR.
+Always HITL — no automation bypasses this merge gate.
 
 ## Caveats
 
-- MUST NOT approve on "looks reasonable" — every AC line needs evidence.
-- MUST NOT merge a change targeting a protected release branch directly.
+- MUST NOT publish a PR/MR on "looks reasonable" — every AC line needs evidence.
+- MUST NOT merge a root change or one targeting a protected release branch directly.
 - MUST NOT merge if any `dependsOn` backlog is incomplete.
-- MUST NOT discard a fork while build is still active.
+- MUST NOT copy the backlog/PRD body into the PR/MR description.
 - MUST NOT skip the final human gate.

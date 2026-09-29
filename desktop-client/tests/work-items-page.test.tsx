@@ -443,7 +443,7 @@ describe("WorkItemsPage", () => {
     await act(async () => { findButton(renderer!, "运行记录").props.onClick(); });
     expect(textContent(renderer!.root.findByProps({ "aria-label": `工作项 ${initial.items[0].id}` }))).toContain("执行中");
     await act(async () => { renderer!.root.findByProps({ "aria-label": "刷新工作项" }).props.onClick(); });
-    expect(textContent(renderer!.root.findByProps({ "aria-label": `工作项 ${initial.items[0].id}` }))).toContain("已完成");
+    expect(textContent(renderer!.root.findByProps({ "aria-label": `工作项 ${initial.items[0].id}` }))).toContain("旧记录：QA 待确认");
     expect(list).toHaveBeenCalledTimes(2);
     act(() => renderer!.unmount());
   });

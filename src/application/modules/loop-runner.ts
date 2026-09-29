@@ -10,9 +10,12 @@ import { ManagementBacklogProvider } from '../../domain/backlog/management-provi
 import { prepareAgentRuntime, resolveAgentProviderName, resolveCodexRuntime } from '../../domain/agents/index';
 import type { AgentProviderName, AgentRuntimeSelection } from '../../domain/agents/types';
 import type { CodexReadinessProbe } from '../../domain/agents/codex-runtime';
+import { parseWorkItemId } from '../../domain/backlog';
+import { readExecutionManifest } from '../workflows/execution-manifest';
+import { executeWorkItem } from '../workflows/execute-work-item';
 
 export interface LoopRunnerOptions {
-  /** Max simultaneous implement chains (WorkflowRunner instances). */
+  /** Max simultaneous legacy implement chains or managed full attempts. */
   maxConcurrent: number;
   /** Backlog polling interval in ms. */
   pollIntervalMs: number;
@@ -26,6 +29,9 @@ export interface LoopRunnerOptions {
   backlogIds?: readonly string[];
   /** Workflow template passed to each implementation run. */
   template?: string;
+  managedExecution?: { workItemId: string; manifestPath: string };
+  readManifest?: typeof readExecutionManifest;
+  executeManagedWorkItem?: typeof executeWorkItem;
   /** Factory for WorkflowRunner — overridable for tests. */
   workflowRunnerFactory?: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
   /** Factory for QARunner — overridable for tests. */
@@ -78,6 +84,9 @@ interface InternalOptions {
   maxIterations: number | undefined;
   backlogIds: ReadonlySet<string> | undefined;
   template: string | undefined;
+  managedExecution: { backlogId: string; workItemId: string; manifestPath: string; providerRef?: string } | undefined;
+  readManifest: typeof readExecutionManifest;
+  executeManagedWorkItem: typeof executeWorkItem;
   workflowRunnerFactory: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
   qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => QARunner;
   pidFilePath: string;
@@ -103,10 +112,11 @@ const DEFAULTS = {
 const POLL_RETRY_DELAY_MS = 5_000;
 
 /**
- * LoopRunner — drives the full pipeline (implement → QA → done) for every
- * canonical `ready`/`afk` backlog item, continuously.
+ * LoopRunner schedules ready/rework backlog items continuously. An explicit
+ * single-item manifest delegates the full lifecycle to executeWorkItem;
+ * without one, the existing legacy chain remains in use.
  *
- * Two pools:
+ * The legacy path has two pools:
  *   - implement: N parallel `WorkflowRunner` instances, bounded by
  *     `maxConcurrent`.
  *   - qa: a single `QARunner` slot + FIFO queue. QA is serial by design.
@@ -151,6 +161,18 @@ export class LoopRunner {
 
   constructor(private readonly providers: ProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
     const workflowConfig = getWorkflowConfig();
+    if (options.managedExecution && (
+      options.backlogIds?.length !== 1 || !options.managedExecution.manifestPath
+      || options.agentProvider || options.agentRuntime || options.ext?.length || options.extParams?.length
+      || Object.keys(options.moduleTriggers ?? {}).length
+    )) {
+      throw new Error('managed loop execution requires exactly one backlog ID and cannot use legacy agent or module overrides');
+    }
+    const managedExecution = options.managedExecution && {
+      backlogId: String(options.backlogIds![0]),
+      workItemId: parseWorkItemId(options.managedExecution.workItemId).id,
+      manifestPath: options.managedExecution.manifestPath,
+    };
     const agentProvider = resolveAgentProviderName(options.agentProvider ?? workflowConfig.agentDefault);
     const agentRuntime = options.agentRuntime ?? (agentProvider === 'codex'
       ? resolveCodexRuntime({ cli: {}, config: workflowConfig.agents.codex })
@@ -168,6 +190,9 @@ export class LoopRunner {
       maxIterations: options.maxIterations,
       backlogIds: options.backlogIds ? new Set(options.backlogIds.map(String)) : undefined,
       template: options.template,
+      managedExecution,
+      readManifest: options.readManifest ?? readExecutionManifest,
+      executeManagedWorkItem: options.executeManagedWorkItem ?? executeWorkItem,
       workflowRunnerFactory: options.workflowRunnerFactory ?? ((p, cfg, runtime) => new WorkflowRunner(p, { config: cfg, agentRuntime: runtime })),
       qaRunnerFactory: options.qaRunnerFactory ?? ((p, cfg, runtime) => new QARunner(p, cfg, { agentRuntime: runtime })),
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
@@ -192,17 +217,18 @@ export class LoopRunner {
     }
     this.infrastructureError = undefined;
     try {
+      await this.validateManagedExecution();
       this.opts.agentRuntime = await prepareAgentRuntime(this.opts.agentRuntime, this.opts.readinessProbe);
     } catch (error) {
       this.infrastructureError = (error as Error).message;
-      logger.error({ error: this.infrastructureError }, 'loop agent readiness failed');
+      logger.error({ error: this.infrastructureError }, 'loop startup precondition failed');
       throw error;
     }
     this.running = true;
     this.startTime = Date.now();
     this.writePidFile();
 
-    this.emitEvent(`started (maxConcurrent=${this.opts.maxConcurrent}, poll=${this.opts.pollIntervalMs}ms, status=${this.opts.statusIntervalMs}ms)`);
+    this.emitEvent(`started (mode=${this.opts.managedExecution ? 'managed' : 'legacy'}, maxConcurrent=${this.opts.maxConcurrent}, poll=${this.opts.pollIntervalMs}ms, status=${this.opts.statusIntervalMs}ms)`);
     logger.info(
       {
         maxConcurrent: this.opts.maxConcurrent,
@@ -223,6 +249,19 @@ export class LoopRunner {
     await new Promise<void>(resolve => {
       this.stopResolve = resolve;
     });
+  }
+
+  private async validateManagedExecution(): Promise<void> {
+    const managed = this.opts.managedExecution;
+    if (!managed) return;
+    const manifest = await this.opts.readManifest(managed.manifestPath, managed.workItemId);
+    const identity = parseWorkItemId(managed.workItemId);
+    if (manifest.workItemId !== managed.workItemId || manifest.providerBacklogId !== managed.backlogId
+      || Number(managed.backlogId) !== identity.issueNumber
+      || manifest.tracker.platform !== identity.platform || manifest.tracker.projectKey !== identity.projectKey) {
+      throw new Error(`execution manifest identity does not match work item ${managed.workItemId} and backlog ${managed.backlogId}`);
+    }
+    managed.providerRef = `${identity.platform}:${manifest.tracker.providerProjectId ?? identity.projectKey}#${identity.issueNumber}`;
   }
 
   /**
@@ -387,10 +426,14 @@ export class LoopRunner {
    * Errors never crash the loop.
    */
   private async runChain(iid: string, projectName?: string): Promise<void> {
+    if (this.opts.managedExecution?.backlogId === iid) {
+      await this.runManagedChain(iid);
+      return;
+    }
     const session = `afk-${iid}-${Date.now()}`;
     const ctx: ChainContext = { iid, session, startedAt: Date.now() };
     this.inImplement.set(iid, ctx);
-    this.emitEvent(`#${iid} implement started (session=${session})`);
+    this.emitEvent(`#${iid} legacy implement started (session=${session})`);
     logger.info({ iid, session, projectName }, 'implement chain starting');
 
     const backlog = await this.providers.backlog.get(iid);
@@ -459,6 +502,54 @@ export class LoopRunner {
     } finally {
       this.inImplement.delete(iid);
       logger.info({ iid, remainingInImplement: this.inImplement.size }, 'implement chain finished');
+    }
+  }
+
+  private async runManagedChain(iid: string): Promise<void> {
+    const managed = this.opts.managedExecution!;
+    const startedAt = Date.now();
+    this.inImplement.set(iid, { iid, session: managed.workItemId, startedAt });
+    this.emitEvent(`${iid} managed execution started (workItemId=${managed.workItemId})`);
+    try {
+      const item = await this.providers.backlog.get(iid);
+      const identity = parseWorkItemId(managed.workItemId);
+      if (!managed.providerRef || (item.providerRef !== managed.workItemId && item.providerRef !== managed.providerRef)
+        || (item.workItemId && item.workItemId !== managed.workItemId)
+        || (item.project && (item.project.platform !== identity.platform || item.project.projectKey !== identity.projectKey))) {
+        throw new Error(`backlog ${iid} work item identity does not match ${managed.workItemId}`);
+      }
+      const result = await this.opts.executeManagedWorkItem({
+        workItemId: managed.workItemId,
+        manifestPath: managed.manifestPath,
+        template: this.opts.template,
+      });
+      const elapsed = formatDuration(Date.now() - startedAt);
+      if (result.status === 'merge_ready' || result.status === 'done') {
+        this.completed++;
+        this.lastError.delete(iid);
+        this.emitEvent(`${iid} managed QA passed → ${result.status} (${elapsed})${result.changeUrl ? ` change=${result.changeUrl}` : ''}`);
+      } else if (result.status === 'rework') {
+        this.lastError.delete(iid);
+        this.emitEvent(`${iid} managed QA failed → rework/afk (${elapsed})`);
+      } else if (result.status === 'not_claimed') {
+        this.emitEvent(`${iid} managed execution skipped (claim unavailable)`);
+      } else {
+        this.failed++;
+        this.lastError.set(iid, 'managed-execution-blocked');
+        this.emitEvent(`${iid} managed execution failed → blocked/hitl (${elapsed})`);
+      }
+    } catch (error) {
+      const message = (error as Error).message;
+      this.failed++;
+      this.lastError.set(iid, `managed-execution: ${message}`);
+      this.emitEvent(`${iid} managed execution failed: ${message}`);
+      logger.error({ iid, err: error }, 'managed execution failed without legacy fallback');
+    } finally {
+      this.inImplement.delete(iid);
+      this.inFlight.delete(iid);
+      if (this.opts.maxIterations !== undefined && this.completed >= this.opts.maxIterations) {
+        void this.stop();
+      }
     }
   }
 

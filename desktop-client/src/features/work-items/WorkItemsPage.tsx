@@ -12,6 +12,7 @@ import type {
   WorkItemRunStartResult,
   WorkItemSourceRef,
 } from "../../../shared/backlog-contract";
+import { type ExecutionSummary } from "../../../shared/execution-contract";
 import {
   planRepositoryCheckoutPaths,
   repositorySelectionKey,
@@ -44,8 +45,13 @@ const stateFilterOptions: Array<{ value: GlobalWorkItem["state"] | "all"; label:
 const runStatusLabels: Record<WorkItemRunRecord["status"], string> = {
   starting: "准备中",
   running: "执行中",
-  completed: "已完成",
+  completed: "旧记录：QA 待确认",
   failed: "失败",
+};
+
+const auditedRunLabels: Record<ExecutionSummary["status"], string> = {
+  queued: "待执行", implementing: "实现中", verifying: "QA 验证中", publishing: "提交 PR 中",
+  awaiting_merge: "等待人工合并", rework: "等待返工", blocked: "已阻塞", failed: "失败", done: "已完成", unknown: "审计待核查",
 };
 
 type DetailTab = "overview" | "plan" | "runs";
@@ -137,7 +143,7 @@ function WorkItemEmptySection({ children }: { children: string }) {
   return <div className="work-item-section-empty">{children}</div>;
 }
 
-export function WorkItemsPage() {
+export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } = {}) {
   const [inventory, setInventory] = useState<WorkItemInventoryResult>(emptyInventory);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -147,6 +153,9 @@ export function WorkItemsPage() {
   const [stateFilter, setStateFilter] = useState<GlobalWorkItem["state"] | "all">("all");
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
+  const [auditedRuns, setAuditedRuns] = useState<ExecutionSummary[]>([]);
+  const [auditCursor, setAuditCursor] = useState<string | undefined>();
+  const [auditError, setAuditError] = useState("");
   const [runSetupOpen, setRunSetupOpen] = useState(false);
   const [runNotice, setRunNotice] = useState("");
   const [runError, setRunError] = useState("");
@@ -156,6 +165,7 @@ export function WorkItemsPage() {
   const requestVersion = useRef(0);
   const runRequestVersion = useRef(0);
   const selectedWorkItemId = useRef<string | null>(null);
+  const lastFocusWorkItemId = useRef<string | null>(null);
   const selected = inventory.items.find(item => item.id === selectedItem?.id) ?? selectedItem;
 
   const load = async (forceRefresh = false, silent = false) => {
@@ -181,6 +191,53 @@ export function WorkItemsPage() {
     const timer = setInterval(() => { void load(false, true); }, 3000);
     return () => clearInterval(timer);
   }, [detailTab, selected?.id, selected?.runs]);
+
+  useEffect(() => {
+    if (detailTab !== "runs" || !selected?.id || typeof window.afkDesktop.workItems.executions !== "function") return;
+    let mounted = true;
+    let initialized = false;
+    const workItemId = selected.id;
+    setAuditedRuns([]);
+    setAuditCursor(undefined);
+    const refresh = async () => {
+      try {
+        const page = await window.afkDesktop.workItems.executions({ workItemId, limit: 100 });
+        if (mounted) {
+          if (!initialized) {
+            setAuditedRuns(page.executions);
+            setAuditCursor(page.nextCursor);
+            initialized = true;
+          } else setAuditedRuns(current => {
+            const currentPageIds = new Set(page.executions.map(run => run.executionId));
+            return [...page.executions, ...current.filter(run => !currentPageIds.has(run.executionId))];
+          });
+          setAuditError("");
+        }
+      } catch (cause) {
+        if (mounted) setAuditError(cause instanceof Error ? cause.message : String(cause));
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => { void refresh(); }, 5000);
+    return () => { mounted = false; clearInterval(timer); };
+  }, [detailTab, selected?.id]);
+
+  const loadMoreAuditedRuns = async () => {
+    if (!selected?.id || !auditCursor) return;
+    const workItemId = selected.id;
+    try {
+      const page = await window.afkDesktop.workItems.executions({ workItemId, limit: 100, since: auditCursor });
+      if (selectedWorkItemId.current !== workItemId) return;
+      setAuditedRuns(current => {
+        const known = new Set(current.map(run => run.executionId));
+        return [...current, ...page.executions.filter(run => !known.has(run.executionId))];
+      });
+      setAuditCursor(page.nextCursor);
+      setAuditError("");
+    } catch (cause) {
+      if (selectedWorkItemId.current === workItemId) setAuditError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
 
   const projectOptions = useMemo(() => [
     { value: "all", label: "全部 Issue 来源", triggerLabel: "全部" },
@@ -224,6 +281,14 @@ export function WorkItemsPage() {
     setRunError("");
     setStartingRun(false);
   };
+
+  useEffect(() => {
+    if (!focusWorkItemId || lastFocusWorkItemId.current === focusWorkItemId) return;
+    const item = inventory.items.find(candidate => candidate.id === focusWorkItemId);
+    if (!item) return;
+    lastFocusWorkItemId.current = focusWorkItemId;
+    openDetails(item);
+  }, [focusWorkItemId, inventory.items]);
 
   const closeDetails = () => {
     runRequestVersion.current += 1;
@@ -351,7 +416,7 @@ export function WorkItemsPage() {
             <nav className="work-item-detail-tabs" aria-label="工作项详情分区">
               <button type="button" className={detailTab === "overview" ? "active" : ""} aria-pressed={detailTab === "overview"} onClick={() => setDetailTab("overview")}>概览</button>
               <button type="button" className={detailTab === "plan" ? "active" : ""} aria-pressed={detailTab === "plan"} onClick={() => setDetailTab("plan")}>执行计划 <span>{selectedPlan.length}</span></button>
-              <button type="button" className={detailTab === "runs" ? "active" : ""} aria-pressed={detailTab === "runs"} onClick={() => setDetailTab("runs")}>运行记录 <span>{selectedRuns.length}</span></button>
+              <button type="button" className={detailTab === "runs" ? "active" : ""} aria-pressed={detailTab === "runs"} onClick={() => setDetailTab("runs")}>运行记录 <span>{selectedRuns.length + auditedRuns.length}</span></button>
             </nav>
             <div className="work-item-detail-body">
               {detailTab === "overview" ? <>
@@ -381,7 +446,11 @@ export function WorkItemsPage() {
 
               {detailTab === "runs" ? <section className="work-item-detail-section">
                 <div className="work-item-section-heading"><h3>运行记录</h3><small>每次运行使用独立任务空间</small></div>
-                {selectedRuns.length ? selectedRuns.map(run => <div className="work-item-run-card" key={run.id}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.id}</b><small>{run.workflow ?? "默认工作流"} · {run.startedAt}</small><code>{run.workspacePath ?? workspacePath(selected)}</code></div><em>{runStatusLabels[run.status]}</em></div>) : <WorkItemEmptySection>暂无运行记录。</WorkItemEmptySection>}
+                {auditError ? <div className="work-item-run-error">运行审计查询失败：{auditError}</div> : null}
+                {auditedRuns.map(run => <div className="work-item-run-card" key={run.executionId}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.executionId}</b><small>{run.startedAt ?? "时间未知"}</small>{run.pr ? <button type="button" aria-label={`打开 PR #${run.pr.id}`} onClick={() => void window.afkDesktop.openExternal(run.pr!.url)}>PR #{run.pr.id}</button> : null}</div><em>{auditedRunLabels[run.status]}</em></div>)}
+                {auditCursor ? <button type="button" onClick={() => void loadMoreAuditedRuns()}>查看更多运行记录</button> : null}
+                {selectedRuns.map(run => <div className="work-item-run-card" key={`old:${run.id}`}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.id}</b><small>旧记录 · {run.workflow ?? "默认工作流"} · {run.startedAt}</small><code>{run.workspacePath ?? workspacePath(selected)}</code></div><em>{runStatusLabels[run.status]}</em></div>)}
+                {!auditedRuns.length && !selectedRuns.length ? <WorkItemEmptySection>暂无运行记录。</WorkItemEmptySection> : null}
               </section> : null}
             </div>
             <footer className="work-item-detail-footer">

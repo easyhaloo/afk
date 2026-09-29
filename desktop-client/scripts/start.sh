@@ -10,15 +10,15 @@ PACKAGED_PROCESS_PATTERN='AFK Control.app/Contents/MacOS/AFK Control'
 
 mkdir -p "$STATE_DIR"
 
-# Kill a process and all of its descendants (depth-first, TERM).
+# Kill a process and all of its descendants (depth-first).
 kill_tree() {
-  local pid="$1" kid
+  local pid="$1" signal="${2:-TERM}" kid
   [[ "$pid" =~ ^[0-9]+$ ]] || return 0
   kill -0 "$pid" 2>/dev/null || return 0
   for kid in $(pgrep -P "$pid" 2>/dev/null || true); do
-    kill_tree "$kid"
+    kill_tree "$kid" "$signal"
   done
-  kill -TERM "$pid" 2>/dev/null || true
+  kill -"$signal" "$pid" 2>/dev/null || true
 }
 
 # True when the process belongs to this project: its cwd or command line
@@ -31,6 +31,65 @@ is_project_process() {
   [[ "$cmd" == *"$PROJECT_DIR"* ]]
 }
 
+port_is_listening() {
+  command -v lsof >/dev/null 2>&1 || return 1
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+is_dev_command() {
+  local cmd="$1"
+  case "$cmd" in
+    *"dev:raw"*|*"concurrently"*|*"dev:main"*|*"vite/bin/vite.js --port $PORT"*|*"vite --port $PORT"*|*"wait-on tcp:$PORT"*|*"tsc -p tsconfig.electron.json --watch"*|*"electron/cli.js ."*|*"pnpm exec electron ."*|*"Electron.app/Contents/MacOS/Electron ."*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+is_dev_process() {
+  local pid="$1" cwd cmd
+  cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+  is_dev_command "$cmd" || return 1
+  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)"
+  [[ "$cwd" == "$PROJECT_DIR" || "$cwd" == "$PROJECT_DIR/"* ]]
+}
+
+list_dev_processes() {
+  ps -axo pid=,command= | awk '{ pid = $1; $1 = ""; sub(/^ /, ""); print pid "\t" $0 }' | while IFS=$'\t' read -r pid cmd; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    is_dev_command "$cmd" || continue
+    is_dev_process "$pid" && printf '%s\n' "$pid"
+  done
+}
+
+stop_dev_processes() {
+  local signal="${1:-TERM}" pid
+  for pid in $(list_dev_processes); do
+    [[ "$pid" == "$$" ]] && continue
+    echo "Stopping existing AFK Control dev process (pid $pid)..."
+    kill_tree "$pid" "$signal"
+  done
+}
+
+wait_for_shutdown() {
+  local remaining
+  for _ in {1..40}; do
+    remaining="$(list_dev_processes)"
+    if [[ -z "$remaining" ]] && ! port_is_listening; then
+      return 0
+    fi
+    sleep 0.25
+  done
+
+  stop_dev_processes KILL
+  for _ in {1..20}; do
+    remaining="$(list_dev_processes)"
+    [[ -z "$remaining" ]] && ! port_is_listening && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
 # --- 1. Tear down any previous dev stack -----------------------------------
 pkill -f "$PACKAGED_PROCESS_PATTERN" >/dev/null 2>&1 || true
 
@@ -38,10 +97,14 @@ if [[ -f "$PID_FILE" ]]; then
   pid="$(cat "$PID_FILE")"
   if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
     echo "Stopping previous AFK Control dev service (pid $pid)..."
-    kill_tree "$pid"
+    if is_dev_process "$pid"; then
+      kill_tree "$pid"
+    fi
   fi
   rm -f "$PID_FILE"
 fi
+
+stop_dev_processes
 
 if command -v lsof >/dev/null 2>&1; then
   for pid in $(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true); do
@@ -55,21 +118,33 @@ if command -v lsof >/dev/null 2>&1; then
     fi
   done
 
-  # --- 2. Wait for the port to be released before replacing it -------------
-  for _ in {1..40}; do
-    lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 || break
-    sleep 0.25
-  done
-  if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "Port $PORT still held after shutdown; refusing to start a duplicate." >&2
-    exit 1
-  fi
+fi
+
+# --- 2. Wait for the previous stack to be fully released -------------------
+if ! wait_for_shutdown; then
+  echo "Previous AFK Control dev service did not stop cleanly; refusing to start a duplicate." >&2
+  exit 1
 fi
 
 # --- 3. Start fresh --------------------------------------------------------
 cd "$PROJECT_DIR"
-nohup bash -c 'exec pnpm run dev:raw' >"$LOG_FILE" 2>&1 < /dev/null &
-service_pid=$!
+service_pid="$(node - "$LOG_FILE" "$PROJECT_DIR" <<'NODE'
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+
+const [logFile, cwd] = process.argv.slice(2);
+const logFd = fs.openSync(logFile, "w");
+const child = spawn("pnpm", ["run", "dev:raw"], {
+  cwd,
+  detached: true,
+  stdio: ["ignore", logFd, logFd],
+});
+
+if (!child.pid) process.exit(1);
+child.unref();
+process.stdout.write(String(child.pid));
+NODE
+)"
 printf '%s\n' "$service_pid" >"$PID_FILE"
 
 cleanup_stale_pid() {
@@ -89,5 +164,7 @@ for _ in {1..60}; do
   sleep 0.25
 done
 
+kill_tree "$service_pid" KILL
+rm -f "$PID_FILE"
 echo "Timed out waiting for AFK Control dev service. See $LOG_FILE." >&2
 exit 1

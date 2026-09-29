@@ -190,19 +190,21 @@ describe("work item execution service", () => {
     expect(spawn).toHaveBeenCalledWith(
       "/usr/local/bin/afk",
       [
-        "run",
-        "--backlog-id",
+        "execute",
+        "--work-item-id",
         "WI-2026-018",
         "--execution-manifest",
         manifestPath,
         "--template",
         "standard-development",
+        "--execution-id",
+        result.runId,
       ],
       { cwd: workspaceRoot, detached: true, stdio: "ignore", env: expect.objectContaining({ PWD: workspaceRoot }) },
     );
     expect(child.unref).toHaveBeenCalledOnce();
     expect(updateRun).toHaveBeenCalledWith("WI-2026-018", expect.any(String));
-    expect(result.runId).toMatch(/^desktop-WI-2026-018-/);
+    expect(result.runId).toMatch(/^desktop-[a-f\d-]{36}$/);
     expect(result.workspace).toEqual({ root: workspaceRoot });
     expect(stored).toEqual([expect.objectContaining({
       id: result.runId,
@@ -299,13 +301,15 @@ describe("work item execution service", () => {
     await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection], workflow: "review" });
 
     expect(spawn.mock.calls[0]?.[1]).toEqual([
-      "run",
-      "--backlog-id",
+      "execute",
+      "--work-item-id",
       "github:acme/api#42",
       "--execution-manifest",
       "/tmp/task/.afk/execution-manifest.json",
       "--template",
       "review",
+      "--execution-id",
+      expect.stringMatching(/^desktop-[a-f\d-]{36}$/),
     ]);
   });
 

@@ -172,6 +172,22 @@ describe("backlog service: write operations invalidate list cache", () => {
 });
 
 describe("backlog service: timeout", () => {
+  it("passes its configured timeout down to the executor", async () => {
+    const { deps, execMock } = makeDeps();
+    execMock.mockResolvedValueOnce({ ok: true, stdout: JSON.stringify({ ok: true, kind: "backlog.list", data: [] }), stderr: "" });
+    const service = createBacklogService(deps, { timeoutMs: 25_000 });
+    await service.list("/workspace");
+    expect(execMock.mock.calls[0][4]).toMatchObject({ timeoutMs: 25_000 });
+  });
+
+  it("defaults the executor timeout to 30s so network-bound provider calls survive", async () => {
+    const { deps, execMock } = makeDeps();
+    execMock.mockResolvedValueOnce({ ok: true, stdout: JSON.stringify({ ok: true, kind: "backlog.list", data: [] }), stderr: "" });
+    const service = createBacklogService(deps);
+    await service.list("/workspace");
+    expect(execMock.mock.calls[0][4]).toMatchObject({ timeoutMs: 30_000 });
+  });
+
   it("aborts a hung subprocess after the configured timeout", async () => {
     vi.useFakeTimers();
     const { deps, execMock } = makeDeps();

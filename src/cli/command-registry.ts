@@ -30,6 +30,7 @@ export const COMMANDS: CommandEntry[] = [
   { names: ['isolate'], loader: () => import('./commands/isolate.js').then(m => m.registerIsolateCommands) },
   { names: ['backlog'], loader: () => import('./commands/backlog.js').then(m => m.registerBacklogCommands) },
   { names: ['run'], loader: () => import('./commands/run.js').then(m => m.registerRunCommands) },
+  { names: ['execute', 'reconcile'], loader: () => import('./commands/execute.js').then(m => m.registerExecuteCommands) },
   { names: ['qa'], loader: () => import('./commands/qa.js').then(m => m.registerQACommands) },
   { names: ['loop'], loader: () => import('./commands/loop.js').then(m => m.registerLoopCommands) },
   { names: ['observe'], loader: () => import('./commands/observe.js').then(m => m.registerObserveCommands) },

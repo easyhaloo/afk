@@ -28,6 +28,27 @@ export function registerObserveCommands(program: Command): void {
     .option('--json', 'Emit JSON')
     .action(async options => emit(await queries(options.root).runs(), options.json));
 
+  observe.command('executions')
+    .description('List execution summaries across work items, optionally filtered by canonical ID')
+    .option('--work-item-id <id>', 'Canonical provider-qualified work item ID')
+    .option('--limit <count>', 'Maximum run streams to inspect (1–100)', '25')
+    .option('--since <runId>', 'Continue after this run ID')
+    .option('--root <path>', 'Event-store root')
+    .option('--json', 'Emit JSON')
+    .action(async options => {
+      const query = queries(options.root);
+      const page = options.workItemId === undefined
+        ? await query.recentExecutions({ limit: Number(options.limit), since: options.since })
+        : await query.workItemExecutions({ workItemId: options.workItemId, limit: Number(options.limit), since: options.since });
+      emit(page, options.json);
+    });
+
+  observe.command('execution <runId>')
+    .description('Show one execution summary and its verified run timeline')
+    .option('--root <path>', 'Event-store root')
+    .option('--json', 'Emit JSON')
+    .action(async (runId, options) => emit(await queries(options.root).execution(runId), options.json));
+
   observe.command('timeline <runId>')
     .description('Show ordered audit events for a run')
     .option('--root <path>', 'Event-store root (defaults to AFK_EVENT_STORE_DIR or ~/.afk/events)')

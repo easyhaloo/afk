@@ -71,7 +71,15 @@ export function BacklogDetailDrawer({ summary, busy, error, defaultAgent, onClos
                 <DetailValue icon={<Hash size={13} />} label="状态" value={backlogStateLabel(item.state)} />
                 <DetailValue icon={item.executionMode === "afk" ? <Bot size={13} /> : <Hand size={13} />} label="模式" value={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"} />
                 <DetailValue icon={<Hash size={13} />} label="依赖" value={item.dependsOn.length ? item.dependsOn.map((id) => `#${id}`).join("、") : "无"} />
-                <DetailValue icon={<GitBranch size={13} />} label="变更请求" value={item.state === "merge_ready" || item.state === "done" ? "已关联 · 由 AFK 核心管理" : "未关联"} />
+                <DetailValue
+                  icon={<GitBranch size={13} />}
+                  label="变更请求"
+                  value={item.changeRequest
+                    ? item.changeRequest.url
+                      ? <button type="button" className="backlog-inline-link" onClick={() => onOpenExternal(item.changeRequest!.url!)}>PR #{item.changeRequest.id} · {item.changeRequest.state === "open" ? "开放" : item.changeRequest.state === "merged" ? "已合并" : "已关闭"}</button>
+                      : `PR #${item.changeRequest.id}`
+                    : "未关联"}
+                />
                 <DetailValue icon={<Hash size={13} />} label="Provider 引用" value={item.providerRef || "—"} />
                 <DetailValue icon={<GitBranch size={13} />} label="分支" value={item.branchName || "—"} />
                 {item.parentId ? <DetailValue icon={<Hash size={13} />} label="父工作项" value={`#${item.parentId}`} /> : null}

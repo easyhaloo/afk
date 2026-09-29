@@ -11,9 +11,6 @@ export function toCodexResponse(result, event) {
     return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: result.nextStep } };
   }
   if (event === 'before-action') {
-    if (result.decision === 'needs-user') {
-      return { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: result.reason } };
-    }
     if (result.decision !== 'deny') return {};
     return { hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -21,12 +18,14 @@ export function toCodexResponse(result, event) {
       permissionDecisionReason: result.reason,
     } };
   }
-  if (event === 'stop' && result.decision === 'deny') return { decision: 'block', reason: result.reason };
+  if (event === 'stop' && result.decision === 'deny') return { decision: 'block',
+    reason: result.nextStep ? `${result.reason} Next: ${result.nextStep}` : result.reason };
   if (event === 'after-action' && result.nextStep) {
     return { hookSpecificOutput: { hookEventName: 'PostToolUse',
       additionalContext: `${result.reason} Next: ${result.nextStep}` } };
   }
-  return { continue: true, systemMessage: result.decision === 'advise' ? result.reason : undefined };
+  return { continue: true, systemMessage: result.decision === 'advise'
+    ? `${result.reason}${result.nextStep ? ` Next: ${result.nextStep}` : ''}` : undefined };
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

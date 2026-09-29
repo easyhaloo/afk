@@ -12,10 +12,9 @@ export function toClaudeResponse(result, event, payload = {}) {
     return { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: result.nextStep } };
   }
   if (event === 'before-action') {
-    if (result.decision !== 'needs-user' && result.decision !== 'deny') return {};
-    const permissionDecision = result.decision === 'needs-user' ? 'ask' : 'deny';
+    if (result.decision !== 'deny') return {};
     return { hookSpecificOutput: {
-      hookEventName: 'PreToolUse', permissionDecision, permissionDecisionReason: result.reason,
+      hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: result.reason,
     } };
   }
   if (event === 'after-failure' && result.nextStep) {
@@ -33,8 +32,10 @@ export function toClaudeResponse(result, event, payload = {}) {
       return { hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput } };
     }
   }
-  if (event === 'stop' && result.decision === 'deny') return { decision: 'block', reason: result.reason };
-  return { continue: true, systemMessage: result.decision === 'advise' ? result.reason : undefined };
+  if (event === 'stop' && result.decision === 'deny') return { decision: 'block',
+    reason: result.nextStep ? `${result.reason} Next: ${result.nextStep}` : result.reason };
+  return { continue: true, systemMessage: result.decision === 'advise'
+    ? `${result.reason}${result.nextStep ? ` Next: ${result.nextStep}` : ''}` : undefined };
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {

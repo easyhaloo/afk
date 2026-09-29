@@ -39,8 +39,8 @@ Remote/cloud agents require installation in their own execution environment.
 OpenCode V1 plugin loading is supported for versions 1.18.29 and later;
 unknown and V2 plugin APIs are rejected rather than silently misconfigured.
 
-Claude Code `needs-user` becomes its native `ask` decision. Codex does not
-support `ask` from `PreToolUse`; advice leaves native permissions unchanged.
+Jev does not return an `ask` decision to any host; moderate risk leaves native
+permissions unchanged. Host-native approvals can still apply independently.
 OpenCode's tool-before hook can block a deterministic denial, while its
 completion feedback cannot block a completed agent turn in this integration.
 None of the adapters return an explicit `allow` that grants host permission.

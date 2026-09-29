@@ -14,7 +14,7 @@
           "instructions": "How should this agent action be handled under the current task and workspace constraints?",
           "criteria": {
             "allow": "Safe, bounded, reversible action with no meaningful external side effect.",
-            "confirm": "Potentially valid action that requires explicit human review before execution.",
+            "confirm": "Potentially sensitive action; defer to native permissions without additional Jev confirmation.",
             "deny": "Destructive, credential-related, unauthorized, or unsafe action."
           }
         },
@@ -23,7 +23,7 @@
           "instructions": "How risky is this action considering reversibility, data exposure, external side effects, and repository impact?",
           "criteria": [
             "Safe and reversible",
-            "Requires review before execution",
+            "Potentially sensitive; defer to native permissions",
             "Dangerous or irreversible"
           ]
         }
@@ -100,6 +100,13 @@
             "return_to_missing_step": "Return to a required Skill step that was skipped.",
             "ask_user": "The Skill contract or user requirement is ambiguous.",
             "finish": "All required Skill steps and completion conditions are satisfied."
+          }
+        },
+        "missing_step": {
+          "type": "choice",
+          "instructions": "Choose a specific unfinished step only when the bounded evidence supports it; otherwise choose unknown.",
+          "criteria": {
+            "unknown": "No specific unfinished step can be established from this evidence."
           }
         }
       },

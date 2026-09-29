@@ -18,10 +18,54 @@ function tracker(issue: any): TrackerProvider {
         ...delta.add.filter((label: string) => !issue.labels.includes(label)),
       ];
     }),
+    listMRs: vi.fn(async () => []),
+    getMR: vi.fn(),
   } as unknown as TrackerProvider;
 }
 
 describe('TrackerBacklogProvider', () => {
+  it('projects the durable QA change metadata for a merge-ready backlog', async () => {
+    const issue = {
+      id: 42,
+      title: 'Ready for merge',
+      description: 'body',
+      labels: ['stage::merge-ready', 'mode::hitl'],
+      state: 'opened',
+      url: 'https://example/42',
+      projectId: 'org/repo',
+    };
+    const t = tracker(issue);
+    t.listMRs = vi.fn(async () => [{
+      id: 9,
+      platform: 'github',
+      projectId: 'org/repo',
+      title: 'Backlog 42: Ready for merge',
+      state: 'opened',
+      sourceBranch: 'afk/backlog-42-qa',
+      targetBranch: 'main',
+      url: 'https://example/pull/9',
+    }]);
+    t.getMR = vi.fn(async () => ({
+      id: 9,
+      platform: 'github',
+      projectId: 'org/repo',
+      title: 'Backlog 42: Ready for merge',
+      state: 'opened',
+      sourceBranch: 'afk/backlog-42-qa',
+      targetBranch: 'main',
+      url: 'https://example/pull/9',
+    }));
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await expect(provider.get('42')).resolves.toMatchObject({
+      changeRequest: {
+        id: '9',
+        state: 'open',
+        url: 'https://example/pull/9',
+      },
+    });
+  });
+
   it('creates a child backlog with metadata, provider links, and concrete URLs in its body', async () => {
     const parent = { id: 7, title: 'PRD', description: '', labels: [], state: 'opened', url: 'https://example/7', projectId: 'org/repo' };
     const dependency = { id: 6, title: 'Foundation', description: '', labels: [], state: 'opened', url: 'https://example/6', projectId: 'org/repo' };
@@ -207,6 +251,23 @@ describe('TrackerBacklogProvider', () => {
     const issue = { id: 9, title: 'Dependency', description: '', labels: [], state: 'closed', url: '', projectId: '' };
     const provider = new TrackerBacklogProvider(tracker(issue), { atomicClaim: vi.fn() });
     await expect(provider.get('9')).resolves.toMatchObject({ state: 'done' });
+  });
+
+  it('fetches MR changes once for the whole list instead of once per merge-ready item', async () => {
+    const mergeReady = (id: number) => ({
+      id, title: `Item ${id}`, description: '',
+      labels: ['stage::merge-ready', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo',
+    });
+    const issues = [mergeReady(1), mergeReady(2), mergeReady(3)];
+    const t = tracker(issues[0]);
+    t.listIssues = vi.fn(async () => issues);
+    const listMRs = vi.fn(async () => []);
+    t.listMRs = listMRs;
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    const items = await provider.list();
+    expect(items).toHaveLength(3);
+    expect(listMRs).toHaveBeenCalledTimes(1);
   });
 
   it('exposes business tags while hiding provider workflow metadata', async () => {

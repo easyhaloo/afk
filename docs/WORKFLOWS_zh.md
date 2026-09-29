@@ -1,5 +1,9 @@
 # AFK 工作流程
 
+> 桌面受管工作项只在“工作项”详情启动或重试；Backlog 用于计划与关联，运行中心查看同一执行的审计历史。CLI 对应 `afk execute --work-item-id <平台:仓库#编号> --execution-manifest <路径>`；旧 `afk run` 只执行实现阶段，`afk loop` 暂保留原调度链，不应与桌面入口并行启动同一项。
+
+> 根 PR 在 QA 后保持 `awaiting_merge`。人工合并后执行 `afk reconcile --work-item-id <平台:仓库#编号> --execution-manifest <路径> --execution-id <原执行ID>`，确认 Provider 上 PR 已合并且关联同一 Issue，才审计为 `done`。Provider 不可用时重试对账，不能仅凭进程退出推断完成。
+
 ## 概述
 
 AFK 实现三种主要工作流模式：

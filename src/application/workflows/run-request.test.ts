@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { resolveWorkflowRequest, resolveWorkflowRunRequest } from './run-request';
 
 describe('resolveWorkflowRequest', () => {
+  it('passes explicit canonical audit identity through to the runner request', () => {
+    expect(resolveWorkflowRequest({ backlogId: '42', observationRunId: 'execution-42', observationWorkItemId: 'github:acme/api#42' }, {}))
+      .toMatchObject({ backlogId: '42', observationRunId: 'execution-42', observationWorkItemId: 'github:acme/api#42' });
+    expect(resolveWorkflowRequest({ backlogId: '42' }, {}).observationRunId).toBeUndefined();
+  });
+
+  it.each([
+    [{ observationRunId: '../bad', observationWorkItemId: 'github:acme/api#42' }, /observationRunId/],
+    [{ observationRunId: 'execution-42', observationWorkItemId: '42' }, /work item ID/],
+    [{ observationRunId: 'execution-42' }, /observationWorkItemId/],
+    [{ observationWorkItemId: 'github:acme/api#42' }, /observationRunId/],
+  ])('rejects an invalid or incomplete audit identity', (overrides, pattern) => {
+    expect(() => resolveWorkflowRequest({ backlogId: '42', ...overrides }, {})).toThrow(pattern);
+  });
+
   it('uses CLI values over config values and defaults', () => {
     const request = resolveWorkflowRequest(
       { backlogId: 'feature/auth', targetBranch: 'release', executionMode: 'batch' },

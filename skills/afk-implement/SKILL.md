@@ -2,8 +2,7 @@
 name: afk-implement
 description: >-
   Use when a backlog item with machine-checkable Acceptance Criteria
-  is ready for autonomous implementation. Produces a change request
-  through the configured provider.
+  is ready for autonomous implementation before independent QA.
 disable-model-invocation: true
 disallowed-tools: >-
   Bash(git push origin main) Bash(git push origin master)
@@ -15,8 +14,9 @@ disallowed-tools: >-
 **Goal:** autonomously implement one backlog item with Acceptance Criteria.
 **Mode:** AFK — the backlog item must have `executionMode: afk`.
 **Contract:** runnable backlog (AC present, dependencies complete, no parent
-execution) → change request and `verification`/`merge_ready`; any automation
-failure escalates to canonical `blocked` state with `executionMode: hitl`.
+execution) → pushed implementation branch and `verification`; QA publishes the
+PR/MR after PASS. Any automation failure escalates to canonical `blocked`
+state with `executionMode: hitl`.
 
 ## Preconditions (fail-closed)
 
@@ -77,7 +77,8 @@ Run Preconditions block against the backlog. Fail-fast on any violation.
 
 Invoke `afk run --backlog-id <id>`. The command claims the item through the
 provider, executes the implementation workflow, and returns when it reaches
-verification/merge-ready or a terminal failure.
+`verification` or a terminal failure. The QA runner creates the PR/MR only
+after independent checks pass.
 
 The provided ID is the Provider Backlog business identity. Runtime `backlogId`
 and `Run.workItemId` must preserve it exactly; `runId` is a separate execution
@@ -111,7 +112,7 @@ Attach, read the last `Next:` line, decide:
 
 ## Common failure modes
 
-- **Target branch moved:** agent rebases before opening the change request.
+- **Target branch moved:** QA integrates the latest baseline before publishing the change request.
 - **Flaky vs. real failure:** different errors on two consecutive attempts
   → flaky, rerun. Identical failure twice → fix the cause.
 - **Self-reported completion is not evidence:** if Progress checklist

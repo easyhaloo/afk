@@ -97,4 +97,10 @@ describe('JsonlEventStore', () => {
     await expect(firstStore.verify(context.runId)).resolves.toMatchObject({ valid: true });
     await expect(secondStore.verify(context.runId)).resolves.toMatchObject({ valid: true });
   });
+
+  it('verifies event hashes after JSON serialization omits optional undefined fields', async () => {
+    const store = new JsonlEventStore({ root: await root() });
+    await store.append([{ ...draft('optional', 'run.requested'), causationId: undefined, idempotencyKey: undefined, evidence: undefined }]);
+    await expect(new JsonlEventStore({ root: store.root }).verify(context.runId)).resolves.toMatchObject({ valid: true, lastSequence: 1 });
+  });
 });

@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { LoopRunner } from './loop-runner';
 import type { ProviderBundle } from '../providers';
 import type { BacklogItem } from '../../domain/backlog/index';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const item: BacklogItem = {
   id: '42',
@@ -15,6 +18,172 @@ const item: BacklogItem = {
 };
 
 describe('LoopRunner QA boundary', () => {
+  it('routes an explicitly scoped managed item through executeWorkItem without legacy implementation or QA', async () => {
+    const ready = { ...item, state: 'ready' as const, workItemId: 'github:org/repo#42' as BacklogItem['workItemId'] };
+    const providers = {
+      backlog: { get: vi.fn(async () => ready), list: vi.fn(async () => [ready]), isRunnable: vi.fn(async () => true) },
+      branches: {}, changes: {},
+    } as unknown as ProviderBundle;
+    const executeManagedWorkItem = vi.fn(async () => ({ status: 'merge_ready', changeUrl: 'https://example.test/pr/42' } as any));
+    const workflowRunnerFactory = vi.fn();
+    const qaRunnerFactory = vi.fn();
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'], managedExecution: { workItemId: 'github:org/repo#42', manifestPath: '/workspace/.afk/execution-manifest.json' },
+      readManifest: vi.fn(async () => ({ workItemId: 'github:org/repo#42', providerBacklogId: '42', tracker: { platform: 'github', projectKey: 'org/repo' } } as any)),
+      executeManagedWorkItem, workflowRunnerFactory, qaRunnerFactory,
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.poll();
+    await vi.waitFor(() => expect(executeManagedWorkItem).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(subject.getStatus().totals.completed).toBe(1));
+
+    expect(executeManagedWorkItem).toHaveBeenCalledWith(expect.objectContaining({
+      workItemId: 'github:org/repo#42', manifestPath: '/workspace/.afk/execution-manifest.json',
+    }));
+    expect(workflowRunnerFactory).not.toHaveBeenCalled();
+    expect(qaRunnerFactory).not.toHaveBeenCalled();
+    expect(subject.getStatus().qa.queue).toEqual([]);
+    expect(internals.inFlight.has('42')).toBe(false);
+  });
+
+  it('stops a bounded managed loop only after the shared use case reports QA PASS and publication', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'afk-managed-loop-'));
+    const ready = { ...item, state: 'ready' as const };
+    const providers = {
+      backlog: { get: vi.fn(async () => ready), list: vi.fn(async () => [ready]), isRunnable: vi.fn(async () => true) },
+      branches: {}, changes: {},
+    } as unknown as ProviderBundle;
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'], maxIterations: 1, pollIntervalMs: 60_000, statusIntervalMs: 60_000,
+      pidFilePath: join(directory, 'loop.pid'), statusFilePath: join(directory, 'status.json'),
+      managedExecution: { workItemId: 'github:org/repo#42', manifestPath: '/workspace/manifest.json' },
+      readManifest: vi.fn(async () => ({ workItemId: 'github:org/repo#42', providerBacklogId: '42', tracker: { platform: 'github', projectKey: 'org/repo' } } as any)),
+      executeManagedWorkItem: vi.fn(async () => ({ status: 'merge_ready', changeUrl: 'https://example.test/pr/42' } as any)),
+    });
+    try {
+      await subject.start();
+      expect(subject.getStatus().totals).toMatchObject({ completed: 1, failed: 0, started: 1 });
+      expect(subject.getStatus().implement.active).toBe(0);
+      expect(subject.getStatus().qa.queue).toEqual([]);
+    } finally {
+      await subject.stop();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects mismatched managed manifest before polling, claiming, or creating the loop pid', async () => {
+    const providers = { backlog: { list: vi.fn(), claim: vi.fn() }, branches: {}, changes: {} } as unknown as ProviderBundle;
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'], managedExecution: { workItemId: 'github:org/repo#42', manifestPath: '/workspace/manifest.json' },
+      readManifest: vi.fn(async () => ({ workItemId: 'github:org/repo#42', providerBacklogId: '43', tracker: { platform: 'github', projectKey: 'org/repo' } } as any)),
+      executeManagedWorkItem: vi.fn(),
+    });
+    await expect(subject.start()).rejects.toThrow(/manifest.*42|backlog.*43/i);
+    expect(providers.backlog.list).not.toHaveBeenCalled();
+    expect(providers.backlog.claim).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to legacy after a managed execution failure', async () => {
+    const ready = { ...item, state: 'ready' as const };
+    const providers = { backlog: { get: vi.fn(async () => ready) }, branches: {}, changes: {} } as unknown as ProviderBundle;
+    const workflowRunnerFactory = vi.fn();
+    const qaRunnerFactory = vi.fn();
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'], managedExecution: { workItemId: 'github:org/repo#42', manifestPath: '/workspace/manifest.json' },
+      readManifest: vi.fn(async () => ({ workItemId: 'github:org/repo#42', providerBacklogId: '42', tracker: { platform: 'github', projectKey: 'org/repo' } } as any)),
+      executeManagedWorkItem: vi.fn(async () => { throw new Error('audit unavailable'); }),
+      workflowRunnerFactory, qaRunnerFactory,
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    internals.inFlight.add('42');
+
+    await internals.runChain('42');
+
+    expect(workflowRunnerFactory).not.toHaveBeenCalled();
+    expect(qaRunnerFactory).not.toHaveBeenCalled();
+    expect(subject.getStatus().totals.failed).toBe(1);
+    expect(subject.getStatus().lastError['42']).toContain('audit unavailable');
+    expect(internals.inFlight.has('42')).toBe(false);
+  });
+
+  it.each([
+    ['rework', 0, 0],
+    ['blocked', 0, 1],
+    ['not_claimed', 0, 0],
+  ] as const)('does not count managed %s as completed or enqueue legacy QA', async (status, completed, failed) => {
+    const ready = { ...item, state: 'ready' as const };
+    const providers = { backlog: { get: vi.fn(async () => ready) }, branches: {}, changes: {} } as unknown as ProviderBundle;
+    const workflowRunnerFactory = vi.fn();
+    const qaRunnerFactory = vi.fn();
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'], managedExecution: { workItemId: 'github:org/repo#42', manifestPath: '/workspace/manifest.json' },
+      readManifest: vi.fn(async () => ({ workItemId: 'github:org/repo#42', providerBacklogId: '42', tracker: { platform: 'github', projectKey: 'org/repo' } } as any)),
+      executeManagedWorkItem: vi.fn(async () => ({ status } as any)),
+      workflowRunnerFactory, qaRunnerFactory,
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    await internals.runChain('42');
+    expect(subject.getStatus().totals).toMatchObject({ completed, failed });
+    expect(subject.getStatus().qa.queue).toEqual([]);
+    expect(workflowRunnerFactory).not.toHaveBeenCalled();
+    expect(qaRunnerFactory).not.toHaveBeenCalled();
+  });
+
+  it('labels the manifest-less path as legacy, even when a canonical ID is present', async () => {
+    const ready = { ...item, state: 'ready' as const, workItemId: 'github:org/repo#42' as BacklogItem['workItemId'] };
+    const providers = { backlog: { get: vi.fn(async () => ready) }, branches: {}, changes: {} } as unknown as ProviderBundle;
+    const run = vi.fn(async () => ({ success: false, skipped: 'not_claimed' as const }));
+    const subject = new LoopRunner(providers, { workflowRunnerFactory: vi.fn(() => ({ run }) as any) });
+    const internals = subject as any;
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    await internals.runChain('42');
+    expect(run).toHaveBeenCalledOnce();
+    expect(internals.emitEvent).toHaveBeenCalledWith(expect.stringContaining('legacy'));
+  });
+
+  it('refuses a managed candidate from another provider project even with the same issue number', async () => {
+    const wrongProject = { ...item, state: 'ready' as const, providerRef: 'github:other/repo#42' };
+    const providers = { backlog: { get: vi.fn(async () => wrongProject) }, branches: {}, changes: {} } as unknown as ProviderBundle;
+    const executeManagedWorkItem = vi.fn();
+    const workflowRunnerFactory = vi.fn();
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'], managedExecution: { workItemId: 'github:org/repo#42', manifestPath: '/workspace/manifest.json' },
+      readManifest: vi.fn(async () => ({ workItemId: 'github:org/repo#42', providerBacklogId: '42', tracker: { platform: 'github', projectKey: 'org/repo' } } as any)),
+      executeManagedWorkItem, workflowRunnerFactory,
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.runChain('42');
+
+    expect(executeManagedWorkItem).not.toHaveBeenCalled();
+    expect(workflowRunnerFactory).not.toHaveBeenCalled();
+    expect(subject.getStatus().lastError['42']).toMatch(/identity|project/);
+  });
+
+  it('rejects a manifest for a different tracker project before starting', async () => {
+    const providers = { backlog: { list: vi.fn() }, branches: {}, changes: {} } as unknown as ProviderBundle;
+    const subject = new LoopRunner(providers, {
+      backlogIds: ['42'], managedExecution: { workItemId: 'github:org/repo#42', manifestPath: '/workspace/manifest.json' },
+      readManifest: vi.fn(async () => ({ workItemId: 'github:org/repo#42', providerBacklogId: '42', tracker: { platform: 'github', projectKey: 'other/repo' } } as any)),
+    });
+    await expect(subject.start()).rejects.toThrow(/tracker|project|identity/);
+    expect(providers.backlog.list).not.toHaveBeenCalled();
+  });
+
   it('propagates one explicit agent provider through implementation and QA', async () => {
     const providers: ProviderBundle = {
       backlog: {

@@ -43,9 +43,10 @@ export type WorkItemExecutionServiceDeps = {
   reportError?: (error: unknown) => void;
 };
 
-export function buildWorkItemRunArgs(input: WorkItemRunStartInput, manifestPath: string): string[] {
-  const args = ["run", "--backlog-id", input.workItemId, "--execution-manifest", manifestPath];
+export function buildWorkItemRunArgs(input: WorkItemRunStartInput, manifestPath: string, executionId?: string): string[] {
+  const args = ["execute", "--work-item-id", input.workItemId, "--execution-manifest", manifestPath];
   if (input.workflow) args.push("--template", input.workflow);
+  if (executionId) args.push("--execution-id", executionId);
   return args;
 }
 
@@ -183,7 +184,7 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
       })),
     });
 
-    const runId = `desktop-${input.workItemId}-${randomUUID()}`;
+    const runId = `desktop-${randomUUID()}`;
     const startedAt = now().toISOString();
     const starting: WorkItemRunRecord = {
       id: runId,
@@ -211,7 +212,7 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
 
     let child: SpawnedProcess;
     try {
-      child = spawn(afkPath, buildWorkItemRunArgs(input, manifestPath), {
+      child = spawn(afkPath, buildWorkItemRunArgs(input, manifestPath, runId), {
         cwd: workspace.root,
         detached: true,
         stdio: "ignore",

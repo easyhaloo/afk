@@ -23,6 +23,7 @@ import type {
 import { extractAC } from '../../domain/tracker/ac';
 import type { BacklogMetadataLabel } from '../../domain/backlog/initialization';
 import { logger } from '../io/index';
+import { parseWorkItemId } from '../../domain/work-item/identity';
 
 /**
  * GitHub authentication options
@@ -241,6 +242,39 @@ export class GitHubClient implements TrackerProvider {
   }
 
   // ============ Pull Requests ============
+
+  async isMRLinkedToIssue(id: number, canonicalWorkItemId: string): Promise<boolean> {
+    const issue = parseWorkItemId(canonicalWorkItemId);
+    if (issue.platform !== 'github') throw new Error('GitHub PR requires a GitHub issue');
+    const [owner, repo, extra] = issue.projectKey.split('/');
+    if (!owner || !repo || extra) throw new Error('GitHub issue project key must be owner/repo');
+    const query = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+      repository(owner: $owner, name: $repo) {
+        issue(number: $number) {
+          closedByPullRequestsReferences(first: 100, after: $after, includeClosedPrs: true) {
+            nodes { number repository { nameWithOwner } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }`;
+    let after: string | null = null;
+    for (let page = 0; page < 20; page += 1) {
+      const response: {
+        repository?: { issue?: { closedByPullRequestsReferences?: {
+          nodes?: ({ number: number; repository?: { nameWithOwner: string } } | null)[];
+          pageInfo?: { hasNextPage: boolean; endCursor?: string | null };
+        } } };
+      } = await this.client.graphql(query, { owner, repo, number: issue.issueNumber, after });
+      const references = response.repository?.issue?.closedByPullRequestsReferences;
+      if (!references || !Array.isArray(references.nodes) || !references.pageInfo) throw new Error('GitHub issue linkage readback unavailable');
+      if (references.nodes.some(pr => pr?.number === id && pr.repository?.nameWithOwner.toLowerCase() === String(this.projectId).toLowerCase())) return true;
+      if (!references.pageInfo.hasNextPage) return false;
+      if (!references.pageInfo.endCursor || references.pageInfo.endCursor === after) throw new Error('GitHub issue linkage cursor unavailable');
+      after = references.pageInfo.endCursor;
+    }
+    throw new Error('GitHub issue linkage readback exceeded pagination limit');
+  }
 
   async getMR(id: number): Promise<TrackedMR> {
     const oct = this.client;

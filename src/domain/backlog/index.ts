@@ -1,5 +1,13 @@
 export type BacklogState = 'ready' | 'rework' | 'in_progress' | 'verification' | 'merge_ready' | 'done' | 'blocked';
 export type BacklogExecutionMode = 'afk' | 'hitl';
+
+export type BacklogChangeRequest = {
+  id: string;
+  state: 'open' | 'merged' | 'closed';
+  sourceBranch: string;
+  targetBranch: string;
+  url?: string;
+};
 import { randomUUID } from 'node:crypto';
 export type { BacklogClaim, ClaimLease } from './claim';
 export { FilesystemClaimLock } from './claim';
@@ -37,6 +45,7 @@ export interface BacklogItem {
   providerRef: string;
   /** Optional provider URL for read-only navigation (for example, opening in a browser). */
   webUrl?: string;
+  changeRequest?: BacklogChangeRequest;
 }
 
 export interface BacklogCreateInput {

@@ -14,13 +14,24 @@ describe('package test scripts', () => {
     expect(packageJson.scripts?.pretest).toBe('npm run build');
   });
 
-  it('keeps desktop development attached while preserving the background start command', () => {
+  it('starts desktop development through the background launcher', () => {
     const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'desktop-client/package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
+    const makefile = readFileSync(join(repositoryRoot, 'Makefile'), 'utf8');
 
-    expect(packageJson.scripts?.dev).toBe('pnpm run dev:raw');
+    expect(makefile).toContain('desktop-dev:\n\tpnpm --filter afk-control-electron start');
     expect(packageJson.scripts?.start).toBe('bash scripts/start.sh');
+  });
+
+  it('cleans up the previous desktop development stack before starting a new one', () => {
+    const startScript = readFileSync(join(repositoryRoot, 'desktop-client/scripts/start.sh'), 'utf8');
+
+    expect(startScript).toContain('dev:raw');
+    expect(startScript).toContain('tsc -p tsconfig.electron.json --watch');
+    expect(startScript).toContain('electron .');
+    expect(startScript).toContain('detached: true');
+    expect(startScript).toContain('stop_dev_processes KILL');
   });
 
   it('builds and packages a standalone inventory runner for clean desktop installs', () => {

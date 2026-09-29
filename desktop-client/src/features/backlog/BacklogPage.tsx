@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, CircleAlert, Eye, GitMerge, Hand, Play, Plus, RotateCcw, Search, Square, X } from "lucide-react";
+import { ArrowUpRight, Bot, CircleAlert, Eye, GitMerge, Hand, Plus, RotateCcw, Search, Square, X } from "lucide-react";
 import type {
   BacklogCreateInput,
   BacklogExecutionMode,
   BacklogItem,
   BacklogListOptions,
   BacklogPlatform,
-  BacklogRunRetryInput,
-  BacklogRunStartInput,
   BacklogRunSummary,
   BacklogRuntimeSummary,
 } from "../../../shared/backlog-contract";
@@ -30,6 +28,7 @@ type BacklogPageProps = {
   templates?: WorkflowTemplateSummary[];
   defaultTemplate?: string;
   defaultAgent?: string;
+  onOpenWorkItem?: (workItemId: string) => void;
 };
 
 const sourceOptions: Array<{ value: SourceFilter; label: string }> = [
@@ -47,17 +46,6 @@ const executionModeOptions: Array<{ value: BacklogExecutionMode; label: string }
   { value: "afk", label: "AFK 自动" },
   { value: "hitl", label: "HITL 人工" },
 ];
-
-const actionLabels: Record<BacklogPrimaryAction, string> = {
-  start: "开始执行",
-  "view-run": "查看运行",
-  stop: "停止并转人工",
-  recover: "标记阻塞并恢复",
-  retry: "修复后重试",
-  "confirm-merge": "确认合并",
-  "view-result": "查看结果",
-  view: "查看详情",
-};
 
 const EMPTY_CREATE_FORM: BacklogCreateInput = { title: "", description: "", executionMode: "afk", tags: [] };
 const BACKLOG_FORCE_REFRESH = 24 * 60 * 60 * 1000;
@@ -80,26 +68,7 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(modalFocusableSelector)).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
 }
 
-function templateSourceLabel(source?: WorkflowTemplateSummary["source"]): string {
-  return source === "builtin" ? "AFK 内置" : source === "managed" ? "本项目 · 自定义" : source === "project" ? "本项目" : "工作区默认";
-}
-
-function templateStepLabel(step: WorkflowTemplateSummary["steps"][number]): string {
-  if (step.kind === "system") return step.action || step.id;
-  if (step.role === "reviewer") return "审查";
-  if (step.role === "implementer") return "实现";
-  return step.id;
-}
-
-function ActionIcon({ action }: { action: BacklogPrimaryAction }) {
-  if (action === "start") return <Play size={12} fill="currentColor" aria-hidden="true" />;
-  if (action === "stop") return <Square size={11} fill="currentColor" aria-hidden="true" />;
-  if (action === "recover" || action === "retry") return <RotateCcw size={12} aria-hidden="true" />;
-  if (action === "confirm-merge") return <GitMerge size={12} aria-hidden="true" />;
-  return <Eye size={12} aria-hidden="true" />;
-}
-
-export function BacklogPage({ workspace, refreshVersion = 0, templates = [], defaultTemplate, defaultAgent = "—" }: BacklogPageProps) {
+export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—", onOpenWorkItem }: BacklogPageProps) {
   const cached = useMemo(() => readBacklogCache(workspace), []);
   const [items, setItems] = useState<BacklogItem[]>(cached?.items ?? []);
   const [state, setState] = useState<SourceFilter>("all");
@@ -119,9 +88,6 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
   const [runBusyFor, setRunBusyFor] = useState("");
   const [runs, setRuns] = useState<Record<string, BacklogRunSummary>>({});
   const [summaries, setSummaries] = useState<Record<string, BacklogRuntimeSummary>>({});
-  const [launchItem, setLaunchItem] = useState<{ item: BacklogItem; intent: "start" | "retry" } | null>(null);
-  const [selectedTemplate, setSelectedTemplate] = useState(defaultTemplate ?? templates[0]?.id ?? "");
-  const [retryReason, setRetryReason] = useState("已完成人工修复，重新执行");
   const createModalRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
@@ -239,35 +205,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
     catch (cause) { if (mountedRef.current) setDetailError(cause instanceof Error ? cause.message : String(cause)); }
   }, []);
 
-  const launchRun = useCallback(async () => {
-    if (!launchItem) return;
-    const { item, intent } = launchItem;
-    setRunBusyFor(item.id);
-    setError("");
-    try {
-      const input: BacklogRunStartInput = { backlogId: item.id, ...(selectedTemplate ? { template: selectedTemplate } : {}) };
-      const run = intent === "retry"
-        ? await window.afkDesktop.backlog.retry(workspace, { ...input, reason: retryReason.trim() } satisfies BacklogRunRetryInput)
-        : await window.afkDesktop.backlog.start(workspace, input);
-      if (!mountedRef.current) return;
-      setRuns((current) => ({ ...current, [item.id]: run }));
-      setSummaries((current) => ({ ...current, [item.id]: { backlogId: item.id, backlog: item, activeRun: run } }));
-      setLaunchItem(null);
-    } catch (cause) {
-      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      if (mountedRef.current) setRunBusyFor("");
-    }
-  }, [launchItem, retryReason, selectedTemplate, workspace]);
-
-  const runAction = useCallback(async (item: BacklogItem, action: BacklogPrimaryAction) => {
-    if (action === "start" || action === "retry") {
-      setSelectedTemplate(runs[item.id]?.template || defaultTemplate || templates[0]?.id || "");
-      setRetryReason("已完成人工修复，重新执行");
-      setLaunchItem({ item, intent: action });
-      return;
-    }
-    if (action === "view" || action === "view-run" || action === "view-result") { await openDetails(item); return; }
+  const runLifecycleAction = useCallback(async (item: BacklogItem, action: "stop" | "recover" | "confirm-merge") => {
     setRunBusyFor(item.id);
     setError("");
     try {
@@ -280,10 +218,10 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
     } finally {
       if (mountedRef.current) setRunBusyFor("");
     }
-  }, [defaultTemplate, openDetails, runs, templates, workspace]);
+  }, [workspace]);
 
   const filtered = useMemo(() => filterBacklogItems(items, query, state).sort((a, b) => b.id.localeCompare(a.id)), [items, query, state]);
-  const templateOptions = templates.map((template) => ({ value: template.id, label: template.name }));
+  const templateOptions = templates.map((template) => ({ value: template.id, label: template.name }));)
 
   return (
     <section className="control-page backlog-page" aria-label="Provider Backlog">
@@ -303,30 +241,20 @@ export function BacklogPage({ workspace, refreshVersion = 0, templates = [], def
         {filtered.length ? filtered.map((item) => {
           const summary = summaries[item.id] ?? { backlogId: item.id, backlog: item, ...(runs[item.id] ? { activeRun: runs[item.id] } : {}) };
           const action = getBacklogPrimaryAction(item, summary);
-          const actionLabel = runBusyFor === item.id ? "处理中" : actionLabels[action];
-          const selected = templates.find((template) => template.id === selectedTemplate);
+          const canExecuteInWorkItem = action === "start" || action === "retry";
+          const missingWorkItemId = canExecuteInWorkItem && !item.workItemId;
+          const actionLabel = runBusyFor === item.id ? "处理中" : canExecuteInWorkItem ? "在工作项中执行" : action === "stop" ? "停止并转人工" : action === "recover" ? "标记阻塞并恢复" : action === "confirm-merge" ? "确认合并" : action === "view-run" ? "查看运行" : action === "view-result" ? "查看结果" : "查看详情";
+          const actionTitle = missingWorkItemId ? "缺少规范化 workItemId，无法在工作项中执行" : canExecuteInWorkItem && !onOpenWorkItem ? "工作项导航未配置" : actionLabel;
           return (
             <article className={`backlog-row${detailSummary?.backlogId === item.id ? " selected" : ""}`} key={item.id} onClick={() => { void openDetails(item); }}>
               <span className={`backlog-mode-mark is-${item.executionMode}`} aria-label={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"} title={item.executionMode === "afk" ? "AFK 自动" : "HITL 人工"}>{item.executionMode === "afk" ? <Bot size={16} aria-hidden="true" /> : <Hand size={16} aria-hidden="true" />}</span>
               <div className="backlog-row-body">
-                <header><div className="backlog-row-heading"><b>{item.title}</b><small>#{item.id}</small></div><button type="button" className="backlog-run-button" onClick={(event) => { event.stopPropagation(); void runAction(item, action); }} disabled={runBusyFor === item.id} aria-label={actionLabel} title={actionLabel}><ActionIcon action={action} /><span className="backlog-run-button-label">{actionLabel}</span></button></header>
+                <header><div className="backlog-row-heading"><b>{item.title}</b><small>#{item.id}</small></div><button type="button" className="backlog-run-button" onClick={(event) => { event.stopPropagation(); if (canExecuteInWorkItem) { if (item.workItemId) onOpenWorkItem?.(item.workItemId); } else if (action === "stop" || action === "recover" || action === "confirm-merge") { void runLifecycleAction(item, action); } else { void openDetails(item); } }} disabled={runBusyFor === item.id || (canExecuteInWorkItem && (!item.workItemId || !onOpenWorkItem))} aria-label={actionLabel} title={actionTitle}>{canExecuteInWorkItem ? <ArrowUpRight size={12} aria-hidden="true" /> : action === "stop" ? <Square size={11} fill="currentColor" aria-hidden="true" /> : action === "recover" ? <RotateCcw size={12} aria-hidden="true" /> : action === "confirm-merge" ? <GitMerge size={12} aria-hidden="true" /> : <Eye size={12} aria-hidden="true" />}<span className="backlog-run-button-label">{actionLabel}</span></button></header>
                 <div className="backlog-item-metadata"><span className={`backlog-state-label backlog-state-${item.state}`}><i aria-hidden="true" />{backlogStateLabel(item.state)}</span></div>
-                {runs[item.id] ? <p className="backlog-run-status">运行状态：{runs[item.id].status === "running" ? "运行中" : runs[item.id].status === "completed" ? "已完成" : runs[item.id].status === "starting" ? "启动中" : "失败"} · PID {runs[item.id].pid ?? "—"}</p> : null}
+                {missingWorkItemId ? <p className="backlog-run-status">缺少规范化 workItemId，请先关联工作项</p> : null}
+                {runs[item.id] ? <p className="backlog-run-status">运行状态：{runs[item.id].status === "running" ? "运行中" : runs[item.id].status === "completed" ? "进程已退出，QA 未确认" : runs[item.id].status === "starting" ? "启动中" : "失败"} · PID {runs[item.id].pid ?? "—"}</p> : null}
                 {item.tags.length ? <ul className="backlog-tags">{item.tags.map((tag) => <li key={tag}><span>{tag}</span></li>)}</ul> : null}
               </div>
-              {launchItem?.item.id === item.id ? (
-                <section className="backlog-launch-confirm" aria-label={`确认执行 Backlog ${item.id}`} onClick={(event) => event.stopPropagation()}>
-                  <header><div><small>{launchItem.intent === "retry" ? "修复后重试" : "开始执行"}</small><b>#{item.id} {item.title}</b></div><button type="button" className="icon-button" aria-label="取消执行" onClick={() => setLaunchItem(null)}><X size={14} /></button></header>
-                  <div className="backlog-launch-fields">
-                    <div><span>执行模板</span>{templateOptions.length ? <SelectMenu label="执行模板" value={selectedTemplate} options={templateOptions} onChange={setSelectedTemplate} /> : <strong>{selectedTemplate || "工作区默认"}</strong>}</div>
-                    <div><span>模板来源</span><strong>{templateSourceLabel(selected?.source)}</strong></div>
-                    <div><span>执行步骤</span><strong>{selected?.steps.length ? selected.steps.map(templateStepLabel).join(" → ") : "使用模板默认步骤"}</strong></div>
-                    <div><span>默认 Agent</span><strong>{defaultAgent}</strong></div>
-                    {launchItem.intent === "retry" ? <label><span>修复说明</span><input value={retryReason} onChange={(event) => setRetryReason(event.target.value)} /></label> : null}
-                  </div>
-                  <button type="button" className="backlog-launch-button" aria-label={`启动 Backlog ${item.id}`} disabled={runBusyFor === item.id || (launchItem.intent === "retry" && !retryReason.trim())} onClick={() => { void launchRun(); }}>{runBusyFor === item.id ? "启动中…" : launchItem.intent === "retry" ? "修复后重试" : "启动"}</button>
-                </section>
-              ) : null}
             </article>
           );
         }) : <div className="backlog-empty"><b>{busy ? "正在读取 Backlog…" : workspace.trim() ? "没有匹配的工作项" : "请先选择工作区"}</b><span>{workspace.trim() ? "Provider Backlog 由 afk CLI 通过 gh / glab 调用；请先安装 CLI 并完成鉴权。" : "项目 Backlog 依赖本地工作区；全局工作项不受此限制。"}</span></div>}

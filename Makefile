@@ -7,7 +7,7 @@ dev:
 	pnpm --filter afk-control-electron start
 
 desktop-dev:
-	pnpm --filter afk-control-electron dev
+	pnpm --filter afk-control-electron start
 
 desktop-build:
 	pnpm --filter afk-control-electron build

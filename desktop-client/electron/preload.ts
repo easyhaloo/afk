@@ -48,6 +48,7 @@ const IPC_CHANNELS = {
   backlogSummary: "afk:backlog-summary",
   workItemsList: "afk:work-items-list",
   workItemsStart: "afk:work-items-start",
+  workItemsExecutions: "afk:work-items-executions",
   jumpserverTestConnection: "afk:jumpserver-test-connection",
   jumpserverAddBastion: "afk:jumpserver-add-bastion",
   jumpserverListAssets: "afk:jumpserver-list-assets",
@@ -124,6 +125,7 @@ const api: DesktopApi = {
         ? ipcRenderer.invoke(IPC_CHANNELS.workItemsList)
         : ipcRenderer.invoke(IPC_CHANNELS.workItemsList, options),
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.workItemsStart, input),
+    executions: (options) => ipcRenderer.invoke(IPC_CHANNELS.workItemsExecutions, options),
   },
   jumpserver: {
     testConnection: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverTestConnection, input),

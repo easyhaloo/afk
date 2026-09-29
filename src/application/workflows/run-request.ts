@@ -14,6 +14,7 @@ import {
   type ResolvedExecutionManifestRepository,
 } from './execution-manifest';
 import { resolveGitLabProjectKey } from '../../shared/gitlab-project';
+import { parseWorkItemId } from '../../domain/work-item/identity';
 
 export type WorkflowRunRepository = ResolvedExecutionManifestRepository;
 
@@ -21,6 +22,9 @@ export type WorkflowRunRepository = ResolvedExecutionManifestRepository;
 export interface WorkflowRunRequest {
   backlogId: string;
   workItemId?: string;
+  observationRunId?: string;
+  observationWorkItemId?: string;
+  auditRequired?: boolean;
   repoRoot: string;
   workspaceRoot: string;
   projectName?: string;
@@ -52,6 +56,9 @@ export interface WorkflowRunRequest {
 export interface WorkflowRunCliInput {
   backlogId: string;
   workItemId?: string;
+  observationRunId?: string;
+  observationWorkItemId?: string;
+  auditRequired?: boolean;
   session?: string;
   projectName?: string;
   repoRoot?: string;
@@ -104,6 +111,19 @@ function deriveBranchStrategy(backlogId: string, raw?: BranchStrategyConfig): Br
   return { type: 'named', branch: deriveBacklogBranchName(backlogId) };
 }
 
+export function validateObservationIdentity(input: {
+  observationRunId?: string;
+  observationWorkItemId?: string;
+  auditRequired?: boolean;
+}): void {
+  if (input.observationRunId === undefined && input.observationWorkItemId === undefined && !input.auditRequired) return;
+  if (!input.observationRunId || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(input.observationRunId)) {
+    throw new Error('observationRunId must be a safe, nonempty execution run ID');
+  }
+  if (!input.observationWorkItemId) throw new Error('observationWorkItemId is required with observationRunId');
+  parseWorkItemId(input.observationWorkItemId);
+}
+
 /** Normalize CLI/config values into the one request consumed by the runner. */
 export function resolveWorkflowRequest(
   input: WorkflowRunCliInput,
@@ -112,6 +132,7 @@ export function resolveWorkflowRequest(
 ): WorkflowRunRequest {
   const backlogId = input.backlogId?.trim();
   if (!backlogId) throw new Error('backlogId is required');
+  validateObservationIdentity(input);
   const budget = input.maxTotalTokens ?? config.goalBudget ?? defaults.goalBudget;
   const agentProvider = resolveAgentProviderName(
     input.agentProvider ?? input.provider ?? config.agentDefault ?? defaults.agentProvider,
@@ -124,6 +145,9 @@ export function resolveWorkflowRequest(
   return {
     backlogId,
     workItemId: input.workItemId,
+    observationRunId: input.observationRunId,
+    observationWorkItemId: input.observationWorkItemId,
+    auditRequired: input.auditRequired,
     repoRoot: context.repoRoot,
     workspaceRoot: input.workspaceRoot ?? context.repoRoot,
     projectName: input.projectName ?? context.projectName,

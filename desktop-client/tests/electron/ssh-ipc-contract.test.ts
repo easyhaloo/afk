@@ -279,3 +279,16 @@ describe("SSH credential IPC contract", () => {
     expect(mocks.credentialService).not.toBeUndefined();
   });
 });
+
+describe("Backlog execution IPC cutover", () => {
+  beforeAll(async () => {
+    const { registerIpcHandlers } = await import("../../electron/ipc/register-handlers");
+    registerIpcHandlers();
+  });
+
+  it("rejects legacy Backlog launch channels rather than spawning another runner", async () => {
+    const sender = { senderFrame: { url: "http://localhost:5174" } };
+    await expect(mocks.handlers.get(IPC_CHANNELS.backlogStart)!(sender, process.cwd(), { backlogId: "158" })).rejects.toThrow("USE_WORK_ITEM_EXECUTION");
+    await expect(mocks.handlers.get(IPC_CHANNELS.backlogRetry)!(sender, process.cwd(), { backlogId: "158", reason: "retry" })).rejects.toThrow("USE_WORK_ITEM_EXECUTION");
+  });
+});

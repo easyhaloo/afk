@@ -45,6 +45,33 @@ describe("Backlog shared contract", () => {
     expect(item).not.toHaveProperty("password");
   });
 
+  it("accepts persisted change request metadata in a backlog runtime summary", () => {
+    expect(parseBacklogRuntimeSummary({
+      backlogId: "42",
+      backlog: {
+        id: "42",
+        title: "Ready for merge",
+        description: "body",
+        parentId: undefined,
+        baseBacklogId: undefined,
+        dependsOn: [],
+        state: "merge_ready",
+        executionMode: "hitl",
+        tags: [],
+        branchName: "afk/backlog-42",
+        providerRef: "github:org/repo#42",
+        webUrl: "https://example/42",
+        changeRequest: {
+          id: "9",
+          state: "open",
+          sourceBranch: "afk/backlog-42-qa",
+          targetBranch: "main",
+          url: "https://example/pull/9",
+        },
+      },
+    }).backlog.changeRequest).toMatchObject({ id: "9", url: "https://example/pull/9" });
+  });
+
   it("parseBacklogListOptions returns an empty object for empty input", () => {
     expect(parseBacklogListOptions({})).toEqual({});
   });

@@ -30,7 +30,9 @@ import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
 import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
+import { executionHistoryEvents } from "./features/run-center/execution-events";
 import type { ProviderProjectRef } from "../shared/backlog-contract";
+import type { ExecutionSummary } from "../shared/execution-contract";
 import type { SshSession } from "../shared/ssh-contract";
 
 type Phase = "ready" | "active" | "verify" | "attention";
@@ -110,9 +112,12 @@ function RuntimeSource({ source }: { source: string }) {
 
 function App() {
   const [view, setView] = useState<View>("backlog");
+  const [focusWorkItemId, setFocusWorkItemId] = useState<string | undefined>();
   const [runMode, setRunMode] = useState<"queue" | "board">("queue");
   const [workspace, setWorkspace] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [auditedExecutions, setAuditedExecutions] = useState<ExecutionSummary[]>([]);
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [selected, setSelected] = useState<RuntimeEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +153,7 @@ function App() {
         freshTimer.current = window.setTimeout(() => setFreshIds(new Set()), 1400);
       }
       setWorkspace(next.workspace.root);
-      setSelected((current) => current ? next.events.find((item) => item.id === current.id) ?? null : null);
+      setSelected((current) => current ? next.events.find((item) => item.id === current.id) ?? current : null);
       setReplayRun((current) => next.events.some((item) => item.source === current) ? current : next.events[0]?.source ?? "");
       if (!session && next.sessions[0]) {
         setSession(next.sessions[0].name);
@@ -165,6 +170,21 @@ function App() {
 
   useEffect(() => () => { if (freshTimer.current) window.clearTimeout(freshTimer.current); }, []);
   useEffect(() => { void refresh(""); }, []);
+  useEffect(() => {
+    if (view !== "queue" && view !== "board") return;
+    let mounted = true;
+    const loadExecutions = async () => {
+      try {
+        const page = await window.afkDesktop.workItems.executions({ limit: 100 });
+        if (mounted) { setAuditedExecutions(page.executions); setAuditError(null); }
+      } catch (cause) {
+        if (mounted) setAuditError(cause instanceof Error ? cause.message : String(cause));
+      }
+    };
+    void loadExecutions();
+    const timer = window.setInterval(() => { void loadExecutions(); }, 5000);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, [view]);
   useEffect(() => { void window.afkDesktop.appearance().then(setAppearance).catch(() => setAppearance(defaultAppearance)); }, []);
   useEffect(() => {
     const buffer = earlySshSessionBuffer.current;
@@ -189,18 +209,9 @@ function App() {
     root.dataset.afkScale = appearance.fontScale;
   }, [appearance]);
 
-  const events = useMemo(() => [
-    ...(snapshot?.events ?? []),
-    ...(snapshot?.workItemRuns ?? []).map((run): RuntimeEvent => ({
-      id: `work-item-run-${run.id}`,
-      timestamp: run.startedAt,
-      source: run.workItemId,
-      status: run.status === "starting" ? "queued" : run.status,
-      result: run.status === "running" ? "工作项正在执行" : run.status === "starting" ? "工作项正在启动" : run.status === "completed" ? "工作项执行完成" : "工作项执行失败",
-      nextStep: `任务空间：${run.workspacePath}`,
-      raw: JSON.stringify(run),
-    })),
-  ], [snapshot]);
+  const events = useMemo(() => view === "events" ? snapshot?.events ?? [] : [
+    ...executionHistoryEvents(auditedExecutions, snapshot?.workItemRuns ?? []),
+  ], [snapshot, auditedExecutions, view]);
 
   const groups = useMemo(() => {
     const value: Record<Phase, RuntimeEvent[]> = { ready: [], active: [], verify: [], attention: [] };
@@ -307,7 +318,7 @@ function App() {
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">A</span><strong>AFK <b>/</b> CONTROL</strong><small>LOCAL OPERATIONS</small></div>
-        <button className="quick-run" onClick={() => { setRunMode("queue"); setView("queue"); }}><Workflow size={18} />新建运行</button>
+        <button className="quick-run" onClick={() => { setFocusWorkItemId(undefined); setView("backlog"); }}><Workflow size={18} />新建运行</button>
         <nav className="primary-nav" aria-label="主导航">{navGroups.map((group) => <section className="nav-group" aria-label={group.label} key={group.label}><span className="nav-label">{group.title}</span><span className="nav-group-label">{group.label}</span>{group.items.map(([key, text, Icon]) => <button key={key} className={activeNav === key ? "nav-item active" : "nav-item"} aria-current={activeNav === key ? "page" : undefined} title={text} onClick={() => { if (key === "queue") setRunMode("queue"); activateView(key); }}><Icon size={16} aria-hidden="true" />{text}{key === "agents" && runtimes.length ? <em className="healthy-badge">{availableRuntimeCount}/{runtimeTotal}</em> : null}</button>)}</section>)}</nav>
       </aside>
 
@@ -316,6 +327,7 @@ function App() {
           <div className="topbar-context"><div className="breadcrumb"><span>AFK</span><b>›</b><strong>{title}</strong></div>{view === "queue" || view === "board" ? <div className="run-view-switcher header-run-mode" aria-label="运行视图切换"><button className={runMode === "queue" ? "active" : ""} onClick={() => { setRunMode("queue"); setView("queue"); }}><LayoutList size={14} />队列</button><button className={runMode === "board" ? "active" : ""} onClick={() => { setRunMode("board"); setView("board"); }}><Workflow size={14} />看板</button></div> : null}{view === "agents" ? <AgentHeaderSummary available={availableRuntimeCount} total={runtimeTotal} unavailable={unavailableRuntimeCount} /> : null}</div>
         </header>
         {error ? <div className="error-banner"><X size={15} />{error}</div> : null}
+        {auditError && (view === "queue" || view === "board") ? <div className="error-banner"><X size={15} />运行审计查询失败：{auditError}</div> : null}
         <div className={view === "queue" || view === "board" ? "run-center-layout" : "view-layout"}>
         <div className="workspace">
           {view === "queue" ? <Queue events={events} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
@@ -324,13 +336,13 @@ function App() {
           {view === "repositories" ? <Repositories /> : null}
           {view === "containers" ? <Environments snapshot={snapshot} onTerminal={(name, targetWorkspace) => void openSession(name, targetWorkspace)} /> : null}
           {view === "ssh" ? <SshHostsPage onSession={openSshSession} /> : null}
-          {view === "backlog" ? <WorkItemsPage /> : null}
-          {view === "projectBacklog" ? <BacklogPage workspace={workspace} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} /> : null}
+          {view === "backlog" ? <WorkItemsPage focusWorkItemId={focusWorkItemId} /> : null}
+          {view === "projectBacklog" ? <BacklogPage workspace={workspace} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} onOpenWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
           {view === "workflows" ? <Workflows snapshot={snapshot} onSave={saveWorkflowConfig} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}
         </div>
-        {selected && (view === "queue" || view === "board") ? <Inspector event={selected} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} /> : null}
+        {selected && (view === "queue" || view === "board") ? <Inspector event={selected} execution={auditedExecutions.find(run => run.executionId === selected.id)} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} onWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} onPR={(url) => void window.afkDesktop.openExternal(url)} /> : null}
         </div>
       </section>
       {terminal.open ? <TerminalSheet mode={terminal.mode} session={session} pane={terminal.pane} line={line} confirmed={confirmed} sshSession={terminal.sshSession} onClose={closeTerminal} onLine={setLine} onConfirmed={setConfirmed} onSend={() => void sendInput()} onSshInput={(data) => {
@@ -776,7 +788,7 @@ function RecordDrawer({ event, onClose }: { event: RuntimeEvent; onClose: () => 
   return <aside className="record-drawer" ref={drawerRef} role="complementary" aria-label="记录详情"><header><span>记录详情</span><button className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={16} /></button></header><div className="record-drawer-body"><RecordStatus status={status} /><h2>{event.result}</h2><p className="record-drawer-next">{event.nextStep}</p><dl><div><dt>运行</dt><dd>{event.source}</dd></div><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div></dl><details className="record-debug"><summary><Braces size={15} />调试信息</summary><pre>{event.raw}</pre></details></div></aside>;
 }
 
-function Inspector({ event, history, fresh, collapsed, onToggle, onSelect, onTerminal }: { event: RuntimeEvent; history: RuntimeEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (event: RuntimeEvent) => void; onTerminal: () => void }) {
+function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSelect, onTerminal, onWorkItem, onPR }: { event: RuntimeEvent; execution?: ExecutionSummary; history: RuntimeEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (event: RuntimeEvent) => void; onTerminal: () => void; onWorkItem: (id: string) => void; onPR: (url: string) => void }) {
   const phase = phaseOf(event);
   useEffect(() => {
     if (collapsed) return;
@@ -795,6 +807,7 @@ function Inspector({ event, history, fresh, collapsed, onToggle, onSelect, onTer
         <div className="inspector-title"><small><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time> · <RuntimeSource source={event.source} /></small><h2>{event.result}</h2></div>
         <div className={`inspector-flow ${visualState}`} aria-label="运行状态"><StateGlyph phase={visualState} size={13} /><span>{state.ariaLabel}</span><span className="inspector-flow-line" /><span>{phase === "active" ? "正在执行" : phase === "verify" ? "最近完成" : "需要处理"}</span></div>
         <dl><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div>{workspacePath ? <div className="inspector-workspace"><dt>任务空间</dt><dd title={workspacePath}>{workspacePath}</dd></div> : <div className="inspector-workspace"><dt>后续操作</dt><dd>{event.nextStep}</dd></div>}</dl>
+        {execution ? <div className="inspector-actions"><button type="button" className="icon-button" aria-label={`打开工作项 ${execution.workItemId}`} title="打开工作项" onClick={() => onWorkItem(execution.workItemId)}><ClipboardList size={16} /></button>{execution.pr ? <button type="button" className="icon-button" aria-label={`打开 PR #${execution.pr.id}`} title="打开 PR" onClick={() => onPR(execution.pr!.url)}><FolderOpen size={16} /></button> : null}</div> : null}
         {history.length > 1 ? <details className="inspector-history"><summary><span className="history-summary-label">运行历史 <b>{history.length}</b></span></summary><div>{history.map((item) => <button type="button" className={item.id === event.id ? "selected" : ""} key={item.id} onClick={() => onSelect(item)}><StateGlyph phase={eventStatus(item) === "failed" ? "failed" : phaseOf(item)} size={13} /><span><b>{item.result}</b><small><time dateTime={item.timestamp} title={item.timestamp}>{displayTimestamp(item.timestamp)}</time></small></span></button>)}</div></details> : null}
         <details className="inspector-debug"><summary>原始 JSON</summary><pre>{event.raw}</pre></details>
         <button className="takeover" onClick={onTerminal}><TerminalSquare size={15} />打开终端</button>

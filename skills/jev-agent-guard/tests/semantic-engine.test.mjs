@@ -42,8 +42,61 @@ test('action-risk denies a high Jev danger probability', async () => {
   assert.equal(response.decision, 'deny');
 });
 
+test('moderate action risk defers to native permissions without requesting approval', async () => {
+  const response = await evaluateSemantic('action-risk', { action: { tool: 'Bash', risk: 'network' } }, {}, {
+    ask: async () => ({ answers: {
+      dangerous: { type: 'noul', noul: 0.6 },
+      handling: { type: 'choice', choice: 'confirm' },
+      severity: { type: 'score', score: 1 },
+    } }), log: () => {},
+  });
+  assert.equal(response.decision, 'warn');
+  assert.equal(response.action, 'defer_to_host');
+  assert.doesNotMatch(response.reason, /human review|approval/i);
+});
+
 test('malformed provider answers cannot silently become an allow decision', async () => {
   await assert.rejects(() => evaluateSemantic('action-risk', {}, {}, {
     ask: async () => ({ answers: {} }), log: () => {},
   }), /Malformed Jev answer/);
+});
+
+test('Skill compliance names a specific unfinished Playbook step before redirecting', async () => {
+  const result = await evaluateSemantic('skill-compliance', {
+    skill: { name: 'build', steps: ['Check git status', 'Run the build'] },
+    evidence: [{ tool: 'Bash', success: false }],
+  }, {}, { ask: async ({ questions }) => {
+    assert.match(JSON.stringify(questions.missing_step), /Run the build/);
+    return { answers: {
+      compliant: { type: 'noul', noul: 0.4 },
+      next_step: { type: 'choice', choice: 'return_to_missing_step' },
+      missing_step: { type: 'choice', choice: 'step_2' },
+    } };
+  }, log: () => {} });
+  assert.equal(result.decision, 'redirect');
+  assert.match(result.nextStep, /Run the build/);
+});
+
+test('uncertain Skill compliance does not assert that work is missing', async () => {
+  const result = await evaluateSemantic('skill-compliance', {
+    skill: { name: 'build', steps: ['Run the build'] }, evidence: [],
+  }, {}, { ask: async () => ({ answers: {
+    compliant: { type: 'noul', noul: 0.3 },
+    next_step: { type: 'choice', choice: 'return_to_missing_step' },
+    missing_step: { type: 'choice', choice: 'unknown' },
+  } }), log: () => {} });
+  assert.equal(result.decision, 'warn');
+  assert.doesNotMatch(result.reason, /still needs work/);
+});
+
+test('uncertain validation gives a safe next action without claiming a missing step', async () => {
+  const result = await evaluateSemantic('skill-compliance', {
+    skill: { name: 'build', steps: ['Run the build'] }, evidence: [],
+  }, {}, { ask: async () => ({ answers: {
+    compliant: { type: 'noul', noul: 0.5 },
+    next_step: { type: 'choice', choice: 'validate' },
+    missing_step: { type: 'choice', choice: 'unknown' },
+  } }), log: () => {} });
+  assert.equal(result.decision, 'warn');
+  assert.match(result.nextStep, /Run the required validation/);
 });

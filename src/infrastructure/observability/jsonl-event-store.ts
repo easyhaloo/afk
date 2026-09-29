@@ -159,9 +159,9 @@ function verify(event: RunEvent, previous?: RunEvent): boolean {
 }
 
 function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map(entry => entry === undefined ? 'null' : stableJson(entry)).join(',')}]`;
   if (!value || typeof value !== 'object') return JSON.stringify(value);
-  const entries: [string, unknown][] = Object.entries(value);
+  const entries: [string, unknown][] = Object.entries(value).filter(([, entry]) => entry !== undefined);
   entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
   return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
 }

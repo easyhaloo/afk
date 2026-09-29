@@ -99,7 +99,9 @@ afk backlog tag remove --id <id> --tag bug
 # Execution & Automation
 afk                                  # Interactive TUI panel
 afk kanban                           # Kanban board
-afk run --backlog-id <id>            # Execute one Backlog item
+afk execute --work-item-id github:owner/repo#123 --execution-manifest <path>  # Managed work item: implement → QA → PR
+afk observe executions --work-item-id github:owner/repo#123 --json
+afk run --backlog-id <id>            # Legacy implementation-only entry
 afk run --backlog-id <id> --project <repo>
 afk qa --backlog-id <id>             # Standalone QA
 afk loop start --daemon --max-concurrent 3

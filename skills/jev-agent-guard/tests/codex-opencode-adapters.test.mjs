@@ -13,10 +13,9 @@ test('Codex maps local denial to supported native PreToolUse output', () => {
   });
 });
 
-test('Codex does not pretend to support ask when Jev recommends review', () => {
-  const result = toCodexResponse({ decision: 'needs-user', reason: 'Review this action' }, 'before-action');
-  assert.equal(result.hookSpecificOutput?.permissionDecision, undefined);
-  assert.equal(result.hookSpecificOutput?.additionalContext, 'Review this action');
+test('Codex leaves native permissions unchanged for Jev network advice', () => {
+  assert.deepEqual(toCodexResponse({ decision: 'advise', reason: 'Native permissions apply.' }, 'before-action'), {});
+  assert.deepEqual(toCodexResponse({ decision: 'needs-user', reason: 'Legacy Jev review' }, 'before-action'), {});
 });
 
 test('Codex sends a trajectory hint as model-visible PostToolUse context', () => {
@@ -35,6 +34,20 @@ test('Codex resumes compacted Skill context through SessionStart', () => {
   assert.deepEqual(toCodexResponse({ decision: 'advise', nextStep: 'Active Skill: debug' }, 'resume-context'), {
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'Active Skill: debug' },
   });
+});
+
+test('Codex stop feedback tells the agent which Skill step to complete', () => {
+  assert.deepEqual(toCodexResponse({ decision: 'deny', reason: 'Skill step needs completion.',
+    nextStep: 'Complete Skill step: Run validation.' }, 'stop'), {
+    decision: 'block', reason: 'Skill step needs completion. Next: Complete Skill step: Run validation.',
+  });
+});
+
+test('Codex stop advice provides a next action without blocking', () => {
+  const response = toCodexResponse({ decision: 'advise', reason: 'No step can be verified.',
+    nextStep: 'Run the required validation.' }, 'stop');
+  assert.equal(response.continue, true);
+  assert.match(response.systemMessage, /Next: Run the required validation/);
 });
 
 test('OpenCode plugin exposes native tool lifecycle handlers', async () => {

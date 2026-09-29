@@ -1,4 +1,4 @@
-import type { BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogProvider, BacklogState } from './index';
+import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogProvider, BacklogState } from './index';
 import { deriveBacklogBranchName } from './index';
 import { FilesystemClaimLock, type ExpiredClaim } from './claim';
 import {
@@ -59,14 +59,14 @@ export class TrackerBacklogProvider implements BacklogProvider {
 
   async get(id: string): Promise<BacklogItem> {
     const issue = await this.tracker.getIssue(this.issueId(id));
-    return toBacklogItem(issue);
+    return this.withChangeRequest(toBacklogItem(issue), issue.labels);
   }
 
   async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {
     // Read all issues so parent readiness can be derived from every child,
     // including completed children and dependencies.
     const issues = await this.tracker.listIssues({ state: 'all' });
-    const items = issues.map(toBacklogItem).filter(item =>
+    const items = (await Promise.all(issues.map(issue => this.withChangeRequest(toBacklogItem(issue), issue.labels)))).filter(item =>
       (options.state === undefined || item.state === options.state) &&
       (options.executionMode === undefined || item.executionMode === options.executionMode) &&
       (options.parentId === undefined || item.parentId === options.parentId) &&
@@ -124,6 +124,26 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const mode = state === 'blocked' ? MODE_LABELS.hitl : currentMode ?? MODE_LABELS.afk;
     await this.updateWorkflowLabels(issueId, issue.labels, [STATE_LABELS[state], mode]);
     if (state === 'done') await this.tracker.updateIssue(issueId, { state: 'closed' });
+  }
+
+  private async withChangeRequest(item: BacklogItem, labels: readonly string[]): Promise<BacklogItem> {
+    if (!labels.includes(STATE_LABELS.merge_ready) && !labels.includes(STATE_LABELS.done)) return item;
+    const changes = await this.tracker.listMRs({ state: 'all' });
+    const candidate = changes.find(change => change.sourceBranch === `${item.branchName}-qa`)
+      ?? changes.find(change => change.sourceBranch === item.branchName);
+    if (!candidate) return item;
+    const change = await this.tracker.getMR(candidate.id);
+    const state: BacklogChangeRequest['state'] = change.state === 'opened' ? 'open' : change.state;
+    return {
+      ...item,
+      changeRequest: {
+        id: String(change.id),
+        state,
+        sourceBranch: change.sourceBranch,
+        targetBranch: change.targetBranch,
+        ...(change.url ? { url: change.url } : {}),
+      },
+    };
   }
 
   async setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void> {

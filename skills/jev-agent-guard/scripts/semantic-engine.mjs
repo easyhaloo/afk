@@ -41,13 +41,22 @@ function buildQuestion(question) {
   throw new Error(`Unsupported Jev question type: ${question.type}`);
 }
 
-function questionMap(rule) {
-  return Object.fromEntries(Object.entries(rule.questions).map(([name, question]) => [name, buildQuestion(question)]));
+function questionsFor(rule, state) {
+  if (rule.id !== 'skill-compliance') return rule.questions;
+  const steps = Array.isArray(state?.skill?.steps) ? state.skill.steps.slice(0, 12) : [];
+  return { ...rule.questions, missing_step: { ...rule.questions.missing_step,
+    criteria: { ...rule.questions.missing_step.criteria,
+      ...Object.fromEntries(steps.map((step, index) => [`step_${index + 1}`, String(step).slice(0, 160)])) },
+  } };
 }
 
-function validateAnswers(rule, answers) {
+function questionMap(questions) {
+  return Object.fromEntries(Object.entries(questions).map(([name, question]) => [name, buildQuestion(question)]));
+}
+
+function validateAnswers(questions, answers) {
   if (!answers || typeof answers !== 'object') throw new Error('Malformed Jev answers');
-  for (const [name, question] of Object.entries(rule.questions)) {
+  for (const [name, question] of Object.entries(questions)) {
     const answer = answers[name];
     const valid = question.type === 'noul'
       ? answer?.type === 'noul' && Number.isFinite(answer.noul) && answer.noul >= 0 && answer.noul <= 1
@@ -63,7 +72,7 @@ function severityValue(answer) {
   return typeof value === 'number' ? value : -1;
 }
 
-function semanticDecision(rule, answers) {
+function semanticDecision(rule, answers, state) {
   if (rule.id === 'action-risk') {
     const risk = answers.dangerous?.noul ?? 0;
     const handling = answers.handling?.choice;
@@ -72,7 +81,7 @@ function semanticDecision(rule, answers) {
       return { decision: 'deny', action: 'block', reason: 'Jev identified a dangerous or irreversible action.' };
     }
     if (risk >= rule.thresholds.dangerous.confirm || handling === 'confirm' || severity >= rule.thresholds.severity.confirm) {
-      return { decision: 'confirm', action: 'request_user_approval', reason: 'Jev identified an action that requires human review.' };
+      return { decision: 'warn', action: 'defer_to_host', reason: 'Jev identified a potentially sensitive action; native permissions still apply.' };
     }
     return { decision: 'allow', action: 'continue', reason: 'Jev identified a bounded action.' };
   }
@@ -102,11 +111,24 @@ function semanticDecision(rule, answers) {
   if (rule.id === 'skill-compliance') {
     const compliant = answers.compliant?.noul ?? 0;
     const next = answers.next_step?.choice ?? 'return_to_missing_step';
-    if (next === 'finish' && compliant >= rule.thresholds.compliant.finish) {
+    const selectedStep = answers.missing_step?.choice;
+    const stepIndex = /^step_([1-9]\d*)$/.exec(selectedStep ?? '')?.[1];
+    const missingStep = stepIndex ? state?.skill?.steps?.[Number(stepIndex) - 1] : undefined;
+    if (next === 'finish' && compliant >= rule.thresholds.compliant.finish && !missingStep) {
       return { decision: 'finish', action: 'finish', reason: 'Jev found the active Skill contract satisfied.' };
     }
+    if (missingStep && next !== 'finish') {
+      return { decision: 'redirect', action: next, reason: 'A specific Skill step needs completion.',
+        nextStep: `Complete Skill step: ${String(missingStep).slice(0, 160)}. Verify the outcome before finishing.` };
+    }
     if (compliant < rule.thresholds.compliant.redirect || next !== 'continue') {
-      return { decision: 'redirect', action: next, reason: 'Jev found that the active Skill contract still needs work.' };
+      const nextStep = {
+        validate: 'Run the required validation and check its result before finishing.',
+        inspect_diff: 'Inspect the final diff and changed files before finishing.',
+        ask_user: 'Ask the user to clarify the missing requirement before proceeding.',
+      }[next] ?? 'Review the Skill steps and validation results; continue only if a requirement is unmet.';
+      return { decision: 'warn', action: next, reason: 'Jev could not identify an unfinished Skill step from bounded evidence.',
+        nextStep };
     }
     return { decision: 'allow', action: 'continue', reason: 'Jev found the current work consistent with the active Skill.' };
   }
@@ -118,9 +140,10 @@ export async function evaluateSemantic(ruleId, state, clientOptions, { ask = ask
   const config = await loadRules();
   const rule = config.rules.find(item => item.id === ruleId);
   if (!rule) throw new Error(`Unknown semantic rule: ${ruleId}`);
-  const response = await ask({ state, questions: questionMap(rule), options: clientOptions });
-  validateAnswers(rule, response?.answers);
-  const result = semanticDecision(rule, response.answers);
+  const questions = questionsFor(rule, state);
+  const response = await ask({ state, questions: questionMap(questions), options: clientOptions });
+  validateAnswers(questions, response?.answers);
+  const result = semanticDecision(rule, response.answers, state);
   log(auditRecord(ruleId, result));
   return { ...result, rule: rule.id, answers: response.answers };
 }

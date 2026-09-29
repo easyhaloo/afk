@@ -141,6 +141,7 @@ import type { BacklogMetadataLabel } from '../backlog/initialization';
 export interface TrackerProvider {
   readonly platform: Platform;
   readonly projectId: string | number;
+  readonly providerHost?: string;
 
   // Issues
   getIssue(id: number): Promise<TrackedIssue>;
@@ -164,6 +165,7 @@ export interface TrackerProvider {
 
   // MR/PR
   getMR(id: number): Promise<TrackedMR>;
+  isMRLinkedToIssue(id: number, canonicalWorkItemId: string): Promise<boolean>;
   listMRs(options?: ListMROptions): Promise<TrackedMR[]>;
   createMR(options: CreateMROptions): Promise<number>;
   mergeMR(id: number, options?: MergeMROptions): Promise<void>;

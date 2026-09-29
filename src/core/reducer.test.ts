@@ -68,6 +68,17 @@ describe('Run reducer', () => {
     });
   });
 
+  it('replays one implementation, QA, and provider-confirmed PR without prematurely ending the run', () => {
+    const verified = [requested(), event(2, { kind: 'run.started' }), event(3, { kind: 'implementation.completed' }),
+      event(4, { kind: 'qa.started' }), event(5, { kind: 'qa.passed' }),
+      event(6, { kind: 'change.published', changeId: '159', url: 'https://github.com/team/project/pull/159' })];
+    expect(replay([...verified, event(7, { kind: 'human_gate.opened', gateId: 'merge:159', reason: 'awaiting human merge' })]))
+      .toMatchObject({ sequence: 7, terminal: false, run: { status: 'awaiting_human' } });
+    expect(replay([...verified, event(7, { kind: 'change.merge_verified', changeId: '159', targetBranch: 'main', child: true }),
+      event(8, { kind: 'run.finished', outcome: 'succeeded' })]))
+      .toMatchObject({ sequence: 8, terminal: true, run: { status: 'succeeded' } });
+  });
+
   it('requires strictly increasing event sequences', () => {
     const state = evolve(initialRunAggregate(), requested());
     expect(() => evolve(state, event(3, { kind: 'run.started' }))).toThrow(RunEventSequenceError);

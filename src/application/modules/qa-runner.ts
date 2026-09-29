@@ -13,6 +13,7 @@ import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '
 import type { ManagementProviderBundle } from '../providers';
 import type { WorkflowConfig } from '../../infrastructure/config/manager';
 import type { BacklogItem, NewReworkRecord } from '../../domain/backlog/index';
+import type { ChangeRequest } from '../../infrastructure/tracker/changes/provider';
 import { formatExecutionFailure } from '../workflow-engine';
 import { buildExecutionPrompt } from '../workflows/execution-protocol';
 import { TaskRuntimeManager } from '../runtime/task-runtime';
@@ -29,6 +30,8 @@ export interface QARunnerDependencies {
   projectRoot?: string;
   mergeBranch?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   runtimeManager?: TaskRuntimeManager;
+  beforeChange?: (action: 'publish' | 'merge', backlog: BacklogItem, change?: ChangeRequest) => Promise<void>;
+  afterPublication?: (change: ChangeRequest) => Promise<void>;
 }
 
 /**
@@ -50,6 +53,8 @@ export class QARunner {
   private readonly projectRoot: string;
   private readonly mergeBranchOverride?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   private readonly runtimeManager: TaskRuntimeManager;
+  private readonly beforeChange?: QARunnerDependencies['beforeChange'];
+  private readonly afterPublication?: QARunnerDependencies['afterPublication'];
 
   constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
@@ -59,6 +64,8 @@ export class QARunner {
     this.projectRoot = deps.projectRoot ?? process.cwd();
     this.mergeBranchOverride = deps.mergeBranch;
     this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
+    this.beforeChange = deps.beforeChange;
+    this.afterPublication = deps.afterPublication;
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
     this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
     this.agentRuntime = deps.agentRuntime;
@@ -230,14 +237,17 @@ export class QARunner {
       const backlog = await this.providers.backlog.get(backlogId);
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
       const targetBranch = await this.resolveExecutionBranch(backlog);
+      await this.beforeChange?.('publish', backlog);
       await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
       await this.providers.branches.push(verificationBranch, worktreePath);
-      const mr = await this.providers.changes.create({
-        backlog,
-        sourceBranch: verificationBranch,
-        targetBranch,
-        draft: false,
+      const existing = this.beforeChange ? await this.providers.changes.findForBacklog(backlog) : null;
+      if (existing && (existing.state !== 'open' || existing.sourceBranch !== verificationBranch || existing.targetBranch !== targetBranch)) {
+        throw new Error(`existing change request ${existing.id} does not match QA branch and target`);
+      }
+      const mr = existing ?? await this.providers.changes.create({
+        backlog, sourceBranch: verificationBranch, targetBranch, draft: false,
       });
+      await this.afterPublication?.(mr);
       if (activeRework) {
         await this.providers.backlog.resolveRework(backlogId, activeRework.id, {
           summary: `QA passed after rework ${activeRework.id}.`,
@@ -249,6 +259,7 @@ export class QARunner {
         logger.info({ backlogId, changeId: mr.id }, 'root backlog QA passed; awaiting human merge');
         return { success: true, autoMerged: false, mrUrl: mr.url };
       }
+      await this.beforeChange?.('merge', backlog, mr);
       await this.providers.changes.merge(String(mr.id));
       await this.providers.backlog.transition(backlogId, 'done', { changeId: String(mr.id) });
       logger.info({ backlogId, changeId: mr.id, targetBranch }, 'child backlog change merged');

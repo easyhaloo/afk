@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } fr
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
 import type { SshFingerprint } from "../../shared/ssh-contract";
 import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, parseWorkItemInventoryOptions, parseWorkItemRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
+import { parseExecutionQueryOptions } from "../../shared/execution-contract";
 import { exec } from "../adapters/process-executor";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
@@ -29,6 +30,7 @@ import { createWorkItemInventoryService } from "../services/work-item-inventory-
 import { createWorkItemInventoryStore } from "../services/work-item-inventory-store";
 import { createWorkItemInventorySyncService } from "../services/work-item-inventory-sync-service";
 import { createWorkItemExecutionService } from "../services/work-item-execution-service";
+import { createWorkItemExecutionQueryService } from "../services/work-item-execution-query-service";
 import { createWorkItemExecutionManifestStore } from "../services/work-item-execution-manifest-store";
 import { createWorkItemRunStore } from "../services/work-item-run-store";
 import { createWorkItemRunHistoryService } from "../services/work-item-run-history-service";
@@ -133,15 +135,12 @@ const backlogService = createBacklogService({
     return candidate && candidate.startsWith("/") ? candidate : "";
   },
   resolveWorkspace,
-  exec: async (command, args, cwd, stdin) => {
-    const result = await exec(command, args, cwd, stdin);
+  exec: async (command, args, cwd, stdin, options) => {
+    const result = await exec(command, args, cwd, stdin, options);
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
   },
 });
-const workItemInventoryService = createWorkItemInventoryService({
-  cwd: app.getPath("userData"),
-  store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
-  resolveAfk: async () => {
+async function resolveDesktopAfk() {
     if (process.env.AFK_DESKTOP_CLI) return { command: process.env.AFK_DESKTOP_CLI, args: [] };
     const localEntry = path.resolve(app.getAppPath(), "../dist/index.js");
     try {
@@ -155,10 +154,23 @@ const workItemInventoryService = createWorkItemInventoryService({
     const result = await exec("/usr/bin/which", ["afk"]);
     const candidate = result.ok ? result.stdout.split("\n")[0]?.trim() ?? "" : "";
     return candidate.startsWith("/") ? { command: candidate, args: [] } : { command: "", args: [] };
-  },
+}
+const workItemInventoryService = createWorkItemInventoryService({
+  cwd: app.getPath("userData"),
+  store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
+  resolveAfk: resolveDesktopAfk,
   exec: async (command, args, cwd) => {
     const result = await exec(command, args, cwd, undefined, { timeoutMs: 300_000, maxBuffer: 50_000_000 });
     return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
+  },
+});
+const workItemExecutionQueryService = createWorkItemExecutionQueryService({
+  run: async (args) => {
+    const invocation = await resolveDesktopAfk();
+    if (!invocation.command) throw new Error("afk CLI 未在 PATH 中发现");
+    const result = await exec(invocation.command, [...invocation.args, ...args], app.getPath("userData"), undefined, { timeoutMs: 30_000, maxBuffer: 5_000_000 });
+    if (!result.ok) throw new Error(result.stderr || "无法读取运行审计记录");
+    return result.stdout;
   },
 });
 const workItemInventorySyncService = createWorkItemInventorySyncService({
@@ -184,7 +196,7 @@ const workItemExecutionService = createWorkItemExecutionService({
         return result.ok ? result.stdout.split("\n")[0]?.trim() ?? "" : "";
       },
       help: async command => {
-        const result = await exec(command, ["run", "--help"], undefined, undefined, { timeoutMs: 10_000 });
+        const result = await exec(command, ["execute", "--help"], undefined, undefined, { timeoutMs: 10_000 });
         return { ok: result.ok, stdout: result.stdout };
       },
     });
@@ -257,6 +269,10 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     (v) => { if (v !== undefined && typeof v !== "boolean") throw new Error("刷新参数无效"); return v as boolean | undefined; },
   ], ([options, forceRefresh]) => workItemInventoryService.list(options, forceRefresh === true).then(inventory => workItemRunHistoryService.merge(inventory)));
   registerHandler(IPC_CHANNELS.workItemsStart, parseWorkItemRunStartInput, (input) => workItemExecutionService.start(input));
+  registerHandler(IPC_CHANNELS.workItemsExecutions, parseExecutionQueryOptions, async (options) => {
+    const page = await workItemExecutionQueryService.list(options);
+    return { executions: page.executions, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+  });
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);
     const selected = await dialog.showOpenDialog({ title: "选择 AFK 工作区", properties: ["openDirectory"] });
@@ -393,7 +409,7 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandlerMulti(IPC_CHANNELS.backlogStart, [
     (v) => backlogWorkspace(v, "backlog.start"),
     parseBacklogRunStartInput,
-  ], ([workspace, input]) => backlogExecutionService.start(workspace, input));
+  ], () => { throw new Error("USE_WORK_ITEM_EXECUTION: 请在工作项详情中启动运行"); });
   registerHandlerMulti(IPC_CHANNELS.backlogStop, [
     (v) => backlogWorkspace(v, "backlog.stop"),
     parseBacklogId,
@@ -405,7 +421,7 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   registerHandlerMulti(IPC_CHANNELS.backlogRetry, [
     (v) => backlogWorkspace(v, "backlog.retry"),
     parseBacklogRunRetryInput,
-  ], ([workspace, input]) => backlogExecutionService.retry(workspace, input));
+  ], () => { throw new Error("USE_WORK_ITEM_EXECUTION: 请在工作项详情中重试运行"); });
   registerHandlerMulti(IPC_CHANNELS.backlogConfirmMerge, [
     (v) => backlogWorkspace(v, "backlog.confirmMerge"),
     parseBacklogId,

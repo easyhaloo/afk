@@ -177,6 +177,15 @@ export type BacklogItem = {
   branchName: string;
   providerRef: string;
   webUrl?: string;
+  changeRequest?: BacklogChangeRequest;
+};
+
+export type BacklogChangeRequest = {
+  id: string;
+  state: "open" | "merged" | "closed";
+  sourceBranch: string;
+  targetBranch: string;
+  url?: string;
 };
 
 export type BacklogListOptions = {
@@ -613,13 +622,14 @@ export function parseBacklogRuntimeSummary(input: unknown): BacklogRuntimeSummar
 function parseBacklogItem(input: unknown): BacklogItem {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog runtime summary: backlog is invalid");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "workItemId", "issueNumber", "project", "managed", "executionEligible", "title", "description", "parentId", "baseBacklogId", "dependsOn", "state", "executionMode", "tags", "branchName", "providerRef", "webUrl"], "backlog item");
+  assertExactKeys(candidate, ["id", "workItemId", "issueNumber", "project", "managed", "executionEligible", "title", "description", "parentId", "baseBacklogId", "dependsOn", "state", "executionMode", "tags", "branchName", "providerRef", "webUrl", "changeRequest"], "backlog item");
   if (typeof candidate.id !== "string" || typeof candidate.title !== "string" || typeof candidate.branchName !== "string" || typeof candidate.providerRef !== "string" || !isBacklogState(candidate.state) || !isBacklogExecutionMode(candidate.executionMode)) throw new Error("backlog item has invalid identity or enum fields");
   if (!Array.isArray(candidate.dependsOn) || candidate.dependsOn.some(value => typeof value !== "string")) throw new Error("backlog item: dependsOn is invalid");
   if (!Array.isArray(candidate.tags) || candidate.tags.some(value => typeof value !== "string")) throw new Error("backlog item: tags is invalid");
   for (const key of ["description", "parentId", "baseBacklogId", "branchName", "providerRef", "webUrl"] as const) {
     if (candidate[key] !== undefined && typeof candidate[key] !== "string") throw new Error(`backlog item: ${key} is invalid`);
   }
+  if (candidate.changeRequest !== undefined) parseBacklogChangeRequest(candidate.changeRequest);
   const globalFields = ["workItemId", "issueNumber", "project", "managed", "executionEligible"] as const;
   if (globalFields.some(key => candidate[key] !== undefined)) {
     if (globalFields.some(key => candidate[key] === undefined)) throw new Error("backlog item: global identity fields must be provided together");
@@ -630,6 +640,17 @@ function parseBacklogItem(input: unknown): BacklogItem {
     if (candidate.executionEligible && !candidate.managed) throw new Error("backlog item: unmanaged items cannot be execution eligible");
   }
   return candidate as unknown as BacklogItem;
+}
+
+function parseBacklogChangeRequest(input: unknown): BacklogChangeRequest {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog item: changeRequest is invalid");
+  const candidate = input as Record<string, unknown>;
+  assertExactKeys(candidate, ["id", "state", "sourceBranch", "targetBranch", "url"], "backlog change request");
+  if (typeof candidate.id !== "string" || !candidate.id || !["open", "merged", "closed"].includes(String(candidate.state)) || typeof candidate.sourceBranch !== "string" || typeof candidate.targetBranch !== "string") {
+    throw new Error("backlog item: changeRequest has invalid fields");
+  }
+  if (candidate.url !== undefined && typeof candidate.url !== "string") throw new Error("backlog item: changeRequest.url is invalid");
+  return candidate as BacklogChangeRequest;
 }
 
 function parseBacklogRunSummary(input: unknown): BacklogRunSummary {

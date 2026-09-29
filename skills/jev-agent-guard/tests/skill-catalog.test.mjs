@@ -26,6 +26,15 @@ test('catalog reads bounded Skill metadata and mandatory step titles', () => {
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('Playbook numbered steps are included in the Skill contract', () => {
+  const contract = extractContract([
+    '---', 'name: build', 'description: Build and deploy.', '---',
+    '## Playbook', '### Build request', '1. Check git status', '2. Run the build',
+    '## Error handling', '1. This is not a Playbook step',
+  ].join('\n'));
+  assert.deepEqual(contract.steps, ['Check git status', 'Run the build']);
+});
+
 test('single relevant Skill is recommended without a Jev request', async () => {
   const catalog = [{ name: 'systematic-debugging', description: 'Diagnose failing tests before a fix.' }];
   const choice = await recommendSkill('Diagnose this failing test', catalog,

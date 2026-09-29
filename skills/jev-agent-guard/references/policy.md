@@ -4,11 +4,18 @@
 
 - Deny known destructive shell commands and credential-file access locally.
 - Let safe local reads and ordinary native permissions proceed without Jev.
+- Moderate Jev action risk does not request a separate human confirmation;
+  native host permissions remain responsible for any approvals.
 - Ask Jev only for ambiguous Skill routing, network actions, repeated
   failures, or an observed Skill's completion checkpoint.
-- Limit Jev to six requests per host/session/project in a 24-hour ledger;
-  each request has a 2.5-second timeout and no retries.
-- Preserve host permissions if Jev fails or the session budget is exhausted.
+- At Stop, offer numbered Steps and Playbook items as bounded choices. Block
+  completion only when Jev identifies a specific unfinished step and tool
+  evidence was observed; include that step in the host's continuation message.
+  If no step can be established, give a non-blocking, actionable review hint
+  without claiming that the work is incomplete. Recheck after new tool evidence.
+- Give each Jev request a 2.5-second timeout and no retries; do not cap
+  requests per session.
+- Preserve host permissions if Jev fails.
   A Jev decision alone cannot authorize a tool.
 - Restore only bounded Skill step titles and tool-result counts after a
   compaction event; do not replay full transcripts.

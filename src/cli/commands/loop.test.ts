@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadLoopConfig } from '../../application/loop/loop-config';
-import { registerLoopCommands } from './loop';
+import { registerLoopCommands, resolveManagedLoopExecution } from './loop';
 import { registerRunCommands } from './run';
 import { registerQACommands } from './qa';
 import { Command } from 'commander';
@@ -89,6 +89,36 @@ describe('loadLoopConfig', () => {
 });
 
 describe('loop option parsing', () => {
+  it('accepts the explicit managed work item and manifest flags on both loop entries', () => {
+    const program = new Command().exitOverride();
+    registerLoopCommands(program);
+    const loop = program.commands.find(command => command.name() === 'loop')!;
+    for (const command of [loop, loop.commands.find(child => child.name() === 'start')!]) {
+      expect(command.options.map(option => option.long)).toEqual(expect.arrayContaining(['--work-item-id', '--execution-manifest']));
+    }
+    expect(resolveManagedLoopExecution({ backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json' })).toEqual({
+      workItemId: 'github:org/repo#42', manifestPath: '/workspace/manifest.json',
+    });
+  });
+
+  it.each([
+    { workItemId: 'github:org/repo#42' },
+    { executionManifest: '/workspace/manifest.json' },
+    { backlogId: ['42', '43'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json' },
+    { backlogId: ['42'], workItemId: '42', executionManifest: '/workspace/manifest.json' },
+    { backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json', agent: 'codex' },
+    { backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json', agentTransport: 'exec' as const },
+    { backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json', ext: ['isolate'] },
+  ])('rejects ambiguous managed loop selection %j', options => {
+    expect(() => resolveManagedLoopExecution(options)).toThrow();
+  });
+
+  it('does not silently ignore configured legacy module triggers for managed execution', () => {
+    expect(() => resolveManagedLoopExecution({
+      backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json',
+    }, { 'need::isolate': ['isolate'] })).toThrow(/module overrides/);
+  });
+
   it('keeps provider and module option values as strings', () => {
     const program = new Command().exitOverride();
     registerLoopCommands(program);

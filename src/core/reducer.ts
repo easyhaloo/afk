@@ -40,6 +40,11 @@ export function evolve(state: RunAggregate, event: RunEvent): RunAggregate {
     case 'workspace.prepared':
     case 'change.created':
     case 'change.merge_verified':
+    case 'implementation.completed':
+    case 'qa.started':
+    case 'qa.passed':
+    case 'qa.failed':
+    case 'change.published':
     case 'decision.made':
     case 'effect.started':
     case 'effect.completed':

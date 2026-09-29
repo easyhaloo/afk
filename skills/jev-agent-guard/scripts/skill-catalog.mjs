@@ -34,7 +34,7 @@ export function extractContract(source) {
   const constraints = [];
   let inSteps = false;
   for (const line of lines) {
-    if (/^##\s/.test(line)) inSteps = /^##\s+(?:Steps\b|步骤(?:\s|$))/i.test(line);
+    if (/^##\s/.test(line)) inSteps = /^##\s+(?:Steps\b|Playbook\b|步骤(?:\s|$))/i.test(line);
     if (inSteps) {
       const step = line.match(/^\s*(?:\d+[.)]|-\s+\*\*Step\b[^:]*:)\s*(.+)/i);
       if (step && steps.length < 12) steps.push(sanitize(step[1]).slice(0, 160));

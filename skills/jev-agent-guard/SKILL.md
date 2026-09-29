@@ -36,15 +36,18 @@ Host adapters normalize observable events and use local checks before Jev:
 - prompt → suggest a relevant Skill from bounded metadata; use Jev for
   ambiguous candidate selection
 - before tool → deny known destructive/credential access locally; ask Jev
-  about bounded network actions when a session budget permits
+  about bounded network actions without adding a confirmation prompt
 - after tool → record limited evidence; ask Jev after repeated failures
-- stop → check an observed Skill contract once, without recursive blocking
+- stop → recognize numbered Steps/Playbook requirements; block with a specific
+  unfinished step only when supported by observed evidence, then recheck after
+  new tool evidence without recursive blocking
 - after compaction → restore a concise active-Skill and evidence checkpoint
 - successful dependency-install output → conservatively reduce model-facing
   noise on hosts with tested output replacement
 
 The guard does not inspect private reasoning. It observes host events and
-never treats Jev as a substitute for native user approval. OpenCode has no
+never requests human confirmation on behalf of Jev or substitutes for native
+permissions. OpenCode has no
 native Stop hook equivalent in this integration, so its Skill completion
 check remains advisory rather than blocking.
 

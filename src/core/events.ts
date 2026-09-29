@@ -30,7 +30,12 @@ export type RunEventData =
   | { kind: 'lease.granted'; leaseId?: string }
   | { kind: 'workspace.prepared'; branch: string; workspace: string; baseBranch: string }
   | { kind: 'change.created'; changeId: string; targetBranch: string; url?: string }
-  | { kind: 'change.merge_verified'; changeId: string; targetBranch: string }
+  | { kind: 'change.merge_verified'; changeId: string; targetBranch: string; child?: boolean }
+  | { kind: 'qa.started' }
+  | { kind: 'implementation.completed' }
+  | { kind: 'qa.passed' }
+  | { kind: 'qa.failed'; reason?: string }
+  | { kind: 'change.published'; changeId: string; url: string }
   | { kind: 'decision.made'; command: string; accepted: boolean; reason?: string }
   | { kind: 'effect.started'; effectKind: string; idempotencyKey: string }
   | { kind: 'effect.completed'; effectKind: string; idempotencyKey: string; outcome: 'succeeded' | 'failed'; summary?: string }
@@ -42,6 +47,8 @@ export type RunEventData =
   | { kind: 'failure.classified'; failureClass: string; summary: string };
 
 export type RunEventType = RunEventData['kind'];
+
+export type LegacyRunEventData = Exclude<RunEventData, { kind: 'qa.started' | 'qa.passed' | 'qa.failed' | 'change.published' }>;
 
 export interface RunEvent<T extends RunEventData = RunEventData> {
   id: string;
@@ -65,4 +72,3 @@ export type UnsignedRunEvent<T extends RunEventData = RunEventData> = Omit<RunEv
 
 /** Caller-provided event intent. The EventStore assigns sequence, observedAt, and integrity. */
 export type RunEventDraft<T extends RunEventData = RunEventData> = Omit<RunEvent<T>, 'sequence' | 'observedAt' | 'integrity'>;
-

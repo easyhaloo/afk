@@ -549,6 +549,8 @@
 .backlog-detail-value { display: grid; gap: 6px; padding: 12px; background: var(--backlog-surface); }
 .backlog-detail-label { display: flex; align-items: center; gap: 5px; color: var(--backlog-muted); font-size: 11px; }
 .backlog-detail-value strong { color: var(--backlog-text); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.backlog-inline-link { padding: 0; border: 0; background: transparent; color: var(--backlog-accent); font: inherit; font-size: inherit; font-weight: inherit; text-align: left; text-decoration: underline; cursor: pointer; }
+.backlog-inline-link:hover { filter: brightness(1.08); }
 .backlog-external-link { display: flex; height: 32px; box-sizing: border-box; align-items: center; justify-content: center; gap: 8px; padding: 0 11px; border: 1px solid transparent; border-radius: 7px; background: var(--backlog-accent); color: var(--surface-raised); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .backlog-external-link span { margin-left: auto; font-size: 16px; }
 .backlog-external-link:hover { filter: brightness(1.05); }

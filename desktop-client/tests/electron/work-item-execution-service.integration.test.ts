@@ -105,8 +105,9 @@ setTimeout(() => process.exit(0), 400);
       });
       expect(invocation.pid).toBe(childPid);
       expect(invocation.args).toEqual([
-        "run", "--backlog-id", item.id, "--execution-manifest",
+        "execute", "--work-item-id", item.id, "--execution-manifest",
         path.join(result.workspace.root, ".afk", "execution-manifest.json"),
+        "--execution-id", result.runId,
       ]);
 
       const terminal = await waitFor(async () => {

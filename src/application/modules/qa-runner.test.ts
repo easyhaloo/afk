@@ -288,6 +288,50 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
   });
 
+  it('does not publish when the attempt audit refuses publication', async () => {
+    const fixtureData = fixture();
+    const beforeChange = vi.fn(async () => { throw new Error('audit unavailable'); });
+    const runner = new QARunner(fixtureData.providers, config, {
+      sandboxProvider: fixtureData.sandboxProvider, agentProvider: fixtureData.agentProvider,
+      executionMode: 'batch', mergeBranch: vi.fn(async () => {}), beforeChange,
+    });
+    expect(await runner.process('60')).toMatchObject({ success: false });
+    expect(beforeChange).toHaveBeenCalledWith('publish', expect.objectContaining({ id: '60' }));
+    expect(fixtureData.changes.create).not.toHaveBeenCalled();
+    expect(fixtureData.changes.merge).not.toHaveBeenCalled();
+  });
+
+  it('does not merge a child when the attempt audit refuses merge', async () => {
+    const fixtureData = fixture();
+    fixtureData.providers.backlog.get.mockResolvedValue({ ...await fixtureData.providers.backlog.get('60'), parentId: '11' });
+    const beforeChange = vi.fn(async (action: string) => {
+      if (action === 'merge') throw new Error('audit unavailable');
+    });
+    const runner = new QARunner(fixtureData.providers, config, {
+      sandboxProvider: fixtureData.sandboxProvider, agentProvider: fixtureData.agentProvider,
+      executionMode: 'batch', mergeBranch: vi.fn(async () => {}), beforeChange,
+    });
+    expect(await runner.process('60')).toMatchObject({ success: false });
+    expect(beforeChange).toHaveBeenCalledWith('merge', expect.objectContaining({ id: '60' }), expect.objectContaining({ id: 'pr-60' }));
+    expect(fixtureData.changes.merge).not.toHaveBeenCalled();
+  });
+
+  it('reuses a matching open change instead of creating a duplicate for an audited attempt', async () => {
+    const fixtureData = fixture();
+    fixtureData.changes.findForBacklog.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main', url: 'https://example.test/pr/60',
+    });
+    const afterPublication = vi.fn(async () => {});
+    const runner = new QARunner(fixtureData.providers, config, {
+      sandboxProvider: fixtureData.sandboxProvider, agentProvider: fixtureData.agentProvider,
+      executionMode: 'batch', mergeBranch: vi.fn(async () => {}),
+      beforeChange: vi.fn(async () => {}), afterPublication,
+    });
+    expect(await runner.process('60')).toMatchObject({ success: true, autoMerged: false, mrUrl: 'https://example.test/pr/60' });
+    expect(fixtureData.changes.create).not.toHaveBeenCalled();
+    expect(afterPublication).toHaveBeenCalledWith(expect.objectContaining({ id: 'pr-60' }));
+  });
+
   it('targets and auto-merges an organizational child backlog into the configured target branch', async () => {
     const f = fixture();
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10' };

@@ -7,6 +7,7 @@ import { createWorkflowProviders } from '../../application/tracker-provider-fact
 import { LoopRunner } from '../../application/modules/loop-runner';
 import { getSchedulerConfig, getWorkflowConfig } from '../../infrastructure/config/manager';
 import { resolveAgentProviderName } from '../../domain/agents/index';
+import { parseWorkItemId } from '../../domain/backlog';
 import { loadLoopConfig } from '../../application/loop/loop-config';
 import { logger, redirectStdioToLog, resolveLogPath } from '../../infrastructure/io';
 import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils';
@@ -23,6 +24,22 @@ import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runt
 
 const AFK_HOME = path.join(os.homedir(), '.afk');
 const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');
+
+export function resolveManagedLoopExecution(
+  options: LoopStartOptions,
+  moduleTriggers: Record<string, string[]> = {},
+): { workItemId: string; manifestPath: string } | undefined {
+  if (options.workItemId === undefined && options.executionManifest === undefined) return undefined;
+  if (!options.workItemId || !options.executionManifest || options.backlogId?.length !== 1) {
+    throw new Error('managed loop execution requires --work-item-id, --execution-manifest, and exactly one --backlog-id');
+  }
+  if (options.agent || options.agentTransport || options.agentAuth || options.agentProvider
+    || options.agentProfile || options.agentAppServer || options.agentAppServerAuthEnv
+    || options.ext?.length || options.extParam?.length || Object.keys(moduleTriggers).length) {
+    throw new Error('managed loop execution cannot use legacy agent or module overrides');
+  }
+  return { workItemId: parseWorkItemId(options.workItemId).id, manifestPath: options.executionManifest };
+}
 
 export function registerLoopCommands(program: Command): void {
   const loop = program.command('loop').description('Continuous integration loop: poll → implement → QA → done, forever').usage('[command] [options]');
@@ -63,6 +80,7 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
 
   const schedulerConfig = getSchedulerConfig();
   const loopConfig = loadLoopConfig();
+  const managedExecution = resolveManagedLoopExecution(options, loopConfig.moduleTriggers);
   const maxConcurrent = options.maxConcurrent ?? schedulerConfig.maxConcurrent;
   const pollIntervalMs = (options.pollInterval ?? schedulerConfig.pollInterval) * 1000;
   const statusIntervalMs = (options.statusInterval ?? 30) * 1000;
@@ -79,13 +97,13 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
     shutdownTimeoutMs,
     maxIterations: options.maxIterations,
     backlogIds: options.backlogId,
+    managedExecution,
     template: options.template,
     ext: options.ext,
     extParams: options.extParam,
-    moduleTriggers: loopConfig.moduleTriggers,
+    moduleTriggers: managedExecution ? undefined : loopConfig.moduleTriggers,
     providers,
-    agentProvider,
-    agentRuntime,
+    ...(managedExecution ? {} : { agentProvider, agentRuntime }),
   });
 
   printStartup(maxConcurrent, pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, loopConfig.moduleTriggers, agentProvider, options.backlogId);

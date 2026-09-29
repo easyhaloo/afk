@@ -22,6 +22,8 @@ import type {
   LabelDelta,
 } from '../../domain/tracker/types';
 import { extractAC } from '../../domain/tracker/ac';
+import { parseWorkItemId } from '../../domain/work-item/identity';
+import { normalizeGitLabHost, resolveGitLabProjectKey } from '../../shared/gitlab-project';
 
 export interface GitLabConfig {
   url: string;
@@ -57,9 +59,11 @@ export async function detectGitLabProject(cwd?: string): Promise<string | null> 
 export class GitLabClient implements TrackerProvider {
   readonly platform: 'gitlab' = 'gitlab';
   readonly projectId: string | number;
+  readonly providerHost: string;
   private client: InstanceType<typeof Gitlab>;
 
   constructor(config: GitLabConfig) {
+    this.providerHost = normalizeGitLabHost(config.url);
     this.client = new Gitlab({
       host: config.url,
       token: config.token,
@@ -151,6 +155,19 @@ export class GitLabClient implements TrackerProvider {
       targetId,
       { link_type: type }
     );
+  }
+
+  async isMRLinkedToIssue(id: number, canonicalWorkItemId: string): Promise<boolean> {
+    const issue = parseWorkItemId(canonicalWorkItemId);
+    if (issue.platform !== 'gitlab') throw new Error('GitLab MR requires a GitLab issue');
+    const location = resolveGitLabProjectKey(issue.projectKey, this.providerHost);
+    const project = await this.client.Projects.show(location.projectPath);
+    if (!Number.isSafeInteger(Number(project.id)) || Number(project.id) <= 0) throw new Error('GitLab issue project readback unavailable');
+    const issues = await this.client.MergeRequests.closesIssues(this.projectId, id);
+    if (!Array.isArray(issues) || issues.some(candidate => !Number.isSafeInteger(Number(candidate.project_id)) || !Number.isSafeInteger(Number(candidate.iid)))) {
+      throw new Error('GitLab MR closing issues readback unavailable');
+    }
+    return issues.some(candidate => Number(candidate.project_id) === Number(project.id) && Number(candidate.iid) === issue.issueNumber);
   }
 
   async getMR(id: number): Promise<TrackedMR> {

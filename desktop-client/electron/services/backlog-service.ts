@@ -19,6 +19,7 @@ export type BacklogExecFn = (
   args: string[],
   cwd: string,
   input?: string,
+  options?: { timeoutMs?: number },
 ) => Promise<BacklogExecResult>;
 
 export type BacklogServiceDeps = {
@@ -121,7 +122,8 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
     let timer: NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
-        exec(cmd, args, cwd, stdin),
+        // Without this the adapter's 8s default kills the child before the service deadline.
+        exec(cmd, args, cwd, stdin, { timeoutMs: ms }),
         new Promise<BacklogExecResult>((_, reject) => {
           timer = setTimeout(() => reject(new BacklogServiceError("unknown", `afk 子进程超时（${ms}ms）`)), ms);
         }),

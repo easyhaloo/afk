@@ -65,11 +65,11 @@ function branchOf(ref) {
 // next list call. Without this, every spawn would start with a fresh seed.
 const SEED_STORE = {
   items: [
-    { id: "1", workItemId: "github:acme/api#1", title: "登录态切换", description: "切换登录态并保留当前工作区。", dependsOn: [], state: "ready", executionMode: "afk", tags: ["billing"], branchName: "afk/backlog-1", providerRef: "stub:1", webUrl: "https://github.com/example/issues/1" },
-    { id: "2", title: "kg 演示", dependsOn: ["1"], state: "in_progress", executionMode: "afk", tags: ["urgent"], branchName: "afk/backlog-2", providerRef: "stub:2" },
-    { id: "3", title: "支付回调", dependsOn: [], state: "done", executionMode: "hitl", tags: [], branchName: "afk/backlog-3", providerRef: "stub:3" },
+    { id: "1", workItemId: "github:acme/api#1", issueNumber: 1, project: { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main", webUrl: "https://github.com/acme/api" }, managed: true, executionEligible: true, title: "登录态切换", description: "切换登录态并保留当前工作区。", dependsOn: [], state: "ready", executionMode: "afk", tags: ["billing"], branchName: "afk/backlog-1", providerRef: "github:acme/api#1", webUrl: "https://github.com/example/issues/1" },
+    { id: "2", workItemId: "github:acme/api#2", issueNumber: 2, project: { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main", webUrl: "https://github.com/acme/api" }, managed: false, executionEligible: false, title: "kg 演示", dependsOn: ["1"], state: "in_progress", executionMode: "afk", tags: ["urgent"], branchName: "afk/backlog-2", providerRef: "stub:2" },
+    { id: "3", workItemId: "github:acme/api#3", issueNumber: 3, project: { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main", webUrl: "https://github.com/acme/api" }, managed: false, executionEligible: false, title: "支付回调", dependsOn: [], state: "done", executionMode: "hitl", tags: [], branchName: "afk/backlog-3", providerRef: "stub:3" },
   ],
-  nextId: 4,
+  nextId: 5,
   history: [],
 };
 

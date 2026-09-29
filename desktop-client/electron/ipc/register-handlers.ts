@@ -127,19 +127,6 @@ const sshService = createSshService({
   externalTerminal: createExternalTerminalAdapter(),
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
 });
-const backlogService = createBacklogService({
-  resolveAfk: async () => {
-    const result = await exec("/usr/bin/which", ["afk"]);
-    if (!result.ok) return "";
-    const candidate = result.stdout.split("\n")[0]?.trim() ?? "";
-    return candidate && candidate.startsWith("/") ? candidate : "";
-  },
-  resolveWorkspace,
-  exec: async (command, args, cwd, stdin, options) => {
-    const result = await exec(command, args, cwd, stdin, options);
-    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
-  },
-});
 async function resolveDesktopAfk() {
     if (process.env.AFK_DESKTOP_CLI) return { command: process.env.AFK_DESKTOP_CLI, args: [] };
     const localEntry = path.resolve(app.getAppPath(), "../dist/index.js");
@@ -155,6 +142,14 @@ async function resolveDesktopAfk() {
     const candidate = result.ok ? result.stdout.split("\n")[0]?.trim() ?? "" : "";
     return candidate.startsWith("/") ? { command: candidate, args: [] } : { command: "", args: [] };
 }
+const backlogService = createBacklogService({
+  resolveAfk: async () => (await resolveDesktopAfk()).command,
+  resolveWorkspace,
+  exec: async (command, args, cwd, stdin, options) => {
+    const result = await exec(command, args, cwd, stdin, options);
+    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
+  },
+});
 const workItemInventoryService = createWorkItemInventoryService({
   cwd: app.getPath("userData"),
   store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
@@ -191,10 +186,7 @@ const workItemExecutionService = createWorkItemExecutionService({
       packaged: app.isPackaged,
       configuredCli: process.env.AFK_DESKTOP_CLI,
       exists: async file => access(file).then(() => true, () => false),
-      which: async () => {
-        const result = await exec("/usr/bin/which", ["afk"]);
-        return result.ok ? result.stdout.split("\n")[0]?.trim() ?? "" : "";
-      },
+      which: async () => (await resolveDesktopAfk()).command,
       help: async command => {
         const result = await exec(command, ["execute", "--help"], undefined, undefined, { timeoutMs: 10_000 });
         return { ok: result.ok, stdout: result.stdout };
@@ -213,12 +205,7 @@ const backlogRuntimeService = createBacklogRuntimeService({
 });
 const workflowGraphService = new WorkflowGraphService();
 const backlogExecutionService = createBacklogExecutionService({
-  resolveAfk: async () => {
-    const result = await exec("/usr/bin/which", ["afk"]);
-    if (!result.ok) return "";
-    const candidate = result.stdout.split("\n")[0]?.trim() ?? "";
-    return candidate && candidate.startsWith("/") ? candidate : "";
-  },
+  resolveAfk: async () => (await resolveDesktopAfk()).command,
   resolveWorkspace,
   getBacklog: (workspace, id) => backlogService.show(workspace, id),
   getSummary: (workspace, id) => backlogRuntimeService.summary(workspace, id),

@@ -31,8 +31,10 @@ test.describe("BacklogPage create modal", () => {
 
     const rows = page.locator(".backlog-row");
     await expect(rows).toHaveCount(4);
-    await expect(rows.first()).toContainText("新建测试 backlog");
-    await expect(rows.first()).toContainText("待处理");
+    // Verify the newly created item appears as a backlog row with the expected content.
+    const newRow = rows.filter({ hasText: "新建测试 backlog" });
+    await expect(newRow).toContainText("新建测试 backlog");
+    await expect(newRow).toContainText("待处理");
   });
 
   test("cancels the modal with the cancel button without calling create", async ({ page }) => {

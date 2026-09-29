@@ -5,8 +5,7 @@ import path from "node:path";
 
 function diagnosticPath() {
   const home = homedir();
-  const entries = [
-    ...(process.env.PATH || "").split(path.delimiter),
+  const additional = [
     path.join(home, "Library", "pnpm"),
     path.join(home, ".local", "bin"),
     path.join(home, ".npm-global", "bin"),
@@ -20,7 +19,11 @@ function diagnosticPath() {
     "/usr/sbin",
     "/sbin",
   ].filter((entry, index, values) => entry && values.indexOf(entry) === index);
-  return entries.join(path.delimiter);
+  // Use the current PATH as the base so test fixture directories (prepended
+  // by the Playwright fixture) are preserved when the Electron main process
+  // resolves CLI binaries like `afk`.
+  const base = (process.env.PATH || "").split(path.delimiter).filter((d) => !additional.includes(d));
+  return [...additional, ...base].join(path.delimiter);
 }
 
 function diagnosticEnvironment(cwd?: string) {

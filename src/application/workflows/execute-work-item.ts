@@ -256,7 +256,7 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
   try {
     const journal = await open(join(directory, `${executionId}.jsonl`), 'wx');
     try {
-      const record = async (phase: string, details: Record<string, unknown> = {}) => {
+      const record = async (phase: string, details: object = {}) => {
         await journal.writeFile(`${JSON.stringify({ executionId, workItemId, phase, at: new Date().toISOString(), ...details })}\n`);
         await journal.sync();
       };
@@ -364,7 +364,7 @@ async function journalPublication(manifest: ResolvedExecutionManifest, execution
   let publication: { id: string; url: string } | undefined;
   let requested = false;
   for (const line of contents.split('\n').filter(Boolean)) {
-    const entry = JSON.parse(line) as Record<string, unknown>;
+    const entry = JSON.parse(line) as { executionId: string; workItemId: string; phase: string; at: string; [key: string]: unknown };
     if (entry.phase === 'publication_requested') {
       if (entry.executionId !== executionId || entry.workItemId !== workItemId) throw new Error('publication journal identity mismatch');
       requested = true;

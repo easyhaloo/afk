@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+# husky pre-push hook
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+failed=0
+
+branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [ -z "$branch" ] || [ "$branch" != "main" ] && [[ ! "$branch" =~ ^release/ ]]; then
+    exit 0
+fi
+
+echo "\n${YELLOW}Running pre-push checks (architecture:check → typecheck → build → test)${NC}"
+
+pnpm run architecture:check || { echo "${RED}Architecture check failed${NC}"; failed=1; }
+pnpm run typecheck         || { echo "${RED}Type check failed${NC}";       failed=1; }
+pnpm run build             || { echo "${RED}Build failed${NC}";             failed=1; }
+pnpm run test              || { echo "${RED}Tests failed${NC}";              failed=1; }
+
+[ $failed -eq 1 ] && exit 1 || exit 0

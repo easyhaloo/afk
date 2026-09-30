@@ -94,8 +94,7 @@ export async function runAdapter({ host, event = 'before-action', payload = {}, 
       const name = input.skill ?? input.name;
       if (typeof name === 'string') {
         const matched = findSkill(listSkillMetadata(skillRoots(host, projectRoot, env)), name);
-        const contract = matched ? extractContract(fs.readFileSync(matched.file, 'utf8')) : { name, steps: [], constraints: [] };
-        recordSkill(key, contract, env);
+        if (matched) recordSkill(key, extractContract(fs.readFileSync(matched.file, 'utf8')), env);
       }
     } else {
       const ledger = recordAction(key, { tool: action.tool, success }, env);
@@ -128,8 +127,7 @@ export async function runAdapter({ host, event = 'before-action', payload = {}, 
     const ledger = event === 'stop' ? stopLedger(key, host, projectRoot, env) : null;
     const activeSkill = ledger?.skill ?? payload.activeSkill ?? payload.active_skill;
     if (event === 'stop' && !activeSkill?.steps?.length) {
-      return result('advise', 'No structured Skill steps were found, so completion cannot be checked.', host, event,
-        'Review the Skill instructions and validation before finishing.');
+      return result('allow', 'No structured Skill steps were found, so completion cannot be checked.', host, event);
     }
     const semantic = await evaluate(rule, normalizedState(payload, host, event, action, risk, ledger),
       { timeout: 2500, retry: { maxRetries: 0 } });

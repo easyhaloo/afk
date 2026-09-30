@@ -87,6 +87,9 @@ test('OpenCode records a successful Skill invocation even without an exit code',
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev opencode skill '));
   try {
     const env = { HOME: home, XDG_STATE_HOME: path.join(home, 'state') };
+    const skill = path.join(home, '.opencode', 'skills', 'debug');
+    fs.mkdirSync(skill, { recursive: true });
+    fs.writeFileSync(path.join(skill, 'SKILL.md'), '---\nname: debug\ndescription: Debug failures.\n---\n## Steps\n1. Reproduce failure\n');
     const plugin = await JevAgentGuard({ directory: home, env });
     await plugin['tool.execute.after']({ tool: 'skill', sessionID: 'session' }, {
       args: { name: 'debug' }, output: 'loaded', metadata: {},

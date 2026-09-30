@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { runAdapter } from '../scripts/adapters/runtime-adapter.mjs';
-import { recordAction, recordSkill } from '../scripts/skill-ledger.mjs';
+import { loadLedger, recordAction, recordSkill } from '../scripts/skill-ledger.mjs';
 
 test('safe local command skips Jev and allows host-native permissions', async () => {
   let calls = 0;
@@ -67,12 +67,31 @@ test('no active Skill does not claim stop compliance or call Jev', async () => {
   assert.equal(calls, 0);
 });
 
-test('Skill without structured steps gets a review hint without a provider claim', async () => {
+test('Skill without structured steps stops silently instead of advising every turn', async () => {
   const result = await runAdapter({ host: 'codex', event: 'stop', payload: {
     session_id: 'no-steps', activeSkill: { name: 'unstructured', steps: [], constraints: ['MUST check output'] },
   }, evaluate: async () => { throw new Error('No verifiable steps'); } });
-  assert.equal(result.decision, 'advise');
-  assert.match(result.nextStep, /Review the Skill instructions/);
+  assert.equal(result.decision, 'allow');
+  assert.equal(result.nextStep, undefined);
+});
+
+test('an unresolvable Skill name is not persisted as a zero-step contract', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'jev unresolvable '));
+  try {
+    const env = { HOME: home, XDG_STATE_HOME: path.join(home, 'state') };
+    const project = path.join(home, 'project');
+    fs.mkdirSync(project, { recursive: true });
+    const session = { cwd: project, session_id: 'unresolvable' };
+    const response = await runAdapter({ host: 'claude-code', event: 'after-action', payload: {
+      ...session, tool_name: 'Skill', tool_input: { skill: 'plugin:namespaced-command' }, tool_response: {},
+    }, env });
+    assert.equal(response.decision, 'allow');
+    const ledger = loadLedger({ host: 'claude-code', sessionId: 'unresolvable', projectRoot: project }, env);
+    assert.equal(ledger?.skill, undefined);
+    const stop = await runAdapter({ host: 'claude-code', event: 'stop', payload: session, env,
+      evaluate: async () => { throw new Error('No verifiable steps'); } });
+    assert.equal(stop.decision, 'allow');
+  } finally { fs.rmSync(home, { recursive: true, force: true }); }
 });
 
 test('provider outage does not turn ordinary actions into a blanket denial', async () => {

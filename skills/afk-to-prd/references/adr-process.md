@@ -2,7 +2,7 @@
 
 **Purpose**: When and how to record Architecture Decisions during PRD drafting.
 **When**: Every afk-to-prd session where a significant technical choice is made.
-**Output**: `docs/adr/ADR-NNNN-title-slug.md` (status: `proposed`) in the target project.
+**Output**: `docs/adr/NNNN-title-slug.md` (status: `proposed`) in the target project.
 
 ---
 
@@ -54,12 +54,12 @@ proposed → accepted → [deprecated | superseded by ADR-NNNN]
 1. While writing PRD, note any significant technical choices being made
 2. For each choice, ask: "Is this expensive to change later?" If yes → write ADR
 3. Fill in Context and Decision in PRD's `## Architecture Decisions` table
-4. Create `docs/adr/ADR-NNNN-title-slug.md` with full details (status: `proposed`)
+4. Create `docs/adr/NNNN-title-slug.md` with full details (status: `proposed`)
 5. Reference ADR number in PRD document
 
 ### ADR Numbering
 
-Use 4-digit zero-padded numbers: `ADR-0001`, `ADR-0002`, etc.
+Use 4-digit zero-padded numbers in the filename: `0001`, `0002`, etc. The H1 inside the file keeps the `ADR-NNNN:` prefix.
 Next number = max existing number + 1. Check `docs/adr/` in the target project.
 
 ### Minimum Viable ADR
@@ -107,9 +107,9 @@ Use Watermill with Redis Stream mode.
 
 | ADR | Decision | Module Mode | Status | PRD Section |
 |-----|----------|------------|--------|-------------|
-| ADR-0001 | Watermill Redis Stream mode | — | accepted | docs/adr/ADR-0001.md |
-| ADR-0002 | PostgreSQL for order data | Deep Module | accepted | docs/adr/ADR-0002.md |
-| ADR-0003 | Use MinIO for object storage | — | proposed | docs/adr/ADR-0003.md |
+| ADR-0001 | Watermill Redis Stream mode | — | accepted | docs/adr/0001-watermill.md |
+| ADR-0002 | PostgreSQL for order data | Deep Module | accepted | docs/adr/0002-postgresql.md |
+| ADR-0003 | Use MinIO for object storage | — | proposed | docs/adr/0003-minio.md |
 
 *(Module Mode: Deep Module = vertical slicing by bounded context; Shallow Module = layered)*
 ```

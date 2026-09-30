@@ -29,21 +29,21 @@ Before making any new significant decision:
 ```bash
 # Check if this is already covered
 ls docs/adr/
-cat docs/adr/ADR-*.md | grep -i "<keyword>"
+cat docs/adr/[0-9]*.md | grep -i "<keyword>"
 ```
 
 ### Step 2 — Write the ADR (status: proposed)
 
 ```bash
 # Find next number
-N=$(ls docs/adr/ADR-*.md 2>/dev/null | sed 's/.*ADR-0*\([0-9]*\).*/\1/' | sort -n | tail -1)
+N=$(ls docs/adr/[0-9]*.md 2>/dev/null | sed 's/.*\/\([0-9]\{4\}).*/\1/' | sort -n | tail -1)
 NEXT=$((N + 1))
-FILENAME=$(printf "ADR-%04d-title-slug.md" $NEXT)
+FILENAME=$(printf "%04d-title-slug.md" $NEXT)
 ```
 
 ### Step 3 — Fill In
 
-Use standard ADR template (see `docs/adr/ADR-template.md`):
+Use standard ADR template:
 
 ```markdown
 # ADR-NNNN: <Title>

@@ -81,7 +81,7 @@ external backlog system decomposes stories into executable items.
 
 For each significant technical choice, check whether an ADR is warranted.
 If it is irreversible and expensive to change, create or reference a proposed
-ADR in `docs/adr/ADR-NNNN.md` according to `references/adr-process.md`.
+ADR in `docs/adr/NNNN-title-slug.md` according to `references/adr-process.md`.
 
 Draft to `/tmp/PRD-<slug>.md` (or the caller's requested path). Do not publish
 or hand off until approval.

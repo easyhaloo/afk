@@ -12,6 +12,7 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | [afk-grill-me-context](./afk-grill-me-context/) | `/afk-grill-me-context` | Gap-fill interview — verify/correct existing context |
 | [afk-hand-off](./afk-hand-off/) | `/afk-hand-off` | Session handoff — zero context loss between sessions |
 | [reasoning-guard](./reasoning-guard/) | `/reasoning-guard` | Self-watch — detect degraded reasoning paths mid-session |
+| [jev-agent-guard](./jev-agent-guard/) | `/jev-agent-guard` | Agent checkpoints across Claude Code, Codex, OpenCode |
 
 ## Pipeline Skills
 
@@ -20,6 +21,7 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | [afk-implement](./afk-implement/) | `/afk-implement` | Spec → code → verify implementation workflow |
 | [afk-scheduler](./afk-scheduler/) | `/afk-scheduler` | Task scheduling and queue management |
 | [afk-prototype](./afk-prototype/) | `/afk-prototype` | Prototype development workflow |
+| [afk-branch-migrate](./afk-branch-migrate/) | `/afk-branch-migrate` | Cross-branch migration — cherry-pick between divergent branches |
 
 ## QA & Output Skills
 
@@ -29,6 +31,9 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 | [afk-to-prd](./afk-to-prd/) | `/afk-to-prd` | Publish results to PRD document |
 | [afk-to-issues](./afk-to-issues/) | `/afk-to-issues` | Produce a provider-neutral backlog manifest from findings |
 | [md-to-pdf](./md-to-pdf/) | `/md-to-pdf` | Convert Markdown to PDF |
+| [afk-ai-prd](./afk-ai-prd/) | `/afk-ai-prd` | AI-friendly PRD — parseable, decomposable, verifiable |
+| [afk-llm-dev-guide](./afk-llm-dev-guide/) | `/afk-llm-dev-guide` | LLM app design guide — architecture and context engineering |
+| [afk-skill-craft](./afk-skill-craft/) | `/afk-skill-craft` | Skill authoring — create, diagnose, or refactor skills |
 
 ## Testing Skills
 
@@ -42,6 +47,7 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 |-------|---------|-------------|
 | [afk-diagnose](./afk-diagnose/) | `/afk-diagnose` | Diagnostic workflow for complex failures |
 | [reasoning-watchdog](./reasoning-watchdog/) | `/reasoning-watchdog` | Hook-based reasoning quality monitoring |
+| [software-complexity-governance](./software-complexity-governance/) | `/software-complexity-governance` | Complexity assessment — cyclomatic/cognitive, coupling, debt |
 
 ---
 

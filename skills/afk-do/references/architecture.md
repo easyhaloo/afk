@@ -2,7 +2,7 @@
 
 **Purpose**: Guide agents to design module structure and data flows before writing code for new features.
 **When**: afk-implement Step 3, if the feature introduces new modules/packages or complex data flows.
-**Output**: Module graph in commit message; architecture decision in `docs/architecture/decisions/`.
+**Output**: Module graph in commit message; architecture decision in `docs/decisions/`.
 
 ---
 

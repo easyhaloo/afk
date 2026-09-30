@@ -3,9 +3,6 @@
 The vocabulary for talking about the AFK workflow system. Architecture reviews
 and design discussions use these terms; keep them in lockstep with the code.
 
-> 历史位置：此文档原为仓库根目录的 `CONTEXT.md`。该文件名已被
-> `afk-grill-me` 技能占用（其产出的需求对齐文档），因此词汇表迁至此处。
-
 ## Workflow execution
 
 - **WorkflowRunner** - Orchestrates a two-phase run (implement -> verify) for
@@ -26,12 +23,11 @@ and design discussions use these terms; keep them in lockstep with the code.
   generation; disarmed during handoff negotiation and on cleanup.
   `src/application/workflows/watchdog.ts`.
 
-- **Signal** - The agent/runner communication protocol via `.afk-signal.json`:
-  `goal_complete`, `ac_result`, `handoff_ready`, `timeout`, `idle`. **Deprecated
-  as the completion protocol** — new agents report via `ExecutionResult`, and
-  `.afk-signal.json` remains readable for old worktrees only. Context overflow
-  is NOT a signal: the runner is the sole authority, polling statusline token
-  usage directly. `src/infrastructure/io/signal.ts`.
+- **Signal** - The interactive agent/runner communication protocol via
+  `.afk-signal.json`: `goal_complete`, `ac_result`, `handoff_ready`, `timeout`,
+  `idle`. Batch agents use `ExecutionResult` instead. Context overflow is NOT a
+  signal: the runner is the sole authority, polling statusline token usage
+  directly. `src/infrastructure/io/signal.ts`.
 
 - **TrackerProvider** - The seam over GitLab and GitHub (issues, MRs/PRs,
   labels, comments, AC parsing). `src/domain/tracker/types.ts`.

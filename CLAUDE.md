@@ -105,16 +105,14 @@ All 8 phases of [docs/architecture/execution.md](docs/architecture/execution.md)
 |-------|--------|-------|
 | 0 | `src/domain/agents/types.ts`, `src/infrastructure/sandbox/types.ts` | Interfaces only |
 | 1 | `src/infrastructure/sandbox/providers/local.ts`, `sandbox/types.ts` | Local sandbox wired into `WorkflowRunner` |
-| 2 | `sandbox/providers/local.ts` (LocalAgentExecution), `src/domain/agents/claude-code.ts` | ExecutionResult.status; `LegacyExecutionWrapper` since removed |
+| 2 | `sandbox/providers/local.ts` (LocalAgentExecution), `src/domain/agents/claude-code.ts` | ExecutionResult.status |
 | 3 | `src/domain/agents/{codex,cursor,pi,opencode,copilot}.ts`, `registry.ts` | 6 providers + capability-gated resume |
 | 4 | `src/application/sessions/{types,file-store,handoff-store,run-state}.ts` | SessionStore chain + atomic writes + checksum |
 | 5 | `src/infrastructure/sandbox/container/*` | Docker + Podman sandbox with env allowlist |
 | 6 | `src/domain/branches/{issue,named,merge-to-head,existing}.ts` | 4 strategies + parallel-worktree isolation |
 | 7 | `src/domain/templates/*` | 5 builtin templates + zod-validated loader |
-| 8 | removed | `sandbox/legacy-compat.ts` is deleted; see the note below |
+| 8 | `src/infrastructure/io/signal.ts` | Interactive completion signal; batch agents use `ExecutionResult` |
 
-Agents split by execution path: **batch** agents report via `ExecutionResult`;
-**interactive** agents still write `.afk-signal.json`, read directly by
-`src/infrastructure/tmux/tmux.ts` and written by
-`src/application/workflows/execution-protocol.ts`. The Phase 8 signal-to-ExecutionResult
-shim is gone, so the two paths no longer share a translation layer.
+Batch agents report via `ExecutionResult`; interactive agents write
+`.afk-signal.json` per `src/application/workflows/execution-protocol.ts`, read
+in `src/infrastructure/tmux/tmux.ts`.

@@ -596,23 +596,15 @@ Acceptance: templates can express dependencies, conditions, execution modes, Age
 Prerequisite: all new workflows and default Provider use ExecutionResult.
 
 - Delete signal writing requirements from new prompts (`templates/builtin.ts`, `workflows.ts` phases)
-- Runner still reads signal as backward-compatible fallback — but **not** via `sandbox/legacy-compat.ts`, which is deleted. The interactive path reads it in `src/infrastructure/tmux/tmux.ts`.
+- Runner still reads signal as backward-compatible fallback (`src/infrastructure/tmux/tmux.ts`)
 - Clean up legacy signal CLI/schema/tests (preserve readSignal/writeSignal/clearSignal + unit tests; CLI/skills have no independent signal subcommand yet)
 - Update skills, README, and architecture docs (`CLAUDE.md` contains Phase status table)
 
 Acceptance: full test suite passes, old worktrees can be compatibly read or explicitly migrated.
 
-Implementation details (as built — this section drifted from the code):
-- ~~`sandbox/legacy-compat.ts` — `readLegacySignalResult()` maps `.afk-signal.json` to `ExecutionResult`.~~ The shim was **deleted**; no signal-to-`ExecutionResult` translation exists anywhere.
-- ~~`LocalAgentExecution.waitForResult` calls legacy adapter as fallback.~~ `LocalAgentExecution` lives in `src/infrastructure/sandbox/providers/local.ts` and has no legacy adapter path.
-- `core/io/signal.ts` top has `@deprecated` JSDoc → the file is `src/infrastructure/io/signal.ts` and carries **no** `@deprecated` tag.
-
-What actually ships today: the split is by execution path, not by protocol age.
-**Batch** agents report via `ExecutionResult`. **Interactive** agents still write
-`.afk-signal.json` — `src/application/workflows/execution-protocol.ts` instructs
-them to, and `src/infrastructure/tmux/tmux.ts` reads it via
-`readSignal`/`readSignalSync`. Phase 8 is therefore **partially complete**: the
-shared shim is gone, the interactive signal file is not.
+Implementation details:
+- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `src/infrastructure/tmux/tmux.ts`.
+- `src/infrastructure/io/signal.ts` owns the signal file primitives.
 
 ## 13. Testing Plan
 

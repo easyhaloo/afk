@@ -32,6 +32,13 @@ Thumbs.db
 # Testing
 coverage/
 .nyc_output/
+desktop-client/test-results/
+# Outputs of past tests/e2e/codex-runtime.ts runs. That test instructs a real
+# Codex agent to create the file and verifies it via the fetched remote ref, so
+# nothing reads the local copy — but a tracked leftover turns the agent's
+# "create this" instruction into "modify this" while the same prompt forbids
+# modifying other tracked files.
+tests/fixtures/afk-codex-e2e-*.txt
 
 # Logs
 *.log
@@ -51,7 +58,16 @@ dump.rdb
 .worktrees/
 .playwright-mcp/
 .playwright-cli/
-.claude/
+
+# Agent working state is local; settings.json is shared so the team gets
+# the same hooks. settings.local.json stays ignored.
+.claude/*
+!.claude/settings.json
+
+# jev-agent-guard host configs are generated per machine and embed absolute
+# paths (e.g. /Users/<name>/...), so they cannot be shared.
+.codex/
+.opencode/
 
 # Agent runtime state
 .omo/

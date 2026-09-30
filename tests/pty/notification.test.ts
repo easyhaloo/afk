@@ -5,7 +5,7 @@
  * node-pty spawns a real PTY with actual terminal dimensions, so Yoga can compute
  * absolute positions correctly.
  *
- * Run: pnpm test tests/e2e/
+ * Run: pnpm test:e2e:pty
  */
 import { spawn } from 'node-pty';
 import { fileURLToPath } from 'url';

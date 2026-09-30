@@ -141,7 +141,7 @@ pnpm dlx vitest --run src/views/
 **模式**：启动子进程，pty 注入按键，捕获输出
 
 ```typescript
-// tests/e2e/notification.test.ts
+// tests/pty/notification.test.ts
 import { spawn } from 'node-pty';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -183,10 +183,16 @@ describeE2E('Notification E2E', () => {
 });
 ```
 
-**运行**：
+**运行**：`tests/pty/` 下的文件被默认配置排除，需显式运行：
+
 ```bash
-pnpm dlx vitest --run tests/e2e/
+pnpm test:e2e:pty
 ```
+
+> **为何改为显式运行**：node-pty 1.1.0 会在 `node::Environment::CleanupHandles`
+> 期间触发 ThreadSafeFunction 回调，该 C++ 异常已无 JS 栈可展开，最终走到
+> `std::__terminate` 并 abort 整个 vitest worker。`vitest.config.ts` 另外设置了
+> `pool: 'forks'`，把残余的 abort 关进子进程，不再拖垮整个测试套件。
 
 ---
 
@@ -209,11 +215,16 @@ afk/
 │   └── views/board/views/
 │       └── Notification.tsx      ← 组件（无独立测试文件）
 ├── tests/
-│   └── e2e/
-│       └── notification.test.ts  ← E2E 测试 (11 tests，已跳过)
+│   ├── e2e/
+│   │   └── codex-runtime.test.ts     ← 单元测试，默认运行
+│   └── pty/                          ← 放在这里的都需要真实终端
+│       ├── notification.test.ts
+│       ├── dashboard-layout.test.ts
+│       └── tui-plugin.test.ts
 ├── scripts/
 │   └── fix-node-pty.sh           ← node-pty macOS 签名修复
-├── vitest.config.ts
+├── vitest.config.ts              ← 默认套件（pool: 'forks'，排除 tests/pty/**）
+├── vitest.pty.config.ts          ← 显式运行的 tests/pty/** 套件
 └── docs/
     ├── guides/testing.md
     └── guides/testing.zh.md
@@ -234,8 +245,8 @@ pnpm dlx vitest --run src/domain/ src/application/ src/infrastructure/ src/share
 # 只跑组件测试
 pnpm dlx vitest --run src/views/
 
-# 只跑 E2E
-pnpm dlx vitest --run tests/e2e/
+# 只跑 PTY E2E（需显式运行，要求真实终端）
+pnpm test:e2e:pty
 
 # 覆盖率
 pnpm dlx vitest --run --coverage

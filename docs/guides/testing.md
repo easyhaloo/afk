@@ -141,7 +141,7 @@ pnpm dlx vitest --run src/views/
 **Pattern**: Spawn a child process, inject keys via pty, capture output
 
 ```typescript
-// tests/e2e/notification.test.ts
+// tests/pty/notification.test.ts
 import { spawn } from 'node-pty';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -183,10 +183,17 @@ describeE2E('Notification E2E', () => {
 });
 ```
 
-**Run**:
+**Run**: anything in `tests/pty/` is excluded from the default config and runs opt-in.
+
 ```bash
-pnpm dlx vitest --run tests/e2e/
+pnpm test:e2e:pty
 ```
+
+> **Why opt-in**: node-pty 1.1.0 fires its ThreadSafeFunction callback during
+> `node::Environment::CleanupHandles`; the C++ exception has no JS stack to
+> unwind into, so `std::__terminate` aborts the whole vitest worker. `vitest.config.ts`
+> also sets `pool: 'forks'` so any remaining abort is contained to one child
+> process instead of taking the suite down with it.
 
 ---
 
@@ -209,11 +216,16 @@ afk/
 │   └── views/board/views/
 │       └── Notification.tsx      ← Component (no dedicated test file)
 ├── tests/
-│   └── e2e/
-│       └── notification.test.ts  ← E2E tests (11 tests, skipped)
+│   ├── e2e/
+│   │   └── codex-runtime.test.ts     ← unit test, runs by default
+│   └── pty/                          ← anything here needs a real terminal
+│       ├── notification.test.ts
+│       ├── dashboard-layout.test.ts
+│       └── tui-plugin.test.ts
 ├── scripts/
 │   └── fix-node-pty.sh           ← node-pty macOS signature fix
-├── vitest.config.ts
+├── vitest.config.ts              ← default suite (pool: 'forks', excludes tests/pty/**)
+├── vitest.pty.config.ts          ← opt-in tests/pty/** suite
 └── docs/
     ├── guides/testing.md
     └── guides/testing.zh.md
@@ -234,8 +246,8 @@ pnpm dlx vitest --run src/domain/ src/application/ src/infrastructure/ src/share
 # Component tests only
 pnpm dlx vitest --run src/views/
 
-# E2E only
-pnpm dlx vitest --run tests/e2e/
+# PTY E2E only (opt-in, needs a real terminal)
+pnpm test:e2e:pty
 
 # Coverage
 pnpm dlx vitest --run --coverage

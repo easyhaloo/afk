@@ -18,6 +18,7 @@
     "pretest": "npm run build",
     "test": "vitest run && pnpm --filter @afk/core test && pnpm --filter @afk/application test && pnpm --filter @afk/workflow-graph test",
     "test:e2e:codex": "tsx tests/e2e/codex-runtime.ts",
+    "test:e2e:pty": "vitest run --config vitest.pty.config.ts",
     "test:watch": "vitest",
     "postinstall": "node scripts/fix-permissions.mjs",
     "prepublishOnly": "npm run build"

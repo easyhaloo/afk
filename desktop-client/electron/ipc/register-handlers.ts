@@ -26,11 +26,13 @@ import { createJumpserverCredentialService } from "../services/jumpserver-creden
 import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
 import { createSshService } from "../services/ssh-service";
 import { createExternalUrlService } from "../services/external-url-service";
+import { createProviderWorkItemApplicationFacade, createWorkItemApplicationAdapter } from "../adapters/work-item-application-adapter";
 import { createWorkItemInventoryService } from "../services/work-item-inventory-service";
 import { createWorkItemInventoryStore } from "../services/work-item-inventory-store";
 import { createWorkItemInventorySyncService } from "../services/work-item-inventory-sync-service";
 import { createWorkItemExecutionService } from "../services/work-item-execution-service";
 import { createWorkItemExecutionQueryService } from "../services/work-item-execution-query-service";
+import { createRunEventQueryAdapter } from "../adapters/run-event-query-adapter";
 import { createWorkItemExecutionManifestStore } from "../services/work-item-execution-manifest-store";
 import { createWorkItemRunStore } from "../services/work-item-run-store";
 import { createWorkItemRunHistoryService } from "../services/work-item-run-history-service";
@@ -151,23 +153,10 @@ const backlogService = createBacklogService({
   },
 });
 const workItemInventoryService = createWorkItemInventoryService({
-  cwd: app.getPath("userData"),
+  application: createWorkItemApplicationAdapter(createProviderWorkItemApplicationFacade()),
   store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
-  resolveAfk: resolveDesktopAfk,
-  exec: async (command, args, cwd) => {
-    const result = await exec(command, args, cwd, undefined, { timeoutMs: 300_000, maxBuffer: 50_000_000 });
-    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
-  },
 });
-const workItemExecutionQueryService = createWorkItemExecutionQueryService({
-  run: async (args) => {
-    const invocation = await resolveDesktopAfk();
-    if (!invocation.command) throw new Error("afk CLI 未在 PATH 中发现");
-    const result = await exec(invocation.command, [...invocation.args, ...args], app.getPath("userData"), undefined, { timeoutMs: 30_000, maxBuffer: 5_000_000 });
-    if (!result.ok) throw new Error(result.stderr || "无法读取运行审计记录");
-    return result.stdout;
-  },
-});
+const workItemExecutionQueryService = createWorkItemExecutionQueryService(createRunEventQueryAdapter());
 const workItemInventorySyncService = createWorkItemInventorySyncService({
   sync: () => workItemInventoryService.sync(),
 });

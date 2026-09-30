@@ -1,22 +1,13 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { WorkflowRunner } from '../workflow-engine';
-import { QARunner } from './qa-runner';
-import { getWorkflowConfig } from '../../infrastructure/config/manager';
 import { logger } from '../../infrastructure/io/index';
-import type { ManagementProviderBundle, ProviderBundle } from '../providers';
-import { ManagementBacklogProvider } from '../../domain/backlog/management-provider';
-import { prepareAgentRuntime, resolveAgentProviderName, resolveCodexRuntime } from '../../domain/agents/index';
-import type { AgentProviderName, AgentRuntimeSelection } from '../../domain/agents/types';
-import type { CodexReadinessProbe } from '../../domain/agents/codex-runtime';
+import type { ProviderBundle } from '../providers';
 import { parseWorkItemId } from '../../domain/backlog';
 import { readExecutionManifest } from '../workflows/execution-manifest';
 import { executeWorkItem } from '../workflows/execute-work-item';
 
 export interface LoopRunnerOptions {
-  /** Max simultaneous legacy implement chains or managed full attempts. */
-  maxConcurrent: number;
   /** Backlog polling interval in ms. */
   pollIntervalMs: number;
   /** Periodic status print interval in ms. */
@@ -25,40 +16,17 @@ export interface LoopRunnerOptions {
   shutdownTimeoutMs: number;
   /** If set, the runner stops itself after this many successful completions. */
   maxIterations?: number;
-  /** Optional exact backlog scope for bounded runs such as real E2E verification. */
-  backlogIds?: readonly string[];
-  /** Workflow template passed to each implementation run. */
+  /** Exact backlog scope for the manifest-bound work item. */
+  backlogIds: readonly string[];
+  /** Workflow template passed to each execution. */
   template?: string;
-  managedExecution?: { workItemId: string; manifestPath: string };
+  managedExecution: { workItemId: string; manifestPath: string };
   readManifest?: typeof readExecutionManifest;
   executeManagedWorkItem?: typeof executeWorkItem;
-  /** Factory for WorkflowRunner — overridable for tests. */
-  workflowRunnerFactory?: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
-  /** Factory for QARunner — overridable for tests. */
-  qaRunnerFactory?: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => QARunner;
   /** Where to write this process's pid (so `afk loop stop` can find it). */
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
   statusFilePath?: string;
-  /** Lifecycle modules to activate (e.g., ['isolate']). */
-  ext?: string[];
-  /** Module parameters (e.g., ['isolate.auto=true']). */
-  extParams?: string[];
-  /**
-   * Label → modules mapping for dynamic per-issue module activation.
-   * When an issue has a matching label, the corresponding modules are added
-   * to the `ext` list for that issue's workflow run.
-   * E.g. { 'need::isolate': ['isolate'] }
-   */
-  moduleTriggers?: Record<string, string[]>;
-  /** Canonical providers for backlog-aware execution. */
-  providers: ProviderBundle;
-  /** Agent provider shared by implementation and QA for each chain. */
-  agentProvider?: AgentProviderName;
-  /** Immutable runtime shared by implementation and QA. */
-  agentRuntime?: AgentRuntimeSelection;
-  /** Readiness seam used before the first provider/backlog operation. */
-  readinessProbe?: CodexReadinessProbe;
 }
 
 export interface ChainContext {
@@ -68,8 +36,7 @@ export interface ChainContext {
 }
 
 export interface LoopStatus {
-  implement: { active: number; ids: string[] };
-  qa: { active: string | null; queue: string[] };
+  execution: { active: number; ids: string[] };
   totals: { completed: number; failed: number; started: number };
   uptimeMs: number;
   lastError: Record<string, string>;
@@ -77,31 +44,20 @@ export interface LoopStatus {
 }
 
 interface InternalOptions {
-  maxConcurrent: number;
   pollIntervalMs: number;
   statusIntervalMs: number;
   shutdownTimeoutMs: number;
   maxIterations: number | undefined;
-  backlogIds: ReadonlySet<string> | undefined;
+  backlogIds: ReadonlySet<string>;
   template: string | undefined;
-  managedExecution: { backlogId: string; workItemId: string; manifestPath: string; providerRef?: string } | undefined;
+  managedExecution: { backlogId: string; workItemId: string; manifestPath: string; providerRef?: string };
   readManifest: typeof readExecutionManifest;
   executeManagedWorkItem: typeof executeWorkItem;
-  workflowRunnerFactory: (providers: ProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => WorkflowRunner;
-  qaRunnerFactory: (providers: ManagementProviderBundle, config: import('../../infrastructure/config/manager').WorkflowConfig, runtime: AgentRuntimeSelection) => QARunner;
   pidFilePath: string;
   statusFilePath: string;
-  ext: string[] | undefined;
-  extParams: string[] | undefined;
-  moduleTriggers: Record<string, string[]>;
-  providers: ProviderBundle;
-  agentProvider: AgentProviderName;
-  agentRuntime: AgentRuntimeSelection;
-  readinessProbe?: CodexReadinessProbe;
 }
 
 const DEFAULTS = {
-  maxConcurrent: 3,
   pollIntervalMs: 60_000,
   statusIntervalMs: 30_000,
   shutdownTimeoutMs: 300_000,
@@ -112,33 +68,16 @@ const DEFAULTS = {
 const POLL_RETRY_DELAY_MS = 5_000;
 
 /**
- * LoopRunner schedules ready/rework backlog items continuously. An explicit
- * single-item manifest delegates the full lifecycle to executeWorkItem;
- * without one, the existing legacy chain remains in use.
- *
- * The legacy path has two pools:
- *   - implement: N parallel `WorkflowRunner` instances, bounded by
- *     `maxConcurrent`.
- *   - qa: a single `QARunner` slot + FIFO queue. QA is serial by design.
- *
- * Each issue flows: poll → implement → qaQueue → qa → done/failed.
+ * LoopRunner schedules one manifest-bound ready/rework work item continuously.
+ * Each attempt delegates the full lifecycle to executeWorkItem.
  *
  * Provider state remains the SSOT: the in-memory `inFlight` set is per-process
  * and rebuilt on restart. A reservation is held from poll until the chain
- * finishes (implement failure or QA completion release it — success keeps it
- * reserved while QA is queued, so poll can't double-start).
+ * finishes, so poll cannot double-start an attempt.
  */
 export class LoopRunner {
   private readonly opts: InternalOptions;
-  private readonly managementProviders: ManagementProviderBundle;
-
-  // Two pools + queue
-  private inImplement = new Map<string, ChainContext>();
-  private inQA: ChainContext | null = null;
-  private qaQueue: string[] = [];
-  // Serial QA executor: each enqueue appends a segment to this chain, so QA
-  // runs FIFO, one at a time, with zero polling.
-  private qaChain: Promise<void> = Promise.resolve();
+  private inExecution = new Map<string, ChainContext>();
 
   // Dedup + counters
   private inFlight = new Set<string>();
@@ -160,55 +99,31 @@ export class LoopRunner {
   private statusTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly providers: ProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
-    const workflowConfig = getWorkflowConfig();
-    if (options.managedExecution && (
-      options.backlogIds?.length !== 1 || !options.managedExecution.manifestPath
-      || options.agentProvider || options.agentRuntime || options.ext?.length || options.extParams?.length
-      || Object.keys(options.moduleTriggers ?? {}).length
-    )) {
-      throw new Error('managed loop execution requires exactly one backlog ID and cannot use legacy agent or module overrides');
+    if (options.backlogIds?.length !== 1 || !options.managedExecution?.manifestPath) {
+      throw new Error('loop execution requires exactly one backlog ID, work item ID, and execution manifest');
     }
-    const managedExecution = options.managedExecution && {
+    const managedExecution = {
       backlogId: String(options.backlogIds![0]),
       workItemId: parseWorkItemId(options.managedExecution.workItemId).id,
       manifestPath: options.managedExecution.manifestPath,
     };
-    const agentProvider = resolveAgentProviderName(options.agentProvider ?? workflowConfig.agentDefault);
-    const agentRuntime = options.agentRuntime ?? (agentProvider === 'codex'
-      ? resolveCodexRuntime({ cli: {}, config: workflowConfig.agents.codex })
-      : { kind: 'default' });
-    this.managementProviders = {
-      backlog: new ManagementBacklogProvider(providers.backlog),
-      branches: providers.branches,
-      changes: providers.changes,
-    };
     this.opts = {
-      maxConcurrent: options.maxConcurrent ?? DEFAULTS.maxConcurrent,
       pollIntervalMs: options.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
       statusIntervalMs: options.statusIntervalMs ?? DEFAULTS.statusIntervalMs,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULTS.shutdownTimeoutMs,
       maxIterations: options.maxIterations,
-      backlogIds: options.backlogIds ? new Set(options.backlogIds.map(String)) : undefined,
+      backlogIds: new Set(options.backlogIds.map(String)),
       template: options.template,
       managedExecution,
       readManifest: options.readManifest ?? readExecutionManifest,
       executeManagedWorkItem: options.executeManagedWorkItem ?? executeWorkItem,
-      workflowRunnerFactory: options.workflowRunnerFactory ?? ((p, cfg, runtime) => new WorkflowRunner(p, { config: cfg, agentRuntime: runtime })),
-      qaRunnerFactory: options.qaRunnerFactory ?? ((p, cfg, runtime) => new QARunner(p, cfg, { agentRuntime: runtime })),
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
       statusFilePath: options.statusFilePath ?? DEFAULTS.statusFilePath,
-      ext: options.ext,
-      extParams: options.extParams,
-      moduleTriggers: options.moduleTriggers ?? {},
-      providers: this.providers,
-      agentProvider,
-      agentRuntime,
-      readinessProbe: options.readinessProbe,
     };
   }
 
   /**
-   * Start the loop: initial poll, then arm three timers.
+   * Start the loop: initial poll, then arm polling and status timers.
    * Resolves when the loop exits (--max-iterations reached or stop() called).
    */
   async start(): Promise<void> {
@@ -218,7 +133,6 @@ export class LoopRunner {
     this.infrastructureError = undefined;
     try {
       await this.validateManagedExecution();
-      this.opts.agentRuntime = await prepareAgentRuntime(this.opts.agentRuntime, this.opts.readinessProbe);
     } catch (error) {
       this.infrastructureError = (error as Error).message;
       logger.error({ error: this.infrastructureError }, 'loop startup precondition failed');
@@ -228,10 +142,9 @@ export class LoopRunner {
     this.startTime = Date.now();
     this.writePidFile();
 
-    this.emitEvent(`started (mode=${this.opts.managedExecution ? 'managed' : 'legacy'}, maxConcurrent=${this.opts.maxConcurrent}, poll=${this.opts.pollIntervalMs}ms, status=${this.opts.statusIntervalMs}ms)`);
+    this.emitEvent(`started (poll=${this.opts.pollIntervalMs}ms, status=${this.opts.statusIntervalMs}ms)`);
     logger.info(
       {
-        maxConcurrent: this.opts.maxConcurrent,
         pollIntervalMs: this.opts.pollIntervalMs,
         pid: process.pid,
         pidFile: this.opts.pidFilePath,
@@ -253,7 +166,6 @@ export class LoopRunner {
 
   private async validateManagedExecution(): Promise<void> {
     const managed = this.opts.managedExecution;
-    if (!managed) return;
     const manifest = await this.opts.readManifest(managed.manifestPath, managed.workItemId);
     const identity = parseWorkItemId(managed.workItemId);
     if (manifest.workItemId !== managed.workItemId || manifest.providerBacklogId !== managed.backlogId
@@ -295,14 +207,12 @@ export class LoopRunner {
     if (winner === 'timeout') {
       logger.warn(
         {
-          inImplement: this.inImplement.size,
-          inQA: this.inQA?.iid ?? null,
-          qaQueue: this.qaQueue.length,
+          active: this.inExecution.size,
         },
         'shutdown timeout — force exit'
       );
       this.emitEvent(
-        `shutdown timeout: implement=${this.inImplement.size} qa=${this.inQA?.iid ?? '-'} qaQueue=${this.qaQueue.length} (force exit)`
+        `shutdown timeout: execution=${this.inExecution.size} (force exit)`
       );
     } else {
       this.emitEvent('stopped: all in-flight drained');
@@ -317,13 +227,9 @@ export class LoopRunner {
    */
   getStatus(): LoopStatus {
     return {
-      implement: {
-        active: this.inImplement.size,
-        ids: [...this.inImplement.keys()],
-      },
-      qa: {
-        active: this.inQA?.iid ?? null,
-        queue: [...this.qaQueue],
+      execution: {
+        active: this.inExecution.size,
+        ids: [...this.inExecution.keys()],
       },
       totals: {
         completed: this.completed,
@@ -339,10 +245,7 @@ export class LoopRunner {
   // ── Private: pool drains ───────────────────────────────────────────────────
 
   private async waitForDrain(): Promise<'drained'> {
-    // Drained = no implement chains, no active QA, and no QA waiting on the
-    // chain (stop() drops queued QA segments, so queue must also be empty).
-    const drained = () =>
-      this.inImplement.size === 0 && this.inQA === null && this.qaQueue.length === 0;
+    const drained = () => this.inExecution.size === 0;
     if (drained()) return 'drained';
     return new Promise<'drained'>(resolve => {
       const check = () => {
@@ -355,7 +258,7 @@ export class LoopRunner {
   }
 
   /**
-   * Pull runnable backlog items from the provider and fire implement chains.
+   * Pull the runnable work item from the provider and start its execution.
    * Tracker errors are logged and swallowed — the loop never dies from a
    * single bad poll.
    */
@@ -378,7 +281,7 @@ export class LoopRunner {
       ]);
       const issues = [...readyIssues, ...reworkIssues]
         .filter((issue, index, all) => all.findIndex(candidate => candidate.id === issue.id) === index)
-        .filter(issue => !this.opts.backlogIds || this.opts.backlogIds.has(String(issue.id)));
+        .filter(issue => this.opts.backlogIds.has(String(issue.id)));
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');
 
       let enqueued = 0;
@@ -389,8 +292,6 @@ export class LoopRunner {
         if (!this.running) break;
 
         if (this.inFlight.has(issueId)) { skipped++; continue; }
-        // Cap reached: later issues can't start either — break, don't continue.
-        if (this.inImplement.size >= this.opts.maxConcurrent) { skipped++; break; }
 
         // Reserve BEFORE any await so overlapping ticks cannot double-start.
         this.inFlight.add(issueId);
@@ -402,12 +303,11 @@ export class LoopRunner {
           continue;
         }
 
-        this.inImplement.set(issueId, { iid: issueId, session: '', startedAt: 0 });
+        this.inExecution.set(issueId, { iid: issueId, session: '', startedAt: 0 });
         this.started++;
         enqueued++;
-        logger.info({ iid: issueId, inImplement: this.inImplement.size }, 'backlog enqueued for implement');
-        // Fire-and-forget — chain manages its own inImplement membership
-        void this.runChain(issueId);
+        logger.info({ iid: issueId, active: this.inExecution.size }, 'backlog enqueued for execution');
+        void this.runManagedChain(issueId);
       }
 
       logger.info({ found: issues.length, enqueued, skipped }, 'poll complete');
@@ -421,95 +321,11 @@ export class LoopRunner {
     }
   }
 
-  /**
-   * Implement chain: WorkflowRunner → on success, push to qaQueue.
-   * Errors never crash the loop.
-   */
-  private async runChain(iid: string, projectName?: string): Promise<void> {
-    if (this.opts.managedExecution?.backlogId === iid) {
-      await this.runManagedChain(iid);
-      return;
-    }
-    const session = `afk-${iid}-${Date.now()}`;
-    const ctx: ChainContext = { iid, session, startedAt: Date.now() };
-    this.inImplement.set(iid, ctx);
-    this.emitEvent(`#${iid} legacy implement started (session=${session})`);
-    logger.info({ iid, session, projectName }, 'implement chain starting');
-
-    const backlog = await this.providers.backlog.get(iid);
-    const targetBranch = getWorkflowConfig().targetBranch ?? 'main';
-    // parentId is organizational only. A stacked branch must opt in through
-    // baseBacklogId; once that base is done its changes are already on target.
-    const executionBase = backlog.baseBacklogId
-      ? await this.providers.backlog.get(backlog.baseBacklogId)
-      : undefined;
-    const baseBranch = executionBase && executionBase.state !== 'done'
-      ? executionBase.branchName
-      : targetBranch;
-
-    try {
-      const resolvedExt = await this.resolveModules(iid);
-      logger.info({ iid, resolvedExt }, 'modules resolved');
-      const config = { ...getWorkflowConfig(), agentDefault: this.opts.agentProvider };
-      const runner = this.opts.workflowRunnerFactory(this.providers, config, this.opts.agentRuntime);
-      const result = await runner.run({
-        session,
-        projectName,
-        targetBranch: baseBranch,
-        baseBranch,
-        ext: resolvedExt,
-        extParams: this.opts.extParams,
-        backlogId: String(iid),
-        template: this.opts.template,
-        executionMode: 'batch',
-        agentProvider: this.opts.agentProvider,
-      });
-      logger.info({ iid, success: result.success, url: result.url }, 'WorkflowRunner.run returned');
-
-      if (result.success) {
-        const elapsed = formatDuration(Date.now() - ctx.startedAt);
-        this.emitEvent(`${iid} implement → verification (${elapsed})`);
-        this.enqueueQA(iid);
-        logger.info({ iid, elapsed, url: result.url }, 'implement succeeded; queued for QA');
-      } else if (result.skipped === 'not_claimed') {
-        this.inFlight.delete(iid);
-        this.emitEvent(`${iid} implement skipped (claim unavailable)`);
-        logger.info({ iid }, 'implement skipped because backlog claim was unavailable');
-      } else {
-        // WorkflowRunner terminalized the failure in the provider.
-        this.failed++;
-        // Release the reservation: a failed issue must be re-pickable once
-        // a human can requeue the item after resolving the failure.
-        this.inFlight.delete(iid);
-        this.lastError.set(iid, 'implement-failed');
-        this.emitEvent(`${iid} implement failed → blocked/hitl`);
-        logger.warn({ iid }, 'implement returned unsuccessful');
-      }
-    } catch (error) {
-      // Should be rare: WorkflowRunner catches its own errors, but if it
-      // throws (e.g. before its try/catch), we still need to keep the loop
-      // alive and mark the issue.
-      const msg = (error as Error).message;
-      this.failed++;
-      this.inFlight.delete(iid);
-      this.lastError.set(iid, `implement-crash: ${msg}`);
-      logger.error({ iid, err: error }, 'implement chain crashed');
-        this.emitEvent(`${iid} implement crashed → blocked/hitl: ${msg}`);
-      try {
-        await this.providers.backlog.transition(String(iid), 'blocked', { reason: msg });
-        await this.providers.backlog.setExecutionMode(String(iid), 'hitl');
-      } catch { /* best-effort */ }
-    } finally {
-      this.inImplement.delete(iid);
-      logger.info({ iid, remainingInImplement: this.inImplement.size }, 'implement chain finished');
-    }
-  }
-
   private async runManagedChain(iid: string): Promise<void> {
     const managed = this.opts.managedExecution!;
     const startedAt = Date.now();
-    this.inImplement.set(iid, { iid, session: managed.workItemId, startedAt });
-    this.emitEvent(`${iid} managed execution started (workItemId=${managed.workItemId})`);
+    this.inExecution.set(iid, { iid, session: managed.workItemId, startedAt });
+    this.emitEvent(`${iid} execution started (workItemId=${managed.workItemId})`);
     try {
       const item = await this.providers.backlog.get(iid);
       const identity = parseWorkItemId(managed.workItemId);
@@ -527,162 +343,27 @@ export class LoopRunner {
       if (result.status === 'merge_ready' || result.status === 'done') {
         this.completed++;
         this.lastError.delete(iid);
-        this.emitEvent(`${iid} managed QA passed → ${result.status} (${elapsed})${result.changeUrl ? ` change=${result.changeUrl}` : ''}`);
+        this.emitEvent(`${iid} execution completed → ${result.status} (${elapsed})${result.changeUrl ? ` change=${result.changeUrl}` : ''}`);
       } else if (result.status === 'rework') {
         this.lastError.delete(iid);
-        this.emitEvent(`${iid} managed QA failed → rework/afk (${elapsed})`);
+        this.emitEvent(`${iid} execution requested rework/afk (${elapsed})`);
       } else if (result.status === 'not_claimed') {
-        this.emitEvent(`${iid} managed execution skipped (claim unavailable)`);
+        this.emitEvent(`${iid} execution skipped (claim unavailable)`);
       } else {
         this.failed++;
-        this.lastError.set(iid, 'managed-execution-blocked');
-        this.emitEvent(`${iid} managed execution failed → blocked/hitl (${elapsed})`);
+        this.lastError.set(iid, 'execution-blocked');
+        this.emitEvent(`${iid} execution failed → blocked/hitl (${elapsed})`);
       }
     } catch (error) {
       const message = (error as Error).message;
       this.failed++;
-      this.lastError.set(iid, `managed-execution: ${message}`);
-      this.emitEvent(`${iid} managed execution failed: ${message}`);
-      logger.error({ iid, err: error }, 'managed execution failed without legacy fallback');
+      this.lastError.set(iid, `execution: ${message}`);
+      this.emitEvent(`${iid} execution failed: ${message}`);
+      logger.error({ iid, err: error }, 'execution failed');
     } finally {
-      this.inImplement.delete(iid);
+      this.inExecution.delete(iid);
       this.inFlight.delete(iid);
       if (this.opts.maxIterations !== undefined && this.completed >= this.opts.maxIterations) {
-        void this.stop();
-      }
-    }
-  }
-
-  /**
-   * Resolve activated modules from provider-neutral business tags.
-   *
-   * 1. Start with the static `--ext` list (if any)
-   * 2. If `moduleTriggers` is configured, fetch the item and check its tags
-   * 3. Union the triggered modules with the base list
-   *
-   * On fetch failure, falls back to the static `--ext` list (doesn't break the
-   * loop — the caller handles the error path).
-   */
-  private async resolveModules(iid: string): Promise<string[] | undefined> {
-    const triggers = this.opts.moduleTriggers;
-    const base = this.opts.ext ?? [];
-
-    // No triggers configured → use static list
-    if (!triggers || Object.keys(triggers).length === 0) {
-      return base.length > 0 ? base : undefined;
-    }
-
-    try {
-      const item = await this.providers.backlog.get(iid);
-      const merged = new Set(base);
-
-      for (const [tag, modules] of Object.entries(triggers)) {
-        if (item.tags.includes(tag)) {
-          for (const mod of modules) {
-            merged.add(mod);
-          }
-        }
-      }
-
-      return [...merged];
-    } catch (err) {
-      logger.warn({ iid, err }, 'failed to resolve modules from tags, falling back to static ext');
-      return base.length > 0 ? base : undefined;
-    }
-  }
-
-  /**
-   * Enqueue an issue for QA. Appends to the serial promise chain — QA runs
-   * FIFO, one at a time, with no polling timer.
-   */
-  private enqueueQA(iid: string): void {
-    this.qaQueue.push(iid);
-    this.qaChain = this.qaChain
-      .then(() => this.runQA())
-      // runQA never rejects (every path is caught), but keep the chain alive
-      // even if a future change breaks that invariant.
-      .catch(err => logger.error({ err }, 'qa chain segment crashed'));
-  }
-
-  /**
-   * Run QARunner.process for the head of qaQueue, route result.
-   * Serial by design — chain segments execute one after another.
-   */
-  private async runQA(): Promise<void> {
-    // Dequeue first so a stop() that drops the segment still drains cleanly.
-    const iid = this.qaQueue.shift();
-    if (iid === undefined) return;
-    if (!this.running) return; // stop() in progress: drop queued QA, exit soon
-    logger.info({ iid, qaQueueRemaining: this.qaQueue.length }, 'qa dequeued');
-
-    const ctx: ChainContext = {
-      iid,
-      session: `qa-${iid}-${Date.now()}`,
-      startedAt: Date.now(),
-    };
-
-    // Re-check the issue is still ready for QA (could be already done/hitl
-    // by another process since the chain finished).
-    try {
-      const item = await this.providers.backlog.get(String(iid));
-      if (item.state !== 'verification') {
-        logger.info({ iid, state: item.state }, 'backlog no longer needs QA, skipping');
-        this.inFlight.delete(iid);
-        return;
-      }
-    } catch (err) {
-      logger.warn({ iid, err }, 're-check failed, proceeding with QA');
-    }
-
-    this.inQA = ctx;
-      this.emitEvent(`${iid} QA started`);
-    logger.info({ iid, session: ctx.session }, 'qa chain starting');
-
-    try {
-      const qa = this.opts.qaRunnerFactory(this.managementProviders, {
-        ...getWorkflowConfig(),
-        agentDefault: this.opts.agentProvider,
-      }, this.opts.agentRuntime);
-      const result = await qa.process(iid);
-      const elapsed = formatDuration(Date.now() - ctx.startedAt);
-
-      if (result.success) {
-        this.completed++;
-        this.lastError.delete(iid);
-        const terminal = result.autoMerged === false ? 'merge_ready (human approval)' : 'done';
-        this.emitEvent(`${iid} QA passed → ${terminal} (${elapsed})${result.mrUrl ? ` change=${result.mrUrl}` : ''}`);
-        logger.info({ iid, mrUrl: result.mrUrl, elapsed }, 'qa passed');
-      } else if (result.rework) {
-        this.lastError.delete(iid);
-        this.emitEvent(`${iid} QA failed → rework/afk (${elapsed})`);
-        logger.info({ iid, elapsed }, 'QA queued rework');
-      } else {
-        // QARunner terminalizes failure in the provider.
-        this.failed++;
-        this.lastError.set(iid, 'qa-failed');
-        this.emitEvent(`${iid} QA failed → blocked/hitl (${elapsed})`);
-        logger.warn({ iid, elapsed }, 'qa failed');
-      }
-    } catch (error) {
-      const msg = (error as Error).message;
-      this.failed++;
-      this.lastError.set(iid, `qa-crash: ${msg}`);
-      logger.error({ iid, err: error }, 'qa crashed');
-      this.emitEvent(`#${iid} qa crashed: ${msg}`);
-      try {
-        await this.providers.backlog.transition(String(iid), 'blocked', { reason: msg });
-        await this.providers.backlog.setExecutionMode(String(iid), 'hitl');
-      } catch { /* best-effort */ }
-    } finally {
-      this.inQA = null;
-      this.inFlight.delete(iid);
-      logger.info({ iid, completed: this.completed, failed: this.failed }, 'qa chain finished');
-
-      // Optional self-stop after N successful completions (testing)
-      if (this.opts.maxIterations !== undefined && this.completed >= this.opts.maxIterations) {
-        this.emitEvent(`max-iterations reached (${this.completed}/${this.opts.maxIterations}), stopping`);
-        logger.info({ iid, completed: this.completed, maxIterations: this.opts.maxIterations }, 'max-iterations reached; stopping');
-        // Don't await — let stop() handle drain in its own time
         void this.stop();
       }
     }
@@ -706,16 +387,14 @@ export class LoopRunner {
 
   /**
    * Print a TUI-parseable status line.
-   * Format: `[HH:MM:SS] loop  --- status: implement=N [ids] qa=N|[iid|null] queue=[ids] done=N failed=N uptime=Hh Mm`
+   * Format: `[HH:MM:SS] loop  --- status: execution=N [ids] done=N failed=N uptime=Hh Mm`
    */
   private printStatus(): void {
     const s = this.getStatus();
     const ts = formatTimestamp();
-    const implementIds = s.implement.ids.length ? `[${s.implement.ids.join(',')}]` : '[]';
-    const qaActive = s.qa.active ?? '-';
-    const qaQ = s.qa.queue.length ? `[${s.qa.queue.join(',')}]` : '[]';
+    const activeIds = s.execution.ids.length ? `[${s.execution.ids.join(',')}]` : '[]';
     const uptime = formatDuration(s.uptimeMs);
-    const line = `[${ts}] loop  --- status: implement=${s.implement.active} ${implementIds} qa=${qaActive} queue=${qaQ} done=${s.totals.completed} failed=${s.totals.failed} uptime=${uptime}\n`;
+    const line = `[${ts}] loop  --- status: execution=${s.execution.active} ${activeIds} done=${s.totals.completed} failed=${s.totals.failed} uptime=${uptime}\n`;
     process.stdout.write(line);
     this.writeStatusFile();
   }

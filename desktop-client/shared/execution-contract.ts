@@ -1,23 +1,22 @@
-import { parseProviderProjectRef, parseWorkItemId, type ProviderProjectRef, type WorkItemId } from "./backlog-contract";
+import { parseWorkItemId, type WorkItemId } from "./backlog-contract";
 import { assertExactKeys, parseObject, parseRequiredString } from "./validation";
 
 export const EXECUTION_STATUSES = [
-  "queued", "implementing", "verifying", "publishing", "awaiting_merge", "rework", "blocked", "failed", "done", "unknown",
+  "pending", "running", "awaiting_human", "succeeded", "failed", "cancelled",
 ] as const;
+export const EXECUTION_PHASES = ["implementation", "verification", "release"] as const;
 
 export type ExecutionStatus = typeof EXECUTION_STATUSES[number];
 
 export type ExecutionSummary = {
-  executionId: string;
-  runId?: string;
+  runId: string;
   workItemId: WorkItemId;
-  project: ProviderProjectRef;
+  profileId: string;
+  attempt: number;
   status: ExecutionStatus;
-  startedAt?: string;
-  updatedAt?: string;
-  workspacePath?: string;
-  pr?: { id: string; url: string; state: "open" | "merged" | "closed" };
-  diagnostic?: string;
+  phase?: typeof EXECUTION_PHASES[number];
+  sequence: number;
+  terminal: boolean;
 };
 
 export type ExecutionQueryOptions = { workItemId?: WorkItemId; limit?: number; since?: string };
@@ -36,39 +35,24 @@ export function parseExecutionQueryOptions(input: unknown): ExecutionQueryOption
   return options;
 }
 
-function parseTimestamp(value: unknown, label: string): string {
-  const timestamp = parseRequiredString(value, label);
-  if (!Number.isFinite(Date.parse(timestamp))) throw new Error(`${label} is invalid`);
-  return timestamp;
-}
-
 export function parseExecutionSummary(input: unknown): ExecutionSummary {
   const candidate = parseObject(input, "execution summary");
-  assertExactKeys(candidate, ["executionId", "runId", "workItemId", "project", "status", "startedAt", "updatedAt", "workspacePath", "pr", "diagnostic"], "execution summary");
+  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal"], "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
-  const project = parseProviderProjectRef(candidate.project);
-  if (!workItemId.startsWith(`${project.platform}:${project.projectKey}#`)) throw new Error("execution summary project does not match work item");
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
+  if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution summary phase is invalid");
+  if (typeof candidate.attempt !== "number" || !Number.isSafeInteger(candidate.attempt) || candidate.attempt < 1) throw new Error("execution summary attempt is invalid");
+  if (typeof candidate.sequence !== "number" || !Number.isSafeInteger(candidate.sequence) || candidate.sequence < 1) throw new Error("execution summary sequence is invalid");
+  if (typeof candidate.terminal !== "boolean") throw new Error("execution summary terminal is invalid");
   const summary: ExecutionSummary = {
-    executionId: parseRequiredString(candidate.executionId, "execution summary: executionId"),
+    runId: parseRequiredString(candidate.runId, "execution summary: runId"),
     workItemId,
-    project,
+    profileId: parseRequiredString(candidate.profileId, "execution summary: profileId"),
+    attempt: candidate.attempt,
     status: candidate.status as ExecutionStatus,
+    sequence: candidate.sequence,
+    terminal: candidate.terminal,
   };
-  if (candidate.runId !== undefined) summary.runId = parseRequiredString(candidate.runId, "execution summary: runId");
-  if (candidate.startedAt !== undefined) summary.startedAt = parseTimestamp(candidate.startedAt, "execution summary: startedAt");
-  if (candidate.updatedAt !== undefined) summary.updatedAt = parseTimestamp(candidate.updatedAt, "execution summary: updatedAt");
-  if (summary.status !== "unknown" && (!summary.startedAt || !summary.updatedAt)) throw new Error("execution summary requires timestamps");
-  if (summary.startedAt && summary.updatedAt && Date.parse(summary.updatedAt) < Date.parse(summary.startedAt)) throw new Error("execution summary updatedAt precedes startedAt");
-  if (candidate.workspacePath !== undefined) summary.workspacePath = parseRequiredString(candidate.workspacePath, "execution summary: workspacePath");
-  if (candidate.diagnostic !== undefined) summary.diagnostic = parseRequiredString(candidate.diagnostic, "execution summary: diagnostic");
-  if (candidate.pr !== undefined) {
-    const pr = parseObject(candidate.pr, "execution summary PR");
-    assertExactKeys(pr, ["id", "url", "state"], "execution summary PR");
-    if (pr.state !== "open" && pr.state !== "merged" && pr.state !== "closed") throw new Error("execution summary PR state is invalid");
-    const url = parseRequiredString(pr.url, "execution summary PR url");
-    if (!/^https:\/\//.test(url)) throw new Error("execution summary PR url is invalid");
-    summary.pr = { id: parseRequiredString(pr.id, "execution summary PR id"), url, state: pr.state };
-  }
+  if (candidate.phase !== undefined) summary.phase = candidate.phase as typeof EXECUTION_PHASES[number];
   return summary;
 }

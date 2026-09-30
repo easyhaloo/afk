@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@afk/application':
+        specifier: workspace:*
+        version: link:packages/afk-application
+      '@afk/core':
+        specifier: workspace:*
+        version: link:packages/afk-core
       '@afk/workflow-graph':
         specifier: workspace:*
         version: link:packages/afk-workflow-graph
@@ -151,6 +157,12 @@ importers:
         specifier: ^4.0.1
         version: 4.0.1(supports-color@8.1.1)
     devDependencies:
+      '@afk/application':
+        specifier: workspace:*
+        version: link:../packages/afk-application
+      '@afk/core':
+        specifier: workspace:*
+        version: link:../packages/afk-core
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1
@@ -196,6 +208,31 @@ importers:
       wait-on:
         specifier: ^8.0.1
         version: 8.0.5(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
+
+  packages/afk-application:
+    dependencies:
+      '@afk/core':
+        specifier: workspace:*
+        version: link:../afk-core
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.43
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.2.0
+        version: 1.6.1(@types/node@20.19.43)(supports-color@8.1.1)
+
+  packages/afk-core:
+    devDependencies:
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.2.0
+        version: 1.6.1(@types/node@20.19.43)(supports-color@8.1.1)
 
   packages/afk-workflow-graph:
     devDependencies:

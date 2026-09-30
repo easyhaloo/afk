@@ -1,32 +1,11 @@
-import type { RunEvent, RunEventData } from '../core/events';
-import type { RunTimeline } from './query-service';
-
-export type ExecutionTimeline = Omit<RunTimeline, 'events'> & { events: readonly RunEvent<RunEventData>[] };
-
-export type ExecutionStatus = 'queued' | 'implementing' | 'verifying' | 'publishing' | 'awaiting_merge' | 'rework' | 'blocked' | 'failed' | 'done' | 'unknown';
-
-export interface ExecutionSummary {
-  executionId: string;
-  runId: string;
-  workItemId: string;
-  status: ExecutionStatus;
-  startedAt?: string;
-  updatedAt?: string;
-  diagnostic?: string;
-  pr?: { id: string; url: string; state: 'open' | 'merged' };
-}
-
-export interface WorkItemExecution {
-  summary: ExecutionSummary;
-  timeline: ExecutionTimeline;
-}
+import type { ExecutionTimeline, WorkItemExecution, WorkItemExecutionSummary } from '@afk/application';
 
 export function projectWorkItemExecution(timeline: ExecutionTimeline): WorkItemExecution {
   const events = timeline.events.filter(event => event.sequence <= timeline.integrity.lastSequence);
   const verifiedTimeline = { ...timeline, events };
   const first = events[0];
-  const summary: ExecutionSummary = {
-    executionId: first ? executionId(first) : timeline.runId,
+  const summary: WorkItemExecutionSummary = {
+    executionId: first?.correlationId ?? timeline.runId,
     runId: timeline.runId,
     workItemId: first?.context.workItemId ?? '',
     status: 'unknown',
@@ -41,7 +20,7 @@ export function projectWorkItemExecution(timeline: ExecutionTimeline): WorkItemE
     summary.diagnostic = 'missing_stream';
     return { summary, timeline: verifiedTimeline };
   }
-  if (events.some(event => event.context.runId !== timeline.runId || event.context.workItemId !== summary.workItemId || executionId(event) !== summary.executionId || (event.data.kind === 'run.requested' && (event.data.run.id !== timeline.runId || event.data.run.workItemId !== summary.workItemId)))) {
+  if (events.some(event => event.context.runId !== timeline.runId || event.context.workItemId !== summary.workItemId || event.correlationId !== summary.executionId || (event.data.kind === 'run.requested' && (event.data.run.id !== timeline.runId || event.data.run.workItemId !== summary.workItemId)))) {
     summary.diagnostic = 'event_identity_mismatch';
     return { summary, timeline: verifiedTimeline };
   }
@@ -109,9 +88,4 @@ export function projectWorkItemExecution(timeline: ExecutionTimeline): WorkItemE
     }
   }
   return { summary, timeline: verifiedTimeline };
-}
-
-function executionId(event: RunEvent<RunEventData>): string {
-  const context = event.context as typeof event.context & { executionId?: string };
-  return context.executionId || event.correlationId || event.context.runId;
 }

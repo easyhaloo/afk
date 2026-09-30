@@ -58,17 +58,16 @@ type WorkflowRunSummary = {
 type LoopStatus = {
   state: "running" | "stopped";
   pid?: number;
-  implement: { active: number; ids: string[] };
-  qa: { active: number | null; queue: string[] };
+  execution: { active: number; ids: string[] };
   totals: { completed: number; failed: number };
   startedAt?: number;
   lastUpdateAt?: number;
-  lastError?: string;
+  lastError: Record<string, string>;
 };
 
 const AFK_CAPABILITY_DEFINITIONS: Omit<CliCapability, "available">[] = [
   { id: "run", label: "单次工作流", command: "afk run", description: "领取并执行一个 backlog 项目" },
-  { id: "loop", label: "持续循环", command: "afk loop", description: "轮询、实现、QA 与完成的守护工作流" },
+  { id: "loop", label: "持续循环", command: "afk loop", description: "轮询并执行 manifest 绑定工作项的守护工作流" },
   { id: "qa", label: "质量验证", command: "afk qa", description: "运行 AFK 质量检查与验证流程" },
   { id: "board", label: "任务看板", command: "afk board", description: "读取和维护工作项状态" },
   { id: "isolate", label: "隔离环境", command: "afk isolate", description: "管理 worktree 的 Compose 隔离服务" },
@@ -422,22 +421,25 @@ function processAlive(pid: number) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+export function parseLoopLastError(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
 async function readLoopStatus(): Promise<LoopStatus> {
   const raw = await fs.readFile(path.join(homedir(), ".afk", "loop-status.json"), "utf8").catch(() => "");
   const record = jsonRecord(raw);
   const pid = typeof record.pid === "number" ? record.pid : undefined;
-  const implement = record.implement && typeof record.implement === "object" ? record.implement as Record<string, unknown> : {};
-  const qa = record.qa && typeof record.qa === "object" ? record.qa as Record<string, unknown> : {};
+  const execution = record.execution && typeof record.execution === "object" ? record.execution as Record<string, unknown> : {};
   const totals = record.totals && typeof record.totals === "object" ? record.totals as Record<string, unknown> : {};
   return {
     state: pid && processAlive(pid) ? "running" : "stopped",
     pid,
-    implement: { active: typeof implement.active === "number" ? implement.active : 0, ids: Array.isArray(implement.ids) ? implement.ids.map(String) : [] },
-    qa: { active: typeof qa.active === "number" ? qa.active : null, queue: Array.isArray(qa.queue) ? qa.queue.map(String) : [] },
+    execution: { active: typeof execution.active === "number" ? execution.active : 0, ids: Array.isArray(execution.ids) ? execution.ids.map(String) : [] },
     totals: { completed: typeof totals.completed === "number" ? totals.completed : 0, failed: typeof totals.failed === "number" ? totals.failed : 0 },
     startedAt: typeof record.startedAt === "number" ? record.startedAt : undefined,
     lastUpdateAt: typeof record.lastUpdateAt === "number" ? record.lastUpdateAt : undefined,
-    lastError: record.lastError && typeof record.lastError === "object" ? textValue(record.lastError as Record<string, unknown>, "message") : undefined,
+    lastError: parseLoopLastError(record.lastError),
   };
 }
 

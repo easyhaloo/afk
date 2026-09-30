@@ -3,6 +3,9 @@ import { WorkflowRunner } from '../workflow-engine';
 import type { ProviderBundle } from '../providers';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index';
 import type { AgentProvider } from '../../domain/agents/types';
+import type { RunObserver } from '../../observability/run-observer';
+
+const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 
 vi.mock('../modules/project-resolver', () => ({ default: () => ({ name: 'project-resolver' }) }));
 
@@ -38,7 +41,7 @@ function claimed(itemToClaim = item): { claim: BacklogClaim; release: ReturnType
 
 function runner(bundle: ProviderBundle): WorkflowRunner {
   const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
-  return new WorkflowRunner(bundle, { agentProvider: agent });
+  return new WorkflowRunner(bundle, { agentProvider: agent, observer });
 }
 
 describe('WorkflowRunner backlog provider mode', () => {
@@ -60,7 +63,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     const createExecution = vi.fn(async () => execution);
     const agent = { name: 'codex', capabilities: new Set(), createExecution } as unknown as AgentProvider;
     const sandbox = { id: 'sandbox-42' };
-    const subject = new WorkflowRunner(bundle, { agentProvider: agent, agentRuntime: runtime }) as any;
+    const subject = new WorkflowRunner(bundle, { agentProvider: agent, agentRuntime: runtime, observer }) as any;
     subject.heartbeatRuntime = vi.fn(async () => {});
     subject.writeRuntimeDiagnostics = vi.fn(async () => {});
 
@@ -166,6 +169,10 @@ describe('WorkflowRunner backlog provider mode', () => {
     const phaseSandbox = { id: 'verify', startAgent: vi.fn(), close: vi.fn() };
     const create = vi.fn(async () => phaseSandbox);
     subject.activeBacklog = item;
+    subject.observationContext = {
+      traceId: 'run-42', runId: 'run-42', workItemId: item.id, profileId: 'test', attempt: 1,
+      actor: { kind: 'system', id: 'test' },
+    };
     subject.sandbox = primarySandbox;
     subject.sandboxProvider = { create };
     subject.heartbeatRuntime = vi.fn(async () => {});
@@ -278,7 +285,7 @@ describe('WorkflowRunner backlog provider mode', () => {
       finish: vi.fn(async () => ({})),
     };
     const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
-    const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any }) as any;
+    const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any, observer }) as any;
     subject.runBody = vi.fn(async () => ({ success: false }));
 
     await subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main', executionMode: 'batch' });
@@ -320,7 +327,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     const bundle = providers(vi.fn(async () => claim));
     const runtime = { start: vi.fn(async () => {}), heartbeat: vi.fn(async () => ({})), finish: vi.fn(async () => ({})) };
     const agent = { name: 'claude-code', capabilities: new Set(), createExecution: async () => { throw new Error('not used'); } } as unknown as AgentProvider;
-    const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any }) as any;
+    const subject = new WorkflowRunner(bundle, { agentProvider: agent, runtimeManager: runtime as any, observer }) as any;
     subject.sandboxProviderByName = vi.fn(() => { throw new Error('sandbox setup failed'); });
 
     await expect(subject.run({ iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main' })).rejects.toThrow('sandbox setup failed');

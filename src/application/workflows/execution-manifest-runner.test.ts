@@ -3,9 +3,12 @@ import type { AgentExecution, AgentProvider } from '../../domain/agents/types';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index';
 import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types';
 import type { ProviderBundle } from '../providers';
+import type { RunObserver } from '../../observability/run-observer';
 import { WorkflowRunner } from '../workflow-engine';
 import type { PreparedRepositorySet } from './multi-repository-preparer';
 import { resolveWorkflowRunRequest } from './run-request';
+
+const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 
 vi.mock('../modules/project-resolver', () => ({ default: () => ({ name: 'project-resolver' }) }));
 
@@ -51,6 +54,7 @@ describe('execution manifest request to runner boundary', () => {
       original: { branch: repository.baseBranch, head: 'head', status: '', workingBranchExisted: false },
     }));
     const runner = new WorkflowRunner(providers, {
+      observer,
       agentProvider: agent,
       multiRepositoryPreparer: {
         prepare: vi.fn(async () => ({
@@ -103,6 +107,7 @@ describe('execution manifest request to runner boundary', () => {
     const watchdog = { arm: vi.fn(() => events.push('watchdog')), disarm: vi.fn() };
     const providers = providersForRun();
     const runner = new WorkflowRunner(providers, {
+      observer,
       agentProvider: agent,
       sandboxProvider,
       watchdog: watchdog as never,
@@ -162,6 +167,7 @@ describe('execution manifest request to runner boundary', () => {
     const providers = providersForRun();
     vi.mocked(providers.backlog.transition).mockImplementation(async (_id, state) => { events.push(`transition-${state}`); });
     const runner = new WorkflowRunner(providers, {
+      observer,
       agentProvider: agentWith(events), sandboxProvider: providerWith(sandboxWith(events), events),
       watchdog: { arm: vi.fn(), disarm: vi.fn() } as never,
       runtimeManager: runtimeManager() as never,
@@ -207,6 +213,7 @@ describe('execution manifest request to runner boundary', () => {
     const watchdog = { arm: vi.fn(), disarm: vi.fn() };
     const providers = providersForRun();
     const runner = new WorkflowRunner(providers, {
+      observer,
       agentProvider: agent,
       sandboxProvider,
       watchdog: watchdog as never,
@@ -237,6 +244,7 @@ describe('execution manifest request to runner boundary', () => {
       branchName: 'afk/backlog-42', worktreePath: '/legacy/worktree',
     });
     const runner = new WorkflowRunner(providers, {
+      observer,
       agentProvider: agentWith(events), sandboxProvider, watchdog: { arm: vi.fn(), disarm: vi.fn() } as never,
       runtimeManager: runtimeManager() as never,
     }) as any;

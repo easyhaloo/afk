@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 import { lstat, mkdir, open, readFile, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { loadWorkItemExecution, type WorkItemExecution } from '@afk/application';
 import { WorkflowRunner } from '../workflow-engine';
 import { QARunner } from '../modules/qa-runner';
 import { createGlobalWorkItemCatalogs, createTracker } from '../tracker-provider-factory';
@@ -14,11 +15,11 @@ import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '../.
 import type { GlobalWorkItem } from '../../domain/work-item/types';
 import { prepareAgentRuntime } from '../../domain/agents/index';
 import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager';
-import type { ObservationContext, RunEventData } from '../../core/events';
+import type { ObservationContext, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store';
+import { createRunObserver } from '../../infrastructure/observability/run-observer-factory';
 import { RunObserver } from '../../observability/run-observer';
-import { RunQueryService } from '../../observability/query-service';
-import type { WorkItemExecution } from '../../observability/work-item-execution-projection';
+import { projectWorkItemExecution } from '../../observability/work-item-execution-projection';
 import { readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest';
 import { resolveWorkflowRunRequest, type WorkflowRunRequest } from './run-request';
 
@@ -242,7 +243,7 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
   const executionId = input.executionId ?? randomUUID();
   if (!executionIdPattern.test(executionId)) throw new Error('invalid executionId');
   const context: ObservationContext = {
-    traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'legacy-compat',
+    traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
     attempt: 1, actor: { kind: 'system', id: 'execute' },
   };
   const observer = dependencies.recordAudit ? undefined : new RunObserver({ events: new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR }) });
@@ -280,7 +281,7 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
         request.agentRuntime = await prepareAgentRuntime(request.agentRuntime);
         await record('implementing');
         const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
-          new WorkflowRunner(bundle, { config: workflowConfig, agentRuntime: runRequest.agentRuntime })))(providers, config, request);
+          new WorkflowRunner(bundle, { config: workflowConfig, agentRuntime: runRequest.agentRuntime, observer: createRunObserver() })))(providers, config, request);
         const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
           executionMode: 'batch', observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
         if (!implementationResult.success) {
@@ -393,7 +394,9 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
   const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
   try {
     const store = new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR });
-    const execution = await (dependencies.loadExecution ?? (runId => new RunQueryService(store).execution(runId)))(executionId);
+    const execution = await (dependencies.loadExecution ?? (runId => loadWorkItemExecution(runId, {
+      events: store, projection: { project: projectWorkItemExecution },
+    })))(executionId);
     const { summary, timeline } = execution;
     if (!timeline.integrity.valid || summary.workItemId !== workItemId || summary.executionId !== executionId) {
       throw new Error('execution audit identity or integrity mismatch');
@@ -439,7 +442,7 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
     await providers.changes.verifyIssueAssociation(change, workItemId);
     const recordAudit = dependencies.recordAudit ?? ((context: ObservationContext, data: RunEventData) => new RunObserver({ events: store }).record(context, data));
     const context: ObservationContext = {
-      traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'legacy-compat',
+      traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
       attempt: 1, actor: { kind: 'system', id: 'merge-reconciliation' },
     };
     if (item.state === 'verification' && change.state === 'open') await providers.backlog.transition(item.id, 'merge_ready', { changeId: change.id });

@@ -17,7 +17,7 @@ describe("work item audit history", () => {
       runs: [{ id: "shared", status: "completed", startedAt: "2026-09-25T00:00:00Z", workspacePath: "/old" }] };
     vi.stubGlobal("window", { afkDesktop: { workItems: {
       list: vi.fn(async () => ({ items: [item], projects: [], diagnostics: [], complete: true })),
-      executions: vi.fn(async () => ({ executions: [{ executionId: "shared", workItemId, project: item.project, status: "verifying", startedAt: "2026-09-29T00:00:00Z", updatedAt: "2026-09-29T00:00:00Z" }] })),
+      executions: vi.fn(async () => ({ executions: [{ runId: "shared", workItemId, profileId: "default", attempt: 1, status: "running", sequence: 1, terminal: false }] })),
       start: vi.fn(),
     } } });
     let renderer!: ReturnType<typeof create>;
@@ -28,27 +28,23 @@ describe("work item audit history", () => {
     act(() => renderer.unmount());
     vi.unstubAllGlobals();
   });
-  it("shows the QA-stage attempt and its confirmed PR instead of declaring implementation done", async () => {
-    const openExternal = vi.fn();
+  it("shows the application run phase and human gate without inventing PR information", async () => {
     const executions = vi.fn(async () => ({ executions: [{
-      executionId: "execution-158", runId: "afk-158", workItemId: "github:easyhaloo/afk#158",
-      project: { platform: "github", projectKey: "easyhaloo/afk", name: "afk" },
-      status: "awaiting_merge", startedAt: "2026-09-29T00:00:00Z", updatedAt: "2026-09-29T00:01:00Z",
-      pr: { id: "159", url: "https://github.com/easyhaloo/afk/pull/159", state: "open" },
+      runId: "afk-158", workItemId: "github:easyhaloo/afk#158",
+      profileId: "default", attempt: 1, status: "awaiting_human", phase: "verification", sequence: 3, terminal: false,
     }] }));
     vi.stubGlobal("window", { afkDesktop: { workItems: {
       list: vi.fn(async () => ({ items: [{ id: "github:easyhaloo/afk#158", issueNumber: 158, project: { platform: "github", projectKey: "easyhaloo/afk", name: "afk" }, title: "Task", managed: true, executionEligible: true, state: "ready", executionMode: "afk", dependsOn: [], tags: [], branchName: "task", providerRef: "github:easyhaloo/afk#158" }], projects: [], diagnostics: [], complete: true })),
       executions, start: vi.fn(),
-    }, openExternal } });
+    } } });
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(WorkItemsPage)); });
     await act(async () => { renderer.root.findByProps({ className: "backlog-row work-item-row" }).props.onClick(); });
     await act(async () => { renderer.root.findAllByType("button").find(node => text(node).includes("运行记录"))!.props.onClick(); });
     expect(executions).toHaveBeenCalledWith({ workItemId: "github:easyhaloo/afk#158", limit: 100 });
-    expect(text(renderer.root.findByProps({ className: "work-item-detail-body" }))).toContain("等待人工合并");
-    const link = renderer.root.findByProps({ "aria-label": "打开 PR #159" });
-    await act(async () => { link.props.onClick(); });
-    expect(openExternal).toHaveBeenCalledWith("https://github.com/easyhaloo/afk/pull/159");
+    expect(text(renderer.root.findByProps({ className: "work-item-detail-body" }))).toContain("等待人工处理");
+    expect(text(renderer.root.findByProps({ className: "work-item-detail-body" }))).toContain("验证");
+    expect(renderer.root.findAllByProps({ "aria-label": "打开 PR #159" })).toHaveLength(0);
     act(() => renderer.unmount());
     vi.unstubAllGlobals();
   });
@@ -57,8 +53,8 @@ describe("work item audit history", () => {
     const workItemId = "github:easyhaloo/afk#158";
     const item = { id: workItemId, issueNumber: 158, project: { platform: "github", projectKey: "easyhaloo/afk", name: "afk" },
       title: "Task", managed: true, executionEligible: true, state: "ready", executionMode: "afk", dependsOn: [], tags: [], branchName: "task", providerRef: workItemId };
-    const run = (executionId: string) => ({ executionId, runId: executionId, workItemId, project: item.project,
-      status: "verifying", startedAt: "2026-09-29T00:00:00Z", updatedAt: "2026-09-29T00:01:00Z" });
+    const run = (runId: string) => ({ runId, workItemId, profileId: "default", attempt: 1,
+      status: "running", sequence: 2, terminal: false });
     const executions = vi.fn(async (options: { since?: string }) => options.since
       ? { executions: [run("older")] }
       : { executions: [run("newer")], nextCursor: "newer" });

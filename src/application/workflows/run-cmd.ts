@@ -3,6 +3,7 @@
  * It claims before creating workflow resources; loop claims its own items.
  */
 import { WorkflowRunner } from '../workflow-engine';
+import { createRunObserver } from '../../infrastructure/observability/run-observer-factory';
 import { createTracker } from '../tracker-provider-factory';
 import { createProviderBundle } from '../providers';
 import { getWorkflowConfig } from '../../infrastructure/config/manager';
@@ -50,7 +51,7 @@ export async function runWorkflowCli(opts: RunWorkflowCliOpts): Promise<RunWorkf
     request.trackerHost,
   );
   const providers = createProviderBundle(tracker, request.repoRoot);
-  const runner = new WorkflowRunner(providers, { config: cfg, agentRuntime: request.agentRuntime });
+  const runner = new WorkflowRunner(providers, { config: cfg, agentRuntime: request.agentRuntime, observer: createRunObserver() });
   const result = await runner.run(request);
   return { success: result.success, url: result.url };
 }

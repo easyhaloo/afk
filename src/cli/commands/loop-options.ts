@@ -1,16 +1,11 @@
 import { Command, InvalidArgumentError } from 'commander';
-import type { AgentRuntimeCommandOptions } from './agent-runtime-options';
 
-export interface LoopStartOptions extends AgentRuntimeCommandOptions {
+export interface LoopStartOptions {
   daemon?: boolean;
-  maxConcurrent?: number;
   pollInterval?: number;
   statusInterval?: number;
   shutdownTimeout?: number;
   maxIterations?: number;
-  ext?: string[];
-  extParam?: string[];
-  agent?: string;
   backlogId?: string[];
   template?: string;
   workItemId?: string;
@@ -26,18 +21,14 @@ interface LoopOptionDefinition {
 
 export const LOOP_START_OPTIONS: readonly LoopOptionDefinition[] = [
   { flags: '-d, --daemon', description: 'Run as background daemon (returns immediately, logs to file)' },
-  { flags: '-n, --max-concurrent <n>', description: 'Max parallel implement chains', numeric: true },
   { flags: '-p, --poll-interval <seconds>', description: 'Backlog poll interval', numeric: true },
   { flags: '-i, --status-interval <seconds>', description: 'Status file write interval', numeric: true },
   { flags: '-t, --shutdown-timeout <seconds>', description: 'Max wait for in-flight on SIGTERM', numeric: true },
   { flags: '-m, --max-iterations <n>', description: 'Stop after N successful completions (testing)', numeric: true },
-  { flags: '--backlog-id <id>', description: 'Restrict execution to one or more backlog IDs (repeatable)', repeatable: true },
+  { flags: '--backlog-id <id>', description: 'The one backlog ID bound to the execution manifest', repeatable: true },
   { flags: '--template <name>', description: 'Workflow template name' },
   { flags: '--work-item-id <id>', description: 'Canonical work item ID for a single managed backlog scope' },
   { flags: '--execution-manifest <path>', description: 'Execution manifest for that managed work item' },
-  { flags: '--ext <modules...>', description: 'Lifecycle modules to activate (e.g., isolate)' },
-  { flags: '--ext-param <params...>', description: 'Module parameters (e.g., isolate.auto=true)' },
-  { flags: '--agent <name>', description: 'Agent provider' },
 ];
 
 export function parsePositiveInt(value: string, _previous: number | undefined): number {

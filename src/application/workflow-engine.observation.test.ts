@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProviderBundle } from './providers';
 import { WorkflowRunner } from './workflow-engine';
 import type { RunObserver } from '../observability/run-observer';
-import type { ObservationContext, RunEventData } from '../core/events';
+import { RunObserver as DurableRunObserver } from '../observability/run-observer';
+import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store';
+import type { ObservationContext, RunEventData } from '@afk/core';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,9 +36,9 @@ describe('WorkflowRunner audit identity', () => {
       { kind: 'run.requested', run: expect.objectContaining({ id: 'execution-42', workItemId: 'github:acme/api#42' }) });
   });
 
-  it('keeps legacy afk run audit identity when overrides are absent', async () => {
+  it('creates an afk run audit identity when overrides are absent', async () => {
     const { workflow, record } = runner();
-    await workflow.run({ backlogId: '42', session: 'legacy', targetBranch: 'main' });
+    await workflow.run({ backlogId: '42', session: 'session-42', targetBranch: 'main' });
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ runId: expect.stringMatching(/^afk-42-/), workItemId: '42' }),
       { kind: 'run.requested', run: expect.objectContaining({ workItemId: '42' }) });
   });
@@ -49,13 +51,12 @@ describe('WorkflowRunner audit identity', () => {
     expect(claim).not.toHaveBeenCalled();
   });
 
-  it('creates an observer even in legacy harness mode when audit is required', async () => {
+  it('persists events using the injected durable observer', async () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'afk-required-audit-'));
     roots.push(root);
-    vi.stubEnv('AFK_HARNESS_MODE', 'legacy');
-    vi.stubEnv('AFK_EVENT_STORE_DIR', root);
     const claim = vi.fn(async () => null);
     const workflow = new WorkflowRunner({ backlog: { claim } } as unknown as ProviderBundle, {
+      observer: new DurableRunObserver({ events: new JsonlEventStore({ root }) }),
       agentProvider: { name: 'claude-code', capabilities: new Set() } as never,
     });
     await workflow.run({ backlogId: '42', session: 'session-42', targetBranch: 'main', auditRequired: true,
@@ -88,11 +89,15 @@ describe('WorkflowRunner audit identity', () => {
     expect(record.mock.calls.map(([, data]) => data.kind)).toEqual(['run.requested', 'run.started']);
   });
 
-  it('keeps legacy mode best-effort when observation fails', async () => {
+  it('fails before claiming even when the caller does not request audit explicitly', async () => {
     const { workflow, record, claim } = runner();
     record.mockRejectedValueOnce(new Error('disk unavailable'));
-    await expect(workflow.run({ backlogId: '42', session: 'legacy', targetBranch: 'main' }))
-      .resolves.toMatchObject({ skipped: 'not_claimed' });
-    expect(claim).toHaveBeenCalledOnce();
+    await expect(workflow.run({ backlogId: '42', session: 'session-42', targetBranch: 'main' }))
+      .rejects.toThrow(/disk unavailable/);
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it('requires an injected observer at construction', () => {
+    expect(() => new WorkflowRunner({} as ProviderBundle, {} as never)).toThrow(/requires an observer/);
   });
 });

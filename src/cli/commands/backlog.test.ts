@@ -62,13 +62,16 @@ describe('hard-cutover command surface', () => {
     expect(qa?.options.some(option => option.long === '--iid')).toBe(false);
   });
 
-  it('exposes explicit agent selection on every execution command', () => {
+  it('keeps agent selection on lower-level commands and binds loop to a manifest', () => {
     const run = commandTree(registerRunCommands).commands.find(command => command.name() === 'run');
     const loop = commandTree(registerLoopCommands).commands.find(command => command.name() === 'loop');
     const qa = commandTree(registerQACommands).commands.find(command => command.name() === 'qa');
 
     expect(run?.options.some(option => option.long === '--agent')).toBe(true);
-    expect(loop?.options.some(option => option.long === '--agent')).toBe(true);
+    expect(loop?.options.map(option => option.long)).toEqual(expect.arrayContaining([
+      '--backlog-id', '--work-item-id', '--execution-manifest',
+    ]));
+    expect(loop?.options.some(option => option.long === '--agent')).toBe(false);
     expect(qa?.options.some(option => option.long === '--agent')).toBe(true);
   });
 

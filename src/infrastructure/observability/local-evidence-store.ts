@@ -2,8 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { EvidenceClassification, EvidenceRef } from '../../core/events';
-import type { EvidenceStorePort } from '../../core/ports';
+import type { EvidenceClassification, EvidenceRef, EvidenceStorePort } from '@afk/core';
 
 const TEXTUAL_MEDIA_TYPE = /^(text\/|application\/(json|xml|javascript|typescript|x-yaml|yaml))/i;
 

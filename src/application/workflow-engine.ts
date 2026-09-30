@@ -51,10 +51,8 @@ import {
   type PreparedRepositorySet,
 } from './workflows/multi-repository-preparer';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata';
-import type { ObservationContext, RunEventData } from '../core/events';
-import { RunObserver } from '../observability/run-observer';
-import { createLegacyRunObserverFromEnvironment } from '../observability/legacy-observer';
-import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store';
+import type { ObservationContext, RunEventData } from '@afk/core';
+import type { RunObserver } from '../observability/run-observer';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -186,8 +184,8 @@ export interface RunnerDependencies {
   providers?: ProviderBundle;
   /** Local runtime projection for the read-only Tasks monitor. */
   runtimeManager?: TaskRuntimeManager;
-  /** Optional append-only audit observer. Defaults to the observe-mode bridge. */
-  observer?: RunObserver;
+  /** Append-only audit observer, composed and injected by the caller. */
+  observer: RunObserver;
   /** Prepares all repositories declared by an execution manifest. */
   multiRepositoryPreparer?: MultiRepositoryPreparationService;
 }
@@ -283,9 +281,7 @@ export class WorkflowRunner {
   private runtimeErrorSummary?: string;
   private acFeedback?: AcVerificationFailure;
   private activeRework?: import('../domain/backlog/index').ReworkRecord;
-  private readonly defaultObserver?: RunObserver;
-  private observer?: RunObserver;
-  private auditRequired = false;
+  private readonly observer: RunObserver;
   private observationContext?: ObservationContext;
   private readonly multiRepositoryPreparer: MultiRepositoryPreparationService;
   private preparedRepositories?: PreparedRepositorySet;
@@ -316,7 +312,8 @@ export class WorkflowRunner {
     return this.sessionStoreChainFactory(worktreePath);
   }
 
-  constructor(providers: ProviderBundle, deps?: RunnerDependencies) {
+  constructor(providers: ProviderBundle, deps: RunnerDependencies) {
+    if (!deps?.observer) throw new Error('WorkflowRunner requires an observer');
     this.tmux = deps?.tmux ?? createTmuxClient();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;
     this.watchdog = deps?.watchdog ?? createWatchdog(this.logDir);
@@ -334,8 +331,7 @@ export class WorkflowRunner {
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
     this.runtimeManager = deps?.runtimeManager ?? new TaskRuntimeManager();
-    this.defaultObserver = deps?.observer ?? createLegacyRunObserverFromEnvironment();
-    this.observer = this.defaultObserver;
+    this.observer = deps.observer;
     this.multiRepositoryPreparer = deps?.multiRepositoryPreparer ?? new MultiRepositoryPreparer();
   }
 
@@ -347,10 +343,6 @@ export class WorkflowRunner {
    */
   async run(options: RunnerOptions): Promise<WorkflowRunResult> {
     validateObservationIdentity(options);
-    this.auditRequired = options.auditRequired === true;
-    this.observer = this.defaultObserver ?? (this.auditRequired
-      ? new RunObserver({ events: new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR }) })
-      : undefined);
     const {
       iid: requestedIid,
       session,
@@ -521,7 +513,7 @@ export class WorkflowRunner {
         if (!result.success) await this.providers.backlog.setExecutionMode(this.activeBacklog.id, 'hitl');
       }
       terminalOutcome = result.success ? 'success' : 'failed';
-      if (result.success && this.auditRequired) await this.recordObservation({ kind: 'implementation.completed' });
+      if (result.success) await this.recordObservation({ kind: 'implementation.completed' });
       else await this.recordObservation({
         kind: 'run.finished',
         outcome: result.success ? 'succeeded' : 'failed',
@@ -1293,27 +1285,22 @@ export class WorkflowRunner {
   private createObservationContext(backlogId: string, session: string, options: RunnerOptions): ObservationContext {
     const runId = options.observationRunId ?? `afk-${backlogId}-${randomUUID()}`;
     return {
-      traceId: options.auditRequired ? runId : randomUUID().replaceAll('-', ''),
+      traceId: runId,
       runId,
       workItemId: options.observationWorkItemId ?? backlogId,
-      profileId: process.env.AFK_PROFILE ?? 'legacy-compat',
+      profileId: process.env.AFK_PROFILE ?? 'local',
       attempt: 1,
       actor: { kind: 'system', id: session },
     };
   }
 
   private async recordObservation(data: RunEventData): Promise<void> {
-    if (!this.observer || !this.observationContext) {
-      if (this.auditRequired) throw new AuditPersistenceError(data.kind, 'observer unavailable');
-      return;
-    }
+    if (!this.observationContext) throw new AuditPersistenceError(data.kind, 'observation context unavailable');
     try {
       await this.observer.record(this.observationContext, data);
     } catch (error) {
-      // Observe mode must not change legacy run behavior. Coordinator mode will
-      // make EventStore health a fail-closed policy precondition.
       logger.error({ runId: this.observationContext.runId, eventType: data.kind, err: error }, 'failed to persist run audit event');
-      if (this.auditRequired) throw new AuditPersistenceError(data.kind, error);
+      throw new AuditPersistenceError(data.kind, error);
     }
   }
 

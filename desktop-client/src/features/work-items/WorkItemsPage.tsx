@@ -50,8 +50,11 @@ const runStatusLabels: Record<WorkItemRunRecord["status"], string> = {
 };
 
 const auditedRunLabels: Record<ExecutionSummary["status"], string> = {
-  queued: "待执行", implementing: "实现中", verifying: "QA 验证中", publishing: "提交 PR 中",
-  awaiting_merge: "等待人工合并", rework: "等待返工", blocked: "已阻塞", failed: "失败", done: "已完成", unknown: "审计待核查",
+  pending: "待执行", running: "执行中", awaiting_human: "等待人工处理",
+  succeeded: "已完成", failed: "失败", cancelled: "已取消",
+};
+const auditedPhaseLabels: Record<NonNullable<ExecutionSummary["phase"]>, string> = {
+  implementation: "实现", verification: "验证", release: "发布",
 };
 
 type DetailTab = "overview" | "plan" | "runs";
@@ -208,8 +211,8 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
             setAuditCursor(page.nextCursor);
             initialized = true;
           } else setAuditedRuns(current => {
-            const currentPageIds = new Set(page.executions.map(run => run.executionId));
-            return [...page.executions, ...current.filter(run => !currentPageIds.has(run.executionId))];
+            const currentPageIds = new Set(page.executions.map(run => run.runId));
+            return [...page.executions, ...current.filter(run => !currentPageIds.has(run.runId))];
           });
           setAuditError("");
         }
@@ -229,8 +232,8 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
       const page = await window.afkDesktop.workItems.executions({ workItemId, limit: 100, since: auditCursor });
       if (selectedWorkItemId.current !== workItemId) return;
       setAuditedRuns(current => {
-        const known = new Set(current.map(run => run.executionId));
-        return [...current, ...page.executions.filter(run => !known.has(run.executionId))];
+        const known = new Set(current.map(run => run.runId));
+        return [...current, ...page.executions.filter(run => !known.has(run.runId))];
       });
       setAuditCursor(page.nextCursor);
       setAuditError("");
@@ -447,7 +450,7 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
               {detailTab === "runs" ? <section className="work-item-detail-section">
                 <div className="work-item-section-heading"><h3>运行记录</h3><small>每次运行使用独立任务空间</small></div>
                 {auditError ? <div className="work-item-run-error">运行审计查询失败：{auditError}</div> : null}
-                {auditedRuns.map(run => <div className="work-item-run-card" key={run.executionId}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.executionId}</b><small>{run.startedAt ?? "时间未知"}</small>{run.pr ? <button type="button" aria-label={`打开 PR #${run.pr.id}`} onClick={() => void window.afkDesktop.openExternal(run.pr!.url)}>PR #{run.pr.id}</button> : null}</div><em>{auditedRunLabels[run.status]}</em></div>)}
+                {auditedRuns.map(run => <div className="work-item-run-card" key={run.runId}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.runId}</b><small>第 {run.attempt} 次 · {run.phase ? auditedPhaseLabels[run.phase] : "尚未开始"} · 事件 #{run.sequence}</small></div><em>{auditedRunLabels[run.status]}</em></div>)}
                 {auditCursor ? <button type="button" onClick={() => void loadMoreAuditedRuns()}>查看更多运行记录</button> : null}
                 {selectedRuns.map(run => <div className="work-item-run-card" key={`old:${run.id}`}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.id}</b><small>旧记录 · {run.workflow ?? "默认工作流"} · {run.startedAt}</small><code>{run.workspacePath ?? workspacePath(selected)}</code></div><em>{runStatusLabels[run.status]}</em></div>)}
                 {!auditedRuns.length && !selectedRuns.length ? <WorkItemEmptySection>暂无运行记录。</WorkItemEmptySection> : null}

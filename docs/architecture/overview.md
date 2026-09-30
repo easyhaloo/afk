@@ -2,15 +2,19 @@
 
 ## Architecture guard
 
-`pnpm architecture:check` enforces layer direction and disallows generic
-records and legacy client-factory imports. The legacy migration is complete:
+`pnpm architecture:check --check-packages` enforces layer direction and checks
+the optional `packages/afk-core` and `packages/afk-application` roots for pure
+source imports and dependency direction. Missing package roots are reported as
+skipped until the corresponding migration phase creates them. The guard also
+disallows generic records and legacy client-factory imports. The legacy migration is complete:
 `scripts/architecture-legacy-baseline.json` records zero legacy files, imports,
 and patterns. New legacy files or imports fail the check. Delete the stale
 baseline record when removing an entry.
 
 Layer direction applies to relative imports between non-test files in
 `src/cli`, `src/domain`, `src/application`, `src/infrastructure`,
-`src/shared`, and `src/views`.
+`src/shared`, and `src/views`. Passing `--require-packages` makes missing
+package roots a failure instead of a skipped check.
 
 ## Scope and command surface
 
@@ -23,7 +27,7 @@ single source of truth for the supported surface:
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk run --backlog-id <id>` | Execute one claimed item |
-| `afk loop` | Repeated execution followed by QA and merge |
+| `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
 | `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
@@ -130,9 +134,10 @@ sequenceDiagram
     R->>P: release lease (resource scope)
 ```
 
-`afk loop` runs the same sequence repeatedly and invokes QA in-process. The
-standalone QA command uses the management bundle and cannot claim
-implementation work.
+`afk loop` accepts exactly one scoped backlog ID and matching execution
+manifest, and delegates to `executeWorkItem`. The former separate
+implementation/QA queue is removed. The standalone QA command remains a
+lower-level verification operation.
 
 ## Extension points
 

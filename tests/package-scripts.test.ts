@@ -34,14 +34,16 @@ describe('package test scripts', () => {
     expect(startScript).toContain('stop_dev_processes KILL');
   });
 
-  it('builds and packages a standalone inventory runner for clean desktop installs', () => {
+  it('builds the in-process inventory provider instead of packaging the CLI runner', () => {
     const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'desktop-client/package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
       build?: { files?: string[] };
     };
 
-    expect(packageJson.scripts?.['build:inventory']).toBe('node scripts/build-inventory-runner.mjs');
-    expect(packageJson.scripts?.['build:main']).toContain('pnpm build:inventory');
-    expect(packageJson.build?.files).toContain('dist-electron/cli/**');
+    expect(packageJson.scripts?.['build:main']).toContain('node scripts/build-provider-inventory.mjs');
+    expect(readFileSync(join(repositoryRoot, 'desktop-client/scripts/build-provider-inventory.mjs'), 'utf8')).toContain('dist-electron/application.cjs');
+    expect(packageJson.scripts?.['build:inventory']).toBeUndefined();
+    expect(packageJson.build?.files).toContain('dist-electron/**');
+    expect(packageJson.build?.files).not.toContain('dist-electron/cli/**');
   });
 });

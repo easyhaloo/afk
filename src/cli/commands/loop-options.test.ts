@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { addLoopStartOptions } from './loop-options';
 
 describe('loop options', () => {
-  it('parses numeric and variadic options with their intended types', () => {
+  it('parses numeric and manifest selection options', () => {
     const command = new Command();
     addLoopStartOptions(command);
     command.exitOverride();
@@ -11,20 +11,23 @@ describe('loop options', () => {
     command.parse([
       'node',
       'afk',
-      '--max-concurrent',
+      '--poll-interval',
       '4',
-      '--ext',
-      'isolate',
-      '--ext-param',
-      'isolate.auto=true',
+      '--backlog-id',
+      '42',
+      '--work-item-id',
+      'github:org/repo#42',
+      '--execution-manifest',
+      '/workspace/manifest.json',
       '--template',
       'custom-workflow',
     ]);
 
     expect(command.opts()).toMatchObject({
-      maxConcurrent: 4,
-      ext: ['isolate'],
-      extParam: ['isolate.auto=true'],
+      pollInterval: 4,
+      backlogId: ['42'],
+      workItemId: 'github:org/repo#42',
+      executionManifest: '/workspace/manifest.json',
       template: 'custom-workflow',
     });
   });
@@ -34,7 +37,7 @@ describe('loop options', () => {
     addLoopStartOptions(command);
     command.exitOverride();
 
-    expect(() => command.parse(['node', 'afk', '--max-concurrent', '0']))
+    expect(() => command.parse(['node', 'afk', '--poll-interval', '0']))
       .toThrow();
   });
 });

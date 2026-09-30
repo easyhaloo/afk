@@ -2,41 +2,29 @@ import { describe, expect, it } from "vitest";
 import { parseExecutionQueryOptions, parseExecutionSummary } from "../../shared/execution-contract";
 
 const valid = {
-  executionId: "afk-github:easyhaloo/afk#158-abc",
+  runId: "afk-github:easyhaloo/afk#158-abc",
   workItemId: "github:easyhaloo/afk#158",
-  project: { platform: "github", projectKey: "easyhaloo/afk", name: "afk" },
-  status: "verifying",
-  startedAt: "2026-09-29T00:00:00.000Z",
-  updatedAt: "2026-09-29T00:01:00.000Z",
+  profileId: "default", attempt: 1, status: "running", phase: "verification", sequence: 2, terminal: false,
 } as const;
 
 describe("execution summary contract", () => {
-  it("parses a canonical attempt and its published change request", () => {
-    expect(parseExecutionSummary({
-      ...valid,
-      status: "awaiting_merge",
-      pr: { id: "159", url: "https://github.com/easyhaloo/afk/pull/159", state: "open" },
-    })).toMatchObject({ workItemId: valid.workItemId, pr: { id: "159" } });
+  it("parses the application execution projection", () => {
+    expect(parseExecutionSummary(valid)).toEqual(valid);
   });
 
-  it("rejects a different project even when the issue number matches", () => {
-    expect(() => parseExecutionSummary({
-      ...valid,
-      project: { platform: "github", projectKey: "other/repo", name: "repo" },
-    })).toThrow();
+  it("rejects missing run identity", () => {
+    expect(() => parseExecutionSummary({ ...valid, runId: "" })).toThrow();
   });
 
-  it("rejects unknown statuses, invalid timestamps and untrusted extra fields", () => {
+  it("rejects unknown statuses, invalid counters and untrusted extra fields", () => {
     expect(() => parseExecutionSummary({ ...valid, status: "completed" })).toThrow();
-    expect(() => parseExecutionSummary({ ...valid, updatedAt: "yesterday" })).toThrow();
+    expect(() => parseExecutionSummary({ ...valid, sequence: -1 })).toThrow();
     expect(() => parseExecutionSummary({ ...valid, token: "secret" })).toThrow();
   });
 
-  it("keeps a missing audit stream unknown without inventing timestamps", () => {
-    const { startedAt: _startedAt, updatedAt: _updatedAt, ...summary } = valid;
-    expect(parseExecutionSummary({ ...summary, status: "unknown", diagnostic: "missing_stream" })).toEqual({
-      ...summary, status: "unknown", diagnostic: "missing_stream",
-    });
+  it("does not invent fields not exposed by the application", () => {
+    const { phase: _phase, ...withoutPhase } = valid;
+    expect(parseExecutionSummary({ ...valid, phase: undefined })).toEqual(withoutPhase);
   });
 });
 

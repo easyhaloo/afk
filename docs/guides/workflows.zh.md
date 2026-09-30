@@ -1,6 +1,6 @@
 # AFK 工作流程
 
-> 桌面受管工作项只在“工作项”详情启动或重试；Backlog 用于计划与关联，运行中心查看同一执行的审计历史。CLI 对应 `afk execute --work-item-id <平台:仓库#编号> --execution-manifest <路径>`；旧 `afk run` 只执行实现阶段，`afk loop` 暂保留原调度链，不应与桌面入口并行启动同一项。
+> 桌面受管工作项只在“工作项”详情启动或重试；Backlog 用于计划与关联，运行中心查看同一执行的审计历史。CLI 对应 `afk execute --work-item-id <平台:仓库#编号> --execution-manifest <路径>`；`afk run` 是仅执行实现阶段的底层命令，`afk loop` 需要唯一 Backlog ID 与匹配的 manifest，并复用 `executeWorkItem`。不要对同一项重复启动。
 
 > 根 PR 在 QA 后保持 `awaiting_merge`。人工合并后执行 `afk reconcile --work-item-id <平台:仓库#编号> --execution-manifest <路径> --execution-id <原执行ID>`，确认 Provider 上 PR 已合并且关联同一 Issue，才审计为 `done`。Provider 不可用时重试对账，不能仅凭进程退出推断完成。
 
@@ -36,15 +36,13 @@ afk qa --backlog-id 123
 ### 自动执行（调度器）
 
 ```bash
-# Start scheduler daemon
-afk loop start --daemon --max-concurrent 3
-
-# Scheduler automatically:
-# 1. 轮询 ready/rework Backlog
-# 2. 校验 AC、父子关系、依赖、executionMode 和 baseBacklogId
-# 3. Launches workflows up to max-concurrent limit
-# 4. Monitors completion and creates MRs
+afk loop start --daemon --backlog-id <id> \
+  --work-item-id github:owner/repo#123 \
+  --execution-manifest /absolute/path/to/manifest.json
 ```
+
+Loop 只轮询该工作项，将完整执行交给 `executeWorkItem`。没有 manifest 的旧实现/QA
+调度链已删除，不存在回退路径。
 
 ### 工作流阶段
 
@@ -434,7 +432,7 @@ flowchart TD
     Type -->|卡住调度器| Stuck[afk loop status]
     Stuck --> Pause[afk loop stop]
     Pause --> Manual["检查 Backlog 状态与 runtime 诊断"]
-    Manual --> Resume[afk loop start --daemon]
+    Manual --> Resume[使用同一工作项和 manifest 重启 loop]
 
     classDef detect fill:#e1f5ff
     classDef action fill:#d4edda
@@ -469,18 +467,17 @@ afk loop stop
 afk backlog show --id 123
 
 # 恢复
-afk loop start --daemon
+afk loop start --daemon --backlog-id <id> \
+  --work-item-id github:owner/repo#123 \
+  --execution-manifest /absolute/path/to/manifest.json
 ```
 
 ## 性能考虑
 
-### 并发调优
+### 轮询间隔
 
-| 配置 | 最大并发 | 轮询间隔 | 适用场景 |
-|------|---------|---------|---------|
-| 保守型 | 2 | 120s | 资源有限 |
-| 均衡型 | 5 | 60s | 典型服务器 |
-| 激进型 | 10 | 30s | 高端机器 |
+Loop 只处理一项绑定 manifest 的工作项，不再提供并发参数；可用
+`--poll-interval <秒数>` 调整检查频率。
 
 ### 每个工作流的资源使用
 

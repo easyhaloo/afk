@@ -1,6 +1,6 @@
 # AFK Workflows
 
-> Managed desktop work items start and retry only from Work Items. Backlog is for planning; Run Center displays the same audited attempt. The CLI equivalent is `afk execute --work-item-id <provider:owner/repo#number> --execution-manifest <path>` (implementation → independent QA → confirmed PR). The older `afk run` is implementation-only; `afk loop` retains its legacy scheduling flow during migration. Do not start the same item through both paths.
+> Managed desktop work items start and retry only from Work Items. Backlog is for planning; Run Center displays the same audited attempt. The CLI equivalent is `afk execute --work-item-id <provider:owner/repo#number> --execution-manifest <path>` (implementation → independent QA → confirmed PR). `afk run` is a lower-level implementation-only command; `afk loop` requires a single backlog ID and matching manifest and uses the same `executeWorkItem` path. Do not start the same item twice.
 
 > A root PR remains `awaiting_merge` after QA. After a human merges it, run `afk reconcile --work-item-id <provider:owner/repo#number> --execution-manifest <path> --execution-id <original-attempt-id>` to verify the provider's PR and Issue association and record `done`. If the provider is unavailable, retry reconciliation; do not infer completion from process exit.
 
@@ -48,15 +48,13 @@ afk qa --backlog-id 123
 ### Automated Execution (Scheduler)
 
 ```bash
-# Start the complete implementation and QA loop
-afk loop --max-concurrent 3 --poll-interval 60
-
-# Scheduler automatically:
-# 1. Lists runnable Backlog items in ready/rework state
-# 2. Validates AC, parent/dependency, execution-mode, and baseBacklogId preconditions
-# 3. Launches workflows up to max-concurrent limit
-# 4. Monitors completion and creates MRs
+afk loop start --daemon --backlog-id <id> \
+  --work-item-id github:owner/repo#123 \
+  --execution-manifest /absolute/path/to/manifest.json
 ```
+
+The loop polls only that item and delegates the complete attempt to `executeWorkItem`.
+The unscoped implementation/QA scheduler has been removed, not retained as a fallback.
 
 ### Workflow Phases
 
@@ -446,7 +444,7 @@ flowchart TD
     Type -->|Stuck scheduler| Stuck[afk loop status]
     Stuck --> Pause[afk loop stop]
     Pause --> Manual["Review Backlog state and runtime diagnostics"]
-    Manual --> Resume[afk loop start --daemon]
+    Manual --> Resume[restart loop with the same item and manifest]
 
     classDef detect fill:#e1f5ff
     classDef action fill:#d4edda
@@ -481,18 +479,17 @@ afk loop stop
 afk backlog show --id 123
 
 # Resume
-afk loop start --daemon
+afk loop start --daemon --backlog-id <id> \
+  --work-item-id github:owner/repo#123 \
+  --execution-manifest /absolute/path/to/manifest.json
 ```
 
 ## Performance Considerations
 
-### Concurrency Tuning
+### Polling
 
-| Configuration | Max Concurrent | Poll Interval | Use Case |
-|---------------|----------------|---------------|----------|
-| Conservative | 2 | 120s | Limited resources |
-| Balanced | 5 | 60s | Typical server |
-| Aggressive | 10 | 30s | High-end machine |
+The loop has one manifest-bound work item and no concurrency setting. Use
+`--poll-interval <seconds>` to control how often it checks that item.
 
 ### Per-Workflow Resource Usage
 

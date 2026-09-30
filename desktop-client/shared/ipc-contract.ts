@@ -93,12 +93,11 @@ export type WorkflowRunSummary = {
 export type LoopStatus = {
   state: "running" | "stopped";
   pid?: number;
-  implement: { active: number; ids: string[] };
-  qa: { active: number | null; queue: string[] };
+  execution: { active: number; ids: string[] };
   totals: { completed: number; failed: number };
   startedAt?: number;
   lastUpdateAt?: number;
-  lastError?: string;
+  lastError: Record<string, string>;
 };
 
 export type AppearancePreferences = {

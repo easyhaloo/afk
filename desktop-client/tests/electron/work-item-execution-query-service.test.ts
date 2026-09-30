@@ -1,44 +1,40 @@
 import { describe, expect, it, vi } from "vitest";
+import type { RunEventQueryPort } from "@afk/application";
+import type { RunEvent } from "@afk/core";
 import { createWorkItemExecutionQueryService } from "../../electron/services/work-item-execution-query-service";
 
-const summary = {
-  executionId: "execution-158",
-  runId: "afk-158",
-  workItemId: "github:easyhaloo/afk#158",
-  status: "verifying",
-  startedAt: "2026-09-29T00:00:00.000Z",
-  updatedAt: "2026-09-29T00:01:00.000Z",
+const event: RunEvent = {
+  id: "event-1", schemaVersion: 1, type: "run.requested", sequence: 1,
+  occurredAt: "2026-09-29T00:00:00.000Z", observedAt: "2026-09-29T00:00:00.000Z",
+  correlationId: "afk-158",
+  context: { traceId: "trace-1", runId: "afk-158", workItemId: "github:easyhaloo/afk#158", profileId: "default", attempt: 1, actor: { kind: "cli", id: "user" } },
+  data: { kind: "run.requested", run: { id: "afk-158", workItemId: "github:easyhaloo/afk#158", profileId: "default", attempt: 1, status: "pending" } },
+  integrity: { hash: "test-hash" },
 };
 
+function port(events: RunEvent[] = [event]): RunEventQueryPort {
+  return {
+    listRuns: vi.fn(async () => [...new Set(events.map(item => item.context.runId))]),
+    async *read(runId: string) { yield* events.filter(item => item.context.runId === runId); },
+    verify: vi.fn(async () => ({ valid: true, lastSequence: events.length })),
+  };
+}
+
 describe("work item execution query", () => {
-  it("requests bounded audit records and projects their exact provider identity", async () => {
-    const run = vi.fn(async () => JSON.stringify({ executions: [summary], nextCursor: "afk-158" }));
-    const query = createWorkItemExecutionQueryService({ run });
-    const page = await query.list({ workItemId: summary.workItemId, limit: 25 });
-    expect(run).toHaveBeenCalledWith(["observe", "executions", "--work-item-id", summary.workItemId, "--limit", "25", "--json"]);
-    expect(page.nextCursor).toBe("afk-158");
-    expect(page.executions[0]).toMatchObject({ workItemId: summary.workItemId, project: { platform: "github", projectKey: "easyhaloo/afk" }, status: "verifying" });
+  it("runs the application use case over the injected EventStore without a CLI", async () => {
+    const events = port();
+    const page = await createWorkItemExecutionQueryService(events).list({ workItemId: event.context.workItemId, limit: 25 });
+    expect(events.listRuns).toHaveBeenCalledOnce();
+    expect(page).toEqual({ executions: [{ runId: "afk-158", workItemId: event.context.workItemId, profileId: "default", attempt: 1, status: "pending", sequence: 1, terminal: false }] });
   });
 
-  it("queries all recent executions and rejects an unrelated issue in a scoped reply", async () => {
-    const run = vi.fn(async () => JSON.stringify({ executions: [summary] }));
-    const query = createWorkItemExecutionQueryService({ run });
-    expect((await query.list({ limit: 10 })).executions).toHaveLength(1);
-    expect(run).toHaveBeenCalledWith(["observe", "executions", "--limit", "10", "--json"]);
-    await expect(query.list({ workItemId: "github:other/repo#158" })).rejects.toThrow(/work item/i);
+  it("uses the application filter and cursor semantics", async () => {
+    const query = createWorkItemExecutionQueryService(port());
+    expect((await query.list({ workItemId: "github:other/repo#158" })).executions).toEqual([]);
+    await expect(query.list({ since: "absent" })).rejects.toThrow(/cursor/);
   });
 
-  it("keeps an audit integrity failure unknown without fabricating timestamps", async () => {
-    const { startedAt: _startedAt, updatedAt: _updatedAt, ...unknown } = summary;
-    const query = createWorkItemExecutionQueryService({ run: async () => JSON.stringify({ executions: [{ ...unknown, status: "unknown", diagnostic: "invalid_hash" }] }) });
-    expect((await query.list()).executions[0]).toMatchObject({ status: "unknown", diagnostic: "invalid_hash" });
-  });
-
-  it("keeps valid executions visible when a corrupt stream has no verifiable identity", async () => {
-    const query = createWorkItemExecutionQueryService({ run: async () => JSON.stringify({ executions: [
-      { executionId: "corrupt", runId: "corrupt", workItemId: "", status: "unknown", diagnostic: "integrity_mismatch" },
-      summary,
-    ] }) });
-    expect((await query.list()).executions.map(execution => execution.executionId)).toEqual(["execution-158"]);
+  it("rejects unbounded query input", async () => {
+    await expect(createWorkItemExecutionQueryService(port()).list({ limit: 101 })).rejects.toThrow(/limit/);
   });
 });

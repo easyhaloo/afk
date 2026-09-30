@@ -1,7 +1,7 @@
-import type { ObservationContext, RunEventData } from '../core/events';
-import type { Decision, Effect, RunAggregate, RunCommand } from '../core/model';
-import { decide } from '../core/model';
-import type { EventStorePort, IdPort } from '../core/ports';
+import type { ObservationContext, RunEventData } from '@afk/core';
+import type { Decision, Effect, RunAggregate, RunCommand } from '@afk/core';
+import { decide } from '@afk/core';
+import type { EventStorePort, IdPort } from '@afk/core';
 
 export interface EffectExecution {
   execute(effect: Effect, context: ObservationContext): Promise<{ summary?: string }>;

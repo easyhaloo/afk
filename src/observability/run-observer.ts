@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import { logger } from '../infrastructure/io/logger';
-import type { ObservationContext, RunEventData, RunEventDraft } from '../core/events';
-import type { AppendReceipt, ClockPort, EventStorePort, IdPort, MetricsPort, TracerPort } from '../core/ports';
+import type { ObservationContext, RunEventData, RunEventDraft, AppendReceipt, ClockPort, EventStorePort, IdPort, MetricsPort, TracerPort } from '@afk/core';
 
 export class SystemClock implements ClockPort {
   now(): Date {
@@ -41,10 +40,7 @@ export interface RunObserverDependencies {
   log?: Logger;
 }
 
-/**
- * The single migration seam for existing runners. It records audit facts before
- * reporting success to callers, and makes missing event persistence observable.
- */
+/** Records audit facts before reporting success to callers. */
 export class RunObserver {
   private readonly tracer: TracerPort;
   private readonly metrics: MetricsPort;

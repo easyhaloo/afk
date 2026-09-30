@@ -43,7 +43,7 @@ export const DEMO_SNAPSHOT: Snapshot = {
     { id: "build-20260822", status: "completed", startedAt: "2026-08-22T09:18:37+08:00", goal: "分析桌面端打包日志并生成 macOS 发布清单", provider: "codex", transport: "app-server", auth: "chatgpt", modelProvider: "openai", worktreePath: "/Users/demo/Projects/afk-release-ops/.worktrees/build-20260822", sessionId: "afk-release", branch: "afk/build-20260822" },
     { id: "incident-20260822", status: "blocked", startedAt: "2026-08-22T09:33:51+08:00", goal: "确认 OpenCode 配置异常的处理方案", provider: "opencode", worktreePath: "/Users/demo/Projects/afk-release-ops/.worktrees/incident-20260822", error: "等待负责人确认处理方式" },
   ],
-  loop: { state: "running", pid: 48210, implement: { active: 1, ids: ["10"] }, qa: { active: null, queue: [] }, totals: { completed: 4, failed: 0 }, startedAt: 1787124200000, lastUpdateAt: 1787127821915 },
+  loop: { state: "running", pid: 48210, execution: { active: 1, ids: ["10"] }, totals: { completed: 4, failed: 0 }, lastError: {}, startedAt: 1787124200000, lastUpdateAt: 1787127821915 },
   agentRuntimes: [
     {
       id: "claude",

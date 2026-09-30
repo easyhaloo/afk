@@ -106,28 +106,26 @@ describe('loop option parsing', () => {
     { executionManifest: '/workspace/manifest.json' },
     { backlogId: ['42', '43'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json' },
     { backlogId: ['42'], workItemId: '42', executionManifest: '/workspace/manifest.json' },
-    { backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json', agent: 'codex' },
-    { backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json', agentTransport: 'exec' as const },
-    { backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json', ext: ['isolate'] },
+    {},
   ])('rejects ambiguous managed loop selection %j', options => {
     expect(() => resolveManagedLoopExecution(options)).toThrow();
   });
 
-  it('does not silently ignore configured legacy module triggers for managed execution', () => {
+  it('rejects configured module triggers instead of silently ignoring them', () => {
     expect(() => resolveManagedLoopExecution({
       backlogId: ['42'], workItemId: 'github:org/repo#42', executionManifest: '/workspace/manifest.json',
-    }, { 'need::isolate': ['isolate'] })).toThrow(/module overrides/);
+    }, { 'need::isolate': ['isolate'] })).toThrow(/module triggers/);
   });
 
-  it('keeps provider and module option values as strings', () => {
+  it('does not expose options for the removed execution chain', () => {
     const program = new Command().exitOverride();
     registerLoopCommands(program);
     const loop = program.commands.find(command => command.name() === 'loop')!;
-    const agent = loop.options.find(option => option.long === '--agent')!;
-    const ext = loop.options.find(option => option.long === '--ext')!;
-
-    expect(agent.parseArg).toBeUndefined();
-    expect(ext.parseArg).toBeUndefined();
+    for (const command of [loop, loop.commands.find(child => child.name() === 'start')!]) {
+      expect(command.options.map(option => option.long)).not.toContain('--agent');
+      expect(command.options.map(option => option.long)).not.toContain('--ext');
+      expect(command.options.map(option => option.long)).not.toContain('--agent-transport');
+    }
   });
 
   it('parses repeated backlog scope values', () => {
@@ -140,16 +138,13 @@ describe('loop option parsing', () => {
     expect(scope.parseArg?.('115', ['114'])).toEqual(['114', '115']);
   });
 
-  it('exposes the same Codex runtime overrides on run, loop, loop start, and qa', () => {
+  it('keeps Codex runtime overrides on run and qa, not on the manifest-bound loop', () => {
     const program = new Command().exitOverride();
     registerRunCommands(program);
     registerLoopCommands(program);
     registerQACommands(program);
-    const loop = program.commands.find(command => command.name() === 'loop')!;
     const commands = [
       program.commands.find(command => command.name() === 'run')!,
-      loop,
-      loop.commands.find(command => command.name() === 'start')!,
       program.commands.find(command => command.name() === 'qa')!,
     ];
     const expected = [

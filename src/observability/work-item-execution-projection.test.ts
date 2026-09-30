@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { RunEvent, RunEventData } from '../core/events';
+import type { RunEvent, RunEventData } from '@afk/core';
 import { projectWorkItemExecution } from './work-item-execution-projection';
 
 const workItemId = 'github:team/project#158';
@@ -42,12 +42,6 @@ describe('projectWorkItemExecution', () => {
     const mismatched = event(1, { kind: 'run.requested', run: { id: 'implement-1', workItemId: 'github:other/project#158', profileId: 'test', attempt: 1, status: 'pending' } });
     expect(projectWorkItemExecution({ runId: 'implement-1', events: [mismatched], integrity: { valid: true, lastSequence: 1 } }).summary)
       .toMatchObject({ status: 'unknown', diagnostic: 'event_identity_mismatch' });
-  });
-
-  it('uses runId as a backwards-compatible execution ID for legacy events', () => {
-    const legacy = { ...requested, correlationId: 'implement-1' };
-    expect(projectWorkItemExecution({ runId: 'implement-1', events: [legacy], integrity: { valid: true, lastSequence: 1 } }).summary)
-      .toMatchObject({ executionId: 'implement-1', status: 'queued' });
   });
 
   it('does not treat a generic verification step as independent QA PASS', () => {

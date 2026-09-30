@@ -18,6 +18,32 @@ src/features/                     renderer feature components and pure graph fun
 tests/                            desktop package unit tests
 ```
 
+## Application Boundary
+
+The work-item inventory service has one required application dependency in
+`electron/adapters/work-item-application-adapter.ts`:
+
+- `createWorkItemInventoryService` cannot be constructed without an
+  application adapter;
+- the Main-process provider adapter invokes `@afk/application/provider-inventory`
+  through a credential-scoped catalog port; the existing GitHub/GitLab SDK is
+  bundled into `dist-electron/provider-inventory.cjs` for in-process use, with
+  no `afk backlog inventory` subprocess;
+- the service owns caching, persistence, freshness, and provider projection;
+- Electron Main composes the adapter and the service once, while IPC and the
+  renderer consume only the resulting application DTO.
+
+Execution history uses a separate direct Application path:
+
+- Electron Main injects `electron/adapters/run-event-query-adapter.ts`, a read-only
+  verified JSONL `RunEventQueryPort` over `~/.afk/events`.
+- `electron/services/work-item-execution-query-service.ts` invokes
+  `@afk/application.queryExecutionHistory`; no CLI subprocess or legacy projection
+  is used for the history view. The Application/Core use cases are bundled into
+  `dist-electron/application.cjs` so packaged Electron does not depend on
+  workspace symlinks; the workspace packages are development-time type/build
+  dependencies only.
+
 The main process is assembled in `electron/main.ts`; it must not own business
 logic. Renderer features consume `shared/ipc-contract.ts` and the preload API,
 while all filesystem, process, YAML, and SQLite operations stay behind main

@@ -7,12 +7,15 @@
     "afk": "./dist/index.js"
   },
   "scripts": {
-    "build": "pnpm --filter @afk/workflow-graph build && node scripts/build.mjs && tsc --emitDeclarationOnly",
-    "typecheck": "pnpm --filter @afk/workflow-graph build && tsc --noEmit",
-    "architecture:check": "node scripts/architecture-guard.mjs",
+    "build": "pnpm --filter @afk/core build && pnpm --filter @afk/application build && pnpm --filter @afk/workflow-graph build && node scripts/build.mjs && tsc --emitDeclarationOnly",
+    "typecheck": "pnpm --filter @afk/core build && pnpm --filter @afk/application typecheck && pnpm --filter @afk/workflow-graph build && tsc --noEmit",
+    "architecture:check": "node scripts/architecture-guard.mjs --check-packages",
+    "application:typecheck": "pnpm --filter @afk/application typecheck",
+    "application:build": "pnpm --filter @afk/application build",
+    "application:test": "pnpm --filter @afk/application test",
     "dev": "tsc --watch",
     "pretest": "npm run build",
-    "test": "vitest run",
+    "test": "vitest run && pnpm --filter @afk/core test && pnpm --filter @afk/application test",
     "test:e2e:codex": "tsx tests/e2e/codex-runtime.ts",
     "test:watch": "vitest",
     "postinstall": "node scripts/fix-permissions.mjs",
@@ -20,6 +23,8 @@
   },
   "keywords": ["afk", "gitlab", "automation", "ci-cd"],
   "dependencies": {
+    "@afk/application": "workspace:*",
+    "@afk/core": "workspace:*",
     "@afk/workflow-graph": "workspace:*",
     "@gitbeaker/node": "^35.8.0",
     "@m234/nerd-fonts": "^0.5.1",

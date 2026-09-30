@@ -2,11 +2,12 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadWorkItemExecution, replayRun } from '@afk/application';
 import { executeWorkItem, reconcileWorkItemMerge, type ExecuteWorkItemDependencies } from './execute-work-item';
 import { encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store';
 import { RunObserver } from '../../observability/run-observer';
-import { RunQueryService } from '../../observability/query-service';
+import { createExecutionQueryPorts } from '../../observability/query-service';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
@@ -71,11 +72,23 @@ function lockProbe(status: 'alive' | 'dead' | 'unknown', pid = 8420) {
 }
 
 describe('executeWorkItem', () => {
+  it('loads the default execution through application ports without an injected loader', async () => {
+    const { deps, directory } = await setup();
+    const previous = process.env.AFK_EVENT_STORE_DIR;
+    process.env.AFK_EVENT_STORE_DIR = join(directory, 'events');
+    try {
+      await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow('execution audit identity or integrity mismatch');
+    } finally {
+      if (previous === undefined) delete process.env.AFK_EVENT_STORE_DIR;
+      else process.env.AFK_EVENT_STORE_DIR = previous;
+    }
+  });
+
   it('reconciles a root PR only after provider-confirmed merge, without duplicate terminal events', async () => {
     const { deps, changes, current, directory } = await setup();
     const observer = new RunObserver({ events: new JsonlEventStore({ root: join(directory, 'events') }) });
     deps.recordAudit = (context, data) => observer.record(context, data);
-    deps.loadExecution = runId => new RunQueryService(new JsonlEventStore({ root: join(directory, 'events') })).execution(runId);
+    deps.loadExecution = runId => loadWorkItemExecution(runId, createExecutionQueryPorts(new JsonlEventStore({ root: join(directory, 'events') })));
     const context = await deps.createContext!({} as any, input, {} as any);
     context.request.targetBranch = 'main';
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
@@ -98,7 +111,7 @@ describe('executeWorkItem', () => {
     const { deps, changes, directory } = await setup();
     const observer = new RunObserver({ events: new JsonlEventStore({ root: join(directory, 'events') }) });
     deps.recordAudit = (context, data) => observer.record(context, data);
-    deps.loadExecution = runId => new RunQueryService(new JsonlEventStore({ root: join(directory, 'events') })).execution(runId);
+    deps.loadExecution = runId => loadWorkItemExecution(runId, createExecutionQueryPorts(new JsonlEventStore({ root: join(directory, 'events') })));
     const context = await deps.createContext!({} as any, input, {} as any);
     context.request.targetBranch = 'main';
     context.providers.backlog.transition = vi.fn();
@@ -117,7 +130,7 @@ describe('executeWorkItem', () => {
     const { deps, changes, current, directory } = await setup();
     const observer = new RunObserver({ events: new JsonlEventStore({ root: join(directory, 'events') }) });
     deps.recordAudit = (context, data) => observer.record(context, data);
-    deps.loadExecution = runId => new RunQueryService(new JsonlEventStore({ root: join(directory, 'events') })).execution(runId);
+    deps.loadExecution = runId => loadWorkItemExecution(runId, createExecutionQueryPorts(new JsonlEventStore({ root: join(directory, 'events') })));
     const context = await deps.createContext!({} as any, input, {} as any);
     context.request.targetBranch = 'main';
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
@@ -136,7 +149,7 @@ describe('executeWorkItem', () => {
     current.state = 'merge_ready';
     const observer = new RunObserver({ events: new JsonlEventStore({ root: join(directory, 'events') }) });
     deps.recordAudit = (context, data) => observer.record(context, data);
-    deps.loadExecution = runId => new RunQueryService(new JsonlEventStore({ root: join(directory, 'events') })).execution(runId);
+    deps.loadExecution = runId => loadWorkItemExecution(runId, createExecutionQueryPorts(new JsonlEventStore({ root: join(directory, 'events') })));
     const context = await deps.createContext!({} as any, input, {} as any);
     context.request.targetBranch = 'main';
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
@@ -157,7 +170,7 @@ describe('executeWorkItem', () => {
     current.state = 'verification';
     const observer = new RunObserver({ events: new JsonlEventStore({ root: join(directory, 'events') }) });
     deps.recordAudit = (context, data) => observer.record(context, data);
-    deps.loadExecution = runId => new RunQueryService(new JsonlEventStore({ root: join(directory, 'events') })).execution(runId);
+    deps.loadExecution = runId => loadWorkItemExecution(runId, createExecutionQueryPorts(new JsonlEventStore({ root: join(directory, 'events') })));
     const context = await deps.createContext!({} as any, input, {} as any);
     context.request.targetBranch = 'main';
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
@@ -194,13 +207,13 @@ describe('executeWorkItem', () => {
       return { success: true };
     });
     await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
-    const queried = await new RunQueryService(store).execution('attempt-1');
+    const queried = await loadWorkItemExecution('attempt-1', createExecutionQueryPorts(store));
     expect(queried.timeline.integrity.lastSequence).toBe(7);
     expect(queried.summary).toMatchObject({ workItemId, status: 'awaiting_merge', pr: { id: '5', url: 'https://github.com/acme/api/pull/5' } });
     expect(queried.timeline.events.map(event => event.data.kind)).toEqual([
       'run.requested', 'run.started', 'implementation.completed', 'qa.started', 'qa.passed', 'change.published', 'human_gate.opened',
     ]);
-    expect((await new RunQueryService(store).replay('attempt-1')).state).toMatchObject({ run: { status: 'awaiting_human' }, terminal: false });
+    expect((await replayRun('attempt-1', store)).state).toMatchObject({ run: { status: 'awaiting_human' }, terminal: false });
   });
 
   it('records intent, claims through WorkflowRunner once, verifies independently, and only then succeeds', async () => {

@@ -40,7 +40,7 @@ jobs:
           cache: pnpm
 
       - name: Architecture check
-        run: pnpm architecture:check
+        run: pnpm architecture:check --check-packages
 
       - name: Cache node-gyp headers
         uses: actions/cache@v4

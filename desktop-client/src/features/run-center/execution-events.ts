@@ -2,29 +2,25 @@ import type { ExecutionSummary } from "../../../shared/execution-contract";
 import type { ProjectRun, RuntimeEvent } from "../../../shared/ipc-contract";
 
 const resultLabels: Record<ExecutionSummary["status"], string> = {
-  queued: "工作项等待执行",
-  implementing: "工作项正在实现",
-  verifying: "工作项正在独立验证",
-  publishing: "QA 通过，正在提交 PR",
-  awaiting_merge: "PR 等待人工合并",
-  rework: "QA 未通过，等待返工",
-  blocked: "工作项执行受阻",
+  pending: "工作项等待执行",
+  running: "工作项正在执行",
+  awaiting_human: "工作项等待人工处理",
+  succeeded: "工作项已完成",
   failed: "工作项执行失败",
-  done: "工作项已完成",
-  unknown: "运行审计待核查",
+  cancelled: "工作项执行已取消",
 };
 
 export function executionEvents(executions: readonly ExecutionSummary[]): RuntimeEvent[] {
   return executions.map(execution => ({
-    id: execution.executionId,
-    timestamp: execution.updatedAt ?? execution.startedAt ?? "—",
+    id: execution.runId,
+    timestamp: "—",
     source: execution.workItemId,
-    status: execution.status === "queued" ? "queued"
-      : execution.status === "done" ? "completed"
-        : execution.status === "failed" || execution.status === "rework" || execution.status === "blocked" ? "failed"
-          : execution.status === "unknown" || execution.status === "awaiting_merge" ? "waiting_confirmation" : "running",
+    status: execution.status === "pending" ? "queued"
+      : execution.status === "succeeded" ? "completed"
+        : execution.status === "failed" || execution.status === "cancelled" ? "failed"
+          : execution.status === "awaiting_human" ? "waiting_confirmation" : "running",
     result: resultLabels[execution.status],
-    nextStep: execution.workspacePath ? `任务空间：${execution.workspacePath}` : execution.diagnostic ?? resultLabels[execution.status],
+    nextStep: resultLabels[execution.status],
     raw: JSON.stringify(execution),
   }));
 }

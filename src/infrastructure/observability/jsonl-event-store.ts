@@ -2,8 +2,7 @@ import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { RunEvent, RunEventDraft } from '../../core/events';
-import type { AppendReceipt, EventStorePort } from '../../core/ports';
+import type { RunEvent, RunEventDraft, AppendReceipt, EventStorePort } from '@afk/core';
 
 export class EventStoreCorruptionError extends Error {
   constructor(message: string) {

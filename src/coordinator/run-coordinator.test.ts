@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { evolve, initialRunAggregate, type ObservationContext } from '../core';
+import { evolve, initialRunAggregate, type ObservationContext } from '@afk/core';
 import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store';
 import { RunCoordinator } from './run-coordinator';
 

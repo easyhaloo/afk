@@ -5,9 +5,8 @@ const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   list: vi.fn(async () => ({
     executions: [{
-      executionId: "execution-158", runId: "afk-158", workItemId: "github:acme/api#42",
-      project: { platform: "github", projectKey: "acme/api", name: "api" },
-      status: "verifying", startedAt: "2026-09-29T00:00:00.000Z", updatedAt: "2026-09-29T00:01:00.000Z",
+      runId: "afk-158", workItemId: "github:acme/api#42",
+      profileId: "default", attempt: 1, status: "running", sequence: 1, terminal: false,
     }],
     nextCursor: "cursor-1",
   })),
@@ -43,10 +42,10 @@ describe("execution IPC channel", () => {
     const handler = mocks.handlers.get(IPC_CHANNELS.workItemsExecutions);
     expect(handler).toBeTypeOf("function");
     const result = await handler!({ senderFrame: { url: "http://localhost:5174" } }, {}) as {
-      executions: Array<{ executionId: string }>;
+      executions: Array<{ runId: string }>;
       nextCursor?: string;
     };
-    expect(result.executions.map(execution => execution.executionId)).toEqual(["execution-158"]);
+    expect(result.executions.map(execution => execution.runId)).toEqual(["afk-158"]);
     expect(result.nextCursor).toBe("cursor-1");
     expect(result).not.toHaveProperty("legacyRuns");
   });

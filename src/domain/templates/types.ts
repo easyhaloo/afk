@@ -1,5 +1,5 @@
 /**
- * Workflow template schema (EXECUTION-DESIGN.md §10 / §12 阶段 7).
+ * Workflow template schema (docs/architecture/execution.md §10 / §12 阶段 7).
  *
  * Templates are YAML documents with steps. Each step has:
  *   id          unique within the template

@@ -1,6 +1,6 @@
 /**
  * Branch strategy types — abstraction over git worktree + branch lifecycle
- * (EXECUTION-DESIGN.md §9 / §12 阶段 6).
+ * (docs/architecture/execution.md §9 / §12 阶段 6).
  *
  * Four built-in strategies:
  *   - issue         default; branch = afk-issue-<iid>, worktree = .worktrees/issue-<iid>

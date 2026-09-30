@@ -116,25 +116,24 @@ afk qa --backlog-id 123
 
 ## Automated Scheduling
 
-Let AFK automatically handle runnable Backlog items:
+Run a manifest-bound work item with the polling daemon:
 
 ```bash
-# Start the implementation → QA → merge loop
-afk loop --max-concurrent 3 --poll-interval 60
-
-# The scheduler will automatically:
-# - Poll for ready/rework Backlog items every 60 seconds
-# - Process up to 3 issues concurrently
-# - Verify preconditions (AC, base label, no blockers)
-# - Create worktrees and tmux sessions
-# - Monitor completion and create MR/PR
+afk loop start --daemon --backlog-id <id> \
+  --work-item-id github:owner/repo#123 \
+  --execution-manifest /absolute/path/to/manifest.json \
+  --poll-interval 60
 ```
+
+The loop requires exactly one backlog ID and a matching execution manifest.
+It calls the same `executeWorkItem` use case as `afk execute`; it does not run
+the former implementation/QA queue or schedule unrelated items without manifests.
 
 ## Next Steps
 
-- **Architecture Design** → [ARCHITECTURE.md](docs/ARCHITECTURE.md) — Understand the cross-platform abstraction layer
-- **Workflow Details** → [WORKFLOWS.md](docs/WORKFLOWS.md) — Deep dive into the three workflow types
-- **Skills System** → [SKILLS.md](docs/SKILLS.md) — Learn the design and usage of afk skills
+- **Architecture Design** → [overview.md](docs/architecture/overview.md) — Understand the cross-platform abstraction layer
+- **Workflow Details** → [workflows.md](docs/guides/workflows.md) — Deep dive into the three workflow types
+- **Skills System** → [skills.md](docs/guides/skills.md) — Learn the design and usage of afk skills
 
 ## Troubleshooting
 

@@ -1,7 +1,7 @@
 /**
  * Container sandbox — implements the Sandbox interface using a ContainerProvider.
  *
- * Per EXECUTION-DESIGN.md §6: "一次 workflow 一个 container，每次 context handoff
+ * Per docs/architecture/execution.md §6: "一次 workflow 一个 container，每次 context handoff
  * 只重启 Agent process". The sandbox owns the container lifecycle; AgentExecution
  * is the per-generation process inside it.
  *

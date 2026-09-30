@@ -1,5 +1,5 @@
 /**
- * Built-in workflow templates (EXECUTION-DESIGN.md §10).
+ * Built-in workflow templates (docs/architecture/execution.md §10).
  *
  *   issue-implementation   — current AFK implementation flow (implement → verify → push)
  *   simple-loop            — single step that loops until the agent reports done

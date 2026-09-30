@@ -665,11 +665,11 @@ Issue
 
 - `README.md`
 - `CLAUDE.md`
-- `docs/ARCHITECTURE.md`
-- `docs/WORKFLOWS.md`
-- `docs/GETTING-STARTED.md`
-- `docs/TESTING.md`
-- `docs/SKILLS.md`
+- `docs/architecture/overview.md`
+- `docs/guides/workflows.md`
+- `docs/getting-started.md`
+- `docs/guides/testing.md`
+- `docs/guides/skills.md`
 
 文档必须说明：
 

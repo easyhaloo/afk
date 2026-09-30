@@ -6,7 +6,7 @@
  *     ├── result.json        (final ExecutionResult)
  *     └── output.log         (tail of tmux pane capture)
  *
- * Per the design (EXECUTION-DESIGN.md §7):
+ * Per the design (docs/architecture/execution.md §7):
  *   "Session 文件必须使用临时文件、校验和原子 rename，避免新 generation 读取半截 JSONL."
  *
  * The run state directory is best-effort diagnostics, NOT a control plane.

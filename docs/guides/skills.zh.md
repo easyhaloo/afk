@@ -821,4 +821,4 @@ references/
 
 - **架构设计** → [ARCHITECTURE.md](ARCHITECTURE.md) — 跨平台抽象层
 - **工作流程** → [WORKFLOWS.md](WORKFLOWS.md) — Issue → MR 流水线、调度器
-- **快速开始** → [GETTING-STARTED.md](GETTING-STARTED.md) — 5 分钟上手
+- **快速开始** → [getting-started.md](../getting-started.zh.md) — 5 分钟上手

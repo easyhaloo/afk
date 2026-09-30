@@ -14,7 +14,7 @@ disallowed-tools: >-
 ## product — want to see before building
 
 **When:** requirements vague; visual confirmation before docs/code.
-**Output:** `docs/prototype/<slug>/` containing index.html and README.md.
+**Output:** `docs/_archive/prototype/<slug>/` containing index.html and README.md.
 
 **Steps:**
 

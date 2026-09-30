@@ -821,4 +821,4 @@ references/
 
 - **Architecture Design** → [ARCHITECTURE.md](ARCHITECTURE.md) — Cross-platform abstraction layer
 - **Workflows** → [WORKFLOWS.md](WORKFLOWS.md) — Issue → MR pipeline, scheduler
-- **Quick Start** → [GETTING-STARTED.md](GETTING-STARTED.md) — 5-minute getting started guide
+- **Quick Start** → [getting-started.md](../getting-started.md) — 5-minute getting started guide

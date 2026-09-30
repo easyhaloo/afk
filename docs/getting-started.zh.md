@@ -114,25 +114,23 @@ afk qa --backlog-id 123
 
 ## 自动化调度
 
-让 AFK 自动处理所有可执行 Backlog：
+使用轮询守护进程执行绑定 manifest 的工作项：
 
 ```bash
-# 启动实现 → QA → 合并循环
-afk loop --max-concurrent 3 --poll-interval 60
-
-# 调度器会自动：
-# - 每 60 秒轮询 ready/rework Backlog
-# - 最多同时处理 3 个 issues
-# - 验证前置条件（AC、base label、无阻塞）
-# - 创建 worktree 和 tmux session
-# - 监控完成并创建 MR/PR
+afk loop start --daemon --backlog-id <id> \
+  --work-item-id github:owner/repo#123 \
+  --execution-manifest /absolute/path/to/manifest.json \
+  --poll-interval 60
 ```
+
+Loop 只接受一个 Backlog ID 与匹配的执行 manifest，并复用 `afk execute`
+的 `executeWorkItem` 用例；不再运行旧的实现/QA 双队列或无 manifest 的全量调度。
 
 ## 下一步
 
-- **架构设计** → [ARCHITECTURE.md](docs/ARCHITECTURE.md) — 了解跨平台抽象层
-- **工作流详解** → [WORKFLOWS.md](docs/WORKFLOWS.md) — 深入理解三种工作流
-- **Skills 系统** → [SKILLS.md](docs/SKILLS.md) — 学习 afk skills 的设计和使用
+- **架构设计** → [overview.md](docs/architecture/overview.md) — 了解跨平台抽象层
+- **工作流详解** → [workflows.md](docs/guides/workflows.md) — 深入理解三种工作流
+- **Skills 系统** → [skills.md](docs/guides/skills.md) — 学习 afk skills 的设计和使用
 
 ## 常见问题
 

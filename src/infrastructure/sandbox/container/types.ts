@@ -1,6 +1,6 @@
 /**
  * Container provider types — engine-agnostic abstraction over Docker/Podman
- * for the container sandbox (EXECUTION-DESIGN.md §6).
+ * for the container sandbox (docs/architecture/execution.md §6).
  *
  * ContainerProvider runs ONE long-lived container per workflow. Each
  * context handoff restarts the Agent process inside the same container

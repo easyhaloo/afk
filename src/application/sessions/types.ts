@@ -3,7 +3,7 @@
  * (e.g., Claude Code session dir, cursor-agent --resume id) and the AFK
  * handoff-Markdown fallback.
  *
- * Phase 4 (EXECUTION-DESIGN.md §12 阶段 4):
+ * Phase 4 (docs/architecture/execution.md §12 阶段 4):
  *   - Provider-specific session store (FileSessionStore for native snapshots)
  *   - HandoffSessionStore wraps the existing handoff-*.md docs
  *   - Native resume preferred; handoff Markdown fallback when corrupt / absent

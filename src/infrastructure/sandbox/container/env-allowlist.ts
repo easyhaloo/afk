@@ -1,7 +1,7 @@
 /**
  * Environment variable allowlist for container sandboxes.
  *
- * Per EXECUTION-DESIGN.md §6: container env must be filtered through an
+ * Per docs/architecture/execution.md §6: container env must be filtered through an
  * explicit allowlist. The defaults cover what coding agents actually need
  * (PATH, locale, model provider keys) and exclude credentials and
  * shell-specific leakage (SSH_AUTH_SOCK, AWS_*, GITHUB_TOKEN, etc.).

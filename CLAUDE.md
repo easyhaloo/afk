@@ -1,118 +1,115 @@
-# AFK — Away From Keyboard CLI
+# AFK — Away From Keyboard
 
-Autonomous development workflow CLI + Skills system.
+Autonomous development workflow CLI + Claude Code skills suite. Cross-platform
+issue tracking (GitLab/GitHub) driven by coding agents.
 
-## Project Overview
+This file is an **entry point**: it tells you where things are and which
+document owns which fact. It deliberately does not restate content — a copy
+here is a copy that will silently drift. If you need depth, follow the link.
 
-AFK is a CLI tool for managing autonomous development workflows, particularly focused on GitLab/GitHub integration, tmux session management, and a TUI-based dashboard.
+## Tech stack
 
-**Tech Stack**: TypeScript, React (Ink), Node.js ≥18
+TypeScript on Node.js ≥18, pnpm workspaces. CLI via `commander`; TUI via
+React + `ink`; validation with `zod`; Git via `simple-git` and `node-tmux`;
+GitLab via `@gitbeaker/node`, GitHub via `@octokit/rest`; structured logging
+with `pino`. Tests run under `vitest`. The Electron desktop client is a
+separate package with its own toolchain — see
+[`desktop-client/ARCHITECTURE.md`](desktop-client/ARCHITECTURE.md).
 
-## Key Commands
-
-| Command | Purpose |
-|---------|---------|
-| `afk backlog` | Backlog management and inspection only |
-| `afk run --backlog-id <id>` | Execute one backlog item |
-| `afk loop` | Complete implementation → QA → merge pipeline |
-| `afk qa --backlog-id <id>` | Standalone QA retry/diagnostic entry point |
-| `afk signal` | Structured signal file management |
-| `afk tmux` | Tmux session management |
-| `afk isolate` | DB service isolation per worktree |
-| `afk` | Interactive TUI dashboard |
-| `afk kanban` | Kanban board of issues |
-| `afk debug` | Debug loop (reproduce → verify) |
-
-The CLI is a breaking backlog hard cutover. `issue`, `tracker`, `mr`, and
-`workflow` execution commands and their old argument forms are removed; there
-are no compatibility aliases. Provider labels are internal adapter metadata.
-
-## Canonical Work Identity
-
-- `BacklogItem.id` is the business identity and is passed as `--backlog-id`.
-- `Run.workItemId`, runtime `backlogId`, TUI `backlogId`, and Desktop
-  `BacklogRuntimeSummary.backlogId` must equal that ID.
-- `runId` identifies one attempt only.
-- `parentId` groups work, `dependsOn` orders work, and `baseBacklogId` chooses
-  the Git execution base; these fields are not interchangeable.
-- `.afk/backlog-runs.json` is Desktop launch metadata. Canonical runtime files
-  and events own execution status and diagnostics; stale runtime does not
-  change Provider Backlog state.
-
-## Architecture
+## Repository layout
 
 ```
 src/
-├── commands/          # CLI command implementations ( commander )
-├── lib/
-│   ├── ui/core/       # TUI core: View, Registry, Keyboard
-│   ├── core/          # GitLab, GitHub, Tracker, IO abstractions
-│   └── plugins/       # Skill loader
-└── index.ts           # Entry point
+├── domain/          # Pure types, reducers, provider seams — no I/O
+├── application/     # Use cases over domain; owns workflow/run state
+├── infrastructure/  # Git, tmux, sandboxes, trackers, observability
+├── cli/             # Commander wiring, command registry
+├── views/           # Ink TUI (core primitives in views/shared/)
+├── coordinator/     # Cross-cutting coordination
+├── observability/   # Query/projection layer over the audit spine
+├── plugin-sdk/      # External plugin contract
+├── types/           # Shared board/runtime type projections
+└── shared/          # Cross-layer utilities
+packages/            # afk-core, afk-application, afk-workflow-graph
+skills/              # Source of truth for all Claude Code skills
+docs/                # All documentation (see below)
 ```
 
-### TUI Core (`src/lib/ui/core/`)
+Layer direction is enforced, not merely documented: `pnpm architecture:check`
+rejects illegal relative imports and quarantines legacy files. Do not add a
+dependency that inverts a layer.
 
-- **View** — Interface for TUI panels; each View has `id`, `shortcut`, `render()`
-- **ViewRegistry** — Manages View registration and active state; sorts by priority
-- **KeyboardDispatcher** — Routes keyboard events to global handlers or active View
+## Documentation
 
-TUI built with React + Ink. Components live in `src/components/` (planned).
+[`docs/index.md`](docs/index.md) is the full map. The live areas:
 
-## Related Projects
+| Area | Path |
+| --- | --- |
+| Architecture, execution design, glossary | [`docs/architecture/`](docs/architecture/overview.md) |
+| Task guides (workflows, skills, testing) | [`docs/guides/`](docs/guides/workflows.md) |
+| Architecture decision records | [`docs/adr/`](docs/adr/README.md) |
+| Product requirements, research | [`docs/product/`](docs/product/PRD.md), [`docs/research/`](docs/research/) |
+| Onboarding | [`docs/getting-started.md`](docs/getting-started.md) |
 
-| Project | Path | Purpose |
-|---------|------|---------|
-| afk-plugin | `~/.claude/plugins/cache/afk/` | Claude Code skill plugins |
+`docs/_archive/` is a historical holding area, not current guidance. Bilingual
+documents ship as `name.md` + `name.zh.md`; update both.
+
+## Conventions
+
+- **The command registry is the single source of truth for the CLI surface.**
+  The supported commands, and the absence of aliases for removed groups, are
+  documented in
+  [docs/architecture/overview.md](docs/architecture/overview.md). If you change
+  a signature, a flag, or remove a command, update that table in the same
+  commit — do not add a second command list here.
+- **Work identity is a contract, not a convention you may redefine.** The
+  `BacklogItem.id` / `Run.workItemId` / `runId` / `parentId` / `dependsOn` /
+  `baseBacklogId` distinctions, and the rules for status ownership, are
+  specified in
+  [docs/architecture/overview.md](docs/architecture/overview.md#work-item-and-execution-identity).
+  Read it before touching run, backlog, or runtime code.
+- **`skills/` is the source of truth.** Never edit skills under
+  `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/` — those are
+  installed copies and edits are lost on reinstall. See
+  [`skills/SKILL-GUIDE.md`](skills/SKILL-GUIDE.md) for authoring standards.
+- **Build output is not source.** `dist/`, `dist-electron/`, `release/`, and
+  test screenshots are generated. Do not review, edit, or commit them.
+- **Add focused tests** for every extracted service or pure function. Each
+  workspace package must pass its own typecheck, build, and test — a green
+  root run must not mask a broken package.
+- **Docs stay in lockstep with code.** The link checker (`pnpm docs:check`) only
+  catches broken links; stale *prose* is on you. When a module moves, grep the
+  docs for the old path.
 
 ## Workflow
 
-1. Make changes in `src/`
-2. Run `pnpm build` to compile to `dist/`
-3. Test with `pnpm test` (vitest)
-4. For TUI testing, see [docs/guides/testing.md](docs/guides/testing.md)
-5. **Documentation sync**: CLI command changes (signature, flags, behavior) or skill modifications must update the corresponding docs — `README.md`, `CLAUDE.md` command table, skill docs, or related `docs/` files. Keep docs in lockstep with code.
+```bash
+pnpm build              # compile to dist/ (runs workspace package builds first)
+pnpm typecheck          # root + workspace typecheck
+pnpm test               # vitest + @afk/core + @afk/application
+pnpm architecture:check # layer direction + legacy quarantine
+pnpm docs:check         # broken/case-mismatched doc links
+```
 
-## Desktop UI Design Standards
-
-All UI changes under `desktop-client/` must follow
-[docs/architecture/design-system.md](docs/architecture/design-system.md).
-
-## Skill Development
-
-When modifying or creating skills, always work in the project's `skills/` directory:
-- **Do not** edit skills in `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/`
-- The project's `skills/` directory is the source of truth
-- Changes should be committed and pushed from here
-- See `skills/SKILL-GUIDE.md` for skill authoring standards
-- Use `afk-skill-craft` to create, diagnose, or refactor skills
+`pretest` runs a build, so `pnpm test` is self-contained. `.husky/pre-push` runs
+architecture:check → typecheck → build → test on `main` and `release/*` before
+letting a push through. Desktop work is scoped to `desktop-client/`, whose
+packages are built and tested separately — run its own scripts there.
 
 ## Environment
 
 ```bash
-# Required env vars for full functionality
-GITLAB_TOKEN=     # GitLab API token
-GITLAB_URL=       # GitLab instance URL
-GITHUB_TOKEN=     # GitHub API token
-TMUX_SESSION=     # tmux session name (default: afk)
+GITLAB_TOKEN=          # GitLab API token
+GITLAB_URL=            # GitLab instance URL
+GITHUB_TOKEN=          # GitHub API token
+AFK_TMUX_SESSION=      # tmux session name (default: afk)
 ```
 
-## Execution Architecture Status
+## Related projects
 
-All 8 phases of [docs/architecture/execution.md](docs/architecture/execution.md) are implemented:
+| Project | Path | Purpose |
+| --- | --- | --- |
+| afk-plugin | `~/.claude/plugins/cache/afk/` | Installed copy of this repo's skills |
 
-| Phase | Module | Notes |
-|-------|--------|-------|
-| 0 | `src/domain/agents/types.ts`, `src/infrastructure/sandbox/types.ts` | Interfaces only |
-| 1 | `src/infrastructure/sandbox/providers/local.ts`, `sandbox/types.ts` | Local sandbox wired into `WorkflowRunner` |
-| 2 | `sandbox/providers/local.ts` (LocalAgentExecution), `src/domain/agents/claude-code.ts` | ExecutionResult.status |
-| 3 | `src/domain/agents/{codex,cursor,pi,opencode,copilot}.ts`, `registry.ts` | 6 providers + capability-gated resume |
-| 4 | `src/application/sessions/{types,file-store,handoff-store,run-state}.ts` | SessionStore chain + atomic writes + checksum |
-| 5 | `src/infrastructure/sandbox/container/*` | Docker + Podman sandbox with env allowlist |
-| 6 | `src/domain/branches/{issue,named,merge-to-head,existing}.ts` | 4 strategies + parallel-worktree isolation |
-| 7 | `src/domain/templates/*` | 5 builtin templates + zod-validated loader |
-| 8 | `src/infrastructure/io/signal.ts` | Interactive completion signal; batch agents use `ExecutionResult` |
-
-Batch agents report via `ExecutionResult`; interactive agents write
-`.afk-signal.json` per `src/application/workflows/execution-protocol.ts`, read
-in `src/infrastructure/tmux/tmux.ts`.
+The repo's `skills/` directory is the editable original; the cache above is
+only what Claude Code loads at runtime.

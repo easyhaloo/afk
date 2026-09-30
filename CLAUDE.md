@@ -70,13 +70,13 @@ TUI built with React + Ink. Components live in `src/components/` (planned).
 1. Make changes in `src/`
 2. Run `pnpm build` to compile to `dist/`
 3. Test with `pnpm test` (vitest)
-4. For TUI testing, see [docs/TESTING.md](docs/TESTING.md)
+4. For TUI testing, see [docs/guides/testing.md](docs/guides/testing.md)
 5. **Documentation sync**: CLI command changes (signature, flags, behavior) or skill modifications must update the corresponding docs — `README.md`, `CLAUDE.md` command table, skill docs, or related `docs/` files. Keep docs in lockstep with code.
 
 ## Desktop UI Design Standards
 
 All UI changes under `desktop-client/` must follow
-[docs/DESKTOP-DESIGN-STANDARDS.md](docs/DESKTOP-DESIGN-STANDARDS.md).
+[docs/architecture/design-system.md](docs/architecture/design-system.md).
 
 ## Skill Development
 
@@ -99,7 +99,7 @@ TMUX_SESSION=     # tmux session name (default: afk)
 
 ## Execution Architecture Status
 
-All 8 phases of [docs/EXECUTION-DESIGN.md](docs/EXECUTION-DESIGN.md) are implemented:
+All 8 phases of [docs/architecture/execution.md](docs/architecture/execution.md) are implemented:
 
 | Phase | Module | Notes |
 |-------|--------|-------|

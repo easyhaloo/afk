@@ -28,7 +28,7 @@ npm link
 afk --version
 ```
 
-See [Getting Started Guide](docs/GETTING-STARTED.md) for detailed setup.
+See [Getting Started Guide](docs/getting-started.md) for detailed setup.
 
 ## Install Claude Code Plugin (Optional)
 
@@ -101,10 +101,10 @@ afk                                  # Interactive TUI panel
 afk kanban                           # Kanban board
 afk execute --work-item-id github:owner/repo#123 --execution-manifest <path>  # Managed work item: implement → QA → PR
 afk observe executions --work-item-id github:owner/repo#123 --json
-afk run --backlog-id <id>            # Legacy implementation-only entry
+afk run --backlog-id <id>            # Lower-level implementation-only entry
 afk run --backlog-id <id> --project <repo>
 afk qa --backlog-id <id>             # Standalone QA
-afk loop start --daemon --max-concurrent 3
+afk loop start --daemon --backlog-id <id> --work-item-id github:owner/repo#123 --execution-manifest <path>
 
 # Infrastructure
 afk tmux create-session --name <name> --dir <path>
@@ -142,7 +142,7 @@ Full command reference: `afk --help`
 | `/reasoning-guard` | Reasoning guard | Multi-turn reasoning degradation in coding agents |
 | `/reasoning-watchdog` | Auto reasoning monitor | Hooks-based automatic reasoning degradation interception |
 
-See [Skills Guide](docs/SKILLS.md) for detailed documentation.
+See [Skills Guide](docs/guides/skills.md) for detailed documentation.
 
 ## Architecture
 
@@ -157,7 +157,7 @@ interface TrackerProvider {
 }
 ```
 
-Platform auto-detected, no command switching needed. See [Architecture Design](docs/ARCHITECTURE.md) and [Execution Environment Design](docs/EXECUTION-DESIGN.md).
+Platform auto-detected, no command switching needed. See [Architecture Design](docs/architecture/overview.md) and [Execution Environment Design](docs/architecture/execution.md).
 
 ## Workflows
 
@@ -167,7 +167,7 @@ Three core workflow patterns:
 2. **Scheduler Workflow** — Background dependency-aware execution
 3. **Skills Workflow** — TDD methodology integration
 
-See [Workflow Documentation](docs/WORKFLOWS.md).
+See [Workflow Documentation](docs/guides/workflows.md).
 
 ## Development
 
@@ -180,10 +180,10 @@ npm link         # Install globally
 
 ## Documentation
 
-- **[Getting Started](docs/GETTING-STARTED.md)** — 5-minute AFK setup
-- **[Architecture Design](docs/ARCHITECTURE.md)** — Cross-platform abstraction + CLI command mapping
-- **[Workflows](docs/WORKFLOWS.md)** — Issue → MR pipeline, scheduler, Skills integration
-- **[Skills Guide](docs/SKILLS.md)** — Core skills design and usage
+- **[Getting Started](docs/getting-started.md)** — 5-minute AFK setup
+- **[Architecture Design](docs/architecture/overview.md)** — Cross-platform abstraction + CLI command mapping
+- **[Workflows](docs/guides/workflows.md)** — Issue → MR pipeline, scheduler, Skills integration
+- **[Skills Guide](docs/guides/skills.md)** — Core skills design and usage
 
 ## License
 

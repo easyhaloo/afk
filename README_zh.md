@@ -28,7 +28,7 @@ npm link
 afk --version
 ```
 
-详细设置请查看[快速入门指南](docs/GETTING-STARTED_zh.md)。
+详细设置请查看[快速入门指南](docs/getting-started.zh.md)。
 
 ## 安装 Claude Code 插件（可选）
 
@@ -151,7 +151,7 @@ afk signal goal-complete               # 工作流信号通信
 | `/reasoning-guard` | 推理守卫 | 编码 Agent 多轮推理降级 |
 | `/reasoning-watchdog` | 自动推理监控 | 基于 Hooks 的推理降级拦截 |
 
-详细文档请查看 [Skills 指南](docs/SKILLS_zh.md)。
+详细文档请查看 [Skills 指南](docs/guides/skills.zh.md)。
 
 ## 架构设计
 
@@ -166,7 +166,7 @@ interface TrackerProvider {
 }
 ```
 
-平台自动检测，无需切换命令。查看[架构设计](docs/ARCHITECTURE_zh.md)和[执行环境设计](docs/EXECUTION-DESIGN_zh.md)。
+平台自动检测，无需切换命令。查看[架构设计](docs/architecture/overview.zh.md)和[执行环境设计](docs/architecture/execution.zh.md)。
 
 ## 工作流程
 
@@ -176,7 +176,7 @@ interface TrackerProvider {
 2. **调度器工作流** — 后台依赖感知执行
 3. **Skills 工作流** — TDD 方法论集成
 
-查看[工作流文档](docs/WORKFLOWS_zh.md)。
+查看[工作流文档](docs/guides/workflows.zh.md)。
 
 ## 开发
 
@@ -189,10 +189,10 @@ npm link         # 全局安装
 
 ## 文档
 
-- **[快速开始](docs/GETTING-STARTED_zh.md)** — 5 分钟 AFK 上手
-- **[架构设计](docs/ARCHITECTURE_zh.md)** — 跨平台抽象 + CLI 命令映射
-- **[工作流程](docs/WORKFLOWS_zh.md)** — Issue → MR 流程、调度器、Skills 集成
-- **[Skills 指南](docs/SKILLS_zh.md)** — Skills 设计与使用
+- **[快速开始](docs/getting-started.zh.md)** — 5 分钟 AFK 上手
+- **[架构设计](docs/architecture/overview.zh.md)** — 跨平台抽象 + CLI 命令映射
+- **[工作流程](docs/guides/workflows.zh.md)** — Issue → MR 流程、调度器、Skills 集成
+- **[Skills 指南](docs/guides/skills.zh.md)** — Skills 设计与使用
 
 ## License
 

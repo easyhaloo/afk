@@ -25,4 +25,4 @@ For work under `desktop-client/`, use the following organization:
 ## Desktop UI Design Standards
 
 For UI work under `desktop-client/`, follow
-[`docs/DESKTOP-DESIGN-STANDARDS.md`](docs/DESKTOP-DESIGN-STANDARDS.md).
+[`docs/architecture/design-system.md`](docs/architecture/design-system.md).

@@ -10,6 +10,7 @@
 | [execution.md](architecture/execution.md) | 8 阶段执行设计（执行环境、sandbox、session、branches、templates） |
 | [observability.md](architecture/observability.md) | 可观测性 harness |
 | [design-system.md](architecture/design-system.md) | Desktop 设计标准 |
+| [glossary.md](architecture/glossary.md) | 领域词汇表（原仓库根 `CONTEXT.md`） |
 | [blueprints/](architecture/blueprints/) | 蓝图与未采纳方案（草稿） |
 
 ## 指南（guides/）

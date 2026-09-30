@@ -28,6 +28,63 @@ jobs:
       - name: Check doc links
         run: node scripts/check-doc-links.mjs
 
+  cli:
+    name: CLI (root package)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # The root workspace declares packages/* AND desktop-client, so this
+      # install also materialises the desktop-client dependency set. That set
+      # is built and tested by the `verify` job against desktop-client's own
+      # lockfile; this job only runs the root CLI's own checks.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+
+      - name: Cache node-gyp headers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/node-gyp
+          key: node-gyp-${{ runner.os }}-node22-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            node-gyp-${{ runner.os }}-node22-
+
+      # --ignore-scripts skipped every postinstall above. esbuild and node-pty
+      # need their native binaries compiled, and puppeteer needs the Chromium
+      # download its postinstall performs, which tests/e2e/notification.test.ts
+      # and tests/e2e/dashboard-layout.test.ts launch headless.
+      - name: Build native dependencies
+        run: pnpm rebuild esbuild node-pty puppeteer --pending --reporter=append-only
+
+      - name: Architecture check
+        run: pnpm architecture:check --check-packages
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
   verify:
     name: Verify
     runs-on: ubuntu-latest

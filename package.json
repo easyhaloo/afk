@@ -16,7 +16,7 @@
     "docs:check": "node scripts/check-doc-links.mjs",
     "dev": "tsc --watch",
     "pretest": "npm run build",
-    "test": "vitest run && pnpm --filter @afk/core test && pnpm --filter @afk/application test",
+    "test": "vitest run && pnpm --filter @afk/core test && pnpm --filter @afk/application test && pnpm --filter @afk/workflow-graph test",
     "test:e2e:codex": "tsx tests/e2e/codex-runtime.ts",
     "test:watch": "vitest",
     "postinstall": "node scripts/fix-permissions.mjs",

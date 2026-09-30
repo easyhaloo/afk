@@ -596,16 +596,21 @@ workflow:
 前提：所有新 workflow 和默认 Provider 已使用 ExecutionResult。
 
 - ✅ 删除新 prompt 中的 signal 写入要求 (`templates/builtin.ts`, `workflows.ts` phases)
-- ✅ Runner 仍读取 signal 作为向后兼容 fallback (`sandbox/legacy-compat.ts`)
+- ⚠️ Runner 仍读取 signal 作为向后兼容 fallback —— 但**不是**通过 `sandbox/legacy-compat.ts`（该文件已删除）。交互式路径在 `src/infrastructure/tmux/tmux.ts` 中读取。
 - ⏳ 清理 legacy signal CLI/schema/tests（保留 readSignal/writeSignal/clearSignal + 单元测试；CLI/技能暂无独立 signal 子命令）
 - ✅ 更新 skills、README 和架构文档（`CLAUDE.md` 含 Phase 状态表）
 
 验收：全量测试通过，旧 worktree 可以被兼容读取或明确迁移。
 
-实现细节：
-- `sandbox/legacy-compat.ts` —— `readLegacySignalResult()` 将 `.afk-signal.json` 映射为 `ExecutionResult`。
-- `LocalAgentExecution.waitForResult` 调用 legacy adapter 作为 fallback。
-- `core/io/signal.ts` 顶部加 `@deprecated` JSDoc。
+实现细节（实际情况 —— 本节此前已与代码脱节）：
+- ~~`sandbox/legacy-compat.ts` —— `readLegacySignalResult()` 将 `.afk-signal.json` 映射为 `ExecutionResult`。~~ 该 shim **已删除**；仓库中不存在任何 signal → `ExecutionResult` 转换层。
+- ~~`LocalAgentExecution.waitForResult` 调用 legacy adapter 作为 fallback。~~ `LocalAgentExecution` 现位于 `src/infrastructure/sandbox/providers/local.ts`，已无 legacy adapter 路径。
+- `core/io/signal.ts` 顶部加 `@deprecated` JSDoc → 实际文件是 `src/infrastructure/io/signal.ts`，且**没有** `@deprecated` 标记。
+
+当前实际形态：分野标准是执行路径，而非协议新旧。**批量** agent 通过 `ExecutionResult` 上报；
+**交互式** agent 仍写 `.afk-signal.json` —— `src/application/workflows/execution-protocol.ts`
+会指示其写入，`src/infrastructure/tmux/tmux.ts` 通过 `readSignal`/`readSignalSync` 读取。
+因此阶段 8 属**部分完成**：共享 shim 已移除，交互式 signal 文件仍在。
 
 ## 13. 测试计划
 

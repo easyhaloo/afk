@@ -51,5 +51,5 @@
 
 ## 原型
 
-- 选定方案：`design-demos/screenshots/backlog-status-labels-a.png`
-- HTML 原型：`design-demos/backlog-status-labels-a.html`
+- 选定方案：`docs/_archive/design-demos/screenshots/backlog-status-labels-a.png`
+- HTML 原型：`docs/_archive/design-demos/backlog-status-labels-a.html`

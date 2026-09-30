@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "pnpm --filter @afk/core build && pnpm --filter @afk/application build && pnpm --filter @afk/workflow-graph build && node scripts/build.mjs && tsc --emitDeclarationOnly",
-    "typecheck": "pnpm --filter @afk/core build && pnpm --filter @afk/application typecheck && pnpm --filter @afk/workflow-graph build && tsc --noEmit",
+    "typecheck": "pnpm --filter @afk/core build && pnpm --filter @afk/application build && pnpm --filter @afk/workflow-graph build && tsc --noEmit",
     "architecture:check": "node scripts/architecture-guard.mjs --check-packages",
     "application:typecheck": "pnpm --filter @afk/application typecheck",
     "application:build": "pnpm --filter @afk/application build",

@@ -122,9 +122,11 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
 
 ## Open Risks
 
-- **R1 — No approved alignment record.** `CONTEXT.md` at repo root is the
-  AFK domain glossary (WorkflowRunner / HandoffCoordinator / Watchdog
-  / etc.), **not** a feature-level alignment record. Per the
+- **R1 — No approved alignment record.** The AFK domain glossary
+  (WorkflowRunner / HandoffCoordinator / Watchdog / etc.) lives at
+  `docs/architecture/glossary.md`; the repo-root `CONTEXT.md` name is reserved
+  for `afk-grill-me` alignment output, which does not exist yet. Either way,
+  **not** a feature-level alignment record. Per the
   `afk-to-prd` skill's anti-patterns, this PRD does not invent user
   stories absent from alignment — the four user stories above were
   distilled from a single observed incident (work item #158 `blocked`

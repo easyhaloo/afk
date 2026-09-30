@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { appReducer } from './StateContext';
-import { initialState } from './initialState';
+import { appReducer } from './StateContext.js';
+import { initialState } from './initialState.js';
 
 describe('appReducer navigation', () => {
   it('preserves list selection and scroll after returning from detail', () => {

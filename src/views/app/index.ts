@@ -1,4 +1,4 @@
-export { AppContent } from './AppContent';
-export { DashboardEntry } from './DashboardEntry';
-export { StateProvider, useState } from './state/StateContext';
-export { createActions } from './actions/handlers';
+export { AppContent } from './AppContent.js';
+export { DashboardEntry } from './DashboardEntry.js';
+export { StateProvider, useState } from './state/StateContext.js';
+export { createActions } from './actions/handlers.js';

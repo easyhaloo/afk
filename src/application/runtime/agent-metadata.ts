@@ -1,5 +1,5 @@
-import type { AgentExecutionMetadata, AgentProviderName, AgentRuntimeSelection } from '../../domain/agents/types';
-import type { TaskRuntimeRecord } from './task-runtime';
+import type { AgentExecutionMetadata, AgentProviderName, AgentRuntimeSelection } from '../../domain/agents/types.js';
+import type { TaskRuntimeRecord } from './task-runtime.js';
 
 type AgentRuntimeFields = Pick<
   TaskRuntimeRecord,

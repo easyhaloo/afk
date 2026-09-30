@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, it, expect, vi } from 'vitest';
-import { defineModule, loadModules, parseModuleParams, resolveModuleNames } from './_registry';
+import { defineModule, loadModules, parseModuleParams, resolveModuleNames } from './_registry.js';
 
 describe('Module Registry', () => {
   it('loads registered modules alongside the core module without duplicates', async () => {

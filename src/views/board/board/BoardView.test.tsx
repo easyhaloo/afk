@@ -1,11 +1,11 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import { BoardView } from './BoardView';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { BacklogListView } from '../views/BacklogListView';
-import { ProjectListView } from '../views/ProjectListView';
-import { BacklogRow } from '../views/BacklogRow';
+import { BoardView } from './BoardView.js';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { BacklogListView } from '../views/BacklogListView.js';
+import { ProjectListView } from '../views/ProjectListView.js';
+import { BacklogRow } from '../views/BacklogRow.js';
 
 const backlog: BacklogViewModel = {
   id: '42',

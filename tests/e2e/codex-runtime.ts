@@ -12,8 +12,8 @@ import {
 import type { BacklogProvider } from '../../src/domain/backlog/index';
 import { BACKLOG_METADATA } from '../../src/domain/backlog/index';
 import { getWorkflowConfig } from '../../src/infrastructure/config/manager';
-import { createProviderBundle as assembleProviderBundle } from '../../src/application/providers';
-import { createTracker } from '../../src/application/tracker-provider-factory';
+import { createProviderBundle as assembleProviderBundle } from '../../src/infrastructure/provider/providers';
+import { createTracker } from '../../src/infrastructure/provider/tracker-provider-factory';
 import { LoopRunner } from '../../src/application/modules/loop-runner';
 import { TaskRuntimeManager } from '../../src/application/runtime/task-runtime';
 

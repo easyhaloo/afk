@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { BacklogItem } from '../../../domain/backlog';
-import type { TaskRuntimeRecord } from '../../../application/runtime/task-runtime';
-import { projectWorkItems } from './work-item-projection';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { TaskRuntimeRecord } from '../../../application/runtime/task-runtime.js';
+import { projectWorkItems } from './work-item-projection.js';
 
 const backlog = (overrides: Partial<BacklogItem> = {}): BacklogItem => ({
   id: '42',

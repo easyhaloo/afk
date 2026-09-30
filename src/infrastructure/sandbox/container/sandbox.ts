@@ -22,8 +22,8 @@
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { isAbsolute, join, relative } from 'path';
-import { clearSignal, readSignal } from '../../io/index';
-import type { Sandbox, SandboxOptions } from '../types';
+import { clearSignal, readSignal } from '../../io/index.js';
+import type { Sandbox, SandboxOptions } from '../types.js';
 import type {
   AgentStartOptions,
   AgentExecution,
@@ -32,11 +32,11 @@ import type {
   InterruptReason,
   CaptureOptions,
   ResumeOptions,
-} from '../types';
-import type { ContainerProvider, ContainerExecResult } from './types';
-import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types';
-import { EnvVarAllowlist } from './env-allowlist';
-import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry';
+} from '../types.js';
+import type { ContainerProvider, ContainerExecResult } from './types.js';
+import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
+import { EnvVarAllowlist } from './env-allowlist.js';
+import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 
 export class ContainerSandbox implements Sandbox {
   readonly id: string;

@@ -10,9 +10,9 @@
  * Markdown goal-text path.
  */
 
-import { FileSessionStore } from './file-store';
-import { HandoffSessionStore } from './handoff-store';
-import { SessionStoreChain } from './types';
+import { FileSessionStore } from './file-store.js';
+import { HandoffSessionStore } from './handoff-store.js';
+import { SessionStoreChain } from './types.js';
 
 export function defaultSessionStoreChain(worktreePath: string): SessionStoreChain {
   return new SessionStoreChain([
@@ -21,6 +21,6 @@ export function defaultSessionStoreChain(worktreePath: string): SessionStoreChai
   ]);
 }
 
-export { FileSessionStore } from './file-store';
-export { HandoffSessionStore } from './handoff-store';
-export * from './types';
+export { FileSessionStore } from './file-store.js';
+export { HandoffSessionStore } from './handoff-store.js';
+export * from './types.js';

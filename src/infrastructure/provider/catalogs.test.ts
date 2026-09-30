@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GitHubProviderCatalog, GitLabProviderCatalog } from './catalogs';
+import { GitHubProviderCatalog, GitLabProviderCatalog } from './catalogs.js';
 
 describe('provider catalogs', () => {
   it('enumerates GitHub repositories and issues across every page', async () => {

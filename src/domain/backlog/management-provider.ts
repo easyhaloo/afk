@@ -1,4 +1,4 @@
-import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index';
+import type { BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, QABacklogProvider, ReworkRecord, ReworkResolution } from './index.js';
 
 /**
  * Physical capability boundary for backlog management and QA. It forwards

@@ -1,5 +1,5 @@
-export { KeyboardDispatcher } from './Keyboard';
-export { ViewRegistry } from './Registry';
+export { KeyboardDispatcher } from './Keyboard.js';
+export { ViewRegistry } from './Registry.js';
 export type {
   View,
   ViewContext,
@@ -11,4 +11,4 @@ export type {
   StatsAPI,
   Notification,
   NotificationType,
-} from './types';
+} from './types.js';

@@ -6,7 +6,7 @@ import type {
   AgentExecutionOptions,
   AgentProvider,
   AgentExecution,
-} from './types';
+} from './types.js';
 
 /** Shared execution boundary for command-based agent providers. */
 export abstract class ProcessAgentProvider implements AgentProvider {

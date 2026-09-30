@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { Box, Text } from 'ink';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { truncate } from '../utils';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { truncate } from '../utils.js';
 
 interface Props {
   backlog: BacklogViewModel | undefined;

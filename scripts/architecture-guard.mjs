@@ -22,6 +22,7 @@ const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
 const legacyFiles = new Set(baseline.legacyFiles);
 const legacyImports = baseline.legacyImports;
 const legacyPatterns = baseline.legacyPatterns;
+const legacyStateMappings = baseline.legacyStateMappings ?? {};
 const checkPackages = flag('--check-packages') || flag('--require-packages');
 const requirePackages = flag('--require-packages');
 const packageRoots = [
@@ -48,13 +49,24 @@ const nodeBuiltins = new Set([
   'url', 'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib',
 ]);
 const domGlobals = ['document', 'window', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'Element'];
+const desktopRoot = option('--desktop-client-root', resolve(new URL('../desktop-client/', import.meta.url).pathname));
+const buildOutputDirectories = new Set(['dist', 'dist-electron', 'node_modules', 'coverage', 'release', 'test-results', 'screenshots']);
+const backlogStateKeys = new Set(['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked']);
+const requiredStateMappingKeys = ['in_progress', 'verification', 'merge_ready'];
+const stateMappingLiteralPattern = /\{([^{}]*)\}/g;
+// A machine-readable state projection (`in_progress: 'implementing'`) maps onto
+// bare lowercase tokens; i18n labels and CSS class names never look like that.
+const stateMappingPairPattern = /^\s*([A-Za-z_$][\w$]*)\s*:\s*(['"])([a-z][a-z0-9_]*)\2\s*$/;
 
 const sourceFiles = [];
 const violations = new Set();
 const observedLegacyFiles = new Set();
 const observedLegacyImports = new Map();
 const observedLegacyPatterns = new Map();
+const observedStateMappings = new Map();
+const observedLegacyStateMappings = new Map();
 const skippedPackageRoots = [];
+const desktopSourceFiles = [];
 
 function addViolation(message) {
   violations.add(message);
@@ -79,7 +91,7 @@ function collectSourceFiles(directory) {
       const fullPath = join(currentDirectory, entry);
       const stat = statSync(fullPath);
       if (stat.isDirectory()) {
-        if (entry === 'dist' || entry === 'node_modules' || entry === 'coverage') continue;
+        if (buildOutputDirectories.has(entry)) continue;
         visit(fullPath);
         continue;
       }
@@ -136,6 +148,57 @@ function dependencyLayer(fromLayer, toLayer) {
   return allowed[fromLayer]?.has(toLayer) ?? false;
 }
 
+/**
+ * Structural fingerprint of a backlog->core state mapping: an object literal
+ * whose entries are all `identifier: 'token'` pairs keyed by the canonical
+ * backlog state vocabulary and valued by machine-readable core state tokens.
+ * Matching on the key set (not on file names or on the mapped values) means a
+ * drifted copy is still recognised as a copy, while plain `BacklogState[]`
+ * enumeration lists, i18n label tables and the smaller execution-mode mapping
+ * are not mistaken for it.
+ */
+function stateMappingSignatures(source) {
+  const signatures = [];
+  for (const match of source.matchAll(stateMappingLiteralPattern)) {
+    const pairs = match[1]
+      .split(',')
+      .map(entry => entry.trim())
+      .filter(entry => entry.length > 0)
+      .map(entry => stateMappingPairPattern.exec(entry));
+    if (pairs.length < requiredStateMappingKeys.length || pairs.some(pair => !pair)) continue;
+    const keys = new Set(pairs.map(pair => pair[1]));
+    if (keys.size !== pairs.length) continue;
+    if (!requiredStateMappingKeys.every(key => keys.has(key))) continue;
+    if (![...keys].every(key => backlogStateKeys.has(key))) continue;
+    signatures.push([...keys].sort().join(','));
+  }
+  return signatures;
+}
+
+function recordStateMappings(fullPath, source) {
+  for (const signature of stateMappingSignatures(source)) {
+    const declaringFiles = observedStateMappings.get(signature) ?? new Set();
+    declaringFiles.add(fullPath);
+    observedStateMappings.set(signature, declaringFiles);
+  }
+}
+
+function checkStateMappingDuplicates() {
+  for (const [signature, declaringFiles] of observedStateMappings) {
+    if (declaringFiles.size < 2) continue;
+
+    const files = [...declaringFiles].sort();
+    const message = `duplicate backlog->core state mapping (${signature}) declared in ${files.join(', ')}; define it once and import it`;
+    if (files.every(file => isLegacy(file))) {
+      const key = files.map(sourcePath).sort().join(', ');
+      observedLegacyStateMappings.set(key, files.length);
+      if (files.length > (legacyStateMappings[key] ?? 0)) addViolation(`${files[0]}: unapproved legacy duplicate state mapping: ${message}`);
+      continue;
+    }
+    addViolation(`${files[0]}: ${message}`);
+  }
+}
+
 function checkFile(fullPath) {
   const source = stripComments(readFileSync(fullPath, 'utf8'));
   const fromLayer = layerOf(fullPath);
@@ -156,6 +219,8 @@ function checkFile(fullPath) {
     }
     rule.pattern.lastIndex = 0;
   }
+
+  recordStateMappings(fullPath, source);
 
   const importPattern = /(?:from\s+|import\s*(?:\(\s*)?)(['"`])([^'"`]+)\1/g;
   for (const match of source.matchAll(importPattern)) {
@@ -275,6 +340,16 @@ if (!existsSync(root)) {
 
 walk(root);
 for (const sourceFile of sourceFiles) checkFile(sourceFile);
+// The desktop client is a separate source tree that the layering rules above
+// do not govern, but it is exactly where a second copy of a shared mapping
+// table tends to appear, so it feeds the duplicate-mapping rule only.
+if (existsSync(desktopRoot) && statSync(desktopRoot).isDirectory()) {
+  desktopSourceFiles.push(...collectSourceFiles(desktopRoot));
+  for (const sourceFile of desktopSourceFiles) {
+    recordStateMappings(sourceFile, stripComments(readFileSync(sourceFile, 'utf8')));
+  }
+}
+checkStateMappingDuplicates();
 if (checkPackages) {
   for (const packageRoot of packageRoots) {
     if (!existsSync(packageRoot.path) || !statSync(packageRoot.path).isDirectory()) {
@@ -294,6 +369,9 @@ for (const [key, count] of Object.entries(legacyImports)) {
 for (const [key, count] of Object.entries(legacyPatterns)) {
   if ((observedLegacyPatterns.get(key) ?? 0) < count) addViolation(`stale legacy pattern baseline: ${key}`);
 }
+for (const [key, count] of Object.entries(legacyStateMappings)) {
+  if ((observedLegacyStateMappings.get(key) ?? 0) < count) addViolation(`stale legacy state mapping baseline: ${key}`);
+}
 
 if (violations.size > 0) {
   console.error(`Architecture guard failed with ${violations.size} violation(s):`);
@@ -302,4 +380,4 @@ if (violations.size > 0) {
 }
 
 for (const packageRoot of skippedPackageRoots) console.log(`Skipped optional package root: ${packageRoot}`);
-console.log(`Architecture guard passed: ${sourceFiles.length} source files checked; ${observedLegacyFiles.size} legacy files, ${observedLegacyImports.size} imports and ${observedLegacyPatterns.size} patterns quarantined.`);
+console.log(`Architecture guard passed: ${sourceFiles.length} source files and ${desktopSourceFiles.length} desktop client files checked; ${observedLegacyFiles.size} legacy files, ${observedLegacyImports.size} imports and ${observedLegacyPatterns.size} patterns quarantined.`);

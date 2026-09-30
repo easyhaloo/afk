@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
-import { logger } from '../infrastructure/io/logger';
+import { logger } from '../infrastructure/io/logger.js';
 import type { ObservationContext, RunEventData, RunEventDraft, AppendReceipt, ClockPort, EventStorePort, IdPort, MetricsPort, TracerPort } from '@afk/core';
 
 export class SystemClock implements ClockPort {

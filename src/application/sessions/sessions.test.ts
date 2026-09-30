@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { FileSessionStore } from './file-store';
-import { HandoffSessionStore } from './handoff-store';
-import { SessionStoreChain, SessionCorruptError, SessionNotFoundError } from './types';
-import { RunStateWriter } from './run-state';
-import type { SessionSnapshot } from '../../domain/agents/types';
+import { FileSessionStore } from './file-store.js';
+import { HandoffSessionStore } from './handoff-store.js';
+import { SessionStoreChain, SessionCorruptError, SessionNotFoundError } from './types.js';
+import { RunStateWriter } from './run-state.js';
+import type { SessionSnapshot } from '../../domain/agents/types.js';
 
 function makeSnapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
   return {

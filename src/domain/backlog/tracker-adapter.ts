@@ -1,22 +1,22 @@
-import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogProvider, BacklogState } from './index';
-import { deriveBacklogBranchName } from './index';
-import { FilesystemClaimLock, type ExpiredClaim } from './claim';
+import type { BacklogChangeRequest, BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogProvider, BacklogState } from './index.js';
+import { deriveBacklogBranchName } from './index.js';
+import { FilesystemClaimLock, type ExpiredClaim } from './claim.js';
 import {
   NativeOrLockedClaimStrategy,
   type AtomicClaim,
   type AtomicClaimPredicate,
   type ClaimLock,
   type ClaimLockFactory,
-} from './claim-strategy';
-import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabilities } from './initialization';
-import { extractBacklogTags, isWorkflowMetadataLabel, validateBusinessTag } from './tags';
-import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record';
-import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types';
+} from './claim-strategy.js';
+import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabilities } from './initialization.js';
+import { extractBacklogTags, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
+import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
+import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
 const MODE_LABELS = BACKLOG_METADATA.executionModeLabels;
 
-export type { AtomicClaimPredicate } from './claim-strategy';
+export type { AtomicClaimPredicate } from './claim-strategy.js';
 
 export interface TrackerBacklogAdapterOptions {
   /** Platform-specific conditional update. It takes precedence over a local lease. */

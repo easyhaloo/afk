@@ -1,19 +1,19 @@
 /**
  * Agent providers — registry and factory.
  */
-import { requireAgentProvider, getAgentProvider, registerAgentProvider } from './registry';
-import type { AgentProvider, AgentProviderName } from './types';
-import { ClaudeCodeProvider } from './claude-code';
-import { CodexProvider } from './codex';
-import { CursorProvider } from './cursor';
-import { PiProvider } from './pi';
-import { OpenCodeProvider } from './opencode';
-import { CopilotProvider } from './copilot';
-export { registerAgentProvider, getAgentProvider, requireAgentProvider } from './registry';
-export { ProcessAgentProvider } from './process-provider';
-export { DEFAULT_CODEX_CONFIG, prepareAgentRuntime, probeCodexReadiness, resolveCodexRuntime } from './codex-runtime';
-export type { CodexAuth, CodexConfig, CodexDoctorRunner, CodexEndpointProbe, CodexHostDiagnostics, CodexReadiness, CodexReadinessProbe, CodexRuntimeOverrides, CodexTransport } from './codex-runtime';
-export type { AgentProvider, AgentProviderName, AgentCapability, AgentCommand, AgentEvent, AgentSession, TokenUsage, SessionSnapshot, AgentCommandOptions, AgentExecutionMetadata, AgentExecutionOptions, AgentRuntimeSelection, CodexRuntimeSelection, CaptureSessionOptions, RestoreSessionOptions } from './types';
+import { requireAgentProvider, getAgentProvider, registerAgentProvider } from './registry.js';
+import type { AgentProvider, AgentProviderName } from './types.js';
+import { ClaudeCodeProvider } from './claude-code.js';
+import { CodexProvider } from './codex.js';
+import { CursorProvider } from './cursor.js';
+import { PiProvider } from './pi.js';
+import { OpenCodeProvider } from './opencode.js';
+import { CopilotProvider } from './copilot.js';
+export { registerAgentProvider, getAgentProvider, requireAgentProvider } from './registry.js';
+export { ProcessAgentProvider } from './process-provider.js';
+export { DEFAULT_CODEX_CONFIG, prepareAgentRuntime, probeCodexReadiness, resolveCodexRuntime } from './codex-runtime.js';
+export type { CodexAuth, CodexConfig, CodexDoctorRunner, CodexEndpointProbe, CodexHostDiagnostics, CodexReadiness, CodexReadinessProbe, CodexRuntimeOverrides, CodexTransport } from './codex-runtime.js';
+export type { AgentProvider, AgentProviderName, AgentCapability, AgentCommand, AgentEvent, AgentSession, TokenUsage, SessionSnapshot, AgentCommandOptions, AgentExecutionMetadata, AgentExecutionOptions, AgentRuntimeSelection, CodexRuntimeSelection, CaptureSessionOptions, RestoreSessionOptions } from './types.js';
 
 /** Register all bundled providers on demand. Safe after test registry resets. */
 export function ensureBuiltinAgentProviders(): void {

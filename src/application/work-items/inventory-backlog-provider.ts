@@ -1,21 +1,21 @@
-import type { TrackerProvider } from '../../domain/tracker/types';
+import type { TrackerProvider } from '../../domain/tracker/types.js';
 import type {
   BacklogCreateInput,
   BacklogItem,
   BacklogListOptions,
   BacklogManagementProvider,
-} from '../../domain/backlog';
-import type { GlobalWorkItem, ProviderProjectRef } from '../../domain/work-item/types';
-import { parseWorkItemId } from '../../domain/work-item/identity';
-import { collectGlobalWorkItemInventory } from './inventory';
-import { toGlobalWorkItem } from './metadata';
-import type { ProviderCatalog, ProviderIssue } from './types';
+} from '../../domain/backlog/index.js';
+import type { GlobalWorkItem, ProviderProjectRef } from '../../domain/work-item/types.js';
+import { parseWorkItemId } from '../../domain/work-item/identity.js';
+import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
+import { toGlobalWorkItem } from '../../domain/work-item/metadata.js';
+import type { ProviderCatalog, ProviderIssue } from '../../domain/work-item/provider-types.js';
 import {
   createGitHubTracker,
   createGitLabTracker,
   createGlobalWorkItemCatalogs,
   type GlobalTrackerPlatform,
-} from '../tracker-provider-factory';
+} from '../../infrastructure/provider/tracker-provider-factory.js';
 
 export type InventoryBacklogProviderDeps = {
   platform?: GlobalTrackerPlatform;

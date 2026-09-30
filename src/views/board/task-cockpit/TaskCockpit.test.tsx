@@ -1,8 +1,8 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import type { Task } from '../../../types/board';
-import { TaskCockpit } from './TaskCockpit';
+import type { Task } from '../../../types/board.js';
+import { TaskCockpit } from './TaskCockpit.js';
 
 const activeTask: Task = {
   backlogId: '42',

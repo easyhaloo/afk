@@ -7,7 +7,7 @@ vi.mock('../cli-utils', () => ({
   handleCommandError: (error: unknown) => { throw error; }, success: vi.fn(), warning: vi.fn(), detail: vi.fn(),
 }));
 
-import { registerExecuteCommands } from './execute';
+import { registerExecuteCommands } from './execute.js';
 
 async function invoke(argv: string[], command = 'execute') {
   const program = new Command().name('afk').exitOverride();

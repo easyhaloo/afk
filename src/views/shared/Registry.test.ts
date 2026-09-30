@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ViewRegistry } from './index';
-import type { View } from './types';
+import { ViewRegistry } from './index.js';
+import type { View } from './types.js';
 
 function makeView(overrides: Partial<View> = {}): View {
   return {

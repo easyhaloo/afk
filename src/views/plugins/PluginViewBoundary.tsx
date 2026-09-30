@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { LoadedTuiView, TuiPluginContext } from './types';
+import type { LoadedTuiView, TuiPluginContext } from './types.js';
 
 interface Props {
   view: LoadedTuiView;

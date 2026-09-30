@@ -1,9 +1,9 @@
 /**
  * Git utilities.
  */
-import { WorktreeManager } from './worktree';
+import { WorktreeManager } from './worktree.js';
 export { WorktreeManager };
-export type { Worktree, WorktreeState, CleanOptions } from './worktree';
+export type { Worktree, WorktreeState, CleanOptions } from './worktree.js';
 
 /**
  * Factory: create a WorktreeManager instance.

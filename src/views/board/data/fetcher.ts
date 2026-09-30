@@ -1,11 +1,11 @@
-import { Task } from '../../../types/board';
-import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecord } from '../../../application/runtime/task-runtime';
-import type { BacklogItem } from '../../../domain/backlog';
-import { createGitLabTracker } from '../../../application/tracker-provider-factory';
-import { resolveGitLabProject } from '../../../infrastructure/tracker/resolver';
-import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types';
-import { fileLogger } from '../../../infrastructure/io/logger';
-import { projectWorkItems } from './work-item-projection';
+import { Task } from '../../../types/board.js';
+import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecord } from '../../../application/runtime/task-runtime.js';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
+import { createGitLabTracker } from '../../../infrastructure/provider/tracker-provider-factory.js';
+import { resolveGitLabProject } from '../../../infrastructure/tracker/resolver.js';
+import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types.js';
+import { fileLogger } from '../../../infrastructure/io/logger.js';
+import { projectWorkItems } from './work-item-projection.js';
 
 const runtimeManager = new TaskRuntimeManager();
 
@@ -90,7 +90,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
   let url = process.env.GITLAB_URL || 'https://gitlab.com';
 
   if (!token) {
-    const glab = await import('../../../infrastructure/gitlab/glab-config').then(m => m.getGlabToken(url));
+    const glab = await import('../../../infrastructure/gitlab/glab-config.js').then(m => m.getGlabToken(url));
     if (glab) {
       token = glab.token;
       url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
@@ -103,7 +103,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
 
   // Use projectId if available, otherwise fallback to first accessible project
   const effectiveProjectId = projectId || 'glab';
-  const client = new (await import('../../../infrastructure/gitlab')).GitLabClient({
+  const client = new (await import('../../../infrastructure/gitlab/index.js')).GitLabClient({
     url,
     token,
     projectId: effectiveProjectId,

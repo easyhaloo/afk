@@ -1,8 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { backlogStateColor } from '../views/BacklogRow';
-import { getExecutionModeColor, getExecutionModeIcon, getStatusIcon } from '../views/display';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { backlogStateColor } from '../views/BacklogRow.js';
+import { getExecutionModeColor, getExecutionModeIcon, getStatusIcon } from '../views/display.js';
 
 function isFullWidthCodePoint(codePoint: number): boolean {
   return (

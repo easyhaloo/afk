@@ -1,5 +1,5 @@
-import type { BacklogState } from '../domain/backlog';
-import type { TaskRuntimeActivity, TaskRuntimeStatus } from '../application/runtime/task-runtime';
+import type { BacklogState } from '../domain/backlog/index.js';
+import type { TaskRuntimeActivity, TaskRuntimeStatus } from '../application/runtime/task-runtime.js';
 
 export type TaskActivity = Omit<TaskRuntimeActivity, 'at'> & { at: Date };
 

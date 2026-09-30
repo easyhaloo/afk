@@ -5,11 +5,11 @@ const mocks = vi.hoisted(() => ({
   gitLabConfig: undefined as unknown,
 }));
 
-vi.mock('../infrastructure/gitlab/glab-config', () => ({
+vi.mock('../gitlab/glab-config', () => ({
   getGlabToken: mocks.getGlabToken,
   listGlabTokens: vi.fn(() => []),
 }));
-vi.mock('../infrastructure/gitlab', () => ({
+vi.mock('../gitlab', () => ({
   GitLabClient: class {
     readonly platform = 'gitlab';
     readonly projectId: string;
@@ -19,13 +19,13 @@ vi.mock('../infrastructure/gitlab', () => ({
     }
   },
 }));
-vi.mock('../infrastructure/tracker/resolver', () => ({
+vi.mock('../tracker/resolver', () => ({
   resolveGitHubRepository: vi.fn(),
   resolveGitLabProject: vi.fn(async () => { throw new Error('git remote must not be consulted'); }),
   resolveTrackerProject: vi.fn(async () => { throw new Error('platform detection must not run'); }),
 }));
 
-import { createTracker } from './tracker-provider-factory';
+import { createTracker } from './tracker-provider-factory.js';
 
 describe('GitLab tracker factory', () => {
   afterEach(() => {

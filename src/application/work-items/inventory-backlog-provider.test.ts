@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InventoryBacklogProvider, isProjectDetectionFailure } from './inventory-backlog-provider';
-import type { ProviderCatalog } from './types';
-import type { ProviderProjectRef } from '../../domain/work-item/types';
-import { BACKLOG_METADATA } from '../../domain/backlog/initialization';
-import type { TrackerProvider } from '../../domain/tracker/types';
+import { InventoryBacklogProvider, isProjectDetectionFailure } from './inventory-backlog-provider.js';
+import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
+import type { ProviderProjectRef } from '../../domain/work-item/types.js';
+import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
+import type { TrackerProvider } from '../../domain/tracker/types.js';
 
 const project: ProviderProjectRef = {
   platform: 'github',

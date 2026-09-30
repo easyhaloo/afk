@@ -8,7 +8,7 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import type { SimpleGit } from 'simple-git';
-import { BranchStrategyError } from './types';
+import { BranchStrategyError } from './types.js';
 
 /** Track worktrees that have been prepared in the current process so that
  *  concurrent calls refuse to share a writable branch. */

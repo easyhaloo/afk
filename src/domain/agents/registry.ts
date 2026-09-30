@@ -11,7 +11,7 @@
  * singletons thereafter. Tests can register throwaway providers.
  */
 
-import type { AgentProvider, AgentProviderName, RestoreSessionOptions } from './types';
+import type { AgentProvider, AgentProviderName, RestoreSessionOptions } from './types.js';
 
 const providers = new Map<AgentProviderName, AgentProvider>();
 
@@ -84,8 +84,8 @@ export async function guardedRestoreSession(
  */
 export async function guardedCaptureSession(
   provider: AgentProvider,
-  options: import('./types').CaptureSessionOptions,
-): Promise<import('./types').SessionSnapshot> {
+  options: import('./types.js').CaptureSessionOptions,
+): Promise<import('./types.js').SessionSnapshot> {
   if (!provider.capabilities.has('resume')) {
     throw new Error(
       `agent provider '${provider.name}' does not support resume; ` +

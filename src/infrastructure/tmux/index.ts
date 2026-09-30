@@ -1,9 +1,9 @@
 /**
  * Tmux core.
  */
-import { TmuxClient } from './tmux';
+import { TmuxClient } from './tmux.js';
 export { TmuxClient };
-export type { TmuxSession, TmuxCaptureOptions } from './tmux';
+export type { TmuxSession, TmuxCaptureOptions } from './tmux.js';
 
 /**
  * Factory: create a TmuxClient instance.

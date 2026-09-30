@@ -1,10 +1,10 @@
-import { BACKLOG_METADATA } from '../../domain/backlog/initialization';
-import type { BacklogExecutionMode, BacklogState } from '../../domain/backlog';
-import { deriveBacklogBranchName } from '../../domain/backlog';
-import { extractBacklogTags } from '../../domain/backlog/tags';
-import { formatWorkItemId, parseWorkItemId } from '../../domain/work-item/identity';
-import type { GlobalWorkItem, ProviderProjectRef, WorkItemId } from '../../domain/work-item/types';
-import type { ProviderIssue } from './types';
+import { BACKLOG_METADATA } from '../backlog/initialization.js';
+import type { BacklogExecutionMode, BacklogState } from '../backlog/index.js';
+import { deriveBacklogBranchName } from '../backlog/index.js';
+import { extractBacklogTags } from '../backlog/tags.js';
+import { formatWorkItemId, parseWorkItemId } from './identity.js';
+import type { GlobalWorkItem, ProviderProjectRef, WorkItemId } from './types.js';
+import type { ProviderIssue } from './provider-types.js';
 
 const stateLabels = BACKLOG_METADATA.stateLabels;
 const modeLabels = BACKLOG_METADATA.executionModeLabels;

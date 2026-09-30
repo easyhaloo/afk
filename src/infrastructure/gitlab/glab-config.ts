@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { load } from 'js-yaml';
-import { normalizeGitLabHost } from '../../shared/gitlab-project';
+import { normalizeGitLabHost } from '../../shared/gitlab-project.js';
 
 export interface GlabHostConfig {
   api_host: string;

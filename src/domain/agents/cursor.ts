@@ -22,8 +22,8 @@ import type {
   SessionSnapshot,
   CaptureSessionOptions,
   RestoreSessionOptions,
-} from './types';
-import { ProcessAgentProvider } from './process-provider';
+} from './types.js';
+import { ProcessAgentProvider } from './process-provider.js';
 
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'streaming',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { StreamingAgentExecution } from './streaming';
-import { CodexProvider } from '../../../domain/agents/codex';
+import { StreamingAgentExecution } from './streaming.js';
+import { CodexProvider } from '../../../domain/agents/codex.js';
 
 function command(script: string) {
   return { argv: [process.execPath, '-e', script], cwd: process.cwd() };

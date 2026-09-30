@@ -1,5 +1,5 @@
-import type { Task } from '../../../types/board';
-import { truncateByVisualWidth } from '../utils';
+import type { Task } from '../../../types/board.js';
+import { truncateByVisualWidth } from '../utils.js';
 
 export function getTaskQueue(tasks: Task[]): Task[] {
   return [...tasks].sort((left, right) => {

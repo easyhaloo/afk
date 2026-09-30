@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../../domain/backlog';
-import type { TrackerProvider } from '../../../domain/tracker/types';
-import { renderChangeDescription, TrackerChangeProvider } from './tracker-adapter';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { TrackerProvider } from '../../../domain/tracker/types.js';
+import { renderChangeDescription, TrackerChangeProvider } from './tracker-adapter.js';
 
 describe('TrackerChangeProvider', () => {
   it('qualifies cross-repository issues without copying the PRD', () => {

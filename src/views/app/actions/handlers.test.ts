@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { openBacklogUrl } from './handlers';
+import { openBacklogUrl } from './handlers.js';
 
 describe('openBacklogUrl', () => {
   it('opens only the URL supplied by the backlog provider', async () => {

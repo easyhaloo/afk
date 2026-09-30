@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StatsAggregator } from './index';
+import { StatsAggregator } from './index.js';
 
 describe('StatsAggregator', () => {
   beforeEach(() => { vi.useFakeTimers(); });

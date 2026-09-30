@@ -18,9 +18,9 @@ import { promises as fs } from 'fs';
 import { dirname, isAbsolute, join, resolve } from 'path';
 import { homedir } from 'os';
 import * as YAML from 'js-yaml';
-import { WorkflowTemplateSchema, type WorkflowTemplate } from './types';
-import { TemplateError } from './types';
-import { getTemplate } from './registry';
+import { WorkflowTemplateSchema, type WorkflowTemplate } from './types.js';
+import { TemplateError } from './types.js';
+import { getTemplate } from './registry.js';
 
 export type TemplateSource = 'cli' | 'project' | 'user' | 'builtin';
 export interface LoadedTemplate {

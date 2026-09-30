@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
-import { registerBacklogCommands } from './backlog';
-import { registerQACommands } from './qa';
-import { createManagementProviders } from '../../application/tracker-provider-factory';
-import { QARunner } from '../../application/modules/qa-runner';
+import { registerBacklogCommands } from './backlog.js';
+import { registerQACommands } from './qa.js';
+import { createManagementProviders } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { QARunner } from '../../application/modules/qa-runner.js';
 
-vi.mock('../../application/tracker-provider-factory', () => ({
+vi.mock('../../infrastructure/provider/tracker-provider-factory', () => ({
   createManagementProviders: vi.fn(),
 }));
 vi.mock('../cli-utils', () => ({

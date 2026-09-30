@@ -1,4 +1,4 @@
-import type { StatsAPI, StatsProvider } from '../../shared/stats/types';
+import type { StatsAPI, StatsProvider } from '../../shared/stats/types.js';
 
 export class StatsAggregator implements StatsAPI {
   private providers = new Map<string, StatsProvider>();

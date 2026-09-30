@@ -1,8 +1,8 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import { DetailScreen } from './DetailScreen';
-import type { BacklogViewModel } from '../data/backlog-adapter';
+import { DetailScreen } from './DetailScreen.js';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
 
 const backlog: BacklogViewModel = {
   id: 'BL-42',

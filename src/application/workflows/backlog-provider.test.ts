@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WorkflowRunner } from '../workflow-engine';
-import type { ProviderBundle } from '../providers';
-import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index';
-import type { AgentProvider } from '../../domain/agents/types';
-import type { RunObserver } from '../../observability/run-observer';
+import { WorkflowRunner } from '../workflow-engine.js';
+import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
+import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
+import type { AgentProvider } from '../../domain/agents/types.js';
+import type { RunObserver } from '../../observability/run-observer.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 

@@ -11,13 +11,13 @@ import {
   runBacklogShow,
   runBacklogTagAdd,
   runBacklogTagRemove,
-} from './backlog';
-import { registerRunCommands } from './run';
-import { registerQACommands } from './qa';
-import { registerLoopCommands } from './loop';
-import type { BacklogItem, QABacklogProvider } from '../../domain/backlog';
-import type { ProviderCatalog } from '../../application/work-items/types';
-import { emitSuccess, emitFailure } from '../json-output';
+} from './backlog.js';
+import { registerRunCommands } from './run.js';
+import { registerQACommands } from './qa.js';
+import { registerLoopCommands } from './loop.js';
+import type { BacklogItem, QABacklogProvider } from '../../domain/backlog/index.js';
+import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
+import { emitSuccess, emitFailure } from '../json-output.js';
 
 function commandTree(register: (program: Command) => void): Command {
   const program = new Command();

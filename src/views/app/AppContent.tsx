@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { useState as useAppState, createActions } from './hooks';
-import { initRegistry } from '../board/registry/init';
+import { useState as useAppState, createActions } from './hooks/index.js';
+import { initRegistry } from '../board/registry/init.js';
 import {
   TaskListView,
   BacklogListView,
@@ -13,15 +13,15 @@ import {
   Header,
   Footer,
   Notification,
-} from '../board/views/index';
-import { getListViewportHeight } from '../board/layout';
-import type { Task, Project } from '../../types/board';
-import type { Branch, Commit, Tag } from '../../domain/tracker/types';
-import type { BacklogViewModel } from '../board/data/backlog-adapter';
-import type { View } from '../board/types';
-import { PluginViewBoundary } from '../plugins/PluginViewBoundary';
-import type { LoadedTuiView, TuiPluginContext } from '../plugins/types';
-import { isBuiltinView } from '../plugins/types';
+} from '../board/views/index.js';
+import { getListViewportHeight } from '../board/layout.js';
+import type { Task, Project } from '../../types/board.js';
+import type { Branch, Commit, Tag } from '../../domain/tracker/types.js';
+import type { BacklogViewModel } from '../board/data/backlog-adapter.js';
+import type { View } from '../board/types.js';
+import { PluginViewBoundary } from '../plugins/PluginViewBoundary.js';
+import type { LoadedTuiView, TuiPluginContext } from '../plugins/types.js';
+import { isBuiltinView } from '../plugins/types.js';
 
 initRegistry();
 

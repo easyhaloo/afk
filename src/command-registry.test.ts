@@ -1,11 +1,11 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
-import { COMMANDS } from './command-registry';
-import { COMMANDS as CLI_COMMANDS } from './cli/command-registry';
-import { lazyLoad } from './lazy-loader';
-import { lazyLoad as cliLazyLoad } from './cli/lazy-loader';
-import { runFullCLI } from './full-cli';
-import { runFullCLI as runCanonicalFullCLI } from './cli/full-cli';
+import { COMMANDS } from './command-registry.js';
+import { COMMANDS as CLI_COMMANDS } from './cli/command-registry.js';
+import { lazyLoad } from './lazy-loader.js';
+import { lazyLoad as cliLazyLoad } from './cli/lazy-loader.js';
+import { runFullCLI } from './full-cli.js';
+import { runFullCLI as runCanonicalFullCLI } from './cli/full-cli.js';
 
 describe('CLI hard cutover registry', () => {
   it('delegates the public registry to the canonical CLI registry', () => {

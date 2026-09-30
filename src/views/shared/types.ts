@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
-import type { StatsProvider, StatsAPI } from '../../shared/stats/types';
+import type { StatsProvider, StatsAPI } from '../../shared/stats/types.js';
 
-export type { StatsProvider, StatsAPI } from '../../shared/stats/types';
+export type { StatsProvider, StatsAPI } from '../../shared/stats/types.js';
 
 // ─── Keyboard Event ───────────────────────────────────────────────────────────
 

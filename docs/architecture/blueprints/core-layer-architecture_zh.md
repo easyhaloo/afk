@@ -32,9 +32,16 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 - Loop 只调度单项 manifest 并调用 `executeWorkItem`，旧 WorkflowRunner→QARunner
   双执行链与 QA 队列已删除；缺失 manifest 时明确拒绝启动。
 - 架构守卫现在检查 Core/Application package 的依赖纯度和 package 边界。
+- backlog 到 core 的状态与执行模式映射收敛为单一实现
+  `packages/afk-application/src/backlog-mapping.ts`，CLI 与 Desktop 共用，
+  不再各维护一份映射表。Desktop 经既有 esbuild 产物
+  `dist-electron/application.cjs` 以值的方式调用，未新增构建变体。
 
 仍需继续收敛根包 `src/application` 中的 Provider SDK 实现、其他 Desktop CLI
 入口和工作项状态转换；不能将已迁移入口的单路径误写成全仓所有能力迁移完成。
+Desktop 目前对 `@afk/core` 的引用仍限于 `import type`，`decide` / `evolve` /
+`replay` / `resolveExecutionBase` 尚未在 Desktop 侧被调用——本节完成的是状态
+映射的去重，Core 行为函数的多端共享尚未达成。
 
 ## 当前结构分析
 

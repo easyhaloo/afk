@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getListViewportHeight, getRowColumns } from './layout';
+import { getListViewportHeight, getRowColumns } from './layout.js';
 
 describe('getListViewportHeight', () => {
   it('removes fixed dashboard chrome from terminal height', () => {

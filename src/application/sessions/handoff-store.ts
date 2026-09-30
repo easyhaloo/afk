@@ -14,7 +14,7 @@
 
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import type { SessionSnapshot } from '../../domain/agents/types';
+import type { SessionSnapshot } from '../../domain/agents/types.js';
 import type {
   SessionStore,
   SessionSaveOptions,
@@ -22,8 +22,8 @@ import type {
   SessionLoadOptions,
   SessionListOptions,
   SessionStoreEntry,
-} from './types';
-import { SessionNotFoundError } from './types';
+} from './types.js';
+import { SessionNotFoundError } from './types.js';
 
 const HANDOFF_DIR = '.afk/handoff';
 

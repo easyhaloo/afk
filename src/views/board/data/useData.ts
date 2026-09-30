@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Task } from '../../../types/board';
-import type { View } from '../types';
-import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types';
-import { fileLogger } from '../../../infrastructure/io/logger';
+import { Task } from '../../../types/board.js';
+import type { View } from '../types.js';
+import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types.js';
+import { fileLogger } from '../../../infrastructure/io/logger.js';
 import {
   fetchTasks,
   fetchProjectDetail,
   fetchProjects,
-} from './fetcher';
-export { toRuntimeTask } from './fetcher';
+} from './fetcher.js';
+export { toRuntimeTask } from './fetcher.js';
 import {
   readBacklogList,
   writeBacklogList,
@@ -17,13 +17,13 @@ import {
   readDetail,
   writeDetail,
   clearDetailCache as clearDiskDetailCache,
-} from '../cache';
+} from '../cache.js';
 import {
   loadBacklogViewModels,
   type BacklogViewModel,
   type TuiManagementProviderBundle,
-} from './backlog-adapter';
-import type { TaskRuntimeManager } from '../../../application/runtime/task-runtime';
+} from './backlog-adapter.js';
+import type { TaskRuntimeManager } from '../../../application/runtime/task-runtime.js';
 
 const PER_PAGE = 50;
 const DETAIL_TTL_MS = 60_000;

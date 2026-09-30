@@ -1,9 +1,9 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AppContent } from './AppContent';
-import { StateProvider } from './state/StateContext';
-import type { Task } from '../../types/board';
+import { AppContent } from './AppContent.js';
+import { StateProvider } from './state/StateContext.js';
+import type { Task } from '../../types/board.js';
 
 const originalColumns = process.stdout.columns;
 const originalRows = process.stdout.rows;

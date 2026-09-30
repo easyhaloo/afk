@@ -1,8 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { getTaskBacklogId, Task } from '../../../types/board';
-import { ListView } from './ListView';
-import { formatRelativeTime } from '../utils';
+import { getTaskBacklogId, Task } from '../../../types/board.js';
+import { ListView } from './ListView.js';
+import { formatRelativeTime } from '../utils.js';
 
 interface Props {
   tasks: Task[];

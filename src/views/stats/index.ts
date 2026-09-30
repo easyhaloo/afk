@@ -1,1 +1,1 @@
-export { StatsAggregator } from './aggregator';
+export { StatsAggregator } from './aggregator.js';

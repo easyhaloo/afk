@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent, RunEventData } from '@afk/core';
-import { projectWorkItemExecution } from './work-item-execution-projection';
+import { projectWorkItemExecution } from './work-item-execution-projection.js';
 
 const workItemId = 'github:team/project#158';
 function event(sequence: number, data: RunEventData, overrides: Partial<RunEvent<RunEventData>> = {}): RunEvent<RunEventData> {

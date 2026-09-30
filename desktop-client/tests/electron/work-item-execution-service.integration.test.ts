@@ -116,7 +116,10 @@ setTimeout(() => process.exit(0), 400);
       });
       expect(terminal).toMatchObject({ id: result.runId, status: "completed", pid: childPid });
       expect(observedStatuses).toContain("completed");
-      expect((await workspace.read(item.id))?.currentRunId).toBeUndefined();
+      // Clearing the workspace pointer is a separate write from flipping the run
+      // status to terminal, so it lands asynchronously — read it under waitFor
+      // like the surrounding assertions, otherwise this races under load.
+      await waitFor(async () => ((await workspace.read(item.id))?.currentRunId === undefined ? true : undefined));
       await waitFor(async () => childPid !== undefined && !processIsAlive(childPid) ? true : undefined);
     } finally {
       if (childPid !== undefined && processIsAlive(childPid)) {

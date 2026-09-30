@@ -3,9 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { Command } from 'commander';
-import { registerCompletionCommands } from './completion';
-import { buildCompletionTree } from '../completion/tree';
-import { COMMANDS } from '../command-registry';
+import { registerCompletionCommands } from './completion.js';
+import { buildCompletionTree } from '../completion/tree.js';
+import { COMMANDS } from '../command-registry.js';
 
 function run(args: string[]): { stdout: string; exitCode: number | undefined } {
   const program = new Command();

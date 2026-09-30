@@ -14,8 +14,8 @@
  * Cycles raise TemplateError.
  */
 
-import type { WorkflowTemplate, Step } from './types';
-import { TemplateError } from './types';
+import type { WorkflowTemplate, Step } from './types.js';
+import { TemplateError } from './types.js';
 
 export interface ExecutionGroup {
   level: number;

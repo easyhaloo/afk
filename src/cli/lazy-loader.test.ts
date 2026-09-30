@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLazyArgv, lazyLoad } from './lazy-loader';
+import { buildLazyArgv, lazyLoad } from './lazy-loader.js';
 
 describe('buildLazyArgv', () => {
   it('removes the parent command before parsing a nested subcommand', () => {

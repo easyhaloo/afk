@@ -3,7 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { simpleGit } from 'simple-git';
-import { captureWorktreeDiagnostics } from './worktree-diagnostics';
+import { captureWorktreeDiagnostics } from './worktree-diagnostics.js';
 
 describe('captureWorktreeDiagnostics', () => {
   it('reports tracked settings changes separately from an otherwise clean worktree', async () => {

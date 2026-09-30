@@ -1,8 +1,8 @@
 import { simpleGit } from 'simple-git';
-import type { BacklogItem } from '../../../domain/backlog/index';
-import type { BranchProvider, BranchHandle } from './provider';
-import { strategyForConfig } from '../../../domain/branches/registry';
-import type { BranchHandle as StrategyHandle } from '../../../domain/branches/types';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { BranchProvider, BranchHandle } from './provider.js';
+import { strategyForConfig } from '../../../domain/branches/registry.js';
+import type { BranchHandle as StrategyHandle } from '../../../domain/branches/types.js';
 
 export class GitBranchProvider implements BranchProvider {
   private readonly handles = new Map<string, StrategyHandle>();

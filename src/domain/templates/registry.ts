@@ -4,9 +4,9 @@
  * templates or replace the builtins via _resetTemplateRegistry().
  */
 
-import type { WorkflowTemplate } from './types';
-import { builtinTemplates } from './builtin';
-import { resolveExecutionPlan } from './resolver';
+import type { WorkflowTemplate } from './types.js';
+import { builtinTemplates } from './builtin.js';
+import { resolveExecutionPlan } from './resolver.js';
 
 const registry = new Map<string, WorkflowTemplate>();
 

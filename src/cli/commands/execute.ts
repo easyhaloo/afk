@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Command } from 'commander';
-import { executeWorkItem, reconcileWorkItemMerge } from '../../application/workflows/execute-work-item';
-import { detail, handleCommandError, success, warning } from '../cli-utils';
+import { executeWorkItem, reconcileWorkItemMerge } from '../../application/workflows/execute-work-item.js';
+import { detail, handleCommandError, success, warning } from '../cli-utils.js';
 
 export function registerExecuteCommands(program: Command): void {
   program.command('reconcile')

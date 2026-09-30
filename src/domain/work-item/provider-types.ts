@@ -1,5 +1,5 @@
-import type { BacklogExecutionMode, BacklogState } from '../../domain/backlog';
-import type { GlobalWorkItem, ProviderProjectRef, WorkItemPlatform } from '../../domain/work-item/types';
+import type { BacklogExecutionMode, BacklogState } from '../backlog/index.js';
+import type { GlobalWorkItem, ProviderProjectRef, WorkItemPlatform } from './types.js';
 
 export interface ProviderIssue {
   issueNumber: number;

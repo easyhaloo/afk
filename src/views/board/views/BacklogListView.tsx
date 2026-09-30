@@ -1,7 +1,7 @@
 import React from 'react';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { ListView } from './ListView';
-import { BacklogRow } from './BacklogRow';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { ListView } from './ListView.js';
+import { BacklogRow } from './BacklogRow.js';
 
 interface Props {
   backlogs: BacklogViewModel[];

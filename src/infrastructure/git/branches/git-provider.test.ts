@@ -3,9 +3,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
-import { GitBranchProvider } from './git-provider';
-import type { BacklogItem } from '../../../domain/backlog/index';
-import { _clearPreparedWorktreesForTest } from '../../../domain/branches/base';
+import { GitBranchProvider } from './git-provider.js';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
+import { _clearPreparedWorktreesForTest } from '../../../domain/branches/base.js';
 
 const cleanupPaths: string[] = [];
 

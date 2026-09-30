@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import { OperationalRow } from './OperationalRow';
+import { OperationalRow } from './OperationalRow.js';
 
 const baseProps = {
   status: 'ready',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveWorkflowRequest, resolveWorkflowRunRequest } from './run-request';
+import { resolveWorkflowRequest, resolveWorkflowRunRequest } from './run-request.js';
 
 describe('resolveWorkflowRequest', () => {
   it('passes explicit canonical audit identity through to the runner request', () => {

@@ -2,16 +2,16 @@
  * Shared single-backlog execution entry point used exclusively by `afk run`.
  * It claims before creating workflow resources; loop claims its own items.
  */
-import { WorkflowRunner } from '../workflow-engine';
-import { createRunObserver } from '../../infrastructure/observability/run-observer-factory';
-import { createTracker } from '../tracker-provider-factory';
-import { createProviderBundle } from '../providers';
-import { getWorkflowConfig } from '../../infrastructure/config/manager';
-import type { SandboxProviderName } from '../../infrastructure/sandbox/types';
-import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types';
-import { prepareAgentRuntime } from '../../domain/agents/codex-runtime';
-import type { BranchStrategyConfig } from '../../domain/branches/types';
-import { resolveWorkflowRunRequest } from './run-request';
+import { WorkflowRunner } from '../workflow-engine.js';
+import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
+import { createTracker } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { createProviderBundle } from '../../infrastructure/provider/providers.js';
+import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
+import type { SandboxProviderName } from '../../infrastructure/sandbox/types.js';
+import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
+import { prepareAgentRuntime } from '../../domain/agents/codex-runtime.js';
+import type { BranchStrategyConfig } from '../../domain/branches/types.js';
+import { resolveWorkflowRunRequest } from './run-request.js';
 
 export interface RunWorkflowCliOpts {
   backlogId: string;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildCompletionTree } from '../../cli/completion/tree';
-import { extractSpec } from './spec';
-import { emitBash } from './shells';
+import { buildCompletionTree } from '../../cli/completion/tree.js';
+import { extractSpec } from './spec.js';
+import { emitBash } from './shells.js';
 
 const script = emitBash(extractSpec(buildCompletionTree()));
 

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Notification } from '../../shared/types';
+import type { Notification } from '../../shared/types.js';
 
 interface Props {
   notification: Notification | null;

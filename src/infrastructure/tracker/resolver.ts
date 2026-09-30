@@ -1,5 +1,5 @@
 import { simpleGit } from 'simple-git';
-import type { Platform } from '../../domain/tracker/types';
+import type { Platform } from '../../domain/tracker/types.js';
 
 export async function resolvePlatform(cwd?: string): Promise<Platform> {
   const remote = await readOriginUrl(cwd);

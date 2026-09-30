@@ -1,20 +1,20 @@
-import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types';
-import type { SandboxProviderName } from '../../infrastructure/sandbox/types';
-import type { BranchStrategyConfig } from '../../domain/branches/types';
-import { deriveBacklogBranchName } from '../../domain/backlog/index';
-import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager';
-import { resolveProjectContext, type ProjectContext } from '../project-context';
-import { resolveAgentProviderName } from '../../domain/agents/index';
-import { DEFAULT_CODEX_CONFIG, resolveCodexRuntime } from '../../domain/agents/codex-runtime';
+import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
+import type { SandboxProviderName } from '../../infrastructure/sandbox/types.js';
+import type { BranchStrategyConfig } from '../../domain/branches/types.js';
+import { deriveBacklogBranchName } from '../../domain/backlog/index.js';
+import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';
+import { resolveProjectContext, type ProjectContext } from '../project-context.js';
+import { resolveAgentProviderName } from '../../domain/agents/index.js';
+import { DEFAULT_CODEX_CONFIG, resolveCodexRuntime } from '../../domain/agents/codex-runtime.js';
 import {
   readExecutionManifest,
   type ReadExecutionManifestDependencies,
   type ExecutionManifestPlatform,
   type ResolvedExecutionManifest,
   type ResolvedExecutionManifestRepository,
-} from './execution-manifest';
-import { resolveGitLabProjectKey } from '../../shared/gitlab-project';
-import { parseWorkItemId } from '../../domain/work-item/identity';
+} from './execution-manifest.js';
+import { resolveGitLabProjectKey } from '../../shared/gitlab-project.js';
+import { parseWorkItemId } from '../../domain/work-item/identity.js';
 
 export type WorkflowRunRepository = ResolvedExecutionManifestRepository;
 

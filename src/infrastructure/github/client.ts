@@ -19,11 +19,11 @@ import type {
   Commit,
   TrackerIssueComment,
   LabelDelta,
-} from '../../domain/tracker/types';
-import { extractAC } from '../../domain/tracker/ac';
-import type { BacklogMetadataLabel } from '../../domain/backlog/initialization';
-import { logger } from '../io/index';
-import { parseWorkItemId } from '../../domain/work-item/identity';
+} from '../../domain/tracker/types.js';
+import { extractAC } from '../../domain/tracker/ac.js';
+import type { BacklogMetadataLabel } from '../../domain/backlog/initialization.js';
+import { logger } from '../io/index.js';
+import { parseWorkItemId } from '../../domain/work-item/identity.js';
 
 /**
  * GitHub authentication options

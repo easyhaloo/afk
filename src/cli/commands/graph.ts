@@ -1,6 +1,6 @@
 import { Command } from 'commander';
-import { generateWorkflowGraph, type WorkflowGraphFormat } from '../../application/visualizations/workflow-graph';
-import { writeGraphCache } from '../../application/visualizations/graph-cache';
+import { generateWorkflowGraph, type WorkflowGraphFormat } from '../../application/visualizations/workflow-graph.js';
+import { writeGraphCache } from '../../application/visualizations/graph-cache.js';
 
 const formats: WorkflowGraphFormat[] = ['json', 'archify-json'];
 

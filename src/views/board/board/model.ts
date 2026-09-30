@@ -1,8 +1,8 @@
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { getStatusIcon } from '../views/display';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { getStatusIcon } from '../views/display.js';
 
-export { getExecutionModeIcon } from '../views/display';
-export { getStatusIcon as getBacklogStateIcon } from '../views/display';
+export { getExecutionModeIcon } from '../views/display.js';
+export { getStatusIcon as getBacklogStateIcon } from '../views/display.js';
 
 export const BOARD_LANES = [
   { state: 'ready', label: 'Ready', shortLabel: 'ready' },

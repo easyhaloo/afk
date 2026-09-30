@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { LocalEncryptedEvidenceStore, redactUtf8 } from './local-evidence-store';
+import { LocalEncryptedEvidenceStore, redactUtf8 } from './local-evidence-store.js';
 
 const roots: string[] = [];
 

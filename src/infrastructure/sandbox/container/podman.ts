@@ -5,8 +5,8 @@
  */
 
 import { spawn } from 'child_process';
-import { CliContainerProvider } from './cli-provider';
-import type { ContainerEngine } from './types';
+import { CliContainerProvider } from './cli-provider.js';
+import type { ContainerEngine } from './types.js';
 
 export class PodmanContainerProvider extends CliContainerProvider {
   readonly engine: ContainerEngine = 'podman';

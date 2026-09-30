@@ -1,13 +1,13 @@
-import type { TrackerProvider } from '../domain/tracker/types';
-import type { BacklogProvider, QABacklogProvider } from '../domain/backlog';
-import { GitHubBacklogProvider } from '../domain/backlog/github-provider';
-import { GitLabBacklogProvider } from '../domain/backlog/gitlab-provider';
-import { ManagementBacklogProvider } from '../domain/backlog/management-provider';
-import type { AtomicClaim, ClaimLock, ClaimLockFactory } from '../domain/backlog/claim-strategy';
-import type { BranchProvider } from '../infrastructure/git/branches/provider';
-import { GitBranchProvider } from '../infrastructure/git/branches/git-provider';
-import type { ChangeProvider } from '../infrastructure/tracker/changes/provider';
-import { TrackerChangeProvider } from '../infrastructure/tracker/changes/tracker-adapter';
+import type { TrackerProvider } from '../../domain/tracker/types.js';
+import type { BacklogProvider, QABacklogProvider } from '../../domain/backlog/index.js';
+import { GitHubBacklogProvider } from '../../domain/backlog/github-provider.js';
+import { GitLabBacklogProvider } from '../../domain/backlog/gitlab-provider.js';
+import { ManagementBacklogProvider } from '../../domain/backlog/management-provider.js';
+import type { AtomicClaim, ClaimLock, ClaimLockFactory } from '../../domain/backlog/claim-strategy.js';
+import type { BranchProvider } from '../git/branches/provider.js';
+import { GitBranchProvider } from '../git/branches/git-provider.js';
+import type { ChangeProvider } from '../tracker/changes/provider.js';
+import { TrackerChangeProvider } from '../tracker/changes/tracker-adapter.js';
 
 export interface ProviderBundle {
   backlog: BacklogProvider;

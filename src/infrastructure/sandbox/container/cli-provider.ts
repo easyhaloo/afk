@@ -17,8 +17,8 @@ import type {
   ContainerExecResult,
   ContainerInspectInfo,
   ContainerStatus,
-} from './types';
-import { ContainerError } from './types';
+} from './types.js';
+import { ContainerError } from './types.js';
 
 export abstract class CliContainerProvider implements ContainerProvider {
   abstract readonly engine: ContainerEngine;

@@ -13,7 +13,7 @@ import type {
   PrepareOptions,
   FinalizeOptions,
   CleanupOptions,
-} from './types';
+} from './types.js';
 import {
   defaultWorktreeBaseDir,
   ensureWorktreeBaseDir,
@@ -22,7 +22,7 @@ import {
   gitBranchDelete,
   checkNotShared,
   releasePath,
-} from './base';
+} from './base.js';
 
 export class IssueBranchStrategy implements BranchStrategy {
   readonly kind = 'issue' as const;

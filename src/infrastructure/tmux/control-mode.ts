@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { normalizeTmuxSessionName } from './session-name';
+import { normalizeTmuxSessionName } from './session-name.js';
 
 export interface ControlModeOptions {
   session: string;

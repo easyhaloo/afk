@@ -19,8 +19,8 @@ import type {
   PrepareOptions,
   FinalizeOptions,
   CleanupOptions,
-} from './types';
-import { BranchStrategyError } from './types';
+} from './types.js';
+import { BranchStrategyError } from './types.js';
 import {
   defaultWorktreeBaseDir,
   ensureWorktreeBaseDir,
@@ -28,7 +28,7 @@ import {
   checkNotShared,
   isBranchCheckedOut,
   releasePath,
-} from './base';
+} from './base.js';
 
 export class ExistingBranchStrategy implements BranchStrategy {
   readonly kind = 'existing' as const;

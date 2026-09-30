@@ -1,8 +1,8 @@
 /**
  * Registry initialization - Call once at app startup
  */
-import { registerAllViews } from './views';
-import { registerAllLoadingPhases } from './loading-init';
+import { registerAllViews } from './views.js';
+import { registerAllLoadingPhases } from './loading-init.js';
 
 let initialized = false;
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CodexAppServerExecution } from './execution';
-import type { AgentExecutionOptions, CodexRuntimeSelection } from '../types';
-import type { AppServerTransport, JsonRpcMessage } from './transport';
+import { CodexAppServerExecution } from './execution.js';
+import type { AgentExecutionOptions, CodexRuntimeSelection } from '../types.js';
+import type { AppServerTransport, JsonRpcMessage } from './transport.js';
 
 class ScriptedTransport implements AppServerTransport {
   readonly endpointKind = 'stdio' as const;

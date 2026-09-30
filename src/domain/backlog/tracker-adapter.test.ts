@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TrackerBacklogProvider } from './tracker-adapter';
-import type { ClaimLease } from './claim';
-import type { TrackerProvider } from '../tracker/types';
+import { TrackerBacklogProvider } from './tracker-adapter.js';
+import type { ClaimLease } from './claim.js';
+import type { TrackerProvider } from '../tracker/types.js';
 
 function tracker(issue: any): TrackerProvider {
   return {

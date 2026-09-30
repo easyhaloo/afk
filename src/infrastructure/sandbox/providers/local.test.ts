@@ -2,8 +2,8 @@ import { access, mkdir, mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
-import { SignalSchema } from '../../../domain/schemas';
-import { LocalAgentExecution, LocalSandboxProvider } from './local';
+import { SignalSchema } from '../../../domain/schemas.js';
+import { LocalAgentExecution, LocalSandboxProvider } from './local.js';
 
 describe('LocalSandboxProvider', () => {
   const metadata = { provider: 'claude-code', transport: 'process' } as const;
@@ -88,7 +88,7 @@ describe('LocalSandboxProvider', () => {
       executionMode: 'interactive',
     });
 
-    await expect(import('../../io').then(({ readSignal }) => readSignal(worktreePath))).resolves.toBeNull();
+    await expect(import('../../io/index.js').then(({ readSignal }) => readSignal(worktreePath))).resolves.toBeNull();
   });
 
   it('clears a stale status marker before launching an interactive session', async () => {

@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadWorkItemExecution, replayRun } from '@afk/application';
-import { executeWorkItem, reconcileWorkItemMerge, type ExecuteWorkItemDependencies } from './execute-work-item';
-import { encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog';
-import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store';
-import { RunObserver } from '../../observability/run-observer';
-import { createExecutionQueryPorts } from '../../observability/query-service';
+import { executeWorkItem, reconcileWorkItemMerge, type ExecuteWorkItemDependencies } from './execute-work-item.js';
+import { encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { RunObserver } from '../../observability/run-observer.js';
+import { createExecutionQueryPorts } from '../../observability/query-service.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {

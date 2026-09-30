@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildCompletionTree } from '../../cli/completion/tree';
-import { extractSpec } from './spec';
+import { buildCompletionTree } from '../../cli/completion/tree.js';
+import { extractSpec } from './spec.js';
 
 describe('extractSpec', () => {
   const spec = extractSpec(buildCompletionTree());

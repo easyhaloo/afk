@@ -3,7 +3,7 @@ import {
   encodeWorkItemIdForPath,
   formatWorkItemId,
   parseWorkItemId,
-} from './identity';
+} from './identity.js';
 
 describe('work-item identity', () => {
   it('formats and parses a GitHub owner/repository identity', () => {

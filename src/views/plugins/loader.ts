@@ -3,9 +3,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { load } from 'js-yaml';
-import { fileLogger } from '../../infrastructure/io/index';
-import type { LoadedTuiView, TuiPlugin } from './types';
-import { isTuiPlugin } from './types';
+import { fileLogger } from '../../infrastructure/io/index.js';
+import type { LoadedTuiView, TuiPlugin } from './types.js';
+import { isTuiPlugin } from './types.js';
 
 interface PluginConfigEntry {
   id: string;

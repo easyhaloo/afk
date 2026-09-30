@@ -46,13 +46,13 @@ vi.mock('../workflow-engine', () => ({
     run = mocks.runnerRun;
   },
 }));
-vi.mock('../tracker-provider-factory', () => ({ createTracker: mocks.createTracker }));
-vi.mock('../providers', () => ({ createProviderBundle: mocks.createProviderBundle }));
+vi.mock('../../infrastructure/provider/tracker-provider-factory', () => ({ createTracker: mocks.createTracker }));
+vi.mock('../../infrastructure/provider/providers', () => ({ createProviderBundle: mocks.createProviderBundle }));
 vi.mock('../../infrastructure/config/manager', () => ({ getWorkflowConfig: () => mocks.config }));
 vi.mock('../../domain/agents/codex-runtime', () => ({ prepareAgentRuntime: async (runtime: unknown) => runtime }));
 vi.mock('./run-request', () => ({ resolveWorkflowRunRequest: async () => mocks.request }));
 
-import { runWorkflowCli } from './run-cmd';
+import { runWorkflowCli } from './run-cmd.js';
 
 describe('runWorkflowCli', () => {
   it('passes the normalized repository collection to WorkflowRunner', async () => {

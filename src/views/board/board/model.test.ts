@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BacklogViewModel } from '../data/backlog-adapter';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
 import {
   BOARD_LANES,
   getBoardColumns,
@@ -7,7 +7,7 @@ import {
   getBoardSelectionTarget,
   getBoardVisibleLaneIndexes,
   groupBacklogsByState,
-} from './model';
+} from './model.js';
 
 function backlog(id: string, state: BacklogViewModel['state']): BacklogViewModel {
   return {

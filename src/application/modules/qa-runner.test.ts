@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { QARunner } from './qa-runner';
-import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index';
+import { QARunner } from './qa-runner.js';
+import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../../infrastructure/io/index', async importOriginal => ({
-  ...await importOriginal<typeof import('../../infrastructure/io/index')>(),
+  ...await importOriginal<typeof import('../../infrastructure/io/index.js')>(),
   configureStatusline: ioMocks.configureStatusline,
 }));
 

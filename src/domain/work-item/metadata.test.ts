@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toGlobalWorkItem } from './metadata';
+import { toGlobalWorkItem } from './metadata.js';
 
 const project = {
   platform: 'github' as const,

@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import { Footer, fitFooterPath } from './Footer';
+import { Footer, fitFooterPath } from './Footer.js';
 
 describe('Footer', () => {
   it('shows detail-only shortcuts', () => {

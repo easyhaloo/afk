@@ -1,5 +1,5 @@
-import type { ProviderProjectRef } from '../../domain/work-item/types';
-import type { CatalogPageResult, ProviderCatalog, ProviderIssue } from './types';
+import type { ProviderProjectRef } from '../../domain/work-item/types.js';
+import type { CatalogPageResult, ProviderCatalog, ProviderIssue } from '../../domain/work-item/provider-types.js';
 
 export interface GitHubCatalogProject {
   id: number;

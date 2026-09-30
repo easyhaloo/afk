@@ -16,9 +16,9 @@ import type {
   AgentCommandOptions,
   AgentEvent,
   AgentExecution,
-} from './types';
-import { ProcessAgentProvider } from './process-provider';
-import { CodexAppServerExecution } from './codex-app-server/execution';
+} from './types.js';
+import { ProcessAgentProvider } from './process-provider.js';
+import { CodexAppServerExecution } from './codex-app-server/execution.js';
 
 type CodexJsonEvent = { [key: string]: unknown };
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getTaskBacklogId } from './board';
+import { getTaskBacklogId } from './board.js';
 
 describe('getTaskBacklogId', () => {
   it('never substitutes runId for a missing backlog identity', () => {

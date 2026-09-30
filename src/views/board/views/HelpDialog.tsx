@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { View } from '../types';
+import type { View } from '../types.js';
 
 interface Props {
   view?: View;

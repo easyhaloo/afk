@@ -15,7 +15,7 @@ vi.mock('../../../infrastructure/gitlab', () => ({
   },
 }));
 
-import { fetchGitLabProjects } from './fetcher';
+import { fetchGitLabProjects } from './fetcher.js';
 
 describe('dashboard GitLab project fetch', () => {
   afterEach(() => {

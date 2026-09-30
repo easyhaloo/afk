@@ -1,9 +1,9 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { BoardCard } from './BoardCard';
-import { BoardLane } from './BoardLane';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { BoardCard } from './BoardCard.js';
+import { BoardLane } from './BoardLane.js';
 
 const backlog: BacklogViewModel = {
   id: '42',

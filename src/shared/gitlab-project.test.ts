@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gitLabCloneUrl, resolveGitLabProjectKey } from './gitlab-project';
+import { gitLabCloneUrl, resolveGitLabProjectKey } from './gitlab-project.js';
 
 describe('GitLab project key resolution', () => {
   it.each([

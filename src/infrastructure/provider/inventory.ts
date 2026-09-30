@@ -1,12 +1,12 @@
-import type { GlobalWorkItem, ProviderProjectRef } from '../../domain/work-item/types';
-import { toGlobalWorkItem } from './metadata';
+import type { GlobalWorkItem, ProviderProjectRef } from '../../domain/work-item/types.js';
+import { toGlobalWorkItem } from '../../domain/work-item/metadata.js';
 import {
   type GlobalWorkItemInventoryFilters,
   ProviderCatalogError,
   type GlobalWorkItemInventoryResult,
   type InventoryDiagnostic,
   type ProviderCatalog,
-} from './types';
+} from '../../domain/work-item/provider-types.js';
 
 interface CatalogProject {
   catalog: ProviderCatalog;

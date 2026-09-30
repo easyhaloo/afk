@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveProfile, type PluginManifest } from './profile';
+import { resolveProfile, type PluginManifest } from './profile.js';
 
 const eventStore: PluginManifest = { id: 'event-store-jsonl', apiVersion: 1, provides: ['event-store'], trusted: true };
 const observer: PluginManifest = { id: 'otel-console', apiVersion: 1, provides: ['tracer', 'metrics'], requires: ['event-store'], trusted: true };

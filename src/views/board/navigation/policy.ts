@@ -1,4 +1,4 @@
-import type { View, ViewState } from '../types';
+import type { View, ViewState } from '../types.js';
 
 export type ActionType =
   | 'project:view-backlogs'

@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { STATUS_FILENAME } from './status';
+import { STATUS_FILENAME } from './status.js';
 
 type JsonObject = Record<string, string | number | boolean | null | object>;
 

@@ -1,9 +1,9 @@
 import { spawn } from 'child_process';
-import { Signal } from '../../domain/schemas';
-import { readSignal, readSignalSync } from '../io/signal';
-import { TIMEOUTS } from '../../shared/constants';
-import { ControlModeConnection } from './control-mode';
-import { normalizeTmuxSessionName } from './session-name';
+import { Signal } from '../../domain/schemas.js';
+import { readSignal, readSignalSync } from '../io/signal.js';
+import { TIMEOUTS } from '../../shared/constants.js';
+import { ControlModeConnection } from './control-mode.js';
+import { normalizeTmuxSessionName } from './session-name.js';
 
 export { normalizeTmuxSessionName };
 

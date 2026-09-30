@@ -1,7 +1,7 @@
-import type { TokenUsage } from '../types';
+import type { TokenUsage } from '../types.js';
 
 type AppServerEventObject = { [key: string]: unknown };
-import type { JsonRpcMessage } from './transport';
+import type { JsonRpcMessage } from './transport.js';
 
 export type AppServerEvent =
   | { type: 'result'; text: string }

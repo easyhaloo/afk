@@ -28,7 +28,7 @@ vi.mock('../cli-utils', () => ({
   detail: vi.fn(),
 }));
 
-import { registerRunCommands } from './run';
+import { registerRunCommands } from './run.js';
 
 describe('run command', () => {
   afterEach(() => vi.clearAllMocks());

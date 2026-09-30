@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { loadTuiViews } from './loader';
-import { isTuiPlugin } from './types';
+import { loadTuiViews } from './loader.js';
+import { isTuiPlugin } from './types.js';
 
 function makePluginHome(input: { config: string; plugins: Record<string, string> }): string {
   const root = mkdtempSync(join(tmpdir(), 'afk-tui-plugin-'));

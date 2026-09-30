@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ObservationContext, RunEventDraft } from '@afk/core';
-import { JsonlEventStore } from './jsonl-event-store';
+import { JsonlEventStore } from './jsonl-event-store.js';
 
 const roots: string[] = [];
 const context: ObservationContext = {

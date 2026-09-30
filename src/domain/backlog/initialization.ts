@@ -1,4 +1,4 @@
-import type { BacklogExecutionMode, BacklogState } from './index';
+import type { BacklogExecutionMode, BacklogState } from './index.js';
 
 /** Canonical-to-provider metadata mapping.  Kept out of application modules. */
 export const BACKLOG_METADATA = {

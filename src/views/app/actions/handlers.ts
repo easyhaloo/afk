@@ -1,6 +1,6 @@
-import { openInBrowser } from '../../../shared/browser';
-import type { BacklogViewModel } from '../../board/data/backlog-adapter';
-import type { StateContextValue } from '../state/StateContext';
+import { openInBrowser } from '../../../shared/browser.js';
+import type { BacklogViewModel } from '../../board/data/backlog-adapter.js';
+import type { StateContextValue } from '../state/StateContext.js';
 
 export type UrlOpener = (url: string) => Promise<void>;
 

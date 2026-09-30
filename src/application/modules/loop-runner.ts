@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { logger } from '../../infrastructure/io/index';
-import type { ProviderBundle } from '../providers';
-import { parseWorkItemId } from '../../domain/backlog';
-import { readExecutionManifest } from '../workflows/execution-manifest';
-import { executeWorkItem } from '../workflows/execute-work-item';
+import { logger } from '../../infrastructure/io/index.js';
+import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
+import { parseWorkItemId } from '../../domain/backlog/index.js';
+import { readExecutionManifest } from '../workflows/execution-manifest.js';
+import { executeWorkItem } from '../workflows/execute-work-item.js';
 
 export interface LoopRunnerOptions {
   /** Backlog polling interval in ms. */

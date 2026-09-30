@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import type { ChildProcess, SpawnOptions } from 'child_process';
-import { normalizeTmuxSessionName } from '../../infrastructure/tmux/session-name';
+import { normalizeTmuxSessionName } from '../../infrastructure/tmux/session-name.js';
 
 /**
  * Detached spawn that works on both Linux and macOS.

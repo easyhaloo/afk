@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { MetricsPort } from '@afk/core';
-import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store';
-import { RunObserver } from './run-observer';
+import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
+import { RunObserver } from './run-observer.js';
 
 const roots: string[] = [];
 

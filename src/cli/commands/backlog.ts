@@ -5,15 +5,15 @@ import {
   createManagementProviders,
   type GlobalTrackerPlatform,
   type TrackerPlatform,
-} from '../../application/tracker-provider-factory';
+} from '../../infrastructure/provider/tracker-provider-factory.js';
 import {
   collectGlobalWorkItemInventory,
   filterGlobalWorkItemInventory,
-} from '../../application/work-items/inventory';
+} from '../../infrastructure/provider/inventory.js';
 import type {
   GlobalWorkItemInventoryResult,
   ProviderCatalog,
-} from '../../application/work-items/types';
+} from '../../domain/work-item/provider-types.js';
 import {
   addBacklogTag,
   confirmBacklogMerge,
@@ -26,17 +26,17 @@ import {
   showBacklog,
   type BacklogChangeProvider,
   type BacklogManagementProvider,
-} from '../../domain/backlog/commands';
-import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '../../domain/backlog';
-import type { BacklogExecutionMode } from '../../domain/backlog';
-import { getWorkflowConfig } from '../../infrastructure/config/manager';
-import { handleCommandError, success, warning, detail } from '../cli-utils';
-import type { CommandRegistrationContext } from '../command-registry';
+} from '../../domain/backlog/commands.js';
+import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '../../domain/backlog/index.js';
+import type { BacklogExecutionMode } from '../../domain/backlog/index.js';
+import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
+import { handleCommandError, success, warning, detail } from '../cli-utils.js';
+import type { CommandRegistrationContext } from '../command-registry.js';
 import {
   classifyError,
   emitFailure,
   emitSuccess,
-} from '../json-output';
+} from '../json-output.js';
 
 const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
 const modes: BacklogExecutionMode[] = ['afk', 'hitl'];

@@ -2,10 +2,10 @@ import { promises as fs } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { simpleGit } from 'simple-git';
-import type { BranchHandle } from '../../domain/branches/types';
-import type { WorkflowRunRepository } from './run-request';
-import type { RunOutcomeStatus } from './resource-scope';
-import { gitLabCloneUrl } from '../../shared/gitlab-project';
+import type { BranchHandle } from '../../domain/branches/types.js';
+import type { WorkflowRunRepository } from './run-request.js';
+import type { RunOutcomeStatus } from './resource-scope.js';
+import { gitLabCloneUrl } from '../../shared/gitlab-project.js';
 
 export type RepositoryTargetState = 'missing' | 'empty' | 'nonempty';
 

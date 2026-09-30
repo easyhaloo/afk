@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import { Header } from './Header';
+import { Header } from './Header.js';
 
 describe('Header', () => {
   it('marks the active Backlogs subview and appends its count', () => {

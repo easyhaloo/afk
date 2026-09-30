@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { IsolateManager } from './isolate';
+import { IsolateManager } from './isolate.js';
 
 describe('IsolateManager', () => {
   describe('available', () => {

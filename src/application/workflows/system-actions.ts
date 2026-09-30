@@ -1,4 +1,4 @@
-import type { PluginRuntime } from '../plugins/runtime';
+import type { PluginRuntime } from '../plugins/runtime.js';
 
 export type SystemActionName = 'publish-change' | 'queue-qa';
 export type SystemActionHandler = (context: unknown) => unknown | Promise<unknown>;

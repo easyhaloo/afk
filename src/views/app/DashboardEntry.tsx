@@ -1,19 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Box } from 'ink';
-import { AppContent } from './AppContent';
-import { initRegistry } from '../board/registry/init';
-import type { Task } from '../../types/board';
-import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter';
-import type { View } from '../board/types';
-import { StateProvider } from './state/StateContext';
-import { TmuxClient } from '../../infrastructure/tmux/tmux';
-import { createManagementProviders } from '../../application/tracker-provider-factory';
-import { useData } from '../board/data/useData';
-import { useLoadingPhases } from '../board/hooks/useLoadingPhase';
-import { SplashScreen } from '../board/components/SplashScreen';
-import { openInBrowser } from '../../shared/browser';
-import { loadTuiViews } from '../plugins/loader';
-import type { LoadedTuiView } from '../plugins/types';
+import { AppContent } from './AppContent.js';
+import { initRegistry } from '../board/registry/init.js';
+import type { Task } from '../../types/board.js';
+import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter.js';
+import type { View } from '../board/types.js';
+import { StateProvider } from './state/StateContext.js';
+import { TmuxClient } from '../../infrastructure/tmux/tmux.js';
+import { createManagementProviders } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { useData } from '../board/data/useData.js';
+import { useLoadingPhases } from '../board/hooks/useLoadingPhase.js';
+import { SplashScreen } from '../board/components/SplashScreen.js';
+import { openInBrowser } from '../../shared/browser.js';
+import { loadTuiViews } from '../plugins/loader.js';
+import type { LoadedTuiView } from '../plugins/types.js';
 
 initRegistry();
 

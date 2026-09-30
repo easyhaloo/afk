@@ -1,9 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { getTaskBacklogId, type Task, type TaskActivity } from '../../../types/board';
-import { formatRelativeTime, truncateByVisualWidth } from '../utils';
-import { getExecutionModeColor, getExecutionModeIcon, getStatusColor, getStatusIcon } from '../views/display';
-import { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, truncateTaskText } from './model';
+import { getTaskBacklogId, type Task, type TaskActivity } from '../../../types/board.js';
+import { formatRelativeTime, truncateByVisualWidth } from '../utils.js';
+import { getExecutionModeColor, getExecutionModeIcon, getStatusColor, getStatusIcon } from '../views/display.js';
+import { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, truncateTaskText } from './model.js';
 
 interface Props {
   tasks: Task[];

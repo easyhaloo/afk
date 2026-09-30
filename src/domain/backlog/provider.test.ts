@@ -3,7 +3,7 @@ import {
   InMemoryBacklogProvider,
   deriveBacklogBranchName,
   type BacklogItem,
-} from './index';
+} from './index.js';
 
 const item = (overrides: Partial<BacklogItem> = {}): BacklogItem => ({
   id: '123',

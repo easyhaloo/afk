@@ -1,6 +1,6 @@
-import { resolveExecutionPlan } from './resolver';
-import type { ExecutionPlan } from './resolver';
-import { TemplateError, type Step, type WorkflowTemplate } from './types';
+import { resolveExecutionPlan } from './resolver.js';
+import type { ExecutionPlan } from './resolver.js';
+import { TemplateError, type Step, type WorkflowTemplate } from './types.js';
 
 export const BUILTIN_SYSTEM_ACTIONS = ['publish-change', 'queue-qa'] as const;
 export type BuiltinSystemAction = typeof BUILTIN_SYSTEM_ACTIONS[number];

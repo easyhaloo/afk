@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
-import { COMMANDS } from './command-registry';
+import { COMMANDS } from './command-registry.js';
 
 describe('CLI hard cutover registry', () => {
   it('exposes the canonical public command registry without duplicate routes', () => {

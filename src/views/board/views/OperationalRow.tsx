@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { getRowColumns } from '../layout';
+import { getRowColumns } from '../layout.js';
 
 function isFullWidthCodePoint(codePoint: number): boolean {
   return (

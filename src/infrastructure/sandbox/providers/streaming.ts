@@ -22,7 +22,7 @@ import type {
   AgentExecutionMetadata,
   TokenUsage,
   SessionSnapshot,
-} from '../../../domain/agents/types';
+} from '../../../domain/agents/types.js';
 import type {
   AgentExecution,
   ExecutionEvent,
@@ -30,8 +30,8 @@ import type {
   InterruptReason,
   CaptureOptions,
   ResumeOptions,
-} from '../types';
-import { extractGoalComplete } from '../../../shared/goal-complete';
+} from '../types.js';
+import { extractGoalComplete } from '../../../shared/goal-complete.js';
 
 export class StreamingAgentExecution implements AgentExecution {
   readonly id: string;

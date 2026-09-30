@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { compileTemplate } from './compiler';
-import type { WorkflowTemplate } from './types';
+import { compileTemplate } from './compiler.js';
+import type { WorkflowTemplate } from './types.js';
 
 describe('compileTemplate', () => {
   it('compiles every agent step to the unified completion signal', () => {

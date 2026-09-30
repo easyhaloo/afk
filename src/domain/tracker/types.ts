@@ -132,8 +132,8 @@ export interface TrackedMR {
   pipeline?: { status: string };  // GitLab only
 }
 
-import type { ACItem, AcceptanceCriteria } from './ac-types';
-import type { BacklogMetadataLabel } from '../backlog/initialization';
+import type { ACItem, AcceptanceCriteria } from './ac-types.js';
+import type { BacklogMetadataLabel } from '../backlog/initialization.js';
 
 /**
  * TrackerProvider interface — unified for GitLab and GitHub
@@ -235,4 +235,4 @@ export interface Commit {
   committed_date?: string;
 }
 
-export type { AcceptanceCriteria } from './ac-types';
+export type { AcceptanceCriteria } from './ac-types.js';

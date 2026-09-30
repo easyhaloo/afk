@@ -1,4 +1,4 @@
-import { getGlabToken } from '../gitlab/glab-config';
+import { getGlabToken } from '../gitlab/glab-config.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as loadYaml } from 'js-yaml';
@@ -8,7 +8,7 @@ import {
   type CodexAuth,
   type CodexConfig,
   type CodexTransport,
-} from '../../domain/agents/codex-runtime';
+} from '../../domain/agents/codex-runtime.js';
 
 type ConfigObject = { [key: string]: unknown };
 

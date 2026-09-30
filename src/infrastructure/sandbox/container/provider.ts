@@ -13,14 +13,14 @@
  * session-transfer}. No 'streaming-exec' yet (Phase 7/8 will add stream-json).
  */
 
-import { WorktreeManager } from '../../git/index';
+import { WorktreeManager } from '../../git/index.js';
 import { promises as fs } from 'fs';
-import type { SandboxProvider, Sandbox, SandboxOptions, SandboxProviderName, IsolationLevel, SandboxCapability, WorktreeInfo } from '../types';
-import { DockerContainerProvider } from './docker';
-import { PodmanContainerProvider } from './podman';
-import { ContainerSandbox } from './sandbox';
-import type { ContainerProvider } from './types';
-import { EnvVarAllowlist } from './env-allowlist';
+import type { SandboxProvider, Sandbox, SandboxOptions, SandboxProviderName, IsolationLevel, SandboxCapability, WorktreeInfo } from '../types.js';
+import { DockerContainerProvider } from './docker.js';
+import { PodmanContainerProvider } from './podman.js';
+import { ContainerSandbox } from './sandbox.js';
+import type { ContainerProvider } from './types.js';
+import { EnvVarAllowlist } from './env-allowlist.js';
 import { homedir } from 'os';
 import { join } from 'path';
 

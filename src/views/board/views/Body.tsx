@@ -1,15 +1,15 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Branch, Commit, Tag } from '../../../domain/tracker/types';
-import type { Task, Project } from '../../../types/board';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { getListViewportHeight } from '../layout';
-import type { View } from '../types';
-import { BoardView } from '../board';
-import { TaskCockpit } from '../task-cockpit';
-import { BacklogListView } from './BacklogListView';
-import { DetailScreen } from './DetailScreen';
-import { ProjectListView } from './ProjectListView';
+import type { Branch, Commit, Tag } from '../../../domain/tracker/types.js';
+import type { Task, Project } from '../../../types/board.js';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { getListViewportHeight } from '../layout.js';
+import type { View } from '../types.js';
+import { BoardView } from '../board/index.js';
+import { TaskCockpit } from '../task-cockpit/index.js';
+import { BacklogListView } from './BacklogListView.js';
+import { DetailScreen } from './DetailScreen.js';
+import { ProjectListView } from './ProjectListView.js';
 
 type DashboardItem = Task | BacklogViewModel | Project;
 

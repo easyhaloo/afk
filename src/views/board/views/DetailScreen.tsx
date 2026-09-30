@@ -1,9 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { getTaskBacklogId, type Task, type Project } from '../../../types/board';
-import type { Branch, Commit, Tag } from '../../../domain/tracker/types';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { parseMarkdownLine } from '../utils';
+import { getTaskBacklogId, type Task, type Project } from '../../../types/board.js';
+import type { Branch, Commit, Tag } from '../../../domain/tracker/types.js';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { parseMarkdownLine } from '../utils.js';
 
 interface Props {
   item: Task | BacklogViewModel | Project | undefined;

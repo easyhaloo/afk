@@ -12,7 +12,7 @@ import type {
   AgentExecutionHost,
   AgentStartOptions,
   ExecutionMode,
-} from '../../domain/agents/types';
+} from '../../domain/agents/types.js';
 export type {
   AgentExecution,
   AgentStartOptions,
@@ -21,7 +21,7 @@ export type {
   ExecutionResult,
   InterruptReason,
   ResumeOptions,
-} from '../../domain/agents/types';
+} from '../../domain/agents/types.js';
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
@@ -51,7 +51,7 @@ export interface SandboxOptions {
    * TmuxClient instance to use. For local provider this must be the same
    * instance the HandoffCoordinator uses, so session lifecycle is coherent.
    */
-  tmux?: import('../tmux/tmux').TmuxClient;
+  tmux?: import('../tmux/tmux.js').TmuxClient;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
   /** Project workspace that owns this worktree; used for AFK resource registry scoping. */

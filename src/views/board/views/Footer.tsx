@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useStdout } from 'ink';
-import { getShortPath, getGitBranch, formatPathLabel } from '../footer-helpers';
-import { truncateByVisualWidth, visualWidth } from '../utils';
-import type { View } from '../types';
+import { getShortPath, getGitBranch, formatPathLabel } from '../footer-helpers.js';
+import { truncateByVisualWidth, visualWidth } from '../utils.js';
+import type { View } from '../types.js';
 
 interface Props {
   view?: View;

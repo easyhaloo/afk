@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
-import { addLoopStartOptions } from './loop-options';
+import { addLoopStartOptions } from './loop-options.js';
 
 describe('loop options', () => {
   it('parses numeric and manifest selection options', () => {

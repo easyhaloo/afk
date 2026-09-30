@@ -6,9 +6,9 @@ import {
   probeCodexReadiness,
   resolveCodexRuntime,
   type CodexConfig,
-} from './codex-runtime';
-import type { AppServerTransport, JsonRpcMessage } from './codex-app-server/transport';
-import { createStdioAppServerTransport } from './codex-app-server/transport';
+} from './codex-runtime.js';
+import type { AppServerTransport, JsonRpcMessage } from './codex-app-server/transport.js';
+import { createStdioAppServerTransport } from './codex-app-server/transport.js';
 
 const config = (overrides: Partial<CodexConfig> = {}): CodexConfig => ({
   transport: 'auto',

@@ -9,18 +9,18 @@ export type BacklogChangeRequest = {
   url?: string;
 };
 import { randomUUID } from 'node:crypto';
-export type { BacklogClaim, ClaimLease } from './claim';
-export { FilesystemClaimLock } from './claim';
-export type { BacklogProviderCapabilities } from './initialization';
-export { BACKLOG_METADATA } from './initialization';
-export type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record';
-export { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags';
-export type { GlobalWorkItem, ProviderProjectRef, WorkItemId, WorkItemIdentityParts, WorkItemPlatform } from '../work-item/types';
-export { encodeWorkItemIdForPath, formatWorkItemId, parseWorkItemId, WORK_ITEM_PLATFORMS } from '../work-item/identity';
-import type { BacklogClaim } from './claim';
-import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record';
-import type { ProviderProjectRef, WorkItemId } from '../work-item/types';
-import { validateBusinessTag } from './tags';
+export type { BacklogClaim, ClaimLease } from './claim.js';
+export { FilesystemClaimLock } from './claim.js';
+export type { BacklogProviderCapabilities } from './initialization.js';
+export { BACKLOG_METADATA } from './initialization.js';
+export type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
+export { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
+export type { GlobalWorkItem, ProviderProjectRef, WorkItemId, WorkItemIdentityParts, WorkItemPlatform } from '../work-item/types.js';
+export { encodeWorkItemIdForPath, formatWorkItemId, parseWorkItemId, WORK_ITEM_PLATFORMS } from '../work-item/identity.js';
+import type { BacklogClaim } from './claim.js';
+import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-record.js';
+import type { ProviderProjectRef, WorkItemId } from '../work-item/types.js';
+import { validateBusinessTag } from './tags.js';
 
 export interface BacklogItem {
   id: string;
@@ -88,7 +88,7 @@ export interface QABacklogProvider extends BacklogManagementProvider {
 }
 
 export interface BacklogProvider {
-  readonly capabilities?: import('./initialization').BacklogProviderCapabilities;
+  readonly capabilities?: import('./initialization.js').BacklogProviderCapabilities;
   get(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
   create(input: BacklogCreateInput): Promise<BacklogItem>;

@@ -1,7 +1,7 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { logger } from '../io/index';
+import { logger } from '../io/index.js';
 
 export type MarkerStatus = 'crashed' | 'success';
 export type WorktreeStatus = 'active' | 'completed' | 'failed';
@@ -91,7 +91,7 @@ export class WorktreeManager {
   private async hasActiveSession(wt: Worktree): Promise<boolean> {
     if (!wt.sessionId) return false;
     const { spawn } = await import('child_process');
-    const { normalizeTmuxSessionName } = await import('../tmux/session-name');
+    const { normalizeTmuxSessionName } = await import('../tmux/session-name.js');
     return new Promise(resolve => {
       const proc = spawn('tmux', ['has-session', '-t', normalizeTmuxSessionName(wt.sessionId!)], { stdio: 'pipe' });
       proc.on('close', code => resolve(code === 0));
@@ -170,7 +170,7 @@ export class WorktreeManager {
       if (wt.status === 'active' && wt.sessionId) {
         try {
           const { spawn } = await import('child_process');
-          const { normalizeTmuxSessionName } = await import('../tmux/session-name');
+          const { normalizeTmuxSessionName } = await import('../tmux/session-name.js');
           const proc = spawn('tmux', ['has-session', '-t', normalizeTmuxSessionName(wt.sessionId)], { stdio: 'pipe' });
           await new Promise((resolve, reject) => { proc.on('close', (code) => { if (code !== 0) orphaned.push(wt); resolve(code); }); proc.on('error', (err) => { orphaned.push(wt); resolve(err); }); });
         } catch { orphaned.push(wt); }

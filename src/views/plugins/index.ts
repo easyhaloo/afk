@@ -1,4 +1,4 @@
-export { loadTuiViews } from './loader';
+export { loadTuiViews } from './loader.js';
 export type {
   BuiltinView,
   LoadedTuiView,
@@ -6,4 +6,4 @@ export type {
   TuiPluginContext,
   TuiPluginView,
   TuiViewId,
-} from './types';
+} from './types.js';

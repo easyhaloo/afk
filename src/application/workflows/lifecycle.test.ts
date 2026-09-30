@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LifecycleDispatcher, type LifecycleContext } from './lifecycle';
+import { LifecycleDispatcher, type LifecycleContext } from './lifecycle.js';
 
 const context: LifecycleContext = {
   iid: 1, repoRoot: '/repo', projectName: 'org/repo', worktreePath: '/repo/.worktrees/1',

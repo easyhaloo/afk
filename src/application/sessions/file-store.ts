@@ -21,7 +21,7 @@
 import { promises as fs } from 'fs';
 import { createHash } from 'crypto';
 import { join } from 'path';
-import type { SessionSnapshot } from '../../domain/agents/types';
+import type { SessionSnapshot } from '../../domain/agents/types.js';
 import type {
   SessionStore,
   SessionSaveOptions,
@@ -29,8 +29,8 @@ import type {
   SessionLoadOptions,
   SessionListOptions,
   SessionStoreEntry,
-} from './types';
-import { SessionCorruptError, SessionNotFoundError } from './types';
+} from './types.js';
+import { SessionCorruptError, SessionNotFoundError } from './types.js';
 
 const SESSIONS_DIR = '.afk/sessions';
 

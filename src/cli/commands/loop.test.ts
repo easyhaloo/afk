@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadLoopConfig } from '../../application/loop/loop-config';
-import { registerLoopCommands, resolveManagedLoopExecution } from './loop';
-import { registerRunCommands } from './run';
-import { registerQACommands } from './qa';
+import { loadLoopConfig } from '../../application/loop/loop-config.js';
+import { registerLoopCommands, resolveManagedLoopExecution } from './loop.js';
+import { registerRunCommands } from './run.js';
+import { registerQACommands } from './qa.js';
 import { Command } from 'commander';
 
 const CONFIG_DIR = path.join('/tmp', `afk-loop-config-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);

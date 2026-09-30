@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseExecutionManifest, readExecutionManifest } from './execution-manifest';
+import { parseExecutionManifest, readExecutionManifest } from './execution-manifest.js';
 
 const manifestPath = '/workspace/.afk/execution-manifest.json';
 const backlogId = 'github:acme/api#42';

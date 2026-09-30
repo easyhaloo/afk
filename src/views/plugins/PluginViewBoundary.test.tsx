@@ -1,8 +1,8 @@
 import React from 'react';
 import { Text, renderToString } from 'ink';
 import { describe, expect, it, vi } from 'vitest';
-import { PluginViewBoundary } from './PluginViewBoundary';
-import type { LoadedTuiView, TuiPluginContext } from './types';
+import { PluginViewBoundary } from './PluginViewBoundary.js';
+import type { LoadedTuiView, TuiPluginContext } from './types.js';
 
 const context: TuiPluginContext = {
   cwd: '/tmp/plugin-test',

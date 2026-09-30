@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildArchifyCommands, runArchifyAdapter } from './archify-adapter';
+import { buildArchifyCommands, runArchifyAdapter } from './archify-adapter.js';
 
 describe('Archify adapter', () => {
   it('constructs only the fixed validation and delivery commands', () => {

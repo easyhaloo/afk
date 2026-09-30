@@ -1,9 +1,9 @@
 /**
  * Sandbox provider implementations.
  */
-export { LocalSandbox, LocalAgentExecution, LocalSandboxProvider } from './local';
-export type { LocalWorktreeOptions } from './local';
-export { StreamingAgentExecution } from './streaming';
+export { LocalSandbox, LocalAgentExecution, LocalSandboxProvider } from './local.js';
+export type { LocalWorktreeOptions } from './local.js';
+export { StreamingAgentExecution } from './streaming.js';
 
 export {
   ContainerSandboxProvider,
@@ -13,4 +13,4 @@ export {
   ContainerSandbox,
   ContainerAgentExecution,
   EnvVarAllowlist,
-} from '../container';
+} from '../container/index.js';

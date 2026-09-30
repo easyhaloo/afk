@@ -6,7 +6,7 @@ vi.mock('child_process', () => ({
 
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
-import { JumpProjectResolver } from './project-resolver';
+import { JumpProjectResolver } from './project-resolver.js';
 
 /**
  * Mock spawn to return a controllable child process. The child emits stdout

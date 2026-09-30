@@ -14,8 +14,8 @@ import type {
   PrepareOptions,
   FinalizeOptions,
   CleanupOptions,
-} from './types';
-import { BranchStrategyError, RESERVED_BRANCH_PREFIXES } from './types';
+} from './types.js';
+import { BranchStrategyError, RESERVED_BRANCH_PREFIXES } from './types.js';
 import {
   defaultWorktreeBaseDir,
   ensureWorktreeBaseDir,
@@ -24,7 +24,7 @@ import {
   gitBranchDelete,
   checkNotShared,
   releasePath,
-} from './base';
+} from './base.js';
 
 export class NamedBranchStrategy implements BranchStrategy {
   readonly kind = 'named' as const;

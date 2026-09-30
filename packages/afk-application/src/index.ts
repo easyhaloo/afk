@@ -1,3 +1,4 @@
+export * from './backlog-mapping.js';
 export * from './execution.js';
 export * from './execution-query.js';
 export * from './inventory.js';

@@ -4,7 +4,7 @@ import {
   getExecutionModeIcon,
   getStatusColor,
   getStatusIcon,
-} from './display';
+} from './display.js';
 
 describe('global status display', () => {
   it('maps backlog lifecycle states to compact icons and semantic colors', () => {

@@ -3,9 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // vi.mock factories are hoisted to the top of the file by Vitest, before any
 // variable declarations. vi.hoisted gives us a place to create values the
 // factory can reference.
-import { ProjectResolverModule } from './project-resolver';
-import type { InitContext, LifecycleContext } from '../workflows/lifecycle';
-import type { ProjectResolver } from './project-resolver';
+import { ProjectResolverModule } from './project-resolver.js';
+import type { InitContext, LifecycleContext } from '../workflows/lifecycle.js';
+import type { ProjectResolver } from './project-resolver.js';
 
 function makeResolver(over: Partial<ProjectResolver> = {}): ProjectResolver {
   return {

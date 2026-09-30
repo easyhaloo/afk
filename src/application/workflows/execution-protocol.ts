@@ -1,5 +1,5 @@
-import type { ExecutionMode } from '../../domain/agents/types';
-export { extractGoalComplete } from '../../shared/goal-complete';
+import type { ExecutionMode } from '../../domain/agents/types.js';
+export { extractGoalComplete } from '../../shared/goal-complete.js';
 
 type JsonObject = Record<string, string | number | boolean | null | object>;
 

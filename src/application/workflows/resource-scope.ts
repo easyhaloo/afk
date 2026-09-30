@@ -1,6 +1,6 @@
 import { simpleGit, type SimpleGit } from 'simple-git';
-import type { BranchHandle, BranchStrategy, BranchStrategyConfig } from '../../domain/branches/types';
-import type { Sandbox, AgentExecution } from '../../infrastructure/sandbox/types';
+import type { BranchHandle, BranchStrategy, BranchStrategyConfig } from '../../domain/branches/types.js';
+import type { Sandbox, AgentExecution } from '../../infrastructure/sandbox/types.js';
 
 export type RunOutcomeStatus = 'success' | 'failed' | 'timeout' | 'handoff' | 'crashed';
 

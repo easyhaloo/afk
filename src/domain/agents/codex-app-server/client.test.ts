@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { AppServerClient } from './client';
-import type { AppServerTransport, JsonRpcMessage } from './transport';
+import { AppServerClient } from './client.js';
+import type { AppServerTransport, JsonRpcMessage } from './transport.js';
 
 class MemoryTransport implements AppServerTransport {
   readonly endpointKind = 'stdio' as const;

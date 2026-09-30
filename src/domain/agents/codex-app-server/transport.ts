@@ -3,7 +3,7 @@ import { createConnection } from 'node:net';
 import WebSocket from 'ws';
 
 type AppServerMessage = { [key: string]: unknown };
-import type { CodexRuntimeSelection } from '../types';
+import type { CodexRuntimeSelection } from '../types.js';
 
 export type JsonRpcId = string | number | null;
 

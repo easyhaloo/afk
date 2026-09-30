@@ -1,24 +1,24 @@
 import { execFileSync } from 'node:child_process';
 import { Octokit } from '@octokit/rest';
-import { GitHubClient } from '../infrastructure/github/client';
-import { GitLabClient } from '../infrastructure/gitlab';
+import { GitHubClient } from '../github/client.js';
+import { GitLabClient } from '../gitlab/index.js';
 import {
   resolveGitHubRepository,
   resolveGitLabProject,
   resolveTrackerProject,
-} from '../infrastructure/tracker/resolver';
-import { getGlabToken, listGlabTokens, type GlabTokenConfig } from '../infrastructure/gitlab/glab-config';
-import type { TrackerProvider } from '../domain/tracker/types';
-import { createManagementProviderBundle, createProviderBundle } from './providers';
-import type { ManagementProviderBundle, ProviderBundle, ProviderBundleOptions } from './providers';
+} from '../tracker/resolver.js';
+import { getGlabToken, listGlabTokens, type GlabTokenConfig } from '../gitlab/glab-config.js';
+import type { TrackerProvider } from '../../domain/tracker/types.js';
+import { createManagementProviderBundle, createProviderBundle } from './providers.js';
+import type { ManagementProviderBundle, ProviderBundle, ProviderBundleOptions } from './providers.js';
 import {
   GitHubProviderCatalog,
   GitLabProviderCatalog,
   type GitHubCatalogIssue,
   type GitHubCatalogProject,
-} from './work-items/catalogs';
-import type { ProviderCatalog } from './work-items/types';
-import { normalizeGitLabHost } from '../shared/gitlab-project';
+} from './catalogs.js';
+import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
+import { normalizeGitLabHost } from '../../shared/gitlab-project.js';
 
 function readGhToken(): string | null {
   try {

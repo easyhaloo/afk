@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PlanExecutor } from './plan-executor';
-import type { WorkflowTemplate } from '../../domain/templates/types';
+import { PlanExecutor } from './plan-executor.js';
+import type { WorkflowTemplate } from '../../domain/templates/types.js';
 
 describe('PlanExecutor', () => {
   it('runs a recovery step gated on a failed dependency', async () => {

@@ -1,9 +1,9 @@
 import { Command, InvalidArgumentError } from 'commander';
 import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
-import { getCurrentTimestamp, type Signal } from '../../domain/schemas';
-import { writeSignal, readSignal, clearSignal, waitForSignal } from '../../infrastructure/io';
-import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils';
+import { getCurrentTimestamp, type Signal } from '../../domain/schemas.js';
+import { writeSignal, readSignal, clearSignal, waitForSignal } from '../../infrastructure/io/index.js';
+import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils.js';
 
 function parseNonNegativeInt(value: string, _previous?: number): number {
   const parsed = Number(value);

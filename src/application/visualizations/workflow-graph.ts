@@ -1,5 +1,5 @@
 import { createReceipt, layoutWorkflow, projectWorkflow, toArchifyWorkflow, validateSnapshot, type ArchifyWorkflowDocument, type GraphReceipt, type GraphSnapshot } from '@afk/workflow-graph';
-import { TemplateLoader, type LoadedTemplate } from '../../domain/templates/loader';
+import { TemplateLoader, type LoadedTemplate } from '../../domain/templates/loader.js';
 
 export type WorkflowGraphFormat = 'json' | 'archify-json';
 

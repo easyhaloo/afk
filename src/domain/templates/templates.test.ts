@@ -3,9 +3,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { promises as afs } from 'fs';
-import { TemplateLoader } from './loader';
-import { resolveExecutionPlan, hasCycle } from './resolver';
-import { evaluateWhen } from './when-evaluator';
+import { TemplateLoader } from './loader.js';
+import { resolveExecutionPlan, hasCycle } from './resolver.js';
+import { evaluateWhen } from './when-evaluator.js';
 import {
   registerTemplate,
   getTemplate,
@@ -13,9 +13,9 @@ import {
   listTemplates,
   planFor,
   _resetTemplateRegistry,
-} from './registry';
-import { builtinTemplates } from './builtin';
-import type { WorkflowTemplate, StepResult } from './types';
+} from './registry.js';
+import { builtinTemplates } from './builtin.js';
+import type { WorkflowTemplate, StepResult } from './types.js';
 
 describe('Template schema — validation', () => {
   const loader = new TemplateLoader();

@@ -2,10 +2,10 @@
  * State Context - provides app state and dispatch
  */
 import React, { createContext, useContext, useReducer, useCallback } from 'react';
-import type { AppState, ViewState, ViewType, ViewContext } from './initialState';
-import { initialState } from './initialState';
-import type { AppAction } from '../actions/types';
-import type { BuiltinView, TuiViewId } from '../../plugins/types';
+import type { AppState, ViewState, ViewType, ViewContext } from './initialState.js';
+import { initialState } from './initialState.js';
+import type { AppAction } from '../actions/types.js';
+import type { BuiltinView, TuiViewId } from '../../plugins/types.js';
 
 const BUILTIN_VIEWS = new Set<BuiltinView>(['tasks', 'backlogs', 'projects', 'board']);
 

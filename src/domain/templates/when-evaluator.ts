@@ -9,7 +9,7 @@
  * not run yet (dependency resolution handles ordering separately).
  */
 
-import type { StepResult, WhenClause } from './types';
+import type { StepResult, WhenClause } from './types.js';
 
 export function evaluateWhen(clause: WhenClause | undefined, results: Record<string, StepResult>): boolean {
   if (!clause) return true;

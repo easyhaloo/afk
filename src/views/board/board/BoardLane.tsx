@@ -1,10 +1,10 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { backlogStateColor } from '../views/BacklogRow';
-import { BoardCard } from './BoardCard';
-import { getBoardColumnIcon } from './model';
-import type { BoardColumnKind } from './model';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { backlogStateColor } from '../views/BacklogRow.js';
+import { BoardCard } from './BoardCard.js';
+import { getBoardColumnIcon } from './model.js';
+import type { BoardColumnKind } from './model.js';
 
 export interface BoardLaneProps {
   label: string;

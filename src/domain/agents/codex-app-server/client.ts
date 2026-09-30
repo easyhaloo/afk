@@ -1,4 +1,4 @@
-import type { AppServerTransport, JsonRpcId, JsonRpcMessage } from './transport';
+import type { AppServerTransport, JsonRpcId, JsonRpcMessage } from './transport.js';
 
 interface PendingRequest {
   resolve(value: unknown): void;

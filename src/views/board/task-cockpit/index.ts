@@ -1,2 +1,2 @@
-export { TaskCockpit } from './TaskCockpit';
-export { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, getTaskSelectionIndex, truncateTaskText } from './model';
+export { TaskCockpit } from './TaskCockpit.js';
+export { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, getTaskSelectionIndex, truncateTaskText } from './model.js';

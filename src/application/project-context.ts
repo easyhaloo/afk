@@ -1,5 +1,5 @@
 import { resolve as resolvePath } from 'path';
-import { JumpProjectResolver, type ProjectResolver } from './project-resolver';
+import { JumpProjectResolver, type ProjectResolver } from './project-resolver.js';
 
 /** Immutable repository identity carried through a workflow run. */
 export interface ProjectContext {

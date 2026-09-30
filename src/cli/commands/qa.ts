@@ -1,10 +1,10 @@
 import { Command } from 'commander';
-import { createManagementProviders } from '../../application/tracker-provider-factory';
-import { QARunner } from '../../application/modules/qa-runner';
-import { handleCommandError, success, warning, detail } from '../cli-utils';
-import { getWorkflowConfig } from '../../infrastructure/config/manager';
-import { createAgentProvider, prepareAgentRuntime, resolveAgentProviderName } from '../../domain/agents/index';
-import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options';
+import { createManagementProviders } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { QARunner } from '../../application/modules/qa-runner.js';
+import { handleCommandError, success, warning, detail } from '../cli-utils.js';
+import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
+import { createAgentProvider, prepareAgentRuntime, resolveAgentProviderName } from '../../domain/agents/index.js';
+import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
 
 /**
  * Run QA for one item already awaiting verification. Loop invokes the same

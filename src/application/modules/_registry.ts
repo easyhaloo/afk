@@ -10,14 +10,14 @@
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { load } from 'js-yaml';
-import type { LifecycleModule, ModuleFactory } from '../workflows/lifecycle';
+import type { LifecycleModule, ModuleFactory } from '../workflows/lifecycle.js';
 
 // Module registry: maps module name → factory function.
 // Module files are NOT imported at module load time — they are dynamically
 // imported on first access via the `ensureModule()` lazy loader.
 const MODULE_LOADERS: Record<string, () => Promise<ModuleFactory>> = {
-  isolate: () => import('./isolate').then(m => m.default),
-  'project-resolver': () => import('./project-resolver').then(m => m.default),
+  isolate: () => import('./isolate.js').then(m => m.default),
+  'project-resolver': () => import('./project-resolver.js').then(m => m.default),
 };
 const registeredModules = new Map<string, ModuleFactory>();
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { KeyboardDispatcher, ViewRegistry } from './index';
-import type { Notification, View } from './index';
+import { KeyboardDispatcher, ViewRegistry } from './index.js';
+import type { Notification, View } from './index.js';
 
 function makeView(id: string, priority: number): View {
   return { id, name: id, shortcut: id[0], priority, render: () => null };

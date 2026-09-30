@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectGlobalWorkItemInventory, filterGlobalWorkItemInventory } from './inventory';
-import type { ProviderCatalog, ProviderIssue } from './types';
+import { collectGlobalWorkItemInventory, filterGlobalWorkItemInventory } from './inventory.js';
+import type { ProviderCatalog, ProviderIssue } from '../../domain/work-item/provider-types.js';
 
 function catalog(
   platform: 'github' | 'gitlab',

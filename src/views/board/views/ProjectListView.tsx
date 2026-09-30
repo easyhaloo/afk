@@ -1,8 +1,8 @@
 import React from 'react';
-import { Project } from '../../../types/board';
-import { ListView, normalizeRowText } from './ListView';
-import { truncate, truncateByVisualWidth } from '../utils';
-import { OperationalRow } from './OperationalRow';
+import { Project } from '../../../types/board.js';
+import { ListView, normalizeRowText } from './ListView.js';
+import { truncate, truncateByVisualWidth } from '../utils.js';
+import { OperationalRow } from './OperationalRow.js';
 
 interface Props {
   projects: Project[];

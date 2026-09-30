@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { visualWidth, truncateByVisualWidth, truncate } from './utils';
+import { visualWidth, truncateByVisualWidth, truncate } from './utils.js';
 
 describe('visualWidth', () => {
   it('returns 1 per ASCII char', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createGlobalWorkItemCatalogs } from './tracker-provider-factory';
-import type { ProviderCatalog } from './work-items/types';
+import { createGlobalWorkItemCatalogs } from './tracker-provider-factory.js';
+import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
 
 describe('global provider catalog factory', () => {
   it('creates a GitHub catalog from credentials without consulting cwd or git remotes', () => {

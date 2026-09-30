@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { resolveProjectContext } from './project-context';
+import { resolveProjectContext } from './project-context.js';
 
 describe('resolveProjectContext', () => {
   it('resolves a project without changing process cwd', async () => {

@@ -20,7 +20,7 @@ import type {
   PrepareOptions,
   FinalizeOptions,
   CleanupOptions,
-} from './types';
+} from './types.js';
 import {
   defaultWorktreeBaseDir,
   ensureWorktreeBaseDir,
@@ -29,7 +29,7 @@ import {
   gitBranchDelete,
   checkNotShared,
   releasePath,
-} from './base';
+} from './base.js';
 
 export class MergeToHeadBranchStrategy implements BranchStrategy {
   readonly kind = 'merge-to-head' as const;

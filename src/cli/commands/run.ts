@@ -1,9 +1,9 @@
 import { Command, InvalidArgumentError } from 'commander';
-import { handleCommandError, success, warning, detail } from '../cli-utils';
-import { runWorkflowCli } from '../../application/workflows/run-cmd';
-import { getWorkflowConfig } from '../../infrastructure/config/manager';
-import { resolveAgentProviderName } from '../../domain/agents/index';
-import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options';
+import { handleCommandError, success, warning, detail } from '../cli-utils.js';
+import { runWorkflowCli } from '../../application/workflows/run-cmd.js';
+import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
+import { resolveAgentProviderName } from '../../domain/agents/index.js';
+import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
 
 function positiveInt(value: string): number {
   const parsed = Number(value);

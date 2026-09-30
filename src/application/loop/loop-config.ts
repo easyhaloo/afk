@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from '../../infrastructure/io/index';
+import { logger } from '../../infrastructure/io/index.js';
 
 export interface LoopConfig {
   moduleTriggers: Record<string, string[]>;

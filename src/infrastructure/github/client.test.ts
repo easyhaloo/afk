@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GitHubClient } from './client';
+import { GitHubClient } from './client.js';
 
 describe('GitHubClient', () => {
   it('reads issue-side linked PRs across repositories and pages', async () => {

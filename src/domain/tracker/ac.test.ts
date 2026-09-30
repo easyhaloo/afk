@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildACLabel, extractAC, extractACFromLabels, parseACLegacy } from './ac';
+import { buildACLabel, extractAC, extractACFromLabels, parseACLegacy } from './ac.js';
 
 describe('tracker acceptance criteria', () => {
   it('prioritizes ordered label criteria over legacy description criteria', () => {

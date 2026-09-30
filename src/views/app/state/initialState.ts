@@ -1,5 +1,5 @@
-import type { Project } from '../../../domain/tracker/types';
-import type { TuiViewId } from '../../plugins/types';
+import type { Project } from '../../../domain/tracker/types.js';
+import type { TuiViewId } from '../../plugins/types.js';
 
 export type ViewType = 'tasks' | 'backlogs' | 'projects' | 'board' | TuiViewId;
 export type DetailMode = 'list' | 'detail';

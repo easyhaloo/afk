@@ -4,8 +4,8 @@
  * Startup sequence mirrors the real initialization:
  *   config → detect platform → connect tracker → load data → ready
  */
-import { LoadingPhaseRegistry } from './loading';
-import { fetchTasks } from '../data/fetcher';
+import { LoadingPhaseRegistry } from './loading.js';
+import { fetchTasks } from '../data/fetcher.js';
 
 export function registerAllLoadingPhases(): void {
   const registry = LoadingPhaseRegistry.getInstance();
@@ -15,7 +15,7 @@ export function registerAllLoadingPhases(): void {
     label: 'Loading configuration...',
     icon: '⚙',
     fetch: async (setDetail) => {
-      const { getGitLabConfig } = await import('../../../infrastructure/config/manager');
+      const { getGitLabConfig } = await import('../../../infrastructure/config/manager.js');
       try {
         const config = getGitLabConfig();
         setDetail('config', `${config.url || 'default'}`);
@@ -32,7 +32,7 @@ export function registerAllLoadingPhases(): void {
     label: 'Detecting platform...',
     icon: '🔍',
     fetch: async (setDetail) => {
-      const { resolvePlatform, resolveTrackerProject } = await import('../../../infrastructure/tracker/resolver');
+      const { resolvePlatform, resolveTrackerProject } = await import('../../../infrastructure/tracker/resolver.js');
       const { platform, projectId } = await resolveTrackerProject();
       setDetail('detect', `${platform}: ${projectId}`);
       return `${platform}: ${projectId}`;
@@ -44,7 +44,7 @@ export function registerAllLoadingPhases(): void {
     label: 'Connecting to tracker...',
     icon: '🔗',
     fetch: async (setDetail) => {
-      const { createTracker } = await import('../../../application/tracker-provider-factory');
+      const { createTracker } = await import('../../../infrastructure/provider/tracker-provider-factory.js');
       const tracker = await createTracker();
       const projects = await tracker.listProjects({ perPage: 1 });
       setDetail('connect', tracker.platform);

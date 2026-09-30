@@ -1,4 +1,4 @@
-import type { CompletionSpec, CommandSpec, OptionSpec } from './spec';
+import type { CompletionSpec, CommandSpec, OptionSpec } from './spec.js';
 
 /** Wrap a string in single quotes, escaping embedded single quotes. */
 function quoteShell(s: string): string {

@@ -2,7 +2,7 @@ import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { BacklogItem } from './index';
+import type { BacklogItem } from './index.js';
 
 export interface BacklogClaim {
   item: BacklogItem;

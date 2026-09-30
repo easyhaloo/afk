@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ClaudeCodeProvider } from './claude-code';
-import { CodexProvider } from './codex';
-import { CursorProvider } from './cursor';
-import { PiProvider } from './pi';
-import { OpenCodeProvider } from './opencode';
-import { CopilotProvider } from './copilot';
+import { ClaudeCodeProvider } from './claude-code.js';
+import { CodexProvider } from './codex.js';
+import { CursorProvider } from './cursor.js';
+import { PiProvider } from './pi.js';
+import { OpenCodeProvider } from './opencode.js';
+import { CopilotProvider } from './copilot.js';
 import {
   registerAgentProvider,
   requireAgentProvider,
@@ -13,10 +13,10 @@ import {
   guardedRestoreSession,
   guardedCaptureSession,
   _resetAgentRegistry,
-} from './registry';
-import { createAgentProvider, ensureBuiltinAgentProviders } from './index';
-import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types';
-import type { AgentProvider } from './types';
+} from './registry.js';
+import { createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
+import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types.js';
+import type { AgentProvider } from './types.js';
 
 /** Build minimal AgentCommandOptions for testing. */
 function opts(over: Partial<{ worktreePath: string; sessionId: string; goal: string; interactive: boolean }> = {}) {

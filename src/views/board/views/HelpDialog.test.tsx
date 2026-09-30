@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import { HelpDialog } from './HelpDialog';
+import { HelpDialog } from './HelpDialog.js';
 
 describe('HelpDialog', () => {
   it('documents task runtime actions without provider open', () => {

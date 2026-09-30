@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { BacklogClaim, BacklogItem } from './index';
-import type { ClaimLease, ExpiredClaim, FilesystemClaimRequest } from './claim';
+import type { BacklogClaim, BacklogItem } from './index.js';
+import type { ClaimLease, ExpiredClaim, FilesystemClaimRequest } from './claim.js';
 
 export interface AtomicClaimPredicate {
   state: 'ready';

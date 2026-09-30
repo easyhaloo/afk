@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { KeyboardDispatcher } from './index';
-import type { KeyboardEvent } from './types';
+import { KeyboardDispatcher } from './index.js';
+import type { KeyboardEvent } from './types.js';
 
 describe('KeyboardDispatcher', () => {
   let dispatcher: KeyboardDispatcher;

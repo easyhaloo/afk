@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Task } from '../../../types/board';
-import { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, getTaskSelectionIndex, truncateTaskText } from './model';
+import type { Task } from '../../../types/board.js';
+import { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, getTaskSelectionIndex, truncateTaskText } from './model.js';
 
 function task(overrides: Partial<Task> = {}): Task {
   return {

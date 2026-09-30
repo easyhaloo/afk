@@ -16,11 +16,11 @@
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { WorktreeManager } from '../../git/index';
-import { TmuxClient } from '../../tmux/tmux';
-import { clearSignal, getTokenUsage, readSignal } from '../../io/index';
-import { StreamingAgentExecution } from './streaming';
-import { normalizeTmuxSessionName } from '../../tmux/session-name';
+import { WorktreeManager } from '../../git/index.js';
+import { TmuxClient } from '../../tmux/tmux.js';
+import { clearSignal, getTokenUsage, readSignal } from '../../io/index.js';
+import { StreamingAgentExecution } from './streaming.js';
+import { normalizeTmuxSessionName } from '../../tmux/session-name.js';
 import {
   type SandboxProvider,
   type Sandbox,
@@ -36,9 +36,9 @@ import {
   type SandboxProviderName,
   type IsolationLevel,
   type WorktreeInfo,
-} from '../types';
-import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types';
-import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry';
+} from '../types.js';
+import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
+import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',

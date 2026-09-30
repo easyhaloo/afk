@@ -19,8 +19,8 @@ import type {
   AgentCommandOptions,
   AgentEvent,
   TokenUsage,
-} from './types';
-import { ProcessAgentProvider } from './process-provider';
+} from './types.js';
+import { ProcessAgentProvider } from './process-provider.js';
 
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'streaming',

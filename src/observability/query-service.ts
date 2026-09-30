@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { loadWorkItemExecution, type ExecutionQueryPorts, type WorkItemExecutionSummary } from '@afk/application';
 import type { EventStorePort } from '@afk/core';
-import { projectWorkItemExecution } from './work-item-execution-projection';
+import { projectWorkItemExecution } from './work-item-execution-projection.js';
 
 interface IndexedExecution {
   signature: string;

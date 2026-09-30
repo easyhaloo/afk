@@ -1,4 +1,4 @@
-import type { View, RegistryAPI } from './types';
+import type { View, RegistryAPI } from './types.js';
 
 /**
  * ViewRegistry — manages View registration and active view state.

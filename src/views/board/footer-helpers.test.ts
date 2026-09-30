@@ -6,7 +6,7 @@ vi.mock('simple-git', () => ({
   default: () => ({ branchLocal: mockBranchLocal }),
 }));
 
-import { formatPathLabel, getGitBranch, getShortPath } from './footer-helpers';
+import { formatPathLabel, getGitBranch, getShortPath } from './footer-helpers.js';
 
 describe('formatPathLabel (AC1: ~/path (branch) format)', () => {
   it('combines path and branch into ~/path (branch) format', () => {

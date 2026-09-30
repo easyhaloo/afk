@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ApplicationFacade } from '../application/facade';
-import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store';
-import { registerObserveCommands } from './observe';
+import type { ApplicationFacade } from '../application/facade.js';
+import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { registerObserveCommands } from './observe.js';
 
 const roots: string[] = [];
 afterEach(async () => {

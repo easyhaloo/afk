@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../../../domain/tracker/types';
-import { mergeProjects, projectDetailKey, toRuntimeTask } from './fetcher';
-import type { ActiveTaskRuntimeRecord } from '../../../application/runtime/task-runtime';
+import type { Project } from '../../../domain/tracker/types.js';
+import { mergeProjects, projectDetailKey, toRuntimeTask } from './fetcher.js';
+import type { ActiveTaskRuntimeRecord } from '../../../application/runtime/task-runtime.js';
 
 function project(id: number, platform: Project['platform'], path: string): Project {
   return {

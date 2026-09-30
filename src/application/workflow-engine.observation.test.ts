@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ProviderBundle } from './providers';
-import { WorkflowRunner } from './workflow-engine';
-import type { RunObserver } from '../observability/run-observer';
-import { RunObserver as DurableRunObserver } from '../observability/run-observer';
-import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store';
+import type { ProviderBundle } from '../infrastructure/provider/providers.js';
+import { WorkflowRunner } from './workflow-engine.js';
+import type { RunObserver } from '../observability/run-observer.js';
+import { RunObserver as DurableRunObserver } from '../observability/run-observer.js';
+import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';

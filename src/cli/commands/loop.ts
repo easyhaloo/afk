@@ -3,22 +3,22 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { createWorkflowProviders } from '../../application/tracker-provider-factory';
-import { LoopRunner } from '../../application/modules/loop-runner';
-import { getSchedulerConfig } from '../../infrastructure/config/manager';
-import { parseWorkItemId } from '../../domain/backlog';
-import { loadLoopConfig } from '../../application/loop/loop-config';
-import { logger, redirectStdioToLog, resolveLogPath } from '../../infrastructure/io';
-import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils';
-import { spawnDetached, waitForProcessPid } from '../../infrastructure/process/daemon';
+import { createWorkflowProviders } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { LoopRunner } from '../../application/modules/loop-runner.js';
+import { getSchedulerConfig } from '../../infrastructure/config/manager.js';
+import { parseWorkItemId } from '../../domain/backlog/index.js';
+import { loadLoopConfig } from '../../application/loop/loop-config.js';
+import { logger, redirectStdioToLog, resolveLogPath } from '../../infrastructure/io/index.js';
+import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils.js';
+import { spawnDetached, waitForProcessPid } from '../../infrastructure/process/daemon.js';
 import {
   LOOP_PID_FILE,
   readPid,
   removePidFile,
   ensurePidDirectory,
   isProcessAlive,
-} from '../../infrastructure/process/pid-file';
-import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options';
+} from '../../infrastructure/process/pid-file.js';
+import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options.js';
 
 const AFK_HOME = path.join(os.homedir(), '.afk');
 const STATUS_FILE = path.join(AFK_HOME, 'loop-status.json');

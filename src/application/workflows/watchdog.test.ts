@@ -5,7 +5,7 @@ vi.mock('child_process', () => ({
 }));
 
 import { spawn } from 'child_process';
-import { Watchdog } from './watchdog';
+import { Watchdog } from './watchdog.js';
 
 describe('Watchdog', () => {
   beforeEach(() => {

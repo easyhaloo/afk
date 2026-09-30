@@ -1,8 +1,8 @@
 import type {
   BacklogItem,
   BacklogListOptions,
-} from '../../../domain/backlog';
-import type { Task } from '../../../types/board';
+} from '../../../domain/backlog/index.js';
+import type { Task } from '../../../types/board.js';
 
 /**
  * Capability boundary exposed to the TUI. Keep this structural type narrow so

@@ -3,7 +3,7 @@
  *
  * Each data loader registers its phases, and the hook consumes them all.
  */
-import type { LoadingPhase } from '../hooks/useLoadingPhase';
+import type { LoadingPhase } from '../hooks/useLoadingPhase.js';
 
 export interface LoadingPhaseDescriptor {
   key: string;

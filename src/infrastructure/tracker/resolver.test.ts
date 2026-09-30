@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { simpleGit } from 'simple-git';
-import { resolveGitHubRepository, resolveGitLabProject, resolvePlatform, resolveTrackerProject } from './resolver';
+import { resolveGitHubRepository, resolveGitLabProject, resolvePlatform, resolveTrackerProject } from './resolver.js';
 
 vi.mock('simple-git', () => ({ simpleGit: vi.fn() }));
 

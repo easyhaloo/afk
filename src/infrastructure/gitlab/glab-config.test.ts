@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listGlabTokens } from './glab-config';
+import { listGlabTokens } from './glab-config.js';
 
 describe('glab token catalog', () => {
   it('returns every configured host with a token in stable order', () => {

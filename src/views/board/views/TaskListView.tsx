@@ -1,8 +1,8 @@
 import React from 'react';
-import { getTaskBacklogId, Task } from '../../../types/board';
-import { ListView, normalizeRowText } from './ListView';
-import { formatRelativeTime } from '../utils';
-import { OperationalRow } from './OperationalRow';
+import { getTaskBacklogId, Task } from '../../../types/board.js';
+import { ListView, normalizeRowText } from './ListView.js';
+import { formatRelativeTime } from '../utils.js';
+import { OperationalRow } from './OperationalRow.js';
 
 interface Props {
   tasks: Task[];

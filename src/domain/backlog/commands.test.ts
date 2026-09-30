@@ -4,9 +4,9 @@ import {
   createBacklog,
   interruptBacklog,
   retryBacklog,
-} from './commands';
-import type { BacklogItem, QABacklogProvider } from './index';
-import { parseReworkRecord, renderReworkRecord, type ReworkRecord } from './rework-record';
+} from './commands.js';
+import type { BacklogItem, QABacklogProvider } from './index.js';
+import { parseReworkRecord, renderReworkRecord, type ReworkRecord } from './rework-record.js';
 
 describe('backlog commands', () => {
   it('creates a backlog item and returns its canonical URL', async () => {

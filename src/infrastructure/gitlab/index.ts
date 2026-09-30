@@ -20,10 +20,10 @@ import type {
   Commit,
   TrackerIssueComment,
   LabelDelta,
-} from '../../domain/tracker/types';
-import { extractAC } from '../../domain/tracker/ac';
-import { parseWorkItemId } from '../../domain/work-item/identity';
-import { normalizeGitLabHost, resolveGitLabProjectKey } from '../../shared/gitlab-project';
+} from '../../domain/tracker/types.js';
+import { extractAC } from '../../domain/tracker/ac.js';
+import { parseWorkItemId } from '../../domain/work-item/identity.js';
+import { normalizeGitLabHost, resolveGitLabProjectKey } from '../../shared/gitlab-project.js';
 
 export interface GitLabConfig {
   url: string;

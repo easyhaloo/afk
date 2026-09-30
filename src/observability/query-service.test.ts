@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ObservationContext } from '@afk/core';
 import { explainExecutionRun, listExecutionRuns, loadRunTimeline, loadWorkItemExecution, queryWorkItemExecutions, replayRun } from '@afk/application';
-import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store';
-import { createExecutionQueryPorts } from './query-service';
+import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
+import { createExecutionQueryPorts } from './query-service.js';
 
 const roots: string[] = [];
 const context: ObservationContext = {

@@ -11,11 +11,11 @@
  * effects on the caller's shared `budget` object — this mirrors the original
  * behavior and is the only reasonable interface given the loop's local bindings.
  */
-import type { AgentProvider, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../../domain/agents/types';
-import type { Sandbox, AgentExecution, ExecutionResult } from '../../infrastructure/sandbox/types';
-import type { SessionStoreChain } from '../sessions/types';
-import { logger } from '../../infrastructure/io/index';
-import type { BudgetManager } from './budget';
+import type { AgentProvider, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../../domain/agents/types.js';
+import type { Sandbox, AgentExecution, ExecutionResult } from '../../infrastructure/sandbox/types.js';
+import type { SessionStoreChain } from '../sessions/types.js';
+import { logger } from '../../infrastructure/io/index.js';
+import type { BudgetManager } from './budget.js';
 
 export interface ResumeContext {
   iid: number;

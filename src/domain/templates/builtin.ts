@@ -11,7 +11,7 @@
  * template's prompt with the iid / branch / worktree at execution time.
  */
 
-import type { WorkflowTemplate } from './types';
+import type { WorkflowTemplate } from './types.js';
 
 export function builtinTemplates(): WorkflowTemplate[] {
   return [

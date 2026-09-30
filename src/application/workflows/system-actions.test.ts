@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { SystemActionExecutor } from './system-actions';
+import { SystemActionExecutor } from './system-actions.js';
 
 describe('SystemActionExecutor', () => {
   it('runs only declared system actions', async () => {

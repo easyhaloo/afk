@@ -11,8 +11,8 @@ import {
   type MultiRepositoryPreparerDependencies,
   type RepositoryGitSnapshot,
   type WorkspaceLockDependencies,
-} from './multi-repository-preparer';
-import type { WorkflowRunRepository } from './run-request';
+} from './multi-repository-preparer.js';
+import type { WorkflowRunRepository } from './run-request.js';
 
 function repository(overrides: Partial<WorkflowRunRepository> = {}): WorkflowRunRepository {
   return {

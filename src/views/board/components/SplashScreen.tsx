@@ -7,7 +7,7 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useAnimation } from 'ink';
-import type { LoadingPhase } from '../hooks/useLoadingPhase';
+import type { LoadingPhase } from '../hooks/useLoadingPhase.js';
 
 interface SplashScreenProps {
   phases: LoadingPhase[];

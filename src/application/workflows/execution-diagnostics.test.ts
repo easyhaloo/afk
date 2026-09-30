@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatExecutionFailure } from '../workflow-engine';
+import { formatExecutionFailure } from '../workflow-engine.js';
 
 describe('execution diagnostics', () => {
   it('includes the execution status and provider details in failure messages', () => {

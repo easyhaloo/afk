@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { basename } from 'path';
-import { IsolateManager } from '../../application/isolate';
-import { handleCommandError, success, info, fail } from '../cli-utils';
+import { IsolateManager } from '../../application/isolate.js';
+import { handleCommandError, success, info, fail } from '../cli-utils.js';
 
 function createIsolate(cwd?: string): IsolateManager {
   return new IsolateManager(cwd ?? process.cwd());

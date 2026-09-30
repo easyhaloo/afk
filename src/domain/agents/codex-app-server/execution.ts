@@ -10,11 +10,11 @@ import type {
   InterruptReason,
   ResumeOptions,
   SessionSnapshot,
-} from '../types';
-import { extractGoalComplete, type GoalCompletePayload } from '../../../shared/goal-complete';
-import { AppServerClient } from './client';
-import { normalizeAppServerNotification } from './events';
-import { createAppServerTransport, type AppServerTransport } from './transport';
+} from '../types.js';
+import { extractGoalComplete, type GoalCompletePayload } from '../../../shared/goal-complete.js';
+import { AppServerClient } from './client.js';
+import { normalizeAppServerNotification } from './events.js';
+import { createAppServerTransport, type AppServerTransport } from './transport.js';
 
 type TransportFactory = (
   runtime: CodexRuntimeSelection,

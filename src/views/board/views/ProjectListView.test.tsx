@@ -1,8 +1,8 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../../../types/board';
-import { ProjectListView } from './ProjectListView';
+import type { Project } from '../../../types/board.js';
+import { ProjectListView } from './ProjectListView.js';
 
 const project: Project = {
   id: 42,

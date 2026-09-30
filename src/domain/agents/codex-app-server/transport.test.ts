@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import type WebSocket from 'ws';
 import { describe, expect, it, vi } from 'vitest';
-import { closeWebSocket, waitForWebSocketOpen } from './transport';
+import { closeWebSocket, waitForWebSocketOpen } from './transport.js';
 
 describe('waitForWebSocketOpen', () => {
   it('terminates a socket that does not open before the startup timeout', async () => {

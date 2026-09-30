@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
-import type { AgentRuntimeSelection, CodexRuntimeSelection } from './types';
+import type { AgentRuntimeSelection, CodexRuntimeSelection } from './types.js';
 
 type RuntimeObject = { [key: string]: unknown };
-import { AppServerClient } from './codex-app-server/client';
-import { createAppServerTransport, type AppServerTransport } from './codex-app-server/transport';
+import { AppServerClient } from './codex-app-server/client.js';
+import { createAppServerTransport, type AppServerTransport } from './codex-app-server/transport.js';
 
 export type CodexTransport = 'auto' | 'exec' | 'app-server';
 export type CodexAuth = 'auto' | 'chatgpt' | 'api';

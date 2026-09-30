@@ -1,5 +1,5 @@
-import type { TrackedIssue } from './types';
-import type { ACItem } from './ac-types';
+import type { TrackedIssue } from './types.js';
+import type { ACItem } from './ac-types.js';
 
 /**
  * AC is represented as issue labels with prefix `ac::`.

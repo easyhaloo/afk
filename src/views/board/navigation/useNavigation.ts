@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { ViewRegistry } from '../registry';
-import type { View, ViewState, ViewContext } from '../types';
-import { navigationPolicy, type ActionType } from './policy';
-import { fileLogger } from '../../../infrastructure/io/logger';
+import { ViewRegistry } from '../registry/index.js';
+import type { View, ViewState, ViewContext } from '../types.js';
+import { navigationPolicy, type ActionType } from './policy.js';
+import { fileLogger } from '../../../infrastructure/io/logger.js';
 
 // Default initial view state
 const DEFAULT_VIEW_STATE: ViewState = { view: 'tasks', context: {} };

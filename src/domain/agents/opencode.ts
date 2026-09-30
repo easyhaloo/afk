@@ -20,8 +20,8 @@ import type {
   AgentCommand,
   AgentCommandOptions,
   AgentEvent,
-} from './types';
-import { ProcessAgentProvider } from './process-provider';
+} from './types.js';
+import { ProcessAgentProvider } from './process-provider.js';
 
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'streaming',
@@ -43,7 +43,7 @@ export class OpenCodeProvider extends ProcessAgentProvider {
     try {
       const parsed = JSON.parse(line);
       if (parsed.type === 'usage' && parsed.usage) {
-        return [{ type: 'usage', usage: parsed.usage as import('./types').TokenUsage }];
+        return [{ type: 'usage', usage: parsed.usage as import('./types.js').TokenUsage }];
       }
       if (parsed.type === 'result') {
         return [{ type: 'result', result: parsed.result }];

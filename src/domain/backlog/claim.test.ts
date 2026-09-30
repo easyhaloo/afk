@@ -2,7 +2,7 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile 
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FilesystemClaimLock } from './claim';
+import { FilesystemClaimLock } from './claim.js';
 
 describe('FilesystemClaimLock', () => {
   const stateRoots: string[] = [];

@@ -1,7 +1,7 @@
 /**
  * View Registration - Register all built-in views
  */
-import { ViewRegistry } from './index';
+import { ViewRegistry } from './index.js';
 
 export function registerAllViews(): void {
   const registry = ViewRegistry.getInstance();

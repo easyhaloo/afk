@@ -6,11 +6,11 @@
  * `_resetBranchStrategyRegistry()` to restore).
  */
 
-import type { BranchStrategy, BranchStrategyKind, BranchStrategyConfig } from './types';
-import { IssueBranchStrategy } from './issue';
-import { NamedBranchStrategy } from './named';
-import { MergeToHeadBranchStrategy } from './merge-to-head';
-import { ExistingBranchStrategy } from './existing';
+import type { BranchStrategy, BranchStrategyKind, BranchStrategyConfig } from './types.js';
+import { IssueBranchStrategy } from './issue.js';
+import { NamedBranchStrategy } from './named.js';
+import { MergeToHeadBranchStrategy } from './merge-to-head.js';
+import { ExistingBranchStrategy } from './existing.js';
 
 const registry = new Map<BranchStrategyKind, BranchStrategy>();
 
@@ -68,8 +68,8 @@ export function _resetBranchStrategyRegistry(): void {
   for (const s of builtinStrategies()) registry.set(s.kind, s);
 }
 
-export * from './types';
-export { IssueBranchStrategy } from './issue';
-export { NamedBranchStrategy } from './named';
-export { MergeToHeadBranchStrategy } from './merge-to-head';
-export { ExistingBranchStrategy } from './existing';
+export * from './types.js';
+export { IssueBranchStrategy } from './issue.js';
+export { NamedBranchStrategy } from './named.js';
+export { MergeToHeadBranchStrategy } from './merge-to-head.js';
+export { ExistingBranchStrategy } from './existing.js';

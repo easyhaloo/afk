@@ -1,4 +1,4 @@
-import type { BacklogItem } from '../../../domain/backlog/index';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
 
 export interface BranchHandle {
   branchName: string;

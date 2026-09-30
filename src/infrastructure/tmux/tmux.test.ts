@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readSignalSync } from '../io/signal';
-import { TmuxClient, normalizeTmuxSessionName } from './tmux';
+import { readSignalSync } from '../io/signal.js';
+import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
 
 describe('normalizeTmuxSessionName', () => {
   it('rewrites colons the same way tmux stores session names', () => {

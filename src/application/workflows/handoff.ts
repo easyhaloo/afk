@@ -1,11 +1,11 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
-import type { BacklogProvider } from '../../domain/backlog/index';
-import type { TmuxClient } from '../../infrastructure/tmux/index';
-import { logger, STATUS_FILENAME, clearSignal } from '../../infrastructure/io/index';
-import type { WorkflowConfig } from '../../infrastructure/config/manager';
-import { Watchdog } from './watchdog';
+import type { BacklogProvider } from '../../domain/backlog/index.js';
+import type { TmuxClient } from '../../infrastructure/tmux/index.js';
+import { logger, STATUS_FILENAME, clearSignal } from '../../infrastructure/io/index.js';
+import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
+import { Watchdog } from './watchdog.js';
 
 /**
  * Path of a handoff recovery doc inside a worktree. The runner uses this to

@@ -2,57 +2,57 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'node:crypto';
 import { simpleGit } from 'simple-git';
-import { WorktreeManager } from '../infrastructure/git/index';
-import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index';
-import { createSandboxProvider } from '../infrastructure/sandbox/index';
-import { createAgentProvider } from '../domain/agents/index';
+import { WorktreeManager } from '../infrastructure/git/index.js';
+import { TmuxClient, createTmuxClient } from '../infrastructure/tmux/index.js';
+import { createSandboxProvider } from '../infrastructure/sandbox/index.js';
+import { createAgentProvider } from '../domain/agents/index.js';
 import type {
   Sandbox,
   SandboxProvider,
   SandboxProviderName,
   AgentExecution,
   ExecutionResult,
-} from '../infrastructure/sandbox/types';
-import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types';
-import { getTokenUsage, configureStatusline, logger } from '../infrastructure/io/index';
-import { getWorkflowConfig } from '../infrastructure/config/manager';
-import { loadModules, parseModuleParams } from './modules/_registry';
-import type { ModuleParams } from './modules/_registry';
-import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle';
-import { Watchdog, createWatchdog } from './workflows/watchdog';
-import type { WorkflowConfig } from '../infrastructure/config/manager';
-import { HandoffCoordinator, handoffDocPath } from './workflows/handoff';
-import { attemptNativeResume } from './workflows/resume';
-import { BudgetManager } from './workflows/budget';
-import type { InitContext } from './workflows/lifecycle';
-import { defaultSessionStoreChain } from './sessions/chain';
-import { TemplateLoader } from '../domain/templates/loader';
-import { PlanExecutor } from './workflows/plan-executor';
-import { SystemActionExecutor } from './workflows/system-actions';
-import { RunResourceScope, type RunOutcomeStatus } from './workflows/resource-scope';
+} from '../infrastructure/sandbox/types.js';
+import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
+import { getTokenUsage, configureStatusline, logger } from '../infrastructure/io/index.js';
+import { getWorkflowConfig } from '../infrastructure/config/manager.js';
+import { loadModules, parseModuleParams } from './modules/_registry.js';
+import type { ModuleParams } from './modules/_registry.js';
+import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle.js';
+import { Watchdog, createWatchdog } from './workflows/watchdog.js';
+import type { WorkflowConfig } from '../infrastructure/config/manager.js';
+import { HandoffCoordinator, handoffDocPath } from './workflows/handoff.js';
+import { attemptNativeResume } from './workflows/resume.js';
+import { BudgetManager } from './workflows/budget.js';
+import type { InitContext } from './workflows/lifecycle.js';
+import { defaultSessionStoreChain } from './sessions/chain.js';
+import { TemplateLoader } from '../domain/templates/loader.js';
+import { PlanExecutor } from './workflows/plan-executor.js';
+import { SystemActionExecutor } from './workflows/system-actions.js';
+import { RunResourceScope, type RunOutcomeStatus } from './workflows/resource-scope.js';
 import {
   buildExecutionPrompt,
   isAcVerificationPass,
   parseAcVerificationFailure,
   type AcVerificationFailure,
   type CompletionKind,
-} from './workflows/execution-protocol';
-import { shouldReusePrimaryWorktree } from './workflows/worktree-selection';
-import type { PluginRuntime } from './plugins/runtime';
-import type { Step, StepResult } from '../domain/templates/types';
-import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/types';
-import type { ProviderBundle } from './providers';
-import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index';
-import { TaskRuntimeManager } from './runtime/task-runtime';
-import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request';
+} from './workflows/execution-protocol.js';
+import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
+import type { PluginRuntime } from './plugins/runtime.js';
+import type { Step, StepResult } from '../domain/templates/types.js';
+import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/types.js';
+import type { ProviderBundle } from '../infrastructure/provider/providers.js';
+import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index.js';
+import { TaskRuntimeManager } from './runtime/task-runtime.js';
+import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request.js';
 import {
   MultiRepositoryPreparer,
   type MultiRepositoryPreparationService,
   type PreparedRepositorySet,
-} from './workflows/multi-repository-preparer';
-import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata';
+} from './workflows/multi-repository-preparer.js';
+import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
-import type { RunObserver } from '../observability/run-observer';
+import type { RunObserver } from '../observability/run-observer.js';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -97,7 +97,7 @@ function formatAcCorrection(failure: AcVerificationFailure): string {
   return `\n\nAC correction required. Work on the current branch and repair exactly these failed acceptance criteria before the verifier runs again:\n${formatCriteria(failure.failedCriteria)}\nVerifier summary: ${failure.summary}`;
 }
 
-function formatReworkContext(rework: import('../domain/backlog/index').ReworkRecord): string {
+function formatReworkContext(rework: import('../domain/backlog/index.js').ReworkRecord): string {
   return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
@@ -159,7 +159,7 @@ export type WorkflowRunResult =
  */
 export interface RunnerDependencies {
   coordinatorFactory?: (deps: {
-    backlog: import('../domain/backlog/index').BacklogProvider;
+    backlog: import('../domain/backlog/index.js').BacklogProvider;
     tmux: TmuxClient;
     watchdog: Watchdog;
     config: WorkflowConfig;
@@ -175,7 +175,7 @@ export interface RunnerDependencies {
   /** Immutable runtime selection resolved by the caller. */
   agentRuntime?: AgentRuntimeSelection;
   /** Session store chain (tests / future). Defaults to defaultSessionStoreChain. */
-  sessionStoreChain?: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
+  sessionStoreChain?: (worktreePath: string) => import('./sessions/types.js').SessionStoreChain;
   /** Workflow config: all timeout and budget values. Defaults to getWorkflowConfig(). */
   config?: WorkflowConfig;
   /** Typed plugin capabilities available to this run. */
@@ -246,7 +246,7 @@ export class WorkflowRunner {
   private agentProvider: AgentProvider;
   private readonly agentRuntime?: AgentRuntimeSelection;
   /** Session store chain factory — defaults to defaultSessionStoreChain. */
-  private sessionStoreChainFactory: (worktreePath: string) => import('./sessions/types').SessionStoreChain;
+  private sessionStoreChainFactory: (worktreePath: string) => import('./sessions/types.js').SessionStoreChain;
   /** Resolved sandbox provider name (set in run()). */
   private sandboxProviderName: SandboxProviderName = 'local';
   /** Resolved agent provider name (set in run()). */
@@ -280,7 +280,7 @@ export class WorkflowRunner {
   private runtimeRunId?: string;
   private runtimeErrorSummary?: string;
   private acFeedback?: AcVerificationFailure;
-  private activeRework?: import('../domain/backlog/index').ReworkRecord;
+  private activeRework?: import('../domain/backlog/index.js').ReworkRecord;
   private readonly observer: RunObserver;
   private observationContext?: ObservationContext;
   private readonly multiRepositoryPreparer: MultiRepositoryPreparationService;
@@ -308,7 +308,7 @@ export class WorkflowRunner {
    * does not yet call this — that's wired separately; the chain is exposed
    * here so the integration is testable in isolation.
    */
-  sessionStoreChainFor(worktreePath: string): import('./sessions/types').SessionStoreChain {
+  sessionStoreChainFor(worktreePath: string): import('./sessions/types.js').SessionStoreChain {
     return this.sessionStoreChainFactory(worktreePath);
   }
 
@@ -1191,7 +1191,7 @@ export class WorkflowRunner {
   }
 
   private async retryFailedAcVerification(
-    template: import('../domain/templates/types').WorkflowTemplate,
+    template: import('../domain/templates/types.js').WorkflowTemplate,
     ctx: Omit<StepRunCtx, 'stepIndex'>,
     initial: StepResult,
     results: Record<string, StepResult>,

@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { configureStatusline } from './statusline-config';
+import { configureStatusline } from './statusline-config.js';
 
 describe('configureStatusline', () => {
   it('preserves tracked project settings and writes an idempotent local override', async () => {

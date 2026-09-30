@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { HandoffCoordinator } from './handoff';
-import type { BacklogProvider } from '../../domain/backlog/index';
-import type { TmuxClient } from '../../infrastructure/tmux/tmux';
-import type { Watchdog } from './watchdog';
-import type { WorkflowConfig } from '../../infrastructure/config/manager';
+import { HandoffCoordinator } from './handoff.js';
+import type { BacklogProvider } from '../../domain/backlog/index.js';
+import type { TmuxClient } from '../../infrastructure/tmux/tmux.js';
+import type { Watchdog } from './watchdog.js';
+import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 
 /** Fake tmux: every method is a vi.fn with sane defaults, overridable per-test. */
 function makeTmux(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {

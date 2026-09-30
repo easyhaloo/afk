@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { evolve, initialRunAggregate, type ObservationContext } from '@afk/core';
-import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store';
-import { RunCoordinator } from './run-coordinator';
+import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
+import { RunCoordinator } from './run-coordinator.js';
 
 const roots: string[] = [];
 const context: ObservationContext = {

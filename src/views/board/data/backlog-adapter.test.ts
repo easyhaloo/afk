@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../../domain/backlog';
-import { loadBacklogViewModels, toBacklogViewModel } from './backlog-adapter';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
+import { loadBacklogViewModels, toBacklogViewModel } from './backlog-adapter.js';
 
 const item = (overrides: Partial<BacklogItem> = {}): BacklogItem => ({
   id: '42',

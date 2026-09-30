@@ -1,8 +1,8 @@
-import type { BacklogItem } from '../../../domain/backlog/index';
-import type { ChangeProvider, ChangeRequest } from './provider';
-import type { TrackerProvider } from '../../../domain/tracker/types';
-import { parseWorkItemId } from '../../../domain/work-item/identity';
-import { resolveGitLabProjectKey } from '../../../shared/gitlab-project';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { ChangeProvider, ChangeRequest } from './provider.js';
+import type { TrackerProvider } from '../../../domain/tracker/types.js';
+import { parseWorkItemId } from '../../../domain/work-item/identity.js';
+import { resolveGitLabProjectKey } from '../../../shared/gitlab-project.js';
 
 export function renderChangeDescription(backlog: BacklogItem, tracker?: Pick<TrackerProvider, 'platform' | 'projectId' | 'providerHost'>): string {
   const issue = backlog.workItemId ?? (/^(github|gitlab):/.test(backlog.providerRef ?? '') ? backlog.providerRef : undefined);

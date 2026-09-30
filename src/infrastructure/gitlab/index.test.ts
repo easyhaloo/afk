@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GitLabClient } from './index';
+import { GitLabClient } from './index.js';
 
 describe('GitLabClient listMRs', () => {
   it('checks native closing issues by project ID and IID, failing closed on unreadable data', async () => {

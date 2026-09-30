@@ -1,13 +1,13 @@
 import React from 'react';
 import { Text, render } from 'ink';
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../../domain/backlog';
-import { loadDashboardBacklogs, loadDashboardTasks, projectBacklogRuntime, toRuntimeTask } from './useData';
-import { useData } from './useData';
-import { fetchTasks } from './fetcher';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
+import { loadDashboardBacklogs, loadDashboardTasks, projectBacklogRuntime, toRuntimeTask } from './useData.js';
+import { useData } from './useData.js';
+import { fetchTasks } from './fetcher.js';
 
 vi.mock('./fetcher', async importOriginal => {
-  const actual = await importOriginal<typeof import('./fetcher')>();
+  const actual = await importOriginal<typeof import('./fetcher.js')>();
   return { ...actual, fetchTasks: vi.fn() };
 });
 

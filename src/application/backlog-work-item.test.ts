@@ -3,7 +3,7 @@ import type { WorkItem, WorkState } from '@afk/core';
 import {
   toCoreWorkItem,
   type BacklogWorkItemInput,
-} from './backlog-work-item';
+} from './backlog-work-item.js';
 
 const backlogItem = (overrides: Partial<BacklogWorkItemInput> = {}): BacklogWorkItemInput => ({
   id: 'backlog-42',

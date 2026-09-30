@@ -1,75 +1,24 @@
 /**
- * Build script using esbuild with ESM extension fix plugin
+ * Build script: transpile src/ to dist/ with esbuild, one output file per
+ * source file (`bundle: false`).
+ *
+ * esbuild preserves each import specifier verbatim, so source must already be
+ * Node-ESM valid: relative specifiers carry an explicit `.js` extension. There
+ * used to be a post-build `fixESMPlugin` codemod that appended the missing
+ * extensions; it was removed so that what ships matches what is committed.
+ * Root `tsconfig.json` uses moduleResolution "bundler" and will NOT catch a
+ * missing extension — a mistake surfaces only when Node loads dist/.
  */
 import { build } from 'esbuild';
 import { globSync } from 'glob';
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'fs';
-import { extname, resolve, dirname } from 'path';
+import { rmSync } from 'fs';
+import { resolve } from 'path';
 
 const entryPoints = globSync('src/**/*.{ts,tsx}', {
   ignore: ['src/**/*.d.ts', 'src/**/*.test.ts', 'src/**/*.spec.ts']
 });
 
 rmSync(resolve('dist'), { recursive: true, force: true });
-
-// Plugin to fix ESM imports after build
-const fixESMPlugin = {
-  name: 'fix-esm-imports',
-  setup(build) {
-    build.onEnd(async (result) => {
-      if (result.errors.length > 0) return;
-
-      const outputFiles = globSync('dist/**/*.js');
-      let fixedCount = 0;
-
-      for (const file of outputFiles) {
-        let content = readFileSync(file, 'utf8');
-        const original = content;
-
-        // Fix relative imports: './foo' -> './foo.js' or './foo/index.js'
-        // Only processes paths that don't already have an extension
-        content = content
-          .replace(/from\s+(['"])(\.[^'"]+)\1/g, (match, quote, path) => {
-            if (extname(path)) return match; // already has extension
-            const dir = dirname(file);
-            const withJs = resolve(dir, path + '.js');
-            const asIndex = resolve(dir, path, 'index.js');
-            if (existsSync(withJs)) return `from ${quote}${path}.js${quote}`;
-            if (existsSync(asIndex)) return `from ${quote}${path}/index.js${quote}`;
-            return `from ${quote}${path}.js${quote}`;
-          })
-          // Fix side-effect imports: import './foo' -> import './foo.js'
-          .replace(/import\s+(['"])(\.[^'"]+)\1\s*;/g, (match, quote, path) => {
-            if (extname(path)) return match; // already has extension
-            const dir = dirname(file);
-            const withJs = resolve(dir, path + '.js');
-            const asIndex = resolve(dir, path, 'index.js');
-            if (existsSync(withJs)) return `import ${quote}${path}.js${quote};`;
-            if (existsSync(asIndex)) return `import ${quote}${path}/index.js${quote};`;
-            return `import ${quote}${path}.js${quote};`;
-          })
-          .replace(/import\s*\(\s*(['"])(\.[^'"]+)\1\s*\)/g, (match, quote, path) => {
-            if (extname(path)) return match; // already has extension
-            const dir = dirname(file);
-            const withJs = resolve(dir, path + '.js');
-            const asIndex = resolve(dir, path, 'index.js');
-            if (existsSync(withJs)) return `import(${quote}${path}.js${quote})`;
-            if (existsSync(asIndex)) return `import(${quote}${path}/index.js${quote})`;
-            return `import(${quote}${path}.js${quote})`;
-          });
-
-        if (content !== original) {
-          writeFileSync(file, content);
-          fixedCount++;
-        }
-      }
-
-      if (fixedCount > 0) {
-        console.log(`✓ Fixed ESM imports in ${fixedCount} file(s)`);
-      }
-    });
-  }
-};
 
 try {
   await build({
@@ -82,7 +31,6 @@ try {
     jsx: 'automatic',
     outExtension: { '.js': '.js' },
     bundle: false,
-    plugins: [fixESMPlugin],
     logLevel: 'warning',
   });
 

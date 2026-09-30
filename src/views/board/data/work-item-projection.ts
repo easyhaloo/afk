@@ -1,10 +1,10 @@
-import type { BacklogItem } from '../../../domain/backlog';
+import type { BacklogItem } from '../../../domain/backlog/index.js';
 import type {
   ActiveTaskRuntimeRecord,
   TaskRuntimePhase,
   TaskRuntimeRecord,
   TaskRuntimeStatus,
-} from '../../../application/runtime/task-runtime';
+} from '../../../application/runtime/task-runtime.js';
 
 export type ProjectedRunStatus = TaskRuntimeStatus | 'stale';
 type BacklogProjectionItem = Pick<BacklogItem, 'id' | 'title' | 'state' | 'providerRef'>;

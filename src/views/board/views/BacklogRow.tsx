@@ -1,7 +1,7 @@
 import React from 'react';
-import type { BacklogViewModel } from '../data/backlog-adapter';
-import { normalizeRowText } from './ListView';
-import { OperationalRow } from './OperationalRow';
+import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import { normalizeRowText } from './ListView.js';
+import { OperationalRow } from './OperationalRow.js';
 
 export interface BacklogRowProps {
   backlog: BacklogViewModel;

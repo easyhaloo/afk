@@ -4,10 +4,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { promises as afs } from 'fs';
 import { simpleGit, type SimpleGit } from 'simple-git';
-import { IssueBranchStrategy } from './issue';
-import { NamedBranchStrategy } from './named';
-import { MergeToHeadBranchStrategy } from './merge-to-head';
-import { ExistingBranchStrategy } from './existing';
+import { IssueBranchStrategy } from './issue.js';
+import { NamedBranchStrategy } from './named.js';
+import { MergeToHeadBranchStrategy } from './merge-to-head.js';
+import { ExistingBranchStrategy } from './existing.js';
 import {
   getBranchStrategy,
   requireBranchStrategy,
@@ -15,9 +15,9 @@ import {
   listBranchStrategies,
   registerBranchStrategy,
   _resetBranchStrategyRegistry,
-} from './registry';
-import { _clearPreparedWorktreesForTest } from './base';
-import type { BranchStrategyConfig } from './types';
+} from './registry.js';
+import { _clearPreparedWorktreesForTest } from './base.js';
+import type { BranchStrategyConfig } from './types.js';
 
 /** Create a temp git repo with an initial commit on main. Returns repoPath + git handle. */
 async function makeRepo(): Promise<{ repoPath: string; git: SimpleGit }> {

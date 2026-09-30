@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildBatchPrompt, buildExecutionPrompt, extractGoalComplete, parseAcVerificationFailure } from './execution-protocol';
+import { buildBatchPrompt, buildExecutionPrompt, extractGoalComplete, parseAcVerificationFailure } from './execution-protocol.js';
 
 describe('batch execution prompt protocol', () => {
   it('treats /goal as prompt syntax instead of a Claude slash command in batch mode', () => {

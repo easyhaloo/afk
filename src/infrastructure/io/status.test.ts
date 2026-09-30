@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { STATUS_FILENAME, getTokenUsage } from './status';
+import { STATUS_FILENAME, getTokenUsage } from './status.js';
 
 const roots: string[] = [];
 

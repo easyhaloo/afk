@@ -1,5 +1,5 @@
-import type { ProjectContext } from '../project-context';
-import type { PreparedRepository } from './multi-repository-preparer';
+import type { ProjectContext } from '../project-context.js';
+import type { PreparedRepository } from './multi-repository-preparer.js';
 
 export type LifecyclePhase = 'init' | 'before-agent' | 'after-agent' | 'cleanup';
 export type ModuleParamValue = string | number | boolean | null;

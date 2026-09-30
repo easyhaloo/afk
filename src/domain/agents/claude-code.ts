@@ -17,8 +17,8 @@ import type {
   SessionSnapshot,
   CaptureSessionOptions,
   RestoreSessionOptions,
-} from './types';
-import { ProcessAgentProvider } from './process-provider';
+} from './types.js';
+import { ProcessAgentProvider } from './process-provider.js';
 
 /** Claude Code capabilities */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([

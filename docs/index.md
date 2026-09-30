@@ -53,7 +53,6 @@
 
 | 路径 | 内容 |
 |---|---|
-| `_archive/patent/` | 专利申请材料 |
 | `_archive/prototype/` | 历史 UI 原型（HTML / PNG） |
 | `_archive/design-demos/` | 历史 design demo 与截图 |
 | `_archive/superpowers/plans/` | 过去的实施计划 |
@@ -64,12 +63,6 @@
 | 路径 | 内容 |
 |---|---|
 | `architecture/observability/profiles/local-observe.yml` | `afk observe` 的本地 profile 示例 |
-
-## 构建产物（不进 git 跟踪）
-
-| 路径 | 内容 |
-|---|---|
-| `scripts/build-patent/` | 专利文档构建脚本与生成物（.docx/.pdf） |
 
 ## 双语版本
 

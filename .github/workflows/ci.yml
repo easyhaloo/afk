@@ -16,6 +16,18 @@ permissions:
   contents: read
 
 jobs:
+  docs-link-check:
+    name: Docs Link Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Check doc links
+        run: node scripts/check-doc-links.mjs
+
   verify:
     name: Verify
     runs-on: ubuntu-latest

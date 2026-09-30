@@ -13,8 +13,9 @@ if [ -z "$branch" ] || [ "$branch" != "main" ] && [[ ! "$branch" =~ ^release/ ]]
     exit 0
 fi
 
-echo "\n${YELLOW}Running pre-push checks (architecture:check → typecheck → build → test)${NC}"
+echo "\n${YELLOW}Running pre-push checks (docs:check → architecture:check → typecheck → build → test)${NC}"
 
+pnpm run docs:check         || { echo "${RED}Docs link check failed${NC}";   failed=1; }
 pnpm run architecture:check || { echo "${RED}Architecture check failed${NC}"; failed=1; }
 pnpm run typecheck         || { echo "${RED}Type check failed${NC}";       failed=1; }
 pnpm run build             || { echo "${RED}Build failed${NC}";             failed=1; }

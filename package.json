@@ -13,6 +13,7 @@
     "application:typecheck": "pnpm --filter @afk/application typecheck",
     "application:build": "pnpm --filter @afk/application build",
     "application:test": "pnpm --filter @afk/application test",
+    "docs:check": "node scripts/check-doc-links.mjs",
     "dev": "tsc --watch",
     "pretest": "npm run build",
     "test": "vitest run && pnpm --filter @afk/core test && pnpm --filter @afk/application test",

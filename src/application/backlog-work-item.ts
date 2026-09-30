@@ -3,7 +3,8 @@ import type { WorkItem, WorkState } from '@afk/core';
 /**
  * Adapter boundary: maps external backlog models (CLI / GitLab backlog
  * naming) onto pure Core `WorkItem` models. Core itself must not know the
- * `afk` / `hitl` backlog naming — see docs/architecture/core-layer-architecture_zh.md.
+ * `afk` / `hitl` backlog naming — see
+ * docs/architecture/blueprints/core-layer-architecture_zh.md.
  */
 
 export interface BacklogWorkItemInput {

@@ -792,7 +792,7 @@ afk backlog show --id 123
 afk run --backlog-id 123
 ```
 
-参见：[ARCHITECTURE.md](ARCHITECTURE.md) 了解跨平台抽象层设计
+参见：[overview.md](../architecture/overview.md) 了解跨平台抽象层设计
 
 ## References 体系
 
@@ -819,6 +819,6 @@ references/
 
 ## 下一步
 
-- **架构设计** → [ARCHITECTURE.md](ARCHITECTURE.md) — 跨平台抽象层
-- **工作流程** → [WORKFLOWS.md](WORKFLOWS.md) — Issue → MR 流水线、调度器
+- **架构设计** → [overview.md](../architecture/overview.md) — 跨平台抽象层
+- **工作流程** → [workflows.md](workflows.md) — Issue → MR 流水线、调度器
 - **快速开始** → [getting-started.md](../getting-started.zh.md) — 5 分钟上手

@@ -792,7 +792,7 @@ afk backlog show --id 123
 afk run --backlog-id 123
 ```
 
-See: [ARCHITECTURE.md](ARCHITECTURE.md) for cross-platform abstraction layer design
+See: [overview.md](../architecture/overview.md) for cross-platform abstraction layer design
 
 ## References System
 
@@ -819,6 +819,6 @@ references/
 
 ## Next Steps
 
-- **Architecture Design** → [ARCHITECTURE.md](ARCHITECTURE.md) — Cross-platform abstraction layer
-- **Workflows** → [WORKFLOWS.md](WORKFLOWS.md) — Issue → MR pipeline, scheduler
+- **Architecture Design** → [overview.md](../architecture/overview.md) — Cross-platform abstraction layer
+- **Workflows** → [workflows.md](workflows.md) — Issue → MR pipeline, scheduler
 - **Quick Start** → [getting-started.md](../getting-started.md) — 5-minute getting started guide

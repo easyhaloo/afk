@@ -63,7 +63,6 @@ export function extractACFromLabels(labels: readonly string[]): ACItem[] {
  *
  * Supports both:
  *   - Authoritative 3-field format: `- [ ] <text> -- <type> -- <command>`
- *     (see docs/ISSUE-TEMPLATE.md)
  *   - Legacy simple format: `- [ ] <text>` (best-effort; evidenceType=none,
  *     checkCommand=empty)
  *

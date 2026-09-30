@@ -1,5 +1,17 @@
 # AFK 架构
 
+## 架构守卫
+
+`pnpm architecture:check --check-packages` 强制层间依赖方向，并检查
+`packages/afk-core` 与 `packages/afk-application` 根目录的纯源码导入和依赖方向。
+该守卫同时禁止泛型 record 和遗留 client-factory 导入。遗留迁移已完成：
+`scripts/architecture-legacy-baseline.json` 记录零个遗留文件、导入和模式。
+新增的遗留文件或导入会导致检查失败。删除基线条目时请一并删除这条过期记录。
+
+层间方向约束适用于 `src/cli`、`src/domain`、`src/application`、
+`src/infrastructure`、`src/shared` 和 `src/views` 中非测试文件的相对导入。
+传入 `--require-packages` 会让缺失的 package 根目录导致失败，而不是跳过检查。
+
 ## 范围与命令
 
 AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创建或拆分任务。
@@ -10,7 +22,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
-| `afk loop` | 连续执行、QA 与合并 |
+| `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
 | `afk`（TUI）、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
 
@@ -34,6 +46,16 @@ tracker 类型。
 执行模式更新；类型和运行时都没有 `claim()`。只有执行 bundle 暴露认领和
 可运行性检查。
 
+## 工作项与执行身份
+
+Provider Backlog 是业务事实来源。其 `BacklogItem.id` 在
+`afk run --backlog-id <id>`、`Run.workItemId`、`TaskRuntimeRecord.backlogId`、
+TUI 投影和 Desktop 摘要之间原样传递。`runId` 标识一次执行尝试，
+绝不可替代 Backlog ID。
+
+各关系字段含义互不相同：`parentId` 表示组织分组，`dependsOn` 控制调度顺序，
+`baseBacklogId` 选择显式的 Git 执行基线。父级边和依赖边都不会隐式选择分支。
+
 ## Backlog 生命周期
 
 ```text
@@ -47,6 +69,17 @@ ready --claim--> in_progress --> verification --> merge_ready --> done
 均为 `done` 时，条目才可运行。`parentId` 用于聚合子 backlog，父 backlog
 本身不可运行。任何自动化失败、冲突、超时或不确定的 lease 恢复都必须将
 条目转为 `blocked` 并切换到 `hitl`。
+
+## 运行时与 Desktop 投影
+
+`~/.afk/runtime/tasks` 下的规范运行时文件拥有执行尝试的状态、阶段、心跳、
+进度和诊断的最终解释权。超过新鲜度阈值的心跳会显示为运行时 `stale`；
+它不会改变 Provider Backlog 的生命周期状态。
+
+Desktop 的工作区本地文件 `.afk/backlog-runs.json` 仅包含进程启动元数据。
+它可以报告 PID 或启动错误，但无法推断 `verification`、`blocked` 或 `done`。
+Desktop 按精确的 `backlogId` 关联 Backlog、启动元数据和规范运行时记录；
+运行时数据缺失或格式错误时，Backlog 仍然可见，并显式呈现为无运行时状态。
 
 ## 认领与本地文件系统 fallback
 

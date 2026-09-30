@@ -204,19 +204,19 @@ pnpm dlx vitest --run tests/e2e/
 afk/
 ├── src/
 │   ├── views/shared/
-│   │   ├── Keyboard.test.ts      ← 单元测试 (4 tests)
-│   │   └── Registry.test.ts      ← 单元测试 (10 tests)
+│   │   ├── Keyboard.test.ts      ← 单元测试 (5 tests)
+│   │   └── Registry.test.ts      ← 单元测试 (8 tests)
 │   └── views/board/views/
-│       └── Notification.test.tsx ← 组件测试 (4 rendering + 5 logic)
+│       └── Notification.tsx      ← 组件（无独立测试文件）
 ├── tests/
 │   └── e2e/
-│       └── notification.test.ts  ← E2E 测试 (2 tests)
+│       └── notification.test.ts  ← E2E 测试 (11 tests，已跳过)
 ├── scripts/
 │   └── fix-node-pty.sh           ← node-pty macOS 签名修复
 ├── vitest.config.ts
 └── docs/
-    ├── TESTING.md
-    └── TESTING_zh.md
+    ├── guides/testing.md
+    └── guides/testing.zh.md
 ```
 
 ## 运行测试

@@ -70,6 +70,6 @@ malformed output, non-zero exits, and timeouts as failed executions.
 
 ## References
 
-- `src/lib/core/io/signal.ts` — interactive mode signal file implementation
-- `src/lib/sandbox/providers/local.ts` — interactive mode `LocalAgentExecution`
-- `src/lib/sandbox/index.ts` — sandbox provider factory
+- `src/infrastructure/io/signal.ts` — interactive mode signal file implementation
+- `src/infrastructure/sandbox/providers/local.ts` — interactive mode `LocalAgentExecution`
+- `src/infrastructure/sandbox/index.ts` — sandbox provider factory

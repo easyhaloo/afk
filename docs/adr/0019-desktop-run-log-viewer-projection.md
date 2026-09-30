@@ -27,7 +27,7 @@ Three candidate sources exist for the viewer:
 The desktop runId format (`desktop-<workItemId>-<uuid>`) is **not** the
 same as the CLI runId used as the event-store key. Work-item ↔ CLI
 correlation exists only via the `workItemId` field on every
-`RunEvent.context` (`src/core/events.ts:9`).
+`RunEvent.context` (`packages/afk-core/src/events.ts:9`).
 
 The viewer must pick exactly one source so the projection does not
 fragment, and must solve runId correlation.

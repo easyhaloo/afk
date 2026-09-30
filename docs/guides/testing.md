@@ -204,19 +204,19 @@ pnpm dlx vitest --run tests/e2e/
 afk/
 ├── src/
 │   ├── views/shared/
-│   │   ├── Keyboard.test.ts      ← Unit tests (4 tests)
-│   │   └── Registry.test.ts      ← Unit tests (10 tests)
+│   │   ├── Keyboard.test.ts      ← Unit tests (5 tests)
+│   │   └── Registry.test.ts      ← Unit tests (8 tests)
 │   └── views/board/views/
-│       └── Notification.test.tsx ← Component tests (4 rendering + 5 logic)
+│       └── Notification.tsx      ← Component (no dedicated test file)
 ├── tests/
 │   └── e2e/
-│       └── notification.test.ts  ← E2E tests (2 tests)
+│       └── notification.test.ts  ← E2E tests (11 tests, skipped)
 ├── scripts/
 │   └── fix-node-pty.sh           ← node-pty macOS signature fix
 ├── vitest.config.ts
 └── docs/
-    ├── TESTING.md
-    └── TESTING_zh.md
+    ├── guides/testing.md
+    └── guides/testing.zh.md
 ```
 
 ## Running Tests

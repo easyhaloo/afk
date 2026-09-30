@@ -13,7 +13,7 @@
 ## 功能特性
 
 - **跨平台** — 统一的 GitLab 和 GitHub CLI（issues、MRs/PRs）
-- **Skills 套件** — 19 个 Claude Code skills，覆盖完整开发周期
+- **Skills 套件** — 22 个 Claude Code skills，覆盖完整开发周期
 - **TUI 仪表盘** — 交互式 Issue 追踪仪表盘
 - **后台自动化** — 基于 tmux 的工作流调度器
 - **TDD 集成** — 内置测试驱动开发方法论
@@ -89,41 +89,32 @@ ln -s /path/to/afk/skills/* ~/.claude/skills/
 ## CLI 命令
 
 ```bash
-# Issue 管理
-afk issue get <id>
-afk issue list --label "stage::ready-for-implement"
-afk issue create "标题" --label "feature"
-afk issue edit <id> --label "bug"
-afk issue comment <id> "消息"
-afk issue link <src> <project>:<iid>     # 跨项目链接
-afk issue run <iid> --project <repo>      # 跨项目工作流
+# Backlog 管理
+afk backlog show --id <id>
+afk backlog list --state ready --mode afk
+afk backlog create "标题" --description-file ./description.md --tag feature
+afk backlog tag add --id <id> --tag bug
+afk backlog tag remove --id <id> --tag bug
 
-# MR/PR 操作
-afk mr create "feat: add login" --source feat/login --target main
-afk mr merge <id> --delete-source-branch
-afk mr approve <id>
-afk mr close <id>
-afk mr reopen <id>
-
-# 工作流与自动化
-afk board                             # 交互式 TUI 面板
-afk kanban                            # 看板
-afk workflow run --iid <id>           # Issue → MR 流程
-afk loop start                        # 持续集成循环
-afk scheduler start --max-concurrent 3 # 后台调度器
-afk qa run                            # QA 验证
+# 执行与自动化
+afk                                  # 交互式 TUI 面板
+afk kanban                           # 看板
+afk execute --work-item-id github:owner/repo#123 --execution-manifest <path>  # 受管工作项：实现 → QA → PR
+afk observe executions --work-item-id github:owner/repo#123 --json
+afk run --backlog-id <id>            # 底层仅实现入口
+afk run --backlog-id <id> --project <repo>
+afk qa --backlog-id <id>             # 独立 QA
+afk loop start --daemon --backlog-id <id> --work-item-id github:owner/repo#123 --execution-manifest <path>
 
 # 基础设施
-afk worktree create <iid>             # Git worktree 管理
-afk tmux create-session               # Tmux 会话管理
-afk isolate up                        # DB 服务隔离
+afk tmux create-session --name <name> --dir <path>
+afk isolate up
 
-# 调试与升级
-afk debug reproduce <cmd>             # 调试循环
-afk escalate create "标题"           # 提 GitLab Issue
+# 调试
+afk debug reproduce <cmd>
 
 # 信号管理
-afk signal goal-complete               # 工作流信号通信
+afk signal goal-complete --summary "<summary>"
 ```
 
 完整命令参考：`afk --help`
@@ -150,6 +141,10 @@ afk signal goal-complete               # 工作流信号通信
 | `/md-to-pdf` | Markdown 转 PDF | 导出带 Mermaid 图表的文档 |
 | `/reasoning-guard` | 推理守卫 | 编码 Agent 多轮推理降级 |
 | `/reasoning-watchdog` | 自动推理监控 | 基于 Hooks 的推理降级拦截 |
+| `/afk-ai-prd` | AI 友好 PRD | AI 可解析、拆解并验收的 PRD |
+| `/afk-llm-dev-guide` | LLM 应用设计指南 | LLM 应用架构与上下文工程 |
+| `/jev-agent-guard` | Agent 检查点 | 为 Claude Code、Codex、OpenCode 安装 Jev 检查点 |
+| `/software-complexity-governance` | 复杂度治理 | 度量圈复杂度、耦合度与技术债 |
 
 详细文档请查看 [Skills 指南](docs/guides/skills.zh.md)。
 

@@ -50,6 +50,7 @@ dump.rdb
 # Git worktrees
 .worktrees/
 .playwright-mcp/
+.playwright-cli/
 .claude/
 
 # Agent runtime state

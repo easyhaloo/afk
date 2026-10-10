@@ -3,6 +3,7 @@ import { test, expect } from "./_helpers/launch";
 test.describe("BacklogPage list", () => {
   test.beforeEach(async ({ page }) => {
     await page.locator(".primary-nav button", { hasText: "Backlog" }).click();
+    await page.getByRole("button", { name: "筛选 Backlog" }).click();
   });
 
   test("keeps the page header without global actions", async ({ page }) => {
@@ -55,7 +56,8 @@ test.describe("BacklogPage list", () => {
     expect(controls[0].height).toBe(controls[1].height);
     expect(controls[2].height).toBe(controls[3].height);
     expect(controls[0].height).toBeLessThanOrEqual(34);
-    expect(controls[0].width).toBe(120);
+    expect(controls[0].width).toBe(controls[3].width);
+    expect(controls[0].width).toBeLessThanOrEqual(310);
 
     const providerAlignment = await platform.evaluate((button) => {
       const buttonBox = button.getBoundingClientRect();
@@ -92,7 +94,7 @@ test.describe("BacklogPage list", () => {
     await expect(page.getByRole("option").first()).toHaveCSS("text-align", "left");
   });
 
-  test("uses the application green palette for backlog controls", async ({ page }) => {
+  test("uses shared appearance tokens for backlog selection controls", async ({ page }) => {
     const platform = page.getByRole("button", { name: "选择 Provider" });
     await platform.click();
 
@@ -108,8 +110,9 @@ test.describe("BacklogPage list", () => {
       const root = getComputedStyle(document.documentElement);
       return {
         run: normalize(root.getPropertyValue("--run").trim()),
-        line: normalize(root.getPropertyValue("--line").trim()),
-        ink: normalize(root.getPropertyValue("--ink").trim()),
+        accent: normalize(root.getPropertyValue("--afk-accent").trim()),
+        line: normalize(root.getPropertyValue("--afk-border").trim()),
+        ink: normalize(root.getPropertyValue("--afk-text").trim()),
       };
     });
     const trigger = page.locator('.select-menu-trigger[aria-label="选择 Provider"]');

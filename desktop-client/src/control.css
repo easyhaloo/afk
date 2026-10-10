@@ -27,6 +27,13 @@
   --afk-text: #f0f0f3;
   --afk-muted: #adaeb8;
   --afk-border: #3d3e47;
+  --canvas: var(--afk-page-bg);
+  --surface: var(--afk-panel-subtle);
+  --surface-raised: var(--afk-panel);
+  --line: var(--afk-border);
+  --line-soft: var(--afk-border);
+  --ink: var(--afk-text);
+  --muted: var(--afk-muted);
   color-scheme: dark;
 }
 :root[data-afk-theme="graphite"] body,
@@ -50,11 +57,12 @@
 :root[data-afk-theme="graphite"] .workflow-section b,
 :root[data-afk-theme="graphite"] .config-item b,
 :root[data-afk-theme="graphite"] .settings-section b { color: var(--afk-text); }
+:root[data-afk-theme="graphite"] .breadcrumb strong { color: var(--afk-text); }
 :root[data-afk-theme="graphite"] .nav-item:hover,
 :root[data-afk-theme="graphite"] .nav-item.active { background: var(--afk-panel-subtle); }
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected,
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected b { color: #303136; }
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected span { color: #5f6068; }
+:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected { background: color-mix(in srgb, var(--afk-accent) 12%, var(--afk-panel)); }
+:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected b { color: var(--afk-text); }
+:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected span { color: var(--afk-muted); }
 
 .control-page {
   width: min(100%, 1180px);
@@ -420,9 +428,9 @@
   .sidebar { align-items: center; padding: 12px 7px 9px; }
   .brand { display: flex; justify-content: center; width: 100%; margin: 0 0 14px; padding: 0; }
   .brand strong, .brand small { display: none; }
-  .quick-run, .nav-item, .local-action { justify-content: center; width: 42px; padding: 0; font-size: 0; }
+  .quick-run, .workspace-switcher, .nav-item, .local-action { justify-content: center; width: 42px; padding: 0; font-size: 0; }
   .quick-run { min-height: 40px; }
-  .quick-run svg, .nav-item svg, .local-action svg { flex: 0 0 auto; }
+  .quick-run svg, .workspace-switcher svg, .nav-item svg, .local-action svg { flex: 0 0 auto; }
   .nav-item { min-height: 38px; }
   .nav-item::before { left: -7px; }
   .nav-item em, .sidebar-projects, .primary-nav .nav-label { display: none; }

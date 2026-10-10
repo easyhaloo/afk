@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath } from "../src/features/run-center/runtime-presentation";
+import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents } from "../src/features/run-center/runtime-presentation";
+
+describe("searchRuntimeEvents", () => {
+  it("matches history without replacing the latest run status", () => {
+    const events = [
+      { source: "WI-1", timestamp: "2026-10-09T10:00:00Z", result: "已完成", nextStep: "等待人工合并" },
+      { source: "WI-1", timestamp: "2026-10-09T09:00:00Z", result: "实现登录修复", nextStep: "进入验证" },
+      { source: "WI-2", timestamp: "2026-10-09T08:00:00Z", result: "失败", nextStep: "等待配置" },
+    ];
+    expect(searchRuntimeEvents(events, " 登录 ")).toEqual(events.slice(0, 2));
+    expect(searchRuntimeEvents(events, "wi-2")).toEqual([events[2]]);
+    expect(searchRuntimeEvents(events, "unknown")).toEqual([]);
+    expect(searchRuntimeEvents(events, "  ")).toBe(events);
+    expect(events).toHaveLength(3);
+  });
+});
 
 describe("groupRuntimeEvents", () => {
   it("shows one source once, newest run first, with its history retained", () => {

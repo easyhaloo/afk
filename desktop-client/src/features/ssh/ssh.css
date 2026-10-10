@@ -50,10 +50,10 @@
 .ssh-search { display: flex; min-height: 30px; flex: 1; align-items: center; gap: 7px; border: 1px solid var(--afk-border); border-radius: 7px; padding: 0 9px; background: var(--afk-panel); color: var(--afk-muted); }
 .ssh-search input { border: 0; outline: 0; background: transparent; color: var(--afk-text); font: inherit; font-size: calc(11px * var(--afk-scale)); }
 .ssh-search input { width: 100%; }
-.ssh-toolbar .ssh-form-picker { flex: 0 0 132px; }
-.ssh-toolbar .ssh-form-picker-trigger { min-height: 30px; padding: 0 8px; font-size: calc(10px * var(--afk-scale)); }
+.ssh-toolbar .ssh-form-picker { flex: 0 0 132px; min-width: 0; }
+.ssh-toolbar .ssh-form-picker .select-menu-trigger { min-height: 30px; padding: 0 8px; font-size: calc(10px * var(--afk-scale)); }
 .ssh-toolbar .icon-button, .ssh-modal .icon-button { width: 28px; height: 28px; }
-.ssh-toolbar .ssh-form-picker-options { bottom: auto; top: calc(100% + 7px); }
+.ssh-toolbar .ssh-form-picker .select-menu-popover { bottom: auto; top: calc(100% + 7px); width: min(100%, 420px); min-width: 250px; }
 .ssh-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 13px; align-items: start; }
 .ssh-host-list, .ssh-details { overflow: hidden; border: 1px solid var(--afk-border); border-radius: 11px; background: var(--afk-panel); }
 .ssh-host-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; min-height: 68px; border-bottom: 1px solid var(--afk-border); background: transparent; }

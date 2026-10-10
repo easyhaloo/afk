@@ -18,6 +18,12 @@ export type RuntimeEventLike = {
   timestamp: string;
 };
 
+export function searchRuntimeEvents<T extends RuntimeEventLike & { result: string; nextStep: string }>(events: T[], query: string): T[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return events;
+  return groupRuntimeEvents(events).filter(group => group.events.some(event => `${event.source} ${event.result} ${event.nextStep}`.toLowerCase().includes(normalized))).flatMap(group => group.events);
+}
+
 export type RuntimeEventGroup<T extends RuntimeEventLike = RuntimeEventLike> = {
   source: string;
   events: T[];

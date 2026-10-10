@@ -13,6 +13,7 @@ import "./replay.css";
 import "./layout.css";
 import "./palette.css";
 import "./control.css";
+import "./selection.css";
 import claudeIcon from "./assets/runtime-icons/claude-official.ico";
 import codexIcon from "./assets/runtime-icons/codex-openai-official.png";
 import geminiIcon from "./assets/runtime-icons/gemini-cli-official.png";
@@ -23,13 +24,15 @@ import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH, CANVAS_WORLD_HEIGHT, CANVAS_WORL
 import { Empty } from "./components/EmptyState";
 import { ProviderIcon } from "./components/ProviderIcon";
 import { SelectMenu } from "./components/SelectMenu";
+import { SegmentedControl } from "./components/SegmentedControl";
+import { ResourceSearch } from "./components/ResourceSearch";
 import { Settings } from "./features/settings/SettingsPage";
 import { SshHostsPage } from "./features/ssh/SshHostsPage";
 import { BacklogPage } from "./features/backlog/BacklogPage";
 import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
-import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
+import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
 import { executionHistoryEvents } from "./features/run-center/execution-events";
 import type { ProviderProjectRef } from "../shared/backlog-contract";
 import type { ExecutionSummary } from "../shared/execution-contract";
@@ -114,6 +117,7 @@ function App() {
   const [view, setView] = useState<View>("backlog");
   const [focusWorkItemId, setFocusWorkItemId] = useState<string | undefined>();
   const [runMode, setRunMode] = useState<"queue" | "board">("queue");
+  const [runQuery, setRunQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [auditedExecutions, setAuditedExecutions] = useState<ExecutionSummary[]>([]);
@@ -212,12 +216,13 @@ function App() {
   const events = useMemo(() => view === "events" ? snapshot?.events ?? [] : [
     ...executionHistoryEvents(auditedExecutions, snapshot?.workItemRuns ?? []),
   ], [snapshot, auditedExecutions, view]);
+  const visibleRunEvents = useMemo(() => searchRuntimeEvents(events, runQuery), [events, runQuery]);
 
   const groups = useMemo(() => {
     const value: Record<Phase, RuntimeEvent[]> = { ready: [], active: [], verify: [], attention: [] };
-    groupRuntimeEvents(events).forEach((group) => value[phaseOf(group.events[0])].push(group.events[0]));
+    groupRuntimeEvents(visibleRunEvents).forEach((group) => value[phaseOf(group.events[0])].push(group.events[0]));
     return value;
-  }, [events]);
+  }, [visibleRunEvents]);
   const selectedHistory = useMemo(() => {
     if (!selected) return [];
     return groupRuntimeEvents(events).find((group) => group.source === selected.source)?.events ?? [selected];
@@ -318,8 +323,9 @@ function App() {
     <main className="app-shell">
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">A</span><strong>AFK <b>/</b> CONTROL</strong><small>LOCAL OPERATIONS</small></div>
-        <button className="quick-run" onClick={() => { setFocusWorkItemId(undefined); setView("backlog"); }}><Workflow size={18} />新建运行</button>
+        <button type="button" className="workspace-switcher" aria-label="选择本地工作区" title={workspace || "选择本地工作区"} disabled={loading} onClick={() => { void (async () => { try { const target = await window.afkDesktop.chooseWorkspace(); if (target) await refresh(target); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } })(); }}><FolderOpen size={16} /><span>{workspace.split(/[\\/]/).filter(Boolean).at(-1) || "选择工作区"}</span></button>
         <nav className="primary-nav" aria-label="主导航">{navGroups.map((group) => <section className="nav-group" aria-label={group.label} key={group.label}><span className="nav-label">{group.title}</span><span className="nav-group-label">{group.label}</span>{group.items.map(([key, text, Icon]) => <button key={key} className={activeNav === key ? "nav-item active" : "nav-item"} aria-current={activeNav === key ? "page" : undefined} title={text} onClick={() => { if (key === "queue") setRunMode("queue"); activateView(key); }}><Icon size={16} aria-hidden="true" />{text}{key === "agents" && runtimes.length ? <em className="healthy-badge">{availableRuntimeCount}/{runtimeTotal}</em> : null}</button>)}</section>)}</nav>
+        <div className="sidebar-quick-find"><SelectMenu label="快速查找" value={activeNav} options={nav.map(([key, text]) => ({ value: key, label: text, description: navGroups.find(group => group.items.some(([item]) => item === key))?.title }))} search={{ label: "搜索页面" }} onChange={activateView} /></div>
       </aside>
 
       <section className="content-shell">
@@ -330,7 +336,8 @@ function App() {
         {auditError && (view === "queue" || view === "board") ? <div className="error-banner"><X size={15} />运行审计查询失败：{auditError}</div> : null}
         <div className={view === "queue" || view === "board" ? "run-center-layout" : "view-layout"}>
         <div className="workspace">
-          {view === "queue" ? <Queue events={events} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
+          {view === "queue" || view === "board" ? <div className="resource-toolbar run-resource-toolbar"><ResourceSearch label="搜索运行、工作项或事件" value={runQuery} onChange={setRunQuery} /></div> : null}
+          {view === "queue" ? <Queue events={visibleRunEvents} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "board" ? <Board groups={groups} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
           {view === "repositories" ? <Repositories /> : null}
@@ -399,13 +406,18 @@ function AgentHeaderSummary({ available, total, unavailable }: { available: numb
   return <div className="agent-header-summary" aria-label="Agent 工具检测摘要"><span className="agent-summary-available"><CircleCheck size={13} />{available}/{total} 可执行</span>{unavailable ? <span className="agent-summary-error"><TriangleAlert size={13} />{unavailable} 未通过</span> : null}</div>;
 }
 
-function Agents({ snapshot, loading, onRefresh }: { snapshot: Snapshot | null; loading: boolean; lastCheckedAt: number | null; onRefresh: () => void }) {
-  const runtimes = snapshot?.agentRuntimes ?? [];
+export function Agents({ snapshot, loading, onRefresh }: { snapshot: Snapshot | null; loading: boolean; lastCheckedAt: number | null; onRefresh: () => void }) {
+  const [query, setQuery] = useState("");
+  const [availability, setAvailability] = useState("all");
+  const allRuntimes = snapshot?.agentRuntimes ?? [];
+  const runtimes = allRuntimes.filter(runtime => (availability === "all" || (availability === "available" ? runtime.available : !runtime.available)) && `${runtime.label} ${runtime.command} ${runtime.executable}`.toLowerCase().includes(query.trim().toLowerCase()));
   const statusLabel: Record<AgentRuntime["status"], string> = { available: "可执行", missing: "未发现", error: "检测失败" };
-  return <section className="table-panel agent-panel"><header><span>本机 Agent 工具</span><button className={`runtime-refresh${loading ? " checking" : ""}`} disabled={loading} onClick={onRefresh}><Settings2 size={15} className={loading ? "spin" : ""} />{loading ? "检查中…" : "重新检查"}</button></header><div className="agent-list">{runtimes.length ? runtimes.map((runtime) => <article className={`agent-runtime ${runtime.status}`} key={runtime.id}><RuntimeProductIcon id={runtime.id} /><RuntimeStatusIcon status={runtime.status} label={statusLabel[runtime.status]} /><div className="runtime-identity"><b>{runtime.label}</b><small title={runtime.executable || runtime.command}>{runtime.executable || runtime.command}</small></div><span className="runtime-summary" title={runtime.summary}>{runtime.summary}</span><strong title={`发现来源：${runtime.installation.source}`}>{statusLabel[runtime.status]}</strong></article>) : <p className="agent-empty"><b>{loading ? "正在检测本机工具…" : "尚未检测 Agent 工具"}</b><br />检查 AFK CLI provider：Claude Code、Codex、Cursor Agent、Pi、OpenCode 与 <ProviderIcon provider="github" size={12} /> Copilot。</p>}</div></section>;
+  return <section className="table-panel agent-panel"><header><span>本机 Agent 工具</span><button className={`runtime-refresh${loading ? " checking" : ""}`} disabled={loading} onClick={onRefresh}><Settings2 size={15} className={loading ? "spin" : ""} />{loading ? "检查中…" : "重新检查"}</button></header><div className="resource-toolbar"><ResourceSearch label="搜索 Agent" value={query} onChange={setQuery} /><SegmentedControl label="Agent 可用状态" value={availability} options={[{ value: "all", label: "全部", count: allRuntimes.length }, { value: "available", label: "可执行", count: allRuntimes.filter(runtime => runtime.available).length }, { value: "unavailable", label: "未通过", count: allRuntimes.filter(runtime => !runtime.available).length }]} onChange={setAvailability} /></div><div className="agent-list">{runtimes.length ? runtimes.map((runtime) => <article className={`agent-runtime ${runtime.status}`} key={runtime.id}><RuntimeProductIcon id={runtime.id} /><RuntimeStatusIcon status={runtime.status} label={statusLabel[runtime.status]} /><div className="runtime-identity"><b>{runtime.label}</b><small title={runtime.executable || runtime.command}>{runtime.executable || runtime.command}</small></div><span className="runtime-summary" title={runtime.summary}>{runtime.summary}</span><strong title={`发现来源：${runtime.installation.source}`}>{statusLabel[runtime.status]}</strong></article>) : <p className="agent-empty"><b>{loading ? "正在检测本机工具…" : allRuntimes.length ? "没有匹配的 Agent" : "尚未检测 Agent 工具"}</b><br />检查 AFK CLI provider：Claude Code、Codex、Cursor Agent、Pi、OpenCode 与 <ProviderIcon provider="github" size={12} /> Copilot。</p>}</div></section>;
 }
 
-function Repositories() {
+export function Repositories() {
+  const [query, setQuery] = useState("");
+  const [platform, setPlatform] = useState("all");
   const [projects, setProjects] = useState<ProviderProjectRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -425,20 +437,24 @@ function Repositories() {
 
   useEffect(() => { void load(); }, []);
 
+  const visibleProjects = projects.filter(project => (platform === "all" || project.platform === platform) && `${project.name} ${project.projectKey} ${project.defaultBranch ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
   return <section className="control-page repository-page" aria-label="代码仓库">
     <header className="control-page-heading"><div><p>Resources</p><h1>代码仓库</h1><span>展示已授权 Provider 中可访问的仓库，作为工作项可关联的独立资源，不依赖当前选择目录。</span></div><button className="repository-refresh" type="button" aria-label="刷新代码仓库" title="刷新代码仓库" disabled={loading} onClick={() => void load(true)}><RefreshCw size={14} className={loading ? "spin" : ""} /></button></header>
+    <div className="resource-toolbar"><ResourceSearch label="搜索代码仓库" value={query} onChange={setQuery} /><SegmentedControl label="仓库来源" value={platform} options={[{ value: "all", label: "全部" }, { value: "github", label: "GitHub" }, { value: "gitlab", label: "GitLab" }]} onChange={setPlatform} /></div>
     {error ? <div className="repository-error"><TriangleAlert size={15} />{error}</div> : null}
-    <div className="repository-list">{projects.length ? projects.map((project) => <article className="repository-row" key={`${project.platform}:${project.projectKey}`}><span className="repository-provider">{project.platform === "github" || project.platform === "gitlab" ? <ProviderIcon provider={project.platform} size={15} /> : project.platform}</span><div><b>{project.projectKey}</b><small>{project.defaultBranch ? `默认分支 · ${project.defaultBranch}` : project.name}</small></div>{project.webUrl ? <button type="button" aria-label={`打开代码仓库 ${project.projectKey}`} title="在浏览器中打开" onClick={() => void window.afkDesktop.openExternal(project.webUrl!)}><FolderOpen size={15} /></button> : null}</article>) : <div className="repository-empty"><b>{loading ? "正在读取代码仓库…" : "没有可访问的代码仓库"}</b><span>{loading ? "正在从已授权 Provider 获取仓库列表。" : <>请检查 <ProviderIcon provider="github" size={12} /> / <ProviderIcon provider="gitlab" size={12} /> 鉴权配置。</>}</span></div>}</div>
+    <div className="repository-list">{visibleProjects.length ? visibleProjects.map((project) => <article className="repository-row" key={`${project.platform}:${project.projectKey}`}><span className="repository-provider">{project.platform === "github" || project.platform === "gitlab" ? <ProviderIcon provider={project.platform} size={15} /> : project.platform}</span><div><b>{project.projectKey}</b><small>{project.defaultBranch ? `默认分支 · ${project.defaultBranch}` : project.name}</small></div>{project.webUrl ? <button type="button" aria-label={`打开代码仓库 ${project.projectKey}`} title="在浏览器中打开" onClick={() => void window.afkDesktop.openExternal(project.webUrl!)}><FolderOpen size={15} /></button> : null}</article>) : <div className="repository-empty"><b>{loading ? "正在读取代码仓库…" : projects.length ? "没有匹配的代码仓库" : "没有可访问的代码仓库"}</b><span>{loading ? "正在从已授权 Provider 获取仓库列表。" : <>请检查 <ProviderIcon provider="github" size={12} /> / <ProviderIcon provider="gitlab" size={12} /> 鉴权配置。</>}</span></div>}</div>
   </section>;
 }
 
-function Environments({ snapshot, onTerminal }: { snapshot: Snapshot | null; onTerminal: (name: string, workspace: string) => void }) {
-  const containers = snapshot?.containers ?? [];
-  const sessions = snapshot?.sessions ?? [];
-  return <section className="environment-grid" aria-label="AFK 已登记执行环境">
+export function Environments({ snapshot, onTerminal }: { snapshot: Snapshot | null; onTerminal: (name: string, workspace: string) => void }) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const containers = (snapshot?.containers ?? []).filter(item => `${item.name} ${item.engine} ${item.image} ${item.status}`.toLowerCase().includes(normalizedQuery));
+  const sessions = (snapshot?.sessions ?? []).filter(item => `${item.name} ${item.workspace}`.toLowerCase().includes(normalizedQuery));
+  return <section className="control-page environment-page" aria-label="执行环境"><header className="control-page-heading"><div><p>资源</p><h1>执行环境</h1><span>只显示 AFK 已登记的容器与会话。</span></div></header><div className="resource-toolbar"><ResourceSearch label="搜索执行环境" value={query} onChange={setQuery} /></div><section className="environment-grid" aria-label="AFK 已登记执行环境">
     <article><header><Container size={18} /><b>AFK 容器</b><span>{containers.length}</span></header>{containers.length ? containers.map((item) => <div className="env-row" key={`${item.engine}-${item.name}`}><span>{item.engine}</span><b>{item.name}</b><small>{item.image}</small><em>{item.status}</em></div>) : <p>当前项目没有由 AFK 登记且仍在运行的容器。</p>}</article>
     <article><header><TerminalSquare size={18} /><b>AFK tmux 会话</b><span>{sessions.length}</span></header>{sessions.length ? sessions.map((item) => <div className="env-row" key={`${item.workspace}:${item.name}`}><span>{item.attached ? "attached" : "detached"}</span><b>{item.name}</b><small title={item.workspace}>{item.workspace} · {item.windows} 个窗口</small><button onClick={() => onTerminal(item.name, item.workspace)}>打开终端</button></div>) : <p>当前项目没有由 AFK 登记且仍可用的 tmux 会话。</p>}</article>
-  </section>;
+  </section></section>;
 }
 
 function durationLabel(milliseconds: number) {
@@ -663,7 +679,7 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
 }
 
 export function WorkflowStudioInspector({ node, workflow, loop, runs, onPatch, onCodexPatch, onTemplatePatch, onDeleteTemplate, dirty, saving, error, onSave, onReset, onCollapse }: { node: WorkflowCanvasNode; workflow: WorkflowConfigSummary; loop: LoopStatus; runs: WorkflowRunSummary[]; onPatch: (patch: Partial<WorkflowConfigSummary>) => void; onCodexPatch: (patch: Partial<WorkflowConfigSummary["codex"]>) => void; onTemplatePatch: (id: string, patch: Partial<CanvasTemplateNode>) => void; onDeleteTemplate: (id: string) => void; dirty: boolean; saving: boolean; error: string | null; onSave: () => Promise<void>; onReset: () => void; onCollapse: () => void }) {
-  const field = (label: string, value: string | number, onChange: (next: string) => void, options?: string[]) => options ? <div className="workflow-field" key={label}><span>{label}</span><SelectMenu label={label} value={String(value)} options={options.map(option => ({ value: option, label: option || "继承默认 Agent" }))} onChange={onChange} /></div> : <label className="workflow-field" key={label}><span>{label}</span><input value={String(value)} onChange={event => onChange(event.target.value)} /></label>;
+  const field = (label: string, value: string | number, onChange: (next: string) => void, options?: string[]) => options ? <div className="workflow-field" key={label}><span>{label}</span>{options.length <= 3 ? <SegmentedControl label={label} value={String(value)} options={options.map(option => ({ value: option, label: option || "继承默认 Agent" }))} onChange={onChange} /> : <SelectMenu label={label} value={String(value)} search={{ label: `搜索${label}` }} options={options.map(option => ({ value: option, label: option || "继承默认 Agent" }))} onChange={onChange} />}</div> : <label className="workflow-field" key={label}><span>{label}</span><input value={String(value)} onChange={event => onChange(event.target.value)} /></label>;
   const numberField = (label: string, value: number, onChange: (next: number) => void) => <label className="workflow-field" key={label}><span>{label}</span><input type="number" min="0" value={value} onChange={event => onChange(Number(event.target.value))} /></label>;
   const textareaField = (label: string, value: string, onChange: (next: string) => void) => <label className="workflow-field workflow-textarea" key={label}><span>{label}</span><textarea value={value} onChange={event => onChange(event.target.value)} /></label>;
   const readOnly = (label: string, value: string) => <div className="workflow-readonly" key={label}><span>{label}</span><b title={value}>{value}</b></div>;
@@ -723,33 +739,23 @@ function replayRuns(events: RuntimeEvent[]): ReplayRun[] {
 }
 
 function Replay({ events, selected, freshIds, activeRun, onRunChange, onSelect, onClose }: { events: RuntimeEvent[]; selected: RuntimeEvent | null; freshIds: Set<string>; activeRun: string; onRunChange: (source: string) => void; onSelect: (event: RuntimeEvent) => void; onClose: () => void }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const dismiss = (event: PointerEvent) => {
-      if (event.target instanceof Node && pickerRef.current && !pickerRef.current.contains(event.target)) setPickerOpen(false);
-    };
-    const dismissOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setPickerOpen(false); };
-    document.addEventListener("pointerdown", dismiss);
-    document.addEventListener("keydown", dismissOnEscape);
-    return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", dismissOnEscape); };
-  }, [pickerOpen]);
+  const [query, setQuery] = useState("");
+  const searchField = <div className="resource-toolbar"><ResourceSearch label="搜索活动记录" value={query} onChange={setQuery} /></div>;
   if (!events.length) return <Empty />;
-  const runs = replayRuns(events);
+  const runs = replayRuns(events).filter(run => `${run.source} ${run.events.map(event => `${event.result} ${event.nextStep}`).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
   const currentRun = runs.find((run) => run.source === activeRun) ?? runs[0];
-  if (!currentRun) return <Empty />;
+  if (!currentRun) return <section className="record-page" aria-label="运行记录">{searchField}<p role="status">没有匹配的活动记录</p></section>;
   const currentStatus = eventStatus(currentRun.latest);
   const detailEvent = selected && currentRun.events.some((event) => event.id === selected.id) ? selected : null;
   const chooseRun = (source: string) => {
     onRunChange(source);
     onClose();
-    setPickerOpen(false);
   };
 
   return <section className="record-page" aria-label="运行记录">
+    {searchField}
     <header className="record-page-header">
-      {runs.length > 1 ? <div className="record-run-picker" ref={pickerRef}><button className="record-run-trigger" aria-haspopup="listbox" aria-expanded={pickerOpen} onClick={() => setPickerOpen((open) => !open)}><span><b>{currentRun.source}</b><small>{currentRun.events.length} 条记录 · {displayTimestamp(currentRun.latest.timestamp)}</small></span><ChevronDown size={15} /></button>{pickerOpen ? <div className="record-run-options" role="listbox" aria-label="选择运行">{runs.map((run) => <button key={run.source} role="option" aria-selected={run.source === currentRun.source} onClick={() => chooseRun(run.source)}><span><b>{run.source}</b><small>{run.events.length} 条记录 · {displayTimestamp(run.latest.timestamp)}</small></span><RecordStatus status={eventStatus(run.latest)} /></button>)}</div> : null}</div> : <div className="record-run-identity"><b>{currentRun.source}</b><small>{displayTimestamp(currentRun.latest.timestamp)}</small></div>}
+      {runs.length > 1 ? <SelectMenu label="选择运行" value={currentRun.source} search={{ label: "搜索运行" }} options={runs.map(run => ({ value: run.source, label: run.source, description: `${recordStatusLabel[eventStatus(run.latest)]} · ${run.events.length} 条记录 · ${displayTimestamp(run.latest.timestamp)}` }))} onChange={chooseRun} /> : <div className="record-run-identity"><b>{currentRun.source}</b><small>{displayTimestamp(currentRun.latest.timestamp)}</small></div>}
       {currentRun.events.length > 1 ? <RecordStatus status={currentStatus} /> : null}
     </header>
     {currentRun.events.length === 1 ? <RecordCard event={currentRun.latest} fresh={freshIds.has(currentRun.latest.id)} onDetails={() => onSelect(currentRun.latest)} /> : <RecordList events={currentRun.events} selected={detailEvent} freshIds={freshIds} onSelect={onSelect} />}

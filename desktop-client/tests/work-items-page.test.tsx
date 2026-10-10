@@ -541,6 +541,14 @@ describe("WorkItemsPage", () => {
     expect(renderer!.root.findByProps({ className: "backlog-toolbar work-items-toolbar" })).toBeTruthy();
     expect(renderer!.root.findAllByProps({ className: "select-menu filter-trigger" })).toHaveLength(3);
 
+    expect(renderer!.root.findByProps({ "aria-label": "筛选条件" }).props.hidden).toBe(true);
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "筛选工作项" }).props.onClick(); });
+    expect(renderer!.root.findByProps({ "aria-label": "筛选条件" }).props.hidden).toBe(false);
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "筛选状态" }).props.onChange({ currentTarget: { value: "blocked" } }); });
+    expect(renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })).toHaveLength(0);
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "移除筛选：状态：已阻塞" }).props.onClick(); });
+    expect(renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })).toHaveLength(result.items.length);
+
     await act(async () => { renderer!.root.findByProps({ "aria-label": "选择仓库" }).props.onClick(); });
     expect(renderer!.root.findByProps({ "aria-label": "搜索 Issue 来源" })).toBeTruthy();
     act(() => renderer!.unmount());

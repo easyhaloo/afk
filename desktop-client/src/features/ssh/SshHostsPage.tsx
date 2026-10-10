@@ -8,6 +8,8 @@ import { JumpserverBastionCard } from "./JumpserverBastionCard";
 import { JumpserverDetail } from "./JumpserverDetail";
 import { SshActionButton } from "./SshActionButton";
 import { SshConfirmDialog } from "./SshConfirmDialog";
+import { FilterPanel } from "../../components/FilterPanel";
+import { SelectMenu } from "../../components/SelectMenu";
 import "./ssh.css";
 
 type SourceFilter = "all" | SshHostSource;
@@ -122,63 +124,7 @@ function SshTerminalPicker({ value, disabled, onChange }: { value: SshTerminalId
 type SshFormPickerOption = { value: string; label: string; description?: string };
 
 export function SshFormPicker({ id, ariaLabel, value, options, placeholder, required, disabled = false, onChange }: { id: string; ariaLabel: string; value: string; options: SshFormPickerOption[]; placeholder: string; required?: boolean; disabled?: boolean; onChange: (value: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const selectedIndex = options.findIndex((option) => option.value === value);
-  const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined;
-  const pickerDisabled = disabled || options.length === 0;
-
-  useEffect(() => {
-    setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
-  }, [selectedIndex, options.length]);
-
-  useEffect(() => {
-    if (pickerDisabled) setOpen(false);
-  }, [pickerDisabled]);
-
-  useEffect(() => {
-    if (!open || typeof document === "undefined") return undefined;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (typeof Node !== "undefined" && event.target instanceof Node && !pickerRef.current?.contains(event.target)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () => document.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [open]);
-
-  const choose = (option: SshFormPickerOption) => {
-    if (pickerDisabled) return;
-    onChange(option.value);
-    setOpen(false);
-  };
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (pickerDisabled) return;
-    if (event.key === "Escape") {
-      setOpen(false);
-      return;
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      setOpen(true);
-      const nextIndex = (highlightedIndex + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
-      setHighlightedIndex(nextIndex);
-      return;
-    }
-    if ((event.key === "Enter" || event.key === " ") && open) {
-      event.preventDefault();
-      choose(options[highlightedIndex] || options[0]);
-    }
-  };
-
-  return <div className="ssh-form-picker" ref={pickerRef}>
-    <button type="button" id={id} className="ssh-form-picker-trigger" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} aria-controls={`${id}-options`} aria-required={required} disabled={pickerDisabled} onClick={() => setOpen((current) => !current)} onKeyDown={handleKeyDown}>
-      <span>{selected?.label || placeholder}</span><ChevronDown className={open ? "ssh-form-picker-chevron-open" : undefined} size={16} aria-hidden="true" />
-    </button>
-    {open ? <div id={`${id}-options`} className="ssh-form-picker-options" role="listbox" aria-label={ariaLabel}>
-      {options.map((option, index) => <button type="button" role="option" aria-selected={option.value === value} data-highlighted={index === highlightedIndex} key={option.value || "empty"} onMouseEnter={() => setHighlightedIndex(index)} onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); choose(option); }} onClick={(event) => event?.stopPropagation()}><span><b>{option.label}</b>{option.description ? <small>{option.description}</small> : null}</span>{option.value === value ? <Check size={15} aria-hidden="true" /> : null}</button>)}
-    </div> : null}
-  </div>;
+  return <SelectMenu id={id} label={ariaLabel} value={value} options={options} placeholder={placeholder} required={required} disabled={disabled || !options.length} className="ssh-form-picker" search={options.length > 4 || options.some(option => option.description) ? { label: `搜索${ariaLabel}` } : undefined} onChange={onChange} />;
 }
 
 function SshDiagnostics({ diagnostics, total }: { diagnostics: GroupedSshDiagnostic[]; total: number }) {
@@ -555,7 +501,7 @@ export function SshHostsPage({ onSession }: SshHostsPageProps) {
     <header className="control-page-heading ssh-heading"><div><p>本地基础设施</p><h1>SSH 主机</h1><span>复用系统 OpenSSH 配置，在不托管私钥和密码的前提下管理远程连接。</span></div><div className="ssh-heading-actions"><SshActionButton size="sm" variant="secondary" className="ssh-icon-action" onClick={generate} disabled={!!busy} aria-label="生成 AFK 密钥" title="生成 AFK 密钥"><KeyRound size={15} aria-hidden="true" /></SshActionButton><SshActionButton ref={addHostButtonRef} size="sm" variant="primary" className="ssh-icon-action" onClick={openAddForm} aria-label="添加 SSH 主机" title="添加 SSH 主机"><Plus size={16} aria-hidden="true" /></SshActionButton><SshActionButton size="sm" variant="secondary" className="ssh-icon-action" onClick={openAddBastionForm} aria-label="添加堡垒机" title="添加堡垒机"><Server size={15} aria-hidden="true" /></SshActionButton></div></header>
     {error ? <div className="ssh-alert error" role="alert"><CircleAlert size={15} />{error}<button onClick={() => setError("")} aria-label="关闭错误"><X size={14} /></button></div> : null}
     {notice ? <div className="ssh-alert success" role="status"><Check size={15} />{notice}</div> : null}
-    <section className="ssh-toolbar"><label className="ssh-search"><Search size={15} /><input aria-label="搜索 SSH 主机" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索别名、地址或用户" /></label><SshFormPicker id="ssh-source-filter" ariaLabel="来源筛选" value={source} options={[{ value: "all", label: "全部来源" }, { value: "system", label: "系统配置" }, { value: "managed", label: "AFK 管理" }]} placeholder="全部来源" disabled={!!busy} onChange={(value) => setSource(value as SourceFilter)} /><SshFormPicker id="ssh-status-filter" ariaLabel="状态筛选" value={status} options={[{ value: "all", label: "全部状态" }, ...Object.entries(statusLabels).map(([value, label]) => ({ value, label }))]} placeholder="全部状态" disabled={!!busy} onChange={(value) => setStatus(value as StatusFilter)} /><SshFormPicker id="ssh-bastion-filter" ariaLabel="堡垒机筛选" value={bastionFilter} options={[{ value: "all", label: "全部" }, { value: "bastion", label: "仅堡垒机" }, { value: "direct", label: "仅直连" }]} placeholder="全部" disabled={!!busy} onChange={(value) => setBastionFilter(value as BastionFilter)} />{diagnostics.length ? <SshDiagnostics diagnostics={groupedDiagnostics} total={diagnostics.length} /> : null}<button className="icon-button" onClick={() => void load({ forceRefresh: true })} disabled={!!busy} aria-label="刷新 SSH 主机"><RefreshCw size={16} className={busy === "list" ? "spin" : ""} /></button></section>
+    <section className="ssh-toolbar"><label className="ssh-search"><Search size={15} /><input aria-label="搜索 SSH 主机" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索别名、地址或用户" /></label><FilterPanel label="筛选 SSH 主机" filters={[...(source !== "all" ? [{ key: "source", label: `来源：${source === "managed" ? "AFK 管理" : "系统配置"}`, onClear: () => setSource("all") }] : []), ...(status !== "all" ? [{ key: "status", label: `状态：${statusLabels[status]}`, onClear: () => setStatus("all") }] : []), ...(bastionFilter !== "all" ? [{ key: "bastion", label: bastionFilter === "direct" ? "仅直连" : "仅堡垒机", onClear: () => setBastionFilter("all") }] : [])]}><SshFormPicker id="ssh-source-filter" ariaLabel="来源筛选" value={source} options={[{ value: "all", label: "全部来源" }, { value: "system", label: "系统配置" }, { value: "managed", label: "AFK 管理" }]} placeholder="全部来源" disabled={!!busy} onChange={(value) => setSource(value as SourceFilter)} /><SshFormPicker id="ssh-status-filter" ariaLabel="状态筛选" value={status} options={[{ value: "all", label: "全部状态" }, ...Object.entries(statusLabels).map(([value, label]) => ({ value, label }))]} placeholder="全部状态" disabled={!!busy} onChange={(value) => setStatus(value as StatusFilter)} /><SshFormPicker id="ssh-bastion-filter" ariaLabel="堡垒机筛选" value={bastionFilter} options={[{ value: "all", label: "全部" }, { value: "bastion", label: "仅堡垒机" }, { value: "direct", label: "仅直连" }]} placeholder="全部" disabled={!!busy} onChange={(value) => setBastionFilter(value as BastionFilter)} /></FilterPanel>{diagnostics.length ? <SshDiagnostics diagnostics={groupedDiagnostics} total={diagnostics.length} /> : null}<button className="icon-button" onClick={() => void load({ forceRefresh: true })} disabled={!!busy} aria-label="刷新 SSH 主机"><RefreshCw size={16} className={busy === "list" ? "spin" : ""} /></button></section>
     <section className="ssh-layout"><div className="ssh-host-list">{displayedBastions.map((bastion) => {
       const assets = bastionAssets(bastion);
       const collapsed = collapsedBastions.has(bastion.id);

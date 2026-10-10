@@ -19,6 +19,8 @@ import {
   validateBaseBranch,
 } from "../../../shared/work-item-run-validation";
 import { SelectMenu } from "../../components/SelectMenu";
+import { FilterPanel } from "../../components/FilterPanel";
+import { SegmentedControl } from "../../components/SegmentedControl";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { MarkdownContent } from "../backlog/MarkdownContent";
 import "../backlog/backlog.css";
@@ -378,11 +380,18 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
       {error ? <div className="backlog-alert error"><ShieldAlert size={15} />{error}</div> : null}
       {inventory.diagnostics.length ? <div className="work-item-diagnostics">{inventory.diagnostics.map((diagnostic, index) => <div key={`${diagnostic.platform}-${diagnostic.projectKey ?? "provider"}-${index}`}><b>{diagnosticTitle(diagnostic)}</b><span>{diagnostic.message}</span></div>)}</div> : null}
 
+      <SegmentedControl label="工作项快捷状态" value={stateFilter} options={[{ value: "all", label: "全部", count: inventory.items.length }, { value: "ready", label: "待处理", count: inventory.items.filter(item => item.state === "ready").length }, { value: "in_progress", label: "执行中", count: inventory.items.filter(item => item.state === "in_progress").length }]} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
       <div className="backlog-toolbar work-items-toolbar">
         <label className="backlog-search"><Search size={14} /><input aria-label="搜索工作项" value={query} onChange={event => { setQuery(event.target.value); setVisibleLimit(pageSize); }} placeholder="搜索标题、来源、关联仓库或标签" /></label>
+        <FilterPanel label="筛选工作项" filters={[
+          ...(platform !== "all" ? [{ key: "platform", label: `来源：${platform === "github" ? "GitHub" : "GitLab"}`, onClear: () => { setPlatform("all"); setProject("all"); setVisibleLimit(pageSize); } }] : []),
+          ...(project !== "all" ? [{ key: "project", label: `Issue：${projectOptions.find(option => option.value === project)?.label ?? project}`, onClear: () => { setProject("all"); setVisibleLimit(pageSize); } }] : []),
+          ...(stateFilter !== "all" ? [{ key: "state", label: `状态：${stateLabels[stateFilter]}`, onClear: () => { setStateFilter("all"); setVisibleLimit(pageSize); } }] : []),
+        ]}>
         <SelectMenu label="选择 Provider" value={platform} variant="filter" triggerPrefix="来源" options={[{ value: "all", label: "全部来源平台", triggerLabel: "全部" }, { value: "github", label: "GitHub", icon: "github", triggerLabel: "GitHub" }, { value: "gitlab", label: "GitLab", icon: "gitlab", triggerLabel: "GitLab" }]} onChange={value => { setPlatform(value as "all" | BacklogPlatform); setProject("all"); setVisibleLimit(pageSize); }} />
         <SelectMenu label="选择仓库" value={project} variant="filter" triggerPrefix="Issue" search={{ label: "搜索 Issue 来源", pinnedValue: "all", emptyMessage: "没有匹配的 Issue 来源" }} options={projectOptions} onChange={value => { setProject(value); setVisibleLimit(pageSize); }} />
         <SelectMenu label="筛选状态" value={stateFilter} variant="filter" options={stateFilterOptions} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
+        </FilterPanel>
       </div>
 
       <div className="backlog-list">

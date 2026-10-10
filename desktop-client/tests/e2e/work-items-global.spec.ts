@@ -1,6 +1,8 @@
 import { test, expect } from "./_helpers/launch";
+import { seedSelectionInventory } from "./_helpers/inventory";
 
 test.describe("global work items", () => {
+  test.beforeEach(async ({ electronApp, page }) => { await seedSelectionInventory(electronApp, page); });
   test("shows same-number issues from different repositories without selecting a directory", async ({ page }) => {
     const rows = page.locator(".backlog-row.work-item-row");
     await expect(rows).toHaveCount(2);
@@ -16,6 +18,7 @@ test.describe("global work items", () => {
   });
 
   test("filters the global inventory by project", async ({ page }) => {
+    await page.getByRole("button", { name: "筛选工作项" }).click();
     const providerTrigger = page.getByLabel("选择 Provider");
     const projectTrigger = page.getByLabel("选择仓库");
     await expect(providerTrigger).toHaveCSS("white-space", "normal");

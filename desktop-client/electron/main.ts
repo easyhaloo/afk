@@ -1,8 +1,8 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
-import { registerIpcHandlers } from "./ipc/register-handlers";
-import { readWorkspacePreference } from "./services/workspace-preference-service";
-import { createMainWindow } from "./window/main-window";
+import { registerIpcHandlers } from "./ipc/register-handlers.js";
+import { readWorkspacePreference } from "./services/workspace-preference-service.js";
+import { createMainWindow } from "./window/main-window.js";
 
 /** Electron bootstrap: lifecycle and module composition only. */
 const hasSingleInstanceLock = app.requestSingleInstanceLock();

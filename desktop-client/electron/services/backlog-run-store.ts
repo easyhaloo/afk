@@ -1,6 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { BacklogRunSummary } from "../../shared/backlog-contract";
+import type { BacklogRunSummary } from "../../shared/backlog-contract.js";
 
 const RUN_STORE_FILE = "backlog-runs.json";
 

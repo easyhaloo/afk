@@ -7,12 +7,13 @@ const port = process.env.AFK_E2E_PORT ?? "5174";
  *
  * Boots the real Electron desktop client against a Vite dev server so the
  * renderer, preload, IPC handlers, and main process are all live in the
- * same window the user gets from `pnpm start`. The fake-afk CLI on PATH
- * (see `tests/e2e/_helpers/launch.ts`) intercepts subprocess calls so the
- * tests don't require real GitHub / GitLab credentials.
+ * same window the user gets from `pnpm start`. A test-only Electron entry
+ * substitutes provider snapshots and fixture binaries intercept CLI calls,
+ * so the tests don't require real GitHub / GitLab credentials.
  */
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalSetup: "./tests/e2e/_helpers/global-setup.ts",
   testIgnore: ["**/_helpers/**", "**/fixtures/**"],
   fullyParallel: false,
   workers: 1,

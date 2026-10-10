@@ -2,7 +2,7 @@ import type {
   BacklogPlatform,
   ProviderProjectRef,
   WorkItemRunRepositorySelection,
-} from "./backlog-contract";
+} from "./backlog-contract.js";
 
 const BACKLOG_PLATFORM_VALUES: Record<BacklogPlatform, true> = {
   github: true,

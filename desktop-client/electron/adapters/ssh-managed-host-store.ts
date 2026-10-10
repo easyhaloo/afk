@@ -2,10 +2,10 @@ import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
-import type { ManagedSshHostInput, ManagedSshHostRecord } from "../../shared/ssh-contract";
-import { validateSshHostInput, validateSshHostId } from "../security/ssh-validation";
-import { createMutex } from "../lib/async-mutex";
-import { writeYamlFileAtomic } from "../lib/secure-store";
+import type { ManagedSshHostInput, ManagedSshHostRecord } from "../../shared/ssh-contract.js";
+import { validateSshHostInput, validateSshHostId } from "../security/ssh-validation.js";
+import { createMutex } from "../lib/async-mutex.js";
+import { writeYamlFileAtomic } from "../lib/secure-store.js";
 
 type FileSystem = Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "writeFile">;
 

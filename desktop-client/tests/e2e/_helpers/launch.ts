@@ -1,11 +1,11 @@
 /**
  * Shared Playwright fixture that boots the real AFK Control Electron
- * application with the `fake-afk` CLI on PATH. Each spec receives an
+ * application with fixture provider snapshots and CLI binaries. Each spec receives an
  * `electronApp` and a `page` whose renderer is the production React tree
  * served from the running Vite dev server.
  *
- * The webServer block in `playwright.config.ts` already starts Vite on
- * port 5174. We pass `ELECTRON_RENDERER_URL` so the main process loads
+ * The webServer block in `playwright.config.ts` starts Vite on the selected
+ * port. We pass `ELECTRON_RENDERER_URL` so the main process loads
  * that URL instead of the packaged `dist/index.html`, which keeps the
  * tests running against the current source without a rebuild cycle.
  */
@@ -13,11 +13,14 @@ import { test as base, _electron as electron, type ElectronApplication, type Pag
 import path from "node:path";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
-const HERE = __dirname;
+// desktop-client is an ESM package, so __dirname is not available.
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 const E2E_TMPDIR = realpathSync(tmpdir());
 export const FIXTURE_DIR = path.resolve(HERE, "../fixtures");
 export const FAKE_AFK = path.join(FIXTURE_DIR, "afk");
+export const E2E_ENTRY = path.join(FIXTURE_DIR, "electron.cjs");
 export const RENDERER_URL = `http://localhost:${process.env.AFK_E2E_PORT ?? "5174"}`;
 // fake-afk persists its in-memory store here so writes from one subprocess
 // invocation survive into the next. Delete before each test for isolation.
@@ -64,7 +67,7 @@ export const test = base.extend<Fixtures>({
     const workspace = createWorkspace();
     const userDataDirectory = mkdtempSync(path.join(E2E_HOME, "electron-data-"));
     const app = await electron.launch({
-      args: [".", `--user-data-dir=${userDataDirectory}`],
+      args: [E2E_ENTRY, `--user-data-dir=${userDataDirectory}`],
       env: {
         ...process.env,
         ELECTRON_RENDERER_URL: RENDERER_URL,

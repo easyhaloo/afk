@@ -47,4 +47,28 @@ describe('run observation facade', () => {
       nextCursor: undefined,
     });
   });
+
+  it('isolates invalid or non-replayable runs while returning healthy executions', async () => {
+    const healthy = port();
+    const deps: RunEventQueryPort = {
+      async *read(runId) {
+        if (runId === 'broken-run') throw new Error("run 'broken-run' event integrity: integrity_mismatch");
+        if (runId === 'non-replayable') {
+          yield { ...event(1, 'run.requested'), type: 'qa.started', data: { kind: 'qa.started' } } as RunEvent;
+          return;
+        }
+        yield* healthy.read(runId);
+      },
+      async listRuns() { return ['broken-run', 'non-replayable', 'run-1']; },
+      async verify(runId) {
+        if (runId === 'broken-run') return { valid: false, lastSequence: 0, reason: 'integrity_mismatch' };
+        if (runId === 'non-replayable') return { valid: true, lastSequence: 1 };
+        return healthy.verify(runId);
+      },
+    };
+
+    await expect(queryExecutionHistory({}, deps)).resolves.toMatchObject({
+      executions: [{ runId: 'run-1' }],
+    });
+  });
 });

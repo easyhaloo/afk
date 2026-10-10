@@ -1,10 +1,15 @@
 import { chmodSync, existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
 import * as pty from "node-pty";
-import type { SshSession } from "../../shared/ssh-contract";
-import type { SshConnectionTarget } from "../../shared/ssh-contract";
-import { sshConnectionArgs } from "../../shared/ssh-contract";
+import type { SshSession } from "../../shared/ssh-contract.js";
+import type { SshConnectionTarget } from "../../shared/ssh-contract.js";
+import { sshConnectionArgs } from "../../shared/ssh-contract.js";
+
+// node-pty is CommonJS; ESM main has no ambient `require`, so path resolution
+// goes through createRequire.
+const requireCjs = createRequire(import.meta.url);
 
 type PtyProcess = {
   pid: number;
@@ -58,7 +63,7 @@ function isSshPasswordPrompt(buffer: string) {
 }
 
 export function ensureNodePtySpawnHelperExecutable({
-  packageRoot = path.dirname(path.dirname(require.resolve("node-pty"))),
+  packageRoot = path.dirname(path.dirname(requireCjs.resolve("node-pty"))),
   platform = process.platform,
   arch = process.arch,
 }: NodePtySpawnHelperOptions = {}) {

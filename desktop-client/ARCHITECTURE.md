@@ -12,7 +12,7 @@ electron/services/                workspace, runtime, appearance, snapshot/workf
 electron/adapters/                execFile, tmux/container/resource, OpenSSH, known_hosts, PTY adapters
 electron/workflow/                schema-aware config parsing and validation
 electron/security/                sender-origin and navigation guards
-electron/preload.ts               fixed contextBridge whitelist
+electron/preload.cts              fixed contextBridge whitelist (CJS: sandboxed preloads must be)
 shared/                           Node/Electron-free IPC DTOs and channel constants
 src/features/                     renderer feature components and pure graph functions
 tests/                            desktop package unit tests
@@ -39,10 +39,16 @@ Execution history uses a separate direct Application path:
   verified JSONL `RunEventQueryPort` over `~/.afk/events`.
 - `electron/services/work-item-execution-query-service.ts` invokes
   `@afk/application.queryExecutionHistory`; no CLI subprocess or legacy projection
-  is used for the history view. The Application/Core use cases are bundled into
-  `dist-electron/application.cjs` so packaged Electron does not depend on
-  workspace symlinks; the workspace packages are development-time type/build
-  dependencies only.
+  is used for the history view. Main source is plain ESM and imports the use cases
+  directly — there is no runtime CommonJS interop shim.
+- **Development vs packaging differ on purpose.** In development
+  `dist-electron/electron/main.js` is transpiled per file and resolves the
+  workspace packages through symlinks. `scripts/build-main.mjs` then bundles
+  main together with `@afk/*` into a self-contained file for packaging, because
+  pnpm workspace deps are symlinks that electron-builder does not follow into the
+  asar. `electron` and `node-pty` stay external.
+- `dist-electron/provider-inventory.cjs` remains a genuine bundle: it inlines the
+  GitHub/GitLab SDKs and is loaded through `createRequire`.
 
 The main process is assembled in `electron/main.ts`; it must not own business
 logic. Renderer features consume `shared/ipc-contract.ts` and the preload API,
@@ -50,6 +56,19 @@ while all filesystem, process, YAML, and SQLite operations stay behind main
 process services and adapters. Workflow graph normalization and layout are
 pure functions so malformed dependencies and cycles can produce diagnostics
 without crashing React.
+
+## End-to-End Testing
+
+Run `pnpm --dir desktop-client exec playwright test --config=playwright.config.ts`
+from the repository root. Set `AFK_E2E_PORT` to a free port when the development
+server is already running; the suite never reuses another Vite server.
+Playwright's global setup builds the current main/preload and provider bundle.
+The test-only Electron entry installs an in-process provider snapshot fixture
+at the external catalog boundary, then starts the real main process. Application
+queries, inventory caching, IPC, preload, and renderer remain live. CLI/JumpServer
+subprocesses use the fixture binaries through explicit CLI configuration and PATH;
+they do not require or use real provider credentials. Tests isolate HOME, workspaces,
+and Electron user data, including the JSONL audit streams.
 
 | API | 主进程操作 | 输入约束 |
 | --- | --- | --- |

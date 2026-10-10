@@ -43,7 +43,7 @@ describe("desktop read-only event store", () => {
 
     await writeFile(file, `${JSON.stringify({ ...draft, integrity: { hash: "tampered" } })}\n`);
     expect(await events.verify(runId)).toMatchObject({ valid: false, reason: "integrity_mismatch" });
-    await expect(createWorkItemExecutionQueryService(events).list()).rejects.toThrow(/integrity/);
+    await expect(createWorkItemExecutionQueryService(events).list()).resolves.toEqual({ executions: [] });
   });
 
   it("returns an empty history when the event directory does not exist", async () => {

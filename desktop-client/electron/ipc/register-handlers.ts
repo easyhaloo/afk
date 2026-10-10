@@ -1,51 +1,51 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron";
-import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract";
-import type { SshFingerprint } from "../../shared/ssh-contract";
-import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, parseWorkItemInventoryOptions, parseWorkItemRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract";
-import { parseExecutionQueryOptions } from "../../shared/execution-contract";
-import { exec } from "../adapters/process-executor";
-import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter";
-import { createSshCommandAdapter } from "../adapters/ssh-command-adapter";
-import { createSshConfigAdapter } from "../adapters/ssh-config-adapter";
-import { createSshManagedHostStore } from "../adapters/ssh-managed-host-store";
-import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter";
-import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter";
-import { isAfkTmuxSession, listAfkTmux } from "../adapters/resource-adapter";
-import { normalizeTmuxSessionName } from "../../shared/tmux-session";
-import { assertTrustedSender } from "../security/sender-guard";
-import { validateJumpserverBastionId, validateJumpserverBastionInput, validateJumpserverSyncOptions, validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation";
-import { readAppearance, saveAppearance } from "../services/appearance-service";
-import { createBacklogService } from "../services/backlog-service";
-import { createBacklogExecutionService } from "../services/backlog-execution-service";
-import { createBacklogRunStore } from "../services/backlog-run-store";
-import { createBacklogRuntimeService } from "../services/backlog-runtime-service";
-import { createClipboardService } from "../services/clipboard-service";
-import { createSshCredentialService } from "../services/ssh-credential-service";
-import { createJumpserverService } from "../services/jumpserver-service";
-import { createJumpserverCredentialService } from "../services/jumpserver-credential-service";
-import { saveWorkflowConfig, snapshot } from "../services/desktop-service";
-import { createSshService } from "../services/ssh-service";
-import { createExternalUrlService } from "../services/external-url-service";
-import { createProviderWorkItemApplicationFacade, createWorkItemApplicationAdapter } from "../adapters/work-item-application-adapter";
-import { createWorkItemInventoryService } from "../services/work-item-inventory-service";
-import { createWorkItemInventoryStore } from "../services/work-item-inventory-store";
-import { createWorkItemInventorySyncService } from "../services/work-item-inventory-sync-service";
-import { createWorkItemExecutionService } from "../services/work-item-execution-service";
-import { createWorkItemExecutionQueryService } from "../services/work-item-execution-query-service";
-import { createRunEventQueryAdapter } from "../adapters/run-event-query-adapter";
-import { createWorkItemExecutionManifestStore } from "../services/work-item-execution-manifest-store";
-import { createWorkItemRunStore } from "../services/work-item-run-store";
-import { createWorkItemRunHistoryService } from "../services/work-item-run-history-service";
-import { resolveWorkItemCli } from "../services/work-item-cli-service";
-import { createExecutionWorkspaceService } from "../services/execution-workspace-service";
-import { WorkflowGraphService } from "../services/graph-service";
-import { saveWorkspacePreference } from "../services/workspace-preference-service";
-import { resolveWorkspace } from "../services/workspace-service";
-import { projectRunScopeService } from "../services/project-run-scope-service";
+import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract.js";
+import type { SshFingerprint } from "../../shared/ssh-contract.js";
+import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, parseWorkItemInventoryOptions, parseWorkItemRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract.js";
+import { parseExecutionQueryOptions } from "../../shared/execution-contract.js";
+import { exec } from "../adapters/process-executor.js";
+import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter.js";
+import { createSshCommandAdapter } from "../adapters/ssh-command-adapter.js";
+import { createSshConfigAdapter } from "../adapters/ssh-config-adapter.js";
+import { createSshManagedHostStore } from "../adapters/ssh-managed-host-store.js";
+import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter.js";
+import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter.js";
+import { isAfkTmuxSession, listAfkTmux } from "../adapters/resource-adapter.js";
+import { normalizeTmuxSessionName } from "../../shared/tmux-session.js";
+import { assertTrustedSender } from "../security/sender-guard.js";
+import { validateJumpserverBastionId, validateJumpserverBastionInput, validateJumpserverSyncOptions, validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation.js";
+import { readAppearance, saveAppearance } from "../services/appearance-service.js";
+import { createBacklogService } from "../services/backlog-service.js";
+import { createBacklogExecutionService } from "../services/backlog-execution-service.js";
+import { createBacklogRunStore } from "../services/backlog-run-store.js";
+import { createBacklogRuntimeService } from "../services/backlog-runtime-service.js";
+import { createClipboardService } from "../services/clipboard-service.js";
+import { createSshCredentialService } from "../services/ssh-credential-service.js";
+import { createJumpserverService } from "../services/jumpserver-service.js";
+import { createJumpserverCredentialService } from "../services/jumpserver-credential-service.js";
+import { saveWorkflowConfig, snapshot } from "../services/desktop-service.js";
+import { createSshService } from "../services/ssh-service.js";
+import { createExternalUrlService } from "../services/external-url-service.js";
+import { createProviderWorkItemApplicationFacade, createWorkItemApplicationAdapter } from "../adapters/work-item-application-adapter.js";
+import { createWorkItemInventoryService } from "../services/work-item-inventory-service.js";
+import { createWorkItemInventoryStore } from "../services/work-item-inventory-store.js";
+import { createWorkItemInventorySyncService } from "../services/work-item-inventory-sync-service.js";
+import { createWorkItemExecutionService } from "../services/work-item-execution-service.js";
+import { createWorkItemExecutionQueryService } from "../services/work-item-execution-query-service.js";
+import { createRunEventQueryAdapter } from "../adapters/run-event-query-adapter.js";
+import { createWorkItemExecutionManifestStore } from "../services/work-item-execution-manifest-store.js";
+import { createWorkItemRunStore } from "../services/work-item-run-store.js";
+import { createWorkItemRunHistoryService } from "../services/work-item-run-history-service.js";
+import { resolveWorkItemCli } from "../services/work-item-cli-service.js";
+import { createExecutionWorkspaceService } from "../services/execution-workspace-service.js";
+import { WorkflowGraphService } from "../services/graph-service.js";
+import { saveWorkspacePreference } from "../services/workspace-preference-service.js";
+import { resolveWorkspace } from "../services/workspace-service.js";
+import { projectRunScopeService } from "../services/project-run-scope-service.js";
 import { homedir } from "node:os";
 import path from "node:path";
 import { access } from "node:fs/promises";
-import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation";
+import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation.js";
 
 type HandlerSchema = (value: unknown) => unknown;
 
@@ -145,7 +145,7 @@ async function resolveDesktopAfk() {
     return candidate.startsWith("/") ? { command: candidate, args: [] } : { command: "", args: [] };
 }
 const backlogService = createBacklogService({
-  resolveAfk: async () => (await resolveDesktopAfk()).command,
+  resolveAfk: resolveDesktopAfk,
   resolveWorkspace,
   exec: async (command, args, cwd, stdin, options) => {
     const result = await exec(command, args, cwd, stdin, options);
@@ -194,7 +194,7 @@ const backlogRuntimeService = createBacklogRuntimeService({
 });
 const workflowGraphService = new WorkflowGraphService();
 const backlogExecutionService = createBacklogExecutionService({
-  resolveAfk: async () => (await resolveDesktopAfk()).command,
+  resolveAfk: resolveDesktopAfk,
   resolveWorkspace,
   getBacklog: (workspace, id) => backlogService.show(workspace, id),
   getSummary: (workspace, id) => backlogRuntimeService.summary(workspace, id),

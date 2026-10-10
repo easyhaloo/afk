@@ -5,7 +5,7 @@ import {
   parseWorkItemInventoryResult,
   type WorkItemInventoryOptions,
   type WorkItemInventoryResult,
-} from "../../shared/backlog-contract";
+} from "../../shared/backlog-contract.js";
 
 const STORE_VERSION = 1;
 

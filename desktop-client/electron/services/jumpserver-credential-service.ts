@@ -1,7 +1,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import { createMutex } from "../lib/async-mutex";
+import { createMutex } from "../lib/async-mutex.js";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "jumpserver-credentials.json");
 const MAX_PASSWORD_BYTES = 4096;

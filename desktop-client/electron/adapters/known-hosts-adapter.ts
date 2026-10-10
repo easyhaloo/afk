@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import type { SshFingerprint } from "../../shared/ssh-contract";
+import type { SshFingerprint } from "../../shared/ssh-contract.js";
 
 type KnownHostsOptions = {
   home: string;

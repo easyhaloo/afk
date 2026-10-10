@@ -27,6 +27,13 @@ function makeDeps(overrides: Partial<BacklogServiceDeps> = {}): { deps: BacklogS
 afterEach(() => vi.useRealTimers());
 
 describe("backlog service: list", () => {
+  it("preserves the local CLI entry point when invoking Node", async () => {
+    const { deps, execMock } = makeDeps({ resolveAfk: async () => ({ command: "/usr/bin/node", args: ["/repo/dist/index.js"] }) });
+    execMock.mockResolvedValue({ ok: true, stdout: JSON.stringify({ ok: true, kind: "backlog.list", data: [] }), stderr: "" });
+    await createBacklogService(deps).list("/workspace");
+    expect(execMock).toHaveBeenCalledWith("/usr/bin/node", ["/repo/dist/index.js", "backlog", "list", "--json"], "/workspace", undefined, { timeoutMs: 30_000 });
+  });
+
   it("parses the JSON success envelope and forwards options as --flags", async () => {
     const { deps, execMock } = makeDeps();
     execMock.mockResolvedValueOnce({

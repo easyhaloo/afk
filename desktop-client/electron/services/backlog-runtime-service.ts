@@ -1,8 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { BacklogRuntimeProjection, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract";
-import { parseBacklogRuntimeSummary } from "../../shared/backlog-contract";
-import type { createBacklogRunStore } from "./backlog-run-store";
+import type { BacklogRuntimeProjection, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract.js";
+import { parseBacklogRuntimeSummary } from "../../shared/backlog-contract.js";
+import type { createBacklogRunStore } from "./backlog-run-store.js";
 
 type RuntimeRecord = BacklogRuntimeProjection & {
   backlogId: string;

@@ -1,7 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { SshConnectionTarget, SshExternalTerminalId } from "../../shared/ssh-contract";
-import { sshConnectionArgs } from "../../shared/ssh-contract";
+import type { SshConnectionTarget, SshExternalTerminalId } from "../../shared/ssh-contract.js";
+import { sshConnectionArgs } from "../../shared/ssh-contract.js";
 
 export type ExternalTerminalName = "iTerm2" | "Warp" | "Ghostty" | "cmux" | "Terminal.app";
 

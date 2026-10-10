@@ -1,8 +1,13 @@
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import path from "node:path";
-import { exec as defaultExec, executable as defaultExecutable } from "./process-executor";
-import { normalizeTmuxSessionName } from "../../shared/tmux-session";
+import { exec as defaultExec, executable as defaultExecutable } from "./process-executor.js";
+import { normalizeTmuxSessionName } from "../../shared/tmux-session.js";
+
+// node:sqlite is loaded through createRequire so this stays synchronous; a
+// dynamic import() would force this reader to become async.
+const requireCjs = createRequire(import.meta.url);
 
 type AfkResourceRow = {
   workspace_path: string;
@@ -27,7 +32,7 @@ type ResourceAdapterDeps = {
 function readDatabaseResources(databasePath: string, workspaces: readonly string[]): AfkResourceRow[] {
   if (!existsSync(databasePath)) return [];
   try {
-    const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: SQLiteDatabaseSync };
+    const { DatabaseSync } = requireCjs("node:sqlite") as { DatabaseSync: SQLiteDatabaseSync };
     const db = new DatabaseSync(databasePath, { readOnly: true });
     try {
       const roots = [...new Set(workspaces.map(workspace => path.resolve(workspace)))];

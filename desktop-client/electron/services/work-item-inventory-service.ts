@@ -1,10 +1,10 @@
-import type { WorkItemApplicationAdapter } from "../adapters/work-item-application-adapter";
+import type { WorkItemApplicationAdapter } from "../adapters/work-item-application-adapter.js";
 import {
   parseWorkItemInventoryOptions,
   type WorkItemInventoryOptions,
   type WorkItemInventoryResult,
-} from "../../shared/backlog-contract";
-import { workItemInventoryKey, type WorkItemInventoryStore } from "./work-item-inventory-store";
+} from "../../shared/backlog-contract.js";
+import { workItemInventoryKey, type WorkItemInventoryStore } from "./work-item-inventory-store.js";
 
 export type WorkItemInventoryServiceDeps = {
   application: WorkItemApplicationAdapter;

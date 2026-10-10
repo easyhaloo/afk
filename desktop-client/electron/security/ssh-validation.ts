@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { ManagedSshHostInput, SshExternalTerminalId, SshJumpHostType } from "../../shared/ssh-contract";
+import type { ManagedSshHostInput, SshExternalTerminalId, SshJumpHostType } from "../../shared/ssh-contract.js";
 
 const OPENSSH_ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 const HOSTNAME_PATTERN = /^\S{1,253}$/u;

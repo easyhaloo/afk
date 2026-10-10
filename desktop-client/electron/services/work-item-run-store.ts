@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { parseWorkItemRunRecord, type WorkItemRunRecord } from "../../shared/backlog-contract";
+import { parseWorkItemRunRecord, type WorkItemRunRecord } from "../../shared/backlog-contract.js";
 
 const RUN_STORE_FILE = "work-item-runs.json";
 

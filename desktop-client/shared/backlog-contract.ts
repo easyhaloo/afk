@@ -9,11 +9,11 @@
  * beyond an icon and a label.
  */
 
-import { assertExactKeys, parseRequiredString } from "./validation";
+import { assertExactKeys, parseRequiredString } from "./validation.js";
 import {
   validateBaseBranch,
   validateRunRepositorySelectionSet,
-} from "./work-item-run-validation";
+} from "./work-item-run-validation.js";
 
 export const BACKLOG_STATES = [
   "ready",

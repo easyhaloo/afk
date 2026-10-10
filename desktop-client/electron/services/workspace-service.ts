@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
-import type { RuntimeEvent } from "../../shared/ipc-contract";
+import type { RuntimeEvent } from "../../shared/ipc-contract.js";
 
 export function resolveWorkspace(input?: string) {
   const candidate = input?.trim() || process.env.AFK_WORKSPACE || path.resolve(process.cwd(), "..");

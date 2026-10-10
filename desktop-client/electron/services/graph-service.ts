@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { WorkflowGraphGenerateRequest, WorkflowGraphGenerateResult, WorkflowGraphStatus } from '../../shared/ipc-contract';
+import type { WorkflowGraphGenerateRequest, WorkflowGraphGenerateResult, WorkflowGraphStatus } from '../../shared/ipc-contract.js';
 
 const run = promisify(execFile);
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

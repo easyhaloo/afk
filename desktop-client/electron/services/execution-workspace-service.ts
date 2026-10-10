@@ -2,9 +2,9 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import type { ProviderProjectRef, WorkItemId } from "../../shared/backlog-contract";
-import { parseWorkItemId } from "../../shared/backlog-contract";
-import { planRepositoryCheckoutPaths } from "../../shared/work-item-run-validation";
+import type { ProviderProjectRef, WorkItemId } from "../../shared/backlog-contract.js";
+import { parseWorkItemId } from "../../shared/backlog-contract.js";
+import { planRepositoryCheckoutPaths } from "../../shared/work-item-run-validation.js";
 
 export type ExecutionWorkspaceRepository = {
   project: ProviderProjectRef;

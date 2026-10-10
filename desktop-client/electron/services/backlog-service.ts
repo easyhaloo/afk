@@ -1,4 +1,5 @@
-import { BacklogServiceError } from "./backlog-error";
+import { BacklogServiceError } from "./backlog-error.js";
+import { normalizeCliInvocation, type CliInvocation } from "../lib/cli-invocation.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -7,7 +8,7 @@ import type {
   BacklogItem,
   BacklogListOptions,
   BacklogPlatform,
-} from "../../shared/backlog-contract";
+} from "../../shared/backlog-contract.js";
 
 export const BACKLOG_LIST_DEFAULT_TTL_MS = 30_000;
 export const BACKLOG_DEFAULT_TIMEOUT_MS = 30_000;
@@ -23,8 +24,8 @@ export type BacklogExecFn = (
 ) => Promise<BacklogExecResult>;
 
 export type BacklogServiceDeps = {
-  /** Resolve the absolute path of the `afk` CLI binary, or empty string if missing. */
-  resolveAfk: () => Promise<string>;
+  /** Resolve the CLI binary or runtime invocation, or empty string if missing. */
+  resolveAfk: () => Promise<string | CliInvocation>;
   /** Resolve a workspace path to an absolute filesystem path. */
   resolveWorkspace: (input: string) => string;
   /** Subprocess executor (defaults to the Electron adapter's `exec`). */
@@ -94,14 +95,14 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
   }
 
   async function runJson<T>(args: string[], workspace: string, kind: string, stdin?: string): Promise<T> {
-    const afkPath = await deps.resolveAfk();
-    if (!afkPath) {
+    const invocation = normalizeCliInvocation(await deps.resolveAfk());
+    if (!invocation.command) {
       throw new BacklogServiceError("auth", "afk CLI 未在 PATH 中发现；请安装或设置 PATH", {
         hint: "afk CLI must be installed and on PATH for backlog features",
       });
     }
     const cwd = deps.resolveWorkspace(workspace);
-    const result = await runWithTimeout(afkPath, [...args, "--json"], cwd, timeoutMs, stdin);
+    const result = await runWithTimeout(invocation.command, [...invocation.args, ...args, "--json"], cwd, timeoutMs, stdin);
     if (!result.ok && !result.stdout) {
       // Subprocess died before emitting JSON — likely spawn / timeout / signal.
       throw new BacklogServiceError("unknown", result.stderr || "afk 子进程退出但未输出 JSON");

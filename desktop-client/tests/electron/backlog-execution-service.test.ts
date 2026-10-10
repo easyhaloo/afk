@@ -44,6 +44,19 @@ describe("backlog execution service", () => {
     await expect(service.start("/repo", { backlogId: "42" })).resolves.toMatchObject({ backlogId: "42", status: "running" });
   });
 
+  it("preserves the local CLI entry point when spawning the loop", async () => {
+    const spawn = vi.fn((command: string, args: string[]) => ({ pid: 1234, once: vi.fn(), unref: vi.fn() }));
+    const service = createBacklogExecutionService({
+      resolveAfk: async () => ({ command: "/usr/bin/node", args: ["/repo/dist/index.js"] }),
+      resolveWorkspace: workspace => workspace,
+      getBacklog: async () => ({ id: "42", title: "工作项", dependsOn: [], state: "ready", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" }),
+      store: createMemoryStore(),
+      spawn,
+    });
+    await service.start("/repo", { backlogId: "42" });
+    expect(spawn.mock.calls[0].slice(0, 2)).toEqual(["/usr/bin/node", ["/repo/dist/index.js", "loop", "--backlog-id", "42", "--max-iterations", "1"]]);
+  });
+
   it("starts one run and returns a desktop run handle", async () => {
     const child = {
       pid: process.pid,

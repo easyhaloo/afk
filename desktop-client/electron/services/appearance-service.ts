@@ -1,7 +1,7 @@
 import { app } from "electron";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { AppearancePreferences } from "../../shared/ipc-contract";
+import type { AppearancePreferences } from "../../shared/ipc-contract.js";
 
 export const DEFAULT_APPEARANCE: AppearancePreferences = { locale: "system", fontFamily: "system", fontScale: "medium", accent: "violet", theme: "light" };
 

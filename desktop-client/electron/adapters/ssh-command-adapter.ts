@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import type { SshConnectionTarget, SshFingerprint } from "../../shared/ssh-contract";
-import { sshConnectionArgs } from "../../shared/ssh-contract";
+import type { SshConnectionTarget, SshFingerprint } from "../../shared/ssh-contract.js";
+import { sshConnectionArgs } from "../../shared/ssh-contract.js";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
 

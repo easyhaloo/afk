@@ -1,9 +1,9 @@
 import path from "node:path";
-import type { ManagedSshHostRecord } from "../../shared/ssh-contract";
-import type { BastionInput, BastionRecord } from "../adapters/jumpserver-store";
-import { createJumpserverStore } from "../adapters/jumpserver-store";
-import { JUMPSERVER_BINARY_ERROR, createJumpserverCli } from "../adapters/jumpserver-cli";
-import { createJumpserverCredentialStore } from "./jumpserver-credential-service";
+import type { ManagedSshHostRecord } from "../../shared/ssh-contract.js";
+import type { BastionInput, BastionRecord } from "../adapters/jumpserver-store.js";
+import { createJumpserverStore } from "../adapters/jumpserver-store.js";
+import { JUMPSERVER_BINARY_ERROR, createJumpserverCli } from "../adapters/jumpserver-cli.js";
+import { createJumpserverCredentialStore } from "./jumpserver-credential-service.js";
 
 // Must match OPENSSH_ALIAS_PATTERN in ../security/ssh-validation.ts
 const ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
@@ -44,7 +44,7 @@ type JumpserverServiceDeps = {
   bastionStore?: ReturnType<typeof createJumpserverStore>;
   credentialService?: ReturnType<typeof createJumpserverCredentialStore>;
   cli?: ReturnType<typeof createJumpserverCli>;
-  managedHostStore?: ReturnType<typeof import("../adapters/ssh-managed-host-store").createSshManagedHostStore>;
+  managedHostStore?: ReturnType<typeof import("../adapters/ssh-managed-host-store.js").createSshManagedHostStore>;
   listManagedHosts?: () => Promise<{ hosts: ManagedSshHostRecord[] }>;
   audit?: (event: { kind: string; bastionId: string; at: string; created?: number; skipped?: number }) => void;
 };

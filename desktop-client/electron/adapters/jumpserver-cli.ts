@@ -1,4 +1,4 @@
-import { exec } from "./process-executor";
+import { exec } from "./process-executor.js";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
 

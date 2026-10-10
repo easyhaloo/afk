@@ -22,8 +22,8 @@ function diagnosticPath() {
   // Use the current PATH as the base so test fixture directories (prepended
   // by the Playwright fixture) are preserved when the Electron main process
   // resolves CLI binaries like `afk`.
-  const base = (process.env.PATH || "").split(path.delimiter).filter((d) => !additional.includes(d));
-  return [...additional, ...base].join(path.delimiter);
+  const base = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  return [...new Set([...base, ...additional])].join(path.delimiter);
 }
 
 function diagnosticEnvironment(cwd?: string) {

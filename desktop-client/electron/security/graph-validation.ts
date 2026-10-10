@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { WorkflowGraphGenerateRequest, WorkflowGraphFormat } from "../../shared/ipc-contract";
+import type { WorkflowGraphGenerateRequest, WorkflowGraphFormat } from "../../shared/ipc-contract.js";
 
 const templateIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

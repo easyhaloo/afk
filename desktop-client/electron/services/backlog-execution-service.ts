@@ -1,7 +1,8 @@
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import type { BacklogItem, BacklogRunRetryInput, BacklogRunStartInput, BacklogRunSummary, BacklogRuntimeSummary } from "../../shared/backlog-contract";
-import type { createBacklogRunStore } from "./backlog-run-store";
+import { normalizeCliInvocation, type CliInvocation } from "../lib/cli-invocation.js";
+import type { BacklogItem, BacklogRunRetryInput, BacklogRunStartInput, BacklogRunSummary, BacklogRuntimeSummary } from "../../shared/backlog-contract.js";
+import type { createBacklogRunStore } from "./backlog-run-store.js";
 
 type SpawnedProcess = Pick<ChildProcess, "pid" | "once" | "unref">;
 type BacklogSpawnOptions = { cwd: string; detached: boolean; stdio: "ignore"; env?: NodeJS.ProcessEnv };
@@ -9,7 +10,7 @@ type ExecResult = { ok: boolean; stdout: string; stderr: string };
 type Signal = "SIGTERM" | "SIGKILL";
 
 export type BacklogExecutionServiceDeps = {
-  resolveAfk: () => Promise<string>;
+  resolveAfk: () => Promise<string | CliInvocation>;
   resolveWorkspace: (input: string) => string;
   getBacklog: (workspace: string, id: string) => Promise<BacklogItem>;
   getSummary?: (workspace: string, id: string) => Promise<BacklogRuntimeSummary>;
@@ -98,11 +99,11 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
     if (input.template && deps.validateTemplate && !(await deps.validateTemplate(workspace, input.template))) {
       throw new Error(`Workflow template not found or invalid: ${input.template}`);
     }
-    const afkPath = await requireAfk();
+    const invocation = await requireAfk();
     const root = deps.resolveWorkspace(workspace);
     const startedAt = now().toISOString();
     const runId = `desktop-${input.backlogId}-${randomUUID()}`;
-    const child = spawn(afkPath, buildBacklogRunArgs(input), { cwd: root, detached: true, stdio: "ignore", env: { ...process.env, PWD: root } });
+    const child = spawn(invocation.command, [...invocation.args, ...buildBacklogRunArgs(input)], { cwd: root, detached: true, stdio: "ignore", env: { ...process.env, PWD: root } });
     const summary: BacklogRunSummary = {
       id: runId,
       backlogId: input.backlogId,
@@ -223,8 +224,8 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
 
   async function runIntent(workspace: string, args: string[], kind: string): Promise<void> {
     if (!deps.exec) throw new Error("AFK backlog control executor is unavailable");
-    const afkPath = await requireAfk();
-    const result = await deps.exec(afkPath, [...args, "--json"], deps.resolveWorkspace(workspace));
+    const invocation = await requireAfk();
+    const result = await deps.exec(invocation.command, [...invocation.args, ...args, "--json"], deps.resolveWorkspace(workspace));
     let envelope: unknown;
     try {
       envelope = JSON.parse(result.stdout);
@@ -239,10 +240,10 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
     deps.invalidateBacklogList?.();
   }
 
-  async function requireAfk(): Promise<string> {
-    const afkPath = await deps.resolveAfk();
-    if (!afkPath) throw new Error("afk CLI 未在 PATH 中发现；请安装或设置 PATH");
-    return afkPath;
+  async function requireAfk(): Promise<CliInvocation> {
+    const invocation = normalizeCliInvocation(await deps.resolveAfk());
+    if (!invocation.command) throw new Error("afk CLI 未在 PATH 中发现；请安装或设置 PATH");
+    return invocation;
   }
 
   function summary(workspace: string, backlogId: string): Promise<BacklogRuntimeSummary> {

@@ -10,16 +10,16 @@ import type {
   WorkItemRunStartInput,
   WorkItemRunStartResult,
   WorkItemRunRecord,
-} from "../../shared/backlog-contract";
+} from "../../shared/backlog-contract.js";
 import {
   validateBaseBranch,
   validateRunRepositorySelection,
-} from "../../shared/work-item-run-validation";
+} from "../../shared/work-item-run-validation.js";
 import {
   workItemExecutionManifestPath,
   type createWorkItemExecutionManifestStore,
-} from "./work-item-execution-manifest-store";
-import type { createWorkItemRunStore } from "./work-item-run-store";
+} from "./work-item-execution-manifest-store.js";
+import type { createWorkItemRunStore } from "./work-item-run-store.js";
 
 type SpawnedProcess = Pick<ChildProcess, "pid" | "once" | "unref"> & Partial<Pick<ChildProcess, "kill">>;
 type WorkItemSpawnOptions = { cwd: string; detached: boolean; stdio: "ignore"; env?: NodeJS.ProcessEnv };

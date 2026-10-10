@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { ProjectRun } from "../../shared/ipc-contract";
-import { exec } from "../adapters/process-executor";
-import { createWorkItemRunStore } from "./work-item-run-store";
+import type { ProjectRun } from "../../shared/ipc-contract.js";
+import { exec } from "../adapters/process-executor.js";
+import { createWorkItemRunStore } from "./work-item-run-store.js";
 
 type Project = { platform: "github" | "gitlab"; projectKey: string; host: string };
 type WorkspaceMetadata = { taskId: string; root: string; repositories: Array<{ project: { platform: string; projectKey: string; providerHost?: string } }> };

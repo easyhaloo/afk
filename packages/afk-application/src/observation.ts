@@ -65,7 +65,12 @@ export async function queryExecutionHistory(
 
   const matching: Array<{ summary: ExecutionSummary; sortKey: string }> = [];
   for (const runId of await ports.listRuns()) {
-    const observed = await observeRun(runId, ports);
+    let observed: Awaited<ReturnType<typeof observeRun>>;
+    try {
+      observed = await observeRun(runId, ports);
+    } catch {
+      continue;
+    }
     if (!observed.state.run || (input.workItemId !== undefined && observed.state.run.workItemId !== input.workItemId)) continue;
     matching.push({
       sortKey: observed.events[0]?.occurredAt ?? '',

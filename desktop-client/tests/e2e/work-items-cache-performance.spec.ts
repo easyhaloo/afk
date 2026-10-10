@@ -2,10 +2,12 @@ import { test, expect, _electron as electron, type ElectronApplication } from "@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const rendererUrl = `http://localhost:${process.env.AFK_E2E_PORT ?? "5174"}`;
-const fixtureDirectory = path.resolve(__dirname, "fixtures");
+const fixtureDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fakeAfk = path.join(fixtureDirectory, "afk");
+const electronEntry = path.join(fixtureDirectory, "electron.cjs");
 const inventoryDelayMs = 2_500;
 
 type LaunchMeasurement = {
@@ -17,16 +19,21 @@ type LaunchMeasurement = {
 async function launchAndMeasure(environment: NodeJS.ProcessEnv): Promise<LaunchMeasurement> {
   const launchStartedAt = performance.now();
   const app = await electron.launch({
-    args: [".", `--user-data-dir=${environment.AFK_E2E_USER_DATA}`],
+    args: [electronEntry, `--user-data-dir=${environment.AFK_E2E_USER_DATA}`],
     env: environment,
     timeout: 30_000,
   });
   const launchMs = performance.now() - launchStartedAt;
-  const page = await app.firstWindow();
-  await page.waitForLoadState("domcontentloaded");
-  const rowsStartedAt = performance.now();
-  await expect(page.locator(".backlog-row.work-item-row")).toHaveCount(2);
-  return { app, launchMs, rowsVisibleMs: performance.now() - rowsStartedAt };
+  try {
+    const page = await app.firstWindow();
+    await page.waitForLoadState("domcontentloaded");
+    const rowsStartedAt = performance.now();
+    await expect(page.locator(".backlog-row.work-item-row")).toHaveCount(2);
+    return { app, launchMs, rowsVisibleMs: performance.now() - rowsStartedAt };
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
 }
 
 test("loads the persisted work item model before a delayed remote synchronization", async () => {

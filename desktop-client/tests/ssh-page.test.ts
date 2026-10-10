@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
-import { Copy, KeyRound, Plus, X } from "lucide-react";
+import { Copy, KeyRound, Plus, Server, X } from "lucide-react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { filterSshHosts, SshHostsPage, sshDiagnosticTypeLabel } from "../src/features/ssh/SshHostsPage";
 import { resetSshHostCache, writeSshHostCache } from "../src/features/ssh/ssh-host-cache";
@@ -640,13 +640,18 @@ describe("SSH host creation", () => {
     const { renderer } = await renderSshPage();
     const addButton = renderer.root.findByProps({ "aria-label": "添加 SSH 主机" });
     const generateButton = renderer.root.findByProps({ "aria-label": "生成 AFK 密钥" });
+    const bastionButton = renderer.root.findByProps({ "aria-label": "添加堡垒机" });
 
     expect(textContent(addButton)).toBe("");
     expect(textContent(generateButton)).toBe("");
+    expect(textContent(bastionButton)).toBe("");
     expect(addButton.props.title).toBe("添加 SSH 主机");
     expect(generateButton.props.title).toBe("生成 AFK 密钥");
+    expect(bastionButton.props.title).toBe("添加堡垒机");
+    expect(bastionButton.props.className).toContain("ssh-icon-action");
     expect(addButton.findByType(Plus)).toBeDefined();
     expect(generateButton.findByType(KeyRound)).toBeDefined();
+    expect(bastionButton.findByType(Server)).toBeDefined();
     act(() => { renderer.unmount(); });
     vi.unstubAllGlobals();
   });

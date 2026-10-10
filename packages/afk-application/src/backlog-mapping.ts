@@ -6,9 +6,8 @@ import type { WorkItem, WorkState } from '@afk/core';
  * Backlog lifecycle names (`in_progress`, `verification`, the `afk` / `hitl`
  * execution modes) are external provider-facing naming. Core must not know
  * them, so the translation lives here at the application boundary and both
- * consumers project through it: the AFK CLI (`src/application`) imports this
- * module directly, and the Electron desktop client reaches it as a value
- * through the pre-bundled `dist-electron/application.cjs`. One table, one
+ * consumers import it directly: the AFK CLI (`src/application`) and the
+ * Electron desktop client, which is ESM like this package. One table, one
  * place a vocabulary change has to land — see
  * docs/architecture/blueprints/core-layer-architecture_zh.md.
  */

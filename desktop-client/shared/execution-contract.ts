@@ -1,5 +1,5 @@
-import { parseWorkItemId, type WorkItemId } from "./backlog-contract";
-import { assertExactKeys, parseObject, parseRequiredString } from "./validation";
+import { parseWorkItemId, type WorkItemId } from "./backlog-contract.js";
+import { assertExactKeys, parseObject, parseRequiredString } from "./validation.js";
 
 export const EXECUTION_STATUSES = [
   "pending", "running", "awaiting_human", "succeeded", "failed", "cancelled",

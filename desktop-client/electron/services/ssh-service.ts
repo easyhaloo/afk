@@ -1,10 +1,10 @@
 import { homedir } from "node:os";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ManagedSshHostInput, SshConnectionTarget, SshExternalTerminalId, SshFingerprint, SshHost, SshListResult, SshSession, SshTestResult, SshTrustRequest } from "../../shared/ssh-contract";
-import type { ExternalTerminalName } from "../adapters/external-terminal-adapter";
-import { assertAllowedSshPath, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId, validateSshUploadLocalPath, validateSshUploadRemoteDirectory } from "../security/ssh-validation";
-import type { SshCredentialTarget } from "./ssh-credential-service";
+import type { ManagedSshHostInput, SshConnectionTarget, SshExternalTerminalId, SshFingerprint, SshHost, SshListResult, SshSession, SshTestResult, SshTrustRequest } from "../../shared/ssh-contract.js";
+import type { ExternalTerminalName } from "../adapters/external-terminal-adapter.js";
+import { assertAllowedSshPath, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId, validateSshUploadLocalPath, validateSshUploadRemoteDirectory } from "../security/ssh-validation.js";
+import type { SshCredentialTarget } from "./ssh-credential-service.js";
 
 type ServiceDependencies = {
   config: {

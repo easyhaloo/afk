@@ -12,11 +12,11 @@ import {
   type WorkItemId,
   type ProviderProjectRef,
   type WorkItemRunRepositorySelection,
-} from "../../shared/backlog-contract";
+} from "../../shared/backlog-contract.js";
 import {
   validateBaseBranch,
   validateRunRepositorySelectionSet,
-} from "../../shared/work-item-run-validation";
+} from "../../shared/work-item-run-validation.js";
 
 const MANIFEST_FILE = "execution-manifest.json";
 const MANIFEST_SCHEMA_VERSION = 1;

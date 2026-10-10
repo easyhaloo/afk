@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const stylesheet = readFileSync(path.resolve(__dirname, "../src/control.css"), "utf8");
-const palette = readFileSync(path.resolve(__dirname, "../src/palette.css"), "utf8");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const stylesheet = readFileSync(path.resolve(here, "../src/control.css"), "utf8");
+const palette = readFileSync(path.resolve(here, "../src/palette.css"), "utf8");
 
 describe("graphite theme selected controls", () => {
   it("keeps selected setting titles readable on accent-soft backgrounds", () => {

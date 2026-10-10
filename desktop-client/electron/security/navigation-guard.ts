@@ -1,5 +1,5 @@
 import type { WebContents } from "electron";
-import { isTrustedRendererUrl } from "./sender-guard";
+import { isTrustedRendererUrl } from "./sender-guard.js";
 
 export function installNavigationGuard(contents: WebContents) {
   contents.on("will-navigate", (event, url) => {

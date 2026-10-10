@@ -3,12 +3,12 @@ import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
-import { exec, executable, firstLine } from "../adapters/process-executor";
-import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter";
-import { configNumber, configString, parseConfig, type ConfigObject } from "../workflow/config-parser";
-import { detectAgentRuntimes } from "./runtime-service";
-import { projectRunScopeService } from "./project-run-scope-service";
-import { readEvents, resolveWorkspace } from "./workspace-service";
+import { exec, executable, firstLine } from "../adapters/process-executor.js";
+import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter.js";
+import { configNumber, configString, parseConfig, type ConfigObject } from "../workflow/config-parser.js";
+import { detectAgentRuntimes } from "./runtime-service.js";
+import { projectRunScopeService } from "./project-run-scope-service.js";
+import { readEvents, resolveWorkspace } from "./workspace-service.js";
 
 type CliCapability = {
   id: string;

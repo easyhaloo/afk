@@ -30,9 +30,9 @@ describe('backlog -> core vocabulary', () => {
   });
 
   it('keeps the public vocabularies reachable from the package barrel', () => {
-    // Desktop reaches these values through the pre-bundled CJS application.cjs,
-    // which is built from this barrel. A missing re-export silently breaks the
-    // Electron adapter at runtime rather than at build time.
+    // The Electron adapter imports these values straight from this barrel at
+    // runtime. A missing re-export breaks the desktop main process at runtime
+    // rather than at build time, so keep the assertion explicit.
     expect(BACKLOG_STATES).toContain('in_progress');
     expect(BACKLOG_EXECUTION_MODES).toContain('hitl');
   });

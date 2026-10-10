@@ -1,4 +1,4 @@
-import type { ExecutionQueryOptions, ExecutionSummary } from "./execution-contract";
+import type { ExecutionQueryOptions, ExecutionSummary } from "./execution-contract.js";
 
 export type RuntimeEvent = {
   id: string;
@@ -295,7 +295,7 @@ import type {
   SshTestResult,
   SshTrustRequest,
   SshUploadResult,
-} from "./ssh-contract";
+} from "./ssh-contract.js";
 import type {
   BacklogCreateInput,
   BacklogItem,
@@ -308,7 +308,7 @@ import type {
   WorkItemInventoryResult,
   WorkItemRunStartInput,
   WorkItemRunStartResult,
-} from "./backlog-contract";
+} from "./backlog-contract.js";
 
 export type SshExternalTerminalResult = {
   terminal: SshExternalTerminalId;

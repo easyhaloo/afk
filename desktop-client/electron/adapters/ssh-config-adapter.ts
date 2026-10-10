@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { ManagedSshHostInput, ManagedSshHostRecord, SshDiagnostic, SshHost, SshJumpHostType, SshListResult } from "../../shared/ssh-contract";
-import { validateSshHostInput } from "../security/ssh-validation";
+import type { ManagedSshHostInput, ManagedSshHostRecord, SshDiagnostic, SshHost, SshJumpHostType, SshListResult } from "../../shared/ssh-contract.js";
+import { validateSshHostInput } from "../security/ssh-validation.js";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
 

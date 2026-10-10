@@ -1,7 +1,7 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import { validateSshHostId } from "../security/ssh-validation";
+import { validateSshHostId } from "../security/ssh-validation.js";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "ssh-credentials.json");
 const MAX_PASSWORD_BYTES = 4096;

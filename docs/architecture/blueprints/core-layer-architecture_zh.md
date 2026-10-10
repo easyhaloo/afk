@@ -34,14 +34,27 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 - 架构守卫现在检查 Core/Application package 的依赖纯度和 package 边界。
 - backlog 到 core 的状态与执行模式映射收敛为单一实现
   `packages/afk-application/src/backlog-mapping.ts`，CLI 与 Desktop 共用，
-  不再各维护一份映射表。Desktop 经既有 esbuild 产物
-  `dist-electron/application.cjs` 以值的方式调用，未新增构建变体。
+  不再各维护一份映射表。
+- Electron main 与 `@afk/*` 统一为 ESM。`desktop-client` 的 `type` 改为 `module`，
+  main 源码直接 `import` Application 用例，不再经过运行期 CommonJS 桥接产物
+  `application.cjs`；`loadApplication()` shim 已删除。沙箱 preload 按 Electron
+  要求保持 CJS，源码以 `preload.cts` 表达（`.cts` 恒定产出 `.cjs`），
+  因此 `sandbox: true` 未被削弱。ESM 内需要访问 CJS 产物或原生模块时
+  统一用 `createRequire`。
+- **开发期与打包期的形态不同，这是有意的**。开发期 main 是逐文件 ESM，直接解析
+  workspace 包；打包期 `scripts/build-main.mjs` 用 esbuild 把 main 与 `@afk/*`
+  一起打成自包含的 `dist-electron/electron/main.js`（`electron` 与 `node-pty`
+  保持 external）。原因是 pnpm 的 workspace 依赖在 `node_modules` 里是 symlink，
+  electron-builder 不跟随，打包产物会解析不到 `@afk/application`。
+  同样保留 `dist-electron/provider-inventory.cjs`，因为它是真正内联了
+  GitHub/GitLab SDK 的 bundle。`@afk/*` 因此是 devDependency 而非 dependency。
 
 仍需继续收敛根包 `src/application` 中的 Provider SDK 实现、其他 Desktop CLI
 入口和工作项状态转换；不能将已迁移入口的单路径误写成全仓所有能力迁移完成。
 Desktop 目前对 `@afk/core` 的引用仍限于 `import type`，`decide` / `evolve` /
 `replay` / `resolveExecutionBase` 尚未在 Desktop 侧被调用——本节完成的是状态
-映射的去重，Core 行为函数的多端共享尚未达成。
+映射的去重，Core 行为函数的多端共享尚未达成。模块制式已统一，但这不等于
+Desktop 已经在复用 Core 的行为函数。
 
 ## 当前结构分析
 

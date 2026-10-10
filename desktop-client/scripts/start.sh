@@ -39,7 +39,7 @@ port_is_listening() {
 is_dev_command() {
   local cmd="$1"
   case "$cmd" in
-    *"dev:raw"*|*"concurrently"*|*"dev:main"*|*"vite/bin/vite.js --port $PORT"*|*"vite --port $PORT"*|*"wait-on tcp:$PORT"*|*"tsc -p tsconfig.electron.json --watch"*|*"electron/cli.js ."*|*"pnpm exec electron ."*|*"Electron.app/Contents/MacOS/Electron ."*)
+    *"dev:raw"*|*"concurrently"*|*"dev:main"*|*"vite/bin/vite.js --port $PORT"*|*"vite --port $PORT"*|*"wait-on tcp:$PORT"*|*"scripts/build-main.mjs --watch"*|*"scripts/build-provider-inventory.mjs"*|*"electron/cli.js ."*|*"pnpm exec electron ."*|*"Electron.app/Contents/MacOS/Electron ."*)
       return 0
       ;;
   esac

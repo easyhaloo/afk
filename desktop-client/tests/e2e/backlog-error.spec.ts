@@ -1,5 +1,5 @@
 import path from "node:path";
-import { test as base, expect, E2E_HOME_PATH, FIXTURE_DIR, RENDERER_URL } from "./_helpers/launch";
+import { test as base, expect, E2E_HOME_PATH, FIXTURE_DIR, FAKE_AFK, E2E_ENTRY, RENDERER_URL, resetHome } from "./_helpers/launch";
 import { _electron as electron, type ElectronApplication, type Page } from "@playwright/test";
 
 /**
@@ -9,20 +9,25 @@ import { _electron as electron, type ElectronApplication, type Page } from "@pla
  */
 const crashTest = base.extend<{ crashApp: ElectronApplication; crashPage: Page }>({
   crashApp: async ({}, use) => {
+    await resetHome();
     const app = await electron.launch({
-      args: [".", `--user-data-dir=${path.join(E2E_HOME_PATH, "crash-electron-data")}`],
+      args: [E2E_ENTRY, `--user-data-dir=${path.join(E2E_HOME_PATH, "crash-electron-data")}`],
       env: {
         ...process.env,
         ELECTRON_RENDERER_URL: RENDERER_URL,
         HOME: E2E_HOME_PATH,
         USERPROFILE: E2E_HOME_PATH,
         PATH: `${FIXTURE_DIR}${path.delimiter}${process.env.PATH ?? ""}`,
+        AFK_DESKTOP_CLI: FAKE_AFK,
         FAKE_AFK_FAIL_LIST: "1",
       },
       timeout: 30_000,
     });
-    await use(app);
-    await app.close();
+    try {
+      await use(app);
+    } finally {
+      await app.close();
+    }
   },
   crashPage: async ({ crashApp }, use) => {
     const page = await crashApp.firstWindow();

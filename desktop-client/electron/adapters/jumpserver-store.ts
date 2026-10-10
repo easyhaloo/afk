@@ -2,8 +2,8 @@ import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
-import { createKeyedMutex } from "../lib/async-mutex";
-import { writeYamlFileAtomic } from "../lib/secure-store";
+import { createKeyedMutex } from "../lib/async-mutex.js";
+import { writeYamlFileAtomic } from "../lib/secure-store.js";
 
 export type BastionInput = {
   alias: string;

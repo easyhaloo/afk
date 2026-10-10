@@ -1,10 +1,24 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { exec } from "../../electron/adapters/process-executor";
 
 describe("process executor", () => {
+  it("preserves explicitly configured PATH precedence before fallback directories", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "afk-executor-path-"));
+    try {
+      const binary = path.join(directory, "node");
+      await writeFile(binary, "#!/bin/sh\nprintf fixture-node");
+      await chmod(binary, 0o755);
+      vi.stubEnv("PATH", `${directory}${path.delimiter}${process.env.PATH ?? ""}`);
+      await expect(exec("node", ["--version"])).resolves.toMatchObject({ ok: true, stdout: "fixture-node" });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("propagates the subprocess working directory through PWD", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "afk-process-executor-"));
     try {

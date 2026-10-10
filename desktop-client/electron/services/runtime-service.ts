@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import type { AgentRuntime } from "../../shared/ipc-contract";
-import { exec, executable, firstLine } from "../adapters/process-executor";
+import type { AgentRuntime } from "../../shared/ipc-contract.js";
+import { exec, executable, firstLine } from "../adapters/process-executor.js";
 
 type AgentRuntimeDefinition = Pick<AgentRuntime, "id" | "label" | "command"> & { versionArgs: string[] };
 

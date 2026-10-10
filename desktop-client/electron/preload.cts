@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopApi } from "../shared/ipc-contract";
+import type { DesktopApi } from "../shared/ipc-contract.js";
 
 // Sandboxed preloads can only require Electron built-ins. Keep the wire names
 // local while the shared contract remains the source of renderer/main types.

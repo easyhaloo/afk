@@ -4,7 +4,7 @@
  * incorrectly placed in shared/ alongside wire-format parsers.
  */
 
-import type { ProviderProjectRef, WorkItemRunRepositorySelection } from "../../shared/backlog-contract";
+import type { ProviderProjectRef, WorkItemRunRepositorySelection } from "../../shared/backlog-contract.js";
 
 const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const CONTROL_CHARACTER_PATTERN = /[\x00-\x1f\x7f]/;

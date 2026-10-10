@@ -1,4 +1,4 @@
-import type { BacklogError, BacklogErrorCode } from "../../shared/backlog-contract";
+import type { BacklogError, BacklogErrorCode } from "../../shared/backlog-contract.js";
 
 /**
  * Error type for backlog service failures. Carries the structured

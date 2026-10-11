@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import simpleGit from 'simple-git';
 import {
   prepareAgentRuntime,
@@ -16,12 +16,19 @@ import { createProviderBundle as assembleProviderBundle } from '../../src/infras
 import { createTracker } from '../../src/infrastructure/provider/tracker-provider-factory';
 import { LoopRunner } from '../../src/application/modules/loop-runner';
 import { TaskRuntimeManager } from '../../src/application/runtime/task-runtime';
+import { deriveBacklogBranchName } from '../../src/domain/backlog/index';
+import { formatWorkItemId } from '../../src/domain/work-item/identity';
+import { toGlobalWorkItem } from '../../src/domain/work-item/metadata';
+import { executeWorkItem } from '../../src/application/workflows/execute-work-item';
 
 const E2E_TIMEOUT_MS = positiveInteger(process.env.AFK_CODEX_E2E_TIMEOUT_MS) ?? 30 * 60_000;
 
 async function main(): Promise<void> {
   const transport = parseTransport(process.argv.slice(2));
   const workflow = getWorkflowConfig();
+  workflow.agentDefault = 'codex';
+  workflow.agents.codex.transport = transport;
+  if (transport === 'app-server') workflow.agents.codex.appServer.endpoint = 'stdio://';
   const unresolvedRuntime = resolveCodexRuntime({
     cli: {
       transport,
@@ -50,12 +57,66 @@ async function main(): Promise<void> {
     ],
   }));
   const initial = await providers.backlog.get(backlogId);
+  const issue = await tracker.getIssue(Number(backlogId));
   const runtimeDir = await mkdtemp(join(tmpdir(), 'afk-codex-e2e-'));
+  const projectKey = tracker.platform === 'gitlab'
+    ? `${tracker.providerHost}/${String(tracker.projectId).replace(`${tracker.providerHost}/`, '')}`
+    : String(tracker.projectId);
+  const workItemId = formatWorkItemId({ platform: tracker.platform, projectKey, issueNumber: Number(backlogId) });
+  const inventoryItem = toGlobalWorkItem({
+    platform: tracker.platform,
+    projectKey,
+    ...(tracker.providerHost ? { providerHost: tracker.providerHost } : {}),
+    ...(tracker.platform === 'gitlab' ? { providerProjectId: String(tracker.projectId) } : {}),
+    name: projectKey.split('/').at(-1) ?? projectKey,
+    defaultBranch: workflow.targetBranch,
+  }, {
+    issueNumber: issue.id,
+    title: issue.title,
+    description: issue.description,
+    labels: issue.labels,
+    state: issue.state === 'closed' ? 'closed' : 'opened',
+    webUrl: issue.url,
+  });
+  const workspaceRoot = dirname(process.cwd());
+  const manifestPath = join(workspaceRoot, '.afk', 'e2e-runtime', `manifest-${marker}.json`);
+  await mkdir(dirname(manifestPath), { recursive: true });
+  await writeFile(manifestPath, JSON.stringify({
+    schemaVersion: 1,
+    workItemId,
+    providerBacklogId: backlogId,
+    tracker: {
+      platform: tracker.platform,
+      projectKey,
+      ...(tracker.providerHost ? { providerHost: tracker.providerHost } : {}),
+      ...(tracker.platform === 'gitlab' ? { providerProjectId: String(tracker.projectId) } : {}),
+    },
+    workingBranch: deriveBacklogBranchName(backlogId),
+    repositories: [{
+      platform: tracker.platform,
+      projectKey,
+      ...(tracker.providerHost ? { providerHost: tracker.providerHost } : {}),
+      ...(tracker.platform === 'gitlab' ? { providerProjectId: String(tracker.projectId) } : {}),
+      name: basename(process.cwd()),
+      checkoutPath: basename(process.cwd()),
+      baseBranch: workflow.targetBranch,
+      workingBranch: deriveBacklogBranchName(backlogId),
+      primary: true,
+    }],
+  }, null, 2));
   const runner = new LoopRunner(providers, {
     providers,
     agentProvider: 'codex',
     agentRuntime: runtime,
     backlogIds: [backlogId],
+    managedExecution: { workItemId, manifestPath },
+    template: 'issue-implementation',
+    executeManagedWorkItem: input => executeWorkItem(input, {
+      lookupWorkItem: async id => {
+        if (id !== workItemId) throw new Error(`unexpected E2E work item lookup: ${id}`);
+        return inventoryItem;
+      },
+    }),
     readinessProbe: async selected => ({
       ready: true,
       auth: selected.auth,
@@ -97,6 +158,7 @@ async function main(): Promise<void> {
     console.error(`Codex E2E failed: backlog=${initial.webUrl ?? backlogId} state=${current?.state ?? 'unknown'} mode=${current?.executionMode ?? 'unknown'}`);
     throw error;
   } finally {
+    await rm(manifestPath, { force: true });
     await rm(runtimeDir, { recursive: true, force: true });
   }
 }

@@ -248,32 +248,24 @@ export class GitHubClient implements TrackerProvider {
     if (issue.platform !== 'github') throw new Error('GitHub PR requires a GitHub issue');
     const [owner, repo, extra] = issue.projectKey.split('/');
     if (!owner || !repo || extra) throw new Error('GitHub issue project key must be owner/repo');
-    const query = `query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+    const query = `query($owner: String!, $repo: String!, $pullRequest: Int!) {
       repository(owner: $owner, name: $repo) {
-        issue(number: $number) {
-          closedByPullRequestsReferences(first: 100, after: $after, includeClosedPrs: true) {
+        pullRequest(number: $pullRequest) {
+          closingIssuesReferences(first: 100) {
             nodes { number repository { nameWithOwner } }
-            pageInfo { hasNextPage endCursor }
           }
         }
       }
     }`;
-    let after: string | null = null;
-    for (let page = 0; page < 20; page += 1) {
-      const response: {
-        repository?: { issue?: { closedByPullRequestsReferences?: {
-          nodes?: ({ number: number; repository?: { nameWithOwner: string } } | null)[];
-          pageInfo?: { hasNextPage: boolean; endCursor?: string | null };
-        } } };
-      } = await this.client.graphql(query, { owner, repo, number: issue.issueNumber, after });
-      const references = response.repository?.issue?.closedByPullRequestsReferences;
-      if (!references || !Array.isArray(references.nodes) || !references.pageInfo) throw new Error('GitHub issue linkage readback unavailable');
-      if (references.nodes.some(pr => pr?.number === id && pr.repository?.nameWithOwner.toLowerCase() === String(this.projectId).toLowerCase())) return true;
-      if (!references.pageInfo.hasNextPage) return false;
-      if (!references.pageInfo.endCursor || references.pageInfo.endCursor === after) throw new Error('GitHub issue linkage cursor unavailable');
-      after = references.pageInfo.endCursor;
-    }
-    throw new Error('GitHub issue linkage readback exceeded pagination limit');
+    const response: {
+      repository?: { pullRequest?: { closingIssuesReferences?: {
+        nodes?: ({ number: number; repository?: { nameWithOwner: string } } | null)[];
+      } } };
+    } = await this.client.graphql(query, { owner, repo, pullRequest: id });
+    const references = response.repository?.pullRequest?.closingIssuesReferences;
+    if (!references || !Array.isArray(references.nodes)) throw new Error('GitHub PR linkage readback unavailable');
+    return references.nodes.some(linked => linked?.number === issue.issueNumber
+      && linked.repository?.nameWithOwner.toLowerCase() === `${owner}/${repo}`.toLowerCase());
   }
 
   async getMR(id: number): Promise<TrackedMR> {

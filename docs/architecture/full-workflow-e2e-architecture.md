@@ -1,0 +1,329 @@
+# AFK 全流程执行与 E2E 验证架构
+
+本文描述 AFK 从任务派发、单项执行、持续 loop、模板编排、QA 和状态流转，到桌面端展示与 E2E 证据归档的真实实现边界。
+
+本文基于当前源码整理，主要实现锚点如下：
+
+| 领域 | 实现入口 |
+| --- | --- |
+| CLI 命令注册 | [`src/cli/command-registry.ts`](../../src/cli/command-registry.ts) |
+| `afk run` | [`src/cli/commands/run.ts`](../../src/cli/commands/run.ts)、[`src/application/workflows/run-cmd.ts`](../../src/application/workflows/run-cmd.ts) |
+| `afk loop` | [`src/cli/commands/loop.ts`](../../src/cli/commands/loop.ts)、[`src/application/modules/loop-runner.ts`](../../src/application/modules/loop-runner.ts) |
+| 单项闭环 | [`src/application/workflows/execute-work-item.ts`](../../src/application/workflows/execute-work-item.ts) |
+| 工作流执行 | [`src/application/workflow-engine.ts`](../../src/application/workflow-engine.ts) |
+| 模板加载与编译 | [`src/domain/templates/loader.ts`](../../src/domain/templates/loader.ts)、[`src/domain/templates/builtin.ts`](../../src/domain/templates/builtin.ts)、[`src/application/workflows/plan-executor.ts`](../../src/application/workflows/plan-executor.ts) |
+| QA | [`src/cli/commands/qa.ts`](../../src/cli/commands/qa.ts)、[`src/application/modules/qa-runner.ts`](../../src/application/modules/qa-runner.ts) |
+| 审计事件 | [`packages/afk-core/src/events.ts`](../../packages/afk-core/src/events.ts)、[`src/infrastructure/observability/jsonl-event-store.ts`](../../src/infrastructure/observability/jsonl-event-store.ts) |
+| 桌面端与 E2E | [`desktop-client/ARCHITECTURE.md`](../../desktop-client/ARCHITECTURE.md)、[`desktop-client/playwright.config.ts`](../../desktop-client/playwright.config.ts)、[`desktop-client/tests/e2e/_helpers/launch.ts`](../../desktop-client/tests/e2e/_helpers/launch.ts) |
+
+## 1. 范围与判定口径
+
+本文中的“全流程”是以下链路全部可追踪：
+
+```text
+任务进入 Provider Backlog
+  → 任务满足可执行条件
+  → afk run 或 afk loop 获取执行权
+  → execution manifest / project context 校验
+  → WorkflowRunner 执行模板步骤
+  → 实现分支推送并进入 verification
+  → QARunner 执行 QA
+  → root 任务进入 merge_ready 等待人工合并，或 child 任务自动合并进入 done
+  → 事件、runtime、执行 journal、CLI/Agent 日志形成证据
+  → Desktop 通过 Main/IPC 查询 Backlog、runtime 和事件投影
+  → Playwright Electron E2E 保存运行结果、截图或 trace
+```
+
+“任务完成”不能只由进程退出码证明。至少要同时核对 Provider 状态、执行身份、审计事件完整性和必要的 runtime 诊断；桌面端的 launch metadata 只能说明桌面端发起过进程，不能推断 `verification`、`blocked` 或 `done`。
+
+## 2. 组件与数据流
+
+```mermaid
+flowchart LR
+    User[用户或调度器] --> Backlog[Provider Backlog]
+    Backlog --> Gate{可执行性}
+    Gate -->|ready / rework| Run[afk run]
+    Gate -->|manifest 绑定单项| Loop[afk loop]
+    Gate -->|其他状态| Stop[不启动或等待]
+
+    Run --> Request[WorkflowRunRequest]
+    Loop --> LoopRunner[LoopRunner]
+    LoopRunner --> Execute[executeWorkItem]
+    Execute --> Request
+
+    Request --> Runner[WorkflowRunner]
+    Runner --> Template[TemplateLoader + compiler]
+    Template --> Plan[PlanExecutor]
+    Plan --> Agent[Agent Provider / Runtime]
+    Plan --> System[受限 SystemActionExecutor]
+    Runner --> Claim[Claim / lease heartbeat]
+    Runner --> Git[Branch / worktree / sandbox]
+
+    Runner --> Verification[verification]
+    Verification --> QA[QARunner]
+    QA --> Change[Change Provider]
+    Change --> MergeReady[merge_ready + human gate]
+    Change --> Done[child merge + done]
+    QA --> Rework[rework]
+    Runner --> Blocked[blocked + hitl]
+    Execute --> Journal[workspace .afk/executions/*.jsonl]
+    Runner --> Events[~/.afk/events/<runId>.jsonl]
+    Runner --> Runtime[~/.afk/runtime/tasks]
+
+    Events --> Main[Electron Main: query adapters]
+    Runtime --> Main
+    Backlog --> Main
+    Main --> IPC[typed preload IPC]
+    IPC --> Desktop[React Desktop]
+    Desktop --> E2E[Playwright Electron E2E]
+    E2E --> Evidence[截图 / trace / stdout / JSON 归档]
+```
+
+### 2.1 Provider Backlog 是业务事实源
+
+`BacklogProvider` 负责任务的身份、标题、描述、状态、执行模式、父子关系、依赖、标签和分支映射。执行器通过 Provider 进行 claim、状态迁移和变更请求操作，不能通过解析 Provider 标签自行推断业务状态。
+
+可执行条件由 Provider 和执行编排共同约束：
+
+- 状态必须是 `ready` 或 `rework`。
+- 执行模式必须是 `afk`；`hitl` 项不能被自动执行。
+- 任务不能有子任务。
+- 所有 `dependsOn` 项必须为 `done`。
+- manifest、Provider 项和全局 work item 身份必须一致。
+
+`afk run` 通过 `WorkflowRunner` 在创建工作树前 claim；claim 失败会记录取消结果并返回 `not_claimed`。claim 成功后持续 heartbeat，租约丢失会把任务转为 `blocked` 并切到 `hitl`。
+
+### 2.2 `afk run` 的单项执行路径
+
+`afk run --backlog-id <id>` 的入口只负责收集 CLI 参数并调用 `runWorkflowCli`。后者解析配置和 manifest、创建 tracker/provider bundle，再交给 `WorkflowRunner.run`。
+
+`WorkflowRunner` 的关键顺序是：
+
+1. 创建 `run.requested` 审计事件。
+2. 对 backlog 做条件 claim；成功后记录 `run.started` 和 `lease.granted`。
+3. 启动 runtime 记录和 lease heartbeat。
+4. 加载并校验模板；模板错误发生在工作树创建前，并会把已 claim 的项收敛到 `blocked`。
+5. 准备 branch、worktree、sandbox、agent runtime 和 watchdog。
+6. 编译模板并由 `PlanExecutor` 按依赖层级执行 agent/system step。
+7. 成功后推送实现分支，进入 `verification`；失败、超时、异常或清理失败进入 `blocked`。
+8. 结束 runtime，释放 claim 和工作树资源，并写入实现阶段审计事件。
+
+实现模板明确要求 Agent 不创建或合并 MR；发布、提交 QA、创建变更请求和合并策略由后续系统动作或 `QARunner` 负责。
+
+### 2.3 `afk loop` 的持续执行路径
+
+`afk loop` 不是多项通用调度器，而是一个 manifest-bound 的单项循环器。启动时必须提供：
+
+```text
+--work-item-id <global-id>
+--execution-manifest <path>
+--backlog-id <exactly-one-id>
+```
+
+同时不允许 module triggers。`LoopRunner` 在每次 poll 中重新读取 manifest，并只把这个 manifest 绑定的 backlog 项交给 `executeWorkItem`。每个成功或失败的尝试都有独立 `executionId`，同一进程用 `inFlight` 防止重复启动。
+
+loop 的外部控制面是：
+
+- `afk loop start` 或兼容的 `afk loop`：前台运行；`-d` 通过 detached child 后台运行。
+- `afk loop status`：读取 `~/.afk/loop.pid`、`~/.afk/loop-status.json` 和进程存活状态。
+- `afk loop stop`：先发 `SIGTERM`，超时后发 `SIGKILL`。
+
+loop 输出状态行和 JSON 状态文件，包含 active execution、完成数、失败数、启动时间和最近错误。Provider 状态仍是事实源；`inFlight` 只用于当前进程内去重，重启后不会恢复之前的内存集合。
+
+### 2.4 `executeWorkItem` 的闭环
+
+manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 命名的 journal 和按 work item 编码的锁。执行前会核对 manifest、Provider backlog、inventory item、项目平台、issue number、执行模式、managed/eligible 标记和依赖完成情况。
+
+执行阶段如下：
+
+1. 写入 journal `requested` 和 `implementing`。
+2. 调用 `WorkflowRunner`，强制 batch 模式，并把 `executionId` 同时作为 observation `traceId` / `runId`。
+3. 实现成功后要求 Provider 状态已经进入 `verification`。
+4. 调用 `QARunner`，写入 `qa.started`，根据 QA 结果写入 `qa.passed` 或 `qa.failed`。
+5. QA PASS 时提交 QA 分支、push、创建或复用 Change Request，并校验变更与 work item 的关联。
+6. root backlog 留在 `merge_ready` 并打开人工 gate；child backlog 执行合并并进入 `done`。
+7. QA FAIL 生成或保留 rework 记录，并让任务回到 `rework`；不可恢复的错误进入 `blocked`。
+
+返回值的 `status` 是执行尝试的结果：`merge_ready`、`done`、`rework`、`blocked` 或 `not_claimed`。它不能直接替换 Provider 的 backlog ID 或生命周期状态。
+
+## 3. 身份字段与关联规则
+
+| 字段 | 所属对象 | 含义 | 使用边界 |
+| --- | --- | --- | --- |
+| `BacklogItem.id` | Provider Backlog | Provider 内部 backlog 主键 | 传给 `afk run --backlog-id`，用于状态迁移和 claim |
+| `workItemId` | 全局工作项、`Run`、事件上下文 | provider-neutral 全局身份，例如 `github:team/repo#158` | 跨 Provider、manifest、inventory、runtime 和 Desktop 精确关联；不能用 `runId` 替代 |
+| `runId` | 核心 `Run`、事件流、runtime | 一次执行尝试的身份 | 每次 attempt 独立；事件流、状态投影和诊断目录按它索引 |
+| `executionId` | `executeWorkItem` 结果、journal、闭环审计 | loop/闭环的一次执行编排身份 | 默认生成 UUID；当前闭环中同时作为 observation `runId` 和 `traceId` |
+| `parentId` | `BacklogItem` | 组织上的父子分组 | 不选择 Git 基线；root 与 child 的 QA 合并策略不同 |
+| `dependsOn` | `BacklogItem` | 任务级调度依赖 | 所有依赖达到 `done` 后任务才可运行；不自动选择分支 |
+| `baseBacklogId` | Provider backlog 投影 | 显式的未合并 Git 执行基线 | 用于 stacked work 的基线选择；和 `parentId`、`dependsOn` 是不同关系 |
+| `baseWorkItemId` | `@afk/core` `WorkLineage` | 核心模型中对应的显式执行基线字段 | 进入 core policy 时表示相同语义；适配层不得把它与父项或依赖项混用 |
+| `providerRef` | `BacklogItem` | Provider 原始引用 | 作为 Provider 边界校验字段，不是执行尝试 ID |
+| `correlationId` | `RunEvent` | 事件所属执行关联 | projection 用它生成 `executionId`；必须与同一事件流身份一致 |
+| `leaseEpoch` | `ObservationContext` | claim/租约世代 | 用于识别租约变更，不能当作任务或 run 身份 |
+
+最小不变量是：`Run.workItemId === event.context.workItemId`，`run.requested.run.id === event.context.runId`，`executionId` 对应的 journal、事件流和 runtime 记录必须指向同一个全局 work item。
+
+## 4. 模板加载、编译与执行
+
+### 4.1 加载优先级
+
+`TemplateLoader` 按以下顺序查找同名模板，并在首次加载后缓存：
+
+```text
+--template 直接路径（名称包含 / 或 .yml/.yaml）
+  > <project>/.afk/workflows/<name>.yml|yaml
+  > ~/.afk/workflows/<name>.yml|yaml
+  > 内置 registry
+```
+
+磁盘模板先经 YAML 解析和 `WorkflowTemplateSchema` 校验，再解析相对 prompt 文件路径。模板版本当前固定为 `1`。agent step 必须有 `role` 和 `prompt`；system step 必须有 `action`。system action 只能通过 `SystemActionExecutor` 的固定动作或已注册 plugin action 执行，不能从模板任意执行 shell 命令。
+
+### 4.2 编译规则
+
+`resolveExecutionPlan` 先校验依赖和 `when` 引用，再用 Kahn 算法计算依赖层级。相同层级的 runnable steps 由 `PlanExecutor` 通过 `Promise.all` 并发执行；有依赖的层级按顺序推进。
+
+条件语义是：
+
+- 没有 `when` 时，所有 `dependsOn` 必须为 `completed` 才运行。
+- 有 `when` 时先由 `evaluateWhen` 判断条件；显式条件可以有意从失败依赖中恢复，例如 `review=failed` 时执行 `fix`。
+- step 结果保存在以 step ID 为键的结果表中，后续 step 只能依赖已记录结果。
+
+## 5. 内置模板覆盖矩阵
+
+当前 `builtinTemplates()` 注册以下 6 个模板；名称由 `src/domain/templates/templates.test.ts` 固定断言。
+
+| 模板 | 图结构 | 主要能力 | 全流程验证重点 | 终态边界 |
+| --- | --- | --- | --- | --- |
+| `issue-implementation` | `implement → verify-ac → publish → queue-qa` | 默认实现流程；包含两个 agent step 和两个 system step | claim、工作树、实现、AC 验证、push、verification | QA 不在模板内完成；后续 `QARunner` 决定 `merge_ready` 或 `done` |
+| `pre-merge-qa-verification` | `verify-ac` | 已合并最新基线后的 QA agent；要求结构化 `goal_complete` | QA 工作树、AC/集成测试、PASS/FAIL 解析、诊断保存 | PASS 由 QA runner 提交/push/发布；Agent 本身不负责 MR |
+| `simple-loop` | `run` | 单 agent step 的最小执行模板 | 单步 prompt、完成信号、单步 runtime 和事件 | 由 runner 的 wrap-up 和 backlog 路由决定 |
+| `sequential-review` | `implement → review → fix` | 依赖顺序和失败条件分支 | `review` 失败时 `fix` 可运行；成功时不应误跑 fix | 后续仍由 runner wrap-up 处理分支和状态 |
+| `parallel-planner` | `plan-frontend ∥ plan-backend ∥ plan-infra` | 同层多个 planner 并发；每步声明独立 named branch | 并发执行、互不复用工作树、结果全量记录 | 模板本身没有合并/QA terminalizer |
+| `planner-with-review` | `plan-frontend ∥ plan-backend → review → fix` | 并发 fan-out、review fan-in、条件修复 | 两个 planner 完成后才进入 review；review 失败才运行 fix | 仍需 runner 的发布和 QA 闭环 |
+
+验证矩阵中的“全流程验证重点”必须分层：模板单元测试可以验证图和条件，runner 集成测试可以验证资源和状态，真实 Provider/Agent E2E 才能验证外部 change、push、合并和凭据边界。
+
+### 5.1 模板当前限制
+
+模板的 `parallel` 字段用于表达模板意图和独立分支约束，但当前 resolver 的并发依据是“同一依赖层级”，不是按 `parallel` 字符串单独分组。因此，未来增加无依赖的多个 step 时，即使没有相同 `parallel` 值，也可能在同层并发；需要改变此语义时必须同时修改 resolver、测试和本文矩阵。
+
+## 6. QA 与状态流转
+
+```mermaid
+stateDiagram-v2
+    [*] --> ready
+    ready --> in_progress: claim
+    rework --> in_progress: claim
+    in_progress --> verification: implementation success
+    in_progress --> blocked: failure / timeout / lease loss
+    verification --> rework: QA FAIL
+    verification --> merge_ready: root QA PASS
+    verification --> done: child QA PASS + auto merge
+    merge_ready --> done: human merge + verified event
+    blocked --> [*]
+    rework --> [*]: 等待下一次 loop/run
+    done --> [*]
+```
+
+`QARunner` 使用管理 provider，不拥有 implementation claim 能力。它要求 backlog 当前处于 `verification`，并要求 Agent 返回满足以下结构的结构化结果：
+
+```json
+{
+  "type": "goal_complete",
+  "kind": "qa",
+  "result": "PASS",
+  "summary": "...",
+  "requiredChecks": []
+}
+```
+
+FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 和 `actual`。PASS 会 commit、push、创建或复用 Change Request，并验证 issue association；root 项切到 `merge_ready` 和 `hitl`，child 项执行 merge 后切到 `done`。QA 的终端路由失败会切到 `blocked` 和 `hitl`。
+
+## 7. 日志、事件和截图归档
+
+### 7.1 运行时产生的证据
+
+| 证据 | 默认位置 | 内容与校验 |
+| --- | --- | --- |
+| 审计事件流 | `~/.afk/events/<runId>.jsonl` | JSONL、连续 sequence、前向 hash 链；`RunEventQueryPort.verify` 和 projection 负责完整性/身份诊断 |
+| 运行时活动 | `~/.afk/runtime/tasks/active/` | 运行中的 `TaskRuntimeRecord`、heartbeat、phase、progress、agent/runtime 元数据 |
+| 运行时归档 | `~/.afk/runtime/tasks/archive/` | terminal runtime 记录；`completed` 或 `blocked` 后从 active 移入 archive |
+| 运行时诊断 | `~/.afk/runtime/tasks/diagnostics/<encoded-run-id>/` | `runtime.json`、`result.json`、`output.log` |
+| 闭环 journal | `<manifest.workspaceRoot>/.afk/executions/<executionId>.jsonl` | `requested`、`implementing`、`verifying`、发布/合并及最终状态；每行包含 `executionId` 和 `workItemId` |
+| 实现超时日志 | `$HOME/.claude/logs/afk/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
+| QA 超时日志 | `$HOME/.claude/logs/afk/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
+| loop 状态 | `~/.afk/loop-status.json` | active execution、完成/失败计数、uptime、启动时间和最近状态 |
+| loop PID | `~/.afk/loop.pid` | daemon 控制和单实例检查 |
+
+`RunEvent` 的每条事件还携带 `ObservationContext`、`correlationId`、可选 `evidence` 和完整性字段。证据引用应填写 `uri`、`sha256`、`mediaType`、分类和脱敏状态；日志中出现凭据、token、私有输出时不得直接作为 public evidence 发布。
+
+### 7.2 E2E 截图和 trace 约定
+
+桌面 E2E 使用真实 Electron Main、preload、IPC 和 React renderer，但通过 fixture provider snapshot、隔离 HOME 和 fake `afk` CLI 运行。`playwright.config.ts` 当前配置为：
+
+- `trace: "retain-on-failure"`：失败保留 trace，成功默认不保留。
+- `screenshot: "only-on-failure"`：失败自动截图，成功默认不截图。
+- 每个测试使用隔离 workspace、Electron user data 和 JSONL 审计目录。
+- `globalSetup` 会先构建当前 main/preload/provider bundle。
+- 使用 `AFK_E2E_PORT` 指定 Vite 端口，并且不复用其他 worktree 的 Vite 服务。
+
+为了让一次全流程验证可以复盘，执行器或 CI 应按以下目录归档本次证据；这是归档约定，不是当前仓库已经固化的额外 runtime schema：
+
+```text
+artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
+├── manifest.json          # workItemId、backlogId、runId/executionId、template、commit、环境
+├── command.log            # afk run/loop/qa/observe 的 stdout + stderr
+├── loop-status.json       # 采样到的 loop status
+├── provider-final.json    # 最终 backlog/change 状态，脱敏后保存
+├── runtime/               # runtime archive 与 diagnostics 的只读副本
+├── events/                # 对应 runId 的 JSONL 事件流
+├── executions/            # 对应 executionId 的闭环 journal
+├── screenshots/           # 关键页面和状态截图
+└── playwright/            # trace、失败截图、测试报告
+```
+
+归档命名必须包含可回查的 `workItemId` 和时间；截图至少覆盖任务列表/详情、运行中或 runtime 视图、QA/状态终态和关键 workflow/template 页面。截图只能证明可见 UI 状态，不能替代 Provider 状态、事件完整性或 runtime 文件。
+
+## 8. 验证边界与建议用例
+
+| 层级 | 应验证什么 | 可接受证据 | 不能证明什么 |
+| --- | --- | --- | --- |
+| 模板纯测试 | 注册、schema、依赖层级、`when` 条件、cycle 拒绝 | `src/domain/templates/templates.test.ts`、compiler/resolver 测试 | Agent、Git、Provider、桌面端真实行为 |
+| workflow 集成测试 | claim、lease、worktree、system action、失败清理、runtime | `src/application/workflow-engine*.test.ts`、workflow tests | 外部 Provider 真实网络结果 |
+| `executeWorkItem` 测试 | manifest 身份、锁、journal、QA 路由、root/child 分支 | `execute-work-item.test.ts`、审计事件投影 | 桌面 UI 和真实 Electron 进程 |
+| loop 测试 | poll、单实例、状态文件、SIGTERM、重试、max iterations | `loop-runner.test.ts`、loop CLI tests | 跨重启恢复内存 `inFlight` |
+| CLI/provider E2E | 真实 claim、push、change request、QA、merge | 隔离 Provider 项目和脱敏命令日志 | 不应使用生产任务做回归 |
+| Desktop Electron E2E | Main/preload/IPC/renderer、导航、筛选、workflow 画布、任务入口 | `desktop-client/tests/e2e/*.spec.ts`、截图/trace | 真实 GitHub/GitLab、真实 Agent、真实 MR merge |
+| 全流程验收 | 从 ready 到 merge_ready/done 的身份和状态闭环 | Provider final snapshot + event/runtime/journal + Playwright evidence | 单一截图或单一进程退出码 |
+
+最低全流程用例应至少覆盖：
+
+1. 一个 root backlog：`ready → in_progress → verification → merge_ready`，并确认 `human_gate.opened`、Change Request 和 `qa.passed`。
+2. 一个 child backlog：验证 QA PASS 后自动 merge，`change.merge_verified.child === true`，最终为 `done`。
+3. 一个 QA FAIL：保存 `failedCriteria`，创建/保留 rework，回到 `rework`，下一次 loop 可重试。
+4. 一个 workflow failure/timeout/lease loss：事件中有失败分类，runtime 为 `blocked`，Provider execution mode 为 `hitl`。
+5. 每个内置模板至少通过模板图验证；需要验证 Agent/Git/Provider 语义时，按模板矩阵单独运行隔离项，不能只运行 `issue-implementation` 代替全部模板。
+6. Desktop E2E 至少确认任务身份按完整 `workItemId` 关联，不能因不同仓库使用相同 issue number 而串项；执行历史应通过 verified JSONL query path 展示。
+
+## 9. 已知限制
+
+- 当前桌面 Playwright E2E 的 Provider 边界是 fixture snapshot，fake `afk` 只实现测试所需的 CLI 子集；它不能证明真实 GitHub/GitLab 凭据、网络、push、MR 创建或 merge。
+- 当前 desktop Playwright 配置只在失败时自动保留 screenshot/trace；成功全流程若要存档，必须显式截图并复制日志/事件/runtime，不能假设测试报告自动包含完整证据。
+- `afk loop` 强制单个 manifest-bound backlog，并且 `inFlight` 是进程内状态；daemon 重启后的恢复依赖 Provider 状态和下一次 poll，不是持久化队列恢复。
+- `JsonlEventStore` 在单进程内串行写入并对每次追加执行 fsync；源码明确预留跨进程 lease fencing，当前不等同于多主机共识系统。
+- workflow runner 的 `parallel` 字段目前不是独立调度器；同层 `Promise.all` 才是实际并发机制。并行模板声明独立 branch/worktree 是设计约束，但仍应由测试确认资源没有被错误共享。
+- runtime heartbeat 过期会在 Desktop 投影为 `stale`，不会自动修改 Provider backlog 生命周期状态；状态修复仍需执行器、loop 或人工处理。
+- root 与 child 的终态不同：root QA PASS 只是 `merge_ready`，只有人工 merge 且审计验证通过后才能达到 `done`；“QA passed”不能直接写成“任务完成”。
+- 模板缓存按进程存在，磁盘模板更新后需要新建 loader 或显式清空 cache；生产运行不会热加载模板文件。
+
+## 10. 完成判定
+
+一次可审计的全流程运行只有在以下条件同时满足时才算通过：
+
+- 所有身份字段能从 Provider backlog、manifest、`executionId`、`runId`、runtime 和事件流互相校验。
+- 每个模板的图结构和条件分支有独立证据；模板覆盖矩阵没有用单一默认模板代替。
+- 实现、QA、Change Request、人工 gate/自动 merge 和最终 Provider 状态与事件顺序一致。
+- 失败、超时、rework、blocked 和 lease loss 至少各有一条可复现或已有测试证据。
+- Desktop E2E 的 UI 结果与真实 Main/IPC 查询结果一致，并且归档包含日志、事件、runtime、journal 和必要截图/trace。
+- 证据经过脱敏、带有时间和 commit，能够从 `workItemId` 反查本次执行的全部材料。

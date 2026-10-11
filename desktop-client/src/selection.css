@@ -78,6 +78,9 @@
 .selection-filter-panel[hidden] { display: none; }
 .app-shell .selection-filter-panel .select-menu, .app-shell .selection-filter-panel .select-menu-trigger { width: 100%; min-width: 0; max-width: none; }
 .app-shell .selection-filter-panel .select-menu .select-menu-trigger { border-radius: 7px; background: var(--afk-panel); }
+.app-shell .selection-filter-panel .select-menu-trigger-copy { gap: 5px; }
+.app-shell .selection-filter-panel .select-menu-trigger-prefix { min-width: 42px; }
+.app-shell .selection-filter-panel .select-menu.filter-trigger .select-menu-popover.searchable { width: 100%; min-width: 0; max-width: none; }
 .selection-filter-panel .select-menu-popover { right: 0; left: auto; min-width: 100%; }
 .selection-filter-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .selection-filter-chips button { display: flex; gap: 6px; align-items: center; min-height: 28px; max-width: 100%; padding: 4px 8px; border: 1px solid var(--afk-accent-border); border-radius: 6px; background: color-mix(in srgb, var(--afk-accent) 6%, var(--afk-panel)); color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); overflow-wrap: anywhere; text-align: left; cursor: pointer; }

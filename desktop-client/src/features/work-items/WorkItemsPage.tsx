@@ -39,8 +39,8 @@ const stateLabels: Record<GlobalWorkItem["state"], string> = {
   blocked: "已阻塞",
 };
 
-const stateFilterOptions: Array<{ value: GlobalWorkItem["state"] | "all"; label: string }> = [
-  { value: "all", label: "全部状态" },
+const stateFilterOptions: Array<{ value: GlobalWorkItem["state"] | "all"; label: string; triggerLabel?: string }> = [
+  { value: "all", label: "全部状态", triggerLabel: "全部" },
   ...Object.entries(stateLabels).map(([value, label]) => ({ value: value as GlobalWorkItem["state"], label })),
 ];
 
@@ -390,7 +390,7 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
         ]}>
         <SelectMenu label="选择 Provider" value={platform} variant="filter" triggerPrefix="来源" options={[{ value: "all", label: "全部来源平台", triggerLabel: "全部" }, { value: "github", label: "GitHub", icon: "github", triggerLabel: "GitHub" }, { value: "gitlab", label: "GitLab", icon: "gitlab", triggerLabel: "GitLab" }]} onChange={value => { setPlatform(value as "all" | BacklogPlatform); setProject("all"); setVisibleLimit(pageSize); }} />
         <SelectMenu label="选择仓库" value={project} variant="filter" triggerPrefix="Issue" search={{ label: "搜索 Issue 来源", pinnedValue: "all", emptyMessage: "没有匹配的 Issue 来源" }} options={projectOptions} onChange={value => { setProject(value); setVisibleLimit(pageSize); }} />
-        <SelectMenu label="筛选状态" value={stateFilter} variant="filter" options={stateFilterOptions} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
+        <SelectMenu label="筛选状态" value={stateFilter} variant="filter" triggerPrefix="状态" options={stateFilterOptions} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
         </FilterPanel>
       </div>
 

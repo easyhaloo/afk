@@ -39,8 +39,34 @@ test.describe("contextual selection", () => {
     await expect(page.getByRole("button", { name: "选择仓库", exact: true })).toBeHidden();
     await trigger.click();
     if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/work-items-filters.png` });
+    const filterBounds = await page.locator(".selection-filter-panel > .select-menu > .select-menu-trigger").evaluateAll(elements => elements.map(element => {
+      const { left, right, width } = element.getBoundingClientRect();
+      return { left, right, width };
+    }));
+    expect(filterBounds).toHaveLength(3);
+    for (const bounds of filterBounds.slice(1)) {
+      expect(Math.abs(bounds.width - filterBounds[0].width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(bounds.left - filterBounds[0].left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(bounds.right - filterBounds[0].right)).toBeLessThanOrEqual(1);
+    }
+    await expect(page.getByRole("button", { name: "筛选状态" })).toContainText("状态");
+    await expect(page.getByRole("button", { name: "筛选状态" })).toContainText("全部");
     const repository = page.getByRole("button", { name: "选择仓库", exact: true });
     await repository.click();
+    const repositoryPopover = repository.locator("..").locator(".select-menu-popover");
+    const repositoryBounds = await repository.evaluate(element => {
+      const trigger = element.getBoundingClientRect();
+      const popover = element.parentElement?.querySelector<HTMLElement>(".select-menu-popover")?.getBoundingClientRect();
+      return popover ? {
+        trigger: { left: trigger.left, right: trigger.right, width: trigger.width },
+        popover: { left: popover.left, right: popover.right, width: popover.width },
+      } : null;
+    });
+    await expect(repositoryPopover).toBeVisible();
+    expect(repositoryBounds).not.toBeNull();
+    expect(Math.abs(repositoryBounds!.popover.width - repositoryBounds!.trigger.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(repositoryBounds!.popover.left - repositoryBounds!.trigger.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(repositoryBounds!.popover.right - repositoryBounds!.trigger.right)).toBeLessThanOrEqual(1);
     const search = page.getByRole("combobox", { name: "搜索 Issue 来源" });
     await search.fill("web");
     await search.press("ArrowDown");

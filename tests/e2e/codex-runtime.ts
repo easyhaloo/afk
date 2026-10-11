@@ -124,8 +124,8 @@ async function main(): Promise<void> {
     }),
     maxConcurrent: 1,
     maxIterations: 1,
-    pollIntervalMs: 1_000,
-    statusIntervalMs: 2_000,
+    pollIntervalMs: 10_000,
+    statusIntervalMs: 10_000,
     shutdownTimeoutMs: 30_000,
     pidFilePath: join(runtimeDir, 'loop.pid'),
     statusFilePath: join(runtimeDir, 'loop-status.json'),
@@ -212,7 +212,7 @@ async function waitForTerminal(
     if (current.state === 'blocked' || current.state === 'done') return current;
     if (loopFailure) throw loopFailure;
     if (loopStopped) throw new Error(`loop stopped while backlog was ${current.state}`);
-    await delay(1_000);
+    await delay(10_000);
   }
   throw new Error(`Codex E2E timed out after ${timeoutMs}ms`);
 }

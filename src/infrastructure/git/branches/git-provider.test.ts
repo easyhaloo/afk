@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
@@ -143,5 +143,17 @@ describe('GitBranchProvider', () => {
 
     expect(handle.branchName).toBe('afk/backlog-43-qa');
     await expect(simpleGit(handle.worktreePath).raw(['show', 'HEAD:parent-result.txt'])).resolves.toContain('parent baseline');
+  });
+
+  it('shares repository dependencies with QA worktrees', async () => {
+    const { repoPath } = await repository();
+    await mkdir(join(repoPath, 'node_modules'), { recursive: true });
+    await writeFile(join(repoPath, 'node_modules', 'marker.txt'), 'shared\n');
+
+    const provider = new GitBranchProvider(repoPath);
+    const handle = await provider.createVerificationWorktree(item(), 'main');
+
+    await expect(lstat(join(handle.worktreePath, 'node_modules'))).resolves.toSatisfy(stat => stat.isSymbolicLink());
+    await expect(readFile(join(handle.worktreePath, 'node_modules', 'marker.txt'), 'utf8')).resolves.toBe('shared\n');
   });
 });

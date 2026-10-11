@@ -1,3 +1,5 @@
+import { lstat, symlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import type { BacklogItem } from '../../../domain/backlog/index.js';
 import type { BranchProvider, BranchHandle } from './provider.js';
@@ -38,6 +40,7 @@ export class GitBranchProvider implements BranchProvider {
     const config = { type: 'named' as const, branch: `${item.branchName}-qa`, baseBranch: verificationBase };
     const strategy = strategyForConfig(config);
     const handle = await strategy.prepareWorktree(git, config, { repoPath: this.repoRoot, baseBranch: verificationBase });
+    await shareNodeModules(this.repoRoot, handle.path);
     this.handles.set(handle.path, handle);
     return { branchName: handle.branch, worktreePath: handle.path };
   }
@@ -99,4 +102,22 @@ async function refExists(git: ReturnType<typeof simpleGit>, ref: string): Promis
 
 async function isAncestor(git: ReturnType<typeof simpleGit>, ancestor: string, descendant: string): Promise<boolean> {
   return (await git.raw(['merge-base', ancestor, descendant])).trim() === ancestor;
+}
+
+async function shareNodeModules(repoRoot: string, worktreePath: string): Promise<void> {
+  const source = join(repoRoot, 'node_modules');
+  const target = join(worktreePath, 'node_modules');
+  try {
+    if (!(await lstat(source)).isDirectory()) return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  try {
+    await lstat(target);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  await symlink(source, target, 'dir');
 }

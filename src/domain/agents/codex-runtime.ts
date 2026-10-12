@@ -283,7 +283,10 @@ function runCodexDoctor(
         ...(process.env.TERM === 'dumb' || !process.env.TERM ? { TERM: 'xterm-256color' } : {}),
       },
     }, (error, stdout, stderr) => {
-      if (error) {
+      // codex doctor --json exits non-zero when overallStatus is 'fail' but still outputs valid JSON.
+      // Only reject on true spawn failures (ENOENT). For all other cases, resolve so the caller
+      // can parse the output and decide what kind of failure it is.
+      if (error && isErrno(error, 'ENOENT')) {
         reject(error);
         return;
       }

@@ -299,10 +299,10 @@ function parseDoctorOutput(stdout: string): {
     if (checks) {
       const auth = check(checks, 'auth.credentials');
       const config = check(checks, 'config.load');
-      const installation = check(checks, 'installation');
-      const reachability = check(checks, 'network.provider_reachability');
-      const relevantFailure = [auth, config, installation, reachability]
-        .find(candidate => candidate?.status === 'fail');
+      // installation and network.provider_reachability are heuristics that can fail for
+      // cosmetic reasons (npm vs pnpm) or custom gateways (/models 404 while the live
+      // probe confirms the provider works). Only auth and config are genuine readiness gates.
+      const relevantFailure = [auth, config].find(candidate => candidate?.status === 'fail');
       return {
         ready: relevantFailure === undefined,
         auth: normalizeAuth(auth?.details?.['stored auth mode']),

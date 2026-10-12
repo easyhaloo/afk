@@ -139,6 +139,32 @@ describe('probeCodexReadiness', () => {
     });
   });
 
+  it('treats installation and provider_reachability doctor failures as non-fatal', async () => {
+    // Custom gateways (LiteLLM, local proxies) often 404 on /models while /responses works.
+    // The live probe is the authoritative check; doctor heuristics are supplementary.
+    const run = vi.fn(async (_executable: string, args: string[]) => ({
+      stdout: args[0] === 'doctor'
+        ? JSON.stringify({
+            schemaVersion: 1,
+            overallStatus: 'fail',
+            checks: {
+              'auth.credentials': { status: 'ok', details: { 'stored auth mode': 'api_key' } },
+              'config.load': { status: 'ok', details: { 'model provider': 'custom' } },
+              'installation': { status: 'fail', summary: 'npm install -g would update a different install' },
+              'network.provider_reachability': { status: 'fail', summary: '/models returned HTTP 404' },
+            },
+          })
+        : '{"type":"turn.completed"}\n',
+      stderr: '',
+    }));
+
+    await expect(probeCodexReadiness(resolveCodexRuntime({ cli: {}, config: config() }), run)).resolves.toEqual({
+      ready: true,
+      auth: 'api',
+      provider: 'custom',
+    });
+  });
+
   it('fails redacted readiness when the live model probe rejects configured credentials', async () => {
     const run = vi.fn(async (_executable: string, args: string[]) => {
       if (args[0] === 'doctor') {

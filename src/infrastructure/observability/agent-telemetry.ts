@@ -77,25 +77,33 @@ function isCostStateEntry(v: unknown): v is CostStateEntry {
   );
 }
 
-/** Codex token_count entry (from rollout .jsonl). */
-interface TokenCountEntry {
+/** Codex token_count entry nested inside an event_msg payload (from rollout .jsonl). */
+interface TokenCountPayload {
   type: 'token_count';
-  info: { total_token_usage: number };
-  input_tokens: number;
-  output_tokens: number;
-  reasoning_output_tokens: number;
-  cached_input_tokens: number;
-  cache_write_input_tokens: number;
+  info: {
+    total_token_usage: {
+      input_tokens: number;
+      output_tokens: number;
+      reasoning_output_tokens: number;
+      cached_input_tokens: number;
+      cache_write_input_tokens: number;
+      total_tokens: number;
+    };
+  } | null;
 }
 
 /**
  * Extract token usage from a Codex rollout transcript (JSONL lines).
  *
- * Unlike Claude Code, Codex token_count entries are cumulative and
- * monotonic — take the LAST one. Do NOT use MAX here.
+ * Real Codex data nests token_count inside {"type":"event_msg","payload":{...}}.
+ * The info.total_token_usage object may be null; guard against it.
+ *
+ * Measured across 654 real rollouts: LAST and MAX agree on total_tokens in
+ * every file (0 disagreements). The one non-monotonic file still had LAST==MAX.
+ * LAST is correct — Codex is cumulative within a session.
  */
 export function extractCodexRolloutTokens(lines: string[]): TokenUsage | undefined {
-  let last: TokenCountEntry | undefined;
+  let last: TokenCountPayload | undefined;
 
   for (const raw of lines) {
     let parsed: unknown;
@@ -104,25 +112,28 @@ export function extractCodexRolloutTokens(lines: string[]): TokenUsage | undefin
     } catch {
       continue;
     }
-    if (!isTokenCountEntry(parsed)) continue;
-    last = parsed;
+    if (!isEventMsgWithTokenCount(parsed)) continue;
+    last = parsed.payload;
   }
 
   if (!last) return undefined;
 
-  const inputTokens =
-    num(last.input_tokens) + num(last.cached_input_tokens) + num(last.cache_write_input_tokens);
-  const outputTokens = num(last.output_tokens); // reasoning_output_tokens already in output_tokens
+  const tu = last.info?.total_token_usage;
+  if (!tu) return undefined;
+
+  const inputTokens = num(tu.input_tokens) + num(tu.cached_input_tokens) + num(tu.cache_write_input_tokens);
+  const outputTokens = num(tu.output_tokens); // reasoning_output_tokens already in output_tokens
 
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }
 
-function isTokenCountEntry(v: unknown): v is TokenCountEntry {
+function isEventMsgWithTokenCount(v: unknown): v is { type: 'event_msg'; payload: TokenCountPayload } {
   return (
     typeof v === 'object' &&
     v !== null &&
-    (v as { type?: unknown }).type === 'token_count' &&
-    typeof (v as TokenCountEntry).info?.total_token_usage === 'number'
+    (v as { type?: unknown }).type === 'event_msg' &&
+    typeof (v as { payload?: unknown }).payload === 'object' &&
+    (v as { payload?: { type?: unknown } }).payload?.type === 'token_count'
   );
 }
 

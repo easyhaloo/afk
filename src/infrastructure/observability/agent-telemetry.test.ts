@@ -122,19 +122,28 @@ describe('extractClaudeTranscriptTokens', () => {
 });
 
 describe('extractCodexRolloutTokens', () => {
-  // Codex token_count entries are cumulative — take LAST, not MAX.
+  // Real Codex token_count is nested inside event_msg.payload.
+  // Derived from ~/.codex/sessions/2026/09/03/rollout-... (real session).
   const tokenCount = (n: number) =>
     JSON.stringify({
-      type: 'token_count',
-      info: { total_token_usage: n * 1000 },
-      input_tokens: n * 100,
-      output_tokens: n * 10,
-      reasoning_output_tokens: 0,
-      cached_input_tokens: n * 5,
-      cache_write_input_tokens: n * 2,
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: {
+            input_tokens: n * 100,
+            output_tokens: n * 10,
+            reasoning_output_tokens: 0,
+            cached_input_tokens: n * 5,
+            cache_write_input_tokens: n * 2,
+            total_tokens: n * 117,
+          },
+        },
+      },
     });
 
   it('takes the last token_count entry (not the max)', () => {
+    // LAST and MAX agree across all 654 real rollouts (0 disagreements).
     // Claude uses MAX (non-monotonic snapshots); Codex uses LAST (cumulative).
     const lines = [tokenCount(1), tokenCount(3), tokenCount(2)];
     const usage = extractCodexRolloutTokens(lines);
@@ -148,13 +157,20 @@ describe('extractCodexRolloutTokens', () => {
 
   it('sums cache tokens into input', () => {
     const lines = [JSON.stringify({
-      type: 'token_count',
-      info: { total_token_usage: 100 },
-      input_tokens: 1000,
-      output_tokens: 200,
-      reasoning_output_tokens: 0,
-      cached_input_tokens: 50,
-      cache_write_input_tokens: 25,
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: {
+            input_tokens: 1000,
+            output_tokens: 200,
+            reasoning_output_tokens: 0,
+            cached_input_tokens: 50,
+            cache_write_input_tokens: 25,
+            total_tokens: 1275,
+          },
+        },
+      },
     })];
     const usage = extractCodexRolloutTokens(lines);
     expect(usage).toEqual({ inputTokens: 1075, outputTokens: 200, totalTokens: 1275 });
@@ -172,16 +188,47 @@ describe('extractCodexRolloutTokens', () => {
 
   it('avoids NaN when cache fields are missing', () => {
     const entry = JSON.stringify({
-      type: 'token_count',
-      info: { total_token_usage: 100 },
-      input_tokens: 1000,
-      output_tokens: 200,
-      // reasoning_output_tokens, cached_input_tokens, cache_write_input_tokens all absent
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: {
+          total_token_usage: {
+            input_tokens: 1000,
+            output_tokens: 200,
+            reasoning_output_tokens: 0,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            total_tokens: 1200,
+          },
+        },
+      },
     });
     const usage = extractCodexRolloutTokens([entry]);
     expect(usage?.inputTokens).toBe(1000);
     expect(usage?.outputTokens).toBe(200);
     expect(Number.isNaN(usage?.totalTokens)).toBe(false);
+  });
+
+  it('returns undefined when info is null (real Codex data has this)', () => {
+    const entry = JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: null,
+      },
+    });
+    expect(extractCodexRolloutTokens([entry])).toBeUndefined();
+  });
+
+  it('returns undefined when total_token_usage is absent', () => {
+    const entry = JSON.stringify({
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: {} },
+      },
+    });
+    expect(extractCodexRolloutTokens([entry])).toBeUndefined();
   });
 });
 
@@ -239,7 +286,7 @@ describe('findCodexRollout', () => {
     const sessionsDir = join(tmp, '.codex', 'sessions', '2025', '01', '15');
     mkdirSync(sessionsDir, { recursive: true });
     const rolloutFile = join(sessionsDir, 'rollout-103000-abc123def456.jsonl');
-    writeFileSync(rolloutFile, JSON.stringify({ type: 'token_count', info: { total_token_usage: 999 }, input_tokens: 100, output_tokens: 20, reasoning_output_tokens: 0, cached_input_tokens: 5, cache_write_input_tokens: 2 }) + '\n');
+    writeFileSync(rolloutFile, JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 20, reasoning_output_tokens: 0, cached_input_tokens: 5, cache_write_input_tokens: 2, total_tokens: 127 } } } }) + '\n');
 
     const found = await findCodexRollout('abc123def456', tmp);
     expect(found).toBe(rolloutFile);

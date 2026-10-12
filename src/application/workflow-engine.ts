@@ -1324,18 +1324,26 @@ export class WorkflowRunner {
       this.sandboxProviderName === 'docker' || this.sandboxProviderName === 'podman' ? 'container' : 'local';
     if (sandboxKind === 'container') return;
 
-    const transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
-    if (!transcriptPath) return;
-
-    let usage;
-    if (this.agentProviderName === 'codex') {
-      const threadId = execution.metadata.threadId;
-      if (!threadId) return;
-      const rolloutPath = await findCodexRollout(threadId);
-      if (!rolloutPath) return;
-      usage = await readAgentTelemetry({ provider: 'codex', transcriptPath: rolloutPath, sandboxKind: 'local' });
-    } else {
-      usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' });
+    // Prefer result.usage (already normalized from stream in AC1).
+    // Fall back to transcript file when result.usage is absent:
+    //   - interactive/tmux: no stdout stream
+    //   - codex batch: turn.completed not mapped to usage event
+    let usage = result.usage;
+    if (!usage) {
+      const transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
+      if (transcriptPath) {
+        if (this.agentProviderName === 'codex') {
+          const threadId = execution.metadata.threadId;
+          if (threadId) {
+            const rolloutPath = await findCodexRollout(threadId);
+            if (rolloutPath) {
+              usage = await readAgentTelemetry({ provider: 'codex', transcriptPath: rolloutPath, sandboxKind: 'local' });
+            }
+          }
+        } else {
+          usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' });
+        }
+      }
     }
 
     if (!this.observationContext) return;

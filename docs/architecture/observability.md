@@ -74,7 +74,27 @@ node dist/index.js observe explain <run-id>
 
 测试覆盖领域 reducer、执行基线、JSONL hash chain、加密与脱敏证据、强制注入的 RunObserver、RunCoordinator、profile 解析、时间线重放，以及 QA/Loop 回归。历史基线与当时的失败分类见 `docs/_archive/superpowers/specs/2026-08-23-observability-harness-baseline.md`；该历史结果不代表当前测试状态。
 
-## 6. 下一阶段的强制门禁
+## 6. Agent Telemetry SSOT Boundary
+
+Agent-layer telemetry (token usage, cost, tool calls) is owned by the harness
+itself. AFK only reads what the harness already recorded; it never re-derives
+or estimates from intermediate events.
+
+| Layer | Owner | AFK reads |
+|---|---|---|
+| Agent usage (tokens, cost, duration) | Harness (Claude Code / Codex) | `agent.session_recorded` event |
+| Domain execution (run.requested, workspace.prepared, change.published, human_gate, commit sha) | AFK | Event log (write) |
+
+The `agent.session_recorded` event is emitted when an execution result is
+assembled, with `sessionId` and optional `usage: { inputTokens, outputTokens,
+totalTokens }`. For `local` sandbox: transcript is read from
+`~/.claude/projects/<slug>/<sessionId>.jsonl` (Claude Code) or
+`~/.codex/sessions/*/*/*/rollout-*-<thread_id>.jsonl` (Codex). For `docker` /
+`podman` sandboxes: `HOME` is not forwarded into the container and harness
+directories are not mounted — telemetry is not collected (distinct from zero
+tokens).
+
+## 7. 下一阶段的强制门禁
 
 将 `RunCoordinator` 作为全部运行副作用的唯一授权来源之前，必须先完成以下门禁：
 

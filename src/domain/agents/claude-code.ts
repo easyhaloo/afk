@@ -90,12 +90,6 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
     return [{ type: 'text', text: line }];
   }
 
-  async getSessionUsage(session: AgentSession): Promise<TokenUsage | undefined> {
-    // Usage is obtained from the statusline tee in the worktree.
-    // This method exists for providers that expose a native usage API.
-    return undefined;
-  }
-
   async captureSession(_options: CaptureSessionOptions): Promise<SessionSnapshot> {
     // Claude Code sessions are managed by the Claude Code CLI.
     // Placeholder for Phase 3/4 session capture.

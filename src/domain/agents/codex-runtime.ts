@@ -139,7 +139,11 @@ export async function probeCodexReadiness(
     if (diagnostics.ready === false) {
       return readinessFailure(diagnostics.code, runtime);
     }
-    if (runtime.auth !== 'unknown' && diagnostics.auth !== runtime.auth) {
+    // Only compare if doctor yielded a usable auth type. Doctor's 'auth storage mode' field
+    // is a storage mechanism (File/env), not an auth type — normalizeAuth returns undefined for
+    // it. In that case the live probe is the sole authority; a false mismatch would block a
+    // working setup entirely while a false negative merely defers to the probe.
+    if (diagnostics.auth !== undefined && runtime.auth !== 'unknown' && diagnostics.auth !== runtime.auth) {
       return readinessFailure('AUTH_INVALID', runtime);
     }
     const probe = await run('codex', [
@@ -160,7 +164,9 @@ export async function probeCodexReadiness(
     if (isErrno(error, 'ENOENT')) {
       return { ready: false, code: 'CLI_NOT_FOUND', message: 'Codex CLI was not found on PATH' };
     }
-    return readinessFailure(undefined, runtime);
+    // Sanitize before surfacing — the error message may contain credentials or tokens.
+    const sanitized = sanitizeErrorMessage(error as Error);
+    return readinessFailure(undefined, runtime, sanitized);
   }
 }
 
@@ -305,7 +311,7 @@ function parseDoctorOutput(stdout: string): {
       const relevantFailure = [auth, config].find(candidate => candidate?.status === 'fail');
       return {
         ready: relevantFailure === undefined,
-        auth: normalizeAuth(auth?.details?.['stored auth mode']),
+        auth: normalizeAuth(auth?.details?.['auth storage mode']),
         provider: stringValue(config?.details?.['model provider']),
         code: relevantFailure === auth ? 'AUTH_INVALID' : relevantFailure ? 'PROVIDER_INVALID' : undefined,
       };
@@ -355,7 +361,11 @@ function check(
   };
 }
 
-function readinessFailure(code: string | undefined, runtime: CodexRuntimeSelection): CodexReadiness {
+function readinessFailure(
+  code: string | undefined,
+  runtime: CodexRuntimeSelection,
+  error?: Error,
+): CodexReadiness {
   if (code === 'ENDPOINT_UNREACHABLE') {
     return { ready: false, code: 'ENDPOINT_UNREACHABLE', message: 'Codex app-server endpoint is not reachable' };
   }
@@ -365,7 +375,10 @@ function readinessFailure(code: string | undefined, runtime: CodexRuntimeSelecti
   if (code === 'PROVIDER_INVALID' || (code === undefined && runtime.auth === 'unknown' && runtime.provider !== 'auto')) {
     return { ready: false, code: 'PROVIDER_INVALID', message: 'Codex model provider is not ready' };
   }
-  return { ready: false, code: 'AUTH_INVALID', message: 'Codex authentication is not ready' };
+  // Surfacing the actual error so the caller knows what failed, rather than masking
+  // probe timeouts, parse errors, etc. behind a generic AUTH_INVALID.
+  const cause = error?.message ?? 'unknown error';
+  return { ready: false, code: 'AUTH_INVALID', message: `Codex readiness probe failed: ${cause}` };
 }
 
 function normalizeAuth(value: unknown): 'chatgpt' | 'api' | 'unknown' | undefined {
@@ -410,4 +423,11 @@ function stringValue(value: unknown): string | undefined {
 
 function isErrno(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === code;
+}
+
+// Strip potential credential fragments from error messages before surfacing them.
+function sanitizeErrorMessage(error: Error): Error {
+  return Object.assign(new Error(error.message.replace(/sk-[a-zA-Z0-9_-]{10,}/g, '[REDACTED]')), {
+    code: (error as NodeJS.ErrnoException).code,
+  });
 }

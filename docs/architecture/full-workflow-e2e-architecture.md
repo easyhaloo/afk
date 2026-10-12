@@ -67,8 +67,9 @@ flowchart LR
     QA --> Rework[rework]
     Runner --> Blocked[blocked + hitl]
     Execute --> Journal[workspace .afk/executions/*.jsonl]
-    Runner --> Events[~/.afk/events/<runId>.jsonl]
+    Runner --> Events[~/.afk/events/base64url编码的runId.jsonl]
     Runner --> Runtime[~/.afk/runtime/tasks]
+    QA --> Runtime
 
     Events --> Main[Electron Main: query adapters]
     Runtime --> Main
@@ -109,6 +110,8 @@ flowchart LR
 8. 结束 runtime，释放 claim 和工作树资源，并写入实现阶段审计事件。
 
 实现模板明确要求 Agent 不创建或合并 MR；发布、提交 QA、创建变更请求和合并策略由后续系统动作或 `QARunner` 负责。
+
+`afk run` 本身只运行实现阶段，成功交付到 `verification`；随后需由 `executeWorkItem` 闭环或独立 `afk qa` 进入 QA。默认模板的 `publish-change` 动作在这里推送实现分支，`queue-qa` 迁移状态，并不创建 PR/MR。若 `verify-ac` 返回可解析的 AC FAIL，runner 会按 `maxSelfIterations` 上限重跑 `implement → verify-ac`；纠正成功后再发布并进入 `verification`。这属于同一次实现尝试，不是 QA FAIL 后的 backlog `rework`。
 
 ### 2.3 `afk loop` 的持续执行路径
 
@@ -151,8 +154,8 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 | 字段 | 所属对象 | 含义 | 使用边界 |
 | --- | --- | --- | --- |
 | `BacklogItem.id` | Provider Backlog | Provider 内部 backlog 主键 | 传给 `afk run --backlog-id`，用于状态迁移和 claim |
-| `workItemId` | 全局工作项、`Run`、事件上下文 | provider-neutral 全局身份，例如 `github:team/repo#158` | 跨 Provider、manifest、inventory、runtime 和 Desktop 精确关联；不能用 `runId` 替代 |
-| `runId` | 核心 `Run`、事件流、runtime | 一次执行尝试的身份 | 每次 attempt 独立；事件流、状态投影和诊断目录按它索引 |
+| `workItemId` / `Run.workItemId` | 全局工作项、`Run`、事件上下文 | manifest-bound `executeWorkItem` 显式使用全局身份，例如 `github:team/repo#158`；普通 `afk run` 的 `Run.workItemId` / observation 默认沿用 Provider `backlogId` | 必须按入口核对命名空间，不能假定所有 `Run.workItemId` 都已全局化，也不能用 `runId` 替代 |
+| `runId` | 核心 `Run`、事件流、runtime | 一次执行或阶段的身份 | 闭环实现阶段使用 `executionId`；QA runtime 独立使用 `qa-<backlogId>-<timestamp>-runtime`，不另建同名闭环事件流 |
 | `executionId` | `executeWorkItem` 结果、journal、闭环审计 | loop/闭环的一次执行编排身份 | 默认生成 UUID；当前闭环中同时作为 observation `runId` 和 `traceId` |
 | `parentId` | `BacklogItem` | 组织上的父子分组 | 不选择 Git 基线；root 与 child 的 QA 合并策略不同 |
 | `dependsOn` | `BacklogItem` | 任务级调度依赖 | 所有依赖达到 `done` 后任务才可运行；不自动选择分支 |
@@ -161,8 +164,9 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 | `providerRef` | `BacklogItem` | Provider 原始引用 | 作为 Provider 边界校验字段，不是执行尝试 ID |
 | `correlationId` | `RunEvent` | 事件所属执行关联 | projection 用它生成 `executionId`；必须与同一事件流身份一致 |
 | `leaseEpoch` | `ObservationContext` | claim/租约世代 | 用于识别租约变更，不能当作任务或 run 身份 |
+| `TaskRuntimeRecord.backlogId` / `providerRef` | canonical runtime | Provider backlog 主键及 Provider 原始引用 | 不要求 `backlogId` 等于全局 `workItemId`；Desktop runtime 服务还按 workspace、可用的 `providerRef` 和启动时间过滤，执行历史按事件中的 `workItemId` 查询 |
 
-最小不变量是：`Run.workItemId === event.context.workItemId`，`run.requested.run.id === event.context.runId`，`executionId` 对应的 journal、事件流和 runtime 记录必须指向同一个全局 work item。
+最小不变量是：`Run.workItemId === event.context.workItemId`，`run.requested.run.id === event.context.runId`；manifest-bound 闭环的 journal 与事件流必须使用同一个 `executionId` 和全局 `workItemId`。实现 runtime 的 `runId` 等于该 `executionId`，QA runtime 则通过 `backlogId`、`providerRef`、workspace 和时间关联，不能要求两阶段 runtime 的 `runId` 相等。执行历史投影的 `awaiting_merge` 对应 Provider 的 `merge_ready`，两者不是同一状态枚举。
 
 ## 4. 模板加载、编译与执行
 
@@ -208,6 +212,8 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 
 模板的 `parallel` 字段用于表达模板意图和独立分支约束，但当前 resolver 的并发依据是“同一依赖层级”，不是按 `parallel` 字符串单独分组。因此，未来增加无依赖的多个 step 时，即使没有相同 `parallel` 值，也可能在同层并发；需要改变此语义时必须同时修改 resolver、测试和本文矩阵。
 
+条件修复只保证 `fix` 可被调度。`WorkflowRunner` 在计划执行后仍检查所有 step 结果；`sequential-review` / `planner-with-review` 的 `fix` 完成不会清除原 `review` 的 `failed` 状态。因此 deterministic 条件分支通过不等于真实 runner 在该分支成功收敛；`verify-ac` 的重试则会显式替换验证结果。
+
 ## 6. QA 与状态流转
 
 ```mermaid
@@ -218,15 +224,14 @@ stateDiagram-v2
     in_progress --> verification: implementation success
     in_progress --> blocked: failure / timeout / lease loss
     verification --> rework: QA FAIL
-    verification --> merge_ready: root QA PASS
-    verification --> done: child QA PASS + auto merge
-    merge_ready --> done: human merge + verified event
+    verification --> merge_ready: QA PASS + change published
+    merge_ready --> done: child auto merge / root human merge + audit verification
     blocked --> [*]
     rework --> [*]: 等待下一次 loop/run
     done --> [*]
 ```
 
-`QARunner` 使用管理 provider，不拥有 implementation claim 能力。它要求 backlog 当前处于 `verification`，并要求 Agent 返回满足以下结构的结构化结果：
+`QARunner` 使用管理 provider，不拥有 implementation claim 能力。进入 QA 的 `verification` 前置检查由 `executeWorkItem` 或独立 QA CLI 执行；`QARunner.process` 不重复该状态检查。Agent 必须返回满足以下结构的结构化结果：
 
 ```json
 {
@@ -238,7 +243,7 @@ stateDiagram-v2
 }
 ```
 
-FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 和 `actual`。PASS 会 commit、push、创建或复用 Change Request，并验证 issue association；root 项切到 `merge_ready` 和 `hitl`，child 项执行 merge 后切到 `done`。QA 的终端路由失败会切到 `blocked` 和 `hitl`。
+FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 和 `actual`。PASS 会 commit、push、发布 Change Request；`executeWorkItem` 注入的回调负责复用检查和 issue association 验证，独立 QA CLI 没有注入这些闭环审计回调。root 项切到 `merge_ready` 和 `hitl`；child 项也先进入 `merge_ready`，再执行 merge 并切到 `done`。QA 的终端路由失败会切到 `blocked` 和 `hitl`。
 
 ## 7. 日志、事件和截图归档
 
@@ -246,10 +251,10 @@ FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 
 
 | 证据 | 默认位置 | 内容与校验 |
 | --- | --- | --- |
-| 审计事件流 | `~/.afk/events/<runId>.jsonl` | JSONL、连续 sequence、前向 hash 链；`RunEventQueryPort.verify` 和 projection 负责完整性/身份诊断 |
+| 审计事件流 | `~/.afk/events/<base64url(runId)>.jsonl` | JSONL、连续 sequence、前向 hash 链；`RunEventQueryPort.verify` 和 projection 负责完整性/身份诊断；CLI 可通过 `AFK_EVENT_STORE_DIR` 覆盖根目录 |
 | 运行时活动 | `~/.afk/runtime/tasks/active/` | 运行中的 `TaskRuntimeRecord`、heartbeat、phase、progress、agent/runtime 元数据 |
 | 运行时归档 | `~/.afk/runtime/tasks/archive/` | terminal runtime 记录；`completed` 或 `blocked` 后从 active 移入 archive |
-| 运行时诊断 | `~/.afk/runtime/tasks/diagnostics/<encoded-run-id>/` | `runtime.json`、`result.json`、`output.log` |
+| 运行时诊断 | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/` | `runtime.json`、`result.json`、`output.log`；active/archive 的 JSON 文件也以相同编码命名 |
 | 闭环 journal | `<manifest.workspaceRoot>/.afk/executions/<executionId>.jsonl` | `requested`、`implementing`、`verifying`、发布/合并及最终状态；每行包含 `executionId` 和 `workItemId` |
 | 实现超时日志 | `$HOME/.claude/logs/afk/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
 | QA 超时日志 | `$HOME/.claude/logs/afk/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
@@ -306,6 +311,28 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 5. 每个内置模板至少通过模板图验证；需要验证 Agent/Git/Provider 语义时，按模板矩阵单独运行隔离项，不能只运行 `issue-implementation` 代替全部模板。
 6. Desktop E2E 至少确认任务身份按完整 `workItemId` 关联，不能因不同仓库使用相同 issue number 而串项；执行历史应通过 verified JSONL query path 展示。
 
+### 8.1 实际验证记录（2026-10-12）
+
+下列结果来自既有本地证据；Issue/PR 的远端状态与关联已由 `gh` 核验，本次文档审阅未重复远端请求。时间统一为 CST（UTC+08:00，Asia/Shanghai）。
+
+| 验证层级 | 实际结果 | 证据与边界 |
+| --- | --- | --- |
+| 6 个 built-in templates | 全部通过 deterministic `PlanExecutor` 和 `LoopRunner` 驱动验证，覆盖依赖、review 失败后的 fix，以及 planner 并发 | `.afk/e2e-artifacts/20261011-234041-full-flow/all-templates-e2e.json`、`loop-full-flow.json`；Agent、system action、Provider 和闭环发布使用替身，不能外推为 6 个真实外部 E2E 全通过 |
+| 真实 GitHub Loop | `github:easyhaloo/afk#174` 完成实现（含一次 AC 纠正）、QA PASS、PR #175 发布与关联；Provider 为 `merge_ready` / `hitl`，PR 保持 OPEN | 执行 ID `ecd8081f-be43-401b-a3cf-70dc213f36fd`；`.afk/e2e-artifacts/20261012-0129-app-server-rerun/issue-174/verification.json`、`issue.json`、`pr.json`；此结果是 root 人工合并门前的通过，不是 `done` 或已合并 |
+| 驱动超时与实际完成 | E2E 驱动在 `600000ms` 超时后，实际 Loop 仍于 **2026-10-12 02:13:56 CST** 输出 `execution completed → merge_ready`；独立后验核验脚本退出码为 `0` | `.afk/e2e-artifacts/20261012-0129-app-server-rerun/codex-runtime.log`、`issue-174/verification.json`；必须区分驱动等待超时与 workflow/QA 自身超时，不能仅凭驱动超时判定本次闭环失败 |
+| runtime 与审计 | 实现和 QA 两份 runtime archive 均为 `codex` / `app-server`、`completed`；事件完整性核验通过（17 条），执行投影为 `awaiting_merge` | 同目录 `issue-174/projection.json`、`implementing-runtime.json`、`verifying-runtime.json`；阶段 `completed` 不代表 Provider `done` |
+| Desktop 全套 | **48 passed，2 failed**；失败为已有的 backlog 控件尺寸及 workflow select 菜单边框样式断言 | `.afk/e2e-artifacts/20261011-234041-full-flow/desktop-e2e.log`；不能声称全部 UI 绿色 |
+| Desktop 目标用例 | backlog Loop **1 passed**；context selection **6 passed** | 同目录 `desktop-backlog-loop.log`、`desktop-e2e.log` 中的 `context-selection.spec.ts` 结果；fixture Electron 验证不替代真实 Provider/Agent 链路 |
+
+上述两份 canonical runtime archive 分别为：
+
+```text
+~/.afk/runtime/tasks/archive/ZWNkODA4MWYtYmU0My00MDFiLWEzY2YtNzBkYzIxM2YzNmZk.json
+~/.afk/runtime/tasks/archive/cWEtMTc0LTE3OTE3NDIxNDczMDUtcnVudGltZQ.json
+```
+
+前者对应实现 `runId = executionId`，后者对应 QA `runId = qa-174-1791742147305-runtime`。QA 日志 `issue-174/verifying/output.log` 还记录了 pnpm 拒绝当前依赖目录符号链接、Agent 将工作树依赖恢复为本地目录后重新验证通过；该恢复只证明本次执行可继续，不能作为 pnpm 普遍支持 symlink `node_modules` 的结论。
+
 ## 9. 已知限制
 
 - 当前桌面 Playwright E2E 的 Provider 边界是 fixture snapshot，fake `afk` 只实现测试所需的 CLI 子集；它不能证明真实 GitHub/GitLab 凭据、网络、push、MR 创建或 merge。
@@ -314,6 +341,7 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 - `JsonlEventStore` 在单进程内串行写入并对每次追加执行 fsync；源码明确预留跨进程 lease fencing，当前不等同于多主机共识系统。
 - workflow runner 的 `parallel` 字段目前不是独立调度器；同层 `Promise.all` 才是实际并发机制。并行模板声明独立 branch/worktree 是设计约束，但仍应由测试确认资源没有被错误共享。
 - runtime heartbeat 过期会在 Desktop 投影为 `stale`，不会自动修改 Provider backlog 生命周期状态；状态修复仍需执行器、loop 或人工处理。
+- runtime `completed` 是阶段记录：实现成功交付 QA 时就归档，QA 使用独立记录。实现成功后的资源清理失败还可能在 runtime 已归档 `completed` 后将 Provider 转为 `blocked`；终态仍需核对 Provider、journal 和事件。
 - root 与 child 的终态不同：root QA PASS 只是 `merge_ready`，只有人工 merge 且审计验证通过后才能达到 `done`；“QA passed”不能直接写成“任务完成”。
 - 模板缓存按进程存在，磁盘模板更新后需要新建 loader 或显式清空 cache；生产运行不会热加载模板文件。
 

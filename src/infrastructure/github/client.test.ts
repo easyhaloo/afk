@@ -9,7 +9,7 @@ describe('GitHubClient', () => {
     } } } });
     (client as unknown as { client: { graphql: typeof graphql } }).client = { graphql };
     await expect(client.isMRLinkedToIssue(9, 'github:owner/issues#158')).resolves.toBe(true);
-    expect(graphql).toHaveBeenCalledWith(expect.stringContaining('closingIssuesReferences'), expect.objectContaining({ owner: 'owner', repo: 'issues', pullRequest: 9 }));
+    expect(graphql).toHaveBeenCalledWith(expect.stringContaining('closingIssuesReferences'), expect.objectContaining({ owner: 'owner', repo: 'code', pullRequest: 9 }));
     graphql.mockResolvedValue({ repository: null });
     await expect(client.isMRLinkedToIssue(9, 'github:owner/issues#158')).rejects.toThrow(/unavailable/i);
   });

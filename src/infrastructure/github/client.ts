@@ -261,7 +261,7 @@ export class GitHubClient implements TrackerProvider {
       repository?: { pullRequest?: { closingIssuesReferences?: {
         nodes?: ({ number: number; repository?: { nameWithOwner: string } } | null)[];
       } } };
-    } = await this.client.graphql(query, { owner, repo, pullRequest: id });
+    } = await this.client.graphql(query, { ...this.getOwnerRepo(), pullRequest: id });
     const references = response.repository?.pullRequest?.closingIssuesReferences;
     if (!references || !Array.isArray(references.nodes)) throw new Error('GitHub PR linkage readback unavailable');
     return references.nodes.some(linked => linked?.number === issue.issueNumber

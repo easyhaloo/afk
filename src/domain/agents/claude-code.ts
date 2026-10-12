@@ -37,8 +37,15 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
  * by ~80%. `output_tokens_details.thinking_tokens` is a breakdown OF
  * `output_tokens`, never additional to it.
  */
-function toTokenUsage(usage: Record<string, unknown>): TokenUsage {
-  const num = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0);
+interface ClaudeUsageBlock {
+  input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  output_tokens?: number;
+}
+
+function toTokenUsage(usage: ClaudeUsageBlock): TokenUsage {
+  const num = (key: keyof ClaudeUsageBlock): number => (typeof usage[key] === 'number' ? usage[key]! : 0);
   const inputTokens = num('input_tokens') + num('cache_creation_input_tokens') + num('cache_read_input_tokens');
   const outputTokens = num('output_tokens');
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };

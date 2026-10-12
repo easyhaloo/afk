@@ -22,6 +22,10 @@ interface CostStateEntry {
   }>;
 }
 
+function num(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+
 /**
  * Extract token usage from a Claude Code transcript (JSONL lines).
  *
@@ -56,8 +60,8 @@ export function extractClaudeTranscriptTokens(lines: string[]): TokenUsage | und
   let outputTokens = 0;
 
   for (const model of Object.values(peak.modelUsage)) {
-    inputTokens += model.inputTokens + model.cacheReadInputTokens + model.cacheCreationInputTokens;
-    outputTokens += model.outputTokens; // thinkingTokens already included in outputTokens
+    inputTokens += num(model.inputTokens) + num(model.cacheReadInputTokens) + num(model.cacheCreationInputTokens);
+    outputTokens += num(model.outputTokens); // thinkingTokens already included in outputTokens
   }
 
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
@@ -67,7 +71,7 @@ function isCostStateEntry(v: unknown): v is CostStateEntry {
   return (
     typeof v === 'object' &&
     v !== null &&
-    (v as Record<string, unknown>).type === 'cost-state' &&
+    (v as { type?: unknown }).type === 'cost-state' &&
     typeof (v as CostStateEntry).totalCostUSD === 'number' &&
     typeof (v as CostStateEntry).modelUsage === 'object'
   );
@@ -107,8 +111,8 @@ export function extractCodexRolloutTokens(lines: string[]): TokenUsage | undefin
   if (!last) return undefined;
 
   const inputTokens =
-    last.input_tokens + last.cached_input_tokens + last.cache_write_input_tokens;
-  const outputTokens = last.output_tokens; // reasoning_output_tokens already in output_tokens
+    num(last.input_tokens) + num(last.cached_input_tokens) + num(last.cache_write_input_tokens);
+  const outputTokens = num(last.output_tokens); // reasoning_output_tokens already in output_tokens
 
   return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
 }
@@ -117,7 +121,7 @@ function isTokenCountEntry(v: unknown): v is TokenCountEntry {
   return (
     typeof v === 'object' &&
     v !== null &&
-    (v as Record<string, unknown>).type === 'token_count' &&
+    (v as { type?: unknown }).type === 'token_count' &&
     typeof (v as TokenCountEntry).info?.total_token_usage === 'number'
   );
 }

@@ -102,6 +102,21 @@ describe('extractClaudeTranscriptTokens', () => {
   it('returns undefined for an empty transcript', () => {
     expect(extractClaudeTranscriptTokens([])).toBeUndefined();
   });
+
+  it('avoids NaN when inner fields are missing from modelUsage', () => {
+    // Harness may emit cost-state with some token fields absent.
+    const incompleteModel = {
+      type: 'cost-state',
+      totalCostUSD: 1,
+      modelUsage: {
+        m: { inputTokens: 10, outputTokens: 20 }, // missing cache fields entirely
+      },
+    };
+    const usage = extractClaudeTranscriptTokens([JSON.stringify(incompleteModel)]);
+    expect(usage?.inputTokens).toBe(10);
+    expect(usage?.outputTokens).toBe(20);
+    expect(Number.isNaN(usage?.totalTokens)).toBe(false);
+  });
 });
 
 describe('extractCodexRolloutTokens', () => {
@@ -118,11 +133,7 @@ describe('extractCodexRolloutTokens', () => {
     });
 
   it('takes the last token_count entry (not the max)', () => {
-    // Unlike Claude, Codex entries are cumulative and monotonic.
-    // Use non-monotonic data: max is at n=3 (321 tokens), last is n=5 (last=2nd-highest).
-    // This distinguishes "last" (321) from "max" (which would be n=3 if it were max).
-    // Actually with n*100 the last is always max, so we use a different structure.
-    // Simpler: just verify it returns the LAST entry's values.
+    // Claude uses MAX (non-monotonic snapshots); Codex uses LAST (cumulative).
     const lines = [tokenCount(1), tokenCount(3), tokenCount(2)];
     const usage = extractCodexRolloutTokens(lines);
     // Last entry is tokenCount(2): input=200+10+4=214, output=20
@@ -155,5 +166,19 @@ describe('extractCodexRolloutTokens', () => {
 
   it('returns undefined for an empty rollout', () => {
     expect(extractCodexRolloutTokens([])).toBeUndefined();
+  });
+
+  it('avoids NaN when cache fields are missing', () => {
+    const entry = JSON.stringify({
+      type: 'token_count',
+      info: { total_token_usage: 100 },
+      input_tokens: 1000,
+      output_tokens: 200,
+      // reasoning_output_tokens, cached_input_tokens, cache_write_input_tokens all absent
+    });
+    const usage = extractCodexRolloutTokens([entry]);
+    expect(usage?.inputTokens).toBe(1000);
+    expect(usage?.outputTokens).toBe(200);
+    expect(Number.isNaN(usage?.totalTokens)).toBe(false);
   });
 });

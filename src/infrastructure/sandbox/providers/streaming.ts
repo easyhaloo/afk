@@ -370,6 +370,18 @@ export class StreamingAgentExecution implements AgentExecution {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  /**
+   * Path to the Claude Code transcript for this session.
+   * batch mode uses the same session lifecycle as interactive (tmux sessionName
+   * is the sessionId), so the transcript path formula is identical.
+   * Returns undefined if sessionId is not set.
+   */
+  get telemetryPath(): string | undefined {
+    if (!this.sessionId) return undefined;
+    const slug = this.worktreePath.replace(/\//g, '__');
+    return `${process.env.HOME ?? ''}/.claude/projects/${slug}/${this.sessionId}.jsonl`;
+  }
+
   private drainStdoutLines(): void {
     let newline: number;
     while ((newline = this.stdoutBuffer.indexOf('\n')) >= 0) {

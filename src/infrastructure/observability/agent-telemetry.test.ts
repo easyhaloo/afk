@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { extractClaudeTranscriptTokens, extractCodexRolloutTokens } from './agent-telemetry.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { extractClaudeTranscriptTokens, extractCodexRolloutTokens, readAgentTelemetry, findCodexRollout } from './agent-telemetry.js';
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Fixtures mirror a real session (`c03ff1c4-…`), whose cost-state sequence was
@@ -180,5 +182,66 @@ describe('extractCodexRolloutTokens', () => {
     expect(usage?.inputTokens).toBe(1000);
     expect(usage?.outputTokens).toBe(200);
     expect(Number.isNaN(usage?.totalTokens)).toBe(false);
+  });
+});
+
+describe('readAgentTelemetry', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = '/tmp/afk-telemetry-test-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    mkdirSync(tmp, { recursive: true });
+  });
+
+  afterEach(() => {
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('returns undefined for container sandbox (no HOME access)', async () => {
+    const usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath: '/nonsense/nonexistent', sandboxKind: 'container' });
+    expect(usage).toBeUndefined();
+  });
+
+  it('returns undefined when transcript file does not exist', async () => {
+    const usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath: '/tmp/this-file-does-not-exist-xyz', sandboxKind: 'local' });
+    expect(usage).toBeUndefined();
+  });
+
+  it('reads and parses a Claude transcript', async () => {
+    const transcriptPath = join(tmp, 'transcript.jsonl');
+    writeFileSync(transcriptPath, [
+      '{"type":"attachment","attachment":{"type":"skill","name":"s1"}}',
+      JSON.stringify(SNAPSHOT_PEAK),
+    ].join('\n'));
+    const usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' });
+    expect(usage).toEqual({ inputTokens: PEAK_INPUT, outputTokens: PEAK_OUTPUT, totalTokens: PEAK_INPUT + PEAK_OUTPUT });
+  });
+});
+
+describe('findCodexRollout', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = '/tmp/afk-codex-test-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    mkdirSync(tmp, { recursive: true });
+  });
+
+  afterEach(() => {
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('returns undefined when no rollout matches thread_id', async () => {
+    const path = await findCodexRollout('nonexistent-thread-id-xyz');
+    expect(path).toBeUndefined();
+  });
+
+  it('locates rollout by thread_id suffix glob', async () => {
+    const sessionsDir = join(tmp, '.codex', 'sessions', '2025', '01', '15');
+    mkdirSync(sessionsDir, { recursive: true });
+    const rolloutFile = join(sessionsDir, 'rollout-103000-abc123def456.jsonl');
+    writeFileSync(rolloutFile, JSON.stringify({ type: 'token_count', info: { total_token_usage: 999 }, input_tokens: 100, output_tokens: 20, reasoning_output_tokens: 0, cached_input_tokens: 5, cache_write_input_tokens: 2 }) + '\n');
+
+    const found = await findCodexRollout('abc123def456', tmp);
+    expect(found).toBe(rolloutFile);
   });
 });

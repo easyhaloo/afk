@@ -82,7 +82,7 @@ or estimates from intermediate events.
 
 | Layer | Owner | AFK reads |
 |---|---|---|
-| Agent usage (tokens, cost, duration) | Harness (Claude Code / Codex) | `agent.session_recorded` event |
+| Agent usage (tokens only) | Harness (Claude Code / Codex) | `agent.session_recorded` event |
 | Domain execution (run.requested, workspace.prepared, change.published, human_gate, commit sha) | AFK | Event log (write) |
 
 The `agent.session_recorded` event is emitted when an execution result is

@@ -29,6 +29,21 @@ const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
   'interactive',
 ]);
 
+/**
+ * Normalise Claude Code's usage block to `TokenUsage`.
+ *
+ * `input_tokens` EXCLUDES cache creation/read — on a real run it was 5252
+ * against 20569 cache-creation tokens, so reading it alone would under-report
+ * by ~80%. `output_tokens_details.thinking_tokens` is a breakdown OF
+ * `output_tokens`, never additional to it.
+ */
+function toTokenUsage(usage: Record<string, unknown>): TokenUsage {
+  const num = (key: string): number => (typeof usage[key] === 'number' ? (usage[key] as number) : 0);
+  const inputTokens = num('input_tokens') + num('cache_creation_input_tokens') + num('cache_read_input_tokens');
+  const outputTokens = num('output_tokens');
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+}
+
 export class ClaudeCodeProvider extends ProcessAgentProvider {
   readonly name: AgentProviderName = 'claude-code';
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
@@ -47,23 +62,27 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
   }
 
   parseLine(line: string): AgentEvent[] {
-    // Claude Code emits structured JSON events on stdout when structured
-    // output is enabled. This is a placeholder — full JSON stream parsing
-    // is Phase 3 (streaming).
+    // Claude Code emits one JSON event per stdout line when structured output
+    // is enabled. The terminal `result` event carries the finished aggregate,
+    // so reading it is reading the final state — no separate flush wait.
     try {
       const parsed = JSON.parse(line);
       if (parsed.type === 'usage' && parsed.usage) {
-        return [{ type: 'usage', usage: parsed.usage as TokenUsage }];
+        return [{ type: 'usage', usage: toTokenUsage(parsed.usage) }];
       }
       if (parsed.type === 'result') {
+        const events: AgentEvent[] = [];
+        if (parsed.usage) events.push({ type: 'usage', usage: toTokenUsage(parsed.usage) });
         const resultEvent: AgentEvent = { type: 'result', result: parsed.result };
         if (parsed.is_error === true) {
-          return [
+          events.push(
             { type: 'error', error: new Error(String(parsed.result ?? 'agent returned an error')) },
             resultEvent,
-          ];
+          );
+          return events;
         }
-        return [resultEvent];
+        events.push(resultEvent);
+        return events;
       }
     } catch {
       // Not JSON — treat as text output

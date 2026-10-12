@@ -339,13 +339,19 @@ Backlog 局部控件高度原为 30px，与设计系统的共享 36px 控件不�
 
 修复后 Desktop 全套为 **50 passed，0 failed**；桌面包 typecheck、build 和 **768 项单测**通过。日志、8 张截图及复现失败到修复通过的记录位于 `.afk/e2e-artifacts/20261012-style-timeout-fix/`，精确结果见 `ui-summary.json`。
 
-首次真实运行的 `600000ms` 来自测试启动时的环境变量覆盖；驱动默认期限一直为 `1800000ms`（30 分钟）。驱动现在在启动时打印有效期限及来源，避免隐藏的环境变量缩短等待时间。复验应显式移除短期限覆盖：
+首次真实运行的 `600000ms` 来自测试启动时的环境变量覆盖。后续 Issue #177 的实现阶段受网络重试影响，耗时约 27 分钟；旧驱动把实现和 QA 共用的 30 分钟作为全程期限，导致 QA 刚开始就超时。现将 `AFK_CODEX_E2E_TIMEOUT_MS`（默认 `1800000ms`）分别用于实现（含排队）和 QA；第一次进入 `verification` 时启动 QA 预算，之后的 rework 不再延长预算。驱动打印有效阶段期限及来源，九项回归测试覆盖阶段预算、停滞超时、rework、Loop 提前停止/异常及 blocked 终态。Loop 拒绝值即使为 `undefined` 也按原值传播，不会误判为阶段超时。复验应显式移除短期限覆盖：
 
 ```sh
 env -u AFK_CODEX_E2E_TIMEOUT_MS pnpm exec tsx tests/e2e/codex-runtime.ts --transport=app-server
 ```
 
-本轮第一次复验 Issue #176 因 GitHub clone 连接失败进入 `blocked` / `hitl`，驱动退出码为 1；该记录保留在 `attempt-176/`，不计为通过。真实 E2E 成功必须同时满足原驱动退出码为 0、实现与 QA runtime 完成、Provider 为 `merge_ready` / `hitl`、PR 关联正确和事件完整性通过，不能用后验成功覆盖原驱动失败。
+本轮第一次复验 Issue #176 因 GitHub clone 连接失败进入 `blocked` / `hitl`，驱动退出码为 1；Issue #177 的旧驱动在全程 `1800000ms` 超时。两个失败记录分别保留在 `attempt-176/`、`attempt-177/`，不计为修复通过。真实 E2E 成功必须同时满足原驱动退出码为 0、实现与 QA runtime 完成、Provider 为 `merge_ready` / `hitl`、PR 关联正确和事件完整性通过，不能用后验成功覆盖原驱动失败。
+
+本机 GitHub HTTPS Git 连接间歇不可达，现有 SSH 认证通道可用。修复后的真实复验通过进程级 `url.git@github.com:.insteadOf=https://github.com/` 将 Git 操作转到同一 GitHub 仓库的 SSH 通道；不修改全局 Git 配置或 Provider API 认证。该环境条件须随驱动退出码一起归档，不能外推为 HTTPS 网络恢复。
+
+Issue #178 的实现、验收检查、QA 和 PR #179 发布已完成，驱动命令于 **2026-10-12 12:33:15 CST** 退出 `0`；命令耗时 23 分 56 秒，Loop 执行耗时 23 分 1 秒。实现与 QA runtime 均为 `completed` / `codex` / `app-server`，13 条事件的 hash chain 校验通过，Provider 为 `merge_ready` / `hitl`。本次 QA 的类型检查在相同源码的临时镜像、真实依赖目录中完成；不能声称 pnpm 已兼容原工作树的依赖符号链接。
+
+独立范围核验另外发现 QA 自动提交带入了生成的 `node_modules` 符号链接：仅匹配目录的 `node_modules/` 规则不会忽略该链接。`GitBranchProvider` 现为自己创建的共享链接补充 Git 本地 `/node_modules` 排除规则，保留既有规则；native Git 回归测试覆盖共享链接与自动提交的真实路径。E2E 驱动同时校验远端分支只能改动指定 fixture。PR #179 中的多余链接已通过提交 `332c73a` 清理，最终 Git diff、PR 文件范围及 fixture 精确字节核验通过；该清理发生在真实运行之后，不属于最初自动发布的结果。完整记录见归档中的 `driver-result.json`、`issue-178/verification.json`、`verification.log` 及依赖链接的 red/green 日志。
 
 ## 9. 已知限制
 

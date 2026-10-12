@@ -9,7 +9,6 @@ import {
   type CodexRuntimeSelection,
   type CodexTransport,
 } from '../../src/domain/agents/index';
-import type { BacklogProvider } from '../../src/domain/backlog/index';
 import { BACKLOG_METADATA } from '../../src/domain/backlog/index';
 import { getWorkflowConfig } from '../../src/infrastructure/config/manager';
 import { createProviderBundle as assembleProviderBundle } from '../../src/infrastructure/provider/providers';
@@ -20,12 +19,13 @@ import { deriveBacklogBranchName } from '../../src/domain/backlog/index';
 import { formatWorkItemId } from '../../src/domain/work-item/identity';
 import { toGlobalWorkItem } from '../../src/domain/work-item/metadata';
 import { executeWorkItem } from '../../src/application/workflows/execute-work-item';
+import { waitForTerminal } from './codex-runtime-wait';
 
-const E2E_TIMEOUT_MS = positiveInteger(process.env.AFK_CODEX_E2E_TIMEOUT_MS) ?? 30 * 60_000;
+const E2E_PHASE_TIMEOUT_MS = positiveInteger(process.env.AFK_CODEX_E2E_TIMEOUT_MS) ?? 30 * 60_000;
 
 async function main(): Promise<void> {
   const transport = parseTransport(process.argv.slice(2));
-  console.log(`Codex E2E deadline: ${E2E_TIMEOUT_MS}ms (${process.env.AFK_CODEX_E2E_TIMEOUT_MS === undefined ? 'default' : 'AFK_CODEX_E2E_TIMEOUT_MS'})`);
+  console.log(`Codex E2E phase deadline: ${E2E_PHASE_TIMEOUT_MS}ms each for implementation and QA (${process.env.AFK_CODEX_E2E_TIMEOUT_MS === undefined ? 'default' : 'AFK_CODEX_E2E_TIMEOUT_MS'})`);
   const workflow = getWorkflowConfig();
   workflow.agentDefault = 'codex';
   workflow.agents.codex.transport = transport;
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
 
   try {
     const loop = runner.start();
-    const final = await waitForTerminal(providers.backlog, backlogId, loop, E2E_TIMEOUT_MS);
+    const final = await waitForTerminal(providers.backlog, backlogId, loop, E2E_PHASE_TIMEOUT_MS);
     await runner.stop();
     await loop;
 
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
     assert(change, 'root backlog did not create an open merge request');
     assert.equal(change.sourceBranch, `${final.branchName}-qa`, 'merge request source branch does not match the QA branch');
     assert.equal(change.targetBranch, workflow.targetBranch, 'root backlog merge request targets the wrong baseline');
-    await assertRemoteFixture(change.sourceBranch, fixturePath, fixtureContent);
+    await assertRemoteFixture(change.sourceBranch, fixturePath, fixtureContent, workflow.targetBranch);
     console.log(`Codex E2E merge request: ${change.url}`);
     console.log(`Codex E2E passed: backlog=${backlogId} state=merge_ready mode=hitl`);
   } catch (error) {
@@ -192,30 +192,6 @@ function buildDescription(fixturePath: string, fixtureContent: string): string {
     '- [ ] `npm run typecheck` succeeds.',
     '- [ ] The implementation is committed and pushed to the backlog branch.',
   ].join('\n');
-}
-
-async function waitForTerminal(
-  backlog: BacklogProvider,
-  backlogId: string,
-  loop: Promise<void>,
-  timeoutMs: number,
-) {
-  const deadline = Date.now() + timeoutMs;
-  let loopStopped = false;
-  let loopFailure: unknown;
-  void loop.then(
-    () => { loopStopped = true; },
-    error => { loopFailure = error; },
-  );
-  while (Date.now() < deadline) {
-    const current = await backlog.get(backlogId);
-    if (current.state === 'merge_ready' && current.executionMode === 'hitl') return current;
-    if (current.state === 'blocked' || current.state === 'done') return current;
-    if (loopFailure) throw loopFailure;
-    if (loopStopped) throw new Error(`loop stopped while backlog was ${current.state}`);
-    await delay(10_000);
-  }
-  throw new Error(`Codex E2E timed out after ${timeoutMs}ms`);
 }
 
 async function assertRuntimeEvidence(
@@ -269,10 +245,13 @@ async function assertRemoteFixture(
   sourceBranch: string,
   fixturePath: string,
   fixtureContent: string,
+  targetBranch: string,
 ): Promise<void> {
   const git = simpleGit(process.cwd());
-  await git.fetch('origin', sourceBranch);
-  const remoteContent = await git.show([`FETCH_HEAD:${fixturePath}`]);
+  await git.raw(['fetch', 'origin', sourceBranch, targetBranch]);
+  const changedPaths = (await git.diff(['--name-only', `origin/${targetBranch}...origin/${sourceBranch}`])).trim().split('\n');
+  assert.deepEqual(changedPaths, [fixturePath], 'merge request must change only the requested fixture');
+  const remoteContent = await git.show([`origin/${sourceBranch}:${fixturePath}`]);
   assert.equal(remoteContent, `${fixtureContent}\n`, 'merge request source branch has unexpected fixture content');
 }
 
@@ -281,10 +260,6 @@ function positiveInteger(value: string | undefined): number | undefined {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error('AFK_CODEX_E2E_TIMEOUT_MS must be a positive integer');
   return parsed;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 main().catch(error => {

@@ -1,5 +1,5 @@
-import { lstat, symlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { appendFile, lstat, mkdir, readFile, symlink } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { simpleGit } from 'simple-git';
 import type { BacklogItem } from '../../../domain/backlog/index.js';
 import type { BranchProvider, BranchHandle } from './provider.js';
@@ -118,6 +118,15 @@ async function shareNodeModules(repoRoot: string, worktreePath: string): Promise
     return;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const excludePath = resolve(worktreePath, (await simpleGit(worktreePath).raw(['rev-parse', '--git-path', 'info/exclude'])).trim());
+  const patterns = await readFile(excludePath, 'utf8').catch(error => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw error;
+  });
+  if (!patterns.split(/\r?\n/).includes('/node_modules')) {
+    await mkdir(dirname(excludePath), { recursive: true });
+    await appendFile(excludePath, '\n/node_modules\n');
   }
   await symlink(source, target, 'dir');
 }

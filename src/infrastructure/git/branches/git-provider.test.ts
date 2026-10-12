@@ -147,6 +147,7 @@ describe('GitBranchProvider', () => {
 
   it('shares repository dependencies with QA worktrees', async () => {
     const { repoPath } = await repository();
+    await writeFile(join(repoPath, '.git/info/exclude'), 'node_modules/\nkeep-local\n');
     await mkdir(join(repoPath, 'node_modules'), { recursive: true });
     await writeFile(join(repoPath, 'node_modules', 'marker.txt'), 'shared\n');
 
@@ -155,5 +156,10 @@ describe('GitBranchProvider', () => {
 
     await expect(lstat(join(handle.worktreePath, 'node_modules'))).resolves.toSatisfy(stat => stat.isSymbolicLink());
     await expect(readFile(join(handle.worktreePath, 'node_modules', 'marker.txt'), 'utf8')).resolves.toBe('shared\n');
+    await writeFile(join(handle.worktreePath, 'fixture.txt'), 'fixture\n');
+    await provider.commit(handle.worktreePath, 'verify fixture');
+    await expect(simpleGit(handle.worktreePath).raw(['ls-tree', '--name-only', 'HEAD']))
+      .resolves.toBe('README.md\nfixture.txt\n');
+    await expect(readFile(join(repoPath, '.git/info/exclude'), 'utf8')).resolves.toContain('keep-local\n');
   });
 });

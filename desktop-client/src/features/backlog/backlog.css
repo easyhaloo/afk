@@ -1,5 +1,5 @@
 .backlog-page {
-  --backlog-control-height: 30px;
+  --backlog-control-height: 36px;
   --backlog-control-radius: 7px;
   --backlog-control-font-size: 12px;
   --backlog-accent: var(--run);

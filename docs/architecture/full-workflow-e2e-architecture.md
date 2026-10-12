@@ -311,7 +311,7 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 5. 每个内置模板至少通过模板图验证；需要验证 Agent/Git/Provider 语义时，按模板矩阵单独运行隔离项，不能只运行 `issue-implementation` 代替全部模板。
 6. Desktop E2E 至少确认任务身份按完整 `workItemId` 关联，不能因不同仓库使用相同 issue number 而串项；执行历史应通过 verified JSONL query path 展示。
 
-### 8.1 实际验证记录（2026-10-12）
+### 8.1 首次验证记录（2026-10-12）
 
 下列结果来自既有本地证据；Issue/PR 的远端状态与关联已由 `gh` 核验，本次文档审阅未重复远端请求。时间统一为 CST（UTC+08:00，Asia/Shanghai）。
 
@@ -332,6 +332,20 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 ```
 
 前者对应实现 `runId = executionId`，后者对应 QA `runId = qa-174-1791742147305-runtime`。QA 日志 `issue-174/verifying/output.log` 还记录了 pnpm 拒绝当前依赖目录符号链接、Agent 将工作树依赖恢复为本地目录后重新验证通过；该恢复只证明本次执行可继续，不能作为 pnpm 普遍支持 symlink `node_modules` 的结论。
+
+### 8.2 样式与驱动期限回归（2026-10-12）
+
+Backlog 局部控件高度原为 30px，与设计系统的共享 36px 控件不一致；现统一为 36px，并在 Electron E2E 中检查搜索、筛选、分段选择和添加控件的尺寸。工作流菜单的边框属于外层 popover，旧断言却检查内部 listbox；现检查 popover 四边的 1px 实线边框、浅色与石墨主题的不透明背景，以及菜单对下方控件的实际遮挡。
+
+修复后 Desktop 全套为 **50 passed，0 failed**；桌面包 typecheck、build 和 **768 项单测**通过。日志、8 张截图及复现失败到修复通过的记录位于 `.afk/e2e-artifacts/20261012-style-timeout-fix/`，精确结果见 `ui-summary.json`。
+
+首次真实运行的 `600000ms` 来自测试启动时的环境变量覆盖；驱动默认期限一直为 `1800000ms`（30 分钟）。驱动现在在启动时打印有效期限及来源，避免隐藏的环境变量缩短等待时间。复验应显式移除短期限覆盖：
+
+```sh
+env -u AFK_CODEX_E2E_TIMEOUT_MS pnpm exec tsx tests/e2e/codex-runtime.ts --transport=app-server
+```
+
+本轮第一次复验 Issue #176 因 GitHub clone 连接失败进入 `blocked` / `hitl`，驱动退出码为 1；该记录保留在 `attempt-176/`，不计为通过。真实 E2E 成功必须同时满足原驱动退出码为 0、实现与 QA runtime 完成、Provider 为 `merge_ready` / `hitl`、PR 关联正确和事件完整性通过，不能用后验成功覆盖原驱动失败。
 
 ## 9. 已知限制
 

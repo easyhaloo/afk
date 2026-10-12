@@ -39,25 +39,27 @@ test.describe("BacklogPage list", () => {
     await expect(platformSelect).toHaveAttribute("value", "auto");
   });
 
-  test("keeps backlog controls compact and consistently sized", async ({ page }) => {
+  test("aligns backlog controls at the shared 36px height", async ({ page }) => {
     const platform = page.getByRole("button", { name: "选择 Provider" });
     const create = page.getByRole("button", { name: "新建 Backlog" });
     const search = page.locator(".backlog-search");
     const state = page.getByLabel("筛选状态");
+    const filter = page.getByRole("button", { name: "筛选 Backlog" });
+    const segments = page.getByRole("radiogroup", { name: "Backlog 快捷状态" });
 
     await expect(page.getByRole("button", { name: "刷新 Backlog" })).toHaveCount(0);
 
-    const controls = await Promise.all([platform, create, search, state].map(async (locator) => {
+    const controls = await Promise.all([platform, create, search, state, filter, segments].map(async (locator) => {
       const box = await locator.boundingBox();
       if (!box) throw new Error("Backlog control is not visible");
       return box;
     }));
 
-    expect(controls[0].height).toBe(controls[1].height);
-    expect(controls[2].height).toBe(controls[3].height);
-    expect(controls[0].height).toBeLessThanOrEqual(34);
+    for (const control of controls) expect(control.height).toBe(36);
+    expect(controls[2].y).toBe(controls[4].y);
     expect(controls[0].width).toBe(controls[3].width);
     expect(controls[0].width).toBeLessThanOrEqual(310);
+    if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/backlog-controls-aligned.png` });
 
     const providerAlignment = await platform.evaluate((button) => {
       const buttonBox = button.getBoundingClientRect();

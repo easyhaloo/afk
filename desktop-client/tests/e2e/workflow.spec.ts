@@ -118,18 +118,47 @@ test.describe("Workflow studio", () => {
   });
 
   test("keeps workflow inspector select menus opaque above the following fields", async ({ page }) => {
-    await page.getByRole("button", { name: "工作流" }).click();
-    await page.locator(".workflow-library-card").first().click();
-    await page.locator(".workflow-editor-node").filter({ hasText: "开始" }).click();
+    for (const theme of ["浅色", "石墨"]) {
+      await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+      await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: theme }).click();
+      await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
+      await page.locator(".workflow-library-card").first().click();
+      await page.locator(".workflow-editor-node").filter({ hasText: "开始" }).click();
 
-    const trigger = page.getByRole("button", { name: "默认 Agent" });
-    await trigger.click();
+      const trigger = page.getByRole("button", { name: "默认 Agent" });
+      await trigger.click();
 
-    const menu = page.getByRole("listbox", { name: "默认 Agent" });
-    await expect(menu).toBeVisible();
-    await expect(menu).toHaveCSS("background-color", "rgb(255, 255, 255)");
-    await expect(menu).toHaveCSS("border-top-width", "1px");
-    await expect(menu.locator('[role="option"]')).toHaveCount(6);
+      const menu = page.getByRole("listbox", { name: "默认 Agent" });
+      const popover = trigger.locator("..").locator(".select-menu-popover");
+      await expect(menu).toBeVisible();
+      const background = await popover.evaluate(element => getComputedStyle(element).backgroundColor);
+      expect(background).toMatch(/^rgb\(/);
+      await expect(popover).toHaveCSS("opacity", "1");
+      await expect(menu).toHaveCSS("background-color", /^rgb\(/);
+      for (const side of ["top", "right", "bottom", "left"]) {
+        await expect(popover).toHaveCSS(`border-${side}-width`, "1px");
+        await expect(popover).toHaveCSS(`border-${side}-style`, "solid");
+      }
+      await expect(menu.locator('[role="option"]')).toHaveCount(6);
+      const overlap = await popover.evaluate(element => {
+        const nextControl = element.closest(".workflow-field")!.nextElementSibling!.querySelector("input, button")!;
+        const nextBounds = nextControl.getBoundingClientRect();
+        const bounds = element.getBoundingClientRect();
+        const left = Math.max(bounds.left, nextBounds.left);
+        const right = Math.min(bounds.right, nextBounds.right);
+        const top = Math.max(bounds.top, nextBounds.top);
+        const bottom = Math.min(bounds.bottom, nextBounds.bottom);
+        return {
+          width: right - left,
+          height: bottom - top,
+          covered: element.contains(document.elementFromPoint((left + right) / 2, (top + bottom) / 2)),
+        };
+      });
+      expect(overlap.width).toBeGreaterThan(0);
+      expect(overlap.height).toBeGreaterThan(0);
+      expect(overlap.covered).toBe(true);
+      if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/workflow-overlay-${theme}.png` });
+    }
   });
 
   test("uses compact workflow library controls and a quiet current-template status", async ({ page }) => {

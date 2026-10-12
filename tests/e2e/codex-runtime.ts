@@ -25,6 +25,7 @@ const E2E_TIMEOUT_MS = positiveInteger(process.env.AFK_CODEX_E2E_TIMEOUT_MS) ?? 
 
 async function main(): Promise<void> {
   const transport = parseTransport(process.argv.slice(2));
+  console.log(`Codex E2E deadline: ${E2E_TIMEOUT_MS}ms (${process.env.AFK_CODEX_E2E_TIMEOUT_MS === undefined ? 'default' : 'AFK_CODEX_E2E_TIMEOUT_MS'})`);
   const workflow = getWorkflowConfig();
   workflow.agentDefault = 'codex';
   workflow.agents.codex.transport = transport;

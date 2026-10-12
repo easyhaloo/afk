@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import type { AgentRuntimeSelection, CodexRuntimeSelection } from './types.js';
 
 type RuntimeObject = { [key: string]: unknown };
@@ -275,23 +275,48 @@ function runCodexDoctor(
   options: { timeoutMs?: number } = {},
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(executable, args, {
-      encoding: 'utf8',
-      timeout: options.timeoutMs,
+    let stdout = '', stderr = '';
+    let resolved = false;
+
+    const child = spawn(executable, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
         ...(process.env.TERM === 'dumb' || !process.env.TERM ? { TERM: 'xterm-256color' } : {}),
       },
-    }, (error, stdout, stderr) => {
+    });
+
+    if (child.stdout) {
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', chunk => { stdout += chunk; });
+    }
+    if (child.stderr) {
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', chunk => { stderr += chunk; });
+    }
+
+    child.on('error', err => {
+      if (!resolved) { resolved = true; reject(err); }
+    });
+
+    child.on('close', (code, signal) => {
+      if (resolved) return;
+      resolved = true;
       // codex doctor --json exits non-zero when overallStatus is 'fail' but still outputs valid JSON.
       // Only reject on true spawn failures (ENOENT). For all other cases, resolve so the caller
       // can parse the output and decide what kind of failure it is.
-      if (error && isErrno(error, 'ENOENT')) {
-        reject(error);
+      if (signal === 'SIGKILL') {
+        reject(Object.assign(new Error('spawn timed out'), { code: 'ETIMEDOUT' }));
         return;
       }
       resolve({ stdout, stderr });
     });
+
+    if (options.timeoutMs) {
+      setTimeout(() => {
+        if (!resolved) { resolved = true; child.kill(); }
+      }, options.timeoutMs);
+    }
   });
 }
 

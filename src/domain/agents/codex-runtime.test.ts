@@ -121,11 +121,37 @@ describe('probeCodexReadiness', () => {
             checks: {
               'auth.credentials': {
                 status: 'warning',
-                details: { 'stored auth mode': 'api_key', 'stored API key': 'true' },
+                details: { 'auth storage mode': 'api_key', 'stored API key': 'true' },
               },
               'config.load': { status: 'ok', details: { 'model provider': 'custom' } },
               'network.provider_reachability': { status: 'ok' },
               'terminal.env': { status: 'fail', summary: 'TERM=dumb' },
+            },
+          })
+        : '{"type":"turn.completed"}\n',
+      stderr: '',
+    }));
+
+    await expect(probeCodexReadiness(resolveCodexRuntime({ cli: {}, config: config() }), run)).resolves.toEqual({
+      ready: true,
+      auth: 'api',
+      provider: 'custom',
+    });
+  });
+
+  it('treats installation and provider_reachability doctor failures as non-fatal', async () => {
+    // Custom gateways (LiteLLM, local proxies) often 404 on /models while /responses works.
+    // The live probe is the authoritative check; doctor heuristics are supplementary.
+    const run = vi.fn(async (_executable: string, args: string[]) => ({
+      stdout: args[0] === 'doctor'
+        ? JSON.stringify({
+            schemaVersion: 1,
+            overallStatus: 'fail',
+            checks: {
+              'auth.credentials': { status: 'ok', details: { 'auth storage mode': 'api_key' } },
+              'config.load': { status: 'ok', details: { 'model provider': 'custom' } },
+              'installation': { status: 'fail', summary: 'npm install -g would update a different install' },
+              'network.provider_reachability': { status: 'fail', summary: '/models returned HTTP 404' },
             },
           })
         : '{"type":"turn.completed"}\n',
@@ -148,23 +174,66 @@ describe('probeCodexReadiness', () => {
     });
 
     const result = await probeCodexReadiness(resolveCodexRuntime({ cli: {}, config: config() }), run);
-    expect(result).toEqual({ ready: false, code: 'AUTH_INVALID', message: 'Codex authentication is not ready' });
+    // The error is surfaced with the actual cause, not masked as generic AUTH_INVALID.
+    // Secrets are still redacted — only '401 INVALID_API_KEY' remains.
+    expect(result).toEqual({ ready: false, code: 'AUTH_INVALID', message: 'Codex readiness probe failed: 401 INVALID_API_KEY [REDACTED]' });
     expect(JSON.stringify(result)).not.toContain('secret-fragment');
   });
 
-  it('rejects an explicit auth mode that differs from host diagnostics', async () => {
+  it('skips auth comparison when doctor auth is unavailable and lets the live probe decide', async () => {
+    // Codex 0.148.0 doctor returns 'auth storage mode' (a storage mechanism, not an auth type),
+    // which normalizeAuth maps to undefined. The comparison must not false-positive.
     const run = vi.fn(async (_executable: string, args: string[]) => ({
       stdout: args[0] === 'doctor'
-        ? JSON.stringify({ ready: true, auth: 'chatgpt', provider: 'openai' })
+        ? JSON.stringify({
+            schemaVersion: 1,
+            overallStatus: 'ok',
+            checks: {
+              'auth.credentials': {
+                status: 'ok',
+                details: {
+                  'auth env vars present': 'OPENAI_API_KEY, CODEX_API_KEY',
+                  'auth file': '/Users/shenggangshu/.codex/auth.json',
+                  'auth storage mode': 'File',
+                  'model provider requires OpenAI auth': 'false',
+                },
+              },
+              'config.load': { status: 'ok', details: { 'model provider': 'openai' } },
+            },
+          })
         : '{"type":"turn.completed"}\n',
       stderr: '',
     }));
     const runtime = resolveCodexRuntime({ cli: { auth: 'api' }, config: config() });
 
     await expect(probeCodexReadiness(runtime, run)).resolves.toEqual({
-      ready: false, code: 'AUTH_INVALID', message: 'Codex authentication is not ready',
+      ready: true, auth: 'api', provider: 'openai',
     });
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(2); // doctor + live probe
+  });
+
+  it('reports a probe failure with its actual cause instead of masking it as AUTH_INVALID', async () => {
+    const run = vi.fn(async (_executable: string, args: string[]) => ({
+      stdout: args[0] === 'doctor'
+        ? JSON.stringify({ ready: true, auth: 'chatgpt', provider: 'openai' })
+        : '{"type":"turn.completed"}\n',
+      stderr: '',
+    }));
+    const runtime = resolveCodexRuntime({ cli: { auth: 'chatgpt', provider: 'openai' }, config: config() });
+    // Override the live probe to fail with a distinct error
+    const probeResult = await probeCodexReadiness(runtime, run);
+    // Simulate the actual probe throwing after doctor succeeds
+    const failingRun = vi.fn(async (_executable: string, args: string[]) => {
+      if (args[0] === 'doctor') {
+        return { stdout: JSON.stringify({ ready: true, auth: 'chatgpt', provider: 'openai' }), stderr: '' };
+      }
+      throw new Error('Codex live model probe did not complete');
+    });
+
+    const result = await probeCodexReadiness(runtime, failingRun);
+    expect(result.ready).toBe(false);
+    expect(result.message).toContain('live model probe');
+    expect(result.message).not.toBe('Codex authentication is not ready');
   });
 
   it('applies profile and provider selection to doctor and live probes', async () => {
@@ -221,7 +290,7 @@ describe('probeCodexReadiness', () => {
     expect(result).toEqual({
       ready: false,
       code: 'AUTH_INVALID',
-      message: 'Codex authentication is not ready',
+      message: 'Codex readiness probe failed: 401 INVALID_API_KEY [REDACTED]',
     });
     expect(JSON.stringify(result)).not.toContain('secret-fragment');
   });

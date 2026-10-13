@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { ClaudeCodeProvider } from './claude-code.js';
+import { StreamingAgentExecution } from '../../infrastructure/sandbox/providers/streaming.js';
+
+function command(script: string) {
+  return { argv: [process.execPath, '-e', script], cwd: process.cwd() };
+}
 
 /**
  * The terminal `result` event carries the finished aggregate. Before this
@@ -63,5 +68,65 @@ describe('ClaudeCodeProvider.parseLine — terminal result usage', () => {
   it('treats a result event without usage as having no usage', () => {
     const events = p.parseLine(JSON.stringify({ type: 'result', result: 'ok', is_error: false }));
     expect(events.some((e) => e.type === 'usage')).toBe(false);
+  });
+});
+
+/**
+ * session_id lives on the same `result` event as usage — verified on a real run:
+ * `{"type":"result","session_id":"47444657-…", …}`.
+ * The value is captured as an AgentEvent of type 'session', which
+ * StreamingAgentExecution.routes to metadata.threadId (mirroring codex).
+ */
+describe('ClaudeCodeProvider.parseLine — session_id on result event', () => {
+  const p = new ClaudeCodeProvider();
+
+  it('emits a session event with the session_id from the result line', () => {
+    const events = p.parseLine(RESULT_EVENT);
+    const session = events.find((e) => e.type === 'session');
+    expect(session).toMatchObject({ type: 'session', sessionId: '47444657-0000-4000-8000-000000000000' });
+  });
+
+  it('does not emit a session event when session_id is absent', () => {
+    const noSession = JSON.stringify({ type: 'result', result: 'ok', is_error: false });
+    const events = p.parseLine(noSession);
+    expect(events.some((e) => e.type === 'session')).toBe(false);
+  });
+});
+
+/**
+ * Test must drive a real line through the same path production uses and
+ * assert the id surfaces in metadata — not merely that parseLine returns a
+ * session event. This mirrors the defect: codex thread_id was unit-tested
+ * but never captured at runtime.
+ *
+ * This test would have caught:
+ * - Defect 4: thread_id captured at parse time but never routed to metadata
+ */
+describe('ClaudeCodeProvider + StreamingAgentExecution — session_id surfaces in metadata', () => {
+  const p = new ClaudeCodeProvider();
+
+  it('populates metadata.threadId from the result event session_id', async () => {
+    const resultEvent = JSON.stringify({
+      type: 'result',
+      session_id: '47444657-aaaa-4000-8000-000000000000',
+      usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 5 },
+      is_error: false,
+      result: '<goal_complete>{"type":"goal_complete","summary":"claude session test"}</goal_complete>',
+    });
+
+    const execution = new StreamingAgentExecution({
+      command: command(`console.log(${JSON.stringify(resultEvent)})`),
+      prompt: 'go',
+      signalType: 'goal_complete',
+      worktreePath: process.cwd(),
+      metadata: { provider: 'claude-code', transport: 'process' },
+      parseLine: p.parseLine.bind(p),
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+      status: 'completed',
+    });
+    expect(execution.metadata.threadId).toBe('47444657-aaaa-4000-8000-000000000000');
   });
 });

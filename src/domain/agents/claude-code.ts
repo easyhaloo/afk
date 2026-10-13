@@ -80,6 +80,9 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
       if (parsed.type === 'result') {
         const events: AgentEvent[] = [];
         if (parsed.usage) events.push({ type: 'usage', usage: toTokenUsage(parsed.usage) });
+        if (typeof parsed.session_id === 'string' && parsed.session_id.length > 0) {
+          events.push({ type: 'session', sessionId: parsed.session_id });
+        }
         const resultEvent: AgentEvent = { type: 'result', result: parsed.result };
         if (parsed.is_error === true) {
           events.push(

@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { StreamingAgentExecution } from './streaming.js';
 import { CodexProvider } from '../../../domain/agents/codex.js';
+import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 function command(script: string) {
   return { argv: [process.execPath, '-e', script], cwd: process.cwd() };
@@ -225,5 +227,47 @@ describe('StreamingAgentExecution', () => {
     await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({ status: 'completed' });
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(() => process.kill(childPid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+  });
+
+  describe('telemetryPath getter', () => {
+    let tmp: string;
+    const origHome = process.env.HOME;
+
+    beforeEach(() => {
+      tmp = '/tmp/afk-slug-test-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      mkdirSync(tmp, { recursive: true });
+      process.env.HOME = tmp;
+    });
+
+    afterEach(() => {
+      try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+      process.env.HOME = origHome;
+    });
+
+    it('resolves to a real transcript file by deriving the correct slug', async () => {
+      // Real Claude Code slug convention: leading '-' then each '/' -> '-'
+      // e.g. /Users/shenggangshu/llm/afk -> -Users-shenggangshu-llm-afk
+      const worktreePath = join(tmp, 'project', 'repo');
+      mkdirSync(worktreePath, { recursive: true });
+      const sessionId = 'c0ffee11-2222-3333-4444-555566667777';
+
+      const execution = new StreamingAgentExecution({
+        command: command(`console.log('ok')`),
+        prompt: 'go',
+        signalType: 'goal_complete',
+        worktreePath,
+        sessionId,
+        metadata: PROCESS_METADATA,
+      });
+
+      const realSlug = '-' + worktreePath.replace(/\//g, '-');
+      const projectDir = join(tmp, '.claude', 'projects', realSlug);
+      mkdirSync(projectDir, { recursive: true });
+      const transcriptPath = join(projectDir, `${sessionId}.jsonl`);
+      writeFileSync(transcriptPath, '{"type":"cost-state","totalCostUSD":1,"modelUsage":{"m":{"inputTokens":100,"outputTokens":50,"thinkingTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}\n');
+
+      expect(execution.telemetryPath).toBe(transcriptPath);
+      expect(existsSync(execution.telemetryPath!)).toBe(true);
+    });
   });
 });

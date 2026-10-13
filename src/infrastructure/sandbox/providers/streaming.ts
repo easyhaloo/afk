@@ -388,7 +388,7 @@ export class StreamingAgentExecution implements AgentExecution {
    */
   get telemetryPath(): string | undefined {
     if (!this.sessionId) return undefined;
-    const slug = this.worktreePath.replace(/\//g, '__');
+    const slug = '-' + this.worktreePath.replace(/\//g, '-');
     return `${process.env.HOME ?? ''}/.claude/projects/${slug}/${this.sessionId}.jsonl`;
   }
 

@@ -381,7 +381,7 @@ export class LocalAgentExecution implements AgentExecution {
    */
   get telemetryPath(): string | undefined {
     if (!this.sessionId) return undefined;
-    const slug = '-' + this.worktreePath.replace(/\//g, '-');
+    const slug = this.worktreePath.replace(/\//g, '-');
     return join(process.env.HOME ?? '', '.claude', 'projects', slug, `${this.sessionId}.jsonl`);
   }
 }

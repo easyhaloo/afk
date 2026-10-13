@@ -260,7 +260,7 @@ describe('StreamingAgentExecution', () => {
         metadata: PROCESS_METADATA,
       });
 
-      const realSlug = '-' + worktreePath.replace(/\//g, '-');
+      const realSlug = '-' + worktreePath.split('/').filter(Boolean).join('-');
       const projectDir = join(tmp, '.claude', 'projects', realSlug);
       mkdirSync(projectDir, { recursive: true });
       const transcriptPath = join(projectDir, `${sessionId}.jsonl`);
@@ -268,6 +268,27 @@ describe('StreamingAgentExecution', () => {
 
       expect(execution.telemetryPath).toBe(transcriptPath);
       expect(existsSync(execution.telemetryPath!)).toBe(true);
+    });
+
+    it('maps a real project path to the slug Claude Code actually uses', () => {
+      // Literal expectation, verified against real directories on disk:
+      //   ls ~/.claude/projects/  ->  -Users-shenggangshu-llm-afk
+      // A directory named '--Users-shenggangshu-llm-afk' does NOT exist, so a
+      // doubled leading hyphen is a bug, not an equivalent spelling. Deriving the
+      // expectation from the implementation's own expression cannot catch that.
+      const sessionId = 'c0ffee11-2222-3333-4444-555566667777';
+      const execution = new StreamingAgentExecution({
+        command: command(`console.log('ok')`),
+        prompt: 'go',
+        signalType: 'goal_complete',
+        worktreePath: '/Users/shenggangshu/llm/afk',
+        sessionId,
+        metadata: PROCESS_METADATA,
+      });
+
+      expect(execution.telemetryPath).toBe(
+        `${process.env.HOME}/.claude/projects/-Users-shenggangshu-llm-afk/${sessionId}.jsonl`,
+      );
     });
   });
 });

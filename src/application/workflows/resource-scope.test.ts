@@ -122,4 +122,38 @@ describe('RunResourceScope', () => {
     await expect(scope.finish({ status: 'success' })).rejects.toThrow('first cleanup failed');
     expect(branch.cleanup).toHaveBeenCalledTimes(2);
   });
+
+  it.each(['failed', 'timeout', 'crashed'] as const)('closes step sandboxes and worktrees once on %s', async status => {
+    const branch = strategy();
+    const sandbox = { close: vi.fn(async () => {}) };
+    const scope = new RunResourceScope({ repoRoot: '/repo', git: simpleGit(), baseBranch: 'main' });
+    scope.registerSandbox(sandbox);
+    scope.registerStepHandle(
+      { branch: 'afk/step', path: '/tmp/step', isNewBranch: true },
+      () => branch.cleanup(simpleGit(), { type: 'named', branch: 'afk/step' }, { branch: 'afk/step', path: '/tmp/step', isNewBranch: true }, { force: true }),
+    );
+
+    await scope.finish({ status });
+
+    expect(sandbox.close).toHaveBeenCalledTimes(1);
+    expect(branch.cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues cleanup after sandbox failure and preserves the first error', async () => {
+    const branch = strategy();
+    const failedSandbox = { close: vi.fn(async () => { throw new Error('sandbox close failed'); }) };
+    const remainingSandbox = { close: vi.fn(async () => {}) };
+    const scope = new RunResourceScope({ repoRoot: '/repo', git: simpleGit(), baseBranch: 'main' });
+    scope.registerSandbox(remainingSandbox);
+    scope.registerSandbox(failedSandbox);
+    scope.registerStepHandle(
+      { branch: 'afk/step', path: '/tmp/step', isNewBranch: true },
+      () => branch.cleanup(simpleGit(), { type: 'named', branch: 'afk/step' }, { branch: 'afk/step', path: '/tmp/step', isNewBranch: true }, { force: true }),
+    );
+
+    await expect(scope.finish({ status: 'failed' })).rejects.toThrow('sandbox close failed');
+    expect(failedSandbox.close).toHaveBeenCalledTimes(1);
+    expect(remainingSandbox.close).toHaveBeenCalledTimes(1);
+    expect(branch.cleanup).toHaveBeenCalledTimes(1);
+  });
 });

@@ -20,6 +20,8 @@ import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
 
 type QAResultObject = { [key: string]: unknown };
+type QAFailureCriterion = { id: string; expected: string; actual: string };
+type QAProcessResult = { success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean; summary?: string; failedCriteria?: QAFailureCriterion[] };
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -72,12 +74,10 @@ export class QARunner {
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }
 
-  async process(backlogId: string): Promise<{ success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean }> {
+  async process(backlogId: string): Promise<QAProcessResult> {
     const id = String(backlogId);
     logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
 
-    const backlog = await this.providers.backlog.get(id);
-    const baselineBranch = await this.resolveExecutionBranch(backlog);
     const session = `qa-${id}-${Date.now()}`;
     let worktreePath: string | undefined;
     let sandbox: Sandbox | undefined;
@@ -87,6 +87,8 @@ export class QARunner {
     let runtimeErrorSummary: string | undefined;
 
     try {
+      const backlog = await this.providers.backlog.get(id);
+      const baselineBranch = await this.resolveExecutionBranch(backlog);
       await this.startRuntime(runtimeRunId, backlog, session);
       runtimeStarted = true;
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
@@ -97,8 +99,9 @@ export class QARunner {
 
       const featureBranch = backlog.branchName;
       if (!featureBranch) {
-        await this.markBlocked(id, 'feature branch could not be resolved');
-        return { success: false };
+        const summary = 'QA execution failed: feature branch could not be resolved';
+        await this.markBlocked(id, summary);
+        return { success: false, summary };
       }
       if (this.mergeBranchOverride) await this.mergeBranchOverride(worktreePath, baselineBranch, featureBranch);
       else await this.mergeBranch(worktreePath, baselineBranch, featureBranch);
@@ -150,30 +153,35 @@ export class QARunner {
       await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
       logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
       if (result.status !== 'completed') {
-        runtimeErrorSummary = formatExecutionFailure(result);
+        const summary = `QA ${result.status}: ${formatExecutionFailure(result)}`;
+        runtimeErrorSummary = summary;
         await this.handleExecutionFailure(id, worktreePath, session, result, execution);
-        return { success: false };
+        return { success: false, summary };
       }
 
       const signal = asQAResult(result.structuredOutput);
       if (!signal) {
-        runtimeErrorSummary = `${formatExecutionFailure(result)}; missing QA completion payload`;
-        await this.markBlocked(id, `${formatExecutionFailure(result)}; missing QA completion payload`);
-        return { success: false };
+        const summary = `${formatExecutionFailure(result)}; missing QA completion payload`;
+        runtimeErrorSummary = summary;
+        await this.markBlocked(id, summary);
+        return { success: false, summary };
       }
       const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName);
       if (!outcome.success) {
-        runtimeErrorSummary = signal.result === 'PASS'
-          ? 'QA terminal routing failed'
-          : signal.summary;
+        runtimeErrorSummary = outcome.summary ?? (signal.result === 'PASS' ? 'QA terminal routing failed' : signal.summary);
       }
       return outcome;
     } catch (error) {
-      const message = `QA execution failed: ${(error as Error).message}`;
+      const message = `QA execution failed: ${error instanceof Error ? error.message : String(error)}`;
       runtimeErrorSummary = message;
-      await this.markBlocked(id, message);
+      try {
+        await this.markBlocked(id, message);
+      } catch (routingError) {
+        logger.error({ backlogId: id, error, routingError }, 'QA failure could not be routed to blocked');
+        throw error;
+      }
       logger.error({ backlogId: id, error }, 'QA execution failed');
-      return { success: false };
+      return { success: false, summary: message };
     } finally {
       if (execution) await execution.kill().catch(() => {});
       if (sandbox) await sandbox.close().catch(error => logger.warn({ backlogId: id, error }, 'failed to close QA sandbox'));
@@ -230,7 +238,7 @@ export class QARunner {
     signal: QAResult,
     worktreePath: string,
     verificationBranch: string,
-  ): Promise<{ success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean }> {
+  ): Promise<QAProcessResult> {
     if (signal.result === 'FAIL') return this.routeQARework(backlogId, signal as QAFailure);
 
     try {
@@ -265,29 +273,32 @@ export class QARunner {
       logger.info({ backlogId, changeId: mr.id, targetBranch }, 'child backlog change merged');
       return { success: true, autoMerged: true, mrUrl: mr.url };
     } catch (error) {
-      await this.markBlocked(backlogId, `QA terminal routing failed: ${(error as Error).message}`);
+      const summary = `QA terminal routing failed: ${error instanceof Error ? error.message : String(error)}`;
+      await this.markBlocked(backlogId, summary);
       logger.error({ backlogId, error }, 'QA failed: terminal routing error');
-      return { success: false };
+      return { success: false, summary };
     }
   }
 
-  private async routeQARework(backlogId: string, signal: QAFailure): Promise<{ success: false; rework: true }> {
+  private async routeQARework(backlogId: string, signal: QAFailure): Promise<QAProcessResult> {
     const active = await this.providers.backlog.getActiveRework(backlogId);
-    if (active) {
-      await this.providers.backlog.transition(backlogId, 'rework', { reason: `QA rework ${active.id} remains open: ${signal.summary}` });
-      await this.providers.backlog.setExecutionMode(backlogId, 'afk');
-      logger.info({ backlogId, reworkId: active.id }, 'QA failure retained active rework record');
-      return { success: false, rework: true };
-    }
+    const limit = this.config.maxQaReworkAttempts;
     const record: NewReworkRecord = {
       source: 'qa',
       summary: signal.summary,
       failedCriteria: signal.failedCriteria,
       requiredChecks: signal.requiredChecks ?? [],
     };
-    await this.providers.backlog.createRework(backlogId, record);
-    logger.info({ backlogId }, 'QA failure created rework record');
-    return { success: false, rework: true };
+    const rework = active && active.attempt >= limit ? active : await this.providers.backlog.createRework(backlogId, record);
+    if (rework.attempt >= limit) {
+      const summary = `QA rework attempt limit reached (${rework.attempt}/${limit}): ${signal.summary}`;
+      await this.markBlocked(backlogId, summary);
+      return { success: false, summary, failedCriteria: signal.failedCriteria };
+    }
+    await this.providers.backlog.transition(backlogId, 'rework', { reason: `QA rework ${rework.id}: ${signal.summary}` });
+    await this.providers.backlog.setExecutionMode(backlogId, 'afk');
+    logger.info({ backlogId, reworkId: rework.id, attempt: rework.attempt }, 'QA failure persisted rework record');
+    return { success: false, rework: true, summary: signal.summary, failedCriteria: signal.failedCriteria };
   }
 
   private async markBlocked(backlogId: string, reason: string): Promise<void> {
@@ -371,20 +382,20 @@ interface QAResult {
   kind: 'qa';
   result: 'PASS' | 'FAIL';
   summary: string;
-  failedCriteria?: Array<{ id: string; expected: string; actual: string }>;
+  failedCriteria?: QAFailureCriterion[];
   requiredChecks?: Array<{ command: string; expected: string }>;
 }
 
 interface QAFailure extends QAResult {
   result: 'FAIL';
-  failedCriteria: Array<{ id: string; expected: string; actual: string }>;
+  failedCriteria: QAFailureCriterion[];
 }
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function parseCriteria(value: unknown): Array<{ id: string; expected: string; actual: string }> | undefined {
+function parseCriteria(value: unknown): QAFailureCriterion[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const criteria = value.map(entry => {
     if (!entry || typeof entry !== 'object') return undefined;
@@ -393,7 +404,7 @@ function parseCriteria(value: unknown): Array<{ id: string; expected: string; ac
       ? { id: item.id, expected: item.expected, actual: item.actual }
       : undefined;
   });
-  return criteria.some(item => item === undefined) ? undefined : criteria as Array<{ id: string; expected: string; actual: string }>;
+  return criteria.some(item => item === undefined) ? undefined : criteria as QAFailureCriterion[];
 }
 
 function parseRequiredChecks(value: unknown): Array<{ command: string; expected: string }> | undefined {

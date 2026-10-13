@@ -34,6 +34,7 @@ export interface WorkflowConfig {
   handoffTimeout: number;
   maxRetries: number;
   maxSelfIterations: number;
+  maxQaReworkAttempts: number;
   targetBranch: string;
   trackerTargetBranch: string;
   goalBudget: number;
@@ -76,6 +77,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   handoffTimeout: 60_000,
   maxRetries: 2,
   maxSelfIterations: 2,
+  maxQaReworkAttempts: 3,
   targetBranch: 'main',
   trackerTargetBranch: 'main',
   goalBudget: 10_000_000,
@@ -125,6 +127,11 @@ export function loadWorkflowConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): WorkflowConfig {
   const file = readProjectConfig(projectRoot);
+  const maxQaReworkAttempts = file.maxQaReworkAttempts
+    ?? Number(env.AFK_MAX_QA_REWORK_ATTEMPTS ?? DEFAULT_WORKFLOW.maxQaReworkAttempts);
+  if (typeof maxQaReworkAttempts !== 'number' || !Number.isSafeInteger(maxQaReworkAttempts) || maxQaReworkAttempts < 1) {
+    throw new Error('maxQaReworkAttempts must be a positive integer');
+  }
   return {
     agentDefault: configString(file.agentDefault) ?? env.AFK_AGENT_DEFAULT ?? DEFAULT_WORKFLOW.agentDefault,
     tmuxSession: configString(file.tmuxSession) ?? env.AFK_TMUX_SESSION ?? DEFAULT_WORKFLOW.tmuxSession,
@@ -138,6 +145,7 @@ export function loadWorkflowConfig(
     handoffTimeout: configNumber(file.handoffTimeout) ?? parseEnvMs('AFK_HANDOFF_TIMEOUT', DEFAULT_WORKFLOW.handoffTimeout, env),
     maxRetries: configNumber(file.maxRetries) ?? parseIntEnv('AFK_MAX_RETRIES', DEFAULT_WORKFLOW.maxRetries, env),
     maxSelfIterations: configNumber(file.maxSelfIterations) ?? parseIntEnv('AFK_MAX_SELF_ITERATIONS', DEFAULT_WORKFLOW.maxSelfIterations, env),
+    maxQaReworkAttempts,
     targetBranch: configString(file.targetBranch) ?? env.AFK_TARGET_BRANCH ?? DEFAULT_WORKFLOW.targetBranch,
     trackerTargetBranch: configString(file.trackerTargetBranch) ?? env.AFK_TRACKER_TARGET_BRANCH ?? DEFAULT_WORKFLOW.trackerTargetBranch,
     goalBudget: configNumber(file.goalBudget) ?? parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget, env),

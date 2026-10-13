@@ -79,6 +79,26 @@ child items; a parent itself is never runnable. Any automation failure,
 conflict, timeout, or uncertain lease recovery transitions the item to
 `blocked` and routes it to `hitl`.
 
+QA FAIL persists a new rework record in the provider's issue comment/note,
+supersedes any active record, and increments `ReworkRecord.attempt` from the
+highest persisted attempt. QA record creation only persists evidence;
+`QARunner` owns the subsequent state/mode routing. Operator retry still creates
+its record and routes directly to `rework` + `afk`.
+
+`WorkflowConfig.maxQaReworkAttempts` defaults to **3** and must be a positive
+integer. Set `maxQaReworkAttempts: 3` in `.afk/config.yml` or use
+`AFK_MAX_QA_REWORK_ATTEMPTS=3`; the project file takes precedence. With no prior
+records, the first FAIL is attempt 1, the second FAIL is attempt 2, and both
+allow `rework` + `afk`. The third FAIL persists attempt 3 and returns
+`success: false` without `rework`, routing directly to `blocked` + `hitl`.
+Further FAIL calls retain that record and cannot reopen automatic rework.
+A limit of 1 blocks the first FAIL. Attempts include earlier resolved,
+superseded, and operator records; restarting a runner does not reset them.
+QA PASS can still resolve an active record. This limit is separate from
+`maxRetries` (execution retries) and `maxSelfIterations` (AC corrections).
+The handoff/token `BudgetManager` remains local to one `WorkflowRunner`;
+neither its budget nor cumulative consumption is persisted across runs.
+
 ## Runtime and Desktop projections
 
 Canonical runtime files under `~/.afk/runtime/tasks` own execution-attempt

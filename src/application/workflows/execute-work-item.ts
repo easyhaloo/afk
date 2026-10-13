@@ -323,9 +323,20 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
               await record('published', { changeId: change.id, changeUrl: change.url });
             },
           })))(management, config, request);
-        const qaResult = await qa.process(request.backlogId);
+        const qaResult = await qa.process(request.backlogId).catch(async error => {
+          await audit({
+            kind: 'qa.failed', reason: 'blocked',
+            summary: `QA execution failed: ${error instanceof Error ? error.message : String(error)}`,
+          }).catch(() => undefined);
+          throw error;
+        });
         if (qaResult.success) await auditQAPass();
-        else await audit({ kind: 'qa.failed', reason: qaResult.rework ? 'rework' : 'blocked' });
+        else await audit({
+          kind: 'qa.failed',
+          reason: qaResult.rework ? 'rework' : 'blocked',
+          ...(qaResult.summary ? { summary: qaResult.summary } : {}),
+          ...(qaResult.failedCriteria ? { failedCriteria: qaResult.failedCriteria } : {}),
+        });
         const change = qaResult.success ? await providers.changes.findForBacklog(item) : null;
         const finalItem = qaResult.success ? await providers.backlog.get(request.backlogId) : null;
         const published = change && change.id && change.url && change.url === qaResult.mrUrl

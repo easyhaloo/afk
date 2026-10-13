@@ -34,7 +34,7 @@ export type RunEventData =
   | { kind: 'qa.started' }
   | { kind: 'implementation.completed' }
   | { kind: 'qa.passed' }
-  | { kind: 'qa.failed'; reason?: string }
+  | { kind: 'qa.failed'; reason?: string; summary?: string; failedCriteria?: Array<{ id: string; expected: string; actual: string }> }
   | { kind: 'change.published'; changeId: string; url: string }
   | { kind: 'decision.made'; command: string; accepted: boolean; reason?: string }
   | { kind: 'effect.started'; effectKind: string; idempotencyKey: string }

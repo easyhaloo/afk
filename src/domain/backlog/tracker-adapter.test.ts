@@ -317,7 +317,77 @@ describe('TrackerBacklogProvider', () => {
     expect(record).toMatchObject({ id: 'r1', attempt: 1, status: 'open' });
     expect(t.addComment).toHaveBeenCalledWith(42, expect.stringContaining('<!-- afk:rework:v1 id=r1 -->'));
     expect(t.updateIssueComment).toHaveBeenCalledWith(42, 'comment-1', expect.stringContaining('"status":"resolved"'));
+    await expect(provider.get('42')).resolves.toMatchObject({ state: 'verification', executionMode: 'afk' });
+  });
+
+  it('allows operator retry to supersede an open QA record and keeps operator duplicates blocked', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(issue) as any;
+    const comments: Array<{ id: string; body: string }> = [];
+    t.listIssueComments = vi.fn(async () => comments.map(comment => ({ ...comment })));
+    t.addComment = vi.fn(async (_id: number, body: string) => { comments.push({ id: `comment-${comments.length + 1}`, body }); });
+    t.updateIssueComment = vi.fn(async (_id: number, commentId: string, body: string) => {
+      const comment = comments.find(candidate => candidate.id === commentId);
+      if (comment) comment.body = body;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.createRework('42', { source: 'qa', summary: 'QA failure', failedCriteria: [], requiredChecks: [] });
+    const retry = await provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] });
+
+    expect(retry).toMatchObject({ id: 'r2', source: 'operator', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', source: 'operator' });
+    await expect(provider.createRework('42', { source: 'operator', summary: 'duplicate retry', failedCriteria: [], requiredChecks: [] }))
+      .rejects.toThrow('already has an open rework record');
+    expect(comments.map(comment => comment.body)).toEqual([
+      expect.stringContaining('"status":"superseded"'),
+      expect.stringContaining('"status":"open"'),
+    ]);
     await expect(provider.get('42')).resolves.toMatchObject({ state: 'rework', executionMode: 'afk' });
+  });
+
+  it('does not change the active record when writing a new rework fails', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(issue) as any;
+    const comments: Array<{ id: string; body: string }> = [];
+    t.listIssueComments = vi.fn(async () => comments.map(comment => ({ ...comment })));
+    t.addComment = vi.fn(async (_id: number, body: string) => { comments.push({ id: 'comment-1', body }); });
+    t.updateIssueComment = vi.fn(async (_id: number, commentId: string, body: string) => {
+      const comment = comments.find(candidate => candidate.id === commentId);
+      if (comment) comment.body = body;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+    await provider.createRework('42', { source: 'qa', summary: 'QA failure', failedCriteria: [], requiredChecks: [] });
+    t.addComment.mockRejectedValueOnce(new Error('tracker write failed'));
+
+    await expect(provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] }))
+      .rejects.toThrow('tracker write failed');
+    expect(t.updateIssueComment).not.toHaveBeenCalled();
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', source: 'qa' });
+  });
+
+  it('supersedes the new record when superseding the old record fails, allowing a later operator retry', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(issue) as any;
+    const comments: Array<{ id: string; body: string }> = [];
+    t.listIssueComments = vi.fn(async () => comments.map(comment => ({ ...comment })));
+    t.addComment = vi.fn(async (_id: number, body: string) => { comments.push({ id: `comment-${comments.length + 1}`, body }); });
+    t.updateIssueComment = vi.fn(async (_id: number, commentId: string, body: string) => {
+      if (commentId === 'comment-1' && t.updateIssueComment.mock.calls.length === 1) throw new Error('supersede failed');
+      const comment = comments.find(candidate => candidate.id === commentId);
+      if (comment) comment.body = body;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+    await provider.createRework('42', { source: 'qa', summary: 'QA failure', failedCriteria: [], requiredChecks: [] });
+
+    await expect(provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] }))
+      .rejects.toThrow('supersede failed');
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', source: 'qa' });
+    expect(comments[1].body).toContain('"status":"superseded"');
+
+    const retry = await provider.createRework('42', { source: 'operator', summary: 'manual retry again', failedCriteria: [], requiredChecks: [] });
+    expect(retry).toMatchObject({ id: 'r3', source: 'operator', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r3', source: 'operator' });
   });
 
   it('uses a filesystem lease to serialize tracker claims without native CAS', async () => {

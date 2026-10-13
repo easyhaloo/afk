@@ -167,7 +167,10 @@ export class TrackerBacklogProvider implements BacklogProvider {
   async createRework(id: string, input: NewReworkRecord): Promise<ReworkRecord> {
     const issueId = this.issueId(id);
     const comments = await this.tracker.listIssueComments(issueId);
-    if (latestOpenRework(comments)) throw new Error(`backlog ${id} already has an open rework record`);
+    const active = latestOpenRework(comments);
+    if (active?.record.source === 'operator' && input.source === 'operator') {
+      throw new Error(`backlog ${id} already has an open rework record`);
+    }
     const attempts = comments
       .map(parseReworkRecord)
       .filter((entry): entry is NonNullable<ReturnType<typeof parseReworkRecord>> => entry !== undefined)
@@ -182,9 +185,29 @@ export class TrackerBacklogProvider implements BacklogProvider {
       createdAt: new Date().toISOString(),
     };
     await this.tracker.addComment(issueId, renderReworkRecord(record));
-    await this.transition(id, 'rework');
-    await this.setExecutionMode(id, 'afk');
+    if (active) {
+      try {
+        await this.tracker.updateIssueComment(issueId, active.commentId, renderReworkRecord({ ...active.record, status: 'superseded' }));
+      } catch (error) {
+        await this.supersedeCreatedRework(issueId, record).catch(() => {});
+        throw error;
+      }
+    }
+    if (input.source === 'operator') {
+      await this.transition(id, 'rework');
+      await this.setExecutionMode(id, 'afk');
+    }
     return record;
+  }
+
+  private async supersedeCreatedRework(issueId: number, record: ReworkRecord): Promise<void> {
+    const comments = await this.tracker.listIssueComments(issueId);
+    const created = comments
+      .map(parseReworkRecord)
+      .find(entry => entry?.record.id === record.id && entry.record.status === 'open');
+    if (created) {
+      await this.tracker.updateIssueComment(issueId, created.commentId, renderReworkRecord({ ...record, status: 'superseded' }));
+    }
   }
 
   async getActiveRework(id: string): Promise<ReworkRecord | undefined> {

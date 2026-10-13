@@ -8,6 +8,7 @@ import { encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { RunObserver } from '../../observability/run-observer.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
+import { QARunner } from '../modules/qa-runner.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
@@ -271,12 +272,65 @@ describe('executeWorkItem', () => {
 
   it('returns non-success for QA rework or publication failure', async () => {
     const { deps, process } = await setup();
-    process.mockResolvedValueOnce({ success: false, rework: true } as any);
+    process.mockResolvedValueOnce({
+      success: false,
+      rework: true,
+      summary: 'The API response is missing the required field.',
+      failedCriteria: [{ id: 'api-response', expected: 'field is present', actual: 'field is missing' }],
+    } as any);
     expect((await executeWorkItem(input, deps)).status).toBe('rework');
     expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.failed', 'run.finished']);
+    expect(vi.mocked(deps.recordAudit!).mock.calls[1][1]).toMatchObject({
+      kind: 'qa.failed',
+      summary: 'The API response is missing the required field.',
+      failedCriteria: [{ id: 'api-response', expected: 'field is present', actual: 'field is missing' }],
+    });
     const { deps: nextDeps, process: nextProcess } = await setup();
     nextProcess.mockResolvedValueOnce({ success: false } as any);
     expect((await executeWorkItem({ ...input, executionId: 'attempt-2' }, nextDeps)).status).toBe('blocked');
+  });
+
+  it('stores diagnostic details on qa.failed for an exceptional QA result', async () => {
+    const { deps, process, directory } = await setup();
+    const store = new JsonlEventStore({ root: join(directory, 'events') });
+    const observer = new RunObserver({ events: store });
+    deps.recordAudit = (context, data) => observer.record(context, data);
+    process.mockResolvedValueOnce({ success: false, summary: 'QA execution failed: provider unavailable' } as any);
+
+    await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'blocked' });
+
+    const events = [];
+    for await (const event of store.read('attempt-1')) events.push(event);
+    expect(events.find(event => event.data.kind === 'qa.failed')?.data).toMatchObject({
+      kind: 'qa.failed',
+      reason: 'blocked',
+      summary: 'QA execution failed: provider unavailable',
+    });
+  });
+
+  it('persists qa.failed when the real QARunner throws and preserves the original provider error', async () => {
+    const { deps, get, directory } = await setup();
+    const store = new JsonlEventStore({ root: join(directory, 'events') });
+    const observer = new RunObserver({ events: store });
+    deps.recordAudit = (context, data) => observer.record(context, data);
+    const context = await deps.createContext!({} as any, input, {} as any);
+    const original = new Error('backlog read unavailable');
+    const transition = vi.fn(async () => { throw new Error('blocked write unavailable'); });
+    context.providers.backlog.transition = transition;
+    deps.createContext = vi.fn(async () => context);
+    deps.createQA = (providers, config) => {
+      get.mockRejectedValueOnce(original);
+      return new QARunner(providers, config);
+    };
+
+    await expect(executeWorkItem(input, deps)).rejects.toBe(original);
+
+    const events = [];
+    for await (const event of store.read('attempt-1')) events.push(event);
+    expect(events.map(event => event.data.kind)).toEqual(['qa.started', 'qa.failed', 'run.finished']);
+    expect(events[1].data).toMatchObject({ kind: 'qa.failed', reason: 'blocked', summary: 'QA execution failed: backlog read unavailable' });
+    expect(events[2].data).toMatchObject({ kind: 'run.finished', outcome: 'failed', reason: 'backlog read unavailable' });
+    expect(transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'QA execution failed: backlog read unavailable' });
   });
 
   it('requires provider confirmation and terminal provider state for success', async () => {

@@ -5,6 +5,16 @@ import type { RunObserver } from '../../observability/run-observer.js';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
+// Re-export findCodexRollout for mocking — imported from agent-telemetry.ts
+// so tests can spy on the module.
+vi.mock('../../infrastructure/observability/agent-telemetry.js', async () => {
+  const actual = await vi.importActual('../../infrastructure/observability/agent-telemetry.js');
+  return {
+    ...actual as object,
+    findCodexRollout: vi.fn(actual!.findCodexRollout),
+  };
+});
+
 /**
  * Tests for agent.session_recorded wiring in WorkflowRunner.
  *
@@ -137,6 +147,53 @@ describe('agent.session_recorded wiring', () => {
     expect(data.kind).toBe('agent.session_recorded');
     expect(data.usage?.inputTokens).toBe(1015); // 1000 + 10 + 5
     expect(data.usage?.outputTokens).toBe(50);
+  });
+
+  it('reaches codex branch when telemetryPath is absent but threadId is present', async () => {
+    // The exec transport has no sessionId, so telemetryPath is undefined.
+    // With threadId present in metadata, findCodexRollout must still be called.
+    const findCodexRollout = await import('../../infrastructure/observability/agent-telemetry.js').then(m => m.findCodexRollout);
+    vi.mocked(findCodexRollout).mockResolvedValueOnce('/fake/rollout.jsonl');
+
+    const record = vi.fn(async () => ({ lastSequence: 1 }));
+    const observer = { record } as unknown as RunObserver;
+    const claim = vi.fn(async () => null);
+
+    const runner = new WorkflowRunner(
+      { backlog: { claim } } as unknown as ProviderBundle,
+      {
+        observer,
+        agentProvider: { name: 'codex', capabilities: new Set() } as never,
+      },
+    );
+
+    Object.defineProperty(runner, 'observationContext', { value: mockContext(), writable: true, configurable: true });
+    Object.defineProperty(runner, 'sandboxProviderName', { value: 'local', writable: true, configurable: true });
+    Object.defineProperty(runner, 'agentProviderName', { value: 'codex', writable: true, configurable: true });
+
+    // telemetryPath is undefined (exec transport has no sessionId)
+    // but threadId is present in metadata
+    const execution = {
+      id: 'exec-codex',
+      sessionId: 'codex-session',
+      metadata: { provider: 'codex', transport: 'exec' as const, threadId: 'thread-abc123' },
+      // telemetryPath deliberately absent — simulates exec transport
+    } as any;
+
+    const result = {
+      version: 1 as const,
+      runId: 'exec-codex',
+      status: 'completed' as const,
+      provider: 'local',
+      sessionId: 'codex-session',
+      usage: undefined,
+      commits: [] as string[],
+    };
+
+    await (runner as any).recordAgentTelemetry(execution, result);
+
+    expect(findCodexRollout).toHaveBeenCalledTimes(1);
+    expect(findCodexRollout).toHaveBeenCalledWith('thread-abc123');
   });
 
   it('returns early for container sandbox without emitting any event', async () => {

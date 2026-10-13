@@ -1330,17 +1330,22 @@ export class WorkflowRunner {
     //   - codex batch: turn.completed not mapped to usage event
     let usage = result.usage;
     if (!usage) {
-      const transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
-      if (transcriptPath) {
-        if (this.agentProviderName === 'codex') {
-          const threadId = execution.metadata.threadId;
-          if (threadId) {
-            const rolloutPath = await findCodexRollout(threadId);
-            if (rolloutPath) {
-              usage = await readAgentTelemetry({ provider: 'codex', transcriptPath: rolloutPath, sandboxKind: 'local' });
-            }
+      if (this.agentProviderName === 'codex') {
+        // Codex batch (exec transport) has no sessionId so telemetryPath is
+        // undefined, but threadId is captured at runtime and findCodexRollout
+        // searches ~/.codex/sessions/ directly — no transcript path needed.
+        const threadId = execution.metadata.threadId;
+        if (threadId) {
+          const rolloutPath = await findCodexRollout(threadId);
+          if (rolloutPath) {
+            usage = await readAgentTelemetry({ provider: 'codex', transcriptPath: rolloutPath, sandboxKind: 'local' });
           }
-        } else {
+        }
+      } else {
+        // Claude interactive/tmux: SessionEnd hook hands us the absolute path
+        // directly, so telemetryPath is populated and we can read it.
+        const transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
+        if (transcriptPath) {
           usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' });
         }
       }

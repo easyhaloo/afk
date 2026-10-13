@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { StreamingAgentExecution } from './streaming.js';
 import { CodexProvider } from '../../../domain/agents/codex.js';
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
 function command(script: string) {
@@ -260,7 +260,9 @@ describe('StreamingAgentExecution', () => {
         metadata: PROCESS_METADATA,
       });
 
-      const realSlug = '-' + worktreePath.split('/').filter(Boolean).join('-');
+      // The temp dir lives under /tmp, which is a symlink to /private/tmp on
+      // macOS. Ask the filesystem where it really is rather than assuming.
+      const realSlug = realpathSync(worktreePath).replace(/\//g, '-');
       const projectDir = join(tmp, '.claude', 'projects', realSlug);
       mkdirSync(projectDir, { recursive: true });
       const transcriptPath = join(projectDir, `${sessionId}.jsonl`);

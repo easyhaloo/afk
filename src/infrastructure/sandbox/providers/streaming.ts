@@ -16,6 +16,7 @@
 
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
+import { realpathSync } from 'fs';
 import type {
   AgentCommand,
   AgentEvent,
@@ -387,9 +388,22 @@ export class StreamingAgentExecution implements AgentExecution {
    * Returns undefined if sessionId is not set.
    */
   get telemetryPath(): string | undefined {
-    if (!this.sessionId) return undefined;
-    const slug = this.worktreePath.replace(/\//g, '-');
-    return `${process.env.HOME ?? ''}/.claude/projects/${slug}/${this.sessionId}.jsonl`;
+    // Prefer the id the harness assigned at runtime. The constructor sessionId is
+    // AFK's own — Claude Code writes the transcript under its own session_id, so
+    // using ours yields a path that never exists.
+    const harnessSessionId = this._mutableMetadata.threadId ?? this.sessionId;
+    if (!harnessSessionId) return undefined;
+    // Resolve symlinks first: the harness derives its project directory from the
+    // real path. On macOS /tmp resolves to /private/tmp, so an unresolved path
+    // yields `-tmp` where the transcript actually lives in `-private-tmp`.
+    let base = this.worktreePath;
+    try {
+      base = realpathSync(this.worktreePath);
+    } catch {
+      // Path may not exist yet; fall back to what we were given.
+    }
+    const slug = base.replace(/\//g, '-');
+    return `${process.env.HOME ?? ''}/.claude/projects/${slug}/${harnessSessionId}.jsonl`;
   }
 
   private drainStdoutLines(): void {

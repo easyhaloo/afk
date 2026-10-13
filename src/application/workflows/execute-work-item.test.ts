@@ -250,6 +250,17 @@ describe('executeWorkItem', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
+  it('names the labels needed to adopt a manually created issue', async () => {
+    // `afk loop --work-item-id` cannot take over an issue the user filed by
+    // hand, because `managed` and `executionEligible` are derived from labels.
+    // The bare string "unmanaged work item" gives the operator no way forward.
+    const { deps, run } = await setup({ managed: false });
+    const message = await executeWorkItem(input, deps).then(() => '', (err: Error) => err.message);
+    expect(message).toMatch(/stage::ready-for-issues/);
+    expect(message).toMatch(/mode::afk/);
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('does not run QA on implementation failure or lost claim', async () => {
     const { deps, run, process } = await setup();
     run.mockResolvedValueOnce({ success: false } as any).mockResolvedValueOnce({ success: false, skipped: 'not_claimed' } as any);

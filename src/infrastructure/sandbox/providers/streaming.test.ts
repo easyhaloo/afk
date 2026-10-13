@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { StreamingAgentExecution } from './streaming.js';
 import { CodexProvider } from '../../../domain/agents/codex.js';
+import { mkdirSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 
 function command(script: string) {
   return { argv: [process.execPath, '-e', script], cwd: process.cwd() };
@@ -34,9 +36,32 @@ describe('StreamingAgentExecution', () => {
     await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'codex fixture complete' },
-      usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
+      usage: { inputTokens: 14, outputTokens: 5, totalTokens: 19 },
     });
     expect(execution.metadata).toEqual({ provider: 'codex', transport: 'exec' });
+  });
+
+  it('captures thread_id from thread.started and surfaces it in metadata', async () => {
+    const threadStarted = JSON.stringify({ type: 'thread.started', thread_id: '01a13312-d9c5-7033-8230-20484caff784' });
+    const result = JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'agent_message',
+        text: '<goal_complete>{"type":"goal_complete","summary":"done"}</goal_complete>',
+      },
+    });
+    const execution = new StreamingAgentExecution({
+      command: command(`console.log(${JSON.stringify(threadStarted)}); console.log(${JSON.stringify(result)})`),
+      prompt: 'go',
+      signalType: 'goal_complete',
+      worktreePath: process.cwd(),
+      metadata: { provider: 'codex', transport: 'exec' },
+      parseLine: new CodexProvider().parseLine.bind(new CodexProvider()),
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({ status: 'completed' });
+    expect(execution.metadata.threadId).toBe('01a13312-d9c5-7033-8230-20484caff784');
   });
 
   it('buffers JSONL records split across stdout chunks', async () => {
@@ -202,5 +227,70 @@ describe('StreamingAgentExecution', () => {
     await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({ status: 'completed' });
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(() => process.kill(childPid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+  });
+
+  describe('telemetryPath getter', () => {
+    let tmp: string;
+    const origHome = process.env.HOME;
+
+    beforeEach(() => {
+      tmp = '/tmp/afk-slug-test-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      mkdirSync(tmp, { recursive: true });
+      process.env.HOME = tmp;
+    });
+
+    afterEach(() => {
+      try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+      process.env.HOME = origHome;
+    });
+
+    it('resolves to a real transcript file by deriving the correct slug', async () => {
+      // Real Claude Code slug convention: leading '-' then each '/' -> '-'
+      // e.g. /Users/shenggangshu/llm/afk -> -Users-shenggangshu-llm-afk
+      const worktreePath = join(tmp, 'project', 'repo');
+      mkdirSync(worktreePath, { recursive: true });
+      const sessionId = 'c0ffee11-2222-3333-4444-555566667777';
+
+      const execution = new StreamingAgentExecution({
+        command: command(`console.log('ok')`),
+        prompt: 'go',
+        signalType: 'goal_complete',
+        worktreePath,
+        sessionId,
+        metadata: PROCESS_METADATA,
+      });
+
+      // The temp dir lives under /tmp, which is a symlink to /private/tmp on
+      // macOS. Ask the filesystem where it really is rather than assuming.
+      const realSlug = realpathSync(worktreePath).replace(/\//g, '-');
+      const projectDir = join(tmp, '.claude', 'projects', realSlug);
+      mkdirSync(projectDir, { recursive: true });
+      const transcriptPath = join(projectDir, `${sessionId}.jsonl`);
+      writeFileSync(transcriptPath, '{"type":"cost-state","totalCostUSD":1,"modelUsage":{"m":{"inputTokens":100,"outputTokens":50,"thinkingTokens":0,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}\n');
+
+      expect(execution.telemetryPath).toBe(transcriptPath);
+      expect(existsSync(execution.telemetryPath!)).toBe(true);
+    });
+
+    it('maps a real project path to the slug Claude Code actually uses', () => {
+      // Literal expectation, verified against real directories on disk:
+      //   ls ~/.claude/projects/  ->  -Users-shenggangshu-llm-afk
+      // A directory named '--Users-shenggangshu-llm-afk' does NOT exist, so a
+      // doubled leading hyphen is a bug, not an equivalent spelling. Deriving the
+      // expectation from the implementation's own expression cannot catch that.
+      const sessionId = 'c0ffee11-2222-3333-4444-555566667777';
+      const execution = new StreamingAgentExecution({
+        command: command(`console.log('ok')`),
+        prompt: 'go',
+        signalType: 'goal_complete',
+        worktreePath: '/Users/shenggangshu/llm/afk',
+        sessionId,
+        metadata: PROCESS_METADATA,
+      });
+
+      expect(execution.telemetryPath).toBe(
+        `${process.env.HOME}/.claude/projects/-Users-shenggangshu-llm-afk/${sessionId}.jsonl`,
+      );
+    });
   });
 });

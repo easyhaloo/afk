@@ -373,6 +373,17 @@ export class LocalAgentExecution implements AgentExecution {
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+
+  /**
+   * Path to the Claude Code transcript for this session.
+   * Returns undefined if the session has no sessionId or the transcript
+   * does not exist (caller decides whether to read it).
+   */
+  get telemetryPath(): string | undefined {
+    if (!this.sessionId) return undefined;
+    const slug = this.worktreePath.replace(/\//g, '-');
+    return join(process.env.HOME ?? '', '.claude', 'projects', slug, `${this.sessionId}.jsonl`);
+  }
 }
 
 /**

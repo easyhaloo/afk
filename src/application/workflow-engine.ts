@@ -53,6 +53,7 @@ import {
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
+import { readAgentTelemetry, findCodexRollout } from '../infrastructure/observability/agent-telemetry.js';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -1087,6 +1088,12 @@ export class WorkflowRunner {
       });
       await this.writeRuntimeDiagnostics(result, execution);
 
+      // Emit agent.session_recorded with token usage from the harness transcript.
+      // For local batch: read the transcript at telemetryPath.
+      // For local interactive: same (tmux session = sessionId, transcript is written).
+      // For container: HOME not forwarded — telemetry not collected (returns undefined).
+      await this.recordAgentTelemetry(execution, result);
+
       switch (result.status) {
         case 'completed':
           return { completed: true, output: result.structuredOutput };
@@ -1301,6 +1308,58 @@ export class WorkflowRunner {
     } catch (error) {
       logger.error({ runId: this.observationContext.runId, eventType: data.kind, err: error }, 'failed to persist run audit event');
       throw new AuditPersistenceError(data.kind, error);
+    }
+  }
+
+  /**
+   * Read harness telemetry and emit agent.session_recorded.
+   *
+   * For local sandbox: reads the transcript at telemetryPath (batch or interactive).
+   * For container sandbox: returns undefined (HOME not forwarded, dirs not mounted).
+   * If transcript cannot be read or parsed, emits with usage: undefined — this
+   * distinguishes "not collected" from "zero tokens".
+   */
+  private async recordAgentTelemetry(execution: AgentExecution, result: ExecutionResult): Promise<void> {
+    const sandboxKind: 'local' | 'container' =
+      this.sandboxProviderName === 'docker' || this.sandboxProviderName === 'podman' ? 'container' : 'local';
+    if (sandboxKind === 'container') return;
+
+    // Prefer result.usage (already normalized from stream in AC1).
+    // Fall back to transcript file when result.usage is absent:
+    //   - interactive/tmux: no stdout stream
+    //   - codex batch: turn.completed not mapped to usage event
+    let usage = result.usage;
+    if (!usage) {
+      if (this.agentProviderName === 'codex') {
+        // Codex batch (exec transport) has no sessionId so telemetryPath is
+        // undefined, but threadId is captured at runtime and findCodexRollout
+        // searches ~/.codex/sessions/ directly — no transcript path needed.
+        const threadId = execution.metadata.threadId;
+        if (threadId) {
+          const rolloutPath = await findCodexRollout(threadId);
+          if (rolloutPath) {
+            usage = await readAgentTelemetry({ provider: 'codex', transcriptPath: rolloutPath, sandboxKind: 'local' });
+          }
+        }
+      } else {
+        // Claude interactive/tmux: SessionEnd hook hands us the absolute path
+        // directly, so telemetryPath is populated and we can read it.
+        const transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
+        if (transcriptPath) {
+          usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' });
+        }
+      }
+    }
+
+    if (!this.observationContext) return;
+    try {
+      await this.observer.record(this.observationContext, {
+        kind: 'agent.session_recorded',
+        sessionId: result.sessionId ?? execution.id,
+        usage,
+      });
+    } catch (err) {
+      logger.info({ runId: this.observationContext.runId, err }, 'agent.session_recorded: telemetry not persisted (non-fatal)');
     }
   }
 

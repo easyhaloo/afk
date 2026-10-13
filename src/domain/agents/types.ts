@@ -101,8 +101,6 @@ export interface AgentExecutionOptions extends AgentCommandOptions {
 /** An event emitted by the agent during execution. */
 export type AgentEvent =
   | { type: 'text'; text: string }
-  | { type: 'tool-start'; name: string }
-  | { type: 'tool-end'; name: string }
   | { type: 'session'; sessionId: string }
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'result'; result: unknown }

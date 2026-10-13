@@ -74,9 +74,15 @@ export class CodexProvider extends ProcessAgentProvider {
       }
     }
 
+    if (event.type === 'thread.started' && typeof event.thread_id === 'string') {
+      return [{ type: 'session', sessionId: event.thread_id }];
+    }
+
     if (event.type === 'turn.completed' && isRecord(event.usage)) {
-      const inputTokens = numberValue(event.usage.input_tokens);
-      const outputTokens = numberValue(event.usage.output_tokens);
+      const num = (value: unknown) => numberValue(value);
+      // Cache tokens count as input; reasoning_output_tokens is already in output_tokens.
+      const inputTokens = num(event.usage['input_tokens']) + num(event.usage['cached_input_tokens']) + num(event.usage['cache_write_input_tokens']);
+      const outputTokens = num(event.usage['output_tokens']);
       return [{
         type: 'usage',
         usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },

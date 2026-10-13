@@ -16,6 +16,7 @@
 
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
+import { realpathSync } from 'fs';
 import type {
   AgentCommand,
   AgentEvent,
@@ -43,6 +44,8 @@ export class StreamingAgentExecution implements AgentExecution {
   private readonly signalType: 'goal_complete';
   private readonly worktreePath: string;
   private readonly parseLine?: (line: string) => AgentEvent[];
+  /** Mutable metadata so providers can update fields (e.g. threadId) after start. */
+  private _mutableMetadata: AgentExecutionMetadata;
 
   private proc: ChildProcess | null = null;
   private done = false;
@@ -67,7 +70,8 @@ export class StreamingAgentExecution implements AgentExecution {
   }) {
     this.id = randomUUID();
     this.sessionId = opts.sessionId;
-    this.metadata = opts.metadata;
+    this._mutableMetadata = opts.metadata;
+    this.metadata = this._mutableMetadata;
     this.command = opts.command;
     this.prompt = opts.prompt;
     this.signalType = opts.signalType;
@@ -176,6 +180,10 @@ export class StreamingAgentExecution implements AgentExecution {
           case 'text':
             // progress text — ignored
             break;
+          case 'session':
+            // Providers (e.g. Codex) emit the runtime thread/session id once discovered.
+            if (event.sessionId) this._mutableMetadata.threadId = event.sessionId;
+            break;
           default:
             break;
         }
@@ -210,6 +218,9 @@ export class StreamingAgentExecution implements AgentExecution {
           code: String(parsed.code ?? 'UNKNOWN'),
           message: String(parsed.message ?? parsed.error ?? 'Unknown error'),
         };
+        break;
+      case 'session':
+        if (parsed.sessionId) this._mutableMetadata.threadId = String(parsed.sessionId);
         break;
       default:
         break;
@@ -368,6 +379,31 @@ export class StreamingAgentExecution implements AgentExecution {
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Path to the Claude Code transcript for this session.
+   * batch mode uses the same session lifecycle as interactive (tmux sessionName
+   * is the sessionId), so the transcript path formula is identical.
+   * Returns undefined if sessionId is not set.
+   */
+  get telemetryPath(): string | undefined {
+    // Prefer the id the harness assigned at runtime. The constructor sessionId is
+    // AFK's own — Claude Code writes the transcript under its own session_id, so
+    // using ours yields a path that never exists.
+    const harnessSessionId = this._mutableMetadata.threadId ?? this.sessionId;
+    if (!harnessSessionId) return undefined;
+    // Resolve symlinks first: the harness derives its project directory from the
+    // real path. On macOS /tmp resolves to /private/tmp, so an unresolved path
+    // yields `-tmp` where the transcript actually lives in `-private-tmp`.
+    let base = this.worktreePath;
+    try {
+      base = realpathSync(this.worktreePath);
+    } catch {
+      // Path may not exist yet; fall back to what we were given.
+    }
+    const slug = base.replace(/\//g, '-');
+    return `${process.env.HOME ?? ''}/.claude/projects/${slug}/${harnessSessionId}.jsonl`;
   }
 
   private drainStdoutLines(): void {

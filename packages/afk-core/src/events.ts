@@ -44,7 +44,8 @@ export type RunEventData =
   | { kind: 'human_gate.opened'; gateId: string; reason: string }
   | { kind: 'human_gate.approved'; gateId: string; approverId: string }
   | { kind: 'run.finished'; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'>; reason?: string }
-  | { kind: 'failure.classified'; failureClass: string; summary: string };
+  | { kind: 'failure.classified'; failureClass: string; summary: string }
+  | { kind: 'agent.session_recorded'; sessionId: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number } };
 
 export type RunEventType = RunEventData['kind'];
 

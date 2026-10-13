@@ -12,6 +12,7 @@ import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/in
 import { createProviderBundle, type ProviderBundle, type ManagementProviderBundle } from '../../infrastructure/provider/providers.js';
 import { ManagementBacklogProvider } from '../../domain/backlog/management-provider.js';
 import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
+import { BACKLOG_METADATA } from '../../domain/backlog/initialization.js';
 import type { GlobalWorkItem } from '../../domain/work-item/types.js';
 import { prepareAgentRuntime } from '../../domain/agents/index.js';
 import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';
@@ -232,7 +233,13 @@ function validateItem(item: BacklogItem, inventoryItem: GlobalWorkItem, manifest
     || manifest.tracker.projectKey !== identity.projectKey) {
     throw new Error(`work item identity does not match provider and execution manifest: ${workItemId}`);
   }
-  if (!inventoryItem.managed || item.managed === false) throw new Error(`unmanaged work item: ${workItemId}`);
+  if (!inventoryItem.managed || item.managed === false) {
+    throw new Error(
+      `unmanaged work item: ${workItemId} — AFK only executes issues it manages. ` +
+      `Add the labels '${BACKLOG_METADATA.stateLabels.ready}' and '${BACKLOG_METADATA.executionModeLabels.afk}' ` +
+      `to adopt it (labels are created by \`afk backlog init\`), or create it through the backlog so they are applied automatically.`,
+    );
+  }
   if (!inventoryItem.executionEligible || item.executionEligible === false) throw new Error(`ineligible work item: ${workItemId}`);
   if (item.executionMode !== 'afk' || inventoryItem.executionMode !== 'afk') throw new Error(`work item ${workItemId} is hitl`);
   if ((item.state !== 'ready' && item.state !== 'rework') || item.state !== inventoryItem.state) throw new Error(`work item ${workItemId} must be ready or rework`);

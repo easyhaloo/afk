@@ -247,7 +247,7 @@ describe('Agent providers — fixture coverage', () => {
         usage: { input_tokens: 10, cached_input_tokens: 3, output_tokens: 4 },
       }))).toContainEqual({
         type: 'usage',
-        usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 },
+        usage: { inputTokens: 13, outputTokens: 4, totalTokens: 17 },
       });
 
       const [event] = p.parseLine(JSON.stringify({ type: 'error', message: 'request failed' }));
@@ -261,7 +261,7 @@ describe('Agent providers — fixture coverage', () => {
       const events = p.parseLine('hello');
       expect(events[0].type).toBe('text');
       expect(p.parseLine(JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }))).toEqual([
-        { type: 'text', text: expect.stringContaining('thread.started') },
+        { type: 'session', sessionId: 'thread-1' },
       ]);
     });
   });

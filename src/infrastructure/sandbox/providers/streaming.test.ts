@@ -34,9 +34,32 @@ describe('StreamingAgentExecution', () => {
     await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'codex fixture complete' },
-      usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
+      usage: { inputTokens: 14, outputTokens: 5, totalTokens: 19 },
     });
     expect(execution.metadata).toEqual({ provider: 'codex', transport: 'exec' });
+  });
+
+  it('captures thread_id from thread.started and surfaces it in metadata', async () => {
+    const threadStarted = JSON.stringify({ type: 'thread.started', thread_id: '01a13312-d9c5-7033-8230-20484caff784' });
+    const result = JSON.stringify({
+      type: 'item.completed',
+      item: {
+        type: 'agent_message',
+        text: '<goal_complete>{"type":"goal_complete","summary":"done"}</goal_complete>',
+      },
+    });
+    const execution = new StreamingAgentExecution({
+      command: command(`console.log(${JSON.stringify(threadStarted)}); console.log(${JSON.stringify(result)})`),
+      prompt: 'go',
+      signalType: 'goal_complete',
+      worktreePath: process.cwd(),
+      metadata: { provider: 'codex', transport: 'exec' },
+      parseLine: new CodexProvider().parseLine.bind(new CodexProvider()),
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({ status: 'completed' });
+    expect(execution.metadata.threadId).toBe('01a13312-d9c5-7033-8230-20484caff784');
   });
 
   it('buffers JSONL records split across stdout chunks', async () => {

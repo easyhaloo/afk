@@ -7,6 +7,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, "../src");
 const tokens = readFileSync(path.join(src, "tokens.css"), "utf8");
 
+// 293 as of the reskin: control.css 167, replay.css 80, ssh.css 35,
+
+// Hardcoded colours outside tokens.css: 293 as of the reskin — control.css 167,
+// replay.css 80, ssh.css 35, ssh-terminal.css 8, layout.css 3. None of them
+// fail contrast today; this only stops the number growing.
+const MAX_CSS_HEXES = 293;
+
 const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })
   .filter(name => name.endsWith(".css"))
   .map(name => readFileSync(path.join(src, name), "utf8"))
@@ -68,6 +75,30 @@ describe("design tokens", () => {
     expect(tokens).toContain("--afk-subtle: var(--paper-3);");
     expect(tokens).toContain("--afk-mono: var(--font-mono);");
     expect(tokens).toContain("--font-mono:");
+  });
+
+  it("keeps hardcoded colours ratcheted down", () => {
+    // The contrast spec only measures rendered text, so a hardcoded background
+    // or border that no text sits on is invisible to it — a view added later,
+    // or one cascade change away, can expose it. This bounds the total so the
+    // number can only fall.
+    //
+    // tokens.css is excluded: its hexes ARE the palette definitions.
+    const residue = readdirSync(src, { recursive: true, encoding: "utf8" })
+      .filter((name) => name.endsWith(".css") && name !== "tokens.css")
+      .map((name) => {
+        const body = readFileSync(path.join(src, name), "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          // var(--x, #abc) fallbacks are inert; --x is always defined.
+          .replace(/var\([^)]*,[^)]*#[0-9a-fA-F]{3,8}[^)]*\)/g, "");
+        return Array.from(body.matchAll(/#[0-9a-fA-F]{3,8}\b/g)).length;
+      })
+      .reduce((a, b) => a + b, 0);
+
+    expect(
+      residue,
+      `${residue} hardcoded colours outside tokens.css (limit ${MAX_CSS_HEXES})`,
+    ).toBeLessThanOrEqual(MAX_CSS_HEXES);
   });
 
   it("has no leftover graphite or per-accent theming", () => {

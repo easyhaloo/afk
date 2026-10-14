@@ -79,7 +79,7 @@
   border: 1px solid #dedee8;
   border-radius: 10px;
   background: #fff;
-  box-shadow: 0 14px 34px rgba(30, 30, 43, .13);
+  box-shadow: var(--shadow-panel);
 }
 
 .record-run-options button {
@@ -130,7 +130,7 @@
   border: 1px solid #e7e7ec;
   border-radius: 14px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(30, 29, 45, .025);
+  box-shadow: var(--shadow-panel-sm);
 }
 
 .record-card-main {
@@ -197,7 +197,7 @@
   border: 1px solid #e7e7ec;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 1px 2px rgba(30, 29, 45, .025);
+  box-shadow: var(--shadow-panel-sm);
 }
 
 .record-list-item {
@@ -238,7 +238,7 @@
   overflow: auto;
   border-left: 1px solid #e5e5eb;
   background: #fff;
-  box-shadow: -14px 0 30px rgba(33, 33, 45, .10);
+  box-shadow: -14px 0 0 var(--ink-shadow);
   animation: record-drawer-in 220ms cubic-bezier(.23, 1, .32, 1) both;
 }
 
@@ -307,7 +307,7 @@
   border: 1px solid #e5e3ef;
   border-radius: 14px;
   background: #fff;
-  box-shadow: 0 14px 34px rgba(39, 35, 61, .12);
+  box-shadow: var(--shadow-panel);
 }
 
 .inspector > header { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; border-bottom: 1px solid #ecebf1; color: #74757f; font-family: "DM Mono", monospace; font-size: 9px; }

@@ -30,6 +30,10 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
   flex: 1 1 auto;
   min-height: 0;
   margin: 10px 12px 12px;
+  /* Hard offset shadows are drawn outside the card, and this is a scroll
+     container — without this the 4px shadow on the last row/column is simply
+     clipped at the scroll edge. Silent: nothing errors, it just looks flat. */
+  padding: 0 6px 6px 0;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -56,7 +60,7 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
   left: 28px;
   z-index: 30;
   margin: 0;
-  box-shadow: 0 10px 26px rgba(111,42,42,.1);
+  box-shadow: var(--shadow-panel);
 }
 
 .board {
@@ -79,7 +83,7 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
 .table-panel,
 .board-column,
 .replay-minimal {
-  box-shadow: 0 1px 2px rgba(30,29,45,.02);
+  box-shadow: var(--shadow-panel-sm);
 }
 
 .board-card,

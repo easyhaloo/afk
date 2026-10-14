@@ -908,7 +908,7 @@ input:focus-visible {
   border-radius: 14px;
   background: var(--afk-panel);
   color: var(--afk-text);
-  box-shadow: 0 16px 46px rgba(17, 17, 27, 0.25);
+  box-shadow: var(--shadow-panel);
 }
 
 .terminal-sheet header {

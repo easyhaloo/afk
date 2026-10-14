@@ -14,6 +14,42 @@ const tokens = readFileSync(path.join(src, "tokens.css"), "utf8");
 // fail contrast today; this only stops the number growing.
 const MAX_CSS_HEXES = 293;
 
+// The retro signature is a hard offset shadow (--shadow-*), never a blurred
+// one. Rings (`0 0 0 Npx`, `inset 0 0 0 …`) are borders expressed as shadows
+// and are deliberately NOT counted.
+const NUM = String.raw`-?\d+(?:\.\d+)?(?:px)?`;
+const BLURRED_LAYER = new RegExp(
+  String.raw`^${NUM}\s+${NUM}\s+(\d+(?:\.\d+)?(?:px)?)\s+(rgba\(|color-mix\()`,
+);
+
+/** Split a comma-separated box-shadow value; commas inside functions are not separators. */
+function layers(value: string): string[] {
+  const out: string[] = [];
+  let depth = 0, current = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) { out.push(current.trim()); current = ""; continue; }
+    current += ch;
+  }
+  out.push(current.trim());
+  return out.filter(Boolean);
+}
+
+/** Every blurred drop shadow in the stylesheets, as `file offset: declaration`. */
+function blurredShadows(): string[] {
+  return readdirSync(src, { recursive: true, encoding: "utf8" })
+    .filter(name => name.endsWith(".css"))
+    .flatMap(name => readFileSync(path.join(src, name), "utf8")
+      // Blank comments out but keep the newlines, so reported line numbers
+      // still point at the real declaration.
+      .replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, " "))
+      .split("\n")
+      .flatMap((line, i) => layers((line.match(/box-shadow:\s*([^;]*)/)?.[1]) ?? "")
+        .filter(layer => BLURRED_LAYER.test(layer))
+        .map(layer => `${name}:${i + 1}: ${layer}`)));
+}
+
 const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })
   .filter(name => name.endsWith(".css"))
   .map(name => readFileSync(path.join(src, name), "utf8"))
@@ -99,6 +135,13 @@ describe("design tokens", () => {
       residue,
       `${residue} hardcoded colours outside tokens.css (limit ${MAX_CSS_HEXES})`,
     ).toBeLessThanOrEqual(MAX_CSS_HEXES);
+  });
+
+  it("has no blurred drop shadows left", () => {
+    expect(
+      blurredShadows(),
+      "blurred drop shadows are pre-reskin; use --shadow-btn/-panel/-panel-sm",
+    ).toEqual([]);
   });
 
   it("has no leftover graphite or per-accent theming", () => {

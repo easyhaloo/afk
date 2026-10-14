@@ -49,7 +49,7 @@
 .work-item-count { color: var(--backlog-muted); background: var(--backlog-surface-soft); }
 
 .work-item-detail-layer { position: fixed; z-index: 40; inset: 0; display: flex; justify-content: flex-end; background: rgba(45, 51, 46, .28); backdrop-filter: blur(2px); }
-.work-item-detail { position: static; display: flex; width: min(620px, 100vw); height: 100%; box-sizing: border-box; flex-direction: column; padding: 0; overflow: hidden; border: 0; border-left: 1px solid var(--backlog-border); background: var(--backlog-surface); box-shadow: -18px 0 42px rgba(46, 51, 47, .15); }
+.work-item-detail { position: static; display: flex; width: min(620px, 100vw); height: 100%; box-sizing: border-box; flex-direction: column; padding: 0; overflow: hidden; border: 0; border-left: 1px solid var(--backlog-border); background: var(--backlog-surface); box-shadow: -18px 0 0 var(--ink-shadow); }
 .work-item-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 24px 26px 18px; }
 .work-item-detail-header > div { display: grid; min-width: 0; gap: 4px; }
 .work-item-detail-header small { color: var(--backlog-accent); font-family: var(--font-mono, monospace); font-size: 11px; }
@@ -126,7 +126,7 @@ button.work-item-reference-card:disabled { opacity: 1; cursor: default; }
 .work-item-secondary-action:disabled { opacity: .5; cursor: not-allowed; }
 
 .work-item-run-modal-layer { position: fixed; z-index: 55; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(45, 51, 46, .36); backdrop-filter: blur(3px); }
-.work-item-run-modal { display: flex; width: min(620px, calc(100vw - 36px)); max-height: calc(100vh - 36px); flex-direction: column; overflow: hidden; border: 1px solid var(--backlog-border); border-radius: 13px; background: var(--backlog-surface); box-shadow: 0 24px 64px rgba(34, 39, 35, .22); }
+.work-item-run-modal { display: flex; width: min(620px, calc(100vw - 36px)); max-height: calc(100vh - 36px); flex-direction: column; overflow: hidden; border: 1px solid var(--backlog-border); border-radius: 13px; background: var(--backlog-surface); box-shadow: var(--shadow-panel); }
 .work-item-run-modal > header,
 .work-item-run-modal > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 19px; }
 .work-item-run-modal > header { border-bottom: 1px solid var(--backlog-border); }

@@ -31,7 +31,7 @@
   background: var(--afk-panel);
   color: var(--afk-text);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+  box-shadow: var(--shadow-panel-sm);
 }
 .selection-segments button span { min-width: 18px; padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, var(--afk-muted) 8%, transparent); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); font-variant-numeric: tabular-nums; }
 .selection-segments button.selected span { background: color-mix(in srgb, var(--afk-accent) 10%, transparent); color: var(--afk-accent); }
@@ -72,7 +72,7 @@
   border: 1px solid var(--afk-border);
   border-radius: 10px;
   background: var(--afk-panel);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, .04), 0 16px 40px rgba(0, 0, 0, .12);
+  box-shadow: var(--shadow-panel);
 }
 .selection-filter-panel::before { content: "筛选条件"; margin-bottom: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--afk-border); color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); font-weight: 600; }
 .selection-filter-panel[hidden] { display: none; }

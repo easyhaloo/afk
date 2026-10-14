@@ -93,6 +93,7 @@ export class LoopRunner {
   private running = false;
   private stopping = false;
   private stopResolve: (() => void) | null = null;
+  private stopPromise?: Promise<void>;
 
   // Timers
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -127,7 +128,7 @@ export class LoopRunner {
    * Resolves when the loop exits (--max-iterations reached or stop() called).
    */
   async start(): Promise<void> {
-    if (this.running) {
+    if (this.running || this.stopPromise) {
       throw new Error('LoopRunner already started');
     }
     this.infrastructureError = undefined;
@@ -138,6 +139,7 @@ export class LoopRunner {
       logger.error({ error: this.infrastructureError }, 'loop startup precondition failed');
       throw error;
     }
+    if (this.stopping) return;
     this.running = true;
     this.startTime = Date.now();
     this.writePidFile();
@@ -180,16 +182,23 @@ export class LoopRunner {
    * Stop the loop: flip running=false, clear timers, drain in-flight up to
    * shutdownTimeoutMs, then resolve.
    */
-  async stop(): Promise<void> {
-    if (!this.running || this.stopping) return;
+  stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.stopPromise = this.drain();
+    return this.stopPromise;
+  }
+
+  private async drain(): Promise<void> {
+    if (!this.running) return;
     this.running = false;
     this.emitEvent('stopping: clearing timers and draining...');
 
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
     if (this.statusTimer) { clearInterval(this.statusTimer); this.statusTimer = null; }
 
-    const drain = this.waitForDrain();
+    const controller = new AbortController();
+    const drain = this.waitForDrain(controller.signal);
     // Race with a typed timeout. The timer must be cleared after the race:
     // otherwise a clean drain leaves the event loop alive for
     // shutdownTimeoutMs (300s default), and a direct stop() caller hangs.
@@ -202,6 +211,7 @@ export class LoopRunner {
       winner = await Promise.race([drain, timeout]);
     } finally {
       if (timer) clearTimeout(timer);
+      controller.abort();
     }
 
     if (winner === 'timeout') {
@@ -244,15 +254,21 @@ export class LoopRunner {
 
   // ── Private: pool drains ───────────────────────────────────────────────────
 
-  private async waitForDrain(): Promise<'drained'> {
+  private async waitForDrain(signal: AbortSignal): Promise<'drained'> {
     const drained = () => this.inExecution.size === 0;
     if (drained()) return 'drained';
     return new Promise<'drained'>(resolve => {
-      const check = () => {
-        if (drained()) resolve('drained');
-        else if (!this.running && !this.stopping) resolve('drained');
-        else setTimeout(check, 100);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const finish = () => {
+        if (timer) clearTimeout(timer);
+        signal.removeEventListener('abort', finish);
+        resolve('drained');
       };
+      const check = () => {
+        if (drained() || signal.aborted) finish();
+        else timer = setTimeout(check, 100);
+      };
+      signal.addEventListener('abort', finish, { once: true });
       check();
     });
   }

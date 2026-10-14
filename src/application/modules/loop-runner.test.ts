@@ -119,6 +119,86 @@ describe('LoopRunner manifest-bound execution', () => {
     expect(internals.inFlight.has('42')).toBe(false);
   });
 
+  it('makes duplicate stop calls idempotent', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'afk-managed-loop-'));
+    const { providers } = providersFor();
+    const subject = new LoopRunner(providers, {
+      ...selection,
+      pidFilePath: join(directory, 'loop.pid'),
+      statusFilePath: join(directory, 'status.json'),
+      readManifest,
+    });
+    const internals = subject as any;
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    internals.inExecution.set('42', { iid: '42', session: 'run-42', startedAt: Date.now() });
+    vi.useFakeTimers();
+
+    try {
+      const firstStop = subject.stop();
+      const secondStop = subject.stop();
+      expect(firstStop).toBe(secondStop);
+      let resolved = false;
+      void secondStop.then(() => { resolved = true; });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(resolved).toBe(false);
+      internals.inExecution.clear();
+      await vi.advanceTimersByTimeAsync(100);
+      await Promise.all([firstStop, secondStop]);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(internals.emitEvent).toHaveBeenCalledTimes(2);
+      expect(internals.emitEvent).toHaveBeenNthCalledWith(1, 'stopping: clearing timers and draining...');
+      expect(internals.emitEvent).toHaveBeenNthCalledWith(2, 'stopped: all in-flight drained');
+    } finally {
+      vi.useRealTimers();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('forces shutdown after the configured timeout when work does not drain', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'afk-managed-loop-'));
+    const { providers } = providersFor();
+    const subject = new LoopRunner(providers, {
+      ...selection,
+      shutdownTimeoutMs: 10,
+      pidFilePath: join(directory, 'loop.pid'),
+      statusFilePath: join(directory, 'status.json'),
+      readManifest,
+    });
+    const internals = subject as any;
+    internals.running = true;
+    internals.inExecution.set('42', { iid: '42', session: '', startedAt: Date.now() });
+    internals.emitEvent = vi.fn();
+    vi.useFakeTimers();
+
+    try {
+      const stopping = subject.stop();
+      await vi.advanceTimersByTimeAsync(10);
+      await stopping;
+      expect(vi.getTimerCount()).toBe(0);
+      expect(internals.emitEvent).toHaveBeenCalledWith(expect.stringContaining('shutdown timeout: execution=1'));
+      expect(subject.getStatus().execution).toEqual({ active: 1, ids: ['42'] });
+    } finally {
+      vi.useRealTimers();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not start polling after a shutdown during startup validation', async () => {
+    const { providers, backlog } = providersFor();
+    let finish!: (manifest: Awaited<ReturnType<typeof readManifest>>) => void;
+    const subject = new LoopRunner(providers, {
+      ...selection,
+      readManifest: () => new Promise(resolve => { finish = resolve; }),
+    });
+    const starting = subject.start();
+    await subject.stop();
+    finish(await readManifest());
+    await starting;
+    expect(backlog.list).not.toHaveBeenCalled();
+    expect(backlog.claim).not.toHaveBeenCalled();
+  });
+
   it('stops after one published execution', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'afk-managed-loop-'));
     const { providers } = providersFor();
@@ -136,4 +216,5 @@ describe('LoopRunner manifest-bound execution', () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
 });

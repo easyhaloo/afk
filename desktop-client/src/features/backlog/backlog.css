@@ -329,7 +329,8 @@
   box-shadow: var(--shadow-panel);
   transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease;
 }
-.backlog-run-button:hover:not(:disabled) { filter: brightness(1.05); transform: translateY(-1px); box-shadow: var(--shadow-panel); }
+.backlog-run-button:hover:not(:disabled) { filter: brightness(1.05); transform: translate(-1px, -1px); box-shadow: var(--shadow-lift); }
+.backlog-run-button:active:not(:disabled) { filter: none; transform: translate(1px, 1px); box-shadow: var(--shadow-press); }
 .backlog-run-button:focus-visible { outline: 2px solid color-mix(in srgb, var(--backlog-accent) 45%, transparent); outline-offset: 2px; }
 .backlog-run-button:disabled { opacity: .48; cursor: not-allowed; box-shadow: none; }
 .backlog-run-button-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }

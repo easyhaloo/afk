@@ -14,7 +14,7 @@
 .ssh-action-button-danger:hover { border-color: var(--fail); background: var(--fail-bg); }
 .ssh-action-button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 18%, transparent); }
 .ssh-action-button-danger:focus-visible { box-shadow: 0 0 0 3px rgba(184, 75, 75, .18); }
-.ssh-action-button:active { transform: translateY(1px); }
+.ssh-action-button:active { transform: translate(1px, 1px); box-shadow: var(--shadow-press); }
 .ssh-action-button:disabled { cursor: not-allowed; opacity: .5; box-shadow: none; }
 .ssh-alert { display: flex; align-items: center; gap: 8px; margin-bottom: 11px; border: 1px solid var(--afk-border); border-radius: var(--radius-md); padding: 9px 11px; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); }
 .ssh-alert button { margin-left: auto; border: 0; background: transparent; color: inherit; cursor: pointer; }

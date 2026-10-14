@@ -78,6 +78,13 @@
   --shadow-panel:    4px 4px 0 var(--ink-shadow);
   --shadow-panel-sm: 2px 2px 0 var(--ink-shadow);
 
+  /* The prototype's "lift": the element moves up-left and its shadow grows in
+     step, so it reads as picking the thing up rather than nudging it. Pressing
+     does the inverse and collapses the shadow to 1px. Pair a translate with
+     one of these or the effect is lost. */
+  --shadow-lift:  5px 5px 0 var(--ink-shadow);
+  --shadow-press: 1px 1px 0 var(--ink-shadow);
+
   color-scheme: dark;
 }
 

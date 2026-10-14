@@ -187,7 +187,7 @@
 .workflow-canvas-track { position: relative; display: grid; grid-template-columns: repeat(6, minmax(105px, 1fr)); gap: 18px; align-items: center; min-width: 760px; min-height: 260px; }
 .workflow-canvas-track::before { position: absolute; top: 130px; right: 8%; left: 8%; height: 1px; background: linear-gradient(90deg, var(--afk-accent-border), #d8d9e1 55%, #d8d9e1); content: ""; }
 .workflow-canvas-node { position: relative; z-index: 1; display: flex; min-height: 128px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 14px; border: 1px solid #dfe0e7; border-radius: var(--radius-md); background: var(--afk-panel); color: var(--afk-text); box-shadow: var(--shadow-panel); text-align: left; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
-.workflow-canvas-node:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-panel); transform: translateY(-2px); }
+.workflow-canvas-node:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-2px, -2px); }
 .workflow-canvas-node.selected { border-color: var(--afk-accent); box-shadow: 0 0 0 3px var(--afk-accent-soft), var(--shadow-panel); }
 .workflow-canvas-node i { display: grid; width: 21px; height: 21px; place-items: center; margin-bottom: 12px; border-radius: 50%; background: var(--afk-accent-soft); color: var(--ink-mid); font-family: "DM Mono", monospace; font-size: 8px; font-style: normal; }
 .workflow-canvas-node.active i { background: var(--afk-accent); color: white; box-shadow: 0 0 0 4px var(--afk-accent-soft); }
@@ -262,7 +262,7 @@
 .workflow-editor-edges .workflow-edge.conditional .workflow-edge-flow { stroke: var(--ink-mid); stroke-dasharray: 6 4; }
 .workflow-editor-edges marker path { fill: var(--afk-accent); }
 .workflow-editor-node { position: absolute; display: flex; width: 164px; min-height: 94px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 13px; border: 1.5px solid #82b9bd; border-radius: var(--radius-md); background: rgba(252,255,254,.96); color: var(--afk-text); box-shadow: var(--shadow-panel); cursor: grab; text-align: left; user-select: none; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
-.workflow-editor-node:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-panel); transform: translateY(-2px); }
+.workflow-editor-node:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-2px, -2px); }
 .workflow-editor-node:active { cursor: grabbing; transform: none; }
 .workflow-editor-node.selected { border-color: #0d8c9c; box-shadow: 0 0 0 3px rgba(13,140,156,.16), var(--shadow-panel); }
 .workflow-editor-node i { display: grid; width: 21px; height: 21px; place-items: center; margin-bottom: 11px; border-radius: 50%; background: var(--afk-panel-subtle); color: var(--ink-mid); font-family: "DM Mono", monospace; font-size: 8px; font-style: normal; }
@@ -381,7 +381,7 @@
 .workflow-library-summary b { display: block; overflow: hidden; margin: 5px 0 4px; color: var(--afk-text); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-library-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
 .workflow-library-card { display: flex; min-height: 174px; flex-direction: column; padding: 14px; border: 1px solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); color: var(--afk-text); text-align: left; box-shadow: var(--shadow-panel-sm); }
-.workflow-library-card:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-panel); transform: translateY(-1px); }
+.workflow-library-card:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-1px, -1px); }
 .workflow-library-card.active { border-color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent), var(--shadow-panel); }
 .workflow-library-card header, .workflow-library-card footer { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .workflow-library-card header span { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; }

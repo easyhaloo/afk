@@ -17,6 +17,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import { realpathSync } from 'fs';
+import type { AgentToolCallSummary } from '@afk/core';
 import type {
   AgentCommand,
   AgentEvent,
@@ -33,6 +34,7 @@ import type {
   ResumeOptions,
 } from '../types.js';
 import { extractGoalComplete } from '../../../shared/goal-complete.js';
+import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js';
 
 export class StreamingAgentExecution implements AgentExecution {
   readonly id: string;
@@ -54,6 +56,7 @@ export class StreamingAgentExecution implements AgentExecution {
   private error: ExecutionResult['error'] | undefined;
   private structuredOutput: unknown;
   private usage: TokenUsage | undefined;
+  private readonly tools = new Map<string, AgentToolCallSummary>();
   private stdoutBuffer = '';
   private stdoutTail = '';
   private stderrBuffer = '';
@@ -151,6 +154,15 @@ export class StreamingAgentExecution implements AgentExecution {
    * locally, keeping the provider free of AFK protocol knowledge.
    */
   private handleLine(line: string): void {
+    if (this.metadata.provider === 'claude-code' || this.metadata.provider === 'codex') {
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        event = undefined;
+      }
+      collectAgentToolEvent(this.metadata.provider, event, this.tools);
+    }
     if (this.done) return;
 
     if (this.parseLine) {
@@ -279,6 +291,7 @@ export class StreamingAgentExecution implements AgentExecution {
           status: 'timed_out',
           provider: 'batch',
           sessionId: this.sessionId,
+          tools: this.tools.size ? [...this.tools.values()] : undefined,
           commits: [],
         };
       }
@@ -294,6 +307,7 @@ export class StreamingAgentExecution implements AgentExecution {
         provider: 'batch',
         sessionId: this.sessionId,
         usage: this.usage,
+        tools: this.tools.size ? [...this.tools.values()] : undefined,
         commits: [],
       };
     }
@@ -308,6 +322,7 @@ export class StreamingAgentExecution implements AgentExecution {
         exitCode: this.exitCode,
         error: this.error,
         usage: this.usage,
+        tools: this.tools.size ? [...this.tools.values()] : undefined,
         commits: [],
       };
     }
@@ -325,6 +340,7 @@ export class StreamingAgentExecution implements AgentExecution {
           message: `batch execution ended without ${this.signalType} result${this.lastResultOutput ? `; lastResult=${this.lastResultOutput}` : ''}`,
         },
         usage: this.usage,
+        tools: this.tools.size ? [...this.tools.values()] : undefined,
         commits: [],
       };
     }
@@ -338,6 +354,7 @@ export class StreamingAgentExecution implements AgentExecution {
       exitCode: this.exitCode,
       structuredOutput: this.structuredOutput,
       usage: this.usage,
+      tools: this.tools.size ? [...this.tools.values()] : undefined,
       commits: [],
     };
     this.terminateProcess();

@@ -60,6 +60,63 @@ const options = (): AgentExecutionOptions => ({
 });
 
 describe('CodexAppServerExecution', () => {
+  it('collects native command and MCP notifications without retaining their bodies', async () => {
+    const transport = new ScriptedTransport();
+    const execution = await CodexAppServerExecution.start(options(), runtime, () => transport);
+    const started: JsonRpcMessage = {
+      jsonrpc: '2.0', method: 'item/started', params: {
+        threadId: 'thread-1', turnId: 'turn-1', startedAtMs: 1791849600000,
+        item: { id: 'cmd-1', type: 'commandExecution', command: 'private command', status: 'inProgress', exitCode: null },
+      },
+    };
+    const completed: JsonRpcMessage = {
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        threadId: 'thread-1', turnId: 'turn-1', completedAtMs: 1791849601000,
+        item: { id: 'cmd-1', type: 'commandExecution', status: 'completed', exitCode: 9, durationMs: 25, aggregatedOutput: 'private success' },
+      },
+    };
+    transport.push(started);
+    transport.push(started);
+    transport.push(completed);
+    transport.push(completed);
+    transport.push(started);
+    transport.push({ jsonrpc: '2.0', method: 'item/completed', params: { item: null } });
+    transport.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        item: { id: 'mcp-1', type: 'mcpToolCall', server: 'docs', tool: 'lookup', status: 'failed', durationMs: 3, arguments: { token: 'private token' }, error: { message: 'private error' }, result: null },
+      },
+    });
+    transport.push({
+      jsonrpc: '2.0', method: 'item/completed', params: {
+        item: { id: 'message-1', type: 'agentMessage', text: '<goal_complete>{"type":"goal_complete"}</goal_complete>' },
+      },
+    });
+    transport.push({ jsonrpc: '2.0', method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });
+    const result = await execution.waitForResult();
+    expect(result.status).toBe('completed');
+    expect(result.tools).toEqual([
+      { id: 'cmd-1', name: 'command_execution', result: 'failed', exitCode: 9, durationMs: 25, startedAt: '2026-10-13T00:00:00.000Z', completedAt: '2026-10-13T00:00:01.000Z' },
+      { id: 'mcp-1', name: 'docs.lookup', result: 'failed', durationMs: 3 },
+    ]);
+    expect(JSON.stringify(result.tools)).not.toContain('private');
+    expect(await execution.captureOutput()).not.toContain('private');
+  });
+
+  it.each(['failed', 'missing_result', 'aborted', 'timed_out'])('returns incomplete tool metadata when %s', async status => {
+    const transport = new ScriptedTransport();
+    const execution = await CodexAppServerExecution.start(options(), runtime, () => transport);
+    transport.push({ jsonrpc: '2.0', method: 'item/started', params: { item: { id: 'cmd-1', type: 'commandExecution', command: 'private', status: 'inProgress' } } });
+    transport.push({ jsonrpc: '2.0', method: 'thread/tokenUsage/updated', params: { tokenUsage: { total: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } } } });
+    await expect(execution.waitForEvent()).resolves.toMatchObject({ type: 'usage' });
+    if (status === 'aborted') await execution.interrupt('manual');
+    else if (status !== 'timed_out') transport.push({
+      jsonrpc: '2.0', method: 'turn/completed', params: { turn: { id: 'turn-1', status: status === 'failed' ? 'failed' : 'completed' } },
+    });
+    const result = await execution.waitForResult({ completionTimeoutMs: status === 'timed_out' ? 1 : 1000 });
+    expect(result.status).toBe(status === 'missing_result' ? 'failed' : status);
+    expect(result.tools).toEqual([{ id: 'cmd-1', name: 'command_execution', result: 'in_progress' }]);
+  });
+
   it('performs the app-server lifecycle and normalizes completion diagnostics', async () => {
     const transport = new ScriptedTransport();
     const execution = await CodexAppServerExecution.start(options(), runtime, () => transport);

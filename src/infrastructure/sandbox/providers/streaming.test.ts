@@ -11,6 +11,51 @@ function command(script: string) {
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
 describe('StreamingAgentExecution', () => {
+  it('collects Codex tools per line before output truncation and deduplicates replayed items', async () => {
+    const started = { type: 'item.started', item: { id: 'cmd-1', type: 'command_execution', command: 'private command', status: 'in_progress' } };
+    const completed = { type: 'item.completed', item: { id: 'cmd-1', type: 'command_execution', exit_code: 3, status: 'completed', aggregated_output: 'success private output' } };
+    const lines = [
+      JSON.stringify(started), JSON.stringify(started), JSON.stringify(completed), JSON.stringify(completed),
+      '{malformed', 'x'.repeat(6000),
+      JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '<goal_complete>{"type":"goal_complete"}</goal_complete>' } }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'mcp-1', type: 'mcp_tool_call', server: 'docs', tool: 'lookup', status: 'completed', arguments: { token: 'private token' }, result: { content: 'private output' } } }),
+    ];
+    const execution = new StreamingAgentExecution({
+      command: command(`process.stdout.write(${JSON.stringify(lines.join('\n') + '\n')})`),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: { provider: 'codex', transport: 'exec' },
+      parseLine: new CodexProvider().parseLine.bind(new CodexProvider()),
+    });
+    execution.start();
+    const result = await execution.waitForResult({ completionTimeoutMs: 1000 });
+    expect(result.status).toBe('completed');
+    expect(result.tools).toEqual([
+      { id: 'cmd-1', name: 'command_execution', result: 'failed', exitCode: 3 },
+      { id: 'mcp-1', name: 'docs.lookup', result: 'succeeded' },
+    ]);
+    expect(JSON.stringify(result.tools)).not.toContain('private');
+    expect(await execution.captureOutput()).not.toContain('cmd-1');
+  });
+
+  it.each(['failed', 'missing_result', 'aborted', 'timed_out'])('returns incomplete tool metadata when %s', async status => {
+    const line = JSON.stringify({ type: 'item.started', item: { id: 'cmd-1', type: 'command_execution', command: 'private command' } });
+    const script = `console.log(${JSON.stringify(line)}); console.log('ready'); ${status === 'failed' ? 'process.exit(3)' : status === 'missing_result' ? '' : 'setInterval(() => {}, 10000)'}`;
+    const execution = new StreamingAgentExecution({
+      command: command(script), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: { provider: 'codex', transport: 'exec' },
+    });
+    execution.start();
+    const deadline = Date.now() + 1000;
+    while (!(await execution.captureOutput()).includes('ready') && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    expect(await execution.captureOutput()).toContain('ready');
+    if (status === 'aborted') await execution.interrupt('manual');
+    const result = await execution.waitForResult({ completionTimeoutMs: status === 'timed_out' ? 0 : 1000 });
+    expect(result.status).toBe(status === 'missing_result' ? 'failed' : status);
+    expect(result.tools).toEqual([{ id: 'cmd-1', name: 'command_execution', result: 'in_progress' }]);
+  });
+
   it('completes from Codex JSONL and preserves normalized token usage', async () => {
     const usage = JSON.stringify({
       type: 'turn.completed',

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { AgentToolCallSummary } from '@afk/core';
 import type {
   AgentExecution,
   AgentExecutionMetadata,
@@ -14,6 +15,7 @@ import type {
 import { extractGoalComplete, type GoalCompletePayload } from '../../../shared/goal-complete.js';
 import { AppServerClient } from './client.js';
 import { normalizeAppServerNotification } from './events.js';
+import { collectAgentToolEvent } from '../tool-telemetry.js';
 import { createAppServerTransport, type AppServerTransport } from './transport.js';
 
 type TransportFactory = (
@@ -35,6 +37,7 @@ export class CodexAppServerExecution implements AgentExecution {
   private readonly resultPromise: Promise<ExecutionResult>;
   private structuredOutput?: GoalCompletePayload;
   private usage?: ExecutionResult['usage'];
+  private readonly tools = new Map<string, AgentToolCallSummary>();
   private threadId?: string;
   private turnId?: string;
 
@@ -148,6 +151,7 @@ export class CodexAppServerExecution implements AgentExecution {
 
   private async consumeNotifications(): Promise<void> {
     for await (const notification of this.client.notifications()) {
+      collectAgentToolEvent('codex', notification, this.tools);
       for (const event of normalizeAppServerNotification(notification)) {
         if (event.type === 'result') {
           this.output.push(event.text);
@@ -190,6 +194,7 @@ export class CodexAppServerExecution implements AgentExecution {
       sessionId: this.sessionId,
       ...(status === 'completed' ? { structuredOutput: this.structuredOutput } : {}),
       ...(this.usage ? { usage: this.usage } : {}),
+      ...(this.tools.size ? { tools: [...this.tools.values()] } : {}),
       ...(error ? { error } : {}),
       commits: [],
     };

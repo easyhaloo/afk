@@ -126,7 +126,7 @@ button.work-item-reference-card:disabled { opacity: 1; cursor: default; }
 .work-item-secondary-action:disabled { opacity: .5; cursor: not-allowed; }
 
 .work-item-run-modal-layer { position: fixed; z-index: 55; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(45, 51, 46, .36); backdrop-filter: blur(3px); }
-.work-item-run-modal { display: flex; width: min(620px, calc(100vw - 36px)); max-height: calc(100vh - 36px); flex-direction: column; overflow: hidden; border: 1px solid var(--backlog-border); border-radius: var(--radius-md); background: var(--backlog-surface); box-shadow: var(--shadow-panel); }
+.work-item-run-modal { display: flex; width: min(520px, calc(100vw - 36px)); max-height: calc(100vh - 36px); flex-direction: column; overflow: hidden; border: 1px solid var(--backlog-border); border-radius: var(--radius-md); background: var(--backlog-surface); box-shadow: var(--shadow-panel); }
 .work-item-run-modal > header,
 .work-item-run-modal > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 19px; }
 .work-item-run-modal > header { border-bottom: 1px solid var(--backlog-border); }

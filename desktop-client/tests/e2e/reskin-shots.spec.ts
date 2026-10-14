@@ -29,4 +29,19 @@ test.describe("reskin evidence", () => {
       await page.screenshot({ path: `${OUT}/${view}-dark.png` });
     });
   }
+
+  // Nothing else in this suite opens an overlay, so a modal or drawer that
+  // silently changes width would pass every other test in the package.
+  test("执行工作项模态 (light)", async ({ page }) => {
+    await setTheme(page, "浅色");
+    await page.locator(".primary-nav button", { hasText: "工作项" }).click();
+    await page.waitForTimeout(400);
+    const row = page.locator(".work-item-row").first();
+    test.skip((await row.count()) === 0, "no work item rows in the fixture");
+    await row.click();
+    await page.waitForTimeout(400);
+    await page.locator(".work-item-primary-action").click();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${OUT}/执行工作项-modal-light.png` });
+  });
 });

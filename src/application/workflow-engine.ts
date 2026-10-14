@@ -1368,6 +1368,12 @@ export class WorkflowRunner {
       this.sandboxProviderName === 'docker' || this.sandboxProviderName === 'podman' ? 'container' : 'local';
     if (sandboxKind === 'container') return undefined;
 
+    // Prefer result.usage (already normalized from stream). Fall back to the
+    // transcript when it is absent:
+    //   - codex batch (exec transport) has no telemetryPath, but threadId is
+    //     captured at runtime and findCodexRollout searches ~/.codex/sessions/
+    //     directly
+    //   - claude interactive/tmux: the SessionEnd hook hands us the absolute path
     let usage = result.usage;
     let tools = result.tools;
     if (!usage || !tools) {

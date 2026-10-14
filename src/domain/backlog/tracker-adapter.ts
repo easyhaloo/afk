@@ -9,7 +9,7 @@ import {
   type ClaimLockFactory,
 } from './claim-strategy.js';
 import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabilities } from './initialization.js';
-import { extractBacklogTags, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
+import { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
 import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
 
@@ -61,6 +61,32 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const issue = await this.tracker.getIssue(this.issueId(id));
     const changes = await this.tracker.listMRs({ state: 'all' });
     return this.withChangeRequest(toBacklogItem(issue), issue.labels, changes);
+  }
+
+  async adopt(id: string): Promise<BacklogItem> {
+    const issueId = this.issueId(id);
+    const issue = await this.tracker.getIssue(issueId);
+    if (issue.state !== 'opened') throw new Error(`backlog ${id} must be open for adoption`);
+    const desired = [STATE_LABELS.ready, MODE_LABELS.afk];
+    const metadata = issue.labels.filter(isInternalBacklogLabel)
+      .map(label => label.replace(/^depends_on::/, 'depends-on::'));
+    if (new Set(metadata).size !== metadata.length
+      || ['parent::', 'base::'].some(prefix => metadata.filter(label => label.startsWith(prefix)).length > 1)
+      || issue.labels.some(label => isWorkflowMetadataLabel(label) && !desired.includes(label))) {
+      throw new Error(`invalid adoption metadata for backlog ${id}: expected ready/afk without duplicate or conflicting AFK labels`);
+    }
+    for (const label of metadata.filter(label => !isWorkflowMetadataLabel(label))) {
+      const relationId = label.slice(label.indexOf('::') + 2);
+      if (this.canonicalId(relationId) !== relationId || relationId === String(issueId)) {
+        throw new Error(`invalid adoption metadata for backlog ${id}: ${label} must reference another canonical backlog ID`);
+      }
+    }
+    const delta = labelDelta(issue.labels, desired, isWorkflowMetadataLabel);
+    if (delta.add.length) {
+      await this.initialize();
+      await this.applyLabelDelta(issueId, delta);
+    }
+    return this.get(id);
   }
 
   async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {

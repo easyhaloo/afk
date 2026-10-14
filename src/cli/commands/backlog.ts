@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import {
   createGlobalWorkItemCatalogs,
@@ -16,6 +16,7 @@ import type {
 } from '../../domain/work-item/provider-types.js';
 import {
   addBacklogTag,
+  adoptBacklog,
   confirmBacklogMerge,
   createBacklog,
   initializeBacklog,
@@ -296,6 +297,14 @@ export async function runBacklogInterrupt(
   await runLifecycleAction('backlog.interrupt', options, () => interruptBacklog(provider, id, reason), `Backlog ${id} interrupted`);
 }
 
+export async function runBacklogAdopt(
+  provider: BacklogManagementProvider,
+  id: string,
+  options: JsonMode = {},
+): Promise<void> {
+  await runLifecycleAction('backlog.adopt', options, () => adoptBacklog(provider, id), `Backlog ${id} adopted`);
+}
+
 export async function runBacklogRetry(
   provider: QABacklogProvider,
   id: string,
@@ -350,6 +359,26 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     },
   });
   const backlog = program.command('backlog').description('Manage and inspect backlog items (read/manage only)');
+
+  backlog.command('adopt')
+    .description('Explicitly adopt an open manual issue into ready AFK work')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .requiredOption('--project <project>', 'Provider project/repository')
+    .addOption(new Option('--platform <platform>', 'Provider platform').choices(['github', 'gitlab']).makeOptionMandatory())
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        if (!options.id.trim()) throw new Error('backlog id must not be empty');
+        if (!options.project.trim()) throw new Error('provider project must not be empty');
+        await runBacklogAdopt(await providerFor(options.project, options.platform), options.id, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.adopt', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
 
   backlog.command('init')
     .description('Initialize provider metadata for backlog state and mode')
@@ -562,6 +591,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     });
 
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'init')!, 'backlog.init', argv);
+  configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'adopt')!, 'backlog.adopt', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'inventory')!, 'backlog.inventory', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'list')!, 'backlog.list', argv);
   configureBacklogJsonErrors(backlog.commands.find(command => command.name() === 'show')!, 'backlog.show', argv);

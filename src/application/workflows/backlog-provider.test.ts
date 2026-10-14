@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WorkflowRunner } from '../workflow-engine.js';
+import { BudgetManager } from './budget.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
 import type { AgentProvider } from '../../domain/agents/types.js';
@@ -74,7 +75,8 @@ describe('WorkflowRunner backlog provider mode', () => {
       hardTimeoutMs: 1_000,
       completionTimeoutMs: 2_000,
       contextHighTokens: 3_000,
-      budget: { used: 0 },
+      budget: new BudgetManager(3, 10000),
+      persistBudget: vi.fn(async () => {}),
       prompt: 'implement backlog 42',
       signalType: 'goal_complete',
       executionMode: 'batch',

@@ -71,6 +71,7 @@ export interface BacklogListOptions {
  */
 export interface BacklogManagementProvider {
   get(id: string): Promise<BacklogItem>;
+  adopt?(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
   create(input: BacklogCreateInput): Promise<BacklogItem>;
   addTag(id: string, tag: string): Promise<void>;
@@ -90,6 +91,7 @@ export interface QABacklogProvider extends BacklogManagementProvider {
 export interface BacklogProvider {
   readonly capabilities?: import('./initialization.js').BacklogProviderCapabilities;
   get(id: string): Promise<BacklogItem>;
+  adopt?(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
   create(input: BacklogCreateInput): Promise<BacklogItem>;
   claim(id: string, owner: string): Promise<BacklogClaim | null>;

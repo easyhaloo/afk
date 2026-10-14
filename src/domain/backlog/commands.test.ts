@@ -1,14 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  adoptBacklog,
   confirmBacklogMerge,
   createBacklog,
   interruptBacklog,
   retryBacklog,
 } from './commands.js';
-import type { BacklogItem, QABacklogProvider } from './index.js';
+import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from './index.js';
+import { InMemoryBacklogProvider } from './index.js';
+import { ManagementBacklogProvider } from './management-provider.js';
 import { parseReworkRecord, renderReworkRecord, type ReworkRecord } from './rework-record.js';
 
 describe('backlog commands', () => {
+  it('rejects adoption when the provider has no optional adoption capability', async () => {
+    const provider = new InMemoryBacklogProvider();
+    await expect(adoptBacklog(provider, '42')).rejects.toThrow('does not support explicit issue adoption');
+    await expect(adoptBacklog(new ManagementBacklogProvider(provider), '42')).rejects.toThrow('does not support explicit issue adoption');
+  });
+
   it('creates a backlog item and returns its canonical URL', async () => {
     const provider: BacklogManagementProvider = {
       get: vi.fn(), list: vi.fn(), addTag: vi.fn(), removeTag: vi.fn(), initialize: vi.fn(),

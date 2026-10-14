@@ -481,7 +481,7 @@
 }
 .backlog-drawer {
   display: flex;
-  width: min(430px, 100vw);
+  width: min(var(--drawer-w), 100vw);
   height: 100%;
   flex-direction: column;
   gap: 20px;

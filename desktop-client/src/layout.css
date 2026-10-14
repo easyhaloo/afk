@@ -38,18 +38,6 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
   scrollbar-gutter: stable;
 }
 
-/* The prototype enters every view section (`viewIn` on `.view > section`).
-   Switching views unmounts the old child and mounts a new one, so the
-   animation replays on its own — no key, no state, no JS. */
-@keyframes viewIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.workspace > * {
-  animation: viewIn var(--dur) var(--ease) both;
-}
-
 .workspace::-webkit-scrollbar,
 .inspector::-webkit-scrollbar,
 .terminal-sheet pre::-webkit-scrollbar { width: 8px; height: 8px; }

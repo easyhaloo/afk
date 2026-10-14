@@ -234,7 +234,7 @@
   top: var(--topbar-h);
   right: 0;
   bottom: 0;
-  width: min(430px, calc(100vw - var(--sidebar-w) - 20px));
+  width: min(var(--drawer-w), calc(100vw - var(--sidebar-w) - 20px));
   overflow: auto;
   border-left: 1px solid #e5e5eb;
   background: #fff;
@@ -340,7 +340,7 @@
   .record-card footer { padding-left: 21px; }
   .record-list-item { grid-template-columns: 58px minmax(0, 1fr) 17px; gap: 9px; padding: 11px; }
   .record-list-item > .record-status { display: none; }
-  .record-drawer { top: 0; width: min(430px, 100vw); }
+  .record-drawer { top: 0; width: min(var(--drawer-w), 100vw); }
 }
 
 @media (prefers-reduced-motion: reduce) {

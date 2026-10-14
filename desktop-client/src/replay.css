@@ -44,7 +44,7 @@
   margin-top: 3px;
   color: #9697a1;
   font-family: "DM Mono", monospace;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .record-run-picker { position: relative; }
@@ -267,7 +267,7 @@
   border-bottom: 1px solid #ededf1;
 }
 
-.record-drawer dt { margin-bottom: 5px; color: #9a9ba5; font-family: "DM Mono", monospace; font-size: 8px; }
+.record-drawer dt { margin-bottom: 5px; color: #9a9ba5; font-family: "DM Mono", monospace; font-size: 10px; }
 .record-drawer dd { margin: 0; color: #545560; font-size: 11px; }
 
 .record-debug { margin-top: 4px; }
@@ -317,14 +317,14 @@
 .inspector-tooltip { display: none; }
 .inspector-surface { padding: 0 16px 16px; }
 .inspector-title { padding: 14px 0 10px; }
-.inspector-title small { color: #94959f; font-family: "DM Mono", monospace; font-size: 8px; }
+.inspector-title small { color: #94959f; font-family: "DM Mono", monospace; font-size: 10px; }
 .inspector-title h2 { margin: 7px 0; color: #363741; font-size: 15px; line-height: 1.35; }
 .inspector-title span { color: #8c6427; font-family: "DM Mono", monospace; font-size: 9px; }
 .inspector dl { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 10px; margin: 14px 0; padding: 12px 0; border-top: 1px solid #ededf1; border-bottom: 1px solid #ededf1; }
-.inspector dt { margin-bottom: 4px; color: #999aa4; font-family: "DM Mono", monospace; font-size: 8px; }
+.inspector dt { margin-bottom: 4px; color: #999aa4; font-family: "DM Mono", monospace; font-size: 10px; }
 .inspector dd { margin: 0; overflow: hidden; color: #53545e; font-size: 10px; text-overflow: ellipsis; }
-.inspector section b { color: #83848e; font-family: "DM Mono", monospace; font-size: 8px; }
-.inspector pre { max-height: 120px; margin: 7px 0 13px; overflow: auto; padding: 8px; border-radius: var(--radius-sm); background: #f7f7fa; color: #62636e; font-family: "DM Mono", monospace; font-size: 8px; white-space: pre-wrap; }
+.inspector section b { color: #83848e; font-family: "DM Mono", monospace; font-size: 10px; }
+.inspector pre { max-height: 120px; margin: 7px 0 13px; overflow: auto; padding: 8px; border-radius: var(--radius-sm); background: #f7f7fa; color: #62636e; font-family: "DM Mono", monospace; font-size: 10px; white-space: pre-wrap; }
 .takeover { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; height: 32px; border-radius: var(--radius-md); background: #2f3039; color: #fff; font-size: 10px; font-weight: 600; }
 .inspector-opening { animation: inspector-pop-in 220ms cubic-bezier(.23, 1, .32, 1) both; }
 .inspector-closing { animation: inspector-pop-out 180ms ease both; pointer-events: none; }

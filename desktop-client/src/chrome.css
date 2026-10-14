@@ -16,7 +16,7 @@
   padding: 0 9px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: calc(7px * var(--afk-scale));
+  font-size: calc(9px * var(--afk-scale));
   font-weight: 650;
   letter-spacing: .12em;
   line-height: 15px;

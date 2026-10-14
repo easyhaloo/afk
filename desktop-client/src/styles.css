@@ -88,7 +88,7 @@ input:focus-visible {
   grid-column: 2;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 7px;
+  font-size: 9px;
   letter-spacing: 0.11em;
 }
 
@@ -125,7 +125,7 @@ input:focus-visible {
 .workspace-switcher small {
   margin-top: 3px;
   color: var(--afk-muted);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 /* ---------- nav ---------- */
@@ -133,7 +133,7 @@ input:focus-visible {
   margin: 22px 8px 6px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.08em;
 }
 
@@ -174,7 +174,7 @@ input:focus-visible {
   background: var(--afk-border);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
   font-style: normal;
   text-align: center;
 }
@@ -230,7 +230,7 @@ input:focus-visible {
   background: var(--afk-panel-subtle);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 /* ---------- icon button ---------- */
@@ -356,7 +356,7 @@ input:focus-visible {
   margin-top: 4px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -368,7 +368,7 @@ input:focus-visible {
   background: var(--afk-border);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .event-row.active .event-state {
@@ -547,7 +547,7 @@ input:focus-visible {
 .archive > span {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.06em;
 }
 
@@ -623,7 +623,7 @@ input:focus-visible {
   gap: 7px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .board-card > div b {
@@ -649,7 +649,7 @@ input:focus-visible {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.45;
 }
 
@@ -689,7 +689,7 @@ input:focus-visible {
 .inspector-title small {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .inspector-title h2 {
@@ -704,7 +704,7 @@ input:focus-visible {
   background: var(--afk-accent-soft);
   color: var(--afk-accent);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .inspector dl {
@@ -721,7 +721,7 @@ input:focus-visible {
   margin-bottom: 4px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .inspector dd {
@@ -735,7 +735,7 @@ input:focus-visible {
 .inspector section b {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .inspector pre {
@@ -747,7 +747,7 @@ input:focus-visible {
   background: var(--afk-panel-subtle);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -822,7 +822,7 @@ input:focus-visible {
 .env-row span {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .env-row small {
@@ -835,7 +835,7 @@ input:focus-visible {
 .env-row em {
   color: var(--run);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
   font-style: normal;
 }
 
@@ -893,7 +893,7 @@ input:focus-visible {
   margin-top: 5px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 8px;
+  font-size: 10px;
 }
 
 /* ---------- terminal sheet ---------- */

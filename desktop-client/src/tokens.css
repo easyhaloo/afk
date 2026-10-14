@@ -39,6 +39,11 @@
      outside it as a margin, so content at the end of a long list still gets
      the breathing room and its hard shadow is not clipped. */
   --view-pad: 16px 20px 28px;
+  /* The prototype draws at 1.5px almost everywhere (32 of its ~50 borders);
+     the app was at 1px throughout. One value, so reverting the experiment is
+     a one-line change rather than 223 edits. */
+  --border-w: 1.5px;
+  --drawer-w: 420px;
 
   /* Hand-drawn corners: adjacent radii are deliberately unequal, which is the
      whole signature. Values are the prototype's ratios at this app's denser

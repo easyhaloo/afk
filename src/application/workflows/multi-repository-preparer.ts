@@ -50,6 +50,12 @@ export interface PreparedRepositorySet {
   repositories: PreparedRepository[];
   primary: PreparedRepository;
   finish(outcome: { status: RunOutcomeStatus }): Promise<void>;
+  /**
+   * Give the workspace back without finalizing it: restore or remove each
+   * checkout and drop the lock. For a phase that only borrows the workspace
+   * (QA) and must never push the implementation branch.
+   */
+  release(): Promise<void>;
 }
 
 export interface MultiRepositoryPreparationService {
@@ -98,6 +104,7 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
 
     const primary = prepared.find(repository => repository.primary)!;
     let finishPromise: Promise<void> | undefined;
+    let releasePromise: Promise<void> | undefined;
     return {
       repositories: prepared,
       primary,
@@ -110,6 +117,16 @@ export class MultiRepositoryPreparer implements MultiRepositoryPreparationServic
           },
         );
         return finishPromise;
+      },
+      release: () => {
+        releasePromise ??= this.cleanup(prepared).then(
+          () => lock.release(),
+          async error => {
+            try { await lock.release(); } catch { /* preserve the terminal error */ }
+            throw error;
+          },
+        );
+        return releasePromise;
       },
     };
   }

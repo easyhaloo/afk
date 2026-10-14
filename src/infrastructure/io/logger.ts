@@ -134,7 +134,10 @@ const pinoOpts: pino.LoggerOptions = {
     ],
     censor: '[redacted]',
   },
-  serializers: { err: pino.stdSerializers.err },
+  // `error` is the key most call sites use; without a serializer pino JSON.stringify's
+  // it, and every Error degrades to its enumerable own properties (message and
+  // stack are non-enumerable), hiding the real cause in the log.
+  serializers: { err: pino.stdSerializers.err, error: pino.stdSerializers.err },
 };
 
 // Console stream -> stderr so diagnostic logs never pollute stdout that users

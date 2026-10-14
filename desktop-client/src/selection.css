@@ -126,7 +126,6 @@
 .ssh-search:focus-within { border-color: var(--afk-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 12%, transparent); }
 .ssh-toolbar .ssh-search { min-height: 36px; }
 .app-shell .ssh-toolbar > .icon-button { width: 36px; height: 36px; }
-:root[data-afk-theme="graphite"] .selection-segments button.selected { background: var(--afk-panel); color: var(--afk-text); }
 @media (max-width: 760px) {
   .selection-filters { width: 100%; }
   .selection-filter-panel { right: auto; left: 0; }

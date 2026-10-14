@@ -59,7 +59,7 @@ const recordStatusLabel: Record<RecordStatus, string> = {
   failed: "失败",
 };
 
-const defaultAppearance: AppearancePreferences = { locale: "system", fontFamily: "system", fontScale: "medium", accent: "violet", theme: "light" };
+const defaultAppearance: AppearancePreferences = { locale: "system", fontFamily: "system", fontScale: "medium", handDrawnHeaders: true, theme: "dark" };
 
 function eventStatus(event: RuntimeEvent): RecordStatus {
   const structured = String(event.status ?? "").trim().toLowerCase().replaceAll("-", "_");
@@ -209,7 +209,7 @@ function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.afkTheme = appearance.theme;
-    root.dataset.afkAccent = appearance.accent;
+    root.dataset.afkHand = appearance.handDrawnHeaders ? "1" : "0";
     root.dataset.afkFont = appearance.fontFamily;
     root.dataset.afkScale = appearance.fontScale;
   }, [appearance]);

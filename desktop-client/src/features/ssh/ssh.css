@@ -157,14 +157,6 @@
 @media (max-width: 620px) { .ssh-heading { display: block; } .ssh-heading-actions { justify-content: flex-start; margin-top: 14px; } .ssh-toolbar { flex-wrap: wrap; } .ssh-search { flex-basis: 100%; } .ssh-host-select { grid-template-columns: 30px minmax(0, 1fr) auto; } .ssh-source { display: none; } }
 @media (max-width: 420px) { .ssh-confirm-dialog { grid-template-columns: 1fr; gap: 10px; padding: 17px; } .ssh-confirm-icon { width: 34px; height: 34px; border-radius: 10px; } .ssh-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; } .ssh-confirm-actions .ssh-action-button { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .ssh-confirm-backdrop, .ssh-confirm-dialog { animation: none; } }
-:root[data-afk-theme="graphite"] .ssh-status.identity-changed, :root[data-afk-theme="graphite"] .ssh-status.invalid { border-color: #7e5b5d; background: #3a292b; color: #f0c6c8; }
-:root[data-afk-theme="graphite"] .ssh-diagnostics { border-color: #5b5547; background: #302f2b; color: #d0c5a8; }
-:root[data-afk-theme="graphite"] .ssh-diagnostic-group.info { border-color: #4f5f60; background: #2d3535; color: #a9c0c0; }
-:root[data-afk-theme="graphite"] .ssh-diagnostic-group.warning { border-color: #5b5547; background: #39362d; color: #d0c5a8; }
-:root[data-afk-theme="graphite"] .ssh-diagnostic-group.error { border-color: #60494a; background: #392e2f; color: #d3aaaa; }
-:root[data-afk-theme="graphite"] .ssh-action-button-danger { border-color: #765456; background: #3a2b2e; color: #f0c3c5; }
-:root[data-afk-theme="graphite"] .ssh-confirm-icon { border-color: #765456; background: #3a2b2e; color: #f0c3c5; }
-:root[data-afk-theme="graphite"] .ssh-confirm-copy small { color: #f0c3c5; }
 
 /* Bastion group header row */
 .ssh-bastion-group { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto auto; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--afk-border); border-left: 3px solid transparent; background: var(--afk-panel-subtle); transition: border-color .14s, background .14s; cursor: pointer; }

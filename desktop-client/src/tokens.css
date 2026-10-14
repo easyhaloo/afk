@@ -50,9 +50,10 @@
 
   /* One accent. It doubles as the running-state colour, which is why the
      palette needs no separate "running" hue. */
-  --accent:      #7ab88c;
-  --accent-bg:   rgba(122, 184, 140, 0.12);
-  --accent-ln:   rgba(122, 184, 140, 0.35);
+  --accent:      #8cc59c;   /* lightened from #7ab88c so accent text clears AA on
+                              an --accent-bg tint over --paper-3 (4.10:1 -> 4.79:1) */
+  --accent-bg:   rgba(140, 197, 156, 0.12);
+  --accent-ln:   rgba(140, 197, 156, 0.35);
 
   --warn:        #c4985a;
   --warn-bg:     rgba(196, 152, 90, 0.12);
@@ -87,7 +88,8 @@
   --ink-main:    #2e2416;
   --ink-shadow:  rgba(58, 42, 22, .62);
 
-  --accent:      #2e6640;
+  --accent:      #214c2e;   /* darkened from #2e6640: accent is used as text on
+                              --accent-bg tints, which only cleared 3.24:1 */
   --accent-bg:   rgba(46, 102, 64, 0.10);
   --accent-ln:   rgba(46, 102, 64, 0.30);
 

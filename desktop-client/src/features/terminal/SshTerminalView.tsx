@@ -93,6 +93,73 @@ export function sshTerminalErrorMessage(operation: SshTerminalOperation) {
   return "终端操作失败，请重试；如果会话已经结束，请重新连接。";
 }
 
+const TERMINAL_THEMES = {
+  dark: {
+    background: "#1c1f24",
+    foreground: "#d9dde5",
+    cursor: "#b8c0cc",
+    cursorAccent: "#1c1f24",
+    selectionBackground: "#3b4657",
+    black: "#202329",
+    red: "#d57a7a",
+    green: "#88b48f",
+    yellow: "#c7a96b",
+    blue: "#7897bd",
+    magenta: "#a68ab8",
+    cyan: "#75a9aa",
+    white: "#c8ccd4",
+    brightBlack: "#656b75",
+    brightRed: "#e19191",
+    brightGreen: "#9bc6a2",
+    brightYellow: "#d9bb7e",
+    brightBlue: "#8ba9cb",
+    brightMagenta: "#b99ccb",
+    brightCyan: "#89bdbd",
+    brightWhite: "#eef0f4",
+  },
+  light: {
+    // page base --paper-in: #e4d9c0 | panel --paper: #f0e8d5 | primary --ink-main: #2e2416
+    // secondary --ink-dim: #63543d | accent --accent: #2e6640 | warn --warn: #6b480d | fail --fail: #9a3c34
+    background: "#e4d9c0",
+    foreground: "#2e2416",
+    cursor: "#2e2416",
+    cursorAccent: "#e4d9c0",
+    selectionBackground: "#e8dec6",
+    // The ANSI ramp assumes a dark background, so on cream paper it has to
+    // invert: "bright" means more prominent, which here means darker and more
+    // saturated, not lighter. An earlier pass ran bright* lighter than its base
+    // colour, which made bold red a pale salmon at 2:1 and left brightWhite
+    // three hex units from black -- bold text indistinguishable from normal.
+    // Every value below clears 4.5:1 on --paper (#f0e8d5).
+    black: "#3a3129",
+    red: "#a04a4a",
+    green: "#357245",
+    yellow: "#86601c",
+    blue: "#3f5a86",
+    magenta: "#82597a",
+    cyan: "#3b7171",
+    white: "#5c5348",
+    brightBlack: "#6e645a",
+    brightRed: "#8c3030",
+    brightGreen: "#2e6640",
+    brightYellow: "#6b480d",
+    brightBlue: "#2f4a76",
+    brightMagenta: "#6b4062",
+    brightCyan: "#2f6565",
+    brightWhite: "#1a1409",
+  },
+} as const;
+
+// ponytail: runtime terminal theme is captured once per mount via useRef in createSshTerminalView.
+// Switches to --paper-in / --ink-main with a session already open require threading appearance into
+// the view and calling terminal.options.theme = … live; one line once the dependency is available.
+function currentTheme() {
+  // Unit tests run in the node environment, where there is no document; the
+  // runtime throws inside the surrounding try and the terminal never builds.
+  const theme = typeof document === "undefined" ? undefined : document.documentElement.dataset.afkTheme;
+  return theme === "light" ? TERMINAL_THEMES.light : TERMINAL_THEMES.dark;
+}
+
 export function sshTerminalOptions(): ITerminalOptions {
   return {
     cursorBlink: true,
@@ -101,29 +168,7 @@ export function sshTerminalOptions(): ITerminalOptions {
     fontFamily: '"SFMono-Regular", "SF Mono", "DM Mono", ui-monospace, monospace',
     fontSize: 11,
     linkHandler: blockedOscLinkHandler,
-    theme: {
-      background: "#1c1f24",
-      foreground: "#d9dde5",
-      cursor: "#b8c0cc",
-      cursorAccent: "#1c1f24",
-      selectionBackground: "#3b4657",
-      black: "#202329",
-      red: "#d57a7a",
-      green: "#88b48f",
-      yellow: "#c7a96b",
-      blue: "#7897bd",
-      magenta: "#a68ab8",
-      cyan: "#75a9aa",
-      white: "#c8ccd4",
-      brightBlack: "#656b75",
-      brightRed: "#e19191",
-      brightGreen: "#9bc6a2",
-      brightYellow: "#d9bb7e",
-      brightBlue: "#8ba9cb",
-      brightMagenta: "#b99ccb",
-      brightCyan: "#89bdbd",
-      brightWhite: "#eef0f4",
-    },
+    theme: currentTheme(),
   };
 }
 

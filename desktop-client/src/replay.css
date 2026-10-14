@@ -236,7 +236,7 @@
   bottom: 0;
   width: min(var(--drawer-w), calc(100vw - var(--sidebar-w) - 20px));
   overflow: auto;
-  border-left: 1px solid #e5e5eb;
+  border-left: var(--edge-modal);
   background: #fff;
   box-shadow: -14px 0 0 var(--ink-shadow);
   animation: record-drawer-in 220ms cubic-bezier(.23, 1, .32, 1) both;

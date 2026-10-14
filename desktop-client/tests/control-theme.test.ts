@@ -88,7 +88,28 @@ function unscaledType(): string[] {
       .map(hit => `${name}: ${hit}`));
 }
 
-const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })  .filter(name => name.endsWith(".css"))
+/**
+ * Fixed, full-viewport layers are scrims. Each one must take its veil from
+ * --scrim-drawer or --scrim-modal: the app carried four different translucent
+ * greys and two of them added a backdrop blur, so overlays read as frosted
+ * glass against hand-drawn corners.
+ */
+function hardcodedScrims(): string[] {
+  return readdirSync(src, { recursive: true, encoding: "utf8" })
+    .filter(name => name.endsWith(".css") && name !== "tokens.css")
+    .flatMap(name => {
+      const css = readFileSync(path.join(src, name), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, " "));
+      return Array.from(css.matchAll(/([^{}]+)\{([^{}]*)\}/g))
+        .filter(([, , body]) => /position:\s*fixed/.test(body!) && /inset:\s*0/.test(body!))
+        .filter(([, , body]) => /background:\s*(?!none|transparent)[^;]*\d/.test(body!))
+        .filter(([, , body]) => !/background:[^;]*var\(--scrim-/.test(body!))
+        .map(([whole]) => `${name}: ${whole.trim().replace(/\s+/g, " ")}`);
+    });
+}
+
+const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })
+  .filter(name => name.endsWith(".css"))
   .map(name => readFileSync(path.join(src, name), "utf8"))
   .join("\n");
 
@@ -195,6 +216,13 @@ describe("design tokens", () => {
     expect(
       unscaledType(),
       "font sizes must read calc(Npx * var(--afk-scale)) so 字号密度 reaches them",
+    ).toEqual([]);
+  });
+
+  it("gives every overlay its veil from a token", () => {
+    expect(
+      hardcodedScrims(),
+      "fixed full-viewport layers must use --scrim-drawer or --scrim-modal",
     ).toEqual([]);
   });
 

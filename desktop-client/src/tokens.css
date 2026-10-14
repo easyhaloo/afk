@@ -45,6 +45,16 @@
   --border-w: 1.5px;
   --drawer-w: 420px;
 
+  /* Overlays sit behind a flat veil, not behind frosted glass: the prototype
+     has no backdrop-filter on either scrim. The app carried four different
+     translucent greys, two of them blurred, which read as a modern glass
+     treatment against hand-drawn corners and hard shadows. */
+  --scrim-drawer: rgba(10, 8, 5, .48);
+  --scrim-modal: rgba(10, 8, 5, .66);
+  /* The prototype rings its modals with the same warm ink it offsets their
+     shadows with, so the edge and the drop read as one stroke. */
+  --edge-modal: 2px solid var(--ink-shadow);
+
   /* Hand-drawn corners: adjacent radii are deliberately unequal, which is the
      whole signature. Values are the prototype's ratios at this app's denser
      pixel scale — the sketch runs 10px type and 18px tags, this runs 9px.

@@ -74,7 +74,7 @@
 }
 .select-menu.filter-trigger { min-width: 0; }
 .select-menu.filter-trigger .select-menu-trigger {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--backlog-surface-soft) 45%, var(--backlog-surface));
 }
 .select-menu-popover {
@@ -87,7 +87,7 @@
   box-sizing: border-box;
   padding: 4px;
   border: 1px solid var(--backlog-border, var(--afk-border, #dfe0da));
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--backlog-surface, var(--afk-panel, #fff));
   box-shadow: var(--shadow-panel);
 }
@@ -101,7 +101,7 @@
   gap: 6px;
   margin-bottom: 4px;
   padding: 0 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--backlog-surface-soft);
   color: var(--backlog-muted);
 }
@@ -118,7 +118,7 @@
   gap: 10px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--backlog-text, var(--afk-text, #30332f));
   font: inherit;
@@ -140,7 +140,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: 13px;
 }
 .backlog-alert.error {
@@ -192,7 +192,7 @@
   column-gap: 12px;
   align-items: stretch;
   padding: 12px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--backlog-surface);
   border: 1px solid var(--backlog-border);
   cursor: pointer;
@@ -251,7 +251,7 @@
   align-items: center;
   gap: 6px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
@@ -344,7 +344,7 @@
 .backlog-tags li {
   font-size: 11px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--backlog-accent) 14%, transparent);
   color: var(--backlog-accent);
   display: inline-flex;
@@ -358,7 +358,7 @@
   margin-top: 10px;
   padding: 12px;
   border: 1px solid color-mix(in srgb, var(--backlog-accent) 34%, var(--backlog-border));
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--backlog-accent) 5%, var(--backlog-surface));
   cursor: default;
 }
@@ -406,7 +406,7 @@
   text-align: center;
   color: var(--backlog-muted);
   border: 1px dashed var(--backlog-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -430,7 +430,7 @@
   gap: 12px;
   overflow-y: auto;
   border: 1px solid var(--backlog-border);
-  border-radius: 13px;
+  border-radius: var(--radius-md);
   padding: 18px;
   background: var(--backlog-surface);
   box-shadow: var(--shadow-panel);
@@ -458,7 +458,7 @@
   min-height: var(--backlog-control-height);
   box-sizing: border-box;
   border: 1px solid var(--backlog-border);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   padding: 0 9px;
   background: var(--backlog-surface);
   color: var(--backlog-text);
@@ -500,11 +500,11 @@
 .backlog-detail-summary .backlog-mode-tag { gap: 5px; }
 .backlog-eyebrow { color: var(--backlog-accent); font-size: 10px; font-weight: 700; letter-spacing: .12em; }
 .backlog-detail-loading,
-.backlog-detail-error { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: 10px; font-size: 13px; }
+.backlog-detail-error { display: flex; align-items: center; gap: 8px; padding: 12px; border-radius: var(--radius-md); font-size: 13px; }
 .backlog-detail-loading { color: var(--backlog-muted); background: color-mix(in srgb, var(--backlog-accent) 8%, transparent); }
 .backlog-detail-error { color: var(--attention); background: color-mix(in srgb, var(--attention) 12%, var(--backlog-surface)); }
 .backlog-detail-content { display: flex; flex-direction: column; gap: 22px; }
-.backlog-status-pill { padding: 4px 9px; border-radius: 999px; background: color-mix(in srgb, var(--backlog-accent) 12%, transparent); color: var(--backlog-accent); font-size: 11px; font-weight: 700; }
+.backlog-status-pill { padding: 4px 9px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--backlog-accent) 12%, transparent); color: var(--backlog-accent); font-size: 11px; font-weight: 700; }
 .backlog-status-pill.ready { background: color-mix(in srgb, var(--ready) 18%, transparent); color: var(--ready); }
 .backlog-status-pill.in_progress, .backlog-status-pill.rework { background: var(--run-soft); color: var(--run); }
 .backlog-status-pill.verification, .backlog-status-pill.merge_ready { background: var(--verify-soft); color: var(--verify); }
@@ -535,8 +535,8 @@
 .backlog-detail-description ol { margin: .65em 0; padding-left: 1.5em; }
 .backlog-detail-description li + li { margin-top: .25em; }
 .backlog-detail-description blockquote { margin: .8em 0; padding: .1em .9em; border-left: 3px solid var(--backlog-accent); color: var(--backlog-muted); background: color-mix(in srgb, var(--backlog-accent) 6%, transparent); }
-.backlog-detail-description pre { margin: .8em 0; padding: 10px 12px; overflow-x: auto; border: 1px solid var(--backlog-border); border-radius: 7px; background: var(--backlog-surface-soft); font-size: 12px; line-height: 1.55; }
-.backlog-detail-description code { padding: .12em .3em; border-radius: 4px; background: color-mix(in srgb, var(--backlog-border) 42%, transparent); font-family: var(--font-mono, monospace); font-size: .9em; }
+.backlog-detail-description pre { margin: .8em 0; padding: 10px 12px; overflow-x: auto; border: 1px solid var(--backlog-border); border-radius: var(--radius-sm); background: var(--backlog-surface-soft); font-size: 12px; line-height: 1.55; }
+.backlog-detail-description code { padding: .12em .3em; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--backlog-border) 42%, transparent); font-family: var(--font-mono, monospace); font-size: .9em; }
 .backlog-detail-description pre code { padding: 0; background: transparent; }
 .backlog-detail-description table { width: 100%; margin: .8em 0; border-collapse: collapse; font-size: 12px; }
 .backlog-detail-description th,
@@ -545,13 +545,13 @@
 .backlog-detail-description a { color: var(--backlog-accent); }
 .backlog-detail-description input[type="checkbox"] { margin: 0 .45em 0 0; vertical-align: -.1em; accent-color: var(--backlog-accent); }
 .backlog-detail-description .markdown-mermaid { margin: .8em 0; }
-.backlog-detail-grid { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--backlog-border); border-radius: 11px; background: var(--backlog-border); }
+.backlog-detail-grid { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--backlog-border); border-radius: var(--radius-md); background: var(--backlog-border); }
 .backlog-detail-value { display: grid; gap: 6px; padding: 12px; background: var(--backlog-surface); }
 .backlog-detail-label { display: flex; align-items: center; gap: 5px; color: var(--backlog-muted); font-size: 11px; }
 .backlog-detail-value strong { color: var(--backlog-text); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .backlog-inline-link { padding: 0; border: 0; background: transparent; color: var(--backlog-accent); font: inherit; font-size: inherit; font-weight: inherit; text-align: left; text-decoration: underline; cursor: pointer; }
 .backlog-inline-link:hover { filter: brightness(1.08); }
-.backlog-external-link { display: flex; height: 32px; box-sizing: border-box; align-items: center; justify-content: center; gap: 8px; padding: 0 11px; border: 1px solid transparent; border-radius: 7px; background: var(--backlog-accent); color: var(--surface-raised); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.backlog-external-link { display: flex; height: 32px; box-sizing: border-box; align-items: center; justify-content: center; gap: 8px; padding: 0 11px; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--backlog-accent); color: var(--surface-raised); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .backlog-external-link span { margin-left: auto; font-size: 16px; }
 .backlog-external-link:hover { filter: brightness(1.05); }
 .backlog-detail-muted { margin: 0; color: var(--backlog-muted); font-size: 12px; }

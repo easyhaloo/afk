@@ -44,7 +44,7 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
 .terminal-sheet pre::-webkit-scrollbar { width: 8px; height: 8px; }
 .workspace::-webkit-scrollbar-thumb,
 .inspector::-webkit-scrollbar-thumb,
-.terminal-sheet pre::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 99px; background: #d5d5dd; background-clip: padding-box; }
+.terminal-sheet pre::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: #d5d5dd; background-clip: padding-box; }
 
 .view-header {
   position: sticky;

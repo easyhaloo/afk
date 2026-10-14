@@ -50,6 +50,26 @@ function blurredShadows(): string[] {
         .map(layer => `${name}:${i + 1}: ${layer}`)));
 }
 
+/**
+ * Every single-value px border-radius outside tokens.css. The hand-drawn
+ * signature lives in --radius-*; a lone `8px` means a mechanical corner crept
+ * back in. Percentages (circles), `0` (squares), var() and hand-written
+ * multi-corner values (the workflow node pair) are all deliberate.
+ *
+ * Matched globally per file, NOT per line: runtime.css and timeline.css are
+ * minified onto a single line, and a line-at-a-time pass silently converts
+ * only the first declaration on it.
+ */
+function literalRadii(): string[] {
+  const single = new RegExp(String.raw`border-radius:\s*\d+(?:\.\d+)?px(?![-\d.,%/\s])`, "g");
+  return readdirSync(src, { recursive: true, encoding: "utf8" })
+    .filter(name => name.endsWith(".css") && name !== "tokens.css")
+    .flatMap(name => (readFileSync(path.join(src, name), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, " "))
+      .match(single) ?? [])
+      .map(hit => `${name}: ${hit}`));
+}
+
 const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })
   .filter(name => name.endsWith(".css"))
   .map(name => readFileSync(path.join(src, name), "utf8"))
@@ -141,6 +161,13 @@ describe("design tokens", () => {
     expect(
       blurredShadows(),
       "blurred drop shadows are pre-reskin; use --shadow-btn/-panel/-panel-sm",
+    ).toEqual([]);
+  });
+
+  it("has no single-value px border radii left", () => {
+    expect(
+      literalRadii(),
+      "single-value px radii are mechanical; use --radius-sm/-md/-lg/-pill",
     ).toEqual([]);
   });
 

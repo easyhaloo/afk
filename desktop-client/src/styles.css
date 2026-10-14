@@ -100,7 +100,7 @@ input:focus-visible {
   align-items: center;
   width: 100%;
   padding: 8px;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--afk-border-strong);
   text-align: left;
@@ -148,7 +148,7 @@ input:focus-visible {
   width: 100%;
   min-height: 34px;
   padding: 0 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--afk-muted);
   font-size: 12px;
@@ -170,7 +170,7 @@ input:focus-visible {
   min-width: 17px;
   margin-left: auto;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--afk-border);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
@@ -217,7 +217,7 @@ input:focus-visible {
   height: 31px;
   padding: 0 10px;
   border: 1px solid var(--afk-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-muted);
   font-size: 10px;
@@ -226,7 +226,7 @@ input:focus-visible {
 .command kbd {
   padding: 1px 4px;
   border: 1px solid var(--afk-border);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--afk-panel-subtle);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
@@ -240,7 +240,7 @@ input:focus-visible {
   width: 30px;
   height: 30px;
   border: 1px solid var(--afk-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-muted);
 }
@@ -259,7 +259,7 @@ input:focus-visible {
   gap: 7px;
   height: 31px;
   padding: 0 11px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-text);
   font-size: 10px;
@@ -274,7 +274,7 @@ input:focus-visible {
   margin: 12px 16px -2px;
   padding: 9px 12px;
   border: 1px solid var(--fail-ln);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--fail-bg);
   color: var(--fail);
   font-size: 11px;
@@ -286,7 +286,7 @@ input:focus-visible {
   margin: 10px 12px 20px;
   padding: 0 20px 20px;
   border: 1px solid var(--afk-border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   background: var(--afk-panel);
   box-shadow: var(--shadow-panel);
 }
@@ -364,7 +364,7 @@ input:focus-visible {
 .event-row .event-state {
   justify-self: end;
   padding: 3px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--afk-border);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
@@ -393,7 +393,7 @@ input:focus-visible {
   height: 19px;
   overflow: visible;
   border: 1px solid var(--afk-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: repeating-linear-gradient(
     90deg,
     transparent 0 11px,
@@ -415,7 +415,7 @@ input:focus-visible {
   z-index: 1;
   top: 6px;
   height: 4px;
-  border-radius: 99px;
+  border-radius: var(--radius-pill);
   background: var(--afk-border-strong);
 }
 
@@ -535,7 +535,7 @@ input:focus-visible {
   margin-top: 15px;
   padding: 0 11px;
   border: 1px solid var(--afk-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: linear-gradient(
     90deg,
     var(--afk-panel-subtle),
@@ -570,7 +570,7 @@ input:focus-visible {
 .board-column {
   min-height: 390px;
   border: 1px solid var(--afk-border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--afk-panel-subtle);
 }
 
@@ -601,7 +601,7 @@ input:focus-visible {
   margin: 8px;
   padding: 10px;
   border: 1px solid var(--afk-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-border-strong);
   text-align: left;
@@ -668,7 +668,7 @@ input:focus-visible {
   overflow: auto;
   padding: 15px;
   border: 1px solid var(--afk-accent-border);
-  border-radius: 15px;
+  border-radius: var(--radius-lg);
   background: var(--afk-panel);
   box-shadow: var(--shadow-panel);
 }
@@ -700,7 +700,7 @@ input:focus-visible {
 
 .inspector-title span {
   padding: 3px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--afk-accent-soft);
   color: var(--afk-accent);
   font-family: var(--afk-mono);
@@ -743,7 +743,7 @@ input:focus-visible {
   overflow: auto;
   margin: 7px 0 13px;
   padding: 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--afk-panel-subtle);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
@@ -760,7 +760,7 @@ input:focus-visible {
   gap: 7px;
   width: 100%;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--afk-border-strong);
   color: var(--afk-panel);
   font-size: 10px;
@@ -779,7 +779,7 @@ input:focus-visible {
 .table-panel {
   overflow: hidden;
   border: 1px solid var(--afk-border);
-  border-radius: 11px;
+  border-radius: var(--radius-md);
   background: var(--afk-panel);
 }
 
@@ -844,7 +844,7 @@ input:focus-visible {
   height: 26px;
   padding: 0 8px;
   border: 1px solid var(--afk-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--afk-panel);
   color: var(--afk-muted);
   font-size: 9px;
@@ -870,7 +870,7 @@ input:focus-visible {
   grid-template-columns: 160px minmax(0, 1fr);
   margin-top: 15px;
   border: 1px solid var(--afk-border);
-  border-radius: 11px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -905,7 +905,7 @@ input:focus-visible {
   width: min(710px, calc(100vw - 276px));
   overflow: hidden;
   border: 1px solid var(--afk-border-strong);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--afk-panel);
   color: var(--afk-text);
   box-shadow: var(--shadow-panel);
@@ -975,7 +975,7 @@ input:focus-visible {
   flex: 1;
   padding: 0 9px;
   border: 1px solid var(--afk-border-strong);
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--afk-page-bg);
   color: var(--afk-text);
   font-family: var(--afk-mono);
@@ -990,7 +990,7 @@ input:focus-visible {
   align-items: center;
   gap: 5px;
   padding: 0 10px;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: var(--afk-accent);
   color: var(--afk-panel);
   font-size: 10px;
@@ -1067,7 +1067,7 @@ input:focus-visible {
   width: 28px;
   height: 28px;
   place-items: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .terminal-sheet .terminal-window-actions .icon-button:hover:not(:disabled) {

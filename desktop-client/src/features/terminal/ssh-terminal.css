@@ -38,6 +38,6 @@
 
 .ssh-terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
   border: 2px solid #1c1f24;
-  border-radius: 99px;
+  border-radius: var(--radius-pill);
   background: #4b525d;
 }

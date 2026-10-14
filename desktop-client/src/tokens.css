@@ -30,6 +30,15 @@
   --ease: cubic-bezier(.23, 1, .32, 1);
   --dur-fast: 110ms;
   --dur: 180ms;
+
+  /* Hand-drawn corners: adjacent radii are deliberately unequal, which is the
+     whole signature. Values are the prototype's ratios at this app's denser
+     pixel scale — the sketch runs 10px type and 18px tags, this runs 9px.
+     --radius-lg rotates, so panels read as pinwheels. */
+  --radius-sm:   2px 5px 3px 1px;
+  --radius-md:   5px 11px 8px 3px;
+  --radius-lg:   10px 16px 13px 7px / 16px 10px 7px 13px;
+  --radius-pill: 999px;
 }
 
 /* ---------- 2. palette: dark (default) ---------- */

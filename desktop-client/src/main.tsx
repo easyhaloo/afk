@@ -6,6 +6,7 @@ import {
   ClipboardList, Clock3, Container, FolderOpen, LayoutList, Minus, Move, Plus, RefreshCw, ChevronLeft,
   Send, Settings2, Sparkles, Terminal, TerminalSquare, TriangleAlert, Workflow, X,
 } from "lucide-react";
+import "./tokens.css";
 import "./styles.css";
 import "./timeline.css";
 import "./runtime.css";

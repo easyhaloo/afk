@@ -1,0 +1,219 @@
+/* ============================================================================
+   AFK Control — design tokens
+   ----------------------------------------------------------------------------
+   The only file that knows what a theme is.
+
+   Three layers, in cascade order:
+     1. structural  — fonts, motion, density. Theme-agnostic.
+     2. palette     — paper/ink ramps, one block per theme.
+     3. aliases     — the three vocabularies the rest of the app already reads
+                      (--afk-*, the bare palette names, --backlog-*). They all
+                      point at the tokens above, so no component rule had to be
+                      touched to restyle the app.
+
+   Layer 3 is a temporary bridge. Phase 2 folds it into layers 1-2 and drops
+   the old vocabularies.
+
+   Dark is the DEFAULT and lives on :root rather than a [data-afk-theme="dark"]
+   block: main.tsx writes the attribute at runtime, so an absent attribute would
+   otherwise paint one unstyled frame before React mounts.
+   ========================================================================== */
+
+/* ---------- 1. structural ---------- */
+:root {
+  /* The prototype stacks PingFang first; the app has always led with
+     -apple-system, and changing glyph selection is not part of a reskin. */
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-hand: "Chalkboard SE", "Marker Felt", "Bradley Hand", cursive;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --ease: cubic-bezier(.23, 1, .32, 1);
+  --dur-fast: 110ms;
+  --dur: 180ms;
+}
+
+/* ---------- 2. palette: dark (default) ---------- */
+:root {
+  --paper:       #1e1c18;
+  --paper-2:     #252320;
+  --paper-3:     #2c2924;
+  --paper-in:    #161410;
+  --paper-rule:  rgba(190, 172, 148, .13);
+  --paper-dot:   rgba(190, 172, 148, .20);
+
+  --ink-faint:   #3d3830;
+  --ink-dim:     #a89b8a;
+  --ink-quiet:   #b8ab99;
+  --ink-mid:     #c9bdaa;
+  --ink-main:    #e0d6c4;
+  --ink-shadow:  rgba(214, 200, 176, .18);
+
+  /* One accent. It doubles as the running-state colour, which is why the
+     palette needs no separate "running" hue. */
+  --accent:      #7ab88c;
+  --accent-bg:   rgba(122, 184, 140, 0.12);
+  --accent-ln:   rgba(122, 184, 140, 0.35);
+
+  --warn:        #c4985a;
+  --warn-bg:     rgba(196, 152, 90, 0.12);
+  --warn-ln:     rgba(196, 152, 90, 0.35);
+
+  --fail:        #c47068;
+  --fail-bg:     rgba(196, 112, 104, 0.12);
+  --fail-ln:     rgba(196, 112, 104, 0.35);
+
+  /* Hard offset shadows are the signature. They need a lighter ink on light
+     paper to read at the same weight — hence the alpha swing in --ink-shadow. */
+  --shadow-btn:      3px 3px 0 var(--ink-shadow);
+  --shadow-panel:    4px 4px 0 var(--ink-shadow);
+  --shadow-panel-sm: 2px 2px 0 var(--ink-shadow);
+
+  color-scheme: dark;
+}
+
+/* ---------- 2b. palette: light ---------- */
+:root[data-afk-theme="light"] {
+  --paper:       #f0e8d5;
+  --paper-2:     #e8dec6;
+  --paper-3:     #ddd4b8;
+  --paper-in:    #e4d9c0;
+  --paper-rule:  rgba(100, 78, 52, .12);
+  --paper-dot:   rgba(100, 78, 52, .18);
+
+  --ink-faint:   #c8bca8;
+  --ink-dim:     #63543d;
+  --ink-quiet:   #574835;
+  --ink-mid:     #453623;
+  --ink-main:    #2e2416;
+  --ink-shadow:  rgba(58, 42, 22, .62);
+
+  --accent:      #2e6640;
+  --accent-bg:   rgba(46, 102, 64, 0.10);
+  --accent-ln:   rgba(46, 102, 64, 0.30);
+
+  --warn:        #6b480d;
+  --warn-bg:     rgba(138, 90, 20, 0.10);
+  --warn-ln:     rgba(138, 90, 20, 0.30);
+
+  --fail:        #9a3c34;
+  --fail-bg:     rgba(154, 60, 52, 0.10);
+  --fail-ln:     rgba(154, 60, 52, 0.30);
+
+  color-scheme: light;
+}
+
+/* ---------- 3a. appearance axes (moved out of control.css) ---------- */
+:root {
+  --afk-font: var(--font-body);
+  --afk-scale: 1;
+  /* Headers resolve through one variable; switching the hand-drawn font is a
+     single root change rather than a branch at every heading. */
+  --afk-font-head: var(--afk-font);
+}
+:root[data-afk-font="serif"] { --afk-font: "Noto Serif SC", "Songti SC", STSong, serif; }
+:root[data-afk-font="mono"]  { --afk-font: "SF Mono", "JetBrains Mono", "Noto Sans Mono CJK SC", monospace; }
+:root[data-afk-scale="small"] { --afk-scale: .92; }
+:root[data-afk-scale="large"] { --afk-scale: 1.1; }
+:root[data-afk-hand="1"] { --afk-font-head: var(--font-hand); }
+
+/* ---------- 3b. alias layer ---------- */
+/* --afk-* vocabulary (control.css). Plain var() references only — selection.css
+   wraps several of these in color-mix(), which requires substitution to happen
+   before mixing. Never make an alias a color-mix. */
+:root {
+  --afk-page-bg: var(--paper-in);
+  --afk-panel: var(--paper);
+  --afk-panel-subtle: var(--paper-2);
+  --afk-text: var(--ink-main);
+  --afk-muted: var(--ink-dim);
+  --afk-border: var(--ink-faint);
+  --afk-border-strong: var(--ink-dim);
+  --afk-accent: var(--accent);
+  --afk-accent-soft: var(--accent-bg);
+  --afk-accent-border: var(--accent-ln);
+
+  /* Consumed by ssh.css but never defined anywhere — these declarations were
+     silently invalid until now. */
+  --afk-danger: var(--fail);
+  --afk-subtle: var(--paper-3);
+  --afk-mono: var(--font-mono);
+}
+
+/* Bare palette vocabulary (was palette.css). --quiet is dropped: zero
+   consumers. ready/verify collapse onto neutral and the accent respectively —
+   the five run states are told apart by their glyph, not by a fifth hue. */
+:root {
+  --canvas: var(--paper-in);
+  --surface: var(--paper-2);
+  --surface-raised: var(--paper);
+  --line: var(--ink-faint);
+  --line-soft: var(--paper-rule);
+  --ink: var(--ink-main);
+  --muted: var(--ink-dim);
+
+  --ready: var(--ink-dim);
+  --run: var(--accent);
+  --run-soft: var(--accent-bg);
+  --verify: var(--accent);
+  --verify-soft: var(--accent-bg);
+  --attention: var(--warn);
+  --attention-soft: var(--warn-bg);
+}
+
+/* The --backlog-* vocabulary is declared on .backlog-page (backlog.css) and
+   aliases the bare names above, so it resolves through inheritance unchanged. */
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+/* The paper texture is the painted floor of the stacking context; the app shell
+   stays transparent so it reads through. #root must sit above it — the
+   prototype only needed body{position:relative;z-index:1} because it had no
+   separate React root. */
+html {
+  position: relative;
+  font-synthesis: none;
+}
+html::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(0deg,   transparent, transparent 24px, var(--paper-rule) 24px, var(--paper-rule) 25px),
+    repeating-linear-gradient(90deg,  transparent, transparent 40px, var(--paper-rule) 40px, var(--paper-rule) 41px),
+    radial-gradient(ellipse 1.5px 1px at 15% 23%, var(--paper-dot) 0%, transparent 100%),
+    radial-gradient(ellipse 1px 1.5px at 67% 11%, var(--paper-dot) 0%, transparent 100%),
+    radial-gradient(ellipse 1px 1px at 43% 77%, var(--paper-dot) 0%, transparent 100%),
+    radial-gradient(ellipse 1.2px 1.2px at 88% 55%, var(--paper-dot) 0%, transparent 100%),
+    radial-gradient(ellipse 1px 1px at 29% 89%, var(--paper-dot) 0%, transparent 100%);
+}
+#root {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+}
+
+body {
+  min-width: 1100px;
+  margin: 0;
+  background: var(--paper-in);
+  color: var(--ink-main);
+  font-family: var(--afk-font);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button, input, textarea, select { font: inherit; color: inherit; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

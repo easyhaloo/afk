@@ -1,0 +1,1262 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AFK Control · 桌面端整体重设计原型</title>
+<style>
+/* ============================================================================
+   AFK Control 视觉系统 v2
+   ----------------------------------------------------------------------------
+   设计意图：本地工程运维控制台。密度优先，语义优先，无装饰。
+   范围：全部 renderer 表面（运行中心、看板、工作项、工作流、Agent、资源、
+         SSH、活动记录、设置）。
+
+   单一强调色规则（COLOR LOCK）
+     全局只有一个品牌强调色：running green。它同时是运行状态的语义色。
+     语义色板 = 同一绿色系的填充/描边区分 + 琥珀（待处理）+ 红（失败）。
+     任何组件不得引入第五种色相。
+   圆角规则（SHAPE LOCK）
+     4px 圆点与色块内芯 / 6px 按钮与输入框 / 10px 面板与卡片 / 999px 药丸与头像。
+   z 轴刻度（SCALE）
+     0 基础流 / 10 粘性表头 / 20 浮层 / 30 抽屉 / 40 对话框。
+   字体
+     CJK 优先系统无衬线；所有数字、ID、路径、时间戳、令牌计数一律等宽。
+   ========================================================================== */
+
+/* ---------- 1. 令牌层 ---------- */
+:root {
+  --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  --r-dot: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-pill: 999px;
+
+  --row-h: 46px;
+  --sidebar-w: 236px;
+  --z-sticky: 10;
+  --z-pop: 20;
+  --z-drawer: 30;
+  --z-modal: 40;
+
+  --ease: cubic-bezier(.23, 1, .32, 1);
+  --dur-fast: 110ms;
+  --dur: 180ms;
+}
+
+html[data-theme="dark"] {
+  --void:        #0d0e10;
+  --chrome:      #131417;
+  --surface:     #17191c;
+  --raised:      #1e2126;
+  --raised-2:    #24272d;
+  --inset:       #101113;
+  --line:        #26292e;
+  --line-strong: #353940;
+  --text:        #e4e7ea;
+  --text-mid:    #a2a8b1;
+  --text-quiet:  #858b94; /* 5.0:1 on --surface，元数据正文仍需 AA */
+  --accent:      #58b489;
+  --accent-ink:  #0d1a14;
+  --accent-soft: rgba(88, 180, 137, .13);
+  --accent-line: rgba(88, 180, 137, .40);
+  --warn:        #d5a049;
+  --warn-soft:   rgba(213, 160, 73, .13);
+  --warn-line:   rgba(213, 160, 73, .38);
+  --fail:        #e0655f;
+  --fail-soft:   rgba(224, 101, 95, .13);
+  --fail-line:   rgba(224, 101, 95, .38);
+  --shadow-pop:  0 14px 34px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  --void:        #e4e7ea;
+  --chrome:      #f2f4f6;
+  --surface:     #ffffff;
+  --raised:      #ffffff;
+  --raised-2:    #f4f6f7;
+  --inset:       #f7f8fa;
+  --line:        #e2e5e9;
+  --line-strong: #cbd0d6;
+  --text:        #1a1d21;
+  --text-mid:    #5c636d;
+  --text-quiet:  #6a7078; /* 4.9:1 on white，元数据正文仍需 AA */
+  --accent:      #256b4a;
+  --accent-ink:  #ffffff;
+  --accent-soft: rgba(43, 129, 88, .10);
+  --accent-line: rgba(43, 129, 88, .34);
+  --warn:        #9a6512;
+  --warn-soft:   rgba(154, 101, 18, .10);
+  --warn-line:   rgba(154, 101, 18, .32);
+  --fail:        #bf4038;
+  --fail-soft:   rgba(191, 64, 56, .10);
+  --fail-line:   rgba(191, 64, 56, .32);
+  --shadow-pop:  0 12px 28px rgba(26, 32, 40, .14);
+  color-scheme: light;
+}
+
+/* ---------- 2. 基础 ---------- */
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; padding: 0; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.ico { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.ico-sm { width: 13px; height: 13px; }
+.ico-lg { width: 19px; height: 19px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+/* ---------- 3. 外框 ---------- */
+.frame { display: grid; height: 100dvh; grid-template-rows: 30px minmax(0, 1fr); }
+.titlebar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+  color: var(--text-quiet);
+  font-size: 11px;
+  user-select: none;
+}
+.traffic { display: flex; gap: 8px; padding-left: 12px; }
+.traffic i { width: 11px; height: 11px; border-radius: var(--r-dot); background: var(--line-strong); }
+.traffic i:nth-child(1) { background: #e0685f; }
+.traffic i:nth-child(2) { background: #d7a24c; }
+.traffic i:nth-child(3) { background: #5cb172; }
+.titlebar > b { font-weight: 600; color: var(--text-mid); letter-spacing: .02em; }
+.titlebar-right { display: flex; gap: 10px; align-items: center; justify-content: flex-end; padding-right: 12px; }
+
+.app { display: grid; min-height: 0; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+
+/* ---------- 4. 侧栏 ---------- */
+.sidebar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 16px 10px 10px;
+  border-right: 1px solid var(--line);
+  background: var(--chrome);
+}
+.brand { display: grid; grid-template-columns: 26px 1fr; align-items: center; gap: 9px; padding: 0 8px 14px; }
+.brand-mark {
+  display: grid; width: 24px; height: 24px; place-items: center;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 12px; font-weight: 800;
+  clip-path: polygon(50% 0, 100% 100%, 66% 100%, 50% 58%, 34% 100%, 0 100%);
+}
+.brand b { display: block; font-size: 11px; font-weight: 700; letter-spacing: .1em; }
+.brand small { display: block; margin-top: 1px; color: var(--text-quiet); font-size: 9px; }
+
+.ws {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 34px; padding: 0 9px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--text-mid); font-size: 12px;
+  text-align: left;
+}
+.ws:hover { border-color: var(--line-strong); color: var(--text); }
+.ws .ico { color: var(--text-quiet); }
+.ws span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws em { margin-left: auto; color: var(--text-quiet); font-size: 10px; font-style: normal; }
+
+.nav { display: grid; gap: 14px; margin-top: 16px; overflow-y: auto; }
+.nav-group { display: grid; gap: 1px; }
+.nav-group > span { padding: 0 9px 5px; color: var(--text-quiet); font-size: 10px; }
+.nav-item {
+  position: relative;
+  display: flex; align-items: center; gap: 9px;
+  min-height: 32px; padding: 0 9px;
+  border-radius: var(--r-sm); color: var(--text-mid); font-size: 12px;
+  text-align: left;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.nav-item .ico { color: var(--text-quiet); transition: color var(--dur-fast) ease; }
+.nav-item:hover { background: var(--raised-2); color: var(--text); }
+.nav-item:hover .ico { color: var(--text-mid); }
+.nav-item.active { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+.nav-item.active .ico { color: var(--accent); }
+.nav-item.active::before {
+  content: ""; position: absolute; left: -10px; top: 8px;
+  width: 2px; height: 16px; border-radius: 0 2px 2px 0; background: var(--accent);
+}
+.nav-item .count {
+  margin-left: auto; padding: 1px 5px; border-radius: var(--r-pill);
+  background: var(--raised-2); color: var(--text-quiet);
+  font-family: var(--font-mono); font-size: 9px; line-height: 1.5;
+}
+.nav-item .count.alarm { background: var(--warn-soft); color: var(--warn); }
+
+.side-foot { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
+.side-foot .nav-item { min-height: 30px; font-size: 11px; }
+.side-foot .nav-item .ico { width: 14px; height: 14px; }
+
+/* ---------- 5. 主区外壳 ---------- */
+.main { display: grid; min-height: 0; grid-template-rows: 46px minmax(0, 1fr); background: var(--surface); }
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 16px 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.topbar h1 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -.01em; }
+.topbar .sub { color: var(--text-quiet); font-size: 11px; }
+.topbar-actions { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+.view { overflow-y: auto; padding: 16px 20px 28px; display: flex; flex-direction: column; }
+.view > section, .view > .run-layout { flex: 1; }
+/* 单面板视图（工作项、Agent、仓库、SSH）让面板吃满视口高度，
+   空状态落在面板内部而不是悬在面板下方，看起来是有意留白而不是漏排。
+   只作用于显式标注 .stack 的视图：网格型视图（.run-layout / .board /
+   .flow-wrap）自己管布局，不走这条纵向流。 */
+.view > section.stack { display: flex; flex-direction: column; }
+.view > section.stack > .panel:last-child { flex: 1; display: flex; flex-direction: column; }
+.view > section.stack > .toolbar, .view > section.stack > .stats { flex: none; }
+
+/* ---------- 6. 控件 ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--raised); color: var(--text-mid);
+  font-size: 12px; white-space: nowrap;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+.btn:hover { border-color: var(--line-strong); background: var(--raised-2); color: var(--text); }
+.btn:active { transform: translateY(1px); }
+.btn .ico { color: var(--text-quiet); }
+.btn.icon { width: 28px; padding: 0; justify-content: center; }
+.btn.primary { border-color: transparent; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.primary:hover { background: var(--accent); filter: brightness(1.1); color: var(--accent-ink); }
+.btn.primary .ico { color: currentColor; }
+.btn.ghost { border-color: transparent; background: transparent; }
+.btn.ghost:hover { background: var(--raised-2); }
+.btn.danger { color: var(--fail); }
+.btn.danger:hover { border-color: var(--fail-line); background: var(--fail-soft); color: var(--fail); }
+.btn[disabled] { opacity: .45; pointer-events: none; }
+
+.seg { display: inline-flex; gap: 1px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--inset); }
+.seg button {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px; padding: 0 9px; border-radius: 4px;
+  color: var(--text-quiet); font-size: 11px; white-space: nowrap;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.seg button:hover { color: var(--text-mid); }
+.seg button.on { background: var(--raised-2); color: var(--text); font-weight: 600; }
+.seg button em { font-family: var(--font-mono); font-style: normal; opacity: .7; }
+
+.field {
+  display: flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 9px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--inset);
+  color: var(--text-quiet);
+  transition: border-color var(--dur-fast) ease;
+}
+.field:focus-within { border-color: var(--accent-line); }
+.field input { width: 100%; min-width: 0; border: 0; background: none; outline: none; font-size: 12px; }
+.field input::placeholder { color: var(--text-quiet); }
+.field .ico { width: 14px; height: 14px; }
+
+select.pick {
+  height: 28px; padding: 0 24px 0 9px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--raised) no-repeat right 7px center/10px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 12px center, right 7px center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--text-mid); font-size: 12px; appearance: none;
+}
+select.pick:hover { border-color: var(--line-strong); color: var(--text); }
+
+/* 状态药丸：语义色 + 文字，不靠裸色点传达状态 */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 19px; padding: 0 7px; border-radius: var(--r-pill);
+  font-size: 10px; font-weight: 600; white-space: nowrap;
+}
+.pill .ico { width: 11px; height: 11px; stroke-width: 2.1; }
+.pill.run    { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.pill.done   { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.pill.wait   { background: var(--warn-soft);   color: var(--warn);   box-shadow: inset 0 0 0 1px var(--warn-line); }
+.pill.fail   { background: var(--fail-soft);   color: var(--fail);   box-shadow: inset 0 0 0 1px var(--fail-line); }
+.pill.idle   { background: var(--raised-2);    color: var(--text-quiet); box-shadow: inset 0 0 0 1px var(--line); }
+.pill.live::after {
+  content: ""; width: 4px; height: 4px; border-radius: var(--r-dot);
+  background: currentColor;
+  animation: beat 1.8s var(--ease) infinite;
+}
+
+/* ---------- 7. 统计条：数据用留白呼吸，不用卡片阵列 ---------- */
+.stats { display: flex; align-items: baseline; gap: 0; margin-bottom: 14px; flex-wrap: wrap; }
+.stats div { display: flex; align-items: baseline; gap: 7px; padding: 0 18px; border-left: 1px solid var(--line); }
+.stats div:first-child { padding-left: 0; border-left: 0; }
+.stats b { font-family: var(--font-mono); font-size: 19px; font-weight: 600; letter-spacing: -.02em; }
+.stats span { color: var(--text-quiet); font-size: 11px; }
+.stats .hot b { color: var(--warn); }
+.stats .bad b { color: var(--fail); }
+.stats .ok b { color: var(--accent); }
+
+/* ---------- 8. 面板 ---------- */
+.panel { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); overflow: hidden; }
+.panel > header {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 40px; padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.panel > header b { font-size: 12px; font-weight: 650; }
+.panel > header .note { color: var(--text-quiet); font-size: 11px; }
+.panel > header .tools { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+
+/* ---------- 9. 运行列表 ---------- */
+.run-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: stretch; }
+.run-layout > div { display: flex; min-width: 0; flex-direction: column; }
+.run-layout > div > .panel { flex: 1; display: flex; flex-direction: column; }
+.run-layout > div > .panel > .run-col-head { flex: none; }
+.run-layout > div > .stats, .run-layout > div > .toolbar { flex: none; }
+.run-col-head {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) 74px 96px;
+  gap: 12px; align-items: center;
+  height: 28px; padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-quiet); font-size: 10px;
+  position: sticky; top: 0; z-index: var(--z-sticky);
+  background: var(--surface);
+}
+.run-col-head span:nth-child(3), .run-col-head span:nth-child(4) { text-align: right; }
+.run-row {
+  position: relative; display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 74px 96px;
+  gap: 12px; align-items: center;
+  width: 100%; min-height: var(--row-h); padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  transition: background-color var(--dur-fast) ease;
+}
+.run-row:last-child { border-bottom: 0; }
+.run-row:hover { background: var(--raised); }
+.run-row.sel { background: var(--raised); }
+.run-row.sel::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+.glyph {
+  display: grid; width: 20px; height: 20px; place-items: center;
+  border-radius: var(--r-sm);
+}
+.glyph .ico { width: 13px; height: 13px; }
+.glyph.run  { background: var(--accent-soft); color: var(--accent); }
+.glyph.done { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.glyph.wait { background: var(--warn-soft);   color: var(--warn); }
+.glyph.fail { background: var(--fail-soft);   color: var(--fail); }
+.glyph.idle { background: var(--raised-2);    color: var(--text-quiet); }
+
+.run-main { min-width: 0; }
+.run-main b { display: block; overflow: hidden; font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.run-main small {
+  display: flex; gap: 7px; margin-top: 2px;
+  overflow: hidden; color: var(--text-quiet);
+  font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap;
+}
+.run-main small i { font-style: normal; overflow: hidden; text-overflow: ellipsis; }
+.run-main small .sep { flex: none; opacity: .5; }
+.run-dur { text-align: right; font-family: var(--font-mono); font-size: 10.5px; }
+.run-time { text-align: right; font-size: 10.5px; color: var(--text-quiet); white-space: nowrap; }
+.run-row:hover .run-dur, .run-row:hover .run-time, .run-row.sel .run-dur, .run-row.sel .run-time { color: var(--text-mid); }
+
+/* 新事件到达：一次高亮，然后归位 */
+@keyframes arrive { from { background: var(--accent-soft); } to { background: transparent; } }
+.run-row.new { animation: arrive 900ms var(--ease) both; }
+
+/* ---------- 10. 检查器 ---------- */
+.inspector { position: sticky; top: 0; display: grid; gap: 0; }
+.insp-head { padding: 13px 14px 12px; border-bottom: 1px solid var(--line); }
+.insp-head .meta { display: flex; align-items: center; gap: 7px; color: var(--text-quiet); font-family: var(--font-mono); font-size: 10px; }
+.insp-head h2 { margin: 8px 0 0; font-size: 14px; font-weight: 650; line-height: 1.35; letter-spacing: -.01em; }
+.insp-sec { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.insp-sec > span { display: block; margin-bottom: 8px; color: var(--text-quiet); font-size: 10px; }
+.kv { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 6px 10px; font-size: 11.5px; }
+.kv dt { color: var(--text-quiet); }
+.kv dd { margin: 0; overflow: hidden; font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.meter { height: 3px; border-radius: var(--r-pill); background: var(--raised-2); overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.insp-foot { display: flex; gap: 7px; padding: 12px 14px; }
+.insp-foot .btn { flex: 1; justify-content: center; }
+
+.stream { display: grid; gap: 0; }
+.stream li { display: grid; grid-template-columns: 46px 16px minmax(0, 1fr); gap: 9px; align-items: baseline; padding: 6px 0; list-style: none; }
+.stream li time { font-family: var(--font-mono); font-size: 10px; color: var(--text-quiet); }
+.stream li p { margin: 0; font-size: 11.5px; color: var(--text-mid); }
+.stream li i { display: block; width: 5px; height: 5px; border-radius: var(--r-dot); background: var(--line-strong); }
+.stream li.ok i { background: var(--accent); }
+.stream li.bad i { background: var(--fail); }
+.stream li.warn i { background: var(--warn); }
+
+/* ---------- 11. 看板 ---------- */
+.board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.lane { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--inset); overflow: hidden; }
+.lane > header { display: flex; align-items: center; gap: 7px; height: 36px; padding: 0 11px; border-bottom: 1px solid var(--line); }
+.lane > header b { font-size: 11.5px; font-weight: 650; }
+.lane > header em { margin-left: auto; font-family: var(--font-mono); font-size: 10px; font-style: normal; color: var(--text-quiet); }
+.lane > header .mark { width: 6px; height: 6px; border-radius: var(--r-dot); }
+.lane.run > header .mark { background: var(--accent); }
+.lane.done > header .mark { background: var(--accent); opacity: .55; }
+.lane.wait > header .mark { background: var(--warn); }
+.lane.fail > header .mark { background: var(--fail); }
+.lane .cards { display: grid; gap: 6px; padding: 8px; min-height: 90px; }
+.card {
+  display: block; width: 100%; padding: 9px 10px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--raised); text-align: left;
+  transition: border-color var(--dur-fast) ease, transform var(--dur-fast) ease, background-color var(--dur-fast) ease;
+}
+.card:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+.card.sel { border-color: var(--accent-line); background: var(--accent-soft); }
+.card b { display: block; font-size: 12px; font-weight: 600; line-height: 1.4; }
+.card small { display: block; margin-top: 4px; overflow: hidden; font-family: var(--font-mono); font-size: 10px; color: var(--text-quiet); text-overflow: ellipsis; white-space: nowrap; }
+.card .foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.card .foot time { margin-left: auto; font-size: 10px; color: var(--text-quiet); }
+.lane-empty { display: grid; place-items: center; min-height: 72px; color: var(--text-quiet); font-size: 11px; }
+
+/* ---------- 12. 工作项 ---------- */
+.toolbar { display: flex; align-items: center; gap: 7px; margin-bottom: 12px; flex-wrap: wrap; }
+.toolbar .field { width: 260px; }
+.item {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 12px; align-items: start;
+  width: 100%; padding: 13px 12px 13px 13px;
+  border-bottom: 1px solid var(--line); text-align: left;
+  transition: background-color var(--dur-fast) ease;
+}
+.item:last-child { border-bottom: 0; }
+.item:hover { background: var(--raised); }
+.item .idx { padding-top: 3px; font-family: var(--font-mono); font-size: 10px; color: var(--text-quiet); }
+.item .item-side { align-self: center; }
+.item b { font-size: 12.5px; font-weight: 600; line-height: 1.4; }
+.item .desc { display: -webkit-box; margin-top: 4px; overflow: hidden; color: var(--text-mid); font-size: 11.5px; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.item .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.tag { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: var(--r-pill); background: var(--raised-2); color: var(--text-quiet); font-size: 10px; }
+.tag.req { background: var(--warn-soft); color: var(--warn); }
+.tag.mono { font-family: var(--font-mono); }
+.item-side { display: flex; align-items: center; gap: 10px; }
+.item-side .foot { display: flex; align-items: center; gap: 7px; color: var(--text-quiet); font-family: var(--font-mono); font-size: 10px; }
+
+/* ---------- 13. 工作流画布 ---------- */
+.flow-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; height: calc(100dvh - 46px - 44px); min-height: 420px; }
+.flow-inspector { display: flex; flex-direction: column; }
+.flow-inspector .insp-foot { margin-top: auto; }
+.fld { display: grid; gap: 5px; margin-bottom: 10px; }
+.fld:last-child { margin-bottom: 0; }
+.fld > span { color: var(--text-quiet); font-size: 10px; }
+.fld input, .fld textarea {
+  width: 100%; padding: 6px 8px; resize: vertical;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--inset); color: var(--text); font-size: 11.5px; outline: none;
+}
+.fld input:focus, .fld textarea:focus { border-color: var(--accent-line); }
+.stage {
+  position: relative; overflow: hidden;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background-color: var(--inset);
+  background-image: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+.world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.edge { fill: none; stroke: var(--line-strong); stroke-width: 1.4; }
+.node {
+  position: absolute; width: 172px; padding: 9px 10px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--raised); text-align: left;
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+.node:hover { border-color: var(--line-strong); }
+.node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.node.origin { background: var(--raised-2); }
+.node .hd { display: flex; align-items: center; gap: 7px; }
+.node .hd b { font-size: 11.5px; font-weight: 650; }
+.node .hd em { margin-left: auto; font-family: var(--font-mono); font-size: 9px; font-style: normal; color: var(--text-quiet); }
+.node p { margin: 5px 0 0; color: var(--text-quiet); font-size: 10.5px; line-height: 1.45; }
+.node .who { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--text-mid); font-size: 10px; }
+.node .who .ico { width: 12px; height: 12px; color: var(--text-quiet); }
+.node .who em { margin-left: auto; font-family: var(--font-mono); font-style: normal; font-size: 9px; color: var(--text-quiet); }
+.stage-bar {
+  position: absolute; left: 12px; right: 12px; bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.stage-bar .zoom { display: flex; align-items: center; gap: 1px; margin-left: auto; padding: 2px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--raised); }
+.stage-bar .zoom button { width: 22px; height: 20px; border-radius: 4px; color: var(--text-quiet); }
+.stage-bar .zoom button:hover { background: var(--raised-2); color: var(--text); }
+.stage-bar .zoom em { padding: 0 6px; font-family: var(--font-mono); font-size: 10px; font-style: normal; color: var(--text-mid); }
+.stage-bar > span { font-family: var(--font-mono); font-size: 10px; color: var(--text-quiet); }
+
+/* ---------- 14. 通用：网格、列表、空态、骨架 ---------- */
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.row-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; min-height: 40px; padding: 8px 12px;
+  border-bottom: 1px solid var(--line); text-align: left;
+  transition: background-color var(--dur-fast) ease;
+}
+.row-item:last-child { border-bottom: 0; }
+.row-item:hover { background: var(--raised); }
+.row-item .ico-box {
+  display: grid; width: 26px; height: 26px; flex: none; place-items: center;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--inset); color: var(--text-mid);
+}
+.row-item .txt { min-width: 0; }
+.row-item .txt b { display: block; overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.row-item .txt small { display: block; margin-top: 2px; overflow: hidden; color: var(--text-quiet); font-family: var(--font-mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.row-item .end { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--text-quiet); font-family: var(--font-mono); font-size: 10px; white-space: nowrap; }
+
+.empty { display: grid; place-items: center; gap: 8px; min-height: 260px; padding: 32px; text-align: center; }
+.empty .ico-box { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--inset); color: var(--text-quiet); }
+.empty b { font-size: 13px; font-weight: 600; }
+.empty p { max-width: 44ch; margin: 0; color: var(--text-quiet); font-size: 11.5px; line-height: 1.6; }
+
+.sk { border-radius: var(--r-sm); background: linear-gradient(90deg, var(--raised) 25%, var(--raised-2) 37%, var(--raised) 63%); background-size: 400% 100%; animation: shimmer 1.5s ease infinite; }
+@keyframes shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+.sk-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) 70px; gap: 12px; align-items: center; height: var(--row-h); padding: 0 12px; border-bottom: 1px solid var(--line); }
+.sk-row .sk:nth-child(1) { width: 20px; height: 20px; }
+.sk-row .sk:nth-child(2) { height: 10px; }
+.sk-row .sk:nth-child(3) { height: 10px; }
+
+/* ---------- 15. 设置 ---------- */
+.set-row { display: flex; align-items: center; gap: 14px; min-height: 46px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.set-row:last-child { border-bottom: 0; }
+.set-row .lbl { min-width: 132px; }
+.set-row .lbl b { display: block; font-size: 12px; font-weight: 600; }
+.set-row .lbl small { display: block; margin-top: 2px; color: var(--text-quiet); font-size: 10.5px; }
+.set-row .ctl { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.swatches { display: flex; gap: 6px; }
+.swatch { width: 26px; height: 26px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
+.swatch.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+
+/* ---------- 16. 终端抽屉 ---------- */
+.sheet {
+  position: absolute; inset: 0; z-index: var(--z-modal);
+  display: grid; grid-template-rows: 34px minmax(0, 1fr);
+  border-top: 1px solid var(--line-strong);
+  background: var(--chrome);
+  box-shadow: 0 -18px 44px rgba(0, 0, 0, .42);
+}
+.sheet > header { display: flex; align-items: center; gap: 9px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.sheet > header b { font-size: 11.5px; font-weight: 600; }
+.sheet > header .ico { color: var(--text-quiet); }
+.sheet > header em { font-family: var(--font-mono); font-size: 10px; font-style: normal; color: var(--text-quiet); }
+.sheet > header .btn { margin-left: auto; }
+.term {
+  margin: 0; padding: 12px 14px; overflow: auto;
+  background: var(--inset);
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.75; color: var(--text-mid);
+  white-space: pre-wrap;
+}
+.term .g { color: var(--accent); }
+.term .y { color: var(--warn); }
+.term .r { color: var(--fail); }
+.term .q { color: var(--text-quiet); }
+
+/* ---------- 17. 视图切换动效：仅 180ms 位移淡入，无循环动画 ---------- */
+@keyframes viewIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.view > section { animation: viewIn var(--dur) var(--ease) both; }
+@keyframes beat { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* 唯一允许的无限动画是运行中指示灯（语义：此刻确实有任务在跑） */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+</style>
+</head>
+<body>
+<svg class="sr" aria-hidden="true"><symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" /></symbol>
+<symbol id="i-archive" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1" /><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></symbol>
+<symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8" /><rect width="16" height="12" x="4" y="8" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M15 13v2" /><path d="M9 13v2" /></symbol>
+<symbol id="i-boxes" viewBox="0 0 24 24"><path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z" /><path d="m7 16.5-4.74-2.85" /><path d="m7 16.5 5-3" /><path d="M7 16.5v5.17" /><path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z" /><path d="m17 16.5-5-3" /><path d="m17 16.5 4.74-2.85" /><path d="M17 16.5v5.17" /><path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z" /><path d="M12 8 7.26 5.15" /><path d="m12 8 4.74-2.85" /><path d="M12 13.5V8" /></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+<symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></symbol>
+<symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></symbol>
+<symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="m16 9-5.5 5.5L8 12" /></symbol>
+<symbol id="i-circle-dashed" viewBox="0 0 24 24"><path d="M10.1 2.182a10 10 0 0 1 3.8 0" /><path d="M13.9 21.818a10 10 0 0 1-3.8 0" /><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7" /><path d="M2.182 13.9a10 10 0 0 1 0-3.8" /><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69" /><path d="M21.818 10.1a10 10 0 0 1 0 3.8" /><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69" /><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7" /></symbol>
+<symbol id="i-circle-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="12" r="10" /></symbol>
+<symbol id="i-circle-play" viewBox="0 0 24 24"><path d="M9 9.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997A1 1 0 0 1 9 14.996z" /><circle cx="12" cy="12" r="10" /></symbol>
+<symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /></symbol>
+<symbol id="i-clipboard-list" viewBox="0 0 24 24"><rect width="8" height="4" x="8" y="2" rx="1" ry="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><path d="M12 11h4" /><path d="M12 16h4" /><path d="M8 11h.01" /><path d="M8 16h.01" /></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></symbol>
+<symbol id="i-container" viewBox="0 0 24 24"><path d="M22 7.7c0-.6-.4-1.2-.8-1.5l-6.3-3.9a1.72 1.72 0 0 0-1.7 0l-10.3 6c-.5.2-.9.8-.9 1.4v6.6c0 .5.4 1.2.8 1.5l6.3 3.9a1.72 1.72 0 0 0 1.7 0l10.3-6c.5-.3.9-1 .9-1.5Z" /><path d="M10 21.9V14L2.1 9.1" /><path d="m10 14 11.9-6.9" /><path d="M14 19.8v-8.1" /><path d="M18 17.5V9.4" /></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><path d="M12 20v2" /><path d="M12 2v2" /><path d="M17 20v2" /><path d="M17 2v2" /><path d="M2 12h2" /><path d="M2 17h2" /><path d="M2 7h2" /><path d="M20 12h2" /><path d="M20 17h2" /><path d="M20 7h2" /><path d="M7 20v2" /><path d="M7 2v2" /><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="8" y="8" width="8" height="8" rx="1" /></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3" /><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /></symbol>
+<symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></symbol>
+<symbol id="i-git-branch" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /></symbol>
+<symbol id="i-hard-drive" viewBox="0 0 24 24"><path d="M10 16h.01" /><path d="M2.212 11.577a2 2 0 0 0-.212.896V18a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-5.527a2 2 0 0 0-.212-.896L18.55 5.11A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /><path d="M21.946 12.013H2.054" /><path d="M6 16h.01" /></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><path d="m2 21 9.6-9.6" /><path d="m7.5 15.5 2.3 2.3a1 1 0 0 1 0 1.4l-2.1 2.1a1 1 0 0 1-1.4 0L4 19" /><circle cx="15.5" cy="7.5" r="5.5" /></symbol>
+<symbol id="i-layout-list" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1" /><rect width="7" height="7" x="3" y="14" rx="1" /><path d="M14 4h7" /><path d="M14 9h7" /><path d="M14 15h7" /><path d="M14 20h7" /></symbol>
+<symbol id="i-list-filter" viewBox="0 0 24 24"><path d="M2 5h20" /><path d="M6 12h12" /><path d="M9 19h6" /></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></symbol>
+<symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14" /></symbol>
+<symbol id="i-move" viewBox="0 0 24 24"><path d="M12 2v20" /><path d="m15 19-3 3-3-3" /><path d="m19 9 3 3-3 3" /><path d="M2 12h20" /><path d="m5 9-3 3 3 3" /><path d="m9 5 3-3 3 3" /></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" /></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" /><path d="M12 5v14" /></symbol>
+<symbol id="i-refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34" /><circle cx="11" cy="11" r="8" /></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z" /><path d="m21.854 2.147-10.94 10.939" /></symbol>
+<symbol id="i-server" viewBox="0 0 24 24"><rect width="20" height="8" x="2" y="2" rx="2" ry="2" /><rect width="20" height="8" x="2" y="14" rx="2" ry="2" /><line x1="6" x2="6.01" y1="6" y2="6" /><line x1="6" x2="6.01" y1="18" y2="18" /></symbol>
+<symbol id="i-settings-2" viewBox="0 0 24 24"><path d="M14 17H5" /><path d="M19 7h-9" /><circle cx="17" cy="17" r="3" /><circle cx="7" cy="7" r="3" /></symbol>
+<symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /><path d="m9 12 2 2 4-4" /></symbol>
+<symbol id="i-square-check-big" viewBox="0 0 24 24"><path d="M21 10.656V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12.344" /><path d="m9 11 3 3L22 4" /></symbol>
+<symbol id="i-square-pen" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" /></symbol>
+<symbol id="i-square-terminal" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2" /><path d="M11 13h4" /><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /></symbol>
+<symbol id="i-terminal" viewBox="0 0 24 24"><path d="M12 19h8" /><path d="m4 17 6-6-6-6" /></symbol>
+<symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></symbol>
+<symbol id="i-workflow" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2" /><path d="M7 11v4a2 2 0 0 0 2 2h4" /><rect width="8" height="8" x="13" y="13" rx="2" /></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></symbol></svg>
+
+<div class="frame">
+  <div class="titlebar">
+    <span class="traffic"><i></i><i></i><i></i></span>
+    <b>AFK Control</b>
+    <span class="titlebar-right" id="titlebar-right">tmux afk · 4 / 5 Agent 就绪</span>
+  </div>
+
+  <div class="app">
+    <!-- ============ 侧栏 ============ -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">A</span>
+        <span><b>AFK / CONTROL</b><small>本地工程运维台</small></span>
+      </div>
+
+      <button class="ws" type="button">
+        <svg class="ico"><use href="#i-folder-open" /></svg>
+        <span>~/company/afk</span>
+        <em>main</em>
+      </button>
+
+      <nav class="nav" id="nav" aria-label="主导航"></nav>
+
+      <div class="side-foot" id="side-foot"></div>
+    </aside>
+
+    <!-- ============ 主区 ============ -->
+    <main class="main">
+      <header class="topbar">
+        <h1 id="page-title">运行中心</h1>
+        <span class="sub" id="page-sub"></span>
+        <div class="topbar-actions" id="page-actions"></div>
+      </header>
+      <div class="view" id="view"></div>
+    </main>
+  </div>
+</div>
+
+<script>
+/* ---------------------------------------------------------------------------
+   原型脚本：视图切换 + 最小交互。无框架，无构建。
+   数据是演示快照，结构与真实 renderer 对齐。
+   --------------------------------------------------------------------------- */
+
+const STATE_LABEL = { run: "运行中", done: "已完成", wait: "待确认", fail: "失败", idle: "排队中" };
+const GLYPH = { run: "activity", done: "check", wait: "clock", fail: "circle-alert", idle: "circle-dashed" };
+
+const RUNS = [
+  { id: "r-201", st: "run",  title: "登录态切换丢失导致二次认证循环", src: "atlas-web #418", meta: "claude-code · worktree/login-session-fix", dur: "06:12", at: "2 分钟前", agent: "Claude Code", tokens: 184300, nodes: ["prepare", "agent", "guard", "verify"] },
+  { id: "r-202", st: "run",  title: "工作流超时后子进程未回收，端口被占用", src: "afk #207", meta: "codex · worktree/timeout-cleanup", dur: "03:40", at: "5 分钟前", agent: "Codex", tokens: 96300, nodes: ["prepare", "agent", "verify"] },
+  { id: "r-203", st: "wait", title: "PR #196 QA 工作区仍指向旧分支，等待人工确认合并", src: "atlas-web #196", meta: "qwen-code · worktree/qa-workspace", dur: "18:55", at: "9 分钟前", agent: "Qwen Code", tokens: 421700, nodes: ["prepare", "agent", "guard"] },
+  { id: "r-204", st: "fail", title: "e2e 启动超时，Playwright 未连接调试端口", src: "desktop-client #204", meta: "claude-code · worktree/e2e-timeout", dur: "01:08", at: "14 分钟前", agent: "Claude Code", tokens: 24100, nodes: ["prepare", "agent"] },
+  { id: "r-205", st: "done", title: "Agent token 用量接入运行中心检查器", src: "afk #185", meta: "claude-code · worktree/token-telemetry", dur: "12:31", at: "31 分钟前", agent: "Claude Code", tokens: 512900, nodes: ["prepare", "agent", "verify"] },
+  { id: "r-206", st: "done", title: "codex runtime 截止时间修复，doctor 启发式不再误阻断", src: "afk #184", meta: "codex · worktree/codex-deadline", dur: "09:47", at: "44 分钟前", agent: "Codex", tokens: 288400, nodes: ["prepare", "agent", "verify"] },
+  { id: "r-207", st: "done", title: "看板列宽在 1280 以下挤压状态药丸", src: "atlas-web #401", meta: "cursor-agent · worktree/board-column", dur: "04:02", at: "1 小时前", agent: "Cursor Agent", tokens: 76200, nodes: ["prepare", "agent", "verify"] },
+  { id: "r-208", st: "idle", title: "SSH 指纹二次扫描不一致时拒绝写入 known_hosts", src: "desktop-client #151", meta: "claude-code · worktree/known-hosts", dur: "00:00", at: "1 小时前", agent: "Claude Code", tokens: 0, nodes: ["prepare"] }
+];
+
+const NAV = [
+  { label: "工作", items: [
+    { k: "runs",    t: "运行中心", ico: "layout-list", badge: null },
+    { k: "items",   t: "工作项",    ico: "clipboard-list", badge: "12" },
+    { k: "flows",   t: "工作流",    ico: "workflow", badge: null }
+  ]},
+  { label: "执行", items: [
+    { k: "agents",  t: "Agent",    ico: "bot", badge: "4/5", alarm: true },
+    { k: "board",   t: "看板",      ico: "square-check-big", badge: null }
+  ]},
+  { label: "资源", items: [
+    { k: "repos",   t: "代码仓库",  ico: "folder-open", badge: "7" },
+    { k: "env",     t: "执行环境",  ico: "container", badge: "3" },
+    { k: "ssh",     t: "SSH 主机",  ico: "terminal", badge: "5" }
+  ]},
+  { label: "证据", items: [
+    { k: "events",  t: "活动记录",  ico: "archive", badge: null }
+  ]}
+];
+
+let current = "runs";
+let selectedRun = "r-201";
+let runFilter = "all";
+
+const icon = (n, cls = "") => `<svg class="ico ${cls}" aria-hidden="true"><use href="#i-${n}" /></svg>`;
+const $ = (sel) => document.querySelector(sel);
+
+function renderNav() {
+  $("#nav").innerHTML = NAV.map(g => `
+    <div class="nav-group">
+      <span>${g.label}</span>
+      ${g.items.map(it => `
+        <button class="nav-item ${current === it.k ? "active" : ""}" data-k="${it.k}" ${current === it.k ? 'aria-current="page"' : ""}>
+          ${icon(it.ico)}<span>${it.t}</span>
+          ${it.badge ? `<span class="count ${it.alarm ? "alarm" : ""}">${it.badge}</span>` : ""}
+        </button>`).join("")}
+    </div>`).join("");
+  $("#side-foot").innerHTML = `
+    <button class="nav-item ${current === "settings" ? "active" : ""}" data-k="settings">${icon("settings-2")}<span>设置</span></button>
+    <button class="nav-item" data-k="theme">${icon("circle-dot")}<span>切换主题</span></button>`;
+  $("#side-foot").querySelectorAll(".nav-item").forEach(b => b.onclick = () => {
+    if (b.dataset.k === "theme") return toggleTheme();
+    go(b.dataset.k);
+  });
+  $("#nav").querySelectorAll(".nav-item").forEach(b => b.onclick = () => go(b.dataset.k));
+}
+
+function toggleTheme() {
+  const el = document.documentElement;
+  el.dataset.theme = el.dataset.theme === "dark" ? "light" : "dark";
+}
+
+const VIEW_META = {
+  runs:     ["运行中心", "本机正在跑的任务，按最近更新排序"],
+  board:    ["看板", "按状态分列，可拖动重排"],
+  items:    ["工作项", "从 GitHub 与 GitLab 拉取的待办，可直接派发运行"],
+  flows:    ["工作流", "模板库与项目级可执行模板"],
+  editor:   ["工作流画布", "检查节点配置，保存写入 .afk/config.yml"],
+  agents:   ["Agent", "本机可执行的编码 Agent 工具检测结果"],
+  repos:    ["代码仓库", "已授权 Provider 中可访问的仓库"],
+  env:      ["执行环境", "AFK 登记的容器与 tmux 会话"],
+  ssh:      ["SSH 主机", "托管主机、指纹与密钥部署"],
+  events:   ["活动记录", "按运行回放执行事件流"],
+  settings: ["设置", "外观、缩放与本地偏好"]
+};
+
+function go(k) {
+  current = k;
+  renderNav();
+  const [t, s] = VIEW_META[k];
+  $("#page-title").textContent = t;
+  $("#page-sub").textContent = s;
+  render();
+  $("#view").scrollTop = 0;
+}
+
+const ACTIONS = {
+  runs: () => `
+    <div class="seg">
+      <button data-m="queue" class="on">${icon("layout-list")}队列</button>
+      <button data-m="board">${icon("square-check-big")}看板</button>
+    </div>
+    <button class="btn" onclick="return false">${icon("refresh-cw")}刷新</button>
+    <button class="btn primary">${icon("play")}新建运行</button>`,
+  items: () => `
+    <select class="pick"><option>自动探测</option><option>GitHub</option><option>GitLab</option></select>
+    <button class="btn icon" title="新建工作项">${icon("plus")}</button>`,
+  flows: () => `<button class="btn primary">${icon("plus")}新建工作流</button>`,
+  agents: () => `<button class="btn" onclick="return false">${icon("refresh-cw")}重新检测</button>`,
+  repos: () => `<button class="btn" onclick="return false">${icon("refresh-cw")}刷新</button>`,
+  settings: () => `<button class="btn primary">${icon("check")}保存</button>`
+};
+
+function filtered() {
+  if (runFilter === "all") return RUNS;
+  if (runFilter === "open") return RUNS.filter(r => r.st === "run" || r.st === "wait");
+  return RUNS.filter(r => r.st === runFilter);
+}
+
+function runRows(list, opts = {}) {
+  if (!list.length) return `<div class="empty">
+    <span class="ico-box">${icon("circle-dashed", "ico-lg")}</span>
+    <b>没有符合条件的运行</b>
+    <p>调整筛选条件，或从工作项页新建一次运行。</p>
+  </div>`;
+  return list.map((r, i) => `
+    <button class="run-row ${selectedRun === r.id && !opts.bare ? "sel" : ""} ${i === 0 && r.st === "run" ? "new" : ""}" data-run="${r.id}">
+      <span class="glyph ${r.st}">${icon(GLYPH[r.st])}</span>
+      <span class="run-main">
+        <b>${r.title}</b>
+        <small><i>${r.src}</i><span class="sep">/</span><i>${r.meta.split(" · ")[1]}</i></small>
+      </span>
+      <span class="run-dur">${r.dur}</span>
+      <span class="run-time">${r.at}</span>
+    </button>`).join("");
+}
+
+function viewRuns() {
+  const segs = [["all", "全部", RUNS.length], ["open", "进行中", RUNS.filter(r => r.st === "run" || r.st === "wait").length], ["fail", "失败", RUNS.filter(r => r.st === "fail").length]]
+    .map(([v, l, n]) => `<button class="${runFilter === v ? "on" : ""}" data-f="${v}">${l}<em>${n}</em></button>`).join("");
+  return `
+  <section class="run-layout">
+    <div>
+      <div class="stats">
+        <div><b>3</b><span>运行中</span></div>
+        <div class="hot"><b>1</b><span>等待确认</span></div>
+        <div class="bad"><b>1</b><span>失败</span></div>
+        <div class="ok"><b>11</b><span>今日完成</span></div>
+        <div><b>1.28M</b><span>Token 消耗</span></div>
+      </div>
+      <div class="toolbar">
+        <div class="seg">${segs}</div>
+        <label class="field">${icon("search")}<input type="search" placeholder="搜索运行、工作项或 Agent" /></label>
+      </div>
+      <div class="panel">
+        <div class="run-col-head"><span></span><span>运行</span><span>耗时</span><span>更新</span></div>
+        ${runRows(filtered())}
+      </div>
+    </div>
+    ${inspector()}
+  </section>`;
+}
+
+function inspector() {
+  const r = RUNS.find(x => x.id === selectedRun) || RUNS[0];
+  const budget = Math.min(100, Math.round(r.tokens / 520000 * 100));
+  const steps = [["prepare", "准备沙箱与工作树"], ["agent", "Agent 执行"], ["guard", "护栏校验"], ["verify", "验证与提交"]];
+  return `
+  <aside class="panel inspector">
+    <div class="insp-head">
+      <div class="meta"><span class="pill ${r.st} ${r.st === "run" ? "live" : ""}">${icon(GLYPH[r.st])}${STATE_LABEL[r.st]}</span>
+        <span>${r.id}</span></div>
+      <h2>${r.title}</h2>
+    </div>
+
+    <div class="insp-sec">
+      <span>执行链路</span>
+      <ol class="stream">
+        ${steps.map(([k, l], i) => {
+          const on = r.nodes.includes(k);
+          const bad = r.st === "fail" && k === "agent";
+          const cls = bad ? "bad" : on ? "ok" : "";
+          return `<li class="${cls}"><time>${on ? ["00:00", "00:14", "02:31", "未开始"][i] : "--:--"}</time><i></i><p>${l}${bad ? "（失败）" : ""}</p></li>`;
+        }).join("")}
+      </ol>
+    </div>
+
+    <div class="insp-sec">
+      <span>Token 用量</span>
+      <div class="kv" style="margin-bottom:9px">
+        <dt>输入</dt><dd>${(r.tokens * 0.82 / 1000).toFixed(1)}k</dd>
+        <dt>输出</dt><dd>${(r.tokens * 0.18 / 1000).toFixed(1)}k</dd>
+        <dt>总计</dt><dd>${(r.tokens / 1000).toFixed(1)}k</dd>
+      </div>
+      <div class="meter"><i style="width:${budget}%"></i></div>
+    </div>
+
+    <div class="insp-sec">
+      <span>上下文</span>
+      <dl class="kv">
+        <dt>工作项</dt><dd>${r.src}</dd>
+        <dt>执行者</dt><dd>${r.agent}</dd>
+        <dt>提交</dt><dd>${r.st === "done" ? "23d0206" : "-"}</dd>
+        <dt>分支</dt><dd>${r.meta.split(" · ")[1]}</dd>
+      </dl>
+    </div>
+
+    <div class="insp-foot">
+      <button class="btn">${icon("square-terminal")}打开终端</button>
+      ${r.st === "wait" ? `<button class="btn primary">${icon("check")}确认并继续</button>` : ""}
+    </div>
+  </aside>`;
+}
+
+function viewBoard() {
+  const cols = [
+    { k: "run",  t: "运行中",   runs: RUNS.filter(r => r.st === "run") },
+    { k: "wait", t: "待处理",   runs: RUNS.filter(r => r.st === "wait" || r.st === "idle") },
+    { k: "done", t: "已完成",   runs: RUNS.filter(r => r.st === "done") },
+    { k: "fail", t: "失败",     runs: RUNS.filter(r => r.st === "fail") }
+  ];
+  return `<section class="board">${cols.map(c => `
+    <div class="lane ${c.k}">
+      <header><span class="mark"></span><b>${c.t}</b><em>${c.runs.length}</em></header>
+      <div class="cards">
+        ${c.runs.length ? c.runs.map(r => `
+          <button class="card ${selectedRun === r.id ? "sel" : ""}" data-run="${r.id}">
+            <b>${r.title}</b>
+            <small>${r.src}</small>
+            <div class="foot"><span class="tag">${r.agent}</span><time>${r.at}</time></div>
+          </button>`).join("") : `<div class="lane-empty">暂无</div>`}
+      </div>
+    </div>`).join("")}</section>`;
+}
+
+const ITEMS = [
+  { n: "#418", st: "wait", t: "登录态切换丢失导致二次认证循环", d: "SSO 回调在 token 过期后会话被清空，用户被迫重复登录。需要在回调侧补一次静默续期。", repo: "atlas-web", labels: ["SSO", "P1"], req: true },
+  { n: "#207", st: "run", t: "工作流超时后子进程未回收，端口被占用", d: "hardTimeoutMs 触发后只发了 SIGTERM，没等待进程组退出。下一轮调度拿到同一端口直接失败。", repo: "afk", labels: ["runtime", "P1"], req: false },
+  { n: "#196", st: "wait", t: "PR QA 工作区仍指向旧分支", d: "合并前 QA 步骤检出的是 baseBacklogId 指向的旧工作树，验证结果不可信。", repo: "atlas-web", labels: ["QA", "人工"], req: true },
+  { n: "#204", st: "fail", t: "e2e 启动超时，调试端口未开放", d: "全局 setup 复用了已在运行的 Vite 服务，Playwright 连不上 9222。", repo: "desktop-client", labels: ["test", "P2"], req: false },
+  { n: "#401", st: "done", t: "看板列宽在 1280 以下挤压状态药丸", d: "列宽用 flex 百分比算的，窄屏下状态药丸换行。改成 grid 后消失。", repo: "atlas-web", labels: ["ui"], req: false },
+  { n: "#151", st: "idle", t: "SSH 指纹二次扫描不一致时拒绝写入", d: "候选指纹与二次扫描结果不同时必须拒绝写入 known_hosts。", repo: "desktop-client", labels: ["ssh", "安全"], req: false }
+];
+
+function viewItems() {
+  return `<section class="stack">
+    <div class="toolbar">
+      <label class="field">${icon("search")}<input type="search" placeholder="搜索标题、ID 或标签" /></label>
+      <select class="pick"><option>全部状态</option><option>待确认</option><option>运行中</option><option>已完成</option></select>
+      <select class="pick"><option>全部来源</option><option>GitHub</option><option>GitLab</option></select>
+    </div>
+    <div class="panel">${ITEMS.map(i => `
+      <button class="item">
+        <span class="idx mono">${i.n}</span>
+        <span>
+          <b>${i.t}</b>
+          <span class="desc">${i.d}</span>
+          <span class="tags">
+            <span class="pill ${i.st}">${icon(GLYPH[i.st])}${STATE_LABEL[i.st]}</span>
+            ${i.labels.map(l => `<span class="tag ${l === "P1" || l === "人工" || l === "安全" ? "req" : ""}">${l}</span>`).join("")}
+          </span>
+        </span>
+        <span class="item-side">
+          <span class="foot"><span class="tag mono">${i.repo}</span></span>
+          <span class="btn">${icon("play")}运行</span>
+        </span>
+      </button>`).join("")}</div>
+  </section>`;
+}
+
+const TEMPLATES = [
+  { n: "标准交付", d: "实现、验证、提交三步，适合边界清晰的常规工作项。", src: "AFK 内置", steps: 4, active: true },
+  { n: "带审查", d: "实现 Agent 之后追加独立审查 Agent，验证验收条件。", src: "AFK 内置", steps: 5 },
+  { n: "缺陷修复", d: "先复现再修复，最后跑一遍回归验证。", src: "本项目", steps: 6 },
+  { n: "自定义工作流", d: "由 AFK Control 管理的项目级可执行模板。", src: "本项目 · 自定义", steps: 3 }
+];
+
+function viewFlows() {
+  return `<section>
+    <div class="grid2" style="margin-bottom:14px">
+      ${TEMPLATES.map(t => `
+        <button class="panel" style="text-align:left;padding:13px 14px;display:grid;gap:6px;${t.active ? "border-color:var(--accent-line)" : ""}">
+          <span style="display:flex;align-items:center;gap:8px">
+            ${icon("workflow")}<b style="font-size:12.5px">${t.n}</b>
+            ${t.active ? `<span class="pill run" style="margin-left:auto">当前模板</span>` : `<span class="tag" style="margin-left:auto">${t.src}</span>`}
+          </span>
+          <span style="color:var(--text-quiet);font-size:11.5px;line-height:1.5">${t.d}</span>
+          <span class="mono" style="color:var(--text-quiet);font-size:10px">${t.steps} 个步骤</span>
+        </button>`).join("")}
+    </div>
+    <div class="panel">
+      <header><b>最近运行</b><span class="note">按结束时间排序</span></header>
+      ${RUNS.slice(4).map(r => `
+        <div class="row-item">
+          <span class="ico-box">${icon(GLYPH[r.st], "ico-sm")}</span>
+          <span class="txt"><b>${r.title}</b><small>${r.meta.split(" · ")[0]} · ${r.dur}</small></span>
+          <span class="end"><span class="pill ${r.st}">${STATE_LABEL[r.st]}</span></span>
+        </div>`).join("")}
+    </div>
+  </section>`;
+}
+
+const NODES = [
+  { id: "start", x: 40,  y: 176, num: "00", t: "开始",     c: "当前模板：标准交付", who: "AFK CLI", st: "idle", kind: "source" },
+  { id: "prep",  x: 254, y: 176, num: "01", t: "准备沙箱", c: "创建 worktree，检出目标分支", who: "系统", st: "done", kind: "sys" },
+  { id: "impl",  x: 468, y: 176, num: "02", t: "实现 Agent", c: "实现当前工作项并留下执行摘要", who: "claude-code", st: "run", kind: "agent" },
+  { id: "guard", x: 682, y: 176, num: "03", t: "护栏",     c: "上下文阈值与令牌预算校验", who: "系统", st: "idle", kind: "sys" },
+  { id: "ver",   x: 896, y: 176, num: "04", t: "验证 Agent", c: "对照验收条件给出 PASS 或 FAIL", who: "claude-code", st: "idle", kind: "agent" },
+  { id: "done",  x: 1110, y: 176, num: "05", t: "提交",     c: "推送分支并回写工作项状态", who: "AFK CLI", st: "idle", kind: "sys" }
+];
+
+function edgePath(a, b) {
+  const x1 = a.x + 172, y1 = a.y + 34, x2 = b.x, y2 = b.y + 34;
+  if (Math.abs(y1 - y2) < 6) return `M${x1} ${y1} H${x2}`;
+  const mid = x2 - 18;
+  return `M${x1} ${y1} H${mid} V${y2} H${x2}`;
+}
+
+function viewEditor() {
+  const sel = NODES[2];
+  return `<section class="flow-wrap">
+    <div class="stage" data-stage>
+      <div class="world" data-world>
+        <svg width="1400" height="260" style="position:absolute;top:0;left:0" aria-hidden="true">
+          ${NODES.slice(0, -1).map((n, i) => `<path class="edge" d="${edgePath(n, NODES[i + 1])}" />`).join("")}
+        </svg>
+        ${NODES.map(n => `
+          <button class="node ${sel.id === n.id ? "sel" : ""} ${n.kind === "source" ? "origin" : ""}" style="left:${n.x}px;top:${n.y}px">
+            <span class="hd">${icon(n.kind === "agent" ? "bot" : n.kind === "sys" ? "shield-check" : "circle")}<b>${n.t}</b><em>${n.num}</em></span>
+            <p>${n.c}</p>
+            <span class="who">${icon(n.kind === "agent" ? "cpu" : "server")}<span>${n.who}</span><em>${n.st === "run" ? "运行中" : n.st === "done" ? "已完成" : "待执行"}</em></span>
+          </button>`).join("")}
+      </div>
+      <div class="stage-bar">
+        <span>标准交付 · .afk/config.yml</span>
+        <span class="btn ghost">${icon("plus")}添加步骤</span>
+        <span class="zoom">
+          <button title="整理画布">${icon("refresh-cw", "ico-sm")}</button>
+          <button title="缩小">${icon("minus", "ico-sm")}</button><em data-zoom>100%</em><button title="放大">${icon("plus", "ico-sm")}</button>
+        </span>
+      </div>
+    </div>
+    <aside class="panel flow-inspector">
+      <div class="insp-head">
+        <div class="meta"><span class="mono">${sel.num}</span><span>工作流配置</span></div>
+        <h2>${sel.t}</h2>
+      </div>
+      <div class="insp-sec">
+        <span>说明</span>
+        <p style="margin:0;color:var(--text-mid);font-size:11.5px;line-height:1.6">${sel.c}</p>
+      </div>
+      <div class="insp-sec">
+        <span>字段</span>
+        <label class="fld"><span>节点名称</span><input value="${sel.t}" /></label>
+        <label class="fld"><span>执行 Agent</span>
+          <select class="pick" style="width:100%;height:26px"><option>claude-code</option><option>codex</option><option>qwen-code</option></select>
+        </label>
+        <label class="fld"><span>执行指令</span><textarea rows="3">实现当前工作项，并留下简洁的执行与验证摘要。</textarea></label>
+      </div>
+      <div class="insp-foot"><span class="btn">还原</span><span class="btn primary">保存</span></div>
+    </aside>
+  </section>`;
+}
+
+// 画布自适应：真实应用同样按 stage 尺寸算 scale 与居中偏移。
+// ponytail: 只做 fit-to-view，不做拖拽平移与缩放交互（原型范围）。
+function fitStage() {
+  const stage = $("[data-stage]"), world = $("[data-world]");
+  if (!stage || !world) return;
+  const pad = 32;
+  const sw = stage.clientWidth - pad * 2, sh = stage.clientHeight - pad * 2;
+  const gw = Math.max(...NODES.map(n => n.x)) + 172;
+  const gh = Math.max(...NODES.map(n => n.y)) + 96;
+  const scale = Math.min(1, sw / gw, sh / gh);
+  const x = (stage.clientWidth - gw * scale) / 2 - Math.min(...NODES.map(n => n.x)) * scale;
+  // 纵向偏上而不是几何居中：与真实应用一致，图不会孤零零浮在画布正中。
+  const y = stage.clientHeight * 0.36 - (Math.min(...NODES.map(n => n.y)) + gh / 2) * scale;
+  world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  const z = $("[data-zoom]");
+  if (z) z.textContent = Math.round(scale * 100) + "%";
+}
+
+const AGENTS = [
+  { n: "Claude Code", cmd: "claude", ok: true,  v: "1.0.118", src: "npm global" },
+  { n: "Codex", cmd: "codex", ok: true,  v: "0.28.1", src: "homebrew" },
+  { n: "Qwen Code", cmd: "qwen", ok: true, v: "0.9.4", src: "npm global" },
+  { n: "OpenCode", cmd: "opencode", ok: true, v: "0.6.2", src: "bun global" },
+  { n: "Cursor Agent", cmd: "cursor-agent", ok: false, v: null, src: "未在 PATH 中找到" }
+];
+
+function viewAgents() {
+  return `<section class="stack">
+    <div class="toolbar">
+      <div class="seg">
+        <button class="on">全部<em>5</em></button><button>可执行<em>4</em></button><button>未通过<em>1</em></button>
+      </div>
+      <label class="field">${icon("search")}<input type="search" placeholder="搜索 Agent" /></label>
+    </div>
+    <div class="panel">
+      ${AGENTS.map(a => `
+        <div class="row-item">
+          <span class="ico-box">${icon("bot", "ico-sm")}</span>
+          <span class="txt"><b>${a.n}</b><small>${a.cmd}</small></span>
+          <span class="end">
+            ${a.ok ? `<span class="mono">${a.v}</span><span class="pill done">${icon("check")}可执行</span>`
+                   : `<span class="pill fail">${icon("circle-alert")}未发现</span>`}
+          </span>
+        </div>`).join("")}
+    </div>
+  </section>`;
+}
+
+function viewRepos() {
+  const repos = [
+    { k: "atlas-web", b: "main", p: "github" }, { k: "afk", b: "main", p: "gitlab" },
+    { k: "k-base", b: "develop", p: "gitlab" }, { k: "aiapi", b: "main", p: "gitlab" },
+    { k: "desktop-client", b: "main", p: "github" }
+  ];
+  return `<section class="stack">
+    <div class="toolbar">
+      <div class="seg"><button class="on">全部<em>7</em></button><button>GitHub<em>2</em></button><button>GitLab<em>5</em></button></div>
+      <label class="field">${icon("search")}<input type="search" placeholder="搜索代码仓库" /></label>
+    </div>
+    <div class="panel">${repos.map(r => `
+      <button class="row-item">
+        <span class="ico-box">${icon("git-branch", "ico-sm")}</span>
+        <span class="txt"><b>${r.k}</b><small>${r.p}</small></span>
+        <span class="end"><span class="mono">${r.b}</span>${icon("chevron-right", "ico-sm")}</span>
+      </button>`).join("")}</div>
+  </section>`;
+}
+
+function viewEnv() {
+  return `<section class="grid2">
+    <div class="panel">
+      <header><b>AFK 容器</b><span class="note">仅显示已登记容器</span><span class="tools"><em class="mono" style="color:var(--text-quiet);font-size:10px">2</em></span></header>
+      <div class="row-item"><span class="ico-box">${icon("container", "ico-sm")}</span><span class="txt"><b>afk-runner</b><small>docker · ghcr.io/afk/runner:1.4</small></span><span class="end"><span class="pill run live">${icon("activity")}running</span></span></div>
+      <div class="row-item"><span class="ico-box">${icon("container", "ico-sm")}</span><span class="txt"><b>afk-sandbox-207</b><small>docker · ghcr.io/afk/sandbox:1.4</small></span><span class="end"><span class="pill run live">${icon("activity")}running</span></span></div>
+    </div>
+    <div class="panel">
+      <header><b>AFK tmux 会话</b><span class="tools"><em class="mono" style="color:var(--text-quiet);font-size:10px">3</em></span></header>
+      ${[["afk-login-session-fix", "worktree/login-session-fix", "attached"],
+        ["afk-timeout-cleanup", "worktree/timeout-cleanup", "attached"],
+        ["afk-idle", "~/company/afk", "detached"]].map(([n, w, a]) => `
+        <div class="row-item">
+          <span class="ico-box">${icon("square-terminal", "ico-sm")}</span>
+          <span class="txt"><b>${n}</b><small>${w}</small></span>
+          <span class="end"><span class="tag">${a}</span><button class="btn">打开终端</button></span>
+        </div>`).join("")}
+    </div>
+  </section>`;
+}
+
+function viewSsh() {
+  const hosts = [
+    { n: "atlas-bastion", a: "bastion.internal:2222", u: "deploy", ok: true, k: "已信任" },
+    { n: "kbase-prod-01", a: "10.20.4.11:22", u: "root", ok: true, k: "已信任" },
+    { n: "atlas-web-ci", a: "10.20.8.30:22", u: "ci", ok: false, k: "指纹待确认" },
+    { n: "kbase-stage-02", a: "10.30.4.12:22", u: "deploy", ok: true, k: "已信任" },
+    { n: "grafana-ops", a: "10.40.1.7:2222", u: "ops", ok: false, k: "密钥未部署" }
+  ];
+  return `<section class="stack">
+    <div class="toolbar">
+      <label class="field">${icon("search")}<input type="search" placeholder="搜索主机" /></label>
+      <button class="btn">${icon("key")}生成密钥</button>
+      <button class="btn primary">${icon("plus")}添加主机</button>
+    </div>
+    <div class="panel">${hosts.map(h => `
+      <div class="row-item">
+        <span class="ico-box">${icon("server", "ico-sm")}</span>
+        <span class="txt"><b>${h.n}</b><small>${h.u}@${h.a}</small></span>
+        <span class="end">
+          <span class="pill ${h.ok ? "done" : "wait"}">${icon(h.ok ? "check" : "clock")}${h.k}</span>
+          <button class="btn">${icon("square-terminal", "ico-sm")}连接</button>
+        </span>
+      </div>`).join("")}</div>
+  </section>`;
+}
+
+function viewEvents() {
+  const ev = [
+    ["14:32:07", "run", "run_started", "afk #207 · codex"],
+    ["14:32:19", "ok", "workspace_ready", "worktree/timeout-cleanup"],
+    ["14:32:44", "ok", "agent_exec", "claude-code 已读 38 个文件"],
+    ["14:33:10", "warn", "hitl_requested", "需要确认合并目标分支"],
+    ["14:33:52", "ok", "tool_result", "tmux 捕获 160 行"],
+    ["14:34:20", "bad", "run_failed", "hardTimeoutMs 超时未回收子进程"]
+  ];
+  return `<section class="run-layout">
+    <div>
+      <div class="toolbar">
+        <select class="pick"><option>afk #207 · codex</option><option>atlas-web #418 · claude-code</option><option>desktop-client #204</option></select>
+        <label class="field">${icon("search")}<input type="search" placeholder="搜索事件" /></label>
+      </div>
+      <div class="panel">
+        <header><b>事件流</b><span class="note">按时间升序，原始 JSON 可展开</span><span class="tools"><span class="pill fail">${icon("circle-alert")}失败</span></span></header>
+        ${ev.map(([t, k, name, detail]) => `
+          <div class="row-item">
+            <span class="mono" style="color:var(--text-quiet);font-size:10.5px">${t}</span>
+            <span class="txt"><b>${name}</b><small>${detail}</small></span>
+            <span class="end">${icon("chevron-right", "ico-sm")}</span>
+          </div>`).join("")}
+      </div>
+    </div>
+    <aside class="panel inspector">
+      <div class="insp-head">
+        <div class="meta"><span class="pill fail">${icon("circle-alert")}run_failed</span><span>14:34:20</span></div>
+        <h2>hardTimeoutMs 超时未回收子进程</h2>
+      </div>
+      <div class="insp-sec">
+        <span>原始 JSON</span>
+        <pre class="term" style="border-radius:var(--r-sm);max-height:220px;border:1px solid var(--line)">{
+  "type": "run_failed",
+  "runId": "r-202",
+  "workItemId": "afk#207",
+  "hardTimeoutMs": 900000,
+  "elapsedMs": 1180432,
+  "reason": "subprocess_group_not_reaped"
+}</pre>
+      </div>
+      <div class="insp-foot"><button class="btn">${icon("square-terminal")}打开终端</button></div>
+    </aside>
+  </section>`;
+}
+
+function viewSettings() {
+  return `<section style="max-width:720px">
+    <div class="panel" style="margin-bottom:12px">
+      <header><b>外观</b></header>
+      <div class="set-row"><span class="lbl"><b>主题</b><small>浅色与深色使用同一套语义令牌</small></span>
+        <span class="ctl"><div class="seg"><button class="on">深色</button><button>浅色</button></div></span></div>
+      <div class="set-row"><span class="lbl"><b>界面缩放</b><small>影响全部字号与间距</small></span>
+        <span class="ctl"><div class="seg"><button>小</button><button class="on">中</button><button>大</button></div></span></div>
+      <div class="set-row"><span class="lbl"><b>字体</b><small>中文优先使用系统无衬线</small></span>
+        <span class="ctl"><select class="pick"><option>系统无衬线</option><option>系统衬线</option><option>等宽</option></select></span></div>
+    </div>
+    <div class="panel">
+      <header><b>运行默认值</b></header>
+      <div class="set-row"><span class="lbl"><b>默认 Agent</b><small>未指定工作项时使用</small></span>
+        <span class="ctl"><select class="pick"><option>claude-code</option><option>codex</option><option>qwen-code</option></select></span></div>
+      <div class="set-row"><span class="lbl"><b>tmux 会话</b><small>运行时的终端会话名</small></span>
+        <span class="ctl"><input class="field mono" style="width:180px" value="afk" /></span></div>
+      <div class="set-row"><span class="lbl"><b>工作流超时</b><small>硬超时，单位毫秒</small></span>
+        <span class="ctl"><input class="field mono" style="width:120px" value="900000" /></span></div>
+      <div class="set-row"><span class="lbl"><b>总令牌预算</b><small>单次运行的硬上限</small></span>
+        <span class="ctl"><input class="field mono" style="width:120px" value="2000000" /></span></div>
+    </div>
+  </section>`;
+}
+
+function skeleton() {
+  return `<section class="run-layout">
+    <div class="panel">
+      ${Array.from({ length: 6 }, () => `<div class="sk-row"><span class="sk"></span><span class="sk"></span><span class="sk"></span></div>`).join("")}
+    </div>
+    <div class="panel" style="height:280px;display:grid;align-content:start;gap:14px;padding:14px">
+      <span class="sk" style="height:12px;width:40%"></span><span class="sk" style="height:16px;width:90%"></span>
+      <span class="sk" style="height:10px;width:100%"></span><span class="sk" style="height:10px;width:72%"></span>
+    </div>
+  </section>`;
+}
+
+const VIEWS = { runs: viewRuns, board: viewBoard, items: viewItems, flows: viewFlows, editor: viewEditor, agents: viewAgents, repos: viewRepos, env: viewEnv, ssh: viewSsh, events: viewEvents, settings: viewSettings };
+
+function render() {
+  const actions = ACTIONS[current];
+  $("#page-actions").innerHTML = actions ? actions() : "";
+  const paint = VIEWS[current] || (() => `<div class="empty">
+      <span class="ico-box">${icon("circle-dashed", "ico-lg")}</span>
+      <b>视图尚未在原型中展开</b>
+      <p>该视图沿用现有的 ${$("#page-title").textContent} 结构，原型只覆盖主链路。</p>
+    </div>`);
+  // 首屏先给骨架，模拟真实快照加载
+  $("#view").innerHTML = skeleton();
+  requestAnimationFrame(() => {
+    $("#view").innerHTML = paint();
+    wire();
+    fitStage();
+  });
+}
+
+function wire() {
+  $("#view").querySelectorAll("[data-run]").forEach(el => el.onclick = () => {
+    selectedRun = el.dataset.run;
+    if (current === "runs" || current === "board") render();
+  });
+  $("#view").querySelectorAll("[data-f]").forEach(el => el.onclick = () => {
+    runFilter = el.dataset.f;
+    render();
+  });
+  $("#page-actions").querySelectorAll("[data-m]").forEach(el => el.onclick = () => {
+    if (el.dataset.m === "board") go("board");
+    if (el.dataset.m === "queue") go("runs");
+  });
+}
+
+go("runs");
+window.addEventListener("resize", fitStage);
+</script>
+</body>
+</html>

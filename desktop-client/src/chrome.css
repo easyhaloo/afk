@@ -97,10 +97,13 @@
   .topbar .header-run-mode button { padding: 0 7px; }
 }
 
-/* The scroll container is a bare paper field; the texture reads through it. */
+/* The scroll container is a bare paper field; the texture reads through it.
+   This rule wins the cascade — chrome.css is imported after layout.css and
+   styles.css, both of which also declare .workspace — so the view padding has
+   to read --view-pad here. Hardcoding it left the token dead. */
 .workspace {
   margin: 0;
-  padding: 18px 30px 64px;
+  padding: var(--view-pad);
   border: 0;
   border-radius: 0;
   background: transparent;

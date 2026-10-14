@@ -284,7 +284,7 @@ input:focus-visible {
 .workspace {
   min-height: calc(100vh - var(--topbar-h));
   margin: 10px 12px 20px;
-  padding: 0 20px 20px;
+  padding: var(--view-pad);
   border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-lg);
   background: var(--afk-panel);

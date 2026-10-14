@@ -108,6 +108,26 @@ function hardcodedScrims(): string[] {
     });
 }
 
+/**
+ * Three stylesheets declare .workspace and chrome.css is imported last, so it
+ * decides. --view-pad was landed in 449956d and then silently overridden by a
+ * literal in chrome.css — the token existed, the prototype's .view padding
+ * (`16px 20px 28px`) never shipped. The winning rule has to read the token.
+ */
+function viewPaddingOwner(): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(src, { recursive: true, encoding: "utf8" })) {
+    if (!name.endsWith(".css")) continue;
+    const css = readFileSync(path.join(src, name), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, " "));
+    for (const [, body] of css.matchAll(/\.workspace\s*\{([^{}]*)\}/g)) {
+      const padding = body!.match(/padding:\s*([^;]+)/);
+      if (padding && !/var\(--view-pad\)/.test(padding[1])) out.push(`${name}: ${padding[1].trim()}`);
+    }
+  }
+  return out;
+}
+
 const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })
   .filter(name => name.endsWith(".css"))
   .map(name => readFileSync(path.join(src, name), "utf8"))
@@ -223,6 +243,13 @@ describe("design tokens", () => {
     expect(
       hardcodedScrims(),
       "fixed full-viewport layers must use --scrim-drawer or --scrim-modal",
+    ).toEqual([]);
+  });
+
+  it("lets --view-pad reach the view", () => {
+    expect(
+      viewPaddingOwner(),
+      "every .workspace must pad with var(--view-pad); chrome.css wins the cascade",
     ).toEqual([]);
   });
 

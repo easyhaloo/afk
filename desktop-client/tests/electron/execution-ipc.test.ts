@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     executions: [{
       runId: "afk-158", workItemId: "github:acme/api#42",
       profileId: "default", attempt: 1, status: "running", sequence: 1, terminal: false,
+      usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
     }],
     nextCursor: "cursor-1",
   })),
@@ -47,6 +48,7 @@ describe("execution IPC channel", () => {
     };
     expect(result.executions.map(execution => execution.runId)).toEqual(["afk-158"]);
     expect(result.nextCursor).toBe("cursor-1");
+    expect(result.executions[0]).toHaveProperty("usage", { inputTokens: 10, outputTokens: 2, totalTokens: 12 });
     expect(result).not.toHaveProperty("legacyRuns");
   });
 });

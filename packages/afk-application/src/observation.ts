@@ -1,5 +1,6 @@
 import type { RunPhase, RunStatus } from '@afk/core';
 import { loadRun } from './execution.js';
+import { projectAgentUsage, type AgentUsage } from './execution-query.js';
 import type { RunEventQueryPort } from './ports.js';
 
 export interface ObserveRunResult {
@@ -47,6 +48,7 @@ export interface ExecutionSummary {
   phase?: RunPhase;
   sequence: number;
   terminal: boolean;
+  usage?: AgentUsage;
 }
 
 export interface QueryExecutionHistoryResult {
@@ -72,6 +74,9 @@ export async function queryExecutionHistory(
       continue;
     }
     if (!observed.state.run || (input.workItemId !== undefined && observed.state.run.workItemId !== input.workItemId)) continue;
+    const usage = observed.integrity.valid ? projectAgentUsage(observed.events.filter(event =>
+      event.sequence <= observed.integrity.lastSequence && event.context.workItemId === observed.state.run!.workItemId
+      && event.correlationId === observed.events[0]?.correlationId)) : undefined;
     matching.push({
       sortKey: observed.events[0]?.occurredAt ?? '',
       summary: {
@@ -83,6 +88,7 @@ export async function queryExecutionHistory(
         phase: observed.state.run.phase,
         sequence: observed.state.sequence,
         terminal: observed.state.terminal,
+        ...(usage ? { usage } : {}),
       },
     });
   }

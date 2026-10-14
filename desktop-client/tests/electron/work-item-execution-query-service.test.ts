@@ -21,6 +21,14 @@ function port(events: RunEvent[] = [event]): RunEventQueryPort {
 }
 
 describe("work item execution query", () => {
+  it("passes verified session usage from the application to the desktop DTO", async () => {
+    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+    const recorded: RunEvent = { ...event, id: "usage", sequence: 2, type: "agent.session_recorded", data: { kind: "agent.session_recorded", sessionId: "session-1", usage } };
+    const page = await createWorkItemExecutionQueryService(port([event, recorded])).list();
+    expect(page.executions[0]).toMatchObject({ runId: event.context.runId, status: "pending", usage });
+    expect(page.executions[0]).not.toHaveProperty("sessionId");
+  });
+
   it("runs the application use case over the injected EventStore without a CLI", async () => {
     const events = port();
     const page = await createWorkItemExecutionQueryService(events).list({ workItemId: event.context.workItemId, limit: 25 });

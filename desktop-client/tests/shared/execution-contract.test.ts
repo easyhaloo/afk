@@ -12,6 +12,27 @@ describe("execution summary contract", () => {
     expect(parseExecutionSummary(valid)).toEqual(valid);
   });
 
+  it("preserves recorded token usage, including a real zero", () => {
+    for (const usage of [{ inputTokens: 10, outputTokens: 2, totalTokens: 12 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }]) {
+      expect(parseExecutionSummary({ ...valid, usage })).toEqual({ ...valid, usage });
+    }
+    expect(parseExecutionSummary(valid)).not.toHaveProperty("usage");
+  });
+
+  it.each([
+    null,
+    { inputTokens: -1, outputTokens: 2, totalTokens: 1 },
+    { inputTokens: 1.5, outputTokens: 2, totalTokens: 3.5 },
+    { inputTokens: NaN, outputTokens: 2, totalTokens: NaN },
+    { inputTokens: Infinity, outputTokens: 2, totalTokens: Infinity },
+    { inputTokens: "10", outputTokens: 2, totalTokens: 12 },
+    { inputTokens: 10, totalTokens: 12 },
+    { inputTokens: 10, outputTokens: 2, totalTokens: 13 },
+    { inputTokens: 10, outputTokens: 2, totalTokens: 12, transcript: "private" },
+  ])("rejects invalid or excessive usage data: %j", usage => {
+    expect(() => parseExecutionSummary({ ...valid, usage })).toThrow(/usage/);
+  });
+
   it("rejects missing run identity", () => {
     expect(() => parseExecutionSummary({ ...valid, runId: "" })).toThrow();
   });

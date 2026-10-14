@@ -14,6 +14,17 @@ function event(sequence: number, data: RunEventData, overrides: Partial<RunEvent
 const requested = event(1, { kind: 'run.requested', run: { id: 'implement-1', workItemId, profileId: 'test', attempt: 1, status: 'pending' } });
 
 describe('projectWorkItemExecution', () => {
+  it('exposes recorded usage without changing status or trusting an invalid timeline', () => {
+    const usage = { inputTokens: 20, outputTokens: 3, totalTokens: 23 };
+    const events = [requested, event(2, { kind: 'agent.session_recorded', sessionId: 'session-1', usage })];
+    const result = projectWorkItemExecution({ runId: 'implement-1', events, integrity: { valid: true, lastSequence: 2 } });
+    expect(result.summary).toMatchObject({ status: 'queued', usage });
+    expect(projectWorkItemExecution({ runId: 'implement-1', events, integrity: { valid: false, lastSequence: 1 } }).summary).not.toHaveProperty('usage');
+    expect(projectWorkItemExecution({ runId: 'implement-1', events, integrity: { valid: true, lastSequence: 1 } }).summary).not.toHaveProperty('usage');
+    const foreign = { ...events[1], context: { ...requested.context, workItemId: 'other' } };
+    expect(projectWorkItemExecution({ runId: 'implement-1', events: [requested, foreign], integrity: { valid: true, lastSequence: 2 } }).summary).not.toHaveProperty('usage');
+  });
+
   it('keeps implementation success in verifying, not QA PASS or done', () => {
     const result = projectWorkItemExecution({ runId: 'implement-1', events: [requested, event(2, { kind: 'run.started' }), event(3, { kind: 'run.finished', outcome: 'succeeded' })], integrity: { valid: true, lastSequence: 3 } });
     expect(result.summary).toMatchObject({ executionId: 'execution-1', runId: 'implement-1', workItemId, status: 'verifying', startedAt: requested.occurredAt });

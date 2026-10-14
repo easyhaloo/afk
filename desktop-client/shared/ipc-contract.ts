@@ -1,4 +1,4 @@
-import type { ExecutionQueryOptions, ExecutionSummary } from "./execution-contract.js";
+import type { AgentUsage, ExecutionQueryOptions, ExecutionSummary } from "./execution-contract.js";
 
 export type RuntimeEvent = {
   id: string;
@@ -8,6 +8,7 @@ export type RuntimeEvent = {
   result: string;
   nextStep: string;
   raw: string;
+  usage?: AgentUsage;
 };
 
 export type AgentRuntime = {

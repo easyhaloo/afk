@@ -1,4 +1,4 @@
-import { replay, type RunAggregate, type RunEvent } from '@afk/core';
+import { replay, type RunAggregate, type RunEvent, type RunEventData } from '@afk/core';
 import type { RunEventQueryPort } from './ports.js';
 
 export interface ExecutionTimeline {
@@ -9,6 +9,33 @@ export interface ExecutionTimeline {
 
 export type WorkItemExecutionStatus = 'queued' | 'implementing' | 'verifying' | 'publishing' | 'awaiting_merge' | 'rework' | 'blocked' | 'failed' | 'done' | 'unknown';
 
+export type AgentUsage = NonNullable<Extract<RunEventData, { kind: 'agent.session_recorded' }>['usage']>;
+
+export function isAgentUsage(input: unknown): input is AgentUsage {
+  if (!input || typeof input !== 'object') return false;
+  const usage = input as AgentUsage;
+  return [usage.inputTokens, usage.outputTokens, usage.totalTokens].every(value => Number.isSafeInteger(value) && value >= 0)
+    && usage.totalTokens === usage.inputTokens + usage.outputTokens;
+}
+
+export function projectAgentUsage(events: readonly RunEvent[]): AgentUsage | undefined {
+  const sessions = new Map<string, AgentUsage>();
+  for (const event of events) {
+    if (event.data.kind === 'agent.session_recorded' && event.data.sessionId && isAgentUsage(event.data.usage)) {
+      const previous = sessions.get(event.data.sessionId);
+      if (!previous || event.data.usage.totalTokens >= previous.totalTokens) sessions.set(event.data.sessionId, event.data.usage);
+    }
+  }
+  if (!sessions.size) return undefined;
+  const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  for (const session of sessions.values()) {
+    usage.inputTokens += session.inputTokens;
+    usage.outputTokens += session.outputTokens;
+    usage.totalTokens += session.totalTokens;
+  }
+  return isAgentUsage(usage) ? usage : undefined;
+}
+
 export interface WorkItemExecutionSummary {
   executionId: string;
   runId: string;
@@ -18,6 +45,7 @@ export interface WorkItemExecutionSummary {
   updatedAt?: string;
   diagnostic?: string;
   pr?: { id: string; url: string; state: 'open' | 'merged' };
+  usage?: AgentUsage;
 }
 
 export interface WorkItemExecution {

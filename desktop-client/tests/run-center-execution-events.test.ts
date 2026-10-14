@@ -8,6 +8,17 @@ const base: ExecutionSummary = {
 };
 
 describe("audited run center events", () => {
+  it("carries optional token usage into run details without replacing execution status", () => {
+    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+    const [recorded, missing, zero] = executionEvents([
+      { ...base, usage }, base, { ...base, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+    ]);
+    expect(recorded).toMatchObject({ usage, status: "running" });
+    expect(JSON.parse(recorded.raw).usage).toEqual(usage);
+    expect(missing).not.toHaveProperty("usage");
+    expect(zero.usage?.totalTokens).toBe(0);
+  });
+
   it("uses execution identity rather than the work item as the event ID", () => {
     const [event] = executionEvents([base, { ...base, runId: "afk-retry-158" }]);
     expect(event.id).toBe(base.runId);

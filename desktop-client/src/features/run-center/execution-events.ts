@@ -22,6 +22,7 @@ export function executionEvents(executions: readonly ExecutionSummary[]): Runtim
     result: resultLabels[execution.status],
     nextStep: resultLabels[execution.status],
     raw: JSON.stringify(execution),
+    ...(execution.usage ? { usage: execution.usage } : {}),
   }));
 }
 

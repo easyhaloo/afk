@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@afk/core';
 import {
-  loadWorkItemExecution, queryWorkItemExecutions, replayRun, explainExecutionRun, loadRunTimeline, listExecutionRuns,
+  loadWorkItemExecution, queryWorkItemExecutions, replayRun, explainExecutionRun, loadRunTimeline, listExecutionRuns, projectAgentUsage,
   type WorkItemExecutionSummary, type RunEventQueryPort,
 } from '../src/index.js';
 
@@ -22,6 +22,23 @@ function events(integrity = { valid: true, lastSequence: 1 }): RunEventQueryPort
 }
 
 describe('execution queries', () => {
+  it('sums the peak recorded usage per session without inventing missing or invalid usage', () => {
+    const recorded = (sequence: number, sessionId: string, usage?: { inputTokens: number; outputTokens: number; totalTokens: number }): RunEvent => ({
+      ...event, sequence, type: 'agent.session_recorded', data: { kind: 'agent.session_recorded', sessionId, usage },
+    });
+    const first = recorded(2, 'session-1', { inputTokens: 10, outputTokens: 2, totalTokens: 12 });
+    const latest = recorded(3, 'session-1', { inputTokens: 20, outputTokens: 3, totalTokens: 23 });
+    const second = recorded(4, 'session-2', { inputTokens: 5, outputTokens: 1, totalTokens: 6 });
+    const zero = recorded(5, 'session-zero', { inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    const missing = recorded(6, 'session-1');
+    const invalid = recorded(7, 'session-1', { inputTokens: NaN, outputTokens: 1, totalTokens: NaN });
+    expect(projectAgentUsage([event, first, latest, second, zero, missing, invalid])).toEqual({ inputTokens: 25, outputTokens: 4, totalTokens: 29 });
+    expect(projectAgentUsage([event, latest, first, second, zero])).toEqual({ inputTokens: 25, outputTokens: 4, totalTokens: 29 });
+    expect(projectAgentUsage([zero])).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+    expect(projectAgentUsage([event, missing, invalid])).toBeUndefined();
+    expect(first.data).toEqual({ kind: 'agent.session_recorded', sessionId: 'session-1', usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12 } });
+  });
+
   it('hands verified timeline to the projection port and reports unreadable streams', async () => {
     const project = (timeline: { runId: string; integrity: { valid: boolean; reason?: string }; events: readonly RunEvent[] }) => ({
       summary: { runId: timeline.runId, executionId: timeline.runId, workItemId: 'work-1', status: 'queued' as const }, timeline,

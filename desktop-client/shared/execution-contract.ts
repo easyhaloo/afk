@@ -8,6 +8,8 @@ export const EXECUTION_PHASES = ["implementation", "verification", "release"] as
 
 export type ExecutionStatus = typeof EXECUTION_STATUSES[number];
 
+export type AgentUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
+
 export type ExecutionSummary = {
   runId: string;
   workItemId: WorkItemId;
@@ -17,6 +19,7 @@ export type ExecutionSummary = {
   phase?: typeof EXECUTION_PHASES[number];
   sequence: number;
   terminal: boolean;
+  usage?: AgentUsage;
 };
 
 export type ExecutionQueryOptions = { workItemId?: WorkItemId; limit?: number; since?: string };
@@ -37,7 +40,7 @@ export function parseExecutionQueryOptions(input: unknown): ExecutionQueryOption
 
 export function parseExecutionSummary(input: unknown): ExecutionSummary {
   const candidate = parseObject(input, "execution summary");
-  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal"], "execution summary");
+  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "usage"], "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
   if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution summary phase is invalid");
@@ -54,5 +57,12 @@ export function parseExecutionSummary(input: unknown): ExecutionSummary {
     terminal: candidate.terminal,
   };
   if (candidate.phase !== undefined) summary.phase = candidate.phase as typeof EXECUTION_PHASES[number];
+  if (candidate.usage !== undefined) {
+    const usage = parseObject(candidate.usage, "execution usage");
+    assertExactKeys(usage, ["inputTokens", "outputTokens", "totalTokens"], "execution usage");
+    if (![usage.inputTokens, usage.outputTokens, usage.totalTokens].every(value => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
+      || usage.totalTokens !== (usage.inputTokens as number) + (usage.outputTokens as number)) throw new Error("execution usage is invalid");
+    summary.usage = { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number, totalTokens: usage.totalTokens as number };
+  }
   return summary;
 }

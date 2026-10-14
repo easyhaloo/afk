@@ -24,6 +24,7 @@ single source of truth for the supported surface:
 | Command | Responsibility |
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
+| `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk run --backlog-id <id>` | Execute one claimed item |
 | `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
@@ -52,6 +53,18 @@ backlog surface includes lookup, listing, metadata initialization, business
 tag updates, and the state/mode updates needed by QA. It has no `claim()` at
 the type or runtime boundary. The execution bundle is the only path that
 exposes claiming and runnable checks.
+
+`adopt` is an optional management/provider capability; unsupported providers
+return an explicit error. The tracker adapter checks the issue's raw state and
+metadata rather than inferring readiness from domain defaults. It accepts only
+open issues with absent or canonical ready/afk lifecycle labels, rejects unknown,
+duplicate or conflicting AFK metadata and malformed or self-referencing
+parent/base/dependency IDs, and preserves business labels, relationships and the
+issue body. Adoption initializes provider metadata only when labels are missing,
+then adds only the missing ready/afk labels with no removals. An already ready/afk
+item is a no-write success; closed, blocked, HITL and other lifecycle states are
+rejected without writes. Project and platform are required, and `--json` emits
+the `backlog.adopt` envelope. Execution and loop never invoke adoption implicitly.
 
 ## Work-item and execution identity
 
@@ -96,8 +109,14 @@ A limit of 1 blocks the first FAIL. Attempts include earlier resolved,
 superseded, and operator records; restarting a runner does not reset them.
 QA PASS can still resolve an active record. This limit is separate from
 `maxRetries` (execution retries) and `maxSelfIterations` (AC corrections).
-The handoff/token `BudgetManager` remains local to one `WorkflowRunner`;
-neither its budget nor cumulative consumption is persisted across runs.
+The handoff/token `BudgetManager` restores its snapshot from
+`<workspace>/.afk/budgets/` per canonical work item. Handoff rounds and native
+harness token usage persist across runs; session IDs are deduplicated and a
+corrupt snapshot fails closed before a new agent execution starts.
+
+The `commit.recorded` audit event links implementation and QA commits to the
+real local SHA and branch. It is emitted only for a new commit; a change
+request SHA is never substituted.
 
 ## Runtime and Desktop projections
 

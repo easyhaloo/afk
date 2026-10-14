@@ -50,7 +50,7 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   padding: 14px 9px;
-  border-right: 1px solid var(--afk-border);
+  border-right: var(--border-w) solid var(--afk-border);
   background: var(--afk-panel-subtle);
 }
 
@@ -186,7 +186,7 @@ input:focus-visible {
   justify-content: space-between;
   height: var(--topbar-h);
   padding: 0 18px;
-  border-bottom: 1px solid var(--afk-border);
+  border-bottom: var(--border-w) solid var(--afk-border);
   background: var(--afk-panel);
 }
 
@@ -216,7 +216,7 @@ input:focus-visible {
   gap: 8px;
   height: 31px;
   padding: 0 10px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-muted);
@@ -225,7 +225,7 @@ input:focus-visible {
 
 .command kbd {
   padding: 1px 4px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-sm);
   background: var(--afk-panel-subtle);
   color: var(--afk-muted);
@@ -239,7 +239,7 @@ input:focus-visible {
   place-items: center;
   width: 30px;
   height: 30px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-muted);
@@ -273,7 +273,7 @@ input:focus-visible {
   align-items: center;
   margin: 12px 16px -2px;
   padding: 9px 12px;
-  border: 1px solid var(--fail-ln);
+  border: var(--border-w) solid var(--fail-ln);
   border-radius: var(--radius-md);
   background: var(--fail-bg);
   color: var(--fail);
@@ -285,7 +285,7 @@ input:focus-visible {
   min-height: calc(100vh - var(--topbar-h));
   margin: 10px 12px 20px;
   padding: 0 20px 20px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-lg);
   background: var(--afk-panel);
   box-shadow: var(--shadow-panel);
@@ -304,7 +304,7 @@ input:focus-visible {
   width: 100%;
   min-height: 62px;
   padding: 0 10px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-top: 0;
   background: var(--afk-panel);
   color: var(--afk-text);
@@ -392,7 +392,7 @@ input:focus-visible {
   min-width: 0;
   height: 19px;
   overflow: visible;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-sm);
   background: repeating-linear-gradient(
     90deg,
@@ -407,7 +407,7 @@ input:focus-visible {
   top: 8px;
   right: 0;
   left: 0;
-  border-top: 1px solid var(--afk-border-strong);
+  border-top: var(--border-w) solid var(--afk-border-strong);
 }
 
 .track-segment {
@@ -534,7 +534,7 @@ input:focus-visible {
   min-height: 62px;
   margin-top: 15px;
   padding: 0 11px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
   background: linear-gradient(
     90deg,
@@ -569,7 +569,7 @@ input:focus-visible {
 
 .board-column {
   min-height: 390px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
   background: var(--afk-panel-subtle);
 }
@@ -580,7 +580,7 @@ input:focus-visible {
   gap: 7px;
   height: 39px;
   padding: 0 11px;
-  border-bottom: 1px solid var(--afk-border);
+  border-bottom: var(--border-w) solid var(--afk-border);
   background: var(--afk-panel);
   font-size: 11px;
 }
@@ -600,7 +600,7 @@ input:focus-visible {
   min-height: 145px;
   margin: 8px;
   padding: 10px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-border-strong);
@@ -667,7 +667,7 @@ input:focus-visible {
   max-height: calc(100vh - 93px);
   overflow: auto;
   padding: 15px;
-  border: 1px solid var(--afk-accent-border);
+  border: var(--border-w) solid var(--afk-accent-border);
   border-radius: var(--radius-lg);
   background: var(--afk-panel);
   box-shadow: var(--shadow-panel);
@@ -713,8 +713,8 @@ input:focus-visible {
   gap: 10px;
   margin: 14px 0;
   padding: 12px 0;
-  border-top: 1px solid var(--afk-border);
-  border-bottom: 1px solid var(--afk-border);
+  border-top: var(--border-w) solid var(--afk-border);
+  border-bottom: var(--border-w) solid var(--afk-border);
 }
 
 .inspector dt {
@@ -778,7 +778,7 @@ input:focus-visible {
 .environment-grid article,
 .table-panel {
   overflow: hidden;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
   background: var(--afk-panel);
 }
@@ -790,7 +790,7 @@ input:focus-visible {
   gap: 8px;
   height: 41px;
   padding: 0 12px;
-  border-bottom: 1px solid var(--afk-border);
+  border-bottom: var(--border-w) solid var(--afk-border);
   color: var(--afk-text);
   font-size: 11px;
 }
@@ -815,7 +815,7 @@ input:focus-visible {
   align-items: center;
   min-height: 43px;
   padding: 0 12px;
-  border-bottom: 1px solid var(--afk-border);
+  border-bottom: var(--border-w) solid var(--afk-border);
   font-size: 10px;
 }
 
@@ -843,7 +843,7 @@ input:focus-visible {
 .table-panel header button {
   height: 26px;
   padding: 0 8px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-sm);
   background: var(--afk-panel);
   color: var(--afk-muted);
@@ -869,14 +869,14 @@ input:focus-visible {
   display: grid;
   grid-template-columns: 160px minmax(0, 1fr);
   margin-top: 15px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
 
 .replay > aside {
   padding: 14px;
-  border-right: 1px solid var(--afk-border);
+  border-right: var(--border-w) solid var(--afk-border);
   background: var(--afk-panel-subtle);
 }
 
@@ -904,7 +904,7 @@ input:focus-visible {
   z-index: 10;
   width: min(710px, calc(100vw - 276px));
   overflow: hidden;
-  border: 1px solid var(--afk-border-strong);
+  border: var(--border-w) solid var(--afk-border-strong);
   border-radius: var(--radius-lg);
   background: var(--afk-panel);
   color: var(--afk-text);
@@ -917,7 +917,7 @@ input:focus-visible {
   justify-content: space-between;
   height: 43px;
   padding: 0 13px;
-  border-bottom: 1px solid var(--afk-border);
+  border-bottom: var(--border-w) solid var(--afk-border);
   background: var(--afk-panel-subtle);
 }
 
@@ -953,7 +953,7 @@ input:focus-visible {
 
 .terminal-sheet footer {
   padding: 10px 12px;
-  border-top: 1px solid var(--afk-border);
+  border-top: var(--border-w) solid var(--afk-border);
   background: var(--afk-panel-subtle);
 }
 
@@ -974,7 +974,7 @@ input:focus-visible {
   height: 31px;
   flex: 1;
   padding: 0 9px;
-  border: 1px solid var(--afk-border-strong);
+  border: var(--border-w) solid var(--afk-border-strong);
   border-radius: var(--radius-sm);
   background: var(--afk-page-bg);
   color: var(--afk-text);

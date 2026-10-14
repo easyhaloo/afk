@@ -31,6 +31,15 @@
   --dur-fast: 110ms;
   --dur: 180ms;
 
+  /* The prototype's frame. Electron draws no titlebar, so there is no 30px
+     row here — the topbar takes the prototype's 46px directly. */
+  --sidebar-w: 236px;
+  --topbar-h: 46px;
+  /* The prototype's `.view` padding. It belongs inside the scroll box, not
+     outside it as a margin, so content at the end of a long list still gets
+     the breathing room and its hard shadow is not clipped. */
+  --view-pad: 16px 20px 28px;
+
   /* Hand-drawn corners: adjacent radii are deliberately unequal, which is the
      whole signature. Values are the prototype's ratios at this app's denser
      pixel scale — the sketch runs 10px type and 18px tags, this runs 9px.

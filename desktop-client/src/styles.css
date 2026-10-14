@@ -41,7 +41,7 @@ input:focus-visible {
 /* ---------- app shell ---------- */
 .app-shell {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -184,7 +184,7 @@ input:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 49px;
+  height: var(--topbar-h);
   padding: 0 18px;
   border-bottom: 1px solid var(--afk-border);
   background: var(--afk-panel);
@@ -282,7 +282,7 @@ input:focus-visible {
 
 /* ---------- workspace / view ---------- */
 .workspace {
-  min-height: calc(100vh - 49px);
+  min-height: calc(100vh - var(--topbar-h));
   margin: 10px 12px 20px;
   padding: 0 20px 20px;
   border: 1px solid var(--afk-border);

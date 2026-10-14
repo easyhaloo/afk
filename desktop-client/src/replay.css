@@ -231,10 +231,10 @@
 .record-drawer {
   position: fixed;
   z-index: 28;
-  top: 49px;
+  top: var(--topbar-h);
   right: 0;
   bottom: 0;
-  width: min(430px, calc(100vw - 260px));
+  width: min(430px, calc(100vw - var(--sidebar-w) - 20px));
   overflow: auto;
   border-left: 1px solid #e5e5eb;
   background: #fff;

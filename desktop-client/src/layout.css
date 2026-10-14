@@ -23,17 +23,16 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
 }
 
 .topbar {
-  flex: 0 0 49px;
+  flex: 0 0 var(--topbar-h);
 }
 
 .workspace {
   flex: 1 1 auto;
   min-height: 0;
-  margin: 10px 12px 12px;
-  /* Hard offset shadows are drawn outside the card, and this is a scroll
-     container — without this the 4px shadow on the last row/column is simply
-     clipped at the scroll edge. Silent: nothing errors, it just looks flat. */
-  padding: 0 6px 6px 0;
+  /* The prototype's `.view` padding. It belongs inside the scroll box, not
+     outside it as a margin: that keeps the end of a long list clear of the
+     scroll edge, so the last row's hard offset shadow is not clipped. */
+  padding: var(--view-pad);
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;

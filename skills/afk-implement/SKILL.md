@@ -67,6 +67,10 @@ Git commit is the SSOT. Every WIP commit must track: done count, total
 count, Progress lines per AC, Next action trailer. `Next:` MUST be the
 last paragraph of the commit body.
 
+Commit metadata is separate from the backlog record. Never rename the backlog
+or replace its description with a commit title/body; record implementation
+progress in commits and the provider's run/QA records instead.
+
 ## Steps
 
 ### Step 1 — Pre-flight checks

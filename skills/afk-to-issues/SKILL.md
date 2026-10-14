@@ -20,6 +20,15 @@ it does not create, link, or split provider records.
 **Mode:** HITL-gated — draft first, obtain explicit approval, then emit the
 approved manifest.
 
+## Backlog/commit boundary
+
+The backlog item is the user-facing issue, so its `title` and `description`
+must describe the problem or intended outcome before implementation. Do not
+reuse a Conventional Commit title such as `fix(qa): ...` or paste a commit
+body into the issue description. Commit type/scope, Progress checklists,
+`Next:` trailers, `Refs #...`, and `Co-Authored-By` belong to Git history
+after implementation and are generated separately.
+
 ## Mode decision
 
 | Input | Use |
@@ -76,6 +85,12 @@ Emit one manifest entry per item with these provider-neutral fields:
       checkCommand: <command exiting 0 on pass>
   outOfScope: [<explicit non-goals>]
 ```
+
+Title review: read it as an issue in a tracker, not as a line from `git log`.
+Prefer `QA fails during startup and drops diagnostics` over
+`fix(qa): preserve QA diagnostics`. Description review: it must be useful
+before any code exists and contain the acceptance criteria; it must not read
+like a completed implementation report.
 
 `parentId`, `dependsOn`, and `baseBacklogId` are references supplied by the external provider;
 use stable temporary references in a draft and have the provider resolve them

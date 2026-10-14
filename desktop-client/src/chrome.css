@@ -1,0 +1,158 @@
+/* ============================================================================
+   Sidebar, topbar and agent chrome
+   ----------------------------------------------------------------------------
+   Migrated here from palette.css before that file was deleted. Seven components
+   were defined nowhere else: nav-group, nav-group-label, healthy-badge,
+   topbar-context, run-view-switcher, header-run-mode, agent-panel.
+
+   palette.css stacked up to eight passes on .agent-panel alone and two on
+   .run-view-switcher, each overriding the last with fresh hardcoded hexes.
+   This is the collapsed result — one definition each, on tokens.
+   ========================================================================== */
+
+.primary-nav .nav-label {
+  min-height: 15px;
+  margin: 0;
+  padding: 0 9px;
+  color: var(--afk-muted);
+  font-family: var(--afk-mono);
+  font-size: calc(7px * var(--afk-scale));
+  font-weight: 650;
+  letter-spacing: .12em;
+  line-height: 15px;
+  text-transform: uppercase;
+}
+.nav-group { display: grid; gap: 3px; }
+/* The English group name is for assistive tech only; the visible label is 中文. */
+.nav-group-label {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.nav-item .healthy-badge {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.topbar-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 16px;
+}
+/* main.tsx puts both classes on one element: run-view-switcher header-run-mode. */
+.run-view-switcher {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  gap: 2px;
+  margin: 15px 0 2px;
+  padding: 3px;
+  border: 1px solid var(--afk-border);
+  border-radius: 8px;
+  background: var(--paper-2);
+}
+.run-view-switcher button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 29px;
+  padding: 0 11px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--afk-muted);
+  font-size: calc(9px * var(--afk-scale));
+}
+.run-view-switcher button:hover { color: var(--afk-text); }
+.run-view-switcher button.active {
+  background: var(--afk-accent-soft);
+  color: var(--afk-accent);
+  box-shadow: inset 0 0 0 1px var(--afk-accent-border);
+}
+.topbar .header-run-mode {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 2px;
+  border-color: var(--afk-border);
+  background: var(--paper-2);
+}
+.topbar .header-run-mode button {
+  height: 26px;
+  padding: 0 9px;
+  color: var(--afk-muted);
+}
+.topbar .header-run-mode button:hover { color: var(--afk-accent); }
+.topbar .header-run-mode button.active {
+  background: var(--afk-accent-soft);
+  color: var(--afk-accent);
+  box-shadow: inset 0 0 0 1px var(--afk-accent-border);
+}
+
+@media (max-width: 920px) {
+  .topbar-context { gap: 10px; }
+  .topbar .header-run-mode button { padding: 0 7px; }
+}
+
+/* The scroll container is a bare paper field; the texture reads through it. */
+.workspace {
+  margin: 0;
+  padding: 18px 30px 64px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.workspace > .agent-panel { border-top: 0; }
+
+.agent-panel {
+  margin-top: 18px;
+  border-top: 1px solid var(--afk-border);
+}
+.agent-panel > header {
+  min-height: 40px;
+  padding: 0 3px;
+  border-bottom-color: var(--afk-border);
+}
+.agent-panel > header > span { font-weight: 620; }
+.agent-panel .agent-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border-top: 0;
+  background: var(--afk-border);
+}
+.agent-panel .agent-runtime {
+  display: block;
+  min-height: 0;
+  padding: 13px 14px 11px;
+  border: 0;
+  background: var(--afk-panel);
+}
+.agent-panel .agent-runtime:hover { background: var(--paper-2); }
+.agent-panel .agent-runtime.available > strong {
+  background: var(--run-soft);
+  color: var(--run);
+}
+.agent-panel .agent-runtime.error > strong {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.agent-panel .agent-runtime.missing > strong {
+  background: var(--paper-3);
+  color: var(--afk-muted);
+}
+.agent-panel .runtime-summary {
+  display: block;
+  margin: 10px 0 9px 53px;
+  color: var(--afk-muted);
+}
+.agent-panel .runtime-identity small { color: var(--afk-muted); }
+
+@media (max-width: 1220px) {
+  .agent-panel .agent-runtime {
+    grid-template-columns: 29px 17px minmax(140px, .8fr) minmax(120px, 1fr);
+  }
+}

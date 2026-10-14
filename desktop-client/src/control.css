@@ -1,68 +1,10 @@
-:root {
-  --afk-accent: #6d5dfc;
-  --afk-accent-soft: #f0eeff;
-  --afk-accent-border: #d7d1fb;
-  --afk-page-bg: #f7f7fa;
-  --afk-panel: #ffffff;
-  --afk-panel-subtle: #fbfbfc;
-  --afk-text: #363741;
-  --afk-muted: #858690;
-  --afk-border: #e7e7ec;
-  --afk-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
-  --afk-scale: 1;
-}
-
-:root[data-afk-accent="teal"] { --afk-accent: #26877c; --afk-accent-soft: #edf8f6; --afk-accent-border: #bfe4de; }
-:root[data-afk-accent="amber"] { --afk-accent: #ad7625; --afk-accent-soft: #fff7e9; --afk-accent-border: #edd6ae; }
-:root[data-afk-font="serif"] { --afk-font: "Noto Serif SC", "Songti SC", STSong, serif; }
-:root[data-afk-font="mono"] { --afk-font: "SF Mono", "JetBrains Mono", "Noto Sans Mono CJK SC", monospace; }
-:root[data-afk-scale="small"] { --afk-scale: .92; }
-:root[data-afk-scale="large"] { --afk-scale: 1.1; }
-
-.app-shell { font-family: var(--afk-font); }
-:root[data-afk-theme="graphite"] {
-  --afk-page-bg: #202126;
-  --afk-panel: #2a2b31;
-  --afk-panel-subtle: #24252b;
-  --afk-text: #f0f0f3;
-  --afk-muted: #adaeb8;
-  --afk-border: #3d3e47;
-  --canvas: var(--afk-page-bg);
-  --surface: var(--afk-panel-subtle);
-  --surface-raised: var(--afk-panel);
-  --line: var(--afk-border);
-  --line-soft: var(--afk-border);
-  --ink: var(--afk-text);
-  --muted: var(--afk-muted);
-  color-scheme: dark;
-}
-:root[data-afk-theme="graphite"] body,
-:root[data-afk-theme="graphite"] .app-shell,
-:root[data-afk-theme="graphite"] .workspace,
-:root[data-afk-theme="graphite"] .content-shell { background: var(--afk-page-bg); }
-:root[data-afk-theme="graphite"] .sidebar,
-:root[data-afk-theme="graphite"] .topbar,
-:root[data-afk-theme="graphite"] .table-panel,
-:root[data-afk-theme="graphite"] .environment-grid article,
-:root[data-afk-theme="graphite"] .record-card,
-:root[data-afk-theme="graphite"] .record-list,
-:root[data-afk-theme="graphite"] .workflow-section,
-:root[data-afk-theme="graphite"] .settings-section { background: var(--afk-panel); border-color: var(--afk-border); }
-:root[data-afk-theme="graphite"] .sidebar,
-:root[data-afk-theme="graphite"] .topbar { border-color: var(--afk-border); }
-:root[data-afk-theme="graphite"] .brand,
-:root[data-afk-theme="graphite"] .nav-item,
-:root[data-afk-theme="graphite"] .control-page,
-:root[data-afk-theme="graphite"] .control-page h1,
-:root[data-afk-theme="graphite"] .workflow-section b,
-:root[data-afk-theme="graphite"] .config-item b,
-:root[data-afk-theme="graphite"] .settings-section b { color: var(--afk-text); }
-:root[data-afk-theme="graphite"] .breadcrumb strong { color: var(--afk-text); }
-:root[data-afk-theme="graphite"] .nav-item:hover,
-:root[data-afk-theme="graphite"] .nav-item.active { background: var(--afk-panel-subtle); }
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected { background: color-mix(in srgb, var(--afk-accent) 12%, var(--afk-panel)); }
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected b { color: var(--afk-text); }
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected span { color: var(--afk-muted); }
+/* ============================================================================
+   AFK Control components
+   ----------------------------------------------------------------------------
+   Tokens, both palettes and the appearance axes live in tokens.css. The
+   :root block, the accent variants and the graphite bridge that used to sit
+   here are gone: a theme is now a token swap, not a per-component override.
+   ========================================================================== */
 
 .control-page {
   width: min(100%, 1180px);

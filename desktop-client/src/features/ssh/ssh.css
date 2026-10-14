@@ -10,8 +10,8 @@
 .ssh-action-button-primary:hover { border-color: var(--afk-accent); background: color-mix(in srgb, var(--afk-accent) 88%, #000); box-shadow: var(--shadow-panel); }
 .ssh-action-button-secondary { border-color: var(--afk-border); background: var(--afk-panel); color: var(--afk-text); box-shadow: var(--shadow-panel-sm), inset 1px 1px 0 var(--ink-faint); }
 .ssh-action-button-secondary:hover { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); box-shadow: var(--shadow-panel); }
-.ssh-action-button-danger { border-color: #efcaca; background: #fff6f6; color: #b84b4b; }
-.ssh-action-button-danger:hover { border-color: #e2a7a7; background: #fff0f0; }
+.ssh-action-button-danger { border-color: var(--fail-ln); background: var(--fail-bg); color: var(--fail); }
+.ssh-action-button-danger:hover { border-color: var(--fail); background: var(--fail-bg); }
 .ssh-action-button:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 18%, transparent); }
 .ssh-action-button-danger:focus-visible { box-shadow: 0 0 0 3px rgba(184, 75, 75, .18); }
 .ssh-action-button:active { transform: translateY(1px); }
@@ -21,7 +21,7 @@
 .ssh-alert.error { border-color: #edcaca; background: #fff8f8; color: #a44e4e; }
 .ssh-alert.success { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
 .ssh-action-status { margin: 10px 0 0; color: var(--afk-accent); font-size: calc(10px * var(--afk-scale)); }
-.ssh-diagnostics { position: relative; display: grid; flex: 0 0 auto; gap: 0; margin: 0; border: 1px solid #e6d7b8; border-radius: var(--radius-md); padding: 0; background: #fcfaf4; color: #765f37; font-size: calc(11px * var(--afk-scale)); }
+.ssh-diagnostics { position: relative; display: grid; flex: 0 0 auto; gap: 0; margin: 0; border: 1px solid var(--warn-ln); border-radius: var(--radius-md); padding: 0; background: var(--warn-bg); color: var(--warn); font-size: calc(11px * var(--afk-scale)); }
 .ssh-diagnostics-toggle { display: flex; width: auto; min-height: 30px; align-items: center; border: 0; padding: 0 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .ssh-diagnostics-toggle:focus-visible { outline: none; border-radius: var(--radius-sm); box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 18%, transparent); }
 .ssh-diagnostics-heading { display: flex; width: auto; align-items: center; justify-content: space-between; gap: 8px; }

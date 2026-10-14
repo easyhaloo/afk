@@ -7,12 +7,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.resolve(here, "../src");
 const tokens = readFileSync(path.join(src, "tokens.css"), "utf8");
 
-// 293 as of the reskin: control.css 167, replay.css 80, ssh.css 35,
-
-// Hardcoded colours outside tokens.css: 293 as of the reskin — control.css 167,
-// replay.css 80, ssh.css 35, ssh-terminal.css 8, layout.css 3. None of them
-// fail contrast today; this only stops the number growing.
-const MAX_CSS_HEXES = 293;
+// Hardcoded colours outside tokens.css. None of them fail contrast today; this
+// only stops the number growing.
+//
+// 293 at the reskin, 283 after the live five-state colours moved to --fail /
+// --warn. There is no bulk sweep to come: an audit found 202 distinct values
+// with ZERO overlap against the palette, so none of the rest map mechanically.
+// Sweep them as their component is next touched.
+const MAX_CSS_HEXES = 283;
 
 // The retro signature is a hard offset shadow (--shadow-*), never a blurred
 // one. Rings (`0 0 0 Npx`, `inset 0 0 0 …`) are borders expressed as shadows

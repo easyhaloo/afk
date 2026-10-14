@@ -59,7 +59,7 @@
 }
 .selection-filter-trigger:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
 .selection-filter-trigger:is(.active, [aria-expanded="true"]) { color: var(--afk-accent); border-color: var(--afk-accent-border); background: color-mix(in srgb, var(--afk-accent) 8%, var(--afk-panel)); }
-.selection-filter-trigger span { min-width: 16px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.selection-filter-trigger span { min-width: 16px; font-size: calc(11px * var(--afk-scale)); font-weight: 600; font-variant-numeric: tabular-nums; }
 .selection-filter-panel {
   position: absolute;
   right: 0;
@@ -99,7 +99,7 @@
 .app-shell .select-menu .select-menu-search:focus-within { border-color: var(--afk-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--afk-accent) 12%, transparent); }
 .app-shell .select-menu .select-menu-search input { background: transparent; color: var(--afk-text); }
 .select-menu-option.keyboard-active { background: var(--afk-panel-subtle); color: var(--afk-text); }
-.select-menu-option-label small { display: block; padding-top: 3px; font-size: 11px; font-weight: 400; color: var(--afk-muted); white-space: normal; }
+.select-menu-option-label small { display: block; padding-top: 3px; font-size: calc(11px * var(--afk-scale)); font-weight: 400; color: var(--afk-muted); white-space: normal; }
 .app-shell .select-menu-option.has-description { height: auto; min-height: 42px; align-items: flex-start; padding-top: 7px; padding-bottom: 7px; line-height: 1.25; }
 .app-shell .select-menu-option.has-description .select-menu-option-label { overflow: visible; text-overflow: clip; white-space: normal; }
 .select-menu-options { max-height: 280px; overflow-y: auto; }
@@ -111,7 +111,7 @@
 .resource-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
 .resource-toolbar .resource-search { flex: 1; min-width: min(100%, 220px); }
 .run-resource-toolbar { padding: 16px 24px 0; margin-bottom: 0; }
-.workspace-switcher { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; margin-bottom: 20px; border: 1px solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel); color: var(--afk-text); font-size: 12px; }
+.workspace-switcher { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; margin-bottom: 20px; border: 1px solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel); color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
 .workspace-switcher span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-switcher svg { flex-shrink: 0; color: var(--afk-muted); }
 .workspace-switcher:hover:not(:disabled) { border-color: var(--afk-accent-border); background: var(--afk-panel-subtle); }

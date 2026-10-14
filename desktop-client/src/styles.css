@@ -70,13 +70,13 @@ input:focus-visible {
   height: 24px;
   background: var(--ink-mid);
   color: var(--afk-panel);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   font-weight: 700;
   clip-path: polygon(50% 0, 100% 100%, 69% 100%, 50% 60%, 31% 100%, 0 100%);
 }
 
 .brand strong {
-  font-size: 11px;
+  font-size: calc(11px * var(--afk-scale));
   letter-spacing: 0.11em;
 }
 
@@ -88,7 +88,7 @@ input:focus-visible {
   grid-column: 2;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   letter-spacing: 0.11em;
 }
 
@@ -119,13 +119,13 @@ input:focus-visible {
 }
 
 .workspace-switcher b {
-  font-size: 11px;
+  font-size: calc(11px * var(--afk-scale));
 }
 
 .workspace-switcher small {
   margin-top: 3px;
   color: var(--afk-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 /* ---------- nav ---------- */
@@ -133,7 +133,7 @@ input:focus-visible {
   margin: 22px 8px 6px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   letter-spacing: 0.08em;
 }
 
@@ -151,7 +151,7 @@ input:focus-visible {
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--afk-muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--afk-scale));
   text-align: left;
 }
 
@@ -174,7 +174,7 @@ input:focus-visible {
   background: var(--afk-border);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   font-style: normal;
   text-align: center;
 }
@@ -196,17 +196,17 @@ input:focus-visible {
   gap: 8px;
   align-items: center;
   color: var(--afk-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .breadcrumb b {
-  font-size: 14px;
+  font-size: calc(14px * var(--afk-scale));
   color: var(--afk-muted);
 }
 
 .breadcrumb strong {
   color: var(--afk-text);
-  font-size: 12px;
+  font-size: calc(12px * var(--afk-scale));
 }
 
 /* ---------- command pill ---------- */
@@ -220,7 +220,7 @@ input:focus-visible {
   border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .command kbd {
@@ -230,7 +230,7 @@ input:focus-visible {
   background: var(--afk-panel-subtle);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 /* ---------- icon button ---------- */
@@ -262,7 +262,7 @@ input:focus-visible {
   border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-text);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   font-weight: 600;
 }
 
@@ -277,7 +277,7 @@ input:focus-visible {
   border-radius: var(--radius-md);
   background: var(--fail-bg);
   color: var(--fail);
-  font-size: 11px;
+  font-size: calc(11px * var(--afk-scale));
 }
 
 /* ---------- workspace / view ---------- */
@@ -338,7 +338,7 @@ input:focus-visible {
 .event-copy b {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   font-weight: 400;
 }
 
@@ -346,7 +346,7 @@ input:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: calc(12px * var(--afk-scale));
   font-weight: 600;
 }
 
@@ -356,7 +356,7 @@ input:focus-visible {
   margin-top: 4px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -368,7 +368,7 @@ input:focus-visible {
   background: var(--afk-border);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .event-row.active .event-state {
@@ -547,14 +547,14 @@ input:focus-visible {
 .archive > span {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   letter-spacing: 0.06em;
 }
 
 .archive p {
   margin: 0;
   color: var(--afk-muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   text-align: right;
 }
 
@@ -582,14 +582,14 @@ input:focus-visible {
   padding: 0 11px;
   border-bottom: var(--border-w) solid var(--afk-border);
   background: var(--afk-panel);
-  font-size: 11px;
+  font-size: calc(11px * var(--afk-scale));
 }
 
 .board-column > header em {
   margin-left: auto;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   font-style: normal;
 }
 
@@ -623,7 +623,7 @@ input:focus-visible {
   gap: 7px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .board-card > div b {
@@ -637,7 +637,7 @@ input:focus-visible {
   margin-top: 9px;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  font-size: 12px;
+  font-size: calc(12px * var(--afk-scale));
   line-height: 1.4;
 }
 
@@ -649,7 +649,7 @@ input:focus-visible {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   line-height: 1.45;
 }
 
@@ -679,7 +679,7 @@ input:focus-visible {
   gap: 7px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 
 .inspector-title {
@@ -689,12 +689,12 @@ input:focus-visible {
 .inspector-title small {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .inspector-title h2 {
   margin: 7px 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--afk-scale));
   line-height: 1.3;
 }
 
@@ -704,7 +704,7 @@ input:focus-visible {
   background: var(--afk-accent-soft);
   color: var(--afk-accent);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .inspector dl {
@@ -721,21 +721,21 @@ input:focus-visible {
   margin-bottom: 4px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .inspector dd {
   margin: 0;
   overflow: hidden;
   color: var(--afk-text);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   text-overflow: ellipsis;
 }
 
 .inspector section b {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .inspector pre {
@@ -747,7 +747,7 @@ input:focus-visible {
   background: var(--afk-panel-subtle);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   line-height: 1.45;
   white-space: pre-wrap;
 }
@@ -763,7 +763,7 @@ input:focus-visible {
   border-radius: var(--radius-md);
   background: var(--afk-border-strong);
   color: var(--afk-panel);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   font-weight: 600;
 }
 
@@ -792,20 +792,20 @@ input:focus-visible {
   padding: 0 12px;
   border-bottom: var(--border-w) solid var(--afk-border);
   color: var(--afk-text);
-  font-size: 11px;
+  font-size: calc(11px * var(--afk-scale));
 }
 
 .environment-grid article > header span {
   margin-left: auto;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 
 .environment-grid article > p {
   padding: 16px;
   color: var(--afk-muted);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .env-row {
@@ -816,13 +816,13 @@ input:focus-visible {
   min-height: 43px;
   padding: 0 12px;
   border-bottom: var(--border-w) solid var(--afk-border);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .env-row span {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .env-row small {
@@ -835,7 +835,7 @@ input:focus-visible {
 .env-row em {
   color: var(--run);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   font-style: normal;
 }
 
@@ -847,7 +847,7 @@ input:focus-visible {
   border-radius: var(--radius-sm);
   background: var(--afk-panel);
   color: var(--afk-muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 
 .table-panel {
@@ -886,14 +886,14 @@ input:focus-visible {
 }
 
 .replay > aside b {
-  font-size: 12px;
+  font-size: calc(12px * var(--afk-scale));
 }
 
 .replay > aside small {
   margin-top: 5px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 /* ---------- terminal sheet ---------- */
@@ -930,7 +930,7 @@ input:focus-visible {
 .terminal-sheet header span {
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 
 .terminal-sheet .icon-button {
@@ -946,7 +946,7 @@ input:focus-visible {
   padding: 13px;
   color: var(--afk-text);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -961,7 +961,7 @@ input:focus-visible {
   display: block;
   margin-bottom: 8px;
   color: var(--afk-muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 
 .terminal-sheet footer > div {
@@ -979,7 +979,7 @@ input:focus-visible {
   background: var(--afk-page-bg);
   color: var(--afk-text);
   font-family: var(--afk-mono);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 /* Text on an accent fill. --afk-panel is the one token that inverts with the
@@ -993,7 +993,7 @@ input:focus-visible {
   border-radius: var(--radius-sm);
   background: var(--afk-accent);
   color: var(--afk-panel);
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .terminal-sheet .send:disabled {
@@ -1019,7 +1019,7 @@ input:focus-visible {
 
 .empty h2 {
   margin: 4px 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--afk-scale));
   color: var(--afk-text);
 }
 
@@ -1027,7 +1027,7 @@ input:focus-visible {
   max-width: 340px;
   margin: 4px 0;
   color: var(--afk-muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--afk-scale));
   line-height: 1.5;
 }
 
@@ -1050,7 +1050,7 @@ input:focus-visible {
 .terminal-sheet .terminal-hint {
   display: block;
   color: var(--afk-muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   line-height: 1.5;
 }
 

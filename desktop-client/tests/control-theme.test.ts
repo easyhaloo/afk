@@ -72,8 +72,23 @@ function literalRadii(): string[] {
       .map(hit => `${name}: ${hit}`));
 }
 
-const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })
-  .filter(name => name.endsWith(".css"))
+/**
+ * Font sizes that ignore --afk-scale. Both spellings count: `font-size: 12px`
+ * and a sized `font:` shorthand, which cannot take a calc() and so has to be
+ * written longhand. Matched globally per file, for the same reason as
+ * literalRadii().
+ */
+function unscaledType(): string[] {
+  const declaration = /(?:\bfont-size\s*:\s*\d+(?:\.\d+)?px|\bfont\s*:[^;}]*\d\s*px)/g;
+  return readdirSync(src, { recursive: true, encoding: "utf8" })
+    .filter(name => name.endsWith(".css"))
+    .flatMap(name => (readFileSync(path.join(src, name), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, " "))
+      .match(declaration) ?? [])
+      .map(hit => `${name}: ${hit}`));
+}
+
+const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })  .filter(name => name.endsWith(".css"))
   .map(name => readFileSync(path.join(src, name), "utf8"))
   .join("\n");
 
@@ -170,6 +185,16 @@ describe("design tokens", () => {
     expect(
       literalRadii(),
       "single-value px radii are mechanical; use --radius-sm/-md/-lg/-pill",
+    ).toEqual([]);
+  });
+
+  it("makes every font size follow the density setting", () => {
+    // 「字号密度」 writes --afk-scale onto <html> (main.tsx, via dataset), but a
+    // bare px size ignores it. For months only 109 of 396 sites followed the
+    // setting, so the control did almost nothing on most of the UI.
+    expect(
+      unscaledType(),
+      "font sizes must read calc(Npx * var(--afk-scale)) so 字号密度 reaches them",
     ).toEqual([]);
   });
 

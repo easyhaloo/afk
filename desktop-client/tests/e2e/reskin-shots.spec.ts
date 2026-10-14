@@ -30,6 +30,20 @@ test.describe("reskin evidence", () => {
     });
   }
 
+  // 字号密度 scales every font size, so a row with a fixed height can clip at
+  // ×1.1 in a way nothing else would notice. 工作流 is the densest surface.
+  for (const view of ["工作流", "工作项"] as const) {
+    test(`${view} (舒展)`, async ({ page }) => {
+      await setTheme(page, "浅色");
+      await page.locator(".primary-nav button", { hasText: "设置" }).click();
+      await page.getByRole("radiogroup", { name: "字号密度" }).getByText("舒展").click();
+      await page.waitForTimeout(250);
+      await page.locator(".primary-nav button", { hasText: view }).click();
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${OUT}/${view}-large.png` });
+    });
+  }
+
   // Nothing else in this suite opens an overlay, so a modal or drawer that
   // silently changes width would pass every other test in the package.
   test("执行工作项模态 (light)", async ({ page }) => {

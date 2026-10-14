@@ -16,6 +16,11 @@ export async function showBacklog(provider: BacklogManagementProvider, id: strin
   return provider.get(id);
 }
 
+export async function adoptBacklog(provider: BacklogManagementProvider, id: string): Promise<BacklogItem> {
+  if (!provider.adopt) throw new Error('backlog provider does not support explicit issue adoption');
+  return provider.adopt(id);
+}
+
 export async function createBacklog(provider: BacklogManagementProvider, input: BacklogCreateInput): Promise<BacklogItem> {
   return provider.create(input);
 }

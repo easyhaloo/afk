@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { extractClaudeTranscriptTokens, extractCodexRolloutTokens, readAgentTelemetry, findCodexRollout } from './agent-telemetry.js';
+import { extractClaudeTranscriptTokens, extractCodexRolloutTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout } from './agent-telemetry.js';
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -262,6 +262,32 @@ describe('readAgentTelemetry', () => {
     ].join('\n'));
     const usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' });
     expect(usage).toEqual({ inputTokens: PEAK_INPUT, outputTokens: PEAK_OUTPUT, totalTokens: PEAK_INPUT + PEAK_OUTPUT });
+  });
+
+  it('reads native tools from a transcript independently of token usage', async () => {
+    const transcriptPath = join(tmp, 'tools.jsonl');
+    writeFileSync(transcriptPath, [
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'Read', input: { path: 'private' } }] } }),
+      '{malformed',
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'private output' }] } }),
+    ].join('\n'));
+    await expect(readAgentTools({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' })).resolves.toEqual([
+      { id: 'call-1', name: 'Read', result: 'succeeded' },
+    ]);
+    await expect(readAgentTelemetry({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' })).resolves.toBeUndefined();
+  });
+
+  it('leaves unavailable native tool telemetry absent and re-exports the CLI parser', async () => {
+    const transcriptPath = join(tmp, 'rollout.jsonl');
+    writeFileSync(transcriptPath, JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: null } }));
+    await expect(readAgentTools({ provider: 'codex', transcriptPath, sandboxKind: 'local' })).resolves.toBeUndefined();
+    await expect(readAgentTools({ provider: 'codex', transcriptPath: join(tmp, 'missing'), sandboxKind: 'local' })).resolves.toBeUndefined();
+    await expect(readAgentTools({ provider: 'codex', transcriptPath, sandboxKind: 'container' })).resolves.toBeUndefined();
+    const cliLine = JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', id: 'cmd-1', exit_code: 2 } });
+    writeFileSync(transcriptPath, cliLine);
+    const expected = [{ id: 'cmd-1', name: 'command_execution', result: 'failed', exitCode: 2 }];
+    await expect(readAgentTools({ provider: 'codex', transcriptPath, sandboxKind: 'local' })).resolves.toEqual(expected);
+    expect(extractCodexToolEvents([cliLine])).toEqual(expected);
   });
 });
 

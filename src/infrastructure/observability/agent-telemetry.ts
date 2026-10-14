@@ -7,7 +7,10 @@
  * Boundary: harness owns agent-layer truth. AFK only READS.
  */
 
+import type { AgentToolCallSummary } from '@afk/core';
 import type { TokenUsage } from '../../domain/agents/types.js';
+import { extractClaudeToolEvents, extractCodexToolEvents } from '../../domain/agents/tool-telemetry.js';
+export { extractClaudeToolEvents, extractCodexToolEvents } from '../../domain/agents/tool-telemetry.js';
 
 /** Claude Code cost-state entry (from transcript .jsonl). */
 interface CostStateEntry {
@@ -152,7 +155,19 @@ export interface ReadTelemetryOptions {
  * Never returns NaN — uses num() for every field.
  */
 export async function readAgentTelemetry(options: ReadTelemetryOptions): Promise<TokenUsage | undefined> {
-  const { provider, transcriptPath, sandboxKind } = options;
+  const lines = await readTranscriptLines(options);
+  if (!lines) return undefined;
+  return options.provider === 'claude-code' ? extractClaudeTranscriptTokens(lines) : extractCodexRolloutTokens(lines);
+}
+
+export async function readAgentTools(options: ReadTelemetryOptions): Promise<AgentToolCallSummary[] | undefined> {
+  const lines = await readTranscriptLines(options);
+  if (!lines) return undefined;
+  return options.provider === 'claude-code' ? extractClaudeToolEvents(lines) : extractCodexToolEvents(lines);
+}
+
+async function readTranscriptLines(options: ReadTelemetryOptions): Promise<string[] | undefined> {
+  const { transcriptPath, sandboxKind } = options;
 
   if (sandboxKind === 'container') {
     // HOME is excluded from container env; harness dirs are not mounted.
@@ -167,9 +182,7 @@ export async function readAgentTelemetry(options: ReadTelemetryOptions): Promise
     return undefined;
   }
 
-  const lines = content.split('\n').filter(l => l.trim());
-  if (provider === 'claude-code') return extractClaudeTranscriptTokens(lines);
-  return extractCodexRolloutTokens(lines);
+  return content.split('\n').filter(l => l.trim());
 }
 
 /**

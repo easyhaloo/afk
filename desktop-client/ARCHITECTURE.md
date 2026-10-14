@@ -41,6 +41,10 @@ Execution history uses a separate direct Application path:
   `@afk/application.queryExecutionHistory`; no CLI subprocess or legacy projection
   is used for the history view. Main source is plain ESM and imports the use cases
   directly — there is no runtime CommonJS interop shim.
+- Execution summaries carry optional token `usage` projected by Application
+  from verified `agent.session_recorded` events. The shared contract validates
+  the three non-negative integer counts; the run-center inspector displays
+  recorded counts or `未采集`, preserving explicit zero and execution status.
 - **Development vs packaging differ on purpose.** In development
   `dist-electron/electron/main.js` is transpiled per file and resolves the
   workspace packages through symlinks. `scripts/build-main.mjs` then bundles

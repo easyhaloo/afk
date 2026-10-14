@@ -1,22 +1,9 @@
-/**
- * BudgetManager — encapsulates handoff budget state and mutations.
- *
- * Before: `budget: { used: number; tokens: number }` was created in runBody,
- * passed around, and mutated in-place at multiple call sites with opaque
- * comparisons like `p.budget.used >= p.maxHandoffs`.
- *
- * After: a single class holds the state and limits, exposing intentful
- * queries and a single mutation point:
- *   - canHandoff()         → readable guard instead of `used >= maxHandoffs`
- *   - isExhausted(tokens)  → readable guard instead of `tokens + usedTokens >= maxTotalTokens`
- *   - record(tokens)        → single mutation: used++ and tokens+=
- *   - used / tokens         → readonly getters for logging
- */
 export class BudgetManager {
   /** @internal — public for test injection; do not mutate directly in production. */
   used: number = 0;
   /** @internal — public for test injection; do not mutate directly in production. */
   tokens: number = 0;
+  private readonly sessions = new Map<string, number>();
 
   constructor(
     private readonly maxHandoffs: number,
@@ -39,7 +26,7 @@ export class BudgetManager {
    * Use `isExhausted(incomingTokens)` to check whether a pending token
    * count would push the session into terminal state.
    */
-  isExhausted(incomingTokens: number): boolean {
+  isExhausted(incomingTokens = 0): boolean {
     return (
       this.used >= this.maxHandoffs ||
       this.tokens + incomingTokens >= this.maxTotalTokens
@@ -50,19 +37,39 @@ export class BudgetManager {
    * Which limit was hit when exhausted, or null if not exhausted.
    * Use this to determine the terminal reason after isExhausted returns true.
    */
-  exhaustionReason(incomingTokens: number): 'budget' | 'tokens' | null {
+  exhaustionReason(incomingTokens = 0): 'budget' | 'tokens' | null {
     if (this.used >= this.maxHandoffs) return 'budget';
     if (this.tokens + incomingTokens >= this.maxTotalTokens) return 'tokens';
     return null;
   }
 
-  /**
-   * Record one completed handoff round.
-   * Idempotent — safe to call even when already exhausted.
-   */
-  record(tokens: number): void {
+  recordHandoff(): void {
     this.used++;
-    this.tokens += tokens;
+  }
+
+  recordSession(sessionId: string, tokens: number): boolean {
+    if (!sessionId || !Number.isSafeInteger(tokens) || tokens < 0) throw new Error('invalid session token usage');
+    const previous = this.sessions.get(sessionId) ?? 0;
+    if (this.sessions.has(sessionId) && tokens <= previous) return false;
+    this.sessions.set(sessionId, tokens);
+    this.tokens += tokens - previous;
+    return true;
+  }
+
+  snapshot(): { used: number; tokens: number; sessions: Record<string, number> } {
+    return { used: this.used, tokens: this.tokens, sessions: Object.fromEntries(this.sessions) };
+  }
+
+  static fromSnapshot(
+    snapshot: { used: number; tokens: number; sessions: Record<string, number> },
+    maxHandoffs: number,
+    maxTotalTokens: number,
+  ): BudgetManager {
+    const manager = new BudgetManager(maxHandoffs, maxTotalTokens);
+    manager.used = snapshot.used;
+    manager.tokens = snapshot.tokens;
+    for (const [sessionId, tokens] of Object.entries(snapshot.sessions)) manager.sessions.set(sessionId, tokens);
+    return manager;
   }
 
   /**

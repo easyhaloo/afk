@@ -8,6 +8,8 @@
  * - Session capture/restore (capability: resume)
  */
 
+import type { AgentToolCallSummary } from '@afk/core';
+
 export type AgentProviderName =
   | 'claude-code'
   | 'codex'
@@ -169,6 +171,7 @@ export interface ExecutionResult {
   exitCode?: number;
   structuredOutput?: unknown;
   usage?: TokenUsage;
+  tools?: AgentToolCallSummary[];
   commits: string[];
   branch?: string;
   error?: { code: string; message: string };

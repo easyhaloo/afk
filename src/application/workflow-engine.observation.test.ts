@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProviderBundle } from '../infrastructure/provider/providers.js';
 import { WorkflowRunner } from './workflow-engine.js';
+import { getLogContext } from '../infrastructure/io/index.js';
 import type { RunObserver } from '../observability/run-observer.js';
 import { RunObserver as DurableRunObserver } from '../observability/run-observer.js';
 import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
@@ -29,11 +30,16 @@ function runner() {
 describe('WorkflowRunner audit identity', () => {
   it('uses deterministic run ID and canonical work item on the first requested event', async () => {
     const { workflow, record, claim } = runner();
+    claim.mockImplementationOnce(async () => {
+      expect(getLogContext()).toEqual({ runId: 'execution-42', workItemId: 'github:acme/api#42' });
+      return null;
+    });
     await workflow.run({ backlogId: '42', session: 'session-42', targetBranch: 'main',
       observationRunId: 'execution-42', observationWorkItemId: 'github:acme/api#42' });
     expect(claim).toHaveBeenCalledWith('42', 'session-42');
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ runId: 'execution-42', workItemId: 'github:acme/api#42' }),
       { kind: 'run.requested', run: expect.objectContaining({ id: 'execution-42', workItemId: 'github:acme/api#42' }) });
+    expect(getLogContext()).toBeUndefined();
   });
 
   it('creates an afk run audit identity when overrides are absent', async () => {

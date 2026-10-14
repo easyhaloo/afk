@@ -23,6 +23,7 @@ import { RunObserver } from '../../observability/run-observer.js';
 import { projectWorkItemExecution } from '../../observability/work-item-execution-projection.js';
 import { readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
 import { resolveWorkflowRunRequest, type WorkflowRunRequest } from './run-request.js';
+import { withLogContext } from '../../infrastructure/io/index.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
@@ -236,8 +237,9 @@ function validateItem(item: BacklogItem, inventoryItem: GlobalWorkItem, manifest
   if (!inventoryItem.managed || item.managed === false) {
     throw new Error(
       `unmanaged work item: ${workItemId} — AFK only executes issues it manages. ` +
-      `Add the labels '${BACKLOG_METADATA.stateLabels.ready}' and '${BACKLOG_METADATA.executionModeLabels.afk}' ` +
-      `to adopt it (labels are created by \`afk backlog init\`), or create it through the backlog so they are applied automatically.`,
+      `Run \`afk backlog adopt --id ${identity.issueNumber} --project ${identity.projectKey} --platform ${identity.platform}\` ` +
+      `to add '${BACKLOG_METADATA.stateLabels.ready}' and '${BACKLOG_METADATA.executionModeLabels.afk}', ` +
+      `or create it through the backlog so they are applied automatically.`,
     );
   }
   if (!inventoryItem.executionEligible || item.executionEligible === false) throw new Error(`ineligible work item: ${workItemId}`);
@@ -253,6 +255,12 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
     traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
     attempt: 1, actor: { kind: 'system', id: 'execute' },
   };
+  return withLogContext(context, () => executeWorkItemObserved(input, dependencies, context));
+}
+
+async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies: ExecuteWorkItemDependencies, context: ObservationContext): Promise<ExecuteWorkItemResult> {
+  const workItemId = parseWorkItemId(context.workItemId).id;
+  const executionId = context.runId;
   const observer = dependencies.recordAudit ? undefined : new RunObserver({ events: new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR }) });
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
   const audit = async (data: RunEventData) => { await recordAudit(context, data); };
@@ -313,6 +321,7 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
         const qa = (dependencies.createQA ?? ((bundle, workflowConfig, runRequest) =>
           new QARunner(bundle, workflowConfig, {
             agentRuntime: runRequest.agentRuntime, executionMode: 'batch', projectRoot: runRequest.workspaceRoot,
+            repositories: runRequest.repositories,
             beforeChange: async (action, _backlog, change) => {
               if (action === 'publish') await auditQAPass();
               if (action === 'merge' && change) await providers.changes.verifyIssueAssociation(change, workItemId);
@@ -322,10 +331,23 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
               await providers.changes.verifyIssueAssociation(change, workItemId);
               await record('published', { changeId: change.id, changeUrl: change.url });
             },
+            onCommit: (commitSha, branch) => audit({ kind: 'commit.recorded', phase: 'qa', commitSha, branch }),
+            onSession: audit,
           })))(management, config, request);
-        const qaResult = await qa.process(request.backlogId);
+        const qaResult = await qa.process(request.backlogId).catch(async error => {
+          await audit({
+            kind: 'qa.failed', reason: 'blocked',
+            summary: `QA execution failed: ${error instanceof Error ? error.message : String(error)}`,
+          }).catch(() => undefined);
+          throw error;
+        });
         if (qaResult.success) await auditQAPass();
-        else await audit({ kind: 'qa.failed', reason: qaResult.rework ? 'rework' : 'blocked' });
+        else await audit({
+          kind: 'qa.failed',
+          reason: qaResult.rework ? 'rework' : 'blocked',
+          ...(qaResult.summary ? { summary: qaResult.summary } : {}),
+          ...(qaResult.failedCriteria ? { failedCriteria: qaResult.failedCriteria } : {}),
+        });
         const change = qaResult.success ? await providers.changes.findForBacklog(item) : null;
         const finalItem = qaResult.success ? await providers.backlog.get(request.backlogId) : null;
         const published = change && change.id && change.url && change.url === qaResult.mrUrl

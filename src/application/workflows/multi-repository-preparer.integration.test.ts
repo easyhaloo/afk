@@ -101,6 +101,49 @@ describe('multi-repository execution manifest integration', () => {
     }
   });
 
+  it('rebuilds a released checkout for a borrowing phase and releases it without pushing', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-qa-workspace-'));
+    try {
+      const workspaceRoot = join(root, 'workspace');
+      const repoRoot = join(workspaceRoot, 'repositories', 'api');
+      const workingBranch = 'afk/backlog-60';
+      const api = await createRemote(root, 'api', 'main');
+      // implementation pushed its branch, then released the checkout.
+      await simpleGit(api.remote).raw(['branch', workingBranch, 'main']);
+      // the clone URL is derived from the tracker identity, so redirect it
+      // per-invocation instead of rewriting the machine's git config.
+      process.env.GIT_CONFIG_COUNT = '1';
+      process.env.GIT_CONFIG_KEY_0 = `url.${api.remote}.insteadOf`;
+      process.env.GIT_CONFIG_VALUE_0 = 'https://github.com/acme/api.git';
+
+      const repositories = [{
+        platform: 'github' as const, projectKey: 'acme/api', name: 'api', checkoutPath: 'repositories/api',
+        repoRoot, baseBranch: 'main', workingBranch, primary: true,
+      }];
+      const preparer = new MultiRepositoryPreparer();
+
+      // QA has no checkout to borrow: it rebuilds one, and that rebuilt
+      // checkout must be usable as a worktree source.
+      const borrowed = await preparer.prepare(repositories, workspaceRoot);
+      expect(borrowed.primary.handle.path).toBe(repoRoot);
+      const rebuilt = simpleGit(repoRoot);
+      expect((await rebuilt.revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe(workingBranch);
+      const qaWorktree = join(repoRoot, '.worktrees', 'afk-backlog-60-qa');
+      await rebuilt.raw(['worktree', 'add', '-b', 'afk/backlog-60-qa', qaWorktree, 'main']);
+
+      await borrowed.release();
+
+      await expect(readFile(qaWorktree, 'utf8').catch(() => Promise.reject(new Error('released')))).rejects.toThrow();
+      expect(await branchExists(api.remote, workingBranch)).toBe(true);
+      expect(await branchExists(api.remote, 'afk/backlog-60-qa')).toBe(false);
+    } finally {
+      delete process.env.GIT_CONFIG_COUNT;
+      delete process.env.GIT_CONFIG_KEY_0;
+      delete process.env.GIT_CONFIG_VALUE_0;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('prepares both repositories from their own bases, cleans success and preserves failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-multi-repository-integration-'));
     try {

@@ -24,6 +24,7 @@ single source of truth for the supported surface:
 | Command | Responsibility |
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
+| `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk run --backlog-id <id>` | Execute one claimed item |
 | `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
@@ -53,6 +54,18 @@ tag updates, and the state/mode updates needed by QA. It has no `claim()` at
 the type or runtime boundary. The execution bundle is the only path that
 exposes claiming and runnable checks.
 
+`adopt` is an optional management/provider capability; unsupported providers
+return an explicit error. The tracker adapter checks the issue's raw state and
+metadata rather than inferring readiness from domain defaults. It accepts only
+open issues with absent or canonical ready/afk lifecycle labels, rejects unknown,
+duplicate or conflicting AFK metadata and malformed or self-referencing
+parent/base/dependency IDs, and preserves business labels, relationships and the
+issue body. Adoption initializes provider metadata only when labels are missing,
+then adds only the missing ready/afk labels with no removals. An already ready/afk
+item is a no-write success; closed, blocked, HITL and other lifecycle states are
+rejected without writes. Project and platform are required, and `--json` emits
+the `backlog.adopt` envelope. Execution and loop never invoke adoption implicitly.
+
 ## Work-item and execution identity
 
 The Provider Backlog is the business source of truth. Its `BacklogItem.id` is
@@ -78,6 +91,32 @@ has no child items, and all `dependsOn` items are `done`. `parentId` groups
 child items; a parent itself is never runnable. Any automation failure,
 conflict, timeout, or uncertain lease recovery transitions the item to
 `blocked` and routes it to `hitl`.
+
+QA FAIL persists a new rework record in the provider's issue comment/note,
+supersedes any active record, and increments `ReworkRecord.attempt` from the
+highest persisted attempt. QA record creation only persists evidence;
+`QARunner` owns the subsequent state/mode routing. Operator retry still creates
+its record and routes directly to `rework` + `afk`.
+
+`WorkflowConfig.maxQaReworkAttempts` defaults to **3** and must be a positive
+integer. Set `maxQaReworkAttempts: 3` in `.afk/config.yml` or use
+`AFK_MAX_QA_REWORK_ATTEMPTS=3`; the project file takes precedence. With no prior
+records, the first FAIL is attempt 1, the second FAIL is attempt 2, and both
+allow `rework` + `afk`. The third FAIL persists attempt 3 and returns
+`success: false` without `rework`, routing directly to `blocked` + `hitl`.
+Further FAIL calls retain that record and cannot reopen automatic rework.
+A limit of 1 blocks the first FAIL. Attempts include earlier resolved,
+superseded, and operator records; restarting a runner does not reset them.
+QA PASS can still resolve an active record. This limit is separate from
+`maxRetries` (execution retries) and `maxSelfIterations` (AC corrections).
+The handoff/token `BudgetManager` restores its snapshot from
+`<workspace>/.afk/budgets/` per canonical work item. Handoff rounds and native
+harness token usage persist across runs; session IDs are deduplicated and a
+corrupt snapshot fails closed before a new agent execution starts.
+
+The `commit.recorded` audit event links implementation and QA commits to the
+real local SHA and branch. It is emitted only for a new commit; a change
+request SHA is never substituted.
 
 ## Runtime and Desktop projections
 

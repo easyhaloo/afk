@@ -16,6 +16,16 @@ export interface ObservationContext {
 export type EvidenceClassification = 'public' | 'internal' | 'sensitive';
 export type RedactionStatus = 'not_required' | 'applied' | 'restricted';
 
+export interface AgentToolCallSummary {
+  id: string;
+  name: string;
+  result: 'succeeded' | 'failed' | 'unknown' | 'in_progress';
+  exitCode?: number;
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+}
+
 export interface EvidenceRef {
   uri: string;
   sha256: string;
@@ -32,9 +42,10 @@ export type RunEventData =
   | { kind: 'change.created'; changeId: string; targetBranch: string; url?: string }
   | { kind: 'change.merge_verified'; changeId: string; targetBranch: string; child?: boolean }
   | { kind: 'qa.started' }
+  | { kind: 'commit.recorded'; phase: 'implementation' | 'qa'; commitSha: string; branch: string }
   | { kind: 'implementation.completed' }
   | { kind: 'qa.passed' }
-  | { kind: 'qa.failed'; reason?: string }
+  | { kind: 'qa.failed'; reason?: string; summary?: string; failedCriteria?: Array<{ id: string; expected: string; actual: string }> }
   | { kind: 'change.published'; changeId: string; url: string }
   | { kind: 'decision.made'; command: string; accepted: boolean; reason?: string }
   | { kind: 'effect.started'; effectKind: string; idempotencyKey: string }
@@ -45,7 +56,7 @@ export type RunEventData =
   | { kind: 'human_gate.approved'; gateId: string; approverId: string }
   | { kind: 'run.finished'; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'>; reason?: string }
   | { kind: 'failure.classified'; failureClass: string; summary: string }
-  | { kind: 'agent.session_recorded'; sessionId: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number } };
+  | { kind: 'agent.session_recorded'; sessionId: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number }; tools?: AgentToolCallSummary[] };
 
 export type RunEventType = RunEventData['kind'];
 

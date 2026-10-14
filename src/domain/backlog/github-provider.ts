@@ -5,7 +5,7 @@ import type { TrackerProvider } from '../tracker/types.js';
 /** GitHub's production backlog boundary. Platform label mapping stays private. */
 export class GitHubBacklogProvider implements BacklogProvider {
   readonly capabilities;
-  private readonly implementation: BacklogProvider;
+  private readonly implementation: TrackerBacklogProvider;
 
   constructor(tracker: TrackerProvider, options: TrackerBacklogAdapterOptions = {}) {
     if (tracker.platform !== 'github') throw new Error('GitHubBacklogProvider requires a GitHub tracker client');
@@ -14,6 +14,7 @@ export class GitHubBacklogProvider implements BacklogProvider {
   }
 
   get(id: string): Promise<BacklogItem> { return this.implementation.get(id); }
+  adopt(id: string): Promise<BacklogItem> { return this.implementation.adopt(id); }
   list(options?: BacklogListOptions): Promise<BacklogItem[]> { return this.implementation.list(options); }
   create(input: BacklogCreateInput): Promise<BacklogItem> { return this.implementation.create(input); }
   claim(id: string, owner: string): Promise<BacklogClaim | null> { return this.implementation.claim(id, owner); }

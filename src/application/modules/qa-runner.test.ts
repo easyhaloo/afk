@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
+import { TrackerBacklogProvider } from '../../domain/backlog/tracker-adapter.js';
+import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
+import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { BudgetStore } from '../workflows/budget-store.js';
+import { getLogContext, withLogContext } from '../../infrastructure/io/index.js';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
 vi.mock('../../infrastructure/io/index', async importOriginal => ({
@@ -12,6 +20,7 @@ const config = {
   targetBranch: 'main',
   completionTimeout: 1000,
   contextThreshold: 100_000,
+  maxQaReworkAttempts: 3,
 } as any;
 
 function fixture() {
@@ -77,6 +86,48 @@ function fixture() {
     createExecution: vi.fn(async () => execution),
   };
   return { providers: { backlog, changes, branches } as any, changes, branches, sandboxProvider: sandboxProvider as any, agentProvider: agentProvider as any, sandbox, execution };
+}
+
+function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttempts = 3) {
+  const issue: TrackedIssue = { id: 60, platform, title: 'search mode', description: 'support /s', labels: ['stage::qa', 'mode::afk'], state: 'opened', projectId: 'org/repo', url: '' };
+  const comments: Array<{ id: string; body: string }> = [];
+  const tracker = {
+    platform, projectId: 'org/repo',
+    getIssue: vi.fn(async () => ({ ...issue, labels: [...issue.labels] })),
+    listIssues: vi.fn(async () => [issue]),
+    listMRs: vi.fn(async () => []),
+    updateLabels: vi.fn(async (_id, delta) => {
+      issue.labels = [...issue.labels.filter(label => !delta.remove.includes(label)), ...delta.add];
+    }),
+    listIssueComments: vi.fn(async () => comments.map(comment => ({ ...comment }))),
+    addComment: vi.fn(async (_id, body) => { comments.push({ id: `comment-${comments.length + 1}`, body }); }),
+    updateIssueComment: vi.fn(async (_id, commentId, body) => {
+      comments.find(comment => comment.id === commentId)!.body = body;
+    }),
+  } satisfies Partial<TrackerProvider>;
+  const createRunner = () => {
+    const f = fixture();
+    const backlog = new TrackerBacklogProvider(tracker as TrackerProvider, { atomicClaim: vi.fn() });
+    const transition = vi.spyOn(backlog, 'transition');
+    const setExecutionMode = vi.spyOn(backlog, 'setExecutionMode');
+    const createRework = vi.spyOn(backlog, 'createRework');
+    f.execution.waitForResult.mockResolvedValue({
+      version: 1, runId: 'execution-60', status: 'completed', provider: 'batch', commits: [],
+      structuredOutput: {
+        type: 'goal_complete', kind: 'qa', result: 'FAIL', summary: 'search shortcut failed',
+        failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }],
+      },
+    });
+    const runner = new QARunner({ ...f.providers, backlog }, { ...config, maxQaReworkAttempts }, {
+      sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider,
+      executionMode: 'batch', mergeBranch: vi.fn(async () => {}),
+      runtimeManager: {
+        start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity: vi.fn(),
+      } as any,
+    });
+    return { runner, backlog, transition, setExecutionMode, createRework };
+  };
+  return { comments, createRunner };
 }
 
 describe('QARunner execution boundary', () => {
@@ -240,7 +291,10 @@ describe('QARunner execution boundary', () => {
       runtimeManager: runtime as any,
     });
 
-    await expect(runner.process('60')).resolves.toMatchObject({ success: false });
+    await expect(runner.process('60')).resolves.toMatchObject({
+      success: false, rework: true, summary: 'search shortcut failed',
+      failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }],
+    });
     expect(f.providers.backlog.createRework).toHaveBeenCalledWith('60', expect.objectContaining({
       source: 'qa', summary: 'search shortcut failed',
       failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }],
@@ -249,6 +303,89 @@ describe('QARunner execution boundary', () => {
     expect(runtime.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
       status: 'blocked', errorSummary: expect.stringContaining('search shortcut failed'),
     }));
+  });
+
+  it.each(['github', 'gitlab'] as const)('bounds repeated active QA FAIL using persisted %s comments across runners', async platform => {
+    const f = persistentReworkFixture(platform);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const current = f.createRunner();
+      const result = await current.runner.process('60');
+      expect(result.success).toBe(false);
+      expect(result.summary).toContain('search shortcut failed');
+      expect(result.failedCriteria).toEqual([{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }]);
+      await expect(current.backlog.getActiveRework('60')).resolves.toMatchObject({ id: `r${attempt}`, attempt, status: 'open' });
+      expect(f.comments.map(comment => parseReworkRecord(comment)?.record.status)).toEqual([
+        ...Array(attempt - 1).fill('superseded'), 'open',
+      ]);
+      if (attempt < 3) {
+        expect(result.rework).toBe(true);
+        await expect(current.backlog.get('60')).resolves.toMatchObject({ state: 'rework', executionMode: 'afk' });
+      } else {
+        expect(result.rework).not.toBe(true);
+        expect(result.summary).toContain('3/3');
+        await expect(current.backlog.get('60')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
+        expect(await current.backlog.isRunnable(await current.backlog.get('60'))).toBe(false);
+        expect(current.transition).not.toHaveBeenCalledWith('60', 'rework', expect.anything());
+        expect(current.transition).not.toHaveBeenCalledWith('60', 'rework');
+        expect(current.setExecutionMode).not.toHaveBeenCalledWith('60', 'afk');
+      }
+    }
+    const subsequent = f.createRunner();
+    const subsequentResult = await subsequent.runner.process('60');
+    expect(subsequentResult).toMatchObject({ success: false });
+    expect(subsequentResult.rework).not.toBe(true);
+    await expect(subsequent.backlog.get('60')).resolves.toMatchObject({ state: 'blocked', executionMode: 'hitl' });
+    expect(subsequent.createRework).not.toHaveBeenCalled();
+    expect(subsequent.transition).not.toHaveBeenCalledWith('60', 'rework', expect.anything());
+    expect(subsequent.transition).not.toHaveBeenCalledWith('60', 'rework');
+    expect(subsequent.setExecutionMode).not.toHaveBeenCalledWith('60', 'afk');
+    expect(f.comments).toHaveLength(3);
+  });
+
+  it.each([1, 4])('honors a configured QA failure limit of %s', async limit => {
+    const f = persistentReworkFixture('github', limit);
+    for (let attempt = 1; attempt <= limit; attempt++) {
+      const current = f.createRunner();
+      const result = await current.runner.process('60');
+      expect(result.rework === true).toBe(attempt < limit);
+      await expect(current.backlog.getActiveRework('60')).resolves.toMatchObject({ attempt });
+      await expect(current.backlog.get('60')).resolves.toMatchObject({
+        state: attempt < limit ? 'rework' : 'blocked', executionMode: attempt < limit ? 'afk' : 'hitl',
+      });
+      if (attempt === limit) {
+        expect(current.transition).not.toHaveBeenCalledWith('60', 'rework');
+        expect(current.setExecutionMode).not.toHaveBeenCalledWith('60', 'afk');
+      }
+    }
+  });
+
+  it('returns a diagnostic summary when the QA agent fails to start', async () => {
+    const f = fixture();
+    f.agentProvider.createExecution.mockRejectedValueOnce(new Error('provider unavailable'));
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+    });
+
+    await expect(runner.process('60')).resolves.toMatchObject({
+      success: false,
+      summary: 'QA execution failed: provider unavailable',
+    });
+  });
+
+  it.each(['backlog', 'execution base'])('routes a failed %s lookup to blocked with a diagnostic summary', async lookup => {
+    const f = fixture();
+    if (lookup === 'execution base') {
+      f.providers.backlog.get.mockResolvedValueOnce({ ...await f.providers.backlog.get('60'), baseBacklogId: '11' });
+    }
+    f.providers.backlog.get.mockRejectedValueOnce(new Error('provider read unavailable'));
+    const runner = new QARunner(f.providers, config, { sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider });
+
+    await expect(runner.process('60')).resolves.toMatchObject({ success: false, summary: 'QA execution failed: provider read unavailable' });
+    expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'blocked', { reason: 'QA execution failed: provider read unavailable' });
+    expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
   });
 
   it('resolves the active QA rework record only after QA passes', async () => {
@@ -286,6 +423,95 @@ describe('QARunner execution boundary', () => {
     expect(f.providers.changes.merge).not.toHaveBeenCalled();
     expect(f.providers.backlog.transition).toHaveBeenCalledWith('60', 'merge_ready', expect.anything());
     expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
+  });
+
+  it('passes the local QA commit SHA to the audit hook', async () => {
+    const f = fixture();
+    const onCommit = vi.fn(async () => {});
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+      onCommit,
+    });
+
+    await runner.process('60');
+
+    expect(onCommit).toHaveBeenCalledWith('commit-60', 'qa-60');
+  });
+
+  it('keeps the managed execution log context throughout QA', async () => {
+    const f = fixture();
+    const context = { runId: 'managed-attempt', workItemId: 'github:org/repo#60' };
+    const onCommit = vi.fn(async () => { expect(getLogContext()).toEqual(context); });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}), onCommit,
+    });
+    await withLogContext(context, () => runner.process('60'));
+    expect(onCommit).toHaveBeenCalledOnce();
+    expect(getLogContext()).toBeUndefined();
+  });
+
+  it('does not call the audit hook when the branch provider reports no commit', async () => {
+    const f = fixture();
+    f.branches.commit.mockResolvedValue(undefined as never);
+    const onCommit = vi.fn(async () => {});
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+      onCommit,
+    });
+
+    await runner.process('60');
+
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it.each(['tokens', 'handoffs', 'corrupt'] as const)('blocks QA before starting an agent for a %s budget ledger', async condition => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-qa-budget-'));
+    try {
+      const store = new BudgetStore(root, '60');
+      await store.save({ used: condition === 'handoffs' ? 1 : 0, tokens: 100, sessions: { session: 100 } });
+      if (condition === 'corrupt') await writeFile(join(root, '.afk', 'budgets', '60.json'), '{}');
+      const f = fixture();
+      const runner = new QARunner(f.providers, { ...config, goalBudget: condition === 'tokens' ? 100 : 1000 }, {
+        sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, projectRoot: root,
+        executionMode: 'batch', mergeBranch: vi.fn(async () => {}),
+      });
+      const result = await runner.process('60');
+      expect(result).toMatchObject({ success: false, summary: expect.stringContaining(condition === 'corrupt' ? 'corrupt' : 'budget exhausted') });
+      expect(f.agentProvider.createExecution).not.toHaveBeenCalled();
+      expect(f.providers.branches.createVerificationWorktree).not.toHaveBeenCalled();
+      expect(f.providers.backlog.setExecutionMode).toHaveBeenCalledWith('60', 'hitl');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('records QA native usage in the shared ledger and telemetry event without counting a repeated session twice', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-qa-usage-'));
+    try {
+      const f = fixture();
+      const result = await f.execution.waitForResult();
+      const tools = [{ id: 'qa-tool', name: 'Bash', result: 'failed', exitCode: 1 }];
+      f.execution.waitForResult.mockResolvedValue({ ...result, sessionId: 'qa-native', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools } as never);
+      const onSession = vi.fn(async () => {});
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const runner = new QARunner(f.providers, { ...config, goalBudget: 1000 }, {
+          sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, projectRoot: root,
+          executionMode: 'batch', mergeBranch: vi.fn(async () => {}), onSession,
+        });
+        expect(await runner.process('60')).toMatchObject({ success: true });
+      }
+      expect(await new BudgetStore(root, '60').load()).toMatchObject({ used: 0, tokens: 15, sessions: { 'qa-native': 15 } });
+      expect(onSession).toHaveBeenCalledWith({ kind: 'agent.session_recorded', sessionId: 'qa-native', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('does not publish when the attempt audit refuses publication', async () => {
@@ -371,5 +597,64 @@ describe('QARunner execution boundary', () => {
 
     expect(mergeBranch).toHaveBeenCalledWith(process.cwd(), 'afk/backlog-11', 'afk/backlog-60');
     expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({ targetBranch: 'afk/backlog-11' }));
+  });
+});
+
+describe('QARunner workspace independence', () => {
+  it('rebuilds a released workspace before creating the QA worktree and releases it afterwards', async () => {
+    // implementation releases its checkout on success, so QA must not depend
+    // on it: the repository root is gone by the time QA starts.
+    const f = fixture();
+    const order: string[] = [];
+    const release = vi.fn(async () => { order.push('release'); });
+    const workspace = {
+      repositories: [],
+      primary: { handle: { path: '/rebuilt/repo' } },
+      finish: vi.fn(async () => {}),
+      release,
+    };
+    const prepareRepositories = { prepare: vi.fn(async () => { order.push('prepare'); return workspace; }) };
+    f.branches.createVerificationWorktree.mockImplementation(async () => {
+      order.push('createVerificationWorktree');
+      return { branchName: 'qa-60', worktreePath: process.cwd() };
+    });
+    f.branches.cleanup.mockImplementation(async () => { order.push('cleanup'); });
+
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+      projectRoot: '/workspace',
+      repositories: [{ platform: 'github', projectKey: 'org/repo', repoRoot: '/workspace/repo', baseBranch: 'main', workingBranch: 'afk/backlog-60', primary: true }] as any,
+      prepareRepositories: prepareRepositories as any,
+      runtimeManager: { start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity: vi.fn() } as any,
+    });
+
+    const result = await runner.process('60');
+
+    expect(result.success).toBe(true);
+    expect(prepareRepositories.prepare).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ repoRoot: '/workspace/repo' })]),
+      '/workspace',
+    );
+    expect(order).toEqual(['prepare', 'createVerificationWorktree', 'cleanup', 'release']);
+    expect(workspace.finish).not.toHaveBeenCalled();
+  });
+
+  it('leaves unmanaged runs untouched when no managed workspace is configured', async () => {
+    const f = fixture();
+    const prepareRepositories = { prepare: vi.fn() };
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+      prepareRepositories: prepareRepositories as any,
+      runtimeManager: { start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity: vi.fn() } as any,
+    });
+
+    expect((await runner.process('60')).success).toBe(true);
+    expect(prepareRepositories.prepare).not.toHaveBeenCalled();
   });
 });

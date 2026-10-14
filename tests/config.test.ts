@@ -5,6 +5,7 @@
  * previously hardcoded in source or in constants.ts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(() => false),
@@ -16,6 +17,7 @@ import { loadWorkflowConfig } from '../src/infrastructure/config/manager';
 describe('WorkflowConfig env var loading', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(existsSync).mockReturnValue(false);
   });
 
   async function freshConfig(env: Record<string, string | undefined> = {}) {
@@ -32,6 +34,7 @@ describe('WorkflowConfig env var loading', () => {
     expect(cfg.promptTimeout).toBe(30_000);
     expect(cfg.handoffTimeout).toBe(60_000);
     expect(cfg.maxRetries).toBe(2);
+    expect(cfg.maxQaReworkAttempts).toBe(3);
     expect(cfg.goalBudget).toBe(10_000_000);
   });
 
@@ -78,6 +81,28 @@ describe('WorkflowConfig env var loading', () => {
   it('parses AFK_MAX_RETRIES', async () => {
     const cfg = await freshConfig({ AFK_MAX_RETRIES: '5' });
     expect(cfg.maxRetries).toBe(5);
+  });
+
+  it('loads an independent QA rework limit from the environment', async () => {
+    const cfg = await freshConfig({ AFK_MAX_QA_REWORK_ATTEMPTS: '4', AFK_MAX_RETRIES: '1' });
+    expect(cfg.maxQaReworkAttempts).toBe(4);
+    expect(cfg.maxRetries).toBe(1);
+  });
+
+  it('prefers the project QA rework limit over the environment', async () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue('maxQaReworkAttempts: 1');
+    expect((await freshConfig({ AFK_MAX_QA_REWORK_ATTEMPTS: '4' })).maxQaReworkAttempts).toBe(1);
+  });
+
+  it.each(['0', '-1', '1.5', 'Infinity', 'invalid', ''])('rejects an invalid QA rework limit: %j', async value => {
+    await expect(freshConfig({ AFK_MAX_QA_REWORK_ATTEMPTS: value })).rejects.toThrow('maxQaReworkAttempts must be a positive integer');
+  });
+
+  it.each(['0', '-1', '1.5', '.inf', 'true', '"3"'])('rejects an invalid project QA rework limit: %s', async value => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(`maxQaReworkAttempts: ${value}`);
+    await expect(freshConfig()).rejects.toThrow('maxQaReworkAttempts must be a positive integer');
   });
 
   it('parses AFK_IDLE_TIMEOUT in ms', async () => {

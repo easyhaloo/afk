@@ -19,9 +19,9 @@ function event(sequence: number, kind: 'run.requested' | 'run.started', status =
   } as RunEvent;
 }
 
-function port(): RunEventQueryPort {
+function port(recorded = [event(1, 'run.requested'), event(2, 'run.started')]): RunEventQueryPort {
   const runs = new Map<string, RunEvent[]>([
-    ['run-1', [event(1, 'run.requested'), event(2, 'run.started')]],
+    ['run-1', recorded],
   ]);
   return {
     async *read(runId) { yield* runs.get(runId) ?? []; },
@@ -31,6 +31,19 @@ function port(): RunEventQueryPort {
 }
 
 describe('run observation facade', () => {
+  it('exposes only verified usage belonging to this work item in execution history', async () => {
+    const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
+    const recorded: RunEvent = { ...event(3, 'run.started'), type: 'agent.session_recorded', data: { kind: 'agent.session_recorded', sessionId: 'session-1', usage } };
+    const deps = port([event(1, 'run.requested'), event(2, 'run.started'), recorded]);
+    expect((await queryExecutionHistory({}, deps)).executions[0]).toMatchObject({ usage, status: 'running' });
+    expect((await queryExecutionHistory({}, { ...deps, verify: async () => ({ valid: false, lastSequence: 2 }) })).executions[0]).not.toHaveProperty('usage');
+    expect((await queryExecutionHistory({}, { ...deps, verify: async () => ({ valid: true, lastSequence: 2 }) })).executions[0]).not.toHaveProperty('usage');
+    const foreign = { ...recorded, context: { ...context, workItemId: 'other-work' } };
+    expect((await queryExecutionHistory({}, port([event(1, 'run.requested'), event(2, 'run.started'), foreign]))).executions[0]).not.toHaveProperty('usage');
+    const otherExecution = { ...recorded, correlationId: 'other-execution' };
+    expect((await queryExecutionHistory({}, port([event(1, 'run.requested'), event(2, 'run.started'), otherExecution]))).executions[0]).not.toHaveProperty('usage');
+  });
+
   it('returns the verified event timeline and replayed state', async () => {
     await expect(observeRun('run-1', port())).resolves.toMatchObject({
       runId: 'run-1',

@@ -8,6 +8,8 @@ import { encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { RunObserver } from '../../observability/run-observer.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
+import { QARunner } from '../modules/qa-runner.js';
+import { getLogContext } from '../../infrastructure/io/index.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
@@ -218,6 +220,10 @@ describe('executeWorkItem', () => {
 
   it('records intent, claims through WorkflowRunner once, verifies independently, and only then succeeds', async () => {
     const { deps, run, process, changes, directory } = await setup();
+    deps.createImplementation = vi.fn(() => {
+      expect(getLogContext()).toEqual({ runId: 'attempt-1', workItemId });
+      return { run } as any;
+    });
     const result = await executeWorkItem(input, deps);
     expect(result).toMatchObject({ status: 'merge_ready', changeUrl: 'https://github.com/acme/api/pull/5' });
     expect(run).toHaveBeenCalledTimes(1);
@@ -250,12 +256,13 @@ describe('executeWorkItem', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('names the labels needed to adopt a manually created issue', async () => {
+  it('names the explicit command and labels needed to adopt a manually created issue', async () => {
     // `afk loop --work-item-id` cannot take over an issue the user filed by
     // hand, because `managed` and `executionEligible` are derived from labels.
     // The bare string "unmanaged work item" gives the operator no way forward.
     const { deps, run } = await setup({ managed: false });
     const message = await executeWorkItem(input, deps).then(() => '', (err: Error) => err.message);
+    expect(message).toContain('afk backlog adopt --id 42 --project acme/api --platform github');
     expect(message).toMatch(/stage::ready-for-issues/);
     expect(message).toMatch(/mode::afk/);
     expect(run).not.toHaveBeenCalled();
@@ -271,12 +278,65 @@ describe('executeWorkItem', () => {
 
   it('returns non-success for QA rework or publication failure', async () => {
     const { deps, process } = await setup();
-    process.mockResolvedValueOnce({ success: false, rework: true } as any);
+    process.mockResolvedValueOnce({
+      success: false,
+      rework: true,
+      summary: 'The API response is missing the required field.',
+      failedCriteria: [{ id: 'api-response', expected: 'field is present', actual: 'field is missing' }],
+    } as any);
     expect((await executeWorkItem(input, deps)).status).toBe('rework');
     expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.failed', 'run.finished']);
+    expect(vi.mocked(deps.recordAudit!).mock.calls[1][1]).toMatchObject({
+      kind: 'qa.failed',
+      summary: 'The API response is missing the required field.',
+      failedCriteria: [{ id: 'api-response', expected: 'field is present', actual: 'field is missing' }],
+    });
     const { deps: nextDeps, process: nextProcess } = await setup();
     nextProcess.mockResolvedValueOnce({ success: false } as any);
     expect((await executeWorkItem({ ...input, executionId: 'attempt-2' }, nextDeps)).status).toBe('blocked');
+  });
+
+  it('stores diagnostic details on qa.failed for an exceptional QA result', async () => {
+    const { deps, process, directory } = await setup();
+    const store = new JsonlEventStore({ root: join(directory, 'events') });
+    const observer = new RunObserver({ events: store });
+    deps.recordAudit = (context, data) => observer.record(context, data);
+    process.mockResolvedValueOnce({ success: false, summary: 'QA execution failed: provider unavailable' } as any);
+
+    await expect(executeWorkItem(input, deps)).resolves.toMatchObject({ status: 'blocked' });
+
+    const events = [];
+    for await (const event of store.read('attempt-1')) events.push(event);
+    expect(events.find(event => event.data.kind === 'qa.failed')?.data).toMatchObject({
+      kind: 'qa.failed',
+      reason: 'blocked',
+      summary: 'QA execution failed: provider unavailable',
+    });
+  });
+
+  it('persists qa.failed when the real QARunner throws and preserves the original provider error', async () => {
+    const { deps, get, directory } = await setup();
+    const store = new JsonlEventStore({ root: join(directory, 'events') });
+    const observer = new RunObserver({ events: store });
+    deps.recordAudit = (context, data) => observer.record(context, data);
+    const context = await deps.createContext!({} as any, input, {} as any);
+    const original = new Error('backlog read unavailable');
+    const transition = vi.fn(async () => { throw new Error('blocked write unavailable'); });
+    context.providers.backlog.transition = transition;
+    deps.createContext = vi.fn(async () => context);
+    deps.createQA = (providers, config) => {
+      get.mockRejectedValueOnce(original);
+      return new QARunner(providers, config);
+    };
+
+    await expect(executeWorkItem(input, deps)).rejects.toBe(original);
+
+    const events = [];
+    for await (const event of store.read('attempt-1')) events.push(event);
+    expect(events.map(event => event.data.kind)).toEqual(['qa.started', 'qa.failed', 'run.finished']);
+    expect(events[1].data).toMatchObject({ kind: 'qa.failed', reason: 'blocked', summary: 'QA execution failed: backlog read unavailable' });
+    expect(events[2].data).toMatchObject({ kind: 'run.finished', outcome: 'failed', reason: 'backlog read unavailable' });
+    expect(transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'QA execution failed: backlog read unavailable' });
   });
 
   it('requires provider confirmation and terminal provider state for success', async () => {

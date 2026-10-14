@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TrackerBacklogProvider } from './tracker-adapter.js';
+import { GitHubBacklogProvider } from './github-provider.js';
+import { GitLabBacklogProvider } from './gitlab-provider.js';
+import { ManagementBacklogProvider } from './management-provider.js';
+import { adoptBacklog } from './commands.js';
 import type { ClaimLease } from './claim.js';
 import type { TrackerProvider } from '../tracker/types.js';
 
@@ -24,6 +28,90 @@ function tracker(issue: any): TrackerProvider {
 }
 
 describe('TrackerBacklogProvider', () => {
+  it.each([
+    ['stage::ready-for-issues'], ['mode::afk'], ['stage::ready-for-issues', 'mode::afk'],
+  ])('fills only missing adoption labels and remains idempotent: %j', async (...labels) => {
+    const issue = { id: 42, labels: [...labels, 'feature'], state: 'opened', projectId: 'org/repo' };
+    const t = { ...tracker(issue), ensureBacklogMetadata: vi.fn(async () => {}) };
+    const provider = new TrackerBacklogProvider(t);
+    const missing = ['stage::ready-for-issues', 'mode::afk'].filter(label => !labels.includes(label));
+
+    await provider.adopt('42');
+    await provider.adopt('42');
+
+    expect(issue.labels).toEqual([...labels, 'feature', ...missing]);
+    expect(t.updateLabels).toHaveBeenCalledTimes(missing.length ? 1 : 0);
+    expect(t.ensureBacklogMetadata).toHaveBeenCalledTimes(missing.length ? 1 : 0);
+    if (missing.length) expect(t.updateLabels).toHaveBeenCalledWith(42, { add: missing, remove: [] });
+    expect(t.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['stage::blocked'], ['mode::hitl'], ['stage::rework'], ['stage::afk-in-progress'],
+    ['stage::qa'], ['stage::merge-ready'], ['stage::done'], ['stage::unknown'], ['mode::unknown'],
+    ['stage::ready-for-issues', 'stage::ready-for-issues'], ['mode::afk', 'mode::afk'],
+    ['stage::ready-for-issues', 'stage::blocked'], ['mode::afk', 'mode::hitl'],
+    ['parent::7', 'parent::8'], ['base::6', 'base::7'], ['parent::7', 'parent::7'],
+    ['depends-on::5', 'depends_on::5'],
+    ['parent::42'], ['base::42'], ['depends-on::42'], ['depends_on::42'],
+    ['parent::'], ['base::'], ['parent::0'], ['base::-1'], ['parent::1.5'],
+    ['base::abc'], ['parent::7::8'], ['base:: 7'], ['parent::07'], ['base::1e2'],
+    ['depends-on::abc'], ['depends_on::'],
+    ['parent::9007199254740992'],
+  ])('rejects unsafe adoption metadata without writing: %j', async (...labels) => {
+    const issue = { id: 42, labels, state: 'opened', projectId: 'org/repo' };
+    const t = { ...tracker(issue), ensureBacklogMetadata: vi.fn(async () => {}) };
+
+    await expect(new TrackerBacklogProvider(t).adopt('42')).rejects.toThrow(/invalid adoption metadata|tracker backlog id must be a positive integer/);
+
+    expect(t.ensureBacklogMetadata).not.toHaveBeenCalled();
+    expect(t.updateLabels).not.toHaveBeenCalled();
+    expect(t.updateIssue).not.toHaveBeenCalled();
+    expect(issue.labels).toEqual(labels);
+  });
+
+  it.each(['closed', 'merged'])('rejects a %s issue even with canonical adoption labels', async state => {
+    const t = { ...tracker({ id: 42, labels: ['stage::ready-for-issues', 'mode::afk'], state }),
+      ensureBacklogMetadata: vi.fn(async () => {}) };
+
+    await expect(new TrackerBacklogProvider(t).adopt('42')).rejects.toThrow('must be open');
+    expect(t.ensureBacklogMetadata).not.toHaveBeenCalled();
+    expect(t.updateLabels).not.toHaveBeenCalled();
+    expect(t.updateIssue).not.toHaveBeenCalled();
+  });
+
+  it('does not add adoption labels when metadata initialization fails', async () => {
+    const t = { ...tracker({ id: 42, labels: [], state: 'opened' }),
+      ensureBacklogMetadata: vi.fn().mockRejectedValue(new Error('metadata unavailable')) };
+
+    await expect(new TrackerBacklogProvider(t).adopt('42')).rejects.toThrow('metadata unavailable');
+    expect(t.updateLabels).not.toHaveBeenCalled();
+  });
+
+  it.each(['github', 'gitlab'] as const)('explicitly adopts an open manual %s issue through the management facade', async platform => {
+    const issue = {
+      id: 42, platform, title: 'Manual issue', description: 'Keep this body',
+      labels: ['feature', 'team::api', 'parent::7', 'base::6', 'depends-on::5'],
+      state: 'opened', url: 'https://example/42', projectId: 'org/repo',
+    };
+    const t = { ...tracker(issue), platform, ensureBacklogMetadata: vi.fn(async () => {}) };
+    const provider = new ManagementBacklogProvider(platform === 'github'
+      ? new GitHubBacklogProvider(t)
+      : new GitLabBacklogProvider(t));
+
+    await expect(adoptBacklog(provider, '42')).resolves.toMatchObject({
+      id: '42', title: issue.title, description: issue.description,
+      state: 'ready', executionMode: 'afk', tags: ['feature', 'team::api'],
+      parentId: '7', baseBacklogId: '6', dependsOn: ['5'],
+    });
+    expect(t.updateLabels).toHaveBeenCalledWith(42, {
+      add: ['stage::ready-for-issues', 'mode::afk'], remove: [],
+    });
+    expect(t.ensureBacklogMetadata.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(t.updateLabels).mock.invocationCallOrder[0]);
+    expect(t.updateIssue).not.toHaveBeenCalled();
+    expect('claim' in provider).toBe(false);
+  });
+
   it('projects the durable QA change metadata for a merge-ready backlog', async () => {
     const issue = {
       id: 42,
@@ -317,7 +405,77 @@ describe('TrackerBacklogProvider', () => {
     expect(record).toMatchObject({ id: 'r1', attempt: 1, status: 'open' });
     expect(t.addComment).toHaveBeenCalledWith(42, expect.stringContaining('<!-- afk:rework:v1 id=r1 -->'));
     expect(t.updateIssueComment).toHaveBeenCalledWith(42, 'comment-1', expect.stringContaining('"status":"resolved"'));
+    await expect(provider.get('42')).resolves.toMatchObject({ state: 'verification', executionMode: 'afk' });
+  });
+
+  it('allows operator retry to supersede an open QA record and keeps operator duplicates blocked', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(issue) as any;
+    const comments: Array<{ id: string; body: string }> = [];
+    t.listIssueComments = vi.fn(async () => comments.map(comment => ({ ...comment })));
+    t.addComment = vi.fn(async (_id: number, body: string) => { comments.push({ id: `comment-${comments.length + 1}`, body }); });
+    t.updateIssueComment = vi.fn(async (_id: number, commentId: string, body: string) => {
+      const comment = comments.find(candidate => candidate.id === commentId);
+      if (comment) comment.body = body;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+
+    await provider.createRework('42', { source: 'qa', summary: 'QA failure', failedCriteria: [], requiredChecks: [] });
+    const retry = await provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] });
+
+    expect(retry).toMatchObject({ id: 'r2', source: 'operator', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r2', source: 'operator' });
+    await expect(provider.createRework('42', { source: 'operator', summary: 'duplicate retry', failedCriteria: [], requiredChecks: [] }))
+      .rejects.toThrow('already has an open rework record');
+    expect(comments.map(comment => comment.body)).toEqual([
+      expect.stringContaining('"status":"superseded"'),
+      expect.stringContaining('"status":"open"'),
+    ]);
     await expect(provider.get('42')).resolves.toMatchObject({ state: 'rework', executionMode: 'afk' });
+  });
+
+  it('does not change the active record when writing a new rework fails', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(issue) as any;
+    const comments: Array<{ id: string; body: string }> = [];
+    t.listIssueComments = vi.fn(async () => comments.map(comment => ({ ...comment })));
+    t.addComment = vi.fn(async (_id: number, body: string) => { comments.push({ id: 'comment-1', body }); });
+    t.updateIssueComment = vi.fn(async (_id: number, commentId: string, body: string) => {
+      const comment = comments.find(candidate => candidate.id === commentId);
+      if (comment) comment.body = body;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+    await provider.createRework('42', { source: 'qa', summary: 'QA failure', failedCriteria: [], requiredChecks: [] });
+    t.addComment.mockRejectedValueOnce(new Error('tracker write failed'));
+
+    await expect(provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] }))
+      .rejects.toThrow('tracker write failed');
+    expect(t.updateIssueComment).not.toHaveBeenCalled();
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', source: 'qa' });
+  });
+
+  it('supersedes the new record when superseding the old record fails, allowing a later operator retry', async () => {
+    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::qa', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const t = tracker(issue) as any;
+    const comments: Array<{ id: string; body: string }> = [];
+    t.listIssueComments = vi.fn(async () => comments.map(comment => ({ ...comment })));
+    t.addComment = vi.fn(async (_id: number, body: string) => { comments.push({ id: `comment-${comments.length + 1}`, body }); });
+    t.updateIssueComment = vi.fn(async (_id: number, commentId: string, body: string) => {
+      if (commentId === 'comment-1' && t.updateIssueComment.mock.calls.length === 1) throw new Error('supersede failed');
+      const comment = comments.find(candidate => candidate.id === commentId);
+      if (comment) comment.body = body;
+    });
+    const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
+    await provider.createRework('42', { source: 'qa', summary: 'QA failure', failedCriteria: [], requiredChecks: [] });
+
+    await expect(provider.createRework('42', { source: 'operator', summary: 'manual retry', failedCriteria: [], requiredChecks: [] }))
+      .rejects.toThrow('supersede failed');
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r1', source: 'qa' });
+    expect(comments[1].body).toContain('"status":"superseded"');
+
+    const retry = await provider.createRework('42', { source: 'operator', summary: 'manual retry again', failedCriteria: [], requiredChecks: [] });
+    expect(retry).toMatchObject({ id: 'r3', source: 'operator', status: 'open' });
+    await expect(provider.getActiveRework('42')).resolves.toMatchObject({ id: 'r3', source: 'operator' });
   });
 
   it('uses a filesystem lease to serialize tracker claims without native CAS', async () => {

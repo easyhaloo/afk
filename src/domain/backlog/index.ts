@@ -71,6 +71,7 @@ export interface BacklogListOptions {
  */
 export interface BacklogManagementProvider {
   get(id: string): Promise<BacklogItem>;
+  adopt?(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
   create(input: BacklogCreateInput): Promise<BacklogItem>;
   addTag(id: string, tag: string): Promise<void>;
@@ -90,6 +91,7 @@ export interface QABacklogProvider extends BacklogManagementProvider {
 export interface BacklogProvider {
   readonly capabilities?: import('./initialization.js').BacklogProviderCapabilities;
   get(id: string): Promise<BacklogItem>;
+  adopt?(id: string): Promise<BacklogItem>;
   list(options?: BacklogListOptions): Promise<BacklogItem[]>;
   create(input: BacklogCreateInput): Promise<BacklogItem>;
   claim(id: string, owner: string): Promise<BacklogClaim | null>;
@@ -196,7 +198,10 @@ export class InMemoryBacklogProvider implements BacklogProvider {
 
   async createRework(id: string, input: NewReworkRecord): Promise<ReworkRecord> {
     const records = this.reworks.get(id) ?? [];
-    if (records.some(record => record.status === 'open')) throw new Error(`backlog ${id} already has an open rework record`);
+    const active = records.find(record => record.status === 'open');
+    if (active?.source === 'operator' && input.source === 'operator') {
+      throw new Error(`backlog ${id} already has an open rework record`);
+    }
     const record: ReworkRecord = {
       ...input,
       version: 1,
@@ -207,8 +212,11 @@ export class InMemoryBacklogProvider implements BacklogProvider {
     };
     records.push(record);
     this.reworks.set(id, records);
-    await this.transition(id, 'rework');
-    await this.setExecutionMode(id, 'afk');
+    if (active) active.status = 'superseded';
+    if (input.source === 'operator') {
+      await this.transition(id, 'rework');
+      await this.setExecutionMode(id, 'afk');
+    }
     return { ...record, failedCriteria: [...record.failedCriteria], requiredChecks: [...record.requiredChecks] };
   }
 

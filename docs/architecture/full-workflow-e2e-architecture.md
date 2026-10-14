@@ -145,7 +145,7 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 4. 调用 `QARunner`，写入 `qa.started`，根据 QA 结果写入 `qa.passed` 或 `qa.failed`。
 5. QA PASS 时提交 QA 分支、push、创建或复用 Change Request，并校验变更与 work item 的关联。
 6. root backlog 留在 `merge_ready` 并打开人工 gate；child backlog 执行合并并进入 `done`。
-7. QA FAIL 生成或保留 rework 记录，并让任务回到 `rework`；不可恢复的错误进入 `blocked`。
+7. QA FAIL 持久化递增的 rework attempt，并 supersede 旧 active 记录；低于 `maxQaReworkAttempts`（默认 3）时回到 `rework` + `afk`，达到上限时进入 `blocked` + `hitl` 且不再返回 rework。后续 FAIL 保留到限记录，不会重新开启自动返工；不可恢复的错误也进入 `blocked`。边界及配置见 [Backlog 生命周期](overview.zh.md#backlog-生命周期)。
 
 返回值的 `status` 是执行尝试的结果：`merge_ready`、`done`、`rework`、`blocked` 或 `not_claimed`。它不能直接替换 Provider 的 backlog ID 或生命周期状态。
 
@@ -306,7 +306,7 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 
 1. 一个 root backlog：`ready → in_progress → verification → merge_ready`，并确认 `human_gate.opened`、Change Request 和 `qa.passed`。
 2. 一个 child backlog：验证 QA PASS 后自动 merge，`change.merge_verified.child === true`，最终为 `done`。
-3. 一个 QA FAIL：保存 `failedCriteria`，创建/保留 rework，回到 `rework`，下一次 loop 可重试。
+3. 连续 QA FAIL：首次保存 `failedCriteria` 与 attempt 1，回到 `rework`；重新创建 runner 后再次 FAIL 必须从 Provider comment/note 读取并递增 attempt；达到上限后保持 `blocked` + `hitl`，后续 loop 不再重试。
 4. 一个 workflow failure/timeout/lease loss：事件中有失败分类，runtime 为 `blocked`，Provider execution mode 为 `hitl`。
 5. 每个内置模板至少通过模板图验证；需要验证 Agent/Git/Provider 语义时，按模板矩阵单独运行隔离项，不能只运行 `issue-implementation` 代替全部模板。
 6. Desktop E2E 至少确认任务身份按完整 `workItemId` 关联，不能因不同仓库使用相同 issue number 而串项；执行历史应通过 verified JSONL query path 展示。

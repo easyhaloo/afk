@@ -62,13 +62,40 @@ node dist/index.js observe replay <run-id> --json
 node dist/index.js observe explain <run-id>
 ```
 
-一次可解释的 run 至少拥有 `run.requested`、`run.started`、执行/QA step 边界、失败分类或变更单事实，以及 `run.finished` 或 `human_gate.opened`。事件名称低基数，动态值写入 data；Pino 日志使用同一 `trace_id`、`run_id`、`work_item_id`、`profile_id`、attempt 和 lease epoch 字段。
+一次可解释的 run 至少拥有 `run.requested`、`run.started`、执行/QA step 边界、失败分类或变更单事实，以及 `run.finished` 或 `human_gate.opened`。事件名称低基数，动态值写入 data。
+
+`src/infrastructure/io/logger.ts` 导出
+`withLogContext({ runId, workItemId }, asyncFn)` 与 `getLogContext()`。
+前者用 AsyncLocalStorage 隔离异步作用域，Pino mixin 为作用域内的
+`logger` / `fileLogger` JSON 行添加 `runId`、`workItemId`；后者返回当前上下文，
+作用域外为 `undefined`。独立 QA 接入时应优先复用已有上下文中的 managed
+`runId`，避免替换管理闭环的主运行身份。并行作用域互不串线，嵌套调用结束或抛错后
+恢复父作用域。现有脱敏与按日轮转保持不变；调用方负责在运行入口接入该作用域。
 
 ## 4. Evidence 与数据治理
 
 `LocalEncryptedEvidenceStore` 对正文按哈希寻址并以 AES-256-GCM 加密。用于创建 store 的密钥必须来自受控 secret provider，而非命令行参数、日志或 profile 文件。文本 evidence 在加密前会尝试去除常见 GitHub token、API key、AWS access key、Bearer token 和 `token=/secret=/password=` 赋值；它不是通用 DLP 引擎，生产化前仍须接入组织的 secret scanner、访问控制与保留策略。
 
 > 事件只记录 metadata、hash 和 `EvidenceRef`。prompt、命令全文、环境变量、cookie、token、私有代码和高基数路径不应进入 metric label、OTLP attribute 或普通日志。
+
+JSONL 事件历史默认全部保留，构造、追加和查询均不自动清理。
+`JsonlEventStore.prune({ retentionMs, exclusiveAccess: true })` 是显式维护 API，
+返回已删除的 run ID；缺少保留时长或独占访问确认时返回空数组。
+`retentionMs` 必须是非负安全整数，截止时间为 store 的当前时间减去该时长。
+没有新增 CLI 命令或自动保留策略。
+
+清理仅针对完整 hash chain、run ID 与 sequence 验证通过，且 core replay
+确认末尾为成功、失败或取消的 `run.finished` 的事件流。终止事件与流中所有
+事件的 `occurredAt` 必须严格早于截止时间；恰在截止时间上的事件保留。
+判断不使用文件 mtime 或写入时的 `observedAt`。活跃、`awaiting_human`、空流、
+损坏、未知 schema/type、无效时间及终止后仍追加事件的流均保留。
+
+prune 复用该 store 的 run mutation 队列；检查期间排入的新追加会使该流跳过删除。
+最终队列检查与同步 unlink 之间没有进程内异步让出。`exclusiveAccess: true`
+是调用方对维护期间没有其他 store 实例或进程写入该目录的确认，**不是文件锁或
+跨进程原子保证**；无法确认独占访问时应省略该参数并保留历史。
+清理只删除对应 run 的 JSONL 文件，不修改独立预算账本或 execution-query index
+缓存；查询层可以从剩余事件流重建 index。
 
 ## 5. 已验证行为
 
@@ -82,7 +109,7 @@ or estimates from intermediate events.
 
 | Layer | Owner | AFK reads |
 |---|---|---|
-| Agent usage (tokens only) | Harness (Claude Code / Codex) | `agent.session_recorded` event |
+| Agent usage and tool calls | Harness (Claude Code / Codex) | `agent.session_recorded` event |
 | Domain execution (run.requested, workspace.prepared, change.published, human_gate, commit sha) | AFK | Event log (write) |
 
 The `agent.session_recorded` event is emitted when an execution result is
@@ -91,8 +118,77 @@ totalTokens }`. For `local` sandbox: transcript is read from
 `~/.claude/projects/<slug>/<sessionId>.jsonl` (Claude Code) or
 `~/.codex/sessions/*/*/*/rollout-*-<thread_id>.jsonl` (Codex). For `docker` /
 `podman` sandboxes: `HOME` is not forwarded into the container and harness
-directories are not mounted — telemetry is not collected (distinct from zero
-tokens).
+directories are not mounted — local transcript telemetry is unavailable
+(distinct from zero tokens). Native stream telemetry can still be returned
+by the execution; reading it does not require host logs.
+
+`agent.session_recorded` and `ExecutionResult` also accept optional
+`tools: AgentToolCallSummary[]` (type exported by `@afk/core`). Each call contains
+only `id`, `name`, `result` (`succeeded`, `failed`, `unknown`, `in_progress`),
+and optional `exitCode`, `startedAt`, `completedAt`, `durationMs`. Commands,
+arguments, output bodies, error messages, file paths and search queries are
+excluded. Timestamps and durations come from native fields; missing values
+are not filled using AFK's clock or text parsing.
+
+The pure domain API in `src/domain/agents/tool-telemetry.ts` exports
+`extractClaudeToolEvents(lines)`, `extractCodexToolEvents(lines)` and
+`collectAgentToolEvent(provider, event, tools)`; the collector merges parsed
+native events into a caller-owned map keyed by tool call/item ID. The two
+JSONL extractors return `AgentToolCallSummary[] | undefined` and skip malformed
+lines. Claude reads native assistant `tool_use` and user `tool_result` blocks;
+repeated assistant entries for one tool ID count once. Missing results remain
+`unknown`; `tool_result.is_error` supplies the native result (omitted means
+false under Claude's protocol).
+
+Codex reads exec `item.started`/`item.completed` and app-server
+`item/started`/`item/completed` with the same parser, mapping snake_case and
+camelCase fields. Recognized tools are commands, MCP calls, file changes,
+web searches, dynamic tools and agent collaboration tools. Commands require
+a real `exit_code`/`exitCode` to report success; nonzero codes report failure
+even if item status says completed. Other results use native status or dynamic
+tool `success`, never output text. A started-only item stays `in_progress`;
+a completed item without result evidence stays `unknown`. Replayed starts
+cannot overwrite a completed result. MCP names use `server.tool`.
+
+`StreamingAgentExecution.handleLine` and
+`CodexAppServerExecution.consumeNotifications` collect the metadata as native
+events arrive, before normalization discards tool fields. Every result branch
+returns collected `tools`, including failure, abort and timeout. This does not
+add a raw-output buffer and does not depend on the bounded `captureOutput`
+tail. With no recognized calls, `tools` remains absent.
+
+`src/infrastructure/observability/agent-telemetry.ts` re-exports both extractors
+and provides `readAgentTools(options: ReadTelemetryOptions):
+Promise<AgentToolCallSummary[] | undefined>`, independently of the existing
+`readAgentTelemetry` token API. WorkflowRunner and QARunner prefer `result.tools`
+and read tools from the transcript only when absent, even if usage is already
+available. Use Claude's existing `telemetryPath` and Codex's
+`findCodexRollout(threadId)` path. A missing file, container sandbox or rollout
+without native item events returns `undefined`. Codex rollouts can contain
+only `response_item` function calls and output bodies, without native item
+lifecycle or typed result/exit-code evidence. The current parser leaves tools
+absent for those records; it does not guess success, failure or an exit code
+from `function_call_output` text. If raw CLI JSONL is already available,
+`extractCodexToolEvents(lines)` can parse native item events from it, but a
+truncated capture tail cannot establish complete session coverage.
+
+The focused fixtures exercise deduplication, exit codes, missing results,
+malformed lines, transport collection and metadata-only output. Runner
+integration tests verify transcript fallback and `agent.session_recorded`
+JSONL persistence. These checks do not establish coverage for every live
+harness version; protocol changes still require native-session checks.
+
+Execution projections and the desktop execution-history IPC expose optional
+`usage: { inputTokens, outputTokens, totalTokens }` from verified
+`agent.session_recorded` events. They sum the peak valid cumulative usage per session
+within one run; repeated or replayed older cumulative records do not count a
+session twice or reduce its peak.
+Only recorded usage contributes to the sum, so it may be partial when some
+sessions have no telemetry. Missing usage stays absent; an explicitly recorded
+zero stays zero. The run-center inspector displays the three token counts or
+“未采集”, independently of execution status. No cost, duration, or transcript
+content is inferred or exposed. The optional execution-query index is versioned
+and rebuilt from event streams when its schema or cached usage is invalid.
 
 ## 7. 下一阶段的强制门禁
 

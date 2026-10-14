@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { createWorkflowProviders } from '../../infrastructure/provider/tracker-provider-factory.js';
 import { LoopRunner } from '../../application/modules/loop-runner.js';
+import { installLoopSignalHandlers } from './loop-signals.js';
 import { getSchedulerConfig } from '../../infrastructure/config/manager.js';
 import { parseWorkItemId } from '../../domain/backlog/index.js';
 import { loadLoopConfig } from '../../application/loop/loop-config.js';
@@ -91,14 +92,16 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
   });
 
   printStartup(pollIntervalMs, statusIntervalMs, shutdownTimeoutMs, options.maxIterations, options.backlogId);
-  const shutdown = async (signal: string) => {
-    warning(`Received ${signal}, draining in-flight work...`);
-    try { await runner.stop(); } catch (error) { logger.error({ err: error }, 'error during loop shutdown'); }
-    process.exit(0);
-  };
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  await runner.start();
+  const removeSignals = installLoopSignalHandlers(
+    () => runner.stop(),
+    signal => warning(`Received ${signal}, draining in-flight work...`),
+    error => logger.error({ err: error }, 'error during loop shutdown'),
+  );
+  try {
+    await runner.start();
+  } finally {
+    removeSignals();
+  }
   success('Loop finished (max-iterations reached)');
   process.exit(0);
 }

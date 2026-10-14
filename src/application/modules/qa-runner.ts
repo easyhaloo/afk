@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { WorktreeManager } from '../../infrastructure/git/index.js';
 import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-diagnostics.js';
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index.js';
-import { configureStatusline, logger } from '../../infrastructure/io/index.js';
+import { configureStatusline, logger, getLogContext, withLogContext } from '../../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { compileTemplate } from '../../domain/templates/compiler.js';
@@ -18,8 +18,16 @@ import { formatExecutionFailure } from '../workflow-engine.js';
 import { buildExecutionPrompt } from '../workflows/execution-protocol.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
+import { BudgetManager } from '../workflows/budget.js';
+import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
+import type { WorkflowRunRepository } from '../workflows/run-request.js';
+import { BudgetStore } from '../workflows/budget-store.js';
+import { findCodexRollout, readAgentTelemetry, readAgentTools } from '../../infrastructure/observability/agent-telemetry.js';
+import type { RunEventData } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
+type QAFailureCriterion = { id: string; expected: string; actual: string };
+type QAProcessResult = { success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean; summary?: string; failedCriteria?: QAFailureCriterion[] };
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -28,10 +36,15 @@ export interface QARunnerDependencies {
   tmux?: TmuxClient;
   executionMode?: ExecutionMode;
   projectRoot?: string;
+  /** Managed workspace to run QA against; QA prepares it if it is gone. */
+  repositories?: readonly WorkflowRunRepository[];
+  prepareRepositories?: MultiRepositoryPreparationService;
   mergeBranch?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   runtimeManager?: TaskRuntimeManager;
   beforeChange?: (action: 'publish' | 'merge', backlog: BacklogItem, change?: ChangeRequest) => Promise<void>;
   afterPublication?: (change: ChangeRequest) => Promise<void>;
+  onCommit?: (commitSha: string, branch: string) => Promise<void>;
+  onSession?: (data: Extract<RunEventData, { kind: 'agent.session_recorded' }>) => Promise<void>;
 }
 
 /**
@@ -51,10 +64,14 @@ export class QARunner {
   private readonly tmux?: TmuxClient;
   private readonly executionMode: ExecutionMode;
   private readonly projectRoot: string;
+  private readonly repositories?: readonly WorkflowRunRepository[];
+  private readonly prepareRepositories: MultiRepositoryPreparationService;
   private readonly mergeBranchOverride?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   private readonly runtimeManager: TaskRuntimeManager;
   private readonly beforeChange?: QARunnerDependencies['beforeChange'];
   private readonly afterPublication?: QARunnerDependencies['afterPublication'];
+  private readonly onCommit?: QARunnerDependencies['onCommit'];
+  private readonly onSession?: QARunnerDependencies['onSession'];
 
   constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
@@ -62,33 +79,53 @@ export class QARunner {
     this.providers = providers;
     this.executionMode = deps.executionMode ?? 'batch';
     this.projectRoot = deps.projectRoot ?? process.cwd();
+    this.repositories = deps.repositories;
+    this.prepareRepositories = deps.prepareRepositories ?? new MultiRepositoryPreparer();
     this.mergeBranchOverride = deps.mergeBranch;
     this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
     this.beforeChange = deps.beforeChange;
     this.afterPublication = deps.afterPublication;
+    this.onCommit = deps.onCommit;
+    this.onSession = deps.onSession;
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
     this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
     this.agentRuntime = deps.agentRuntime;
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);
   }
 
-  async process(backlogId: string): Promise<{ success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean }> {
+  async process(backlogId: string): Promise<QAProcessResult> {
     const id = String(backlogId);
-    logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
-
-    const backlog = await this.providers.backlog.get(id);
-    const baselineBranch = await this.resolveExecutionBranch(backlog);
     const session = `qa-${id}-${Date.now()}`;
+    return withLogContext(getLogContext() ?? { runId: `${session}-runtime`, workItemId: id }, () => this.processObserved(id, session));
+  }
+
+  private async processObserved(id: string, session: string): Promise<QAProcessResult> {
+    logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
     let worktreePath: string | undefined;
     let sandbox: Sandbox | undefined;
     let execution: AgentExecution | undefined;
+    let workspace: PreparedRepositorySet | undefined;
     const runtimeRunId = `${session}-runtime`;
     let runtimeStarted = false;
     let runtimeErrorSummary: string | undefined;
 
     try {
+      const backlog = await this.providers.backlog.get(id);
+      const budgetStore = new BudgetStore(this.projectRoot, backlog.workItemId ?? backlog.providerRef);
+      const savedBudget = await budgetStore.load();
+      const maxHandoffs = Math.min(Math.ceil(this.config.goalBudget / 1_000_000), 20);
+      const budget = savedBudget
+        ? BudgetManager.fromSnapshot(savedBudget, maxHandoffs, this.config.goalBudget)
+        : new BudgetManager(maxHandoffs, this.config.goalBudget);
+      if (budget.isExhausted()) {
+        const summary = `work item budget exhausted: ${budget.exhaustionReason()}`;
+        await this.markBlocked(id, summary);
+        return { success: false, summary };
+      }
+      const baselineBranch = await this.resolveExecutionBranch(backlog);
       await this.startRuntime(runtimeRunId, backlog, session);
       runtimeStarted = true;
+      workspace = await this.prepareWorkspace(id);
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
       await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
@@ -97,8 +134,9 @@ export class QARunner {
 
       const featureBranch = backlog.branchName;
       if (!featureBranch) {
-        await this.markBlocked(id, 'feature branch could not be resolved');
-        return { success: false };
+        const summary = 'QA execution failed: feature branch could not be resolved';
+        await this.markBlocked(id, summary);
+        return { success: false, summary };
       }
       if (this.mergeBranchOverride) await this.mergeBranchOverride(worktreePath, baselineBranch, featureBranch);
       else await this.mergeBranch(worktreePath, baselineBranch, featureBranch);
@@ -146,34 +184,40 @@ export class QARunner {
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
       const result = await execution.waitForResult({ completionTimeoutMs: this.config.completionTimeout });
+      await this.recordBudgetUsage(budgetStore, budget, execution, result);
       await this.logWorktreeDiagnostics(id, 'agent-completed', worktreePath);
       await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
       logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
       if (result.status !== 'completed') {
-        runtimeErrorSummary = formatExecutionFailure(result);
+        const summary = `QA ${result.status}: ${formatExecutionFailure(result)}`;
+        runtimeErrorSummary = summary;
         await this.handleExecutionFailure(id, worktreePath, session, result, execution);
-        return { success: false };
+        return { success: false, summary };
       }
 
       const signal = asQAResult(result.structuredOutput);
       if (!signal) {
-        runtimeErrorSummary = `${formatExecutionFailure(result)}; missing QA completion payload`;
-        await this.markBlocked(id, `${formatExecutionFailure(result)}; missing QA completion payload`);
-        return { success: false };
+        const summary = `${formatExecutionFailure(result)}; missing QA completion payload`;
+        runtimeErrorSummary = summary;
+        await this.markBlocked(id, summary);
+        return { success: false, summary };
       }
       const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName);
       if (!outcome.success) {
-        runtimeErrorSummary = signal.result === 'PASS'
-          ? 'QA terminal routing failed'
-          : signal.summary;
+        runtimeErrorSummary = outcome.summary ?? (signal.result === 'PASS' ? 'QA terminal routing failed' : signal.summary);
       }
       return outcome;
     } catch (error) {
-      const message = `QA execution failed: ${(error as Error).message}`;
+      const message = `QA execution failed: ${error instanceof Error ? error.message : String(error)}`;
       runtimeErrorSummary = message;
-      await this.markBlocked(id, message);
+      try {
+        await this.markBlocked(id, message);
+      } catch (routingError) {
+        logger.error({ backlogId: id, error, routingError }, 'QA failure could not be routed to blocked');
+        throw error;
+      }
       logger.error({ backlogId: id, error }, 'QA execution failed');
-      return { success: false };
+      return { success: false, summary: message };
     } finally {
       if (execution) await execution.kill().catch(() => {});
       if (sandbox) await sandbox.close().catch(error => logger.warn({ backlogId: id, error }, 'failed to close QA sandbox'));
@@ -184,10 +228,30 @@ export class QARunner {
           logger.warn({ backlogId: id, error }, 'failed to clean QA worktree');
         }
       }
+      if (workspace) {
+        try {
+          await workspace.release();
+        } catch (error) {
+          logger.warn({ backlogId: id, error }, 'failed to release QA workspace');
+        }
+      }
       if (runtimeStarted) {
         await this.finishRuntime(runtimeRunId, runtimeErrorSummary ? 'blocked' : 'completed', runtimeErrorSummary);
       }
     }
+  }
+
+  /**
+   * QA is independently runnable: the managed workspace is released once
+   * implementation finishes, so rebuild it when it is gone instead of failing
+   * on a missing repository root. A borrowed checkout is restored, one this
+   * call created is removed again by release().
+   */
+  private async prepareWorkspace(id: string): Promise<PreparedRepositorySet | undefined> {
+    if (!this.repositories?.length) return undefined;
+    const workspace = await this.prepareRepositories.prepare(this.repositories, this.projectRoot);
+    logger.info({ backlogId: id, workspace: workspace.primary.handle.path }, 'QA workspace prepared');
+    return workspace;
   }
 
   /** Resolve only an explicit unmerged execution base; parentId remains organizational. */
@@ -230,7 +294,7 @@ export class QARunner {
     signal: QAResult,
     worktreePath: string,
     verificationBranch: string,
-  ): Promise<{ success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean }> {
+  ): Promise<QAProcessResult> {
     if (signal.result === 'FAIL') return this.routeQARework(backlogId, signal as QAFailure);
 
     try {
@@ -238,7 +302,8 @@ export class QARunner {
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
       const targetBranch = await this.resolveExecutionBranch(backlog);
       await this.beforeChange?.('publish', backlog);
-      await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
+      const commitSha = await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
+      if (commitSha) await this.onCommit?.(commitSha, verificationBranch);
       await this.providers.branches.push(verificationBranch, worktreePath);
       const existing = this.beforeChange ? await this.providers.changes.findForBacklog(backlog) : null;
       if (existing && (existing.state !== 'open' || existing.sourceBranch !== verificationBranch || existing.targetBranch !== targetBranch)) {
@@ -265,34 +330,59 @@ export class QARunner {
       logger.info({ backlogId, changeId: mr.id, targetBranch }, 'child backlog change merged');
       return { success: true, autoMerged: true, mrUrl: mr.url };
     } catch (error) {
-      await this.markBlocked(backlogId, `QA terminal routing failed: ${(error as Error).message}`);
+      const summary = `QA terminal routing failed: ${error instanceof Error ? error.message : String(error)}`;
+      await this.markBlocked(backlogId, summary);
       logger.error({ backlogId, error }, 'QA failed: terminal routing error');
-      return { success: false };
+      return { success: false, summary };
     }
   }
 
-  private async routeQARework(backlogId: string, signal: QAFailure): Promise<{ success: false; rework: true }> {
+  private async routeQARework(backlogId: string, signal: QAFailure): Promise<QAProcessResult> {
     const active = await this.providers.backlog.getActiveRework(backlogId);
-    if (active) {
-      await this.providers.backlog.transition(backlogId, 'rework', { reason: `QA rework ${active.id} remains open: ${signal.summary}` });
-      await this.providers.backlog.setExecutionMode(backlogId, 'afk');
-      logger.info({ backlogId, reworkId: active.id }, 'QA failure retained active rework record');
-      return { success: false, rework: true };
-    }
+    const limit = this.config.maxQaReworkAttempts;
     const record: NewReworkRecord = {
       source: 'qa',
       summary: signal.summary,
       failedCriteria: signal.failedCriteria,
       requiredChecks: signal.requiredChecks ?? [],
     };
-    await this.providers.backlog.createRework(backlogId, record);
-    logger.info({ backlogId }, 'QA failure created rework record');
-    return { success: false, rework: true };
+    const rework = active && active.attempt >= limit ? active : await this.providers.backlog.createRework(backlogId, record);
+    if (rework.attempt >= limit) {
+      const summary = `QA rework attempt limit reached (${rework.attempt}/${limit}): ${signal.summary}`;
+      await this.markBlocked(backlogId, summary);
+      return { success: false, summary, failedCriteria: signal.failedCriteria };
+    }
+    await this.providers.backlog.transition(backlogId, 'rework', { reason: `QA rework ${rework.id}: ${signal.summary}` });
+    await this.providers.backlog.setExecutionMode(backlogId, 'afk');
+    logger.info({ backlogId, reworkId: rework.id, attempt: rework.attempt }, 'QA failure persisted rework record');
+    return { success: false, rework: true, summary: signal.summary, failedCriteria: signal.failedCriteria };
   }
 
   private async markBlocked(backlogId: string, reason: string): Promise<void> {
     await this.providers.backlog.transition(backlogId, 'blocked', { reason });
     await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
+  }
+
+  private async recordBudgetUsage(store: BudgetStore, budget: BudgetManager, execution: AgentExecution, result: ExecutionResult): Promise<void> {
+    let usage = result.usage;
+    let tools = result.tools;
+    if ((!usage || !tools) && this.sandboxProvider.name !== 'docker' && this.sandboxProvider.name !== 'podman') {
+      let transcriptPath: string | undefined;
+      if (this.agentProvider.name === 'codex') {
+        const threadId = execution.metadata.threadId;
+        if (threadId) transcriptPath = await findCodexRollout(threadId);
+      } else {
+        transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
+      }
+      if (transcriptPath) {
+        const options = { provider: this.agentProvider.name === 'codex' ? 'codex' as const : 'claude-code' as const, transcriptPath, sandboxKind: 'local' as const };
+        if (!usage) usage = await readAgentTelemetry(options);
+        if (!tools) tools = await readAgentTools(options);
+      }
+    }
+    const sessionId = execution.metadata.threadId ?? result.sessionId ?? execution.id;
+    if (usage && budget.recordSession(sessionId, usage.totalTokens)) await store.save(budget.snapshot());
+    await this.onSession?.({ kind: 'agent.session_recorded', sessionId, usage, tools });
   }
 
   private async startRuntime(runId: string, backlog: BacklogItem, session: string): Promise<void> {
@@ -371,20 +461,20 @@ interface QAResult {
   kind: 'qa';
   result: 'PASS' | 'FAIL';
   summary: string;
-  failedCriteria?: Array<{ id: string; expected: string; actual: string }>;
+  failedCriteria?: QAFailureCriterion[];
   requiredChecks?: Array<{ command: string; expected: string }>;
 }
 
 interface QAFailure extends QAResult {
   result: 'FAIL';
-  failedCriteria: Array<{ id: string; expected: string; actual: string }>;
+  failedCriteria: QAFailureCriterion[];
 }
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function parseCriteria(value: unknown): Array<{ id: string; expected: string; actual: string }> | undefined {
+function parseCriteria(value: unknown): QAFailureCriterion[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined;
   const criteria = value.map(entry => {
     if (!entry || typeof entry !== 'object') return undefined;
@@ -393,7 +483,7 @@ function parseCriteria(value: unknown): Array<{ id: string; expected: string; ac
       ? { id: item.id, expected: item.expected, actual: item.actual }
       : undefined;
   });
-  return criteria.some(item => item === undefined) ? undefined : criteria as Array<{ id: string; expected: string; actual: string }>;
+  return criteria.some(item => item === undefined) ? undefined : criteria as QAFailureCriterion[];
 }
 
 function parseRequiredChecks(value: unknown): Array<{ command: string; expected: string }> | undefined {

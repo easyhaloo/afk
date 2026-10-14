@@ -24,6 +24,35 @@ afterEach(async () => {
 });
 
 describe('execution query ports', () => {
+  it('carries usage through indexed queries and rebuilds legacy or malformed cached usage', async () => {
+    const directory = await root();
+    const store = new JsonlEventStore({ root: directory });
+    const usage = { inputTokens: 20, outputTokens: 3, totalTokens: 23 };
+    await store.append([
+      { id: 'requested', schemaVersion: 1, type: 'run.requested', occurredAt: '2026-10-13T00:00:00Z', context, correlationId: context.runId,
+        data: { kind: 'run.requested', run: { id: context.runId, workItemId: context.workItemId, profileId: 'test', attempt: 1, status: 'pending' } } },
+      { id: 'usage', schemaVersion: 1, type: 'agent.session_recorded', occurredAt: '2026-10-13T00:00:01Z', context, correlationId: context.runId,
+        data: { kind: 'agent.session_recorded', sessionId: 'session-1', usage } },
+    ]);
+    const query = () => queryWorkItemExecutions({}, createExecutionQueryPorts(store));
+    expect((await query()).executions[0]).toMatchObject({ usage });
+    const verify = vi.spyOn(store, 'verify');
+    expect((await query()).executions[0]).toMatchObject({ usage });
+    expect(verify).not.toHaveBeenCalled();
+    const indexPath = join(directory, '.execution-query-index.json');
+    const legacy = JSON.parse(await fs.readFile(indexPath, 'utf8'));
+    legacy.version = 1;
+    delete legacy.entries[0][1].summary.usage;
+    await fs.writeFile(indexPath, JSON.stringify(legacy));
+    expect((await query()).executions[0]).toMatchObject({ usage });
+    expect(verify).toHaveBeenCalledTimes(1);
+    const malformed = JSON.parse(await fs.readFile(indexPath, 'utf8'));
+    malformed.entries[0][1].summary.usage.totalTokens = -1;
+    await fs.writeFile(indexPath, JSON.stringify(malformed));
+    expect((await query()).executions[0]).toMatchObject({ usage });
+    expect(verify).toHaveBeenCalledTimes(2);
+  });
+
   it('pages all work items by start time without suppressing unknown audit streams', async () => {
     const directory = await root();
     const store = new JsonlEventStore({ root: directory });

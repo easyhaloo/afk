@@ -20,6 +20,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | 命令 | 职责 |
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
+| `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
 | `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
@@ -46,6 +47,15 @@ tracker 类型。
 执行模式更新；类型和运行时都没有 `claim()`。只有执行 bundle 暴露认领和
 可运行性检查。
 
+`adopt` 是管理/provider 的可选能力，不支持时明确报错。tracker adapter
+检查 issue 原始状态和元数据，不从 domain 默认状态推断 ready。只接受开放且
+生命周期标签缺失或为 canonical ready/afk 的 issue；拒绝未知、重复或冲突的
+AFK 元数据，以及格式非法或指向自身的父级、执行基线和依赖 ID，保留业务标签、
+关系和 issue 正文。仅在缺少标签时初始化 provider 元数据，再只添加缺失的
+ready/afk 标签，不移除任何标签。已 ready/afk 项无写入地幂等成功；closed、
+blocked、HITL 和其他生命周期状态无写入地拒绝。项目与平台必须显式提供，
+`--json` 输出 `backlog.adopt` envelope。execute 和 loop 不会隐式调用接管。
+
 ## 工作项与执行身份
 
 Provider Backlog 是业务事实来源。其 `BacklogItem.id` 在
@@ -59,16 +69,38 @@ TUI 投影和 Desktop 摘要之间原样传递。`runId` 标识一次执行尝�
 ## Backlog 生命周期
 
 ```text
-ready --claim--> in_progress --> verification --> merge_ready --> done
+ready/rework --claim--> in_progress --> verification --> merge_ready --> done
    \                         \
     \                         +--> blocked（执行模式：hitl）
      +--> blocked（冲突、失败、超时或 lease 过期）
 ```
 
-只有状态为 `ready`、执行模式为 `afk`、没有子 backlog 且所有 `dependsOn`
+只有状态为 `ready` 或 `rework`、执行模式为 `afk`、没有子 backlog 且所有 `dependsOn`
 均为 `done` 时，条目才可运行。`parentId` 用于聚合子 backlog，父 backlog
 本身不可运行。任何自动化失败、冲突、超时或不确定的 lease 恢复都必须将
 条目转为 `blocked` 并切换到 `hitl`。
+
+QA FAIL 在 Provider issue comment/note 中持久化新的返工记录，将旧 active
+记录标为 `superseded`，并从已持久化的最高值递增 `ReworkRecord.attempt`。
+QA 记录创建只持久化证据，后续状态和执行模式由 `QARunner` 路由；operator
+retry 仍在创建记录后直接切到 `rework` + `afk`。
+
+`WorkflowConfig.maxQaReworkAttempts` 默认 **3**，必须为正整数。可在
+`.afk/config.yml` 设置 `maxQaReworkAttempts: 3`，或使用环境变量
+`AFK_MAX_QA_REWORK_ATTEMPTS=3`，项目文件优先。没有历史记录时，首次 FAIL
+为 attempt 1，第二次 FAIL 为 attempt 2，均允许 `rework` + `afk`；第三次
+FAIL 持久化 attempt 3，返回 `success: false` 且不返回 `rework`，直接转为
+`blocked` + `hitl`。后续 FAIL 保留该记录，不再开启自动返工。上限为 1 时
+首次 FAIL 即阻塞。attempt 包含历史 resolved、superseded 和 operator
+记录，重新创建 runner 不会重置；QA PASS 仍可 resolve active 记录。
+该上限独立于执行重试的 `maxRetries` 和 AC 纠正的 `maxSelfIterations`。
+handoff/token `BudgetManager` 会按 canonical work item 从
+`<workspace>/.afk/budgets/` 恢复快照。handoff 次数和 harness 原生 token
+消耗会跨运行持久化，并按 session ID 去重；账本损坏时会在启动新 Agent
+前 fail closed。
+
+`commit.recorded` 审计事件会在有新提交时记录实现或 QA 的真实本地 SHA
+和分支；没有新提交时不产生该事件，也不会用变更请求的 SHA 替代。
 
 ## 运行时与 Desktop 投影
 

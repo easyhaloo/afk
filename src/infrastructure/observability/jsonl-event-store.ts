@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { RunEvent, RunEventDraft, AppendReceipt, EventStorePort } from '@afk/core';
+import { replay } from '@afk/core';
 
 export class EventStoreCorruptionError extends Error {
   constructor(message: string) {
@@ -103,6 +104,39 @@ export class JsonlEventStore implements EventStorePort {
     } catch (error) {
       return { valid: false, lastSequence: count, lastHash: previous?.integrity.hash, reason: error instanceof Error ? error.message : 'unknown_error' };
     }
+  }
+
+  async prune(options: { retentionMs?: number; exclusiveAccess?: boolean } = {}): Promise<readonly string[]> {
+    if (options.retentionMs === undefined) return [];
+    if (!Number.isSafeInteger(options.retentionMs) || options.retentionMs < 0) {
+      throw new Error('retentionMs must be a non-negative safe integer');
+    }
+    if (options.exclusiveAccess !== true) return [];
+    const cutoff = this.now().getTime() - options.retentionMs;
+    if (!Number.isFinite(cutoff)) throw new Error('retention cutoff must be a valid time');
+    const pruned: string[] = [];
+    for (const runId of await this.listRuns()) {
+      let pruningTail: Promise<void> | undefined;
+      const pruning = this.mutate(runId, async () => {
+        try {
+          if (!(await this.verify(runId)).valid) return false;
+          const events = await this.load(runId);
+          const last = events.at(-1);
+          if (last?.data.kind !== 'run.finished' || !['succeeded', 'failed', 'cancelled'].includes(last.data.outcome)) return false;
+          if (!events.every(event => event.schemaVersion === 1 && event.type === event.data.kind && typeof event.occurredAt === 'string'
+            && Number.isFinite(Date.parse(event.occurredAt)) && Date.parse(event.occurredAt) < cutoff)) return false;
+          if (!replay(events)?.terminal) return false;
+          if (this.mutations.get(runId) !== pruningTail) return false;
+          unlinkSync(this.pathFor(runId));
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      pruningTail = this.mutations.get(runId);
+      if (await pruning) pruned.push(runId);
+    }
+    return pruned;
   }
 
   private async load(runId: string): Promise<RunEvent[]> {

@@ -1,4 +1,4 @@
-import type { ExecutionTimeline, WorkItemExecution, WorkItemExecutionSummary } from '@afk/application';
+import { projectAgentUsage, type ExecutionTimeline, type WorkItemExecution, type WorkItemExecutionSummary } from '@afk/application';
 
 export function projectWorkItemExecution(timeline: ExecutionTimeline): WorkItemExecution {
   const events = timeline.events.filter(event => event.sequence <= timeline.integrity.lastSequence);
@@ -26,6 +26,8 @@ export function projectWorkItemExecution(timeline: ExecutionTimeline): WorkItemE
   }
 
   let verificationStep: string | undefined;
+  const usage = projectAgentUsage(events);
+  if (usage) summary.usage = usage;
   let qaPassed = false;
   let publishedChangeId: string | undefined;
   summary.status = 'queued';

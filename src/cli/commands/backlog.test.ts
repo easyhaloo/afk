@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 import {
   registerBacklogCommands,
+  runBacklogAdopt,
   runBacklogConfirmMerge,
   runBacklogCreate,
   runBacklogInterrupt,
@@ -18,6 +19,7 @@ import { registerLoopCommands } from './loop.js';
 import type { BacklogItem, QABacklogProvider } from '../../domain/backlog/index.js';
 import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
 import { emitSuccess, emitFailure } from '../json-output.js';
+import * as providerFactory from '../../infrastructure/provider/tracker-provider-factory.js';
 
 function commandTree(register: (program: Command) => void): Command {
   const program = new Command();
@@ -32,7 +34,7 @@ describe('hard-cutover command surface', () => {
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const commandNames = backlog?.commands.map(command => command.name()) ?? [];
     expect(commandNames).toEqual(expect.arrayContaining([
-      'init', 'inventory', 'list', 'show', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
+      'init', 'adopt', 'inventory', 'list', 'show', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
     ]));
     expect(new Set(commandNames).size).toBe(commandNames.length);
     const tagNames = backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name()) ?? [];
@@ -110,6 +112,74 @@ describe('hard-cutover command surface', () => {
     expect(tagAdd?.options.some(option => option.long === '--platform')).toBe(true);
     expect(tagRemove?.options.some(option => option.long === '--json')).toBe(true);
     expect(tagRemove?.options.some(option => option.long === '--platform')).toBe(true);
+  });
+});
+
+describe('explicit backlog adoption', () => {
+  it.each(['github', 'gitlab'])('uses the explicit %s project and emits one adoption envelope', async platform => {
+    const item: BacklogItem = {
+      id: '42', title: 'Manual issue', state: 'ready', executionMode: 'afk',
+      tags: ['feature'], dependsOn: [], branchName: 'afk/backlog-42', providerRef: `${platform}:org/repo#42`,
+    };
+    const adopt = vi.fn().mockResolvedValue(item);
+    const factory = vi.spyOn(providerFactory, 'createManagementProviders').mockResolvedValue({
+      backlog: stubProvider([], { adopt }),
+    } as Awaited<ReturnType<typeof providerFactory.createManagementProviders>>);
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      await commandTree(registerBacklogCommands).parseAsync([
+        'node', 'afk', 'backlog', 'adopt', '--id', '42', '--project', 'org/repo', '--platform', platform, '--json',
+      ]);
+      expect(factory).toHaveBeenCalledWith('org/repo', undefined, platform);
+      expect(adopt).toHaveBeenCalledWith('42');
+      expect(stdout).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(stdout.mock.calls[0][0]))).toEqual({ ok: true, kind: 'backlog.adopt', data: item });
+    } finally {
+      factory.mockRestore();
+      stdout.mockRestore();
+    }
+  });
+
+  it.each([
+    ['--project', 'org/repo', '--platform', 'github'],
+    ['--id', '42', '--platform', 'github'],
+    ['--id', '42', '--project', 'org/repo'],
+    ['--id', '42', '--project', 'org/repo', '--platform', 'all'],
+  ])('rejects invalid or missing adoption scope before provider creation: %j', async flags => {
+    const argv = ['node', 'afk', 'backlog', 'adopt', ...flags, '--json'];
+    const program = new Command().name('afk').exitOverride();
+    registerBacklogCommands(program, { argv });
+    const factory = vi.spyOn(providerFactory, 'createManagementProviders');
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const previousExitCode = process.exitCode;
+    try {
+      await expect(program.parseAsync(argv)).rejects.toThrow();
+      expect(factory).not.toHaveBeenCalled();
+      expect(stdout).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(stdout.mock.calls[0][0]))).toMatchObject({
+        ok: false, kind: 'backlog.adopt', error: { code: 'validation' },
+      });
+    } finally {
+      process.exitCode = previousExitCode;
+      stdout.mockRestore();
+      factory.mockRestore();
+    }
+  });
+
+  it('emits one JSON failure when adoption is unsupported', async () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const previousExitCode = process.exitCode;
+    try {
+      await runBacklogAdopt(stubProvider([]), '42', { json: true });
+      expect(stdout).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(stdout.mock.calls[0][0]))).toMatchObject({
+        ok: false, kind: 'backlog.adopt', error: { message: expect.stringContaining('does not support explicit issue adoption') },
+      });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+      stdout.mockRestore();
+    }
   });
 });
 

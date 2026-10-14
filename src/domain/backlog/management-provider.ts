@@ -9,6 +9,10 @@ export class ManagementBacklogProvider implements QABacklogProvider {
   constructor(private readonly provider: BacklogProvider) {}
 
   get(id: string): Promise<BacklogItem> { return this.provider.get(id); }
+  async adopt(id: string): Promise<BacklogItem> {
+    if (!this.provider.adopt) throw new Error('backlog provider does not support explicit issue adoption');
+    return this.provider.adopt(id);
+  }
   list(options?: BacklogListOptions): Promise<BacklogItem[]> { return this.provider.list(options); }
   create(input: BacklogCreateInput): Promise<BacklogItem> { return this.provider.create(input); }
   transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void> { return this.provider.transition(id, state, details); }

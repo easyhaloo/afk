@@ -9,7 +9,7 @@ import {
   type ClaimLockFactory,
 } from './claim-strategy.js';
 import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabilities } from './initialization.js';
-import { extractBacklogTags, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
+import { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from './tags.js';
 import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from './rework-record.js';
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '../tracker/types.js';
 
@@ -61,6 +61,32 @@ export class TrackerBacklogProvider implements BacklogProvider {
     const issue = await this.tracker.getIssue(this.issueId(id));
     const changes = await this.tracker.listMRs({ state: 'all' });
     return this.withChangeRequest(toBacklogItem(issue), issue.labels, changes);
+  }
+
+  async adopt(id: string): Promise<BacklogItem> {
+    const issueId = this.issueId(id);
+    const issue = await this.tracker.getIssue(issueId);
+    if (issue.state !== 'opened') throw new Error(`backlog ${id} must be open for adoption`);
+    const desired = [STATE_LABELS.ready, MODE_LABELS.afk];
+    const metadata = issue.labels.filter(isInternalBacklogLabel)
+      .map(label => label.replace(/^depends_on::/, 'depends-on::'));
+    if (new Set(metadata).size !== metadata.length
+      || ['parent::', 'base::'].some(prefix => metadata.filter(label => label.startsWith(prefix)).length > 1)
+      || issue.labels.some(label => isWorkflowMetadataLabel(label) && !desired.includes(label))) {
+      throw new Error(`invalid adoption metadata for backlog ${id}: expected ready/afk without duplicate or conflicting AFK labels`);
+    }
+    for (const label of metadata.filter(label => !isWorkflowMetadataLabel(label))) {
+      const relationId = label.slice(label.indexOf('::') + 2);
+      if (this.canonicalId(relationId) !== relationId || relationId === String(issueId)) {
+        throw new Error(`invalid adoption metadata for backlog ${id}: ${label} must reference another canonical backlog ID`);
+      }
+    }
+    const delta = labelDelta(issue.labels, desired, isWorkflowMetadataLabel);
+    if (delta.add.length) {
+      await this.initialize();
+      await this.applyLabelDelta(issueId, delta);
+    }
+    return this.get(id);
   }
 
   async list(options: { state?: BacklogState; executionMode?: BacklogExecutionMode; parentId?: string; tag?: string } = {}): Promise<BacklogItem[]> {
@@ -167,7 +193,10 @@ export class TrackerBacklogProvider implements BacklogProvider {
   async createRework(id: string, input: NewReworkRecord): Promise<ReworkRecord> {
     const issueId = this.issueId(id);
     const comments = await this.tracker.listIssueComments(issueId);
-    if (latestOpenRework(comments)) throw new Error(`backlog ${id} already has an open rework record`);
+    const active = latestOpenRework(comments);
+    if (active?.record.source === 'operator' && input.source === 'operator') {
+      throw new Error(`backlog ${id} already has an open rework record`);
+    }
     const attempts = comments
       .map(parseReworkRecord)
       .filter((entry): entry is NonNullable<ReturnType<typeof parseReworkRecord>> => entry !== undefined)
@@ -182,9 +211,29 @@ export class TrackerBacklogProvider implements BacklogProvider {
       createdAt: new Date().toISOString(),
     };
     await this.tracker.addComment(issueId, renderReworkRecord(record));
-    await this.transition(id, 'rework');
-    await this.setExecutionMode(id, 'afk');
+    if (active) {
+      try {
+        await this.tracker.updateIssueComment(issueId, active.commentId, renderReworkRecord({ ...active.record, status: 'superseded' }));
+      } catch (error) {
+        await this.supersedeCreatedRework(issueId, record).catch(() => {});
+        throw error;
+      }
+    }
+    if (input.source === 'operator') {
+      await this.transition(id, 'rework');
+      await this.setExecutionMode(id, 'afk');
+    }
     return record;
+  }
+
+  private async supersedeCreatedRework(issueId: number, record: ReworkRecord): Promise<void> {
+    const comments = await this.tracker.listIssueComments(issueId);
+    const created = comments
+      .map(parseReworkRecord)
+      .find(entry => entry?.record.id === record.id && entry.record.status === 'open');
+    if (created) {
+      await this.tracker.updateIssueComment(issueId, created.commentId, renderReworkRecord({ ...record, status: 'superseded' }));
+    }
   }
 
   async getActiveRework(id: string): Promise<ReworkRecord | undefined> {

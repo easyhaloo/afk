@@ -1,5 +1,6 @@
 import pino from 'pino';
 import pretty from 'pino-pretty';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
 import { join } from 'path';
@@ -7,6 +8,21 @@ import { homedir } from 'os';
 import { closeSync, mkdirSync, openSync, readdirSync, statSync, unlinkSync, writeSync } from 'fs';
 
 const LOG_DIR = join(homedir(), '.afk', 'logs');
+
+export interface LogContext {
+  runId: string;
+  workItemId: string;
+}
+
+const logContext = new AsyncLocalStorage<Readonly<LogContext>>();
+
+export function getLogContext(): Readonly<LogContext> | undefined {
+  return logContext.getStore();
+}
+
+export function withLogContext<T>(context: LogContext, asyncFn: () => Promise<T>): Promise<T> {
+  return logContext.run({ runId: context.runId, workItemId: context.workItemId }, asyncFn);
+}
 
 // ── Unified day-rotated log file ────────────────────────────────────────────
 
@@ -110,6 +126,7 @@ const consoleActive = !isTest && Boolean(process.stderr.isTTY);
 const pinoOpts: pino.LoggerOptions = {
   level,
   base: { name: 'afk' },
+  mixin: () => ({ ...getLogContext() }),
   redact: {
     paths: [
       'token', 'password', 'secret', 'key',
@@ -117,7 +134,10 @@ const pinoOpts: pino.LoggerOptions = {
     ],
     censor: '[redacted]',
   },
-  serializers: { err: pino.stdSerializers.err },
+  // `error` is the key most call sites use; without a serializer pino JSON.stringify's
+  // it, and every Error degrades to its enumerable own properties (message and
+  // stack are non-enumerable), hiding the real cause in the log.
+  serializers: { err: pino.stdSerializers.err, error: pino.stdSerializers.err },
 };
 
 // Console stream -> stderr so diagnostic logs never pollute stdout that users

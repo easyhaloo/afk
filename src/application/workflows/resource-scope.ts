@@ -127,12 +127,8 @@ export class RunResourceScope {
     const attempt = async (operation: () => Promise<void>) => {
       try { await operation(); } catch (error) { if (firstError === undefined) firstError = error; }
     };
-    for (const execution of [...this.executions].reverse()) {
-      try { await execution.kill(); } catch { /* best effort */ }
-    }
-    for (const sandbox of [...this.sandboxes].reverse()) {
-      try { await sandbox.close(); } catch { /* best effort */ }
-    }
+    for (const execution of [...this.executions].reverse()) await attempt(() => execution.kill());
+    for (const sandbox of [...this.sandboxes].reverse()) await attempt(() => sandbox.close());
 
     if (this.options.managePrimary !== false && outcome.status === 'success' && this.primary && !this.finalized && this.options.branchStrategy && this.options.branchConfig) {
       this.finalized = true;

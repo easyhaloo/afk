@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 /** AFK Control design: quiet local-operations shell; runtime cards are secondary to Timeline evidence and stay concise. */
+import { Overlay } from "./overlay";
 import { createRoot } from "react-dom/client";
 import {
   Activity, Archive, Bot, Boxes, Braces, Check, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleX,
@@ -336,6 +337,9 @@ function App() {
         {error ? <div className="error-banner"><X size={15} />{error}</div> : null}
         {auditError && (view === "queue" || view === "board") ? <div className="error-banner"><X size={15} />运行审计查询失败：{auditError}</div> : null}
         <div className={view === "queue" || view === "board" ? "run-center-layout" : "view-layout"}>
+        {/* Overlays portal here, beside .workspace rather than inside it — see src/overlay.tsx.
+            display:contents keeps the host from generating a box. */}
+        <div id="afk-overlay-root" style={{ display: "contents" }} />
         <div className="workspace">
           {view === "queue" || view === "board" ? <div className="resource-toolbar run-resource-toolbar"><ResourceSearch label="搜索运行、工作项或事件" value={runQuery} onChange={setRunQuery} /></div> : null}
           {view === "queue" ? <Queue events={visibleRunEvents} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
@@ -792,7 +796,7 @@ function RecordDrawer({ event, onClose }: { event: RuntimeEvent; onClose: () => 
     document.addEventListener("keydown", dismissOnEscape);
     return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", dismissOnEscape); };
   }, [onClose]);
-  return <aside className="record-drawer" ref={drawerRef} role="complementary" aria-label="记录详情"><header><span>记录详情</span><button className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={16} /></button></header><div className="record-drawer-body"><RecordStatus status={status} /><h2>{event.result}</h2><p className="record-drawer-next">{event.nextStep}</p><dl><div><dt>运行</dt><dd>{event.source}</dd></div><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div></dl><details className="record-debug"><summary><Braces size={15} />调试信息</summary><pre>{event.raw}</pre></details></div></aside>;
+  return <Overlay><aside className="record-drawer" ref={drawerRef} role="complementary" aria-label="记录详情"><header><span>记录详情</span><button className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={16} /></button></header><div className="record-drawer-body"><RecordStatus status={status} /><h2>{event.result}</h2><p className="record-drawer-next">{event.nextStep}</p><dl><div><dt>运行</dt><dd>{event.source}</dd></div><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div></dl><details className="record-debug"><summary><Braces size={15} />调试信息</summary><pre>{event.raw}</pre></details></div></aside></Overlay>;
 }
 
 function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSelect, onTerminal, onWorkItem }: { event: RuntimeEvent; execution?: ExecutionSummary; history: RuntimeEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (event: RuntimeEvent) => void; onTerminal: () => void; onWorkItem: (id: string) => void }) {

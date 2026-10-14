@@ -30,11 +30,59 @@ test("a fixed overlay inside a view fills the window, not the view box", async (
       const s = getComputedStyle(n);
       if (s.transform !== "none") blockers.push(`${n.tagName}.${n.className}: ${s.transform}`);
     }
-    return { width: el.getBoundingClientRect().width, window: innerWidth, blockers };
+    return {
+      width: el.getBoundingClientRect().width,
+      window: innerWidth,
+      blockers,
+      // The transform sweep alone passes trivially once the overlay escapes the
+      // view, so assert the invariant that makes viewIn safe at all.
+      insideWorkspace: Boolean(el.closest(".workspace")),
+    };
   });
 
   test.skip(measured === null, "the click did not open the drawer");
   const shown = `${measured!.width}px of ${measured!.window}px; blockers: ${measured!.blockers.join(", ") || "none"}`;
   expect(measured!.blockers, shown).toEqual([]);
   expect(measured!.width, shown).toBeGreaterThan(measured!.window * 0.9);
+  expect(measured!.insideWorkspace, "overlays must portal out, beside .workspace").toBe(false);
+});
+
+test("the view actually animates in", async ({ page }) => {
+  // The regression above was invisible because nothing asserted the animation
+  // existed: a deleted viewIn reads exactly like a correct one.
+  const motion = await page.evaluate(() => {
+    const child = document.querySelector(".workspace > *");
+    if (!child) return null;
+    const s = getComputedStyle(child);
+    return { name: s.animationName, duration: s.animationDuration };
+  });
+  test.skip(motion === null, "no view rendered");
+  expect(motion!.name, "layout.css .workspace > * lost its viewIn").toBe("viewIn");
+});
+
+test("a portalled overlay still resolves its own tokens", async ({ page }) => {
+  // Portalling moved this modal out of .backlog-page, which is the only place
+  // --backlog-surface is declared. `background: var(--backlog-surface)` then
+  // resolved to nothing and the panel rendered fully transparent — no error,
+  // correct geometry, correct z-index, and every screenshot looked plausible
+  // until you looked at it. Scoped vocabularies must follow their overlays out.
+  await page.locator(".primary-nav button", { hasText: "工作项" }).click();
+  await page.waitForTimeout(400);
+  const row = page.locator(".work-item-row").first();
+  test.skip((await row.count()) === 0, "no work item rows in the fixture");
+  await row.click();
+  await page.waitForTimeout(400);
+  await page.locator(".work-item-primary-action").click();
+  await page.waitForTimeout(400);
+
+  const surfaces = await page.evaluate(() => {
+    const sels = [".work-item-run-modal", ".work-item-detail", ".backlog-modal", ".backlog-drawer"];
+    return sels.flatMap(sel => {
+      const el = document.querySelector(sel);
+      if (!el) return [];
+      const bg = getComputedStyle(el).backgroundColor;
+      return bg === "rgba(0, 0, 0, 0)" || bg === "transparent" ? [sel] : [];
+    });
+  });
+  expect(surfaces, "an overlay resolved its background token to nothing").toEqual([]);
 });

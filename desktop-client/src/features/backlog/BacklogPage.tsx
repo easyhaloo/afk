@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Overlay } from "../../overlay";
 import { ArrowUpRight, Bot, CircleAlert, Eye, GitMerge, Hand, Plus, RotateCcw, Search, Square, X } from "lucide-react";
 import type {
   BacklogCreateInput,
@@ -268,7 +269,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—
         }) : <div className="backlog-empty"><b>{busy ? "正在读取 Backlog…" : workspace.trim() ? "没有匹配的工作项" : "请先选择工作区"}</b><span>{workspace.trim() ? "Provider Backlog 由 afk CLI 通过 gh / glab 调用；请先安装 CLI 并完成鉴权。" : "项目 Backlog 依赖本地工作区；全局工作项不受此限制。"}</span></div>}
       </section>
       <BacklogDetailDrawer summary={detailSummary} busy={detailBusy} error={detailError} defaultAgent={defaultAgent} onClose={closeDetails} onOpenExternal={(url) => { void openExternal(url); }} />
-      {createOpen ? (
+      {createOpen ? (<Overlay>
         <div className="backlog-modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) closeCreateModal(); }}>
           <form ref={createModalRef} className="backlog-modal" role="dialog" aria-modal="true" aria-labelledby="backlog-create-title" onKeyDown={(event) => {
             if (event.key !== "Tab") return;
@@ -287,7 +288,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—
             <footer><button type="button" onClick={closeCreateModal} disabled={createBusy}>取消</button><button type="submit" disabled={createBusy}>{createBusy ? "创建中…" : "创建"}</button></footer>
           </form>
         </div>
-      ) : null}
+      </Overlay>) : null}
     </section>
   );
 }

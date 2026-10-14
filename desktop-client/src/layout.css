@@ -38,6 +38,22 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
   scrollbar-gutter: stable;
 }
 
+/* The prototype's view-entry motion (`.view > section { animation: viewIn … }`).
+   It is only safe here because every overlay now portals out to
+   #afk-overlay-root, beside .workspace: a transform on this element would
+   otherwise become the containing block for its fixed descendants and quietly
+   resize every drawer and modal. Do not move an overlay back inside a view. */
+.workspace > * { animation: viewIn var(--dur) var(--ease) both; }
+
+@keyframes viewIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace > * { animation: none; }
+}
+
 .workspace::-webkit-scrollbar,
 .inspector::-webkit-scrollbar,
 .terminal-sheet pre::-webkit-scrollbar { width: 8px; height: 8px; }

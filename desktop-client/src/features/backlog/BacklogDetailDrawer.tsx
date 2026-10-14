@@ -1,4 +1,5 @@
 import { Bot, ExternalLink, GitBranch, Hand, Hash, LoaderCircle, Tags, X } from "lucide-react";
+import { Overlay } from "../../overlay";
 import { useEffect, useRef, type ReactNode } from "react";
 import type { BacklogRuntimeSummary } from "../../../shared/backlog-contract";
 import { backlogStateLabel } from "./backlog-filter";
@@ -42,6 +43,7 @@ export function BacklogDetailDrawer({ summary, busy, error, defaultAgent, onClos
   const process = summary?.activeRun;
 
   return (
+  <Overlay>
     <div className="backlog-drawer-layer" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside className="backlog-drawer" role="dialog" aria-modal="true" aria-labelledby="backlog-detail-title">
         <header className="backlog-drawer-header">
@@ -115,6 +117,6 @@ export function BacklogDetailDrawer({ summary, busy, error, defaultAgent, onClos
           </div>
         ) : null}
       </aside>
-    </div>
+    </div></Overlay>
   );
 }

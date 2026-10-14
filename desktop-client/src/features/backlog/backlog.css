@@ -1,4 +1,9 @@
-.backlog-page {
+/* #afk-overlay-root is listed too: overlays portal out of .backlog-page, and
+   without this they land outside every declaration of this vocabulary. The
+   symptom is silent — `background: var(--backlog-surface)` simply resolves to
+   nothing and the panel renders fully transparent. */
+.backlog-page,
+#afk-overlay-root {
   --backlog-control-height: 36px;
   --backlog-control-radius: 7px;
   --backlog-control-font-size: calc(12px * var(--afk-scale));
@@ -10,6 +15,9 @@
   --backlog-border-soft: var(--line-soft);
   --backlog-text: var(--ink);
   --backlog-muted: var(--muted);
+}
+
+.backlog-page {
   width: min(100%, 1240px);
   display: flex;
   flex-direction: column;

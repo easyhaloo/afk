@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { Overlay } from "../../overlay";
 import { CircleAlert } from "lucide-react";
 import { SshActionButton } from "./SshActionButton";
 
@@ -26,7 +27,7 @@ export function SshConfirmDialog({ title, description, confirmLabel, confirmAria
     return () => document.removeEventListener("keydown", dismissOnEscape);
   }, [onCancel]);
 
-  return <div className="ssh-confirm-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
+  return <Overlay><div className="ssh-confirm-backdrop" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onCancel(); }}>
     <div ref={dialogRef} className="ssh-confirm-dialog" role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()}>
       <div className="ssh-confirm-icon" aria-hidden="true">{icon}</div>
       <div className="ssh-confirm-copy"><small>请确认操作</small><h2>{title}</h2><p>{description}</p></div>
@@ -35,5 +36,5 @@ export function SshConfirmDialog({ title, description, confirmLabel, confirmAria
         <SshActionButton size="md" variant="danger" type="button" aria-label={confirmAriaLabel} onClick={onConfirm}>{confirmLabel}</SshActionButton>
       </footer>
     </div>
-  </div>;
+  </div></Overlay>;
 }

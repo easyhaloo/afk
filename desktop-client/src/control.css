@@ -967,6 +967,14 @@
 }
 
 .workflow-studio-page {
+  /* The column flex here is load-bearing, not cosmetic: .workflow-studio-shell
+     and .workflow-studio-canvas below carry `flex: 1 1 auto`, which does
+     nothing unless this is the flex container. Without it the shell collapses
+     to its content height and .workflow-editor-stage — `overflow: hidden` —
+     measures 0, clipping every node and edge out of sight. 09099d3 dropped the
+     display and the canvas has been invisible ever since. */
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
   margin-bottom: 0;

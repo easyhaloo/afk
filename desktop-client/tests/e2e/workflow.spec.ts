@@ -85,10 +85,39 @@ test.describe("Workflow studio", () => {
     await page.getByRole("button", { name: "工作流" }).click();
     await page.locator(".workflow-library-card").first().click();
 
-    const pageBox = await page.locator(".workflow-studio-page").boundingBox();
-    const workspaceBox = await page.locator(".workspace").boundingBox();
-    if (!pageBox || !workspaceBox) throw new Error("workflow studio layout is not measurable");
-    expect(Math.abs(pageBox.y + pageBox.height - (workspaceBox.y + workspaceBox.height))).toBeLessThanOrEqual(2);
+    const studio = page.locator(".workflow-studio-page");
+    const workspace = page.locator(".workspace");
+    if (!(await studio.boundingBox()) || !(await workspace.boundingBox())) {
+      throw new Error("workflow studio layout is not measurable");
+    }
+    // The view entry animation travels 4px, which is wider than this 2px
+    // tolerance, so a single snapshot measures the page mid-flight. Poll until
+    // it settles instead of reading the first frame.
+    await expect
+      .poll(async () => {
+        const [p, w] = await Promise.all([studio.boundingBox(), workspace.boundingBox()]);
+        return Math.abs(p!.y + p!.height - (w!.y + w!.height));
+      })
+      .toBeLessThanOrEqual(2);
+  });
+
+  test("gives the canvas a stage tall enough to show its nodes", async ({ page }) => {
+    await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
+    await page.locator(".workflow-library-card").first().click();
+
+    // Playwright's toBeVisible() only looks at the element's own box, so it is
+    // blind to an ancestor clipping it away — which is how a zero-height stage
+    // passed eleven green tests while the canvas showed nothing at all.
+    const stage = await page.locator(".workflow-editor-stage").boundingBox();
+    expect(stage?.height, "the stage collapsed and clipped every node").toBeGreaterThan(200);
+    const painted = await page.evaluate(() => {
+      const node = document.querySelector(".workflow-editor-node");
+      if (!node) return false;
+      const box = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return Boolean(hit && (hit === node || node.contains(hit)));
+    });
+    expect(painted, "a node is not the topmost thing at its own centre").toBe(true);
   });
 
   test("uses the available editor width instead of collapsing the canvas", async ({ page }) => {
@@ -118,7 +147,9 @@ test.describe("Workflow studio", () => {
   });
 
   test("keeps workflow inspector select menus opaque above the following fields", async ({ page }) => {
-    for (const theme of ["浅色", "石墨"]) {
+    // 石墨 was removed when the themes collapsed to 浅色 / 深色; asking for it
+    // here could only ever time out.
+    for (const theme of ["浅色", "深色"]) {
       await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
       await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: theme }).click();
       await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();

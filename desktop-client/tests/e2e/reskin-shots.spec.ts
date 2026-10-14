@@ -44,6 +44,17 @@ test.describe("reskin evidence", () => {
     });
   }
 
+  // The canvas is the most complex surface in the app and was never
+  // photographed, which is how it stayed invisible behind eleven green tests.
+  test("工作流画布 (light)", async ({ page }) => {
+    await setTheme(page, "浅色");
+    await page.locator(".primary-nav button", { hasText: "工作流" }).click();
+    await page.waitForTimeout(400);
+    await page.locator(".workflow-library-card").first().click();
+    await page.waitForTimeout(600);
+    await page.screenshot({ path: `${OUT}/工作流画布-light.png` });
+  });
+
   // Nothing else in this suite opens an overlay, so a modal or drawer that
   // silently changes width would pass every other test in the package.
   test("执行工作项模态 (light)", async ({ page }) => {

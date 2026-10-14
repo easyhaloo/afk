@@ -59,8 +59,6 @@
 .select-menu-trigger[aria-expanded="true"],
 .select-menu-trigger:focus-visible {
   border: 1px solid var(--backlog-accent, var(--afk-accent));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--backlog-accent, var(--afk-accent)) 10%, transparent);
-  outline: none;
 }
 .select-menu-trigger:disabled { opacity: .55; cursor: not-allowed; }
 .select-menu-trigger-copy { display: flex; min-width: 0; align-items: center; gap: 5px; overflow: hidden; white-space: nowrap; }

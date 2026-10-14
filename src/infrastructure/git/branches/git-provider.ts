@@ -66,8 +66,9 @@ export class GitBranchProvider implements BranchProvider {
   async commit(worktreePath: string, message: string): Promise<string> {
     const git = simpleGit(worktreePath);
     await git.add(['-A']);
-    const result = await git.commit(message);
-    return result.commit;
+    if ((await git.status()).isClean() && !(await git.raw(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']).catch(() => ''))) return '';
+    await git.commit(message);
+    return (await git.revparse(['HEAD'])).trim();
   }
 
   async cleanup(worktreePath: string, options: { preserve?: boolean } = {}): Promise<void> {

@@ -162,4 +162,31 @@ describe('GitBranchProvider', () => {
       .resolves.toBe('README.md\nfixture.txt\n');
     await expect(readFile(join(repoPath, '.git/info/exclude'), 'utf8')).resolves.toContain('keep-local\n');
   });
+
+  it('returns the full local commit SHA and leaves an unchanged repository without a new commit', async () => {
+    const { repoPath } = await repository();
+    const git = simpleGit(repoPath);
+    const provider = new GitBranchProvider(repoPath);
+    const base = (await git.revparse(['HEAD'])).trim();
+    expect(await provider.commit(repoPath, 'no changes')).toBe('');
+    expect((await git.revparse(['HEAD'])).trim()).toBe(base);
+    await writeFile(join(repoPath, 'result.txt'), 'result\n');
+    const sha = await provider.commit(repoPath, 'QA result');
+    expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(sha).toBe((await git.revparse(['HEAD'])).trim());
+    expect(sha).not.toBe(base);
+  });
+
+  it('commits a pending merge even when the merged trees are identical', async () => {
+    const { repoPath } = await repository();
+    const git = simpleGit(repoPath);
+    await git.checkoutLocalBranch('empty-change');
+    await git.raw(['commit', '--allow-empty', '-m', 'branch marker']);
+    await git.checkout('main');
+    await git.merge(['empty-change', '--no-ff', '--no-commit']);
+    expect((await git.status()).isClean()).toBe(true);
+    const sha = await new GitBranchProvider(repoPath).commit(repoPath, 'QA merge');
+    expect(sha).toBe((await git.revparse(['HEAD'])).trim());
+    expect((await git.raw(['rev-list', '--parents', '-n', '1', 'HEAD'])).trim().split(' ')).toHaveLength(3);
+  });
 });

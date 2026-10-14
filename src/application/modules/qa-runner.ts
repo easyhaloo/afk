@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import { WorktreeManager } from '../../infrastructure/git/index.js';
 import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-diagnostics.js';
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index.js';
-import { configureStatusline, logger } from '../../infrastructure/io/index.js';
+import { configureStatusline, logger, getLogContext, withLogContext } from '../../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { compileTemplate } from '../../domain/templates/compiler.js';
@@ -18,6 +18,12 @@ import { formatExecutionFailure } from '../workflow-engine.js';
 import { buildExecutionPrompt } from '../workflows/execution-protocol.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
+import { BudgetManager } from '../workflows/budget.js';
+import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
+import type { WorkflowRunRepository } from '../workflows/run-request.js';
+import { BudgetStore } from '../workflows/budget-store.js';
+import { findCodexRollout, readAgentTelemetry, readAgentTools } from '../../infrastructure/observability/agent-telemetry.js';
+import type { RunEventData } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
@@ -30,10 +36,15 @@ export interface QARunnerDependencies {
   tmux?: TmuxClient;
   executionMode?: ExecutionMode;
   projectRoot?: string;
+  /** Managed workspace to run QA against; QA prepares it if it is gone. */
+  repositories?: readonly WorkflowRunRepository[];
+  prepareRepositories?: MultiRepositoryPreparationService;
   mergeBranch?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   runtimeManager?: TaskRuntimeManager;
   beforeChange?: (action: 'publish' | 'merge', backlog: BacklogItem, change?: ChangeRequest) => Promise<void>;
   afterPublication?: (change: ChangeRequest) => Promise<void>;
+  onCommit?: (commitSha: string, branch: string) => Promise<void>;
+  onSession?: (data: Extract<RunEventData, { kind: 'agent.session_recorded' }>) => Promise<void>;
 }
 
 /**
@@ -53,10 +64,14 @@ export class QARunner {
   private readonly tmux?: TmuxClient;
   private readonly executionMode: ExecutionMode;
   private readonly projectRoot: string;
+  private readonly repositories?: readonly WorkflowRunRepository[];
+  private readonly prepareRepositories: MultiRepositoryPreparationService;
   private readonly mergeBranchOverride?: (worktreePath: string, baselineBranch: string, featureBranch: string) => Promise<void>;
   private readonly runtimeManager: TaskRuntimeManager;
   private readonly beforeChange?: QARunnerDependencies['beforeChange'];
   private readonly afterPublication?: QARunnerDependencies['afterPublication'];
+  private readonly onCommit?: QARunnerDependencies['onCommit'];
+  private readonly onSession?: QARunnerDependencies['onSession'];
 
   constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
@@ -64,10 +79,14 @@ export class QARunner {
     this.providers = providers;
     this.executionMode = deps.executionMode ?? 'batch';
     this.projectRoot = deps.projectRoot ?? process.cwd();
+    this.repositories = deps.repositories;
+    this.prepareRepositories = deps.prepareRepositories ?? new MultiRepositoryPreparer();
     this.mergeBranchOverride = deps.mergeBranch;
     this.runtimeManager = deps.runtimeManager ?? new TaskRuntimeManager();
     this.beforeChange = deps.beforeChange;
     this.afterPublication = deps.afterPublication;
+    this.onCommit = deps.onCommit;
+    this.onSession = deps.onSession;
     this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
     this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
     this.agentRuntime = deps.agentRuntime;
@@ -76,21 +95,37 @@ export class QARunner {
 
   async process(backlogId: string): Promise<QAProcessResult> {
     const id = String(backlogId);
-    logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
-
     const session = `qa-${id}-${Date.now()}`;
+    return withLogContext(getLogContext() ?? { runId: `${session}-runtime`, workItemId: id }, () => this.processObserved(id, session));
+  }
+
+  private async processObserved(id: string, session: string): Promise<QAProcessResult> {
+    logger.info({ backlogId: id, executionMode: this.executionMode }, 'QA processing started');
     let worktreePath: string | undefined;
     let sandbox: Sandbox | undefined;
     let execution: AgentExecution | undefined;
+    let workspace: PreparedRepositorySet | undefined;
     const runtimeRunId = `${session}-runtime`;
     let runtimeStarted = false;
     let runtimeErrorSummary: string | undefined;
 
     try {
       const backlog = await this.providers.backlog.get(id);
+      const budgetStore = new BudgetStore(this.projectRoot, backlog.workItemId ?? backlog.providerRef);
+      const savedBudget = await budgetStore.load();
+      const maxHandoffs = Math.min(Math.ceil(this.config.goalBudget / 1_000_000), 20);
+      const budget = savedBudget
+        ? BudgetManager.fromSnapshot(savedBudget, maxHandoffs, this.config.goalBudget)
+        : new BudgetManager(maxHandoffs, this.config.goalBudget);
+      if (budget.isExhausted()) {
+        const summary = `work item budget exhausted: ${budget.exhaustionReason()}`;
+        await this.markBlocked(id, summary);
+        return { success: false, summary };
+      }
       const baselineBranch = await this.resolveExecutionBranch(backlog);
       await this.startRuntime(runtimeRunId, backlog, session);
       runtimeStarted = true;
+      workspace = await this.prepareWorkspace(id);
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
       await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
@@ -149,6 +184,7 @@ export class QARunner {
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
       const result = await execution.waitForResult({ completionTimeoutMs: this.config.completionTimeout });
+      await this.recordBudgetUsage(budgetStore, budget, execution, result);
       await this.logWorktreeDiagnostics(id, 'agent-completed', worktreePath);
       await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
       logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
@@ -192,10 +228,30 @@ export class QARunner {
           logger.warn({ backlogId: id, error }, 'failed to clean QA worktree');
         }
       }
+      if (workspace) {
+        try {
+          await workspace.release();
+        } catch (error) {
+          logger.warn({ backlogId: id, error }, 'failed to release QA workspace');
+        }
+      }
       if (runtimeStarted) {
         await this.finishRuntime(runtimeRunId, runtimeErrorSummary ? 'blocked' : 'completed', runtimeErrorSummary);
       }
     }
+  }
+
+  /**
+   * QA is independently runnable: the managed workspace is released once
+   * implementation finishes, so rebuild it when it is gone instead of failing
+   * on a missing repository root. A borrowed checkout is restored, one this
+   * call created is removed again by release().
+   */
+  private async prepareWorkspace(id: string): Promise<PreparedRepositorySet | undefined> {
+    if (!this.repositories?.length) return undefined;
+    const workspace = await this.prepareRepositories.prepare(this.repositories, this.projectRoot);
+    logger.info({ backlogId: id, workspace: workspace.primary.handle.path }, 'QA workspace prepared');
+    return workspace;
   }
 
   /** Resolve only an explicit unmerged execution base; parentId remains organizational. */
@@ -246,7 +302,8 @@ export class QARunner {
       const activeRework = await this.providers.backlog.getActiveRework(backlogId);
       const targetBranch = await this.resolveExecutionBranch(backlog);
       await this.beforeChange?.('publish', backlog);
-      await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
+      const commitSha = await this.providers.branches.commit(worktreePath, `QA: verify backlog ${backlogId}`);
+      if (commitSha) await this.onCommit?.(commitSha, verificationBranch);
       await this.providers.branches.push(verificationBranch, worktreePath);
       const existing = this.beforeChange ? await this.providers.changes.findForBacklog(backlog) : null;
       if (existing && (existing.state !== 'open' || existing.sourceBranch !== verificationBranch || existing.targetBranch !== targetBranch)) {
@@ -304,6 +361,28 @@ export class QARunner {
   private async markBlocked(backlogId: string, reason: string): Promise<void> {
     await this.providers.backlog.transition(backlogId, 'blocked', { reason });
     await this.providers.backlog.setExecutionMode(backlogId, 'hitl');
+  }
+
+  private async recordBudgetUsage(store: BudgetStore, budget: BudgetManager, execution: AgentExecution, result: ExecutionResult): Promise<void> {
+    let usage = result.usage;
+    let tools = result.tools;
+    if ((!usage || !tools) && this.sandboxProvider.name !== 'docker' && this.sandboxProvider.name !== 'podman') {
+      let transcriptPath: string | undefined;
+      if (this.agentProvider.name === 'codex') {
+        const threadId = execution.metadata.threadId;
+        if (threadId) transcriptPath = await findCodexRollout(threadId);
+      } else {
+        transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
+      }
+      if (transcriptPath) {
+        const options = { provider: this.agentProvider.name === 'codex' ? 'codex' as const : 'claude-code' as const, transcriptPath, sandboxKind: 'local' as const };
+        if (!usage) usage = await readAgentTelemetry(options);
+        if (!tools) tools = await readAgentTools(options);
+      }
+    }
+    const sessionId = execution.metadata.threadId ?? result.sessionId ?? execution.id;
+    if (usage && budget.recordSession(sessionId, usage.totalTokens)) await store.save(budget.snapshot());
+    await this.onSession?.({ kind: 'agent.session_recorded', sessionId, usage, tools });
   }
 
   private async startRuntime(runId: string, backlog: BacklogItem, session: string): Promise<void> {

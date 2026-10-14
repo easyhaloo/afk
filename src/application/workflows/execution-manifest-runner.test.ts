@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AgentExecution, AgentProvider } from '../../domain/agents/types.js';
 import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
 import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
@@ -9,8 +12,15 @@ import type { PreparedRepositorySet } from './multi-repository-preparer.js';
 import { resolveWorkflowRunRequest } from './run-request.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
+let workspaceRoot: string;
+beforeEach(async () => { workspaceRoot = await mkdtemp(join(tmpdir(), 'afk-manifest-runner-')); });
+afterEach(async () => { await rm(workspaceRoot, { recursive: true, force: true }); });
 
 vi.mock('../modules/project-resolver', () => ({ default: () => ({ name: 'project-resolver' }) }));
+vi.mock('simple-git', async importOriginal => ({
+  ...await importOriginal<typeof import('simple-git')>(),
+  simpleGit: vi.fn(() => ({ revparse: vi.fn(async () => 'baseline') })),
+}));
 
 describe('execution manifest request to runner boundary', () => {
   it('claims the provider backlog id and keeps the manifest working branch', async () => {
@@ -118,15 +128,15 @@ describe('execution manifest request to runner boundary', () => {
 
     await expect(runner.run({
       backlogId: '42', workItemId: 'WI-2026-018', session: 'afk-WI-2026-018', targetBranch: 'afk/work-item-18',
-      baseBranch: 'main', repoRoot: repositories[0].repoRoot, workspaceRoot: '/workspace', repositories,
+      baseBranch: 'main', repoRoot: repositories[0].repoRoot, workspaceRoot, repositories,
       sandboxProvider: 'docker', template: 'simple-loop', executionMode: 'batch',
     })).resolves.toMatchObject({ success: true });
 
-    expect(preparer.prepare).toHaveBeenCalledWith(repositories, '/workspace');
+    expect(preparer.prepare).toHaveBeenCalledWith(repositories, workspaceRoot);
     expect(providers.branches.createBranch).not.toHaveBeenCalled();
     expect(sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({
       worktreePath: repositories[0].repoRoot,
-      workspaceRoot: '/workspace',
+      workspaceRoot,
     }));
     expect(repositories[1].repoRoot.startsWith('/workspace/')).toBe(true);
     const prompt = vi.mocked(agent.createExecution).mock.calls[0][0].prompt;
@@ -182,7 +192,7 @@ describe('execution manifest request to runner boundary', () => {
 
     const result = await runner.run({
       backlogId: '42', session: 'worker-42', targetBranch: 'afk/work-item-18', baseBranch: 'main',
-      repoRoot: repositories[0].repoRoot, workspaceRoot: '/workspace', repositories,
+      repoRoot: repositories[0].repoRoot, workspaceRoot, repositories,
       template: 'issue-implementation', executionMode: 'batch',
     });
 
@@ -252,12 +262,12 @@ describe('execution manifest request to runner boundary', () => {
 
     await runner.run({
       backlogId: '42', session: 'worker-42', targetBranch: 'afk/backlog-42', baseBranch: 'main',
-      repoRoot: '/legacy/repo', template: 'simple-loop', executionMode: 'batch',
+      repoRoot: '/legacy/repo', workspaceRoot, template: 'simple-loop', executionMode: 'batch',
     });
 
     expect(providers.branches.createBranch).toHaveBeenCalledTimes(1);
     expect(sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({
-      worktreePath: '/legacy/worktree', workspaceRoot: '/legacy/repo',
+      worktreePath: '/legacy/worktree', workspaceRoot,
     }));
   });
 });

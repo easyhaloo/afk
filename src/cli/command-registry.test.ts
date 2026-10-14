@@ -45,10 +45,17 @@ describe('CLI hard cutover registry', () => {
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const create = backlog?.commands.filter(command => command.name() === 'create');
     const inventory = backlog?.commands.filter(command => command.name() === 'inventory');
+    const adopt = backlog?.commands.filter(command => command.name() === 'adopt');
     const tag = backlog?.commands.find(command => command.name() === 'tag');
 
     expect(create).toHaveLength(1);
     expect(inventory).toHaveLength(1);
+    expect(adopt).toHaveLength(1);
+    expect(adopt?.[0]?.options.filter(option => option.mandatory).map(option => option.long)).toEqual([
+      '--id', '--project', '--platform',
+    ]);
+    expect(adopt?.[0]?.options.find(option => option.long === '--platform')?.argChoices).toEqual(['github', 'gitlab']);
+    expect(adopt?.[0]?.options.some(option => option.long === '--json')).toBe(true);
     expect(inventory?.[0]?.options.map(option => option.long)).toEqual(expect.arrayContaining([
       '--platform', '--state', '--mode', '--tag', '--project', '--json',
     ]));

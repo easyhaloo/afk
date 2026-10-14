@@ -14,7 +14,7 @@ import type {
   ExecutionResult,
 } from '../infrastructure/sandbox/types.js';
 import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
-import { getTokenUsage, configureStatusline, logger } from '../infrastructure/io/index.js';
+import { getTokenUsage, configureStatusline, logger, withLogContext } from '../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
 import { loadModules, parseModuleParams } from './modules/_registry.js';
 import type { ModuleParams } from './modules/_registry.js';
@@ -24,6 +24,7 @@ import type { WorkflowConfig } from '../infrastructure/config/manager.js';
 import { HandoffCoordinator, handoffDocPath } from './workflows/handoff.js';
 import { attemptNativeResume } from './workflows/resume.js';
 import { BudgetManager } from './workflows/budget.js';
+import { BudgetStore } from './workflows/budget-store.js';
 import type { InitContext } from './workflows/lifecycle.js';
 import { defaultSessionStoreChain } from './sessions/chain.js';
 import { TemplateLoader } from '../domain/templates/loader.js';
@@ -53,7 +54,7 @@ import {
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
-import { readAgentTelemetry, findCodexRollout } from '../infrastructure/observability/agent-telemetry.js';
+import { readAgentTelemetry, readAgentTools, findCodexRollout } from '../infrastructure/observability/agent-telemetry.js';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -229,6 +230,7 @@ interface StepRunCtx {
   completionTimeoutMs: number;
   contextHighTokens: number;
   budget: BudgetManager;
+  persistBudget: () => Promise<void>;
   stepIndex: number;
   executionMode?: ExecutionMode;
 }
@@ -287,6 +289,8 @@ export class WorkflowRunner {
   private readonly multiRepositoryPreparer: MultiRepositoryPreparationService;
   private preparedRepositories?: PreparedRepositorySet;
   private preparedRepositoryFinish?: Promise<void>;
+  private readonly implementationBaseShas = new Map<string, string>();
+  private readonly implementationCommitShas = new Map<string, string>();
 
   /**
    * Inject a sandbox for testing. Production code goes through runBody →
@@ -344,6 +348,11 @@ export class WorkflowRunner {
    */
   async run(options: RunnerOptions): Promise<WorkflowRunResult> {
     validateObservationIdentity(options);
+    const context = this.createObservationContext(options.backlogId, options.session, options);
+    return withLogContext(context, () => this.runObserved(options, context));
+  }
+
+  private async runObserved(options: RunnerOptions, context: ObservationContext): Promise<WorkflowRunResult> {
     const {
       iid: requestedIid,
       session,
@@ -367,7 +376,9 @@ export class WorkflowRunner {
     this.runtimeErrorSummary = undefined;
     this.preparedRepositories = undefined;
     this.preparedRepositoryFinish = undefined;
-    this.observationContext = this.createObservationContext(backlogId, session, options);
+    this.implementationBaseShas.clear();
+    this.implementationCommitShas.clear();
+    this.observationContext = context;
     await this.recordObservation({
       kind: 'run.requested',
       run: {
@@ -501,6 +512,7 @@ export class WorkflowRunner {
         return { success: false };
       }
       if (result.success && this.preparedRepositories) {
+        for (const repository of this.preparedRepositories.repositories) await this.recordImplementationCommit(repository.handle.path, repository.handle.branch);
         try {
           await this.finishPreparedRepositories({ status: 'success' });
         } catch (error) {
@@ -695,6 +707,7 @@ export class WorkflowRunner {
         completionTimeoutMs: ctx.completionTimeoutMs,
         contextHighTokens: ctx.contextHighTokens,
         budget: ctx.budget,
+        persistBudget: ctx.persistBudget,
         prompt,
         signalType,
         executionMode: ctx.executionMode ?? 'batch',
@@ -804,6 +817,19 @@ export class WorkflowRunner {
     executionMode?: ExecutionMode;
   }): Promise<{ success: boolean; url?: string }> {
     const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, executionMode } = ctx;
+    if (!this.activeBacklog) throw new Error('backlog is not active');
+    const budgetStore = new BudgetStore(workspaceRoot, this.activeBacklog.workItemId ?? this.activeBacklog.providerRef);
+    const savedBudget = await budgetStore.load();
+    const budget = savedBudget
+      ? BudgetManager.fromSnapshot(savedBudget, maxHandoffs, maxTotalTokens)
+      : new BudgetManager(maxHandoffs, maxTotalTokens);
+    const persistBudget = async (): Promise<void> => { await budgetStore.save(budget.snapshot()); };
+    if (budget.isExhausted()) {
+      this.runtimeErrorSummary = `work item budget exhausted: ${budget.exhaustionReason()}`;
+      await this.markBacklogBlocked(this.runtimeErrorSummary);
+      return { success: false };
+    }
+    await persistBudget();
 
     // ── Step 0: Init hooks (pre-worktree) ─────────────────────────────────
     // ProjectResolverModule runs here and may chdir to the target repo.
@@ -832,6 +858,9 @@ export class WorkflowRunner {
       wt = { iid, path: handle.worktreePath, branch: handle.branchName, createdAt: new Date(), status: 'active' };
     }
     logger.info({ iid, worktree: wt.path, branch: wt.branch }, 'worktree created');
+    for (const path of this.preparedRepositories?.repositories.map(repository => repository.handle.path) ?? [wt.path]) {
+      this.implementationBaseShas.set(path, (await simpleGit(path).revparse(['HEAD'])).trim());
+    }
     await this.recordObservation({ kind: 'workspace.prepared', branch: wt.branch, workspace: wt.path, baseBranch });
     logger.info({ iid, status: 'active' }, 'worktree status updated');
     if (this.executionMode === 'interactive') {
@@ -869,7 +898,6 @@ export class WorkflowRunner {
 
     // ── Phases: implement then verify; handoff budgets are shared across both ──
     // used = handoff rounds, tokens = accumulated total across generations.
-    const budget = new BudgetManager(maxHandoffs, maxTotalTokens);
     const stepResults: Record<string, StepResult> = {};
 
     // ── Template execution: compilation + typed dispatch ─────────────────────
@@ -883,6 +911,7 @@ export class WorkflowRunner {
           this.systemActionsRan = true;
           return { url: undefined };
         }
+        await this.recordImplementationCommit(wt.path, wt.branch);
         await this.providers.branches.push(wt.branch, wt.path);
         this.systemActionsRan = true;
         return { url: undefined };
@@ -900,7 +929,7 @@ export class WorkflowRunner {
         iid, session: `${session}-${step.id}`, baseSession: session,
         primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
         hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, stepIndex: 0,
-        executionMode: step.executionMode ?? executionMode,
+        executionMode: step.executionMode ?? executionMode, persistBudget,
       }, results),
       executeSystem: async step => {
         const startedAt = new Date().toISOString();
@@ -919,10 +948,11 @@ export class WorkflowRunner {
     if (verification?.status === 'failed') {
       const recovered = await this.retryFailedAcVerification(loadedTemplate, {
         iid, session, baseSession: session, primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
-        hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, executionMode,
+        hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
       }, verification, stepResults);
       if (recovered) {
         if (!this.preparedRepositories) {
+          await this.recordImplementationCommit(wt.path, wt.branch);
           await this.providers.branches.push(wt.branch, wt.path);
           await this.transitionBacklog(iid, 'verification');
         }
@@ -975,6 +1005,7 @@ export class WorkflowRunner {
       await this.markBacklogBlocked('claim heartbeat failed');
       return { success: false };
     }
+    await this.recordImplementationCommit(worktreePath, targetBranch);
     if (!this.preparedRepositories) {
       // Push the implementation branch. QA creates the change request only
       // after merging the latest baseline and running integration tests.
@@ -993,6 +1024,15 @@ export class WorkflowRunner {
     logger.info({ iid, worktreePath }, 'worktree cleaned up');
 
     return { success: true };
+  }
+
+  private async recordImplementationCommit(worktreePath: string, branch: string): Promise<void> {
+    const base = this.implementationBaseShas.get(worktreePath);
+    if (!base) return;
+    const head = (await simpleGit(worktreePath).revparse(['HEAD'])).trim();
+    if (head === base || head === this.implementationCommitShas.get(worktreePath)) return;
+    await this.recordObservation({ kind: 'commit.recorded', phase: 'implementation', commitSha: head, branch });
+    this.implementationCommitShas.set(worktreePath, head);
   }
 
   /**
@@ -1048,6 +1088,7 @@ export class WorkflowRunner {
     completionTimeoutMs: number;
     contextHighTokens: number;
     budget: BudgetManager;
+    persistBudget: () => Promise<void>;
     prompt: string;
     signalType: 'goal_complete';
     executionMode?: ExecutionMode;
@@ -1057,7 +1098,13 @@ export class WorkflowRunner {
     completionKind: CompletionKind;
   }): Promise<PhaseResult> {
     const basePrompt = p.prompt ?? (p as unknown as { goalBase?: string }).goalBase ?? '';
+    let resumedExecution: AgentExecution | undefined;
     for (let round = 1; ; round++) {
+      if (!resumedExecution && p.budget.isExhausted() && round === 1) {
+        this.runtimeErrorSummary = `work item budget exhausted: ${p.budget.exhaustionReason()}`;
+        await this.markBacklogBlocked(this.runtimeErrorSummary);
+        return { completed: false };
+      }
       const rawPrompt = round === 1
         ? basePrompt
         : this.continuePrompt(basePrompt, p.iid, p.wtPath, round - 1);
@@ -1067,7 +1114,7 @@ export class WorkflowRunner {
 
       const agentProvider = p.agentProvider ?? this.agentProvider;
       const sandbox = p.sandbox ?? this.sandbox!;
-      let execution = await agentProvider.createExecution({
+      const execution = resumedExecution ?? await agentProvider.createExecution({
         sandbox,
         worktreePath: p.wtPath,
         sessionId: p.session,
@@ -1077,12 +1124,13 @@ export class WorkflowRunner {
         executionMode: p.executionMode,
         runtime: p.runtime,
       });
+      resumedExecution = undefined;
       await this.heartbeatRuntime(runtimeFieldsFromExecution(execution.metadata));
       this.resourceScope?.registerExecution(execution);
       await this.heartbeatRuntime({ phase: 'implementing', progress: `agent generation ${round}` });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 
-      let result = await execution.waitForResult({
+      const result = await execution.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
       });
@@ -1092,7 +1140,11 @@ export class WorkflowRunner {
       // For local batch: read the transcript at telemetryPath.
       // For local interactive: same (tmux session = sessionId, transcript is written).
       // For container: HOME not forwarded — telemetry not collected (returns undefined).
-      await this.recordAgentTelemetry(execution, result);
+      const telemetry = await this.recordAgentTelemetry(execution, result);
+      if (telemetry) {
+        p.budget.recordSession(telemetry.sessionId, telemetry.totalTokens);
+        await p.persistBudget();
+      }
 
       switch (result.status) {
         case 'completed':
@@ -1112,8 +1164,8 @@ export class WorkflowRunner {
             tokens: result.usage?.totalTokens ?? 0,
           };
 
-          if (p.budget.isExhausted(hctx.tokens)) {
-            await this.coordinator.handoff(hctx, 'terminal', p.budget.exhaustionReason(hctx.tokens)!);
+          if (p.budget.isExhausted()) {
+            await this.coordinator.handoff(hctx, 'terminal', p.budget.exhaustionReason()!);
             return { completed: false };
           }
 
@@ -1134,48 +1186,40 @@ export class WorkflowRunner {
             }
           }
 
-          // Phase 4 native resume: attemptNativeResume encapsulates the full
-          // resume flow (capability check, load snapshot, restoreSession,
-          // startAgent, waitForResult). On 'completed' return true; on 'continued'
-          // reassign (execution, result) to the resumed values and loop back;
-          // on 'failed' fall through to HandoffCoordinator.
-          const resumeOutcome = await attemptNativeResume(
+          const reserveHandoff = async (): Promise<void> => {
+            if (!p.budget.canHandoff()) throw new Error('work item handoff budget exhausted');
+            p.budget.recordHandoff();
+            await p.persistBudget();
+          };
+          resumedExecution = await attemptNativeResume(
             {
               iid: p.iid,
               session: p.session,
               wtPath: p.wtPath,
               runId,
               generation: p.budget.used + 2,
-              completionTimeoutMs: p.completionTimeoutMs,
-              contextHighTokens: p.contextHighTokens,
               signalType: p.signalType,
               prompt,
-              triggerTokens: hctx.tokens,
               executionMode: p.executionMode,
               runtime: p.runtime,
             },
-            p.budget,
             agentProvider,
             sandbox,
             () => chain,
-            () => execution.captureSession(),
+            reserveHandoff,
           );
-
-          if (resumeOutcome.status === 'completed') return { completed: true };
-          if (resumeOutcome.status === 'continued') {
-            execution = resumeOutcome.resumedExecution;
-            this.resourceScope?.registerExecution(execution);
-            result = resumeOutcome.resumeResult;
-            logger.info({ iid: p.iid, runId }, 'native resume: agent hit context_high again; looping');
-            continue;
+          if (resumedExecution) continue;
+          if (!p.budget.canHandoff()) {
+            this.runtimeErrorSummary = 'work item handoff budget exhausted';
+            await this.markBacklogBlocked(this.runtimeErrorSummary);
+            return { completed: false };
           }
-          // 'failed' — fall through to coordinator
 
           // Coordinator.restartSession() creates a new tmux session.
           // After it returns, the loop continues and sends the continued goal in the next iteration.
           // This mirrors the original behavior exactly.
+          await reserveHandoff();
           if ((await this.coordinator.handoff(hctx, 'auto')) === 'continued') {
-            p.budget.record(hctx.tokens);
             logger.info({ iid: p.iid, round, generation: p.budget.used + 1 }, 'handoff continued; looping to send continued goal');
             continue;
           }
@@ -1319,48 +1363,41 @@ export class WorkflowRunner {
    * If transcript cannot be read or parsed, emits with usage: undefined — this
    * distinguishes "not collected" from "zero tokens".
    */
-  private async recordAgentTelemetry(execution: AgentExecution, result: ExecutionResult): Promise<void> {
+  private async recordAgentTelemetry(execution: AgentExecution, result: ExecutionResult): Promise<{ sessionId: string; totalTokens: number } | undefined> {
     const sandboxKind: 'local' | 'container' =
       this.sandboxProviderName === 'docker' || this.sandboxProviderName === 'podman' ? 'container' : 'local';
-    if (sandboxKind === 'container') return;
+    if (sandboxKind === 'container') return undefined;
 
-    // Prefer result.usage (already normalized from stream in AC1).
-    // Fall back to transcript file when result.usage is absent:
-    //   - interactive/tmux: no stdout stream
-    //   - codex batch: turn.completed not mapped to usage event
     let usage = result.usage;
-    if (!usage) {
+    let tools = result.tools;
+    if (!usage || !tools) {
+      let transcriptPath: string | undefined;
       if (this.agentProviderName === 'codex') {
-        // Codex batch (exec transport) has no sessionId so telemetryPath is
-        // undefined, but threadId is captured at runtime and findCodexRollout
-        // searches ~/.codex/sessions/ directly — no transcript path needed.
         const threadId = execution.metadata.threadId;
-        if (threadId) {
-          const rolloutPath = await findCodexRollout(threadId);
-          if (rolloutPath) {
-            usage = await readAgentTelemetry({ provider: 'codex', transcriptPath: rolloutPath, sandboxKind: 'local' });
-          }
-        }
+        if (threadId) transcriptPath = await findCodexRollout(threadId);
       } else {
-        // Claude interactive/tmux: SessionEnd hook hands us the absolute path
-        // directly, so telemetryPath is populated and we can read it.
-        const transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
-        if (transcriptPath) {
-          usage = await readAgentTelemetry({ provider: 'claude-code', transcriptPath, sandboxKind: 'local' });
-        }
+        transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
+      }
+      if (transcriptPath) {
+        const options = { provider: this.agentProviderName === 'codex' ? 'codex' as const : 'claude-code' as const, transcriptPath, sandboxKind };
+        if (!usage) usage = await readAgentTelemetry(options);
+        if (!tools) tools = await readAgentTools(options);
       }
     }
 
-    if (!this.observationContext) return;
+    const sessionId = execution.metadata.threadId ?? result.sessionId ?? execution.id;
+    if (!this.observationContext) return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
     try {
       await this.observer.record(this.observationContext, {
         kind: 'agent.session_recorded',
-        sessionId: result.sessionId ?? execution.id,
+        sessionId,
         usage,
+        tools,
       });
     } catch (err) {
       logger.info({ runId: this.observationContext.runId, err }, 'agent.session_recorded: telemetry not persisted (non-fatal)');
     }
+    return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
   }
 
   private async startRuntime(backlogId: string, session: string): Promise<void> {

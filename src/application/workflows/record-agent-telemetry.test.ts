@@ -235,4 +235,29 @@ describe('agent.session_recorded wiring', () => {
 
     expect(record).not.toHaveBeenCalled();
   });
+
+  it('reads tool results from a transcript even when token usage already exists', async () => {
+    const transcriptPath = join(tmp, 'tools.jsonl');
+    writeFileSync(transcriptPath, [
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'Bash', input: { command: 'private command' } }] } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', is_error: true, content: 'private output' }] } },
+    ].map(event => JSON.stringify(event)).join('\n'));
+    const record = vi.fn(async () => ({ lastSequence: 1 }));
+    const runner = new WorkflowRunner({} as ProviderBundle, {
+      observer: { record } as unknown as RunObserver,
+      agentProvider: { name: 'claude-code', capabilities: new Set() } as never,
+    });
+    Object.defineProperty(runner, 'observationContext', { value: mockContext() });
+    Object.defineProperty(runner, 'sandboxProviderName', { value: 'local' });
+    Object.defineProperty(runner, 'agentProviderName', { value: 'claude-code' });
+    await (runner as any).recordAgentTelemetry({ id: 'exec-tools', metadata: {}, telemetryPath: transcriptPath }, {
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    });
+    expect(record).toHaveBeenCalledWith(mockContext(), {
+      kind: 'agent.session_recorded', sessionId: 'exec-tools',
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      tools: [{ id: 'call-1', name: 'Bash', result: 'failed' }],
+    });
+    expect(JSON.stringify(record.mock.calls)).not.toContain('private');
+  });
 });

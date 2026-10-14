@@ -9,6 +9,7 @@ import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-
 import { RunObserver } from '../../observability/run-observer.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
 import { QARunner } from '../modules/qa-runner.js';
+import { getLogContext } from '../../infrastructure/io/index.js';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {
@@ -219,6 +220,10 @@ describe('executeWorkItem', () => {
 
   it('records intent, claims through WorkflowRunner once, verifies independently, and only then succeeds', async () => {
     const { deps, run, process, changes, directory } = await setup();
+    deps.createImplementation = vi.fn(() => {
+      expect(getLogContext()).toEqual({ runId: 'attempt-1', workItemId });
+      return { run } as any;
+    });
     const result = await executeWorkItem(input, deps);
     expect(result).toMatchObject({ status: 'merge_ready', changeUrl: 'https://github.com/acme/api/pull/5' });
     expect(run).toHaveBeenCalledTimes(1);
@@ -251,12 +256,13 @@ describe('executeWorkItem', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('names the labels needed to adopt a manually created issue', async () => {
+  it('names the explicit command and labels needed to adopt a manually created issue', async () => {
     // `afk loop --work-item-id` cannot take over an issue the user filed by
     // hand, because `managed` and `executionEligible` are derived from labels.
     // The bare string "unmanaged work item" gives the operator no way forward.
     const { deps, run } = await setup({ managed: false });
     const message = await executeWorkItem(input, deps).then(() => '', (err: Error) => err.message);
+    expect(message).toContain('afk backlog adopt --id 42 --project acme/api --platform github');
     expect(message).toMatch(/stage::ready-for-issues/);
     expect(message).toMatch(/mode::afk/);
     expect(run).not.toHaveBeenCalled();

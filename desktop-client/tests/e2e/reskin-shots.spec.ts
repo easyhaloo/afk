@@ -12,6 +12,9 @@ async function setTheme(page: import("playwright").Page, label: string) {
 test.describe("reskin evidence", () => {
   for (const view of VIEWS) {
     test(`${view} (light)`, async ({ page }) => {
+      // The default theme is now dark, so light must be selected explicitly —
+      // otherwise every "light" shot is silently dark.
+      await setTheme(page, "浅色");
       await page.locator(".primary-nav button", { hasText: view }).click();
       await page.waitForTimeout(500);
       await page.screenshot({ path: `${OUT}/${view}-light.png` });

@@ -150,14 +150,33 @@ const TERMINAL_THEMES = {
   },
 } as const;
 
-// ponytail: runtime terminal theme is captured once per mount via useRef in createSshTerminalView.
-// Switches to --paper-in / --ink-main with a session already open require threading appearance into
-// the view and calling terminal.options.theme = … live; one line once the dependency is available.
-function currentTheme() {
+// The runtime theme is set once at creation and re-applied by watching the
+// attribute main.tsx already writes. That attribute is the runtime source of
+// truth; threading `appearance` down through TerminalSheet would touch two
+// files this module does not own, for the same result.
+export type TerminalThemeName = keyof typeof TERMINAL_THEMES;
+
+function readTheme(): TerminalThemeName {
   // Unit tests run in the node environment, where there is no document; the
   // runtime throws inside the surrounding try and the terminal never builds.
   const theme = typeof document === "undefined" ? undefined : document.documentElement.dataset.afkTheme;
-  return theme === "light" ? TERMINAL_THEMES.light : TERMINAL_THEMES.dark;
+  return theme === "light" ? "light" : "dark";
+}
+
+export type ThemeWatcher = { disconnect(): void };
+
+/** Calls `onChange` whenever the app's theme flips, with an open session running. */
+export function watchTheme(onChange: (theme: TerminalThemeName) => void): ThemeWatcher {
+  // Test environments here are partial: some have no `document`, and
+  // terminal-sheet.test.ts has a document but no MutationObserver. A terminal
+  // that never recolours is a cosmetic loss; one that throws on mount is a
+  // broken page. Degrade to a no-op watcher.
+  if (typeof document === "undefined" || typeof MutationObserver === "undefined") {
+    return { disconnect: () => {} };
+  }
+  const observer = new MutationObserver(() => onChange(readTheme()));
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-afk-theme"] });
+  return { disconnect: () => observer.disconnect() };
 }
 
 export function sshTerminalOptions(): ITerminalOptions {
@@ -168,7 +187,7 @@ export function sshTerminalOptions(): ITerminalOptions {
     fontFamily: '"SFMono-Regular", "SF Mono", "DM Mono", ui-monospace, monospace',
     fontSize: 11,
     linkHandler: blockedOscLinkHandler,
-    theme: currentTheme(),
+    theme: TERMINAL_THEMES[readTheme()],
   };
 }
 
@@ -256,11 +275,18 @@ export function createSshTerminalRuntime(options: SshTerminalRuntimeOptions) {
         reportError(error);
       }
     },
+    setTheme(theme: TerminalThemeName) {
+      if (!active || !terminal) return;
+      terminal.options.theme = TERMINAL_THEMES[theme];
+    },
     dispose,
   };
 }
 
-export function createSshTerminalView(runtimeFactory: typeof createSshTerminalRuntime = createSshTerminalRuntime) {
+export function createSshTerminalView(
+  runtimeFactory: typeof createSshTerminalRuntime = createSshTerminalRuntime,
+  themeWatcher: typeof watchTheme = watchTheme,
+) {
   return function SshTerminalViewComponent({ sessionId, output, disabled, fontSize = 11, onInput, onResize, onCopy, onError }: SshTerminalViewProps) {
     const hostRef = useRef<HTMLDivElement>(null);
     const runtimeRef = useRef<ReturnType<typeof createSshTerminalRuntime> | null>(null);
@@ -305,6 +331,12 @@ export function createSshTerminalView(runtimeFactory: typeof createSshTerminalRu
     useEffect(() => {
       runtimeRef.current?.setFontSize(fontSize);
     }, [fontSize, sessionId]);
+
+    // Runs after the creation effect above, so the runtime already exists.
+    useEffect(() => {
+      const watcher = themeWatcher(theme => runtimeRef.current?.setTheme(theme));
+      return () => watcher.disconnect();
+    }, [sessionId]);
 
     return <div className="ssh-terminal-shell"><div className="ssh-terminal-host" ref={hostRef} aria-label="SSH 交互终端" /></div>;
   };

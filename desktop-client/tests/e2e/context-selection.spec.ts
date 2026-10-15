@@ -74,7 +74,7 @@ test.describe("contextual selection", () => {
     await expect(repository).toBeFocused();
     await expect(page.locator(".backlog-row.work-item-row")).toHaveCount(1);
     await page.getByRole("button", { name: "移除筛选：Issue：acme/web" }).click();
-    await expect(page.locator(".backlog-row.work-item-row")).toHaveCount(2);
+    await expect(page.locator(".backlog-row.work-item-row")).toHaveCount(3);
     await repository.click();
     await page.getByRole("combobox", { name: "搜索 Issue 来源" }).press("Escape");
     await expect(repository).toBeFocused();

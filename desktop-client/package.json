@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev:main": "pnpm build:application && node scripts/build-provider-inventory.mjs && node scripts/build-main.mjs --watch",
-    "dev:raw": "concurrently -k \"pnpm run dev:main\" \"vite --port 5174\" \"wait-on tcp:5174 file:dist-electron/electron/main.js && ELECTRON_RENDERER_URL=http://localhost:5174 electron .\"",
+    "dev:raw": "concurrently -k \"pnpm run dev:main\" \"vite --port ${AFK_CONTROL_PORT:-5174}\" \"wait-on tcp:${AFK_CONTROL_PORT:-5174} file:dist-electron/electron/main.js && ELECTRON_RENDERER_URL=http://localhost:${AFK_CONTROL_PORT:-5174} electron .\"",
     "dev": "pnpm run dev:raw",
     "start": "bash scripts/start.sh",
     "build:application": "tsc -p ../packages/afk-core/tsconfig.json && tsc -p ../packages/afk-application/tsconfig.json",

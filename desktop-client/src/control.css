@@ -107,7 +107,12 @@
 .repository-refresh:disabled { cursor: default; opacity: .6; }
 .repository-error { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; padding: 10px 12px; border: var(--border-w) solid var(--fail-ln); border-radius: var(--radius-md); background: var(--fail-bg); color: var(--fail); font-size: calc(10px * var(--afk-scale)); }
 .repository-list { overflow: hidden; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); }
-.repository-list .row-item { min-height: 52px; }
+/* Rows are <button> here, unlike the read-only rows on other pages: reset the
+   native chrome so they match, and only invite a click when there is a URL. */
+.repository-list .row-item { min-height: 52px; border: 0; border-bottom: var(--border-w) solid var(--afk-border); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.repository-list .row-item:last-child { border-bottom: 0; }
+.repository-list .row-item:disabled { cursor: default; }
+.repository-list .row-item:disabled:hover { background: transparent; }
 .repository-list .row-item .ico-box { color: var(--afk-muted); }
 .repository-list .row-item .end { color: var(--afk-muted); }
 .repository-list .row-item .end svg { color: var(--afk-muted); }

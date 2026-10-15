@@ -279,12 +279,15 @@
 .workflow-editor-node b { font-size: calc(11px * var(--afk-scale)); }
 .workflow-editor-node small { display: -webkit-box; overflow: hidden; margin-top: 5px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .workflow-editor-node > span { margin-top: 9px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
-/* Prototype's .stage-bar: floating inside the stage, left caption + right-anchored zoom pill */
+/* Prototype's .stage-bar: floating inside the stage, left caption + right-anchored zoom pill.
+   The inspector overlays the stage rather than taking a grid column, so the bar has to
+   stop at its edge — 332px is the same reserve the viewport fit already uses. */
 .workflow-canvas-controls {
-  position: absolute; left: 12px; bottom: 10px;
+  position: absolute; left: 12px; right: 12px; bottom: 10px;
   z-index: 5; display: flex; align-items: center; gap: 8px;
   box-shadow: var(--shadow-panel);
 }
+
 .workflow-canvas-caption { font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); color: var(--ink-dim); }
 .workflow-canvas-zoom {
   display: flex; align-items: center; gap: 1px; margin-left: auto;
@@ -1570,3 +1573,4 @@
 @media (max-width: 900px) {
   .run-center-layout .board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.workflow-canvas-controls.has-inspector { right: 332px; }

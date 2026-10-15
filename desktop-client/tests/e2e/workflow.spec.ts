@@ -48,6 +48,25 @@ test.describe("Workflow studio", () => {
     expect(agent.y + agent.height).toBeLessThanOrEqual(system.y);
   });
 
+  test("keeps the zoom controls clickable beside the inspector", async ({ page }) => {
+    await page.getByRole("button", { name: "工作流" }).click();
+    await page.locator(".workflow-library-card").first().click();
+    await page.waitForTimeout(400);
+
+    // The inspector overlays the stage rather than taking a grid column, so a
+    // full-width stage-bar parks the zoom pill underneath it: present in the DOM,
+    // impossible to click. Measure what is actually on top at the pill's centre.
+    const hit = await page.evaluate(() => {
+      const zoom = document.querySelector(".workflow-canvas-zoom button");
+      if (!zoom) return "missing";
+      const box = zoom.getBoundingClientRect();
+      const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return Boolean(top && (top === zoom || zoom.contains(top))) ? "reachable" : (top?.className?.toString() ?? "none");
+    });
+
+    expect(hit, "the zoom button is covered by the inspector").toBe("reachable");
+  });
+
   test("pans the workflow canvas by dragging its empty surface", async ({ page }) => {
     await page.getByRole("button", { name: "工作流" }).click();
     await page.locator(".workflow-library-card").first().click();

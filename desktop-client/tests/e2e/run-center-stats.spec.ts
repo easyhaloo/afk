@@ -2,6 +2,7 @@ import path from "node:path";
 import type { RunEventDraft } from "@afk/core";
 import { JsonlEventStore } from "../../../src/infrastructure/observability/jsonl-event-store";
 import { test, expect, E2E_HOME_PATH } from "./_helpers/launch";
+import { expectColumnsAligned } from "./_helpers/geometry";
 
 function pastTimestamp(hoursAgo: number): string {
   return new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
@@ -112,60 +113,16 @@ test("column headers are present in queue view", async ({ page }) => {
   await expect(colHead.locator("span").nth(2)).toHaveText("更新");
 });
 
-test("column header and row grid alignment — head span offsets match row cell offsets within 3px", async ({ page }) => {
+test("column header sits on the same columns as the rows beneath it", async ({ page }) => {
   const store = new JsonlEventStore({ root: path.join(E2E_HOME_PATH, ".afk", "events") });
   await seedEvents(store);
 
   await page.locator(".primary-nav button", { hasText: "运行中心" }).click();
   await page.waitForTimeout(600);
 
-  const headOffsets = await page.evaluate(() => {
-    const head = document.querySelector(".run-col-head");
-    if (!head) return null;
-    return Array.from(head.querySelectorAll("span")).map(el => {
-      const r = el.getBoundingClientRect();
-      return { text: el.textContent, left: r.left, width: r.width };
-    });
-  });
-
-  const rowOffsets = await page.evaluate(() => {
-    const row = document.querySelector(".queue .event-row");
-    if (!row) return null;
-    return Array.from(row.children).map((el, i) => {
-      const r = el.getBoundingClientRect();
-      return { index: i, left: r.left, width: r.width };
-    });
-  });
-
-  expect(headOffsets, "run-col-head not found in DOM").not.toBeNull();
-  expect(rowOffsets, "event-row not found in DOM").not.toBeNull();
-
-  console.log("head offsets:", JSON.stringify(headOffsets));
-  console.log("row offsets:", JSON.stringify(rowOffsets));
-
-  // head[0] = empty cell, head[1] = 运行, head[2] = 更新
-  // row[0] = StateGlyph(22px), row[1] = .run-main, row[2] = event-time(96px), row[3] = chevron
-  const headCol1Left = headOffsets![1].left;
-  const rowCol1Left = rowOffsets![1].left;
-  expect(Math.abs(headCol1Left - rowCol1Left), `col1 运行: head=${headCol1Left} row=${rowCol1Left} gap=${Math.abs(headCol1Left - rowCol1Left)}`).toBeLessThanOrEqual(3);
-
-  const headCol2Left = headOffsets![2].left;
-  const rowCol2Left = rowOffsets![2].left;
-  expect(Math.abs(headCol2Left - rowCol2Left), `col2 更新: head=${headCol2Left} row=${rowCol2Left} gap=${Math.abs(headCol2Left - rowCol2Left)}`).toBeLessThanOrEqual(3);
-
-  expect(rowOffsets).toHaveLength(3);
-  expect(headOffsets).toHaveLength(3);
-});
-
-test("event-row child count matches grid columns (4 cells)", async ({ page }) => {
-  const store = new JsonlEventStore({ root: path.join(E2E_HOME_PATH, ".afk", "events") });
-  await seedEvents(store);
-  await page.locator(".primary-nav button", { hasText: "运行中心" }).click();
-  await page.waitForTimeout(600);
-
-  const info = await page.evaluate(() => {
-    const row = document.querySelector(".queue .event-row");
-    return { childCount: row ? row.children.length : -1, html: row ? row.innerHTML.substring(0, 300) : "" };
-  });
-  expect(info.childCount, `expected 3 children but got ${info.childCount}. Row HTML: ${info.html}`).toBe(3);
+  // The head is three columns (empty / 运行 / 更新) and each row is three cells
+  // (glyph / copy / timestamp). Anything else and a label points at the wrong
+  // data — which is exactly how the first pass shipped a four-track header over
+  // five-track rows with every test green.
+  await expectColumnsAligned(page, ".run-col-head", ".queue .event-row");
 });

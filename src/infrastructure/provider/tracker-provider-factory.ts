@@ -214,6 +214,7 @@ function createGitHubProviderCatalog(token: string): ProviderCatalog {
         labels: issue.labels.map(label => typeof label === 'string' ? label : label.name ?? ''),
         state: issue.state === 'closed' ? 'closed' : 'open',
         webUrl: issue.html_url,
+        updatedAt: issue.updated_at,
         pullRequest: 'pull_request' in issue,
       }));
     },
@@ -247,6 +248,7 @@ function createGitLabProviderCatalog(host: string, url: string, token: string): 
       labels: issue.labels,
       state: issue.state,
       webUrl: issue.web_url,
+      updatedAt: issue.updated_at,
     }))),
   });
 }
@@ -266,6 +268,7 @@ interface GitLabIssueResponse {
   labels: string[];
   state: 'opened' | 'closed';
   web_url: string;
+  updated_at?: string;
 }
 
 async function fetchGitLabPage<T>(

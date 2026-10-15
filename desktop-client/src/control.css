@@ -253,21 +253,20 @@
 .workflow-editor-canvas > header b { display: block; color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
 .workflow-editor-canvas > header small { display: block; max-width: 530px; margin-top: 4px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
 .workflow-editor-canvas > header > span { min-height: 20px; padding: 0 7px; border: var(--border-w) solid var(--afk-accent-border); border-radius: var(--radius-pill); background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 18px; white-space: nowrap; }
-.workflow-editor-stage { position: relative; min-height: 530px; overflow: hidden; background-color: #f5f8f8; background-image: linear-gradient(rgba(117,158,167,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(117,158,167,.12) 1px, transparent 1px), radial-gradient(circle at 1px 1px, rgba(21,139,153,.22) 1px, transparent 0); background-size: 24px 24px, 24px 24px, 24px 24px; cursor: grab; touch-action: none; }
+.workflow-editor-stage { position: relative; min-height: 530px; overflow: hidden; border: var(--border-w) solid var(--ink-faint); border-radius: 16px 6px 20px 8px / 6px 20px 8px 16px; background-color: var(--afk-panel-subtle); background-image: radial-gradient(circle at 1px 1px, var(--ink-faint) 1px, transparent 0); background-size: 22px 22px; box-shadow: var(--shadow-panel); cursor: grab; touch-action: none; }
 .workflow-canvas-lanes { position: absolute; inset: 0; pointer-events: none; }
 .workflow-canvas-lane { position: absolute; left: 42px; width: 1220px; border: var(--border-w) dashed var(--ink-mid); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--ink-mid) 30%, transparent); }
 .workflow-canvas-lane::after { position: absolute; inset: 8px; border: var(--border-w) solid rgba(255,255,255,.54); border-radius: var(--radius-md); content: ""; }
 .workflow-canvas-lane span { position: absolute; top: 9px; left: 16px; z-index: 1; color: var(--ink-mid); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 700; letter-spacing: .08em; }
 .workflow-canvas-lane small { position: absolute; top: 11px; right: 17px; z-index: 1; color: var(--ink-dim); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); letter-spacing: .14em; }
-.workflow-editor-stage:active { cursor: grabbing; }
 .workflow-editor-world { position: absolute; top: 0; left: 0; width: 1500px; height: 520px; transform-origin: 0 0; transition: transform .12s ease-out; }
 .workflow-editor-edges { position: absolute; inset: 0; width: 1500px; height: 520px; overflow: visible; pointer-events: none; }
-.workflow-editor-edges path { fill: none; stroke: var(--ink-mid); stroke-width: 1.35; marker-end: url(#workflow-arrow); }
-.workflow-editor-edges .workflow-edge-flow { stroke: var(--afk-accent); stroke-width: 2.3; opacity: .74; }
-.workflow-editor-edges .workflow-edge:not(.linked) .workflow-edge-flow { opacity: .16; }
-.workflow-editor-edges .workflow-edge.linked .workflow-edge-flow { opacity: .92; }
-.workflow-editor-edges .workflow-edge.conditional .workflow-edge-base { stroke: var(--ink-mid); stroke-dasharray: 6 4; }
-.workflow-editor-edges .workflow-edge.conditional .workflow-edge-flow { stroke: var(--ink-mid); stroke-dasharray: 6 4; }
+.workflow-editor-edges path { fill: none; stroke: var(--ink-mid); stroke-width: 1.4; stroke-dasharray: 6 3; marker-end: url(#workflow-arrow); }
+.workflow-editor-edges .workflow-edge-flow { stroke: var(--ink-mid); stroke-width: 1.4; stroke-dasharray: 6 3; marker-end: none; opacity: .4; }
+.workflow-editor-edges .workflow-edge:not(.linked) .workflow-edge-flow { opacity: .12; }
+.workflow-editor-edges .workflow-edge.linked .workflow-edge-flow { opacity: .72; }
+.workflow-editor-edges .workflow-edge.conditional .workflow-edge-base { stroke: var(--ink-mid); }
+.workflow-editor-edges .workflow-edge.conditional .workflow-edge-flow { stroke: var(--ink-mid); }
 .workflow-editor-edges marker path { fill: var(--afk-accent); }
 .workflow-editor-node { position: absolute; display: flex; width: 164px; min-height: 94px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 13px; border: var(--border-w) solid #82b9bd; border-radius: var(--radius-md); background: rgba(252,255,254,.96); color: var(--afk-text); box-shadow: var(--shadow-panel); cursor: grab; text-align: left; user-select: none; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
 .workflow-editor-node:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-2px, -2px); }
@@ -280,7 +279,22 @@
 .workflow-editor-node b { font-size: calc(11px * var(--afk-scale)); }
 .workflow-editor-node small { display: -webkit-box; overflow: hidden; margin-top: 5px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .workflow-editor-node > span { margin-top: 9px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
-.workflow-canvas-controls { position: absolute; right: 14px; bottom: 13px; z-index: 5; display: flex; overflow: hidden; align-items: center; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--afk-panel) 92%, transparent); box-shadow: var(--shadow-panel); backdrop-filter: blur(8px); }
+/* Prototype's .stage-bar: floating inside the stage, left caption + right-anchored zoom pill */
+.workflow-canvas-controls {
+  position: absolute; left: 12px; right: 12px; bottom: 10px;
+  z-index: 5; display: flex; align-items: center; gap: 8px;
+  box-shadow: var(--shadow-panel);
+}
+.workflow-canvas-caption { font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); color: var(--ink-dim); }
+.workflow-canvas-zoom {
+  display: flex; align-items: center; gap: 1px; margin-left: auto;
+  padding: 2px;
+  border: var(--border-w) solid var(--ink-faint); border-radius: 3px 8px 5px 2px;
+  background: var(--paper-2);
+}
+.workflow-canvas-zoom button { width: 22px; height: 20px; border-radius: 2px 4px 3px 1px; background: transparent; color: var(--ink-dim); }
+.workflow-canvas-zoom button:hover { background: var(--paper-3); color: var(--ink-main); }
+.workflow-canvas-zoom span { padding: 0 6px; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); color: var(--ink-mid); }
 .workflow-canvas-controls button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-right: var(--border-w) solid var(--afk-border); background: transparent; color: var(--afk-muted); }
 .workflow-canvas-controls button:last-child { border-right: 0; }
 .workflow-canvas-controls button:hover { color: var(--afk-accent); background: var(--afk-accent-soft); }
@@ -534,11 +548,9 @@
 .workflow-editor-node.selected { box-shadow: var(--shadow-panel-sm), 0 0 0 3px color-mix(in srgb, var(--afk-accent-soft) 72%, transparent); }
 .workflow-editor-node.system-node { border-style: dashed; background: color-mix(in srgb, var(--afk-panel) 92%, #f2efe8); }
 
-.workflow-editor-edges .workflow-edge-base { fill: none; stroke: color-mix(in srgb, var(--afk-border-strong) 72%, #9d9689); stroke-width: 1.15; marker-end: url(#workflow-arrow); }
-.workflow-editor-edges .workflow-edge-flow { fill: none; stroke: var(--afk-accent); stroke-width: 1.8; stroke-linecap: round; stroke-dasharray: 2px 14px; marker-end: none; opacity: .55; animation: workflow-edge-flow 2.7s linear infinite; }
-.workflow-editor-edges marker path { fill: color-mix(in srgb, var(--afk-border-strong) 72%, #9d9689); }
-@keyframes workflow-edge-flow { to { stroke-dashoffset: -32px; } }
-@media (prefers-reduced-motion: reduce) { .workflow-editor-edges .workflow-edge-flow { animation: none; } }
+.workflow-editor-edges .workflow-edge-base { stroke: var(--ink-faint); }
+.workflow-editor-edges .workflow-edge-flow { stroke: var(--ink-mid); opacity: .42; }
+.workflow-editor-edges marker path { fill: var(--ink-faint); }
 
 .workflow-studio-actions .workflow-save,
 .workflow-studio-toolbar .workflow-toolbar-button,
@@ -695,10 +707,10 @@
 .workflow-editor-node.custom-node.dragging { box-shadow: var(--shadow-panel); transform: translateY(-2px) scale(1.01); }
 
 .workflow-editor-edges .workflow-edge-base { stroke: #c9cac4; stroke-width: 1.1; }
-.workflow-edge:not(.linked) .workflow-edge-flow { opacity: .08; animation-duration: 5.4s; }
+.workflow-edge:not(.linked) .workflow-edge-flow { opacity: .12; }
 .workflow-edge.linked .workflow-edge-base { stroke: #8491ae; stroke-width: 1.2; }
-.workflow-edge.linked .workflow-edge-flow { stroke: #6277ab; opacity: .58; animation-duration: 1.8s; }
-.workflow-editor-stage.is-dragging .workflow-edge-flow { animation-play-state: paused; opacity: .22; }
+.workflow-edge.linked .workflow-edge-flow { stroke: #8491ae; opacity: .62; }
+.workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .18; }
 @keyframes workflow-node-select { 0% { transform: scale(.985); } 100% { transform: scale(1); } }
 
 .workflow-studio-inspector { border-left-color: #e5e5df; background: var(--afk-panel); animation: workflow-inspector-enter 190ms cubic-bezier(.2,.75,.2,1); }
@@ -717,7 +729,7 @@
 .workflow-studio-toolbar .workflow-toolbar-button:hover { border-color: transparent; background: var(--afk-panel-subtle); color: var(--ink-main); }
 .workflow-studio-actions .workflow-save { min-height: 29px; border-radius: var(--radius-sm); background: var(--afk-accent); border-color: var(--afk-accent); box-shadow: none; }
 .workflow-studio-actions .workflow-save:hover:not(:disabled) { background: #222832; box-shadow: none; transform: translateY(-1px); }
-.workflow-canvas-controls { right: 16px; bottom: 14px; padding: 2px; border-color: #dedfd9; border-radius: var(--radius-sm); background: var(--afk-panel); box-shadow: var(--shadow-panel); }
+.workflow-canvas-controls { padding: 2px; border-color: #dedfd9; border-radius: var(--radius-sm); background: var(--afk-panel); box-shadow: var(--shadow-panel); }
 .workflow-canvas-controls .workflow-canvas-control { width: 26px; height: 26px; border-radius: var(--radius-sm); color: var(--ink-mid); }
 .workflow-canvas-controls .workflow-canvas-control:hover { background: var(--afk-accent-soft); color: #303743; }
 .workflow-canvas-controls .workflow-canvas-control{ color: var(--afk-accent); }
@@ -911,11 +923,11 @@
 .workflow-editor-node.selected::before { width: 3px; background: var(--afk-accent); }
 .workflow-editor-node.system-node { border-style: dashed; background: #f9faf7; }
 .workflow-editor-node.custom-node { border-color: var(--afk-accent-border); }
-.workflow-editor-edges .workflow-edge-base { stroke: var(--ink-faint); stroke-width: 1.05; }
+.workflow-editor-edges .workflow-edge-base { stroke: var(--ink-faint); stroke-width: 1.05; stroke-dasharray: 6 3; }
 .workflow-edge:not(.linked) .workflow-edge-flow { opacity: .045; }
 .workflow-edge.linked .workflow-edge-base { stroke: var(--afk-accent); stroke-width: 1.25; }
-.workflow-edge.linked .workflow-edge-flow { stroke: var(--afk-accent); opacity: .46; animation-duration: 2.2s; }
-.workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .16; }
+.workflow-edge.linked .workflow-edge-flow { stroke: var(--afk-accent); opacity: .46; }
+.workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .12; }
 .workflow-studio-toolbar { gap: 4px; }
 .workflow-studio-toolbar .workflow-toolbar-button { min-height: 30px; padding: 0 10px; border: var(--border-w) solid transparent; border-radius: var(--radius-sm); }
 .workflow-studio-toolbar .workflow-toolbar-button:hover { border-color: #d8dad4; background: var(--afk-panel); color: #303630; }
@@ -969,23 +981,22 @@
 .workflow-editor-node.track-conditional i { background: var(--warn-bg); color: var(--warn); }
 .workflow-editor-node.track-system { border-style: dashed; }
 .workflow-editor-stage.is-dragging .workflow-editor-node { transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease; }
-.workflow-editor-edges .workflow-edge-base { fill: none; stroke: var(--ink-faint); stroke-width: 1.15; stroke-linejoin: round; marker-end: url(#workflow-arrow); }
-.workflow-editor-edges .workflow-edge-flow { fill: none; stroke: #1b9c8a; stroke-width: 1.65; stroke-linecap: round; stroke-dasharray: 2px 14px; opacity: 0; animation: none; }
-.workflow-edge:not(.linked) .workflow-edge-flow { opacity: 0; animation: none; }
+.workflow-editor-edges .workflow-edge-base { fill: none; stroke: var(--ink-faint); stroke-width: 1.15; stroke-linejoin: round; stroke-dasharray: 6 3; marker-end: url(#workflow-arrow); }
+.workflow-editor-edges .workflow-edge-flow { fill: none; stroke: var(--ink-mid); stroke-width: 1.4; stroke-linecap: round; stroke-dasharray: 6 3; opacity: 0; }
+.workflow-edge:not(.linked) .workflow-edge-flow { opacity: 0; }
 .workflow-edge.linked .workflow-edge-base { stroke: var(--accent); stroke-width: 1.35; }
-.workflow-edge.linked .workflow-edge-flow { opacity: .82; animation: workflow-edge-flow 1.18s linear 1 both; }
-.workflow-edge.conditional .workflow-edge-base { stroke: var(--ink-mid); stroke-dasharray: 4px 4px; }
-.workflow-edge.conditional.linked .workflow-edge-base { stroke: #9674a8; }
-.workflow-edge.conditional.linked .workflow-edge-flow { stroke: #816bba; }
+.workflow-edge.linked .workflow-edge-flow { stroke: var(--accent); opacity: .72; }
+.workflow-edge.conditional .workflow-edge-base { stroke: var(--ink-mid); stroke-dasharray: 6 3; }
+.workflow-edge.conditional.linked .workflow-edge-base { stroke: var(--accent); }
+.workflow-edge.conditional.linked .workflow-edge-flow { stroke: var(--accent); opacity: .72; }
 .workflow-edge-label rect { fill: var(--paper); opacity: .96; }
 .workflow-edge-label text { fill: var(--ink-mid); font-family: "DM Mono", ui-monospace, monospace; font-size: calc(10px * var(--afk-scale)); font-weight: 650; letter-spacing: .01em; }
-.workflow-editor-stage.is-dragging .workflow-edge-flow { animation-play-state: paused; opacity: .12; }
+.workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .12; }
 @keyframes workflow-track-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes workflow-phase-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) {
   .workflow-canvas-track, .workflow-canvas-phases span { animation: none; }
   .workflow-editor-node { transition: none; }
-  .workflow-edge.linked .workflow-edge-flow { animation: none; opacity: .58; }
 }
 
 .workflow-studio-page {

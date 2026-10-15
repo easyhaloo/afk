@@ -72,7 +72,7 @@ test.describe("Workflow studio", () => {
     await page.locator(".workflow-library-card").first().click();
 
     const stage = page.locator(".workflow-editor-stage");
-    const zoomLabel = page.locator(".workflow-canvas-controls span");
+    const zoomLabel = page.locator(".workflow-canvas-zoom-label");
     const stageBox = await stage.boundingBox();
     if (!stageBox) throw new Error("workflow canvas stage is not measurable");
     const before = await zoomLabel.textContent();

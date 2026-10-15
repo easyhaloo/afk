@@ -542,7 +542,7 @@ describe("WorkItemsPage", () => {
     await act(async () => { renderer = create(createElement(WorkItemsPage)); });
 
     expect(renderer!.root.findByProps({ className: "backlog-toolbar work-items-toolbar" })).toBeTruthy();
-    expect(renderer!.root.findAllByProps({ className: "select-menu filter-trigger" })).toHaveLength(3);
+    expect(renderer!.root.findAllByProps({ className: "select-menu filter-trigger" })).toHaveLength(4);
 
     expect(renderer!.root.findByProps({ "aria-label": "筛选条件" }).props.hidden).toBe(true);
     await act(async () => { renderer!.root.findByProps({ "aria-label": "筛选工作项" }).props.onClick(); });

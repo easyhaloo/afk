@@ -3,6 +3,8 @@ import { act, create } from "react-test-renderer";
 import { describe, expect, it } from "vitest";
 import { ProviderIcon } from "../src/components/ProviderIcon";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 describe("ProviderIcon", () => {
   it.each(["github", "gitlab"] as const)("renders the saved %s SVG asset with an accessible label", provider => {
     let renderer!: ReturnType<typeof create>;

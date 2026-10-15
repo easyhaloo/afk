@@ -69,4 +69,22 @@ describe('provider catalogs', () => {
     expect(issues.items.map(issue => issue.issueNumber)).toEqual([4]);
     expect(issues.error).toMatchObject({ message: 'HTTP 503 issues' });
   });
+
+  it('passes updatedAt from GitHub issues through to the domain layer', async () => {
+    const listIssuesPage = vi.fn(async () => [
+      { number: 5, title: 'Has updated_at', body: null, labels: [], state: 'open' as const, webUrl: 'https://github.com/acme/api/issues/5', updatedAt: '2026-09-01T00:00:00Z' },
+    ]);
+    const catalog = new GitHubProviderCatalog({ listProjectsPage: vi.fn(), listIssuesPage }, 50);
+    const issues = await catalog.listIssues({ platform: 'github', projectKey: 'acme/api', name: 'api' });
+    expect(issues[0]).toMatchObject({ issueNumber: 5, updatedAt: '2026-09-01T00:00:00Z' });
+  });
+
+  it('passes updatedAt from GitLab issues through to the domain layer', async () => {
+    const listIssuesPage = vi.fn(async () => [
+      { iid: 6, title: 'GitLab updated', description: null, labels: [], state: 'opened' as const, webUrl: 'https://gitlab.corp/api/-/issues/6', updatedAt: '2026-10-01T00:00:00Z' },
+    ]);
+    const catalog = new GitLabProviderCatalog('gitlab.corp', { listProjectsPage: vi.fn(), listIssuesPage }, 50);
+    const issues = await catalog.listIssues({ platform: 'gitlab', projectKey: 'gitlab.corp/api', providerHost: 'gitlab.corp', name: 'api' });
+    expect(issues[0]).toMatchObject({ issueNumber: 6, updatedAt: '2026-10-01T00:00:00Z' });
+  });
 });

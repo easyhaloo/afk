@@ -11,6 +11,13 @@ const project = {
 };
 
 describe('global work item metadata', () => {
+  it.each(['2026-10-15T08:00:00Z', undefined])('preserves the optional Provider updatedAt %s', updatedAt => {
+    const item = toGlobalWorkItem(project, {
+      issueNumber: 7, title: 'Timestamp', labels: [], state: 'opened', updatedAt,
+    });
+    expect(item.updatedAt).toBe(updatedAt);
+  });
+
   it('keeps unmanaged issues visible but never execution eligible', () => {
     const item = toGlobalWorkItem(project, {
       issueNumber: 7,

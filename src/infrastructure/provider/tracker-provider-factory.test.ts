@@ -1,8 +1,43 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createGlobalWorkItemCatalogs } from './tracker-provider-factory.js';
 import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
+import { toGlobalWorkItem } from '../../domain/work-item/metadata.js';
+
+const { listForRepo } = vi.hoisted(() => ({ listForRepo: vi.fn() }));
+vi.mock('@octokit/rest', () => ({
+  Octokit: vi.fn(function () { return { issues: { listForRepo } }; }),
+}));
+vi.mock('../gitlab/glab-config.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../gitlab/glab-config.js')>(),
+  listGlabTokens: () => [],
+}));
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  listForRepo.mockReset();
+});
 
 describe('global provider catalog factory', () => {
+  it.each(['github', 'gitlab'] as const)('carries raw %s updated_at through the catalog into the work item', async platform => {
+    const updatedAt = '2026-10-15T08:00:00Z';
+    vi.stubEnv('GITHUB_TOKEN', 'test-token');
+    vi.stubEnv('GITLAB_TOKEN', 'test-token');
+    vi.stubEnv('GITLAB_URL', 'https://gitlab.example');
+    const raw = { number: 7, iid: 7, title: 'Timestamp', body: null, description: null,
+      labels: [], state: platform === 'github' ? 'open' : 'opened', updated_at: updatedAt };
+    listForRepo.mockResolvedValue({ data: [raw] });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify([raw]))));
+    const catalog = createGlobalWorkItemCatalogs(platform)[0];
+    const project = { platform, projectKey: platform === 'github' ? 'acme/api' : 'gitlab.example/acme/api',
+      providerHost: platform === 'gitlab' ? 'gitlab.example' : undefined, name: 'api' };
+    const issues = await catalog.listIssues(project);
+    expect(Array.isArray(issues)).toBe(true);
+    if (!Array.isArray(issues)) throw new Error('Unexpected partial catalog response');
+    expect(issues[0]).toMatchObject({ updatedAt });
+    expect(toGlobalWorkItem(project, issues[0])).toMatchObject({ updatedAt });
+  });
+
   it('creates a GitHub catalog from credentials without consulting cwd or git remotes', () => {
     const githubCatalog = { platform: 'github', scopeKey: 'github.com' } as ProviderCatalog;
     const createGitHubCatalog = vi.fn(() => githubCatalog);

@@ -29,4 +29,5 @@ export interface GlobalWorkItem {
   branchName: string;
   providerRef: string;
   webUrl?: string;
+  updatedAt?: string;
 }

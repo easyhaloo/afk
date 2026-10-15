@@ -281,7 +281,7 @@
 .workflow-editor-node > span { margin-top: 9px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
 /* Prototype's .stage-bar: floating inside the stage, left caption + right-anchored zoom pill */
 .workflow-canvas-controls {
-  position: absolute; left: 12px; right: 12px; bottom: 10px;
+  position: absolute; left: 12px; bottom: 10px;
   z-index: 5; display: flex; align-items: center; gap: 8px;
   box-shadow: var(--shadow-panel);
 }

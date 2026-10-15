@@ -629,7 +629,7 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
       const inspectorReserve = inspectorOpen && rect.width >= 980 ? 332 : 0;
       const visibleWidth = Math.max(1, rect.width - inspectorReserve);
       const scale = Math.max(.72, Math.min(1.12, (visibleWidth - padX * 2) / graphWidth, (rect.height - padY * 2) / graphHeight));
-      const targetCenterY = Math.max(padY + graphHeight * scale / 2, Math.min(rect.height * .34, rect.height - padY - graphHeight * scale / 2));
+      const targetCenterY = Math.max(padY + graphHeight * scale / 2, Math.min(rect.height * .68, rect.height - padY - graphHeight * scale / 2));
       setViewport({ scale: Math.round(scale * 100) / 100, x: Math.round((visibleWidth - graphWidth * scale) / 2 - minX * scale), y: Math.round(targetCenterY - (minY + graphHeight / 2) * scale) });
     });
     return () => window.cancelAnimationFrame(frame);

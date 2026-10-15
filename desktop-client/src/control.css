@@ -1306,9 +1306,7 @@
 }
 
 .queue {
-  width: min(100%, 1040px);
-  max-width: 1040px;
-  margin: 0 auto;
+  width: 100%;
   padding-top: 10px;
 }
 
@@ -1330,18 +1328,15 @@
 .queue .event-row {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: 24px minmax(210px, .8fr) minmax(260px, 1fr) 118px 22px;
-  gap: 11px;
-  align-items: center;
-  min-height: 64px;
-  padding: 9px 10px 9px 0;
-  border: var(--border-w) solid transparent;
-  border-bottom: var(--border-w) solid var(--line-soft);
-  border-radius: var(--radius-md);
+  padding: 0 12px;
+  border-bottom: var(--border-w) solid var(--afk-border);
+  border-radius: 0;
   background: transparent;
-  text-align: left;
 }
+.queue .event-row .state-glyph { flex-shrink: 0; }
+.queue .event-row .run-main { flex: 1; min-width: 0; overflow: hidden; }
+.queue .event-row .event-time { flex-shrink: 0; width: 96px; margin-left: auto; text-align: right; }
+.queue .event-row .event-detail-affordance { flex-shrink: 0; width: 22px; display: grid; place-items: center; }
 
 .event-row:hover { background: #fafcf9; }
 .event-row.selected { border-color: var(--line-soft); background: #f2f7f2; box-shadow: inset 2px 0 0 var(--run); }
@@ -1508,12 +1503,13 @@
 }
 
 @media (max-width: 1220px) {
-  .event-row { grid-template-columns: 24px minmax(150px, 1fr) minmax(180px, 1.15fr) 96px 22px; gap: 9px; }
+  .queue .event-row { gap: 10px; }
 }
 
 @media (max-width: 900px) {
-  .event-row { grid-template-columns: 24px minmax(140px, .9fr) minmax(160px, 1.1fr) 22px; }
-  .event-time { display: none; }
+  .queue .event-row { gap: 8px; }
+  .queue .event-row .event-time { display: none; }
+  .queue .event-row .event-detail-affordance { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1558,10 +1554,9 @@
 .stats .ok b { color: var(--afk-accent); }
 
 .run-col-head {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 74px 96px;
-  gap: 12px;
+  display: flex;
   align-items: center;
+  gap: 12px;
   height: 28px;
   padding: 0 12px;
   border-bottom: 1.5px solid var(--afk-border);
@@ -1572,8 +1567,11 @@
   z-index: 1;
   background: var(--afk-panel);
 }
-.run-col-head span:nth-child(3),
-.run-col-head span:nth-child(4) { text-align: right; }
+.run-col-head span:nth-child(1) { width: 22px; flex-shrink: 0; }
+.run-col-head span:nth-child(2) { flex: 1; min-width: 0; }
+.run-col-head span:nth-child(3) { width: 96px; flex-shrink: 0; text-align: right; }
+
+.run-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow: hidden; }
 
 .view-layout { display: contents; }
 .run-center-layout {

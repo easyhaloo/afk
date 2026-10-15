@@ -337,11 +337,9 @@ input:focus-visible {
 }
 
 .event-row {
-  display: grid;
-  grid-template-columns: 20px minmax(260px, 0.9fr) minmax(300px, 1.2fr) 80px;
-  gap: 9px;
+  display: flex;
   align-items: center;
-  width: 100%;
+  gap: 9px;
   min-height: 62px;
   padding: 0 10px;
   border: var(--border-w) solid var(--afk-border);
@@ -350,6 +348,11 @@ input:focus-visible {
   color: var(--afk-text);
   text-align: left;
 }
+.event-row .state-glyph { flex-shrink: 0; }
+.event-row .event-copy { flex: 1; min-width: 0; }
+.event-row .event-state { flex-shrink: 0; }
+.queue .event-row { width: 100%; }
+.queue .event-row .run-main { flex: 1; min-width: 0; overflow: hidden; }
 
 .event-row:last-child {
   border-radius: 0 0 9px 9px;

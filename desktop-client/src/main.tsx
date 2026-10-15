@@ -466,14 +466,14 @@ function Queue({ events, selected, freshIds, onSelect }: { events: RuntimeEvent[
   const grouped = groupRuntimeEvents(events);
   const orderedGroups = phases.flatMap((phase) => grouped.filter((group) => phaseOf(group.events[0]) === phase));
   if (!events.length) return <Empty />;
-  return <section className="queue" aria-label="运行队列"><div className="run-col-head" aria-hidden="true"><span></span><span>运行</span><span>耗时</span><span>更新</span></div><div className="queue-stream">{orderedGroups.map((group) => { const event = group.events[0]; return <EventRow key={group.source} event={event} historyCount={group.events.length} fresh={freshIds.has(event.id)} selected={selected?.id === event.id} onSelect={onSelect} />; })}</div></section>;
+  return <section className="queue" aria-label="运行队列"><div className="run-col-head" aria-hidden="true"><span></span><span>运行</span><span>更新</span></div><div className="queue-stream">{orderedGroups.map((group) => { const event = group.events[0]; return <EventRow key={group.source} event={event} historyCount={group.events.length} fresh={freshIds.has(event.id)} selected={selected?.id === event.id} onSelect={onSelect} />; })}</div></section>;
 }
 
 function EventRow({ event, historyCount, fresh, selected, onSelect }: { event: RuntimeEvent; historyCount: number; fresh: boolean; selected: boolean; onSelect: (event: RuntimeEvent) => void }) {
   const phase = phaseOf(event);
   const visualState = eventStatus(event) === "failed" ? "failed" : phase;
   const state = runtimeStateMeta(visualState);
-  return <button className={`event-row ${selected ? "selected" : ""} ${visualState}${fresh ? " fresh" : ""}`} onClick={() => onSelect(event)} aria-label={`查看${state.ariaLabel}运行 ${event.source} 的详情`}><StateGlyph phase={visualState} /><RuntimeSource source={event.source} /><span className="event-copy"><strong>{event.result}</strong><small>{historyCount > 1 ? `${historyCount} 次运行 · ` : ""}{runtimeWorkspacePath(event.nextStep) ? "最近完成" : event.nextStep}</small></span><time className="event-time" dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time><span className="event-detail-affordance"><ChevronRight size={14} /></span></button>;
+  return <button className={`event-row ${selected ? "selected" : ""} ${visualState}${fresh ? " fresh" : ""}`} onClick={() => onSelect(event)} aria-label={`查看${state.ariaLabel}运行 ${event.source} 的详情`}><StateGlyph phase={visualState} /><div className="run-main"><RuntimeSource source={event.source} /><span className="event-copy"><strong>{event.result}</strong><small>{historyCount > 1 ? `${historyCount} 次运行 · ` : ""}{runtimeWorkspacePath(event.nextStep) ? "最近完成" : event.nextStep}</small></span></div><time className="event-time" dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></button>;
 }
 
 function Board({ groups, selected, freshIds, onSelect }: { groups: Record<Phase, RuntimeEvent[]>; selected: RuntimeEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeEvent) => void }) {

@@ -456,7 +456,8 @@
 .workflow-studio-title > span { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
 .workflow-studio-title b { margin-top: 2px; font-size: calc(11px * var(--afk-scale)); }
 .workflow-studio-title small { margin-top: 2px; font-size: calc(10px * var(--afk-scale)); }
-.workflow-studio-shell { grid-template-columns: minmax(0, 1fr) 284px; }
+/* The prototype's .flow-wrap is `minmax(0, 1fr) 300px` with a 16px gap. */
+.workflow-studio-shell { grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; }
 .workflow-studio-canvas { background: var(--afk-panel-subtle); }
 .workflow-studio-canvas > header { min-height: 48px; padding: 0 16px; background: transparent; }
 .workflow-studio-canvas > header b { font-size: calc(10px * var(--afk-scale)); }
@@ -627,7 +628,18 @@
 .workflow-studio-canvas > header b { font-size: calc(10px * var(--afk-scale)); font-weight: 650; }
 .workflow-studio-canvas > header small { display: none; }
 .workflow-studio-canvas > footer { flex-basis: 30px; border-top-color: #e8e8e3; background: var(--afk-panel); color: #969790; }
-.workflow-editor-stage { background: var(--afk-panel-subtle); background-image: none; }
+/* The prototype's `.stage`: a dot field on ruled paper, ringed and rotated.
+   The texture was switched off here while the palette was still being chased;
+   the sibling .workflow-canvas-stage kept its dots, so the two stages in one
+   page disagreed. Spacing stays 24px — the rule above has the higher
+   specificity, and 2px is not worth the churn. */
+.workflow-editor-stage {
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--afk-panel-subtle);
+  background-image: radial-gradient(circle at 1px 1px, var(--ink-faint) 1px, transparent 0);
+  background-size: 22px 22px;
+}
 .workflow-editor-stage::before { display: none; }
 .workflow-editor-world { transition: transform 180ms cubic-bezier(.2,.75,.2,1); }
 .workflow-editor-node {
@@ -850,7 +862,9 @@
 @media (max-width: 720px) { .workflow-editor-stage .workflow-studio-inspector { top: 10px; right: 10px; bottom: 10px; width: min(304px, calc(100% - 20px)); } .workflow-inspector-trigger { top: 10px; right: 10px; } }
 
 /* Archify-inspired workflow instrument: semantic role marks, path focus, low-interference chrome. */
-.workflow-editor-stage { background: var(--afk-panel-subtle); }
+/* background-color, not the shorthand: `background:` resets background-image
+   to none and silently wiped the dot field set two hundred lines earlier. */
+.workflow-editor-stage { background-color: var(--afk-panel-subtle); }
 .workflow-editor-node {
   width: 164px;
   min-height: 94px;

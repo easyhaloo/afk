@@ -27,11 +27,7 @@ import { FilterPanel } from "../../components/FilterPanel";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { MarkdownContent } from "../backlog/MarkdownContent";
-<<<<<<< HEAD
 import { sortBacklogItems, parseBacklogSort, WORK_ITEM_SORT_OPTIONS, type BacklogSortSelection } from "../backlog/backlog-sort";
-=======
-import { sortBacklogItems, parseBacklogSort, WORK_ITEM_SORT_OPTIONS, type BacklogSortSelection } from "../backlog/backlog-sort";
->>>>>>> origin/afk/backlog-208
 import "../backlog/backlog.css";
 import "./work-items.css";
 

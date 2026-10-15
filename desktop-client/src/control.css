@@ -457,7 +457,7 @@
 @media (max-width: 700px) { .workflow-library-heading { display: block; } .workflow-create { margin-top: 14px; } .workflow-library-summary { grid-template-columns: 1fr; } .workflow-library-summary > div, .workflow-library-summary > div + div { padding: 12px 0; border-left: 0; border-bottom: var(--border-w) solid var(--afk-border); } .workflow-library-summary > div:last-child { border-bottom: 0; } .workflow-library-grid { grid-template-columns: 1fr; } .workflow-studio-page { margin: 0 -14px -32px; } .workflow-studio-topbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 0 12px; } .workflow-back { font-size: 0; } .workflow-back svg { width: 19px; height: 19px; } .workflow-studio-title small { display: none; } .workflow-studio-canvas > header { align-items: flex-start; flex-direction: column; padding: 12px 14px; } .workflow-studio-toolbar { width: 100%; } .workflow-studio-canvas .workflow-editor-stage { min-height: 470px; } .workflow-studio-canvas > footer { padding: 0 14px; } }
 
 /* Library: prototype-aligned two-column panel-card grid + recent runs panel. */
-.workflow-library { width: min(100%, 960px); margin-top: 24px; }
+.workflow-library { width: 100%; margin: 8px 0 44px; }
 .workflow-library-heading { align-items: center; padding: 8px 0 24px; border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-library-heading p { margin-bottom: 5px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
 .workflow-library-heading h1 { font-size: calc(24px * var(--afk-scale)); font-weight: 650; letter-spacing: -.045em; }
@@ -465,10 +465,10 @@
 .workflow-create { display: inline-grid; width: 30px; height: 30px; min-height: 30px; margin: 0; padding: 0; place-items: center; border-color: transparent; background: transparent; color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent-border); }
 .workflow-create:hover { border-color: transparent; background: var(--afk-accent-soft); }
 .workflow-library-summary { display: none; }
-/* .workflow-library-grid is now two-column from the base rule above; the single-column retro override is removed. */
+/* .workflow-library-grid is now two-column from the base rule above. */
 
 /* Prototype-aligned panel-card: replaces the retro list-row card. */
-.workflow-library-card { display: grid; gap: 6px; padding: 13px 14px; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); }
+.workflow-library-card { display: grid; gap: 6px; padding: 13px 14px; min-height: auto; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); }
 .workflow-library-card:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-1px, -1px); }
 .workflow-library-card.active { border-color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent), var(--shadow-panel); }
 .workflow-library-card-header { display: flex; align-items: center; gap: 8px; }
@@ -497,9 +497,8 @@
 .workflow-run-row .status-pill { padding: 3px 7px; border-radius: var(--radius-pill); font-size: calc(10px * var(--afk-scale)); border: 1px solid transparent; }
 .status-pill.running { background: var(--afk-accent-soft); color: var(--afk-accent); border-color: var(--afk-accent-border); }
 .status-pill.completed { background: var(--afk-accent-soft); color: var(--afk-accent); border-color: var(--afk-accent-border); }
-.status-pill.failed { background: var(--afk-fail-soft, #fee2e2); color: var(--afk-fail, #dc2626); border-color: var(--afk-fail-border, #fca5a5); }
-.status-pill.blocked, .status-pill.timed_out, .status-pill.aborted { background: var(--afk-warn-soft, #fef3c7); color: var(--afk-warn, #d97706); border-color: var(--afk-warn-border, #fcd34d); }
-.status-pill.context_high { background: var(--afk-warn-soft, #fef3c7); color: var(--afk-warn, #d97706); border-color: var(--afk-warn-border, #fcd34d); }
+.status-pill.failed { background: var(--afk-danger); color: var(--afk-panel); border-color: var(--afk-danger); }
+.status-pill.blocked, .status-pill.timed_out, .status-pill.aborted, .status-pill.context_high { background: var(--afk-accent); color: var(--afk-panel); border-color: var(--afk-accent); }
 .workflow-studio-topbar { grid-template-columns: 112px minmax(0, 1fr) auto; min-height: 56px; padding: 0 16px; border-bottom-color: var(--afk-border); }
 .workflow-back { padding: 5px 0; font-size: calc(9px * var(--afk-scale)); }
 .workflow-studio-title > span { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }

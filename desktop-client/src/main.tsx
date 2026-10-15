@@ -4,7 +4,7 @@ import { Overlay } from "./overlay";
 import { createRoot } from "react-dom/client";
 import {
   Activity, Archive, Bot, Boxes, Braces, Check, ChevronDown, ChevronRight, CircleCheck, CircleDashed, CircleX,
-  ClipboardList, Clock3, Container, FolderOpen, LayoutList, Minus, Move, Plus, RefreshCw, ChevronLeft,
+  ClipboardList, Clock3, Container, FolderOpen, GitBranch, LayoutList, Minus, Move, Plus, RefreshCw, ChevronLeft,
   Send, Settings2, Sparkles, Terminal, TerminalSquare, TriangleAlert, Workflow, X,
 } from "lucide-react";
 import "./tokens.css";
@@ -446,9 +446,9 @@ export function Repositories() {
   const visibleProjects = projects.filter(project => (platform === "all" || project.platform === platform) && `${project.name} ${project.projectKey} ${project.defaultBranch ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
   return <section className="control-page repository-page" aria-label="代码仓库">
     <header className="control-page-heading"><div><p>Resources</p><h1>代码仓库</h1><span>展示已授权 Provider 中可访问的仓库，作为工作项可关联的独立资源，不依赖当前选择目录。</span></div><button className="repository-refresh" type="button" aria-label="刷新代码仓库" title="刷新代码仓库" disabled={loading} onClick={() => void load(true)}><RefreshCw size={14} className={loading ? "spin" : ""} /></button></header>
-    <div className="resource-toolbar"><ResourceSearch label="搜索代码仓库" value={query} onChange={setQuery} /><SegmentedControl label="仓库来源" value={platform} options={[{ value: "all", label: "全部" }, { value: "github", label: "GitHub" }, { value: "gitlab", label: "GitLab" }]} onChange={setPlatform} /></div>
+    <div className="resource-toolbar"><SegmentedControl label="仓库来源" value={platform} options={[{ value: "all", label: "全部" }, { value: "github", label: "GitHub" }, { value: "gitlab", label: "GitLab" }]} onChange={setPlatform} /><ResourceSearch label="搜索代码仓库" value={query} onChange={setQuery} /></div>
     {error ? <div className="repository-error"><TriangleAlert size={15} />{error}</div> : null}
-    <div className="repository-list">{visibleProjects.length ? visibleProjects.map((project) => <article className="repository-row" key={`${project.platform}:${project.projectKey}`}><span className="repository-provider">{project.platform === "github" || project.platform === "gitlab" ? <ProviderIcon provider={project.platform} size={15} /> : project.platform}</span><div><b>{project.projectKey}</b><small>{project.defaultBranch ? `默认分支 · ${project.defaultBranch}` : project.name}</small></div>{project.webUrl ? <button type="button" aria-label={`打开代码仓库 ${project.projectKey}`} title="在浏览器中打开" onClick={() => void window.afkDesktop.openExternal(project.webUrl!)}><FolderOpen size={15} /></button> : null}</article>) : <div className="repository-empty"><b>{loading ? "正在读取代码仓库…" : projects.length ? "没有匹配的代码仓库" : "没有可访问的代码仓库"}</b><span>{loading ? "正在从已授权 Provider 获取仓库列表。" : <>请检查 <ProviderIcon provider="github" size={12} /> / <ProviderIcon provider="gitlab" size={12} /> 鉴权配置。</>}</span></div>}</div>
+    <div className="repository-list">{visibleProjects.length ? visibleProjects.map((project) => <div className="row-item" key={`${project.platform}:${project.projectKey}`}><span className="ico-box"><GitBranch size={14} aria-hidden="true" /></span><span className="txt"><b>{project.projectKey}</b><small>{project.platform}</small></span><span className="end"><span className="mono">{project.defaultBranch ?? project.name}</span><ChevronRight size={13} aria-hidden="true" /></span></div>) : <div className="repository-empty"><b>{loading ? "正在读取代码仓库…" : projects.length ? "没有匹配的代码仓库" : "没有可访问的代码仓库"}</b><span>{loading ? "正在从已授权 Provider 获取仓库列表。" : <>请检查 <ProviderIcon provider="github" size={12} /> / <ProviderIcon provider="gitlab" size={12} /> 鉴权配置。</>}</span></div>}</div>
   </section>;
 }
 

@@ -14,7 +14,7 @@ describe("resource search pages", () => {
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(Repositories)); });
     act(() => renderer.root.findByProps({ "aria-label": "搜索代码仓库" }).props.onChange({ target: { value: "web" } }));
-    expect(renderer.root.findAllByProps({ className: "repository-row" })).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ className: "row-item" })).toHaveLength(1);
     expect(list).toHaveBeenCalledOnce();
     act(() => renderer.unmount());
   });

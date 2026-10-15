@@ -30,6 +30,16 @@ test.describe("reskin evidence", () => {
     });
   }
 
+  // 代码仓库 evidence shots — row-item layout and toolbar order per prototype
+  for (const label of ["浅色", "深色"] as const) {
+    test(`代码仓库 (${label})`, async ({ page }) => {
+      await setTheme(page, label);
+      await page.locator(".primary-nav button", { hasText: "代码仓库" }).click();
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: `${OUT}/代码仓库-${label}.png` });
+    });
+  }
+
   // 字号密度 scales every font size, so a row with a fixed height can clip at
   // ×1.1 in a way nothing else would notice. 工作流 is the densest surface.
   for (const view of ["工作流", "工作项"] as const) {

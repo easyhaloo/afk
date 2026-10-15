@@ -105,18 +105,23 @@
 }
 .repository-refresh:hover:not(:disabled) { border-color: var(--afk-border-strong); background: var(--afk-panel-subtle); color: var(--afk-text); }
 .repository-refresh:disabled { cursor: default; opacity: .6; }
-.repository-error { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; padding: 10px 12px; border: var(--border-w) solid #e5c6c4; border-radius: var(--radius-md); background: #fff7f6; color: #9b4d49; font-size: calc(10px * var(--afk-scale)); }
+.repository-error { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; padding: 10px 12px; border: var(--border-w) solid var(--fail-ln); border-radius: var(--radius-md); background: var(--fail-bg); color: var(--fail); font-size: calc(10px * var(--afk-scale)); }
 .repository-list { overflow: hidden; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); }
-.repository-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) 32px; gap: 12px; align-items: center; min-height: 61px; padding: 0 14px; border-bottom: var(--border-w) solid var(--afk-border); }
-.repository-row:last-child { border-bottom: 0; }
-.repository-provider { display: inline-flex; align-items: center; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); font-weight: 650; text-transform: uppercase; }
-.repository-provider .provider-icon { width: 15px; height: 15px; }
-.repository-row div { min-width: 0; }
-.repository-row b, .repository-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.repository-row b { color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); }
-.repository-row small { margin-top: 4px; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
-.repository-row > button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: var(--radius-sm); background: transparent; color: var(--afk-muted); }
-.repository-row > button:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.repository-list .row-item { min-height: 52px; }
+.repository-list .row-item .ico-box { color: var(--afk-muted); }
+.repository-list .row-item .end { color: var(--afk-muted); }
+.repository-list .row-item .end svg { color: var(--afk-muted); }
+
+/* Shared row-item pattern (prototype .row-item / .ico-box / .txt / .end / .mono) */
+.row-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 12px; border-bottom: var(--border-w) solid var(--afk-border); transition: background-color var(--dur-fast) ease; cursor: default; }
+.row-item:last-child { border-bottom: 0; }
+.row-item:hover { background: var(--afk-panel-subtle); }
+.row-item .ico-box { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel-subtle); }
+.row-item .txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.row-item .txt b { display: block; overflow: hidden; color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.row-item .txt small { display: block; overflow: hidden; color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(9px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.row-item .end { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(10px * var(--afk-scale)); white-space: nowrap; }
+.row-item .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .repository-empty { padding: 34px 18px; text-align: center; }
 .repository-empty b, .repository-empty span { display: block; }
 .repository-empty b { color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }

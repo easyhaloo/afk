@@ -26,6 +26,28 @@ test.describe("Workflow studio", () => {
     await expect(page.locator(".workflow-editor-node").first()).toBeVisible();
   });
 
+  test("lays the track bands on separate rows so they cannot overlap", async ({ page }) => {
+    await page.getByRole("button", { name: "工作流" }).click();
+    await page.locator(".workflow-library-card").first().click();
+
+    // Measure the stage itself: toBeVisible() only inspects the element's own box
+    // and is blind to an ancestor clipping it (the canvas rendered 0px high for a
+    // whole phase while every node test stayed green).
+    const stage = page.locator(".workflow-editor-stage");
+    expect(((await stage.boundingBox())?.height ?? 0)).toBeGreaterThan(200);
+
+    const bands = page.locator(".workflow-canvas-track");
+    await expect(bands).toHaveCount(2);
+
+    const [agent, system] = await Promise.all([
+      page.locator(".workflow-canvas-track.track-agent").boundingBox(),
+      page.locator(".workflow-canvas-track.track-system").boundingBox(),
+    ]);
+    if (!agent || !system) throw new Error("track bands are not measurable");
+
+    expect(agent.y + agent.height).toBeLessThanOrEqual(system.y);
+  });
+
   test("pans the workflow canvas by dragging its empty surface", async ({ page }) => {
     await page.getByRole("button", { name: "工作流" }).click();
     await page.locator(".workflow-library-card").first().click();

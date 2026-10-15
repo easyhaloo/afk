@@ -127,9 +127,8 @@
   border-top: 0;
   background: var(--afk-border);
 }
+/* The five-column grid itself is runtime.css's job; only the card shell is ours. */
 .agent-panel .agent-runtime {
-  display: block;
-  min-height: 0;
   padding: 13px 14px 11px;
   border: 0;
   background: var(--afk-panel);
@@ -147,15 +146,12 @@
   background: var(--paper-3);
   color: var(--afk-muted);
 }
-.agent-panel .runtime-summary {
-  display: block;
-  margin: 10px 0 9px 53px;
-  color: var(--afk-muted);
-}
 .agent-panel .runtime-identity small { color: var(--afk-muted); }
 
 @media (max-width: 1220px) {
+  /* Five tracks, like the base rule: dropping the trailing `auto` would push the
+     status badge onto a second row. */
   .agent-panel .agent-runtime {
-    grid-template-columns: 29px 17px minmax(140px, .8fr) minmax(120px, 1fr);
+    grid-template-columns: 29px 17px minmax(140px, .8fr) minmax(120px, 1fr) auto;
   }
 }

@@ -133,6 +133,27 @@ const stylesheets = readdirSync(src, { recursive: true, encoding: "utf8" })
   .map(name => readFileSync(path.join(src, name), "utf8"))
   .join("\n");
 
+/**
+ * The agent card's body rule lives in runtime.css as a five-track grid. Nothing
+ * may re-declare `display` on it from a later stylesheet: `display: block`
+ * silently stacks the icon, status, name, path, summary and badge into six
+ * vertical lines while every behavioural test stays green, because the page
+ * only ever renders with live IPC data and no fixture serves that.
+ */
+function agentDisplayOverrides(): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(src, { recursive: true, encoding: "utf8" })) {
+    if (!name.endsWith(".css") || name === "runtime.css") continue;
+    const css = readFileSync(path.join(src, name), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, " "));
+    for (const [, body] of css.matchAll(/\.agent-panel\s+\.agent-runtime\s*\{([^{}]*)\}/g)) {
+      const display = body!.match(/display:\s*([^;]+)/);
+      if (display) out.push(`${name}: display ${display[1].trim()}`);
+    }
+  }
+  return out;
+}
+
 /** Token names declared by a chunk of CSS. */
 function declared(chunk: string): Set<string> {
   return new Set(Array.from(chunk.matchAll(/(--[\w-]+)\s*:/g), match => match[1]));
@@ -250,6 +271,13 @@ describe("design tokens", () => {
     expect(
       viewPaddingOwner(),
       "every .workspace must pad with var(--view-pad); chrome.css wins the cascade",
+    ).toEqual([]);
+  });
+
+  it("keeps the agent card on its grid", () => {
+    expect(
+      agentDisplayOverrides(),
+      "no stylesheet may re-declare display on .agent-panel .agent-runtime; runtime.css owns the grid",
     ).toEqual([]);
   });
 

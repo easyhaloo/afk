@@ -32,15 +32,17 @@ import { BacklogPage } from "./features/backlog/BacklogPage";
 import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
-import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
+import { groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
 import { executionHistoryEvents } from "./features/run-center/execution-events";
+import { RunTimelineSection } from "./features/run-center/RunTimelineView";
+import { WorkflowInstancesPage, type ExecutionSelection } from "./features/workflows/WorkflowInstancesPage";
 import type { ProviderProjectRef } from "../shared/backlog-contract";
-import type { ExecutionSummary } from "../shared/execution-contract";
+import type { ExecutionRunDetail, ExecutionSummary } from "../shared/execution-contract";
 import type { SshSession } from "../shared/ssh-contract";
 
 type Phase = "ready" | "active" | "verify" | "attention";
 type RecordStatus = "queued" | "running" | "waiting_confirmation" | "completed" | "failed";
-type View = "queue" | "board" | "workflows" | "agents" | "repositories" | "containers" | "events" | "ssh" | "backlog" | "projectBacklog" | "settings";
+type View = "queue" | "board" | "workflows" | "workflowInstances" | "agents" | "repositories" | "containers" | "events" | "ssh" | "backlog" | "projectBacklog" | "settings";
 type NavigationItem = [View, string, typeof LayoutList];
 
 const label: Record<Phase, string> = {
@@ -116,6 +118,9 @@ function RuntimeSource({ source }: { source: string }) {
 function App() {
   const [view, setView] = useState<View>("backlog");
   const [focusWorkItemId, setFocusWorkItemId] = useState<string | undefined>();
+  const [workflowSelection, setWorkflowSelection] = useState<ExecutionSelection>();
+  const [focusTemplateId, setFocusTemplateId] = useState<string>();
+  const [environmentSelection, setEnvironmentSelection] = useState<ExecutionSelection>();
   const [runMode, setRunMode] = useState<"queue" | "board">("queue");
   const [runQuery, setRunQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
@@ -164,8 +169,10 @@ function App() {
         setSessionWorkspace(next.sessions[0].workspace);
       }
       setLastCheckedAt(Date.now());
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       refreshInFlight.current = false;
       setLoading(false);
@@ -175,7 +182,13 @@ function App() {
   useEffect(() => () => { if (freshTimer.current) window.clearTimeout(freshTimer.current); }, []);
   useEffect(() => { void refresh(""); }, []);
   useEffect(() => {
-    if (view !== "queue" && view !== "board") return;
+    if (view !== "containers") return;
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 5000);
+    return () => { window.clearInterval(timer); };
+  }, [view, workspace]);
+  useEffect(() => {
+    if (view !== "queue" && view !== "board" && view !== "workflowInstances") return;
     let mounted = true;
     const loadExecutions = async () => {
       try {
@@ -243,14 +256,34 @@ function App() {
   };
 
   const openEventTerminal = async (event: RuntimeEvent) => {
-    const targetWorkspace = runtimeWorkspacePath(event.nextStep) ?? (sessionWorkspace || workspace);
-    const target = findRuntimeTerminalSession(runtimeWorkspacePath(event.nextStep), snapshot?.sessions ?? [], sessionWorkspace || workspace);
-    if (!target) {
-      setTerminal({ open: true, pane: `无法打开终端\n\n当前运行没有可用的 tmux 会话。\n任务空间：${targetWorkspace}`, mode: "tmux" });
-      return;
-    }
-    await openSession(target.name, target.workspace);
+    await openExecutionTerminal(event.id);
   };
+
+  const openExecutionTerminal = async (runId: string, resourceId?: string) => {
+    setSession("");
+    setConfirmed(false);
+    try {
+      const resolved = await window.afkDesktop.workItems.resolveAttachTarget({ runId, resourceId });
+      if (!resolved.available) {
+        setTerminal({ open: true, pane: `无法接管运行\n\n${resolved.unavailable.reason}`, mode: "notice" });
+        return;
+      }
+      const attached = await window.afkDesktop.workItems.attach({ runId, resourceId: resolved.environment.resourceId });
+      setTerminal({ open: true, pane: "", mode: "attach", attachId: attached.attachId });
+    } catch (cause) {
+      setTerminal({ open: true, pane: `无法接管运行\n\n${cause instanceof Error ? cause.message : String(cause)}`, mode: "notice" });
+    }
+  };
+
+  useEffect(() => {
+    const onData = window.afkDesktop.workItems.onAttachData((attachId, data) => {
+      setTerminal(current => current.attachId === attachId ? { ...current, pane: current.pane + data } : current);
+    });
+    const onExit = window.afkDesktop.workItems.onAttachExit((attachId, code) => {
+      setTerminal(current => current.attachId === attachId ? { ...current, pane: `${current.pane}\n\n[接管终端已断开，退出码 ${code}]` } : current);
+    });
+    return () => { onData(); onExit(); };
+  }, []);
 
   const openSshSession = (sshSession: SshSession, publicKeyPath?: string) => {
     activeSshSessionId.current = sshSession.id;
@@ -262,6 +295,7 @@ function App() {
     }
   };
   const closeTerminal = () => {
+    if (terminal.mode === "attach" && terminal.attachId) void window.afkDesktop.workItems.detach(terminal.attachId);
     if (terminal.mode === "ssh" && terminal.sshSession) {
       activeSshSessionId.current = null;
       earlySshSessionBuffer.current.close(terminal.sshSession.id);
@@ -286,11 +320,11 @@ function App() {
   const navGroups: Array<{ label: string; title: string; items: NavigationItem[] }> = [
     { label: "Work", title: "工作", items: [["backlog", "工作项", ClipboardList], ["queue", "运行中心", Workflow]] },
     { label: "Automation", title: "自动化", items: [["workflows", "工作流", Boxes], ["agents", "Agents", Activity]] },
-    { label: "Resources", title: "资源", items: [["repositories", "代码仓库", FolderOpen], ["containers", "执行环境", Container], ["ssh", "SSH 主机", Terminal], ["projectBacklog", "本地 Backlog", Braces]] },
+    { label: "Resources", title: "资源", items: [["repositories", "代码仓库", FolderOpen], ["containers", "执行环境", Container], ["ssh", "SSH 主机", Terminal]] },
     { label: "System", title: "系统", items: [["events", "活动记录", Archive], ["settings", "设置", Settings2]] },
   ];
   const nav = navGroups.flatMap((group) => group.items);
-  const activeNav = view === "board" ? "queue" : view;
+  const activeNav = view === "board" ? "queue" : view === "workflowInstances" ? "workflows" : view;
   const title = nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
   const runtimes = snapshot?.agentRuntimes ?? [];
   const availableRuntimeCount = runtimes.filter((runtime) => runtime.available).length;
@@ -300,6 +334,43 @@ function App() {
     setView(nextView);
     if (nextView === "events" && selected) setReplayRun(selected.source);
     setSelected(null);
+    if (nextView === "containers") setEnvironmentSelection(undefined);
+    if (nextView === "workflows") setFocusTemplateId(undefined);
+  };
+  const openWorkflowInstance = (runId: string, workItemId: string) => {
+    setWorkflowSelection({ runId, workItemId });
+    setView("workflowInstances");
+  };
+  const openRun = async (selection: ExecutionSelection) => {
+    let page = await window.afkDesktop.workItems.executions({ workItemId: selection.workItemId, limit: 100 });
+    let execution = page.executions.find(run => run.runId === selection.runId);
+    while (!execution && page.nextCursor) {
+      page = await window.afkDesktop.workItems.executions({ workItemId: selection.workItemId, limit: 100, since: page.nextCursor });
+      execution = page.executions.find(run => run.runId === selection.runId);
+    }
+    if (!execution) { setError("该运行不在最近记录中，请从工作项查看其时间线。"); return; }
+    setAuditedExecutions(page.executions);
+    setSelected(executionHistoryEvents([execution], [])[0]);
+    setRunQuery(selection.runId);
+    setInspectorCollapsed(false);
+    setView("queue");
+  };
+  const openEnvironmentWorkflow = async (runId: string) => {
+    if (environmentSelection?.runId === runId) { openWorkflowInstance(runId, environmentSelection.workItemId); return; }
+    let page = await window.afkDesktop.workItems.executions({ limit: 100 });
+    let execution = page.executions.find(run => run.runId === runId);
+    while (!execution && page.nextCursor) {
+      page = await window.afkDesktop.workItems.executions({ limit: 100, since: page.nextCursor });
+      execution = page.executions.find(run => run.runId === runId);
+    }
+    if (execution) openWorkflowInstance(runId, execution.workItemId);
+    else setError("该执行环境没有可验证的工作流实例记录。");
+  };
+  const openDefinition = async (detail: ExecutionRunDetail) => {
+    if (!detail.workspacePath || !detail.workflow) return;
+    if (!await refresh(detail.workspacePath)) return;
+    setFocusTemplateId(detail.workflow.name);
+    setView("workflows");
   };
   const openEventDetails = (event: RuntimeEvent) => {
     setSelected(event);
@@ -331,6 +402,7 @@ function App() {
       <section className="content-shell">
         <header className="topbar">
           <div className="topbar-context"><div className="breadcrumb"><span>AFK</span><b>›</b><strong>{title}</strong></div>{view === "queue" || view === "board" ? <div className="run-view-switcher header-run-mode" aria-label="运行视图切换"><button className={runMode === "queue" ? "active" : ""} onClick={() => { setRunMode("queue"); setView("queue"); }}><LayoutList size={14} />队列</button><button className={runMode === "board" ? "active" : ""} onClick={() => { setRunMode("board"); setView("board"); }}><Workflow size={14} />看板</button></div> : null}{view === "agents" ? <AgentHeaderSummary available={availableRuntimeCount} total={runtimeTotal} unavailable={unavailableRuntimeCount} /> : null}</div>
+          {view === "workflows" || view === "workflowInstances" ? <SegmentedControl label="工作流视图" value={view} options={[{ value: "workflows", label: "定义" }, { value: "workflowInstances", label: "运行实例" }]} onChange={value => setView(value as View)} /> : null}
         </header>
         {error ? <div className="error-banner"><X size={15} />{error}</div> : null}
         {auditError && (view === "queue" || view === "board") ? <div className="error-banner"><X size={15} />运行审计查询失败：{auditError}</div> : null}
@@ -341,18 +413,19 @@ function App() {
           {view === "board" ? <Board groups={groups} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
           {view === "repositories" ? <Repositories /> : null}
-          {view === "containers" ? <Environments snapshot={snapshot} onTerminal={(name, targetWorkspace) => void openSession(name, targetWorkspace)} /> : null}
+          {view === "containers" ? <Environments snapshot={snapshot} selection={environmentSelection} onWorkflow={runId => void openEnvironmentWorkflow(runId).catch(cause => setError(String(cause)))} onTerminal={(name, targetWorkspace, runId, resourceId) => runId ? void openExecutionTerminal(runId, resourceId) : void openSession(name, targetWorkspace)} /> : null}
           {view === "ssh" ? <SshHostsPage onSession={openSshSession} /> : null}
-          {view === "backlog" ? <WorkItemsPage focusWorkItemId={focusWorkItemId} /> : null}
+          {view === "backlog" ? <WorkItemsPage focusWorkItemId={focusWorkItemId} agentRuntimes={snapshot?.agentRuntimes} defaultAgent={snapshot?.workflow.agentDefault} onAttach={(runId) => void openExecutionTerminal(runId)} onWorkflow={openWorkflowInstance} /> : null}
           {view === "projectBacklog" ? <BacklogPage workspace={workspace} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} onOpenWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
-          {view === "workflows" ? <Workflows snapshot={snapshot} onSave={saveWorkflowConfig} /> : null}
+          {view === "workflows" ? <Workflows key={`${workspace}:${focusTemplateId ?? ""}`} snapshot={snapshot} focusTemplateId={focusTemplateId} onSave={saveWorkflowConfig} /> : null}
+          {view === "workflowInstances" ? <WorkflowInstancesPage executions={auditedExecutions} selection={workflowSelection} onSelect={setWorkflowSelection} onRun={selection => void openRun(selection).catch(cause => setError(String(cause)))} onWorkItem={workItemId => { setFocusWorkItemId(workItemId); setView("backlog"); }} onEnvironment={selection => { setEnvironmentSelection(selection); setView("containers"); }} onAttach={runId => void openExecutionTerminal(runId)} onDefinition={detail => void openDefinition(detail)} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}
         </div>
-        {selected && (view === "queue" || view === "board") ? <Inspector event={selected} execution={auditedExecutions.find(run => run.runId === selected.id)} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} onWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
+        {selected && (view === "queue" || view === "board") ? <Inspector event={selected} execution={auditedExecutions.find(run => run.runId === selected.id)} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} onWorkflow={openWorkflowInstance} onWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
         </div>
       </section>
-      {terminal.open ? <TerminalSheet mode={terminal.mode} session={session} pane={terminal.pane} line={line} confirmed={confirmed} sshSession={terminal.sshSession} onClose={closeTerminal} onLine={setLine} onConfirmed={setConfirmed} onSend={() => void sendInput()} onSshInput={(data) => {
+      {terminal.open ? <TerminalSheet mode={terminal.mode} session={terminal.attachId ?? session} pane={terminal.pane} line={line} confirmed={confirmed} sshSession={terminal.sshSession} onClose={closeTerminal} onLine={setLine} onConfirmed={setConfirmed} onSend={() => void sendInput()} onAttachInput={(data) => terminal.attachId ? window.afkDesktop.workItems.attachInput(terminal.attachId, data) : undefined} onAttachResize={(cols, rows) => terminal.attachId ? window.afkDesktop.workItems.attachResize(terminal.attachId, cols, rows) : undefined} onSshInput={(data) => {
         const sshSession = terminal.sshSession;
         if (!sshSession || sshSession.state === "closed" || sshSession.state === "failed") return;
         return window.afkDesktop.ssh.input({ sessionId: sshSession.id, data });
@@ -446,14 +519,16 @@ export function Repositories() {
   </section>;
 }
 
-export function Environments({ snapshot, onTerminal }: { snapshot: Snapshot | null; onTerminal: (name: string, workspace: string) => void }) {
+export function Environments({ snapshot, selection, onWorkflow, onTerminal }: { snapshot: Snapshot | null; selection?: ExecutionSelection; onWorkflow?: (runId: string) => void; onTerminal: (name: string, workspace: string, runId?: string, resourceId?: string) => void }) {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
-  const containers = (snapshot?.containers ?? []).filter(item => `${item.name} ${item.engine} ${item.image} ${item.status}`.toLowerCase().includes(normalizedQuery));
-  const sessions = (snapshot?.sessions ?? []).filter(item => `${item.name} ${item.workspace}`.toLowerCase().includes(normalizedQuery));
-  return <section className="control-page environment-page" aria-label="执行环境"><header className="control-page-heading"><div><p>资源</p><h1>执行环境</h1><span>只显示 AFK 已登记的容器与会话。</span></div></header><div className="resource-toolbar"><ResourceSearch label="搜索执行环境" value={query} onChange={setQuery} /></div><section className="environment-grid" aria-label="AFK 已登记执行环境">
+  const containers = selection ? [] : (snapshot?.containers ?? []).filter(item => `${item.name} ${item.engine} ${item.image} ${item.status}`.toLowerCase().includes(normalizedQuery));
+  const sessions = (snapshot?.sessions ?? []).filter(item => (!selection || item.runId === selection.runId) && `${item.name} ${item.workspace} ${item.runId ?? ""}`.toLowerCase().includes(normalizedQuery));
+  return <section className="control-page environment-page" aria-label="执行环境"><header className="control-page-heading"><div><p>资源</p><h1>执行环境</h1><span>只显示 AFK 已登记的容器与会话。</span></div></header><div className="resource-toolbar"><ResourceSearch label="搜索执行环境" value={query} onChange={setQuery} /></div>
+    {selection ? <p>{selection.workItemId} · <code>{selection.runId}</code> <button type="button" onClick={() => onWorkflow?.(selection.runId)}>返回工作流实例</button></p> : null}
+    <section className="environment-grid" aria-label="AFK 已登记执行环境">
     <article><header><Container size={18} /><b>AFK 容器</b><span>{containers.length}</span></header>{containers.length ? containers.map((item) => <div className="env-row" key={`${item.engine}-${item.name}`}><span>{item.engine}</span><b>{item.name}</b><small>{item.image}</small><em>{item.status}</em></div>) : <p>当前项目没有由 AFK 登记且仍在运行的容器。</p>}</article>
-    <article><header><TerminalSquare size={18} /><b>AFK tmux 会话</b><span>{sessions.length}</span></header>{sessions.length ? sessions.map((item) => <div className="env-row" key={`${item.workspace}:${item.name}`}><span>{item.attached ? "attached" : "detached"}</span><b>{item.name}</b><small title={item.workspace}>{item.workspace} · {item.windows} 个窗口</small><button onClick={() => onTerminal(item.name, item.workspace)}>打开终端</button></div>) : <p>当前项目没有由 AFK 登记且仍可用的 tmux 会话。</p>}</article>
+    <article><header><TerminalSquare size={18} /><b>AFK tmux 会话</b><span>{sessions.length}</span></header>{sessions.length ? sessions.map((item) => <div className="env-row" key={`${item.workspace}:${item.name}`}><span>{item.attached ? "attached" : "detached"}</span><b>{item.name}</b><small title={item.workspace}>{item.workspace} · {item.windows} 个窗口</small><span>{item.runId && onWorkflow ? <button type="button" aria-label={`查看运行 ${item.runId} 的工作流实例`} title="工作流实例" onClick={() => onWorkflow(item.runId!)}><Workflow size={14} /></button> : null}<button onClick={() => onTerminal(item.name, item.workspace, item.runId, item.resourceId)}>打开终端</button></span></div>) : <p>当前项目没有由 AFK 登记且仍可用的 tmux 会话。</p>}</article>
   </section></section>;
 }
 
@@ -511,10 +586,11 @@ export function workflowNodeDisplayLabel(template: CanvasTemplateNode["template"
 function workflowTrack(step?: WorkflowTemplateStepSummary): WorkflowCanvasTrack { return step?.when ? "conditional" : step?.kind === "system" ? "system" : "agent"; }
 function workflowTrackLabel(track: WorkflowCanvasTrack) { return track === "agent" ? "Agent 步骤" : track === "system" ? "系统操作" : "条件分支"; }
 
-function Workflows({ snapshot, onSave }: { snapshot: Snapshot | null; onSave: (workflow: WorkflowConfigSummary) => Promise<WorkflowConfigSummary> }) {
-  const [mode, setMode] = useState<"library" | "editor">("library");
+function Workflows({ snapshot, onSave, focusTemplateId }: { snapshot: Snapshot | null; focusTemplateId?: string; onSave: (workflow: WorkflowConfigSummary) => Promise<WorkflowConfigSummary> }) {
+  const focusedTemplate = snapshot?.workflowTemplates.find(template => template.id === focusTemplateId);
+  const [mode, setMode] = useState<"library" | "editor">(focusedTemplate ? "editor" : "library");
   const [selected, setSelected] = useState<string>("start");
-  const [draft, setDraft] = useState<WorkflowConfigSummary | null>(null);
+  const [draft, setDraft] = useState<WorkflowConfigSummary | null>(focusedTemplate && snapshot ? { ...snapshot.workflow, templateName: focusedTemplate.id, canvasNodes: focusedTemplate.source === "managed" ? snapshot.workflow.canvasNodes : [] } : null);
   const [savedCustomTemplate, setSavedCustomTemplate] = useState<WorkflowTemplateSummary | null>(null);
   if (!snapshot) return <Empty />;
   const { workflow, workflowRuns, loop, workflowTemplates } = snapshot;
@@ -536,7 +612,7 @@ function Workflows({ snapshot, onSave }: { snapshot: Snapshot | null; onSave: (w
     if (candidate.templateName !== "afk-control-workflow" || !candidate.canvasNodes.length) return;
     setSavedCustomTemplate({ id: "afk-control-workflow", name: "自定义工作流", description: "由 AFK Control 管理的项目级可执行模板。", source: "managed", steps: candidate.canvasNodes.map((node, index) => ({ id: node.id, role: node.template === "qa" ? "reviewer" : "implementer", kind: "agent", provider: node.provider, dependsOn: index ? [candidate.canvasNodes[index - 1].id] : [] })) });
   };
-  if (mode === "library") return <WorkflowLibrary templates={templates} activeTemplateName={model.templateName || workflow.templateName} workflowRuns={workflowRuns} onOpen={openTemplate} onCreate={createCustom} />;
+  if (mode === "library") return <>{focusTemplateId && !focusedTemplate ? <p role="status">当前任务目录已找不到定义 {focusTemplateId}；实例快照仍保留原始内容。</p> : null}<WorkflowLibrary templates={templates} activeTemplateName={model.templateName || workflow.templateName} workflowRuns={workflowRuns} onOpen={openTemplate} onCreate={createCustom} /></>;
   return <WorkflowStudio workflow={workflow} model={model} activeTemplate={activeTemplate} loop={loop} workflowRuns={workflowRuns} onSave={onSave} onSavedTemplate={rememberCustomTemplate} onBack={() => { rememberCustomTemplate(model); setDraft(null); setMode("library"); }} selected={selected} onSelected={setSelected} onDraft={setDraft} />;
 }
 
@@ -794,7 +870,7 @@ function RecordDrawer({ event, onClose }: { event: RuntimeEvent; onClose: () => 
   return <aside className="record-drawer" ref={drawerRef} role="complementary" aria-label="记录详情"><header><span>记录详情</span><button className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={16} /></button></header><div className="record-drawer-body"><RecordStatus status={status} /><h2>{event.result}</h2><p className="record-drawer-next">{event.nextStep}</p><dl><div><dt>运行</dt><dd>{event.source}</dd></div><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div></dl><details className="record-debug"><summary><Braces size={15} />调试信息</summary><pre>{event.raw}</pre></details></div></aside>;
 }
 
-function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSelect, onTerminal, onWorkItem }: { event: RuntimeEvent; execution?: ExecutionSummary; history: RuntimeEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (event: RuntimeEvent) => void; onTerminal: () => void; onWorkItem: (id: string) => void }) {
+function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSelect, onTerminal, onWorkItem, onWorkflow }: { event: RuntimeEvent; execution?: ExecutionSummary; history: RuntimeEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (event: RuntimeEvent) => void; onTerminal: () => void; onWorkItem: (id: string) => void; onWorkflow: (runId: string, workItemId: string) => void }) {
   const phase = phaseOf(event);
   useEffect(() => {
     if (collapsed) return;
@@ -818,7 +894,8 @@ function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSe
           <div><dt>输出 Tokens</dt><dd>{event.usage?.outputTokens ?? "未采集"}</dd></div>
           <div><dt>总 Tokens</dt><dd>{event.usage?.totalTokens ?? "未采集"}</dd></div>
         </dl>
-        {execution ? <div className="inspector-actions"><button type="button" className="icon-button" aria-label={`打开工作项 ${execution.workItemId}`} title="打开工作项" onClick={() => onWorkItem(execution.workItemId)}><ClipboardList size={16} /></button></div> : null}
+        {execution ? <div className="inspector-actions"><button type="button" className="icon-button" aria-label={`打开工作项 ${execution.workItemId}`} title="打开工作项" onClick={() => onWorkItem(execution.workItemId)}><ClipboardList size={16} /></button><button type="button" className="icon-button" aria-label="查看本次工作流实例" title="工作流实例" onClick={() => onWorkflow(execution.runId, execution.workItemId)}><Workflow size={16} /></button></div> : null}
+        {execution ? <RunTimelineSection key={execution.runId} runId={execution.runId} workItemId={execution.workItemId} running={execution.status === "running"} load={(id, itemId) => window.afkDesktop.workItems.executionRunDetail(id, itemId)} /> : null}
         {history.length > 1 ? <details className="inspector-history"><summary><span className="history-summary-label">运行历史 <b>{history.length}</b></span></summary><div>{history.map((item) => <button type="button" className={item.id === event.id ? "selected" : ""} key={item.id} onClick={() => onSelect(item)}><StateGlyph phase={eventStatus(item) === "failed" ? "failed" : phaseOf(item)} size={13} /><span><b>{item.result}</b><small><time dateTime={item.timestamp} title={item.timestamp}>{displayTimestamp(item.timestamp)}</time></small></span></button>)}</div></details> : null}
         <details className="inspector-debug"><summary>原始 JSON</summary><pre>{event.raw}</pre></details>
         <button className="takeover" onClick={onTerminal}><TerminalSquare size={15} />打开终端</button>

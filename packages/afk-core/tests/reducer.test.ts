@@ -37,6 +37,14 @@ const requested = () => event(1, {
 });
 
 describe('Run reducer', () => {
+  it('replays a recorded workflow without changing scheduling state', () => {
+    const state = replay([requested(), event(2, {
+      kind: 'workflow.recorded', name: 'issue-implementation', version: 1,
+      steps: [{ id: 'implement', kind: 'agent', dependsOn: [], provider: 'opencode', executionMode: 'interactive' }],
+    })]);
+    expect(state).toMatchObject({ sequence: 2, terminal: false, run: { status: 'pending' } });
+    expect(state.activeStep).toBeUndefined();
+  });
   it('replays an implementation, human gate, and completion timeline deterministically', () => {
     const state = replay([
       requested(),

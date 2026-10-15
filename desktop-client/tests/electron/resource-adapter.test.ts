@@ -11,7 +11,7 @@ describe("AFK resource adapter", () => {
     const task = path.join(root, "github", "easyhaloo", "afk", "144");
     const other = path.join(root, "github", "elsewhere", "afk", "99");
     const resources = [
-      { workspace_path: task, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "afk-github:easyhaloo/afk#144-verify-ac", external_id: null, detail: null },
+      { id: "resource-144", workspace_path: task, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "afk-github:easyhaloo/afk#144-verify-ac", external_id: null, detail: null, run_id: "run-144" },
       { workspace_path: other, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "unrelated-session", external_id: null, detail: null },
     ];
     const adapter = createResourceAdapter({ readResources: () => resources, executable: async () => "/usr/bin/tmux", exec: async (_command, args) => ({
@@ -19,7 +19,7 @@ describe("AFK resource adapter", () => {
     }) });
 
     expect(await adapter.listAfkTmux([selected, task])).toEqual([{
-      workspace: task, name: "afk-github:easyhaloo/afk#144-verify-ac", windows: "1", attached: false,
+      workspace: task, name: "afk-github:easyhaloo/afk#144-verify-ac", windows: "1", attached: false, runId: "run-144", resourceId: "resource-144",
     }]);
     expect(adapter.isAfkTmuxSession([selected, task], "unrelated-session", task)).toBe(false);
     expect(adapter.isAfkTmuxSession([selected, task], "afk-github:easyhaloo/afk#144-verify-ac", task)).toBe(true);

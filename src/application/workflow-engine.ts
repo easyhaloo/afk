@@ -903,6 +903,13 @@ export class WorkflowRunner {
     // ── Template execution: compilation + typed dispatch ─────────────────────
     logger.info({ iid, template }, 'using compiled execution plan');
     const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot }).load(template);
+    await this.recordObservation({
+      kind: 'workflow.recorded', name: loadedTemplate.name, version: loadedTemplate.version,
+      steps: loadedTemplate.steps.map(step => ({
+        id: step.id, kind: step.kind ?? 'agent', dependsOn: step.dependsOn ?? [],
+        ...(step.kind === 'system' ? {} : { provider: step.provider ?? this.agentProvider.name, executionMode: step.executionMode ?? executionMode ?? 'batch' }),
+      })),
+    });
     const autoWrapupOverridden = this.autoWrapup !== WorkflowRunner.prototype.autoWrapup;
     const systemActions = new SystemActionExecutor({
       publishChange: async () => {

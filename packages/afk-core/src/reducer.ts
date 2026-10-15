@@ -38,6 +38,7 @@ export function evolve(state: RunAggregate, event: RunEvent): RunAggregate {
       return { ...next, run: { ...state.run!, status: 'running' } };
     case 'lease.granted':
     case 'workspace.prepared':
+    case 'workflow.recorded':
     case 'change.created':
     case 'change.merge_verified':
     case 'implementation.completed':

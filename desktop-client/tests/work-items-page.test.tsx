@@ -119,6 +119,9 @@ describe("WorkItemsPage", () => {
     expect(textContent(rows[1])).toContain("acme/web");
     expect(textContent(rows[0])).toContain("#1");
     expect(textContent(rows[1])).toContain("#1");
+    expect(textContent(rows[0])).toContain("AFK 自动");
+    expect(textContent(rows[1])).toContain("HITL 人工");
+    expect(rows[1].findByProps({ className: "backlog-mode-mark is-hitl" }).props["aria-label"]).toBe("HITL 人工");
     act(() => renderer!.unmount());
   });
 

@@ -3,6 +3,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
+import { RUNTIME_STALE_AFTER_MS } from '@afk/application';
+
 export type TaskRuntimePhase = 'implementing' | 'verifying';
 export type TaskRuntimeStatus = 'running' | 'completed' | 'blocked' | 'failed';
 export type VisibleTaskRuntimeStatus = TaskRuntimeStatus | 'stale';
@@ -258,7 +260,7 @@ export class TaskRuntimeManager {
   private readonly staleAfterMs: number;
 
   constructor(readonly store = new TaskRuntimeStore(), options: TaskRuntimeManagerOptions = {}) {
-    this.staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
+    this.staleAfterMs = options.staleAfterMs ?? RUNTIME_STALE_AFTER_MS;
   }
 
   start(record: TaskRuntimeRecord): Promise<void> {

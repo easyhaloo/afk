@@ -215,7 +215,9 @@ async function createContext(manifest: ResolvedExecutionManifest, input: Execute
     executionManifestPath: manifest.manifestPath,
     template: input.template,
     projectName: input.project,
-    executionMode: 'batch',
+    // ADR-0019 §4: managed executions are interactive tmux sessions, never
+    // batch/exec. Do not "simplify" this back to 'batch'.
+    executionMode: 'interactive',
   }, config);
   const tracker = await createTracker(request.trackerProjectId ?? request.projectName, request.repoRoot, request.trackerPlatform, request.trackerHost);
   return { request, providers: createProviderBundle(tracker, request.repoRoot) };
@@ -298,7 +300,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         const implementation = (dependencies.createImplementation ?? ((bundle, workflowConfig, runRequest) =>
           new WorkflowRunner(bundle, { config: workflowConfig, agentRuntime: runRequest.agentRuntime, observer: createRunObserver() })))(providers, config, request);
         const implementationResult = await implementation.run({ ...request, template: input.template ?? request.template, session: executionId,
-          executionMode: 'batch', observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
+          executionMode: 'interactive', observationRunId: executionId, observationWorkItemId: workItemId, auditRequired: true });
         if (!implementationResult.success) {
           const status = implementationResult.skipped === 'not_claimed' ? 'not_claimed' : 'blocked';
           await record(status);
@@ -320,7 +322,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         };
         const qa = (dependencies.createQA ?? ((bundle, workflowConfig, runRequest) =>
           new QARunner(bundle, workflowConfig, {
-            agentRuntime: runRequest.agentRuntime, executionMode: 'batch', projectRoot: runRequest.workspaceRoot,
+            agentRuntime: runRequest.agentRuntime, executionMode: 'interactive', projectRoot: runRequest.workspaceRoot,
             repositories: runRequest.repositories,
             beforeChange: async (action, _backlog, change) => {
               if (action === 'publish') await auditQAPass();

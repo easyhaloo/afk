@@ -451,6 +451,7 @@ describe('QARunner execution boundary', () => {
     });
     await withLogContext(context, () => runner.process('60'));
     expect(onCommit).toHaveBeenCalledOnce();
+    expect(f.sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({ runtimeRunId: context.runId }));
     expect(getLogContext()).toBeUndefined();
   });
 

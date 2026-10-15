@@ -24,10 +24,10 @@ export const E2E_ENTRY = path.join(FIXTURE_DIR, "electron.cjs");
 export const RENDERER_URL = `http://localhost:${process.env.AFK_E2E_PORT ?? "5174"}`;
 // fake-afk persists its in-memory store here so writes from one subprocess
 // invocation survive into the next. Delete before each test for isolation.
-export const FAKE_AFK_STORE = path.join(E2E_TMPDIR, "afk-backlog-e2e-store.json");
+export const FAKE_AFK_STORE = path.join(E2E_TMPDIR, `afk-backlog-e2e-store-${process.pid}.json`);
 // Per-spec scratch HOME so the SSH page sees a deterministic, empty
 // ~/.ssh/config regardless of the developer's real environment.
-export const E2E_HOME = path.join(E2E_TMPDIR, "afk-control-e2e-home");
+export const E2E_HOME = path.join(E2E_TMPDIR, `afk-control-e2e-home-${process.pid}`);
 
 function resetStore() {
   if (existsSync(FAKE_AFK_STORE)) rmSync(FAKE_AFK_STORE);

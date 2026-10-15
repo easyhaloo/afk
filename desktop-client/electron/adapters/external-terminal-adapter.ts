@@ -130,6 +130,23 @@ export function createExternalTerminalAdapter(options: ExternalTerminalAdapterOp
   const isApplicationInstalled = options.isApplicationInstalled ?? createLaunchServicesApplicationDetector(execFile);
 
   return {
+    async openCommand(command: string, requestedTerminalId: SshExternalTerminalId): Promise<ExternalTerminalName> {
+      if (platform !== "darwin") throw new Error("外部终端仅支持 macOS");
+      if (!await isApplicationInstalled(TERMINAL_BUNDLE_IDS[requestedTerminalId])) throw new Error(`${TERMINAL_LABELS[requestedTerminalId]} 未安装`);
+      try {
+        if (requestedTerminalId === "ghostty") {
+          await execFile("/usr/bin/open", ["-na", "Ghostty.app", "--args", "-e", "/bin/zsh", "-lc", command]);
+        } else if (requestedTerminalId === "cmux") {
+          await execFile(CMUX_CLI, ["new-workspace", "--command", command]);
+        } else {
+          const script = requestedTerminalId === "iterm2" ? STRUCTURED_ITERM2_SCRIPT : requestedTerminalId === "warp" ? STRUCTURED_WARP_SCRIPT : STRUCTURED_TERMINAL_SCRIPT;
+          await execFile("/usr/bin/osascript", ["-e", script, "--", command]);
+        }
+      } catch {
+        throw new Error("外部终端启动失败");
+      }
+      return TERMINAL_LABELS[requestedTerminalId];
+    },
     async open(targetOrAlias: SshConnectionTarget | string, displayAliasOrTerminalId?: string | SshExternalTerminalId, requestedTerminalId?: SshExternalTerminalId): Promise<ExternalTerminalName> {
       if (platform !== "darwin") throw new Error("外部终端仅支持 macOS");
       const structured = typeof targetOrAlias !== "string";

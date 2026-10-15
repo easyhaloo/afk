@@ -13,9 +13,8 @@ test.describe("AFK Control boot", () => {
     await expect(groups.nth(3)).toHaveAttribute("aria-label", "System");
     await expect(groups.nth(0).getByRole("button")).toHaveText([/工作项/, /运行中心/]);
     await expect(groups.nth(1).getByRole("button")).toHaveText([/工作流/, /Agents?/]);
-    await expect(groups.nth(2).getByRole("button")).toHaveText([/代码仓库/, /执行环境/, /SSH 主机/, /本地 Backlog/]);
+    await expect(groups.nth(2).getByRole("button")).toHaveText([/代码仓库/, /执行环境/, /SSH 主机/]);
     await expect(groups.nth(3).getByRole("button")).toHaveText([/活动记录/, /设置/]);
-    await expect(primaryNav.getByRole("button", { name: /项目 Backlog/ })).toHaveCount(0);
     await expect(primaryNav.locator(".nav-item .nav-item")).toHaveCount(0);
     await expect(page.locator(".backlog-row.work-item-row")).toHaveCount(2);
   });

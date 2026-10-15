@@ -14,5 +14,5 @@ for the workflow.
 | [ADR-0016](0016-run-event-audit-spine.md) | Run Event Audit Spine | accepted | 2026-08 |
 | [ADR-0017](0017-capability-profiles-and-ports.md) | Capability profiles and ports | accepted | 2026-08 |
 | [ADR-0018](0018-evidence-classification-and-redaction.md) | Evidence classification and redaction | accepted | 2026-08 |
-| [ADR-0019](0019-desktop-run-log-viewer-projection.md) | Desktop run log viewer projects from RunEvent via `afk observe` | proposed | 2026-09-28 |
+| [ADR-0019](0019-desktop-run-log-viewer-projection.md) | Shared execution views and interactive tmux access | in progress | 2026-10-14 |
 | [ADR-0020](0020-backlog-item-drop-singular-change-request.md) | Backlog item drop = singular change request | proposed | 2026-09-29 |

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, History, Link2, ListChecks, Play, RefreshCw, Search, ShieldAlert, X } from "lucide-react";
+import { Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, Hand, History, Link2, ListChecks, Play, RefreshCw, Search, ShieldAlert, Workflow, X } from "lucide-react";
 import type { ReactNode } from "react";
 import type {
   BacklogPlatform,
@@ -11,8 +11,12 @@ import type {
   WorkItemRunStartInput,
   WorkItemRunStartResult,
   WorkItemSourceRef,
+  WorkItemAgentId,
+  WorkItemTerminalId,
 } from "../../../shared/backlog-contract";
+import type { AgentRuntime } from "../../../shared/ipc-contract";
 import { type ExecutionSummary } from "../../../shared/execution-contract";
+import { RunTimelineSection } from "../run-center/RunTimelineView";
 import {
   planRepositoryCheckoutPaths,
   repositorySelectionKey,
@@ -39,6 +43,11 @@ const stateLabels: Record<GlobalWorkItem["state"], string> = {
   blocked: "已阻塞",
 };
 
+const executionModeLabels: Record<GlobalWorkItem["executionMode"], string> = {
+  afk: "AFK 自动",
+  hitl: "HITL 人工",
+};
+
 const stateFilterOptions: Array<{ value: GlobalWorkItem["state"] | "all"; label: string; triggerLabel?: string }> = [
   { value: "all", label: "全部状态", triggerLabel: "全部" },
   ...Object.entries(stateLabels).map(([value, label]) => ({ value: value as GlobalWorkItem["state"], label })),
@@ -58,6 +67,14 @@ const auditedRunLabels: Record<ExecutionSummary["status"], string> = {
 const auditedPhaseLabels: Record<NonNullable<ExecutionSummary["phase"]>, string> = {
   implementation: "实现", verification: "验证", release: "发布",
 };
+
+const terminalOptions: Array<{ value: WorkItemTerminalId; label: string }> = [
+  { value: "iterm2", label: "iTerm2" },
+  { value: "warp", label: "Warp" },
+  { value: "ghostty", label: "Ghostty" },
+  { value: "cmux", label: "cmux" },
+  { value: "terminal", label: "Terminal.app" },
+];
 
 type DetailTab = "overview" | "plan" | "runs";
 type RepositoryRunDraft = { selected: boolean; baseBranch: string };
@@ -148,7 +165,7 @@ function WorkItemEmptySection({ children }: { children: string }) {
   return <div className="work-item-section-empty">{children}</div>;
 }
 
-export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } = {}) {
+export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgent = "claude-code", onAttach, onWorkflow }: { focusWorkItemId?: string; agentRuntimes?: AgentRuntime[]; defaultAgent?: string; onAttach?: (runId: string) => void; onWorkflow?: (runId: string, workItemId: string) => void } = {}) {
   const [inventory, setInventory] = useState<WorkItemInventoryResult>(emptyInventory);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -165,6 +182,8 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
   const [runNotice, setRunNotice] = useState("");
   const [runError, setRunError] = useState("");
   const [startingRun, setStartingRun] = useState(false);
+  const [foregroundAgent, setForegroundAgent] = useState<WorkItemAgentId>();
+  const [foregroundTerminal, setForegroundTerminal] = useState<WorkItemTerminalId>("terminal");
   const [repositoryRunDrafts, setRepositoryRunDrafts] = useState<Record<string, RepositoryRunDraft>>({});
   const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const requestVersion = useRef(0);
@@ -321,7 +340,8 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
   const selectedCheckoutPathByKey = new Map(selectedExecutionRepositories.map((repository, index) => [repositoryDraftKey(repository), selectedCheckoutPaths[index]]));
   const availableCheckoutPathByKey = new Map(availableExecutionRepositories.map((repository, index) => [repositoryDraftKey(repository), availableCheckoutPaths[index]]));
   const hasInvalidSelectedBranch = selectedExecutionRepositories.some(repository => baseBranchError(repositoryRunDrafts[repositoryDraftKey(repository)].baseBranch));
-  const canStartRun = !startingRun && selectedExecutionRepositories.length > 0 && !hasInvalidSelectedBranch;
+  const availableAgents = agentRuntimes.filter(runtime => runtime.available);
+  const canStartRun = !startingRun && selectedExecutionRepositories.length > 0 && !hasInvalidSelectedBranch && (selected?.executionMode !== "hitl" || foregroundAgent !== undefined);
 
   const openRunSetup = () => {
     runRequestVersion.current += 1;
@@ -331,6 +351,9 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
       repositoryDraftKey(repository),
       { selected: true, baseBranch: repository.defaultBranch ?? "main" },
     ])));
+    const preferredAgent = availableAgents.find(runtime => runtime.id === defaultAgent || (defaultAgent === "claude-code" && runtime.id === "claude")) ?? availableAgents[0];
+    setForegroundAgent(preferredAgent?.id);
+    setForegroundTerminal("terminal");
     setRunSetupOpen(true);
   };
 
@@ -353,7 +376,12 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
         ...(repository.role === undefined ? {} : { role: repository.role }),
       };
     });
-    const input: WorkItemRunStartInput = { workItemId, repositories, environment: "local" };
+    const input: WorkItemRunStartInput = {
+      workItemId,
+      repositories,
+      environment: "local",
+      ...(selected.executionMode === "hitl" && foregroundAgent ? { foreground: { agent: foregroundAgent, terminal: foregroundTerminal } } : {}),
+    };
     setStartingRun(true);
     setRunError("");
     try {
@@ -400,12 +428,13 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
           const repositories = itemRepositories(item);
           return (
             <article key={item.id} className="backlog-row work-item-row" onClick={() => openDetails(item)}>
-              <span className={`backlog-mode-mark ${item.executionMode === "afk" ? "is-afk" : "is-hitl"}`}><Bot size={15} /></span>
+              <span className={`backlog-mode-mark is-${item.executionMode}`} aria-label={executionModeLabels[item.executionMode]} title={executionModeLabels[item.executionMode]}>{item.executionMode === "afk" ? <Bot size={15} aria-hidden="true" /> : <Hand size={15} aria-hidden="true" />}</span>
               <div className="backlog-row-body">
                 <header><b>{item.title}</b></header>
                 <div className="work-item-row-context"><span>{sourceSummary(item)}</span><span><FolderGit2 size={12} />{repositorySummary(repositories)}</span></div>
                 <div className="backlog-item-metadata">
                   <span className={`backlog-state-label backlog-state-${item.state}`}>{stateLabels[item.state]}</span>
+                  <span className={`backlog-mode-tag is-${item.executionMode}`}>{executionModeLabels[item.executionMode]}</span>
                   <span className={item.managed ? "work-item-managed" : "work-item-unmanaged"}>{item.managed ? item.executionEligible ? "可执行" : "已管理" : "待导入"}</span>
                   <span className="work-item-count">{sources.length} 个来源</span>
                   <span className="work-item-count">{repositories.length} 个关联仓库</span>
@@ -422,7 +451,7 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
         <div className="work-item-detail-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeDetails(); }}>
           <aside className="work-item-detail" role="dialog" aria-modal="true" aria-label={`工作项 ${selected.id}`}>
             <header className="work-item-detail-header">
-              <div><small className="work-item-detail-id"><ProviderIcon provider={selected.project.platform ?? selected.sources?.[0]?.platform} size={11} />{selected.issueNumber ? `${selected.project.projectKey} #${selected.issueNumber}` : selected.id} · {selected.executionEligible ? "可执行" : "不可执行"}</small><h2>{selected.title}</h2><p>{[selected.owner ? `负责人：${selected.owner}` : "", selected.priority ? `优先级 ${selected.priority}` : "", selected.updatedAt ? `更新于 ${selected.updatedAt}` : ""].filter(Boolean).join(" · ") || "独立工作项"}</p></div>
+              <div><small className="work-item-detail-id"><ProviderIcon provider={selected.project.platform ?? selected.sources?.[0]?.platform} size={11} />{selected.issueNumber ? `${selected.project.projectKey} #${selected.issueNumber}` : selected.id} · {executionModeLabels[selected.executionMode]} · {selected.executionEligible ? "可执行" : "不可执行"}</small><h2>{selected.title}</h2><p>{[selected.owner ? `负责人：${selected.owner}` : "", selected.priority ? `优先级 ${selected.priority}` : "", selected.updatedAt ? `更新于 ${selected.updatedAt}` : ""].filter(Boolean).join(" · ") || "独立工作项"}</p></div>
               <button type="button" aria-label="关闭工作项详情" onClick={closeDetails}><X size={16} /></button>
             </header>
             <nav className="work-item-detail-tabs" aria-label="工作项详情分区">
@@ -459,7 +488,7 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
               {detailTab === "runs" ? <section className="work-item-detail-section">
                 <div className="work-item-section-heading"><h3>运行记录</h3><small>每次运行使用独立任务空间</small></div>
                 {auditError ? <div className="work-item-run-error">运行审计查询失败：{auditError}</div> : null}
-                {auditedRuns.map(run => <div className="work-item-run-card" key={run.runId}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.runId}</b><small>第 {run.attempt} 次 · {run.phase ? auditedPhaseLabels[run.phase] : "尚未开始"} · 事件 #{run.sequence}</small></div><em>{auditedRunLabels[run.status]}</em></div>)}
+                {auditedRuns.map(run => <div key={run.runId}><div className="work-item-run-card"><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.runId}</b><small>第 {run.attempt} 次 · {run.phase ? auditedPhaseLabels[run.phase] : "尚未开始"} · 事件 #{run.sequence}</small></div><em>{auditedRunLabels[run.status]}</em>{onWorkflow ? <button type="button" aria-label={`查看运行 ${run.runId} 的工作流实例`} title="工作流实例" onClick={() => onWorkflow(run.runId, selected.id)}><Workflow size={14} /></button> : null}{onAttach && !run.terminal ? <button type="button" onClick={() => onAttach(run.runId)}>接管</button> : null}</div>{typeof window.afkDesktop.workItems.executionRunDetail === "function" ? <RunTimelineSection runId={run.runId} workItemId={selected.id} running={run.status === "running"} load={(id, itemId) => window.afkDesktop.workItems.executionRunDetail(id, itemId)} /> : null}</div>)}
                 {auditCursor ? <button type="button" onClick={() => void loadMoreAuditedRuns()}>查看更多运行记录</button> : null}
                 {selectedRuns.map(run => <div className="work-item-run-card" key={`old:${run.id}`}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.id}</b><small>旧记录 · {run.workflow ?? "默认工作流"} · {run.startedAt}</small><code>{run.workspacePath ?? workspacePath(selected)}</code></div><em>{runStatusLabels[run.status]}</em></div>)}
                 {!auditedRuns.length && !selectedRuns.length ? <WorkItemEmptySection>暂无运行记录。</WorkItemEmptySection> : null}
@@ -478,8 +507,15 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
           <section className="work-item-run-modal" role="dialog" aria-modal="true" aria-label="开始执行工作项">
             <header><div><h2>开始执行工作项</h2><p>确认执行资源和隔离任务空间。</p></div><button type="button" aria-label="关闭执行配置" onClick={closeRunSetup}><X size={16} /></button></header>
             <div className="work-item-run-modal-body">
-              <div className="work-item-run-field"><span>执行工作流</span><b><ListChecks size={14} />标准研发流程</b></div>
-              <div className="work-item-run-field"><span>执行环境</span><b><Bot size={14} />本地隔离环境</b></div>
+              <div className="work-item-run-field"><span>执行模式</span><b>{selected.executionMode === "hitl" ? <Hand size={14} /> : <Bot size={14} />}{executionModeLabels[selected.executionMode]}</b></div>
+              {selected.executionMode === "hitl" ? <>
+                <label className="work-item-run-field"><span>选择 Agent</span><select aria-label="选择 Agent" value={foregroundAgent ?? ""} onChange={event => setForegroundAgent(event.target.value as WorkItemAgentId)}><option value="" disabled>没有可用 Agent</option>{availableAgents.map(agent => <option value={agent.id} key={agent.id}>{agent.label} · {agent.command}</option>)}</select></label>
+                <label className="work-item-run-field"><span>选择终端</span><select aria-label="选择终端" value={foregroundTerminal} onChange={event => setForegroundTerminal(event.target.value as WorkItemTerminalId)}>{terminalOptions.map(option => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+                <div className="work-item-run-field"><span>执行方式</span><b><Hand size={14} />在选定终端前台启动 Agent</b></div>
+              </> : <>
+                <div className="work-item-run-field"><span>执行工作流</span><b><ListChecks size={14} />标准研发流程</b></div>
+                <div className="work-item-run-field"><span>执行环境</span><b><Bot size={14} />本地隔离环境</b></div>
+              </>}
               <section className="work-item-run-resources"><div className="work-item-section-heading"><h3>本次运行使用的代码仓库</h3><small>{availableExecutionRepositories.length} 个</small></div>{availableExecutionRepositories.length ? availableExecutionRepositories.map(repository => {
                 const key = repositoryDraftKey(repository);
                 const draft = repositoryRunDrafts[key] ?? { selected: false, baseBranch: "" };
@@ -497,7 +533,7 @@ export function WorkItemsPage({ focusWorkItemId }: { focusWorkItemId?: string } 
               <div className="work-item-workspace-preview"><FolderGit2 size={18} /><div><b>系统将创建独立任务空间</b><code>{workspacePath(selected)}{"{repositories,runtime,artifacts,logs,diagnostics}"}</code></div></div>
               {runError ? <div className="work-item-run-error"><ShieldAlert size={14} />{runError}</div> : null}
             </div>
-            <footer><button type="button" className="work-item-secondary-action" disabled={startingRun} onClick={closeRunSetup}>取消</button><button type="button" className="work-item-primary-action" disabled={!canStartRun} onClick={() => void startRun()}><Play size={14} />{startingRun ? "正在创建…" : "创建运行"}</button></footer>
+            <footer><button type="button" className="work-item-secondary-action" disabled={startingRun} onClick={closeRunSetup}>取消</button><button type="button" className="work-item-primary-action" disabled={!canStartRun} onClick={() => void startRun()}><Play size={14} />{startingRun ? "正在启动…" : selected.executionMode === "hitl" ? "开始前台执行" : "创建运行"}</button></footer>
           </section>
         </div>
       ) : null}

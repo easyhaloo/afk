@@ -10,6 +10,7 @@ import { normalizeTmuxSessionName } from "../../shared/tmux-session.js";
 const requireCjs = createRequire(import.meta.url);
 
 type AfkResourceRow = {
+  id: string;
   workspace_path: string;
   kind: "tmux" | "container" | "isolate-service";
   origin: "local-sandbox" | "container-sandbox" | "isolate";
@@ -17,6 +18,11 @@ type AfkResourceRow = {
   name: string;
   external_id: string | null;
   detail: string | null;
+  status: "active" | "closed" | "missing" | "failed";
+  worktree_path: string;
+  run_id: string | null;
+  updated_at: string;
+  metadata_json: string;
 };
 
 type SQLiteStatement = { all(...params: unknown[]): unknown[] };
@@ -39,7 +45,8 @@ function readDatabaseResources(databasePath: string, workspaces: readonly string
       if (!roots.length) return [];
       const placeholders = roots.map(() => "?").join(", ");
       return db.prepare(`
-        SELECT workspace_path, kind, origin, engine, name, external_id, detail
+        SELECT id, workspace_path, kind, origin, engine, name, external_id, detail,
+               status, worktree_path, run_id, updated_at, metadata_json
         FROM afk_resources
         WHERE workspace_path IN (${placeholders}) AND status = 'active'
         ORDER BY updated_at DESC, name ASC
@@ -78,8 +85,8 @@ export function createResourceAdapter(deps: ResourceAdapterDeps = {}) {
   }
 
   async function listAfkTmux(workspaces: readonly string[]) {
-    if (!(await executable("tmux"))) return [] as Array<{ workspace: string; name: string; windows: string; attached: boolean }>;
-    const output: Array<{ workspace: string; name: string; windows: string; attached: boolean }> = [];
+    if (!(await executable("tmux"))) return [] as Array<{ workspace: string; name: string; windows: string; attached: boolean; runId?: string; resourceId?: string }>;
+    const output: Array<{ workspace: string; name: string; windows: string; attached: boolean; runId?: string; resourceId?: string }> = [];
     for (const resource of resources(workspaces).filter(item => item.kind === "tmux")) {
       const target = normalizeTmuxSessionName(resource.name);
       const exists = await exec("tmux", ["has-session", "-t", target]);
@@ -87,7 +94,7 @@ export function createResourceAdapter(deps: ResourceAdapterDeps = {}) {
       const result = await exec("tmux", ["display-message", "-p", "-t", target, "#{session_windows}\t#{session_attached}"]);
       if (!result.ok) continue;
       const [windows, attached] = result.stdout.split("\t");
-      output.push({ workspace: resource.workspace_path, name: resource.name, windows: windows || "0", attached: attached === "1" });
+      output.push({ workspace: resource.workspace_path, name: resource.name, windows: windows || "0", attached: attached === "1", resourceId: resource.id, ...(resource.run_id ? { runId: resource.run_id } : {}) });
     }
     return output;
   }
@@ -99,10 +106,33 @@ export function createResourceAdapter(deps: ResourceAdapterDeps = {}) {
       && (owner === undefined || path.resolve(resource.workspace_path) === owner));
   }
 
-  return { listAfkContainers, listAfkTmux, isAfkTmuxSession };
+  /** Run-scoped resource reader for the ADR-0019 exact attach target path. */
+  function listRunResources(runId: string): AfkResourceRow[] {
+    if (!existsSync(databasePath)) return [];
+    try {
+      const { DatabaseSync } = requireCjs("node:sqlite") as { DatabaseSync: SQLiteDatabaseSync };
+      const db = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        return db.prepare(`
+          SELECT id, workspace_path, kind, origin, engine, name, external_id, detail,
+                 status, worktree_path, run_id, updated_at, metadata_json
+          FROM afk_resources
+          WHERE run_id = ?
+          ORDER BY updated_at DESC, name ASC
+        `).all(runId) as AfkResourceRow[];
+      } finally {
+        db.close();
+      }
+    } catch {
+      return [];
+    }
+  }
+
+  return { listAfkContainers, listAfkTmux, isAfkTmuxSession, listRunResources };
 }
 
 const resourceAdapter = createResourceAdapter();
 export const listAfkContainers = resourceAdapter.listAfkContainers;
 export const listAfkTmux = resourceAdapter.listAfkTmux;
 export const isAfkTmuxSession = resourceAdapter.isAfkTmuxSession;
+export const listRunResources = resourceAdapter.listRunResources;

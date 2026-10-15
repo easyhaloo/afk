@@ -48,6 +48,7 @@ dependency that inverts a layer.
 | Architecture, execution design, glossary | [`docs/architecture/`](docs/architecture/overview.md) |
 | Task guides (workflows, skills, testing) | [`docs/guides/`](docs/guides/workflows.md) |
 | Architecture decision records | [`docs/adr/`](docs/adr/README.md) |
+| Desktop execution and interactive tmux access | [`ADR-0019`](docs/adr/0019-desktop-run-log-viewer-projection.md) |
 | Product requirements, research | [`docs/product/`](docs/product/PRD.md), [`docs/research/`](docs/research/) |
 | Onboarding | [`docs/getting-started.md`](docs/getting-started.md) |
 

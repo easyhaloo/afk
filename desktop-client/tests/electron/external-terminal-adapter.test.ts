@@ -98,6 +98,18 @@ describe("LaunchServices application detection", () => {
 });
 
 describe("external terminal adapter", () => {
+  it("opens a shell command in the explicitly selected terminal", async () => {
+    const { adapter, calls, detections } = createHarness();
+
+    await expect(adapter.openCommand("cd '/tmp/task' && '/usr/local/bin/codex' 'implement issue'", "iterm2")).resolves.toBe("iTerm2");
+
+    expect(detections).toEqual(["com.googlecode.iterm2"]);
+    expect(calls).toEqual([{
+      file: "/usr/bin/osascript",
+      args: ["-e", expect.stringContaining("set sshCommand to item 1 of argv"), "--", "cd '/tmp/task' && '/usr/local/bin/codex' 'implement issue'"],
+    }]);
+  });
+
   it("opens a managed host with structured IP arguments", async () => {
     const { adapter, calls } = createHarness();
 

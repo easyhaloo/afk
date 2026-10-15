@@ -55,6 +55,60 @@ describe('LocalSandboxProvider', () => {
     );
   });
 
+  it('does not submit the launch prompt twice for OpenCode', async () => {
+    const tmux = {
+      createSession: vi.fn(async () => ({})),
+      sendPrompt: vi.fn(async () => {}),
+      killSession: vi.fn(async () => {}),
+      closeSession: vi.fn(),
+    };
+    const provider = new LocalSandboxProvider();
+    const sandbox = await provider.create({
+      worktreePath: process.cwd(),
+      session: 'opencode-test',
+      executionMode: 'interactive',
+      tmux: tmux as never,
+    });
+
+    await sandbox.startAgent({
+      command: { argv: ['opencode', '--auto'], cwd: process.cwd() },
+      prompt: 'goal the runner must NOT type',
+      generation: 1,
+      signalType: 'goal_complete',
+      executionMode: 'interactive',
+      metadata: { provider: 'opencode', transport: 'process' },
+    });
+
+    expect(tmux.createSession).toHaveBeenCalled();
+    expect(tmux.sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it('still starts interactive flag-fed providers when the tmux client lacks the stability probe', async () => {
+    const tmux = {
+      createSession: vi.fn(async () => ({})),
+      sendPrompt: vi.fn(async () => {}),
+      killSession: vi.fn(async () => {}),
+      closeSession: vi.fn(),
+    };
+    const provider = new LocalSandboxProvider();
+    const sandbox = await provider.create({
+      worktreePath: process.cwd(),
+      session: 'opencode-legacy',
+      executionMode: 'interactive',
+      tmux: tmux as never,
+    });
+
+    await expect(sandbox.startAgent({
+      command: { argv: ['opencode', '--auto'], cwd: process.cwd() },
+      prompt: 'goal',
+      generation: 1,
+      signalType: 'goal_complete',
+      executionMode: 'interactive',
+      metadata: { provider: 'opencode', transport: 'process' },
+    })).resolves.toBeDefined();
+    expect(tmux.sendPrompt).not.toHaveBeenCalled();
+  });
+
   it('clears a prior completion signal before starting the next interactive phase', async () => {
     const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-sandbox-'));
     await writeFile(

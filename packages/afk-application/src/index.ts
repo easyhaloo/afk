@@ -5,3 +5,5 @@ export * from './inventory.js';
 export * from './observation.js';
 export * from './ports.js';
 export * from './provider-inventory.js';
+export * from './runtime-health.js';
+export * from './workflow-instance.js';

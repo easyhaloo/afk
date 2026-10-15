@@ -34,7 +34,7 @@
 | [0016](adr/0016-run-event-audit-spine.md) | Run Event Audit Spine | accepted |
 | [0017](adr/0017-capability-profiles-and-ports.md) | Capability profiles and ports | accepted |
 | [0018](adr/0018-evidence-classification-and-redaction.md) | Evidence classification and redaction | accepted |
-| [0019](adr/0019-desktop-run-log-viewer-projection.md) | Desktop run log viewer projection | proposed |
+| [0019](adr/0019-desktop-run-log-viewer-projection.md) | Shared execution views and interactive tmux access | in progress |
 
 ## 产品与研究
 

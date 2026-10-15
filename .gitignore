@@ -71,3 +71,7 @@ dump.rdb
 
 # Agent runtime state
 .omo/
+
+# Playwright run output — regenerated on every e2e run.
+desktop-client/test-results/
+desktop-client/playwright-report/

@@ -41,6 +41,7 @@
 | 路径 | 内容 |
 |---|---|
 | [product/PRD.md](product/PRD.md) | 产品需求文档 |
+| [product/PRD-work-items-reverse-sort-2026-10-15.md](product/PRD-work-items-reverse-sort-2026-10-15.md) | 全局工作项倒序筛选 |
 | [research/](research/) | 研究材料与方法论文档 |
 
 ## 决策日志

@@ -27,6 +27,7 @@ import { FilterPanel } from "../../components/FilterPanel";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { MarkdownContent } from "../backlog/MarkdownContent";
+import { sortBacklogItems, WORK_ITEM_SORT_OPTIONS, type BacklogSortSelection } from "../backlog/backlog-sort";
 import "../backlog/backlog.css";
 import "./work-items.css";
 
@@ -173,6 +174,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [platform, setPlatform] = useState<"all" | BacklogPlatform>("all");
   const [project, setProject] = useState("all");
   const [stateFilter, setStateFilter] = useState<GlobalWorkItem["state"] | "all">("all");
+  const [sortSelection, setSortSelection] = useState<BacklogSortSelection>({ field: "updatedAt", direction: "desc" });
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
   const [auditedRuns, setAuditedRuns] = useState<ExecutionSummary[]>([]);
@@ -288,12 +290,8 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       ].join(" ").toLowerCase();
       return !normalized || searchable.includes(normalized);
     });
-    return filtered.sort((a, b) => {
-      const aTime = a.updatedAt ?? "";
-      const bTime = b.updatedAt ?? "";
-      return bTime.localeCompare(aTime);
-    });
-  }, [inventory.items, platform, project, stateFilter, query]);
+    return sortBacklogItems(filtered, sortSelection);
+  }, [inventory.items, platform, project, stateFilter, query, sortSelection]);
 
   const openDetails = (item: GlobalWorkItem) => {
     runRequestVersion.current += 1;
@@ -419,6 +417,12 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
         <SelectMenu label="选择 Provider" value={platform} variant="filter" triggerPrefix="来源" options={[{ value: "all", label: "全部来源平台", triggerLabel: "全部" }, { value: "github", label: "GitHub", icon: "github", triggerLabel: "GitHub" }, { value: "gitlab", label: "GitLab", icon: "gitlab", triggerLabel: "GitLab" }]} onChange={value => { setPlatform(value as "all" | BacklogPlatform); setProject("all"); setVisibleLimit(pageSize); }} />
         <SelectMenu label="选择仓库" value={project} variant="filter" triggerPrefix="Issue" search={{ label: "搜索 Issue 来源", pinnedValue: "all", emptyMessage: "没有匹配的 Issue 来源" }} options={projectOptions} onChange={value => { setProject(value); setVisibleLimit(pageSize); }} />
         <SelectMenu label="筛选状态" value={stateFilter} variant="filter" triggerPrefix="状态" options={stateFilterOptions} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
+        <SelectMenu
+          label="排序"
+          value={`${sortSelection.field}:${sortSelection.direction}` as "updatedAt:desc" | "updatedAt:asc"}
+          options={WORK_ITEM_SORT_OPTIONS.filter(o => o.field === "updatedAt") as Array<{ value: "updatedAt:desc" | "updatedAt:asc"; label: string }>}
+          onChange={value => { const [field, direction] = value.split(":") as ["updatedAt", "asc" | "desc"]; setSortSelection({ field, direction }); setVisibleLimit(pageSize); }}
+        />
         </FilterPanel>
       </div>
 

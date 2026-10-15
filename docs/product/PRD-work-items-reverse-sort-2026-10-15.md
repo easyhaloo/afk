@@ -36,9 +36,10 @@
 
 ## 3. Non-Goals
 
-- 不改变工作项来源采集、权限范围、执行逻辑或数据模型。
+- 不改变工作项来源采集、权限范围、执行逻辑或数据模型身份（id、workItemId、parentId 等）。
 - 不引入服务端分页、无限滚动或跨页面的排序持久化。
 - 不修改 Provider 的原始排序语义。
+- 允许从 GitHub/GitLab 原始 updated_at 到可选 updatedAt 的传输映射。
 
 ## 4. Users & Jobs
 

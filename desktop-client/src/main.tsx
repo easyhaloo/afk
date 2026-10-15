@@ -243,7 +243,10 @@ function App() {
   const runStats = useMemo(() => {
     // Compute from auditedExecutions (which has accurate run status) rather than
     // snapshot.events, which only carries queued/initial statuses from the snapshot pipeline.
-    const running = auditedExecutions.filter(ex => ex.status === "running" || ex.status === "pending").length;
+    // "pending" is a queued work item, not a run in flight — the prototype
+    // gives 排队中 its own state and counts it in none of the five tiles, so
+    // folding it in here made every queued item read as 运行中.
+    const running = auditedExecutions.filter(ex => ex.status === "running").length;
     const waiting = auditedExecutions.filter(ex => ex.status === "awaiting_human").length;
     const failed = auditedExecutions.filter(ex => ex.status === "failed" || ex.status === "cancelled").length;
     const done = auditedExecutions.filter(ex => ex.status === "succeeded").length;

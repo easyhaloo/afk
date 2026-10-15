@@ -5,6 +5,8 @@ import type { SshSession } from "../shared/ssh-contract";
 import { TerminalSheet } from "../src/features/terminal/TerminalSheet";
 import { SshTerminalView } from "../src/features/terminal/SshTerminalView";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 const session: SshSession = {
   id: "ssh-1",
   hostId: "host-1",

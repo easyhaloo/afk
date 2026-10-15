@@ -1,4 +1,5 @@
 import { test, expect } from "./_helpers/launch";
+import { expectOccupiesSpace } from "./_helpers/geometry";
 
 test.describe("Workflow studio", () => {
   test("uses an icon-only create action in the workflow library", async ({ page }) => {
@@ -34,7 +35,7 @@ test.describe("Workflow studio", () => {
     // and is blind to an ancestor clipping it (the canvas rendered 0px high for a
     // whole phase while every node test stayed green).
     const stage = page.locator(".workflow-editor-stage");
-    expect(((await stage.boundingBox())?.height ?? 0)).toBeGreaterThan(200);
+    await expectOccupiesSpace(page, ".workflow-editor-stage", 200);
 
     const bands = page.locator(".workflow-canvas-track");
     await expect(bands).toHaveCount(2);

@@ -14,6 +14,7 @@
     "typecheck": "pnpm build:application && tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test": "pnpm build:application && node scripts/build-provider-inventory.mjs && vitest run --config vitest.config.ts",
     "test:contrast": "playwright test --config=playwright.config.ts contrast",
+    "shots": "playwright test --config=playwright.config.ts reskin-shots",
     "e2e": "playwright test --config=playwright.config.ts",
     "build:main": "pnpm build:application && node scripts/build-provider-inventory.mjs && node scripts/build-main.mjs",
     "build": "pnpm typecheck && pnpm build:main && vite build",

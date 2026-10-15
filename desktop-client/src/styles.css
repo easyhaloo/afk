@@ -941,7 +941,9 @@ input:focus-visible {
   position: fixed;
   right: 18px;
   bottom: 18px;
-  z-index: 10;
+  /* Clears the 30-tier chrome (topbar overlay, command sheet) so the sheet is
+     never covered by them; the standalone full-screen form sits at 100 above. */
+  z-index: 60;
   width: min(710px, calc(100vw - 276px));
   overflow: hidden;
   border: var(--border-w) solid var(--afk-border-strong);

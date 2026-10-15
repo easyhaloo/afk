@@ -49,6 +49,14 @@ const IPC_CHANNELS = {
   workItemsList: "afk:work-items-list",
   workItemsStart: "afk:work-items-start",
   workItemsExecutions: "afk:work-items-executions",
+  workItemsExecutionRunDetail: "afk:work-items-execution-run-detail",
+  workItemsResolveAttachTarget: "afk:work-items-resolve-attach-target",
+  workItemsAttach: "afk:work-items-attach",
+  workItemsAttachInput: "afk:work-items-attach-input",
+  workItemsAttachResize: "afk:work-items-attach-resize",
+  workItemsDetach: "afk:work-items-detach",
+  workItemsAttachData: "afk:work-items-attach-data",
+  workItemsAttachExit: "afk:work-items-attach-exit",
   jumpserverTestConnection: "afk:jumpserver-test-connection",
   jumpserverAddBastion: "afk:jumpserver-add-bastion",
   jumpserverListAssets: "afk:jumpserver-list-assets",
@@ -126,6 +134,22 @@ const api: DesktopApi = {
         : ipcRenderer.invoke(IPC_CHANNELS.workItemsList, options),
     start: (input) => ipcRenderer.invoke(IPC_CHANNELS.workItemsStart, input),
     executions: (options) => ipcRenderer.invoke(IPC_CHANNELS.workItemsExecutions, options),
+    executionRunDetail: (runId, workItemId) => ipcRenderer.invoke(IPC_CHANNELS.workItemsExecutionRunDetail, runId, workItemId),
+    resolveAttachTarget: (request) => ipcRenderer.invoke(IPC_CHANNELS.workItemsResolveAttachTarget, request),
+    attach: (input) => ipcRenderer.invoke(IPC_CHANNELS.workItemsAttach, input),
+    attachInput: (attachId, data) => ipcRenderer.invoke(IPC_CHANNELS.workItemsAttachInput, attachId, data),
+    attachResize: (attachId, cols, rows) => ipcRenderer.invoke(IPC_CHANNELS.workItemsAttachResize, attachId, cols, rows),
+    detach: (attachId) => ipcRenderer.invoke(IPC_CHANNELS.workItemsDetach, attachId),
+    onAttachData: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, attachId: string, data: string) => listener(attachId, data);
+      ipcRenderer.on(IPC_CHANNELS.workItemsAttachData, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.workItemsAttachData, handler);
+    },
+    onAttachExit: (listener) => {
+      const handler = (_event: Electron.IpcRendererEvent, attachId: string, code: number) => listener(attachId, code);
+      ipcRenderer.on(IPC_CHANNELS.workItemsAttachExit, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.workItemsAttachExit, handler);
+    },
   },
   jumpserver: {
     testConnection: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverTestConnection, input),

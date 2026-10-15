@@ -79,6 +79,16 @@ Codex + docker sandbox + named branch + planner template
 - 人工 attach
 - HITL 接管
 
+Provider 差异收敛在 Agent Provider 内部。OpenCode 的交互式 TUI 通过启动参数
+消费目标（`opencode --auto --prompt …`，TUI 渲染完成后自动提交），因此 local
+sandbox 绝不向其 pane 键入 prompt；OpenCode 自行处理启动就绪，完成仍走共享的
+`goal_complete` 信号文件。模型选择属于运行时配置（`AFK_OPENCODE_MODEL`，
+`provider/model`），产品源码不硬编码默认模型；批处理模式使用
+`opencode run --format json`，目标通过 stdin 传入。OpenCode Provider 在启动
+TUI 前移除开头的 `/goal` 命令前缀，将完整工作项正文和完成协议作为普通 prompt
+传入，避免 OpenCode 自身展开斜杠命令后丢掉多行 prompt 的后续内容。托管 QA
+资源保留父级审计 run ID，确保各接管入口定位到同一次执行。
+
 ### 2.4 `.afk-signal.json` 逐步退役
 
 不再让 Agent 通过 prompt 主动写控制信号。新的控制协议使用：

@@ -59,8 +59,6 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
     const argv = ['claude', '--dangerously-skip-permissions'];
     if (options.executionMode === 'batch') {
       argv.push('--print', '--output-format', 'stream-json', '--verbose');
-    } else if (options.interactive) {
-      argv.push('--no-input');
     }
     return {
       argv,

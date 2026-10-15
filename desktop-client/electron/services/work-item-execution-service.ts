@@ -10,7 +10,9 @@ import type {
   WorkItemRunStartInput,
   WorkItemRunStartResult,
   WorkItemRunRecord,
+  WorkItemAgentId,
 } from "../../shared/backlog-contract.js";
+import type { SshExternalTerminalId } from "../../shared/ssh-contract.js";
 import {
   validateBaseBranch,
   validateRunRepositorySelection,
@@ -31,10 +33,13 @@ type Workspace = {
   allocate: (workItemId: WorkItemId, repositories: readonly ProviderProjectRef[]) => Promise<AllocatedWorkspace>;
   updateRun: (workItemId: WorkItemId, runId: string | undefined, expectedRunId?: string) => Promise<unknown>;
 };
+type ForegroundAgent = { id: WorkItemAgentId; label: string; command: string; executable: string };
 
 export type WorkItemExecutionServiceDeps = {
   getWorkItem: (workItemId: WorkItemId) => Promise<GlobalWorkItem>;
   resolveAfk: () => Promise<string>;
+  resolveAgent?: (id: WorkItemAgentId) => Promise<ForegroundAgent | undefined>;
+  openTerminalCommand?: (command: string, terminal: SshExternalTerminalId) => Promise<string>;
   workspace: Workspace;
   manifestStore: Pick<ReturnType<typeof createWorkItemExecutionManifestStore>, "save">;
   runStore: Pick<ReturnType<typeof createWorkItemRunStore>, "load" | "save"> & Partial<Pick<ReturnType<typeof createWorkItemRunStore>, "update">>;
@@ -42,6 +47,24 @@ export type WorkItemExecutionServiceDeps = {
   now?: () => Date;
   reportError?: (error: unknown) => void;
 };
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+export function buildForegroundAgentCommand(item: GlobalWorkItem, agent: ForegroundAgent, workspaceRoot: string): string {
+  const issueReference = item.webUrl ?? item.providerRef;
+  const prompt = [
+    `请读取并实施工作项 ${item.id}。`,
+    `标题：${item.title}`,
+    `对应 Issue：${issueReference}`,
+    item.description?.trim() ? `工作项内容：\n${item.description.trim()}` : "请先读取对应 Issue 或工作项的完整内容。",
+    "请在当前工作区完成实现，遵循仓库中的 AGENTS.md/项目约束，运行相关检查，并在完成后汇报改动和验证结果。",
+    "任务完成后，请在对应的 GitHub 或 GitLab Issue 上附上一条进度评论，说明完成内容、验证结果和后续事项。",
+  ].join("\n\n");
+  const args = agent.id === "claude" ? ["--dangerously-skip-permissions", prompt] : [prompt];
+  return `cd ${shellQuote(workspaceRoot)} && ${[agent.executable || agent.command, ...args].map(shellQuote).join(" ")}`;
+}
 
 export function buildWorkItemRunArgs(input: WorkItemRunStartInput, manifestPath: string, executionId?: string): string[] {
   const args = ["execute", "--work-item-id", input.workItemId, "--execution-manifest", manifestPath];
@@ -152,6 +175,10 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
   async function startUnlocked(input: WorkItemRunStartInput): Promise<WorkItemRunStartResult> {
     const item = await deps.getWorkItem(input.workItemId);
     if (!item.managed || !item.executionEligible) throw new Error(`工作项 ${input.workItemId} 当前不可执行`);
+    const foregroundAgent = input.foreground
+      ? await deps.resolveAgent?.(input.foreground.agent)
+      : undefined;
+    if (input.foreground && (!foregroundAgent || !deps.openTerminalCommand)) throw new Error("前台执行能力不可用，请检查 Agent 和终端配置");
 
     const associated = item.repositories === undefined ? [item.project] : item.repositories;
     const selected = validateRunRepositorySelection(input.repositories, associated);
@@ -163,6 +190,10 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
       throw new Error(`工作项 ${input.workItemId} 已有运行中的任务，请等待运行结束`);
     }
     const repositories = canonicalRepositories(workspace, authoritative);
+    if (input.foreground && foregroundAgent) {
+      await deps.openTerminalCommand!(buildForegroundAgentCommand(item, foregroundAgent, workspace.root), input.foreground.terminal);
+      return { runId: `desktop-${randomUUID()}`, workspace: { root: workspace.root } };
+    }
     const afkPath = await deps.resolveAfk();
     if (!afkPath) throw new Error("afk CLI 未在 PATH 中发现");
     const manifestPath = workItemExecutionManifestPath(workspace.root);

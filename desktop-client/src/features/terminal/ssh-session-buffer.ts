@@ -7,7 +7,8 @@ export type SshSessionEvent =
 export type SshTerminalState = {
   open: boolean;
   pane: string;
-  mode: "tmux" | "ssh";
+  mode: "tmux" | "ssh" | "attach" | "notice";
+  attachId?: string;
   sshSession?: SshSession;
   publicKeyPath?: string;
 };

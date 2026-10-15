@@ -161,7 +161,7 @@ export class QARunner {
         executionMode: this.executionMode,
         tmux: this.executionMode === 'interactive' ? this.tmux : undefined,
         workspaceRoot: this.projectRoot,
-        runtimeRunId,
+        runtimeRunId: getLogContext()?.runId ?? runtimeRunId,
       });
       logger.info({ backlogId: id, session, sandboxId: sandbox.id }, 'QA sandbox created');
       await this.logWorktreeDiagnostics(id, 'before-agent-start', worktreePath);

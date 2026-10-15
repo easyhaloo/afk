@@ -10,6 +10,7 @@
  */
 
 import { assertExactKeys, parseRequiredString } from "./validation.js";
+import type { SshExternalTerminalId } from "./ssh-contract.js";
 import {
   validateBaseBranch,
   validateRunRepositorySelectionSet,
@@ -29,6 +30,9 @@ export type BacklogState = typeof BACKLOG_STATES[number];
 
 export const BACKLOG_EXECUTION_MODES = ["afk", "hitl"] as const;
 export type BacklogExecutionMode = typeof BACKLOG_EXECUTION_MODES[number];
+export const WORK_ITEM_AGENT_IDS = ["claude", "codex", "cursor", "pi", "opencode", "copilot"] as const;
+export type WorkItemAgentId = typeof WORK_ITEM_AGENT_IDS[number];
+export type WorkItemTerminalId = SshExternalTerminalId;
 
 export const BACKLOG_PLATFORMS = ["github", "gitlab"] as const;
 export type BacklogPlatform = typeof BACKLOG_PLATFORMS[number];
@@ -100,6 +104,10 @@ export type WorkItemRunStartInput = {
   repositories: WorkItemRunRepositorySelection[];
   workflow?: string;
   environment?: "local";
+  foreground?: {
+    agent: WorkItemAgentId;
+    terminal: WorkItemTerminalId;
+  };
 };
 
 export type WorkItemRunStartResult = {
@@ -364,7 +372,7 @@ export function parseBacklogRunRetryInput(input: unknown): BacklogRunRetryInput 
 export function parseWorkItemRunStartInput(input: unknown): WorkItemRunStartInput {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item run input must be an object");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["workItemId", "repositories", "workflow", "environment"], "work item run input");
+  assertExactKeys(candidate, ["workItemId", "repositories", "workflow", "environment", "foreground"], "work item run input");
   if (!Array.isArray(candidate.repositories)) throw new Error("work item run input: repositories must be an array");
   const result: WorkItemRunStartInput = {
     workItemId: parseGlobalWorkItemIdentity(candidate.workItemId, "work item run input: workItemId"),
@@ -377,6 +385,14 @@ export function parseWorkItemRunStartInput(input: unknown): WorkItemRunStartInpu
   if (candidate.environment !== undefined) {
     if (candidate.environment !== "local") throw new Error("work item run input: environment is invalid");
     result.environment = "local";
+  }
+  if (candidate.foreground !== undefined) {
+    if (!candidate.foreground || typeof candidate.foreground !== "object" || Array.isArray(candidate.foreground)) throw new Error("work item run input: foreground is invalid");
+    const foreground = candidate.foreground as Record<string, unknown>;
+    assertExactKeys(foreground, ["agent", "terminal"], "work item run input: foreground");
+    if (!WORK_ITEM_AGENT_IDS.includes(foreground.agent as WorkItemAgentId)) throw new Error("work item run input: foreground agent is invalid");
+    if (!["iterm2", "warp", "ghostty", "cmux", "terminal"].includes(foreground.terminal as string)) throw new Error("work item run input: foreground terminal is invalid");
+    result.foreground = { agent: foreground.agent as WorkItemAgentId, terminal: foreground.terminal as WorkItemTerminalId };
   }
   return result;
 }

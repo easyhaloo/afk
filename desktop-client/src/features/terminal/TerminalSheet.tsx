@@ -6,7 +6,7 @@ import { SshTerminalView, sshTerminalErrorMessage } from "./SshTerminalView";
 type MaybePromise = Promise<unknown> | void;
 
 type TerminalSheetProps = {
-  mode?: "tmux" | "ssh";
+  mode?: "tmux" | "ssh" | "attach" | "notice";
   session: string;
   pane: string;
   line: string;
@@ -18,9 +18,11 @@ type TerminalSheetProps = {
   onSend(): void;
   onSshInput?(data: string): MaybePromise;
   onSshResize?(cols: number, rows: number): MaybePromise;
+  onAttachInput?(data: string): MaybePromise;
+  onAttachResize?(cols: number, rows: number): MaybePromise;
 };
 
-export function TerminalSheet({ mode = "tmux", session, pane, line, confirmed, sshSession, onClose, onLine, onConfirmed, onSend, onSshInput, onSshResize }: TerminalSheetProps) {
+export function TerminalSheet({ mode = "tmux", session, pane, line, confirmed, sshSession, onClose, onLine, onConfirmed, onSend, onSshInput, onSshResize, onAttachInput, onAttachResize }: TerminalSheetProps) {
   const panelRef = useRef<HTMLElement>(null);
   const [terminalError, setTerminalError] = useState("");
   const [standalone, setStandalone] = useState(false);
@@ -35,7 +37,7 @@ export function TerminalSheet({ mode = "tmux", session, pane, line, confirmed, s
       if (event.target instanceof Node && panelRef.current && !panelRef.current.contains(event.target)) onClose();
     };
     const dismissOnEscape = (event: KeyboardEvent) => {
-      if (mode === "tmux" && event.key === "Escape") onClose();
+      if ((mode === "tmux" || mode === "notice") && event.key === "Escape") onClose();
     };
     document.addEventListener("pointerdown", dismiss);
     document.addEventListener("keydown", dismissOnEscape);
@@ -78,13 +80,23 @@ export function TerminalSheet({ mode = "tmux", session, pane, line, confirmed, s
             </small>
           </footer>
         </>
+      ) : mode === "attach" ? (
+        <SshTerminalView
+          sessionId={session}
+          output={pane}
+          disabled={false}
+          onInput={(data) => onAttachInput?.(data)}
+          onResize={(cols, rows) => onAttachResize?.(cols, rows)}
+          onCopy={(data) => window.afkDesktop.copyText(data)}
+          onError={(operation) => setTerminalError(sshTerminalErrorMessage(operation))}
+        />
       ) : (
         <>
           <pre>{pane || "没有可用的 tmux 会话。"}</pre>
-          <footer>
+          {mode === "tmux" ? <footer>
             <label><input type="checkbox" checked={confirmed} onChange={(event) => onConfirmed(event.target.checked)} />确认发送到此 tmux 会话</label>
             <div><input value={line} onChange={(event) => onLine(event.target.value)} placeholder="输入一行命令或文本" onKeyDown={(event) => { if (event.key === "Enter") onSend(); }} /><button className="send" disabled={!confirmed || !line.trim()} onClick={onSend}><Send size={15} />发送</button></div>
-          </footer>
+          </footer> : null}
         </>
       )}
     </section>

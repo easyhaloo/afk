@@ -1,5 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { RUNTIME_STALE_AFTER_MS } from "@afk/application";
 import type { BacklogRuntimeProjection, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract.js";
 import { parseBacklogRuntimeSummary } from "../../shared/backlog-contract.js";
 import type { createBacklogRunStore } from "./backlog-run-store.js";
@@ -21,7 +22,6 @@ export type BacklogRuntimeServiceDeps = {
   isPidAlive?: (pid: number) => boolean;
 };
 
-const STALE_AFTER_MS = 5 * 60 * 1000;
 
 export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
   const now = deps.now ?? Date.now;
@@ -71,7 +71,7 @@ export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
     }
     const latest = records.sort((left, right) => Date.parse(right.heartbeatAt) - Date.parse(left.heartbeatAt))[0];
     if (!latest) return undefined;
-    const stale = latest.status === "running" && Number.isFinite(Date.parse(latest.heartbeatAt)) && now() - Date.parse(latest.heartbeatAt) > STALE_AFTER_MS;
+    const stale = latest.status === "running" && Number.isFinite(Date.parse(latest.heartbeatAt)) && now() - Date.parse(latest.heartbeatAt) > RUNTIME_STALE_AFTER_MS;
     return {
       runId: latest.runId,
       status: stale ? "stale" : latest.status,

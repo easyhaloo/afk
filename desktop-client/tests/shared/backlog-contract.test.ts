@@ -157,6 +157,16 @@ describe("Backlog shared contract", () => {
     ]);
   });
 
+  it("parses a foreground Agent and terminal selection", () => {
+    expect(parseWorkItemRunStartInput({
+      workItemId: "WI-1",
+      repositories: [{ platform: "github", projectKey: "acme/api", name: "api", baseBranch: "main", checkoutPath: "repositories/api" }],
+      foreground: { agent: "codex", terminal: "iterm2" },
+    }).foreground).toEqual({ agent: "codex", terminal: "iterm2" });
+    expect(() => parseWorkItemRunStartInput({ workItemId: "WI-1", repositories: [{ platform: "github", projectKey: "acme/api", name: "api", baseBranch: "main", checkoutPath: "repositories/api" }], foreground: { agent: "unknown", terminal: "iterm2" } })).toThrow(/agent/i);
+    expect(() => parseWorkItemRunStartInput({ workItemId: "WI-1", repositories: [{ platform: "github", projectKey: "acme/api", name: "api", baseBranch: "main", checkoutPath: "repositories/api" }], foreground: { agent: "codex", terminal: "unknown" } })).toThrow(/terminal/i);
+  });
+
   it("parseBacklogPlatform only accepts github or gitlab", () => {
     expect(parseBacklogPlatform("github")).toBe("github");
     expect(parseBacklogPlatform("gitlab")).toBe("gitlab");

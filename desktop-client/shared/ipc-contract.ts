@@ -1,4 +1,6 @@
-import type { AgentUsage, ExecutionQueryOptions, ExecutionSummary } from "./execution-contract.js";
+import type { AgentUsage, ExecutionQueryOptions, ExecutionRunDetail, ExecutionSummary } from "./execution-contract.js";
+import type { WorkItemAgentId } from "./backlog-contract.js";
+import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
 
 export type RuntimeEvent = {
   id: string;
@@ -12,7 +14,7 @@ export type RuntimeEvent = {
 };
 
 export type AgentRuntime = {
-  id: "claude" | "codex" | "cursor" | "pi" | "opencode" | "copilot";
+  id: WorkItemAgentId;
   label: string;
   command: string;
   available: boolean;
@@ -158,7 +160,26 @@ export type Snapshot = {
   events: RuntimeEvent[];
   workItemRuns: ProjectRun[];
   containers: Array<{ engine: string; name: string; image: string; status: string }>;
-  sessions: Array<{ name: string; workspace: string; windows: string; attached: boolean }>;
+  sessions: Array<{ name: string; workspace: string; windows: string; attached: boolean; runId?: string; resourceId?: string }>;
+};
+
+export type ExecutionAttachRequest = {
+  runId: string;
+  workItemId?: string;
+  resourceId?: string;
+};
+
+export type ExecutionAttachResult = {
+  attachId: string;
+  attachTarget: string;
+  resourceId: string;
+};
+
+export type ExecutionAttachInput = {
+  runId: string;
+  resourceId?: string;
+  cols?: number;
+  rows?: number;
 };
 
 export type DesktopApi = {
@@ -212,6 +233,14 @@ export type DesktopApi = {
     list: (options?: WorkItemInventoryOptions, forceRefresh?: boolean) => Promise<WorkItemInventoryResult>;
     start: (input: WorkItemRunStartInput) => Promise<WorkItemRunStartResult>;
     executions: (options?: ExecutionQueryOptions) => Promise<{ executions: ExecutionSummary[]; nextCursor?: string }>;
+    executionRunDetail: (runId: string, workItemId: string) => Promise<ExecutionRunDetail>;
+    resolveAttachTarget: (request: ExecutionAttachRequest) => Promise<ExecutionEnvironmentQueryResult>;
+    attach: (input: ExecutionAttachInput) => Promise<ExecutionAttachResult>;
+    attachInput: (attachId: string, data: string) => Promise<boolean>;
+    attachResize: (attachId: string, cols: number, rows: number) => Promise<boolean>;
+    detach: (attachId: string) => Promise<boolean>;
+    onAttachData: (listener: (attachId: string, data: string) => void) => () => void;
+    onAttachExit: (listener: (attachId: string, code: number) => void) => () => void;
   };
   jumpserver: {
     testConnection: (input: JumpserverTestConnectionInput) => Promise<JumpserverTestConnectionResult>;
@@ -271,6 +300,14 @@ export const IPC_CHANNELS = {
   workItemsList: "afk:work-items-list",
   workItemsStart: "afk:work-items-start",
   workItemsExecutions: "afk:work-items-executions",
+  workItemsExecutionRunDetail: "afk:work-items-execution-run-detail",
+  workItemsResolveAttachTarget: "afk:work-items-resolve-attach-target",
+  workItemsAttach: "afk:work-items-attach",
+  workItemsAttachInput: "afk:work-items-attach-input",
+  workItemsAttachResize: "afk:work-items-attach-resize",
+  workItemsDetach: "afk:work-items-detach",
+  workItemsAttachData: "afk:work-items-attach-data",
+  workItemsAttachExit: "afk:work-items-attach-exit",
   jumpserverTestConnection: "afk:jumpserver-test-connection",
   jumpserverAddBastion: "afk:jumpserver-add-bastion",
   jumpserverListAssets: "afk:jumpserver-list-assets",

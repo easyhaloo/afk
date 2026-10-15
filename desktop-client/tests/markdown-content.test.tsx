@@ -3,6 +3,8 @@ import { createElement } from "react";
 import { act, create } from "react-test-renderer";
 import { MarkdownContent } from "../src/features/backlog/MarkdownContent";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 describe("MarkdownContent", () => {
   it("renders GitHub-flavored Markdown headings, emphasis, and task lists", () => {
     let renderer!: ReturnType<typeof create>;

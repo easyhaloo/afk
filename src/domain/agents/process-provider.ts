@@ -18,7 +18,7 @@ export abstract class ProcessAgentProvider implements AgentProvider {
 
   async createExecution(options: AgentExecutionOptions): Promise<AgentExecution> {
     return options.sandbox.startAgent({
-      command: this.buildCommand(options),
+      command: this.buildCommand({ ...options, goal: options.prompt }),
       generation: options.generation,
       prompt: options.prompt,
       signalType: options.signalType,

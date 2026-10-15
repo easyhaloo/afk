@@ -8,6 +8,7 @@ import type {
   WorkItemRunRepositorySelection,
 } from "../../shared/backlog-contract";
 import { createWorkItemExecutionService } from "../../electron/services/work-item-execution-service";
+import { buildForegroundAgentCommand } from "../../electron/services/work-item-execution-service";
 
 const apiProject: WorkItemRepositoryRef = { platform: "github", projectKey: "acme/api", providerProjectId: "101", name: "api-service", role: "backend" };
 const webProject: WorkItemRepositoryRef = { platform: "gitlab", projectKey: "git.corp/platform/web", providerHost: "git.corp", providerProjectId: "202", name: "web-client", role: "frontend" };
@@ -65,6 +66,44 @@ function createStoredRunStore(stored: WorkItemRunRecord[] = []) {
 }
 
 describe("work item execution service", () => {
+  it("opens a selected Agent in the selected terminal for HITL work", async () => {
+    const openTerminalCommand = vi.fn(async () => "Terminal.app");
+    const manifestStore = { save: vi.fn(async () => undefined) };
+    const service = createWorkItemExecutionService({
+      getWorkItem: async () => item({ executionMode: "hitl", webUrl: "https://github.com/acme/api/issues/42", description: "Implement the checkout change." }),
+      workspace: { allocate: async () => allocatedWorkspace("/tmp/hitl-task", [apiProject]), updateRun: vi.fn(async () => undefined) },
+      resolveAfk: async () => "/usr/local/bin/afk",
+      resolveAgent: async id => ({ id, label: "Codex", command: "codex", executable: "/usr/local/bin/codex" }),
+      openTerminalCommand,
+      manifestStore,
+      runStore: { load: async () => [], save: async () => undefined },
+    });
+
+    const result = await service.start({
+      workItemId: "github:acme/api#42",
+      repositories: [apiSelection],
+      foreground: { agent: "codex", terminal: "terminal" },
+    });
+
+    expect(result.workspace).toEqual({ root: "/tmp/hitl-task" });
+    expect(openTerminalCommand).toHaveBeenCalledWith(expect.stringContaining("请读取并实施工作项 github:acme/api#42"), "terminal");
+    expect(openTerminalCommand).toHaveBeenCalledWith(expect.stringContaining("Implement the checkout change."), "terminal");
+    expect(manifestStore.save).not.toHaveBeenCalled();
+  });
+
+  it("quotes the foreground Agent command and prompt as one shell command", () => {
+    const command = buildForegroundAgentCommand(item({ title: "Issue's implementation" }), { id: "codex", label: "Codex", command: "codex", executable: "/usr/local/bin/codex" }, "/tmp/hitl task");
+    expect(command).toContain("cd '/tmp/hitl task'");
+    expect(command).toContain("'/usr/local/bin/codex'");
+    expect(command).toContain("Issue'\\''s implementation");
+  });
+
+  it("runs Claude Code with permission checks skipped", () => {
+    const command = buildForegroundAgentCommand(item(), { id: "claude", label: "Claude Code", command: "claude", executable: "/usr/local/bin/claude" }, "/tmp/task");
+    expect(command).toContain("'/usr/local/bin/claude' '--dangerously-skip-permissions'");
+    expect(command).toContain("GitHub 或 GitLab Issue");
+  });
+
   it("uses atomic updates and leaves a reconciled terminal record unchanged on child exit", async () => {
     const stored: WorkItemRunRecord[] = [];
     const listeners = new Map<string, (...args: unknown[]) => void>();

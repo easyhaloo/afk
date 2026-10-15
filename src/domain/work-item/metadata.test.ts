@@ -57,4 +57,17 @@ describe('global work item metadata', () => {
       tags: ['team::api'],
     });
   });
+
+  it('keeps ready HITL issues executable for foreground agent runs', () => {
+    const item = toGlobalWorkItem(project, {
+      issueNumber: 9,
+      title: 'Human guided issue',
+      description: 'Implement this with a selected agent.',
+      labels: ['stage::ready-for-issues', 'mode::hitl'],
+      state: 'opened',
+      webUrl: 'https://github.com/acme/api/issues/9',
+    });
+
+    expect(item).toMatchObject({ managed: true, executionEligible: true, state: 'ready', executionMode: 'hitl' });
+  });
 });

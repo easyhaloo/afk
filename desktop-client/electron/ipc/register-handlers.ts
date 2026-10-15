@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } fr
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract.js";
 import type { SshFingerprint } from "../../shared/ssh-contract.js";
 import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, parseWorkItemInventoryOptions, parseWorkItemRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract.js";
-import { parseExecutionQueryOptions } from "../../shared/execution-contract.js";
+import { parseExecutionQueryOptions, type ExecutionRunDetail } from "../../shared/execution-contract.js";
 import { exec } from "../adapters/process-executor.js";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter.js";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter.js";
@@ -10,7 +10,10 @@ import { createSshConfigAdapter } from "../adapters/ssh-config-adapter.js";
 import { createSshManagedHostStore } from "../adapters/ssh-managed-host-store.js";
 import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter.js";
 import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter.js";
-import { isAfkTmuxSession, listAfkTmux } from "../adapters/resource-adapter.js";
+import { isAfkTmuxSession, listAfkTmux, listRunResources } from "../adapters/resource-adapter.js";
+import { createTmuxAttachPtyAdapter } from "../adapters/tmux-pty-adapter.js";
+import { createExecutionAttachService } from "../services/execution-attach-service.js";
+import { createExecutionRuntimeAdapter } from "../adapters/execution-runtime-adapter.js";
 import { normalizeTmuxSessionName } from "../../shared/tmux-session.js";
 import { assertTrustedSender } from "../security/sender-guard.js";
 import { validateJumpserverBastionId, validateJumpserverBastionInput, validateJumpserverSyncOptions, validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation.js";
@@ -41,6 +44,7 @@ import { createExecutionWorkspaceService } from "../services/execution-workspace
 import { WorkflowGraphService } from "../services/graph-service.js";
 import { saveWorkspacePreference } from "../services/workspace-preference-service.js";
 import { resolveWorkspace } from "../services/workspace-service.js";
+import { detectAgentRuntimes } from "../services/runtime-service.js";
 import { projectRunScopeService } from "../services/project-run-scope-service.js";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -110,6 +114,7 @@ const defaultJumpserverService = createJumpserverService({
   managedHostStore: sshManagedHostStore,
   listManagedHosts: async () => ({ hosts: await sshManagedHostStore.list() }),
 });
+const externalTerminal = createExternalTerminalAdapter();
 const commands = createSshCommandAdapter({ exec });
 const knownHosts = createKnownHostsAdapter({
   home,
@@ -126,7 +131,7 @@ const sshService = createSshService({
   commands,
   knownHosts,
   credentialService: sshCredentialService,
-  externalTerminal: createExternalTerminalAdapter(),
+  externalTerminal,
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
 });
 async function resolveDesktopAfk() {
@@ -156,12 +161,26 @@ const workItemInventoryService = createWorkItemInventoryService({
   application: createWorkItemApplicationAdapter(createProviderWorkItemApplicationFacade()),
   store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
 });
-const workItemExecutionQueryService = createWorkItemExecutionQueryService(createRunEventQueryAdapter());
+const tmuxAttachPty = createTmuxAttachPtyAdapter({
+  onData: (attachId, data) => broadcast(IPC_CHANNELS.workItemsAttachData, attachId, data),
+  onExit: (attachId, code) => broadcast(IPC_CHANNELS.workItemsAttachExit, attachId, code),
+});
+const executionAttachService = createExecutionAttachService({
+  readRunResources: listRunResources,
+  verifyTargetExists: async (target) => (await exec("tmux", ["has-session", "-t", target])).ok,
+});
 const workItemInventorySyncService = createWorkItemInventorySyncService({
   sync: () => workItemInventoryService.sync(),
 });
 const executionWorkspaceService = createExecutionWorkspaceService();
 const workItemRunStore = createWorkItemRunStore({ resolveWorkspace });
+const workItemExecutionQueryService = createWorkItemExecutionQueryService(createRunEventQueryAdapter(), createExecutionRuntimeAdapter({
+  readReceipt: async (runId, workItemId) => {
+    const metadata = await executionWorkspaceService.read(workItemId);
+    if (!metadata || metadata.taskId !== workItemId) return undefined;
+    return (await workItemRunStore.load(metadata.root)).find(run => run.id === runId && run.workspacePath === metadata.root);
+  },
+}));
 const workItemRunHistoryService = createWorkItemRunHistoryService({ workspace: executionWorkspaceService, runStore: workItemRunStore });
 const workItemExecutionService = createWorkItemExecutionService({
   getWorkItem: async (workItemId) => {
@@ -182,6 +201,11 @@ const workItemExecutionService = createWorkItemExecutionService({
       },
     });
   },
+  resolveAgent: async (id) => {
+    const runtime = (await detectAgentRuntimes()).find(candidate => candidate.id === id && candidate.available);
+    return runtime ? { id: runtime.id, label: runtime.label, command: runtime.command, executable: runtime.executable } : undefined;
+  },
+  openTerminalCommand: (command, terminal) => externalTerminal.openCommand(command, terminal),
   workspace: executionWorkspaceService,
   manifestStore: createWorkItemExecutionManifestStore(),
   runStore: workItemRunStore,
@@ -249,6 +273,49 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     const page = await workItemExecutionQueryService.list(options);
     return { executions: page.executions, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
   });
+  registerHandlerMulti(IPC_CHANNELS.workItemsExecutionRunDetail, [
+    (value) => { if (typeof value !== "string" || !value.trim()) throw new Error("运行 ID 无效"); return value; },
+    (value) => { if (typeof value !== "string" || !value.trim()) throw new Error("工作项 ID 无效"); return value; },
+  ], async ([runId, workItemId]) => {
+    const detail: ExecutionRunDetail = await workItemExecutionQueryService.detail(runId, workItemId);
+    return detail;
+  });
+  registerHandler(IPC_CHANNELS.workItemsResolveAttachTarget, (value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("接管参数无效");
+    const input = value as Record<string, unknown>;
+    if (typeof input.runId !== "string" || !input.runId.trim()) throw new Error("运行 ID 无效");
+    if (input.workItemId !== undefined && typeof input.workItemId !== "string") throw new Error("工作项 ID 无效");
+    if (input.resourceId !== undefined && (typeof input.resourceId !== "string" || !input.resourceId.trim())) throw new Error("执行环境 ID 无效");
+    return { runId: input.runId, resourceId: input.resourceId as string | undefined };
+  }, (request) => executionAttachService.resolve(request.runId, request.resourceId));
+  registerHandler(IPC_CHANNELS.workItemsAttach, (value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("接管参数无效");
+    const input = value as Record<string, unknown>;
+    if (typeof input.runId !== "string" || !input.runId.trim()) throw new Error("运行 ID 无效");
+    if (input.resourceId !== undefined && (typeof input.resourceId !== "string" || !input.resourceId.trim())) throw new Error("执行环境 ID 无效");
+    const cols = input.cols === undefined ? 120 : input.cols;
+    const rows = input.rows === undefined ? 32 : input.rows;
+    if (typeof cols !== "number" || typeof rows !== "number" || !Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1 || cols > 500 || rows > 200) throw new Error("终端尺寸无效");
+    return { runId: input.runId, resourceId: input.resourceId as string | undefined, cols, rows };
+  }, async (input) => {
+    const resolved = await executionAttachService.resolve(input.runId, input.resourceId);
+    if (!resolved.available || !resolved.attachTarget) throw new Error("unavailable" in resolved ? resolved.unavailable.reason : "执行环境不可接管");
+    const attachId = tmuxAttachPty.attach(resolved.attachTarget, input.cols, input.rows);
+    return { attachId, attachTarget: resolved.attachTarget, resourceId: resolved.environment.resourceId };
+  });
+  registerHandlerMulti(IPC_CHANNELS.workItemsAttachInput, [
+    (value) => { if (typeof value !== "string" || !value.trim()) throw new Error("接管会话 ID 无效"); return value; },
+    (value) => { if (typeof value !== "string" || value.includes("\0") || value.length > 8_000) throw new Error("终端输入无效"); return value; },
+  ], ([attachId, data]) => tmuxAttachPty.input(attachId, data));
+  registerHandlerMulti(IPC_CHANNELS.workItemsAttachResize, [
+    (value) => { if (typeof value !== "string" || !value.trim()) throw new Error("接管会话 ID 无效"); return value; },
+    (value) => { if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 500) throw new Error("终端列数无效"); return value; },
+    (value) => { if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 200) throw new Error("终端行数无效"); return value; },
+  ], ([attachId, cols, rows]) => tmuxAttachPty.resize(attachId, cols, rows));
+  registerHandler(IPC_CHANNELS.workItemsDetach, (value) => {
+    if (typeof value !== "string" || !value.trim()) throw new Error("接管会话 ID 无效");
+    return value;
+  }, (attachId) => tmuxAttachPty.detach(attachId));
   ipcMain.handle(IPC_CHANNELS.chooseWorkspace, async (event) => {
     assertTrustedSender(event);
     const selected = await dialog.showOpenDialog({ title: "选择 AFK 工作区", properties: ["openDirectory"] });

@@ -9,13 +9,17 @@ import { expect, test } from "./_helpers/launch";
  * It failed for real once — 287 of 396 sizes were bare px literals, so the
  * setting moved the nav and nothing else.
  */
-const SAMPLED = [".nav-item", ".backlog-page"] as const;
+// Sampled on 工作项, which is where the app lands by default. It used to be
+// 本地 Backlog, but that nav item is gone. The two samples have to carry a
+// calc(... * var(--afk-scale)) font size of their own: a container that merely
+// inherits the browser default reads 16px at every density and proves nothing.
+const SAMPLED = [".nav-item", ".backlog-search input"] as const;
 
 async function setDensity(page: import("playwright").Page, label: string) {
   await page.locator(".primary-nav button", { hasText: "设置" }).click();
   await page.getByRole("radiogroup", { name: "字号密度" }).getByText(label).click();
   await page.waitForTimeout(250);
-  await page.locator(".primary-nav button", { hasText: "本地 Backlog" }).click();
+  await page.locator(".primary-nav button", { hasText: "工作项" }).click();
   await page.waitForTimeout(400);
 }
 

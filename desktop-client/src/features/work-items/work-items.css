@@ -108,6 +108,9 @@ button.work-item-reference-card:disabled { opacity: 1; cursor: default; }
 .work-item-plan-card em.completed { color: var(--ready); }
 .work-item-plan-card em.blocked { color: var(--attention); }
 .work-item-run-card { grid-template-columns: 30px minmax(0, 1fr) auto; }
+.work-item-run-card:has(> button) { grid-template-columns: 30px minmax(0, 1fr) auto auto; }
+.work-item-run-card:has(> button ~ button) { grid-template-columns: 30px minmax(0, 1fr) auto auto auto; }
+.work-item-run-card > button { padding: 5px 8px; border: var(--border-w) solid var(--backlog-border); border-radius: var(--radius-sm); background: var(--backlog-surface); color: var(--backlog-text); font-size: calc(11px * var(--afk-scale)); white-space: nowrap; cursor: pointer; }
 .work-item-run-card code { overflow: hidden; color: var(--backlog-muted); font-family: var(--font-mono, monospace); font-size: calc(10px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
 .work-item-run-status { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: var(--run); background: var(--run-soft); }
 .work-item-run-status.failed { color: var(--attention); background: var(--attention-soft); }
@@ -138,6 +141,7 @@ button.work-item-reference-card:disabled { opacity: 1; cursor: default; }
 .work-item-run-field { display: grid; gap: 6px; }
 .work-item-run-field > span { color: var(--backlog-muted); font-size: calc(11px * var(--afk-scale)); }
 .work-item-run-field > b { display: flex; min-height: 36px; box-sizing: border-box; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--backlog-border); border-radius: var(--radius-sm); font-size: calc(12px * var(--afk-scale)); font-weight: 600; }
+.work-item-run-field select { width: 100%; min-height: 36px; box-sizing: border-box; padding: 0 9px; border: 1px solid var(--backlog-border); border-radius: var(--radius-sm); background: var(--backlog-surface); color: var(--backlog-text); font: inherit; font-size: calc(12px * var(--afk-scale)); }
 .work-item-run-resources,
 .work-item-workspace-preview,
 .work-item-run-error { grid-column: 1 / -1; }
@@ -159,6 +163,39 @@ button.work-item-reference-card:disabled { opacity: 1; cursor: default; }
 .work-item-workspace-preview b { color: var(--backlog-text); font-size: calc(12px * var(--afk-scale)); }
 .work-item-workspace-preview code { color: var(--backlog-muted); font-family: var(--font-mono, monospace); font-size: calc(10px * var(--afk-scale)); overflow-wrap: anywhere; }
 .work-item-run-error { display: flex; align-items: center; gap: 7px; padding: 10px; border-radius: var(--radius-md); background: var(--attention-soft); color: var(--attention); font-size: calc(11px * var(--afk-scale)); }
+
+.run-timeline { display: grid; gap: 8px; margin: 0; padding: 0 0 0 14px; list-style: none; }
+.run-timeline-entry { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 10px; font-size: calc(11px * var(--afk-scale)); }
+.run-timeline-entry time { color: var(--backlog-muted); font-size: calc(10px * var(--afk-scale)); }
+.run-timeline-entry b { font-size: calc(11px * var(--afk-scale)); }
+.run-timeline-entry small { color: var(--backlog-muted); font-size: calc(10px * var(--afk-scale)); }
+.run-timeline-entry code { color: var(--backlog-muted); font-family: var(--font-mono, monospace); font-size: calc(10px * var(--afk-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-timeline-entry.failed b { color: var(--attention); }
+.run-timeline-missing,
+.run-timeline-loading { color: var(--backlog-muted); font-size: calc(11px * var(--afk-scale)); }
+.execution-health { margin: 12px 0; padding: 12px; border: 1px solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); }
+.execution-health h3 { margin: 0 0 6px; font-size: calc(12px * var(--afk-scale)); }
+.execution-health p, .execution-health small { color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); }
+.execution-health dl { display: grid; gap: 5px; margin: 8px 0; font-size: calc(11px * var(--afk-scale)); }
+.execution-health dl > div { display: flex; gap: 12px; }
+.execution-health dd { margin: 0; overflow-wrap: anywhere; }
+.workflow-instances { padding: 20px; color: var(--afk-text); }
+.workflow-instances header p { color: var(--afk-muted); font-size: calc(12px * var(--afk-scale)); }
+.workflow-instance-layout { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 20px; }
+.workflow-instance-layout nav { display: flex; flex-direction: column; gap: 8px; }
+.workflow-instance-layout nav button { display: grid; gap: 6px; padding: 12px; text-align: left; color: var(--afk-text); background: var(--afk-panel); border: 1px solid var(--afk-border); border-radius: var(--radius-md); cursor: pointer; }
+.workflow-instance-layout nav button[aria-pressed="true"] { border-color: var(--afk-accent); }
+.workflow-instance-layout article { min-width: 0; }
+.workflow-instance-layout code { overflow-wrap: anywhere; font-size: calc(11px * var(--afk-scale)); }
+.workflow-instance-layout table { width: 100%; border-collapse: collapse; font-size: calc(12px * var(--afk-scale)); }
+.workflow-instance-layout th, .workflow-instance-layout td { padding: 10px 8px; border-bottom: 1px solid var(--afk-border); text-align: left; overflow-wrap: anywhere; }
+.workflow-instance-actions { display: flex; gap: 8px; }
+.workflow-instance-actions button { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel); color: var(--afk-text); cursor: pointer; }
+.workflow-instance-actions button:disabled { opacity: .4; cursor: default; }
+@media (max-width: 900px) { .workflow-instance-layout { grid-template-columns: 1fr; } }
+
+.work-item-run-timeline > summary,
+.inspector-run-timeline > summary { color: var(--backlog-muted); cursor: pointer; font-size: calc(11px * var(--afk-scale)); }
 
 @media (max-width: 760px) {
   .work-items-toolbar { flex-wrap: wrap; }

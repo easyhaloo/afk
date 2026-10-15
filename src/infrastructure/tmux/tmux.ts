@@ -13,6 +13,8 @@ export interface TmuxSession {
   dir: string;
   status?: string;
   created?: string;
+  /** tmux-native pane id (e.g. %0) when known — exact ADR-0019 target. */
+  paneId?: string;
 }
 
 export interface TmuxCaptureOptions {
@@ -84,10 +86,22 @@ export class TmuxClient {
       '-c', dir,
       command,
     ]);
-    // Bypass the workspace trust dialog by auto-confirming.
-    await this.sleep(2000);
-    await this.exec(['send-keys', '-t', `${session}:${window}`, '--', 'Enter']);
-    return { name: session, window, dir };
+    const paneId = await this.firstPaneId(session, window).catch(() => undefined);
+    return { name: session, window, dir, ...(paneId ? { paneId } : {}) };
+  }
+
+  /**
+   * First pane id of a window — the exact ADR-0019 control target component.
+   * `#{pane_id}` (e.g. %0) survives window renames and never collides across
+   * sessions in the same tmux server.
+   */
+  async firstPaneId(session: string, window: string): Promise<string | undefined> {
+    try {
+      const output = await this.exec(['list-panes', '-t', `${normalizeTmuxSessionName(session)}:${window}`, '-F', '#{pane_id}']);
+      return output.split('\n').map(line => line.trim()).filter(Boolean)[0];
+    } catch {
+      return undefined;
+    }
   }
 
   /**

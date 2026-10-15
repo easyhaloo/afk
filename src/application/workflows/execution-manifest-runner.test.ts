@@ -150,6 +150,10 @@ describe('execution manifest request to runner boundary', () => {
     expect(events.indexOf('prepared')).toBeLessThan(events.indexOf('agent'));
     expect(finish).toHaveBeenCalledTimes(1);
     expect(finish).toHaveBeenCalledWith({ status: 'success' });
+    expect(observer.record).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      kind: 'workflow.recorded', name: 'simple-loop', version: 1,
+      steps: expect.arrayContaining([expect.objectContaining({ kind: 'agent', dependsOn: [] })]),
+    }));
   });
 
   it.each([false, true])('finalizes both repositories before QA, with secondary push failure=%s', async failSecondary => {

@@ -94,10 +94,10 @@ test.describe("contextual selection", () => {
     await expect(page.getByRole("button", { name: "筛选工作项" })).toBeVisible();
   });
 
-  test("keeps shared controls readable in graphite and within a narrow desktop viewport", async ({ electronApp, page }) => {
+  test("keeps shared controls readable in the light theme and within a narrow desktop viewport", async ({ electronApp, page }) => {
     await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
-    await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: "石墨" }).click();
-    await expect(page.locator("html")).toHaveAttribute("data-afk-theme", "graphite");
+    await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: "浅色" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-afk-theme", "light");
     await page.getByRole("radiogroup", { name: "字号密度" }).getByRole("radio", { name: "舒展" }).click();
     await page.locator(".primary-nav").getByRole("button", { name: "工作项", exact: true }).click();
     await seedSelectionInventory(electronApp, page);
@@ -122,7 +122,7 @@ test.describe("contextual selection", () => {
     expect(colors.background).toBe(colors.panelBackground);
     expect(colors.searchBackground).toBe(colors.panelBackground);
     expect(colors.panelWidth - colors.width).toBeLessThanOrEqual(36);
-    if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/filters-graphite-narrow.png` });
+    if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/filters-light-narrow.png` });
   });
 
   test("aligns SSH search and actions and gives filter choices the full panel width", async ({ page }) => {

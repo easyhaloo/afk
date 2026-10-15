@@ -79,6 +79,20 @@ Codex + docker sandbox + named branch + planner template
 - Human attach
 - HITL takeover
 
+Provider differences stay inside the Agent provider. OpenCode's interactive
+TUI consumes the goal via a launch flag (`opencode --auto --prompt …`, which
+auto-submits once the TUI is rendered), so the local sandbox never types the
+prompt into its pane; OpenCode handles its own startup and completion still
+flows through the shared `goal_complete` signal file. Model
+selection is runtime configuration via `AFK_OPENCODE_MODEL` (`provider/model`),
+never a hardcoded product default; batch mode uses `opencode run --format
+json` with the goal on stdin. The OpenCode provider removes the leading
+`/goal` command prefix before launching its TUI, preserving the full issue body
+and completion protocol as ordinary prompt text; otherwise OpenCode expands
+its own slash command and drops the remainder of a multiline prompt. Managed
+QA resources retain the parent audit run ID so all attach entry points resolve
+the same execution attempt.
+
 ### 2.4 Gradual Retirement of `.afk-signal.json`
 
 Agents should no longer actively write control signals via prompt. The new control protocol uses:

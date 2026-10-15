@@ -4,6 +4,8 @@ import { act, create } from "react-test-renderer";
 import { SelectMenu } from "../src/components/SelectMenu";
 import { WorkflowStudioInspector } from "../src/main";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 describe("SelectMenu", () => {
   it("adds an explicit centered trigger variant without changing the default class", () => {
     const props = {

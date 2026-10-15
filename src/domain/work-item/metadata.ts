@@ -31,8 +31,7 @@ export function toGlobalWorkItem(project: ProviderProjectRef, issue: ProviderIss
     description: issue.description,
     managed,
     executionEligible: managed
-      && (state === 'ready' || state === 'rework')
-      && executionMode === 'afk',
+      && (state === 'ready' || state === 'rework'),
     state,
     executionMode,
     parentId: relationId(project, issue.labels, ['parent::']),

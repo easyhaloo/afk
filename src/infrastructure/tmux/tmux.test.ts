@@ -35,6 +35,7 @@ describe('TmuxClient with special-character session names', () => {
       await client.killSession(raw).catch(() => undefined);
     }
   }, 30000);
+
 });
 
 describe('TmuxClient signal readers', () => {

@@ -55,14 +55,14 @@ describe("resource search pages", () => {
 
   it("searches registered environment resources and preserves session targets", () => {
     const onTerminal = vi.fn();
-    const snapshot = { ...DEMO_SNAPSHOT, sessions: [{ name: "session-special", workspace: "/tmp/project", windows: 1, attached: false }] };
+    const snapshot = { ...DEMO_SNAPSHOT, sessions: [{ name: "session-special", workspace: "/tmp/project", windows: 1, attached: false, runId: "run-144", resourceId: "resource-144" }] };
     let renderer!: ReturnType<typeof create>;
     act(() => { renderer = create(createElement(Environments, { snapshot, onTerminal })); });
     act(() => renderer.root.findByProps({ "aria-label": "搜索执行环境" }).props.onChange({ target: { value: "special" } }));
     const rows = renderer.root.findAllByProps({ className: "env-row" });
     expect(rows).toHaveLength(1);
     act(() => rows[0].findByType("button").props.onClick());
-    expect(onTerminal).toHaveBeenCalledWith("session-special", "/tmp/project");
+    expect(onTerminal).toHaveBeenCalledWith("session-special", "/tmp/project", "run-144", "resource-144");
     act(() => renderer.unmount());
   });
 });

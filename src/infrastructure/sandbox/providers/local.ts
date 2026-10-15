@@ -117,8 +117,10 @@ export class LocalSandbox implements Sandbox {
       await fs.unlink(join(this.worktreePath, '.afk', 'claude-status.json')).catch(error => {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       });
-      await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
+      const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
       this.sessionCreated = true;
+      const paneId = created.paneId
+        ?? await this.tmux.firstPaneId?.(created.name, created.window).catch(() => undefined);
       getAfkResourceRegistry().register({
         workspacePath: this.workspaceRoot,
         runId: this.runtimeRunId,
@@ -127,7 +129,13 @@ export class LocalSandbox implements Sandbox {
         origin: 'local-sandbox',
         name: this.sessionName,
         detail: 'interactive tmux session',
-        metadata: { branch: this.branch, generation: options.generation },
+        metadata: {
+          branch: this.branch,
+          generation: options.generation,
+          ...(paneId
+            ? { tmuxSession: created.name, tmuxWindowName: created.window, tmuxPaneId: paneId }
+            : {}),
+        },
       });
     }
 
@@ -145,7 +153,6 @@ export class LocalSandbox implements Sandbox {
     await execution.sendPrompt();
     return execution;
   }
-
   async close(): Promise<void> {
     if (this._closed) return;
     this._closed = true;
@@ -212,6 +219,8 @@ export class LocalAgentExecution implements AgentExecution {
 
   /** Send the goal to the tmux session — called by LocalSandbox.startAgent(). */
   async sendPrompt(): Promise<void> {
+    if (this.metadata?.provider === 'opencode') return;
+
     // `sendGoal` is retained as a narrow compatibility seam for injected
     // legacy tmux fakes and older embedders; production TmuxClient exposes
     // sendPrompt as the canonical operation.

@@ -3,7 +3,7 @@ import { ClaudeCodeProvider } from './claude-code.js';
 import { CodexProvider } from './codex.js';
 import { CursorProvider } from './cursor.js';
 import { PiProvider } from './pi.js';
-import { OpenCodeProvider } from './opencode.js';
+import { OpenCodeProvider, resolveOpenCodeModel } from './opencode.js';
 import { CopilotProvider } from './copilot.js';
 import {
   registerAgentProvider,
@@ -49,6 +49,7 @@ describe('Agent providers — fixture coverage', () => {
       const cmd = p.buildCommand(opts({ interactive: true }));
       expect(cmd.argv[0]).toBe('claude');
       expect(cmd.argv).toContain('--dangerously-skip-permissions');
+      expect(cmd.argv).not.toContain('--no-input');
       expect(cmd.cwd).toBe('/tmp/worktree');
     });
 
@@ -322,13 +323,101 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('resume')).toBe(false);
       expect(p.capabilities.has('streaming')).toBe(true);
       expect(p.capabilities.has('usage')).toBe(true);
+      expect(p.capabilities.has('interactive')).toBe(true);
     });
 
-    it('buildCommand always uses --format json', () => {
-      const cmd = p.buildCommand(opts({}));
+    it('builds the TUI command with auto-approve for interactive execution', () => {
+      const cmd = p.buildCommand({ ...opts({ interactive: true }), executionMode: 'interactive' });
       expect(cmd.argv[0]).toBe('opencode');
-      expect(cmd.argv).toContain('--format');
-      expect(cmd.argv).toContain('json');
+      expect(cmd.argv[1]).not.toBe('run');
+      expect(cmd.argv).not.toContain('--format');
+      expect(cmd.argv).not.toContain('--non-interactive');
+      expect(cmd.argv).toContain('--auto');
+      expect(cmd.cwd).toBe('/tmp/worktree');
+    });
+
+    it('passes the goal via --prompt for TUI auto-submit', () => {
+      const cmd = p.buildCommand({ ...opts({ goal: 'implement feature X' }), executionMode: 'interactive' });
+      const promptIndex = cmd.argv.indexOf('--prompt');
+      expect(promptIndex).toBeGreaterThan(-1);
+      expect(cmd.argv[promptIndex + 1]).toBe('implement feature X');
+    });
+
+    it('passes the runner prompt intact when creating an interactive execution', async () => {
+      const startAgent = vi.fn(async () => ({ id: 'interactive-opencode' } as AgentExecution));
+      const prompt = '/goal Implement the assigned task.\nBacklog description: exact acceptance criteria.\nAFK interactive completion protocol: write .afk-signal.json.';
+      await p.createExecution({
+        worktreePath: '/tmp/worktree',
+        sessionId: 'sess-1',
+        sandbox: { startAgent } as unknown as Sandbox,
+        generation: 1,
+        prompt,
+        signalType: 'goal_complete',
+        executionMode: 'interactive',
+      });
+      expect(startAgent).toHaveBeenCalledWith(expect.objectContaining({
+        command: expect.objectContaining({ argv: expect.arrayContaining(['--prompt', prompt.replace(/^\/goal\s*/, '')]) }),
+        prompt,
+      }));
+    });
+
+    it('builds run --format json for batch execution', () => {
+      const cmd = p.buildCommand({ ...opts(), executionMode: 'batch' });
+      expect(cmd.argv).toEqual(['opencode', 'run', '--format', 'json']);
+      expect(cmd.cwd).toBe('/tmp/worktree');
+    });
+
+    it('resolves --model from the environment and never hardcodes one', () => {
+      const interactive = p.buildCommand({ ...opts({ interactive: true }), executionMode: 'interactive' });
+      expect(interactive.argv).not.toContain('--model');
+
+      const batch = p.buildCommand({ ...opts(), executionMode: 'batch' });
+      expect(batch.argv).not.toContain('--model');
+
+      const modelEnv = process.env.AFK_OPENCODE_MODEL;
+      process.env.AFK_OPENCODE_MODEL = 'acme/model-x';
+      try {
+        const configured = p.buildCommand({ ...opts({ interactive: true }), executionMode: 'interactive' });
+        const modelIndex = configured.argv.indexOf('--model');
+        expect(modelIndex).toBeGreaterThan(-1);
+        expect(configured.argv[modelIndex + 1]).toBe('acme/model-x');
+      } finally {
+        if (modelEnv === undefined) delete process.env.AFK_OPENCODE_MODEL;
+        else process.env.AFK_OPENCODE_MODEL = modelEnv;
+      }
+
+      expect(resolveOpenCodeModel({ AFK_OPENCODE_MODEL: 'acme/model-x' })).toBe('acme/model-x');
+      expect(resolveOpenCodeModel({})).toBeUndefined();
+      expect(resolveOpenCodeModel({ AFK_OPENCODE_MODEL: '   ' })).toBeUndefined();
+    });
+
+    it('routes step_finish tokens into usage and result events', () => {
+      const line = JSON.stringify({
+        type: 'step_finish',
+        timestamp: 1791992467521,
+        sessionID: 'ses_x',
+        part: { type: 'step-finish', reason: 'stop', tokens: { total: 703, input: 700, output: 3 } },
+      });
+      const events = p.parseLine(line);
+      const usage = events.find(e => e.type === 'usage');
+      expect(usage).toMatchObject({ usage: { inputTokens: 700, outputTokens: 3, totalTokens: 703 } });
+      expect(events.some(e => e.type === 'result')).toBe(true);
+    });
+
+    it('captures the session id from step_start', () => {
+      const line = JSON.stringify({ type: 'step_start', sessionID: 'ses_ec4e', part: { type: 'step-start' } });
+      const events = p.parseLine(line);
+      expect(events[0]).toEqual({ type: 'session', sessionId: 'ses_ec4e' });
+    });
+
+    it('exposes completion text to the batch signal reader', () => {
+      const text = '<goal_complete>{"type":"goal_complete","kind":"task","summary":"done"}</goal_complete>';
+      expect(p.parseLine(JSON.stringify({ type: 'text', part: { text } })))
+        .toContainEqual({ type: 'result', result: text });
+    });
+
+    it('falls back to text for non-JSON lines', () => {
+      expect(p.parseLine('plain output')[0].type).toBe('text');
     });
   });
 

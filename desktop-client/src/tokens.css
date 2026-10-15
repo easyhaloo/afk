@@ -63,6 +63,9 @@
   --radius-md:   5px 11px 8px 3px;
   --radius-lg:   10px 16px 13px 7px / 16px 10px 7px 13px;
   --radius-pill: 999px;
+  /* The prototype's `.ws` — the workspace well. Bigger and rounder than a
+     panel: it reads as a container, not a surface. */
+  --radius-well: 18px 6px 22px 9px / 6px 18px 9px 22px;
 }
 
 /* ---------- 2. palette: dark (default) ---------- */

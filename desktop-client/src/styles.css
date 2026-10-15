@@ -49,18 +49,22 @@ input:focus-visible {
 .sidebar {
   display: flex;
   flex-direction: column;
-  padding: 14px 9px;
+  padding: 14px 10px 10px;
   border-right: var(--border-w) solid var(--afk-border);
-  background: var(--afk-panel-subtle);
+  /* The prototype leaves the sidebar clear so the paper texture reads through
+     the whole shell; only the 1.5px rule separates it. */
+  background: transparent;
 }
 
 /* ---------- brand ---------- */
 .brand {
   display: grid;
-  grid-template-columns: 25px 1fr;
+  grid-template-columns: 26px 1fr;
   align-items: center;
-  gap: 0 8px;
+  gap: 9px;
   margin: 3px 8px 22px;
+  /* The hand-drawn tilt is the whole point of the mark. */
+  transform: rotate(-0.4deg);
 }
 
 .brand-mark {
@@ -68,16 +72,21 @@ input:focus-visible {
   place-items: center;
   width: 24px;
   height: 24px;
-  background: var(--ink-mid);
-  color: var(--afk-panel);
-  font-size: calc(10px * var(--afk-scale));
-  font-weight: 700;
+  background: var(--afk-accent);
+  color: var(--paper);
+  font-size: calc(12px * var(--afk-scale));
+  font-weight: 800;
   clip-path: polygon(50% 0, 100% 100%, 69% 100%, 50% 60%, 31% 100%, 0 100%);
+  box-shadow: 2px 2px 0 var(--ink-shadow);
 }
 
 .brand strong {
+  /* --afk-font-head is what the 手绘标题 setting switches; until this the
+     token existed and nothing read it, so the control did nothing. */
+  font-family: var(--afk-font-head);
   font-size: calc(11px * var(--afk-scale));
-  letter-spacing: 0.11em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 .brand strong b {
@@ -86,6 +95,7 @@ input:focus-visible {
 
 .brand small {
   grid-column: 2;
+  margin-top: 1px;
   color: var(--afk-muted);
   font-family: var(--afk-mono);
   font-size: calc(9px * var(--afk-scale));
@@ -93,21 +103,29 @@ input:focus-visible {
 }
 
 /* ---------- workspace switcher ---------- */
+/* The prototype's `.ws`: a ruled well with a rotated corner that lifts on
+   hover. It was a borderless transparent row before, which is why the panel
+   read as flat next to everything else. */
 .workspace-switcher {
   display: grid;
   grid-template-columns: 27px minmax(0, 1fr) 16px;
   gap: 8px;
   align-items: center;
   width: 100%;
-  padding: 8px;
-  border-radius: var(--radius-md);
-  background: transparent;
+  min-height: 34px;
+  padding: 0 9px;
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-well);
+  background: var(--paper-2);
   color: var(--afk-border-strong);
   text-align: left;
+  box-shadow: var(--shadow-panel-sm);
+  transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 
 .workspace-switcher:hover {
-  background: var(--afk-panel-subtle);
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 var(--ink-shadow);
 }
 
 .workspace-switcher b,
@@ -131,10 +149,11 @@ input:focus-visible {
 /* ---------- nav ---------- */
 .nav-label {
   margin: 22px 8px 6px;
+  padding: 0 9px 5px;
   color: var(--afk-muted);
-  font-family: var(--afk-mono);
+  font-family: var(--afk-font-head);
   font-size: calc(10px * var(--afk-scale));
-  letter-spacing: 0.08em;
+  letter-spacing: 0.03em;
 }
 
 .nav-label.lower {
@@ -142,9 +161,10 @@ input:focus-visible {
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   width: 100%;
   min-height: 34px;
   padding: 0 9px;
@@ -153,30 +173,50 @@ input:focus-visible {
   color: var(--afk-muted);
   font-size: calc(12px * var(--afk-scale));
   text-align: left;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 
+/* Hover lifts off the paper, the way every other control here does. */
 .nav-item:hover {
+  transform: translate(-1px, -1px);
   background: var(--afk-panel-subtle);
   color: var(--afk-text);
+  box-shadow: 2px 2px 0 var(--ink-shadow);
 }
 
 .nav-item.active {
-  background: var(--afk-border);
+  background: var(--afk-accent-soft);
   color: var(--afk-text);
-  font-weight: 600;
+  font-weight: 700;
+}
+
+/* The prototype marks the current view with a ruled tick in the gutter, not
+   only by tinting the row. */
+.nav-item.active::before {
+  position: absolute;
+  top: 8px;
+  left: -10px;
+  width: 2px;
+  height: 16px;
+  border-radius: 1px 3px 2px 1px;
+  background: var(--afk-accent);
+  box-shadow: 1px 1px 0 var(--ink-shadow);
+  content: "";
 }
 
 .nav-item em {
   min-width: 17px;
   margin-left: auto;
-  padding: 2px 4px;
+  padding: 1px 5px;
   border-radius: var(--radius-sm);
   background: var(--afk-border);
   color: var(--afk-muted);
   font-family: var(--afk-mono);
-  font-size: calc(10px * var(--afk-scale));
+  font-size: calc(9px * var(--afk-scale));
   font-style: normal;
+  line-height: 1.5;
   text-align: center;
+  box-shadow: 1px 1px 0 var(--afk-border-strong);
 }
 
 /* ---------- topbar ---------- */

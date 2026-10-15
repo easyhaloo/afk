@@ -9,13 +9,13 @@ const BASE_ITEMS = [
   { id: "github:acme/api#99", issueNumber: 99, project: { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main" }, title: "早期 API 调整", description: "早期工作项。", managed: false, executionEligible: false, state: "ready", executionMode: "afk", dependsOn: [], tags: [], branchName: "afk/backlog-99", providerRef: "github:acme/api#99", updatedAt: "2025-06-15T00:00:00.000Z" },
 ];
 
-const PAGINATED_ITEMS = Array.from({ length: 55 }, (_, i) => {
-  const month = String(Math.min(9, (i % 9) + 2));
+const PAGINATED_ITEMS = Array.from({ length: 55 }, (_, index) => {
+  const month = String(Math.min(9, (index % 9) + 2));
   return {
-    id: `github:acme/api#${i + 10}`,
-    issueNumber: i + 10,
+    id: `github:acme/api#${index + 10}`,
+    issueNumber: index + 10,
     project: { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main" },
-    title: `批量填充项目 ${i + 10}`,
+    title: `批量填充项目 ${index + 10}`,
     description: "用于加载更多测试。",
     managed: false,
     executionEligible: false,
@@ -23,8 +23,8 @@ const PAGINATED_ITEMS = Array.from({ length: 55 }, (_, i) => {
     executionMode: "afk" as const,
     dependsOn: [],
     tags: [],
-    branchName: `afk/backlog-${i + 10}`,
-    providerRef: `github:acme/api#${i + 10}`,
+    branchName: `afk/backlog-${index + 10}`,
+    providerRef: `github:acme/api#${index + 10}`,
     updatedAt: `2026-${month.padStart(2, '0')}-01T00:00:00.000Z`,
   };
 });
@@ -91,15 +91,19 @@ test.describe("global work items", () => {
 
     await expect(rows.nth(0)).toContainText("早期 API 调整");
     await expect(rows.nth(1)).toContainText("API 登录态切换");
+    const sortTriggerValueAfterSelect = sortTrigger.locator(".select-menu-trigger-value");
+    await expect(sortTriggerValueAfterSelect).toContainText("最早更新优先");
 
     await page.getByRole("button", { name: "筛选工作项" }).click();
     await page.getByLabel("选择仓库").click();
     await page.getByRole("option", { name: "acme/api" }).click();
     await expect(page.getByRole("button", { name: "显示更多工作项" })).toBeVisible();
+    await expect(sortTriggerValueAfterSelect).toContainText("最早更新优先");
 
     await page.getByRole("button", { name: "显示更多工作项" }).click();
     await expect(rows).toHaveCount(57);
     await expect(rows.first()).toContainText("早期 API 调整");
+    await expect(sortTriggerValueAfterSelect).toContainText("最早更新优先");
   });
 
   test("sort selector keyboard and accessibility", async ({ page }) => {
@@ -111,5 +115,49 @@ test.describe("global work items", () => {
     const rows = page.locator(".backlog-row.work-item-row");
     await rows.first().click();
     await expect(page.getByRole("dialog")).toBeVisible();
+  });
+
+  test("sort selection persists across search, provider, state, and refresh", async ({ electronApp, page }) => {
+    const paginatedInventory = parseWorkItemInventoryResult({
+      items: [...BASE_ITEMS, ...PAGINATED_ITEMS],
+      projects: [
+        { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main" },
+        { platform: "github", projectKey: "acme/web", name: "web", defaultBranch: "main" },
+      ],
+      diagnostics: [],
+      complete: true,
+    });
+    await electronApp.evaluate(({ ipcMain }, input) => {
+      ipcMain.removeHandler(input.channel);
+      ipcMain.handle(input.channel, () => input.inventory);
+    }, { channel: IPC_CHANNELS.workItemsList, inventory: paginatedInventory });
+    await page.getByRole("button", { name: "刷新工作项" }).click();
+
+    const rows = page.locator(".backlog-row.work-item-row");
+    await expect(rows.first()).toContainText("Web 登录页调整");
+
+    const sortTrigger = page.getByRole("button", { name: "排序" });
+    const sortTriggerValue = sortTrigger.locator(".select-menu-trigger-value");
+    await sortTrigger.click();
+    await page.getByRole("option", { name: "最早更新优先" }).click();
+    await expect(sortTriggerValue).toContainText("最早更新优先");
+    await expect(rows.first()).toContainText("早期 API 调整");
+
+    await page.locator("[aria-label=\"搜索工作项\"]").fill("API");
+    await expect(sortTriggerValue).toContainText("最早更新优先");
+    await page.locator("[aria-label=\"搜索工作项\"]").fill("");
+
+    await page.getByRole("button", { name: "筛选工作项" }).click();
+    await page.getByLabel("选择 Provider").click();
+    await page.getByRole("option", { name: "GitHub" }).click();
+    await expect(sortTriggerValue).toContainText("最早更新优先");
+
+    await page.getByLabel("筛选状态").click();
+    await page.getByRole("option", { name: "待处理" }).click();
+    await expect(sortTriggerValue).toContainText("最早更新优先");
+
+    await page.getByRole("button", { name: "刷新工作项" }).click();
+    await expect(sortTriggerValue).toContainText("最早更新优先");
+    await expect(rows.first()).toContainText("早期 API 调整");
   });
 });

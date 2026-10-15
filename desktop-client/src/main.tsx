@@ -640,10 +640,54 @@ function Workflows({ snapshot, onSave, focusTemplateId }: { snapshot: Snapshot |
   return <WorkflowStudio workflow={workflow} model={model} activeTemplate={activeTemplate} loop={loop} workflowRuns={workflowRuns} onSave={onSave} onSavedTemplate={rememberCustomTemplate} onBack={() => { rememberCustomTemplate(model); setDraft(null); setMode("library"); }} selected={selected} onSelected={setSelected} onDraft={setDraft} />;
 }
 
-function WorkflowLibrary({ templates, activeTemplateName, onOpen, onCreate }: { templates: WorkflowTemplateSummary[]; activeTemplateName?: string; workflowRuns: WorkflowRunSummary[]; onOpen: (template: WorkflowTemplateSummary) => void; onCreate: () => void }) {
+function WorkflowLibrary({ templates, activeTemplateName, onOpen, onCreate, workflowRuns }: { templates: WorkflowTemplateSummary[]; activeTemplateName?: string; workflowRuns: WorkflowRunSummary[]; onOpen: (template: WorkflowTemplateSummary) => void; onCreate: () => void }) {
+  const sortedRuns = useMemo(() => [...workflowRuns].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()).slice(0, 5), [workflowRuns]);
+
+  const statusIcon = (status: WorkflowRunSummary["status"]) => {
+    if (status === "running") return <CircleDashed size={14} aria-hidden="true" />;
+    if (status === "completed") return <CircleCheck size={14} aria-hidden="true" />;
+    if (status === "failed") return <CircleX size={14} aria-hidden="true" />;
+    return <TriangleAlert size={14} aria-hidden="true" />;
+  };
+
   return <section className="workflow-library" aria-label="工作流列表">
     <header className="workflow-library-heading"><div><p>WORKFLOWS</p><h1>工作流</h1><span>选择一个模板，在画布中查看或配置其执行链路。</span></div><button className="workflow-create" onClick={onCreate} aria-label="新建工作流" title="新建工作流"><Plus size={16} aria-hidden="true" /></button></header>
-    <div className="workflow-library-grid">{templates.map(template => { const active = template.id === activeTemplateName; const agentSteps = template.steps.filter(step => step.kind === "agent").length; return <button key={template.id} className={"workflow-library-card" + (active ? " active" : "")} onClick={() => onOpen(template)}><span className="workflow-library-source" title={workflowSourceLabel(template.source)}>{workflowSourceIcon(template.source)}</span><div className="workflow-library-copy"><b>{template.name}</b><p>{template.description}</p></div><div className="workflow-library-meta"><span className="workflow-library-meta-stat" title={`${template.steps.length} 步 · ${agentSteps} Agent`}><Bot size={12} aria-hidden="true" /><em>{agentSteps}</em></span>{active ? <em className="workflow-library-card-status"><span aria-hidden="true" />当前模板</em> : <ChevronRight size={13} aria-hidden="true" />}</div></button>; })}</div>
+
+    <div className="workflow-library-grid">
+      {templates.map(template => {
+        const active = template.id === activeTemplateName;
+        return <button key={template.id} className={"workflow-library-card" + (active ? " active" : "")} onClick={() => onOpen(template)}>
+          <div className="workflow-library-card-header">
+            <span className="workflow-library-source" title={workflowSourceLabel(template.source)}>{workflowSourceIcon(template.source)}</span>
+            <b>{template.name}</b>
+            {active
+              ? <span className="workflow-library-card-tag active-tag">当前模板</span>
+              : <span className="workflow-library-card-tag">{workflowSourceLabel(template.source)}</span>}
+          </div>
+          <p>{template.description}</p>
+          <span className="steps-label">{template.steps.length} 个步骤</span>
+        </button>;
+      })}
+    </div>
+
+    {sortedRuns.length > 0 && (
+      <div className="workflow-recent-runs">
+        <header><b>最近运行</b><span className="runs-note">按结束时间排序</span></header>
+        {sortedRuns.map(run => (
+          <div key={run.id} className="workflow-run-row">
+            <span className="workflow-run-row-icon">{statusIcon(run.status)}</span>
+            <span className="workflow-run-row-text">
+              <b>{run.goal}</b>
+              <small>{run.provider} · {new Date(run.startedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</small>
+            </span>
+            <span className="workflow-run-row-end">
+              <span className={`status-pill ${run.status}`}>{workflowStatusLabel(run.status)}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    )}
+
     {!templates.length ? <div className="workflow-library-empty"><b>尚未发现工作流模板</b><span>新建后会在项目 .afk/workflows 目录创建可执行模板。</span><button className="workflow-create" onClick={onCreate} aria-label="新建工作流" title="新建工作流"><Plus size={16} aria-hidden="true" /></button></div> : null}
   </section>;
 }

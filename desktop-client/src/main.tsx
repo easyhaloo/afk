@@ -125,6 +125,7 @@ function App() {
   const [focusTemplateId, setFocusTemplateId] = useState<string>();
   const [environmentSelection, setEnvironmentSelection] = useState<ExecutionSelection>();
   const [runMode, setRunMode] = useState<"queue" | "board">("queue");
+  const [runFilter, setRunFilter] = useState<"all" | "open" | "fail">("all");
   const [runQuery, setRunQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -232,7 +233,23 @@ function App() {
   const events = useMemo(() => view === "events" ? snapshot?.events ?? [] : [
     ...executionHistoryEvents(auditedExecutions, snapshot?.workItemRuns ?? []),
   ], [snapshot, auditedExecutions, view]);
-  const visibleRunEvents = useMemo(() => searchRuntimeEvents(events, runQuery), [events, runQuery]);
+  const visibleRunEvents = useMemo(() => {
+    const searched = searchRuntimeEvents(events, runQuery);
+    if (runFilter === "all") return searched;
+    if (runFilter === "open") return searched.filter(e => { const s = eventStatus(e); return s === "running" || s === "waiting_confirmation"; });
+    return searched.filter(e => eventStatus(e) === "failed");
+  }, [events, runQuery, runFilter]);
+
+  const runStats = useMemo(() => {
+    // Compute from auditedExecutions (which has accurate run status) rather than
+    // snapshot.events, which only carries queued/initial statuses from the snapshot pipeline.
+    const running = auditedExecutions.filter(ex => ex.status === "running" || ex.status === "pending").length;
+    const waiting = auditedExecutions.filter(ex => ex.status === "awaiting_human").length;
+    const failed = auditedExecutions.filter(ex => ex.status === "failed" || ex.status === "cancelled").length;
+    const done = auditedExecutions.filter(ex => ex.status === "succeeded").length;
+    const tokens = auditedExecutions.reduce((sum, ex) => sum + (ex.usage?.totalTokens ?? 0), 0);
+    return { running, waiting, failed, done, tokens };
+  }, [auditedExecutions]);
 
   const groups = useMemo(() => {
     const value: Record<Phase, RuntimeEvent[]> = { ready: [], active: [], verify: [], attention: [] };
@@ -414,7 +431,7 @@ function App() {
             display:contents keeps the host from generating a box. */}
         <div id="afk-overlay-root" style={{ display: "contents" }} />
         <div className="workspace">
-          {view === "queue" || view === "board" ? <div className="resource-toolbar run-resource-toolbar"><ResourceSearch label="搜索运行、工作项或事件" value={runQuery} onChange={setRunQuery} /></div> : null}
+          {view === "queue" || view === "board" ? <div className="run-center-toolbar"><div className="stats"><div><b>{runStats.running}</b><span>运行中</span></div><div className="hot"><b>{runStats.waiting}</b><span>等待确认</span></div><div className="bad"><b>{runStats.failed}</b><span>失败</span></div><div className="ok"><b>{runStats.done}</b><span>今日完成</span></div></div><div className="resource-toolbar run-resource-toolbar"><SegmentedControl label="运行筛选" value={runFilter} options={[{ value: "all", label: "全部", count: events.length }, { value: "open", label: "进行中", count: runStats.running + runStats.waiting }, { value: "fail", label: "失败", count: runStats.failed }]} onChange={v => setRunFilter(v as typeof runFilter)} /><ResourceSearch label="搜索运行、工作项或事件" value={runQuery} onChange={setRunQuery} /></div></div> : null}
           {view === "queue" ? <Queue events={visibleRunEvents} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "board" ? <Board groups={groups} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
@@ -449,7 +466,7 @@ function Queue({ events, selected, freshIds, onSelect }: { events: RuntimeEvent[
   const grouped = groupRuntimeEvents(events);
   const orderedGroups = phases.flatMap((phase) => grouped.filter((group) => phaseOf(group.events[0]) === phase));
   if (!events.length) return <Empty />;
-  return <section className="queue" aria-label="运行队列"><div className="queue-stream">{orderedGroups.map((group) => { const event = group.events[0]; return <EventRow key={group.source} event={event} historyCount={group.events.length} fresh={freshIds.has(event.id)} selected={selected?.id === event.id} onSelect={onSelect} />; })}</div></section>;
+  return <section className="queue" aria-label="运行队列"><div className="run-col-head" aria-hidden="true"><span></span><span>运行</span><span>耗时</span><span>更新</span></div><div className="queue-stream">{orderedGroups.map((group) => { const event = group.events[0]; return <EventRow key={group.source} event={event} historyCount={group.events.length} fresh={freshIds.has(event.id)} selected={selected?.id === event.id} onSelect={onSelect} />; })}</div></section>;
 }
 
 function EventRow({ event, historyCount, fresh, selected, onSelect }: { event: RuntimeEvent; historyCount: number; fresh: boolean; selected: boolean; onSelect: (event: RuntimeEvent) => void }) {

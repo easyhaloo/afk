@@ -1520,6 +1520,61 @@
   .state-glyph.active svg { animation: none; }
 }
 
+.run-center-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px 0;
+  width: 100%;
+}
+
+.stats {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  padding: 0 4px;
+  border-radius: var(--radius-md);
+  background: var(--afk-panel);
+  overflow: hidden;
+}
+.stats > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0 18px;
+  border-left: 1.5px solid var(--afk-border);
+}
+.stats > div:first-child { padding-left: 0; border-left: 0; }
+.stats b {
+  font-family: "DM Mono", monospace;
+  font-size: calc(19px * var(--afk-scale));
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--afk-text);
+}
+.stats span { color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); }
+.stats .hot b { color: var(--warn); }
+.stats .bad b { color: var(--fail); }
+.stats .ok b { color: var(--afk-accent); }
+
+.run-col-head {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 74px 96px;
+  gap: 12px;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-bottom: 1.5px solid var(--afk-border);
+  color: var(--afk-muted);
+  font-size: calc(10px * var(--afk-scale));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--afk-panel);
+}
+.run-col-head span:nth-child(3),
+.run-col-head span:nth-child(4) { text-align: right; }
+
 .view-layout { display: contents; }
 .run-center-layout {
   position: relative;
@@ -1531,7 +1586,7 @@
 }
 .run-center-layout > .workspace { min-width: 0; }
 .run-center-layout .board { max-width: none; }
-.run-center-layout .queue { width: min(100%, 1040px); max-width: 1040px; }
+.run-center-layout .queue { width: 100%; }
 .run-center-layout .board { align-items: start; }
 .run-center-layout .board-column { min-height: 86px; }
 .run-center-layout .board-card { min-height: 106px; }

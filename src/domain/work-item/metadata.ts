@@ -40,6 +40,7 @@ export function toGlobalWorkItem(project: ProviderProjectRef, issue: ProviderIss
     branchName: deriveBacklogBranchName(String(issue.issueNumber)),
     providerRef: id,
     webUrl: issue.webUrl,
+    updatedAt: issue.updatedAt,
   };
 }
 

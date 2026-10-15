@@ -16,6 +16,7 @@ export interface GitHubCatalogIssue {
   labels: string[];
   state: 'open' | 'closed';
   webUrl?: string;
+  updatedAt?: string;
   pullRequest?: boolean;
 }
 
@@ -57,6 +58,7 @@ export class GitHubProviderCatalog implements ProviderCatalog {
       labels: issue.labels,
       state: issue.state === 'open' ? 'opened' : 'closed',
       webUrl: issue.webUrl,
+      updatedAt: issue.updatedAt,
     }));
   }
 }
@@ -76,6 +78,7 @@ export interface GitLabCatalogIssue {
   labels: string[];
   state: 'opened' | 'closed';
   webUrl?: string;
+  updatedAt?: string;
 }
 
 export interface GitLabCatalogPageClient {
@@ -124,6 +127,7 @@ export class GitLabProviderCatalog implements ProviderCatalog {
       labels: issue.labels,
       state: issue.state,
       webUrl: issue.webUrl,
+      updatedAt: issue.updatedAt,
     }));
   }
 }

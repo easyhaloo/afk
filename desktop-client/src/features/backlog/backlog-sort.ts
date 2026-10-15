@@ -56,8 +56,17 @@ export function sortBacklogItems<T extends SortableBacklogRow>(items: T[], selec
       if (diff !== 0) return diff * factor;
       return left.id.localeCompare(right.id);
     }
-    const leftValue = selection.field === "updatedAt" ? left.updatedAt ?? "" : left[selection.field];
-    const rightValue = selection.field === "updatedAt" ? right.updatedAt ?? "" : right[selection.field];
+    if (selection.field === "updatedAt") {
+      if (left.updatedAt !== undefined && right.updatedAt !== undefined) {
+        const diff = left.updatedAt.localeCompare(right.updatedAt);
+        return diff !== 0 ? diff * factor : left.id.localeCompare(right.id);
+      }
+      if (left.updatedAt !== undefined) return -1;
+      if (right.updatedAt !== undefined) return 1;
+      return left.id.localeCompare(right.id);
+    }
+    const leftValue = left[selection.field];
+    const rightValue = right[selection.field];
     const diff = leftValue.localeCompare(rightValue);
     return diff !== 0 ? diff * factor : left.id.localeCompare(right.id);
   });

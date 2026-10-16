@@ -662,7 +662,7 @@ function WorkflowLibrary({ templates, activeTemplateName, onOpen, onCreate, work
             <span className="workflow-library-source" title={workflowSourceLabel(template.source)}>{workflowSourceIcon(template.source)}</span>
             <b>{template.name}</b>
             {active
-              ? <span className="workflow-library-card-tag active-tag">当前模板</span>
+              ? <span className="workflow-library-card-status">当前模板</span>
               : <span className="workflow-library-card-tag">{workflowSourceLabel(template.source)}</span>}
           </div>
           <p>{template.description}</p>

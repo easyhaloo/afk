@@ -44,6 +44,13 @@
   align-items: center;
   gap: 16px;
 }
+.topbar-subtitle {
+  overflow: hidden;
+  color: var(--afk-muted);
+  font-size: calc(10px * var(--afk-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* main.tsx puts both classes on one element: run-view-switcher header-run-mode. */
 .run-view-switcher {
   position: relative;

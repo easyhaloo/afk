@@ -349,6 +349,7 @@ function App() {
   const nav = navGroups.flatMap((group) => group.items);
   const activeNav = view === "board" ? "queue" : view === "workflowInstances" ? "workflows" : view;
   const title = nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
+  const subtitle = activeNav === "queue" ? "本机正在跑的任务，按最近更新排序" : activeNav === "workflows" ? "模板库与项目级可执行模板" : activeNav === "repositories" ? "已授权 Provider 中可访问的仓库" : "";
   const runtimes = snapshot?.agentRuntimes ?? [];
   const availableRuntimeCount = runtimes.filter((runtime) => runtime.available).length;
   const runtimeTotal = runtimes.length || 4;
@@ -424,7 +425,7 @@ function App() {
 
       <section className="content-shell">
         <header className="topbar">
-          <div className="topbar-context"><div className="breadcrumb"><span>AFK</span><b>›</b><strong>{title}</strong></div>{view === "queue" || view === "board" ? <div className="run-view-switcher header-run-mode" aria-label="运行视图切换"><button className={runMode === "queue" ? "active" : ""} onClick={() => { setRunMode("queue"); setView("queue"); }}><LayoutList size={14} />队列</button><button className={runMode === "board" ? "active" : ""} onClick={() => { setRunMode("board"); setView("board"); }}><Workflow size={14} />看板</button></div> : null}{view === "agents" ? <AgentHeaderSummary available={availableRuntimeCount} total={runtimeTotal} unavailable={unavailableRuntimeCount} /> : null}</div>
+          <div className="topbar-context"><div className="breadcrumb"><span>AFK</span><b>›</b><strong>{title}</strong></div>{subtitle ? <span className="topbar-subtitle">{subtitle}</span> : null}{view === "queue" || view === "board" ? <div className="run-view-switcher header-run-mode" aria-label="运行视图切换"><button className={runMode === "queue" ? "active" : ""} onClick={() => { setRunMode("queue"); setView("queue"); }}><LayoutList size={14} />队列</button><button className={runMode === "board" ? "active" : ""} onClick={() => { setRunMode("board"); setView("board"); }}><Workflow size={14} />看板</button></div> : null}{view === "agents" ? <AgentHeaderSummary available={availableRuntimeCount} total={runtimeTotal} unavailable={unavailableRuntimeCount} /> : null}</div>
           {view === "workflows" || view === "workflowInstances" ? <SegmentedControl label="工作流视图" value={view} options={[{ value: "workflows", label: "定义" }, { value: "workflowInstances", label: "运行实例" }]} onChange={value => setView(value as View)} /> : null}
         </header>
         {error ? <div className="error-banner"><X size={15} />{error}</div> : null}

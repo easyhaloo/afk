@@ -66,6 +66,22 @@ describe("work item inventory service", () => {
     expect(result.diagnostics[0].projectKey).toBe("corp/tools");
   });
 
+  it("caches partial results in memory during polling and permits a forced retry", async () => {
+    const partial = { ...inventory, complete: false, diagnostics: [{ platform: "github" as const,
+      projectKey: "acme/blocked", code: "forbidden", message: "Repository access blocked", retryable: false }] };
+    const listWorkItems = vi.fn().mockResolvedValueOnce(partial).mockResolvedValue(inventory);
+    const store = { read: vi.fn(async () => null), write: vi.fn(async () => undefined), clear: vi.fn() };
+    const service = createWorkItemInventoryService({ application: createWorkItemApplicationAdapter({ listWorkItems }), store });
+
+    await expect(service.list()).resolves.toEqual(partial);
+    await expect(service.list()).resolves.toEqual(partial);
+    expect(listWorkItems).toHaveBeenCalledTimes(1);
+    expect(store.write).not.toHaveBeenCalled();
+    await expect(service.list(undefined, true)).resolves.toEqual(inventory);
+    expect(listWorkItems).toHaveBeenCalledTimes(2);
+    expect(store.write).toHaveBeenCalledTimes(1);
+  });
+
   it("returns a persisted snapshot without invoking the application", async () => {
     const listWorkItems = vi.fn(async () => inventory);
     const app = createWorkItemApplicationAdapter({ listWorkItems });

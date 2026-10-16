@@ -35,7 +35,7 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
   padding: var(--view-pad);
   overflow: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
 }
 
 /* The prototype's view-entry motion (`.view > section { animation: viewIn … }`).

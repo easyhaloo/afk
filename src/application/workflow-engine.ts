@@ -720,7 +720,7 @@ export class WorkflowRunner {
       await this.recordObservation({ kind: 'step.completed', stepId: step.id, outcome: 'failed' });
       throw error;
     } finally {
-      if (!this.resourceScope && sandbox !== this.sandbox && ctx.executionMode === 'interactive') await sandbox.close();
+      if (sandbox !== this.sandbox && ctx.executionMode === 'interactive') await sandbox.close();
     }
 
     const completedAt = new Date().toISOString();

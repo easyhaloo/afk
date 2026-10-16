@@ -23,17 +23,11 @@
     "postinstall": "node scripts/fix-permissions.mjs",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [
-    "afk",
-    "gitlab",
-    "automation",
-    "ci-cd"
-  ],
+  "keywords": ["afk", "gitlab", "automation", "ci-cd"],
   "dependencies": {
     "@afk/application": "workspace:*",
     "@afk/core": "workspace:*",
     "@afk/workflow-graph": "workspace:*",
-    "@anthropic-ai/claude-code": "^2.1.299",
     "@gitbeaker/node": "^35.8.0",
     "@m234/nerd-fonts": "^0.5.1",
     "@octokit/rest": "^22.0.1",
@@ -72,15 +66,6 @@
     "vitest": "^1.2.0",
     "xterm": "^5.3.0"
   },
-  "engines": {
-    "node": ">=18"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "esbuild",
-      "node-pty",
-      "puppeteer"
-    ]
-  }
+  "engines": {"node": ">=18"},
+  "pnpm": {"onlyBuiltDependencies": ["electron", "esbuild", "node-pty", "puppeteer"]}
 }

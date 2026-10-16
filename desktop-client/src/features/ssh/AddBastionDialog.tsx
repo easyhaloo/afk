@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Overlay } from "../../overlay";
 import { Check, CircleAlert, RefreshCw, X } from "lucide-react";
 import type { ManagedSshHostInput, SshBastionAssetPreview, SshBastionSyncResult, SshHost, SshJumpHostType } from "../../../shared/ssh-contract";
 import { SshActionButton } from "./SshActionButton";
@@ -199,7 +200,7 @@ export function AddBastionDialog({
   );
 
   return (
-    <div className="ssh-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <Overlay>    <div className="ssh-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form
         ref={modalRef}
         className="ssh-modal"
@@ -238,6 +239,6 @@ export function AddBastionDialog({
           })()}
         </footer>
       </form>
-    </div>
+    </div></Overlay>
   );
 }

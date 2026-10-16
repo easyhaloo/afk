@@ -1,4 +1,5 @@
 import { test, expect } from "./_helpers/launch";
+import { expectOccupiesSpace } from "./_helpers/geometry";
 
 test.describe("Workflow studio", () => {
   test("uses an icon-only create action in the workflow library", async ({ page }) => {
@@ -26,6 +27,47 @@ test.describe("Workflow studio", () => {
     await expect(page.locator(".workflow-editor-node").first()).toBeVisible();
   });
 
+  test("lays the track bands on separate rows so they cannot overlap", async ({ page }) => {
+    await page.getByRole("button", { name: "工作流" }).click();
+    await page.locator(".workflow-library-card").first().click();
+
+    // Measure the stage itself: toBeVisible() only inspects the element's own box
+    // and is blind to an ancestor clipping it (the canvas rendered 0px high for a
+    // whole phase while every node test stayed green).
+    const stage = page.locator(".workflow-editor-stage");
+    await expectOccupiesSpace(page, ".workflow-editor-stage", 200);
+
+    const bands = page.locator(".workflow-canvas-track");
+    await expect(bands).toHaveCount(2);
+
+    const [agent, system] = await Promise.all([
+      page.locator(".workflow-canvas-track.track-agent").boundingBox(),
+      page.locator(".workflow-canvas-track.track-system").boundingBox(),
+    ]);
+    if (!agent || !system) throw new Error("track bands are not measurable");
+
+    expect(agent.y + agent.height).toBeLessThanOrEqual(system.y);
+  });
+
+  test("keeps the zoom controls clickable beside the inspector", async ({ page }) => {
+    await page.getByRole("button", { name: "工作流" }).click();
+    await page.locator(".workflow-library-card").first().click();
+    await page.waitForTimeout(400);
+
+    // The inspector overlays the stage rather than taking a grid column, so a
+    // full-width stage-bar parks the zoom pill underneath it: present in the DOM,
+    // impossible to click. Measure what is actually on top at the pill's centre.
+    const hit = await page.evaluate(() => {
+      const zoom = document.querySelector(".workflow-canvas-zoom button");
+      if (!zoom) return "missing";
+      const box = zoom.getBoundingClientRect();
+      const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return Boolean(top && (top === zoom || zoom.contains(top))) ? "reachable" : (top?.className?.toString() ?? "none");
+    });
+
+    expect(hit, "the zoom button is covered by the inspector").toBe("reachable");
+  });
+
   test("pans the workflow canvas by dragging its empty surface", async ({ page }) => {
     await page.getByRole("button", { name: "工作流" }).click();
     await page.locator(".workflow-library-card").first().click();
@@ -50,7 +92,7 @@ test.describe("Workflow studio", () => {
     await page.locator(".workflow-library-card").first().click();
 
     const stage = page.locator(".workflow-editor-stage");
-    const zoomLabel = page.locator(".workflow-canvas-controls span");
+    const zoomLabel = page.locator(".workflow-canvas-zoom-label");
     const stageBox = await stage.boundingBox();
     if (!stageBox) throw new Error("workflow canvas stage is not measurable");
     const before = await zoomLabel.textContent();
@@ -85,10 +127,39 @@ test.describe("Workflow studio", () => {
     await page.getByRole("button", { name: "工作流" }).click();
     await page.locator(".workflow-library-card").first().click();
 
-    const pageBox = await page.locator(".workflow-studio-page").boundingBox();
-    const workspaceBox = await page.locator(".workspace").boundingBox();
-    if (!pageBox || !workspaceBox) throw new Error("workflow studio layout is not measurable");
-    expect(Math.abs(pageBox.y + pageBox.height - (workspaceBox.y + workspaceBox.height))).toBeLessThanOrEqual(2);
+    const studio = page.locator(".workflow-studio-page");
+    const workspace = page.locator(".workspace");
+    if (!(await studio.boundingBox()) || !(await workspace.boundingBox())) {
+      throw new Error("workflow studio layout is not measurable");
+    }
+    // The view entry animation travels 4px, which is wider than this 2px
+    // tolerance, so a single snapshot measures the page mid-flight. Poll until
+    // it settles instead of reading the first frame.
+    await expect
+      .poll(async () => {
+        const [p, w] = await Promise.all([studio.boundingBox(), workspace.boundingBox()]);
+        return Math.abs(p!.y + p!.height - (w!.y + w!.height));
+      })
+      .toBeLessThanOrEqual(2);
+  });
+
+  test("gives the canvas a stage tall enough to show its nodes", async ({ page }) => {
+    await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
+    await page.locator(".workflow-library-card").first().click();
+
+    // Playwright's toBeVisible() only looks at the element's own box, so it is
+    // blind to an ancestor clipping it away — which is how a zero-height stage
+    // passed eleven green tests while the canvas showed nothing at all.
+    const stage = await page.locator(".workflow-editor-stage").boundingBox();
+    expect(stage?.height, "the stage collapsed and clipped every node").toBeGreaterThan(200);
+    const painted = await page.evaluate(() => {
+      const node = document.querySelector(".workflow-editor-node");
+      if (!node) return false;
+      const box = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return Boolean(hit && (hit === node || node.contains(hit)));
+    });
+    expect(painted, "a node is not the topmost thing at its own centre").toBe(true);
   });
 
   test("uses the available editor width instead of collapsing the canvas", async ({ page }) => {
@@ -118,7 +189,9 @@ test.describe("Workflow studio", () => {
   });
 
   test("keeps workflow inspector select menus opaque above the following fields", async ({ page }) => {
-    for (const theme of ["浅色", "石墨"]) {
+    // 石墨 was removed when the themes collapsed to 浅色 / 深色; asking for it
+    // here could only ever time out.
+    for (const theme of ["浅色", "深色"]) {
       await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
       await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: theme }).click();
       await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();

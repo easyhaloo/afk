@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, Hand, History, Link2, ListChecks, Play, RefreshCw, Search, ShieldAlert, Workflow, X } from "lucide-react";
+import { Overlay } from "../../overlay";
 import type { ReactNode } from "react";
 import type {
   BacklogPlatform,
@@ -447,7 +448,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       </div>
       {remainingItems > 0 ? <div className="work-items-load-more"><span>还有 {remainingItems} 个</span><button type="button" aria-label="显示更多工作项" onClick={() => setVisibleLimit(limit => limit + pageSize)}>继续加载 <ChevronDown size={13} /></button></div> : null}
 
-      {selected ? (
+      {selected ? (<Overlay>
         <div className="work-item-detail-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeDetails(); }}>
           <aside className="work-item-detail" role="dialog" aria-modal="true" aria-label={`工作项 ${selected.id}`}>
             <header className="work-item-detail-header">
@@ -500,9 +501,9 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
             </footer>
           </aside>
         </div>
-      ) : null}
+      </Overlay>) : null}
 
-      {selected && runSetupOpen ? (
+      {selected && runSetupOpen ? (<Overlay>
         <div className="work-item-run-modal-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeRunSetup(); }}>
           <section className="work-item-run-modal" role="dialog" aria-modal="true" aria-label="开始执行工作项">
             <header><div><h2>开始执行工作项</h2><p>确认执行资源和隔离任务空间。</p></div><button type="button" aria-label="关闭执行配置" onClick={closeRunSetup}><X size={16} /></button></header>
@@ -536,7 +537,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
             <footer><button type="button" className="work-item-secondary-action" disabled={startingRun} onClick={closeRunSetup}>取消</button><button type="button" className="work-item-primary-action" disabled={!canStartRun} onClick={() => void startRun()}><Play size={14} />{startingRun ? "正在启动…" : selected.executionMode === "hitl" ? "开始前台执行" : "创建运行"}</button></footer>
           </section>
         </div>
-      ) : null}
+      </Overlay>) : null}
     </section>
   );
 }

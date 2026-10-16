@@ -58,6 +58,14 @@ describe('Agent providers — fixture coverage', () => {
       expect(cmd.argv).toContain('--print');
       expect(cmd.argv).toContain('--output-format');
       expect(cmd.argv).toContain('stream-json');
+      expect(cmd.argv).not.toContain('--settings');
+    });
+
+    it('passes worktree-local settings explicitly for interactive readiness', () => {
+      const command = new ClaudeCodeProvider().buildCommand({ ...opts(),
+        worktreePath: '/tmp/worktree with spaces/qa', executionMode: 'interactive' });
+      expect(command.argv).toEqual(['claude', '--dangerously-skip-permissions', '--settings',
+        '/tmp/worktree with spaces/qa/.claude/settings.local.json']);
     });
 
     it('owns process execution creation and passes neutral parser metadata to the sandbox', async () => {

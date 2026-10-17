@@ -35,6 +35,7 @@ import type {
 } from '../types.js';
 import { extractGoalComplete } from '../../../shared/goal-complete.js';
 import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js';
+import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 
 export class StreamingAgentExecution implements AgentExecution {
   readonly id: string;
@@ -419,7 +420,7 @@ export class StreamingAgentExecution implements AgentExecution {
     } catch {
       // Path may not exist yet; fall back to what we were given.
     }
-    const slug = base.replace(/\//g, '-');
+    const slug = claudeProjectSlug(base);
     return `${process.env.HOME ?? ''}/.claude/projects/${slug}/${harnessSessionId}.jsonl`;
   }
 

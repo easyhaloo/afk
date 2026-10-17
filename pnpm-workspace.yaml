@@ -2,6 +2,7 @@ packages:
   - packages/*
   - desktop-client
 allowBuilds:
+  '@anthropic-ai/claude-code': set this to true or false
   electron: true
   electron-winstaller: false
   esbuild: true

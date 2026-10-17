@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { promises as fs } from 'fs';
+import { promises as fs, realpathSync } from 'fs';
 import { join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import { TmuxClient } from '../../tmux/tmux.js';
@@ -39,6 +39,7 @@ import {
 } from '../types.js';
 import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
+import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 
 const SANDBOX_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
   'streaming-exec',
@@ -390,7 +391,9 @@ export class LocalAgentExecution implements AgentExecution {
    */
   get telemetryPath(): string | undefined {
     if (!this.sessionId) return undefined;
-    const slug = this.worktreePath.replace(/\//g, '-');
+    let base = this.worktreePath;
+    try { base = realpathSync(this.worktreePath); } catch { /* path may not exist yet */ }
+    const slug = claudeProjectSlug(base);
     return join(process.env.HOME ?? '', '.claude', 'projects', slug, `${this.sessionId}.jsonl`);
   }
 }

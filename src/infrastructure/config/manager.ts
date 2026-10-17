@@ -25,6 +25,7 @@ export interface WorkflowConfig {
   agentDefault: string;
   tmuxSession: string;
   completionTimeout: number;
+  qaTimeout?: number;
   workflowHardTimeout: number;
   completionPoll: number;
   idleTimeout: number;
@@ -68,6 +69,7 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   agentDefault: 'claude-code',
   tmuxSession: 'afk',
   completionTimeout: 7200 * 1000,
+  qaTimeout: 30 * 60 * 1000,
   workflowHardTimeout: 7200 * 1000,
   completionPoll: 5,
   idleTimeout: 1800 * 1000,
@@ -136,6 +138,7 @@ export function loadWorkflowConfig(
     agentDefault: configString(file.agentDefault) ?? env.AFK_AGENT_DEFAULT ?? DEFAULT_WORKFLOW.agentDefault,
     tmuxSession: configString(file.tmuxSession) ?? env.AFK_TMUX_SESSION ?? DEFAULT_WORKFLOW.tmuxSession,
     completionTimeout: configNumber(file.completionTimeout) ?? parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW.completionTimeout, env),
+    qaTimeout: configNumber(file.qaTimeout) ?? parseEnvMs('AFK_QA_TIMEOUT', DEFAULT_WORKFLOW.qaTimeout!, env),
     workflowHardTimeout: configNumber(file.workflowHardTimeout) ?? parseEnvMs('AFK_WORKFLOW_HARD_TIMEOUT', DEFAULT_WORKFLOW.workflowHardTimeout, env),
     completionPoll: configNumber(file.completionPoll) ?? parseSeconds('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll, env),
     idleTimeout: configNumber(file.idleTimeout) ?? parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW.idleTimeout, env),

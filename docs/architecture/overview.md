@@ -29,6 +29,8 @@ single source of truth for the supported surface:
 | `afk run --backlog-id <id>` | Execute one claimed item |
 | `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
+| `afk retro run --run-id <id> --workspace <path>` | Analyze recorded evidence with the existing `/retro` skill and write `report.json` plus `report.html` |
+| `afk retro show <report>` | Read a generated retro report |
 | `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
 There are no aliases for removed command groups. Provider metadata labels are

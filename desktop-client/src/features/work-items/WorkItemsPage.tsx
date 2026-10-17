@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, Hand, History, Link2, ListChecks, Play, RefreshCw, Search, ShieldAlert, Workflow, X } from "lucide-react";
+import { Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, Hand, History, Link2, ListChecks, Play, Plus, RefreshCw, Search, ShieldAlert, Workflow, X } from "lucide-react";
 import { Overlay } from "../../overlay";
 import type { ReactNode } from "react";
 import type {
@@ -166,7 +166,7 @@ function WorkItemEmptySection({ children }: { children: string }) {
   return <div className="work-item-section-empty">{children}</div>;
 }
 
-export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgent = "claude-code", onAttach, onWorkflow }: { focusWorkItemId?: string; agentRuntimes?: AgentRuntime[]; defaultAgent?: string; onAttach?: (runId: string) => void; onWorkflow?: (runId: string, workItemId: string) => void } = {}) {
+export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgent = "claude-code", onAttach, onWorkflow, onCreate, onReviewMerge }: { focusWorkItemId?: string; agentRuntimes?: AgentRuntime[]; defaultAgent?: string; onAttach?: (runId: string) => void; onWorkflow?: (runId: string, workItemId: string) => void; onCreate?: () => void; onReviewMerge?: () => void } = {}) {
   const [inventory, setInventory] = useState<WorkItemInventoryResult>(emptyInventory);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -404,7 +404,10 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     <section className="backlog-page work-items-page">
       <div className="control-page-heading backlog-heading">
         <div><p>工作项</p><span>工作项是独立任务；Issue 是可选外部来源，代码仓库是按需关联的执行资源。</span></div>
-        <button type="button" className="work-items-refresh" aria-label="刷新工作项" title="刷新工作项" disabled={loading} onClick={() => void load(true)}><RefreshCw size={14} className={loading ? "spin" : ""} /></button>
+        <div className="work-items-heading-actions">
+          {onCreate ? <button type="button" className="work-items-create" aria-label="创建工作项" title="创建工作项" onClick={onCreate}><Plus size={14} />创建</button> : null}
+          <button type="button" className="work-items-refresh" aria-label="刷新工作项" title="刷新工作项" disabled={loading} onClick={() => void load(true)}><RefreshCw size={14} className={loading ? "spin" : ""} /></button>
+        </div>
       </div>
       {error ? <div className="backlog-alert error"><ShieldAlert size={15} />{error}</div> : null}
       {inventory.diagnostics.length ? <div className="work-item-diagnostics">{inventory.diagnostics.map((diagnostic, index) => <div key={`${diagnostic.platform}-${diagnostic.projectKey ?? "provider"}-${index}`}><b>{diagnosticTitle(diagnostic)}</b><span>{diagnostic.message}</span></div>)}</div> : null}
@@ -497,6 +500,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
             </div>
             <footer className="work-item-detail-footer">
               <div><small>运行不会使用当前打开目录</small><code>{workspacePath(selected)}</code>{runNotice ? <span>{runNotice}</span> : null}</div>
+              {selected.state === "merge_ready" && onReviewMerge ? <button type="button" className="work-item-secondary-action" onClick={onReviewMerge}>处理合并</button> : null}
               <button type="button" className="work-item-primary-action" disabled={!selected.executionEligible} onClick={openRunSetup}><Play size={14} />开始执行</button>
             </footer>
           </aside>

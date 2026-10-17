@@ -19,6 +19,7 @@ vi.mock('../../infrastructure/io/index', async importOriginal => ({
 const config = {
   targetBranch: 'main',
   completionTimeout: 1000,
+  qaTimeout: 2000,
   contextThreshold: 100_000,
   maxQaReworkAttempts: 3,
 } as any;
@@ -169,6 +170,7 @@ describe('QARunner execution boundary', () => {
     });
 
     await expect(runner.process('60')).resolves.toMatchObject({ success: true });
+    expect(f.execution.waitForResult).toHaveBeenCalledWith({ completionTimeoutMs: 2000 });
     expect(f.sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({ executionMode: 'batch' }));
     expect(f.sandboxProvider.create.mock.calls[0][0].tmux).toBeUndefined();
     const session = f.sandboxProvider.create.mock.calls[0][0].session;
@@ -191,6 +193,30 @@ describe('QARunner execution boundary', () => {
     expect(tmux.waitForPrompt).not.toHaveBeenCalled();
     expect(tmux.sendPrompt).not.toHaveBeenCalled();
     expect(tmux.waitForSignal).not.toHaveBeenCalled();
+  });
+
+  it('classifies a QA execution timeout separately from a generic QA failure', async () => {
+    const f = fixture();
+    f.execution.waitForResult.mockResolvedValue({
+      version: 1,
+      runId: 'execution-60',
+      status: 'timed_out',
+      provider: 'batch',
+      sessionId: 'agent-session-60',
+      commits: [],
+    });
+    const runner = new QARunner(f.providers, { ...config, qaTimeout: 25 }, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+    });
+
+    await expect(runner.process('60')).resolves.toMatchObject({
+      success: false,
+      failureCode: 'qa_timeout',
+    });
+    expect(f.execution.waitForResult).toHaveBeenCalledWith({ completionTimeoutMs: 25 });
   });
 
   it('passes tmux only to the sandbox for interactive QA', async () => {
@@ -495,11 +521,17 @@ describe('QARunner execution boundary', () => {
 
   it('records QA native usage in the shared ledger and telemetry event without counting a repeated session twice', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-qa-usage-'));
+    const previousHome = process.env.HOME;
     try {
       const f = fixture();
+      const nativeSessionId = 'f1817331-17b7-40e2-98f0-834f6b02320c';
+      f.execution.telemetryPath = join(root, 'qa-204-1791984447541.jsonl');
+      f.execution.metadata.threadId = nativeSessionId;
+      await writeFile(join(root, `${nativeSessionId}.jsonl`), JSON.stringify({ session_id: nativeSessionId }) + '\n');
+      process.env.HOME = root;
       const result = await f.execution.waitForResult();
       const tools = [{ id: 'qa-tool', name: 'Bash', result: 'failed', exitCode: 1 }];
-      f.execution.waitForResult.mockResolvedValue({ ...result, sessionId: 'qa-native', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools } as never);
+      f.execution.waitForResult.mockResolvedValue({ ...result, sessionId: 'qa-204-1791984447541', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools } as never);
       const onSession = vi.fn(async () => {});
       for (let attempt = 0; attempt < 2; attempt++) {
         const runner = new QARunner(f.providers, { ...config, goalBudget: 1000 }, {
@@ -508,9 +540,10 @@ describe('QARunner execution boundary', () => {
         });
         expect(await runner.process('60')).toMatchObject({ success: true });
       }
-      expect(await new BudgetStore(root, '60').load()).toMatchObject({ used: 0, tokens: 15, sessions: { 'qa-native': 15 } });
-      expect(onSession).toHaveBeenCalledWith({ kind: 'agent.session_recorded', sessionId: 'qa-native', usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools });
+      expect(await new BudgetStore(root, '60').load()).toMatchObject({ used: 0, tokens: 15, sessions: { [nativeSessionId]: 15 } });
+      expect(onSession).toHaveBeenCalledWith({ kind: 'agent.session_recorded', sessionId: nativeSessionId, transcriptPath: join(root, `${nativeSessionId}.jsonl`), usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools });
     } finally {
+      process.env.HOME = previousHome;
       await rm(root, { recursive: true, force: true });
     }
   });

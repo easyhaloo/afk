@@ -80,7 +80,7 @@ export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—
   const [error, setError] = useState("");
   const mountedRef = useRef(true);
   const loadGenerationRef = useRef(0);
-  const handledRefreshVersionRef = useRef(refreshVersion);
+  const handledRefreshVersionRef = useRef<number | undefined>(undefined);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<BacklogCreateInput>(EMPTY_CREATE_FORM);
   const [createBusy, setCreateBusy] = useState(false);

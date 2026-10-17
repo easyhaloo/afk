@@ -12,6 +12,7 @@ vi.mock('../../infrastructure/observability/agent-telemetry.js', async () => {
   return {
     ...actual as object,
     findCodexRollout: vi.fn(actual!.findCodexRollout),
+    resolveAgentTranscript: vi.fn(actual!.resolveAgentTranscript),
   };
 });
 
@@ -73,8 +74,9 @@ describe('agent.session_recorded wiring', () => {
       id: 'exec-1',
       sessionId: 'session-abc',
       metadata: { provider: 'claude-code', transport: 'process' as const },
-      telemetryPath: join(tmp, 'nonexistent-transcript.jsonl'), // does not exist
+      telemetryPath: join(tmp, 'transcript.jsonl'),
     } as any;
+    writeFileSync(execution.telemetryPath, JSON.stringify({ session_id: 'session-abc' }) + '\n');
 
     const result = {
       version: 1 as const,
@@ -92,6 +94,7 @@ describe('agent.session_recorded wiring', () => {
     const [, data] = record.mock.calls[0]!;
     expect(data.kind).toBe('agent.session_recorded');
     expect(data.sessionId).toBe('session-abc');
+    expect(data.transcriptPath).toBe(join(tmp, '.afk', 'transcripts', 'session-abc.jsonl'));
     expect(data.usage).toEqual({ inputTokens: 5000, outputTokens: 200, totalTokens: 5200 });
   });
 
@@ -99,13 +102,13 @@ describe('agent.session_recorded wiring', () => {
     // Interactive/tmux: no stdout stream, result.usage is undefined.
     // recordAgentTelemetry must read the transcript file.
     const transcriptPath = join(tmp, 'transcript.jsonl');
-    writeFileSync(transcriptPath, JSON.stringify({
+    writeFileSync(transcriptPath, [JSON.stringify({ session_id: 'agent-session-xyz' }), JSON.stringify({
       type: 'cost-state',
       totalCostUSD: 1.5,
       modelUsage: {
         'm': { inputTokens: 1000, outputTokens: 50, thinkingTokens: 0, cacheReadInputTokens: 10, cacheCreationInputTokens: 5 },
       },
-    }) + '\n');
+    })].join('\n') + '\n');
 
     const record = vi.fn(async () => ({ lastSequence: 1 }));
     const observer = { record } as unknown as RunObserver;
@@ -145,6 +148,8 @@ describe('agent.session_recorded wiring', () => {
     expect(record).toHaveBeenCalledTimes(1);
     const [, data] = record.mock.calls[0]!;
     expect(data.kind).toBe('agent.session_recorded');
+    expect(data.sessionId).toBe('agent-session-xyz');
+    expect(data.transcriptPath).toBe(join(tmp, '.afk', 'transcripts', 'agent-session-xyz.jsonl'));
     expect(data.usage?.inputTokens).toBe(1015); // 1000 + 10 + 5
     expect(data.usage?.outputTokens).toBe(50);
   });
@@ -152,8 +157,8 @@ describe('agent.session_recorded wiring', () => {
   it('reaches codex branch when telemetryPath is absent but threadId is present', async () => {
     // The exec transport has no sessionId, so telemetryPath is undefined.
     // With threadId present in metadata, findCodexRollout must still be called.
-    const findCodexRollout = await import('../../infrastructure/observability/agent-telemetry.js').then(m => m.findCodexRollout);
-    vi.mocked(findCodexRollout).mockResolvedValueOnce('/fake/rollout.jsonl');
+    const resolveAgentTranscript = await import('../../infrastructure/observability/agent-telemetry.js').then(m => m.resolveAgentTranscript);
+    vi.mocked(resolveAgentTranscript).mockResolvedValueOnce({ path: '/fake/rollout.jsonl', sessionId: 'thread-abc123' });
 
     const record = vi.fn(async () => ({ lastSequence: 1 }));
     const observer = { record } as unknown as RunObserver;
@@ -192,8 +197,10 @@ describe('agent.session_recorded wiring', () => {
 
     await (runner as any).recordAgentTelemetry(execution, result);
 
-    expect(findCodexRollout).toHaveBeenCalledTimes(1);
-    expect(findCodexRollout).toHaveBeenCalledWith('thread-abc123');
+    expect(resolveAgentTranscript).toHaveBeenCalledWith({ provider: 'codex', telemetryPath: undefined, threadId: 'thread-abc123', fallbackSessionId: 'codex-session' });
+    const [, data] = record.mock.calls[0]!;
+    expect(data.sessionId).toBe('thread-abc123');
+    expect(data.transcriptPath).toBe('/fake/rollout.jsonl');
   });
 
   it('returns early for container sandbox without emitting any event', async () => {
@@ -239,6 +246,7 @@ describe('agent.session_recorded wiring', () => {
   it('reads tool results from a transcript even when token usage already exists', async () => {
     const transcriptPath = join(tmp, 'tools.jsonl');
     writeFileSync(transcriptPath, [
+      { session_id: 'agent-session-tools' },
       { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'Bash', input: { command: 'private command' } }] } },
       { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'call-1', is_error: true, content: 'private output' }] } },
     ].map(event => JSON.stringify(event)).join('\n'));
@@ -254,7 +262,8 @@ describe('agent.session_recorded wiring', () => {
       usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
     });
     expect(record).toHaveBeenCalledWith(mockContext(), {
-      kind: 'agent.session_recorded', sessionId: 'exec-tools',
+      kind: 'agent.session_recorded', sessionId: 'agent-session-tools',
+      transcriptPath: join(tmp, '.afk', 'transcripts', 'agent-session-tools.jsonl'),
       usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
       tools: [{ id: 'call-1', name: 'Bash', result: 'failed' }],
     });

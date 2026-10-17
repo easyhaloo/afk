@@ -288,9 +288,11 @@ describe('executeWorkItem', () => {
     expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.failed', 'run.finished']);
     expect(vi.mocked(deps.recordAudit!).mock.calls[1][1]).toMatchObject({
       kind: 'qa.failed',
+      reasonCode: 'qa_rework',
       summary: 'The API response is missing the required field.',
       failedCriteria: [{ id: 'api-response', expected: 'field is present', actual: 'field is missing' }],
     });
+    expect(vi.mocked(deps.recordAudit!).mock.calls[2][1]).toMatchObject({ kind: 'run.finished', reasonCode: 'qa_rework' });
     const { deps: nextDeps, process: nextProcess } = await setup();
     nextProcess.mockResolvedValueOnce({ success: false } as any);
     expect((await executeWorkItem({ ...input, executionId: 'attempt-2' }, nextDeps)).status).toBe('blocked');

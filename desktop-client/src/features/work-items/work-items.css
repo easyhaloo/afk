@@ -1,5 +1,10 @@
 .work-items-page { position: relative; }
 
+.work-items-heading-actions { display: flex; align-items: center; gap: 7px; }
+.work-items-create { display: inline-flex; height: 32px; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid var(--backlog-border); border-radius: 7px; background: var(--backlog-surface); color: var(--backlog-text); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.work-items-create:hover,
+.work-items-create:focus-visible { border-color: var(--backlog-accent); outline: none; }
+
 .work-items-refresh,
 .work-item-detail-header button,
 .work-item-run-modal header button {

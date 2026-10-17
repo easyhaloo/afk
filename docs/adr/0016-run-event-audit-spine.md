@@ -17,4 +17,4 @@ The initial store is a local JSONL adapter with atomic append and verification.
 ## Consequences
 State may be replayed deterministically, interrupted runs can be explained, and
 side effects become auditable. Event persistence is a fail-closed precondition
-for automated external writes and merges. This for automated external writes and merges. This for automated external write
+for automated external writes and merges.

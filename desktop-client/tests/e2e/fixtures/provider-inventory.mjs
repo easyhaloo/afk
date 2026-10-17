@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 export const INVENTORY = {
   items: [
@@ -19,6 +19,30 @@ export async function collectProviderInventory(platform) {
   const delayMs = Number(process.env.FAKE_AFK_INVENTORY_DELAY_MS ?? "0");
   if (Number.isFinite(delayMs) && delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
   const inventory = structuredClone(INVENTORY);
+  if (process.env.FAKE_AFK_STORE && existsSync(process.env.FAKE_AFK_STORE)) {
+    const store = JSON.parse(readFileSync(process.env.FAKE_AFK_STORE, "utf8"));
+    for (const item of store.items ?? []) {
+      const workItemId = item.workItemId ?? `github:${item.project?.projectKey}#${item.issueNumber}`;
+      if (inventory.items.some(candidate => candidate.id === workItemId)) continue;
+      inventory.items.push({
+        id: workItemId,
+        issueNumber: item.issueNumber,
+        project: item.project,
+        title: item.title,
+        description: item.description,
+        managed: item.managed,
+        executionEligible: item.executionEligible,
+        state: item.state,
+        executionMode: item.executionMode,
+        dependsOn: item.dependsOn ?? [],
+        tags: item.tags ?? [],
+        branchName: item.branchName,
+        providerRef: item.providerRef,
+        webUrl: item.webUrl,
+      });
+      if (!inventory.projects.some(candidate => candidate.platform === item.project.platform && candidate.projectKey === item.project.projectKey)) inventory.projects.push(item.project);
+    }
+  }
   inventory.items = inventory.items.filter(item => platform === "all" || item.project.platform === platform);
   inventory.projects = inventory.projects.filter(project => platform === "all" || project.platform === platform);
   return inventory;

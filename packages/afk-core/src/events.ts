@@ -26,6 +26,12 @@ export interface AgentToolCallSummary {
   durationMs?: number;
 }
 
+export type RunFailureReasonCode =
+  | 'qa_timeout'
+  | 'qa_execution_failed'
+  | 'qa_rework'
+  | 'provider_change_unconfirmed';
+
 export interface EvidenceRef {
   uri: string;
   sha256: string;
@@ -46,7 +52,7 @@ export type RunEventData =
   | { kind: 'commit.recorded'; phase: 'implementation' | 'qa'; commitSha: string; branch: string }
   | { kind: 'implementation.completed' }
   | { kind: 'qa.passed' }
-  | { kind: 'qa.failed'; reason?: string; summary?: string; failedCriteria?: Array<{ id: string; expected: string; actual: string }> }
+  | { kind: 'qa.failed'; reason?: string; reasonCode?: RunFailureReasonCode; summary?: string; failedCriteria?: Array<{ id: string; expected: string; actual: string }> }
   | { kind: 'change.published'; changeId: string; url: string }
   | { kind: 'decision.made'; command: string; accepted: boolean; reason?: string }
   | { kind: 'effect.started'; effectKind: string; idempotencyKey: string }
@@ -55,9 +61,9 @@ export type RunEventData =
   | { kind: 'step.completed'; stepId: string; outcome: 'succeeded' | 'failed' }
   | { kind: 'human_gate.opened'; gateId: string; reason: string }
   | { kind: 'human_gate.approved'; gateId: string; approverId: string }
-  | { kind: 'run.finished'; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'>; reason?: string }
+  | { kind: 'run.finished'; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'>; reason?: string; reasonCode?: RunFailureReasonCode }
   | { kind: 'failure.classified'; failureClass: string; summary: string }
-  | { kind: 'agent.session_recorded'; sessionId: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number }; tools?: AgentToolCallSummary[] };
+  | { kind: 'agent.session_recorded'; sessionId: string; transcriptPath?: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number }; tools?: AgentToolCallSummary[] };
 
 export type RunEventType = RunEventData['kind'];
 

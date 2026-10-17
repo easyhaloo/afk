@@ -118,6 +118,7 @@ function RuntimeSource({ source }: { source: string }) {
 function App() {
   const [view, setView] = useState<View>("backlog");
   const [focusWorkItemId, setFocusWorkItemId] = useState<string | undefined>();
+  const [backlogRefreshVersion, setBacklogRefreshVersion] = useState(0);
   const [workflowSelection, setWorkflowSelection] = useState<ExecutionSelection>();
   const [focusTemplateId, setFocusTemplateId] = useState<string>();
   const [environmentSelection, setEnvironmentSelection] = useState<ExecutionSelection>();
@@ -415,8 +416,8 @@ function App() {
           {view === "repositories" ? <Repositories /> : null}
           {view === "containers" ? <Environments snapshot={snapshot} selection={environmentSelection} onWorkflow={runId => void openEnvironmentWorkflow(runId).catch(cause => setError(String(cause)))} onTerminal={(name, targetWorkspace, runId, resourceId) => runId ? void openExecutionTerminal(runId, resourceId) : void openSession(name, targetWorkspace)} /> : null}
           {view === "ssh" ? <SshHostsPage onSession={openSshSession} /> : null}
-          {view === "backlog" ? <WorkItemsPage focusWorkItemId={focusWorkItemId} agentRuntimes={snapshot?.agentRuntimes} defaultAgent={snapshot?.workflow.agentDefault} onAttach={(runId) => void openExecutionTerminal(runId)} onWorkflow={openWorkflowInstance} /> : null}
-          {view === "projectBacklog" ? <BacklogPage workspace={workspace} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} onOpenWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
+          {view === "backlog" ? <WorkItemsPage focusWorkItemId={focusWorkItemId} agentRuntimes={snapshot?.agentRuntimes} defaultAgent={snapshot?.workflow.agentDefault} onAttach={(runId) => void openExecutionTerminal(runId)} onWorkflow={openWorkflowInstance} onCreate={() => setView("projectBacklog")} onReviewMerge={() => { setBacklogRefreshVersion(version => version + 1); setView("projectBacklog"); }} /> : null}
+          {view === "projectBacklog" ? <BacklogPage workspace={workspace} refreshVersion={backlogRefreshVersion} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} onOpenWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
           {view === "workflows" ? <Workflows key={`${workspace}:${focusTemplateId ?? ""}`} snapshot={snapshot} focusTemplateId={focusTemplateId} onSave={saveWorkflowConfig} /> : null}
           {view === "workflowInstances" ? <WorkflowInstancesPage executions={auditedExecutions} selection={workflowSelection} onSelect={setWorkflowSelection} onRun={selection => void openRun(selection).catch(cause => setError(String(cause)))} onWorkItem={workItemId => { setFocusWorkItemId(workItemId); setView("backlog"); }} onEnvironment={selection => { setEnvironmentSelection(selection); setView("containers"); }} onAttach={runId => void openExecutionTerminal(runId)} onDefinition={detail => void openDefinition(detail)} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}

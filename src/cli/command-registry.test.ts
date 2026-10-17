@@ -18,6 +18,7 @@ describe('CLI hard cutover registry', () => {
       'qa',
       'loop',
       'observe',
+      'retro',
       'graph',
       'completion',
       '__complete',
@@ -25,7 +26,7 @@ describe('CLI hard cutover registry', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it.each(['backlog', 'run', 'execute', 'loop', 'qa', 'observe', 'graph', 'completion'])('loads the public %s command advertised by the registry', async name => {
+  it.each(['backlog', 'run', 'execute', 'loop', 'qa', 'observe', 'retro', 'graph', 'completion'])('loads the public %s command advertised by the registry', async name => {
     const entry = COMMANDS.find(candidate => candidate.names.includes(name));
     expect(entry).toBeDefined();
 

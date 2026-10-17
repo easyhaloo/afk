@@ -30,6 +30,7 @@ describe('WorkflowConfig env var loading', () => {
     expect(cfg.tmuxSession).toBe('afk');
     expect(cfg.workflowHardTimeout).toBe(7200 * 1000);
     expect(cfg.completionTimeout).toBe(7200 * 1000);
+    expect(cfg.qaTimeout).toBe(30 * 60 * 1000);
     expect(cfg.contextThreshold).toBe(100_000);
     expect(cfg.promptTimeout).toBe(30_000);
     expect(cfg.handoffTimeout).toBe(60_000);
@@ -61,6 +62,11 @@ describe('WorkflowConfig env var loading', () => {
   it('parses AFK_COMPLETION_TIMEOUT in milliseconds', async () => {
     const cfg = await freshConfig({ AFK_COMPLETION_TIMEOUT: '3600000' });
     expect(cfg.completionTimeout).toBe(3_600_000);
+  });
+
+  it('parses AFK_QA_TIMEOUT in milliseconds', async () => {
+    const cfg = await freshConfig({ AFK_QA_TIMEOUT: '1800000' });
+    expect(cfg.qaTimeout).toBe(1_800_000);
   });
 
   it('parses AFK_PROMPT_TIMEOUT in ms', async () => {

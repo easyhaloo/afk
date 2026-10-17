@@ -34,6 +34,7 @@ export const COMMANDS: CommandEntry[] = [
   { names: ['qa'], loader: () => import('./commands/qa.js').then(m => m.registerQACommands) },
   { names: ['loop'], loader: () => import('./commands/loop.js').then(m => m.registerLoopCommands) },
   { names: ['observe'], loader: () => import('./commands/observe.js').then(m => m.registerObserveCommands) },
+  { names: ['retro'], loader: () => import('./commands/retro.js').then(m => m.registerRetroCommands) },
   { names: ['graph'], loader: () => import('./commands/graph.js').then(m => m.registerGraphCommands) },
   { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },
 ];

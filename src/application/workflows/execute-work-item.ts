@@ -347,6 +347,9 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         else await audit({
           kind: 'qa.failed',
           reason: qaResult.rework ? 'rework' : 'blocked',
+          ...((qaResult.failureCode ?? (qaResult.rework ? 'qa_rework' : undefined))
+            ? { reasonCode: qaResult.failureCode ?? 'qa_rework' }
+            : {}),
           ...(qaResult.summary ? { summary: qaResult.summary } : {}),
           ...(qaResult.failedCriteria ? { failedCriteria: qaResult.failedCriteria } : {}),
         });
@@ -366,7 +369,12 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
             await audit({ kind: 'change.merge_verified', changeId: String(change!.id), targetBranch: request.targetBranch, child: true });
             await audit({ kind: 'run.finished', outcome: 'succeeded' });
           } else await audit({ kind: 'human_gate.opened', gateId: `merge:${change!.id}`, reason: 'awaiting human merge' });
-        } else await audit({ kind: 'run.finished', outcome: 'failed', reason: status === 'rework' ? 'QA requested rework' : 'QA or provider change not confirmed' });
+        } else await audit({
+          kind: 'run.finished',
+          outcome: 'failed',
+          reason: status === 'rework' ? 'QA requested rework' : 'QA or provider change not confirmed',
+          reasonCode: qaResult.failureCode ?? (status === 'rework' ? 'qa_rework' : 'provider_change_unconfirmed'),
+        });
         auditConcluded = true;
         await record(status, published ? { changeId: change.id, changeUrl: change.url } : {});
         return { executionId, workItemId, status, ...(published ? { changeUrl: change.url } : {}) };

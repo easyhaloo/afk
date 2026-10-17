@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { extractClaudeTranscriptTokens, extractCodexRolloutTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout } from './agent-telemetry.js';
+import { extractClaudeSessionId, extractClaudeTranscriptTokens, extractCodexRolloutTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout, resolveAgentTranscript } from './agent-telemetry.js';
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -316,5 +316,55 @@ describe('findCodexRollout', () => {
 
     const found = await findCodexRollout('abc123def456', tmp);
     expect(found).toBe(rolloutFile);
+  });
+});
+
+describe('resolveAgentTranscript', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = '/tmp/afk-transcript-test-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    mkdirSync(tmp, { recursive: true });
+  });
+
+  afterEach(() => {
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('links the event session id to the provider session and archives it under a short global path', async () => {
+    const source = join(tmp, 'very', 'long', 'claude', 'project', 'afk-session.jsonl');
+    mkdirSync(join(tmp, 'very', 'long', 'claude', 'project'), { recursive: true });
+    writeFileSync(source, [
+      JSON.stringify({ type: 'assistant', session_id: 'agent-session-123' }),
+      JSON.stringify({ type: 'cost-state', totalCostUSD: 1, modelUsage: {} }),
+    ].join('\n'));
+
+    const resolved = await resolveAgentTranscript({
+      provider: 'claude-code',
+      telemetryPath: source,
+      archiveRoot: join(tmp, 'afk', 'transcripts'),
+    });
+
+    expect(resolved).toEqual({
+      sessionId: 'agent-session-123',
+      path: join(tmp, 'afk', 'transcripts', 'agent-session-123.jsonl'),
+    });
+    expect(readFileSync(resolved!.path, 'utf8')).toContain('agent-session-123');
+  });
+
+  it('finds the newest provider transcript when the provisional AFK session path does not exist', async () => {
+    const projectDir = join(tmp, 'claude-project');
+    mkdirSync(projectDir, { recursive: true });
+    const source = join(projectDir, 'agent-session-456.jsonl');
+    writeFileSync(source, JSON.stringify({ type: 'assistant', session_id: 'agent-session-456' }));
+
+    const resolved = await resolveAgentTranscript({
+      provider: 'claude-code',
+      telemetryPath: join(projectDir, 'qa-204-1791984447541.jsonl'),
+      archiveRoot: join(tmp, 'afk', 'transcripts'),
+    });
+
+    expect(resolved?.sessionId).toBe('agent-session-456');
+    expect(resolved?.path).toBe(join(tmp, 'afk', 'transcripts', 'agent-session-456.jsonl'));
   });
 });

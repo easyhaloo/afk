@@ -12,6 +12,100 @@ import type { TokenUsage } from '../../domain/agents/types.js';
 import { extractClaudeToolEvents, extractCodexToolEvents } from '../../domain/agents/tool-telemetry.js';
 export { extractClaudeToolEvents, extractCodexToolEvents } from '../../domain/agents/tool-telemetry.js';
 
+export interface ResolvedAgentTranscript {
+  path: string;
+  sessionId: string;
+}
+
+export function extractClaudeSessionId(lines: readonly string[]): string | undefined {
+  for (const raw of lines) {
+    try {
+      const parsed = JSON.parse(raw) as { session_id?: unknown; sessionId?: unknown };
+      const sessionId = typeof parsed.session_id === 'string' && parsed.session_id.length > 0
+        ? parsed.session_id
+        : typeof parsed.sessionId === 'string' && parsed.sessionId.length > 0
+          ? parsed.sessionId
+          : undefined;
+      if (sessionId) return sessionId;
+    } catch {
+      // Ignore incomplete transcript lines.
+    }
+  }
+  return undefined;
+}
+
+export async function resolveAgentTranscript(options: {
+  provider: 'claude-code' | 'codex';
+  telemetryPath?: string;
+  threadId?: string;
+  fallbackSessionId?: string;
+  archiveRoot?: string;
+}): Promise<ResolvedAgentTranscript | undefined> {
+  const { dirname, extname, basename, join } = await import('node:path');
+  const { copyFile, mkdir, readdir, readFile, stat, chmod } = await import('node:fs/promises');
+  const { homedir } = await import('node:os');
+
+  let sourcePath: string | undefined;
+  if (options.provider === 'codex') {
+    sourcePath = options.threadId ? await findCodexRollout(options.threadId) : undefined;
+  } else if (options.telemetryPath) {
+    try {
+      await stat(options.telemetryPath);
+      sourcePath = options.telemetryPath;
+    } catch {
+      const directory = dirname(options.telemetryPath);
+      try {
+        const candidates = await Promise.all((await readdir(directory))
+          .filter(name => extname(name) === '.jsonl')
+          .map(async name => {
+            const path = join(directory, name);
+            try {
+              return { path, mtimeMs: (await stat(path)).mtimeMs };
+            } catch {
+              return undefined;
+            }
+          }));
+        sourcePath = candidates
+          .filter((candidate): candidate is { path: string; mtimeMs: number } => candidate !== undefined)
+          .sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.path;
+      } catch {
+        sourcePath = undefined;
+      }
+    }
+  }
+  if (!sourcePath) return undefined;
+
+  let lines: string[];
+  try {
+    lines = (await readFile(sourcePath, 'utf8')).split('\n').filter(line => line.trim());
+  } catch {
+    return undefined;
+  }
+
+  const sessionId = options.provider === 'claude-code'
+    ? extractClaudeSessionId(lines)
+    : options.threadId;
+  const resolvedSessionId = sessionId ?? options.fallbackSessionId ?? basename(sourcePath, extname(sourcePath));
+  const archiveRoot = options.archiveRoot ?? join(homedir(), '.afk', 'transcripts');
+  const archivePath = join(archiveRoot, `${resolvedSessionId}.jsonl`);
+  await mkdir(archiveRoot, { recursive: true, mode: 0o700 });
+  if (sourcePath !== archivePath) {
+    await copyFile(sourcePath, archivePath);
+    await chmod(archivePath, 0o600);
+  }
+  return { path: archivePath, sessionId: resolvedSessionId };
+}
+
+export async function resolveAgentTranscriptPath(options: {
+  provider: 'claude-code' | 'codex';
+  telemetryPath?: string;
+  threadId?: string;
+  fallbackSessionId?: string;
+  archiveRoot?: string;
+}): Promise<string | undefined> {
+  return (await resolveAgentTranscript(options))?.path;
+}
+
 /** Claude Code cost-state entry (from transcript .jsonl). */
 interface CostStateEntry {
   type: 'cost-state';

@@ -54,7 +54,7 @@ import {
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
-import { readAgentTelemetry, readAgentTools, findCodexRollout } from '../infrastructure/observability/agent-telemetry.js';
+import { readAgentTelemetry, readAgentTools, resolveAgentTranscript } from '../infrastructure/observability/agent-telemetry.js';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -1383,27 +1383,26 @@ export class WorkflowRunner {
     //   - claude interactive/tmux: the SessionEnd hook hands us the absolute path
     let usage = result.usage;
     let tools = result.tools;
-    if (!usage || !tools) {
-      let transcriptPath: string | undefined;
-      if (this.agentProviderName === 'codex') {
-        const threadId = execution.metadata.threadId;
-        if (threadId) transcriptPath = await findCodexRollout(threadId);
-      } else {
-        transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
-      }
-      if (transcriptPath) {
-        const options = { provider: this.agentProviderName === 'codex' ? 'codex' as const : 'claude-code' as const, transcriptPath, sandboxKind };
-        if (!usage) usage = await readAgentTelemetry(options);
-        if (!tools) tools = await readAgentTools(options);
-      }
+    const transcript = await resolveAgentTranscript({
+      provider: this.agentProviderName === 'codex' ? 'codex' : 'claude-code',
+      telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
+      threadId: execution.metadata.threadId,
+      fallbackSessionId: result.sessionId ?? execution.id,
+    });
+    const transcriptPath = transcript?.path;
+    if (transcriptPath && (!usage || !tools)) {
+      const options = { provider: this.agentProviderName === 'codex' ? 'codex' as const : 'claude-code' as const, transcriptPath, sandboxKind };
+      if (!usage) usage = await readAgentTelemetry(options);
+      if (!tools) tools = await readAgentTools(options);
     }
 
-    const sessionId = execution.metadata.threadId ?? result.sessionId ?? execution.id;
+    const sessionId = transcript?.sessionId ?? execution.metadata.threadId ?? result.sessionId ?? execution.id;
     if (!this.observationContext) return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
     try {
       await this.observer.record(this.observationContext, {
         kind: 'agent.session_recorded',
         sessionId,
+        ...(transcriptPath ? { transcriptPath } : {}),
         usage,
         tools,
       });

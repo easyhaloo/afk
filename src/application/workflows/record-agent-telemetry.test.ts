@@ -94,7 +94,7 @@ describe('agent.session_recorded wiring', () => {
     const [, data] = record.mock.calls[0]!;
     expect(data.kind).toBe('agent.session_recorded');
     expect(data.sessionId).toBe('session-abc');
-    expect(data.transcriptPath).toBe(join(tmp, '.afk', 'transcripts', 'session-abc.jsonl'));
+    expect(data.transcriptPath).toBe(execution.telemetryPath);
     expect(data.usage).toEqual({ inputTokens: 5000, outputTokens: 200, totalTokens: 5200 });
   });
 
@@ -149,7 +149,7 @@ describe('agent.session_recorded wiring', () => {
     const [, data] = record.mock.calls[0]!;
     expect(data.kind).toBe('agent.session_recorded');
     expect(data.sessionId).toBe('agent-session-xyz');
-    expect(data.transcriptPath).toBe(join(tmp, '.afk', 'transcripts', 'agent-session-xyz.jsonl'));
+    expect(data.transcriptPath).toBe(transcriptPath);
     expect(data.usage?.inputTokens).toBe(1015); // 1000 + 10 + 5
     expect(data.usage?.outputTokens).toBe(50);
   });
@@ -197,7 +197,7 @@ describe('agent.session_recorded wiring', () => {
 
     await (runner as any).recordAgentTelemetry(execution, result);
 
-    expect(resolveAgentTranscript).toHaveBeenCalledWith({ provider: 'codex', telemetryPath: undefined, threadId: 'thread-abc123', fallbackSessionId: 'codex-session' });
+    expect(resolveAgentTranscript).toHaveBeenCalledWith({ provider: 'codex', telemetryPath: undefined, threadId: 'thread-abc123' });
     const [, data] = record.mock.calls[0]!;
     expect(data.sessionId).toBe('thread-abc123');
     expect(data.transcriptPath).toBe('/fake/rollout.jsonl');
@@ -263,7 +263,7 @@ describe('agent.session_recorded wiring', () => {
     });
     expect(record).toHaveBeenCalledWith(mockContext(), {
       kind: 'agent.session_recorded', sessionId: 'agent-session-tools',
-      transcriptPath: join(tmp, '.afk', 'transcripts', 'agent-session-tools.jsonl'),
+      transcriptPath,
       usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
       tools: [{ id: 'call-1', name: 'Bash', result: 'failed' }],
     });

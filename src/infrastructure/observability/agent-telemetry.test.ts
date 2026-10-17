@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { extractClaudeSessionId, extractClaudeTranscriptTokens, extractCodexRolloutTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout, resolveAgentTranscript } from './agent-telemetry.js';
-import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { extractClaudeSessionId, extractClaudeTranscriptTokens, extractCodexRolloutTokens, extractOpenCodeTranscriptTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout, resolveAgentTranscript } from './agent-telemetry.js';
+import { mkdirSync, writeFileSync, rmSync, appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+
+const childProcessMocks = vi.hoisted(() => ({ execFile: vi.fn() }));
+vi.mock('node:child_process', () => ({ execFile: childProcessMocks.execFile }));
 
 /**
  * Fixtures mirror a real session (`c03ff1c4-…`), whose cost-state sequence was
@@ -325,13 +328,15 @@ describe('resolveAgentTranscript', () => {
   beforeEach(() => {
     tmp = '/tmp/afk-transcript-test-' + Date.now() + '-' + Math.random().toString(36).slice(2);
     mkdirSync(tmp, { recursive: true });
+    vi.stubEnv('HOME', tmp);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  it('links the event session id to the provider session and archives it under a short global path', async () => {
+  it('returns the original transcript and reads subsequent provider updates without creating a copy', async () => {
     const source = join(tmp, 'very', 'long', 'claude', 'project', 'afk-session.jsonl');
     mkdirSync(join(tmp, 'very', 'long', 'claude', 'project'), { recursive: true });
     writeFileSync(source, [
@@ -342,29 +347,97 @@ describe('resolveAgentTranscript', () => {
     const resolved = await resolveAgentTranscript({
       provider: 'claude-code',
       telemetryPath: source,
-      archiveRoot: join(tmp, 'afk', 'transcripts'),
     });
 
     expect(resolved).toEqual({
       sessionId: 'agent-session-123',
-      path: join(tmp, 'afk', 'transcripts', 'agent-session-123.jsonl'),
+      path: source,
     });
-    expect(readFileSync(resolved!.path, 'utf8')).toContain('agent-session-123');
+    expect(existsSync(join(tmp, '.afk'))).toBe(false);
+    appendFileSync(source, '\n' + JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'new-tool', name: 'Read', input: {} }] } }));
+    await expect(readAgentTools({ provider: 'claude-code', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual([
+      { id: 'new-tool', name: 'Read', result: 'unknown' },
+    ]);
   });
 
-  it('finds the newest provider transcript when the provisional AFK session path does not exist', async () => {
+  it('locates the original transcript by the runtime provider session id instead of the newest file', async () => {
     const projectDir = join(tmp, 'claude-project');
     mkdirSync(projectDir, { recursive: true });
     const source = join(projectDir, 'agent-session-456.jsonl');
     writeFileSync(source, JSON.stringify({ type: 'assistant', session_id: 'agent-session-456' }));
+    writeFileSync(join(projectDir, 'unrelated-session.jsonl'), JSON.stringify({ session_id: 'unrelated-session' }));
 
     const resolved = await resolveAgentTranscript({
       provider: 'claude-code',
       telemetryPath: join(projectDir, 'qa-204-1791984447541.jsonl'),
-      archiveRoot: join(tmp, 'afk', 'transcripts'),
+      threadId: 'agent-session-456',
     });
 
     expect(resolved?.sessionId).toBe('agent-session-456');
-    expect(resolved?.path).toBe(join(tmp, 'afk', 'transcripts', 'agent-session-456.jsonl'));
+    expect(resolved?.path).toBe(source);
+  });
+
+  it('leaves a missing transcript unresolved even when another session exists in the same project', async () => {
+    writeFileSync(join(tmp, 'unrelated-session.jsonl'), JSON.stringify({ session_id: 'unrelated-session' }));
+    await expect(resolveAgentTranscript({
+      provider: 'claude-code', telemetryPath: join(tmp, 'missing-session.jsonl'),
+    })).resolves.toBeUndefined();
+  });
+
+  it('rejects a transcript whose session id conflicts with the runtime provider session id', async () => {
+    const source = join(tmp, 'expected-session.jsonl');
+    writeFileSync(source, JSON.stringify({ session_id: 'different-session' }));
+    await expect(resolveAgentTranscript({
+      provider: 'claude-code', telemetryPath: source, threadId: 'expected-session',
+    })).resolves.toBeUndefined();
+  });
+
+  it('returns the original Codex rollout without creating a copy', async () => {
+    const sessionsDir = join(tmp, '.codex', 'sessions', '2026', '10', '17');
+    mkdirSync(sessionsDir, { recursive: true });
+    const source = join(sessionsDir, 'rollout-103000-thread-123.jsonl');
+    writeFileSync(source, JSON.stringify({ type: 'session_meta', payload: { id: 'thread-123' } }));
+    await expect(resolveAgentTranscript({ provider: 'codex', threadId: 'thread-123' })).resolves.toEqual({
+      sessionId: 'thread-123', path: source,
+    });
+    expect(existsSync(join(tmp, '.afk'))).toBe(false);
+  });
+
+  it('reads the original OpenCode provider export without creating a copy', async () => {
+    vi.stubEnv('XDG_DATA_HOME', tmp);
+    const messageDir = join(tmp, 'opencode', 'storage', 'message', 'ses_original');
+    const partDir = join(tmp, 'opencode', 'storage', 'part', 'msg-1');
+    mkdirSync(messageDir, { recursive: true });
+    mkdirSync(partDir, { recursive: true });
+    writeFileSync(join(messageDir, 'msg-1.json'), JSON.stringify({ id: 'msg-1', sessionID: 'ses_original', role: 'assistant', tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 1 } } }));
+    writeFileSync(join(partDir, 'part-1.json'), JSON.stringify({ type: 'tool', callID: 'call-1', tool: 'read', state: { status: 'completed' } }));
+
+    const resolved = await resolveAgentTranscript({ provider: 'opencode', threadId: 'ses_original' });
+
+    expect(resolved).toEqual({ sessionId: 'ses_original', path: messageDir });
+    await expect(readAgentTelemetry({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual({ inputTokens: 14, outputTokens: 7, totalTokens: 21 });
+    await expect(readAgentTools({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual([{ id: 'call-1', name: 'read', result: 'succeeded' }]);
+    expect(existsSync(join(tmp, '.afk'))).toBe(false);
+    expect(childProcessMocks.execFile).not.toHaveBeenCalled();
+  });
+
+  it('reads a database-only OpenCode session through the provider database command', async () => {
+    childProcessMocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => {
+      const isSessionQuery = args[1]?.includes('from session');
+      const isMessageQuery = args[1]?.includes('from message');
+      const stdout = isSessionQuery
+        ? JSON.stringify([{ tokens_input: 10, tokens_output: 5, tokens_reasoning: 1, tokens_cache_read: 2, tokens_cache_write: 0 }])
+        : isMessageQuery
+        ? JSON.stringify([{ id: 'msg-db', role: 'assistant', tokens: JSON.stringify({ input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 0 } }) }])
+        : JSON.stringify([{ message_id: 'msg-db', call_id: 'call-db', tool: 'bash', status: 'completed' }]);
+      callback(null, { stdout, stderr: '' });
+    });
+
+    const resolved = await resolveAgentTranscript({ provider: 'opencode', threadId: 'ses_db' });
+
+    expect(resolved).toEqual({ sessionId: 'ses_db', path: 'opencode://session/ses_db' });
+    await expect(readAgentTelemetry({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual({ inputTokens: 12, outputTokens: 6, totalTokens: 18 });
+    await expect(readAgentTools({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual([{ id: 'call-db', name: 'bash', result: 'succeeded' }]);
+    expect(childProcessMocks.execFile).toHaveBeenCalledTimes(6);
   });
 });

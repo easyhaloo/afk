@@ -109,7 +109,7 @@ describe('retro command', () => {
     expect(report.metrics.toolCallCount).toBe(1);
   });
 
-  it('prefers the short global transcript archive for legacy session events', async () => {
+  it.each([false, true])('reads provider updates instead of archive copies (indexed archive: %s)', async indexedArchive => {
     const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-archive-'));
     roots.push(root);
     const previousHome = process.env.HOME;
@@ -117,24 +117,39 @@ describe('retro command', () => {
     try {
       const workspace = join(root, 'workspace');
       const eventRoot = join(root, 'events');
-      const transcriptPath = join(root, '.afk', 'transcripts', 'agent-session.jsonl');
+      const archivedPath = join(root, '.afk', 'transcripts', 'agent-session.jsonl');
       await fs.mkdir(workspace, { recursive: true });
       await fs.mkdir(join(root, '.afk', 'transcripts'), { recursive: true });
-      await fs.writeFile(transcriptPath, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: {} }] } }) + '\n');
-      await createRetroFixture({ workspace, eventRoot, sessionId: 'agent-session' });
+      await fs.writeFile(archivedPath, JSON.stringify({ sessionId: 'agent-session' }) + '\n');
+      const projectDir = join(root, '.claude', 'projects', claudeProjectSlug(realpathSync(workspace)));
+      const transcriptPath = join(projectDir, 'agent-session.jsonl');
+      await fs.mkdir(projectDir, { recursive: true });
+      await fs.writeFile(transcriptPath, JSON.stringify({ type: 'assistant', sessionId: 'agent-session', message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: {} }] } }) + '\n');
+      await createRetroFixture({ workspace, eventRoot, sessionId: 'agent-session', ...(indexedArchive ? { indexedPath: archivedPath } : {}) });
       childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
 
       const { runRetro } = await import('./retro.js');
       const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
 
       expect(report.sessions?.[0]).toMatchObject({ sessionId: 'agent-session', transcriptPath });
+      expect(report.metrics.toolCallCount).toBe(1);
+
+      await fs.appendFile(transcriptPath, JSON.stringify({ type: 'assistant', sessionId: 'agent-session', message: { content: [{ type: 'tool_use', id: 'tool-2', name: 'Bash', input: {} }] } }) + '\n');
+      const updated = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
+      expect(updated.metrics.toolCallCount).toBe(2);
+      expect(updated.retroId).not.toBe(report.retroId);
+
+      await fs.unlink(transcriptPath);
+      const missing = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
+      expect(missing.sessions?.[0]?.source).toBe('transcript_missing');
+      expect(missing.metrics.toolCallCount).toBe(0);
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
     }
   });
 
-  it('marks a legacy event as unindexed when compatibility discovery finds the native transcript', async () => {
+  it('marks a legacy session as missing instead of guessing from another session in the same workspace', async () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-unindexed-'));
     roots.push(root);
     const previousHome = process.env.HOME;
@@ -154,7 +169,8 @@ describe('retro command', () => {
       const { runRetro } = await import('./retro.js');
       const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
 
-      expect(report.sessions?.[0]?.source).toBe('transcript_unindexed');
+      expect(report.sessions?.[0]?.source).toBe('transcript_missing');
+      expect(report.metrics.toolCallCount).toBe(0);
       expect(report.source).toBe('provisional');
     } finally {
       if (previousHome === undefined) delete process.env.HOME;

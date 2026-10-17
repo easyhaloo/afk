@@ -9,12 +9,12 @@ import { z } from 'zod';
 import type { AgentToolCallSummary, RunEvent } from '@afk/core';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
-import { readAgentTelemetry, readAgentTools, findCodexRollout } from '../../infrastructure/observability/agent-telemetry.js';
+import { readAgentTelemetry, readAgentTools, readAgentTranscript, findCodexRollout } from '../../infrastructure/observability/agent-telemetry.js';
 import { defaultSessionStoreChain } from '../../application/sessions/chain.js';
 import { claudeProjectSlug } from '../../shared/agent-transcript-path.js';
 
 const execFileAsync = promisify(execFile);
-const RETRO_VERSION = '2';
+const RETRO_VERSION = '3';
 
 const findingCategorySchema = z.string().transform(value => {
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -76,7 +76,7 @@ interface RetroOptions {
   workItemId?: string;
   workspace: string;
   root?: string;
-  provider: 'claude-code' | 'codex';
+  provider: 'claude-code' | 'codex' | 'opencode';
   transcript?: string;
 }
 
@@ -154,6 +154,13 @@ async function fileEvidence(kind: string, path: string, mediaType: string): Prom
   }
 }
 
+async function transcriptEvidence(provider: RetroOptions['provider'], path: string): Promise<EvidenceFile | undefined> {
+  const content = await readAgentTranscript({ provider, transcriptPath: path, sandboxKind: 'local' });
+  if (content === undefined) return undefined;
+  const hash = sha256(content);
+  return { kind: 'transcript', path, uri: `evidence://${hash}`, sha256: hash, mediaType: 'application/x-ndjson' };
+}
+
 async function findStateRoot(workspace: string, executionId: string): Promise<string> {
   let current = workspace;
   for (let depth = 0; depth < 8; depth += 1) {
@@ -171,13 +178,7 @@ async function findStateRoot(workspace: string, executionId: string): Promise<st
 
 async function transcriptPath(workspace: string, provider: RetroOptions['provider'], sessionId: string): Promise<string | undefined> {
   if (provider === 'codex') return findCodexRollout(sessionId);
-  const archivedPath = join(homedir(), '.afk', 'transcripts', `${sessionId}.jsonl`);
-  try {
-    await fs.access(archivedPath);
-    return archivedPath;
-  } catch {
-    // Fall back to the native Claude project path for older sessions.
-  }
+  if (provider === 'opencode') return `opencode://session/${encodeURIComponent(sessionId)}`;
   let realWorkspace = workspace;
   try { realWorkspace = realpathSync(workspace); } catch { /* workspace may be a fixture */ }
   const slug = claudeProjectSlug(realWorkspace);
@@ -235,47 +236,13 @@ async function readEvents(store: JsonlEventStore, runId: string): Promise<Event[
   return events;
 }
 
-function sessionEvents(events: readonly Event[]): Array<{ sessionId: string; transcriptPath?: string; occurredAt: string; observedUsage?: unknown; observedTools?: AgentToolCallSummary[] }> {
+function sessionEvents(events: readonly Event[]): Array<{ sessionId: string; transcriptPath?: string; observedUsage?: unknown; observedTools?: AgentToolCallSummary[] }> {
   return events.flatMap(event => event.data.kind === 'agent.session_recorded' ? [{
     sessionId: event.data.sessionId,
     transcriptPath: event.data.transcriptPath,
-    occurredAt: event.occurredAt,
     observedUsage: event.data.usage,
     observedTools: event.data.tools,
   }] : []);
-}
-
-async function findUnindexedClaudeTranscript(workspace: string, occurredAt: string, excludedPaths: ReadonlySet<string> = new Set()): Promise<string | undefined> {
-  let realWorkspace = workspace;
-  try { realWorkspace = realpathSync(workspace); } catch { /* workspace may be a fixture */ }
-  const projectDir = join(homedir(), '.claude', 'projects', claudeProjectSlug(realWorkspace));
-  const entries = await fs.readdir(projectDir, { withFileTypes: true }).catch(() => []);
-  const targetTime = Date.parse(occurredAt);
-  const candidates: Array<{ path: string; distance: number }> = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
-    const path = join(projectDir, entry.name);
-    if (excludedPaths.has(path)) continue;
-    const content = await fs.readFile(path, 'utf8').catch(() => '');
-    const matchesWorkspace = content.split('\n').slice(0, 32).some(line => {
-      try {
-        const value = JSON.parse(line) as { cwd?: unknown };
-        return value.cwd === realWorkspace;
-      } catch {
-        return false;
-      }
-    });
-    if (!matchesWorkspace) continue;
-    const stat = await fs.stat(path).catch(() => undefined);
-    const distance = stat && Number.isFinite(targetTime) ? Math.abs(stat.mtimeMs - targetTime) : Number.MAX_SAFE_INTEGER;
-    candidates.push({ path, distance });
-  }
-  return candidates.sort((left, right) => left.distance - right.distance || left.path.localeCompare(right.path))[0]?.path;
-}
-
-async function findArchivedTranscript(sessionId: string): Promise<string | undefined> {
-  const path = join(homedir(), '.afk', 'transcripts', `${sessionId}.jsonl`);
-  return (await fileEvidence('transcript', path, 'application/x-ndjson')) ? path : undefined;
 }
 
 async function runRetro(options: RetroOptions): Promise<RetroReport> {
@@ -296,15 +263,13 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
   const sessions = sessionEvents(events);
   const sessionProjections: Array<{ sessionId: string; source: 'transcript_found' | 'transcript_missing' | 'transcript_unindexed'; transcriptPath?: string; usage?: unknown; tools?: AgentToolCallSummary[]; transcript?: string }> = [];
   const missing: string[] = [];
-  const usedUnindexedPaths = new Set<string>();
   for (const session of sessions) {
-    const indexedPath = options.transcript ?? session.transcriptPath;
-    let path = indexedPath ?? await findArchivedTranscript(session.sessionId) ?? await transcriptPath(options.workspace, options.provider, session.sessionId);
-    let transcript = path ? await fileEvidence('transcript', path, 'application/x-ndjson') : undefined;
-    if (!indexedPath && !transcript && options.provider === 'claude-code') {
-      path = await findUnindexedClaudeTranscript(options.workspace, session.occurredAt, usedUnindexedPaths);
-      transcript = path ? await fileEvidence('transcript', path, 'application/x-ndjson') : undefined;
-    }
+    const recordedPath = options.transcript ?? session.transcriptPath;
+    const archivedRoot = join(homedir(), '.afk', 'transcripts') + '/';
+    const indexedPath = recordedPath && !recordedPath.startsWith(archivedRoot) ? recordedPath : undefined;
+    const indexedTranscript = indexedPath ? await transcriptEvidence(options.provider, indexedPath) : undefined;
+    const path = indexedTranscript ? indexedPath : await transcriptPath(options.workspace, options.provider, session.sessionId);
+    const transcript = indexedTranscript ?? (path ? await transcriptEvidence(options.provider, path) : undefined);
     if (!path || !transcript) {
       missing.push(`transcript:${session.sessionId}`);
       sessionProjections.push({ sessionId: session.sessionId, source: 'transcript_missing', ...(path ? { transcriptPath: path } : {}), tools: undefined, usage: undefined });
@@ -314,8 +279,7 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
     const telemetryOptions = { provider: options.provider, transcriptPath: path, sandboxKind: 'local' as const };
     const [usage, tools] = await Promise.all([readAgentTelemetry(telemetryOptions), readAgentTools(telemetryOptions)]);
     if (!usage && !tools) missing.push(`telemetry:${session.sessionId}`);
-    if (!indexedPath) usedUnindexedPaths.add(path);
-    sessionProjections.push({ sessionId: session.sessionId, source: indexedPath ? 'transcript_found' : 'transcript_unindexed', transcriptPath: path, usage, tools, transcript: transcript.uri });
+    sessionProjections.push({ sessionId: session.sessionId, source: indexedTranscript ? 'transcript_found' : 'transcript_unindexed', transcriptPath: path, usage, tools, transcript: transcript.uri });
   }
 
   const sessionStore = defaultSessionStoreChain(stateRoot);
@@ -406,7 +370,7 @@ export function registerRetroCommands(program: Command, _context: CommandRegistr
     .requiredOption('--workspace <path>', 'Workspace containing .afk state')
     .option('--execution-id <id>', 'Execution journal ID; defaults to run ID')
     .option('--work-item-id <id>', 'Canonical work item ID')
-    .option('--provider <provider>', 'claude-code or codex', 'claude-code')
+    .option('--provider <provider>', 'claude-code, codex, or opencode', 'claude-code')
     .option('--transcript <path>', 'Explicit transcript path for fixture/replay runs')
     .option('--root <path>', 'AFK event-store root')
     .option('--json', 'Emit JSON')

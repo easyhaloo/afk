@@ -1384,14 +1384,13 @@ export class WorkflowRunner {
     let usage = result.usage;
     let tools = result.tools;
     const transcript = await resolveAgentTranscript({
-      provider: this.agentProviderName === 'codex' ? 'codex' : 'claude-code',
+      provider: this.agentProviderName === 'codex' ? 'codex' : this.agentProviderName === 'opencode' ? 'opencode' : 'claude-code',
       telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
       threadId: execution.metadata.threadId,
-      fallbackSessionId: result.sessionId ?? execution.id,
     });
     const transcriptPath = transcript?.path;
     if (transcriptPath && (!usage || !tools)) {
-      const options = { provider: this.agentProviderName === 'codex' ? 'codex' as const : 'claude-code' as const, transcriptPath, sandboxKind };
+      const options = { provider: this.agentProviderName === 'codex' ? 'codex' as const : this.agentProviderName === 'opencode' ? 'opencode' as const : 'claude-code' as const, transcriptPath, sandboxKind };
       if (!usage) usage = await readAgentTelemetry(options);
       if (!tools) tools = await readAgentTools(options);
     }

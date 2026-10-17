@@ -41,7 +41,7 @@ AFK 已经具备 Desktop 工作项入口、审计事件流、Agent telemetry 读
 
 ### GOAL-002: 保证 Agent 行为结论只有一个事实源
 
-Agent 的 session 行为、工具调用、token usage、错误和重试结论全部从对应 Claude transcript 或 Codex rollout 派生。其他文件只能提供生命周期、恢复 checkpoint、handoff provenance 或一致性对照信息。
+Agent 的 session 行为、工具调用、token usage、错误和重试结论全部从对应 Claude transcript、Codex rollout 或 OpenCode provider-native session 派生。其他文件只能提供生命周期、恢复 checkpoint、handoff provenance 或一致性对照信息。
 
 ### GOAL-003: 把复盘结论转成可评审环境改进
 
@@ -80,7 +80,7 @@ Agent 的 session 行为、工具调用、token usage、错误和重试结论全
 
 | Term | Definition |
 |---|---|
-| Agent transcript | Claude Code transcript 或 Codex rollout；记录 Agent 行为的唯一事实源。 |
+| Agent transcript | Claude Code transcript、Codex rollout 或 OpenCode provider-native session；记录 Agent 行为的唯一事实源。 |
 | AFK event stream | `runId` 维度的 hash-chained JSONL；记录 AFK 生命周期和审计事实。 |
 | Session checkpoint | `.afk/sessions` 中用于恢复 Agent 的 provider snapshot 及 checksum。 |
 | Handoff | `.afk/handoff` 中供下一轮 Agent 或人工阅读的交接摘要。 |
@@ -164,12 +164,12 @@ Agent 的 session 行为、工具调用、token usage、错误和重试结论全
 
 #### Preconditions
 
-- 系统可以根据现有 Agent execution metadata 定位 transcript。
-- Claude transcript 或 Codex rollout 的来源身份与执行尝试可以关联。
+- 系统可以根据现有 Agent execution metadata 定位 transcript 或 provider-native session。
+- Claude transcript、Codex rollout 或 OpenCode session 的来源身份与执行尝试可以关联。
 
 #### Main Flow
 
-1. 系统定位 Claude 的 `telemetryPath` 或 Codex 的 thread rollout。
+1. 系统定位 Claude 的 `telemetryPath`、Codex 的 thread rollout 或 OpenCode 的 provider-native session，始终读取 provider 原始数据，不创建或读取 AFK transcript 副本。事件只保存真实 provider session ID 和原始数据定位符。
 2. 系统使用现有 telemetry reader 解析 transcript。
 3. 系统将 transcript 派生的 usage、tool calls、错误和重试写入复盘输入。
 4. 系统读取 AFK event stream 作为 lifecycle context 和完整性校验。
@@ -178,6 +178,7 @@ Agent 的 session 行为、工具调用、token usage、错误和重试结论全
 #### Abnormal Flows
 
 - If transcript 不可读，系统将 session 标记为 incomplete，不从 event、checkpoint 或 handoff 推导缺失行为。
+- If 旧事件指向 AFK transcript 副本，系统按 session ID 回查 provider 原始文件；找不到则标记缺失，不根据文件修改时间猜测其他会话。
 - If transcript 与 `agent.session_recorded` 的派生观测不一致，系统以 transcript 为准并记录 source conflict。
 - If container 没有 transcript 挂载，系统明确记录 telemetry unavailable。
 

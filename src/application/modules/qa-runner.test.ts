@@ -526,6 +526,7 @@ describe('QARunner execution boundary', () => {
       const f = fixture();
       const nativeSessionId = 'f1817331-17b7-40e2-98f0-834f6b02320c';
       f.execution.telemetryPath = join(root, 'qa-204-1791984447541.jsonl');
+      f.execution.metadata.threadId = nativeSessionId;
       await writeFile(join(root, `${nativeSessionId}.jsonl`), JSON.stringify({ session_id: nativeSessionId }) + '\n');
       process.env.HOME = root;
       const result = await f.execution.waitForResult();
@@ -540,7 +541,7 @@ describe('QARunner execution boundary', () => {
         expect(await runner.process('60')).toMatchObject({ success: true });
       }
       expect(await new BudgetStore(root, '60').load()).toMatchObject({ used: 0, tokens: 15, sessions: { [nativeSessionId]: 15 } });
-      expect(onSession).toHaveBeenCalledWith({ kind: 'agent.session_recorded', sessionId: nativeSessionId, transcriptPath: join(root, '.afk', 'transcripts', `${nativeSessionId}.jsonl`), usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools });
+      expect(onSession).toHaveBeenCalledWith({ kind: 'agent.session_recorded', sessionId: nativeSessionId, transcriptPath: join(root, `${nativeSessionId}.jsonl`), usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools });
     } finally {
       process.env.HOME = previousHome;
       await rm(root, { recursive: true, force: true });

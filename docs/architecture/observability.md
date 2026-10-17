@@ -157,13 +157,14 @@ returns collected `tools`, including failure, abort and timeout. This does not
 add a raw-output buffer and does not depend on the bounded `captureOutput`
 tail. With no recognized calls, `tools` remains absent.
 
-`src/infrastructure/observability/agent-telemetry.ts` re-exports both extractors
+`src/infrastructure/observability/agent-telemetry.ts` re-exports the provider extractors
 and provides `readAgentTools(options: ReadTelemetryOptions):
 Promise<AgentToolCallSummary[] | undefined>`, independently of the existing
 `readAgentTelemetry` token API. WorkflowRunner and QARunner prefer `result.tools`
 and read tools from the transcript only when absent, even if usage is already
-available. Use Claude's existing `telemetryPath` and Codex's
-`findCodexRollout(threadId)` path. A missing file, container sandbox or rollout
+available. Use Claude's existing `telemetryPath`, Codex's
+`findCodexRollout(threadId)` path, or OpenCode's provider-native storage/database
+session identified by `threadId`. A missing file, container sandbox or rollout
 without native item events returns `undefined`. Codex rollouts can contain
 only `response_item` function calls and output bodies, without native item
 lifecycle or typed result/exit-code evidence. The current parser leaves tools

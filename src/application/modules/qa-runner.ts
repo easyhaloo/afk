@@ -369,14 +369,13 @@ export class QARunner {
     const transcript = this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman'
       ? undefined
       : await resolveAgentTranscript({
-        provider: this.agentProvider.name === 'codex' ? 'codex' : 'claude-code',
+        provider: this.agentProvider.name === 'codex' ? 'codex' : this.agentProvider.name === 'opencode' ? 'opencode' : 'claude-code',
         telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
         threadId: execution.metadata.threadId,
-        fallbackSessionId: result.sessionId ?? execution.id,
       });
     const transcriptPath = transcript?.path;
     if (transcriptPath && (!usage || !tools)) {
-      const options = { provider: this.agentProvider.name === 'codex' ? 'codex' as const : 'claude-code' as const, transcriptPath, sandboxKind: 'local' as const };
+      const options = { provider: this.agentProvider.name === 'codex' ? 'codex' as const : this.agentProvider.name === 'opencode' ? 'opencode' as const : 'claude-code' as const, transcriptPath, sandboxKind: 'local' as const };
       if (!usage) usage = await readAgentTelemetry(options);
       if (!tools) tools = await readAgentTools(options);
     }

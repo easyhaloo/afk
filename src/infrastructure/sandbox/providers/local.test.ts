@@ -51,7 +51,7 @@ describe('LocalSandboxProvider', () => {
       'interactive-test', process.cwd(), "'agent' '--interactive'",
     );
     expect(tmux.sendPrompt).toHaveBeenCalledWith(
-      process.cwd(), 'interactive-test', 'main', 'goal', 'goal_complete',
+      process.cwd(), 'interactive-test', 'main', 'goal', 'goal_complete', 'claude-code',
     );
   });
 

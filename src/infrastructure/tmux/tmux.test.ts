@@ -65,3 +65,13 @@ describe('TmuxClient signal readers', () => {
     expect(readLegacySignal).toHaveBeenCalledWith('/unused');
   });
 });
+
+describe('TmuxClient provider readiness', () => {
+  it('accepts non-Claude interactive providers after their tmux session exists', async () => {
+    const client = new TmuxClient();
+    vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+
+    await expect(client.waitForPrompt('/missing-status', 10, 'codex', 'codex-session')).resolves.toBe(true);
+  });
+});

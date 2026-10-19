@@ -617,7 +617,7 @@ Prerequisite: all new workflows and default Provider use ExecutionResult.
 Acceptance: full test suite passes, old worktrees can be compatibly read or explicitly migrated.
 
 Implementation details:
-- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `packages/afk-execution/packages/afk-execution/src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `packages/afk-execution/src/infrastructure/tmux/tmux.ts`.
+- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `packages/afk-execution/src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `packages/afk-execution/src/infrastructure/tmux/tmux.ts`.
 - `packages/afk-infrastructure/src/io/signal.ts` owns the signal file primitives.
 
 ## 13. Testing Plan

@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { FileSessionStore } from '@afk/execution/application/sessions/file-store';
-import { HandoffSessionStore } from '@afk/execution/application/sessions/handoff-store';
-import { SessionStoreChain, SessionCorruptError, SessionNotFoundError } from '@afk/execution/application/sessions/types';
-import { RunStateWriter } from '@afk/execution/application/sessions/run-state';
-import type { SessionSnapshot } from '@afk/execution/domain/agents/types';
+import { FileSessionStore } from './file-store.js';
+import { HandoffSessionStore } from './handoff-store.js';
+import { SessionStoreChain, SessionCorruptError, SessionNotFoundError } from './types.js';
+import { RunStateWriter } from './run-state.js';
+import type { SessionSnapshot } from '../../domain/agents/types.js';
 
 function makeSnapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
   return {

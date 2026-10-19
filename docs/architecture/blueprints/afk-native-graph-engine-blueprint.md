@@ -57,7 +57,7 @@ packages/afk-workflow-graph/
     validate.test.ts
     determinism.test.ts
 
-packages/afk-execution/packages/afk-execution/src/application/workflows/
+packages/afk-execution/src/application/workflows/
   graph-snapshot.ts       # AFK CLI 调用共享包的适配器
 
 desktop-client/

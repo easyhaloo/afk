@@ -16,12 +16,12 @@ and design discussions use these terms; keep them in lockstep with the code.
   post issue comment, restart or terminate the session. One interface -
   `handoff(ctx, mode: 'auto' | 'terminal', reason?)` - hides the
   negotiate/persist/notify/relaunch cluster. The manual flip is an internal
-  failure mode of `'auto'`. `packages/afk-execution/packages/afk-execution/src/application/workflows/handoff.ts`.
+  failure mode of `'auto'`. `packages/afk-execution/src/application/workflows/handoff.ts`.
 
 - **Watchdog** - Detached process-group that fires after the hard timeout:
   writes a timeout signal, then kills the tmux session. Armed per phase /
   generation; disarmed during handoff negotiation and on cleanup.
-  `packages/afk-execution/packages/afk-execution/src/application/workflows/watchdog.ts`.
+  `packages/afk-execution/src/application/workflows/watchdog.ts`.
 
 - **Signal** - The interactive agent/runner communication protocol via
   `.afk-signal.json`: `goal_complete`, `ac_result`, `handoff_ready`, `timeout`,

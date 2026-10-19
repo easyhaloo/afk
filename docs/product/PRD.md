@@ -114,7 +114,7 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
 
 | Context | Module | Touch |
 |---------|--------|-------|
-| Run audit spine | `src/core/events.ts`, `packages/afk-infrastructure/packages/afk-execution/src/observability/jsonl-event-store.ts` | none (read-only consumer) |
+| Run audit spine | `src/core/events.ts`, `packages/afk-infrastructure/src/observability/jsonl-event-store.ts` | none (read-only consumer) |
 | CLI projection | `src/cli/commands/observe.ts` (`runs`, `timeline`) | none (already exposes needed subcommands) |
 | Electron IPC | `desktop-client/shared/ipc-contract.ts`, `desktop-client/electron/ipc/register-handlers.ts` | add 2 handlers |
 | Electron service | `desktop-client/electron/services/` | add `run-log-service.ts` |

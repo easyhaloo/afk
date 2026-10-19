@@ -613,7 +613,7 @@ workflow:
 验收：全量测试通过，旧 worktree 可以被兼容读取或明确迁移。
 
 实现细节：
-- 批量 agent 通过 `ExecutionResult` 上报；交互式 agent 按 `packages/afk-execution/packages/afk-execution/src/application/workflows/execution-protocol.ts` 写 `.afk-signal.json`，由 `packages/afk-execution/src/infrastructure/tmux/tmux.ts` 的 `readSignal`/`readSignalSync` 读取。
+- 批量 agent 通过 `ExecutionResult` 上报；交互式 agent 按 `packages/afk-execution/src/application/workflows/execution-protocol.ts` 写 `.afk-signal.json`，由 `packages/afk-execution/src/infrastructure/tmux/tmux.ts` 的 `readSignal`/`readSignalSync` 读取。
 - `packages/afk-infrastructure/src/io/signal.ts` 持有 signal 文件原语。
 
 ## 13. 测试计划

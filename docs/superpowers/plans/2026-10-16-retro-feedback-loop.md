@@ -14,14 +14,14 @@
 
 仓库已有以下能力，实施时必须复用：
 
-- `packages/afk-infrastructure/packages/afk-execution/src/observability/jsonl-event-store.ts`：追加写入、顺序号、前向 hash 链、`fsync`、校验和按运行查询。
+- `packages/afk-infrastructure/src/observability/jsonl-event-store.ts`：追加写入、顺序号、前向 hash 链、`fsync`、校验和按运行查询。
 - `packages/afk-execution/src/infrastructure/observability/local-evidence-store.ts`：AES-256-GCM 加密、SHA-256 去重、文本脱敏、`EvidenceRef` 引用。
 - `packages/afk-core/src/events.ts`：`RunEvent`、`RunEventData`、`EvidenceRef`、`AgentToolCallSummary`。
 - `packages/afk-execution/src/observability/run-observer.ts`：将事件追加到审计流并记录可观测字段。
 - `packages/afk-execution/src/infrastructure/observability/agent-telemetry.ts` 与 `packages/afk-execution/src/domain/agents/tool-telemetry.ts`：从 Claude/Codex transcript/rollout 读取 token 和工具调用元数据；transcript 是 agent 行为的唯一事实源。
 - `packages/afk-execution/src/application/sessions/types.ts`、`packages/afk-execution/src/application/sessions/chain.ts`、`packages/afk-execution/src/application/sessions/file-store.ts`、`packages/afk-execution/src/application/sessions/handoff-store.ts`：provider-native session snapshot、checksum、优先级 fallback 和 handoff fallback。
 - `packages/afk-execution/src/application/workflow-engine.ts:1146-1415`：定位 transcript、读取 transcript 派生 telemetry 并写入 `agent.session_recorded`。
-- `packages/afk-execution/packages/afk-execution/src/application/workflows/execute-work-item.ts`：实现、QA、发布和人工合并关联的执行闭环。
+- `packages/afk-execution/src/application/workflows/execute-work-item.ts`：实现、QA、发布和人工合并关联的执行闭环。
 - `docs/architecture/observability.md` 与 `docs/adr/0018-evidence-classification-and-redaction.md`：审计和证据分类规则。
 
 现有 `/Users/shenggangshu/.claude/skills/retro` 是复盘规则的唯一来源。AFK 不复制其正文、不新增同名 skill、不修改 `~/.claude/skills` 或其软链接目标。AFK 只负责准备输入、启动已有 skill、校验输出和保存结果。
@@ -81,7 +81,7 @@
 
 如果 transcript 与 `agent.session_recorded`、session snapshot 或 handoff summary 的同名字段不一致，记录 `sourceConflict`，以 transcript 为准；不做“多数值胜出”、不合并 token、不合并 tool call。若 transcript 缺失，报告标记 `incomplete`，而不是用其他来源伪造完整 session。
 
-`WorkflowRunner` 已在 `context_high` 路径调用 `execution.captureSession()` 后通过 `SessionStoreChain.saveFirst()` 保存 snapshot；恢复路径由 `packages/afk-execution/packages/afk-execution/src/application/workflows/resume.ts` 调用同一条 chain。Retro 只读这些既有产物，不重新捕获、不重新持久化，也不创建第二个 session id 体系。
+`WorkflowRunner` 已在 `context_high` 路径调用 `execution.captureSession()` 后通过 `SessionStoreChain.saveFirst()` 保存 snapshot；恢复路径由 `packages/afk-execution/src/application/workflows/resume.ts` 调用同一条 chain。Retro 只读这些既有产物，不重新捕获、不重新持久化，也不创建第二个 session id 体系。
 
 ### 2.2 复盘任务
 
@@ -307,7 +307,7 @@ retro.failed:<retroId>:<attempt>
 | `docs/architecture/overview.md` | 更新 command surface，记录 `afk retro` 不改变工作项生命周期 |
 | `docs/architecture/observability.md` | 记录 manifest、task、report 的位置和审计边界 |
 | `docs/adr/0018-evidence-classification-and-redaction.md` | 增加 Retro 输入、原始证据和报告的分类规则 |
-| `packages/afk-execution/packages/afk-execution/src/application/workflows/execute-work-item.ts` | 只追加可选 `retro.requested`，不等待 Retro Agent，不改变执行结果 |
+| `packages/afk-execution/src/application/workflows/execute-work-item.ts` | 只追加可选 `retro.requested`，不等待 Retro Agent，不改变执行结果 |
 | `packages/afk-execution/src/application/workflow-engine.ts:1146-1415` | 调整 `recordAgentTelemetry()`：transcript 可读时以 transcript 为唯一 authoritative source；`ExecutionResult.usage/tools` 只能做运行时一致性检查，不能覆盖或替代 transcript |
 | `desktop-client/shared/execution-contract.ts` | 展示新增事件名称，保持 Desktop 兼容未知 retro 事件 |
 
@@ -381,7 +381,7 @@ pnpm vitest run src/domain/observability/retro-types.test.ts packages/afk-core/s
 
 - Create: `src/application/retrospectives/evidence-manifest.ts`
 - Create: `src/infrastructure/observability/retro-manifest-store.ts`
-- Modify: `packages/afk-execution/packages/afk-execution/src/application/workflows/execute-work-item.ts`
+- Modify: `packages/afk-execution/src/application/workflows/execute-work-item.ts`
 - Test: `src/application/retrospectives/evidence-manifest.test.ts`
 - Test: `src/infrastructure/observability/retro-manifest-store.test.ts`
 
@@ -413,7 +413,7 @@ expect(manifest.inputHash).toMatch(/^[a-f0-9]{64}$/);
 - [ ] **Step 5: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/application/retrospectives/evidence-manifest.test.ts src/infrastructure/observability/retro-manifest-store.test.ts packages/afk-execution/packages/afk-execution/src/application/workflows/execute-work-item.test.ts
+pnpm vitest run src/application/retrospectives/evidence-manifest.test.ts src/infrastructure/observability/retro-manifest-store.test.ts packages/afk-execution/src/application/workflows/execute-work-item.test.ts
 ```
 
 ### Task 3: 复用 session/telemetry 并归档 Git/CI 证据
@@ -450,7 +450,7 @@ Git 只读取 `HEAD`、当前 branch、base branch、`diff --stat` 和 commit SH
 - [ ] **Step 6: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/application/retrospectives/evidence-collector.test.ts src/infrastructure/observability/agent-telemetry.test.ts packages/afk-execution/packages/afk-execution/src/application/workflows/record-agent-telemetry.test.ts
+pnpm vitest run src/application/retrospectives/evidence-collector.test.ts src/infrastructure/observability/agent-telemetry.test.ts packages/afk-execution/src/application/workflows/record-agent-telemetry.test.ts
 ```
 
 ### Task 4: 实现 Retro task store 和 report store
@@ -623,8 +623,8 @@ pnpm vitest run src/cli/commands/retro.test.ts src/cli/command-registry.test.ts 
 
 - Create: `src/application/retrospectives/retro-trigger.ts`
 - Create: `src/application/retrospectives/retro-reconciler.ts`
-- Modify: `packages/afk-execution/packages/afk-execution/src/application/workflows/execute-work-item.ts`
-- Modify: `packages/afk-execution/packages/afk-execution/src/application/workflows/execute-work-item.ts`
+- Modify: `packages/afk-execution/src/application/workflows/execute-work-item.ts`
+- Modify: `packages/afk-execution/src/application/workflows/execute-work-item.ts`
 - Test: `src/application/retrospectives/retro-trigger.test.ts`
 - Test: `src/application/retrospectives/retro-reconciler.test.ts`
 
@@ -647,7 +647,7 @@ pnpm vitest run src/cli/commands/retro.test.ts src/cli/command-registry.test.ts 
 - [ ] **Step 5: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/application/retrospectives/retro-trigger.test.ts src/application/retrospectives/retro-reconciler.test.ts packages/afk-execution/packages/afk-execution/src/application/workflows/execute-work-item.test.ts
+pnpm vitest run src/application/retrospectives/retro-trigger.test.ts src/application/retrospectives/retro-reconciler.test.ts packages/afk-execution/src/application/workflows/execute-work-item.test.ts
 ```
 
 ### Task 8: 提案输出和反馈闭环

@@ -2,21 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentExecution, AgentProvider } from '@afk/execution/domain/agents/types';
+import type { AgentExecution, AgentProvider } from '../../domain/agents/types.js';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
-import type { Sandbox, SandboxProvider } from '@afk/execution/infrastructure/sandbox/types';
+import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
 import type { ProviderBundle } from '@afk/infrastructure';
-import type { RunObserver } from '@afk/execution/observability/run-observer';
-import { WorkflowRunner } from '@afk/execution/application/workflow-engine';
-import type { PreparedRepositorySet } from '@afk/execution/application/workflows/multi-repository-preparer';
-import { resolveWorkflowRunRequest } from '@afk/execution/application/workflows/run-request';
+import type { RunObserver } from '../../observability/run-observer.js';
+import { WorkflowRunner } from '../workflow-engine.js';
+import type { PreparedRepositorySet } from './multi-repository-preparer.js';
+import { resolveWorkflowRunRequest } from './run-request.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 let workspaceRoot: string;
 beforeEach(async () => { workspaceRoot = await mkdtemp(join(tmpdir(), 'afk-manifest-runner-')); });
 afterEach(async () => { await rm(workspaceRoot, { recursive: true, force: true }); });
 
-vi.mock('@afk/execution/application/modules/project-resolver', () => ({ default: () => ({ name: 'project-resolver' }) }));
+vi.mock('../modules/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
 vi.mock('simple-git', async importOriginal => ({
   ...await importOriginal<typeof import('simple-git')>(),
   simpleGit: vi.fn(() => ({ revparse: vi.fn(async () => 'baseline') })),

@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WorkflowRunner } from '@afk/execution/application/workflow-engine';
-import { BudgetManager } from '@afk/execution/application/workflows/budget';
+import { WorkflowRunner } from '../workflow-engine.js';
+import { BudgetManager } from './budget.js';
 import type { ProviderBundle } from '@afk/infrastructure';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
-import type { AgentProvider } from '@afk/execution/domain/agents/types';
-import type { RunObserver } from '@afk/execution/observability/run-observer';
+import type { AgentProvider } from '../../domain/agents/types.js';
+import type { RunObserver } from '../../observability/run-observer.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 
-vi.mock('@afk/execution/application/modules/project-resolver', () => ({ default: () => ({ name: 'project-resolver' }) }));
+vi.mock('../modules/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
 
 const item: BacklogItem = {
   id: '42', title: 'Item', dependsOn: [], state: 'in_progress', executionMode: 'afk',

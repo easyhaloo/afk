@@ -3,9 +3,9 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { promises as afs } from 'fs';
-import { TemplateLoader } from '@afk/execution/domain/templates/loader';
-import { resolveExecutionPlan, hasCycle } from '@afk/execution/domain/templates/resolver';
-import { evaluateWhen } from '@afk/execution/domain/templates/when-evaluator';
+import { TemplateLoader } from './loader.js';
+import { resolveExecutionPlan, hasCycle } from './resolver.js';
+import { evaluateWhen } from './when-evaluator.js';
 import {
   registerTemplate,
   getTemplate,
@@ -13,9 +13,9 @@ import {
   listTemplates,
   planFor,
   _resetTemplateRegistry,
-} from '@afk/execution/domain/templates/registry';
-import { builtinTemplates } from '@afk/execution/domain/templates/builtin';
-import type { WorkflowTemplate, StepResult } from '@afk/execution/domain/templates/types';
+} from './registry.js';
+import { builtinTemplates } from './builtin.js';
+import type { WorkflowTemplate, StepResult } from './types.js';
 
 describe('Template schema — validation', () => {
   const loader = new TemplateLoader();

@@ -43,9 +43,9 @@ a composition root that calls the same use cases the CLI does.
   the JSONL event store. Node builtins and provider SDKs belong here.
 - `packages/afk-execution` — the work item execution runtime: the workflow and
   QA orchestration, the agent runtimes, the sandbox, tmux, the templates and the
-  session stores. This is a transitional shape; splitting its use cases into
-  ports so that `executeWorkItem` itself can move to `@afk/application` is
-  follow-up work.
+  session stores — 15,072 lines of non-test source. This is a transitional
+  shape; splitting its use cases into ports so that `executeWorkItem` itself
+  can move to `@afk/application` is follow-up work.
 
 The root package keeps the CLI and the TUI. The architecture guard becomes
 table driven per package, and gains a rule the packages already implied: the
@@ -70,11 +70,16 @@ implementations agreeing on a wire format. The JSON envelope survives as the
 CLI's `--json` output, but it is no longer a boundary the desktop has to
 cross.
 
-Measured on the same workspace: the work item inventory goes from 16.1s to
-4.3s with the same 158 items and the same 138 projects, and it is complete
-rather than carrying a permission diagnostic. The backlog list goes from a
-subprocess that took seconds to an in-process call, and the desktop no longer
-needs an installed CLI, a PATH entry or a version probe.
+Measured on one workspace: the work item inventory goes from 16.1s to 4.3s
+with the same 158 items and the same 138 projects, and it is complete rather
+than carrying a permission diagnostic. That measurement needs credentialed
+provider access — the GitHub token was read through `gh auth token` and the
+GitLab host through the `glab` configuration — and a run without them cannot
+reproduce the absolute numbers. The shape of the change does not depend on the
+credentials: the request count per inventory goes from one per project to one
+per owner, and the fallback keeps the old behaviour. The backlog list goes
+from a subprocess that took seconds to an in-process call, and the desktop no
+longer needs an installed CLI, a PATH entry or a version probe.
 
 The cost is bundle size. The desktop's main process now inlines the execution
 runtime, 441K to 2.6M, and the package that carries the work item execution

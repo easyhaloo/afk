@@ -75,11 +75,11 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 
 核心模型现在位于独立的 `packages/afk-core`：
 
-- `src/model.ts` 定义 `WorkItem`、`Run`、状态和运行决策。
-- `src/reducer.ts` 负责运行事件回放和状态演进。
-- `src/events.ts` 定义运行事件、观察上下文和证据引用。
-- `src/ports.ts` 定义事件存储、证据存储、时钟、ID、指标和追踪 Port。
-- `src/execution-base-policy.ts` 负责执行基线策略。
+- `packages/afk-core/src/model.ts` 定义 `WorkItem`、`Run`、状态和运行决策。
+- `packages/afk-core/src/reducer.ts` 负责运行事件回放和状态演进。
+- `packages/afk-core/src/events.ts` 定义运行事件、观察上下文和证据引用。
+- `packages/afk-core/src/ports.ts` 定义事件存储、证据存储、时钟、ID、指标和追踪 Port。
+- `packages/afk-core/src/execution-base-policy.ts` 负责执行基线策略。
 
 这些模块大体是纯 TypeScript，已经具备核心层的基本形态。
 
@@ -202,7 +202,7 @@ Core 禁止依赖：
 - Commander、Ink、IPC channel 和 CLI 参数；
 - Provider 标签字符串或平台客户端。
 
-`src/application/backlog-work-item.ts` 中把外部 backlog 模型映射为 Core 模型的逻辑
+`packages/afk-execution/src/application/backlog-work-item.ts` 中把外部 backlog 模型映射为 Core 模型的逻辑
 属于 adapter/application 边界，不应让 Core 依赖 `BacklogWorkItemInput`、`afk`
 或 `hitl` 这样的外部命名。
 

@@ -115,4 +115,77 @@ if (broken.length > 0) {
   process.exit(1);
 }
 
+// --- Source path references -------------------------------------------------
+//
+// A document that names a source file in backticks makes a claim that the
+// file exists. The link check above cannot see that claim, because a
+// backticked path is not a link. Moving a module without correcting the
+// documents that name it is exactly what this catches.
+//
+// Known-stale references are recorded in scripts/doc-source-paths-baseline.json
+// with the number of times each one appears. A reference that is new, or
+// that appears more often than the baseline records, fails the check; a
+// baseline entry that no longer appears at all is reported so the baseline
+// can be tightened.
+
+const sourcePathPattern = /`([^`\s]+\.(?:ts|tsx|mjs|js))(?::\d+(?:-\d+)?)?`/g;
+const sourcePathBaselineFile = join(repoRoot, 'scripts', 'doc-source-paths-baseline.json');
+const sourcePathBaseline = existsSync(sourcePathBaselineFile)
+  ? JSON.parse(readFileSync(sourcePathBaselineFile, 'utf8'))
+  : {};
+const observedSourcePaths = new Map();
+const staleSourcePathViolations = [];
+
+for (const mdFile of mdFiles) {
+  // docs/_archive is a historical holding area: its documents describe the
+  // repository as it was, not as it is.
+  if (mdFile.startsWith('docs/_archive/')) continue;
+
+  const fullPath = join(repoRoot, mdFile);
+  if (!existsSync(fullPath)) continue;
+  const content = readFileSync(fullPath, 'utf8');
+  const fileDir = join(repoRoot, dirname(mdFile));
+
+  for (const match of content.matchAll(sourcePathPattern)) {
+    const raw = match[1];
+    // A path, not a bare file name, and not a glob or a placeholder.
+    if (!raw.includes('/')) continue;
+    if (/[*<>]|\$\{/.test(raw)) continue;
+
+    // A document may name a path relative to its own directory, to the
+    // repository root, or relative to the desktop client.
+    const candidates = [
+      join(fileDir, raw),
+      join(repoRoot, raw),
+      join(repoRoot, 'desktop-client', raw),
+      join(repoRoot, 'desktop-client', 'src', raw),
+    ];
+    if (candidates.some(candidate => existsSync(candidate))) continue;
+
+    observedSourcePaths.set(raw, (observedSourcePaths.get(raw) ?? 0) + 1);
+  }
+}
+
+const sourcePathViolations = [];
+for (const [raw, count] of observedSourcePaths) {
+  const known = sourcePathBaseline[raw];
+  if (known === undefined) {
+    sourcePathViolations.push(`new stale source path: ${raw} (${count}x)`);
+  } else if (count > known) {
+    sourcePathViolations.push(`stale source path spread: ${raw} (${count}x, baseline ${known}x)`);
+  }
+}
+for (const [raw, known] of Object.entries(sourcePathBaseline)) {
+  if (!observedSourcePaths.has(raw)) {
+    staleSourcePathViolations.push(`stale baseline entry no longer referenced: ${raw}`);
+  }
+}
+
+if (sourcePathViolations.length > 0 || staleSourcePathViolations.length > 0) {
+  for (const v of sourcePathViolations) console.error(v);
+  for (const v of staleSourcePathViolations) console.error(v);
+  console.error(`\nchecked ${mdFiles.length} files, ${sourcePathViolations.length} broken source paths`);
+  process.exit(1);
+}
+
 console.log(`checked ${mdFiles.length} files, 0 broken`);

@@ -82,7 +82,10 @@ documents ship as `name.md` + `name.zh.md`; update both.
   root run must not mask a broken package.
 - **Docs stay in lockstep with code.** The link checker (`pnpm docs:check`) only
   catches broken links; stale *prose* is on you. When a module moves, grep the
-  docs for the old path.
+  docs for the old path. The same command also checks the source paths the
+  documents name in backticks, against a recorded baseline of the references
+  that were already stale — a path that stops existing, or starts appearing
+  more often, fails the check.
 
 ## Workflow
 
@@ -91,7 +94,7 @@ pnpm build              # compile to dist/ (runs workspace package builds first)
 pnpm typecheck          # root + workspace typecheck
 pnpm test               # vitest + every workspace package
 pnpm architecture:check # layer direction + legacy quarantine
-pnpm docs:check         # broken/case-mismatched doc links
+pnpm docs:check         # broken doc links + stale source paths the docs name
 ```
 
 `pretest` runs a build, so `pnpm test` is self-contained. `.husky/pre-push` runs

@@ -33,6 +33,15 @@ The work-item inventory service has one required application dependency in
 - Electron Main composes the adapter and the service once, while IPC and the
   renderer consume only the resulting application DTO.
 
+The client does not spawn an AFK CLI process at all. `electron/composition-root.ts`
+assembles the provider ports, and the services call the same
+`@afk/application` and `@afk/execution` use cases the CLI calls: the backlog
+read and control commands, the work item execution, the workflow graph
+generation and the runtime version. The desktop therefore depends on
+`@afk/application`, `@afk/core`, `@afk/infrastructure` and `@afk/execution`,
+and the architecture guard rejects any import that reaches the root package's
+`src/` tree.
+
 Execution history uses a separate direct Application path:
 
 - Electron Main injects `electron/adapters/run-event-query-adapter.ts`, a read-only
@@ -85,10 +94,12 @@ server is already running; the suite never reuses another Vite server.
 Playwright's global setup builds the current main/preload and provider bundle.
 The test-only Electron entry installs an in-process provider snapshot fixture
 at the external catalog boundary, then starts the real main process. Application
-queries, inventory caching, IPC, preload, and renderer remain live. CLI/JumpServer
-subprocesses use the fixture binaries through explicit CLI configuration and PATH;
-they do not require or use real provider credentials. Tests isolate HOME, workspaces,
-and Electron user data, including the JSONL audit streams.
+queries, inventory caching, IPC, preload, and renderer remain live. JumpServer
+subprocesses use the fixture binaries through explicit configuration and PATH;
+they do not require or use real provider credentials. The AFK CLI itself is not
+part of the test setup: the client runs the shared packages in process. Tests
+isolate HOME, workspaces, and Electron user data, including the JSONL audit
+streams.
 
 | API | 主进程操作 | 输入约束 |
 | --- | --- | --- |

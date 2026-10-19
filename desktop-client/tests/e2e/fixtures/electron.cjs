@@ -33,7 +33,11 @@ async function start() {
   const fixture = new Module(bundle);
   fixture.filename = bundle;
   fixture.loaded = true;
-  fixture.exports = { collectProviderInventory: provider.collectProviderInventory };
+  fixture.exports = {
+    collectProviderInventory: provider.collectProviderInventory,
+    createManagementProviders: provider.createManagementProviders,
+    executeWorkItem: provider.executeWorkItem,
+  };
   require.cache[bundle] = fixture;
   await import(pathToFileURL(path.join(desktop, "dist-electron/electron/main.js")).href);
 }

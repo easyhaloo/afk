@@ -19,7 +19,7 @@ import { assertTrustedSender } from "../security/sender-guard.js";
 import { validateJumpserverBastionId, validateJumpserverBastionInput, validateJumpserverSyncOptions, validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation.js";
 import { readAppearance, saveAppearance } from "../services/appearance-service.js";
 import { createBacklogService } from "../services/backlog-service.js";
-import { backlogProviders, providerBundle, workflowTargetBranch } from "../composition-root.js";
+import { backlogProviders, executeWorkItem, providerBundle, workflowTargetBranch } from "../composition-root.js";
 import { createBacklogExecutionService } from "../services/backlog-execution-service.js";
 import { createBacklogRunStore } from "../services/backlog-run-store.js";
 import { createBacklogRuntimeService } from "../services/backlog-runtime-service.js";
@@ -35,7 +35,6 @@ import { createWorkItemInventoryService } from "../services/work-item-inventory-
 import { createWorkItemInventoryStore } from "../services/work-item-inventory-store.js";
 import { createWorkItemInventorySyncService } from "../services/work-item-inventory-sync-service.js";
 import { createWorkItemExecutionService } from "../services/work-item-execution-service.js";
-import { executeWorkItem } from "@afk/execution";
 import { createWorkItemExecutionQueryService } from "../services/work-item-execution-query-service.js";
 import { createRunEventQueryAdapter } from "../adapters/run-event-query-adapter.js";
 import { createWorkItemExecutionManifestStore } from "../services/work-item-execution-manifest-store.js";
@@ -170,12 +169,7 @@ const workItemExecutionService = createWorkItemExecutionService({
     if (!item) throw new Error(`工作项 ${workItemId} 不存在或当前账号无权访问`);
     return item;
   },
-  execute: async input => executeWorkItem({
-    workItemId: input.workItemId,
-    manifestPath: input.manifestPath,
-    ...(input.template ? { template: input.template } : {}),
-    executionId: input.executionId,
-  }),
+  execute: async input => executeWorkItem()(input),
   resolveAgent: async (id) => {
     const runtime = (await detectAgentRuntimes()).find(candidate => candidate.id === id && candidate.available);
     return runtime ? { id: runtime.id, label: runtime.label, command: runtime.command, executable: runtime.executable } : undefined;

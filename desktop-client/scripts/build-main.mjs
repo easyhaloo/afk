@@ -38,12 +38,20 @@ const common = {
   external: ['electron', 'node-pty'],
 };
 
+// A CommonJS dependency that calls require() at load time — simple-git pulls
+// in @kwsites/file-exists, which does — cannot be bundled into an ESM
+// output: esbuild's require shim has no synchronous require to fall back on
+// in an ES module. Give the bundle a real one.
+const esmRequireBanner = `import { createRequire as __createRequire } from 'node:module';
+const require = __createRequire(import.meta.url);`;
+
 const configs = [
   {
     ...common,
     entryPoints: [join(desktop, 'electron/main.ts')],
     outfile: join(desktop, 'dist-electron/electron/main.js'),
     format: 'esm',
+    banner: { js: esmRequireBanner },
   },
   {
     ...common,

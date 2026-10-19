@@ -19,6 +19,7 @@ import { assertTrustedSender } from "../security/sender-guard.js";
 import { validateJumpserverBastionId, validateJumpserverBastionInput, validateJumpserverSyncOptions, validateSshExternalTerminalId, validateSshHostId, validateSshHostInput, validateSshResize, validateSshSessionId } from "../security/ssh-validation.js";
 import { readAppearance, saveAppearance } from "../services/appearance-service.js";
 import { createBacklogService } from "../services/backlog-service.js";
+import { backlogProviders, providerBundle, workflowTargetBranch } from "../composition-root.js";
 import { createBacklogExecutionService } from "../services/backlog-execution-service.js";
 import { createBacklogRunStore } from "../services/backlog-run-store.js";
 import { createBacklogRuntimeService } from "../services/backlog-runtime-service.js";
@@ -150,12 +151,8 @@ async function resolveDesktopAfk() {
     return candidate.startsWith("/") ? { command: candidate, args: [] } : { command: "", args: [] };
 }
 const backlogService = createBacklogService({
-  resolveAfk: resolveDesktopAfk,
+  providers: (workspace, platform) => backlogProviders(workspace, platform),
   resolveWorkspace,
-  exec: async (command, args, cwd, stdin, options) => {
-    const result = await exec(command, args, cwd, stdin, options);
-    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
-  },
 });
 const workItemInventoryService = createWorkItemInventoryService({
   application: createWorkItemApplicationAdapter(createProviderWorkItemApplicationFacade()),
@@ -220,6 +217,11 @@ const workflowGraphService = new WorkflowGraphService();
 const backlogExecutionService = createBacklogExecutionService({
   resolveAfk: resolveDesktopAfk,
   resolveWorkspace,
+  providers: async (workspace: string) => {
+    const bundle = await providerBundle(workspace);
+    return { backlog: bundle.backlog, changes: bundle.changes };
+  },
+  targetBranch: (workspace: string) => workflowTargetBranch(workspace),
   getBacklog: (workspace, id) => backlogService.show(workspace, id),
   getSummary: (workspace, id) => backlogRuntimeService.summary(workspace, id),
   validateTemplate: async (workspace, template) => (await workflowGraphService.generate({ workspace: resolveWorkspace(workspace), templateId: template, format: "json" })).status.state !== "rejected",

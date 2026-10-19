@@ -5,6 +5,7 @@ export * from './backlog/initialization.js';
 export * from './backlog/model.js';
 export * from './backlog/rework-record.js';
 export * from './backlog/tags.js';
+export * from './errors.js';
 export * from './execution.js';
 export * from './execution-query.js';
 export * from './inventory.js';

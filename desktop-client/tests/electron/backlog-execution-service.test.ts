@@ -6,6 +6,29 @@ import {
 import type { BacklogItem, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract";
 
 describe("backlog execution service", () => {
+  function createPorts(item: BacklogItem) {
+    const backlog = {
+      get: vi.fn(async () => item),
+      list: vi.fn(async () => [item]),
+      create: vi.fn(async () => item),
+      addTag: vi.fn(async () => undefined),
+      removeTag: vi.fn(async () => undefined),
+      initialize: vi.fn(async () => undefined),
+      transition: vi.fn(async () => undefined),
+      setExecutionMode: vi.fn(async () => undefined),
+      createRework: vi.fn(async () => ({ id: "r1", attempt: 1, status: "open", source: "operator", summary: "rework", failedCriteria: [], requiredChecks: [], createdAt: "2026-09-17T00:00:00.000Z" })),
+      getActiveRework: vi.fn(async () => undefined),
+      resolveRework: vi.fn(async () => undefined),
+    };
+    const change = { id: "7", state: "open" as const, sourceBranch: `${item.branchName}-qa`, targetBranch: "main", mergeable: true };
+    const changes = {
+      findForBacklog: vi.fn(async () => change),
+      merge: vi.fn(async () => undefined),
+      get: vi.fn(async () => ({ ...change, state: "merged" as const })),
+    };
+    return { backlog, changes };
+  }
+
   function createMemoryStore() {
     const values = new Map<string, BacklogRunSummary[]>();
     return {
@@ -171,14 +194,15 @@ describe("backlog execution service", () => {
       .mockResolvedValueOnce(summary(active))
       .mockResolvedValueOnce(summary(blocked));
     const kill = vi.fn();
-    const exec = vi.fn(async (_command, args) => ({ ok: true, stdout: JSON.stringify({ ok: true, kind: args[1] === "interrupt" ? "backlog.interrupt" : "backlog.retry", data: {} }), stderr: "" }));
+    const ports = createPorts(active);
     const service = createBacklogExecutionService({
       resolveAfk: async () => "/usr/local/bin/afk",
       resolveWorkspace: value => value,
+      providers: async () => ports,
+      targetBranch: async () => "main",
       getBacklog: async () => active,
       getSummary,
       store,
-      exec,
       kill,
       isPidAlive: () => true,
       stopTimeoutMs: 0,
@@ -186,11 +210,8 @@ describe("backlog execution service", () => {
 
     await expect(service.stop("/repo", "42")).resolves.toEqual(summary(blocked));
     expect(kill.mock.calls).toEqual([[1234, "SIGTERM"], [1234, "SIGKILL"]]);
-    expect(exec).toHaveBeenCalledWith(
-      "/usr/local/bin/afk",
-      ["backlog", "interrupt", "--id", "42", "--reason", "用户从桌面停止执行", "--json"],
-      "/repo",
-    );
+    expect(ports.backlog.transition).toHaveBeenCalledWith("42", "blocked", { reason: "用户从桌面停止执行" });
+    expect(ports.backlog.setExecutionMode).toHaveBeenCalledWith("42", "hitl");
   });
 
   it("continues stop recovery when the process exits between the liveness check and SIGTERM", async () => {
@@ -199,21 +220,22 @@ describe("backlog execution service", () => {
     const active = backlog({ state: "in_progress" });
     const blocked = summary(backlog({ state: "blocked", executionMode: "hitl" }));
     const missing = Object.assign(new Error("missing"), { code: "ESRCH" });
-    const exec = vi.fn(async () => ({ ok: true, stdout: JSON.stringify({ ok: true, kind: "backlog.interrupt", data: {} }), stderr: "" }));
+    const ports = createPorts(active);
     const service = createBacklogExecutionService({
       resolveAfk: async () => "/usr/local/bin/afk",
       resolveWorkspace: value => value,
+      providers: async () => ports,
+      targetBranch: async () => "main",
       getBacklog: async () => active,
       getSummary: vi.fn().mockResolvedValueOnce(summary(active)).mockResolvedValueOnce(blocked),
       store,
-      exec,
       kill: () => { throw missing; },
       isPidAlive: () => true,
       stopTimeoutMs: 0,
     });
 
     await expect(service.stop("/repo", "42")).resolves.toEqual(blocked);
-    expect(exec).toHaveBeenCalledOnce();
+    expect(ports.backlog.transition).toHaveBeenCalledOnce();
     expect((await store.load("/repo"))[0]).toMatchObject({ status: "failed", error: "用户从桌面停止执行" });
   });
 
@@ -224,24 +246,21 @@ describe("backlog execution service", () => {
     });
     const blocked = summary(backlog({ state: "blocked", executionMode: "hitl" }));
     const getSummary = vi.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(stale).mockResolvedValueOnce(blocked);
-    const exec = vi.fn(async () => ({ ok: true, stdout: JSON.stringify({ ok: true, kind: "backlog.interrupt", data: {} }), stderr: "" }));
+    const ports = createPorts(stale.backlog);
     const service = createBacklogExecutionService({
       resolveAfk: async () => "/usr/local/bin/afk",
       resolveWorkspace: value => value,
+      providers: async () => ports,
+      targetBranch: async () => "main",
       getBacklog: async () => stale.backlog,
       getSummary,
       store: createMemoryStore(),
-      exec,
       isPidAlive: () => false,
     });
 
     await expect(service.recover("/repo", "42")).resolves.toEqual(blocked);
     expect(getSummary).toHaveBeenCalledTimes(3);
-    expect(exec).toHaveBeenCalledWith(
-      "/usr/local/bin/afk",
-      ["backlog", "interrupt", "--id", "42", "--reason", "桌面恢复 stale 运行", "--json"],
-      "/repo",
-    );
+    expect(ports.backlog.transition).toHaveBeenCalledWith("42", "blocked", { reason: "桌面恢复 stale 运行" });
   });
 
   it("retries through the intent command and preserves the previous template", async () => {
@@ -250,24 +269,21 @@ describe("backlog execution service", () => {
     const blocked = backlog({ state: "blocked", executionMode: "hitl" });
     const rework = backlog({ state: "rework", executionMode: "afk" });
     const spawn = vi.fn(() => ({ pid: 4567, once: vi.fn().mockReturnThis(), unref: vi.fn() }));
-    const exec = vi.fn(async () => ({ ok: true, stdout: JSON.stringify({ ok: true, kind: "backlog.retry", data: {} }), stderr: "" }));
+    const ports = createPorts(blocked);
     const service = createBacklogExecutionService({
       resolveAfk: async () => "/usr/local/bin/afk",
       resolveWorkspace: value => value,
+      providers: async () => ports,
+      targetBranch: async () => "main",
       getBacklog: vi.fn().mockResolvedValueOnce(rework),
       getSummary: async () => summary(blocked),
       store,
-      exec,
       spawn,
     });
 
     const run = await service.retry("/repo", { backlogId: "42", reason: "已修复失败检查" });
 
-    expect(exec).toHaveBeenCalledWith(
-      "/usr/local/bin/afk",
-      ["backlog", "retry", "--id", "42", "--reason", "已修复失败检查", "--json"],
-      "/repo",
-    );
+    expect(ports.backlog.createRework).toHaveBeenCalledWith("42", expect.objectContaining({ source: "operator", summary: "已修复失败检查" }));
     expect(spawn).toHaveBeenCalledWith(
       "/usr/local/bin/afk",
       ["loop", "--backlog-id", "42", "--max-iterations", "1", "--template", "feature-delivery"],
@@ -279,22 +295,20 @@ describe("backlog execution service", () => {
   it("confirms a root merge through the intent command", async () => {
     const mergeReady = backlog({ state: "merge_ready", executionMode: "hitl" });
     const done = summary(backlog({ state: "done", executionMode: "hitl" }));
-    const exec = vi.fn(async () => ({ ok: true, stdout: JSON.stringify({ ok: true, kind: "backlog.confirm-merge", data: {} }), stderr: "" }));
+    const ports = createPorts(mergeReady);
     const service = createBacklogExecutionService({
       resolveAfk: async () => "/usr/local/bin/afk",
       resolveWorkspace: value => value,
+      providers: async () => ports,
+      targetBranch: async () => "main",
       getBacklog: async () => mergeReady,
       getSummary: vi.fn().mockResolvedValueOnce(summary(mergeReady)).mockResolvedValueOnce(done),
       store: createMemoryStore(),
-      exec,
     });
 
     await expect(service.confirmMerge("/repo", "42")).resolves.toEqual(done);
-    expect(exec).toHaveBeenCalledWith(
-      "/usr/local/bin/afk",
-      ["backlog", "confirm-merge", "--id", "42", "--json"],
-      "/repo",
-    );
+    expect(ports.changes.merge).toHaveBeenCalledWith("7");
+    expect(ports.backlog.transition).toHaveBeenCalledWith("42", "done", { changeId: "7" });
   });
 });
 

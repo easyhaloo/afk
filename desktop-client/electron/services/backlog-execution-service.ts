@@ -1,5 +1,12 @@
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import {
+  confirmBacklogMerge,
+  interruptBacklog,
+  retryBacklog,
+  type BacklogChangeProvider,
+  type QABacklogProvider,
+} from "@afk/application";
 import { normalizeCliInvocation, type CliInvocation } from "../lib/cli-invocation.js";
 import type { BacklogItem, BacklogRunRetryInput, BacklogRunStartInput, BacklogRunSummary, BacklogRuntimeSummary } from "../../shared/backlog-contract.js";
 import type { createBacklogRunStore } from "./backlog-run-store.js";
@@ -12,6 +19,17 @@ type Signal = "SIGTERM" | "SIGKILL";
 export type BacklogExecutionServiceDeps = {
   resolveAfk: () => Promise<string | CliInvocation>;
   resolveWorkspace: (input: string) => string;
+  /**
+   * Resolve the backlog control ports for a workspace. The control commands
+   * are application use cases, so the desktop calls them in process rather
+   * than through a CLI subprocess.
+   */
+  providers: (workspace: string) => Promise<{
+    backlog: QABacklogProvider;
+    changes: BacklogChangeProvider;
+  }>;
+  /** The branch a confirmed merge must target. */
+  targetBranch: (workspace: string) => Promise<string>;
   getBacklog: (workspace: string, id: string) => Promise<BacklogItem>;
   getSummary?: (workspace: string, id: string) => Promise<BacklogRuntimeSummary>;
   validateTemplate?: (workspace: string, template: string) => Promise<boolean>;
@@ -163,11 +181,7 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
       if (run) await update(workspace, { ...run, status: "failed", error: "用户从桌面停止执行" });
       const current = await summary(workspace, backlogId);
       if (current.backlog.state === "in_progress" || current.backlog.state === "verification") {
-        await runIntent(
-          workspace,
-          ["backlog", "interrupt", "--id", backlogId, "--reason", "用户从桌面停止执行"],
-          "backlog.interrupt",
-        );
+        await runIntent(workspace, ports => interruptBacklog(ports.backlog, backlogId, "用户从桌面停止执行"));
         return summary(workspace, backlogId);
       }
       return current;
@@ -183,11 +197,7 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
       if (current.runtime?.status !== "stale") throw new Error(`Backlog ${backlogId} runtime 已恢复，不再 stale`);
       if (current.activeRun?.pid !== undefined && isPidAlive(current.activeRun.pid)) throw new Error(`Backlog ${backlogId} 的 AFK 进程已恢复`);
       if (current.backlog.state === "in_progress" || current.backlog.state === "verification") {
-        await runIntent(
-          workspace,
-          ["backlog", "interrupt", "--id", backlogId, "--reason", "桌面恢复 stale 运行"],
-          "backlog.interrupt",
-        );
+        await runIntent(workspace, ports => interruptBacklog(ports.backlog, backlogId, "桌面恢复 stale 运行"));
         return summary(workspace, backlogId);
       }
       return current;
@@ -204,11 +214,7 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
         .filter((run) => run.backlogId === input.backlogId)
         .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
       const template = input.template ?? previous?.template;
-      await runIntent(
-        workspace,
-        ["backlog", "retry", "--id", input.backlogId, "--reason", input.reason],
-        "backlog.retry",
-      );
+      await runIntent(workspace, ports => retryBacklog(ports.backlog, input.backlogId, input.reason));
       return startUnlocked(workspace, { backlogId: input.backlogId, ...(template ? { template } : {}) });
     });
   }
@@ -217,26 +223,18 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
     return withLock(backlogId, async () => {
       const current = await summary(workspace, backlogId);
       if (current.backlog.parentId || current.backlog.state !== "merge_ready" || current.backlog.executionMode !== "hitl") throw new Error(`Backlog ${backlogId} 不是可确认合并的根任务`);
-      await runIntent(workspace, ["backlog", "confirm-merge", "--id", backlogId], "backlog.confirm-merge");
+      const expectedTargetBranch = await deps.targetBranch(deps.resolveWorkspace(workspace));
+      await runIntent(workspace, ports => confirmBacklogMerge(ports.backlog, ports.changes, backlogId, expectedTargetBranch));
       return summary(workspace, backlogId);
     });
   }
 
-  async function runIntent(workspace: string, args: string[], kind: string): Promise<void> {
-    if (!deps.exec) throw new Error("AFK backlog control executor is unavailable");
-    const invocation = await requireAfk();
-    const result = await deps.exec(invocation.command, [...invocation.args, ...args, "--json"], deps.resolveWorkspace(workspace));
-    let envelope: unknown;
-    try {
-      envelope = JSON.parse(result.stdout);
-    } catch {
-      throw new Error(result.stderr || "AFK backlog control returned invalid JSON");
-    }
-    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) throw new Error("AFK backlog control returned an invalid JSON envelope");
-    const parsed = envelope as { ok?: unknown; kind?: unknown; error?: { message?: unknown } };
-    if (parsed.kind !== kind) throw new Error(`AFK backlog control returned unexpected kind: ${String(parsed.kind)}`);
-    if (parsed.ok !== true) throw new Error(typeof parsed.error?.message === "string" ? parsed.error.message : result.stderr || "AFK backlog control failed");
-    if (!result.ok) throw new Error("AFK backlog control failed");
+  async function runIntent(
+    workspace: string,
+    action: (ports: { backlog: QABacklogProvider; changes: BacklogChangeProvider }) => Promise<unknown>,
+  ): Promise<void> {
+    const ports = await deps.providers(deps.resolveWorkspace(workspace));
+    await action(ports);
     deps.invalidateBacklogList?.();
   }
 

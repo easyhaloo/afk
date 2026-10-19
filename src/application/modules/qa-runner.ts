@@ -22,12 +22,12 @@ import { BudgetManager } from '../workflows/budget.js';
 import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
 import { BudgetStore } from '../workflows/budget-store.js';
-import { findCodexRollout, readAgentTelemetry, readAgentTools } from '../../infrastructure/observability/agent-telemetry.js';
+import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import type { RunEventData } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
-type QAProcessResult = { success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean; summary?: string; failedCriteria?: QAFailureCriterion[] };
+type QAProcessResult = { success: boolean; mrUrl?: string; autoMerged?: boolean; rework?: boolean; summary?: string; failureCode?: 'qa_timeout' | 'qa_execution_failed' | 'qa_rework' | 'provider_change_unconfirmed'; failedCriteria?: QAFailureCriterion[] };
 
 export interface QARunnerDependencies {
   sandboxProvider?: SandboxProvider;
@@ -136,7 +136,7 @@ export class QARunner {
       if (!featureBranch) {
         const summary = 'QA execution failed: feature branch could not be resolved';
         await this.markBlocked(id, summary);
-        return { success: false, summary };
+        return { success: false, summary, failureCode: 'qa_execution_failed' };
       }
       if (this.mergeBranchOverride) await this.mergeBranchOverride(worktreePath, baselineBranch, featureBranch);
       else await this.mergeBranch(worktreePath, baselineBranch, featureBranch);
@@ -183,7 +183,7 @@ export class QARunner {
       await this.heartbeatRuntime(runtimeRunId, { progress: 'QA agent running' });
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
-      const result = await execution.waitForResult({ completionTimeoutMs: this.config.completionTimeout });
+      const result = await execution.waitForResult({ completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout });
       await this.recordBudgetUsage(budgetStore, budget, execution, result);
       await this.logWorktreeDiagnostics(id, 'agent-completed', worktreePath);
       await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
@@ -192,7 +192,7 @@ export class QARunner {
         const summary = `QA ${result.status}: ${formatExecutionFailure(result)}`;
         runtimeErrorSummary = summary;
         await this.handleExecutionFailure(id, worktreePath, session, result, execution);
-        return { success: false, summary };
+        return { success: false, summary, failureCode: result.status === 'timed_out' ? 'qa_timeout' : 'qa_execution_failed' };
       }
 
       const signal = asQAResult(result.structuredOutput);
@@ -200,7 +200,7 @@ export class QARunner {
         const summary = `${formatExecutionFailure(result)}; missing QA completion payload`;
         runtimeErrorSummary = summary;
         await this.markBlocked(id, summary);
-        return { success: false, summary };
+        return { success: false, summary, failureCode: 'qa_execution_failed' };
       }
       const outcome = await this.handleQAResult(id, signal, worktreePath, handle.branchName);
       if (!outcome.success) {
@@ -217,7 +217,7 @@ export class QARunner {
         throw error;
       }
       logger.error({ backlogId: id, error }, 'QA execution failed');
-      return { success: false, summary: message };
+      return { success: false, summary: message, failureCode: 'qa_execution_failed' };
     } finally {
       if (execution) await execution.kill().catch(() => {});
       if (sandbox) await sandbox.close().catch(error => logger.warn({ backlogId: id, error }, 'failed to close QA sandbox'));
@@ -333,7 +333,7 @@ export class QARunner {
       const summary = `QA terminal routing failed: ${error instanceof Error ? error.message : String(error)}`;
       await this.markBlocked(backlogId, summary);
       logger.error({ backlogId, error }, 'QA failed: terminal routing error');
-      return { success: false, summary };
+      return { success: false, summary, failureCode: 'provider_change_unconfirmed' };
     }
   }
 
@@ -350,12 +350,12 @@ export class QARunner {
     if (rework.attempt >= limit) {
       const summary = `QA rework attempt limit reached (${rework.attempt}/${limit}): ${signal.summary}`;
       await this.markBlocked(backlogId, summary);
-      return { success: false, summary, failedCriteria: signal.failedCriteria };
+      return { success: false, summary, failureCode: 'qa_rework', failedCriteria: signal.failedCriteria };
     }
     await this.providers.backlog.transition(backlogId, 'rework', { reason: `QA rework ${rework.id}: ${signal.summary}` });
     await this.providers.backlog.setExecutionMode(backlogId, 'afk');
     logger.info({ backlogId, reworkId: rework.id, attempt: rework.attempt }, 'QA failure persisted rework record');
-    return { success: false, rework: true, summary: signal.summary, failedCriteria: signal.failedCriteria };
+    return { success: false, rework: true, summary: signal.summary, failureCode: 'qa_rework', failedCriteria: signal.failedCriteria };
   }
 
   private async markBlocked(backlogId: string, reason: string): Promise<void> {
@@ -364,25 +364,11 @@ export class QARunner {
   }
 
   private async recordBudgetUsage(store: BudgetStore, budget: BudgetManager, execution: AgentExecution, result: ExecutionResult): Promise<void> {
-    let usage = result.usage;
-    let tools = result.tools;
-    if ((!usage || !tools) && this.sandboxProvider.name !== 'docker' && this.sandboxProvider.name !== 'podman') {
-      let transcriptPath: string | undefined;
-      if (this.agentProvider.name === 'codex') {
-        const threadId = execution.metadata.threadId;
-        if (threadId) transcriptPath = await findCodexRollout(threadId);
-      } else {
-        transcriptPath = (execution as { telemetryPath?: string }).telemetryPath;
-      }
-      if (transcriptPath) {
-        const options = { provider: this.agentProvider.name === 'codex' ? 'codex' as const : 'claude-code' as const, transcriptPath, sandboxKind: 'local' as const };
-        if (!usage) usage = await readAgentTelemetry(options);
-        if (!tools) tools = await readAgentTools(options);
-      }
-    }
-    const sessionId = execution.metadata.threadId ?? result.sessionId ?? execution.id;
+    const sandboxKind = this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman' ? 'container' : 'local';
+    const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
+    const { sessionId, usage } = telemetry;
     if (usage && budget.recordSession(sessionId, usage.totalTokens)) await store.save(budget.snapshot());
-    await this.onSession?.({ kind: 'agent.session_recorded', sessionId, usage, tools });
+    await this.onSession?.({ kind: 'agent.session_recorded', ...telemetry });
   }
 
   private async startRuntime(runId: string, backlog: BacklogItem, session: string): Promise<void> {

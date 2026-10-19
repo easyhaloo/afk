@@ -41,6 +41,12 @@ Execution history uses a separate direct Application path:
   `@afk/application.queryExecutionHistory`; no CLI subprocess or legacy projection
   is used for the history view. Main source is plain ESM and imports the use cases
   directly — there is no runtime CommonJS interop shim.
+- The renderer's `src/features/run-center/use-execution-history.ts` owns execution
+  list polling, pagination, and run lookup for the run center and work-item history.
+  Refreshes merge by run identity and audit sequence, preserving loaded historical
+  attempts and pagination progress. Scope changes and newer lookups invalidate stale
+  responses. Navigation also cancels pending lookups without clearing loaded
+  attempts; `useExecutionDetail` remains responsible for each attempt's detail.
 - Execution summaries carry optional token `usage` projected by Application
   from verified `agent.session_recorded` events. The shared contract validates
   the three non-negative integer counts; the run-center inspector displays
@@ -60,6 +66,16 @@ while all filesystem, process, YAML, and SQLite operations stay behind main
 process services and adapters. Workflow graph normalization and layout are
 pure functions so malformed dependencies and cycles can produce diagnostics
 without crashing React.
+
+Workflow definition saving and discovery belong to
+`electron/services/desktop-service.ts`. After saving, the renderer uses the
+fresh main-process snapshot rather than reconstructing roles, providers or
+dependencies. Unsaved drafts never enter the template library. Empty managed
+workflows are rejected before either configuration or template files are
+written; clearing the final node leaves an empty draft and preserves the last
+saved definition. Selecting a built-in template retains the managed canvas
+layout, returned as `WorkflowTemplateSummary.canvasNodes` when rediscovered,
+so the managed definition can be reopened and selected again.
 
 ## End-to-End Testing
 

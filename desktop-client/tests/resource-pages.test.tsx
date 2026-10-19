@@ -14,8 +14,31 @@ describe("resource search pages", () => {
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(Repositories)); });
     act(() => renderer.root.findByProps({ "aria-label": "搜索代码仓库" }).props.onChange({ target: { value: "web" } }));
-    expect(renderer.root.findAllByProps({ className: "repository-row" })).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ className: "row-item" })).toHaveLength(1);
     expect(list).toHaveBeenCalledOnce();
+    act(() => renderer.unmount());
+  });
+
+  it("opens a repository in the browser from its row", async () => {
+    const openExternal = vi.fn(async () => true);
+    const list = vi.fn(async () => ({
+      projects: [
+        { platform: "github", projectKey: "acme/api", name: "API", defaultBranch: "main", webUrl: "https://github.com/acme/api" },
+        { platform: "gitlab", projectKey: "acme/web", name: "Web" },
+      ],
+    }));
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list }, openExternal } });
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(Repositories)); });
+
+    const rows = renderer.root.findAllByType("button").filter(node => node.props.className === "row-item");
+    expect(rows).toHaveLength(2);
+
+    await act(async () => { rows[0]!.props.onClick(); });
+    expect(openExternal).toHaveBeenCalledWith("https://github.com/acme/api");
+
+    // No webUrl: the row stays inert rather than advertising a chevron it cannot honour.
+    expect(rows[1]!.props.disabled).toBe(true);
     act(() => renderer.unmount());
   });
 

@@ -59,6 +59,7 @@ export type WorkflowTemplateSummary = {
   description: string;
   source: "builtin" | "project" | "managed";
   steps: WorkflowTemplateStepSummary[];
+  canvasNodes?: CanvasTemplateNode[];
 };
 
 export type WorkflowConfigSummary = {
@@ -107,8 +108,8 @@ export type AppearancePreferences = {
   locale: "system" | "zh-CN" | "en-US";
   fontFamily: "system" | "serif" | "mono";
   fontScale: "small" | "medium" | "large";
-  accent: "violet" | "teal" | "amber";
-  theme: "light" | "graphite";
+  handDrawnHeaders: boolean;
+  theme: "light" | "dark";
 };
 
 export type WorkflowGraphFormat = "json" | "archify-json";

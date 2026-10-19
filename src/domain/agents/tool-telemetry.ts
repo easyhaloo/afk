@@ -1,6 +1,6 @@
 import type { AgentToolCallSummary } from '@afk/core';
 
-type ToolProvider = 'claude-code' | 'codex';
+type ToolProvider = 'claude-code' | 'codex' | 'opencode';
 
 interface RawToolEvent {
   type?: unknown;
@@ -155,4 +155,31 @@ export function extractClaudeToolEvents(lines: readonly string[]): AgentToolCall
 
 export function extractCodexToolEvents(lines: readonly string[]): AgentToolCallSummary[] | undefined {
   return extractToolEvents('codex', lines);
+}
+
+export function extractOpenCodeToolEvents(lines: readonly string[]): AgentToolCallSummary[] | undefined {
+  const tools: AgentToolCallSummary[] = [];
+  for (const line of lines) {
+    try {
+      const exportData = JSON.parse(line) as { messages?: Array<{ parts?: unknown[] }> };
+      for (const message of exportData.messages ?? []) {
+        for (const rawPart of message.parts ?? []) {
+          if (!isObject(rawPart)) continue;
+          const part = rawPart as { type?: unknown; callID?: unknown; tool?: unknown; state?: unknown };
+          if (part.type !== 'tool' || typeof part.callID !== 'string' || typeof part.tool !== 'string') continue;
+          const state = isObject(part.state) ? part.state as { status?: unknown } : {};
+          const status = state.status;
+          const result: AgentToolCallSummary['result'] = status === 'error' || status === 'rejected'
+            ? 'failed'
+            : status === 'completed'
+              ? 'succeeded'
+              : 'in_progress';
+          tools.push({ id: part.callID, name: part.tool, result });
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+  return tools.length ? tools : undefined;
 }

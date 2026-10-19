@@ -227,18 +227,26 @@ export class TmuxClient {
     }
   }
 
-  /**
-   * Wait for Claude session to be ready for input.
-   *
-   * Detection is observation-based, NOT regex-on-pane: we wait for the
-   * worktree's `.afk/claude-status.json` to be written by the statusline
-   * tee (configured via `configureStatusline()`). Claude Code's statusline
-   * is invoked on every turn — its first invocation means the TUI is up
-   * and processing input.
-   *
-   * Avoids: pane capture + glyph matching (breaks on theme/font changes).
-   */
-  async waitForPrompt(worktreeDir: string, timeout: number = 30000): Promise<boolean> {
+  /** Wait for an interactive provider to be ready for input. */
+  async waitForPrompt(
+    worktreeDir: string,
+    timeout: number = 30000,
+    provider: string = 'claude-code',
+    session?: string,
+  ): Promise<boolean> {
+    if (provider !== 'claude-code') {
+      if (!session) return true;
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        if (await this.hasSession(session)) {
+          await this.sleep(500);
+          return true;
+        }
+        await this.sleep(500);
+      }
+      return false;
+    }
+
     const { promises: fs } = await import('fs');
     const { join } = await import('path');
     const statusPath = join(worktreeDir, '.afk', 'claude-status.json');
@@ -258,9 +266,16 @@ export class TmuxClient {
    * Send /goal command with text, followed by instructions to write signal.
    * @param signalType - The signal type to write on completion (default: 'goal_complete')
    */
-  async sendPrompt(worktreeDir: string, session: string, window: string, prompt: string, signalType: string = 'goal_complete'): Promise<void> {
-    const hasPrompt = await this.waitForPrompt(worktreeDir);
-    if (!hasPrompt) throw new Error('Timeout waiting for claude prompt');
+  async sendPrompt(
+    worktreeDir: string,
+    session: string,
+    window: string,
+    prompt: string,
+    signalType: string = 'goal_complete',
+    provider: string = 'claude-code',
+  ): Promise<void> {
+    const hasPrompt = await this.waitForPrompt(worktreeDir, 30000, provider, session);
+    if (!hasPrompt) throw new Error(`Timeout waiting for ${provider} prompt`);
 
     // Type the prompt text directly (which already contains `/goal ` prefix).
     // The text is submitted as a single line

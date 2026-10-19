@@ -1,72 +1,18 @@
-:root {
-  --afk-accent: #6d5dfc;
-  --afk-accent-soft: #f0eeff;
-  --afk-accent-border: #d7d1fb;
-  --afk-page-bg: #f7f7fa;
-  --afk-panel: #ffffff;
-  --afk-panel-subtle: #fbfbfc;
-  --afk-text: #363741;
-  --afk-muted: #858690;
-  --afk-border: #e7e7ec;
-  --afk-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
-  --afk-scale: 1;
-}
-
-:root[data-afk-accent="teal"] { --afk-accent: #26877c; --afk-accent-soft: #edf8f6; --afk-accent-border: #bfe4de; }
-:root[data-afk-accent="amber"] { --afk-accent: #ad7625; --afk-accent-soft: #fff7e9; --afk-accent-border: #edd6ae; }
-:root[data-afk-font="serif"] { --afk-font: "Noto Serif SC", "Songti SC", STSong, serif; }
-:root[data-afk-font="mono"] { --afk-font: "SF Mono", "JetBrains Mono", "Noto Sans Mono CJK SC", monospace; }
-:root[data-afk-scale="small"] { --afk-scale: .92; }
-:root[data-afk-scale="large"] { --afk-scale: 1.1; }
-
-.app-shell { font-family: var(--afk-font); }
-:root[data-afk-theme="graphite"] {
-  --afk-page-bg: #202126;
-  --afk-panel: #2a2b31;
-  --afk-panel-subtle: #24252b;
-  --afk-text: #f0f0f3;
-  --afk-muted: #adaeb8;
-  --afk-border: #3d3e47;
-  --canvas: var(--afk-page-bg);
-  --surface: var(--afk-panel-subtle);
-  --surface-raised: var(--afk-panel);
-  --line: var(--afk-border);
-  --line-soft: var(--afk-border);
-  --ink: var(--afk-text);
-  --muted: var(--afk-muted);
-  color-scheme: dark;
-}
-:root[data-afk-theme="graphite"] body,
-:root[data-afk-theme="graphite"] .app-shell,
-:root[data-afk-theme="graphite"] .workspace,
-:root[data-afk-theme="graphite"] .content-shell { background: var(--afk-page-bg); }
-:root[data-afk-theme="graphite"] .sidebar,
-:root[data-afk-theme="graphite"] .topbar,
-:root[data-afk-theme="graphite"] .table-panel,
-:root[data-afk-theme="graphite"] .environment-grid article,
-:root[data-afk-theme="graphite"] .record-card,
-:root[data-afk-theme="graphite"] .record-list,
-:root[data-afk-theme="graphite"] .workflow-section,
-:root[data-afk-theme="graphite"] .settings-section { background: var(--afk-panel); border-color: var(--afk-border); }
-:root[data-afk-theme="graphite"] .sidebar,
-:root[data-afk-theme="graphite"] .topbar { border-color: var(--afk-border); }
-:root[data-afk-theme="graphite"] .brand,
-:root[data-afk-theme="graphite"] .nav-item,
-:root[data-afk-theme="graphite"] .control-page,
-:root[data-afk-theme="graphite"] .control-page h1,
-:root[data-afk-theme="graphite"] .workflow-section b,
-:root[data-afk-theme="graphite"] .config-item b,
-:root[data-afk-theme="graphite"] .settings-section b { color: var(--afk-text); }
-:root[data-afk-theme="graphite"] .breadcrumb strong { color: var(--afk-text); }
-:root[data-afk-theme="graphite"] .nav-item:hover,
-:root[data-afk-theme="graphite"] .nav-item.active { background: var(--afk-panel-subtle); }
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected { background: color-mix(in srgb, var(--afk-accent) 12%, var(--afk-panel)); }
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected b { color: var(--afk-text); }
-:root[data-afk-theme="graphite"] .settings-section .setting-options button.selected span { color: var(--afk-muted); }
+/* ============================================================================
+   AFK Control components
+   ----------------------------------------------------------------------------
+   Tokens, both palettes and the appearance axes live in tokens.css. The
+   :root block and the accent variants that used to sit here are gone: a
+   theme is now a token swap, not a per-component override.
+   ========================================================================== */
 
 .control-page {
-  width: min(100%, 1180px);
-  margin: 8px auto 36px;
+  /* The prototype caps nothing here: `.view > section { flex: 1 }` fills the
+     scroll box, and the only inset is `.view`'s own padding. A page-level
+     max-width strands the content in the middle of a wide window — the exact
+     "两侧留白太多" the reskin was meant to remove. */
+  width: 100%;
+  margin: 8px 0 36px;
   color: var(--afk-text);
   font-size: calc(13px * var(--afk-scale));
 }
@@ -81,50 +27,50 @@
 .control-page-heading p { margin: 0 0 6px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
 .control-page-heading h1 { margin: 0; color: var(--afk-text); font-size: calc(25px * var(--afk-scale)); letter-spacing: -.03em; }
 .control-page-heading span { display: block; max-width: 640px; margin-top: 7px; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); line-height: 1.6; }
-.loop-state { flex: 0 0 auto; display: inline-flex !important; min-height: 25px; align-items: center; margin-top: 8px !important; padding: 0 9px; border: 1px solid #d7d8df; border-radius: 999px; background: #f8f8fa; color: #70717b !important; font-family: "DM Mono", monospace; font-size: 9px !important; font-weight: 600; }
+.loop-state { flex: 0 0 auto; display: inline-flex !important; min-height: 25px; align-items: center; margin-top: 8px !important; padding: 0 9px; border: var(--border-w) solid #d7d8df; border-radius: var(--radius-pill); background: #f8f8fa; color: #70717b !important; font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)) !important; font-weight: 600; }
 .loop-state.running { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent) !important; }
 
 .loop-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
 .loop-summary article,
 .workflow-section,
-.settings-section { border: 1px solid var(--afk-border); border-radius: 12px; background: var(--afk-panel); box-shadow: 0 1px 2px rgba(30,29,45,.025); }
+.settings-section { border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); }
 .loop-summary article { min-height: 105px; padding: 15px; }
 .loop-summary small,
-.config-item small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); }
+.config-item small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
 .loop-summary b { display: block; margin: 6px 0 5px; color: var(--afk-text); font-size: calc(21px * var(--afk-scale)); line-height: 1; }
 .loop-summary span { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
 
 .workflow-section,
 .settings-section { margin-top: 14px; overflow: hidden; }
 .workflow-section > header,
-.settings-section > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; min-height: 52px; padding: 14px 17px; border-bottom: 1px solid var(--afk-border); }
+.settings-section > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; min-height: 52px; padding: 14px 17px; border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-section > header b,
 .settings-section > header b { display: block; color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
 .workflow-section > header small,
 .settings-section > header small { display: block; max-width: 720px; margin-top: 4px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
-.workflow-section > header > span { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 10px; }
-.config-source { min-height: 22px; padding: 0 7px; border: 1px solid #dfe0e6; border-radius: 999px; background: #fafafd; line-height: 20px; }
+.workflow-section > header > span { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.config-source { min-height: 22px; padding: 0 7px; border: var(--border-w) solid #dfe0e6; border-radius: var(--radius-pill); background: #fafafd; line-height: 20px; }
 .config-source.project { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent) !important; }
 
 .workflow-config-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 0 17px; }
-.config-item { min-width: 0; min-height: 68px; padding: 14px 12px 14px 0; border-bottom: 1px solid var(--afk-border); }
+.config-item { min-width: 0; min-height: 68px; padding: 14px 12px 14px 0; border-bottom: var(--border-w) solid var(--afk-border); }
 .config-item:nth-last-child(-n+3) { border-bottom: 0; }
 .config-item b { display: block; overflow: hidden; margin-top: 6px; color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.runtime-config { margin: 0 17px 17px; overflow: hidden; border: 1px solid var(--afk-border); border-radius: 9px; background: var(--afk-panel-subtle); }
-.runtime-config > header { display: flex; align-items: baseline; gap: 8px; min-height: 40px; padding: 0 12px; border-bottom: 1px solid var(--afk-border); }
+.runtime-config { margin: 0 17px 17px; overflow: hidden; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel-subtle); }
+.runtime-config > header { display: flex; align-items: baseline; gap: 8px; min-height: 40px; padding: 0 12px; border-bottom: var(--border-w) solid var(--afk-border); }
 .runtime-config > header b { font-size: calc(10px * var(--afk-scale)); }
 .runtime-config > header span { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
 .runtime-config .workflow-config-grid { padding: 0 12px; }
 
 .workflow-run-list { display: grid; }
-.workflow-run { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 16px; padding: 15px 17px; border-bottom: 1px solid var(--afk-border); }
+.workflow-run { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 16px; padding: 15px 17px; border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-run:last-child { border-bottom: 0; }
 .workflow-run-primary { min-width: 0; }
 .workflow-run-primary > b,
 .workflow-run-primary > small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-run-primary > b { margin: 7px 0 4px; color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
 .workflow-run-primary > small { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
-.workflow-run-status { display: inline-flex; min-height: 21px; align-items: center; padding: 0 7px; border: 1px solid #dfe0e6; border-radius: 999px; background: #f8f8fa; color: #73747e; font-family: "DM Mono", monospace; font-size: 8px; font-weight: 600; }
+.workflow-run-status { display: inline-flex; min-height: 21px; align-items: center; padding: 0 7px; border: var(--border-w) solid #dfe0e6; border-radius: var(--radius-pill); background: #f8f8fa; color: #73747e; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); font-weight: 600; }
 .workflow-run-status.running { border-color: #c9daf5; background: #f2f6ff; color: #4978bf; }
 .workflow-run-status.completed { border-color: #cbe5d7; background: #f1faf5; color: #3f775b; }
 .workflow-run-status.blocked,.workflow-run-status.context_high { border-color: #ecd8b4; background: #fff8ea; color: #96651e; }
@@ -135,7 +81,7 @@
 .workflow-empty { margin: 0; padding: 18px; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); }
 
 .capability-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
-.capability-grid article { min-height: 112px; padding: 15px 17px; border-right: 1px solid var(--afk-border); border-bottom: 1px solid var(--afk-border); }
+.capability-grid article { min-height: 112px; padding: 15px 17px; border-right: var(--border-w) solid var(--afk-border); border-bottom: var(--border-w) solid var(--afk-border); }
 .capability-grid article:nth-child(3n) { border-right: 0; }
 .capability-grid article:nth-last-child(-n+3) { border-bottom: 0; }
 .capability-grid b,
@@ -146,8 +92,13 @@
 .capability-grid span { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
 .capability-grid .unavailable { opacity: .54; }
 
-.settings-page { max-width: 900px; }
-.repository-page { max-width: 960px; }
+/* Settings keeps a narrow measure — the prototype caps that view at 720px —
+   so it re-centres itself now that .control-page no longer does. */
+.settings-page { max-width: 900px; margin-inline: auto; }
+.repository-page { position: relative; margin-top: 0; }
+.repository-page > .control-page-heading { position: absolute; top: 0; right: 0; z-index: 1; padding: 0; }
+.repository-page > .control-page-heading > div,
+.workflow-library-heading > div { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .provider-icon { display: inline-block; flex: 0 0 auto; object-fit: contain; vertical-align: -3px; }
 .repository-refresh {
   display: grid;
@@ -156,25 +107,35 @@
   flex: 0 0 auto;
   place-items: center;
   margin-top: 3px;
-  border: 1px solid var(--afk-border);
-  border-radius: 8px;
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-md);
   background: var(--afk-panel);
   color: var(--afk-muted);
 }
 .repository-refresh:hover:not(:disabled) { border-color: var(--afk-border-strong); background: var(--afk-panel-subtle); color: var(--afk-text); }
 .repository-refresh:disabled { cursor: default; opacity: .6; }
-.repository-error { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; padding: 10px 12px; border: 1px solid #e5c6c4; border-radius: 9px; background: #fff7f6; color: #9b4d49; font-size: calc(10px * var(--afk-scale)); }
-.repository-list { overflow: hidden; border: 1px solid var(--afk-border); border-radius: 12px; background: var(--afk-panel); }
-.repository-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) 32px; gap: 12px; align-items: center; min-height: 61px; padding: 0 14px; border-bottom: 1px solid var(--afk-border); }
-.repository-row:last-child { border-bottom: 0; }
-.repository-provider { display: inline-flex; align-items: center; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); font-weight: 650; text-transform: uppercase; }
-.repository-provider .provider-icon { width: 15px; height: 15px; }
-.repository-row div { min-width: 0; }
-.repository-row b, .repository-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.repository-row b { color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); }
-.repository-row small { margin-top: 4px; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
-.repository-row > button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; background: transparent; color: var(--afk-muted); }
-.repository-row > button:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.repository-error { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; padding: 10px 12px; border: var(--border-w) solid var(--fail-ln); border-radius: var(--radius-md); background: var(--fail-bg); color: var(--fail); font-size: calc(10px * var(--afk-scale)); }
+.repository-list { overflow: hidden; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); }
+/* Rows are <button> here, unlike the read-only rows on other pages: reset the
+   native chrome so they match, and only invite a click when there is a URL. */
+.repository-list .row-item { min-height: 40px; border: 0; border-bottom: var(--border-w) solid var(--afk-border); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.repository-list .row-item:last-child { border-bottom: 0; }
+.repository-list .row-item:disabled { cursor: default; }
+.repository-list .row-item:disabled:hover { background: transparent; }
+.repository-list .row-item .ico-box { color: var(--afk-muted); }
+.repository-list .row-item .end { color: var(--afk-muted); }
+.repository-list .row-item .end svg { color: var(--afk-muted); }
+
+/* Shared row-item pattern (prototype .row-item / .ico-box / .txt / .end / .mono) */
+.row-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 12px; border-bottom: var(--border-w) solid var(--afk-border); transition: background-color var(--dur-fast) ease; cursor: default; }
+.row-item:last-child { border-bottom: 0; }
+.row-item:hover { background: var(--afk-panel-subtle); }
+.row-item .ico-box { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel-subtle); }
+.row-item .txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.row-item .txt b { display: block; overflow: hidden; color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.row-item .txt small { display: block; overflow: hidden; color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(9px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.row-item .end { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(10px * var(--afk-scale)); white-space: nowrap; }
+.row-item .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .repository-empty { padding: 34px 18px; text-align: center; }
 .repository-empty b, .repository-empty span { display: block; }
 .repository-empty b { color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
@@ -184,37 +145,23 @@
 .setting-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 15px 17px 17px; }
 .setting-options button,
 .segmented-options button,
-.accent-options button { border: 1px solid var(--afk-border); background: var(--afk-panel); color: var(--afk-text); }
-.setting-options button { min-height: 93px; padding: 14px; border-radius: 9px; text-align: left; }
+.accent-options button { border: var(--border-w) solid var(--afk-border); background: var(--afk-panel); color: var(--afk-text); }
+.setting-options button { min-height: 93px; padding: 14px; border-radius: var(--radius-md); text-align: left; }
 .setting-options button b,
 .setting-options button span { display: block; }
 .setting-options button b { font-size: calc(11px * var(--afk-scale)); }
 .setting-options button span { margin-top: 6px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
-.setting-options button.selected,
-.segmented-options button.selected { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); box-shadow: inset 0 0 0 1px var(--afk-accent); }
-.segmented-options { display: flex; gap: 7px; padding: 15px 17px 17px; }
-.segmented-options button { min-width: 82px; min-height: 31px; padding: 0 11px; border-radius: 7px; font-size: calc(10px * var(--afk-scale)); }
-.accent-options { display: flex; gap: 9px; padding: 15px 17px 17px; }
-.accent-options button { display: inline-flex; align-items: center; gap: 8px; min-height: 33px; padding: 0 11px; border-radius: 8px; font-size: calc(10px * var(--afk-scale)); }
-.accent-options button i { width: 11px; height: 11px; border-radius: 50%; background: #6d5dfc; }
-.accent-options button.teal i { background: #26877c; }
-.accent-options button.amber i { background: #ad7625; }
-.accent-options button.selected { border-color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent); }
-
-:root[data-afk-accent="teal"] .nav-item.active,
-:root[data-afk-accent="amber"] .nav-item.active { color: var(--afk-accent); }
-:root[data-afk-accent="teal"] .primary-nav .active::before,
-:root[data-afk-accent="amber"] .primary-nav .active::before { background: var(--afk-accent); }
+.setting-options button.selected { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); box-shadow: inset 0 0 0 1px var(--afk-accent); }
 
 @media (max-width: 980px) {
   .loop-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .workflow-config-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .config-item:nth-last-child(-n+3) { border-bottom: 1px solid var(--afk-border); }
+  .config-item:nth-last-child(-n+3) { border-bottom: var(--border-w) solid var(--afk-border); }
   .config-item:nth-last-child(-n+2) { border-bottom: 0; }
   .capability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .capability-grid article:nth-child(3n) { border-right: 1px solid var(--afk-border); }
+  .capability-grid article:nth-child(3n) { border-right: var(--border-w) solid var(--afk-border); }
   .capability-grid article:nth-child(2n) { border-right: 0; }
-  .capability-grid article:nth-last-child(-n+3) { border-bottom: 1px solid var(--afk-border); }
+  .capability-grid article:nth-last-child(-n+3) { border-bottom: var(--border-w) solid var(--afk-border); }
   .capability-grid article:nth-last-child(-n+2) { border-bottom: 0; }
 }
 
@@ -230,7 +177,7 @@
   .config-item,
   .config-item:nth-last-child(-n+2),
   .capability-grid article,
-  .capability-grid article:nth-last-child(-n+2) { border-bottom: 1px solid var(--afk-border); }
+  .capability-grid article:nth-last-child(-n+2) { border-bottom: var(--border-w) solid var(--afk-border); }
   .config-item:last-child,
   .capability-grid article:last-child { border-bottom: 0; }
   .capability-grid article,
@@ -247,42 +194,40 @@
 .workflow-canvas-heading p { margin: 0 0 6px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 650; letter-spacing: .09em; }
 .workflow-canvas-heading h1 { margin: 0; color: var(--afk-text); font-size: calc(25px * var(--afk-scale)); letter-spacing: -.035em; }
 .workflow-canvas-heading > div > span { display: block; max-width: 600px; margin-top: 7px; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); line-height: 1.55; }
-.canvas-loop-state { display: inline-flex; flex: 0 0 auto; min-height: 26px; align-items: center; margin-top: 8px; padding: 0 9px; border: 1px solid #dbdce3; border-radius: 999px; background: #fafafd; color: #747580; font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 600; }
+.canvas-loop-state { display: inline-flex; flex: 0 0 auto; min-height: 26px; align-items: center; margin-top: 8px; padding: 0 9px; border: var(--border-w) solid #dbdce3; border-radius: var(--radius-pill); background: #fafafd; color: #747580; font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 600; }
 .canvas-loop-state.running { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
 .workflow-canvas-layout { display: grid; grid-template-columns: minmax(0, 1fr) 294px; gap: 14px; align-items: stretch; }
-.workflow-canvas { overflow: hidden; border: 1px solid var(--afk-border); border-radius: 13px; background: var(--afk-panel); box-shadow: 0 1px 2px rgba(30,29,45,.03); }
-.workflow-canvas > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-height: 64px; padding: 15px 18px; border-bottom: 1px solid var(--afk-border); }
+.workflow-canvas { overflow: hidden; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); }
+.workflow-canvas > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-height: 64px; padding: 15px 18px; border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-canvas > header b { display: block; color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
 .workflow-canvas > header small { display: block; max-width: 590px; margin-top: 4px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
-.workflow-canvas > header > span { min-height: 21px; padding: 0 7px; border: 1px solid var(--afk-accent-border); border-radius: 999px; background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); line-height: 19px; white-space: nowrap; }
+.workflow-canvas > header > span { min-height: 21px; padding: 0 7px; border: var(--border-w) solid var(--afk-accent-border); border-radius: var(--radius-pill); background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 19px; white-space: nowrap; }
 .workflow-canvas-stage { min-height: 390px; padding: 42px 32px 26px; background-color: var(--afk-panel-subtle); background-image: radial-gradient(circle at 1px 1px, rgba(118,119,134,.14) 1px, transparent 0); background-size: 16px 16px; }
-.workflow-canvas-track { position: relative; display: grid; grid-template-columns: repeat(6, minmax(105px, 1fr)); gap: 18px; align-items: center; min-width: 760px; min-height: 260px; }
-.workflow-canvas-track::before { position: absolute; top: 130px; right: 8%; left: 8%; height: 1px; background: linear-gradient(90deg, var(--afk-accent-border), #d8d9e1 55%, #d8d9e1); content: ""; }
-.workflow-canvas-node { position: relative; z-index: 1; display: flex; min-height: 128px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 14px; border: 1px solid #dfe0e7; border-radius: 10px; background: var(--afk-panel); color: var(--afk-text); box-shadow: 0 5px 14px rgba(32,33,49,.035); text-align: left; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
-.workflow-canvas-node:hover { border-color: var(--afk-accent-border); box-shadow: 0 8px 18px rgba(38,35,91,.07); transform: translateY(-2px); }
-.workflow-canvas-node.selected { border-color: var(--afk-accent); box-shadow: 0 0 0 3px var(--afk-accent-soft), 0 9px 21px rgba(38,35,91,.09); }
-.workflow-canvas-node i { display: grid; width: 21px; height: 21px; place-items: center; margin-bottom: 12px; border-radius: 50%; background: #edf0f0; color: #69706f; font-family: "DM Mono", monospace; font-size: 8px; font-style: normal; }
+.workflow-canvas-node { position: relative; z-index: 1; display: flex; min-height: 128px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 14px; border: var(--border-w) solid #dfe0e7; border-radius: var(--radius-md); background: var(--afk-panel); color: var(--afk-text); box-shadow: var(--shadow-panel); text-align: left; transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+.workflow-canvas-node:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-2px, -2px); }
+.workflow-canvas-node.selected { border-color: var(--afk-accent); box-shadow: 0 0 0 3px var(--afk-accent-soft), var(--shadow-panel); }
+.workflow-canvas-node i { display: grid; width: 21px; height: 21px; place-items: center; margin-bottom: 12px; border-radius: 50%; background: var(--afk-accent-soft); color: var(--ink-mid); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); font-style: normal; }
 .workflow-canvas-node.active i { background: var(--afk-accent); color: white; box-shadow: 0 0 0 4px var(--afk-accent-soft); }
-.workflow-canvas-node.complete i { background: #e7f5ee; color: #4d8b6a; }
+.workflow-canvas-node.complete i { background: var(--accent-bg); color: var(--accent); }
 .workflow-canvas-node.muted { opacity: .72; }
 .workflow-canvas-node b { font-size: calc(11px * var(--afk-scale)); }
-.workflow-canvas-node small { display: -webkit-box; overflow: hidden; margin-top: 5px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.workflow-canvas-key { display: flex; gap: 13px; align-items: center; margin-top: 32px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); }
+.workflow-canvas-node small { display: -webkit-box; overflow: hidden; margin-top: 5px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.workflow-canvas-key { display: flex; gap: 13px; align-items: center; margin-top: 32px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
 .workflow-canvas-key span { display: inline-flex; gap: 5px; align-items: center; }
-.workflow-canvas-key i { width: 7px; height: 7px; border-radius: 50%; background: #ced0d8; }
+.workflow-canvas-key i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
 .workflow-canvas-key i.active { background: var(--afk-accent); }
-.workflow-canvas-key i.complete { background: #58a279; }
-.workflow-canvas > footer { display: flex; justify-content: space-between; gap: 14px; min-height: 44px; padding: 0 18px; border-top: 1px solid var(--afk-border); color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); line-height: 43px; }
+.workflow-canvas-key i.complete { background: var(--accent); }
+.workflow-canvas > footer { display: flex; justify-content: space-between; gap: 14px; min-height: 44px; padding: 0 18px; border-top: var(--border-w) solid var(--afk-border); color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 43px; }
 .workflow-canvas > footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.workflow-node-inspector { display: flex; min-height: 100%; flex-direction: column; overflow: hidden; border: 1px solid var(--afk-border); border-radius: 13px; background: var(--afk-panel); box-shadow: 0 1px 2px rgba(30,29,45,.03); }
-.workflow-node-inspector > header { display: flex; gap: 10px; align-items: center; min-height: 70px; padding: 15px; border-bottom: 1px solid var(--afk-border); }
-.workflow-node-inspector > header > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: 9px; font-weight: 650; }
-.workflow-node-inspector > header small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; }
+.workflow-node-inspector { display: flex; min-height: 100%; flex-direction: column; overflow: hidden; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); }
+.workflow-node-inspector > header { display: flex; gap: 10px; align-items: center; min-height: 70px; padding: 15px; border-bottom: var(--border-w) solid var(--afk-border); }
+.workflow-node-inspector > header > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: var(--radius-md); background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 650; }
+.workflow-node-inspector > header small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
 .workflow-node-inspector > header b { display: block; margin-top: 3px; color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
-.workflow-node-inspector > p { min-height: 52px; margin: 0; padding: 13px 15px; border-bottom: 1px solid var(--afk-border); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
+.workflow-node-inspector > p { min-height: 52px; margin: 0; padding: 13px 15px; border-bottom: var(--border-w) solid var(--afk-border); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
 .workflow-node-inspector dl { margin: 0; padding: 0 15px; }
-.workflow-node-inspector dl > div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; min-height: 40px; align-items: center; border-bottom: 1px solid var(--afk-border); }
+.workflow-node-inspector dl > div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; min-height: 40px; align-items: center; border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-node-inspector dt { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
 .workflow-node-inspector dd { overflow: hidden; margin: 0; color: var(--afk-text); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-node-inspector footer { margin-top: auto; padding: 14px 15px; background: var(--afk-panel-subtle); color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); line-height: 1.45; }
@@ -307,88 +252,102 @@
 .workflow-editor-heading h1 { margin: 0; color: var(--afk-text); font-size: calc(26px * var(--afk-scale)); letter-spacing: -.035em; }
 .workflow-editor-heading > div > span { display: block; max-width: 660px; margin-top: 7px; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); line-height: 1.55; }
 .workflow-editor-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; padding-top: 7px; }
-.workflow-dirty { display: inline-flex; min-height: 25px; align-items: center; padding: 0 8px; border: 1px solid #ecd8b4; border-radius: 999px; background: #fff8ea; color: #96651e; font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); }
-.workflow-save { min-height: 29px; padding: 0 11px; border: 1px solid var(--afk-accent); border-radius: 7px; background: var(--afk-accent); color: white; font-size: calc(10px * var(--afk-scale)); font-weight: 600; }
+.workflow-dirty { display: inline-flex; min-height: 25px; align-items: center; padding: 0 8px; border: var(--border-w) solid #ecd8b4; border-radius: var(--radius-pill); background: #fff8ea; color: #96651e; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.workflow-save { min-height: 29px; padding: 0 11px; border: var(--border-w) solid var(--afk-accent); border-radius: var(--radius-sm); background: var(--afk-accent); color: white; font-size: calc(10px * var(--afk-scale)); font-weight: 600; }
 .workflow-save:hover:not(:disabled) { filter: brightness(.96); }
 .workflow-save:disabled { cursor: default; opacity: .45; }
 .workflow-editor-layout { display: grid; grid-template-columns: minmax(0, 1fr) 316px; gap: 14px; align-items: stretch; }
-.workflow-editor-canvas, .workflow-editor-inspector { overflow: hidden; border: 1px solid var(--afk-border); border-radius: 13px; background: var(--afk-panel); box-shadow: 0 1px 2px rgba(28,29,43,.035); }
-.workflow-editor-canvas > header { display: flex; min-height: 62px; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 17px; border-bottom: 1px solid var(--afk-border); }
+.workflow-editor-canvas, .workflow-editor-inspector { overflow: hidden; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); }
+.workflow-editor-canvas > header { display: flex; min-height: 62px; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 17px; border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-editor-canvas > header b { display: block; color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
 .workflow-editor-canvas > header small { display: block; max-width: 530px; margin-top: 4px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
-.workflow-editor-canvas > header > span { min-height: 20px; padding: 0 7px; border: 1px solid var(--afk-accent-border); border-radius: 999px; background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); line-height: 18px; white-space: nowrap; }
-.workflow-editor-stage { position: relative; min-height: 530px; overflow: hidden; background-color: #f5f8f8; background-image: linear-gradient(rgba(117,158,167,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(117,158,167,.12) 1px, transparent 1px), radial-gradient(circle at 1px 1px, rgba(21,139,153,.22) 1px, transparent 0); background-size: 24px 24px, 24px 24px, 24px 24px; cursor: grab; touch-action: none; }
+.workflow-editor-canvas > header > span { min-height: 20px; padding: 0 7px; border: var(--border-w) solid var(--afk-accent-border); border-radius: var(--radius-pill); background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 18px; white-space: nowrap; }
+.workflow-editor-stage { position: relative; min-height: 530px; overflow: hidden; border: var(--border-w) solid var(--ink-faint); border-radius: 16px 6px 20px 8px / 6px 20px 8px 16px; background-color: var(--afk-panel-subtle); background-image: radial-gradient(circle at 1px 1px, var(--ink-faint) 1px, transparent 0); background-size: 22px 22px; box-shadow: var(--shadow-panel); cursor: grab; touch-action: none; }
 .workflow-canvas-lanes { position: absolute; inset: 0; pointer-events: none; }
-.workflow-canvas-lane { position: absolute; left: 42px; width: 1220px; border: 1px dashed rgba(69,151,169,.45); border-radius: 14px; background: rgba(222,241,244,.42); }
-.workflow-canvas-lane::after { position: absolute; inset: 8px; border: 1px solid rgba(255,255,255,.54); border-radius: 9px; content: ""; }
-.workflow-canvas-lane span { position: absolute; top: 9px; left: 16px; z-index: 1; color: #438ca0; font-family: "DM Mono", monospace; font-size: 9px; font-weight: 700; letter-spacing: .08em; }
-.workflow-canvas-lane small { position: absolute; top: 11px; right: 17px; z-index: 1; color: rgba(67,140,160,.68); font-family: "DM Mono", monospace; font-size: 7px; letter-spacing: .14em; }
-.workflow-editor-stage:active { cursor: grabbing; }
+.workflow-canvas-lane { position: absolute; left: 42px; width: 1220px; border: var(--border-w) dashed var(--ink-mid); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--ink-mid) 30%, transparent); }
+.workflow-canvas-lane::after { position: absolute; inset: 8px; border: var(--border-w) solid rgba(255,255,255,.54); border-radius: var(--radius-md); content: ""; }
+.workflow-canvas-lane span { position: absolute; top: 9px; left: 16px; z-index: 1; color: var(--ink-mid); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 700; letter-spacing: .08em; }
+.workflow-canvas-lane small { position: absolute; top: 11px; right: 17px; z-index: 1; color: var(--ink-dim); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); letter-spacing: .14em; }
 .workflow-editor-world { position: absolute; top: 0; left: 0; width: 1500px; height: 520px; transform-origin: 0 0; transition: transform .12s ease-out; }
 .workflow-editor-edges { position: absolute; inset: 0; width: 1500px; height: 520px; overflow: visible; pointer-events: none; }
-.workflow-editor-edges path { fill: none; stroke: #8eb5bd; stroke-width: 1.35; marker-end: url(#workflow-arrow); }
-.workflow-editor-edges .workflow-edge-flow { stroke: #1593a0; stroke-width: 2.3; opacity: .74; }
-.workflow-editor-edges .workflow-edge:not(.linked) .workflow-edge-flow { opacity: .16; }
-.workflow-editor-edges .workflow-edge.linked .workflow-edge-flow { opacity: .92; }
-.workflow-editor-edges .workflow-edge.conditional .workflow-edge-base { stroke: #7d7bd2; stroke-dasharray: 6 4; }
-.workflow-editor-edges .workflow-edge.conditional .workflow-edge-flow { stroke: #716fd0; stroke-dasharray: 6 4; }
-.workflow-editor-edges marker path { fill: #1593a0; }
-.workflow-editor-node { position: absolute; display: flex; width: 164px; min-height: 94px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 13px; border: 1.5px solid #82b9bd; border-radius: 9px; background: rgba(252,255,254,.96); color: var(--afk-text); box-shadow: 0 4px 12px rgba(42,104,112,.08); cursor: grab; text-align: left; user-select: none; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
-.workflow-editor-node:hover { border-color: var(--afk-accent-border); box-shadow: 0 10px 22px rgba(47,43,110,.085); transform: translateY(-2px); }
+.workflow-editor-edges path { fill: none; stroke: var(--ink-mid); stroke-width: 1.4; stroke-dasharray: 6 3; marker-end: url(#workflow-arrow); }
+.workflow-editor-edges .workflow-edge-flow { stroke: var(--ink-mid); stroke-width: 1.4; stroke-dasharray: 6 3; marker-end: none; opacity: .4; }
+.workflow-editor-edges .workflow-edge:not(.linked) .workflow-edge-flow { opacity: .12; }
+.workflow-editor-edges .workflow-edge.linked .workflow-edge-flow { opacity: .72; }
+.workflow-editor-edges .workflow-edge.conditional .workflow-edge-base { stroke: var(--ink-mid); }
+.workflow-editor-edges .workflow-edge.conditional .workflow-edge-flow { stroke: var(--ink-mid); }
+.workflow-editor-edges marker path { fill: var(--afk-accent); }
+.workflow-editor-node { position: absolute; display: flex; width: 164px; min-height: 94px; flex-direction: column; align-items: flex-start; justify-content: center; padding: 13px; border: var(--border-w) solid #82b9bd; border-radius: var(--radius-md); background: rgba(252,255,254,.96); color: var(--afk-text); box-shadow: var(--shadow-panel); cursor: grab; text-align: left; user-select: none; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.workflow-editor-node:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-2px, -2px); }
 .workflow-editor-node:active { cursor: grabbing; transform: none; }
-.workflow-editor-node.selected { border-color: #0d8c9c; box-shadow: 0 0 0 3px rgba(13,140,156,.16), 0 10px 24px rgba(37,112,122,.15); }
-.workflow-editor-node i { display: grid; width: 21px; height: 21px; place-items: center; margin-bottom: 11px; border-radius: 50%; background: #eff0f3; color: #777984; font-family: "DM Mono", monospace; font-size: 8px; font-style: normal; }
+.workflow-editor-node.selected { border-color: #0d8c9c; box-shadow: 0 0 0 3px rgba(13,140,156,.16), var(--shadow-panel); }
+.workflow-editor-node i { display: grid; width: 21px; height: 21px; place-items: center; margin-bottom: 11px; border-radius: 50%; background: var(--afk-panel-subtle); color: var(--ink-mid); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); font-style: normal; }
 .workflow-editor-node.active i { background: var(--afk-accent); color: white; box-shadow: 0 0 0 4px var(--afk-accent-soft); }
-.workflow-editor-node.complete i { background: #e8f5ee; color: #498764; }
+.workflow-editor-node.complete i { background: var(--accent-bg); color: var(--accent); }
 .workflow-editor-node.muted { opacity: .7; }
 .workflow-editor-node b { font-size: calc(11px * var(--afk-scale)); }
-.workflow-editor-node small { display: -webkit-box; overflow: hidden; margin-top: 5px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.workflow-editor-node > span { margin-top: 9px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); }
-.workflow-canvas-controls { position: absolute; right: 14px; bottom: 13px; z-index: 5; display: flex; overflow: hidden; align-items: center; border: 1px solid var(--afk-border); border-radius: 8px; background: color-mix(in srgb, var(--afk-panel) 92%, transparent); box-shadow: 0 3px 10px rgba(29,30,43,.08); backdrop-filter: blur(8px); }
-.workflow-canvas-controls button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-right: 1px solid var(--afk-border); background: transparent; color: var(--afk-muted); }
+.workflow-editor-node small { display: -webkit-box; overflow: hidden; margin-top: 5px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.workflow-editor-node > span { margin-top: 9px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+/* Prototype's .stage-bar: floating inside the stage, left caption + right-anchored zoom pill.
+   The inspector overlays the stage rather than taking a grid column, so the bar has to
+   stop at its edge — 332px is the same reserve the viewport fit already uses. */
+.workflow-canvas-controls {
+  position: absolute; left: 12px; right: 12px; bottom: 10px;
+  z-index: 5; display: flex; align-items: center; gap: 8px;
+  box-shadow: var(--shadow-panel);
+}
+
+.workflow-canvas-caption { font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); color: var(--ink-dim); }
+.workflow-canvas-zoom {
+  display: flex; align-items: center; gap: 1px; margin-left: auto;
+  padding: 2px;
+  border: var(--border-w) solid var(--ink-faint); border-radius: 3px 8px 5px 2px;
+  background: var(--paper-2);
+}
+.workflow-canvas-zoom button { width: 22px; height: 20px; border-radius: 2px 4px 3px 1px; background: transparent; color: var(--ink-dim); }
+.workflow-canvas-zoom button:hover { background: var(--paper-3); color: var(--ink-main); }
+.workflow-canvas-zoom span { padding: 0 6px; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); color: var(--ink-mid); }
+.workflow-canvas-controls button { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-right: var(--border-w) solid var(--afk-border); background: transparent; color: var(--afk-muted); }
 .workflow-canvas-controls button:last-child { border-right: 0; }
 .workflow-canvas-controls button:hover { color: var(--afk-accent); background: var(--afk-accent-soft); }
-.workflow-canvas-controls span { min-width: 39px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; text-align: center; }
-.workflow-editor-canvas > footer { display: flex; min-height: 42px; justify-content: space-between; gap: 14px; padding: 0 17px; border-top: 1px solid var(--afk-border); color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); line-height: 41px; }
+.workflow-canvas-controls span { min-width: 39px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); text-align: center; }
+.workflow-editor-canvas > footer { display: flex; min-height: 42px; justify-content: space-between; gap: 14px; padding: 0 17px; border-top: var(--border-w) solid var(--afk-border); color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); line-height: 41px; }
 .workflow-editor-canvas > footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-editor-inspector { display: flex; min-height: 604px; flex-direction: column; }
-.workflow-editor-inspector > header { display: flex; min-height: 69px; gap: 10px; align-items: center; padding: 14px; border-bottom: 1px solid var(--afk-border); }
-.workflow-editor-inspector > header > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: 9px; font-weight: 650; }
-.workflow-editor-inspector > header small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; }
+.workflow-editor-inspector > header { display: flex; min-height: 69px; gap: 10px; align-items: center; padding: 14px; border-bottom: var(--border-w) solid var(--afk-border); }
+.workflow-editor-inspector > header > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: var(--radius-md); background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 650; }
+.workflow-editor-inspector > header small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
 .workflow-editor-inspector > header b { display: block; margin-top: 3px; color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
-.workflow-editor-inspector > p { min-height: 50px; margin: 0; padding: 13px 14px; border-bottom: 1px solid var(--afk-border); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
+.workflow-editor-inspector > p { min-height: 50px; margin: 0; padding: 13px 14px; border-bottom: var(--border-w) solid var(--afk-border); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
 .workflow-inspector-fields { display: grid; gap: 11px; padding: 15px; }
 .workflow-field { display: grid; gap: 6px; }
 .workflow-field > span, .workflow-readonly > span { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
-.workflow-field input, .workflow-field select { width: 100%; min-height: 30px; padding: 0 8px; border: 1px solid #dedfe7; border-radius: 6px; outline: 0; background: var(--afk-panel); color: var(--afk-text); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
+.workflow-field input, .workflow-field select { width: 100%; min-height: 30px; padding: 0 8px; border: var(--border-w) solid #dedfe7; border-radius: var(--radius-sm); outline: 0; background: var(--afk-panel); color: var(--afk-text); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
 .workflow-field input:focus, .workflow-field select:focus { border-color: var(--afk-accent); box-shadow: 0 0 0 3px var(--afk-accent-soft); }
-.workflow-readonly { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; min-height: 31px; align-items: center; border-bottom: 1px solid var(--afk-border); }
+.workflow-readonly { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; min-height: 31px; align-items: center; border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-readonly b { overflow: hidden; color: var(--afk-text); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 500; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-save-error { margin: 0 15px; padding: 9px; border: 1px solid #edcdca; border-radius: 7px; background: #fff4f3; color: #a35350; font-size: calc(9px * var(--afk-scale)); line-height: 1.45; }
-.workflow-editor-inspector footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: auto; padding: 13px 14px; border-top: 1px solid var(--afk-border); background: var(--afk-panel-subtle); }
-.workflow-editor-inspector footer small { flex-basis: 100%; color: var(--afk-muted); font-size: calc(8px * var(--afk-scale)); line-height: 1.45; }
-.workflow-reset { min-height: 28px; padding: 0 9px; border: 1px solid var(--afk-border); border-radius: 7px; background: var(--afk-panel); color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
+.workflow-save-error { margin: 0 15px; padding: 9px; border: var(--border-w) solid #edcdca; border-radius: var(--radius-sm); background: #fff4f3; color: #a35350; font-size: calc(9px * var(--afk-scale)); line-height: 1.45; }
+.workflow-editor-inspector footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: auto; padding: 13px 14px; border-top: var(--border-w) solid var(--afk-border); background: var(--afk-panel-subtle); }
+.workflow-editor-inspector footer small { flex-basis: 100%; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
+.workflow-reset { min-height: 28px; padding: 0 9px; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel); color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
 .workflow-reset:disabled { cursor: default; opacity: .45; }
-:root[data-afk-theme="graphite"] .workflow-editor-canvas, :root[data-afk-theme="graphite"] .workflow-editor-inspector { background: var(--afk-panel); border-color: var(--afk-border); }
-:root[data-afk-theme="graphite"] .workflow-editor-stage { background-color: var(--afk-panel-subtle); background-image: linear-gradient(rgba(224,224,234,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(224,224,234,.08) 1px, transparent 1px); }
-:root[data-afk-theme="graphite"] .workflow-editor-node, :root[data-afk-theme="graphite"] .workflow-field input, :root[data-afk-theme="graphite"] .workflow-field select, :root[data-afk-theme="graphite"] .workflow-reset { border-color: var(--afk-border); background: var(--afk-panel); color: var(--afk-text); }
-:root[data-afk-theme="graphite"] .workflow-editor-edges path { stroke: #555762; }
+
 @media (max-width: 1120px) { .workflow-editor-layout { grid-template-columns: 1fr; } .workflow-editor-inspector { min-height: 0; } }
 @media (max-width: 700px) { .workflow-editor-heading { display: block; } .workflow-editor-actions { margin-top: 13px; } .workflow-editor-canvas > footer { display: block; min-height: 59px; padding: 7px 14px; line-height: 1.8; } .workflow-editor-canvas > footer span { display: block; } }
 
 /* Template insertion and responsive canvas safeguards. */
 .workflow-template-add { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
-.workflow-template-add > span { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); }
-.workflow-template-add button { min-height: 25px; padding: 0 8px; border: 1px solid var(--afk-accent-border); border-radius: 6px; background: var(--afk-accent-soft); color: var(--afk-accent); font-size: calc(9px * var(--afk-scale)); font-weight: 600; white-space: nowrap; }
+.workflow-template-add > span { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.workflow-template-add button { min-height: 25px; padding: 0 8px; border: var(--border-w) solid var(--afk-accent-border); border-radius: var(--radius-sm); background: var(--afk-accent-soft); color: var(--afk-accent); font-size: calc(9px * var(--afk-scale)); font-weight: 600; white-space: nowrap; }
 .workflow-template-add button:hover { border-color: var(--afk-accent); background: var(--afk-panel); }
-.workflow-editor-node.template-agent { border-style: solid; border-color: #1398a1; }
-.workflow-editor-node.template-agent i { background: #d8f0ee; color: #087c87; }
-.workflow-editor-node.template-qa { border-style: solid; border-color: #e28a47; background: #fffaf4; }
-.workflow-editor-node.template-qa i { background: #fbe4d1; color: #b96828; }
-.workflow-editor-node.template-qa > span { color: #458060; }
-.workflow-editor-node.origin-node { border-color: #7c9aac; background: #f6fbfc; }
-.workflow-editor-node.origin-node i { background: #e1edf2; color: #507487; }
-.workflow-reset.destructive { border-color: #edcdca; background: #fff4f3; color: #a35350; }
+.workflow-editor-node.template-agent { border-style: solid; border-color: var(--afk-accent); }
+.workflow-editor-node.template-agent i { background: var(--afk-accent-soft); color: var(--afk-accent); }
+.workflow-editor-node.template-qa { border-style: solid; border-color: var(--warn); background: var(--warn-bg); }
+.workflow-editor-node.template-qa i { background: var(--warn-bg); color: var(--warn); }
+.workflow-editor-node.template-qa > span { color: var(--accent); }
+.workflow-editor-node.origin-node { border-color: var(--afk-accent); background: var(--afk-accent-soft); }
+.workflow-editor-node.origin-node i { background: var(--afk-accent-soft); color: var(--afk-accent); }
+.workflow-reset.destructive { border-color: var(--fail-ln); background: var(--fail-bg); color: #a35350; }
 .workflow-editor-world { transition: none; }
 
 @media (max-width: 1120px) {
@@ -402,7 +361,7 @@
   .workflow-editor-canvas > header { flex-wrap: wrap; }
   .workflow-template-add { justify-content: flex-start; }
   .workflow-editor-stage { min-height: 500px; }
-  .workflow-editor-inspector { border-radius: 11px; }
+  .workflow-editor-inspector { border-radius: var(--radius-md); }
 }
 @media (max-width: 700px) {
   .workflow-editor-page { margin-top: 4px; }
@@ -413,8 +372,6 @@
   .workflow-editor-stage { min-height: 470px; }
   .workflow-editor-inspector > header, .workflow-inspector-fields, .workflow-editor-inspector > p { padding-right: 13px; padding-left: 13px; }
 }
-:root[data-afk-theme="graphite"] .workflow-template-add button { border-color: var(--afk-accent-border); background: color-mix(in srgb, var(--afk-accent-soft) 72%, var(--afk-panel)); }
-:root[data-afk-theme="graphite"] .workflow-reset.destructive { border-color: #754d4b; background: #3c2c2c; color: #f0aaa5; }
 
 /* Responsive application shell used by the verified 1024px and 768px desktop widths. */
 @media (max-width: 1024px) {
@@ -445,117 +402,134 @@
 /* Workflow library and focused studio: one list entry point, one uninterrupted canvas workspace. */
 .workflow-library { width: min(100%, 1180px); margin: 8px auto 44px; color: var(--afk-text); }
 .workflow-library-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 12px 2px 24px; }
-.workflow-library-heading p { margin: 0 0 7px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: 9px; font-weight: 650; letter-spacing: .09em; }
-.workflow-library-heading h1 { margin: 0; font-size: 27px; letter-spacing: -.04em; }
-.workflow-library-heading span { display: block; max-width: 590px; margin-top: 8px; color: var(--afk-muted); font-size: 11px; line-height: 1.6; }
-.workflow-create { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; min-height: 32px; margin-top: 8px; padding: 0 11px; border: 1px solid var(--afk-accent-border); border-radius: 8px; background: var(--afk-accent-soft); color: var(--afk-accent); font-size: 10px; font-weight: 650; }
+.workflow-library-heading p { margin: 0 0 7px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 650; letter-spacing: .09em; }
+.workflow-library-heading h1 { margin: 0; font-size: calc(27px * var(--afk-scale)); letter-spacing: -.04em; }
+.workflow-library-heading span { display: block; max-width: 590px; margin-top: 8px; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); line-height: 1.6; }
+.workflow-create { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 6px; min-height: 32px; margin-top: 8px; padding: 0 11px; border: var(--border-w) solid var(--afk-accent-border); border-radius: var(--radius-md); background: var(--afk-accent-soft); color: var(--afk-accent); font-size: calc(10px * var(--afk-scale)); font-weight: 650; }
 .workflow-create:hover { border-color: var(--afk-accent); background: var(--afk-panel); }
-.workflow-library-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 22px; border-top: 1px solid var(--afk-border); border-bottom: 1px solid var(--afk-border); }
+.workflow-library-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 22px; border-top: var(--border-w) solid var(--afk-border); border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-library-summary > div { min-width: 0; padding: 15px 16px 14px 0; }
-.workflow-library-summary > div + div { padding-left: 18px; border-left: 1px solid var(--afk-border); }
-.workflow-library-summary small, .workflow-library-summary span { display: block; color: var(--afk-muted); font-size: 9px; }
+.workflow-library-summary > div + div { padding-left: 18px; border-left: var(--border-w) solid var(--afk-border); }
+.workflow-library-summary small, .workflow-library-summary span { display: block; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
 .workflow-library-summary small { font-family: "DM Mono", monospace; }
-.workflow-library-summary b { display: block; overflow: hidden; margin: 5px 0 4px; color: var(--afk-text); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-library-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
-.workflow-library-card { display: flex; min-height: 174px; flex-direction: column; padding: 14px; border: 1px solid var(--afk-border); border-radius: 11px; background: var(--afk-panel); color: var(--afk-text); text-align: left; box-shadow: 0 1px 2px rgba(28,29,43,.025); }
-.workflow-library-card:hover { border-color: var(--afk-accent-border); box-shadow: 0 8px 19px rgba(37,34,90,.06); transform: translateY(-1px); }
-.workflow-library-card.active { border-color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent), 0 8px 19px rgba(37,34,90,.06); }
+.workflow-library-summary b { display: block; overflow: hidden; margin: 5px 0 4px; color: var(--afk-text); font-size: calc(15px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-library-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.workflow-library-card { display: flex; min-height: 174px; flex-direction: column; padding: 14px; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); color: var(--afk-text); text-align: left; box-shadow: var(--shadow-panel-sm); }
+.workflow-library-card:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-1px, -1px); }
+.workflow-library-card.active { border-color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent), var(--shadow-panel); }
 .workflow-library-card header, .workflow-library-card footer { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-.workflow-library-card header span { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; }
-.workflow-library-card header em { padding: 3px 5px; border-radius: 4px; background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: 8px; font-style: normal; }
-.workflow-library-card > b { margin-top: 18px; font-size: 13px; }
-.workflow-library-card > p { display: -webkit-box; overflow: hidden; margin: 7px 0 auto; color: var(--afk-muted); -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 10px; line-height: 1.5; }
-.workflow-library-card footer { margin-top: 14px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; }
-.workflow-library-card footer i { display: inline-flex; align-items: center; gap: 2px; color: var(--afk-accent); font-family: var(--afk-font); font-size: 9px; font-style: normal; }
-.workflow-library-empty { display: grid; justify-items: start; gap: 7px; padding: 30px 0; border-top: 1px solid var(--afk-border); color: var(--afk-muted); font-size: 11px; }
+.workflow-library-card header span { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.workflow-library-card header em { padding: 3px 5px; border-radius: var(--radius-sm); background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); font-style: normal; }
+.workflow-library-card > b { margin-top: 18px; font-size: calc(13px * var(--afk-scale)); }
+.workflow-library-card > p { display: -webkit-box; overflow: hidden; margin: 7px 0 auto; color: var(--afk-muted); -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: calc(10px * var(--afk-scale)); line-height: 1.5; }
+.workflow-library-card footer { margin-top: 14px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.workflow-library-card footer i { display: inline-flex; align-items: center; gap: 2px; color: var(--afk-accent); font-family: var(--afk-font); font-size: calc(9px * var(--afk-scale)); font-style: normal; }
+.workflow-library-empty { display: grid; justify-items: start; gap: 7px; padding: 30px 0; border-top: var(--border-w) solid var(--afk-border); color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); }
 .workflow-library-empty b { color: var(--afk-text); }
 .workflow-library-empty .workflow-create { margin-top: 8px; }
 
-.workflow-studio-page { display: flex; min-height: calc(100vh - 70px); flex-direction: column; margin: 0 -18px -28px; color: var(--afk-text); }
-.workflow-studio-topbar { display: grid; grid-template-columns: minmax(138px, .5fr) minmax(0, 1.5fr) auto; align-items: center; gap: 16px; min-height: 72px; padding: 0 20px; border-bottom: 1px solid var(--afk-border); background: var(--afk-panel); }
-.workflow-back { display: inline-flex; width: fit-content; align-items: center; gap: 2px; padding: 6px 0; background: transparent; color: var(--afk-muted); font-size: 10px; }
+.workflow-studio-topbar { display: grid; grid-template-columns: minmax(138px, .5fr) minmax(0, 1.5fr) auto; align-items: center; gap: 16px; min-height: 72px; padding: 0 20px; border-bottom: var(--border-w) solid var(--afk-border); background: var(--afk-panel); }
+.workflow-back { display: inline-flex; width: fit-content; align-items: center; gap: 2px; padding: 6px 0; background: transparent; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
 .workflow-back:hover { color: var(--afk-accent); }
 .workflow-studio-title { min-width: 0; }
-.workflow-studio-title > span { display: block; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: 8px; letter-spacing: .06em; }
-.workflow-studio-title b { display: block; overflow: hidden; margin-top: 3px; color: var(--afk-text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-studio-title small { display: block; overflow: hidden; margin-top: 3px; color: var(--afk-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-studio-title > span { display: block; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); letter-spacing: .06em; }
+.workflow-studio-title b { display: block; overflow: hidden; margin-top: 3px; color: var(--afk-text); font-size: calc(13px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-studio-title small { display: block; overflow: hidden; margin-top: 3px; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
 .workflow-studio-actions { display: flex; align-items: center; gap: 8px; }
 .workflow-studio-shell { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr) 306px; min-height: 0; }
-.workflow-studio-canvas { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: 1px solid var(--afk-border); background: var(--afk-panel-subtle); }
-.workflow-studio-canvas > header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 14px; min-height: 57px; padding: 0 20px; border-bottom: 1px solid var(--afk-border); background: var(--afk-panel); }
-.workflow-studio-canvas > header b { display: block; font-size: 11px; }
-.workflow-studio-canvas > header small { display: block; max-width: 680px; margin-top: 3px; color: var(--afk-muted); font-size: 9px; line-height: 1.45; }
+.workflow-studio-canvas { display: flex; min-width: 0; min-height: 0; flex-direction: column; border-right: var(--border-w) solid var(--afk-border); background: var(--afk-panel-subtle); }
+.workflow-studio-canvas > header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 14px; min-height: 57px; padding: 0 20px; border-bottom: var(--border-w) solid var(--afk-border); background: var(--afk-panel); }
+.workflow-studio-canvas > header b { display: block; font-size: calc(11px * var(--afk-scale)); }
+.workflow-studio-canvas > header small { display: block; max-width: 680px; margin-top: 3px; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); line-height: 1.45; }
 .workflow-studio-toolbar { display: flex; align-items: center; gap: 6px; }
-.workflow-studio-toolbar button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 8px; border: 1px solid var(--afk-accent-border); border-radius: 6px; background: var(--afk-accent-soft); color: var(--afk-accent); font-size: 9px; font-weight: 650; }
+.workflow-studio-toolbar button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 8px; border: var(--border-w) solid var(--afk-accent-border); border-radius: var(--radius-sm); background: var(--afk-accent-soft); color: var(--afk-accent); font-size: calc(9px * var(--afk-scale)); font-weight: 650; }
 .workflow-studio-toolbar button:hover { border-color: var(--afk-accent); background: var(--afk-panel); }
 .workflow-studio-canvas .workflow-editor-stage { flex: 1 1 auto; min-height: 530px; }
-.workflow-studio-canvas > footer { display: flex; flex: 0 0 35px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px; border-top: 1px solid var(--afk-border); background: var(--afk-panel); color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; }
+.workflow-studio-canvas > footer { display: flex; flex: 0 0 35px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 20px; border-top: var(--border-w) solid var(--afk-border); background: var(--afk-panel); color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
 .workflow-studio-inspector { display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--afk-panel); }
-.workflow-studio-inspector > header { display: flex; flex: 0 0 auto; min-height: 72px; gap: 10px; align-items: center; padding: 14px 16px; border-bottom: 1px solid var(--afk-border); }
-.workflow-studio-inspector > header > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: 9px; font-weight: 650; }
-.workflow-studio-inspector > header small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 8px; }
-.workflow-studio-inspector > header b { display: block; margin-top: 3px; font-size: 12px; }
-.workflow-studio-inspector > p { margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--afk-border); color: var(--afk-muted); font-size: 10px; line-height: 1.45; }
+.workflow-studio-inspector > header { display: flex; flex: 0 0 auto; min-height: 72px; gap: 10px; align-items: center; padding: 14px 16px; border-bottom: var(--border-w) solid var(--afk-border); }
+.workflow-studio-inspector > header > span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: var(--radius-md); background: var(--afk-accent-soft); color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 650; }
+.workflow-studio-inspector > header small { display: block; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.workflow-studio-inspector > header b { display: block; margin-top: 3px; font-size: calc(12px * var(--afk-scale)); }
+.workflow-studio-inspector > p { margin: 0; padding: 12px 16px; border-bottom: var(--border-w) solid var(--afk-border); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
 .workflow-studio-inspector .workflow-inspector-fields { overflow: auto; padding: 15px 16px; }
-.workflow-field textarea { width: 100%; min-height: 72px; resize: vertical; padding: 8px; border: 1px solid #dedfe7; border-radius: 6px; outline: 0; background: var(--afk-panel); color: var(--afk-text); font-family: "DM Mono", monospace; font-size: 9px; line-height: 1.5; }
+.workflow-field textarea { width: 100%; min-height: 72px; resize: vertical; padding: 8px; border: var(--border-w) solid #dedfe7; border-radius: var(--radius-sm); outline: 0; background: var(--afk-panel); color: var(--afk-text); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); line-height: 1.5; }
 .workflow-field textarea:focus { border-color: var(--afk-accent); box-shadow: 0 0 0 3px var(--afk-accent-soft); }
-.workflow-studio-inspector footer { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: auto; padding: 13px 16px; border-top: 1px solid var(--afk-border); background: var(--afk-panel-subtle); }
-.workflow-studio-inspector footer small { flex-basis: 100%; color: var(--afk-muted); font-size: 8px; line-height: 1.45; }
-:root[data-afk-theme="graphite"] .workflow-library-card, :root[data-afk-theme="graphite"] .workflow-studio-topbar, :root[data-afk-theme="graphite"] .workflow-studio-canvas > header, :root[data-afk-theme="graphite"] .workflow-studio-canvas > footer, :root[data-afk-theme="graphite"] .workflow-studio-inspector { background: var(--afk-panel); border-color: var(--afk-border); }
-:root[data-afk-theme="graphite"] .workflow-field textarea { border-color: var(--afk-border); background: var(--afk-panel); color: var(--afk-text); }
-@media (max-width: 1120px) { .workflow-library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .workflow-studio-shell { grid-template-columns: 1fr; } .workflow-studio-canvas { border-right: 0; } .workflow-studio-inspector { min-height: 420px; border-top: 1px solid var(--afk-border); } }
-@media (max-width: 700px) { .workflow-library-heading { display: block; } .workflow-create { margin-top: 14px; } .workflow-library-summary { grid-template-columns: 1fr; } .workflow-library-summary > div, .workflow-library-summary > div + div { padding: 12px 0; border-left: 0; border-bottom: 1px solid var(--afk-border); } .workflow-library-summary > div:last-child { border-bottom: 0; } .workflow-library-grid { grid-template-columns: 1fr; } .workflow-studio-page { margin: 0 -14px -32px; } .workflow-studio-topbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 0 12px; } .workflow-back { font-size: 0; } .workflow-back svg { width: 19px; height: 19px; } .workflow-studio-title small { display: none; } .workflow-studio-canvas > header { align-items: flex-start; flex-direction: column; padding: 12px 14px; } .workflow-studio-toolbar { width: 100%; } .workflow-studio-canvas .workflow-editor-stage { min-height: 470px; } .workflow-studio-canvas > footer { padding: 0 14px; } }
+.workflow-studio-inspector footer { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: auto; padding: 13px 16px; border-top: var(--border-w) solid var(--afk-border); background: var(--afk-panel-subtle); }
+.workflow-studio-inspector footer small { flex-basis: 100%; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
+@media (max-width: 1120px) { .workflow-library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .workflow-studio-shell { grid-template-columns: 1fr; } .workflow-studio-canvas { border-right: 0; } .workflow-studio-inspector { min-height: 420px; border-top: var(--border-w) solid var(--afk-border); } }
+@media (max-width: 700px) { .workflow-library-heading { display: block; } .workflow-create { margin-top: 14px; } .workflow-library-summary { grid-template-columns: 1fr; } .workflow-library-summary > div, .workflow-library-summary > div + div { padding: 12px 0; border-left: 0; border-bottom: var(--border-w) solid var(--afk-border); } .workflow-library-summary > div:last-child { border-bottom: 0; } .workflow-library-grid { grid-template-columns: 1fr; } .workflow-studio-page { margin: 0 -14px -32px; } .workflow-studio-topbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 0 12px; } .workflow-back { font-size: 0; } .workflow-back svg { width: 19px; height: 19px; } .workflow-studio-title small { display: none; } .workflow-studio-canvas > header { align-items: flex-start; flex-direction: column; padding: 12px 14px; } .workflow-studio-toolbar { width: 100%; } .workflow-studio-canvas .workflow-editor-stage { min-height: 470px; } .workflow-studio-canvas > footer { padding: 0 14px; } }
 
-/* Manus-like reduction pass: quiet list rows, one canvas surface, one contextual inspector. */
-.workflow-library { width: min(100%, 960px); margin-top: 24px; }
-.workflow-library-heading { align-items: center; padding: 8px 0 24px; border-bottom: 1px solid var(--afk-border); }
-.workflow-library-heading p { margin-bottom: 5px; color: var(--afk-muted); font-size: 8px; }
-.workflow-library-heading h1 { font-size: 24px; font-weight: 650; letter-spacing: -.045em; }
-.workflow-library-heading span { max-width: 520px; margin-top: 5px; font-size: 10px; }
+/* Library: prototype-aligned two-column panel-card grid + recent runs panel. */
+.workflow-library { position: relative; width: 100%; margin: 0 0 44px; animation: none; }
+.workflow-library-heading { position: fixed; top: 8px; right: 180px; z-index: 20; align-items: center; padding: 0; border-bottom: 0; }
+.workflow-library-heading p { margin-bottom: 5px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.workflow-library-heading h1 { font-size: calc(24px * var(--afk-scale)); font-weight: 650; letter-spacing: -.045em; }
+.workflow-library-heading span { max-width: 520px; margin-top: 5px; font-size: calc(10px * var(--afk-scale)); }
 .workflow-create { display: inline-grid; width: 30px; height: 30px; min-height: 30px; margin: 0; padding: 0; place-items: center; border-color: transparent; background: transparent; color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent-border); }
 .workflow-create:hover { border-color: transparent; background: var(--afk-accent-soft); }
 .workflow-library-summary { display: none; }
-.workflow-library-grid { display: grid; grid-template-columns: 1fr; gap: 0; }
-.workflow-library-card { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; min-height: 50px; align-items: center; gap: 12px; padding: 0 4px; border: 0; border-bottom: 1px solid var(--afk-border); border-radius: 0; background: transparent; box-shadow: none; }
-.workflow-library-card:hover { border-color: var(--afk-border); background: transparent; box-shadow: none; transform: none; }
-.workflow-library-card.active { border-color: var(--afk-border); background: transparent; box-shadow: none; }
-.workflow-library-source { display: grid; grid-column: 1; grid-row: 1; place-items: center; width: 22px; height: 22px; color: var(--afk-muted); background: var(--afk-panel-subtle); border-radius: 5px; }
-.workflow-library-source svg { width: 12px; height: 12px; }
-.workflow-library-card.active .workflow-library-source { color: var(--afk-accent); background: var(--afk-accent-soft); }
-.workflow-library-copy { grid-column: 2; min-width: 0; }
-.workflow-library-copy b { display: block; font-size: 12px; font-weight: 600; }
-.workflow-library-copy p { overflow: hidden; margin: 1px 0 0; color: var(--afk-muted); font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-library-meta { display: flex; grid-column: 3; align-items: center; gap: 10px; padding-right: 8px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: 9px; }
-.workflow-library-meta .workflow-library-meta-stat { display: inline-flex; align-items: center; gap: 3px; }
-.workflow-library-meta .workflow-library-meta-stat svg { width: 12px; height: 12px; }
-.workflow-library-meta .workflow-library-meta-stat em { font-style: normal; font-family: "DM Mono", monospace; font-size: 9px; }
-.workflow-library-meta em { padding: 3px 6px; border-radius: 99px; background: var(--afk-accent-soft); color: var(--afk-accent); font-family: inherit; font-size: 8px; font-style: normal; }
-.workflow-library-card > header, .workflow-library-card > footer, .workflow-library-card > b, .workflow-library-card > p { display: none; }
-.workflow-studio-page { min-height: calc(100vh - 50px); margin: 0 -28px -30px; background: var(--afk-panel-subtle); }
+/* .workflow-library-grid is now two-column from the base rule above. */
+
+/* Prototype-aligned panel-card: replaces the retro list-row card. */
+.workflow-library-card { display: grid; gap: 6px; padding: 13px 14px; min-height: auto; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); }
+.workflow-library-card:hover { border-color: var(--afk-accent-border); box-shadow: var(--shadow-lift); transform: translate(-1px, -1px); }
+.workflow-library-card.active { border-color: var(--afk-accent); box-shadow: inset 0 0 0 1px var(--afk-accent), var(--shadow-panel); }
+.workflow-library-card-header { display: flex; align-items: center; gap: 8px; }
+.workflow-library-card-header b { font-size: calc(12.5px * var(--afk-scale)); }
+.workflow-library-card-header .workflow-library-source svg { width: 14px; height: 14px; }
+.workflow-library-card-tag { margin-left: auto; padding: 3px 7px; border-radius: var(--radius-sm); background: var(--afk-panel-subtle); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); border: 1px solid var(--afk-border); }
+.workflow-library-card-tag.active-tag { padding: 3px 6px; border-radius: var(--radius-pill); background: var(--afk-accent-soft); color: var(--afk-accent); border-color: transparent; }
+.workflow-library-card > p { margin: 0; color: var(--afk-muted); font-size: calc(11.5px * var(--afk-scale)); line-height: 1.5; }
+.workflow-library-card > .steps-label { color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.workflow-library-card > header, .workflow-library-card > footer, .workflow-library-card > b { display: none; }
+
+/* Recent runs panel (原型 .panel + .row-item). */
+.workflow-recent-runs { margin-top: 14px; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); overflow: hidden; }
+.workflow-recent-runs > header { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: var(--border-w) solid var(--afk-border); }
+.workflow-recent-runs > header b { font-size: calc(12px * var(--afk-scale)); font-weight: 700; }
+.workflow-recent-runs > header .runs-note { color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); margin-left: auto; }
+.workflow-recent-runs .workflow-run-row { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: var(--border-w) solid var(--afk-border); }
+.workflow-recent-runs .workflow-run-row:last-child { border-bottom: 0; }
+.workflow-recent-runs .workflow-run-row:hover { background: var(--afk-panel-subtle); }
+.workflow-run-row-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-sm); background: var(--afk-panel-subtle); color: var(--afk-muted); flex-shrink: 0; }
+.workflow-run-row-icon svg { width: 14px; height: 14px; }
+.workflow-run-row-text { min-width: 0; flex: 1; }
+.workflow-run-row-text b { display: block; overflow: hidden; font-size: calc(12px * var(--afk-scale)); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-run-row-text small { display: block; overflow: hidden; margin-top: 2px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-run-row-end { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); white-space: nowrap; }
+.workflow-run-row .status-pill { padding: 3px 7px; border-radius: var(--radius-pill); font-size: calc(10px * var(--afk-scale)); border: 1px solid transparent; }
+.status-pill.running { background: var(--afk-accent-soft); color: var(--afk-accent); border-color: var(--afk-accent-border); }
+.status-pill.completed { background: var(--afk-accent-soft); color: var(--afk-accent); border-color: var(--afk-accent-border); }
+.status-pill.failed { background: var(--afk-danger); color: var(--afk-panel); border-color: var(--afk-danger); }
+/* Blocked and context-pressure runs read amber, the prototype's --warn, so a
+   stalled run never looks like a healthy one. Same token .stats .hot uses. */
+.status-pill.blocked, .status-pill.timed_out, .status-pill.aborted, .status-pill.context_high { background: var(--warn); color: var(--afk-panel); border-color: var(--warn); }
 .workflow-studio-topbar { grid-template-columns: 112px minmax(0, 1fr) auto; min-height: 56px; padding: 0 16px; border-bottom-color: var(--afk-border); }
-.workflow-back { padding: 5px 0; font-size: 9px; }
-.workflow-studio-title > span { color: var(--afk-muted); font-size: 7px; }
-.workflow-studio-title b { margin-top: 2px; font-size: 11px; }
-.workflow-studio-title small { margin-top: 2px; font-size: 8px; }
-.workflow-studio-shell { grid-template-columns: minmax(0, 1fr) 284px; }
+.workflow-back { padding: 5px 0; font-size: calc(9px * var(--afk-scale)); }
+.workflow-studio-title > span { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
+.workflow-studio-title b { margin-top: 2px; font-size: calc(11px * var(--afk-scale)); }
+.workflow-studio-title small { margin-top: 2px; font-size: calc(10px * var(--afk-scale)); }
+/* The prototype's .flow-wrap is `minmax(0, 1fr) 300px` with a 16px gap. */
+.workflow-studio-shell { grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; }
 .workflow-studio-canvas { background: var(--afk-panel-subtle); }
 .workflow-studio-canvas > header { min-height: 48px; padding: 0 16px; background: transparent; }
-.workflow-studio-canvas > header b { font-size: 10px; }
-.workflow-studio-canvas > header small { margin-top: 2px; font-size: 8px; }
+.workflow-studio-canvas > header b { font-size: calc(10px * var(--afk-scale)); }
+.workflow-studio-canvas > header small { margin-top: 2px; font-size: calc(10px * var(--afk-scale)); }
 .workflow-studio-toolbar button { min-height: 24px; padding: 0 7px; border-color: transparent; background: transparent; color: var(--afk-muted); }
 .workflow-studio-toolbar button:hover { border-color: transparent; background: var(--afk-accent-soft); color: var(--afk-accent); }
 .workflow-studio-canvas .workflow-editor-stage { background-size: 24px 24px; }
-.workflow-studio-canvas > footer { flex-basis: 29px; padding: 0 16px; background: transparent; font-size: 7px; }
+.workflow-studio-canvas > footer { flex-basis: 29px; padding: 0 16px; background: transparent; font-size: calc(9px * var(--afk-scale)); }
 .workflow-studio-inspector { background: var(--afk-panel); }
 .workflow-studio-inspector > header { min-height: 58px; padding: 11px 14px; }
-.workflow-studio-inspector > header > span { width: 24px; height: 24px; border-radius: 7px; font-size: 8px; }
-.workflow-studio-inspector > p { padding: 10px 14px; font-size: 9px; }
+.workflow-studio-inspector > header > span { width: 24px; height: 24px; border-radius: var(--radius-sm); font-size: calc(10px * var(--afk-scale)); }
+.workflow-studio-inspector > p { padding: 10px 14px; font-size: calc(9px * var(--afk-scale)); }
 .workflow-studio-inspector .workflow-inspector-fields { padding: 13px 14px; }
 .workflow-studio-inspector footer { padding: 11px 14px; background: transparent; }
-.workflow-editor-node { width: 154px; min-height: 116px; padding: 12px; border-radius: 8px; box-shadow: 0 3px 11px rgba(31,31,48,.04); }
-.workflow-editor-node i { width: 18px; height: 18px; margin-bottom: 9px; font-size: 7px; }
-.workflow-editor-node > span { margin-top: 7px; font-size: 7px; }
-.workflow-editor-node small { font-size: 7px; }
+.workflow-editor-node { width: 154px; min-height: 116px; padding: 12px; border-radius: var(--radius-md); box-shadow: var(--shadow-panel); }
+.workflow-editor-node i { width: 18px; height: 18px; margin-bottom: 9px; font-size: calc(9px * var(--afk-scale)); }
+.workflow-editor-node > span { margin-top: 7px; font-size: calc(9px * var(--afk-scale)); }
+.workflow-editor-node small { font-size: calc(9px * var(--afk-scale)); }
 @media (max-width: 1120px) { .workflow-studio-page { margin: 0 -20px -30px; } .workflow-studio-shell { grid-template-columns: 1fr; } }
 @media (max-width: 700px) { .workflow-library { margin-top: 12px; } .workflow-library-card { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; padding: 8px 4px; min-height: 44px; } .workflow-library-source { width: 20px; height: 20px; } .workflow-library-copy p { display: none; } .workflow-studio-page { margin: 0 -14px -32px; } }
 
@@ -570,7 +544,7 @@
 .workflow-editor-stage.is-dragging .workflow-editor-edges path { opacity: .58; }
 .workflow-editor-node { touch-action: none; transition: left 160ms cubic-bezier(.2,.8,.2,1), top 160ms cubic-bezier(.2,.8,.2,1), box-shadow 160ms ease, transform 160ms ease, border-color 160ms ease; }
 .workflow-editor-node.custom-node { cursor: grab; }
-.workflow-editor-node.custom-node.dragging { z-index: 8; cursor: grabbing; border-color: var(--afk-accent); box-shadow: 0 16px 32px color-mix(in srgb, var(--afk-accent) 18%, transparent); transform: scale(1.025); transition: box-shadow 100ms ease, transform 100ms ease, border-color 100ms ease; }
+.workflow-editor-node.custom-node.dragging { z-index: 8; cursor: grabbing; border-color: var(--afk-accent); box-shadow: var(--shadow-panel); transform: scale(1.025); transition: box-shadow 100ms ease, transform 100ms ease, border-color 100ms ease; }
 .workflow-editor-stage .workflow-editor-world { transform-origin: 0 0; }
 .workflow-canvas-controls button[aria-label="自动整理画布"] { color: var(--afk-accent); }
 
@@ -593,32 +567,22 @@
   content: "";
   pointer-events: none;
 }
-:root[data-afk-theme="graphite"] .workflow-editor-stage {
-  background-color: color-mix(in srgb, var(--afk-panel-subtle) 94%, #171713);
-  background-image:
-    radial-gradient(circle at 16% 22%, color-mix(in srgb, var(--afk-accent) 13%, transparent) 0 1px, transparent 1.5px),
-    radial-gradient(circle at 78% 68%, rgba(224, 220, 205, .06) 0 .8px, transparent 1.4px),
-    linear-gradient(112deg, rgba(224, 220, 205, .025), transparent 24%, transparent 76%, rgba(224, 220, 205, .018));
-  background-size: 78px 78px, 104px 104px, auto;
-}
-:root[data-afk-theme="graphite"] .workflow-editor-stage::before { background: repeating-linear-gradient(0deg, transparent 0 58px, rgba(224, 220, 205, .028) 59px 60px, transparent 61px 118px); }
+:root[data-afk-theme="dark"] .workflow-editor-stage::before { background: repeating-linear-gradient(0deg, transparent 0 58px, rgba(224, 220, 205, .028) 59px 60px, transparent 61px 118px); }
 
 .workflow-editor-node {
   border: 1.25px solid color-mix(in srgb, var(--afk-border-strong) 84%, #817b71);
   border-radius: 14px 12px 13px 11px;
   background: color-mix(in srgb, var(--afk-panel) 96%, #fffdf8);
-  box-shadow: 1px 2px 0 color-mix(in srgb, var(--afk-border) 82%, #877f73), 0 7px 18px rgba(43, 39, 31, .035);
+  box-shadow: var(--shadow-panel);
 }
 .workflow-editor-node:nth-of-type(2n) { border-radius: 12px 14px 11px 13px; }
-.workflow-editor-node:hover { border-color: color-mix(in srgb, var(--afk-accent) 52%, var(--afk-border-strong)); box-shadow: 2px 3px 0 color-mix(in srgb, var(--afk-accent-border) 72%, #877f73), 0 10px 22px rgba(43, 39, 31, .055); }
-.workflow-editor-node.selected { box-shadow: 2px 3px 0 color-mix(in srgb, var(--afk-accent) 42%, #817b71), 0 0 0 3px color-mix(in srgb, var(--afk-accent-soft) 72%, transparent); }
+.workflow-editor-node:hover { border-color: color-mix(in srgb, var(--afk-accent) 52%, var(--afk-border-strong)); box-shadow: var(--shadow-panel); }
+.workflow-editor-node.selected { box-shadow: var(--shadow-panel-sm), 0 0 0 3px color-mix(in srgb, var(--afk-accent-soft) 72%, transparent); }
 .workflow-editor-node.system-node { border-style: dashed; background: color-mix(in srgb, var(--afk-panel) 92%, #f2efe8); }
 
-.workflow-editor-edges .workflow-edge-base { fill: none; stroke: color-mix(in srgb, var(--afk-border-strong) 72%, #9d9689); stroke-width: 1.15; marker-end: url(#workflow-arrow); }
-.workflow-editor-edges .workflow-edge-flow { fill: none; stroke: var(--afk-accent); stroke-width: 1.8; stroke-linecap: round; stroke-dasharray: 2px 14px; marker-end: none; opacity: .55; animation: workflow-edge-flow 2.7s linear infinite; }
-.workflow-editor-edges marker path { fill: color-mix(in srgb, var(--afk-border-strong) 72%, #9d9689); }
-@keyframes workflow-edge-flow { to { stroke-dashoffset: -32px; } }
-@media (prefers-reduced-motion: reduce) { .workflow-editor-edges .workflow-edge-flow { animation: none; } }
+.workflow-editor-edges .workflow-edge-base { stroke: var(--ink-faint); }
+.workflow-editor-edges .workflow-edge-flow { stroke: var(--ink-mid); opacity: .42; }
+.workflow-editor-edges marker path { fill: var(--ink-faint); }
 
 .workflow-studio-actions .workflow-save,
 .workflow-studio-toolbar .workflow-toolbar-button,
@@ -627,7 +591,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-family: var(--afk-font);
   font-weight: 600;
   transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease;
@@ -635,36 +599,36 @@
 .workflow-studio-actions .workflow-save {
   min-height: 30px;
   padding: 0 12px;
-  border: 1px solid var(--afk-accent);
+  border: var(--border-w) solid var(--afk-accent);
   background: var(--afk-accent);
-  box-shadow: 0 1px 1px color-mix(in srgb, var(--afk-accent) 45%, transparent);
+  box-shadow: var(--shadow-panel-sm);
   color: white;
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
-.workflow-studio-actions .workflow-save:hover:not(:disabled) { filter: none; background: color-mix(in srgb, var(--afk-accent) 91%, #000); box-shadow: 0 3px 8px color-mix(in srgb, var(--afk-accent) 24%, transparent); transform: translateY(-1px); }
+.workflow-studio-actions .workflow-save:hover:not(:disabled) { filter: none; background: color-mix(in srgb, var(--afk-accent) 91%, #000); box-shadow: var(--shadow-panel); transform: translateY(-1px); }
 .workflow-studio-actions .workflow-save:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
 .workflow-studio-toolbar .workflow-toolbar-button {
   min-height: 27px;
   gap: 5px;
   padding: 0 9px;
-  border: 1px solid transparent;
+  border: var(--border-w) solid transparent;
   background: transparent;
   color: var(--afk-muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 .workflow-studio-toolbar .workflow-toolbar-button:hover { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
 .workflow-canvas-controls {
   padding: 3px;
   gap: 1px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--afk-panel) 94%, transparent);
-  box-shadow: 0 4px 16px rgba(43, 39, 31, .09);
+  box-shadow: var(--shadow-panel);
 }
 .workflow-canvas-controls .workflow-canvas-control {
   width: 27px;
   height: 27px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--afk-muted);
 }
@@ -674,91 +638,60 @@
 .workflow-studio-inspector .workflow-reset {
   min-height: 29px;
   padding: 0 10px;
-  border: 1px solid var(--afk-border);
+  border: var(--border-w) solid var(--afk-border);
   background: transparent;
   color: var(--afk-muted);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 .workflow-studio-inspector .workflow-reset:hover:not(:disabled) { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
 
 /* Workflow colour system: paper neutrals first, one restrained ink-blue accent second. */
-.workflow-studio-page {
-  --afk-panel: #fffefd;
-  --afk-panel-subtle: #faf9f5;
-  --afk-text: #343633;
-  --afk-muted: #777974;
-  --afk-border: #e2e1da;
-  --afk-border-strong: #c9c9c1;
-  --afk-accent: #66718f;
-  --afk-accent-soft: #eef0f5;
-  --afk-accent-border: #d0d5e0;
-  background: #fbfaf7;
-}
 .workflow-studio-topbar,
 .workflow-studio-canvas > header,
 .workflow-studio-canvas > footer,
 .workflow-studio-inspector { background: var(--afk-panel); }
-.workflow-dirty { border-color: #e7ddbf; background: #fbf7e9; color: #846e35; }
-.workflow-editor-stage { background-color: #faf9f5; }
-.workflow-editor-node { background: #fffefd; }
-.workflow-editor-node.system-node { border-color: #b7b5ae; background: #f7f6f1; }
+.workflow-dirty { border-color: var(--warn-ln); background: var(--warn-bg); color: var(--warn); }
+.workflow-editor-stage { background-color: var(--afk-panel-subtle); }
+.workflow-editor-node { background: var(--afk-panel); }
+.workflow-editor-node.system-node { border-color: #b7b5ae; background: color-mix(in srgb, var(--afk-panel) 88%, var(--afk-accent-soft)); }
 .workflow-editor-node > span { color: #68718e; }
 .workflow-editor-edges .workflow-edge-base { stroke: #b7b6ae; }
 .workflow-editor-edges .workflow-edge-flow { stroke: #74809e; opacity: .42; }
 .workflow-editor-edges marker path { fill: #a9a8a0; }
-.workflow-studio-actions .workflow-save { background: #66718f; border-color: #66718f; box-shadow: 0 1px 1px rgba(49, 57, 80, .18); }
-.workflow-studio-actions .workflow-save:hover:not(:disabled) { background: #58627f; box-shadow: 0 3px 8px rgba(49, 57, 80, .18); }
+.workflow-studio-actions .workflow-save { background: var(--afk-accent); border-color: var(--afk-accent); box-shadow: var(--shadow-panel-sm); }
+.workflow-studio-actions .workflow-save:hover:not(:disabled) { background: color-mix(in srgb, var(--afk-accent) 85%, #000); box-shadow: var(--shadow-panel); }
 .workflow-studio-toolbar .workflow-toolbar-button:hover,
 .workflow-canvas-controls .workflow-canvas-control:hover,
 .workflow-studio-inspector .workflow-reset:hover:not(:disabled) { background: #f0f2f6; color: #596582; border-color: #d0d5e0; }
-.workflow-canvas-controls { border-color: #dfded7; background: rgba(255, 254, 253, .9); box-shadow: 0 4px 16px rgba(58, 53, 43, .07); }
-.workflow-canvas-controls .workflow-canvas-control { color: #858781; }
-.workflow-canvas-controls .workflow-canvas-control[aria-label="自动整理画布"] { color: #66718f; }
+.workflow-canvas-controls { border-color: #dfded7; background: color-mix(in srgb, var(--afk-panel) 94%, transparent); box-shadow: var(--shadow-panel); }
+.workflow-canvas-controls .workflow-canvas-control { color: var(--ink-mid); }
+.workflow-canvas-controls .workflow-canvas-control{ color: var(--afk-accent); }
 
-:root[data-afk-theme="graphite"] .workflow-studio-page {
-  --afk-panel: #242624;
-  --afk-panel-subtle: #20221f;
-  --afk-text: #ecebe5;
-  --afk-muted: #a7a79f;
-  --afk-border: #393b37;
-  --afk-border-strong: #575a54;
-  --afk-accent: #a9b4d1;
-  --afk-accent-soft: #303641;
-  --afk-accent-border: #465069;
-  background: #20211f;
-}
-:root[data-afk-theme="graphite"] .workflow-editor-stage { background-color: #20211f; }
-:root[data-afk-theme="graphite"] .workflow-editor-node { background: #282a27; box-shadow: 1px 2px 0 #181916, 0 7px 18px rgba(0,0,0,.18); }
-:root[data-afk-theme="graphite"] .workflow-editor-node.system-node { border-color: #676861; background: #242622; }
-:root[data-afk-theme="graphite"] .workflow-editor-edges .workflow-edge-base { stroke: #64655f; }
-:root[data-afk-theme="graphite"] .workflow-editor-edges .workflow-edge-flow { stroke: #a9b4d1; opacity: .55; }
-:root[data-afk-theme="graphite"] .workflow-editor-edges marker path { fill: #777872; }
-:root[data-afk-theme="graphite"] .workflow-studio-actions .workflow-save { background: #93a0c4; border-color: #93a0c4; color: #20221f; }
-:root[data-afk-theme="graphite"] .workflow-studio-actions .workflow-save:hover:not(:disabled) { background: #a6b2d3; }
+
+:root[data-afk-theme="dark"] .workflow-studio-actions .workflow-save:hover:not(:disabled) { background: color-mix(in srgb, var(--afk-accent) 85%, #000); }
 
 /* Workflow studio reframing: a precise systems canvas, not a decorative AI surface. */
-.workflow-studio-page {
-  --afk-panel: #ffffff;
-  --afk-panel-subtle: #f8f8f6;
-  --afk-text: #262824;
-  --afk-muted: #7b7d76;
-  --afk-border: #e5e5df;
-  --afk-border-strong: #c7c8c1;
-  --afk-accent: #4d6297;
-  --afk-accent-soft: #edf0f8;
-  --afk-accent-border: #cbd4ea;
-  background: #fafaf8;
-}
 .workflow-studio-topbar { min-height: 52px; border-bottom-color: #e8e8e3; }
-.workflow-studio-title > span { font-size: 7px; letter-spacing: .08em; }
-.workflow-studio-title b { font-size: 12px; }
+.workflow-studio-title > span { font-size: calc(9px * var(--afk-scale)); letter-spacing: .08em; }
+.workflow-studio-title b { font-size: calc(12px * var(--afk-scale)); }
 .workflow-studio-title small { display: none; }
-.workflow-studio-canvas { background: #f8f8f6; }
-.workflow-studio-canvas > header { min-height: 44px; padding: 0 18px; border-bottom-color: #e8e8e3; background: #fff; }
-.workflow-studio-canvas > header b { font-size: 10px; font-weight: 650; }
+.workflow-studio-canvas { background: var(--afk-panel-subtle); }
+.workflow-studio-canvas > header { min-height: 44px; padding: 0 18px; border-bottom-color: #e8e8e3; background: var(--afk-panel); }
+.workflow-studio-canvas > header b { font-size: calc(10px * var(--afk-scale)); font-weight: 650; }
 .workflow-studio-canvas > header small { display: none; }
-.workflow-studio-canvas > footer { flex-basis: 30px; border-top-color: #e8e8e3; background: #fff; color: #969790; }
-.workflow-editor-stage { background: #f8f8f6; background-image: none; }
+.workflow-studio-canvas > footer { flex-basis: 30px; border-top-color: #e8e8e3; background: var(--afk-panel); color: #969790; }
+/* The prototype's `.stage`: a dot field on ruled paper, ringed and rotated.
+   The texture was switched off here while the palette was still being chased;
+   the sibling .workflow-canvas-stage kept its dots, so the two stages in one
+   page disagreed. Spacing stays 24px — the rule above has the higher
+   specificity, and 2px is not worth the churn. */
+.workflow-editor-stage {
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--afk-panel-subtle);
+  background-image: radial-gradient(circle at 1px 1px, var(--ink-faint) 1px, transparent 0);
+  background-size: 22px 22px;
+}
 .workflow-editor-stage::before { display: none; }
 .workflow-editor-world { transition: transform 180ms cubic-bezier(.2,.75,.2,1); }
 .workflow-editor-node {
@@ -769,86 +702,73 @@
   gap: 9px;
   align-items: start;
   padding: 13px 12px;
-  border: 1px solid #dcded8;
-  border-radius: 8px;
-  background: #fff;
+  border: var(--border-w) solid #dcded8;
+  border-radius: var(--radius-md);
+  background: var(--afk-panel);
   box-shadow: none;
   color: #272925;
   cursor: default;
   transform: none;
   transition: left 190ms cubic-bezier(.2,.75,.2,1), top 190ms cubic-bezier(.2,.75,.2,1), border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
-.workflow-editor-node:nth-of-type(2n) { border-radius: 8px; }
+.workflow-editor-node:nth-of-type(2n) { border-radius: var(--radius-md); }
 .workflow-editor-node:hover { border-color: #bfc3bc; box-shadow: none; transform: none; }
-.workflow-editor-node.selected { border-color: #6073a5; background: #fff; box-shadow: 0 0 0 1px #6073a5; animation: workflow-node-select 180ms cubic-bezier(.2,.75,.2,1); }
-.workflow-editor-node.system-node { border-style: dashed; border-color: #c8c9c3; background: #fbfbf9; }
-.workflow-editor-node.system-node.selected { border-color: #70726d; box-shadow: 0 0 0 1px #70726d; }
+.workflow-editor-node.selected { border-color: var(--afk-accent); background: var(--afk-panel); box-shadow: 0 0 0 1px #6073a5; animation: workflow-node-select 180ms cubic-bezier(.2,.75,.2,1); }
+.workflow-editor-node.system-node { border-style: dashed; border-color: #c8c9c3; background: color-mix(in srgb, var(--afk-panel) 88%, var(--afk-accent-soft)); }
+.workflow-editor-node.system-node.selected { border-color: var(--afk-accent); box-shadow: 0 0 0 1px #70726d; }
 .workflow-editor-node i {
   display: grid;
   width: 22px;
   height: 22px;
   place-items: center;
   margin: 0;
-  border-radius: 5px;
-  background: #f1f2ef;
-  color: #797b75;
-  font-size: 7px;
+  border-radius: var(--radius-sm);
+  background: var(--afk-panel-subtle);
+  color: var(--ink-mid);
+  font-size: calc(9px * var(--afk-scale));
 }
-.workflow-editor-node.selected i { background: #edf0f8; color: #4d6297; }
+.workflow-editor-node.selected i { background: var(--afk-accent-soft); color: var(--afk-accent); }
 .workflow-editor-node-copy { display: block; min-width: 0; padding-top: 1px; }
-.workflow-editor-node-copy b { display: block; overflow: hidden; color: #2a2c28; font-family: var(--afk-font); font-size: 11px; font-weight: 650; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-editor-node-copy small { display: block; overflow: hidden; margin-top: 5px; color: #858780; font-family: "DM Mono", monospace; font-size: 7px; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-editor-node em { width: 5px; height: 5px; align-self: start; margin-top: 5px; border-radius: 50%; background: #babcb5; }
-.workflow-editor-node.selected em { background: #5f72a5; }
+.workflow-editor-node-copy b { display: block; overflow: hidden; color: var(--afk-text); font-family: var(--afk-font); font-size: calc(11px * var(--afk-scale)); font-weight: 650; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-editor-node-copy small { display: block; overflow: hidden; margin-top: 5px; color: var(--afk-muted); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-editor-node em { width: 5px; height: 5px; align-self: start; margin-top: 5px; border-radius: 50%; background: var(--ink-mid); }
+.workflow-editor-node.selected em { background: var(--afk-accent); }
 .workflow-editor-node.system-node em { background: #aeb0aa; }
 .workflow-editor-node > span:not(.workflow-editor-node-copy) { display: none; }
 .workflow-editor-node.custom-node { cursor: grab; border-color: #b8c4dd; }
-.workflow-editor-node.custom-node.dragging { box-shadow: 0 8px 20px rgba(31, 36, 52, .13); transform: translateY(-2px) scale(1.01); }
+.workflow-editor-node.custom-node.dragging { box-shadow: var(--shadow-panel); transform: translateY(-2px) scale(1.01); }
 
 .workflow-editor-edges .workflow-edge-base { stroke: #c9cac4; stroke-width: 1.1; }
-.workflow-edge:not(.linked) .workflow-edge-flow { opacity: .08; animation-duration: 5.4s; }
+.workflow-edge:not(.linked) .workflow-edge-flow { opacity: .12; }
 .workflow-edge.linked .workflow-edge-base { stroke: #8491ae; stroke-width: 1.2; }
-.workflow-edge.linked .workflow-edge-flow { stroke: #6277ab; opacity: .58; animation-duration: 1.8s; }
-.workflow-editor-stage.is-dragging .workflow-edge-flow { animation-play-state: paused; opacity: .22; }
+.workflow-edge.linked .workflow-edge-flow { stroke: #8491ae; opacity: .62; }
+.workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .18; }
 @keyframes workflow-node-select { 0% { transform: scale(.985); } 100% { transform: scale(1); } }
 
-.workflow-studio-inspector { border-left-color: #e5e5df; background: #fff; animation: workflow-inspector-enter 190ms cubic-bezier(.2,.75,.2,1); }
+.workflow-studio-inspector { border-left-color: #e5e5df; background: var(--afk-panel); animation: workflow-inspector-enter 190ms cubic-bezier(.2,.75,.2,1); }
 .workflow-studio-inspector > header { min-height: 58px; padding: 11px 15px; border-bottom-color: #e9e9e4; }
-.workflow-studio-inspector > header > span { width: 24px; height: 24px; border-radius: 5px; background: #f0f1ee; color: #6f716b; }
-.workflow-studio-inspector > header b { font-size: 12px; }
-.workflow-studio-inspector > p { min-height: auto; padding: 9px 15px; border-bottom-color: #e9e9e4; font-size: 9px; }
+.workflow-studio-inspector > header > span { width: 24px; height: 24px; border-radius: var(--radius-sm); background: var(--afk-accent-soft); color: var(--ink-mid); }
+.workflow-studio-inspector > header b { font-size: calc(12px * var(--afk-scale)); }
+.workflow-studio-inspector > p { min-height: auto; padding: 9px 15px; border-bottom-color: #e9e9e4; font-size: calc(9px * var(--afk-scale)); }
 .workflow-studio-inspector .workflow-inspector-fields { padding: 10px 15px; }
 .workflow-readonly { min-height: 38px; border-bottom-color: #eeeeea; }
-.workflow-readonly > span { font-size: 8px; }
-.workflow-readonly b { color: #454741; font-size: 8px; }
+.workflow-readonly > span { font-size: calc(10px * var(--afk-scale)); }
+.workflow-readonly b { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
 @keyframes workflow-inspector-enter { from { opacity: 0; transform: translateX(5px); } to { opacity: 1; transform: translateX(0); } }
 
 .workflow-studio-toolbar { gap: 2px; }
-.workflow-studio-toolbar .workflow-toolbar-button { min-height: 28px; padding: 0 8px; color: #676962; font-size: 8px; }
-.workflow-studio-toolbar .workflow-toolbar-button:hover { border-color: transparent; background: #f1f2ef; color: #363833; }
-.workflow-studio-actions .workflow-save { min-height: 29px; border-radius: 6px; background: #303743; border-color: #303743; box-shadow: none; }
+.workflow-studio-toolbar .workflow-toolbar-button { min-height: 28px; padding: 0 8px; color: var(--ink-mid); font-size: calc(10px * var(--afk-scale)); }
+.workflow-studio-toolbar .workflow-toolbar-button:hover { border-color: transparent; background: var(--afk-panel-subtle); color: var(--ink-main); }
+.workflow-studio-actions .workflow-save { min-height: 29px; border-radius: var(--radius-sm); background: var(--afk-accent); border-color: var(--afk-accent); box-shadow: none; }
 .workflow-studio-actions .workflow-save:hover:not(:disabled) { background: #222832; box-shadow: none; transform: translateY(-1px); }
-.workflow-canvas-controls { right: 16px; bottom: 14px; padding: 2px; border-color: #dedfd9; border-radius: 7px; background: #fff; box-shadow: 0 3px 10px rgba(34, 36, 31, .08); }
-.workflow-canvas-controls .workflow-canvas-control { width: 26px; height: 26px; border-radius: 5px; color: #74766f; }
-.workflow-canvas-controls .workflow-canvas-control:hover { background: #f1f2ef; color: #303743; }
-.workflow-canvas-controls .workflow-canvas-control[aria-label="自动整理画布"] { color: #4d6297; }
-.workflow-canvas-controls span { min-width: 34px; color: #878981; font-size: 7px; }
-.workflow-studio-inspector .workflow-reset { min-height: 28px; border-radius: 6px; color: #74766f; }
+.workflow-canvas-controls { padding: 2px; border-color: #dedfd9; border-radius: var(--radius-sm); background: var(--afk-panel); box-shadow: var(--shadow-panel); }
+.workflow-canvas-controls .workflow-canvas-control { width: 26px; height: 26px; border-radius: var(--radius-sm); color: var(--ink-mid); }
+.workflow-canvas-controls .workflow-canvas-control:hover { background: var(--afk-accent-soft); color: #303743; }
+.workflow-canvas-controls .workflow-canvas-control{ color: var(--afk-accent); }
+.workflow-canvas-controls span { min-width: 34px; color: #878981; font-size: calc(9px * var(--afk-scale)); }
+.workflow-studio-inspector .workflow-reset { min-height: 28px; border-radius: var(--radius-sm); color: #74766f; }
 .workflow-studio-inspector .workflow-reset:hover:not(:disabled) { background: #f1f2ef; border-color: #dedfd9; color: #303743; }
 
-:root[data-afk-theme="graphite"] .workflow-studio-page { --afk-panel: #242624; --afk-panel-subtle: #1e201e; --afk-text: #e8e9e4; --afk-muted: #a2a49c; --afk-border: #363936; --afk-border-strong: #555953; --afk-accent: #9eafd3; --afk-accent-soft: #2d3442; --afk-accent-border: #444f67; background: #1e201e; }
-:root[data-afk-theme="graphite"] .workflow-studio-canvas, :root[data-afk-theme="graphite"] .workflow-editor-stage { background: #1e201e; }
-:root[data-afk-theme="graphite"] .workflow-studio-canvas > header, :root[data-afk-theme="graphite"] .workflow-studio-canvas > footer, :root[data-afk-theme="graphite"] .workflow-studio-inspector { background: #242624; }
-:root[data-afk-theme="graphite"] .workflow-editor-node { border-color: #4a4d48; background: #282a27; color: #e8e9e4; }
-:root[data-afk-theme="graphite"] .workflow-editor-node:hover { border-color: #666a63; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.selected { border-color: #9eafd3; box-shadow: 0 0 0 1px #9eafd3; }
-:root[data-afk-theme="graphite"] .workflow-editor-node i { background: #343733; color: #adb0a7; }
-:root[data-afk-theme="graphite"] .workflow-editor-node-copy b { color: #eceee8; }
-:root[data-afk-theme="graphite"] .workflow-editor-node-copy small { color: #aaaDA3; }
-:root[data-afk-theme="graphite"] .workflow-editor-edges .workflow-edge-base { stroke: #595c57; }
-:root[data-afk-theme="graphite"] .workflow-edge.linked .workflow-edge-base { stroke: #8090b1; }
-:root[data-afk-theme="graphite"] .workflow-edge.linked .workflow-edge-flow { stroke: #a5b5d8; }
-:root[data-afk-theme="graphite"] .workflow-studio-actions .workflow-save { background: #d3d7df; border-color: #d3d7df; color: #20221f; }
 @media (prefers-reduced-motion: reduce) { .workflow-editor-world, .workflow-editor-node, .workflow-studio-inspector { transition: none; animation: none; } .workflow-edge-flow { animation: none !important; } }
 
 /* Canvas-native inspector and workflow form primitives. */
@@ -866,17 +786,17 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid rgba(38, 40, 36, .12);
-  border-radius: 10px;
+  border: var(--border-w) solid rgba(38, 40, 36, .12);
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, .96);
-  box-shadow: 0 12px 28px rgba(29, 32, 28, .11);
+  box-shadow: var(--shadow-panel);
   backdrop-filter: blur(12px);
   animation: workflow-inspector-in 180ms cubic-bezier(.2,.75,.2,1);
 }
 .workflow-studio-inspector > header { position: relative; min-height: 54px; padding: 10px 42px 10px 12px; }
-.workflow-studio-inspector > header > span { width: 23px; height: 23px; border-radius: 5px; }
-.workflow-studio-inspector > header b { font-size: 11px; }
-.workflow-studio-inspector > header small { font-size: 7px; }
+.workflow-studio-inspector > header > span { width: 23px; height: 23px; border-radius: var(--radius-sm); }
+.workflow-studio-inspector > header b { font-size: calc(11px * var(--afk-scale)); }
+.workflow-studio-inspector > header small { font-size: calc(9px * var(--afk-scale)); }
 .workflow-inspector-collapse {
   position: absolute;
   top: 13px;
@@ -885,27 +805,27 @@
   width: 26px;
   height: 26px;
   place-items: center;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  border: var(--border-w) solid transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: #777a73;
+  color: var(--ink-mid);
 }
-.workflow-inspector-collapse:hover { border-color: #dedfd9; background: #f3f4f1; color: #30332f; }
-.workflow-studio-inspector > p { padding: 8px 12px; font-size: 8px; line-height: 1.45; }
+.workflow-inspector-collapse:hover { border-color: #dedfd9; background: #f3f4f1; color: var(--ink-main); }
+.workflow-studio-inspector > p { padding: 8px 12px; font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
 .workflow-studio-inspector .workflow-inspector-fields { display: grid; gap: 12px; overflow: auto; padding: 12px; scrollbar-gutter: stable; }
 .workflow-studio-inspector .workflow-field { gap: 5px; }
 .workflow-studio-inspector .workflow-field > span,
-.workflow-studio-inspector .workflow-readonly > span { color: #7c7f78; font-size: 8px; font-weight: 550; }
+.workflow-studio-inspector .workflow-readonly > span { color: #7c7f78; font-size: calc(10px * var(--afk-scale)); font-weight: 550; }
 .workflow-studio-inspector .workflow-field input,
 .workflow-studio-inspector .workflow-field textarea {
   width: 100%;
-  border: 1px solid #dfe0da;
-  border-radius: 6px;
+  border: var(--border-w) solid #dfe0da;
+  border-radius: var(--radius-sm);
   outline: none;
-  background: #fff;
-  color: #2d302c;
+  background: var(--afk-panel);
+  color: var(--afk-text);
   font-family: var(--afk-font);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 .workflow-studio-inspector .workflow-field input { min-height: 32px; padding: 0 9px; }
@@ -914,12 +834,12 @@
   min-height: 32px;
   height: 32px;
   padding: 0 9px;
-  border-radius: 6px;
-  border-color: #dfe0da;
-  background: #fff;
-  color: #30332f;
+  border-radius: var(--radius-sm);
+  border-color: var(--afk-border);
+  background: var(--afk-panel);
+  color: var(--afk-text);
   font-family: var(--afk-font);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 .workflow-studio-inspector .workflow-field .select-menu-trigger:hover,
 .workflow-studio-inspector .workflow-field .select-menu-trigger.open,
@@ -931,12 +851,12 @@
   z-index: 12;
   border-color: #dfe0da;
   background: #fff;
-  box-shadow: 0 10px 24px rgba(29, 32, 28, .14);
+  box-shadow: var(--shadow-panel);
 }
 .workflow-studio-inspector .workflow-field .select-menu-option {
   height: 30px;
   color: #30332f;
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 .workflow-studio-inspector .workflow-field .select-menu-option:hover,
 .workflow-studio-inspector .workflow-field .select-menu-option:focus-visible,
@@ -946,13 +866,13 @@
 }
 .workflow-studio-inspector .workflow-field textarea { min-height: 78px; padding: 8px 9px; line-height: 1.45; resize: vertical; }
 .workflow-studio-inspector .workflow-field input:hover,
-.workflow-studio-inspector .workflow-field textarea:hover { border-color: #c8cbc3; }
+.workflow-studio-inspector .workflow-field textarea:hover { border-color: var(--afk-border-strong); }
 .workflow-studio-inspector .workflow-field input:focus,
-.workflow-studio-inspector .workflow-field textarea:focus { border-color: #7180a5; box-shadow: 0 0 0 3px rgba(112, 128, 165, .14); }
+.workflow-studio-inspector .workflow-field textarea:focus { border-color: var(--afk-accent); box-shadow: 0 0 0 3px rgba(112, 128, 165, .14); }
 .workflow-studio-inspector .workflow-field input:disabled,
-.workflow-studio-inspector .workflow-field textarea:disabled { cursor: not-allowed; background: #f4f4f1; color: #9b9d96; }
+.workflow-studio-inspector .workflow-field textarea:disabled { cursor: not-allowed; background: var(--afk-panel-subtle); color: var(--afk-muted); }
 .workflow-studio-inspector .workflow-readonly { min-height: 34px; padding: 6px 0; }
-.workflow-studio-inspector footer { gap: 6px; padding: 10px 12px; background: #fafaf8; }
+.workflow-studio-inspector footer { gap: 6px; padding: 10px 12px; background: var(--afk-panel-subtle); }
 .workflow-studio-inspector .workflow-save,
 .workflow-studio-inspector .workflow-reset,
 .workflow-studio-actions .workflow-save,
@@ -963,57 +883,40 @@
   justify-content: center;
   gap: 5px;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--afk-font);
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   font-weight: 650;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
 }
 .workflow-studio-inspector .workflow-save,
-.workflow-studio-actions .workflow-save { border: 1px solid #303743; background: #303743; color: #fff; }
+.workflow-studio-actions .workflow-save { border: var(--border-w) solid #303743; background: #303743; color: #fff; }
 .workflow-studio-inspector .workflow-save:hover:not(:disabled),
-.workflow-studio-actions .workflow-save:hover:not(:disabled) { background: #202630; border-color: #202630; transform: translateY(-1px); box-shadow: 0 3px 8px rgba(27, 32, 42, .16); }
-.workflow-studio-inspector .workflow-reset { border: 1px solid #dfe0da; background: #fff; color: #666962; }
-.workflow-studio-inspector .workflow-reset:hover:not(:disabled) { border-color: #c8cbc3; background: #f4f4f1; color: #30332f; }
-.workflow-studio-inspector .workflow-reset.destructive { border-color: #ecd4d0; background: #fffafa; color: #9a534b; }
-.workflow-studio-inspector .workflow-reset.destructive:hover:not(:disabled) { border-color: #dca9a1; background: #fff1ef; color: #87423b; }
+.workflow-studio-actions .workflow-save:hover:not(:disabled) { background: color-mix(in srgb, var(--afk-accent) 80%, #000); border-color: color-mix(in srgb, var(--afk-accent) 80%, #000); transform: translateY(-1px); box-shadow: var(--shadow-panel); }
+.workflow-studio-inspector .workflow-reset { border: var(--border-w) solid #dfe0da; background: #fff; color: #666962; }
+.workflow-studio-inspector .workflow-reset:hover:not(:disabled) { border-color: var(--afk-border-strong); background: var(--afk-panel-subtle); color: var(--afk-text); }
+.workflow-studio-inspector .workflow-reset.destructive { border-color: var(--fail-ln); background: var(--fail-bg); color: var(--fail); }
+.workflow-studio-inspector .workflow-reset.destructive:hover:not(:disabled) { border-color: var(--fail); background: var(--fail-bg); color: var(--fail); }
 .workflow-inspector-trigger {
   position: absolute;
   z-index: 8;
   top: 14px;
   right: 14px;
   padding: 0 9px;
-  border: 1px solid #dfe0da;
+  border: var(--border-w) solid #dfe0da;
   background: rgba(255, 255, 255, .96);
-  box-shadow: 0 4px 12px rgba(29, 32, 28, .09);
+  box-shadow: var(--shadow-panel);
   color: #4b4f48;
 }
-.workflow-inspector-trigger:hover { border-color: #bcc3d4; background: #f5f7fb; color: #4d6297; }
-.workflow-inspector-trigger span { font-size: 8px; }
+.workflow-inspector-trigger:hover { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
+.workflow-inspector-trigger span { font-size: calc(10px * var(--afk-scale)); }
 @keyframes workflow-inspector-in { from { opacity: 0; transform: translateX(10px) scale(.985); } to { opacity: 1; transform: translateX(0) scale(1); } }
-:root[data-afk-theme="graphite"] .workflow-editor-stage .workflow-studio-inspector { border-color: #41443f; background: rgba(36, 38, 36, .96); box-shadow: 0 12px 28px rgba(0, 0, 0, .28); }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector footer { background: #20221f; }
-:root[data-afk-theme="graphite"] .workflow-inspector-collapse { color: #adb0a7; }
-:root[data-afk-theme="graphite"] .workflow-inspector-collapse:hover { border-color: #4a4e48; background: #30332f; color: #e4e6df; }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field input,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field textarea { border-color: #464a44; background: #20221f; color: #e6e8e1; }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-trigger { border-color: #464a44; background: #20221f; color: #e6e8e1; }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field input:hover,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field textarea:hover { border-color: #656b63; }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-trigger:hover,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-trigger.open,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-trigger:focus-visible { border-color: #656b63; box-shadow: 0 0 0 3px rgba(101, 107, 99, .2); }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-popover { border-color: #464a44; background: #20221f; box-shadow: 0 12px 28px rgba(0, 0, 0, .28); }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-option { color: #e6e8e1; }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-option:hover,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-option:focus-visible,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-field .select-menu-option.selected { background: #30332f; color: #a9b9df; }
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-reset { border-color: #464a44; background: #282a27; color: #b9bcb3; }
-:root[data-afk-theme="graphite"] .workflow-inspector-trigger { border-color: #464a44; background: rgba(36, 38, 36, .96); color: #d9ddd3; }
 @media (max-width: 720px) { .workflow-editor-stage .workflow-studio-inspector { top: 10px; right: 10px; bottom: 10px; width: min(304px, calc(100% - 20px)); } .workflow-inspector-trigger { top: 10px; right: 10px; } }
 
 /* Archify-inspired workflow instrument: semantic role marks, path focus, low-interference chrome. */
-.workflow-editor-stage { background: #f6f7f5; }
+/* background-color, not the shorthand: `background:` resets background-image
+   to none and silently wiped the dot field set two hundred lines earlier. */
+.workflow-editor-stage { background-color: var(--afk-panel-subtle); }
 .workflow-editor-node {
   width: 164px;
   min-height: 94px;
@@ -1021,8 +924,8 @@
   gap: 8px;
   padding: 12px 11px 12px 14px;
   border-color: #d7d9d3;
-  border-radius: 6px;
-  background: #fcfcfa;
+  border-radius: var(--radius-sm);
+  background: var(--afk-panel);
 }
 .workflow-editor-node::before {
   position: absolute;
@@ -1030,53 +933,36 @@
   bottom: 10px;
   left: -1px;
   width: 2px;
-  border-radius: 2px;
-  background: #aeb2aa;
+  border-radius: var(--radius-sm);
+  background: var(--ink-faint);
   content: "";
 }
-.workflow-editor-node.origin-node::before { background: #6178ac; }
+.workflow-editor-node.origin-node::before { background: var(--afk-accent); }
 .workflow-editor-node.agent-node::before,
-.workflow-editor-node.template-agent::before { background: #5d8f87; }
-.workflow-editor-node.template-qa::before { background: #a47d4c; }
-.workflow-editor-node.system-node::before { background: #a7aaa3; }
-.workflow-editor-node i { width: 21px; height: 21px; border-radius: 4px; background: #f0f1ee; color: #747870; }
-.workflow-editor-node.origin-node i { background: #eaf0fb; color: #526a9f; }
+.workflow-editor-node.template-agent::before { background: var(--accent); }
+.workflow-editor-node.template-qa::before { background: var(--warn); }
+.workflow-editor-node.system-node::before { background: var(--ink-faint); }
+.workflow-editor-node i { width: 21px; height: 21px; border-radius: var(--radius-sm); background: var(--afk-panel-subtle); color: var(--ink-mid); }
+.workflow-editor-node.origin-node i { background: var(--afk-accent-soft); color: var(--afk-accent); }
 .workflow-editor-node.agent-node i,
-.workflow-editor-node.template-agent i { background: #edf6f3; color: #4f7f77; }
-.workflow-editor-node.template-qa i { background: #f9f2e7; color: #89673d; }
-.workflow-editor-node-copy b { font-size: 10px; font-weight: 680; letter-spacing: -.012em; }
-.workflow-editor-node-copy small { margin-top: 4px; color: #777b74; font-size: 7px; line-height: 1.2; }
-.workflow-editor-node:hover { border-color: #aeb5ac; background: #fff; }
-.workflow-editor-node.related:not(.selected) { border-color: #b8c2d5; }
-.workflow-editor-node.selected { border-color: #6077aa; box-shadow: 0 0 0 1px #6077aa, 0 5px 12px rgba(49, 61, 91, .08); }
-.workflow-editor-node.selected::before { width: 3px; background: #526b9f; }
+.workflow-editor-node.template-agent i { background: var(--accent-bg); color: var(--accent); }
+.workflow-editor-node.template-qa i { background: var(--warn-bg); color: var(--warn); }
+.workflow-editor-node-copy b { font-size: calc(10px * var(--afk-scale)); font-weight: 680; letter-spacing: -.012em; }
+.workflow-editor-node-copy small { margin-top: 4px; color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); line-height: 1.2; }
+.workflow-editor-node:hover { border-color: var(--afk-accent-border); background: #fff; }
+.workflow-editor-node.related:not(.selected) { border-color: var(--afk-accent-border); }
+.workflow-editor-node.selected { border-color: #6077aa; box-shadow: 0 0 0 1px #6077aa, var(--shadow-panel); }
+.workflow-editor-node.selected::before { width: 3px; background: var(--afk-accent); }
 .workflow-editor-node.system-node { border-style: dashed; background: #f9faf7; }
-.workflow-editor-node.custom-node { border-color: #b9c7d7; }
-.workflow-editor-edges .workflow-edge-base { stroke: #bec4bc; stroke-width: 1.05; }
+.workflow-editor-node.custom-node { border-color: var(--afk-accent-border); }
+.workflow-editor-edges .workflow-edge-base { stroke: var(--ink-faint); stroke-width: 1.05; stroke-dasharray: 6 3; }
 .workflow-edge:not(.linked) .workflow-edge-flow { opacity: .045; }
-.workflow-edge.linked .workflow-edge-base { stroke: #7182a4; stroke-width: 1.25; }
-.workflow-edge.linked .workflow-edge-flow { stroke: #6178ac; opacity: .46; animation-duration: 2.2s; }
-.workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .16; }
+.workflow-edge.linked .workflow-edge-base { stroke: var(--afk-accent); stroke-width: 1.25; }
+.workflow-edge.linked .workflow-edge-flow { stroke: var(--afk-accent); opacity: .46; }
+.workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .12; }
 .workflow-studio-toolbar { gap: 4px; }
-.workflow-studio-toolbar .workflow-toolbar-button { min-height: 30px; padding: 0 10px; border: 1px solid transparent; border-radius: 6px; }
-.workflow-studio-toolbar .workflow-toolbar-button:hover { border-color: #d8dad4; background: #fff; color: #303630; }
-:root[data-afk-theme="graphite"] .workflow-editor-stage { background: #1d201e; }
-:root[data-afk-theme="graphite"] .workflow-editor-node { border-color: #444943; background: #252825; }
-:root[data-afk-theme="graphite"] .workflow-editor-node::before { background: #6e736b; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.origin-node::before { background: #9baed8; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.agent-node::before,
-:root[data-afk-theme="graphite"] .workflow-editor-node.template-agent::before { background: #83b8ad; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.template-qa::before { background: #d6a974; }
-:root[data-afk-theme="graphite"] .workflow-editor-node i { background: #313530; color: #b1b5ab; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.origin-node i { background: #2f3a50; color: #b4c4e6; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.agent-node i,
-:root[data-afk-theme="graphite"] .workflow-editor-node.template-agent i { background: #273a35; color: #a3d0c7; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.template-qa i { background: #3d3427; color: #e4bd8e; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.related:not(.selected) { border-color: #58647c; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.selected { border-color: #a8b9df; box-shadow: 0 0 0 1px #a8b9df, 0 5px 14px rgba(0,0,0,.22); }
-:root[data-afk-theme="graphite"] .workflow-editor-edges .workflow-edge-base { stroke: #545c55; }
-:root[data-afk-theme="graphite"] .workflow-edge.linked .workflow-edge-base { stroke: #91a2c8; }
-:root[data-afk-theme="graphite"] .workflow-edge.linked .workflow-edge-flow { stroke: #b5c6ee; }
+.workflow-studio-toolbar .workflow-toolbar-button { min-height: 30px; padding: 0 10px; border: var(--border-w) solid transparent; border-radius: var(--radius-sm); }
+.workflow-studio-toolbar .workflow-toolbar-button:hover { border-color: #d8dad4; background: var(--afk-panel); color: #303630; }
 
 /* Archify workflow reference layer: authored phases, semantic tracks, orthogonal paths, finite reader-triggered trace. */
 .workflow-editor-world { width: 1500px; height: 640px; transform-origin: 0 0; }
@@ -1087,9 +973,9 @@
   position: absolute;
   top: 14px;
   min-width: 96px;
-  color: #678078;
+  color: var(--ink-mid);
   font-family: "DM Mono", ui-monospace, monospace;
-  font-size: 8px;
+  font-size: calc(10px * var(--afk-scale));
   font-weight: 700;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -1100,70 +986,60 @@
   position: absolute;
   left: 192px;
   width: 980px;
-  border: 1px dashed #c9d6d0;
-  border-radius: 6px;
-  background: rgba(235, 244, 240, .28);
+  border: var(--border-w) dashed var(--ink-faint);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ink-faint) 28%, transparent);
   animation: workflow-track-enter 180ms cubic-bezier(.22,.8,.24,1) both;
 }
 .workflow-canvas-track > span {
   position: absolute;
   top: 10px;
   left: 13px;
-  color: #789089;
+  color: var(--ink-mid);
   font-family: "DM Mono", ui-monospace, monospace;
-  font-size: 8px;
+  font-size: calc(10px * var(--afk-scale));
   font-weight: 700;
   letter-spacing: .08em;
 }
-.workflow-canvas-track.track-system { border-color: #d3d5cf; background: rgba(245, 246, 242, .5); }
-.workflow-canvas-track.track-system > span { color: #858981; }
-.workflow-canvas-track.track-conditional { border-color: #d7adca; background: rgba(251, 244, 249, .42); }
-.workflow-canvas-track.track-conditional > span { color: #a66a91; }
+.workflow-canvas-track.track-system { border-color: var(--ink-faint); background: color-mix(in srgb, var(--ink-faint) 50%, transparent); }
+.workflow-canvas-track.track-system > span { color: var(--ink-dim); }
+.workflow-canvas-track.track-conditional { border-color: var(--ink-faint); background: color-mix(in srgb, var(--ink-faint) 42%, transparent); }
+.workflow-canvas-track.track-conditional > span { color: var(--ink-dim); }
 .workflow-editor-edges { z-index: 2; width: 1500px; height: 640px; overflow: visible; }
 .workflow-editor-node { z-index: 3; transition: left 180ms cubic-bezier(.22,.8,.24,1), top 180ms cubic-bezier(.22,.8,.24,1), border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
 .workflow-editor-node.selected { z-index: 5; }
-.workflow-editor-node.track-conditional { border-color: #c99362; background: #fffaf4; }
-.workflow-editor-node.track-conditional::before { background: #bd8049; }
-.workflow-editor-node.track-conditional i { background: #fff2e4; color: #9a6434; }
+.workflow-editor-node.track-conditional { border-color: var(--warn); background: var(--warn-bg); }
+.workflow-editor-node.track-conditional::before { background: var(--warn); }
+.workflow-editor-node.track-conditional i { background: var(--warn-bg); color: var(--warn); }
 .workflow-editor-node.track-system { border-style: dashed; }
 .workflow-editor-stage.is-dragging .workflow-editor-node { transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease; }
-.workflow-editor-edges .workflow-edge-base { fill: none; stroke: #aeb9b4; stroke-width: 1.15; stroke-linejoin: round; marker-end: url(#workflow-arrow); }
-.workflow-editor-edges .workflow-edge-flow { fill: none; stroke: #1b9c8a; stroke-width: 1.65; stroke-linecap: round; stroke-dasharray: 2px 14px; opacity: 0; animation: none; }
-.workflow-edge:not(.linked) .workflow-edge-flow { opacity: 0; animation: none; }
-.workflow-edge.linked .workflow-edge-base { stroke: #43897f; stroke-width: 1.35; }
-.workflow-edge.linked .workflow-edge-flow { opacity: .82; animation: workflow-edge-flow 1.18s linear 1 both; }
-.workflow-edge.conditional .workflow-edge-base { stroke: #a98fb5; stroke-dasharray: 4px 4px; }
-.workflow-edge.conditional.linked .workflow-edge-base { stroke: #9674a8; }
-.workflow-edge.conditional.linked .workflow-edge-flow { stroke: #816bba; }
-.workflow-edge-label rect { fill: #f6f7f5; opacity: .96; }
-.workflow-edge-label text { fill: #725391; font-family: "DM Mono", ui-monospace, monospace; font-size: 8px; font-weight: 650; letter-spacing: .01em; }
-.workflow-editor-stage.is-dragging .workflow-edge-flow { animation-play-state: paused; opacity: .12; }
+.workflow-editor-edges .workflow-edge-base { fill: none; stroke: var(--ink-faint); stroke-width: 1.15; stroke-linejoin: round; stroke-dasharray: 6 3; marker-end: url(#workflow-arrow); }
+.workflow-editor-edges .workflow-edge-flow { fill: none; stroke: var(--ink-mid); stroke-width: 1.4; stroke-linecap: round; stroke-dasharray: 6 3; opacity: 0; }
+.workflow-edge:not(.linked) .workflow-edge-flow { opacity: 0; }
+.workflow-edge.linked .workflow-edge-base { stroke: var(--accent); stroke-width: 1.35; }
+.workflow-edge.linked .workflow-edge-flow { stroke: var(--accent); opacity: .72; }
+.workflow-edge.conditional .workflow-edge-base { stroke: var(--ink-mid); stroke-dasharray: 6 3; }
+.workflow-edge.conditional.linked .workflow-edge-base { stroke: var(--accent); }
+.workflow-edge.conditional.linked .workflow-edge-flow { stroke: var(--accent); opacity: .72; }
+.workflow-edge-label rect { fill: var(--paper); opacity: .96; }
+.workflow-edge-label text { fill: var(--ink-mid); font-family: "DM Mono", ui-monospace, monospace; font-size: calc(10px * var(--afk-scale)); font-weight: 650; letter-spacing: .01em; }
+.workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .12; }
 @keyframes workflow-track-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes workflow-phase-enter { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
-:root[data-afk-theme="graphite"] .workflow-canvas-phases span { color: #8ebcb1; }
-:root[data-afk-theme="graphite"] .workflow-canvas-track { border-color: #36544d; background: rgba(13, 40, 35, .28); }
-:root[data-afk-theme="graphite"] .workflow-canvas-track > span { color: #87afa6; }
-:root[data-afk-theme="graphite"] .workflow-canvas-track.track-system { border-color: #4a514a; background: rgba(37, 41, 37, .38); }
-:root[data-afk-theme="graphite"] .workflow-canvas-track.track-system > span { color: #a4aba1; }
-:root[data-afk-theme="graphite"] .workflow-canvas-track.track-conditional { border-color: #764d6c; background: rgba(61, 29, 52, .25); }
-:root[data-afk-theme="graphite"] .workflow-canvas-track.track-conditional > span { color: #cf9cbd; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.track-conditional { border-color: #a9784d; background: #302821; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.track-conditional::before { background: #e0a96f; }
-:root[data-afk-theme="graphite"] .workflow-editor-node.track-conditional i { background: #463725; color: #efc18d; }
-:root[data-afk-theme="graphite"] .workflow-editor-edges .workflow-edge-base { stroke: #4d665f; }
-:root[data-afk-theme="graphite"] .workflow-edge.linked .workflow-edge-base { stroke: #73b9ad; }
-:root[data-afk-theme="graphite"] .workflow-edge.linked .workflow-edge-flow { stroke: #63e1cb; }
-:root[data-afk-theme="graphite"] .workflow-edge.conditional .workflow-edge-base { stroke: #80628c; }
-:root[data-afk-theme="graphite"] .workflow-edge.conditional.linked .workflow-edge-flow { stroke: #c3a0e1; }
-:root[data-afk-theme="graphite"] .workflow-edge-label rect { fill: #1d201e; }
-:root[data-afk-theme="graphite"] .workflow-edge-label text { fill: #cfb2de; }
 @media (prefers-reduced-motion: reduce) {
   .workflow-canvas-track, .workflow-canvas-phases span { animation: none; }
   .workflow-editor-node { transition: none; }
-  .workflow-edge.linked .workflow-edge-flow { animation: none; opacity: .58; }
 }
 
 .workflow-studio-page {
+  /* The column flex here is load-bearing, not cosmetic: .workflow-studio-shell
+     and .workflow-studio-canvas below carry `flex: 1 1 auto`, which does
+     nothing unless this is the flex container. Without it the shell collapses
+     to its content height and .workflow-editor-stage — `overflow: hidden` —
+     measures 0, clipping every node and edge out of sight. 09099d3 dropped the
+     display and the canvas has been invisible ever since. */
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
   margin-bottom: 0;
@@ -1195,8 +1071,8 @@
   height: 28px;
   min-height: 28px;
   padding: 0;
-  border: 1px solid var(--afk-border);
-  border-radius: 7px;
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-sm);
   background: var(--afk-panel);
   color: var(--afk-muted);
 }
@@ -1209,7 +1085,7 @@
   z-index: 7;
   cursor: grabbing;
   border-color: var(--afk-accent-border);
-  box-shadow: 0 10px 22px rgba(35, 39, 35, .14);
+  box-shadow: var(--shadow-panel);
   transform: translateY(-2px) scale(1.01);
 }
 .workflow-studio-toolbar {
@@ -1224,10 +1100,10 @@
   width: 246px;
   overflow: hidden;
   padding: 5px;
-  border: 1px solid var(--afk-border);
-  border-radius: 9px;
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--afk-panel) 96%, transparent);
-  box-shadow: 0 14px 32px rgba(33, 37, 33, .16);
+  box-shadow: var(--shadow-panel);
   backdrop-filter: blur(12px);
 }
 .workflow-studio-toolbar .workflow-add-option {
@@ -1238,7 +1114,7 @@
   min-height: 54px;
   padding: 7px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--afk-text);
   text-align: left;
@@ -1253,31 +1129,19 @@
   width: 30px;
   height: 30px;
   place-items: center;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
 }
-.workflow-add-option.agent .workflow-add-option-icon { background: #edf6f3; color: #4f7f77; }
-.workflow-add-option.qa .workflow-add-option-icon { background: #f9f2e7; color: #89673d; }
+.workflow-add-option.agent .workflow-add-option-icon { background: var(--accent-bg); color: var(--accent); }
+.workflow-add-option.qa .workflow-add-option-icon { background: var(--warn-bg); color: var(--warn); }
 .workflow-add-option-copy { display: grid; min-width: 0; gap: 3px; }
-.workflow-add-option-copy b { font-size: 10px; font-weight: 680; }
-.workflow-add-option-copy small { color: var(--afk-muted); font-size: 8px; line-height: 1.35; }
+.workflow-add-option-copy b { font-size: calc(10px * var(--afk-scale)); font-weight: 680; }
+.workflow-add-option-copy small { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.35; }
 .workflow-add-option > svg { color: var(--afk-muted); }
-:root[data-afk-theme="graphite"] .workflow-editor-node.dragging {
-  border-color: #a8b9df;
-  box-shadow: 0 12px 26px rgba(0, 0, 0, .32);
-}
-:root[data-afk-theme="graphite"] .workflow-add-menu {
-  border-color: #444943;
-  background: rgba(36, 39, 36, .97);
-  box-shadow: 0 16px 34px rgba(0, 0, 0, .34);
-}
-:root[data-afk-theme="graphite"] .workflow-studio-toolbar .workflow-add-option:hover { background: #30332f; }
-:root[data-afk-theme="graphite"] .workflow-add-option.agent .workflow-add-option-icon { background: #273a35; color: #a3d0c7; }
-:root[data-afk-theme="graphite"] .workflow-add-option.qa .workflow-add-option-icon { background: #3d3427; color: #e4bd8e; }
 .workflow-dirty {
   min-height: 21px;
   padding: 0 7px;
   font-family: "DM Mono", monospace;
-  font-size: 8px;
+  font-size: calc(10px * var(--afk-scale));
   font-weight: 600;
 }
 .workflow-studio-actions .workflow-save,
@@ -1309,7 +1173,7 @@
   height: 28px;
   padding: 0;
   border-color: var(--afk-border);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--afk-panel);
   box-shadow: none;
   color: var(--afk-muted);
@@ -1337,7 +1201,7 @@
   background: transparent;
   color: var(--afk-accent);
   font-family: "DM Mono", monospace;
-  font-size: 8px;
+  font-size: calc(10px * var(--afk-scale));
   font-style: normal;
   font-weight: 650;
 }
@@ -1353,11 +1217,11 @@
   height: 27px;
   padding: 0 10px;
   border-color: #343936;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: #343936;
   box-shadow: none;
   color: #fff;
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 .workflow-studio-actions .workflow-save:hover:not(:disabled),
 .workflow-studio-inspector .workflow-save:hover:not(:disabled) {
@@ -1374,9 +1238,9 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #a96d25;
+  color: var(--warn);
   font-family: "DM Mono", monospace;
-  font-size: 8px;
+  font-size: calc(10px * var(--afk-scale));
   font-weight: 650;
 }
 .workflow-dirty > span {
@@ -1389,9 +1253,9 @@
   min-height: 27px;
   height: 27px;
   padding: 0 9px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   box-shadow: none;
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 .workflow-studio-toolbar .workflow-toolbar-button {
   position: relative;
@@ -1399,8 +1263,8 @@
   min-height: 26px;
   height: 26px;
   padding: 0;
-  border: 1px solid var(--afk-border);
-  border-radius: 5px;
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-sm);
   background: var(--afk-panel);
   box-shadow: none;
 }
@@ -1421,14 +1285,14 @@
 .workflow-canvas-controls {
   gap: 1px;
   padding: 2px;
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(29, 32, 28, .07);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-panel);
 }
 .workflow-canvas-controls .workflow-canvas-control {
   width: 27px;
   height: 27px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .workflow-editor-node {
   grid-template-columns: 22px minmax(0, 1fr) auto;
@@ -1440,9 +1304,9 @@
   align-self: start;
   margin-top: 5px;
   background: transparent;
-  color: #858b84;
+  color: var(--ink-mid);
   font-family: "DM Mono", monospace;
-  font-size: 7px;
+  font-size: calc(9px * var(--afk-scale));
   font-weight: 650;
   white-space: nowrap;
 }
@@ -1452,9 +1316,9 @@
   border-radius: 50%;
   background: currentColor;
 }
-.workflow-node-status.active { color: #5268a2; }
-.workflow-node-status.complete { color: #4f8b7d; }
-.workflow-node-status.muted { color: #9a7a52; }
+.workflow-node-status.active { color: var(--afk-accent); }
+.workflow-node-status.complete { color: var(--accent); }
+.workflow-node-status.muted { color: var(--ink-dim); }
 .workflow-node-kind {
   position: absolute;
   overflow: hidden;
@@ -1464,38 +1328,15 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-:root[data-afk-theme="graphite"] .workflow-studio-actions .workflow-save,
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-save {
-  border-color: #d7dad4;
-  background: #d7dad4;
-  color: #222521;
-}
-:root[data-afk-theme="graphite"] .workflow-studio-actions .workflow-save:hover:not(:disabled),
-:root[data-afk-theme="graphite"] .workflow-studio-inspector .workflow-save:hover:not(:disabled) {
-  border-color: #f0f2ed;
-  background: #f0f2ed;
-}
-:root[data-afk-theme="graphite"] .workflow-create,
-:root[data-afk-theme="graphite"] .workflow-studio-toolbar .workflow-toolbar-button {
-  border-color: #464a44;
-  background: #282a27;
-  color: #b9bcb3;
-}
-:root[data-afk-theme="graphite"] .workflow-node-status { color: #a4aaa1; }
-:root[data-afk-theme="graphite"] .workflow-node-status.active { color: #a9b9df; }
-:root[data-afk-theme="graphite"] .workflow-node-status.complete { color: #9bc8bd; }
-:root[data-afk-theme="graphite"] .workflow-node-status.muted { color: #cfaa7d; }
 
 .queue {
-  width: min(100%, 1040px);
-  max-width: 1040px;
-  margin: 0 auto;
+  width: 100%;
   padding-top: 10px;
 }
 
 .queue-stream {
   position: relative;
-  border-top: 1px solid var(--line-soft);
+  border-top: var(--border-w) solid var(--line-soft);
 }
 
 .queue-stream::before {
@@ -1511,18 +1352,15 @@
 .queue .event-row {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: 24px minmax(210px, .8fr) minmax(260px, 1fr) 118px 22px;
-  gap: 11px;
-  align-items: center;
-  min-height: 64px;
-  padding: 9px 10px 9px 0;
-  border: 1px solid transparent;
-  border-bottom: 1px solid var(--line-soft);
-  border-radius: 9px;
+  padding: 0 12px;
+  border-bottom: var(--border-w) solid var(--afk-border);
+  border-radius: 0;
   background: transparent;
-  text-align: left;
 }
+.queue .event-row .state-glyph { flex-shrink: 0; }
+.queue .event-row .run-main { flex: 1; min-width: 0; overflow: hidden; }
+.queue .event-row .event-time { flex-shrink: 0; width: 96px; margin-left: auto; text-align: right; }
+.queue .event-row .event-detail-affordance { flex-shrink: 0; width: 22px; display: grid; place-items: center; }
 
 .event-row:hover { background: #fafcf9; }
 .event-row.selected { border-color: var(--line-soft); background: #f2f7f2; box-shadow: inset 2px 0 0 var(--run); }
@@ -1540,7 +1378,7 @@
   width: 22px;
   height: 22px;
   place-items: center;
-  border: 1px solid #d7ddd6;
+  border: var(--border-w) solid #d7ddd6;
   border-radius: 50%;
   background: var(--surface-raised, #fff);
   color: #8b948c;
@@ -1549,7 +1387,7 @@
 .state-glyph.active { border-color: #afc9b5; color: var(--run); }
 .state-glyph.verify { border-color: #bfd2cb; color: var(--verify); }
 .state-glyph.attention { border-color: #e2cda8; color: var(--attention); }
-.state-glyph.failed { border-color: #d8c0c0; color: #a66a6a; }
+.state-glyph.failed { border-color: #d8c0c0; color: var(--fail); }
 .state-glyph.ready { border-color: #d7dbe0; color: var(--ready); }
 .state-glyph.muted { border-color: #dfe4de; background: #fbfcfa; color: #aab2aa; }
 .state-glyph.active svg { animation: run-center-state-pulse 1.9s ease-in-out infinite; }
@@ -1571,7 +1409,7 @@
   overflow: hidden;
   color: #626a64;
   font-family: "DM Mono", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1580,7 +1418,7 @@
   flex: 0 0 auto;
   color: #9a9e9a;
   font-family: "DM Mono", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 
 .event-copy { min-width: 0; }
@@ -1591,9 +1429,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.event-copy strong { color: var(--afk-text, #343832); font-size: 12px; font-weight: 650; }
-.event-copy small { margin-top: 5px; color: #7f8981; font-family: "DM Mono", monospace; font-size: 8px; }
-.event-time { color: #7f8981; font-family: "DM Mono", monospace; font-size: 8px; white-space: nowrap; }
+.event-copy strong { color: var(--afk-text, #343832); font-size: calc(12px * var(--afk-scale)); font-weight: 650; }
+.event-copy small { margin-top: 5px; color: #7f8981; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.event-time { color: #7f8981; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); white-space: nowrap; }
 .event-detail-affordance { display: grid; place-items: center; color: #99a199; }
 .event-row:hover .event-detail-affordance,
 .event-row.selected .event-detail-affordance { color: var(--afk-accent, #6d5dfc); }
@@ -1621,8 +1459,8 @@
   background: transparent;
 }
 .board-column.is-empty > header {
-  border: 1px solid #e7ebe5;
-  border-radius: 9px;
+  border: var(--border-w) solid #e7ebe5;
+  border-radius: var(--radius-md);
   background: #fbfcfa;
 }
 
@@ -1651,7 +1489,7 @@
 .inspector-title .runtime-work-item,
 .inspector dd .runtime-source { padding: 0; border-radius: 0; background: transparent; color: inherit; }
 .inspector-title small { display: flex; align-items: center; gap: 5px; }
-.inspector-debug { margin-bottom: 12px; color: #838c84; font-family: "DM Mono", monospace; font-size: 8px; }
+.inspector-debug { margin-bottom: 12px; color: #838c84; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
 .inspector-debug summary { cursor: pointer; }
 .inspector-flow {
   display: flex;
@@ -1660,18 +1498,18 @@
   margin: 4px 0 14px;
   color: #6f786f;
   font-family: "DM Mono", monospace;
-  font-size: 8px;
+  font-size: calc(10px * var(--afk-scale));
 }
 .inspector-flow .state-glyph { width: 17px; height: 17px; flex: 0 0 auto; }
-.inspector-flow.failed { color: #a66a6a; }
+.inspector-flow.failed { color: var(--fail); }
 .inspector-flow.attention { color: #9b7438; }
 .inspector-flow.active { color: #578469; }
-.inspector-flow-line { width: 22px; border-top: 1px solid #d9dfd9; }
-.inspector-workspace dd { font-family: "DM Mono", monospace; font-size: 9px; line-height: 1.55; }
-.inspector-history { margin: 0 0 13px; border-bottom: 1px solid #ededf1; color: #6f786f; font-family: "DM Mono", monospace; font-size: 8px; }
+.inspector-flow-line { width: 22px; border-top: var(--border-w) solid #d9dfd9; }
+.inspector-workspace dd { font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); line-height: 1.55; }
+.inspector-history { margin: 0 0 13px; border-bottom: var(--border-w) solid #ededf1; color: #6f786f; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
 .inspector-history summary { display: flex; align-items: center; padding: 0 0 8px; cursor: pointer; }
 .inspector-history summary .history-summary-label { display: inline-flex; align-items: center; color: #6f786f; }
-.inspector-history summary b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 5px; place-items: center; border: 1px solid #e0e7e0; border-radius: 5px; background: #fafcf9; color: #7f8a80; font: 8px "DM Mono", monospace; }
+.inspector-history summary b { display: inline-grid; min-width: 16px; height: 16px; margin-left: 5px; place-items: center; border: var(--border-w) solid #e0e7e0; border-radius: var(--radius-sm); background: #fafcf9; color: #7f8a80; font-family: "DM Mono", monospace; font-size: calc(8px * var(--afk-scale)); }
 .inspector-history > div { position: relative; padding: 2px 0 10px; }
 .inspector-history > div::before { position: absolute; top: 10px; bottom: 17px; left: 6px; width: 1px; background: #e2e8e2; content: ""; }
 .inspector-history button { position: relative; z-index: 1; display: grid; width: 100%; grid-template-columns: 15px minmax(0, 1fr); align-items: center; gap: 9px; min-height: 37px; padding: 6px 8px 6px 0; border: 0; border-left: 2px solid transparent; border-radius: 0 7px 7px 0; background: transparent; color: #6f786f; text-align: left; }
@@ -1680,8 +1518,8 @@
 .inspector-history button .state-glyph { width: 15px; height: 15px; flex: 0 0 auto; background: var(--afk-panel, #fff); }
 .inspector-history button span:not(.state-glyph) { min-width: 0; }
 .inspector-history button b, .inspector-history button small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.inspector-history button b { color: #4c554d; font-family: inherit; font-size: 8px; font-weight: 500; }
-.inspector-history button small { margin-top: 3px; color: #9aa19b; font-family: inherit; font-size: 7px; }
+.inspector-history button b { color: #4c554d; font-family: inherit; font-size: calc(10px * var(--afk-scale)); font-weight: 500; }
+.inspector-history button small { margin-top: 3px; color: #9aa19b; font-family: inherit; font-size: calc(9px * var(--afk-scale)); }
 
 @keyframes run-center-state-pulse {
   0%, 100% { opacity: .72; transform: scale(.92); }
@@ -1689,17 +1527,75 @@
 }
 
 @media (max-width: 1220px) {
-  .event-row { grid-template-columns: 24px minmax(150px, 1fr) minmax(180px, 1.15fr) 96px 22px; gap: 9px; }
+  .queue .event-row { gap: 10px; }
 }
 
 @media (max-width: 900px) {
-  .event-row { grid-template-columns: 24px minmax(140px, .9fr) minmax(160px, 1.1fr) 22px; }
-  .event-time { display: none; }
+  .queue .event-row { gap: 8px; }
+  .queue .event-row .event-time { display: none; }
+  .queue .event-row .event-detail-affordance { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .state-glyph.active svg { animation: none; }
 }
+
+.run-center-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 24px 0;
+  width: 100%;
+}
+
+.stats {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  padding: 0 4px;
+  border-radius: var(--radius-md);
+  background: var(--afk-panel);
+  overflow: hidden;
+}
+.stats > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0 18px;
+  border-left: 1.5px solid var(--afk-border);
+}
+.stats > div:first-child { padding-left: 0; border-left: 0; }
+.stats b {
+  font-family: "DM Mono", monospace;
+  font-size: calc(19px * var(--afk-scale));
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--afk-text);
+}
+.stats span { color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); }
+.stats .hot b { color: var(--warn); }
+.stats .bad b { color: var(--fail); }
+.stats .ok b { color: var(--afk-accent); }
+
+.run-col-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 28px;
+  padding: 0 12px;
+  border-bottom: 1.5px solid var(--afk-border);
+  color: var(--afk-muted);
+  font-size: calc(10px * var(--afk-scale));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--afk-panel);
+}
+.run-col-head span:nth-child(1) { width: 22px; flex-shrink: 0; }
+.run-col-head span:nth-child(2) { flex: 1; min-width: 0; }
+.run-col-head span:nth-child(3) { width: 96px; flex-shrink: 0; text-align: right; }
+
+.run-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow: hidden; }
 
 .view-layout { display: contents; }
 .run-center-layout {
@@ -1712,7 +1608,7 @@
 }
 .run-center-layout > .workspace { min-width: 0; }
 .run-center-layout .board { max-width: none; }
-.run-center-layout .queue { width: min(100%, 1040px); max-width: 1040px; }
+.run-center-layout .queue { width: 100%; }
 .run-center-layout .board { align-items: start; }
 .run-center-layout .board-column { min-height: 86px; }
 .run-center-layout .board-card { min-height: 106px; }
@@ -1738,7 +1634,7 @@
   height: 100%;
   overflow-y: auto;
   border: 0;
-  border-left: 1px solid var(--afk-border);
+  border-left: var(--border-w) solid var(--afk-border);
   border-radius: 0;
   background: var(--afk-panel);
   box-shadow: none;
@@ -1749,15 +1645,14 @@
 .run-center-layout .inspector dl { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .run-center-layout .inspector-workspace { grid-column: 1 / -1; }
 .run-center-layout .inspector-workspace dd { overflow-wrap: anywhere; text-overflow: clip; line-height: 1.6; }
-:root[data-afk-theme="graphite"] .state-glyph.failed { border-color: #745456; color: #d89a98; }
-:root[data-afk-theme="graphite"] .inspector-flow.failed { color: #d89a98; }
 
 @media (max-width: 1260px) {
   .run-center-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(240px, 1fr) auto; overflow-y: auto; }
   .run-center-layout > .workspace { overflow: visible; }
-  .run-center-layout .inspector { width: 100%; height: auto; max-height: 45vh; border-top: 1px solid var(--afk-border); border-left: 0; }
+  .run-center-layout .inspector { width: 100%; height: auto; max-height: 45vh; border-top: var(--border-w) solid var(--afk-border); border-left: 0; }
 }
 
 @media (max-width: 900px) {
   .run-center-layout .board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.workflow-canvas-controls.has-inspector { right: 332px; }

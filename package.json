@@ -7,8 +7,8 @@
     "afk": "./dist/index.js"
   },
   "scripts": {
-    "build": "pnpm --filter @afk/core build && pnpm --filter @afk/application build && pnpm --filter @afk/workflow-graph build && node scripts/build.mjs && tsc --emitDeclarationOnly",
-    "typecheck": "pnpm --filter @afk/core build && pnpm --filter @afk/application build && pnpm --filter @afk/workflow-graph build && tsc --noEmit",
+    "build": "tsc -p packages/afk-core/tsconfig.json && tsc -p packages/afk-application/tsconfig.json && tsc -p packages/afk-workflow-graph/tsconfig.json && node scripts/build.mjs && tsc --emitDeclarationOnly",
+    "typecheck": "tsc -p packages/afk-core/tsconfig.json && tsc -p packages/afk-application/tsconfig.json && tsc -p packages/afk-workflow-graph/tsconfig.json && tsc --noEmit",
     "architecture:check": "node scripts/architecture-guard.mjs --check-packages",
     "application:typecheck": "pnpm --filter @afk/application typecheck",
     "application:build": "pnpm --filter @afk/application build",
@@ -23,11 +23,17 @@
     "postinstall": "node scripts/fix-permissions.mjs",
     "prepublishOnly": "npm run build"
   },
-  "keywords": ["afk", "gitlab", "automation", "ci-cd"],
+  "keywords": [
+    "afk",
+    "gitlab",
+    "automation",
+    "ci-cd"
+  ],
   "dependencies": {
     "@afk/application": "workspace:*",
     "@afk/core": "workspace:*",
     "@afk/workflow-graph": "workspace:*",
+    "@anthropic-ai/claude-code": "^2.1.299",
     "@gitbeaker/node": "^35.8.0",
     "@m234/nerd-fonts": "^0.5.1",
     "@octokit/rest": "^22.0.1",
@@ -66,6 +72,15 @@
     "vitest": "^1.2.0",
     "xterm": "^5.3.0"
   },
-  "engines": {"node": ">=18"},
-  "pnpm": {"onlyBuiltDependencies": ["electron", "esbuild", "node-pty", "puppeteer"]}
+  "engines": {
+    "node": ">=18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "node-pty",
+      "puppeteer"
+    ]
+  }
 }

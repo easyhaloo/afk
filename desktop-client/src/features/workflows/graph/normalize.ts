@@ -15,8 +15,20 @@ export type NormalizedWorkflow = {
 
 export type WorkflowNodePosition = { x: number; y: number };
 
+export type WorkflowCanvasTrack = "agent" | "system" | "conditional";
+
+/** Each track owns a canvas row, so its lane band never overlaps another track's. */
+const TRACKS: readonly WorkflowCanvasTrack[] = ["agent", "system", "conditional"];
+
 const LAYER_GAP = 190;
 const ROW_GAP = 124;
+/** Track pitch: a within-track row gap plus the 28px band padding above and below,
+ *  so one band's box can never reach the next track's. */
+const TRACK_GAP = 180;
+
+export function workflowStepTrack(step?: WorkflowTemplateStepSummary): WorkflowCanvasTrack {
+  return step?.when ? "conditional" : step?.kind === "system" ? "system" : "agent";
+}
 
 export function normalizeWorkflowSteps(input: readonly WorkflowTemplateStepSummary[]): NormalizedWorkflow {
   const steps = input.map((step) => ({ ...step, dependsOn: [...step.dependsOn] }));
@@ -83,7 +95,13 @@ export function workflowStepLayout(input: readonly WorkflowTemplateStepSummary[]
   });
   const positions = new Map<string, WorkflowNodePosition>();
   [...layers.entries()].sort(([left], [right]) => left - right).forEach(([layer, steps]) => {
-    steps.forEach((step, index) => positions.set(step.id, { x: 220 + layer * LAYER_GAP, y: 54 + index * ROW_GAP }));
+    const rowsInTrack = new Map<WorkflowCanvasTrack, number>();
+    steps.forEach((step) => {
+      const track = workflowStepTrack(step);
+      const row = rowsInTrack.get(track) ?? 0;
+      rowsInTrack.set(track, row + 1);
+      positions.set(step.id, { x: 220 + layer * LAYER_GAP, y: 54 + TRACKS.indexOf(track) * TRACK_GAP + row * ROW_GAP });
+    });
   });
   return positions;
 }

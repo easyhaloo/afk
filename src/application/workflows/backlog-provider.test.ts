@@ -164,7 +164,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     expect(prompt).toContain('pnpm vitest run');
   });
 
-  it('uses an independent sandbox session for an interactive primary-worktree phase', async () => {
+  it('closes an interactive phase sandbox before returning even when a resource scope owns it', async () => {
     const bundle = providers(vi.fn(async () => null));
     const subject = runner(bundle) as any;
     const primarySandbox = { id: 'primary', startAgent: vi.fn(), close: vi.fn() };
@@ -176,6 +176,7 @@ describe('WorkflowRunner backlog provider mode', () => {
       actor: { kind: 'system', id: 'test' },
     };
     subject.sandbox = primarySandbox;
+    subject.resourceScope = { registerSandbox: vi.fn() };
     subject.sandboxProvider = { create };
     subject.heartbeatRuntime = vi.fn(async () => {});
     subject.runPhase = vi.fn(async () => ({
@@ -198,6 +199,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     }));
     expect(subject.runPhase).toHaveBeenCalledWith(expect.objectContaining({ sandbox: phaseSandbox, completionKind: 'ac' }));
     expect(phaseSandbox.close).toHaveBeenCalledTimes(1);
+    expect(primarySandbox.close).not.toHaveBeenCalled();
   });
 
   it('retries a diagnosable AC failure in the same implementation branch', async () => {

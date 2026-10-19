@@ -1,7 +1,70 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { extractClaudeTranscriptTokens, extractCodexRolloutTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout } from './agent-telemetry.js';
-import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { collectAgentTelemetry, extractClaudeSessionId, extractClaudeTranscriptTokens, extractCodexRolloutTokens, extractOpenCodeTranscriptTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout, resolveAgentTranscript } from './agent-telemetry.js';
+import type { AgentExecution, ExecutionResult } from '../../domain/agents/types.js';
+import { mkdirSync, writeFileSync, rmSync, appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+
+const childProcessMocks = vi.hoisted(() => ({ execFile: vi.fn() }));
+vi.mock('node:child_process', () => ({ execFile: childProcessMocks.execFile }));
+
+describe('collectAgentTelemetry', () => {
+  let directory: string;
+  let transcriptPath: string;
+
+  beforeEach(() => {
+    directory = '/tmp/afk-collect-telemetry-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    mkdirSync(directory, { recursive: true });
+    transcriptPath = join(directory, 'transcript.jsonl');
+    writeFileSync(transcriptPath, [
+      { session_id: 'native-session' },
+      { type: 'cost-state', totalCostUSD: 1, modelUsage: { model: { inputTokens: 10, outputTokens: 5 } } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'Bash' }] } },
+    ].map(event => JSON.stringify(event)).join('\n'));
+  });
+
+  afterEach(() => { rmSync(directory, { recursive: true, force: true }); });
+
+  function execution(provider: AgentExecution['metadata']['provider'] = 'claude-code'): AgentExecution {
+    return { id: 'execution-1', metadata: { provider, transport: 'process' }, telemetryPath: transcriptPath } as AgentExecution;
+  }
+
+  const result: ExecutionResult = { version: 1, runId: 'execution-1', status: 'completed', provider: 'local', commits: [] };
+
+  it('preserves explicit zero usage and empty tools over transcript data', async () => {
+    const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    await expect(collectAgentTelemetry(execution(), { ...result, usage, tools: [] }, 'local')).resolves.toEqual({
+      sessionId: 'native-session', transcriptPath, usage, tools: [],
+    });
+  });
+
+  it('fills missing usage without replacing native tools', async () => {
+    const tools = [{ id: 'native-tool', name: 'Bash', result: 'failed' as const }];
+    await expect(collectAgentTelemetry(execution(), { ...result, tools }, 'local')).resolves.toEqual({
+      sessionId: 'native-session', transcriptPath, usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools,
+    });
+  });
+
+  it.each(['cursor', 'pi', 'copilot'] as const)('does not read a Claude transcript for %s', async provider => {
+    await expect(collectAgentTelemetry(execution(provider), { ...result, sessionId: 'result-session' }, 'local')).resolves.toEqual({
+      sessionId: 'result-session', usage: undefined, tools: undefined,
+    });
+  });
+
+  it('keeps missing container usage absent and prefers the native thread identity', async () => {
+    const agent = execution();
+    agent.metadata.threadId = 'thread-1';
+    await expect(collectAgentTelemetry(agent, { ...result, sessionId: 'runner-session' }, 'container')).resolves.toEqual({
+      sessionId: 'thread-1', usage: undefined, tools: undefined,
+    });
+  });
+
+  it('keeps unreadable local telemetry absent without inventing zero usage', async () => {
+    rmSync(transcriptPath);
+    await expect(collectAgentTelemetry(execution(), result, 'local')).resolves.toEqual({
+      sessionId: 'execution-1', usage: undefined, tools: undefined,
+    });
+  });
+});
 
 /**
  * Fixtures mirror a real session (`c03ff1c4-…`), whose cost-state sequence was
@@ -316,5 +379,125 @@ describe('findCodexRollout', () => {
 
     const found = await findCodexRollout('abc123def456', tmp);
     expect(found).toBe(rolloutFile);
+  });
+});
+
+describe('resolveAgentTranscript', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = '/tmp/afk-transcript-test-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    mkdirSync(tmp, { recursive: true });
+    vi.stubEnv('HOME', tmp);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('returns the original transcript and reads subsequent provider updates without creating a copy', async () => {
+    const source = join(tmp, 'very', 'long', 'claude', 'project', 'afk-session.jsonl');
+    mkdirSync(join(tmp, 'very', 'long', 'claude', 'project'), { recursive: true });
+    writeFileSync(source, [
+      JSON.stringify({ type: 'assistant', session_id: 'agent-session-123' }),
+      JSON.stringify({ type: 'cost-state', totalCostUSD: 1, modelUsage: {} }),
+    ].join('\n'));
+
+    const resolved = await resolveAgentTranscript({
+      provider: 'claude-code',
+      telemetryPath: source,
+    });
+
+    expect(resolved).toEqual({
+      sessionId: 'agent-session-123',
+      path: source,
+    });
+    expect(existsSync(join(tmp, '.afk'))).toBe(false);
+    appendFileSync(source, '\n' + JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'new-tool', name: 'Read', input: {} }] } }));
+    await expect(readAgentTools({ provider: 'claude-code', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual([
+      { id: 'new-tool', name: 'Read', result: 'unknown' },
+    ]);
+  });
+
+  it('locates the original transcript by the runtime provider session id instead of the newest file', async () => {
+    const projectDir = join(tmp, 'claude-project');
+    mkdirSync(projectDir, { recursive: true });
+    const source = join(projectDir, 'agent-session-456.jsonl');
+    writeFileSync(source, JSON.stringify({ type: 'assistant', session_id: 'agent-session-456' }));
+    writeFileSync(join(projectDir, 'unrelated-session.jsonl'), JSON.stringify({ session_id: 'unrelated-session' }));
+
+    const resolved = await resolveAgentTranscript({
+      provider: 'claude-code',
+      telemetryPath: join(projectDir, 'qa-204-1791984447541.jsonl'),
+      threadId: 'agent-session-456',
+    });
+
+    expect(resolved?.sessionId).toBe('agent-session-456');
+    expect(resolved?.path).toBe(source);
+  });
+
+  it('leaves a missing transcript unresolved even when another session exists in the same project', async () => {
+    writeFileSync(join(tmp, 'unrelated-session.jsonl'), JSON.stringify({ session_id: 'unrelated-session' }));
+    await expect(resolveAgentTranscript({
+      provider: 'claude-code', telemetryPath: join(tmp, 'missing-session.jsonl'),
+    })).resolves.toBeUndefined();
+  });
+
+  it('rejects a transcript whose session id conflicts with the runtime provider session id', async () => {
+    const source = join(tmp, 'expected-session.jsonl');
+    writeFileSync(source, JSON.stringify({ session_id: 'different-session' }));
+    await expect(resolveAgentTranscript({
+      provider: 'claude-code', telemetryPath: source, threadId: 'expected-session',
+    })).resolves.toBeUndefined();
+  });
+
+  it('returns the original Codex rollout without creating a copy', async () => {
+    const sessionsDir = join(tmp, '.codex', 'sessions', '2026', '10', '17');
+    mkdirSync(sessionsDir, { recursive: true });
+    const source = join(sessionsDir, 'rollout-103000-thread-123.jsonl');
+    writeFileSync(source, JSON.stringify({ type: 'session_meta', payload: { id: 'thread-123' } }));
+    await expect(resolveAgentTranscript({ provider: 'codex', threadId: 'thread-123' })).resolves.toEqual({
+      sessionId: 'thread-123', path: source,
+    });
+    expect(existsSync(join(tmp, '.afk'))).toBe(false);
+  });
+
+  it('reads the original OpenCode provider export without creating a copy', async () => {
+    vi.stubEnv('XDG_DATA_HOME', tmp);
+    const messageDir = join(tmp, 'opencode', 'storage', 'message', 'ses_original');
+    const partDir = join(tmp, 'opencode', 'storage', 'part', 'msg-1');
+    mkdirSync(messageDir, { recursive: true });
+    mkdirSync(partDir, { recursive: true });
+    writeFileSync(join(messageDir, 'msg-1.json'), JSON.stringify({ id: 'msg-1', sessionID: 'ses_original', role: 'assistant', tokens: { input: 10, output: 5, reasoning: 2, cache: { read: 3, write: 1 } } }));
+    writeFileSync(join(partDir, 'part-1.json'), JSON.stringify({ type: 'tool', callID: 'call-1', tool: 'read', state: { status: 'completed' } }));
+
+    const resolved = await resolveAgentTranscript({ provider: 'opencode', threadId: 'ses_original' });
+
+    expect(resolved).toEqual({ sessionId: 'ses_original', path: messageDir });
+    await expect(readAgentTelemetry({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual({ inputTokens: 14, outputTokens: 7, totalTokens: 21 });
+    await expect(readAgentTools({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual([{ id: 'call-1', name: 'read', result: 'succeeded' }]);
+    expect(existsSync(join(tmp, '.afk'))).toBe(false);
+    expect(childProcessMocks.execFile).not.toHaveBeenCalled();
+  });
+
+  it('reads a database-only OpenCode session through the provider database command', async () => {
+    childProcessMocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => {
+      const isSessionQuery = args[1]?.includes('from session');
+      const isMessageQuery = args[1]?.includes('from message');
+      const stdout = isSessionQuery
+        ? JSON.stringify([{ tokens_input: 10, tokens_output: 5, tokens_reasoning: 1, tokens_cache_read: 2, tokens_cache_write: 0 }])
+        : isMessageQuery
+        ? JSON.stringify([{ id: 'msg-db', role: 'assistant', tokens: JSON.stringify({ input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 0 } }) }])
+        : JSON.stringify([{ message_id: 'msg-db', call_id: 'call-db', tool: 'bash', status: 'completed' }]);
+      callback(null, { stdout, stderr: '' });
+    });
+
+    const resolved = await resolveAgentTranscript({ provider: 'opencode', threadId: 'ses_db' });
+
+    expect(resolved).toEqual({ sessionId: 'ses_db', path: 'opencode://session/ses_db' });
+    await expect(readAgentTelemetry({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual({ inputTokens: 12, outputTokens: 6, totalTokens: 18 });
+    await expect(readAgentTools({ provider: 'opencode', transcriptPath: resolved!.path, sandboxKind: 'local' })).resolves.toEqual([{ id: 'call-db', name: 'bash', result: 'succeeded' }]);
+    expect(childProcessMocks.execFile).toHaveBeenCalledTimes(6);
   });
 });

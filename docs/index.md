@@ -6,6 +6,7 @@
 
 | 文档 | 说明 |
 |---|---|
+| [system-architecture-design.md](architecture/system-architecture-design.md) | **系统架构设计说明书**：边界、约束、分层、闭环、不变量、失败模型与演进 |
 | [overview.md](architecture/overview.md) | AFK 跨平台抽象与 CLI 命令映射 |
 | [execution.md](architecture/execution.md) | 8 阶段执行设计（执行环境、sandbox、session、branches、templates） |
 | [observability.md](architecture/observability.md) | 可观测性 harness |
@@ -41,6 +42,7 @@
 | 路径 | 内容 |
 |---|---|
 | [product/PRD.md](product/PRD.md) | 产品需求文档 |
+| [product/PRD-retro-feedback-loop.md](product/PRD-retro-feedback-loop.md) | AFK 执行复盘反馈闭环 PRD |
 | [product/PRD-work-items-reverse-sort-2026-10-15.md](product/PRD-work-items-reverse-sort-2026-10-15.md) | 全局工作项倒序筛选 |
 | [research/](research/) | 研究材料与方法论文档 |
 

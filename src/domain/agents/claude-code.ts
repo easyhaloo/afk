@@ -6,6 +6,7 @@
  * command is built for execution inside a Sandbox.
  */
 
+import { join } from 'node:path';
 import type {
   AgentProviderName,
   AgentCapability,
@@ -59,6 +60,8 @@ export class ClaudeCodeProvider extends ProcessAgentProvider {
     const argv = ['claude', '--dangerously-skip-permissions'];
     if (options.executionMode === 'batch') {
       argv.push('--print', '--output-format', 'stream-json', '--verbose');
+    } else if (options.executionMode === 'interactive') {
+      argv.push('--settings', join(options.worktreePath, '.claude', 'settings.local.json'));
     }
     return {
       argv,

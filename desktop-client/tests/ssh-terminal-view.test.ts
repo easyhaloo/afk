@@ -104,6 +104,12 @@ describe("SSH terminal view", () => {
     expect(terminal.options.fontSize).toBe(15);
     expect(addon.fit).toHaveBeenCalledTimes(3);
 
+    // The one that used to need a reconnect: an open session recolours live.
+    runtime.setTheme("light");
+    expect(terminal.options.theme.background).toBe("#e4d9c0");
+    runtime.setTheme("dark");
+    expect(terminal.options.theme.background).toBe("#1c1f24");
+
     runtime.dispose();
     expect(cancelFrame).toHaveBeenCalledWith(17);
     expect(observer.disconnect).toHaveBeenCalledTimes(1);
@@ -175,9 +181,44 @@ describe("SSH terminal view", () => {
     runtime.dispose();
   });
 
+  it("recolours a live session when the app theme flips", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const runtime = { syncOutput: vi.fn(), setDisabled: vi.fn(), setFontSize: vi.fn(), setTheme: vi.fn(), dispose: vi.fn() };
+    // Stands in for MutationObserver on root[data-afk-theme], which main.tsx writes.
+    let emit: ((theme: "light" | "dark") => void) | undefined;
+    const disconnect = vi.fn();
+    const themeWatcher = vi.fn((onChange: (theme: "light" | "dark") => void) => {
+      emit = onChange;
+      return { disconnect };
+    });
+    const TestView = createSshTerminalView(() => runtime, themeWatcher);
+    const host = {} as HTMLElement;
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(createElement(TestView, {
+        sessionId: "session-a", output: "", disabled: false,
+        onInput: vi.fn(), onResize: vi.fn(), onCopy: vi.fn(), onError: vi.fn(),
+      }), { createNodeMock: (element) => element.props.className === "ssh-terminal-host" ? host : {} });
+    });
+
+    expect(themeWatcher).toHaveBeenCalledTimes(1);
+    expect(runtime.setTheme).not.toHaveBeenCalled();
+
+    await act(async () => { emit?.("light"); });
+    expect(runtime.setTheme).toHaveBeenCalledWith("light");
+
+    await act(async () => { emit?.("dark"); });
+    expect(runtime.setTheme).toHaveBeenLastCalledWith("dark");
+
+    await act(async () => renderer!.unmount());
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
   it("keeps the real component lifecycle stable across StrictMode and rerenders", async () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    const runtimes = Array.from({ length: 4 }, () => ({ syncOutput: vi.fn(), setDisabled: vi.fn(), setFontSize: vi.fn(), dispose: vi.fn() }));
+    const runtimes = Array.from({ length: 4 }, () => ({ syncOutput: vi.fn(), setDisabled: vi.fn(), setFontSize: vi.fn(), setTheme: vi.fn(), dispose: vi.fn() }));
     const runtimeOptions: SshTerminalRuntimeOptions[] = [];
     const runtimeFactory = vi.fn((options: SshTerminalRuntimeOptions) => {
       runtimeOptions.push(options);

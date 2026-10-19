@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AppearancePreferences } from "../../shared/ipc-contract.js";
 
-export const DEFAULT_APPEARANCE: AppearancePreferences = { locale: "system", fontFamily: "system", fontScale: "medium", accent: "violet", theme: "light" };
+export const DEFAULT_APPEARANCE: AppearancePreferences = { locale: "system", fontFamily: "system", fontScale: "medium", handDrawnHeaders: true, theme: "dark" };
 
 function preferencePath() {
   return path.join(app.getPath("userData"), "appearance.json");
@@ -15,8 +15,8 @@ export function cleanAppearance(value: unknown): AppearancePreferences {
     locale: candidate.locale === "zh-CN" || candidate.locale === "en-US" ? candidate.locale : "system",
     fontFamily: candidate.fontFamily === "serif" || candidate.fontFamily === "mono" ? candidate.fontFamily : "system",
     fontScale: candidate.fontScale === "small" || candidate.fontScale === "large" ? candidate.fontScale : "medium",
-    accent: candidate.accent === "teal" || candidate.accent === "amber" ? candidate.accent : "violet",
-    theme: candidate.theme === "graphite" ? "graphite" : "light",
+    handDrawnHeaders: candidate.handDrawnHeaders !== false,
+    theme: candidate.theme === "light" ? "light" : "dark",
   };
 }
 

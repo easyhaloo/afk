@@ -62,16 +62,11 @@ export function createWorkItemInventoryService(deps: WorkItemInventoryServiceDep
     const inflight = refreshes.get(key);
     if (inflight) return inflight;
     const request = fetchRemote(options).then(async inventory => {
-      if (inventory.complete) {
-        const timestamp = new Date().toISOString();
-        if (inventory.items.length > 0 || deps.store) cache.set(key, inventory);
-        else cache.delete(key);
-        syncedAt.set(key, Date.parse(timestamp));
-        if (deps.store) await deps.store.write({ options, inventory, syncedAt: timestamp }).catch(() => undefined);
-      } else {
-        cache.delete(key);
-        syncedAt.delete(key);
-      }
+      const timestamp = new Date().toISOString();
+      if (inventory.items.length > 0 || deps.store || !inventory.complete) cache.set(key, inventory);
+      else cache.delete(key);
+      syncedAt.set(key, Date.parse(timestamp));
+      if (inventory.complete && deps.store) await deps.store.write({ options, inventory, syncedAt: timestamp }).catch(() => undefined);
       return inventory;
     }).finally(() => {
       refreshes.delete(key);

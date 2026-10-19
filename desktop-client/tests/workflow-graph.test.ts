@@ -38,4 +38,25 @@ describe("workflow graph normalization", () => {
     expect(first.get("implement")?.x).toBeLessThan(first.get("review")?.x ?? 0);
     expect(first.get("review")?.x).toBeLessThan(first.get("publish")?.x ?? 0);
   });
+
+  it("gives each track its own row so lane bands cannot overlap", () => {
+    const system: WorkflowTemplateStepSummary = { ...step("commit", ["implement"]), kind: "system" };
+    const layout = workflowStepLayout([step("implement"), system]);
+
+    const agent = layout.get("implement");
+    const sys = layout.get("commit");
+    expect(agent).toBeDefined();
+    expect(sys).toBeDefined();
+    // One row apart: node height 94 + 28px band padding above and below.
+    expect((sys?.y ?? 0) - (agent?.y ?? 0)).toBeGreaterThanOrEqual(94 + 56);
+  });
+
+  it("stacks same-depth steps of one track without overlapping each other", () => {
+    const layout = workflowStepLayout([step("implement"), step("review")]);
+
+    const first = layout.get("implement");
+    const second = layout.get("review");
+    expect(first!.x).toBe(second!.x);
+    expect(second!.y - first!.y).toBeGreaterThanOrEqual(94);
+  });
 });

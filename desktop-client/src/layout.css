@@ -23,16 +23,35 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
 }
 
 .topbar {
-  flex: 0 0 49px;
+  flex: 0 0 var(--topbar-h);
 }
 
 .workspace {
   flex: 1 1 auto;
   min-height: 0;
-  margin: 10px 12px 12px;
+  /* The prototype's `.view` padding. It belongs inside the scroll box, not
+     outside it as a margin: that keeps the end of a long list clear of the
+     scroll edge, so the last row's hard offset shadow is not clipped. */
+  padding: var(--view-pad);
   overflow: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
+}
+
+/* The prototype's view-entry motion (`.view > section { animation: viewIn … }`).
+   It is only safe here because every overlay now portals out to
+   #afk-overlay-root, beside .workspace: a transform on this element would
+   otherwise become the containing block for its fixed descendants and quietly
+   resize every drawer and modal. Do not move an overlay back inside a view. */
+.workspace > * { animation: viewIn var(--dur) var(--ease) both; }
+
+@keyframes viewIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace > * { animation: none; }
 }
 
 .workspace::-webkit-scrollbar,
@@ -40,7 +59,7 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
 .terminal-sheet pre::-webkit-scrollbar { width: 8px; height: 8px; }
 .workspace::-webkit-scrollbar-thumb,
 .inspector::-webkit-scrollbar-thumb,
-.terminal-sheet pre::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 99px; background: #d5d5dd; background-clip: padding-box; }
+.terminal-sheet pre::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: #d5d5dd; background-clip: padding-box; }
 
 .view-header {
   position: sticky;
@@ -56,7 +75,7 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
   left: 28px;
   z-index: 30;
   margin: 0;
-  box-shadow: 0 10px 26px rgba(111,42,42,.1);
+  box-shadow: var(--shadow-panel);
 }
 
 .board {
@@ -79,7 +98,7 @@ body { height: 100vh; min-height: 0; overflow: hidden; }
 .table-panel,
 .board-column,
 .replay-minimal {
-  box-shadow: 0 1px 2px rgba(30,29,45,.02);
+  box-shadow: var(--shadow-panel-sm);
 }
 
 .board-card,

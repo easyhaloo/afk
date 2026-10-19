@@ -157,7 +157,10 @@ function readDescription() {
 }
 const descriptionText = readDescription();
 
-if (args[0] === "graph" && args[1] === "workflow") {
+if (args[0] === "execute" && args.includes("--help")) {
+  process.stdout.write("Usage: afk execute --work-item-id <id> --execution-manifest <path>\n");
+}
+else if (args[0] === "graph" && args[1] === "workflow") {
   const template = args[2];
   const project = flag("--project") ?? process.cwd();
   const directory = path.join(project, ".afk", "cache", "archify", "workflow", template, "e2e");
@@ -203,6 +206,24 @@ else if (args[0] === "loop") {
   update("verification", "afk", "verifying", "running");
   await new Promise((resolve) => setTimeout(resolve, 100));
   update("merge_ready", "hitl", "verifying", "completed");
+}
+else if (args[0] === "execute") {
+  const workItemId = flag("--work-item-id");
+  const update = async (state, executionMode) => {
+    mutate((store) => {
+      const item = store.items.find(entry => entry.workItemId === workItemId);
+      if (!item) return null;
+      item.state = state;
+      item.executionMode = executionMode;
+      store.history ??= [];
+      store.history.push({ workItemId, state });
+      return item;
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+  };
+  await update("in_progress", "afk");
+  await update("verification", "afk");
+  await update("merge_ready", "hitl");
 }
 else if (subcommand === "inventory") {
   if (process.env.FAKE_AFK_FAIL_INVENTORY === "1") fail("backlog.inventory", "provider", "FAKE_AFK_FAIL_INVENTORY is set");
@@ -250,16 +271,25 @@ else if (subcommand === "create") {
   log("create description", JSON.stringify(description));
   if (!description.trim()) fail("backlog.create", "validation", "description required");
   const item = mutate((store) => {
+    const id = String(store.nextId);
+    const issueNumber = Number(id);
+    const project = { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main", webUrl: "https://github.com/acme/api" };
     const newItem = {
-      id: String(store.nextId),
+      id,
+      workItemId: `github:acme/api#${issueNumber}`,
+      issueNumber,
+      project,
+      managed: true,
+      executionEligible: true,
       title,
       description: description.trim(),
       dependsOn: flagAll("--depends-on"),
       state: "ready",
       executionMode: flag("--mode") ?? "afk",
       tags: flagAll("--tag"),
-      branchName: `afk/backlog-${store.nextId}`,
-      providerRef: "stub:new",
+      branchName: `afk/backlog-${id}`,
+      providerRef: `github:acme/api#${issueNumber}`,
+      webUrl: `https://github.com/acme/api/issues/${issueNumber}`,
       parentId: flag("--parent"),
       baseBacklogId: flag("--base-backlog"),
     };

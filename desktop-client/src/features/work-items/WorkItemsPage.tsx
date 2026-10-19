@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, Hand, History, Link2, ListChecks, Play, RefreshCw, Search, ShieldAlert, Workflow, X } from "lucide-react";
+import { Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, Hand, History, Link2, ListChecks, Play, Plus, RefreshCw, Search, ShieldAlert, Workflow, X } from "lucide-react";
+import { Overlay } from "../../overlay";
 import type { ReactNode } from "react";
 import type {
   BacklogPlatform,
@@ -17,6 +18,7 @@ import type {
 import type { AgentRuntime } from "../../../shared/ipc-contract";
 import { type ExecutionSummary } from "../../../shared/execution-contract";
 import { RunTimelineSection } from "../run-center/RunTimelineView";
+import { useExecutionHistory } from "../run-center/use-execution-history";
 import {
   planRepositoryCheckoutPaths,
   repositorySelectionKey,
@@ -166,7 +168,7 @@ function WorkItemEmptySection({ children }: { children: string }) {
   return <div className="work-item-section-empty">{children}</div>;
 }
 
-export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgent = "claude-code", onAttach, onWorkflow }: { focusWorkItemId?: string; agentRuntimes?: AgentRuntime[]; defaultAgent?: string; onAttach?: (runId: string) => void; onWorkflow?: (runId: string, workItemId: string) => void } = {}) {
+export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgent = "claude-code", onAttach, onWorkflow, onCreate, onReviewMerge }: { focusWorkItemId?: string; agentRuntimes?: AgentRuntime[]; defaultAgent?: string; onAttach?: (runId: string) => void; onWorkflow?: (runId: string, workItemId: string) => void; onCreate?: () => void; onReviewMerge?: () => void } = {}) {
   const [inventory, setInventory] = useState<WorkItemInventoryResult>(emptyInventory);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -177,9 +179,6 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [sortSelection, setSortSelection] = useState<BacklogSortSelection>(() => parseBacklogSort("updatedAt:desc"));
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
-  const [auditedRuns, setAuditedRuns] = useState<ExecutionSummary[]>([]);
-  const [auditCursor, setAuditCursor] = useState<string | undefined>();
-  const [auditError, setAuditError] = useState("");
   const [runSetupOpen, setRunSetupOpen] = useState(false);
   const [runNotice, setRunNotice] = useState("");
   const [runError, setRunError] = useState("");
@@ -193,6 +192,9 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const selectedWorkItemId = useRef<string | null>(null);
   const lastFocusWorkItemId = useRef<string | null>(null);
   const selected = inventory.items.find(item => item.id === selectedItem?.id) ?? selectedItem;
+  const { executions: auditedRuns, nextCursor: auditCursor, error: auditError, loadMore: loadMoreAuditedRuns } = useExecutionHistory(
+    detailTab === "runs" && !!selected?.id && typeof window.afkDesktop.workItems.executions === "function", selected?.id,
+  );
 
   const load = async (forceRefresh = false, silent = false) => {
     const version = ++requestVersion.current;
@@ -217,53 +219,6 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     const timer = setInterval(() => { void load(false, true); }, 3000);
     return () => clearInterval(timer);
   }, [detailTab, selected?.id, selected?.runs]);
-
-  useEffect(() => {
-    if (detailTab !== "runs" || !selected?.id || typeof window.afkDesktop.workItems.executions !== "function") return;
-    let mounted = true;
-    let initialized = false;
-    const workItemId = selected.id;
-    setAuditedRuns([]);
-    setAuditCursor(undefined);
-    const refresh = async () => {
-      try {
-        const page = await window.afkDesktop.workItems.executions({ workItemId, limit: 100 });
-        if (mounted) {
-          if (!initialized) {
-            setAuditedRuns(page.executions);
-            setAuditCursor(page.nextCursor);
-            initialized = true;
-          } else setAuditedRuns(current => {
-            const currentPageIds = new Set(page.executions.map(run => run.runId));
-            return [...page.executions, ...current.filter(run => !currentPageIds.has(run.runId))];
-          });
-          setAuditError("");
-        }
-      } catch (cause) {
-        if (mounted) setAuditError(cause instanceof Error ? cause.message : String(cause));
-      }
-    };
-    void refresh();
-    const timer = setInterval(() => { void refresh(); }, 5000);
-    return () => { mounted = false; clearInterval(timer); };
-  }, [detailTab, selected?.id]);
-
-  const loadMoreAuditedRuns = async () => {
-    if (!selected?.id || !auditCursor) return;
-    const workItemId = selected.id;
-    try {
-      const page = await window.afkDesktop.workItems.executions({ workItemId, limit: 100, since: auditCursor });
-      if (selectedWorkItemId.current !== workItemId) return;
-      setAuditedRuns(current => {
-        const known = new Set(current.map(run => run.runId));
-        return [...current, ...page.executions.filter(run => !known.has(run.runId))];
-      });
-      setAuditCursor(page.nextCursor);
-      setAuditError("");
-    } catch (cause) {
-      if (selectedWorkItemId.current === workItemId) setAuditError(cause instanceof Error ? cause.message : String(cause));
-    }
-  };
 
   const projectOptions = useMemo(() => [
     { value: "all", label: "全部 Issue 来源", triggerLabel: "全部" },
@@ -401,7 +356,10 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     <section className="backlog-page work-items-page">
       <div className="control-page-heading backlog-heading">
         <div><p>工作项</p><span>工作项是独立任务；Issue 是可选外部来源，代码仓库是按需关联的执行资源。</span></div>
-        <button type="button" className="work-items-refresh" aria-label="刷新工作项" title="刷新工作项" disabled={loading} onClick={() => void load(true)}><RefreshCw size={14} className={loading ? "spin" : ""} /></button>
+        <div className="work-items-heading-actions">
+          {onCreate ? <button type="button" className="work-items-create" aria-label="创建工作项" title="创建工作项" onClick={onCreate}><Plus size={14} />创建</button> : null}
+          <button type="button" className="work-items-refresh" aria-label="刷新工作项" title="刷新工作项" disabled={loading} onClick={() => void load(true)}><RefreshCw size={14} className={loading ? "spin" : ""} /></button>
+        </div>
       </div>
       {error ? <div className="backlog-alert error"><ShieldAlert size={15} />{error}</div> : null}
       {inventory.diagnostics.length ? <div className="work-item-diagnostics">{inventory.diagnostics.map((diagnostic, index) => <div key={`${diagnostic.platform}-${diagnostic.projectKey ?? "provider"}-${index}`}><b>{diagnosticTitle(diagnostic)}</b><span>{diagnostic.message}</span></div>)}</div> : null}
@@ -446,7 +404,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       </div>
       {remainingItems > 0 ? <div className="work-items-load-more"><span>还有 {remainingItems} 个</span><button type="button" aria-label="显示更多工作项" onClick={() => setVisibleLimit(limit => limit + pageSize)}>继续加载 <ChevronDown size={13} /></button></div> : null}
 
-      {selected ? (
+      {selected ? (<Overlay>
         <div className="work-item-detail-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeDetails(); }}>
           <aside className="work-item-detail" role="dialog" aria-modal="true" aria-label={`工作项 ${selected.id}`}>
             <header className="work-item-detail-header">
@@ -495,13 +453,14 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
             </div>
             <footer className="work-item-detail-footer">
               <div><small>运行不会使用当前打开目录</small><code>{workspacePath(selected)}</code>{runNotice ? <span>{runNotice}</span> : null}</div>
+              {selected.state === "merge_ready" && onReviewMerge ? <button type="button" className="work-item-secondary-action" onClick={onReviewMerge}>处理合并</button> : null}
               <button type="button" className="work-item-primary-action" disabled={!selected.executionEligible} onClick={openRunSetup}><Play size={14} />开始执行</button>
             </footer>
           </aside>
         </div>
-      ) : null}
+      </Overlay>) : null}
 
-      {selected && runSetupOpen ? (
+      {selected && runSetupOpen ? (<Overlay>
         <div className="work-item-run-modal-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeRunSetup(); }}>
           <section className="work-item-run-modal" role="dialog" aria-modal="true" aria-label="开始执行工作项">
             <header><div><h2>开始执行工作项</h2><p>确认执行资源和隔离任务空间。</p></div><button type="button" aria-label="关闭执行配置" onClick={closeRunSetup}><X size={16} /></button></header>
@@ -535,7 +494,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
             <footer><button type="button" className="work-item-secondary-action" disabled={startingRun} onClick={closeRunSetup}>取消</button><button type="button" className="work-item-primary-action" disabled={!canStartRun} onClick={() => void startRun()}><Play size={14} />{startingRun ? "正在启动…" : selected.executionMode === "hitl" ? "开始前台执行" : "创建运行"}</button></footer>
           </section>
         </div>
-      ) : null}
+      </Overlay>) : null}
     </section>
   );
 }

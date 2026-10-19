@@ -31,7 +31,7 @@
   overflow: hidden;
   color: #454650;
   font-family: "DM Mono", monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -44,7 +44,7 @@
   margin-top: 3px;
   color: #9697a1;
   font-family: "DM Mono", monospace;
-  font-size: 8px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .record-run-picker { position: relative; }
@@ -53,7 +53,7 @@
   min-width: 220px;
   padding: 7px 9px;
   border: 1px solid #e3e3e9;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #fff;
   color: #6f707b;
 }
@@ -77,9 +77,9 @@
   width: 292px;
   padding: 5px;
   border: 1px solid #dedee8;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: #fff;
-  box-shadow: 0 14px 34px rgba(30, 30, 43, .13);
+  box-shadow: var(--shadow-panel);
 }
 
 .record-run-options button {
@@ -87,7 +87,7 @@
   width: 100%;
   padding: 8px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
 }
 
@@ -106,9 +106,9 @@
   min-height: 22px;
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-family: "DM Mono", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   font-weight: 600;
   letter-spacing: .01em;
   line-height: 1;
@@ -128,9 +128,9 @@
   margin-top: 14px;
   overflow: hidden;
   border: 1px solid #e7e7ec;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: #fff;
-  box-shadow: 0 1px 2px rgba(30, 29, 45, .025);
+  box-shadow: var(--shadow-panel-sm);
 }
 
 .record-card-main {
@@ -145,7 +145,7 @@
 .record-card h1 {
   margin: 13px 0 8px;
   color: #30313a;
-  font-size: 22px;
+  font-size: calc(22px * var(--afk-scale));
   font-weight: 650;
   letter-spacing: -.025em;
   line-height: 1.35;
@@ -155,7 +155,7 @@
 .record-drawer-next {
   margin: 0;
   color: #777884;
-  font-size: 13px;
+  font-size: calc(13px * var(--afk-scale));
   line-height: 1.65;
 }
 
@@ -171,7 +171,7 @@
 .record-card footer time {
   color: #9596a0;
   font-family: "DM Mono", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
 }
 
 .record-card footer button {
@@ -181,10 +181,10 @@
   min-height: 30px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: #5b5c66;
-  font-size: 11px;
+  font-size: calc(11px * var(--afk-scale));
   font-weight: 600;
 }
 
@@ -195,9 +195,9 @@
   margin-top: 14px;
   overflow: hidden;
   border: 1px solid #e7e7ec;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: #fff;
-  box-shadow: 0 1px 2px rgba(30, 29, 45, .025);
+  box-shadow: var(--shadow-panel-sm);
 }
 
 .record-list-item {
@@ -219,26 +219,26 @@
 .record-list-item:hover,
 .record-list-item.selected { background: #fafafd; }
 .record-list-item.selected { box-shadow: inset 2px 0 0 #7c6ee6; }
-.record-list-item > time { color: #92939e; font-family: "DM Mono", monospace; font-size: 9px; }
+.record-list-item > time { color: #92939e; font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
 .record-list-item > span:nth-of-type(2) { min-width: 0; }
 .record-list-item b,
 .record-list-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.record-list-item b { color: #454650; font-size: 12px; font-weight: 600; }
-.record-list-item small { margin-top: 4px; color: #8d8e98; font-size: 10px; }
+.record-list-item b { color: #454650; font-size: calc(12px * var(--afk-scale)); font-weight: 600; }
+.record-list-item small { margin-top: 4px; color: #8d8e98; font-size: calc(10px * var(--afk-scale)); }
 .record-list-item > svg { justify-self: end; color: #a1a2ab; }
 .record-list-item.fresh { animation: record-enter 320ms cubic-bezier(.23, 1, .32, 1) both; }
 
 .record-drawer {
   position: fixed;
   z-index: 28;
-  top: 49px;
+  top: var(--topbar-h);
   right: 0;
   bottom: 0;
-  width: min(430px, calc(100vw - 260px));
+  width: min(var(--drawer-w), calc(100vw - var(--sidebar-w) - 20px));
   overflow: auto;
-  border-left: 1px solid #e5e5eb;
+  border-left: var(--edge-modal);
   background: #fff;
-  box-shadow: -14px 0 30px rgba(33, 33, 45, .10);
+  box-shadow: -14px 0 0 var(--ink-shadow);
   animation: record-drawer-in 220ms cubic-bezier(.23, 1, .32, 1) both;
 }
 
@@ -251,11 +251,11 @@
   border-bottom: 1px solid #e9e9ee;
   color: #646570;
   font-family: "DM Mono", monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .record-drawer-body { padding: 26px 24px 34px; }
-.record-drawer h2 { margin: 13px 0 9px; color: #30313a; font-size: 19px; line-height: 1.38; }
+.record-drawer h2 { margin: 13px 0 9px; color: #30313a; font-size: calc(19px * var(--afk-scale)); line-height: 1.38; }
 
 .record-drawer dl {
   display: grid;
@@ -267,8 +267,8 @@
   border-bottom: 1px solid #ededf1;
 }
 
-.record-drawer dt { margin-bottom: 5px; color: #9a9ba5; font-family: "DM Mono", monospace; font-size: 8px; }
-.record-drawer dd { margin: 0; color: #545560; font-size: 11px; }
+.record-drawer dt { margin-bottom: 5px; color: #9a9ba5; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.record-drawer dd { margin: 0; color: #545560; font-size: calc(11px * var(--afk-scale)); }
 
 .record-debug { margin-top: 4px; }
 .record-debug summary {
@@ -277,7 +277,7 @@
   gap: 6px;
   cursor: pointer;
   color: #72737e;
-  font-size: 11px;
+  font-size: calc(11px * var(--afk-scale));
   font-weight: 600;
   list-style: none;
 }
@@ -287,11 +287,11 @@
   margin: 10px 0 0;
   overflow: auto;
   padding: 11px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #f6f6f8;
   color: #686974;
   font-family: "DM Mono", monospace;
-  font-size: 9px;
+  font-size: calc(9px * var(--afk-scale));
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
@@ -305,27 +305,27 @@
   width: 330px;
   overflow: hidden;
   border: 1px solid #e5e3ef;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: #fff;
-  box-shadow: 0 14px 34px rgba(39, 35, 61, .12);
+  box-shadow: var(--shadow-panel);
 }
 
-.inspector > header { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; border-bottom: 1px solid #ecebf1; color: #74757f; font-family: "DM Mono", monospace; font-size: 9px; }
-.inspector-toggle { display: grid; width: 27px; height: 27px; place-items: center; padding: 0; border: 1px solid #e3e3e9; border-radius: 7px; background: #fff; color: #676872; }
+.inspector > header { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 12px; border-bottom: 1px solid #ecebf1; color: #74757f; font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
+.inspector-toggle { display: grid; width: 27px; height: 27px; place-items: center; padding: 0; border: 1px solid #e3e3e9; border-radius: var(--radius-sm); background: #fff; color: #676872; }
 .inspector-toggle:hover { background: #f6f5fb; }
 .inspector-corner-mark { width: 15px; height: 15px; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 .inspector-tooltip { display: none; }
 .inspector-surface { padding: 0 16px 16px; }
 .inspector-title { padding: 14px 0 10px; }
-.inspector-title small { color: #94959f; font-family: "DM Mono", monospace; font-size: 8px; }
-.inspector-title h2 { margin: 7px 0; color: #363741; font-size: 15px; line-height: 1.35; }
-.inspector-title span { color: #8c6427; font-family: "DM Mono", monospace; font-size: 9px; }
+.inspector-title small { color: #94959f; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.inspector-title h2 { margin: 7px 0; color: #363741; font-size: calc(15px * var(--afk-scale)); line-height: 1.35; }
+.inspector-title span { color: #8c6427; font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
 .inspector dl { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 10px; margin: 14px 0; padding: 12px 0; border-top: 1px solid #ededf1; border-bottom: 1px solid #ededf1; }
-.inspector dt { margin-bottom: 4px; color: #999aa4; font-family: "DM Mono", monospace; font-size: 8px; }
-.inspector dd { margin: 0; overflow: hidden; color: #53545e; font-size: 10px; text-overflow: ellipsis; }
-.inspector section b { color: #83848e; font-family: "DM Mono", monospace; font-size: 8px; }
-.inspector pre { max-height: 120px; margin: 7px 0 13px; overflow: auto; padding: 8px; border-radius: 7px; background: #f7f7fa; color: #62636e; font-family: "DM Mono", monospace; font-size: 8px; white-space: pre-wrap; }
-.takeover { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; height: 32px; border-radius: 8px; background: #2f3039; color: #fff; font-size: 10px; font-weight: 600; }
+.inspector dt { margin-bottom: 4px; color: #999aa4; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.inspector dd { margin: 0; overflow: hidden; color: #53545e; font-size: calc(10px * var(--afk-scale)); text-overflow: ellipsis; }
+.inspector section b { color: #83848e; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
+.inspector pre { max-height: 120px; margin: 7px 0 13px; overflow: auto; padding: 8px; border-radius: var(--radius-sm); background: #f7f7fa; color: #62636e; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); white-space: pre-wrap; }
+.takeover { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; height: 32px; border-radius: var(--radius-md); background: #2f3039; color: #fff; font-size: calc(10px * var(--afk-scale)); font-weight: 600; }
 .inspector-opening { animation: inspector-pop-in 220ms cubic-bezier(.23, 1, .32, 1) both; }
 .inspector-closing { animation: inspector-pop-out 180ms ease both; pointer-events: none; }
 
@@ -340,7 +340,7 @@
   .record-card footer { padding-left: 21px; }
   .record-list-item { grid-template-columns: 58px minmax(0, 1fr) 17px; gap: 9px; padding: 11px; }
   .record-list-item > .record-status { display: none; }
-  .record-drawer { top: 0; width: min(430px, 100vw); }
+  .record-drawer { top: 0; width: min(var(--drawer-w), 100vw); }
 }
 
 @media (prefers-reduced-motion: reduce) {

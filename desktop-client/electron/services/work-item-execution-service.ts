@@ -1,4 +1,3 @@
-import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
@@ -23,8 +22,6 @@ import {
 } from "./work-item-execution-manifest-store.js";
 import type { createWorkItemRunStore } from "./work-item-run-store.js";
 
-type SpawnedProcess = Pick<ChildProcess, "pid" | "once" | "unref"> & Partial<Pick<ChildProcess, "kill">>;
-type WorkItemSpawnOptions = { cwd: string; detached: boolean; stdio: "ignore"; env?: NodeJS.ProcessEnv };
 type AllocatedWorkspace = {
   root: string;
   repositories: Array<{ project: ProviderProjectRef; path: string }>;
@@ -35,15 +32,30 @@ type Workspace = {
 };
 type ForegroundAgent = { id: WorkItemAgentId; label: string; command: string; executable: string };
 
+/** The outcome of one work item execution, as reported by the execution runtime. */
+export type WorkItemExecutionOutcome = {
+  status: "merge_ready" | "done" | "rework" | "blocked" | "not_claimed";
+  changeUrl?: string;
+};
+
 export type WorkItemExecutionServiceDeps = {
   getWorkItem: (workItemId: WorkItemId) => Promise<GlobalWorkItem>;
-  resolveAfk: () => Promise<string>;
+  /**
+   * Run one work item execution in process. The desktop and the CLI call the
+   * same execution runtime, so a work item runs through the same code no
+   * matter which entry point asked for it.
+   */
+  execute: (input: {
+    workItemId: string;
+    manifestPath: string;
+    template?: string;
+    executionId: string;
+  }) => Promise<WorkItemExecutionOutcome>;
   resolveAgent?: (id: WorkItemAgentId) => Promise<ForegroundAgent | undefined>;
   openTerminalCommand?: (command: string, terminal: SshExternalTerminalId) => Promise<string>;
   workspace: Workspace;
   manifestStore: Pick<ReturnType<typeof createWorkItemExecutionManifestStore>, "save">;
   runStore: Pick<ReturnType<typeof createWorkItemRunStore>, "load" | "save"> & Partial<Pick<ReturnType<typeof createWorkItemRunStore>, "update">>;
-  spawn?: (command: string, args: string[], options: WorkItemSpawnOptions) => SpawnedProcess;
   now?: () => Date;
   reportError?: (error: unknown) => void;
 };
@@ -64,13 +76,6 @@ export function buildForegroundAgentCommand(item: GlobalWorkItem, agent: Foregro
   ].join("\n\n");
   const args = agent.id === "claude" ? ["--dangerously-skip-permissions", prompt] : [prompt];
   return `cd ${shellQuote(workspaceRoot)} && ${[agent.executable || agent.command, ...args].map(shellQuote).join(" ")}`;
-}
-
-export function buildWorkItemRunArgs(input: WorkItemRunStartInput, manifestPath: string, executionId?: string): string[] {
-  const args = ["execute", "--work-item-id", input.workItemId, "--execution-manifest", manifestPath];
-  if (input.workflow) args.push("--template", input.workflow);
-  if (executionId) args.push("--execution-id", executionId);
-  return args;
 }
 
 function repositoryKey(repository: Pick<ProviderProjectRef, "platform" | "projectKey">): string {
@@ -124,7 +129,6 @@ function canonicalRepositories(
 }
 
 export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDeps) {
-  const spawn = deps.spawn ?? ((command, args, options) => nodeSpawn(command, args, options));
   const now = deps.now ?? (() => new Date());
   const reportError = deps.reportError ?? ((error: unknown) => console.error(error));
   let storeWrite = Promise.resolve();
@@ -194,8 +198,6 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
       await deps.openTerminalCommand!(buildForegroundAgentCommand(item, foregroundAgent, workspace.root), input.foreground.terminal);
       return { runId: `desktop-${randomUUID()}`, workspace: { root: workspace.root } };
     }
-    const afkPath = await deps.resolveAfk();
-    if (!afkPath) throw new Error("afk CLI 未在 PATH 中发现");
     const manifestPath = workItemExecutionManifestPath(workspace.root);
     await deps.manifestStore.save(workspace.root, {
       schemaVersion: 1,
@@ -241,30 +243,9 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
       throw error;
     }
 
-    let child: SpawnedProcess;
-    try {
-      child = spawn(afkPath, buildWorkItemRunArgs(input, manifestPath, runId), {
-        cwd: workspace.root,
-        detached: true,
-        stdio: "ignore",
-        env: { ...process.env, PWD: workspace.root },
-      });
-    } catch (error) {
-      const failed: WorkItemRunRecord = {
-        ...starting,
-        status: "failed",
-        completedAt: now().toISOString(),
-        error: error instanceof Error ? error.message : String(error),
-      };
-      await update(workspace.root, failed).catch(report);
-      await deps.workspace.updateRun(input.workItemId, undefined, runId).catch(report);
-      throw error;
-    }
-
     const running: WorkItemRunRecord = {
       ...starting,
       status: "running",
-      ...(typeof child.pid === "number" ? { pid: child.pid } : {}),
     };
     let runningPersisted = false;
     let terminalRecorded = false;
@@ -285,29 +266,10 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
       if (runningPersisted) void persistTerminal(terminal);
       else pendingTerminal = terminal;
     };
-    child.once("error", (error: Error) => {
-      recordTerminal({ ...running, status: "failed", completedAt: now().toISOString(), error: error.message });
-    });
-    child.once("exit", (code: number | null) => {
-      recordTerminal({
-        ...running,
-        status: code === 0 ? "completed" : "failed",
-        completedAt: now().toISOString(),
-        ...(code === 0 ? {} : { error: `afk run exited with code ${code ?? "unknown"}` }),
-      });
-    });
-    child.unref();
     try {
       await update(workspace.root, running);
     } catch (error) {
       terminalRecorded = true;
-      if (child.kill) {
-        try {
-          child.kill();
-        } catch (killError) {
-          report(killError);
-        }
-      }
       const failed: WorkItemRunRecord = {
         ...running,
         status: "failed",
@@ -321,6 +283,33 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
     }
     runningPersisted = true;
     if (pendingTerminal) await persistTerminal(pendingTerminal);
+    // The execution runs in the background of the main process: the call
+    // returns as soon as the run is recorded, and the outcome is persisted
+    // when the execution settles.
+    void deps.execute({
+      workItemId: input.workItemId,
+      manifestPath,
+      ...(input.workflow ? { template: input.workflow } : {}),
+      executionId: runId,
+    }).then(
+      outcome => {
+        const succeeded = outcome.status === "merge_ready" || outcome.status === "done";
+        recordTerminal({
+          ...running,
+          status: succeeded ? "completed" : "failed",
+          completedAt: now().toISOString(),
+          ...(succeeded ? {} : { error: `work item execution stopped: ${outcome.status}` }),
+        });
+      },
+      (error: unknown) => {
+        recordTerminal({
+          ...running,
+          status: "failed",
+          completedAt: now().toISOString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
     return { runId, workspace: { root: workspace.root } };
   }
 

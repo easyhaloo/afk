@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -15,32 +15,13 @@ async function waitFor<T>(read: () => Promise<T | undefined>, timeoutMs = 5_000)
     if (value !== undefined) return value;
     await new Promise(resolve => setTimeout(resolve, 25));
   }
-  throw new Error("timed out waiting for child process state");
+  throw new Error("timed out waiting for the run lifecycle");
 }
 
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-describe("work item execution service process integration", () => {
-  it("forks a detached executable and persists the manifest and full run lifecycle", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "afk-desktop-process-integration-"));
-    let childPid: number | undefined;
+describe("work item execution service integration", () => {
+  it("runs the execution in process and persists the manifest and full run lifecycle", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "afk-desktop-execution-integration-"));
     try {
-      const shim = path.join(root, "afk-shim");
-      await writeFile(shim, `#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
-fs.writeFileSync(path.join(process.cwd(), ".afk", "shim-invocation.json"), JSON.stringify({ pid: process.pid, args: process.argv.slice(2) }));
-setTimeout(() => process.exit(0), 400);
-`, "utf8");
-      await chmod(shim, 0o755);
-
       const project = { platform: "github" as const, projectKey: "acme/api", name: "api" };
       const item: GlobalWorkItem = {
         id: "WI-2026-018",
@@ -68,12 +49,23 @@ setTimeout(() => process.exit(0), 400);
           await persistedRunStore.save(workspaceRoot, runs);
         },
       };
+      const invocations: Array<{ workItemId: string; manifestPath: string; executionId: string }> = [];
       const service = createWorkItemExecutionService({
         getWorkItem: async () => item,
-        resolveAfk: async () => shim,
         workspace,
         manifestStore,
         runStore,
+        // Stands in for the execution runtime: it records the call it received
+        // next to the manifest, the way a real run would leave evidence.
+        execute: async input => {
+          invocations.push(input);
+          await writeFile(
+            path.join(input.manifestPath.replace(/\/[^/]+$/, ""), "execution-invocation.json"),
+            JSON.stringify(input),
+            "utf8",
+          );
+          return { status: "done" as const };
+        },
       });
 
       const result = await service.start({
@@ -83,9 +75,8 @@ setTimeout(() => process.exit(0), 400);
       expect(result.runId).toBeTruthy();
 
       const running = (await persistedRunStore.load(result.workspace.root))[0];
-      expect(running).toMatchObject({ id: result.runId, status: "running", pid: expect.any(Number) });
-      childPid = running.pid;
-      expect(childPid).toBeTypeOf("number");
+      expect(running).toMatchObject({ id: result.runId, status: "running" });
+      expect(running).not.toHaveProperty("pid");
       expect(observedStatuses).toContain("starting");
       expect(observedStatuses).toContain("running");
       expect(await manifestStore.load(result.workspace.root)).toMatchObject({
@@ -96,36 +87,28 @@ setTimeout(() => process.exit(0), 400);
         repositories: [expect.objectContaining({ baseBranch: "main", primary: true })],
       });
 
-      const invocation = await waitFor(async () => {
-        try {
-          return JSON.parse(await readFile(path.join(result.workspace.root, ".afk", "shim-invocation.json"), "utf8")) as { pid: number; args: string[] };
-        } catch {
-          return undefined;
-        }
-      });
-      expect(invocation.pid).toBe(childPid);
-      expect(invocation.args).toEqual([
-        "execute", "--work-item-id", item.id, "--execution-manifest",
-        path.join(result.workspace.root, ".afk", "execution-manifest.json"),
-        "--execution-id", result.runId,
-      ]);
-
       const terminal = await waitFor(async () => {
         const run = (await persistedRunStore.load(result.workspace.root))[0];
         return run?.status === "completed" || run?.status === "failed" ? run : undefined;
       });
-      expect(terminal).toMatchObject({ id: result.runId, status: "completed", pid: childPid });
+      expect(terminal).toMatchObject({ id: result.runId, status: "completed" });
       expect(observedStatuses).toContain("completed");
+      expect(invocations).toEqual([{
+        workItemId: item.id,
+        manifestPath: path.join(result.workspace.root, ".afk", "execution-manifest.json"),
+        executionId: result.runId,
+      }]);
+      const invocation = JSON.parse(
+        await readFile(path.join(result.workspace.root, ".afk", "execution-invocation.json"), "utf8"),
+      ) as { workItemId: string; executionId: string };
+      expect(invocation.workItemId).toBe(item.id);
+      expect(invocation.executionId).toBe(result.runId);
+
       // Clearing the workspace pointer is a separate write from flipping the run
       // status to terminal, so it lands asynchronously — read it under waitFor
       // like the surrounding assertions, otherwise this races under load.
       await waitFor(async () => ((await workspace.read(item.id))?.currentRunId === undefined ? true : undefined));
-      await waitFor(async () => childPid !== undefined && !processIsAlive(childPid) ? true : undefined);
     } finally {
-      if (childPid !== undefined && processIsAlive(childPid)) {
-        try { process.kill(-childPid, "SIGTERM"); } catch { /* already stopped */ }
-        try { process.kill(childPid, "SIGTERM"); } catch { /* already stopped */ }
-      }
       await rm(root, { recursive: true, force: true });
     }
   });

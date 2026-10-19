@@ -5,6 +5,7 @@ import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { exec, executable, firstLine } from "../adapters/process-executor.js";
 import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter.js";
+import { AFK_VERSION } from "@afk/application";
 import { configNumber, configString, parseConfig, type ConfigObject } from "../workflow/config-parser.js";
 import { detectAgentRuntimes } from "./runtime-service.js";
 import { projectRunScopeService } from "./project-run-scope-service.js";
@@ -448,8 +449,9 @@ async function readLoopStatus(): Promise<LoopStatus> {
 export async function snapshot(workspace?: string) {
   const root = resolveWorkspace(workspace);
   const resourceWorkspaces = await projectRunScopeService.workspaces(root);
-  const afkPath = await executable("afk");
-  const version = afkPath ? await exec(afkPath, ["--version"], root) : { ok: false, stdout: "", stderr: "未在 PATH 中发现 afk" };
+  // The desktop client embeds the runtime, so it reports the version it runs
+  // rather than probing a CLI that may not be installed.
+  const afkPath = "in-process";
   const [events, workItemRuns, containers, sessions, agentRuntimes, workflow, workflowRuns, loop, workflowTemplates] = await Promise.all([
     readEvents(root),
     projectRunScopeService.runs(root, resourceWorkspaces),
@@ -461,10 +463,10 @@ export async function snapshot(workspace?: string) {
     readLoopStatus(),
     readWorkflowTemplates(root),
   ]);
-  const afkAvailable = Boolean(afkPath) && version.ok;
+  const afkAvailable = true;
   return {
     workspace: { root, afkDirectoryPresent: existsSync(path.join(root, ".afk")), eventCount: events.length + workItemRuns.length },
-    afk: { available: afkAvailable, executable: afkPath || "afk", summary: version.ok ? firstLine(version.stdout || version.stderr, "AFK 已就绪") : firstLine(version.stderr, "AFK 未就绪") },
+    afk: { available: afkAvailable, executable: afkPath, summary: `AFK 已就绪（${AFK_VERSION}）` },
     capabilities: AFK_CAPABILITY_DEFINITIONS.map(item => ({ ...item, available: afkAvailable })),
     workflow,
     workflowTemplates,

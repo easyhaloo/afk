@@ -53,6 +53,14 @@ function item(overrides: Partial<GlobalWorkItem> = {}): GlobalWorkItem {
   };
 }
 
+/** A promise whose settlement the test controls, standing in for a running execution. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
 function createStoredRunStore(stored: WorkItemRunRecord[] = []) {
   return {
     stored,
@@ -72,7 +80,7 @@ describe("work item execution service", () => {
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ executionMode: "hitl", webUrl: "https://github.com/acme/api/issues/42", description: "Implement the checkout change." }),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/hitl-task", [apiProject]), updateRun: vi.fn(async () => undefined) },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => ({ status: "done" as const }),
       resolveAgent: async id => ({ id, label: "Codex", command: "codex", executable: "/usr/local/bin/codex" }),
       openTerminalCommand,
       manifestStore,
@@ -104,9 +112,9 @@ describe("work item execution service", () => {
     expect(command).toContain("GitHub 或 GitLab Issue");
   });
 
-  it("uses atomic updates and leaves a reconciled terminal record unchanged on child exit", async () => {
+  it("uses atomic updates and leaves a reconciled terminal record unchanged when the execution finishes", async () => {
     const stored: WorkItemRunRecord[] = [];
-    const listeners = new Map<string, (...args: unknown[]) => void>();
+    const execution = deferred<{ status: "done" }>();
     const runStore = {
       load: vi.fn(async () => [...stored]),
       save: vi.fn(async () => { throw new Error("non-atomic save"); }),
@@ -115,25 +123,19 @@ describe("work item execution service", () => {
         if (next) stored.splice(0, stored.length, ...next);
       }),
     };
-    const child = {
-      pid: 101,
-      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, listener); return child; }),
-      unref: vi.fn(),
-    };
     const updateRun = vi.fn(async () => undefined);
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: () => execution.promise,
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: () => child,
     });
 
     const { runId } = await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
     expect(stored[0]?.status).toBe("running");
     stored[0] = { ...stored[0], status: "failed", error: "reconciled" };
-    listeners.get("exit")?.(0);
+    execution.resolve({ status: "done" });
 
     await vi.waitFor(() => expect(updateRun).toHaveBeenCalledWith("github:acme/api#42", undefined, runId));
     expect(stored[0]).toMatchObject({ status: "failed", error: "reconciled" });
@@ -144,7 +146,8 @@ describe("work item execution service", () => {
 
   it("rejects another run while one is active and preserves the current run", async () => {
     const { runStore } = createStoredRunStore();
-    const listeners: Array<Map<string, (...args: unknown[]) => void>> = [];
+    const execution = deferred<{ status: "done" }>();
+    const execute = vi.fn(() => execution.promise);
     let currentRunId: string | undefined;
     const updateRun = vi.fn(async (_workItemId: string, runId: string | undefined, expectedRunId?: string) => {
       if (expectedRunId === undefined || currentRunId === expectedRunId) currentRunId = runId;
@@ -152,53 +155,41 @@ describe("work item execution service", () => {
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute,
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: () => {
-        const callbacks = new Map<string, (...args: unknown[]) => void>();
-        listeners.push(callbacks);
-        const child = {
-          pid: listeners.length,
-          once: vi.fn((event: string, listener: (...args: unknown[]) => void) => { callbacks.set(event, listener); return child; }),
-          unref: vi.fn(),
-        };
-        return child;
-      },
     });
 
     const firstStart = service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
     const secondStart = service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
     const first = await firstStart;
     await expect(secondStart).rejects.toThrow("已有运行中的任务");
-    expect(listeners).toHaveLength(1);
+    expect(execute).toHaveBeenCalledTimes(1);
     expect(currentRunId).toBe(first.runId);
-    listeners[0]?.get("exit")?.(0);
+    execution.resolve({ status: "done" });
 
     await vi.waitFor(() => expect(updateRun).toHaveBeenCalledWith("github:acme/api#42", undefined, first.runId));
     expect(currentRunId).toBeUndefined();
   });
 
-  it("writes the ordered repository manifest, spawns one AFK process, and persists the selection", async () => {
+  it("writes the ordered repository manifest, starts one in-process execution, and persists the selection", async () => {
     const workspaceRoot = "/tmp/.loop-workspace/WI-2026-018";
     const allocate = vi.fn(async () => allocatedWorkspace(workspaceRoot, [webProject, apiProject], ["frontend", "backend"]));
     const updateRun = vi.fn(async () => undefined);
     const manifestStore = { save: vi.fn(async () => undefined) };
     const { stored, runStore } = createStoredRunStore();
-    const child = { pid: 4321, once: vi.fn(() => child), unref: vi.fn() };
-    const spawn = vi.fn(() => {
+    const execute = vi.fn(async () => {
       expect(stored).toEqual([expect.objectContaining({ status: "starting" })]);
       expect(stored[0]).not.toHaveProperty("pid");
       expect(updateRun).toHaveBeenCalledWith("WI-2026-018", stored[0]?.id);
-      return child;
+      return { status: "done" as const };
     });
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ id: "WI-2026-018", repositories: [apiProject, webProject], branchName: "afk/work-item-18" }),
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute,
       workspace: { allocate, updateRun },
       manifestStore,
       runStore,
-      spawn,
       now: () => new Date("2026-09-21T08:00:00.000Z"),
     });
 
@@ -225,23 +216,13 @@ describe("work item execution service", () => {
         { ...apiProject, checkoutPath: "repositories/backend", baseBranch: apiSelection.baseBranch, workingBranch: "afk/work-item-18", primary: false },
       ],
     });
-    expect(spawn).toHaveBeenCalledTimes(1);
-    expect(spawn).toHaveBeenCalledWith(
-      "/usr/local/bin/afk",
-      [
-        "execute",
-        "--work-item-id",
-        "WI-2026-018",
-        "--execution-manifest",
-        manifestPath,
-        "--template",
-        "standard-development",
-        "--execution-id",
-        result.runId,
-      ],
-      { cwd: workspaceRoot, detached: true, stdio: "ignore", env: expect.objectContaining({ PWD: workspaceRoot }) },
-    );
-    expect(child.unref).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith({
+      workItemId: "WI-2026-018",
+      manifestPath,
+      template: "standard-development",
+      executionId: result.runId,
+    });
     expect(updateRun).toHaveBeenCalledWith("WI-2026-018", expect.any(String));
     expect(result.runId).toMatch(/^desktop-[a-f\d-]{36}$/);
     expect(result.workspace).toEqual({ root: workspaceRoot });
@@ -256,7 +237,6 @@ describe("work item execution service", () => {
         { ...apiProject, checkoutPath: "repositories/backend", baseBranch: apiSelection.baseBranch },
       ],
       workspacePath: workspaceRoot,
-      pid: 4321,
     })]);
   });
 
@@ -267,11 +247,10 @@ describe("work item execution service", () => {
     const child = { pid: 4321, once: vi.fn(() => child), unref: vi.fn() };
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ id: "WI-2026-018", issueNumber: 731, repositories: [apiProject, webProject] }),
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => ({ status: "done" as const }),
       workspace: { allocate, updateRun: vi.fn(async () => undefined) },
       manifestStore,
       runStore: createStoredRunStore().runStore,
-      spawn: vi.fn(() => child),
     });
 
     await service.start({ workItemId: "WI-2026-018", repositories: [webSelection] });
@@ -291,11 +270,10 @@ describe("work item execution service", () => {
     const allocate = vi.fn();
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ repositories: [apiProject] }),
-      workspace: { allocate, updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: vi.fn() },
       runStore: { load: async () => [], save: async () => undefined },
-      spawn: vi.fn(),
     });
 
     await expect(service.start({
@@ -308,59 +286,51 @@ describe("work item execution service", () => {
   it("rejects allocated repository paths outside the workspace repositories directory", async () => {
     const workspaceRoot = "/tmp/task";
     const manifestStore = { save: vi.fn() };
-    const spawn = vi.fn();
+    const execute = vi.fn(async () => ({ status: "done" as const }));
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ repositories: [apiProject] }),
       workspace: {
         allocate: async () => ({ root: workspaceRoot, repositories: [{ project: apiProject, path: path.join(workspaceRoot, "outside", "api") }] }),
-        updateRun: vi.fn(),
+        updateRun: vi.fn(async () => undefined),
       },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => ({ status: "done" as const }),
       manifestStore,
       runStore: { load: async () => [], save: async () => undefined },
-      spawn,
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toThrow(/repositories/i);
     expect(manifestStore.save).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
-  it("places the workflow arguments after the execution manifest arguments", async () => {
-    const spawn = vi.fn(() => ({ pid: 1, once: vi.fn(), unref: vi.fn() }));
+  it("passes the workflow template to the execution runtime", async () => {
+    const execute = vi.fn(async () => ({ status: "done" as const }));
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
-      workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun: vi.fn(async () => undefined) },
+      execute,
       manifestStore: { save: async () => undefined },
       runStore: { load: async () => [], save: async () => undefined },
-      spawn,
     });
 
     await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection], workflow: "review" });
 
-    expect(spawn.mock.calls[0]?.[1]).toEqual([
-      "execute",
-      "--work-item-id",
-      "github:acme/api#42",
-      "--execution-manifest",
-      "/tmp/task/.afk/execution-manifest.json",
-      "--template",
-      "review",
-      "--execution-id",
-      expect.stringMatching(/^desktop-[a-f\d-]{36}$/),
-    ]);
+    expect(execute).toHaveBeenCalledWith({
+      workItemId: "github:acme/api#42",
+      manifestPath: "/tmp/task/.afk/execution-manifest.json",
+      template: "review",
+      executionId: expect.stringMatching(/^desktop-[a-f\d-]{36}$/),
+    });
   });
 
   it("falls back to the imported issue project when no explicit repositories exist", async () => {
     const allocate = vi.fn(async () => allocatedWorkspace("/tmp/task", [apiProject]));
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
-      workspace: { allocate, updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: async () => undefined },
       runStore: { load: async () => [], save: async () => undefined },
-      spawn: vi.fn(() => ({ pid: 1, once: vi.fn(), unref: vi.fn() })),
     });
 
     const result = await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
@@ -374,11 +344,10 @@ describe("work item execution service", () => {
     const manifestStore = { save: vi.fn() };
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ managed: false, executionEligible: false }),
-      workspace: { allocate, updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute: async () => ({ status: "done" as const }),
       manifestStore,
       runStore: { load: async () => [], save: async () => undefined },
-      spawn: vi.fn(),
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toThrow("不可执行");
@@ -389,31 +358,29 @@ describe("work item execution service", () => {
   it("rejects an empty repository selection before allocating or saving", async () => {
     const allocate = vi.fn();
     const manifestStore = { save: vi.fn() };
-    const spawn = vi.fn();
+    const execute = vi.fn(async () => ({ status: "done" as const }));
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
-      workspace: { allocate, updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute: async () => ({ status: "done" as const }),
       manifestStore,
       runStore: { load: async () => [], save: async () => undefined },
-      spawn,
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [] })).rejects.toThrow(/repositories/i);
     expect(allocate).not.toHaveBeenCalled();
     expect(manifestStore.save).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("rejects repositories that are not associated with the work item", async () => {
     const allocate = vi.fn();
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ repositories: [apiProject] }),
-      workspace: { allocate, updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: vi.fn() },
       runStore: { load: async () => [], save: async () => undefined },
-      spawn: vi.fn(),
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [webSelection] })).rejects.toThrow(/not associated|未关联/i);
@@ -424,11 +391,10 @@ describe("work item execution service", () => {
     const allocate = vi.fn();
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
-      workspace: { allocate, updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: vi.fn() },
       runStore: { load: async () => [], save: async () => undefined },
-      spawn: vi.fn(),
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection, apiSelection] })).rejects.toThrow(/duplicate repository/i);
@@ -439,11 +405,10 @@ describe("work item execution service", () => {
     const allocate = vi.fn();
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ repositories: [] }),
-      workspace: { allocate, updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: vi.fn() },
       runStore: { load: async () => [], save: async () => undefined },
-      spawn: vi.fn(),
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toThrow(/not associated|未关联/i);
@@ -454,59 +419,56 @@ describe("work item execution service", () => {
     const allocate = vi.fn();
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ branchName }),
-      workspace: { allocate, updateRun: vi.fn() },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: vi.fn() },
       runStore: { load: async () => [], save: async () => undefined },
-      spawn: vi.fn(),
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toThrow(/branchName/i);
     expect(allocate).not.toHaveBeenCalled();
   });
 
-  it("does not spawn, persist a run, or update currentRunId when manifest saving fails", async () => {
+  it("does not start the execution, persist a run, or update currentRunId when manifest saving fails", async () => {
     const saveFailure = new Error("manifest write failed");
-    const spawn = vi.fn();
+    const execute = vi.fn(async () => ({ status: "done" as const }));
     const updateRun = vi.fn();
     const runStore = { load: vi.fn(async () => []), save: vi.fn(async () => undefined) };
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: vi.fn(async () => { throw saveFailure; }) },
       runStore,
-      spawn,
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toBe(saveFailure);
-    expect(spawn).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
     expect(runStore.load).toHaveBeenCalledOnce();
     expect(runStore.save).not.toHaveBeenCalled();
     expect(updateRun).not.toHaveBeenCalled();
   });
 
-  it("does not spawn when the initial starting record cannot be persisted", async () => {
+  it("does not start the execution when the initial starting record cannot be persisted", async () => {
     const initialSaveFailure = new Error("starting record write failed");
-    const spawn = vi.fn();
+    const execute = vi.fn(async () => ({ status: "done" as const }));
     const updateRun = vi.fn();
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: async () => undefined },
       runStore: { load: async () => [], save: vi.fn(async () => { throw initialSaveFailure; }) },
-      spawn,
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toBe(initialSaveFailure);
     expect(updateRun).not.toHaveBeenCalled();
-    expect(spawn).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
-  it("does not spawn when currentRunId cannot be persisted", async () => {
+  it("does not start the execution when currentRunId cannot be persisted", async () => {
     const updateFailure = new Error("workspace update failed");
-    const spawn = vi.fn();
+    const execute = vi.fn(async () => ({ status: "done" as const }));
     const updateRun = vi.fn()
       .mockRejectedValueOnce(updateFailure)
       .mockResolvedValueOnce(undefined);
@@ -514,10 +476,9 @@ describe("work item execution service", () => {
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn,
       now: () => new Date("2026-09-21T08:00:00.000Z"),
     });
 
@@ -531,30 +492,32 @@ describe("work item execution service", () => {
     expect(updateRun).toHaveBeenNthCalledWith(1, "github:acme/api#42", expect.any(String));
     expect(updateRun).toHaveBeenNthCalledWith(2, "github:acme/api#42", undefined, expect.any(String));
     expect(updateRun).toHaveBeenCalledTimes(2);
-    expect(spawn).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
-  it("records a failed terminal state and clears currentRunId when spawn throws synchronously", async () => {
-    const spawnFailure = new Error("spawn threw");
+  it("records a failed terminal state and clears currentRunId when the execution rejects", async () => {
+    const executionFailure = new Error("execution failed");
     const updateRun = vi.fn(async () => undefined);
     const { stored, runStore } = createStoredRunStore();
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => { throw executionFailure; },
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: vi.fn(() => { throw spawnFailure; }),
       now: () => new Date("2026-09-21T08:00:00.000Z"),
     });
 
-    await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toBe(spawnFailure);
-    expect(stored).toEqual([expect.objectContaining({ status: "failed", error: "spawn threw", completedAt: "2026-09-21T08:00:00.000Z" })]);
+    await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
+
+    await vi.waitFor(() => {
+      expect(stored).toEqual([expect.objectContaining({ status: "failed", error: "execution failed", completedAt: "2026-09-21T08:00:00.000Z" })]);
+    });
     expect(updateRun).toHaveBeenNthCalledWith(1, "github:acme/api#42", expect.any(String));
     expect(updateRun).toHaveBeenNthCalledWith(2, "github:acme/api#42", undefined, expect.any(String));
   });
 
-  it("kills the child and records failure when the running record cannot be persisted", async () => {
+  it("records failure and never starts the execution when the running record cannot be persisted", async () => {
     const runningSaveFailure = new Error("running record write failed");
     const reportError = vi.fn();
     const updateRun = vi.fn(async () => undefined);
@@ -568,20 +531,19 @@ describe("work item execution service", () => {
         stored.splice(0, stored.length, ...runs);
       }),
     };
-    const child = { pid: 321, once: vi.fn(() => child), unref: vi.fn(), kill: vi.fn(() => true) };
+    const execute = vi.fn(async () => ({ status: "done" as const }));
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute,
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: () => child,
       reportError,
       now: () => new Date("2026-09-21T08:00:00.000Z"),
     });
 
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toBe(runningSaveFailure);
-    expect(child.kill).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalled();
     expect(stored).toEqual([expect.objectContaining({ status: "failed", error: "running record write failed" })]);
     expect(updateRun).toHaveBeenLastCalledWith("github:acme/api#42", undefined, expect.any(String));
     expect(reportError).toHaveBeenCalledWith(runningSaveFailure);
@@ -594,7 +556,6 @@ describe("work item execution service", () => {
     const updateRun = vi.fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(cleanupFailure);
-    const listeners = new Map<string, (...args: unknown[]) => void>();
     let saveCount = 0;
     const runStore = {
       load: vi.fn(async () => []),
@@ -603,23 +564,16 @@ describe("work item execution service", () => {
         if (saveCount === 3) throw terminalSaveFailure;
       }),
     };
-    const child = {
-      pid: 99,
-      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, listener); return child; }),
-      unref: vi.fn(),
-    };
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => { throw new Error("execution failed"); },
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: () => child,
       reportError,
     });
 
     await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
-    listeners.get("error")?.(new Error("child failed"));
 
     await vi.waitFor(() => {
       expect(reportError).toHaveBeenCalledWith(terminalSaveFailure);
@@ -628,70 +582,52 @@ describe("work item execution service", () => {
     expect(updateRun).toHaveBeenCalledTimes(2);
   });
 
-  it("persists an error that arrives before the running record save completes", async () => {
-    const listeners = new Map<string, (...args: unknown[]) => void>();
+  it("persists a failure that arrives after the running record was saved", async () => {
     const stored: WorkItemRunRecord[] = [];
-    let emitted = false;
     const runStore = {
       load: vi.fn(async () => stored),
       save: vi.fn(async (_workspace: string, runs: WorkItemRunRecord[]) => {
-        if (runs[0]?.status === "running" && !emitted) {
-          emitted = true;
-          listeners.get("error")?.(new Error("early child failure"));
-        }
         stored.splice(0, stored.length, ...runs);
       }),
-    };
-    const child = {
-      pid: 99,
-      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, listener); return child; }),
-      unref: vi.fn(),
     };
     const updateRun = vi.fn(async () => undefined);
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => { throw new Error("early execution failure"); },
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: () => child,
       now: () => new Date("2026-09-21T08:00:00.000Z"),
     });
 
     await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
 
-    expect(stored).toEqual([expect.objectContaining({ status: "failed", error: "early child failure" })]);
+    await vi.waitFor(() => {
+      expect(stored).toEqual([expect.objectContaining({ status: "failed", error: "early execution failure" })]);
+    });
     expect(updateRun).toHaveBeenNthCalledWith(2, "github:acme/api#42", undefined, expect.any(String));
     expect(updateRun).toHaveBeenCalledTimes(2);
   });
 
-  it("persists a terminal failure with repository context when the child process emits an error", async () => {
-    const listeners = new Map<string, (...args: unknown[]) => void>();
+  it("persists a terminal failure with repository context when the execution rejects", async () => {
     const { stored, runStore } = createStoredRunStore();
-    const child = {
-      pid: 99,
-      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, listener); return child; }),
-      unref: vi.fn(),
-    };
     const updateRun = vi.fn(async () => undefined);
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => { throw new Error("execution failed"); },
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: () => child,
       now: () => new Date("2026-09-21T08:00:00.000Z"),
     });
 
     const result = await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
-    listeners.get("error")?.(new Error("spawn failed"));
 
     await vi.waitFor(() => {
       expect(stored[0]).toMatchObject({
         id: result.runId,
         status: "failed",
-        error: "spawn failed",
+        error: "execution failed",
         workingBranch: "afk/42",
         repositories: [{ ...apiProject, checkoutPath: "repositories/api-service", baseBranch: apiSelection.baseBranch }],
       });
@@ -700,27 +636,19 @@ describe("work item execution service", () => {
     expect(updateRun).toHaveBeenCalledTimes(2);
   });
 
-  it("persists a completed terminal state with repository context when the child exits successfully", async () => {
-    const listeners = new Map<string, (...args: unknown[]) => void>();
+  it("persists a completed terminal state with repository context when the execution succeeds", async () => {
     const { stored, runStore } = createStoredRunStore();
-    const child = {
-      pid: 100,
-      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, listener); return child; }),
-      unref: vi.fn(),
-    };
     const updateRun = vi.fn(async () => undefined);
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => ({ status: "done" as const }),
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: () => child,
       now: () => new Date("2026-09-21T08:00:00.000Z"),
     });
 
     const result = await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
-    listeners.get("exit")?.(0);
 
     await vi.waitFor(() => {
       expect(stored[0]).toMatchObject({
@@ -735,30 +663,22 @@ describe("work item execution service", () => {
     expect(updateRun).toHaveBeenCalledTimes(2);
   });
 
-  it("persists and clears currentRunId when the child exits unsuccessfully", async () => {
-    const listeners = new Map<string, (...args: unknown[]) => void>();
+  it("persists and clears currentRunId when the execution stops without a merge", async () => {
     const { stored, runStore } = createStoredRunStore();
     const updateRun = vi.fn(async () => undefined);
-    const child = {
-      pid: 101,
-      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => { listeners.set(event, listener); return child; }),
-      unref: vi.fn(),
-    };
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item(),
       workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun },
-      resolveAfk: async () => "/usr/local/bin/afk",
+      execute: async () => ({ status: "rework" as const }),
       manifestStore: { save: async () => undefined },
       runStore,
-      spawn: () => child,
       now: () => new Date("2026-09-21T08:00:00.000Z"),
     });
 
     await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
-    listeners.get("exit")?.(7);
 
     await vi.waitFor(() => {
-      expect(stored[0]).toMatchObject({ status: "failed", error: "afk run exited with code 7" });
+      expect(stored[0]).toMatchObject({ status: "failed", error: "work item execution stopped: rework" });
       expect(updateRun).toHaveBeenNthCalledWith(2, "github:acme/api#42", undefined, expect.any(String));
     });
     expect(updateRun).toHaveBeenCalledTimes(2);

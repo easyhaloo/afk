@@ -12,7 +12,8 @@ const extraArgs = process.argv.slice(3);
 // handles the version contract and last-resort errors.
 async function main() {
   if (cmd === '--version' || cmd === '-V') {
-    console.log('0.1.0');
+    const { AFK_VERSION } = await import('@afk/application');
+    console.log(AFK_VERSION);
     return;
   }
 

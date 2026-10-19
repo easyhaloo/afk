@@ -35,12 +35,12 @@ import { createWorkItemInventoryService } from "../services/work-item-inventory-
 import { createWorkItemInventoryStore } from "../services/work-item-inventory-store.js";
 import { createWorkItemInventorySyncService } from "../services/work-item-inventory-sync-service.js";
 import { createWorkItemExecutionService } from "../services/work-item-execution-service.js";
+import { executeWorkItem } from "@afk/execution";
 import { createWorkItemExecutionQueryService } from "../services/work-item-execution-query-service.js";
 import { createRunEventQueryAdapter } from "../adapters/run-event-query-adapter.js";
 import { createWorkItemExecutionManifestStore } from "../services/work-item-execution-manifest-store.js";
 import { createWorkItemRunStore } from "../services/work-item-run-store.js";
 import { createWorkItemRunHistoryService } from "../services/work-item-run-history-service.js";
-import { resolveWorkItemCli } from "../services/work-item-cli-service.js";
 import { createExecutionWorkspaceService } from "../services/execution-workspace-service.js";
 import { WorkflowGraphService } from "../services/graph-service.js";
 import { saveWorkspacePreference } from "../services/workspace-preference-service.js";
@@ -135,21 +135,6 @@ const sshService = createSshService({
   externalTerminal,
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
 });
-async function resolveDesktopAfk() {
-    if (process.env.AFK_DESKTOP_CLI) return { command: process.env.AFK_DESKTOP_CLI, args: [] };
-    const localEntry = path.resolve(app.getAppPath(), "../dist/index.js");
-    try {
-      await access(localEntry);
-      const node = await exec("/usr/bin/which", ["node"]);
-      const nodePath = node.ok ? node.stdout.split("\n")[0]?.trim() ?? "" : "";
-      if (nodePath.startsWith("/")) return { command: nodePath, args: [localEntry] };
-    } catch {
-      // Fall through to an installed AFK CLI for packaged applications.
-    }
-    const result = await exec("/usr/bin/which", ["afk"]);
-    const candidate = result.ok ? result.stdout.split("\n")[0]?.trim() ?? "" : "";
-    return candidate.startsWith("/") ? { command: candidate, args: [] } : { command: "", args: [] };
-}
 const backlogService = createBacklogService({
   providers: (workspace, platform) => backlogProviders(workspace, platform),
   resolveWorkspace,
@@ -185,19 +170,12 @@ const workItemExecutionService = createWorkItemExecutionService({
     if (!item) throw new Error(`工作项 ${workItemId} 不存在或当前账号无权访问`);
     return item;
   },
-  resolveAfk: async () => {
-    return resolveWorkItemCli({
-      appPath: app.getAppPath(),
-      packaged: app.isPackaged,
-      configuredCli: process.env.AFK_DESKTOP_CLI,
-      exists: async file => access(file).then(() => true, () => false),
-      which: async () => (await resolveDesktopAfk()).command,
-      help: async command => {
-        const result = await exec(command, ["execute", "--help"], undefined, undefined, { timeoutMs: 10_000 });
-        return { ok: result.ok, stdout: result.stdout };
-      },
-    });
-  },
+  execute: async input => executeWorkItem({
+    workItemId: input.workItemId,
+    manifestPath: input.manifestPath,
+    ...(input.template ? { template: input.template } : {}),
+    executionId: input.executionId,
+  }),
   resolveAgent: async (id) => {
     const runtime = (await detectAgentRuntimes()).find(candidate => candidate.id === id && candidate.available);
     return runtime ? { id: runtime.id, label: runtime.label, command: runtime.command, executable: runtime.executable } : undefined;
@@ -215,8 +193,30 @@ const backlogRuntimeService = createBacklogRuntimeService({
 });
 const workflowGraphService = new WorkflowGraphService();
 const backlogExecutionService = createBacklogExecutionService({
-  resolveAfk: resolveDesktopAfk,
   resolveWorkspace,
+  startExecution: async (workspace: string, input: { workItemId: string; template?: string }) => {
+    const workItem = (await workItemInventoryService.list()).items.find(candidate => candidate.id === input.workItemId);
+    if (!workItem) throw new Error(`工作项 ${input.workItemId} 不存在或当前账号无权访问`);
+    const associated = workItem.repositories === undefined ? [workItem.project] : workItem.repositories;
+    const baseBranch = await workflowTargetBranch(resolveWorkspace(workspace));
+    return workItemExecutionService.start({
+      workItemId: input.workItemId,
+      repositories: associated.map(repository => ({
+        ...repository,
+        checkoutPath: `repositories/${repository.name}`,
+        baseBranch,
+      })),
+      ...(input.template ? { workflow: input.template } : {}),
+    });
+  },
+  executionState: async (workspace: string, runId: string) => {
+    const runs = await workItemRunStore.load(resolveWorkspace(workspace));
+    const run = runs.find(candidate => candidate.id === runId);
+    if (!run) return "unknown" as const;
+    if (run.status === "completed") return "completed" as const;
+    if (run.status === "failed") return "failed" as const;
+    return "running" as const;
+  },
   providers: async (workspace: string) => {
     const bundle = await providerBundle(workspace);
     return { backlog: bundle.backlog, changes: bundle.changes };
@@ -227,10 +227,6 @@ const backlogExecutionService = createBacklogExecutionService({
   validateTemplate: async (workspace, template) => (await workflowGraphService.generate({ workspace: resolveWorkspace(workspace), templateId: template, format: "json" })).status.state !== "rejected",
   invalidateBacklogList: backlogService.invalidateListCache,
   store: backlogRunStore,
-  exec: async (command, args, cwd) => {
-    const result = await exec(command, args, cwd);
-    return { ok: result.ok, stdout: result.stdout, stderr: result.stderr };
-  },
 });
 
 function fingerprintInput(value: unknown): SshFingerprint {

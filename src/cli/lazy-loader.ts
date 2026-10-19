@@ -2,6 +2,7 @@
  * Lazy-loads command modules for all non-board commands.
  */
 import { Command } from 'commander';
+import { AFK_VERSION } from '@afk/application';
 import { COMMANDS } from './command-registry.js';
 
 export async function lazyLoad(cmd: string, extraArgs: string[]) {
@@ -11,7 +12,7 @@ export async function lazyLoad(cmd: string, extraArgs: string[]) {
     try {
       const register = await entry.loader();
       const program = new Command();
-      program.name('afk').version('0.1.0').exitOverride();
+      program.name('afk').version(AFK_VERSION).exitOverride();
       register(program, { argv: ['node', 'afk', cmd, ...extraArgs] });
 
       // Parse on the command that owns the remaining args. Commander 12

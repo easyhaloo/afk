@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildBacklogRunArgs,
-  createBacklogExecutionService,
-} from "../../electron/services/backlog-execution-service";
+import { createBacklogExecutionService } from "../../electron/services/backlog-execution-service";
 import type { BacklogItem, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract";
 
 describe("backlog execution service", () => {
@@ -37,258 +34,123 @@ describe("backlog execution service", () => {
     };
   }
 
-  it("builds a single-backlog command without shell interpolation", () => {
-    expect(buildBacklogRunArgs({ backlogId: "42", template: "feature-delivery" })).toEqual([
-      "loop",
-      "--backlog-id",
-      "42",
-      "--max-iterations",
-      "1",
-      "--template",
-      "feature-delivery",
-    ]);
-  });
-
-  it("allows a rework backlog to start a new execution attempt", async () => {
-    const values = new Map<string, BacklogRunSummary[]>();
-    const store = {
-      load: vi.fn(async (workspace: string) => values.get(workspace) ?? []),
-      save: vi.fn(async (workspace: string, runs: BacklogRunSummary[]) => { values.set(workspace, runs); }),
+  function backlog(overrides: Partial<BacklogItem> = {}): BacklogItem {
+    return {
+      id: "42",
+      title: "工作项",
+      dependsOn: [],
+      state: "ready",
+      executionMode: "afk",
+      tags: [],
+      branchName: "afk/backlog-42",
+      providerRef: "stub:42",
+      ...overrides,
     };
-    const child = { pid: 1234, once: vi.fn(), unref: vi.fn() };
-    const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: value => value,
-      getBacklog: async () => ({ id: "42", title: "返工项", dependsOn: [], state: "rework", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" }),
-      store,
-      spawn: vi.fn(() => child),
-    });
+  }
 
-    await expect(service.start("/repo", { backlogId: "42" })).resolves.toMatchObject({ backlogId: "42", status: "running" });
-  });
+  function summary(item: BacklogItem, extra: Partial<BacklogRuntimeSummary> = {}): BacklogRuntimeSummary {
+    return { backlog: item, ...extra } as BacklogRuntimeSummary;
+  }
 
-  it("preserves the local CLI entry point when spawning the loop", async () => {
-    const spawn = vi.fn((command: string, args: string[]) => ({ pid: 1234, once: vi.fn(), unref: vi.fn() }));
-    const service = createBacklogExecutionService({
-      resolveAfk: async () => ({ command: "/usr/bin/node", args: ["/repo/dist/index.js"] }),
-      resolveWorkspace: workspace => workspace,
-      getBacklog: async () => ({ id: "42", title: "工作项", dependsOn: [], state: "ready", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" }),
-      store: createMemoryStore(),
-      spawn,
-    });
-    await service.start("/repo", { backlogId: "42" });
-    expect(spawn.mock.calls[0].slice(0, 2)).toEqual(["/usr/bin/node", ["/repo/dist/index.js", "loop", "--backlog-id", "42", "--max-iterations", "1"]]);
-  });
-
-  it("starts one run and returns a desktop run handle", async () => {
-    const child = {
-      pid: process.pid,
-      once: vi.fn().mockReturnThis(),
-      unref: vi.fn(),
-    };
-    const spawn = vi.fn(() => child);
+  it("starts the work item execution in process and records a running summary", async () => {
     const store = createMemoryStore();
+    const startExecution = vi.fn(async () => ({ runId: "desktop-work-item-run" }));
     const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
       resolveWorkspace: (workspace) => workspace,
-      getBacklog: async () => ({ id: "42", title: "工作项", dependsOn: [], state: "ready", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" }),
+      startExecution,
+      executionState: async () => "running" as const,
+      providers: async () => createPorts(backlog()),
+      targetBranch: async () => "main",
+      getBacklog: async () => backlog({ workItemId: "github:acme/api#42" }),
       store,
-      spawn,
-      now: () => new Date("2026-09-08T10:00:00.000Z"),
     });
 
     const result = await service.start("/repo", { backlogId: "42", template: "feature-delivery" });
 
-    expect(spawn).toHaveBeenCalledWith(
-      "/usr/local/bin/afk",
-      ["loop", "--backlog-id", "42", "--max-iterations", "1", "--template", "feature-delivery"],
-      expect.objectContaining({ cwd: "/repo", env: expect.objectContaining({ PWD: "/repo" }) }),
-    );
-    expect(child.unref).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({
-      backlogId: "42",
-      status: "running",
-      startedAt: "2026-09-08T10:00:00.000Z",
-      pid: process.pid,
-      template: "feature-delivery",
-    });
-    expect(await service.list("/repo", "42")).toEqual([result]);
+    expect(startExecution).toHaveBeenCalledWith("/repo", { workItemId: "github:acme/api#42", template: "feature-delivery" });
+    expect(result).toMatchObject({ backlogId: "42", status: "running", template: "feature-delivery" });
+    expect((await store.load("/repo"))[0]).toMatchObject({ status: "running" });
   });
 
-  it("invalidates the provider list cache when the loop exits", async () => {
-    const listeners = new Map<string, (...args: unknown[]) => void>();
-    const child = {
-      pid: 1234,
-      once: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
-        listeners.set(event, listener);
-        return child;
-      }),
-      unref: vi.fn(),
-    };
-    const invalidateBacklogList = vi.fn();
+  it("records a failed summary when the delegated execution cannot start", async () => {
+    const store = createMemoryStore();
     const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: value => value,
+      resolveWorkspace: (workspace) => workspace,
+      startExecution: async () => { throw new Error("execution refused"); },
+      executionState: async () => "unknown" as const,
+      providers: async () => createPorts(backlog()),
+      targetBranch: async () => "main",
       getBacklog: async () => backlog(),
-      store: createMemoryStore(),
-      spawn: vi.fn(() => child),
-      invalidateBacklogList,
+      store,
+    });
+
+    await expect(service.start("/repo", { backlogId: "42" })).rejects.toThrow("execution refused");
+    expect((await store.load("/repo"))[0]).toMatchObject({ status: "failed", error: "execution refused" });
+  });
+
+  it("follows the delegated execution to its terminal state", async () => {
+    const store = createMemoryStore();
+    let state: "running" | "completed" | "failed" = "running";
+    const service = createBacklogExecutionService({
+      resolveWorkspace: (workspace) => workspace,
+      startExecution: async () => ({ runId: "desktop-work-item-run" }),
+      executionState: async () => state,
+      providers: async () => createPorts(backlog()),
+      targetBranch: async () => "main",
+      getBacklog: async () => backlog(),
+      store,
+      sleep: async () => undefined,
     });
 
     await service.start("/repo", { backlogId: "42" });
-    expect(invalidateBacklogList).not.toHaveBeenCalled();
-    listeners.get("exit")?.(0);
-    expect(invalidateBacklogList).toHaveBeenCalledOnce();
+    state = "completed";
+    await vi.waitFor(async () => {
+      expect((await store.load("/repo"))[0]).toMatchObject({ status: "completed" });
+    });
   });
 
-  it("rejects non-ready items before resolving the CLI", async () => {
-    const spawn = vi.fn();
+  it("marks the run failed and interrupts the backlog when the user stops it", async () => {
     const store = createMemoryStore();
-    const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: (workspace) => workspace,
-      getBacklog: async () => ({ id: "42", title: "工作项", dependsOn: [], state: "in_progress", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" }),
-      store,
-      spawn,
-    });
-
-    await expect(service.start("/repo", { backlogId: "42" })).rejects.toThrow("只有 ready/rework 项可以启动");
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it("rejects HITL items even when their lifecycle state is ready", async () => {
-    const spawn = vi.fn();
-    const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: (workspace) => workspace,
-      getBacklog: async () => ({ id: "42", title: "人工项", dependsOn: [], state: "ready", executionMode: "hitl", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" }),
-      store: createMemoryStore(),
-      spawn,
-    });
-
-    await expect(service.start("/repo", { backlogId: "42" })).rejects.toThrow("只有 AFK 自动项可以启动");
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it("rejects an invalid selected template before spawning", async () => {
-    const spawn = vi.fn();
-    const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: (workspace) => workspace,
-      getBacklog: async () => backlog(),
-      validateTemplate: async () => false,
-      store: createMemoryStore(),
-      spawn,
-    });
-
-    await expect(service.start("/repo", { backlogId: "42", template: "missing-template" })).rejects.toThrow("not found or invalid");
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it("stops the local loop, escalates to SIGKILL, then interrupts an active backlog", async () => {
-    const store = createMemoryStore();
-    await store.save("/repo", [{ id: "desktop-42", backlogId: "42", status: "running", startedAt: "2026-09-17T00:00:00.000Z", pid: 1234 }]);
-    const active = backlog({ state: "in_progress", executionMode: "afk" });
-    const blocked = backlog({ state: "blocked", executionMode: "hitl" });
-    const getSummary = vi.fn()
-      .mockResolvedValueOnce(summary(active))
-      .mockResolvedValueOnce(summary(blocked));
-    const kill = vi.fn();
-    const ports = createPorts(active);
-    const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: value => value,
-      providers: async () => ports,
-      targetBranch: async () => "main",
-      getBacklog: async () => active,
-      getSummary,
-      store,
-      kill,
-      isPidAlive: () => true,
-      stopTimeoutMs: 0,
-    });
-
-    await expect(service.stop("/repo", "42")).resolves.toEqual(summary(blocked));
-    expect(kill.mock.calls).toEqual([[1234, "SIGTERM"], [1234, "SIGKILL"]]);
-    expect(ports.backlog.transition).toHaveBeenCalledWith("42", "blocked", { reason: "用户从桌面停止执行" });
-    expect(ports.backlog.setExecutionMode).toHaveBeenCalledWith("42", "hitl");
-  });
-
-  it("continues stop recovery when the process exits between the liveness check and SIGTERM", async () => {
-    const store = createMemoryStore();
-    await store.save("/repo", [{ id: "desktop-42", backlogId: "42", status: "running", startedAt: "2026-09-17T00:00:00.000Z", pid: 1234 }]);
+    await store.save("/repo", [{ id: "desktop-42", backlogId: "42", status: "running", startedAt: "2026-09-17T00:00:00.000Z" }]);
     const active = backlog({ state: "in_progress" });
-    const blocked = summary(backlog({ state: "blocked", executionMode: "hitl" }));
-    const missing = Object.assign(new Error("missing"), { code: "ESRCH" });
     const ports = createPorts(active);
     const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: value => value,
+      resolveWorkspace: (workspace) => workspace,
+      startExecution: async () => ({ runId: "desktop-work-item-run" }),
+      executionState: async () => "running" as const,
       providers: async () => ports,
       targetBranch: async () => "main",
       getBacklog: async () => active,
-      getSummary: vi.fn().mockResolvedValueOnce(summary(active)).mockResolvedValueOnce(blocked),
+      getSummary: vi.fn().mockResolvedValueOnce(summary(active)).mockResolvedValueOnce(summary(backlog({ state: "blocked", executionMode: "hitl" }))),
       store,
-      kill: () => { throw missing; },
-      isPidAlive: () => true,
-      stopTimeoutMs: 0,
     });
 
-    await expect(service.stop("/repo", "42")).resolves.toEqual(blocked);
-    expect(ports.backlog.transition).toHaveBeenCalledOnce();
+    await service.stop("/repo", "42");
+
     expect((await store.load("/repo"))[0]).toMatchObject({ status: "failed", error: "用户从桌面停止执行" });
-  });
-
-  it("recovers only after confirming the PID is dead and runtime is still stale", async () => {
-    const stale = summary(backlog({ state: "verification", executionMode: "afk" }), {
-      activeRun: { id: "desktop-42", backlogId: "42", status: "failed", startedAt: "2026-09-17T00:00:00.000Z", pid: 1234 },
-      runtime: { runId: "run-42", status: "stale", phase: "verifying", heartbeatAt: "2026-09-17T00:00:00.000Z" },
-    });
-    const blocked = summary(backlog({ state: "blocked", executionMode: "hitl" }));
-    const getSummary = vi.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(stale).mockResolvedValueOnce(blocked);
-    const ports = createPorts(stale.backlog);
-    const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: value => value,
-      providers: async () => ports,
-      targetBranch: async () => "main",
-      getBacklog: async () => stale.backlog,
-      getSummary,
-      store: createMemoryStore(),
-      isPidAlive: () => false,
-    });
-
-    await expect(service.recover("/repo", "42")).resolves.toEqual(blocked);
-    expect(getSummary).toHaveBeenCalledTimes(3);
-    expect(ports.backlog.transition).toHaveBeenCalledWith("42", "blocked", { reason: "桌面恢复 stale 运行" });
+    expect(ports.backlog.transition).toHaveBeenCalledWith("42", "blocked", { reason: "用户从桌面停止执行" });
   });
 
   it("retries through the intent command and preserves the previous template", async () => {
     const store = createMemoryStore();
     await store.save("/repo", [{ id: "desktop-old", backlogId: "42", status: "failed", startedAt: "2026-09-17T00:00:00.000Z", template: "feature-delivery" }]);
     const blocked = backlog({ state: "blocked", executionMode: "hitl" });
-    const rework = backlog({ state: "rework", executionMode: "afk" });
-    const spawn = vi.fn(() => ({ pid: 4567, once: vi.fn().mockReturnThis(), unref: vi.fn() }));
     const ports = createPorts(blocked);
+    const startExecution = vi.fn(async () => ({ runId: "desktop-work-item-run" }));
     const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: value => value,
+      resolveWorkspace: (workspace) => workspace,
+      startExecution,
+      executionState: async () => "running" as const,
       providers: async () => ports,
       targetBranch: async () => "main",
-      getBacklog: vi.fn().mockResolvedValueOnce(rework),
+      getBacklog: vi.fn().mockResolvedValueOnce(backlog({ state: "rework", executionMode: "afk" })),
       getSummary: async () => summary(blocked),
       store,
-      spawn,
     });
 
     const run = await service.retry("/repo", { backlogId: "42", reason: "已修复失败检查" });
 
     expect(ports.backlog.createRework).toHaveBeenCalledWith("42", expect.objectContaining({ source: "operator", summary: "已修复失败检查" }));
-    expect(spawn).toHaveBeenCalledWith(
-      "/usr/local/bin/afk",
-      ["loop", "--backlog-id", "42", "--max-iterations", "1", "--template", "feature-delivery"],
-      expect.objectContaining({ cwd: "/repo" }),
-    );
     expect(run.template).toBe("feature-delivery");
   });
 
@@ -297,8 +159,9 @@ describe("backlog execution service", () => {
     const done = summary(backlog({ state: "done", executionMode: "hitl" }));
     const ports = createPorts(mergeReady);
     const service = createBacklogExecutionService({
-      resolveAfk: async () => "/usr/local/bin/afk",
-      resolveWorkspace: value => value,
+      resolveWorkspace: (workspace) => workspace,
+      startExecution: async () => ({ runId: "desktop-work-item-run" }),
+      executionState: async () => "running" as const,
       providers: async () => ports,
       targetBranch: async () => "main",
       getBacklog: async () => mergeReady,
@@ -310,12 +173,27 @@ describe("backlog execution service", () => {
     expect(ports.changes.merge).toHaveBeenCalledWith("7");
     expect(ports.backlog.transition).toHaveBeenCalledWith("42", "done", { changeId: "7" });
   });
+
+  it("interrupts a stale runtime when recovering", async () => {
+    const stale = summary(backlog({ state: "verification", executionMode: "afk" }), {
+      activeRun: { id: "desktop-42", backlogId: "42", status: "failed", startedAt: "2026-09-17T00:00:00.000Z" },
+      runtime: { runId: "run-42", status: "stale", phase: "verifying", heartbeatAt: "2026-09-17T00:00:00.000Z" },
+    });
+    const blocked = summary(backlog({ state: "blocked", executionMode: "hitl" }));
+    const ports = createPorts(stale.backlog);
+    const getSummary = vi.fn().mockResolvedValueOnce(stale).mockResolvedValueOnce(stale).mockResolvedValueOnce(blocked);
+    const service = createBacklogExecutionService({
+      resolveWorkspace: (workspace) => workspace,
+      startExecution: async () => ({ runId: "desktop-work-item-run" }),
+      executionState: async () => "running" as const,
+      providers: async () => ports,
+      targetBranch: async () => "main",
+      getBacklog: async () => stale.backlog,
+      getSummary,
+      store: createMemoryStore(),
+    });
+
+    await expect(service.recover("/repo", "42")).resolves.toEqual(blocked);
+    expect(ports.backlog.transition).toHaveBeenCalledWith("42", "blocked", { reason: "桌面恢复 stale 运行" });
+  });
 });
-
-function backlog(overrides: Partial<BacklogItem> = {}): BacklogItem {
-  return { id: "42", title: "工作项", dependsOn: [], state: "ready", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42", ...overrides };
-}
-
-function summary(item: BacklogItem, overrides: Partial<BacklogRuntimeSummary> = {}): BacklogRuntimeSummary {
-  return { backlogId: item.id, backlog: item, ...overrides };
-}

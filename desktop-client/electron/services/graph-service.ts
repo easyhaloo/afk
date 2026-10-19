@@ -1,10 +1,8 @@
-import { execFile } from 'node:child_process';
-import { existsSync, promises as fs } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import { generateWorkflowGraph, writeGraphCache } from "@afk/execution";
 import type { WorkflowGraphGenerateRequest, WorkflowGraphGenerateResult, WorkflowGraphStatus } from '../../shared/ipc-contract.js';
 
-const run = promisify(execFile);
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function validateRequest(request: WorkflowGraphGenerateRequest): void {
@@ -31,17 +29,18 @@ export class WorkflowGraphService {
     }
   }
 
+  /**
+   * Generate the workflow graph in process, through the same use case the
+   * `afk graph workflow` command calls.
+   */
   async generate(request: WorkflowGraphGenerateRequest): Promise<WorkflowGraphGenerateResult> {
     validateRequest(request);
     const format = request.format ?? 'json';
-    const localCli = path.resolve(request.workspace, 'node_modules', '.bin', 'afk');
-    const cli = existsSync(localCli) ? localCli : (process.env.AFK_CLI ?? 'afk');
     try {
-      const args = ['graph', 'workflow', request.templateId, '--project', request.workspace, '--format', format, '--validate'];
-      const { stdout } = await run(cli, args, { cwd: request.workspace, timeout: 30_000, maxBuffer: 8_000_000 });
-      const payload = JSON.parse(String(stdout)) as { cache?: { directory?: string } };
+      const result = await generateWorkflowGraph({ projectRoot: request.workspace, template: request.templateId });
+      const cache = await writeGraphCache(request.workspace, result, format);
       const status = await this.status(request.workspace, request.templateId);
-      return { status, outputPath: payload.cache?.directory };
+      return { status, outputPath: cache.directory };
     } catch (error) {
       const previous = await this.status(request.workspace, request.templateId);
       return {

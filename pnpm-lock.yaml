@@ -172,6 +172,9 @@ importers:
       '@afk/core':
         specifier: workspace:*
         version: link:../packages/afk-core
+      '@afk/execution':
+        specifier: workspace:*
+        version: link:../packages/afk-execution
       '@afk/infrastructure':
         specifier: workspace:*
         version: link:../packages/afk-infrastructure

@@ -1,4 +1,3 @@
-import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   confirmBacklogMerge,
@@ -7,18 +6,23 @@ import {
   type BacklogChangeProvider,
   type QABacklogProvider,
 } from "@afk/application";
-import { normalizeCliInvocation, type CliInvocation } from "../lib/cli-invocation.js";
 import type { BacklogItem, BacklogRunRetryInput, BacklogRunStartInput, BacklogRunSummary, BacklogRuntimeSummary } from "../../shared/backlog-contract.js";
 import type { createBacklogRunStore } from "./backlog-run-store.js";
 
-type SpawnedProcess = Pick<ChildProcess, "pid" | "once" | "unref">;
 type BacklogSpawnOptions = { cwd: string; detached: boolean; stdio: "ignore"; env?: NodeJS.ProcessEnv };
-type ExecResult = { ok: boolean; stdout: string; stderr: string };
-type Signal = "SIGTERM" | "SIGKILL";
 
 export type BacklogExecutionServiceDeps = {
-  resolveAfk: () => Promise<string | CliInvocation>;
   resolveWorkspace: (input: string) => string;
+  /**
+   * Start the execution for a backlog's work item. The desktop runs the
+   * execution in process, through the same runtime the CLI drives.
+   */
+  startExecution: (workspace: string, input: { workItemId: string; template?: string }) => Promise<{ runId: string }>;
+  /**
+   * Report the state of a delegated execution, so the backlog run follows
+   * the work item run it started.
+   */
+  executionState: (workspace: string, runId: string) => Promise<"running" | "completed" | "failed" | "unknown">;
   /**
    * Resolve the backlog control ports for a workspace. The control commands
    * are application use cases, so the desktop calls them in process rather
@@ -35,28 +39,14 @@ export type BacklogExecutionServiceDeps = {
   validateTemplate?: (workspace: string, template: string) => Promise<boolean>;
   invalidateBacklogList?: () => void;
   store: ReturnType<typeof createBacklogRunStore>;
-  spawn?: (command: string, args: string[], options: BacklogSpawnOptions) => SpawnedProcess;
-  exec?: (command: string, args: string[], cwd: string) => Promise<ExecResult>;
-  kill?: (pid: number, signal: Signal) => void;
-  isPidAlive?: (pid: number) => boolean;
   sleep?: (ms: number) => Promise<void>;
   stopTimeoutMs?: number;
   now?: () => Date;
 };
 
-export function buildBacklogRunArgs(input: BacklogRunStartInput): string[] {
-  const args = ["loop", "--backlog-id", input.backlogId, "--max-iterations", "1"];
-  if (input.template) args.push("--template", input.template);
-  return args;
-}
-
 export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps) {
-  const spawn = deps.spawn ?? ((command, args, options) => nodeSpawn(command, args, options));
   const now = deps.now ?? (() => new Date());
-  const isPidAlive = deps.isPidAlive ?? defaultIsProcessAlive;
-  const kill = deps.kill ?? ((pid, signal) => process.kill(pid, signal));
   const sleep = deps.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const stopTimeoutMs = deps.stopTimeoutMs ?? 2_000;
   const operationLocks = new Map<string, Promise<void>>();
   let storeWrite = Promise.resolve();
 
@@ -117,18 +107,15 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
     if (input.template && deps.validateTemplate && !(await deps.validateTemplate(workspace, input.template))) {
       throw new Error(`Workflow template not found or invalid: ${input.template}`);
     }
-    const invocation = await requireAfk();
-    const root = deps.resolveWorkspace(workspace);
+    const workItemId = backlog.workItemId ?? backlog.id;
     const startedAt = now().toISOString();
     const runId = `desktop-${input.backlogId}-${randomUUID()}`;
-    const child = spawn(invocation.command, [...invocation.args, ...buildBacklogRunArgs(input)], { cwd: root, detached: true, stdio: "ignore", env: { ...process.env, PWD: root } });
     const summary: BacklogRunSummary = {
       id: runId,
       backlogId: input.backlogId,
       status: "running",
       startedAt,
       ...(input.template ? { template: input.template } : {}),
-      ...(typeof child.pid === "number" ? { pid: child.pid } : {}),
     };
     let persisted = false;
     let pendingTerminal: BacklogRunSummary | undefined;
@@ -136,19 +123,48 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
       if (persisted) void updateRunning(workspace, terminal);
       else pendingTerminal = terminal;
     };
-    child.once("error", (error: Error) => {
+    let executionRunId: string;
+    try {
+      const started = await deps.startExecution(workspace, { workItemId, ...(input.template ? { template: input.template } : {}) });
+      executionRunId = started.runId;
+    } catch (error) {
       deps.invalidateBacklogList?.();
-      recordTerminal({ ...summary, status: "failed", error: error.message });
-    });
-    child.once("exit", (code: number | null) => {
-      deps.invalidateBacklogList?.();
-      recordTerminal({ ...summary, status: code === 0 ? "completed" : "failed", ...(code === 0 ? {} : { error: `afk loop exited with code ${code ?? "unknown"}` }) });
-    });
-    child.unref();
+      const failed: BacklogRunSummary = {
+        ...summary,
+        status: "failed",
+        error: error instanceof Error ? error.message : String(error),
+      };
+      await update(workspace, failed);
+      throw error;
+    }
     await update(workspace, summary);
     persisted = true;
     if (pendingTerminal) await updateRunning(workspace, pendingTerminal);
+    // The delegated execution owns the lifecycle; the backlog run follows it.
+    void followExecution(workspace, executionRunId, summary, recordTerminal);
     return summary;
+  }
+
+  async function followExecution(
+    workspace: string,
+    executionRunId: string,
+    summary: BacklogRunSummary,
+    recordTerminal: (terminal: BacklogRunSummary) => void,
+  ): Promise<void> {
+    const deadline = Date.now() + (deps.stopTimeoutMs ?? 2_000) * 60;
+    while (Date.now() < deadline) {
+      const state = await deps.executionState(workspace, executionRunId).catch(() => "unknown" as const);
+      if (state === "completed" || state === "failed") {
+        deps.invalidateBacklogList?.();
+        recordTerminal({
+          ...summary,
+          status: state === "completed" ? "completed" : "failed",
+          ...(state === "completed" ? {} : { error: "工作项执行未完成" }),
+        });
+        return;
+      }
+      await (deps.sleep ?? (async (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))))(500);
+    }
   }
 
   async function start(workspace: string, input: BacklogRunStartInput): Promise<BacklogRunSummary> {
@@ -158,12 +174,7 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
   async function list(workspace: string, backlogId?: string): Promise<BacklogRunSummary[]> {
     return withStore(async () => {
       const stored = await deps.store.load(workspace);
-      const refreshed = stored.map((run) => {
-        if (run.status !== "running" || run.pid === undefined || isPidAlive(run.pid)) return run;
-        return { ...run, status: "failed" as const, error: "桌面应用重启后未检测到原 AFK 进程" };
-      });
-      if (JSON.stringify(refreshed) !== JSON.stringify(stored)) await deps.store.save(workspace, refreshed);
-      return refreshed.filter((run) => !backlogId || run.backlogId === backlogId);
+      return stored.filter((run) => !backlogId || run.backlogId === backlogId);
     });
   }
 
@@ -172,12 +183,6 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
       const run = (await withStore(() => deps.store.load(workspace)))
         .filter((item) => item.backlogId === backlogId && item.status === "running")
         .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
-      if (run?.pid !== undefined && isPidAlive(run.pid)) {
-        safeKill(run.pid, "SIGTERM");
-        const deadline = Date.now() + stopTimeoutMs;
-        while (isPidAlive(run.pid) && Date.now() < deadline) await sleep(Math.min(50, deadline - Date.now()));
-        if (isPidAlive(run.pid)) safeKill(run.pid, "SIGKILL");
-      }
       if (run) await update(workspace, { ...run, status: "failed", error: "用户从桌面停止执行" });
       const current = await summary(workspace, backlogId);
       if (current.backlog.state === "in_progress" || current.backlog.state === "verification") {
@@ -192,10 +197,8 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
     return withLock(backlogId, async () => {
       const initial = await summary(workspace, backlogId);
       if (initial.runtime?.status !== "stale") throw new Error(`Backlog ${backlogId} 当前没有 stale runtime`);
-      if (initial.activeRun?.pid !== undefined && isPidAlive(initial.activeRun.pid)) throw new Error(`Backlog ${backlogId} 的 AFK 进程仍在运行`);
       const current = await summary(workspace, backlogId);
       if (current.runtime?.status !== "stale") throw new Error(`Backlog ${backlogId} runtime 已恢复，不再 stale`);
-      if (current.activeRun?.pid !== undefined && isPidAlive(current.activeRun.pid)) throw new Error(`Backlog ${backlogId} 的 AFK 进程已恢复`);
       if (current.backlog.state === "in_progress" || current.backlog.state === "verification") {
         await runIntent(workspace, ports => interruptBacklog(ports.backlog, backlogId, "桌面恢复 stale 运行"));
         return summary(workspace, backlogId);
@@ -208,7 +211,6 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
     return withLock(input.backlogId, async () => {
       const current = await summary(workspace, input.backlogId);
       if (current.backlog.state !== "blocked" || current.backlog.executionMode !== "hitl") throw new Error(`Backlog ${input.backlogId} 只有 blocked + hitl 状态可以重试`);
-      if (current.activeRun?.pid !== undefined && isPidAlive(current.activeRun.pid)) throw new Error(`Backlog ${input.backlogId} 的 AFK 进程仍在运行`);
       if (current.runtime?.status === "running") throw new Error(`Backlog ${input.backlogId} 仍有新鲜 runtime`);
       const previous = (await withStore(() => deps.store.load(workspace)))
         .filter((run) => run.backlogId === input.backlogId)
@@ -238,33 +240,11 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
     deps.invalidateBacklogList?.();
   }
 
-  async function requireAfk(): Promise<CliInvocation> {
-    const invocation = normalizeCliInvocation(await deps.resolveAfk());
-    if (!invocation.command) throw new Error("afk CLI 未在 PATH 中发现；请安装或设置 PATH");
-    return invocation;
-  }
-
   function summary(workspace: string, backlogId: string): Promise<BacklogRuntimeSummary> {
     if (!deps.getSummary) throw new Error("Backlog runtime summary is unavailable");
     return deps.getSummary(workspace, backlogId);
   }
 
-  function safeKill(pid: number, signal: Signal): void {
-    try {
-      kill(pid, signal);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-    }
-  }
 
   return { start, stop, recover, retry, confirmMerge, list };
-}
-
-function defaultIsProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }

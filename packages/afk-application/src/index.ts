@@ -21,4 +21,5 @@ export * from './work-items/inventory.js';
 export * from './work-items/metadata.js';
 export * from './work-items/provider-types.js';
 export * from './work-items/types.js';
+export * from './version.js';
 export * from './workflow-instance.js';

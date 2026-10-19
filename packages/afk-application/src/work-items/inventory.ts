@@ -13,9 +13,19 @@ interface CatalogProject {
   project: ProviderProjectRef;
 }
 
+/**
+ * How many provider requests the inventory may have in flight at once.
+ *
+ * The listing is network bound — one round trip per repository, or per owner
+ * when the platform can filter server-side — so a low ceiling spends most of
+ * the wall clock waiting. Twelve keeps the request rate well inside the
+ * provider's secondary rate limits while removing the queueing delay.
+ */
+export const DEFAULT_INVENTORY_CONCURRENCY = 12;
+
 export async function collectGlobalWorkItemInventory(
   catalogs: readonly ProviderCatalog[],
-  concurrency = 4,
+  concurrency = DEFAULT_INVENTORY_CONCURRENCY,
 ): Promise<GlobalWorkItemInventoryResult> {
   const diagnostics: InventoryDiagnostic[] = [];
   const discovered: CatalogProject[] = [];
@@ -39,19 +49,7 @@ export async function collectGlobalWorkItemInventory(
     if (!uniqueProjects.has(key)) uniqueProjects.set(key, entry);
   }
   const projectEntries = [...uniqueProjects.values()].sort((left, right) => compareProjects(left.project, right.project));
-  const itemGroups = await mapLimit(projectEntries, concurrency, async ({ catalog, project }) => {
-    try {
-      const result = await catalog.listIssues(project);
-      const issues = Array.isArray(result) ? result : result.items;
-      if (!Array.isArray(result)) {
-        diagnostics.push(toDiagnostic(project.platform, project.projectKey, 'issue_list_failed', result.error));
-      }
-      return issues.map(issue => toGlobalWorkItem(project, issue));
-    } catch (error) {
-      diagnostics.push(toDiagnostic(project.platform, project.projectKey, 'issue_list_failed', error));
-      return [];
-    }
-  });
+  const itemGroups = await collectIssues(projectEntries, concurrency, diagnostics);
   const items = itemGroups.flat().sort(compareItems);
 
   diagnostics.sort((left, right) =>
@@ -65,6 +63,55 @@ export async function collectGlobalWorkItemInventory(
     diagnostics,
     complete: diagnostics.length === 0,
   };
+}
+
+/**
+ * Collect the issues of every discovered project.
+ *
+ * A platform that can filter server-side answers the whole scope in one
+ * round trip, which replaces one request per project. When that capability
+ * is missing or fails, the per-project listing is used instead, so the
+ * inventory always covers the same set of issues.
+ */
+async function collectIssues(
+  projectEntries: readonly CatalogProject[],
+  concurrency: number,
+  diagnostics: InventoryDiagnostic[],
+): Promise<GlobalWorkItem[][]> {
+  const byCatalog = new Map<ProviderCatalog, CatalogProject[]>();
+  for (const entry of projectEntries) {
+    const group = byCatalog.get(entry.catalog);
+    if (group) group.push(entry);
+    else byCatalog.set(entry.catalog, [entry]);
+  }
+
+  const groups: GlobalWorkItem[][] = [];
+  await mapLimit([...byCatalog.values()], concurrency, async entries => {
+    const catalog = entries[0].catalog;
+    if (catalog.listIssuesAcrossScope) {
+      const result = await catalog.listIssuesAcrossScope(entries.map(entry => entry.project));
+      if (Array.isArray(result)) {
+        groups.push(result.map(entry => toGlobalWorkItem(entry.project, entry.issue)));
+        return;
+      }
+      diagnostics.push(toDiagnostic(catalog.platform, catalog.scopeKey, 'scope_issue_list_failed', result.error));
+    }
+    const perProject = await mapLimit(entries, concurrency, async ({ project }) => {
+      try {
+        const result = await catalog.listIssues(project);
+        const issues = Array.isArray(result) ? result : result.items;
+        if (!Array.isArray(result)) {
+          diagnostics.push(toDiagnostic(project.platform, project.projectKey, 'issue_list_failed', result.error));
+        }
+        return issues.map(issue => toGlobalWorkItem(project, issue));
+      } catch (error) {
+        diagnostics.push(toDiagnostic(project.platform, project.projectKey, 'issue_list_failed', error));
+        return [];
+      }
+    });
+    groups.push(...perProject);
+  });
+  return groups;
 }
 
 export function filterGlobalWorkItemInventory(

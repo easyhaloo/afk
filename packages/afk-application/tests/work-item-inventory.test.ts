@@ -161,4 +161,37 @@ describe('global work item inventory', () => {
     expect(result.diagnostics).toHaveLength(1);
     expect(result.complete).toBe(false);
   });
+
+  it('prefers the scope-wide issue listing over one request per project', async () => {
+    const project = { platform: 'github' as const, projectKey: 'acme/api', name: 'api' };
+    const source: ProviderCatalog = {
+      platform: 'github', scopeKey: 'github.com',
+      async listProjects() { return [project]; },
+      async listIssues() { throw new Error('the per-project path must not be used'); },
+      async listIssuesAcrossScope(projects) {
+        expect(projects).toEqual([project]);
+        return [{ issue: { issueNumber: 7, title: 'scoped', labels: [], state: 'opened' }, project }];
+      },
+    };
+
+    const result = await collectGlobalWorkItemInventory([source]);
+
+    expect(result.items.map(item => item.id)).toEqual(['github:acme/api#7']);
+    expect(result.complete).toBe(true);
+  });
+
+  it('falls back to the per-project listing when the scope-wide listing fails', async () => {
+    const project = { platform: 'github' as const, projectKey: 'acme/api', name: 'api' };
+    const source: ProviderCatalog = {
+      platform: 'github', scopeKey: 'github.com',
+      async listProjects() { return [project]; },
+      async listIssues() { return [{ issueNumber: 8, title: 'per project', labels: [], state: 'opened' }]; },
+      async listIssuesAcrossScope() { return { items: [], error: new Error('search unavailable') }; },
+    };
+
+    const result = await collectGlobalWorkItemInventory([source]);
+
+    expect(result.items.map(item => item.id)).toEqual(['github:acme/api#8']);
+    expect(result.diagnostics.map(diagnostic => diagnostic.code)).toContain('scope_issue_list_failed');
+  });
 });

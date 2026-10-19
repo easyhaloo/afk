@@ -16,6 +16,7 @@ import {
   GitLabProviderCatalog,
   type GitHubCatalogIssue,
   type GitHubCatalogProject,
+  type GitHubScopedPageResult,
 } from './catalogs.js';
 import type { ProviderCatalog } from '@afk/application';
 import { normalizeGitLabHost } from '../shared/gitlab-project.js';
@@ -217,6 +218,30 @@ function createGitHubProviderCatalog(token: string): ProviderCatalog {
         pullRequest: 'pull_request' in issue,
       }));
     },
+    async listIssuesByOwnerPage(owner, page, perPage): Promise<GitHubScopedPageResult> {
+      // `is:issue` keeps pull requests out, matching the per-repository
+      // issue listing, and `user:` covers both users and organisations.
+      const response = await client.search.issuesAndPullRequests({
+        q: `is:issue user:${owner}`,
+        sort: 'created',
+        order: 'asc',
+        page,
+        per_page: perPage,
+      });
+      return {
+        totalCount: response.data.total_count,
+        items: response.data.items.map(issue => ({
+          number: issue.number,
+          title: issue.title,
+          body: issue.body ?? null,
+          labels: issue.labels.map(label => typeof label === 'string' ? label : label.name ?? ''),
+          state: issue.state === 'closed' ? 'closed' : 'open',
+          webUrl: issue.html_url,
+          pullRequest: 'pull_request' in issue,
+          projectKey: issue.repository_url.split('/repos/')[1] ?? '',
+        })),
+      };
+    },
   });
 }
 
@@ -248,6 +273,20 @@ function createGitLabProviderCatalog(host: string, url: string, token: string): 
       state: issue.state,
       webUrl: issue.web_url,
     }))),
+    listIssuesAcrossScopePage: (page, perPage) => fetchGitLabPage<GitLabIssueResponse>(
+      baseUrl,
+      token,
+      '/api/v4/issues',
+      { scope: 'all', state: 'all', page: String(page), per_page: String(perPage) },
+    ).then(issues => issues.map(issue => ({
+      iid: issue.iid,
+      title: issue.title,
+      description: issue.description,
+      labels: issue.labels,
+      state: issue.state,
+      webUrl: issue.web_url,
+      projectId: String(issue.project_id),
+    }))),
   });
 }
 
@@ -266,6 +305,7 @@ interface GitLabIssueResponse {
   labels: string[];
   state: 'opened' | 'closed';
   web_url: string;
+  project_id: number;
 }
 
 async function fetchGitLabPage<T>(

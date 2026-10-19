@@ -16,6 +16,23 @@ export interface ProviderCatalog {
   scopeKey: string;
   listProjects(): Promise<CatalogPageResult<ProviderProjectRef>>;
   listIssues(project: ProviderProjectRef): Promise<CatalogPageResult<ProviderIssue>>;
+  /**
+   * Optional: list the issues of every project in the scope in one round
+   * trip, when the platform can filter server-side (a scoped issue search,
+   * a global issue feed). Platforms without this capability fall back to one
+   * request per project, which is the slow path.
+   *
+   * The result carries the owning project for every issue and must be
+   * restricted to the projects that were passed in, so that a scope-wide
+   * listing never widens the inventory.
+   */
+  listIssuesAcrossScope?(projects: readonly ProviderProjectRef[]): Promise<CatalogPageResult<ScopedProviderIssue>>;
+}
+
+/** An issue together with the project that owns it. */
+export interface ScopedProviderIssue {
+  issue: ProviderIssue;
+  project: ProviderProjectRef;
 }
 
 export type CatalogPageResult<T> = T[] | { items: T[]; error: unknown };

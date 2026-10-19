@@ -1,10 +1,70 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { extractClaudeSessionId, extractClaudeTranscriptTokens, extractCodexRolloutTokens, extractOpenCodeTranscriptTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout, resolveAgentTranscript } from './agent-telemetry.js';
+import { collectAgentTelemetry, extractClaudeSessionId, extractClaudeTranscriptTokens, extractCodexRolloutTokens, extractOpenCodeTranscriptTokens, readAgentTelemetry, readAgentTools, extractCodexToolEvents, findCodexRollout, resolveAgentTranscript } from './agent-telemetry.js';
+import type { AgentExecution, ExecutionResult } from '../../domain/agents/types.js';
 import { mkdirSync, writeFileSync, rmSync, appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const childProcessMocks = vi.hoisted(() => ({ execFile: vi.fn() }));
 vi.mock('node:child_process', () => ({ execFile: childProcessMocks.execFile }));
+
+describe('collectAgentTelemetry', () => {
+  let directory: string;
+  let transcriptPath: string;
+
+  beforeEach(() => {
+    directory = '/tmp/afk-collect-telemetry-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    mkdirSync(directory, { recursive: true });
+    transcriptPath = join(directory, 'transcript.jsonl');
+    writeFileSync(transcriptPath, [
+      { session_id: 'native-session' },
+      { type: 'cost-state', totalCostUSD: 1, modelUsage: { model: { inputTokens: 10, outputTokens: 5 } } },
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'call-1', name: 'Bash' }] } },
+    ].map(event => JSON.stringify(event)).join('\n'));
+  });
+
+  afterEach(() => { rmSync(directory, { recursive: true, force: true }); });
+
+  function execution(provider: AgentExecution['metadata']['provider'] = 'claude-code'): AgentExecution {
+    return { id: 'execution-1', metadata: { provider, transport: 'process' }, telemetryPath: transcriptPath } as AgentExecution;
+  }
+
+  const result: ExecutionResult = { version: 1, runId: 'execution-1', status: 'completed', provider: 'local', commits: [] };
+
+  it('preserves explicit zero usage and empty tools over transcript data', async () => {
+    const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+    await expect(collectAgentTelemetry(execution(), { ...result, usage, tools: [] }, 'local')).resolves.toEqual({
+      sessionId: 'native-session', transcriptPath, usage, tools: [],
+    });
+  });
+
+  it('fills missing usage without replacing native tools', async () => {
+    const tools = [{ id: 'native-tool', name: 'Bash', result: 'failed' as const }];
+    await expect(collectAgentTelemetry(execution(), { ...result, tools }, 'local')).resolves.toEqual({
+      sessionId: 'native-session', transcriptPath, usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, tools,
+    });
+  });
+
+  it.each(['cursor', 'pi', 'copilot'] as const)('does not read a Claude transcript for %s', async provider => {
+    await expect(collectAgentTelemetry(execution(provider), { ...result, sessionId: 'result-session' }, 'local')).resolves.toEqual({
+      sessionId: 'result-session', usage: undefined, tools: undefined,
+    });
+  });
+
+  it('keeps missing container usage absent and prefers the native thread identity', async () => {
+    const agent = execution();
+    agent.metadata.threadId = 'thread-1';
+    await expect(collectAgentTelemetry(agent, { ...result, sessionId: 'runner-session' }, 'container')).resolves.toEqual({
+      sessionId: 'thread-1', usage: undefined, tools: undefined,
+    });
+  });
+
+  it('keeps unreadable local telemetry absent without inventing zero usage', async () => {
+    rmSync(transcriptPath);
+    await expect(collectAgentTelemetry(execution(), result, 'local')).resolves.toEqual({
+      sessionId: 'execution-1', usage: undefined, tools: undefined,
+    });
+  });
+});
 
 /**
  * Fixtures mirror a real session (`c03ff1c4-…`), whose cost-state sequence was

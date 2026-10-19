@@ -18,6 +18,7 @@ import type {
 import type { AgentRuntime } from "../../../shared/ipc-contract";
 import { type ExecutionSummary } from "../../../shared/execution-contract";
 import { RunTimelineSection } from "../run-center/RunTimelineView";
+import { useExecutionHistory } from "../run-center/use-execution-history";
 import {
   planRepositoryCheckoutPaths,
   repositorySelectionKey,
@@ -176,9 +177,6 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [stateFilter, setStateFilter] = useState<GlobalWorkItem["state"] | "all">("all");
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
-  const [auditedRuns, setAuditedRuns] = useState<ExecutionSummary[]>([]);
-  const [auditCursor, setAuditCursor] = useState<string | undefined>();
-  const [auditError, setAuditError] = useState("");
   const [runSetupOpen, setRunSetupOpen] = useState(false);
   const [runNotice, setRunNotice] = useState("");
   const [runError, setRunError] = useState("");
@@ -192,6 +190,9 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const selectedWorkItemId = useRef<string | null>(null);
   const lastFocusWorkItemId = useRef<string | null>(null);
   const selected = inventory.items.find(item => item.id === selectedItem?.id) ?? selectedItem;
+  const { executions: auditedRuns, nextCursor: auditCursor, error: auditError, loadMore: loadMoreAuditedRuns } = useExecutionHistory(
+    detailTab === "runs" && !!selected?.id && typeof window.afkDesktop.workItems.executions === "function", selected?.id,
+  );
 
   const load = async (forceRefresh = false, silent = false) => {
     const version = ++requestVersion.current;
@@ -216,53 +217,6 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     const timer = setInterval(() => { void load(false, true); }, 3000);
     return () => clearInterval(timer);
   }, [detailTab, selected?.id, selected?.runs]);
-
-  useEffect(() => {
-    if (detailTab !== "runs" || !selected?.id || typeof window.afkDesktop.workItems.executions !== "function") return;
-    let mounted = true;
-    let initialized = false;
-    const workItemId = selected.id;
-    setAuditedRuns([]);
-    setAuditCursor(undefined);
-    const refresh = async () => {
-      try {
-        const page = await window.afkDesktop.workItems.executions({ workItemId, limit: 100 });
-        if (mounted) {
-          if (!initialized) {
-            setAuditedRuns(page.executions);
-            setAuditCursor(page.nextCursor);
-            initialized = true;
-          } else setAuditedRuns(current => {
-            const currentPageIds = new Set(page.executions.map(run => run.runId));
-            return [...page.executions, ...current.filter(run => !currentPageIds.has(run.runId))];
-          });
-          setAuditError("");
-        }
-      } catch (cause) {
-        if (mounted) setAuditError(cause instanceof Error ? cause.message : String(cause));
-      }
-    };
-    void refresh();
-    const timer = setInterval(() => { void refresh(); }, 5000);
-    return () => { mounted = false; clearInterval(timer); };
-  }, [detailTab, selected?.id]);
-
-  const loadMoreAuditedRuns = async () => {
-    if (!selected?.id || !auditCursor) return;
-    const workItemId = selected.id;
-    try {
-      const page = await window.afkDesktop.workItems.executions({ workItemId, limit: 100, since: auditCursor });
-      if (selectedWorkItemId.current !== workItemId) return;
-      setAuditedRuns(current => {
-        const known = new Set(current.map(run => run.runId));
-        return [...current, ...page.executions.filter(run => !known.has(run.runId))];
-      });
-      setAuditCursor(page.nextCursor);
-      setAuditError("");
-    } catch (cause) {
-      if (selectedWorkItemId.current === workItemId) setAuditError(cause instanceof Error ? cause.message : String(cause));
-    }
-  };
 
   const projectOptions = useMemo(() => [
     { value: "all", label: "全部 Issue 来源", triggerLabel: "全部" },

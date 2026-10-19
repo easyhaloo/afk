@@ -54,7 +54,7 @@ import {
 import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
-import { readAgentTelemetry, readAgentTools, resolveAgentTranscript } from '../infrastructure/observability/agent-telemetry.js';
+import { collectAgentTelemetry } from '../infrastructure/observability/agent-telemetry.js';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -1143,10 +1143,6 @@ export class WorkflowRunner {
       });
       await this.writeRuntimeDiagnostics(result, execution);
 
-      // Emit agent.session_recorded with token usage from the harness transcript.
-      // For local batch: read the transcript at telemetryPath.
-      // For local interactive: same (tmux session = sessionId, transcript is written).
-      // For container: HOME not forwarded — telemetry not collected (returns undefined).
       const telemetry = await this.recordAgentTelemetry(execution, result);
       if (telemetry) {
         p.budget.recordSession(telemetry.sessionId, telemetry.totalTokens);
@@ -1362,48 +1358,16 @@ export class WorkflowRunner {
     }
   }
 
-  /**
-   * Read harness telemetry and emit agent.session_recorded.
-   *
-   * For local sandbox: reads the transcript at telemetryPath (batch or interactive).
-   * For container sandbox: returns undefined (HOME not forwarded, dirs not mounted).
-   * If transcript cannot be read or parsed, emits with usage: undefined — this
-   * distinguishes "not collected" from "zero tokens".
-   */
   private async recordAgentTelemetry(execution: AgentExecution, result: ExecutionResult): Promise<{ sessionId: string; totalTokens: number } | undefined> {
     const sandboxKind: 'local' | 'container' =
-      this.sandboxProviderName === 'docker' || this.sandboxProviderName === 'podman' ? 'container' : 'local';
-    if (sandboxKind === 'container') return undefined;
-
-    // Prefer result.usage (already normalized from stream). Fall back to the
-    // transcript when it is absent:
-    //   - codex batch (exec transport) has no telemetryPath, but threadId is
-    //     captured at runtime and findCodexRollout searches ~/.codex/sessions/
-    //     directly
-    //   - claude interactive/tmux: the SessionEnd hook hands us the absolute path
-    let usage = result.usage;
-    let tools = result.tools;
-    const transcript = await resolveAgentTranscript({
-      provider: this.agentProviderName === 'codex' ? 'codex' : this.agentProviderName === 'opencode' ? 'opencode' : 'claude-code',
-      telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
-      threadId: execution.metadata.threadId,
-    });
-    const transcriptPath = transcript?.path;
-    if (transcriptPath && (!usage || !tools)) {
-      const options = { provider: this.agentProviderName === 'codex' ? 'codex' as const : this.agentProviderName === 'opencode' ? 'opencode' as const : 'claude-code' as const, transcriptPath, sandboxKind };
-      if (!usage) usage = await readAgentTelemetry(options);
-      if (!tools) tools = await readAgentTools(options);
-    }
-
-    const sessionId = transcript?.sessionId ?? execution.metadata.threadId ?? result.sessionId ?? execution.id;
+      this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman' ? 'container' : 'local';
+    const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
+    const { sessionId, usage } = telemetry;
     if (!this.observationContext) return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
     try {
       await this.observer.record(this.observationContext, {
         kind: 'agent.session_recorded',
-        sessionId,
-        ...(transcriptPath ? { transcriptPath } : {}),
-        usage,
-        tools,
+        ...telemetry,
       });
     } catch (err) {
       logger.info({ runId: this.observationContext.runId, err }, 'agent.session_recorded: telemetry not persisted (non-fatal)');

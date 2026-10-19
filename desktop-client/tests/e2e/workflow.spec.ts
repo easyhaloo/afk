@@ -2,6 +2,71 @@ import { test, expect } from "./_helpers/launch";
 import { expectOccupiesSpace } from "./_helpers/geometry";
 
 test.describe("Workflow studio", () => {
+  test("rejects saving an empty managed draft and reopens the last saved definition", async ({ page }) => {
+    await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
+    await page.getByRole("button", { name: "新建工作流" }).click();
+    await page.getByRole("button", { name: "添加工作流步骤" }).click();
+    await page.getByRole("menuitem", { name: "添加 Agent 步骤" }).click();
+    const save = page.getByRole("button", { name: "保存", exact: true }).first();
+    await save.click();
+    await expect(save).toBeDisabled();
+    const saved = await page.evaluate(() => window.afkDesktop.snapshot(""));
+    expect(saved.workflow.canvasNodes).toHaveLength(1);
+    const savedId = saved.workflow.canvasNodes[0].id;
+
+    await page.getByRole("button", { name: "移除节点", exact: true }).click();
+    await expect(page.locator(".workflow-editor-node:not(.origin-node)")).toHaveCount(0);
+    await save.click();
+    await expect(page.getByRole("alert")).toContainText("自定义工作流至少需要一个步骤");
+    await expect(page.locator(".workflow-dirty")).toBeVisible();
+    const unchanged = await page.evaluate(() => window.afkDesktop.snapshot(""));
+    expect(unchanged.workflow.canvasNodes.map(node => node.id)).toEqual([savedId]);
+    expect(unchanged.workflowTemplates.find(template => template.id === "afk-control-workflow")?.steps.map(step => step.id)).toEqual([savedId]);
+
+    await page.locator(".workflow-back").click();
+    await page.locator(".workflow-library-card").filter({ hasText: "自定义工作流" }).click();
+    await expect(page.locator(".workflow-editor-node.custom-node")).toHaveCount(1);
+    await page.locator(".workflow-editor-node.custom-node").click();
+    await page.getByRole("button", { name: "移除节点", exact: true }).click();
+    await page.getByRole("button", { name: "添加工作流步骤" }).click();
+    await page.getByRole("menuitem", { name: "添加审查 Agent" }).click();
+    await save.click();
+    await expect(save).toBeDisabled();
+    const replaced = await page.evaluate(() => window.afkDesktop.snapshot(""));
+    expect(replaced.workflow.canvasNodes).toHaveLength(1);
+    expect(replaced.workflow.canvasNodes[0].id).not.toBe(savedId);
+    expect(replaced.workflowTemplates.find(template => template.id === "afk-control-workflow")?.steps).toMatchObject([
+      { id: replaced.workflow.canvasNodes[0].id, role: "reviewer", dependsOn: [] },
+    ]);
+    await page.reload();
+    await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
+    await page.locator(".workflow-library-card").filter({ hasText: "自定义工作流" }).click();
+    await expect(page.locator(".workflow-editor-node.custom-node")).toHaveCount(1);
+    await expect(page.locator(".workflow-editor-node.custom-node")).toContainText("审查 Agent");
+    await page.locator(".workflow-back").click();
+    await page.locator(".workflow-library-card").filter({ hasText: "Issue 实现" }).click();
+    await save.click();
+    await expect(save).toBeDisabled();
+    await page.locator(".workflow-back").click();
+    await page.locator(".workflow-library-card").filter({ hasText: "自定义工作流" }).click();
+    await expect(page.locator(".workflow-editor-node.custom-node")).toHaveCount(1);
+    await expect(page.locator(".workflow-editor-node.custom-node")).toContainText("审查 Agent");
+    await save.click();
+    await expect(save).toBeDisabled();
+    const reselected = await page.evaluate(() => window.afkDesktop.snapshot(""));
+    expect(reselected.workflow.templateName).toBe("afk-control-workflow");
+    expect(reselected.workflow.canvasNodes).toEqual(replaced.workflow.canvasNodes);
+  });
+
+  test("does not add an unsaved draft to the workflow library", async ({ page }) => {
+    await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
+    await page.getByRole("button", { name: "新建工作流" }).click();
+    await page.getByRole("button", { name: "添加工作流步骤" }).click();
+    await page.getByRole("menuitem", { name: "添加 Agent 步骤" }).click();
+    await page.locator(".workflow-back").click();
+    await expect(page.locator(".workflow-library-card").filter({ hasText: "自定义工作流" })).toHaveCount(0);
+  });
+
   test("uses an icon-only create action in the workflow library", async ({ page }) => {
     await page.getByRole("button", { name: "工作流" }).click();
 

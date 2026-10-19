@@ -22,7 +22,7 @@ import { BudgetManager } from '../workflows/budget.js';
 import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
 import { BudgetStore } from '../workflows/budget-store.js';
-import { readAgentTelemetry, readAgentTools, resolveAgentTranscript } from '../../infrastructure/observability/agent-telemetry.js';
+import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import type { RunEventData } from '@afk/core';
 
 type QAResultObject = { [key: string]: unknown };
@@ -364,24 +364,11 @@ export class QARunner {
   }
 
   private async recordBudgetUsage(store: BudgetStore, budget: BudgetManager, execution: AgentExecution, result: ExecutionResult): Promise<void> {
-    let usage = result.usage;
-    let tools = result.tools;
-    const transcript = this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman'
-      ? undefined
-      : await resolveAgentTranscript({
-        provider: this.agentProvider.name === 'codex' ? 'codex' : this.agentProvider.name === 'opencode' ? 'opencode' : 'claude-code',
-        telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
-        threadId: execution.metadata.threadId,
-      });
-    const transcriptPath = transcript?.path;
-    if (transcriptPath && (!usage || !tools)) {
-      const options = { provider: this.agentProvider.name === 'codex' ? 'codex' as const : this.agentProvider.name === 'opencode' ? 'opencode' as const : 'claude-code' as const, transcriptPath, sandboxKind: 'local' as const };
-      if (!usage) usage = await readAgentTelemetry(options);
-      if (!tools) tools = await readAgentTools(options);
-    }
-    const sessionId = transcript?.sessionId ?? execution.metadata.threadId ?? result.sessionId ?? execution.id;
+    const sandboxKind = this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman' ? 'container' : 'local';
+    const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
+    const { sessionId, usage } = telemetry;
     if (usage && budget.recordSession(sessionId, usage.totalTokens)) await store.save(budget.snapshot());
-    await this.onSession?.({ kind: 'agent.session_recorded', sessionId, ...(transcriptPath ? { transcriptPath } : {}), usage, tools });
+    await this.onSession?.({ kind: 'agent.session_recorded', ...telemetry });
   }
 
   private async startRuntime(runId: string, backlog: BacklogItem, session: string): Promise<void> {

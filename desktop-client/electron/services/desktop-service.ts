@@ -21,7 +21,7 @@ type CliCapability = {
 type CanvasTemplateNode = { id: string; template: "agent" | "qa"; label: string; description: string; prompt: string; provider?: string; x: number; y: number };
 
 type WorkflowTemplateStepSummary = { id: string; role: string; kind: "agent" | "system"; provider?: string; action?: string; when?: { step: string; equals: string }; dependsOn: string[] };
-type WorkflowTemplateSummary = { id: string; name: string; description: string; source: "builtin" | "project" | "managed"; steps: WorkflowTemplateStepSummary[] };
+type WorkflowTemplateSummary = { id: string; name: string; description: string; source: "builtin" | "project" | "managed"; steps: WorkflowTemplateStepSummary[]; canvasNodes?: CanvasTemplateNode[] };
 
 type WorkflowConfigSummary = {
   configPath: string;
@@ -136,6 +136,7 @@ async function readWorkflowTemplates(root: string): Promise<WorkflowTemplateSumm
   const directory = path.join(root, ".afk", "workflows");
   const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => [] as import("node:fs").Dirent[]);
   const projectTemplates: WorkflowTemplateSummary[] = [];
+  const configRaw = await fs.readFile(path.join(root, ".afk", "config.yml"), "utf8").catch(() => "");
   for (const entry of entries.filter(item => item.isFile() && /\.ya?ml$/i.test(item.name)).sort((a, b) => a.name.localeCompare(b.name))) {
     try {
       const document = asConfigObject(loadYaml(await fs.readFile(path.join(directory, entry.name), "utf8")));
@@ -143,7 +144,7 @@ async function readWorkflowTemplates(root: string): Promise<WorkflowTemplateSumm
       if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) continue;
       const steps = Array.isArray(document.steps) ? document.steps.map(templateStepSummary).filter((item): item is WorkflowTemplateStepSummary => item !== null) : [];
       if (!steps.length) continue;
-      projectTemplates.push({ id, name: id === "afk-control-workflow" ? "自定义工作流" : id, description: typeof document.description === "string" ? document.description : "项目级 AFK 工作流模板", source: id === "afk-control-workflow" ? "managed" : "project", steps });
+      projectTemplates.push({ id, name: id === "afk-control-workflow" ? "自定义工作流" : id, description: typeof document.description === "string" ? document.description : "项目级 AFK 工作流模板", source: id === "afk-control-workflow" ? "managed" : "project", steps, ...(id === "afk-control-workflow" ? { canvasNodes: await readCanvasNodes(root, configRaw, id) } : {}) });
     } catch { /* A malformed project template stays outside the selectable list. */ }
   }
   const merged = new Map(BUILTIN_WORKFLOW_TEMPLATES.map(item => [item.id, item]));
@@ -325,6 +326,7 @@ function assignOptional(target: ConfigObject, key: string, value: string | undef
 export async function saveWorkflowConfig(workspace: string, value: unknown): Promise<WorkflowConfigSummary> {
   const root = resolveWorkspace(workspace);
   const patch = cleanWorkflowPatch(value);
+  if (patch.templateName === "afk-control-workflow" && !patch.canvasNodes.length) throw new Error("自定义工作流至少需要一个步骤");
   const configPath = path.join(root, ".afk", "config.yml");
   const existingRaw = await fs.readFile(configPath, "utf8").catch(() => "");
   let existing: ConfigObject = {};
@@ -365,7 +367,7 @@ export async function saveWorkflowConfig(workspace: string, value: unknown): Pro
     delete next.template;
   }
   const desktop = { ...asConfigObject(next.desktop) };
-  const canvas = { ...asConfigObject(desktop.canvas), nodes: patch.canvasNodes };
+  const canvas = { ...asConfigObject(desktop.canvas), nodes: patch.canvasNodes.length ? patch.canvasNodes : canvasLayoutNodes(existingRaw) };
   desktop.canvas = canvas;
   next.desktop = desktop;
   await fs.mkdir(path.dirname(configPath), { recursive: true });

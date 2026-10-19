@@ -59,6 +59,7 @@ export type WorkflowTemplateSummary = {
   description: string;
   source: "builtin" | "project" | "managed";
   steps: WorkflowTemplateStepSummary[];
+  canvasNodes?: CanvasTemplateNode[];
 };
 
 export type WorkflowConfigSummary = {

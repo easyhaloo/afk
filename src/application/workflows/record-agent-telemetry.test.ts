@@ -5,24 +5,13 @@ import type { RunObserver } from '../../observability/run-observer.js';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Re-export findCodexRollout for mocking — imported from agent-telemetry.ts
-// so tests can spy on the module.
-vi.mock('../../infrastructure/observability/agent-telemetry.js', async () => {
-  const actual = await vi.importActual('../../infrastructure/observability/agent-telemetry.js');
-  return {
-    ...actual as object,
-    findCodexRollout: vi.fn(actual!.findCodexRollout),
-    resolveAgentTranscript: vi.fn(actual!.resolveAgentTranscript),
-  };
-});
-
 /**
  * Tests for agent.session_recorded wiring in WorkflowRunner.
  *
  * Verifies:
  * 1. result.usage is used directly (no file read needed)
  * 2. Falls back to transcript file when result.usage is absent
- * 3. Container sandbox returns early without emitting
+ * 3. Container sandbox preserves native telemetry without reading host transcripts
  */
 
 function mockContext() {
@@ -42,12 +31,12 @@ describe('agent.session_recorded wiring', () => {
   beforeEach(() => {
     tmp = '/tmp/afk-telemetry-wiring-' + Date.now() + '-' + Math.random().toString(36).slice(2);
     mkdirSync(tmp, { recursive: true });
-    process.env.HOME = tmp;
+    vi.stubEnv('HOME', tmp);
   });
 
   afterEach(() => {
     try { rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
-    delete process.env.HOME;
+    vi.unstubAllEnvs();
   });
 
   it('prefers result.usage over file read when result.usage is present', async () => {
@@ -154,11 +143,14 @@ describe('agent.session_recorded wiring', () => {
     expect(data.usage?.outputTokens).toBe(50);
   });
 
-  it('reaches codex branch when telemetryPath is absent but threadId is present', async () => {
-    // The exec transport has no sessionId, so telemetryPath is undefined.
-    // With threadId present in metadata, findCodexRollout must still be called.
-    const resolveAgentTranscript = await import('../../infrastructure/observability/agent-telemetry.js').then(m => m.resolveAgentTranscript);
-    vi.mocked(resolveAgentTranscript).mockResolvedValueOnce({ path: '/fake/rollout.jsonl', sessionId: 'thread-abc123' });
+  it('reads Codex native telemetry when a step overrides the default Claude provider', async () => {
+    const rolloutDirectory = join(tmp, '.codex', 'sessions', '2026', '10', '18');
+    mkdirSync(rolloutDirectory, { recursive: true });
+    const transcriptPath = join(rolloutDirectory, 'rollout-test-thread-abc123.jsonl');
+    writeFileSync(transcriptPath, [
+      { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } } } },
+      { type: 'item.completed', item: { id: 'call-1', type: 'command_execution', exit_code: 0 } },
+    ].map(event => JSON.stringify(event)).join('\n'));
 
     const record = vi.fn(async () => ({ lastSequence: 1 }));
     const observer = { record } as unknown as RunObserver;
@@ -168,13 +160,13 @@ describe('agent.session_recorded wiring', () => {
       { backlog: { claim } } as unknown as ProviderBundle,
       {
         observer,
-        agentProvider: { name: 'codex', capabilities: new Set() } as never,
+        agentProvider: { name: 'claude-code', capabilities: new Set() } as never,
       },
     );
 
     Object.defineProperty(runner, 'observationContext', { value: mockContext(), writable: true, configurable: true });
     Object.defineProperty(runner, 'sandboxProviderName', { value: 'local', writable: true, configurable: true });
-    Object.defineProperty(runner, 'agentProviderName', { value: 'codex', writable: true, configurable: true });
+    Object.defineProperty(runner, 'agentProviderName', { value: 'claude-code', writable: true, configurable: true });
 
     // telemetryPath is undefined (exec transport has no sessionId)
     // but threadId is present in metadata
@@ -195,17 +187,15 @@ describe('agent.session_recorded wiring', () => {
       commits: [] as string[],
     };
 
-    await (runner as any).recordAgentTelemetry(execution, result);
-
-    expect(resolveAgentTranscript).toHaveBeenCalledWith({ provider: 'codex', telemetryPath: undefined, threadId: 'thread-abc123' });
+    await expect((runner as any).recordAgentTelemetry(execution, result)).resolves.toEqual({ sessionId: 'thread-abc123', totalTokens: 15 });
     const [, data] = record.mock.calls[0]!;
     expect(data.sessionId).toBe('thread-abc123');
-    expect(data.transcriptPath).toBe('/fake/rollout.jsonl');
+    expect(data.transcriptPath).toBe(transcriptPath);
+    expect(data.usage).toEqual({ inputTokens: 10, outputTokens: 5, totalTokens: 15 });
+    expect(data.tools).toEqual([{ id: 'call-1', name: 'command_execution', result: 'succeeded', exitCode: 0 }]);
   });
 
-  it('returns early for container sandbox without emitting any event', async () => {
-    // Container: HOME not forwarded, harness dirs not mounted.
-    // recordAgentTelemetry must not emit any event.
+  it.each(['docker', 'podman'])('preserves native telemetry in %s without reading host transcripts', async sandboxProvider => {
     const record = vi.fn(async () => ({ lastSequence: 1 }));
     const observer = { record } as unknown as RunObserver;
     const claim = vi.fn(async () => null);
@@ -219,15 +209,16 @@ describe('agent.session_recorded wiring', () => {
     );
 
     Object.defineProperty(runner, 'observationContext', { value: mockContext(), writable: true, configurable: true });
-    Object.defineProperty(runner, 'sandboxProviderName', { value: 'docker', writable: true, configurable: true });
+    Object.defineProperty(runner, 'sandboxProvider', { value: { name: sandboxProvider }, writable: true, configurable: true });
     Object.defineProperty(runner, 'agentProviderName', { value: 'claude-code', writable: true, configurable: true });
 
     const execution = {
       id: 'exec-3',
       sessionId: 'session-docker',
       metadata: { provider: 'claude-code', transport: 'process' as const },
-      telemetryPath: '/nonsense/path/transcript.jsonl',
+      telemetryPath: join(tmp, 'host-transcript.jsonl'),
     } as any;
+    writeFileSync(execution.telemetryPath, JSON.stringify({ session_id: 'unrelated-host-session' }));
 
     const result = {
       version: 1 as const,
@@ -235,12 +226,15 @@ describe('agent.session_recorded wiring', () => {
       status: 'completed' as const,
       provider: 'container',
       sessionId: 'session-docker',
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      tools: [{ id: 'call-1', name: 'Bash', result: 'failed' as const }],
       commits: [] as string[],
     };
 
-    await (runner as any).recordAgentTelemetry(execution, result);
-
-    expect(record).not.toHaveBeenCalled();
+    await expect((runner as any).recordAgentTelemetry(execution, result)).resolves.toEqual({ sessionId: 'session-docker', totalTokens: 15 });
+    expect(record).toHaveBeenCalledWith(mockContext(), {
+      kind: 'agent.session_recorded', sessionId: 'session-docker', usage: result.usage, tools: result.tools,
+    });
   });
 
   it('reads tool results from a transcript even when token usage already exists', async () => {
@@ -258,7 +252,7 @@ describe('agent.session_recorded wiring', () => {
     Object.defineProperty(runner, 'observationContext', { value: mockContext() });
     Object.defineProperty(runner, 'sandboxProviderName', { value: 'local' });
     Object.defineProperty(runner, 'agentProviderName', { value: 'claude-code' });
-    await (runner as any).recordAgentTelemetry({ id: 'exec-tools', metadata: {}, telemetryPath: transcriptPath }, {
+    await (runner as any).recordAgentTelemetry({ id: 'exec-tools', metadata: { provider: 'claude-code' }, telemetryPath: transcriptPath }, {
       usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
     });
     expect(record).toHaveBeenCalledWith(mockContext(), {

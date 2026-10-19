@@ -1,14 +1,11 @@
 /**
- * Agent telemetry readers.
- *
- * Pure functions over transcript/rollout data — zero I/O, fully testable
- * with fixtures. Thin I/O wrappers (file reading) live at call sites.
+ * Agent telemetry collection and transcript readers.
  *
  * Boundary: harness owns agent-layer truth. AFK only READS.
  */
 
 import type { AgentToolCallSummary } from '@afk/core';
-import type { TokenUsage } from '../../domain/agents/types.js';
+import type { AgentExecution, ExecutionResult, TokenUsage } from '../../domain/agents/types.js';
 import { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
 export { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
 
@@ -82,6 +79,34 @@ export async function resolveAgentTranscriptPath(options: {
   threadId?: string;
 }): Promise<string | undefined> {
   return (await resolveAgentTranscript(options))?.path;
+}
+
+export async function collectAgentTelemetry(
+  execution: AgentExecution,
+  result: ExecutionResult,
+  sandboxKind: 'local' | 'container',
+): Promise<{ sessionId: string; transcriptPath?: string; usage?: TokenUsage; tools?: AgentToolCallSummary[] }> {
+  const provider = execution.metadata.provider;
+  const transcript = sandboxKind === 'local' && (provider === 'claude-code' || provider === 'codex' || provider === 'opencode')
+    ? await resolveAgentTranscript({
+      provider,
+      telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
+      threadId: execution.metadata.threadId,
+    })
+    : undefined;
+  let usage = result.usage;
+  let tools = result.tools;
+  if (transcript && (provider === 'claude-code' || provider === 'codex' || provider === 'opencode')) {
+    const options = { provider, transcriptPath: transcript.path, sandboxKind };
+    if (!usage) usage = await readAgentTelemetry(options);
+    if (!tools) tools = await readAgentTools(options);
+  }
+  return {
+    sessionId: transcript?.sessionId ?? execution.metadata.threadId ?? result.sessionId ?? execution.id,
+    ...(transcript ? { transcriptPath: transcript.path } : {}),
+    usage,
+    tools,
+  };
 }
 
 /** Claude Code cost-state entry (from transcript .jsonl). */

@@ -37,6 +37,7 @@ import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
 import { groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
 import { executionHistoryEvents } from "./features/run-center/execution-events";
+import { useExecutionHistory } from "./features/run-center/use-execution-history";
 import { RunTimelineSection } from "./features/run-center/RunTimelineView";
 import { WorkflowInstancesPage, type ExecutionSelection } from "./features/workflows/WorkflowInstancesPage";
 import type { ProviderProjectRef } from "../shared/backlog-contract";
@@ -119,7 +120,7 @@ function RuntimeSource({ source }: { source: string }) {
 }
 
 function App() {
-  const [view, setView] = useState<View>("backlog");
+  const [view, setCurrentView] = useState<View>("backlog");
   const [focusWorkItemId, setFocusWorkItemId] = useState<string | undefined>();
   const [backlogRefreshVersion, setBacklogRefreshVersion] = useState(0);
   const [workflowSelection, setWorkflowSelection] = useState<ExecutionSelection>();
@@ -130,8 +131,8 @@ function App() {
   const [runQuery, setRunQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [auditedExecutions, setAuditedExecutions] = useState<ExecutionSummary[]>([]);
-  const [auditError, setAuditError] = useState<string | null>(null);
+  const { executions: auditedExecutions, error: auditError, find: findExecution, cancelLookup } = useExecutionHistory(view === "queue" || view === "board" || view === "workflowInstances");
+  const setView = (nextView: View) => { cancelLookup(); setCurrentView(nextView); };
   const [selected, setSelected] = useState<RuntimeEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,21 +193,6 @@ function App() {
     const timer = window.setInterval(() => { void refresh(); }, 5000);
     return () => { window.clearInterval(timer); };
   }, [view, workspace]);
-  useEffect(() => {
-    if (view !== "queue" && view !== "board" && view !== "workflowInstances") return;
-    let mounted = true;
-    const loadExecutions = async () => {
-      try {
-        const page = await window.afkDesktop.workItems.executions({ limit: 100 });
-        if (mounted) { setAuditedExecutions(page.executions); setAuditError(null); }
-      } catch (cause) {
-        if (mounted) setAuditError(cause instanceof Error ? cause.message : String(cause));
-      }
-    };
-    void loadExecutions();
-    const timer = window.setInterval(() => { void loadExecutions(); }, 5000);
-    return () => { mounted = false; window.clearInterval(timer); };
-  }, [view]);
   useEffect(() => { void window.afkDesktop.appearance().then(setAppearance).catch(() => setAppearance(defaultAppearance)); }, []);
   useEffect(() => {
     const buffer = earlySshSessionBuffer.current;
@@ -367,14 +353,8 @@ function App() {
     setView("workflowInstances");
   };
   const openRun = async (selection: ExecutionSelection) => {
-    let page = await window.afkDesktop.workItems.executions({ workItemId: selection.workItemId, limit: 100 });
-    let execution = page.executions.find(run => run.runId === selection.runId);
-    while (!execution && page.nextCursor) {
-      page = await window.afkDesktop.workItems.executions({ workItemId: selection.workItemId, limit: 100, since: page.nextCursor });
-      execution = page.executions.find(run => run.runId === selection.runId);
-    }
-    if (!execution) { setError("该运行不在最近记录中，请从工作项查看其时间线。"); return; }
-    setAuditedExecutions(page.executions);
+    const execution = await findExecution(selection.runId, selection.workItemId);
+    if (!execution) return;
     setSelected(executionHistoryEvents([execution], [])[0]);
     setRunQuery(selection.runId);
     setInspectorCollapsed(false);
@@ -382,14 +362,8 @@ function App() {
   };
   const openEnvironmentWorkflow = async (runId: string) => {
     if (environmentSelection?.runId === runId) { openWorkflowInstance(runId, environmentSelection.workItemId); return; }
-    let page = await window.afkDesktop.workItems.executions({ limit: 100 });
-    let execution = page.executions.find(run => run.runId === runId);
-    while (!execution && page.nextCursor) {
-      page = await window.afkDesktop.workItems.executions({ limit: 100, since: page.nextCursor });
-      execution = page.executions.find(run => run.runId === runId);
-    }
+    const execution = await findExecution(runId);
     if (execution) openWorkflowInstance(runId, execution.workItemId);
-    else setError("该执行环境没有可验证的工作流实例记录。");
   };
   const openDefinition = async (detail: ExecutionRunDetail) => {
     if (!detail.workspacePath || !detail.workflow) return;
@@ -407,12 +381,11 @@ function App() {
     void window.afkDesktop.saveAppearance(next).then(setAppearance).catch(() => undefined);
   };
   const saveWorkflowConfig = async (workflow: WorkflowConfigSummary) => {
-    const saved = await window.afkDesktop.saveWorkflow(workspace, workflow);
+    await window.afkDesktop.saveWorkflow(workspace, workflow);
     const { snapshot: refreshed } = presentationSnapshot(await window.afkDesktop.snapshot(workspace));
-    const customTemplate = workflow.templateName === "afk-control-workflow" && workflow.canvasNodes.length ? { id: "afk-control-workflow", name: "自定义工作流", description: "由 AFK Control 管理的项目级可执行模板。", source: "managed" as const, steps: workflow.canvasNodes.map((node, index) => ({ id: node.id, role: node.template === "qa" ? "reviewer" : "implementer", kind: "agent" as const, provider: node.provider, dependsOn: index ? [workflow.canvasNodes[index - 1].id] : [] })) } : undefined;
-    setSnapshot(customTemplate ? { ...refreshed, workflow: saved, workflowTemplates: [...refreshed.workflowTemplates.filter(template => template.id !== customTemplate.id), customTemplate] } : refreshed);
+    setSnapshot(refreshed);
     setWorkspace(refreshed.workspace.root);
-    return saved;
+    return refreshed.workflow;
   };
 
   return (
@@ -446,11 +419,11 @@ function App() {
           {view === "backlog" ? <WorkItemsPage focusWorkItemId={focusWorkItemId} agentRuntimes={snapshot?.agentRuntimes} defaultAgent={snapshot?.workflow.agentDefault} onAttach={(runId) => void openExecutionTerminal(runId)} onWorkflow={openWorkflowInstance} onCreate={() => setView("projectBacklog")} onReviewMerge={() => { setBacklogRefreshVersion(version => version + 1); setView("projectBacklog"); }} /> : null}
           {view === "projectBacklog" ? <BacklogPage workspace={workspace} refreshVersion={backlogRefreshVersion} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} onOpenWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
           {view === "workflows" ? <Workflows key={`${workspace}:${focusTemplateId ?? ""}`} snapshot={snapshot} focusTemplateId={focusTemplateId} onSave={saveWorkflowConfig} /> : null}
-          {view === "workflowInstances" ? <WorkflowInstancesPage executions={auditedExecutions} selection={workflowSelection} onSelect={setWorkflowSelection} onRun={selection => void openRun(selection).catch(cause => setError(String(cause)))} onWorkItem={workItemId => { setFocusWorkItemId(workItemId); setView("backlog"); }} onEnvironment={selection => { setEnvironmentSelection(selection); setView("containers"); }} onAttach={runId => void openExecutionTerminal(runId)} onDefinition={detail => void openDefinition(detail)} /> : null}
+          {view === "workflowInstances" ? <WorkflowInstancesPage executions={auditedExecutions} selection={workflowSelection} onSelect={selection => openWorkflowInstance(selection.runId, selection.workItemId)} onRun={selection => void openRun(selection).catch(cause => setError(String(cause)))} onWorkItem={workItemId => { setFocusWorkItemId(workItemId); setView("backlog"); }} onEnvironment={selection => { setEnvironmentSelection(selection); setView("containers"); }} onAttach={runId => void openExecutionTerminal(runId)} onDefinition={detail => void openDefinition(detail)} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}
         </div>
-        {selected && (view === "queue" || view === "board") ? <Inspector event={selected} execution={auditedExecutions.find(run => run.runId === selected.id)} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} onWorkflow={openWorkflowInstance} onWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
+        {selected && (view === "queue" || view === "board") ? <Inspector event={events.find(event => event.id === selected.id) ?? selected} execution={auditedExecutions.find(run => run.runId === selected.id && run.workItemId === selected.source)} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} onWorkflow={openWorkflowInstance} onWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
         </div>
       </section>
       {terminal.open ? <TerminalSheet mode={terminal.mode} session={terminal.attachId ?? session} pane={terminal.pane} line={line} confirmed={confirmed} sshSession={terminal.sshSession} onClose={closeTerminal} onLine={setLine} onConfirmed={setConfirmed} onSend={() => void sendInput()} onAttachInput={(data) => terminal.attachId ? window.afkDesktop.workItems.attachInput(terminal.attachId, data) : undefined} onAttachResize={(cols, rows) => terminal.attachId ? window.afkDesktop.workItems.attachResize(terminal.attachId, cols, rows) : undefined} onSshInput={(data) => {
@@ -585,6 +558,7 @@ const DEFAULT_WORKFLOW_NODE_POSITIONS: Record<WorkflowCanvasNodeId, WorkflowNode
 };
 
 function validateWorkflowDraft(workflow: WorkflowConfigSummary): string | null {
+  if (workflow.templateName === "afk-control-workflow" && !workflow.canvasNodes.length) return "自定义工作流至少需要一个步骤";
   if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(workflow.tmuxSession)) return "tmux 会话只能包含字母、数字、点、下划线、连字符或冒号。";
   for (const [label, value] of [["目标分支", workflow.targetBranch], ["基准分支", workflow.baseBranch]] as const) if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value) || value.includes("..") || value.endsWith("/")) return label + "不是有效 Git 分支名。";
   const limits: Array<[string, number, number, number]> = [["工作流超时", workflow.hardTimeoutMs, 1_000, 86_400_000], ["完成等待", workflow.completionTimeoutMs, 1_000, 86_400_000], ["最大重试", workflow.maxRetries, 0, 20], ["上下文阈值", workflow.contextThreshold, 1_000, 10_000_000], ["总令牌预算", workflow.goalBudget, 1_000, 100_000_000]];
@@ -616,16 +590,13 @@ function Workflows({ snapshot, onSave, focusTemplateId }: { snapshot: Snapshot |
   const focusedTemplate = snapshot?.workflowTemplates.find(template => template.id === focusTemplateId);
   const [mode, setMode] = useState<"library" | "editor">(focusedTemplate ? "editor" : "library");
   const [selected, setSelected] = useState<string>("start");
-  const [draft, setDraft] = useState<WorkflowConfigSummary | null>(focusedTemplate && snapshot ? { ...snapshot.workflow, templateName: focusedTemplate.id, canvasNodes: focusedTemplate.source === "managed" ? snapshot.workflow.canvasNodes : [] } : null);
-  const [savedCustomTemplate, setSavedCustomTemplate] = useState<WorkflowTemplateSummary | null>(null);
+  const [draft, setDraft] = useState<WorkflowConfigSummary | null>(focusedTemplate && snapshot ? { ...snapshot.workflow, templateName: focusedTemplate.id, canvasNodes: focusedTemplate.canvasNodes ?? [] } : null);
   if (!snapshot) return <Empty />;
-  const { workflow, workflowRuns, loop, workflowTemplates } = snapshot;
-  const templates = savedCustomTemplate ? [...workflowTemplates.filter(template => template.id !== savedCustomTemplate.id), savedCustomTemplate] : workflowTemplates;
+  const { workflow, workflowRuns, loop, workflowTemplates: templates } = snapshot;
   const model = draft ?? workflow;
   const activeTemplate = templates.find(template => template.id === model.templateName) ?? (model.templateName === "afk-control-workflow" ? { id: "afk-control-workflow", name: "自定义工作流", description: "由 AFK Control 管理的项目级可执行模板。", source: "managed" as const, steps: [] } : undefined);
   const openTemplate = (template: WorkflowTemplateSummary) => {
-    const isCurrentManagedTemplate = workflow.templateName === template.id && template.source === "managed";
-    setDraft({ ...workflow, templateName: template.id, canvasNodes: isCurrentManagedTemplate ? workflow.canvasNodes : [] });
+    setDraft({ ...workflow, templateName: template.id, canvasNodes: template.canvasNodes ?? [] });
     setSelected("start");
     setMode("editor");
   };
@@ -634,12 +605,8 @@ function Workflows({ snapshot, onSave, focusTemplateId }: { snapshot: Snapshot |
     setSelected("start");
     setMode("editor");
   };
-  const rememberCustomTemplate = (candidate: WorkflowConfigSummary) => {
-    if (candidate.templateName !== "afk-control-workflow" || !candidate.canvasNodes.length) return;
-    setSavedCustomTemplate({ id: "afk-control-workflow", name: "自定义工作流", description: "由 AFK Control 管理的项目级可执行模板。", source: "managed", steps: candidate.canvasNodes.map((node, index) => ({ id: node.id, role: node.template === "qa" ? "reviewer" : "implementer", kind: "agent", provider: node.provider, dependsOn: index ? [candidate.canvasNodes[index - 1].id] : [] })) });
-  };
   if (mode === "library") return <>{focusTemplateId && !focusedTemplate ? <p role="status">当前任务目录已找不到定义 {focusTemplateId}；实例快照仍保留原始内容。</p> : null}<WorkflowLibrary templates={templates} activeTemplateName={model.templateName || workflow.templateName} workflowRuns={workflowRuns} onOpen={openTemplate} onCreate={createCustom} /></>;
-  return <WorkflowStudio workflow={workflow} model={model} activeTemplate={activeTemplate} loop={loop} workflowRuns={workflowRuns} onSave={onSave} onSavedTemplate={rememberCustomTemplate} onBack={() => { rememberCustomTemplate(model); setDraft(null); setMode("library"); }} selected={selected} onSelected={setSelected} onDraft={setDraft} />;
+  return <WorkflowStudio workflow={workflow} model={model} activeTemplate={activeTemplate} loop={loop} workflowRuns={workflowRuns} onSave={onSave} onBack={() => { setDraft(null); setMode("library"); }} selected={selected} onSelected={setSelected} onDraft={setDraft} />;
 }
 
 function WorkflowLibrary({ templates, activeTemplateName, onOpen, onCreate, workflowRuns }: { templates: WorkflowTemplateSummary[]; activeTemplateName?: string; workflowRuns: WorkflowRunSummary[]; onOpen: (template: WorkflowTemplateSummary) => void; onCreate: () => void }) {
@@ -694,7 +661,7 @@ function WorkflowLibrary({ templates, activeTemplateName, onOpen, onCreate, work
   </section>;
 }
 
-function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, onSave, onSavedTemplate, onBack, selected, onSelected, onDraft }: { workflow: WorkflowConfigSummary; model: WorkflowConfigSummary; activeTemplate?: WorkflowTemplateSummary; loop: LoopStatus; workflowRuns: WorkflowRunSummary[]; onSave: (workflow: WorkflowConfigSummary) => Promise<WorkflowConfigSummary>; onSavedTemplate: (workflow: WorkflowConfigSummary) => void; onBack: () => void; selected: string; onSelected: (id: string) => void; onDraft: (draft: WorkflowConfigSummary | null | ((current: WorkflowConfigSummary | null) => WorkflowConfigSummary)) => void }) {
+function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, onSave, onBack, selected, onSelected, onDraft }: { workflow: WorkflowConfigSummary; model: WorkflowConfigSummary; activeTemplate?: WorkflowTemplateSummary; loop: LoopStatus; workflowRuns: WorkflowRunSummary[]; onSave: (workflow: WorkflowConfigSummary) => Promise<WorkflowConfigSummary>; onBack: () => void; selected: string; onSelected: (id: string) => void; onDraft: (draft: WorkflowConfigSummary | null | ((current: WorkflowConfigSummary | null) => WorkflowConfigSummary)) => void }) {
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -734,7 +701,7 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
     setSaveError(null); selectNode(id);
     setAddMenuOpen(false);
   };
-  const builtinSteps = activeTemplate?.steps ?? [];
+  const builtinSteps = model.templateName === "afk-control-workflow" ? [] : activeTemplate?.steps ?? [];
   const graphDiagnostics = normalizeWorkflowSteps(builtinSteps).diagnostics;
   const builtinLayout = workflowStepLayout(builtinSteps);
   const rootPositions = builtinSteps.filter(step => !step.dependsOn.length).map(step => builtinLayout.get(step.id)).filter((position): position is WorkflowNodePosition => Boolean(position));
@@ -793,7 +760,7 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
   const edgeLabelPosition = (from: WorkflowCanvasNode, to: WorkflowCanvasNode) => ({ x: edgeElbowX(from, to) + 8, y: Math.round((from.y + CANVAS_NODE_HEIGHT / 2 + to.y + CANVAS_NODE_HEIGHT / 2) / 2 - 9) });
   const templateEdges: WorkflowCanvasEdge[] = customNodes.length ? customNodes.map((node, index) => ({ from: index === 0 ? startNode : customNodes[index - 1], to: node })) : builtinNodes.flatMap(node => { const dependencies = node.step?.dependsOn ?? []; if (!dependencies.length) return [{ from: startNode, to: node }]; return dependencies.map((id): WorkflowCanvasEdge | null => { const from = byId("step-" + id); return from ? { from, to: node, when: node.step?.when } : null; }).filter((edge): edge is WorkflowCanvasEdge => edge !== null); });
   const relatedNodeIds = new Set(templateEdges.flatMap(({ from, to }) => from.id === selected || to.id === selected ? [from.id, to.id] : []));
-  const save = async () => { const localError = validateWorkflowDraft(model); if (localError) { setSaveError(localError); return; } setSaving(true); setSaveError(null); try { const saved = await onSave(model); onDraft(saved); onSavedTemplate(model); } catch (error) { setSaveError(error instanceof Error ? error.message : String(error)); } finally { setSaving(false); } };
+  const save = async () => { const localError = validateWorkflowDraft(model); if (localError) { setSaveError(localError); return; } setSaving(true); setSaveError(null); try { const saved = await onSave(model); onDraft(saved); } catch (error) { setSaveError(error instanceof Error ? error.message : String(error)); } finally { setSaving(false); } };
   const zoomAtStageCenter = (delta: number) => {
     const rect = stageRef.current?.getBoundingClientRect();
     if (!rect) return;

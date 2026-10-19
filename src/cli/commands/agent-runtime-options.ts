@@ -1,12 +1,12 @@
 import { Command, InvalidArgumentError } from 'commander';
-import type { AgentRuntimeSelection, AgentProviderName } from '../../domain/agents/types.js';
+import type { AgentRuntimeSelection, AgentProviderName } from '@afk/execution/domain/agents/types';
 import {
   resolveCodexRuntime,
   type CodexAuth,
   type CodexRuntimeOverrides,
   type CodexTransport,
-} from '../../domain/agents/codex-runtime.js';
-import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
+} from '@afk/execution/domain/agents/codex-runtime';
+import type { WorkflowConfig } from '@afk/execution/infrastructure/config/manager';
 
 export interface AgentRuntimeCommandOptions {
   agentTransport?: CodexTransport;

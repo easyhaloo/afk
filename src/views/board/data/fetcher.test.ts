@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from '@afk/application';
 import { mergeProjects, projectDetailKey, toRuntimeTask } from './fetcher.js';
-import type { ActiveTaskRuntimeRecord } from '../../../application/runtime/task-runtime.js';
+import type { ActiveTaskRuntimeRecord } from '@afk/execution/application/runtime/task-runtime';
 
 function project(id: number, platform: Project['platform'], path: string): Project {
   return {

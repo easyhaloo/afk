@@ -6,12 +6,12 @@ import type { Task } from '../../types/board.js';
 import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter.js';
 import type { View } from '../board/types.js';
 import { StateProvider } from './state/StateContext.js';
-import { TmuxClient } from '../../infrastructure/tmux/tmux.js';
+import { TmuxClient } from '@afk/execution/infrastructure/tmux/tmux';
 import { createManagementProviders } from '@afk/infrastructure';
 import { useData } from '../board/data/useData.js';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase.js';
 import { SplashScreen } from '../board/components/SplashScreen.js';
-import { openInBrowser } from '../../shared/browser.js';
+import { openInBrowser } from '@afk/execution/shared/browser';
 import { loadTuiViews } from '../plugins/loader.js';
 import type { LoadedTuiView } from '../plugins/types.js';
 

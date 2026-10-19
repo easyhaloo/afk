@@ -2,11 +2,11 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ClaudeCodeProvider } from '../../domain/agents/claude-code.js';
-import { LocalSandboxProvider } from '../../infrastructure/sandbox/providers/local.js';
-import { buildExecutionPrompt } from '../workflows/execution-protocol.js';
+import { ClaudeCodeProvider } from '@afk/execution/domain/agents/claude-code';
+import { LocalSandboxProvider } from '@afk/execution/infrastructure/sandbox/providers/local';
+import { buildExecutionPrompt } from '@afk/execution/application/workflows/execution-protocol';
 import { fetchTasks } from '../../views/board/data/fetcher.js';
-import { TaskRuntimeManager, TaskRuntimeStore } from './task-runtime.js';
+import { TaskRuntimeManager, TaskRuntimeStore } from '@afk/execution/application/runtime/task-runtime';
 
 class NoToolClaudeCodeProvider extends ClaudeCodeProvider {
   override buildCommand(options: Parameters<ClaudeCodeProvider['buildCommand']>[0]) {

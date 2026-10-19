@@ -30,7 +30,7 @@ import {
 } from '@afk/application';
 import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '@afk/application';
 import type { BacklogExecutionMode } from '@afk/application';
-import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
+import { getWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import {

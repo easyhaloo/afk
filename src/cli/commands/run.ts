@@ -1,8 +1,8 @@
 import { Command, InvalidArgumentError } from 'commander';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
-import { runWorkflowCli } from '../../application/workflows/run-cmd.js';
-import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
-import { resolveAgentProviderName } from '../../domain/agents/index.js';
+import { runWorkflowCli } from '@afk/execution/application/workflows/run-cmd';
+import { getWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
+import { resolveAgentProviderName } from '@afk/execution/domain/agents/index';
 import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
 
 function positiveInt(value: string): number {

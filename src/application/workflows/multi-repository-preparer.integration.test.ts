@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { simpleGit } from 'simple-git';
-import { MultiRepositoryPreparer } from './multi-repository-preparer.js';
-import { resolveWorkflowRunRequest } from './run-request.js';
+import { MultiRepositoryPreparer } from '@afk/execution/application/workflows/multi-repository-preparer';
+import { resolveWorkflowRunRequest } from '@afk/execution/application/workflows/run-request';
 
 async function createRemote(
   root: string,

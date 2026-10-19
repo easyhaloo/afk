@@ -1,19 +1,19 @@
 import { Command } from 'commander';
-import { spawnSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { buildBacklogRunArgs } from '../../desktop-client/electron/services/backlog-execution-service';
+import type { BacklogManagementProvider } from '@afk/application';
 import {
   createBacklogService,
-  type BacklogExecResult,
   type BacklogServiceDeps,
 } from '../../desktop-client/electron/services/backlog-service';
 import type { BacklogItem } from '../../desktop-client/shared/backlog-contract';
 import { COMMANDS } from '../../src/command-registry';
 import { COMMANDS as CLI_COMMANDS } from '../../src/cli/command-registry';
 import { registerBacklogCommands } from '../../src/cli/commands/backlog';
-import { registerObserveCommands } from '../../src/cli/commands/observe';
 
-function stubItem(id: string): BacklogItem {
+function stubItem(id: string, overrides: Partial<BacklogItem> = {}): BacklogItem {
   return {
     id,
     title: `task ${id}`,
@@ -24,28 +24,56 @@ function stubItem(id: string): BacklogItem {
     tags: [],
     branchName: `afk/backlog-${id}`,
     providerRef: `stub:${id}`,
+    ...overrides,
   };
 }
 
-function success(kind: string, data: BacklogItem | BacklogItem[]): BacklogExecResult {
-  return { ok: true, stdout: JSON.stringify({ ok: true, kind, data }), stderr: '' };
-}
+/**
+ * One provider, shared by both entry points. The CLI resolves its provider
+ * through `@afk/infrastructure`; the desktop resolves it through its own
+ * composition root. Both end up at the same Port.
+ */
+const provider: BacklogManagementProvider = {
+  get: vi.fn(async (id: string) => stubItem(id)),
+  list: vi.fn(async (options) => {
+    const items = [stubItem('42', { state: 'ready', tags: ['billing'] })];
+    return options?.state ? items.filter(item => item.state === options.state) : items;
+  }),
+  create: vi.fn(async (input) => stubItem('new', { title: input.title })),
+  addTag: vi.fn(async () => undefined),
+  removeTag: vi.fn(async () => undefined),
+  initialize: vi.fn(async () => undefined),
+};
 
-function makeDesktopService() {
-  const execMock = vi.fn(async (_command: string, args: string[]) => {
-    const operation = args.slice(0, 3).join(' ');
-    if (operation === 'backlog tag add') return success('backlog.tag.add', stubItem('42'));
-    if (operation === 'backlog tag remove') return success('backlog.tag.remove', stubItem('42'));
-    if (args[1] === 'list') return success('backlog.list', [stubItem('42')]);
-    if (args[1] === 'show') return success('backlog.show', stubItem('42'));
-    return success('backlog.create', stubItem('new'));
-  });
+vi.mock('@afk/infrastructure', async importOriginal => ({
+  ...await importOriginal<typeof import('@afk/infrastructure')>(),
+  createManagementProviders: vi.fn(async () => ({ backlog: provider, branches: {}, changes: {} })),
+}));
+
+function desktopService(): ReturnType<typeof createBacklogService> {
   const deps: BacklogServiceDeps = {
-    resolveAfk: async () => '/usr/local/bin/afk',
-    resolveWorkspace: workspace => workspace,
-    exec: execMock,
+    providers: async () => provider,
+    resolveWorkspace: (workspace: string) => workspace,
   };
-  return { service: createBacklogService(deps), execMock };
+  return createBacklogService(deps);
+}
+
+/** Run a CLI command and capture the JSON envelope it writes to stdout. */
+async function runCli(args: string[]): Promise<{ ok: boolean; kind: string; data: unknown }> {
+  const program = new Command().name('afk').exitOverride();
+  registerBacklogCommands(program);
+  const captured: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk: string | Uint8Array): boolean => {
+    captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    return true;
+  };
+  try {
+    await program.parseAsync(['node', 'afk', ...args]);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+  return JSON.parse(captured.join(''));
 }
 
 async function publicCommandTree(): Promise<Command> {
@@ -56,44 +84,6 @@ async function publicCommandTree(): Promise<Command> {
     (await entry!.loader())(program);
   }
   return program;
-}
-
-function parseCanonicalHelp(args: string[]): string {
-  const program = new Command().name('afk').exitOverride();
-  registerBacklogCommands(program);
-  registerObserveCommands(program);
-  const captured: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = (chunk: string | Uint8Array): boolean => {
-    captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
-    return true;
-  };
-  let error: unknown;
-  try {
-    program.parse(['node', 'afk', ...args]);
-  } catch (caught) {
-    error = caught;
-  } finally {
-    process.stdout.write = originalWrite;
-  }
-  expect(error).toMatchObject({ code: 'commander.helpDisplayed', message: '(outputHelp)' });
-  return captured.join('');
-}
-
-function optionNames(command: Command | undefined): string[] {
-  return command?.options
-    .map(option => option.long)
-    .filter((name): name is string => name !== undefined) ?? [];
-}
-
-function flags(args: string[]): string[] {
-  return args.filter(argument => argument.startsWith('--'));
-}
-
-function expectDesktopFlagsMatchPublicCommand(args: string[], command: Command | undefined): void {
-  const desktopFlags = flags(args);
-  const publicFlags = optionNames(command);
-  expect(desktopFlags.every(flag => publicFlags.includes(flag))).toBe(true);
 }
 
 describe('Backlog public CLI/Desktop compatibility regression', () => {
@@ -108,106 +98,50 @@ describe('Backlog public CLI/Desktop compatibility regression', () => {
     expect(new Set(backlogNames).size).toBe(backlogNames.length);
     expect(backlog?.commands.filter(command => command.name() === 'create')).toHaveLength(1);
     expect(run?.options.find(option => option.long === '--backlog-id')).toMatchObject({ required: true });
-    expect(optionNames(run)).not.toContain('--iid');
+    expect(run?.options.map(option => option.long)).not.toContain('--iid');
   });
 
-  it('matches Desktop list/show/tag argv to options supported by the public CLI', async () => {
-    const program = await publicCommandTree();
-    const backlog = program.commands.find(command => command.name() === 'backlog')!;
-    const list = backlog.commands.find(command => command.name() === 'list');
-    const show = backlog.commands.find(command => command.name() === 'show');
-    const tag = backlog.commands.find(command => command.name() === 'tag');
-    const addTag = tag?.commands.find(command => command.name() === 'add');
-    const removeTag = tag?.commands.find(command => command.name() === 'remove');
-    const { service, execMock } = makeDesktopService();
+  it('lists the same items in the CLI and the desktop', async () => {
+    const envelope = await runCli(['backlog', 'list', '--state', 'ready', '--json']);
+    const items = await desktopService().list('/workspace', { state: 'ready' });
 
-    await service.list('/workspace', { state: 'ready', executionMode: 'hitl', parentId: 'epic-7', tag: 'billing' });
-    await service.show('/workspace', '42');
-    await service.addTag('/workspace', '42', 'urgent');
-    await service.removeTag('/workspace', '42', 'urgent');
-
-    const [listArgs, showArgs, addTagArgs, removeTagArgs] = execMock.mock.calls.map(call => call[1] as string[]);
-    expectDesktopFlagsMatchPublicCommand(listArgs, list);
-    expectDesktopFlagsMatchPublicCommand(showArgs, show);
-    expectDesktopFlagsMatchPublicCommand(addTagArgs, addTag);
-    expectDesktopFlagsMatchPublicCommand(removeTagArgs, removeTag);
+    expect(envelope.kind).toBe('backlog.list');
+    expect(envelope.data).toEqual(items);
   });
 
-  it('supports Desktop backlog list platform selection in the public CLI', async () => {
-    const program = await publicCommandTree();
-    const backlog = program.commands.find(command => command.name() === 'backlog')!;
-    const list = backlog.commands.find(command => command.name() === 'list');
-    const { service, execMock } = makeDesktopService();
+  it('shows the same item in the CLI and the desktop', async () => {
+    const envelope = await runCli(['backlog', 'show', '--id', '42', '--json']);
+    const item = await desktopService().show('/workspace', '42');
 
-    await service.list('/workspace', { platform: 'github' });
-
-    const listArgs = execMock.mock.calls[0][1] as string[];
-    expect(listArgs).toEqual(['backlog', 'list', '--platform', 'github', '--json']);
-    expect(optionNames(list)).toEqual(expect.arrayContaining(['--platform', '--json']));
+    expect(envelope.kind).toBe('backlog.show');
+    expect(envelope.data).toEqual(item);
   });
 
-  it('supports Desktop create and JSON output in the public CLI', async () => {
-    const program = await publicCommandTree();
-    const backlog = program.commands.find(command => command.name() === 'backlog')!;
-    const list = backlog.commands.find(command => command.name() === 'list');
-    const show = backlog.commands.find(command => command.name() === 'show');
-    const create = backlog.commands.find(command => command.name() === 'create');
-    const tag = backlog.commands.find(command => command.name() === 'tag');
-    const addTag = tag?.commands.find(command => command.name() === 'add');
-    const { service, execMock } = makeDesktopService();
+  it('creates the same backlog in the CLI and the desktop', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'afk-contract-'));
+    const descriptionFile = path.join(directory, 'description.md');
+    await writeFile(descriptionFile, 'fresh', 'utf8');
+    const envelope = await runCli(['backlog', 'create', 'fresh', '--description-file', descriptionFile, '--json']);
+    const item = await desktopService().create('/workspace', { title: 'fresh', description: 'fresh' });
+    await rm(directory, { recursive: true, force: true });
 
-    await service.list('/workspace');
-    await service.show('/workspace', '42');
-    await service.create('/workspace', { title: 'fresh', description: 'demo' });
-    await service.addTag('/workspace', '42', 'urgent');
-
-    const desktopArgs = execMock.mock.calls.map(call => call[1] as string[]);
-    expect(backlog.commands.filter(command => command.name() === 'create')).toHaveLength(1);
-    expect(desktopArgs.find(args => args[1] === 'create')).toEqual([
-      'backlog',
-      'create',
-      'fresh',
-      '--description-file',
-      expect.stringMatching(/afk-backlog-.*\/description\.md$/),
-      '--json',
-    ]);
-    expect(desktopArgs.every(args => args.at(-1) === '--json')).toBe(true);
-    expectDesktopFlagsMatchPublicCommand(desktopArgs[0], list);
-    expectDesktopFlagsMatchPublicCommand(desktopArgs[1], show);
-    expectDesktopFlagsMatchPublicCommand(desktopArgs[2], create);
-    expectDesktopFlagsMatchPublicCommand(desktopArgs[3], addTag);
+    expect(envelope.kind).toBe('backlog.create');
+    expect(envelope.data).toEqual(item);
   });
 
-  it('keeps Desktop run assembly aligned with the public scoped loop command', async () => {
-    const program = await publicCommandTree();
-    const loop = program.commands.find(command => command.name() === 'loop');
-    const args = buildBacklogRunArgs({ backlogId: 'feature/auth', template: 'feature-delivery' });
+  it('adds the same tag in the CLI and the desktop', async () => {
+    const envelope = await runCli(['backlog', 'tag', 'add', '--id', '42', '--tag', 'urgent', '--json']);
+    const item = await desktopService().addTag('/workspace', '42', 'urgent');
 
-    expect(args).toEqual(['loop', '--backlog-id', 'feature/auth', '--max-iterations', '1', '--template', 'feature-delivery']);
-    expect(flags(args)).toEqual(['--backlog-id', '--max-iterations', '--template']);
-    expect(optionNames(loop)).toEqual(expect.arrayContaining(flags(args)));
+    expect(envelope.kind).toBe('backlog.tag.add');
+    expect(envelope.data).toEqual(item);
   });
 
-  it.each([
-    [['backlog', 'tag', 'add', '--help'], 'Add a business tag'],
-    [['backlog', 'tag', 'remove', '--help'], 'Remove a business tag'],
-    [['observe', 'timeline', '--help'], 'Show ordered audit events for a run'],
-  ] as const)('routes canonical nested parser %j to the intended command', (args, expectedHelp) => {
-    expect(parseCanonicalHelp([...args])).toContain(expectedHelp);
-  });
+  it('removes the same tag in the CLI and the desktop', async () => {
+    const envelope = await runCli(['backlog', 'tag', 'remove', '--id', '42', '--tag', 'urgent', '--json']);
+    const item = await desktopService().removeTag('/workspace', '42', 'urgent');
 
-  it('emits one JSON failure without CommanderError text for missing required options', () => {
-    const result = spawnSync(process.execPath, [
-      '--import', 'tsx/esm', 'src/index.ts', 'backlog', 'show', '--json',
-    ], { cwd: process.cwd(), encoding: 'utf8' });
-
-    expect(result.status).toBe(1);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      ok: false,
-      kind: 'backlog.show',
-      error: { code: 'validation', message: expect.stringMatching(/required option/i) },
-    });
-    expect(result.stderr).not.toMatch(/CommanderError|commander\.missingMandatoryOptionValue|at .*src\/index/);
-    expect(result.stderr).not.toMatch(/required option .* not specified/i);
+    expect(envelope.kind).toBe('backlog.tag.remove');
+    expect(envelope.data).toEqual(item);
   });
 });

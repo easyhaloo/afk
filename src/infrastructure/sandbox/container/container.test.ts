@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { EnvVarAllowlist } from './env-allowlist.js';
-import { DockerContainerProvider } from './docker.js';
-import { PodmanContainerProvider } from './podman.js';
-import { ContainerSandbox, ContainerAgentExecution } from './sandbox.js';
-import { ContainerSandboxProvider } from './provider.js';
-import type { ContainerProvider, ContainerCreateOptions, ContainerHandle } from './types.js';
+import { EnvVarAllowlist } from '@afk/execution/infrastructure/sandbox/container/env-allowlist';
+import { DockerContainerProvider } from '@afk/execution/infrastructure/sandbox/container/docker';
+import { PodmanContainerProvider } from '@afk/execution/infrastructure/sandbox/container/podman';
+import { ContainerSandbox, ContainerAgentExecution } from '@afk/execution/infrastructure/sandbox/container/sandbox';
+import { ContainerSandboxProvider } from '@afk/execution/infrastructure/sandbox/container/provider';
+import type { ContainerProvider, ContainerCreateOptions, ContainerHandle } from '@afk/execution/infrastructure/sandbox/container/types';
 import { join } from 'path';
 import * as os from 'os';
 import * as fs from 'fs';

@@ -1,5 +1,5 @@
 import { Task } from '../../../types/board.js';
-import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecord } from '../../../application/runtime/task-runtime.js';
+import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecord } from '@afk/execution/application/runtime/task-runtime';
 import type { BacklogItem } from '@afk/application';
 import { createGitLabTracker } from '@afk/infrastructure';
 import { resolveGitLabProject } from '@afk/infrastructure';

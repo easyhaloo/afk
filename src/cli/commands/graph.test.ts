@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { generateWorkflowGraph } from '../../application/visualizations/workflow-graph.js';
-import { writeGraphCache } from '../../application/visualizations/graph-cache.js';
+import { generateWorkflowGraph } from '@afk/execution/application/visualizations/workflow-graph';
+import { writeGraphCache } from '@afk/execution/application/visualizations/graph-cache';
 
 const projects: string[] = [];
 afterEach(async () => { await Promise.all(projects.splice(0).map((project) => rm(project, { recursive: true, force: true }))); });

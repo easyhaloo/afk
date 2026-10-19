@@ -1,5 +1,5 @@
 import type { BacklogState } from '@afk/application';
-import type { TaskRuntimeActivity, TaskRuntimeStatus } from '../application/runtime/task-runtime.js';
+import type { TaskRuntimeActivity, TaskRuntimeStatus } from '@afk/execution/application/runtime/task-runtime';
 
 export type TaskActivity = Omit<TaskRuntimeActivity, 'at'> & { at: Date };
 

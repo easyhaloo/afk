@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadLoopConfig } from '../../application/loop/loop-config.js';
+import { loadLoopConfig } from '@afk/execution/application/loop/loop-config';
 import { registerLoopCommands, resolveManagedLoopExecution } from './loop.js';
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';

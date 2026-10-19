@@ -4,7 +4,7 @@ import type {
   TaskRuntimePhase,
   TaskRuntimeRecord,
   TaskRuntimeStatus,
-} from '../../../application/runtime/task-runtime.js';
+} from '@afk/execution/application/runtime/task-runtime';
 
 export type ProjectedRunStatus = TaskRuntimeStatus | 'stale';
 type BacklogProjectionItem = Pick<BacklogItem, 'id' | 'title' | 'state' | 'providerRef'>;

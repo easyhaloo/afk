@@ -6,7 +6,7 @@ vi.mock('@afk/infrastructure', async importOriginal => ({
   getGlabToken,
 }));
 
-import { getGitLabConfig } from '../src/infrastructure/config/manager';
+import { getGitLabConfig } from '@afk/execution/infrastructure/config/manager';
 
 describe('gitlab config', () => {
   it('resolves glab authentication from the infrastructure implementation', () => {

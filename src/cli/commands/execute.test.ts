@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
 
 const mocks = vi.hoisted(() => ({ executeWorkItem: vi.fn(), reconcileWorkItemMerge: vi.fn() }));
-vi.mock('../../application/workflows/execute-work-item', () => ({ executeWorkItem: mocks.executeWorkItem, reconcileWorkItemMerge: mocks.reconcileWorkItemMerge }));
+vi.mock('@afk/execution/application/workflows/execute-work-item', () => ({ executeWorkItem: mocks.executeWorkItem, reconcileWorkItemMerge: mocks.reconcileWorkItemMerge }));
 vi.mock('../cli-utils', () => ({
   handleCommandError: (error: unknown) => { throw error; }, success: vi.fn(), warning: vi.fn(), detail: vi.fn(),
 }));

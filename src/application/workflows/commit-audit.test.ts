@@ -4,18 +4,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import type { RunEvent } from '@afk/core';
-import type { AgentExecution, AgentExecutionOptions, AgentProvider } from '../../domain/agents/types.js';
-import { createAgentProvider } from '../../domain/agents/index.js';
+import type { AgentExecution, AgentExecutionOptions, AgentProvider } from '@afk/execution/domain/agents/types';
+import { createAgentProvider } from '@afk/execution/domain/agents/index';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
-import { TemplateLoader } from '../../domain/templates/loader.js';
+import { TemplateLoader } from '@afk/execution/domain/templates/loader';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import type { ProviderBundle } from '@afk/infrastructure';
-import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
-import { RunObserver } from '../../observability/run-observer.js';
-import { WorkflowRunner } from '../workflow-engine.js';
-import { BudgetStore } from './budget-store.js';
+import type { Sandbox, SandboxProvider } from '@afk/execution/infrastructure/sandbox/types';
+import { RunObserver } from '@afk/execution/observability/run-observer';
+import { WorkflowRunner } from '@afk/execution/application/workflow-engine';
+import { BudgetStore } from '@afk/execution/application/workflows/budget-store';
 
-vi.mock('../modules/project-resolver', () => ({ default: () => ({ name: 'project-resolver' }) }));
+vi.mock('@afk/execution/application/modules/project-resolver', () => ({ default: () => ({ name: 'project-resolver' }) }));
 
 let directory: string;
 beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'afk-commit-audit-')); });

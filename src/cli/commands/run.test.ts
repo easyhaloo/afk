@@ -5,8 +5,8 @@ const mocks = vi.hoisted(() => ({
   runWorkflowCli: vi.fn(async () => ({ success: true })),
 }));
 
-vi.mock('../../application/workflows/run-cmd', () => ({ runWorkflowCli: mocks.runWorkflowCli }));
-vi.mock('../../infrastructure/config/manager', () => ({
+vi.mock('@afk/execution/application/workflows/run-cmd', () => ({ runWorkflowCli: mocks.runWorkflowCli }));
+vi.mock('@afk/execution/infrastructure/config/manager', () => ({
   getWorkflowConfig: () => ({
     agentDefault: 'claude-code',
     maxRetries: 2,
@@ -16,7 +16,7 @@ vi.mock('../../infrastructure/config/manager', () => ({
     agents: { codex: {} },
   }),
 }));
-vi.mock('../../domain/agents/index', () => ({ resolveAgentProviderName: () => 'claude-code' }));
+vi.mock('@afk/execution/domain/agents/index', () => ({ resolveAgentProviderName: () => 'claude-code' }));
 vi.mock('./agent-runtime-options', () => ({
   addAgentRuntimeOptions: (command: Command) => command,
   resolveAgentRuntimeOptions: () => ({ kind: 'default' }),

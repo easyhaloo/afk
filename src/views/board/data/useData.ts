@@ -23,7 +23,7 @@ import {
   type BacklogViewModel,
   type TuiManagementProviderBundle,
 } from './backlog-adapter.js';
-import type { TaskRuntimeManager } from '../../../application/runtime/task-runtime.js';
+import type { TaskRuntimeManager } from '@afk/execution/application/runtime/task-runtime';
 
 const PER_PAGE = 50;
 const DETAIL_TTL_MS = 60_000;

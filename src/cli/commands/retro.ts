@@ -9,9 +9,9 @@ import { z } from 'zod';
 import type { AgentToolCallSummary, RunEvent } from '@afk/core';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
-import { readAgentTelemetry, readAgentTools, readAgentTranscript, findCodexRollout } from '../../infrastructure/observability/agent-telemetry.js';
-import { defaultSessionStoreChain } from '../../application/sessions/chain.js';
-import { claudeProjectSlug } from '../../shared/agent-transcript-path.js';
+import { readAgentTelemetry, readAgentTools, readAgentTranscript, findCodexRollout } from '@afk/execution/infrastructure/observability/agent-telemetry';
+import { defaultSessionStoreChain } from '@afk/execution/application/sessions/chain';
+import { claudeProjectSlug } from '@afk/execution/shared/agent-transcript-path';
 
 const execFileAsync = promisify(execFile);
 const RETRO_VERSION = '3';

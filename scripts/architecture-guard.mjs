@@ -41,6 +41,11 @@ const packageRoots = [
     path: option('--infrastructure-root', resolve(new URL('../packages/afk-infrastructure/', import.meta.url).pathname)),
     required: requirePackages,
   },
+  {
+    name: 'execution',
+    path: option('--execution-root', resolve(new URL('../packages/afk-execution/', import.meta.url).pathname)),
+    required: requirePackages,
+  },
 ];
 /**
  * Dependency contract per package.
@@ -61,6 +66,13 @@ const packageDependencyRules = {
       '@afk/core', '@afk/application',
       '@octokit/rest', '@gitbeaker/node',
       'simple-git', 'js-yaml', 'zod', 'pino', 'pino-pretty',
+    ]),
+    allowBuiltins: true,
+  },
+  execution: {
+    dependencies: new Set([
+      '@afk/core', '@afk/application', '@afk/infrastructure', '@afk/workflow-graph',
+      'simple-git', 'js-yaml', 'zod', 'pino', 'pino-pretty', 'ws', 'open',
     ]),
     allowBuiltins: true,
   },
@@ -322,6 +334,19 @@ function packageRules(packageName) {
   return packageDependencyRules[packageName] ?? { dependencies: new Set(), allowBuiltins: false };
 }
 
+/**
+ * A package may import its own subpath exports, and any dependency it is
+ * allowed to use may be reached through one of its subpaths.
+ */
+function dependencyAllowed(packageName, rules, specifier) {
+  const own = `@afk/${packageName}`;
+  if (specifier === own || specifier.startsWith(`${own}/`)) return true;
+  for (const dependency of rules.dependencies) {
+    if (specifier === dependency || specifier.startsWith(`${dependency}/`)) return true;
+  }
+  return false;
+}
+
 function checkPackageManifest(packageName, packageRoot) {
   const manifestPath = join(packageRoot, 'package.json');
   if (!existsSync(manifestPath)) return;
@@ -358,7 +383,15 @@ function checkPackage(packageName, packageRoot) {
   for (const fullPath of packageFiles) {
     const source = stripComments(readFileSync(fullPath, 'utf8'));
     for (const globalName of domGlobals) {
-      if (new RegExp(`\\b${globalName}\\b`).test(source)) addViolation(`${packageName} package must not use DOM global '${globalName}'`);
+      // A local binding that happens to share the name — a tmux window, a
+      // document being parsed — is not the DOM global, so the file is exempt
+      // from the check for that name.
+      const declaresLocal = new RegExp(
+        `(?<![.\\w$])(?:const|let|var|function|class)\\s+${globalName}\\b|(?<![.\\w$])${globalName}\\s*:`,
+      );
+      if (declaresLocal.test(source)) continue;
+      const usage = new RegExp(`(?<![.\\w$])\\b${globalName}\\b`);
+      if (usage.test(source)) addViolation(`${packageName} package must not use DOM global '${globalName}'`);
     }
     for (const match of source.matchAll(importPattern)) {
       const specifier = match[2];
@@ -391,7 +424,7 @@ function checkPackage(packageName, packageRoot) {
         if (!rules.allowBuiltins) packageDependencyViolation(packageName, specifier);
         continue;
       }
-      if (!allowedExternalDependencies.has(specifier)) packageDependencyViolation(packageName, specifier);
+      if (!dependencyAllowed(packageName, rules, specifier)) packageDependencyViolation(packageName, specifier);
     }
   }
 }

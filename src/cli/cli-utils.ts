@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { logger } from '@afk/infrastructure';
-export { openInBrowser } from '../shared/browser.js';
+export { openInBrowser } from '@afk/execution/shared/browser';
 
 /** Parse comma-separated string into trimmed array. */
 export function parseCommaSeparated(input: string): string[] {

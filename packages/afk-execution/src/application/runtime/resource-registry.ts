@@ -2,7 +2,7 @@ export {
   AfkResourceRegistry,
   getAfkResourceRegistry,
   workspaceRootForWorktree,
-} from '../../infrastructure/runtime/resource-registry.js';
+} from '../../infrastructure/runtime/resource-registry';
 export type {
   AfkResourceKind,
   AfkResourceMetadata,
@@ -11,4 +11,4 @@ export type {
   AfkResourceRegistryOptions,
   AfkResourceStatus,
   RegisterAfkResource,
-} from '../../infrastructure/runtime/resource-registry.js';
+} from '../../infrastructure/runtime/resource-registry';

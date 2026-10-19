@@ -4,21 +4,21 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createWorkflowProviders } from '@afk/infrastructure';
-import { LoopRunner } from '../../application/modules/loop-runner.js';
+import { LoopRunner } from '@afk/execution/application/modules/loop-runner';
 import { installLoopSignalHandlers } from './loop-signals.js';
-import { getSchedulerConfig } from '../../infrastructure/config/manager.js';
+import { getSchedulerConfig } from '@afk/execution/infrastructure/config/manager';
 import { parseWorkItemId } from '@afk/application';
-import { loadLoopConfig } from '../../application/loop/loop-config.js';
+import { loadLoopConfig } from '@afk/execution/application/loop/loop-config';
 import { logger, redirectStdioToLog, resolveLogPath } from '@afk/infrastructure';
 import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils.js';
-import { spawnDetached, waitForProcessPid } from '../../infrastructure/process/daemon.js';
+import { spawnDetached, waitForProcessPid } from '@afk/execution/infrastructure/process/daemon';
 import {
   LOOP_PID_FILE,
   readPid,
   removePidFile,
   ensurePidDirectory,
   isProcessAlive,
-} from '../../infrastructure/process/pid-file.js';
+} from '@afk/execution/infrastructure/process/pid-file';
 import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options.js';
 
 const AFK_HOME = path.join(os.homedir(), '.afk');

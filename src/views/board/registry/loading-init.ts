@@ -15,7 +15,7 @@ export function registerAllLoadingPhases(): void {
     label: 'Loading configuration...',
     icon: '⚙',
     fetch: async (setDetail) => {
-      const { getGitLabConfig } = await import('../../../infrastructure/config/manager.js');
+      const { getGitLabConfig } = await import('@afk/execution/infrastructure/config/manager');
       try {
         const config = getGitLabConfig();
         setDetail('config', `${config.url || 'default'}`);

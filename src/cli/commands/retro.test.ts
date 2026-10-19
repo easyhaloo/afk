@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
-import { claudeProjectSlug } from '../../shared/agent-transcript-path.js';
+import { claudeProjectSlug } from '@afk/execution/shared/agent-transcript-path';
 import { registerRetroCommands, renderRetroHtml, reportSchema } from './retro.js';
 
 const childProcessMocks = vi.hoisted(() => ({ execFile: vi.fn() }));

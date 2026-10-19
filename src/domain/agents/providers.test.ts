@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ClaudeCodeProvider } from './claude-code.js';
-import { CodexProvider } from './codex.js';
-import { CursorProvider } from './cursor.js';
-import { PiProvider } from './pi.js';
-import { OpenCodeProvider, resolveOpenCodeModel } from './opencode.js';
-import { CopilotProvider } from './copilot.js';
+import { ClaudeCodeProvider } from '@afk/execution/domain/agents/claude-code';
+import { CodexProvider } from '@afk/execution/domain/agents/codex';
+import { CursorProvider } from '@afk/execution/domain/agents/cursor';
+import { PiProvider } from '@afk/execution/domain/agents/pi';
+import { OpenCodeProvider, resolveOpenCodeModel } from '@afk/execution/domain/agents/opencode';
+import { CopilotProvider } from '@afk/execution/domain/agents/copilot';
 import {
   registerAgentProvider,
   requireAgentProvider,
@@ -13,10 +13,10 @@ import {
   guardedRestoreSession,
   guardedCaptureSession,
   _resetAgentRegistry,
-} from './registry.js';
-import { createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
-import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types.js';
-import type { AgentProvider } from './types.js';
+} from '@afk/execution/domain/agents/registry';
+import { createAgentProvider, ensureBuiltinAgentProviders } from '@afk/execution/domain/agents/index';
+import type { AgentExecution, Sandbox } from '@afk/execution/infrastructure/sandbox/types';
+import type { AgentProvider } from '@afk/execution/domain/agents/types';
 
 /** Build minimal AgentCommandOptions for testing. */
 function opts(over: Partial<{ worktreePath: string; sessionId: string; goal: string; interactive: boolean }> = {}) {

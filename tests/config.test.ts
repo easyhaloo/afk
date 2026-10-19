@@ -12,7 +12,7 @@ vi.mock('node:fs', () => ({
   readFileSync: vi.fn(() => { throw new Error('not found'); }),
 }));
 
-import { loadWorkflowConfig } from '../src/infrastructure/config/manager';
+import { loadWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
 
 describe('WorkflowConfig env var loading', () => {
   beforeEach(() => {
@@ -137,7 +137,7 @@ describe('SchedulerConfig env var loading', () => {
     const original = process.env;
     process.env = { ...original, ...env };
     try {
-      const { getSchedulerConfig } = await import('../src/infrastructure/config/manager');
+      const { getSchedulerConfig } = await import('@afk/execution/infrastructure/config/manager');
       return getSchedulerConfig();
     } finally {
       process.env = original;

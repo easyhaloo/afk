@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { basename } from 'path';
-import { IsolateManager } from '../../application/isolate.js';
+import { IsolateManager } from '@afk/execution/application/isolate';
 import { handleCommandError, success, info, fail } from '../cli-utils.js';
 
 function createIsolate(cwd?: string): IsolateManager {

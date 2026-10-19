@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { registerBacklogCommands } from './backlog.js';
 import { registerQACommands } from './qa.js';
 import { createManagementProviders } from '@afk/infrastructure';
-import { QARunner } from '../../application/modules/qa-runner.js';
+import { QARunner } from '@afk/execution/application/modules/qa-runner';
 
 vi.mock('@afk/infrastructure', async importOriginal => ({
   ...await importOriginal<typeof import('@afk/infrastructure')>(),
@@ -13,11 +13,11 @@ vi.mock('../cli-utils', () => ({
   handleCommandError: (error: unknown) => { throw error; },
   success: vi.fn(), info: vi.fn(), warning: vi.fn(), fail: vi.fn(), detail: vi.fn(),
 }));
-vi.mock('../../infrastructure/config/manager', () => ({
+vi.mock('@afk/execution/infrastructure/config/manager', () => ({
   getSchedulerConfig: () => ({ maxConcurrent: 3, pollInterval: 60 }),
   getWorkflowConfig: () => ({}),
 }));
-vi.mock('../../domain/agents/index', () => ({
+vi.mock('@afk/execution/domain/agents/index', () => ({
   createAgentProvider: vi.fn(),
   prepareAgentRuntime: vi.fn(() => ({})),
   resolveAgentProviderName: vi.fn(() => 'claude-code'),
@@ -26,7 +26,7 @@ vi.mock('./agent-runtime-options', () => ({
   addAgentRuntimeOptions: (command: Command) => command,
   resolveAgentRuntimeOptions: () => ({}),
 }));
-vi.mock('../../application/modules/qa-runner', () => ({ QARunner: vi.fn() }));
+vi.mock('@afk/execution/application/modules/qa-runner', () => ({ QARunner: vi.fn() }));
 
 async function runCommand(register: (program: Command) => void, ...args: string[]): Promise<void> {
   const program = new Command().exitOverride();

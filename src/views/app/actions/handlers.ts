@@ -1,4 +1,4 @@
-import { openInBrowser } from '../../../shared/browser.js';
+import { openInBrowser } from '@afk/execution/shared/browser';
 import type { BacklogViewModel } from '../../board/data/backlog-adapter.js';
 import type { StateContextValue } from '../state/StateContext.js';
 

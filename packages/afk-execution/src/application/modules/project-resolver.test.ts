@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // variable declarations. vi.hoisted gives us a place to create values the
 // factory can reference.
 import { ProjectResolverModule } from './project-resolver.js';
-import type { InitContext, LifecycleContext } from '../workflows/lifecycle.js';
+import type { InitContext, LifecycleContext } from '../workflows/lifecycle';
 import type { ProjectResolver } from './project-resolver.js';
 
 function makeResolver(over: Partial<ProjectResolver> = {}): ProjectResolver {

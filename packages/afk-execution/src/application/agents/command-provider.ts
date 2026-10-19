@@ -1,4 +1,4 @@
-import type { AgentCommand, AgentCommandOptions, AgentEvent, AgentProvider } from '../../domain/agents/types.js';
+import type { AgentCommand, AgentCommandOptions, AgentEvent, AgentProvider } from '../../domain/agents/types';
 
 export type CommandAgentProvider = AgentProvider & {
   buildCommand(options: AgentCommandOptions): AgentCommand;

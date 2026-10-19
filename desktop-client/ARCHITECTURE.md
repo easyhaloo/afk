@@ -104,7 +104,7 @@ and Electron user data, including the JSONL audit streams.
 | `ssh.connect(hostId)` | 通过 PTY 启动 `/usr/bin/ssh` 并传入托管主机的真实地址参数 | 托管主机不依赖 OpenSSH `Host` alias；系统配置主机保留原有 alias 兼容路径；输入和输出不写入日志。 |
 | `ssh.generateKey()` / `ssh.deployKey(hostId)` | 通过 PTY 调用 `ssh-keygen` 或结构化 OpenSSH 部署命令 | 私钥口令和远程密码由终端直接处理，AFK 不持久化。 |
 
-运行诊断遵循 AFK 的实际状态目录：`<worktree>/.afk/runs/<run-id>/events.jsonl`。该路径、增量事件流与诊断属性在 AFK 源码的 `src/application/sessions/run-state.ts` 中定义；桌面客户端不把这类诊断文件作为控制平面。
+运行诊断遵循 AFK 的实际状态目录：`<worktree>/.afk/runs/<run-id>/events.jsonl`。该路径、增量事件流与诊断属性在 AFK 源码的 `packages/afk-execution/src/application/sessions/run-state.ts` 中定义；桌面客户端不把这类诊断文件作为控制平面。
 
 本项目最初验证过 Tauri 的命令与 Shell 权限模型；根据用户要求已改为 Electron，Tauri 不再是运行时依赖。保留的官方参考链接：
 

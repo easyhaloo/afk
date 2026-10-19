@@ -6,7 +6,7 @@
 
 ## Context
 
-`BacklogItem.changeRequest?: BacklogChangeRequest` (`src/domain/backlog/index.ts:48`) 在 PR 数据进入桌面时由 `withChangeRequest()` (`src/domain/backlog/tracker-adapter.ts:131-148`) 写入。该方法按分支名 (`<branchName>-qa` 优先，再 `<branchName>`) 挑出**最近一条** MR，**覆盖**而非追加。返工产生的旧 PR 因此在 CLI 输出里被替换掉。
+`BacklogItem.changeRequest?: BacklogChangeRequest` (`src/domain/backlog/index.ts:48`) 在 PR 数据进入桌面时由 `withChangeRequest()` (`packages/afk-infrastructure/src/backlog/tracker-adapter.ts:131-148`) 写入。该方法按分支名 (`<branchName>-qa` 优先，再 `<branchName>`) 挑出**最近一条** MR，**覆盖**而非追加。返工产生的旧 PR 因此在 CLI 输出里被替换掉。
 
 新需求让桌面 UI 展示**一对多历史 PR 列表**。如果保留单字段 + 增并列数组，需要：
 - CLI 双写两份并保持顺序一致

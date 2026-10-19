@@ -114,7 +114,7 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
 
 | Context | Module | Touch |
 |---------|--------|-------|
-| Run audit spine | `src/core/events.ts`, `src/infrastructure/observability/jsonl-event-store.ts` | none (read-only consumer) |
+| Run audit spine | `src/core/events.ts`, `packages/afk-infrastructure/packages/afk-execution/src/observability/jsonl-event-store.ts` | none (read-only consumer) |
 | CLI projection | `src/cli/commands/observe.ts` (`runs`, `timeline`) | none (already exposes needed subcommands) |
 | Electron IPC | `desktop-client/shared/ipc-contract.ts`, `desktop-client/electron/ipc/register-handlers.ts` | add 2 handlers |
 | Electron service | `desktop-client/electron/services/` | add `run-log-service.ts` |
@@ -144,7 +144,7 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
   Spot-check confirms the field is present on `RunEvent.context`
   (`src/core/events.ts:9`). If any future emitter skips it, the
   viewer's "latest run for this item" lookup silently returns nothing.
-  Owner action: add a regression test in `src/observability/` that
+  Owner action: add a regression test in `packages/afk-execution/src/observability/` that
   asserts every append sets `workItemId`.
 - **R4 — Pull-poll may miss late events that emit between polls.**
   Acceptable for the user-stated value (occasional inspection), but

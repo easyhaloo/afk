@@ -16,3 +16,4 @@ for the workflow.
 | [ADR-0018](0018-evidence-classification-and-redaction.md) | Evidence classification and redaction | accepted | 2026-08 |
 | [ADR-0019](0019-desktop-run-log-viewer-projection.md) | Shared execution views and interactive tmux access | in progress | 2026-10-14 |
 | [ADR-0020](0020-backlog-item-drop-singular-change-request.md) | Backlog item drop = singular change request | proposed | 2026-09-29 |
+| [ADR-0021](0021-package-boundaries-and-in-process-desktop.md) | Package boundaries and the in-process desktop client | accepted | 2026-10-19 |

@@ -3,8 +3,9 @@
 ## Architecture guard
 
 `pnpm architecture:check --check-packages` enforces layer direction and checks
-the `packages/afk-core` and `packages/afk-application` roots for pure
-source imports and dependency direction. The guard also
+the `packages/afk-core`, `packages/afk-application` and
+`packages/afk-infrastructure` roots for pure source imports and dependency
+direction. The guard also
 disallows generic records and legacy client-factory imports. The legacy migration is complete:
 `scripts/architecture-legacy-baseline.json` records zero legacy files, imports,
 and patterns. New legacy files or imports fail the check. Delete the stale
@@ -14,6 +15,11 @@ Layer direction applies to relative imports between non-test files in
 `src/cli`, `src/domain`, `src/application`, `src/infrastructure`,
 `src/shared`, and `src/views`. Passing `--require-packages` makes a missing
 package root a failure instead of a skipped check.
+
+The desktop client is a separate source tree with its own contract: it may
+consume the shared `@afk/*` packages, but it must not import the root
+package's `src/` tree. A relative import that escapes the desktop root into
+`src/` is reported the same way a package importing outside its own root is.
 
 ## Scope and command surface
 

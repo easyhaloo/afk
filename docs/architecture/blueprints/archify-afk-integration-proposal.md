@@ -76,7 +76,7 @@ flowchart LR
 | `parallel` 或同层多个 root | 同列、同轨道的确定性垂直分布 | 共享端点采用可读的正交分散路由。 | 真实并发槽位、资源占用。|
 | `request.json` / `result.json` | 独立的 run overlay / proof card | 仅显示已落盘的 runId、状态、开始时间、错误摘要。 | 尚未落盘的“实时完成百分比”。|
 
-建议把转换器实现为 AFK core 中无副作用的纯函数，例如 `src/application/visualizations/project-workflow-to-archify.ts`。该函数的输入是已解析的模板及可选的 run fact snapshot，输出是符合 Archify schema 的对象。它必须有单测覆盖：每个 `dependsOn` 都转成边；每个 `when` 都转成条件标签；未知 provider 或缺失运行记录均不能导致虚构节点、状态或颜色。
+建议把转换器实现为 AFK core 中无副作用的纯函数，例如 `packages/afk-execution/src/application/visualizations/project-workflow-to-archify.ts`。该函数的输入是已解析的模板及可选的 run fact snapshot，输出是符合 Archify schema 的对象。它必须有单测覆盖：每个 `dependsOn` 都转成边；每个 `when` 都转成条件标签；未知 provider 或缺失运行记录均不能导致虚构节点、状态或颜色。
 
 ## 3. 产物、缓存与验证生命周期
 

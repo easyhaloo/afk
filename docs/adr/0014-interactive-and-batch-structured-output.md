@@ -70,6 +70,6 @@ malformed output, non-zero exits, and timeouts as failed executions.
 
 ## References
 
-- `src/infrastructure/io/signal.ts` — interactive mode signal file implementation
-- `src/infrastructure/sandbox/providers/local.ts` — interactive mode `LocalAgentExecution`
-- `src/infrastructure/sandbox/index.ts` — sandbox provider factory
+- `packages/afk-infrastructure/src/io/signal.ts` — interactive mode signal file implementation
+- `packages/afk-execution/src/infrastructure/sandbox/providers/local.ts` — interactive mode `LocalAgentExecution`
+- `packages/afk-execution/src/infrastructure/sandbox/index.ts` — sandbox provider factory

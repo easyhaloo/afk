@@ -610,15 +610,15 @@ Acceptance: templates can express dependencies, conditions, execution modes, Age
 Prerequisite: all new workflows and default Provider use ExecutionResult.
 
 - Delete signal writing requirements from new prompts (`templates/builtin.ts`, `workflows.ts` phases)
-- Runner still reads signal as backward-compatible fallback (`src/infrastructure/tmux/tmux.ts`)
+- Runner still reads signal as backward-compatible fallback (`packages/afk-execution/src/infrastructure/tmux/tmux.ts`)
 - Clean up legacy signal CLI/schema/tests (preserve readSignal/writeSignal/clearSignal + unit tests; CLI/skills have no independent signal subcommand yet)
 - Update skills, README, and architecture docs (`CLAUDE.md` contains Phase status table)
 
 Acceptance: full test suite passes, old worktrees can be compatibly read or explicitly migrated.
 
 Implementation details:
-- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `src/infrastructure/tmux/tmux.ts`.
-- `src/infrastructure/io/signal.ts` owns the signal file primitives.
+- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `packages/afk-execution/packages/afk-execution/src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `packages/afk-execution/src/infrastructure/tmux/tmux.ts`.
+- `packages/afk-infrastructure/src/io/signal.ts` owns the signal file primitives.
 
 ## 13. Testing Plan
 

@@ -114,7 +114,7 @@ afk/
 | `src/infrastructure/` | 全部 I/O：git、tmux、sandbox、tracker、文件、进程 | `domain`、`core`、`shared` | 业务决策；依赖 `application` 及以上 |
 | `src/cli/` | 命令表面、参数解析、输出格式。**唯一真源** | `application`、`domain`、`infrastructure`、`shared`、`views` | 业务逻辑下沉；命令重复注册 |
 | `src/views/` | Ink 渲染。按功能分组 | `application`、`domain`、`infrastructure`、`shared` | 业务逻辑；`components/utils/types` 式类型分组 |
-| `src/observability/` | 审计主干的查询与投影 | `application`、`domain`、`infrastructure`、`core` | 写审计事件（属 infrastructure） |
+| `packages/afk-execution/src/observability/` | 审计主干的查询与投影 | `application`、`domain`、`infrastructure`、`core` | 写审计事件（属 infrastructure） |
 | `src/coordinator/` | 跨切面协调：把用例与执行环境接起来 | `application`、`infrastructure` | 沉淀通用工具 |
 | `src/plugin-sdk/` | 对外插件契约。**兼容性承诺面** | `domain` | 反向依赖仓库内部实现 |
 | `src/types/` | 仅 ambient 声明（如 `node-sqlite.d.ts`） | — | 业务类型、任何运行时值 |
@@ -189,7 +189,7 @@ afk/
 
 ### 5.6 `modules/` → `runners/`
 
-`src/application/modules/` 内是 `loop-runner` / `qa-runner` / `_registry` / `isolate` /
+`packages/afk-execution/src/application/modules/` 内是 `loop-runner` / `qa-runner` / `_registry` / `isolate` /
 `project-resolver`——是执行器，不是「模块」。改用业务语言命名。
 
 ### 5.7 `packages/afk-application` 更名（可选，中等成本）
@@ -209,10 +209,10 @@ afk/
 
 | 文件 | I/O |
 | --- | --- |
-| `src/domain/agents/codex-app-server/transport.ts` | `spawn`、`net.createConnection` |
-| `src/domain/agents/codex-runtime.ts` | `execFile` |
-| `src/domain/backlog/claim.ts` | `fs/promises`、`os` |
-| `src/domain/templates/loader.ts` | `fs`、`os`、`path` |
+| `packages/afk-execution/src/domain/agents/codex-app-server/transport.ts` | `spawn`、`net.createConnection` |
+| `packages/afk-execution/src/domain/agents/codex-runtime.ts` | `execFile` |
+| `packages/afk-infrastructure/src/backlog/filesystem-claim-lock.ts` | `fs/promises`、`os` |
+| `packages/afk-execution/src/domain/templates/loader.ts` | `fs`、`os`、`path` |
 
 **为什么没被拦住**：`architecture-guard.mjs` 的 `nodeBuiltins` 黑名单只作用于
 `packages/*/`（第 262 行）；`src/**` 只检查**相对导入**的层方向，而这 12 个文件

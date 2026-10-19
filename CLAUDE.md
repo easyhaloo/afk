@@ -19,24 +19,26 @@ separate package with its own toolchain — see
 ## Repository layout
 
 ```
-src/
-├── domain/          # Pure types, reducers, provider seams — no I/O
-├── application/     # Use cases over domain; owns workflow/run state
-├── infrastructure/  # Git, tmux, sandboxes, trackers, observability
+src/                  # CLI and TUI presentation layer
 ├── cli/             # Commander wiring, command registry
 ├── views/           # Ink TUI (core primitives in views/shared/)
 ├── coordinator/     # Cross-cutting coordination
-├── observability/   # Query/projection layer over the audit spine
 ├── plugin-sdk/      # External plugin contract
 ├── types/           # Shared board/runtime type projections
 └── shared/          # Cross-layer utilities
-packages/            # afk-core, afk-application, afk-workflow-graph
+packages/
+├── afk-core/            # Business kernel: models, events, reducer, policy
+├── afk-application/     # Use cases and the Port interfaces they are written against
+├── afk-infrastructure/  # Provider SDK, git, tracker, claim lock, event store
+├── afk-execution/       # Work item execution runtime: workflow, QA, agents, sandbox
+└── afk-workflow-graph/  # Deterministic workflow graph algorithms
 skills/              # Source of truth for all Claude Code skills
 docs/                # All documentation (see below)
 ```
 
 Layer direction is enforced, not merely documented: `pnpm architecture:check`
-rejects illegal relative imports and quarantines legacy files. Do not add a
+rejects illegal relative imports, quarantines legacy files, and refuses a
+desktop client that reaches into the root package's `src/` tree. Do not add a
 dependency that inverts a layer.
 
 ## Documentation
@@ -87,7 +89,7 @@ documents ship as `name.md` + `name.zh.md`; update both.
 ```bash
 pnpm build              # compile to dist/ (runs workspace package builds first)
 pnpm typecheck          # root + workspace typecheck
-pnpm test               # vitest + @afk/core + @afk/application
+pnpm test               # vitest + every workspace package
 pnpm architecture:check # layer direction + legacy quarantine
 pnpm docs:check         # broken/case-mismatched doc links
 ```

@@ -3,7 +3,8 @@
 ## 架构守卫
 
 `pnpm architecture:check --check-packages` 强制层间依赖方向，并检查
-`packages/afk-core` 与 `packages/afk-application` 根目录的纯源码导入和依赖方向。
+`packages/afk-core`、`packages/afk-application` 与
+`packages/afk-infrastructure` 根目录的纯源码导入和依赖方向。
 该守卫同时禁止泛型 record 和遗留 client-factory 导入。遗留迁移已完成：
 `scripts/architecture-legacy-baseline.json` 记录零个遗留文件、导入和模式。
 新增的遗留文件或导入会导致检查失败。删除基线条目时请一并删除这条过期记录。
@@ -11,6 +12,10 @@
 层间方向约束适用于 `src/cli`、`src/domain`、`src/application`、
 `src/infrastructure`、`src/shared` 和 `src/views` 中非测试文件的相对导入。
 传入 `--require-packages` 会让缺失的 package 根目录导致失败，而不是跳过检查。
+
+桌面客户端是独立的源码树，有自己的依赖约定：它可以使用共享的 `@afk/*` 包，
+但不得导入根包的 `src/` 目录。逃逸到 `src/` 的相对导入，与包越界导入一样
+会被守卫报告。
 
 ## 范围与命令
 

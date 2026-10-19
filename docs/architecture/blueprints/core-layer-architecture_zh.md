@@ -49,12 +49,25 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
   同样保留 `dist-electron/provider-inventory.cjs`，因为它是真正内联了
   GitHub/GitLab SDK 的 bundle。`@afk/*` 因此是 devDependency 而非 dependency。
 
-仍需继续收敛根包 `src/application` 中的 Provider SDK 实现、其他 Desktop CLI
-入口和工作项状态转换；不能将已迁移入口的单路径误写成全仓所有能力迁移完成。
-Desktop 目前对 `@afk/core` 的引用仍限于 `import type`，`decide` / `evolve` /
-`replay` / `resolveExecutionBase` 尚未在 Desktop 侧被调用——本节完成的是状态
-映射的去重，Core 行为函数的多端共享尚未达成。模块制式已统一，但这不等于
-Desktop 已经在复用 Core 的行为函数。
+- 共享能力已从根包 `src/` 上移为四个 workspace package：
+  `packages/afk-application`（用例与 Port，纯、无运行时依赖）、
+  `packages/afk-infrastructure`（Provider SDK、git、tracker、claim lock、事件存储）、
+  `packages/afk-execution`（工作项执行运行时：workflow、QA、agent、sandbox）、
+  `packages/afk-workflow-graph`（图算法）。根包 `src/` 现在只保留 CLI 与 TUI
+  表现层。
+- 架构守卫按包表驱动检查依赖方向，并新增一条：桌面客户端不得导入根包 `src/` 树。
+  桌面只依赖 `@afk/application`、`@afk/core`、`@afk/infrastructure`、
+  `@afk/execution`。
+- Desktop 已不再 spawn 任何 AFK CLI 进程：backlog 读写与控制命令、工作项执行、
+  工作流图生成、版本探测全部在进程内调用同一批用例。原先 `afk loop` 的参数
+  本来就不被当前 CLI 接受，改为委派给工作项执行后该路径才真正可用。
+- 工作项清单改为 scope 级列举：平台能服务端过滤时按 owner/全局 feed 一次取回，
+  否则回退到逐项目请求。并发上限从 4 提到 12。
+
+仍需继续收敛的部分：把执行运行时里的用例按 Port 拆开，让 `executeWorkItem`
+本身可以进入 `@afk/application`；`@afk/execution` 目前仍是"用例 + 实现"合一的
+过渡形态。Core 行为函数（`decide` / `evolve` / `replay` /
+`resolveExecutionBase`）在 Desktop 侧仍只被用作类型引用。
 
 ## 当前结构分析
 

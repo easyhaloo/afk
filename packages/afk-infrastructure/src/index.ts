@@ -8,7 +8,7 @@
  * depend on anything outside `@afk/core` and `@afk/application`. The
  * architecture guard enforces both halves of that rule.
  */
-export * from './backlog/index.js';
+export * from './backlog/implementations.js';
 export * from './branches/index.js';
 export * from './git/index.js';
 export * from './io/index.js';

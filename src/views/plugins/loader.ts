@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { load } from 'js-yaml';
-import { fileLogger } from '../../infrastructure/io/index.js';
+import { fileLogger } from '@afk/infrastructure';
 import type { LoadedTuiView, TuiPlugin } from './types.js';
 import { isTuiPlugin } from './types.js';
 

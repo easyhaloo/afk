@@ -1,7 +1,7 @@
 import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
 import type { SandboxProviderName } from '../../infrastructure/sandbox/types.js';
-import type { BranchStrategyConfig } from '../../domain/branches/types.js';
-import { deriveBacklogBranchName } from '../../domain/backlog/index.js';
+import type { BranchStrategyConfig } from '@afk/infrastructure';
+import { deriveBacklogBranchName } from '@afk/application';
 import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';
 import { resolveProjectContext, type ProjectContext } from '../project-context.js';
 import { resolveAgentProviderName } from '../../domain/agents/index.js';
@@ -13,8 +13,8 @@ import {
   type ResolvedExecutionManifest,
   type ResolvedExecutionManifestRepository,
 } from './execution-manifest.js';
-import { resolveGitLabProjectKey } from '../../shared/gitlab-project.js';
-import { parseWorkItemId } from '../../domain/work-item/identity.js';
+import { resolveGitLabProjectKey } from '@afk/infrastructure';
+import { parseWorkItemId } from '@afk/application';
 
 export type WorkflowRunRepository = ResolvedExecutionManifestRepository;
 

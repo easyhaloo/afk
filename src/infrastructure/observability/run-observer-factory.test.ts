@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { JsonlEventStore } from './jsonl-event-store.js';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { createRunObserver } from './run-observer-factory.js';
 
 const roots: string[] = [];

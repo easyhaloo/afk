@@ -1,7 +1,7 @@
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
 import type { Sandbox, AgentExecution } from '../../infrastructure/sandbox/types.js';
 import type { SessionStoreChain } from '../sessions/types.js';
-import { logger } from '../../infrastructure/io/index.js';
+import { logger } from '@afk/infrastructure';
 
 export interface ResumeContext {
   iid: number;

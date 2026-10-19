@@ -36,7 +36,35 @@ const packageRoots = [
     path: option('--application-root', resolve(new URL('../packages/afk-application/', import.meta.url).pathname)),
     required: requirePackages,
   },
+  {
+    name: 'infrastructure',
+    path: option('--infrastructure-root', resolve(new URL('../packages/afk-infrastructure/', import.meta.url).pathname)),
+    required: requirePackages,
+  },
 ];
+/**
+ * Dependency contract per package.
+ *
+ * `core` is the pure business kernel: no runtime, no I/O, no sibling package.
+ * `application` holds use cases and the Port interfaces they are written
+ * against: it may reach for the core model and nothing else, so it stays
+ * free of Node, Electron and provider SDKs.
+ * `infrastructure` is where I/O implementations live — Node builtins and the
+ * provider SDKs are the reason it exists — but it may only ever point
+ * inwards at core and application.
+ */
+const packageDependencyRules = {
+  core: { dependencies: new Set(), allowBuiltins: false },
+  application: { dependencies: new Set(['@afk/core']), allowBuiltins: false },
+  infrastructure: {
+    dependencies: new Set([
+      '@afk/core', '@afk/application',
+      '@octokit/rest', '@gitbeaker/node',
+      'simple-git', 'js-yaml', 'zod', 'pino', 'pino-pretty',
+    ]),
+    allowBuiltins: true,
+  },
+};
 const layers = ['cli', 'domain', 'core', 'application', 'infrastructure', 'shared', 'views'];
 const forbiddenPatterns = [
   { pattern: /Record\s*<\s*string\s*,\s*unknown\s*>/g, message: 'generic Record<string, unknown> used in source' },
@@ -57,6 +85,7 @@ const stateMappingLiteralPattern = /\{([^{}]*)\}/g;
 // A machine-readable state projection (`in_progress: 'implementing'`) maps onto
 // bare lowercase tokens; i18n labels and CSS class names never look like that.
 const stateMappingPairPattern = /^\s*([A-Za-z_$][\w$]*)\s*:\s*(['"])([a-z][a-z0-9_]*)\2\s*$/;
+const importPattern = /(?:from\s+|import\s*(?:\(\s*)?)(['"`])([^'"`]+)\1/g;
 
 const sourceFiles = [];
 const violations = new Set();
@@ -222,7 +251,6 @@ function checkFile(fullPath) {
 
   recordStateMappings(fullPath, source);
 
-  const importPattern = /(?:from\s+|import\s*(?:\(\s*)?)(['"`])([^'"`]+)\1/g;
   for (const match of source.matchAll(importPattern)) {
     const specifier = match[2];
     if (match[1] === '`' && specifier.includes('${')) continue;
@@ -256,6 +284,29 @@ function isWithin(child, parent) {
     || (!childRelativePath.startsWith(`..${sep}`) && childRelativePath !== '..' && !isAbsolute(childRelativePath));
 }
 
+/**
+ * The desktop client keeps its own dependency contract: it may consume the
+ * shared @afk/* packages, but it must not reach into the root package's src/
+ * tree. A relative import that escapes the desktop root into src/ sidesteps
+ * every package boundary the guard enforces elsewhere, so it is reported
+ * here — the same rule that stops a package from importing outside its own
+ * root (see checkPackage).
+ */
+function checkDesktopImports(fullPath) {
+  const source = stripComments(readFileSync(fullPath, 'utf8'));
+  for (const match of source.matchAll(importPattern)) {
+    const specifier = match[2];
+    if (match[1] === '`' && specifier.includes('${')) continue;
+    if (!specifier.startsWith('.')) continue;
+
+    const resolved = resolveImport(fullPath, specifier);
+    if (!resolved) continue;
+    if (isWithin(resolved, root)) {
+      addViolation(`${fullPath}: desktop client must not import the root package src/ tree via '${specifier}'; depend on @afk/application or @afk/infrastructure instead`);
+    }
+  }
+}
+
 function packageSourceRoot(packageRoot) {
   const srcRoot = join(packageRoot, 'src');
   if (existsSync(srcRoot) && statSync(srcRoot).isDirectory()) return srcRoot;
@@ -265,6 +316,10 @@ function packageSourceRoot(packageRoot) {
 
 function packageDependencyViolation(packageName, specifier) {
   addViolation(`${packageName} package must not depend on '${specifier}'`);
+}
+
+function packageRules(packageName) {
+  return packageDependencyRules[packageName] ?? { dependencies: new Set(), allowBuiltins: false };
 }
 
 function checkPackageManifest(packageName, packageRoot) {
@@ -279,7 +334,7 @@ function checkPackageManifest(packageName, packageRoot) {
     return;
   }
 
-  const allowedDependencies = packageName === 'application' ? new Set(['@afk/core']) : new Set();
+  const allowedDependencies = packageRules(packageName).dependencies;
   const dependencies = {
     ...(manifest.dependencies ?? {}),
     ...(manifest.optionalDependencies ?? {}),
@@ -297,14 +352,15 @@ function checkPackage(packageName, packageRoot) {
   }
 
   checkPackageManifest(packageName, packageRoot);
-  const allowedExternalDependencies = packageName === 'application' ? new Set(['@afk/core']) : new Set();
+  const rules = packageRules(packageName);
+  const allowedExternalDependencies = rules.dependencies;
   const packageFiles = collectSourceFiles(sourceRoot).filter(file => !isTestFile(file));
   for (const fullPath of packageFiles) {
     const source = stripComments(readFileSync(fullPath, 'utf8'));
     for (const globalName of domGlobals) {
       if (new RegExp(`\\b${globalName}\\b`).test(source)) addViolation(`${packageName} package must not use DOM global '${globalName}'`);
     }
-    for (const match of source.matchAll(/(?:from\s+|import\s*(?:\(\s*)?)(['"`])([^'"`]+)\1/g)) {
+    for (const match of source.matchAll(importPattern)) {
       const specifier = match[2];
       if (match[1] === '`' && specifier.includes('${')) continue;
 
@@ -324,8 +380,15 @@ function checkPackage(packageName, packageRoot) {
       const builtinRoot = builtinName.split('/')[0];
       const isElectronImport = specifier === 'electron' || specifier.startsWith('electron/');
       const isReactImport = specifier === 'react' || specifier.startsWith('react/');
-      if (specifier.startsWith('node:') || nodeBuiltins.has(builtinRoot) || isElectronImport || isReactImport) {
+      if (isElectronImport || isReactImport) {
         packageDependencyViolation(packageName, specifier);
+        continue;
+      }
+      const isBuiltin = specifier.startsWith('node:') || nodeBuiltins.has(builtinRoot);
+      if (isBuiltin) {
+        // Builtins are the runtime this package exists to wrap; only the pure
+        // packages forbid them.
+        if (!rules.allowBuiltins) packageDependencyViolation(packageName, specifier);
         continue;
       }
       if (!allowedExternalDependencies.has(specifier)) packageDependencyViolation(packageName, specifier);
@@ -347,6 +410,7 @@ if (existsSync(desktopRoot) && statSync(desktopRoot).isDirectory()) {
   desktopSourceFiles.push(...collectSourceFiles(desktopRoot));
   for (const sourceFile of desktopSourceFiles) {
     recordStateMappings(sourceFile, stripComments(readFileSync(sourceFile, 'utf8')));
+    checkDesktopImports(sourceFile);
   }
 }
 checkStateMappingDuplicates();

@@ -16,10 +16,10 @@ import {
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
-import type { BacklogItem, QABacklogProvider } from '../../domain/backlog/index.js';
-import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
+import type { BacklogItem, QABacklogProvider } from '@afk/application';
+import type { ProviderCatalog } from '@afk/application';
 import { emitSuccess, emitFailure } from '../json-output.js';
-import * as providerFactory from '../../infrastructure/provider/tracker-provider-factory.js';
+import * as providerFactory from '@afk/infrastructure';
 
 function commandTree(register: (program: Command) => void): Command {
   const program = new Command();

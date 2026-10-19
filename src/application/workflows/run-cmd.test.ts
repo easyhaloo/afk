@@ -46,8 +46,11 @@ vi.mock('../workflow-engine', () => ({
     run = mocks.runnerRun;
   },
 }));
-vi.mock('../../infrastructure/provider/tracker-provider-factory', () => ({ createTracker: mocks.createTracker }));
-vi.mock('../../infrastructure/provider/providers', () => ({ createProviderBundle: mocks.createProviderBundle }));
+vi.mock('@afk/infrastructure', async importOriginal => ({
+  ...await importOriginal<typeof import('@afk/infrastructure')>(),
+  createTracker: mocks.createTracker,
+  createProviderBundle: mocks.createProviderBundle,
+}));
 vi.mock('../../infrastructure/config/manager', () => ({ getWorkflowConfig: () => mocks.config }));
 vi.mock('../../domain/agents/codex-runtime', () => ({ prepareAgentRuntime: async (runtime: unknown) => runtime }));
 vi.mock('./run-request', () => ({ resolveWorkflowRunRequest: async () => mocks.request }));

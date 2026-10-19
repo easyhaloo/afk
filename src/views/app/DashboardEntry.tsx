@@ -7,7 +7,7 @@ import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter.
 import type { View } from '../board/types.js';
 import { StateProvider } from './state/StateContext.js';
 import { TmuxClient } from '../../infrastructure/tmux/tmux.js';
-import { createManagementProviders } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { createManagementProviders } from '@afk/infrastructure';
 import { useData } from '../board/data/useData.js';
 import { useLoadingPhases } from '../board/hooks/useLoadingPhase.js';
 import { SplashScreen } from '../board/components/SplashScreen.js';

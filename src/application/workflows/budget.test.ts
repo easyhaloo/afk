@@ -6,7 +6,7 @@ import { BudgetManager } from './budget.js';
 import { BudgetStore, BudgetStoreCorruptionError } from './budget-store.js';
 import { WorkflowRunner } from '../workflow-engine.js';
 import type { AgentProvider } from '../../domain/agents/types.js';
-import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
+import type { ProviderBundle } from '@afk/infrastructure';
 import type { RunObserver } from '../../observability/run-observer.js';
 
 describe('BudgetStore', () => {

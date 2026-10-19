@@ -1,18 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
-import { TrackerBacklogProvider } from '../../domain/backlog/tracker-adapter.js';
-import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
-import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
+import { TrackerBacklogProvider } from '@afk/infrastructure';
+import { parseReworkRecord } from '@afk/application';
+import type { TrackedIssue, TrackerProvider } from '@afk/application';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
-import { getLogContext, withLogContext } from '../../infrastructure/io/index.js';
+import { getLogContext, withLogContext } from '@afk/infrastructure';
 
 const ioMocks = vi.hoisted(() => ({ configureStatusline: vi.fn(async () => {}) }));
-vi.mock('../../infrastructure/io/index', async importOriginal => ({
-  ...await importOriginal<typeof import('../../infrastructure/io/index.js')>(),
+vi.mock('@afk/infrastructure', async importOriginal => ({
+  ...await importOriginal<typeof import('@afk/infrastructure')>(),
   configureStatusline: ioMocks.configureStatusline,
 }));
 

@@ -1,21 +1,21 @@
-import type { TrackerProvider } from '../../domain/tracker/types.js';
+import type { TrackerProvider } from '@afk/application';
 import type {
   BacklogCreateInput,
   BacklogItem,
   BacklogListOptions,
   BacklogManagementProvider,
-} from '../../domain/backlog/index.js';
-import type { GlobalWorkItem, ProviderProjectRef } from '../../domain/work-item/types.js';
-import { parseWorkItemId } from '../../domain/work-item/identity.js';
-import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
-import { toGlobalWorkItem } from '../../domain/work-item/metadata.js';
-import type { ProviderCatalog, ProviderIssue } from '../../domain/work-item/provider-types.js';
+} from '@afk/application';
+import type { GlobalWorkItem, ProviderProjectRef } from '@afk/application';
+import { parseWorkItemId } from '@afk/application';
+import { collectGlobalWorkItemInventory } from '@afk/application';
+import { toGlobalWorkItem } from '@afk/application';
+import type { ProviderCatalog, ProviderIssue } from '@afk/application';
 import {
   createGitHubTracker,
   createGitLabTracker,
   createGlobalWorkItemCatalogs,
   type GlobalTrackerPlatform,
-} from '../../infrastructure/provider/tracker-provider-factory.js';
+} from '@afk/infrastructure';
 
 export type InventoryBacklogProviderDeps = {
   platform?: GlobalTrackerPlatform;

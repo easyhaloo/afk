@@ -1,8 +1,8 @@
 import { Command, InvalidArgumentError } from 'commander';
 import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
-import { getCurrentTimestamp, type Signal } from '../../domain/schemas.js';
-import { writeSignal, readSignal, clearSignal, waitForSignal } from '../../infrastructure/io/index.js';
+import { getCurrentTimestamp, type Signal } from '@afk/infrastructure';
+import { writeSignal, readSignal, clearSignal, waitForSignal } from '@afk/infrastructure';
 import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils.js';
 
 function parseNonNegativeInt(value: string, _previous?: number): number {

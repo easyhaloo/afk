@@ -4,12 +4,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadWorkItemExecution, replayRun } from '@afk/application';
 import { executeWorkItem, reconcileWorkItemMerge, type ExecuteWorkItemDependencies } from './execute-work-item.js';
-import { encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/index.js';
-import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { encodeWorkItemIdForPath, type BacklogItem } from '@afk/application';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { RunObserver } from '../../observability/run-observer.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
 import { QARunner } from '../modules/qa-runner.js';
-import { getLogContext } from '../../infrastructure/io/index.js';
+import { getLogContext } from '@afk/infrastructure';
 
 const workItemId = 'github:acme/api#42';
 const item: BacklogItem = {

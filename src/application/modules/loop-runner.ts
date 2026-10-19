@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { logger } from '../../infrastructure/io/index.js';
-import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
-import { parseWorkItemId } from '../../domain/backlog/index.js';
+import { logger } from '@afk/infrastructure';
+import type { ProviderBundle } from '@afk/infrastructure';
+import { parseWorkItemId } from '@afk/application';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 

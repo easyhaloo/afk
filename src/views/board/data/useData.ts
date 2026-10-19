@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Task } from '../../../types/board.js';
 import type { View } from '../types.js';
-import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types.js';
-import { fileLogger } from '../../../infrastructure/io/logger.js';
+import type { Project, Branch, Tag, Commit } from '@afk/application';
+import { fileLogger } from '@afk/infrastructure';
 import {
   fetchTasks,
   fetchProjectDetail,

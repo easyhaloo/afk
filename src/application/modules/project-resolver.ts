@@ -14,7 +14,7 @@
  */
 import { JumpProjectResolver } from '../project-resolver.js';
 import type { InitContext, LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
-import { logger } from '../../infrastructure/io/index.js';
+import { logger } from '@afk/infrastructure';
 
 export class ProjectResolverModule implements LifecycleModule {
   name = 'project-resolver';

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, render } from 'ink';
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { BacklogItem } from '@afk/application';
 import { loadDashboardBacklogs, loadDashboardTasks, projectBacklogRuntime, toRuntimeTask } from './useData.js';
 import { useData } from './useData.js';
 import { fetchTasks } from './fetcher.js';

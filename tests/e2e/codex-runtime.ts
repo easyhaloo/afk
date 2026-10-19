@@ -9,15 +9,15 @@ import {
   type CodexRuntimeSelection,
   type CodexTransport,
 } from '../../src/domain/agents/index';
-import { BACKLOG_METADATA } from '../../src/domain/backlog/index';
+import { BACKLOG_METADATA } from '@afk/application';
 import { getWorkflowConfig } from '../../src/infrastructure/config/manager';
-import { createProviderBundle as assembleProviderBundle } from '../../src/infrastructure/provider/providers';
-import { createTracker } from '../../src/infrastructure/provider/tracker-provider-factory';
+import { createProviderBundle as assembleProviderBundle } from '@afk/infrastructure';
+import { createTracker } from '@afk/infrastructure';
 import { LoopRunner } from '../../src/application/modules/loop-runner';
 import { TaskRuntimeManager } from '../../src/application/runtime/task-runtime';
-import { deriveBacklogBranchName } from '../../src/domain/backlog/index';
-import { formatWorkItemId } from '../../src/domain/work-item/identity';
-import { toGlobalWorkItem } from '../../src/domain/work-item/metadata';
+import { deriveBacklogBranchName } from '@afk/application';
+import { formatWorkItemId } from '@afk/application';
+import { toGlobalWorkItem } from '@afk/application';
 import { executeWorkItem } from '../../src/application/workflows/execute-work-item';
 import { waitForTerminal } from './codex-runtime-wait';
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
+import type { ProviderBundle } from '@afk/infrastructure';
 import { WorkflowRunner } from '../workflow-engine.js';
 import type { RunObserver } from '../../observability/run-observer.js';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';

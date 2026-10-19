@@ -1,4 +1,4 @@
-import type { Project } from '../../../domain/tracker/types.js';
+import type { Project } from '@afk/application';
 import type { TuiViewId } from '../../plugins/types.js';
 
 export type ViewType = 'tasks' | 'backlogs' | 'projects' | 'board' | TuiViewId;

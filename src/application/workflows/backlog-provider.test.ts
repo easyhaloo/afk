@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { BudgetManager } from './budget.js';
-import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
-import type { BacklogClaim, BacklogItem } from '../../domain/backlog/index.js';
+import type { ProviderBundle } from '@afk/infrastructure';
+import type { BacklogClaim, BacklogItem } from '@afk/application';
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { RunObserver } from '../../observability/run-observer.js';
 

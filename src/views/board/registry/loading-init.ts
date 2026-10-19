@@ -32,7 +32,7 @@ export function registerAllLoadingPhases(): void {
     label: 'Detecting platform...',
     icon: '🔍',
     fetch: async (setDetail) => {
-      const { resolvePlatform, resolveTrackerProject } = await import('../../../infrastructure/tracker/resolver.js');
+      const { resolvePlatform, resolveTrackerProject } = await import('@afk/infrastructure');
       const { platform, projectId } = await resolveTrackerProject();
       setDetail('detect', `${platform}: ${projectId}`);
       return `${platform}: ${projectId}`;
@@ -44,7 +44,7 @@ export function registerAllLoadingPhases(): void {
     label: 'Connecting to tracker...',
     icon: '🔗',
     fetch: async (setDetail) => {
-      const { createTracker } = await import('../../../infrastructure/provider/tracker-provider-factory.js');
+      const { createTracker } = await import('@afk/infrastructure');
       const tracker = await createTracker();
       const projects = await tracker.listProjects({ perPage: 1 });
       setDetail('connect', tracker.platform);

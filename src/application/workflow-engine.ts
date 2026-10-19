@@ -14,7 +14,7 @@ import type {
   ExecutionResult,
 } from '../infrastructure/sandbox/types.js';
 import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
-import { getTokenUsage, configureStatusline, logger, withLogContext } from '../infrastructure/io/index.js';
+import { getTokenUsage, configureStatusline, logger, withLogContext } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
 import { loadModules, parseModuleParams } from './modules/_registry.js';
 import type { ModuleParams } from './modules/_registry.js';
@@ -41,9 +41,9 @@ import {
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
 import type { Step, StepResult } from '../domain/templates/types.js';
-import type { BranchHandle, BranchStrategyConfig } from '../domain/branches/types.js';
-import type { ProviderBundle } from '../infrastructure/provider/providers.js';
-import type { BacklogClaim, BacklogItem, BacklogState } from '../domain/backlog/index.js';
+import type { BranchHandle, BranchStrategyConfig } from '@afk/infrastructure';
+import type { ProviderBundle } from '@afk/infrastructure';
+import type { BacklogClaim, BacklogItem, BacklogState } from '@afk/application';
 import { TaskRuntimeManager } from './runtime/task-runtime.js';
 import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request.js';
 import {
@@ -99,7 +99,7 @@ function formatAcCorrection(failure: AcVerificationFailure): string {
   return `\n\nAC correction required. Work on the current branch and repair exactly these failed acceptance criteria before the verifier runs again:\n${formatCriteria(failure.failedCriteria)}\nVerifier summary: ${failure.summary}`;
 }
 
-function formatReworkContext(rework: import('../domain/backlog/index.js').ReworkRecord): string {
+function formatReworkContext(rework: import('@afk/application').ReworkRecord): string {
   return `\n\nAn open QA rework record (${rework.id}, attempt ${rework.attempt}) applies to this backlog. Repair it on the current branch and run its required checks:\n${formatCriteria(rework.failedCriteria)}\nQA summary: ${rework.summary}${rework.requiredChecks.length ? `\nRequired checks:\n${rework.requiredChecks.map(check => `- ${check.command}: ${check.expected}`).join('\n')}` : ''}`;
 }
 
@@ -161,7 +161,7 @@ export type WorkflowRunResult =
  */
 export interface RunnerDependencies {
   coordinatorFactory?: (deps: {
-    backlog: import('../domain/backlog/index.js').BacklogProvider;
+    backlog: import('@afk/application').BacklogProvider;
     tmux: TmuxClient;
     watchdog: Watchdog;
     config: WorkflowConfig;
@@ -283,7 +283,7 @@ export class WorkflowRunner {
   private runtimeRunId?: string;
   private runtimeErrorSummary?: string;
   private acFeedback?: AcVerificationFailure;
-  private activeRework?: import('../domain/backlog/index.js').ReworkRecord;
+  private activeRework?: import('@afk/application').ReworkRecord;
   private readonly observer: RunObserver;
   private observationContext?: ObservationContext;
   private readonly multiRepositoryPreparer: MultiRepositoryPreparationService;

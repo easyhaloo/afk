@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, expect, it, vi } from 'vitest';
-import { SignalSchema } from '../../../domain/schemas.js';
+import { SignalSchema } from '@afk/infrastructure';
 import { LocalAgentExecution, LocalSandboxProvider } from './local.js';
 
 describe('LocalSandboxProvider', () => {
@@ -142,7 +142,7 @@ describe('LocalSandboxProvider', () => {
       executionMode: 'interactive',
     });
 
-    await expect(import('../../io/index.js').then(({ readSignal }) => readSignal(worktreePath))).resolves.toBeNull();
+    await expect(import('@afk/infrastructure').then(({ readSignal }) => readSignal(worktreePath))).resolves.toBeNull();
   });
 
   it('clears a stale status marker before launching an interactive session', async () => {

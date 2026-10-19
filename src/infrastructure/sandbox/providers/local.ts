@@ -18,7 +18,7 @@ import { promises as fs, realpathSync } from 'fs';
 import { join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import { TmuxClient } from '../../tmux/tmux.js';
-import { clearSignal, getTokenUsage, readSignal } from '../../io/index.js';
+import { clearSignal, getTokenUsage, readSignal } from '@afk/infrastructure';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../tmux/session-name.js';
 import {

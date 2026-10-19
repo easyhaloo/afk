@@ -3,13 +3,13 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { createWorkflowProviders } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { createWorkflowProviders } from '@afk/infrastructure';
 import { LoopRunner } from '../../application/modules/loop-runner.js';
 import { installLoopSignalHandlers } from './loop-signals.js';
 import { getSchedulerConfig } from '../../infrastructure/config/manager.js';
-import { parseWorkItemId } from '../../domain/backlog/index.js';
+import { parseWorkItemId } from '@afk/application';
 import { loadLoopConfig } from '../../application/loop/loop-config.js';
-import { logger, redirectStdioToLog, resolveLogPath } from '../../infrastructure/io/index.js';
+import { logger, redirectStdioToLog, resolveLogPath } from '@afk/infrastructure';
 import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils.js';
 import { spawnDetached, waitForProcessPid } from '../../infrastructure/process/daemon.js';
 import {

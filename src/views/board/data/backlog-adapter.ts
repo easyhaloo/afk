@@ -1,7 +1,7 @@
 import type {
   BacklogItem,
   BacklogListOptions,
-} from '../../../domain/backlog/index.js';
+} from '@afk/application';
 import type { Task } from '../../../types/board.js';
 
 /**

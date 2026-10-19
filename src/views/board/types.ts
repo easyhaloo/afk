@@ -12,7 +12,7 @@ export interface Notification {
 
 // View context - carries data with a view state
 export interface ViewContext {
-  project?: import('../../domain/tracker/types.js').Project;
+  project?: import('@afk/application').Project;
   scrollOffset?: number;
   selectedIndex?: number;
 }

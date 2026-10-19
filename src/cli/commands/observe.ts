@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { explainRun, listRunIds, observeRun } from '@afk/application';
-import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import type { CliApplicationFactory } from '../composition-root.js';
 import { createCliApplication } from '../composition-root.js';

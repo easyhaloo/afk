@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const getGlabToken = vi.hoisted(() => vi.fn());
-vi.mock('../src/infrastructure/gitlab/glab-config', () => ({ getGlabToken }));
+vi.mock('@afk/infrastructure', async importOriginal => ({
+  ...await importOriginal<typeof import('@afk/infrastructure')>(),
+  getGlabToken,
+}));
 
 import { getGitLabConfig } from '../src/infrastructure/config/manager';
 

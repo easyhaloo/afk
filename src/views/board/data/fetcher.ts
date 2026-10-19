@@ -1,10 +1,10 @@
 import { Task } from '../../../types/board.js';
 import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecord } from '../../../application/runtime/task-runtime.js';
-import type { BacklogItem } from '../../../domain/backlog/index.js';
-import { createGitLabTracker } from '../../../infrastructure/provider/tracker-provider-factory.js';
-import { resolveGitLabProject } from '../../../infrastructure/tracker/resolver.js';
-import type { Project, Branch, Tag, Commit } from '../../../domain/tracker/types.js';
-import { fileLogger } from '../../../infrastructure/io/logger.js';
+import type { BacklogItem } from '@afk/application';
+import { createGitLabTracker } from '@afk/infrastructure';
+import { resolveGitLabProject } from '@afk/infrastructure';
+import type { Project, Branch, Tag, Commit } from '@afk/application';
+import { fileLogger } from '@afk/infrastructure';
 import { projectWorkItems } from './work-item-projection.js';
 
 const runtimeManager = new TaskRuntimeManager();
@@ -90,7 +90,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
   let url = process.env.GITLAB_URL || 'https://gitlab.com';
 
   if (!token) {
-    const glab = await import('../../../infrastructure/gitlab/glab-config.js').then(m => m.getGlabToken(url));
+    const glab = await import('@afk/infrastructure').then(m => m.getGlabToken(url));
     if (glab) {
       token = glab.token;
       url = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
@@ -103,7 +103,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
 
   // Use projectId if available, otherwise fallback to first accessible project
   const effectiveProjectId = projectId || 'glab';
-  const client = new (await import('../../../infrastructure/gitlab/index.js')).GitLabClient({
+  const client = new (await import('@afk/infrastructure')).GitLabClient({
     url,
     token,
     projectId: effectiveProjectId,

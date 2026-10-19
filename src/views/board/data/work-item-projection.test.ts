@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { BacklogItem } from '@afk/application';
 import type { TaskRuntimeRecord } from '../../../application/runtime/task-runtime.js';
 import { projectWorkItems } from './work-item-projection.js';
 

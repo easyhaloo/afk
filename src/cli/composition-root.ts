@@ -1,5 +1,5 @@
 import { queryExecutionHistory } from '@afk/application';
-import { JsonlEventStore } from '../infrastructure/observability/jsonl-event-store.js';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import type { ApplicationFacade } from './application/facade.js';
 
 export interface CliApplicationOptions {

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ApplicationFacade } from '../application/facade.js';
-import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { registerObserveCommands } from './observe.js';
 
 const roots: string[] = [];

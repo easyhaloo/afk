@@ -8,7 +8,7 @@ import { Command } from 'commander';
 import { z } from 'zod';
 import type { AgentToolCallSummary, RunEvent } from '@afk/core';
 import type { CommandRegistrationContext } from '../command-registry.js';
-import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { readAgentTelemetry, readAgentTools, readAgentTranscript, findCodexRollout } from '../../infrastructure/observability/agent-telemetry.js';
 import { defaultSessionStoreChain } from '../../application/sessions/chain.js';
 import { claudeProjectSlug } from '../../shared/agent-transcript-path.js';

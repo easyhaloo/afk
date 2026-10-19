@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { HandoffCoordinator } from './handoff.js';
-import type { BacklogProvider } from '../../domain/backlog/index.js';
+import type { BacklogProvider } from '@afk/application';
 import type { TmuxClient } from '../../infrastructure/tmux/tmux.js';
 import type { Watchdog } from './watchdog.js';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';

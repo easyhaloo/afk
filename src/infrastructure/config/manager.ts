@@ -1,4 +1,4 @@
-import { getGlabToken } from '../gitlab/glab-config.js';
+import { getGlabToken } from '@afk/infrastructure';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as loadYaml } from 'js-yaml';

@@ -1,0 +1,31 @@
+import type { BacklogExecutionMode, BacklogState } from '../backlog-mapping.js';
+import type { WorkItemId, WorkItemPlatform } from './identity.js';
+
+
+export interface ProviderProjectRef {
+  platform: WorkItemPlatform;
+  projectKey: string;
+  providerHost?: string;
+  providerProjectId?: string;
+  name: string;
+  defaultBranch?: string;
+  webUrl?: string;
+}
+
+export interface GlobalWorkItem {
+  id: WorkItemId;
+  issueNumber: number;
+  project: ProviderProjectRef;
+  title: string;
+  description?: string;
+  managed: boolean;
+  executionEligible: boolean;
+  state: BacklogState;
+  executionMode: BacklogExecutionMode;
+  parentId?: WorkItemId;
+  dependsOn: WorkItemId[];
+  tags: string[];
+  branchName: string;
+  providerRef: string;
+  webUrl?: string;
+}

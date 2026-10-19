@@ -5,15 +5,15 @@ import {
   createManagementProviders,
   type GlobalTrackerPlatform,
   type TrackerPlatform,
-} from '../../infrastructure/provider/tracker-provider-factory.js';
+} from '@afk/infrastructure';
 import {
   collectGlobalWorkItemInventory,
   filterGlobalWorkItemInventory,
-} from '../../infrastructure/provider/inventory.js';
+} from '@afk/application';
 import type {
   GlobalWorkItemInventoryResult,
   ProviderCatalog,
-} from '../../domain/work-item/provider-types.js';
+} from '@afk/application';
 import {
   addBacklogTag,
   adoptBacklog,
@@ -27,9 +27,9 @@ import {
   showBacklog,
   type BacklogChangeProvider,
   type BacklogManagementProvider,
-} from '../../domain/backlog/commands.js';
-import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '../../domain/backlog/index.js';
-import type { BacklogExecutionMode } from '../../domain/backlog/index.js';
+} from '@afk/application';
+import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '@afk/application';
+import type { BacklogExecutionMode } from '@afk/application';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import type { CommandRegistrationContext } from '../command-registry.js';

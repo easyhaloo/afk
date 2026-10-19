@@ -3,7 +3,7 @@
  * Fallback for: unknown commands.
  */
 import { Command } from 'commander';
-import '../infrastructure/io/logger.js';
+import '@afk/infrastructure/io';
 import { COMMANDS } from './command-registry.js';
 
 export async function runFullCLI() {

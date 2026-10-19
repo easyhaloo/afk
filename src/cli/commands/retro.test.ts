@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { claudeProjectSlug } from '../../shared/agent-transcript-path.js';
 import { registerRetroCommands, renderRetroHtml, reportSchema } from './retro.js';
 

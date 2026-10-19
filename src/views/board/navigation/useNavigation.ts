@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { ViewRegistry } from '../registry/index.js';
 import type { View, ViewState, ViewContext } from '../types.js';
 import { navigationPolicy, type ActionType } from './policy.js';
-import { fileLogger } from '../../../infrastructure/io/logger.js';
+import { fileLogger } from '@afk/infrastructure';
 
 // Default initial view state
 const DEFAULT_VIEW_STATE: ViewState = { view: 'tasks', context: {} };

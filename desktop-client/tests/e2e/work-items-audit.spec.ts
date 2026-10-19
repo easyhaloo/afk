@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RunEventDraft } from "@afk/core";
-import { JsonlEventStore } from "../../../src/infrastructure/observability/jsonl-event-store";
+import { JsonlEventStore } from "@afk/infrastructure/observability";
 import { IPC_CHANNELS } from "../../shared/ipc-contract";
 import { test, expect, E2E_HOME_PATH } from "./_helpers/launch";
 

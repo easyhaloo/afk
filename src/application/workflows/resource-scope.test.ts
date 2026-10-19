@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { RunResourceScope } from './resource-scope.js';
-import type { BranchHandle, BranchStrategy, BranchStrategyConfig } from '../../domain/branches/types.js';
+import type { BranchHandle, BranchStrategy, BranchStrategyConfig } from '@afk/infrastructure';
 import { simpleGit } from 'simple-git';
 
 function strategy(): BranchStrategy {

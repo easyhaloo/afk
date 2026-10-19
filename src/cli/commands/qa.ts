@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { createManagementProviders } from '../../infrastructure/provider/tracker-provider-factory.js';
+import { createManagementProviders } from '@afk/infrastructure';
 import { QARunner } from '../../application/modules/qa-runner.js';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';

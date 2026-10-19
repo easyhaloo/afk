@@ -1,4 +1,4 @@
-import type { BacklogItem } from '../../../domain/backlog/index.js';
+import type { BacklogItem } from '@afk/application';
 import type {
   ActiveTaskRuntimeRecord,
   TaskRuntimePhase,

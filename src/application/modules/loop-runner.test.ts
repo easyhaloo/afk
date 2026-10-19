@@ -3,8 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LoopRunner } from './loop-runner.js';
-import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
-import type { BacklogItem } from '../../domain/backlog/index.js';
+import type { ProviderBundle } from '@afk/infrastructure';
+import type { BacklogItem } from '@afk/application';
 
 const item: BacklogItem = {
   id: '42', title: 'verify me', dependsOn: [], state: 'ready', executionMode: 'afk',

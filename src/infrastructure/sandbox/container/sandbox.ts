@@ -22,7 +22,7 @@
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { isAbsolute, join, relative } from 'path';
-import { clearSignal, readSignal } from '../../io/index.js';
+import { clearSignal, readSignal } from '@afk/infrastructure';
 import type { Sandbox, SandboxOptions } from '../types.js';
 import type {
   AgentStartOptions,

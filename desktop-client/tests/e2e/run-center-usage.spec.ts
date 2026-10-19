@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { RunEventDraft } from "@afk/core";
-import { JsonlEventStore } from "../../../src/infrastructure/observability/jsonl-event-store";
+import { JsonlEventStore } from "@afk/infrastructure/observability";
 import { test, expect, E2E_HOME_PATH } from "./_helpers/launch";
 
 test("shows audited agent tokens and distinguishes missing telemetry from zero", async ({ page }) => {

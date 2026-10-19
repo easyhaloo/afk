@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PluginRuntime, type WorkflowPlugin } from '../../application/plugins/runtime.js';
-import type { BacklogProvider } from '../../domain/backlog/index.js';
+import type { BacklogProvider } from '@afk/application';
 
 describe('workflow plugin runtime', () => {
   it('registers typed capabilities through the setup context', async () => {

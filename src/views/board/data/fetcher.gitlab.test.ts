@@ -6,9 +6,10 @@ const mocks = vi.hoisted(() => ({
   config: undefined as unknown,
 }));
 
-vi.mock('../../../infrastructure/tracker/resolver', () => ({ resolveGitLabProject: vi.fn(async () => null) }));
-vi.mock('../../../infrastructure/gitlab/glab-config', () => ({ getGlabToken: mocks.getGlabToken }));
-vi.mock('../../../infrastructure/gitlab', () => ({
+vi.mock('@afk/infrastructure', async importOriginal => ({
+  ...await importOriginal<typeof import('@afk/infrastructure')>(),
+  resolveGitLabProject: vi.fn(async () => null),
+  getGlabToken: mocks.getGlabToken,
   GitLabClient: class {
     constructor(config: unknown) { mocks.config = config; }
     listProjects = mocks.listProjects;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../src/domain/backlog/index';
+import type { BacklogItem } from '@afk/application';
 import { waitForTerminal } from './codex-runtime-wait';
 
 describe('Codex E2E phase deadlines', () => {

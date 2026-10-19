@@ -4,13 +4,13 @@
  */
 import { WorkflowRunner } from '../workflow-engine.js';
 import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
-import { createTracker } from '../../infrastructure/provider/tracker-provider-factory.js';
-import { createProviderBundle } from '../../infrastructure/provider/providers.js';
+import { createTracker } from '@afk/infrastructure';
+import { createProviderBundle } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { SandboxProviderName } from '../../infrastructure/sandbox/types.js';
 import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
 import { prepareAgentRuntime } from '../../domain/agents/codex-runtime.js';
-import type { BranchStrategyConfig } from '../../domain/branches/types.js';
+import type { BranchStrategyConfig } from '@afk/infrastructure';
 import { resolveWorkflowRunRequest } from './run-request.js';
 
 export interface RunWorkflowCliOpts {

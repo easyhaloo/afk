@@ -1,4 +1,4 @@
-import type { BacklogProvider } from '../../src/domain/backlog/index';
+import type { BacklogProvider } from '@afk/application';
 
 export async function waitForTerminal(
   backlog: Pick<BacklogProvider, 'get'>,

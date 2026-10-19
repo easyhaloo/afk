@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readSignalSync } from '../io/signal.js';
+import { readSignalSync } from '@afk/infrastructure';
 import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
 
 describe('normalizeTmuxSessionName', () => {

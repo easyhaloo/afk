@@ -172,8 +172,10 @@ describe('SessionStoreChain', () => {
     ]);
     // No file snapshot saved; falls through to handoff-md store.
     const r = await chain.loadFirst({ runId: 'issue-42-gen-1' });
-    expect(r?.storeName).toBe('handoff-md');
-    expect(r?.snapshot.summary).toContain('fallback doc');
+    expect(r.status).toBe('loaded');
+    if (r.status !== 'loaded') throw new Error('expected the handoff fallback');
+    expect(r.storeName).toBe('handoff-md');
+    expect(r.snapshot.summary).toContain('fallback doc');
   });
 
   it('loadFirst returns null when every store misses', async () => {
@@ -182,7 +184,21 @@ describe('SessionStoreChain', () => {
       new HandoffSessionStore(wtPath),
     ]);
     const r = await chain.loadFirst({ runId: 'issue-99-gen-99' });
-    expect(r).toBeNull();
+    expect(r.status).toBe('missing');
+  });
+
+  it('loadFirst says a corrupt snapshot apart from a missing one', async () => {
+    fs.mkdirSync(path.join(wtPath, '.afk', 'sessions'), { recursive: true });
+    // A snapshot that was written and cannot be read is not the same fact
+    // as one that was never written.
+    fs.writeFileSync(path.join(wtPath, '.afk', 'sessions', 'issue-42-gen-1.json'), '{not json', 'utf-8');
+
+    const chain = new SessionStoreChain([
+      new FileSessionStore(wtPath),
+      new HandoffSessionStore(wtPath),
+    ]);
+    const r = await chain.loadFirst({ runId: 'issue-42-gen-1' });
+    expect(r.status).toBe('corrupt');
   });
 
   it('loadFirst skips corrupt file store and falls back to handoff', async () => {
@@ -202,8 +218,10 @@ describe('SessionStoreChain', () => {
       new HandoffSessionStore(wtPath),
     ]);
     const r = await chain.loadFirst({ runId: 'issue-42-gen-1' });
-    expect(r?.storeName).toBe('handoff-md');
-    expect(r?.snapshot.summary).toContain('safe fallback');
+    expect(r.status).toBe('loaded');
+    if (r.status !== 'loaded') throw new Error('expected the handoff fallback');
+    expect(r.storeName).toBe('handoff-md');
+    expect(r.snapshot.summary).toContain('safe fallback');
   });
 
   it('saveFirst writes to first supporting store', async () => {

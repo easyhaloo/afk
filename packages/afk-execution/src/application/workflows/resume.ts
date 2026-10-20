@@ -24,9 +24,13 @@ export async function attemptNativeResume(
 ): Promise<AgentExecution | undefined> {
   if (!agentProvider.capabilities.has('resume')) return undefined;
   try {
-    const loaded = await chainFactory().loadFirst({ runId: ctx.runId });
-    if (!loaded) return undefined;
-    await agentProvider.restoreSession!({ snapshot: loaded.snapshot, worktreePath: ctx.wtPath });
+    const outcome = await chainFactory().loadFirst({ runId: ctx.runId });
+    if (outcome.status === 'corrupt') {
+      logger.warn({ iid: ctx.iid, runId: ctx.runId, error: outcome.error }, 'native session is corrupt; starting fresh');
+      return undefined;
+    }
+    if (outcome.status === 'missing') return undefined;
+    await agentProvider.restoreSession!({ snapshot: outcome.snapshot, worktreePath: ctx.wtPath });
   } catch (error) {
     logger.info({ iid: ctx.iid, runId: ctx.runId, error }, 'native resume unavailable; falling through to coordinator');
     return undefined;

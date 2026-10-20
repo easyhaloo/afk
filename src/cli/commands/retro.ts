@@ -283,7 +283,7 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
   }
 
   const sessionStore = defaultSessionStoreChain(stateRoot);
-  const checkpoint = await sessionStore.loadFirst({ runId: options.executionId }).catch(() => null);
+  const outcome = await sessionStore.loadFirst({ runId: options.executionId }).catch(() => ({ status: 'missing' } as const));
   const manifest = {
     version: 1,
     retroVersion: RETRO_VERSION,
@@ -292,7 +292,7 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
     workItemId,
     eventStream: { valid: integrity.valid, eventCount: events.length, lastSequence: integrity.lastSequence, lastHash: integrity.lastHash, reason: integrity.reason },
     sessions: sessionProjections,
-    sessionStore: checkpoint?.storeName ?? 'missing',
+    sessionStore: outcome.status === 'loaded' ? outcome.storeName : outcome.status,
     files: evidence.map(({ path: _path, ...entry }) => entry),
     missing,
   };

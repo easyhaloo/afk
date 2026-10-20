@@ -102,6 +102,19 @@ export interface SessionStore {
 }
 
 /**
+ * What the chain found.
+ *
+ * A snapshot that is missing and a snapshot that is corrupt are different
+ * facts, and a reader that cannot tell them apart reports a broken snapshot
+ * as an absent one. The reader here is a diagnostic that tells a person why
+ * a run failed, so the difference is the answer.
+ */
+export type SessionLoadOutcome =
+  | { status: 'loaded'; snapshot: SessionSnapshot; storeName: string }
+  | { status: 'missing' }
+  | { status: 'corrupt'; error: SessionCorruptError };
+
+/**
  * Session store chain — walks a priority-ordered list of stores; the first
  * one that returns a snapshot wins. Used by the runner for native-resume
  * preference with safe fallback.
@@ -110,32 +123,33 @@ export class SessionStoreChain {
   constructor(private readonly stores: SessionStore[]) {}
 
   /**
-   * Try each store in priority order. Returns the first successful load.
-   * SessionCorruptError from one store falls through to the next; only
-   * SessionNotFoundError surfaces as 'not found' if every store misses.
+   * Try each store in priority order.
+   *
+   * A store that finds nothing falls through to the next. A store that
+   * finds a snapshot it cannot read also falls through — a fallback that
+   * works is better than an error — but the corruption is remembered, and
+   * it is what the chain reports when no store could answer. A snapshot
+   * that was written and cannot be read is not the same fact as one that
+   * was never written.
    */
-  async loadFirst(options: SessionLoadOptions): Promise<{ snapshot: SessionSnapshot; storeName: string } | null> {
-    let lastError: unknown = null;
+  async loadFirst(options: SessionLoadOptions): Promise<SessionLoadOutcome> {
+    let corrupt: SessionCorruptError | undefined;
     for (const store of this.stores) {
       try {
         const snapshot = await store.load(options);
-        return { snapshot, storeName: store.name };
+        return { status: 'loaded', snapshot, storeName: store.name };
       } catch (err) {
         if (err instanceof SessionNotFoundError) {
-          lastError = err;
           continue;
         }
         if (err instanceof SessionCorruptError) {
-          // Surface corruption but keep falling back — the design says
-          // session 损坏时能安全降级.
-          lastError = err;
+          corrupt ??= err;
           continue;
         }
         throw err;
       }
     }
-    void lastError;
-    return null;
+    return corrupt ? { status: 'corrupt', error: corrupt } : { status: 'missing' };
   }
 
   /** Save to the first store that supports the given provider. */

@@ -117,7 +117,6 @@ describe('WorkflowRunner default template commit audit', () => {
             ...(implementing && codexOverride ? { threadId: nativeSessionId } : {}),
           },
           ...(sandboxName === 'docker' ? { telemetryPath: hostTranscriptPath } : {}),
-          waitForEvent: vi.fn(async () => null),
           waitForResult: vi.fn(async (): Promise<ExecutionResult> => {
             if (implementing && createsCommit) {
               await writeFile(join(options.worktreePath, 'implementation.txt'), 'implemented\n');
@@ -136,7 +135,6 @@ describe('WorkflowRunner default template commit audit', () => {
           }),
           interrupt: vi.fn(async () => undefined), kill: vi.fn(async () => undefined),
           captureOutput: vi.fn(async () => ''), captureSession: vi.fn(async () => undefined),
-          resume: vi.fn(async () => { throw new Error('unsupported'); }),
         };
         return execution;
       }),

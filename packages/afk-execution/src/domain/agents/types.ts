@@ -156,17 +156,6 @@ export interface CaptureOptions {
   history?: number;
 }
 
-export interface ResumeOptions {
-  snapshot: SessionSnapshot;
-}
-
-export type ExecutionEvent =
-  | { type: 'text'; text: string }
-  | { type: 'usage'; usage: TokenUsage }
-  | { type: 'error'; error: Error }
-  | { type: 'interrupt-acked' }
-  | { type: 'killed' };
-
 export interface ExecutionResult {
   version: 1;
   runId: string;
@@ -200,13 +189,11 @@ export interface AgentExecution {
    * the contract rather than to a cast at the reading site.
    */
   readonly telemetryPath?: string;
-  waitForEvent(): Promise<ExecutionEvent | null>;
   waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
   interrupt(reason: InterruptReason): Promise<void>;
   kill(): Promise<void>;
   captureOutput(options?: CaptureOptions): Promise<string>;
   captureSession(): Promise<SessionSnapshot | undefined>;
-  resume(options: ResumeOptions): Promise<AgentExecution>;
 }
 
 /**
@@ -220,12 +207,6 @@ export interface AgentProvider {
   readonly capabilities: ReadonlySet<AgentCapability>;
 
   createExecution(options: AgentExecutionOptions): Promise<AgentExecution>;
-
-  /**
-   * Get token usage for a running or completed session.
-   * Only required if the provider has 'usage' capability.
-   */
-  getSessionUsage?(session: AgentSession): Promise<TokenUsage | undefined>;
 
   /**
    * Capture the current session state for later resume.

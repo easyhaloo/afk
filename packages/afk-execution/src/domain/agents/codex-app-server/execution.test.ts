@@ -107,7 +107,6 @@ describe('CodexAppServerExecution', () => {
     const execution = await CodexAppServerExecution.start(options(), runtime, () => transport);
     transport.push({ jsonrpc: '2.0', method: 'item/started', params: { item: { id: 'cmd-1', type: 'commandExecution', command: 'private', status: 'inProgress' } } });
     transport.push({ jsonrpc: '2.0', method: 'thread/tokenUsage/updated', params: { tokenUsage: { total: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } } } });
-    await expect(execution.waitForEvent()).resolves.toMatchObject({ type: 'usage' });
     if (status === 'aborted') await execution.interrupt('manual');
     else if (status !== 'timed_out') transport.push({
       jsonrpc: '2.0', method: 'turn/completed', params: { turn: { id: 'turn-1', status: status === 'failed' ? 'failed' : 'completed' } },
@@ -115,6 +114,7 @@ describe('CodexAppServerExecution', () => {
     const result = await execution.waitForResult({ completionTimeoutMs: status === 'timed_out' ? 1 : 1000 });
     expect(result.status).toBe(status === 'missing_result' ? 'failed' : status);
     expect(result.tools).toEqual([{ id: 'cmd-1', name: 'command_execution', result: 'in_progress' }]);
+    expect(result.usage).toEqual({ inputTokens: 1, outputTokens: 1, totalTokens: 2 });
   });
 
   it('performs the app-server lifecycle and normalizes completion diagnostics', async () => {

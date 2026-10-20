@@ -27,11 +27,9 @@ import type {
 } from '../../../domain/agents/types.js';
 import type {
   AgentExecution,
-  ExecutionEvent,
   ExecutionResult,
   InterruptReason,
   CaptureOptions,
-  ResumeOptions,
 } from '../types.js';
 import { extractGoalComplete } from '../../../shared/goal-complete.js';
 import { COMMON_TOKEN_USAGE, parseTokenUsage } from '../../../domain/agents/token-usage.js';
@@ -287,12 +285,6 @@ export class StreamingAgentExecution implements AgentExecution {
     return (this.structuredOutput as { type?: unknown }).type === this.signalType;
   }
 
-  async waitForEvent(): Promise<ExecutionEvent | null> {
-    // StreamingAgentExecution is single-shot; events are consumed inline via handleLine.
-    // This method returns null since the stream is not exposed as an async iterator.
-    return null;
-  }
-
   async waitForResult(options?: {
     completionTimeoutMs?: number;
     contextHighTokens?: number;
@@ -408,10 +400,6 @@ export class StreamingAgentExecution implements AgentExecution {
 
   async captureSession(): Promise<SessionSnapshot | undefined> {
     return undefined;
-  }
-
-  async resume(_options: ResumeOptions): Promise<AgentExecution> {
-    throw new Error('StreamingAgentExecution.resume not yet implemented');
   }
 
   private sleep(ms: number): Promise<void> {

@@ -29,13 +29,11 @@ describe('collectAgentTelemetry', () => {
     return {
       id: 'execution-1',
       metadata: { provider, transport: 'process' },
-      waitForEvent: async () => null,
       waitForResult: async () => result,
       interrupt: async () => {},
       kill: async () => {},
       captureOutput: async () => '',
       captureSession: async () => undefined,
-      resume: async () => { throw new Error('unsupported'); },
       telemetryPath: transcriptPath,
     };
   }

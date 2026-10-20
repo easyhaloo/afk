@@ -27,11 +27,9 @@ import type { Sandbox, SandboxOptions } from '../types.js';
 import type {
   AgentStartOptions,
   AgentExecution,
-  ExecutionEvent,
   ExecutionResult,
   InterruptReason,
   CaptureOptions,
-  ResumeOptions,
 } from '../types.js';
 import type { ContainerProvider, ContainerExecResult } from './types.js';
 import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
@@ -298,11 +296,6 @@ export class ContainerAgentExecution implements AgentExecution {
     this._interruptAcked = false;
   }
 
-  async waitForEvent(): Promise<ExecutionEvent | null> {
-    // Streaming exec is Phase 7/8; this returns null until then.
-    return null;
-  }
-
   async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
     const timeout = options?.completionTimeoutMs ?? 600_000;
     const startedAt = Date.now();
@@ -369,11 +362,6 @@ export class ContainerAgentExecution implements AgentExecution {
 
   async captureSession(): Promise<SessionSnapshot | undefined> {
     return undefined;
-  }
-
-  async resume(_options: ResumeOptions): Promise<AgentExecution> {
-    // Phase 7/8: re-exec the agent inside the same container with handoff doc.
-    throw new Error('ContainerAgentExecution.resume not yet implemented');
   }
 
   private result(status: ExecutionResult['status'], extra: Partial<ExecutionResult> = {}): ExecutionResult {

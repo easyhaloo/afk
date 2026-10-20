@@ -78,7 +78,6 @@ function fixture() {
     kill: vi.fn(async () => {}),
     captureOutput: vi.fn(async () => ''),
     captureSession: vi.fn(async () => undefined),
-    resume: vi.fn(),
   };
   const sandbox = {
     id: 'sandbox-60',

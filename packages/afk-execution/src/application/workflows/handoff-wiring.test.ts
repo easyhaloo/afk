@@ -28,7 +28,6 @@ describe('Handoff wiring', () => {
       kill: async () => {},
       captureOutput: async () => '',
       captureSession: async () => undefined,
-      resume: async () => { throw new Error('not used'); },
     };
   }
 

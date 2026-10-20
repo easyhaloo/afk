@@ -6,10 +6,8 @@ import type {
   AgentExecutionOptions,
   CaptureOptions,
   CodexRuntimeSelection,
-  ExecutionEvent,
   ExecutionResult,
   InterruptReason,
-  ResumeOptions,
   SessionSnapshot,
 } from '../types.js';
 import { extractGoalComplete, type GoalCompletePayload } from '../../../shared/goal-complete.js';
@@ -29,8 +27,6 @@ export class CodexAppServerExecution implements AgentExecution {
 
   private readonly client: AppServerClient;
   private readonly output: string[] = [];
-  private readonly events: ExecutionEvent[] = [];
-  private readonly eventReaders: Array<(result: IteratorResult<ExecutionEvent>) => void> = [];
   private result?: ExecutionResult;
   private finishPromise?: Promise<void>;
   private resolveResult!: (result: ExecutionResult) => void;
@@ -84,14 +80,6 @@ export class CodexAppServerExecution implements AgentExecution {
     }
   }
 
-  async waitForEvent(): Promise<ExecutionEvent | null> {
-    const event = this.events.shift();
-    if (event) return event;
-    if (this.result) return null;
-    const next = await new Promise<IteratorResult<ExecutionEvent>>(resolve => this.eventReaders.push(resolve));
-    return next.done ? null : next.value;
-  }
-
   async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
     const timeoutMs = options?.completionTimeoutMs ?? 600_000;
     const timer = setTimeout(() => {
@@ -125,10 +113,6 @@ export class CodexAppServerExecution implements AgentExecution {
     return undefined;
   }
 
-  async resume(_options: ResumeOptions): Promise<AgentExecution> {
-    throw new Error('Codex app-server execution does not support resume');
-  }
-
   private async initialize(): Promise<void> {
     await this.client.request('initialize', {
       clientInfo: { name: 'afk', title: 'AFK', version: '0.1.0' },
@@ -156,12 +140,9 @@ export class CodexAppServerExecution implements AgentExecution {
         if (event.type === 'result') {
           this.output.push(event.text);
           this.structuredOutput = extractGoalComplete(event.text);
-          this.emit({ type: 'text', text: event.text });
         } else if (event.type === 'usage') {
           this.usage = event.usage;
-          this.emit({ type: 'usage', usage: event.usage });
         } else if (event.type === 'error') {
-          this.emit({ type: 'error', error: event.error });
           await this.finish(this.buildResult('failed', { code: 'AGENT_ERROR', message: event.error.message }));
           return;
         } else if (event.type === 'completed') {
@@ -204,7 +185,6 @@ export class CodexAppServerExecution implements AgentExecution {
   private finish(result: ExecutionResult): Promise<void> {
     if (this.finishPromise) return this.finishPromise;
     this.result = result;
-    for (const reader of this.eventReaders.splice(0)) reader({ done: true, value: undefined });
     this.finishPromise = (async () => {
       let finalResult = result;
       try {
@@ -220,11 +200,6 @@ export class CodexAppServerExecution implements AgentExecution {
     return this.finishPromise;
   }
 
-  private emit(event: ExecutionEvent): void {
-    const reader = this.eventReaders.shift();
-    if (reader) reader({ done: false, value: event });
-    else this.events.push(event);
-  }
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

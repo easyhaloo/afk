@@ -32,7 +32,6 @@ describe('WorkflowRunner completion validation', () => {
             kill: async () => {},
             captureOutput: async () => '',
             captureSession: async () => undefined,
-            resume: async () => { throw new Error('not used'); },
           }),
         } as unknown as AgentProvider,
       },

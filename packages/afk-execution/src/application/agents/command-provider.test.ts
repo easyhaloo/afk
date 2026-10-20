@@ -17,13 +17,11 @@ describe('requireCommandAgentProvider', () => {
       createExecution: async (): Promise<AgentExecution> => ({
         id: 'execution-1',
         metadata: { provider: 'codex', transport: 'process' },
-        waitForEvent: async () => null,
         waitForResult: async () => ({ version: 1, runId: 'run-1', status: 'completed', provider: 'codex', commits: [] }),
         interrupt: async () => {},
         kill: async () => {},
         captureOutput: async () => '',
         captureSession: async () => undefined,
-        resume: async () => { throw new Error('unsupported'); },
       }),
     };
     expect(() => requireCommandAgentProvider(provider)).toThrow("agent provider 'codex' does not support command execution");

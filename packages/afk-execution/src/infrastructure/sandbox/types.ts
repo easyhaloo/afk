@@ -17,10 +17,8 @@ export type {
   AgentExecution,
   AgentStartOptions,
   CaptureOptions,
-  ExecutionEvent,
   ExecutionResult,
   InterruptReason,
-  ResumeOptions,
 } from '../../domain/agents/types.js';
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';

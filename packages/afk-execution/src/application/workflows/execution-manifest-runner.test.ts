@@ -316,14 +316,12 @@ function providerWith(sandbox: Sandbox, events: string[], name: 'local' | 'docke
 function agentWith(events: string[]): AgentProvider {
   const execution: AgentExecution = {
     id: 'execution-1', metadata: { provider: 'claude-code', transport: 'process' },
-    waitForEvent: vi.fn(async () => null),
     waitForResult: vi.fn(async (): Promise<ExecutionResult> => ({
       version: 1, runId: 'execution-1', status: 'completed', provider: 'claude-code', commits: [],
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' },
     })),
     interrupt: vi.fn(async () => undefined), kill: vi.fn(async () => undefined),
     captureOutput: vi.fn(async () => ''), captureSession: vi.fn(async () => undefined),
-    resume: vi.fn(async () => { throw new Error('unsupported'); }),
   };
   return {
     name: 'claude-code', capabilities: new Set(),

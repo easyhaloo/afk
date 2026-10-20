@@ -27,11 +27,9 @@ import {
   type SandboxOptions,
   type AgentStartOptions,
   type AgentExecution,
-  type ExecutionEvent,
   type ExecutionResult,
   type InterruptReason,
   type CaptureOptions,
-  type ResumeOptions,
   type SandboxProviderName,
 } from '../types.js';
 import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
@@ -224,12 +222,6 @@ export class LocalAgentExecution implements AgentExecution {
     }
   }
 
-  async waitForEvent(): Promise<ExecutionEvent | null> {
-    // Local tmux does not have a streaming event API — this is a placeholder
-    // for provider-specific streaming (Phase 3). Returns null until implemented.
-    return null;
-  }
-
   async waitForResult(options?: {
     completionTimeoutMs?: number;
     contextHighTokens?: number;
@@ -360,14 +352,6 @@ export class LocalAgentExecution implements AgentExecution {
     } catch {
       return undefined;
     }
-  }
-
-  async resume(_options: ResumeOptions): Promise<AgentExecution> {
-    // Resume logic (reading handoff doc, rebuilding prompt) is runner-owned.
-    // This throws until Phase 3/4 implements native session restore.
-    throw new Error(
-      'LocalAgentExecution.resume not yet implemented — runner must inject handoff text',
-    );
   }
 
   private sleep(ms: number): Promise<void> {

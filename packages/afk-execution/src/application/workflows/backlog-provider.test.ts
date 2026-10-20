@@ -62,7 +62,7 @@ describe('WorkflowRunner backlog provider mode', () => {
         structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' }, commits: [],
       })),
       waitForEvent: vi.fn(async () => null), interrupt: vi.fn(), kill: vi.fn(),
-      captureOutput: vi.fn(async () => ''), captureSession: vi.fn(async () => undefined), resume: vi.fn(),
+      captureOutput: vi.fn(async () => ''), captureSession: vi.fn(async () => undefined),
     };
     const createExecution = vi.fn(async () => execution);
     const agent = { name: 'codex', capabilities: new Set(), createExecution } as unknown as AgentProvider;

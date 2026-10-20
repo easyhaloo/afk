@@ -13,6 +13,7 @@
 | 文档 | 说明 |
 |---|---|
 | [system-architecture-design.md](architecture/system-architecture-design.md) | **系统架构设计说明书**：边界、约束、分层、闭环、不变量、失败模型与演进 |
+| [architecture-handbook.md](architecture/architecture-handbook.md) | **系统架构手册**：概念六层栈、十条架构决策（背景 → 决策 → 否决的备选 → 后果）、失败模型 |
 | [overview.md](architecture/overview.md) | AFK 跨平台抽象与 CLI 命令映射 |
 | [execution.md](architecture/execution.md) | 8 阶段执行设计（执行环境、sandbox、session、branches、templates） |
 | [observability.md](architecture/observability.md) | 可观测性 harness |

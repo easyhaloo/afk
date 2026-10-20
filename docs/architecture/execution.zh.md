@@ -355,19 +355,65 @@ Docker socket
 9. 继续当前 workflow step
 ```
 
-运行状态目录：
-
-```text
-<worktree>/.afk/runs/<run-id>/
-├── request.json
-├── events.jsonl
-├── result.json
-└── output.log
-```
-
-交接恢复文档不属于 run 目录，它写入
+交接恢复文档写入
 `<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
 （`packages/afk-execution/src/application/workflows/handoff.ts`）。
+
+### 东西分别写在哪里
+
+一次执行会留下三类痕迹，落在三个不同的地方，由三个不同的主人写入。三者不可互换：
+一个是权威记录，一个是投影，一个是桌面端自己的暂存空间。
+
+**审计脊柱** —— 一次执行的权威、只追加记录。每个 run 一个 JSONL 文件，带 hash 链，
+回放前先校验。
+
+```text
+~/.afk/events/<base64url(runId)>.jsonl
+```
+
+根目录可由 `AFK_EVENT_STORE_DIR` 改写
+（`packages/afk-infrastructure/src/observability/jsonl-event-store.ts`）。
+
+**运行时记录** —— TUI 与桌面端读它来展示进度、心跳与阶段。每个 run 一个文件，
+到达终态时从 `active/` 移到 `archive/`。
+
+```text
+~/.afk/runtime/tasks/
+├── active/<base64url(runId)>.json
+├── archive/<base64url(runId)>.json
+└── diagnostics/<base64url(runId)>/
+    ├── runtime.json
+    ├── result.json
+    └── output.log
+```
+
+（`packages/afk-execution/src/application/runtime/task-runtime.ts`。）
+
+**桌面执行工作区** —— 一个桌面工作项的检出目录、产物与日志。
+
+```text
+~/.loop-workspace/<taskId>/
+├── repositories/<project>/...
+├── artifacts/
+├── runtime/
+├── logs/
+└── diagnostics/
+```
+
+（`desktop-client/electron/services/execution-workspace-service.ts`。）
+
+本节此前描述的那棵按 run 的目录树没有了，但它的四个条目并非一起消失——活下来的两个
+只是换了位置：
+
+| 原先 | 现在 |
+|---|---|
+| `<worktree>/.afk/runs/<run-id>/request.json` | 无人写入——产生它的写者只能从它自己的测试到达 |
+| `<worktree>/.afk/runs/<run-id>/events.jsonl` | 审计脊柱 `~/.afk/events/<base64url(runId)>.jsonl` |
+| `<worktree>/.afk/runs/<run-id>/result.json` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/result.json` |
+| `<worktree>/.afk/runs/<run-id>/output.log` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/output.log` |
+
+`result.json` 与 `output.log` 由 `TaskRuntimeStore.writeDiagnostics` 写入，并由运行中心
+读取；它们原先所在的那棵树被删除，是因为生产路径上从未有人创建过它。
 
 Session 文件必须使用临时文件、校验和原子 rename，避免新 generation 读取半截 JSONL。
 
@@ -500,8 +546,12 @@ afk run --backlog-id <id>
 ```
 
 `afk run` 认领一个 ready 状态的 backlog 项，并按该项选定的模板推进执行。模板由
-`packages/afk-execution/src/domain/templates/builtin.ts` 解析；CLI 上没有
-`--template` 选项，也不存在 `afk workflow` 命令组。
+`packages/afk-execution/src/domain/templates/builtin.ts` 解析，可用
+`--template <name>` 覆盖；相关选项还有 `--agent`、`--sandbox`、
+`--execution-mode`、`--base-branch`、`--target-branch`、`--max-handoffs`、
+`--context-high`、`--max-total-tokens` 与 `--hard-timeout`。不存在 `afk workflow`
+命令组，也没有 `--iid` 或 `--branch-strategy` 选项——工作项用 `--backlog-id` 选择，
+分支用 `--base-branch` 选择。
 
 配置示例：
 

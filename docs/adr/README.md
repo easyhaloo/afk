@@ -17,3 +17,9 @@ for the workflow.
 | [ADR-0019](0019-desktop-run-log-viewer-projection.md) | Shared execution views and interactive tmux access | in progress | 2026-10-14 |
 | [ADR-0020](0020-backlog-item-drop-singular-change-request.md) | Backlog item drop = singular change request | proposed | 2026-09-29 |
 | [ADR-0021](0021-package-boundaries-and-in-process-desktop.md) | Package boundaries and the in-process desktop client | accepted | 2026-10-19 |
+
+Numbering starts at 0014. Numbers 0002–0013 were never allocated in this
+repository — no ADR with those numbers was ever written, so the gap is not a
+deletion and nothing is reserved behind it. Renumbering the series to close
+the gap would touch every cross-reference (seven source files cite ADR
+numbers today), so the series keeps its current numbers.

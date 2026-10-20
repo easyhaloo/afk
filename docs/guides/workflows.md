@@ -72,7 +72,7 @@ flowchart TD
     F -->|"token >= threshold"| H["Context Handoff: interrupt -> summarize -> kill session -> restart -> inject summary to continue"]
     F -->|timeout| Z2["Timeout: Backlog blocked + HITL, retain worktree"]
 
-    G -->|ac_result| I["MR/PR Creation: push branch, link Closes iid"]
+    G -->|goal_complete (ac_verification)| I["MR/PR Creation: push branch, link Closes iid"]
     G -->|"token >= threshold"| H
     G -->|timeout| Z2
 
@@ -90,104 +90,26 @@ flowchart TD
     class A,C,D,E,F,G,H process
 ```
 
-## Scheduler Workflow
+## Removed: the Unscoped Scheduler
 
-Dependency-aware background execution system.
+The dependency-aware background scheduler that this document used to describe
+no longer exists. There is no `afk scheduler` command, no scheduler module, and
+no worker pool. It was removed rather than kept as a fallback, and the
+dependency graph, the task state machine and the concurrent worker pool went
+with it.
 
-### Architecture
+What replaced it:
 
-```mermaid
-graph TD
-    Sched["Scheduler Service: Poll 60s, max concurrent 3"] --> Dep["Dependency Graph: Read Backlog dependsOn, build DAG, topological sort"]
+| Concern | Now |
+| --- | --- |
+| Deciding what to run | `afk loop` polls exactly one backlog ID bound to one execution manifest |
+| Deciding when an item is eligible | The provider backlog state: `ready` or `rework`, execution mode `afk`, no child items, all `dependsOn` items `done` |
+| Running the attempt | `executeWorkItem`, the same use case `afk run` calls |
+| Ordering | The dependency graph is read from the provider backlog, not built by a local scheduler |
 
-    Dep --> Queue["Task Queue: Priority scheduling high/medium/low"]
-
-    Queue --> Pool["Worker Pool: Worker-1, Worker-2, ..."]
-
-    Pool --> W1["Worker-1: Dequeue task, launch workflow, monitor completion, update dependencies"]
-    Pool --> W2[Worker-2]
-    Pool --> W3[Worker-N]
-
-    classDef config fill:#fff4e1
-    classDef data fill:#f0e1ff
-    class Sched,Queue,Pool config
-    class Dep data
-```
-
-### Dependency Resolution
-
-Backlog items declare dependencies through provider-neutral fields:
-
-```
-Backlog #10: dependsOn: [], baseBacklogId: null
-Backlog #11: dependsOn: ["10"], baseBacklogId: null
-Backlog #12: dependsOn: ["10", "11"], baseBacklogId: "11"
-```
-
-```mermaid
-graph LR
-    N10["Issue #10: No dependencies"] --> N11["Issue #11: blocks-10"]
-    N10 --> N12["Issue #12: blocks-10, blocks-11"]
-    N11 --> N12
-
-    classDef root fill:#d4edda,stroke:#28a745
-    class N10 root
-```
-
-Scheduler execution order:
-1. **#10** starts first (no dependencies)
-2. **#11** waits for #10 to complete
-3. **#12** waits for both #10 and #11 to complete
-
-### Concurrency Control
-
-```typescript
-// Pseudocode
-class Scheduler {
-  maxConcurrent: number = 3;
-  activeWorkers: Set<Worker> = new Set();
-
-  async processQueue() {
-    while (activeWorkers.size < maxConcurrent) {
-      const task = queue.dequeue();  // Get highest priority ready task
-      if (!task) break;
-
-      const worker = new Worker(task);
-      activeWorkers.add(worker);
-
-      worker.on('complete', () => {
-        activeWorkers.delete(worker);
-        this.notifyDependents(task.id);  // Unblock blocked tasks
-      });
-
-      worker.start();
-    }
-  }
-}
-```
-
-### Task State Machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: Task created
-    PENDING: PENDING - Initial state, waiting for dependencies
-    QUEUED: QUEUED - Ready, in priority queue
-    RUNNING: RUNNING - Workflow executing
-    COMPLETED: COMPLETED - Success, MR created
-    FAILED: FAILED - AC check failed or error
-    BLOCKED: BLOCKED - Unresolvable dependency or timeout
-
-    PENDING --> QUEUED: Dependencies satisfied
-    QUEUED --> RUNNING: Worker available
-    RUNNING --> COMPLETED: Success
-    RUNNING --> FAILED: AC failed
-    RUNNING --> BLOCKED: Timeout/unresolvable
-
-    COMPLETED --> [*]
-    FAILED --> [*]
-    BLOCKED --> [*]
-```
+A scheduler that re-derived eligibility from its own in-memory state could
+disagree with the provider backlog, which is the single source of truth for
+work identity. Removing it removes that second source.
 
 ## Skills Workflow
 
@@ -368,19 +290,21 @@ Workflows communicate state via typed signals (written to `<worktree>/.afk-signa
 
 ```typescript
 type SignalType =
-  | 'goal_complete'    // Phase 1 complete: implementation delivered (summary required)
-  | 'ac_result'        // Phase 2 complete: AC validation result
-  | 'timeout'          // watchdog hard timeout (written by forked process)
+  | 'goal_complete'    // Phase complete: implementation, QA, or AC verification
   | 'handoff_ready'    // Handoff summary complete (summary required)
+  | 'timeout'          // watchdog hard timeout (written by forked process)
+  | 'idle'             // The agent has nothing to do and is waiting
 
 interface Signal {
   type: SignalType;
   timestamp: string;
   summary?: string;        // required for goal_complete / handoff_ready
   sha?: string;            // Git commit SHA
-  result?: 'PASS' | 'FAIL'; // for ac_result
+  kind?: 'task' | 'qa' | 'ac_verification';  // goal_complete only
+  result?: 'PASS' | 'FAIL';                    // goal_complete only
   tests_run?: number;
   tests_passed?: number;
+  failedCriteria?: { id: string; expected: string; actual: string }[];
 }
 ```
 
@@ -391,21 +315,21 @@ When context approaches its limit, the workflow **automatically interrupts the c
 ### Detection Mechanism
 
 - **Runner polls statusline**: The agent cannot reliably perceive its own context limit (Claude Code's TUI warnings are invisible at the rendering layer, and the compression system message arrives too late). There is no context_high in the signal protocol. The Runner is the sole authority for context overflow — checks signal files and `<worktree>/.afk/claude-status.json` token usage during wait cycles (statusline writes every turn).
-- **Threshold**: Absolute token count, default `CONTEXT.HIGH_THRESHOLD` = 100,000, configurable via `--context-high <tokens>`.
+- **Threshold**: Absolute token count, default `contextThreshold` = 100,000, configurable with `--context-high <tokens>` and overridable per project with `contextThreshold` in `.afk/config.yml`.
 - **Signal priority**: If agent has already written a completion signal, no interruption occurs (signal file check takes precedence over token check).
 
 ### Handoff Flow (Auto-Resume)
 
 1. **Request summary**: Type plain text handoff instructions (urge immediate brief summary) — ① `git add -A && git commit` (skip if no changes) → ② 3 quick answers (done/doing/next) → ③ write `handoff_ready` signal. If no valid `handoff_ready` within 60s (template placeholder `<summary>` counts as no summary), use pane snapshot as fallback.
-2. **Handoff document**: Summary + snapshot + commit sha written to `<worktree>/.afk/handoff/handoff-<iid>-<gen>.md` (`.afk/` is already in the repo's `.gitignore`, so it won't be committed to the MR via `git add -A`; the document travels with the worktree, and the recovering agent can read it directly on resume).
+2. **Handoff document**: Summary + snapshot + commit sha written to `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md` (`.afk/` is already in the repo's `.gitignore`, so it won't be committed to the MR via `git add -A`; the document travels with the worktree, and the recovering agent can read it directly on resume).
 3. **No issue comment**: the handoff records itself in the audit spine (`handoff.performed`). The recovery document on disk is the handover artefact; a termination handoff also moves the backlog to `blocked` + `hitl`, which is the signal an operator sees in the tracker.
 4. **Restart**: Kill tmux session → clear signal files and old statusline data → recreate session with same name → restart watchdog (each generation gets a full hard timeout).
 5. **Continue**: New session receives instructions to "continue implementing/verifying issue #N (read handoff document first)", looping until completion signal or another handoff.
 
 ### Budget and Fallback
 
-- `--max-handoffs <n>` (default 3): Auto-resume round limit, shared **globally** across both phases (implementation/verification).
-- `--max-total-tokens <tokens>` (default 500,000): Cumulative token limit across the entire run spanning handoff generations (each handoff adds the old session's usage; termination check = cumulative + current session usage >= limit).
+- `--max-handoffs <n>` (default `min(ceil(goalBudget / 1,000,000), 20)`, so **10** with the default `goalBudget` of 10,000,000): Auto-resume round limit, shared **globally** across both phases (implementation/verification).
+- `--max-total-tokens <tokens>` (default `goalBudget`, so **10,000,000**): Cumulative token limit across the entire run spanning handoff generations (each handoff adds the old session's usage; termination check = cumulative + current session usage >= limit).
 - **Either budget exhausted** → Termination handoff: the backlog moves to `blocked` + `hitl`, the recovery document is written to `<worktree>/.afk/handoff/`, and the session is killed. The worktree is retained for a manual resume.
 - **Restart failure** (e.g., Claude not ready within 30s) → Automatically flip to termination handoff (blocked + hitl, session killed), avoid crash path.
 

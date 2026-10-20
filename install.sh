@@ -127,12 +127,15 @@ if [[ "$SKIP_DEPS" == false ]]; then
     fi
     print_success "Node.js v$(node --version)"
 
-    # Check npm
-    if ! command -v npm &> /dev/null; then
-        print_error "npm is not installed"
+    # Check pnpm. The repository is a pnpm workspace: the root package
+    # depends on the workspace packages through the `workspace:*` protocol,
+    # which npm cannot resolve.
+    if ! command -v pnpm &> /dev/null; then
+        print_error "pnpm is not installed"
+        echo "Please install it with: npm install -g pnpm"
         exit 1
     fi
-    print_success "npm v$(npm --version)"
+    print_success "pnpm v$(pnpm --version)"
 
     # Check git
     if ! command -v git &> /dev/null; then
@@ -177,15 +180,15 @@ if command -v afk &> /dev/null && [[ "$FORCE" == false ]]; then
     fi
 fi
 
-# Install npm dependencies (full, including devDependencies for build)
-print_info "Installing npm dependencies..."
+# Install dependencies (full, including devDependencies for build)
+print_info "Installing dependencies..."
 cd "$SCRIPT_DIR"
-npm install --silent
+pnpm install --silent
 print_success "Dependencies installed"
 
 # Build TypeScript
 print_info "Building TypeScript..."
-npm run build > /dev/null
+pnpm build > /dev/null
 if [[ ! -f "$SCRIPT_DIR/dist/index.js" ]]; then
     print_error "Build failed: dist/index.js not found"
     exit 1

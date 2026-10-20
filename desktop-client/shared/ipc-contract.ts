@@ -6,6 +6,12 @@ import type { ExecutionEnvironmentQueryResult } from "./execution-environment-co
  * The snapshot pipeline's record: one free-form diagnostic line read from
  * `.afk/runs/**\/events.jsonl`. Its status is whatever the log says, so the
  * renderer reads it as a diagnostic and never as a business fact.
+ *
+ * This is a legacy channel. Nothing writes `.afk/runs/` any more — the
+ * writer was reachable only from its own test and was removed — so the
+ * stream reads empty in practice. The authoritative run records are
+ * `RuntimeRunEvent`, read from the runtime task store
+ * (`~/.afk/runtime/tasks`).
  */
 export type RuntimeEvent = {
   id: string;

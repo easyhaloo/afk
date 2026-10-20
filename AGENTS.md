@@ -16,10 +16,11 @@ before touching `desktop-client/`.
 - **Add focused tests** for every extracted service or pure function. Each
   workspace package must pass its own typecheck, build, and test; a green root
   run must not mask a broken package.
-- **The command registry is the CLI source of truth.** Changing a signature,
-  flag, or command means updating
-  [docs/architecture/overview.md](docs/architecture/overview.md#scope-and-command-surface)
-  in the same commit.
+- **The command registry is the CLI source of truth.** The supported commands,
+  and the absence of aliases for removed groups, are documented in
+  [docs/architecture/overview.md](docs/architecture/overview.md#scope-and-command-surface).
+  Changing a signature, a flag, or a command means updating that table in the
+  same commit — do not add a second command list anywhere.
 - **Work identity is a contract.** `BacklogItem.id`, `Run.workItemId`,
   `runId`, `parentId`, `dependsOn`, and `baseBacklogId` have distinct,
   non-interchangeable meanings — see

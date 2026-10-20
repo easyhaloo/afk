@@ -1,7 +1,7 @@
 # AFK 过时文档清理计划
 
 > 编制日期：2026-10-20
-> 范围：`docs/`（40 篇在用 + 92 篇归档）、仓库根入口文档、`desktop-client/ARCHITECTURE.md`、`skills/`
+> 范围：`docs/`（执行前 40 篇在用 + 92 篇归档；执行后 38 篇在用 + 96 篇归档）、仓库根入口文档、`desktop-client/ARCHITECTURE.md`、`skills/`
 > 判定基线：`main` @ `2b4a72b`（盘点时的代码状态）
 > **执行基线：`refactor/afk-package-boundaries` @ `e167fc9`** —— 本计划在该分支上执行，文中所有路径与行号已重基到分支的 `packages/*` 布局
 > 判定依据：源码实测 + CLI 注册表 + 架构守卫 + git 历史
@@ -50,7 +50,7 @@
 
 `scripts/check-doc-links.mjs` 只解析 markdown 链接。文档里"某文件在某处"的断言（反引号包裹的路径）全部逃逸。分支上新增的源路径检查填补了部分盲区，但仍有三处缺口：
 
-- 正则 `/`([^`\s]+\.(?:ts|tsx|mjs|js))`/` —— **不覆盖** `.cts` `.json` `.yml` `.css` `.html` `.md` `.sh`（实测 37 处过期引用落在盲区）。
+- 正则 `/`([^`\s]+\.(?:ts|tsx|mjs|js))`/` —— **不覆盖** `.cts` `.json` `.yml` `.css` `.html` `.md` `.sh`。**执行结论**：只补上无歧义的 `.cts` / `.mts`；其余扩展名经实测会引入 294 处误报（运行时产物、占位符、用户项目输出），详见 §5.1。
 - `if (!raw.includes('/')) continue;` —— **裸文件名一律跳过**（`workflows.ts`、`types.ts`、`main.tsx`、`run-log-service.ts` 等，全部无法检查）。
 - `scripts/doc-source-paths-baseline.json` 是 **50 条已知过时的白名单**。机制上，白名单会冻结这些引用不被修复。
 
@@ -115,7 +115,7 @@
 | P1-3 | `architecture/execution.md:702` | "默认超时遵循 src/lib/constants.ts" | 文件不存在；超时是 `afk run --hard-timeout`（`run.ts:26`） |
 | P1-4 | `architecture/execution.md:612` | 引用 `workflows.ts` 的阶段 | 该文件不存在；模板在 `packages/afk-execution/src/domain/templates/builtin.ts` |
 | P1-5 | `architecture/execution.md:468-475` | 5 个内置模板 | `builtinTemplates()` 返回 **6** 个（多 `parallel-planner`、`planner-with-review`） |
-| P1-6 | `architecture/execution.md:381` | handoff 文档写入 `<worktree>/.afk/runs/<run-id>/handoff/handoff-1.md` | 实际写入 `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md`（`packages/afk-execution/src/application/workflows/handoff.ts:15-16`） |
+| P1-6 | `architecture/execution.md:381` | handoff 文档写入 `<worktree>/.afk/runs/<run-id>/handoff/handoff-1.md` | 实际写入 `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md`（`packages/afk-execution/src/application/workflows/handoff.ts:15-16`）。**后续**：§7 整段重写——原写的 `.afk/runs/` 树没有任何生产代码在写，见 §9 |
 | P1-7 | `architecture/glossary.md:27` | 信号种类含 `ac_result` | 实际 union 为 `goal_complete \| handoff_ready \| timeout \| idle`（`packages/afk-infrastructure/src/schemas.ts:3-40`） |
 | P1-8 | `architecture/glossary.md:40-46` | Packages 只列 `@afk/core`、`@afk/application` | 漏 `@afk/workflow-graph`（承载 `afk graph workflow`） |
 | P1-9 | `architecture/observability.md:17,207` | `confirm-merge` 标为"未切换 / 下一阶段工作" | `afk reconcile`（`command-registry.ts:32`）与 `afk backlog confirm-merge` 均已上线并产出 `change.merge_verified` 事件 |
@@ -164,13 +164,13 @@
 
 | # | 对象 | 动作 |
 |---|---|---|
-| P2-1 | `AFK-ARCHITECTURE.md` + `AFK-ARCHITECTURE.pdf` | 二选一：① 删除根副本，内容归 `docs/architecture/system-architecture-design.md`，在 `docs/index.md` 留唯一入口；② 建立 PDF 生成脚本（写进 `package.json` scripts）、加 `.gitignore` 规则、声明为发布产物。**当前状态是"重复 + 不可达 + 不可再生"** |
+| P2-1 | `AFK-ARCHITECTURE.md` + `AFK-ARCHITECTURE.pdf` | **已执行**：手册并非纯重复——它的 §7 十条架构决策（D-01…D-10）在 `system-architecture-design.md` 中并不存在。因此**迁入** `docs/architecture/architecture-handbook.md` 并挂进 `docs/index.md`；PDF 没有生成脚本、无法随正文重生成，**从仓库移除** |
 | P2-2 | `tsconfig.tests.json` | **未跟踪但被 `package.json:11` 的 typecheck 引用** —— 干净克隆上 `pnpm typecheck` 直接失败。分支 `acd68f5` 已把它入库 → 合入分支即可 |
 | P2-3 | src/cli/commands/board.ts | 工作区已删除未提交。`afk board` 的移除是有意的（`src/index.ts:26-30`）→ 提交该删除，避免"文档说 board 被删、代码里还在"的分裂 |
-| P2-4 | `scripts/check-doc-links.mjs` | 扩检测面：① 去掉 `!raw.includes('/')` 的裸文件名跳过（改为按文档目录/仓库根/desktop-client 三向解析后再判）；② 扩展正则覆盖 `.cts .json .yml .css .html .md .sh`；③ `https://` 链接做一次人工白名单检查（已发现 `docs/adr/README.md:4`） |
+| P2-4 | `scripts/check-doc-links.mjs` | 扩检测面（**已执行，实测后收窄**）：① 正则补上无歧义的 `.cts` / `.mts`；② 裸文件名与 `.json/.yml/.css/.html/.md/.sh` 经实测会引入 294 处误报，改为在检查器注释中写明校准结论，而非扩大正则；③ `https://` 链接做一次人工白名单检查（已发现并修复 `docs/adr/README.md:4`） |
 | P2-5 | `scripts/doc-source-paths-baseline.json` | **目标归零**。50 条白名单是"冻结过时"的机制；清零是本计划的硬验收指标 |
-| P2-6 | `docs/_archive/` | 增加 `README.md` 索引，说明"归档 = 当时仓库的快照，不是当前指引"，并给 92 篇历史材料按主题分组；同步修正 `docs/index.md` 的归档说明 |
-| P2-7 | `skills/SKILL-GUIDE.md:26-48` | frontmatter 字段文档与实际不符：实际是 `name`(22) `description`(22) **`disallowed-tools`(14)** **`disable-model-invocation`(14)** 在用，而文档写的 `license`/`compatibility`/`metadata` 各仅 1 处。→ 补两个高频字段，删三个近乎未用字段 |
+| P2-6 | `docs/_archive/` | **已执行**：新增 `README.md`，说明"归档 = 当时仓库的快照，不是当前指引"，并把 88 份历史计划与规格按 SSH／Backlog／TUI／执行运行时四组归类；`docs/index.md` 的归档说明同步修正 |
+| P2-7 | `skills/SKILL-GUIDE.md:26-48` | **已执行**：补上 `disallowed-tools` 与 `disable-model-invocation`（各 14 处在用）并写明各自语义；`license`/`compatibility`/`metadata` 各仅 1 处在用，保留但标注"按需使用，不要当模板" |
 
 ---
 
@@ -200,9 +200,20 @@
 
 ## 5. 防复发机制
 
-### 5.1 引用检查覆盖到"裸文件名"与非代码扩展名
+### 5.1 引用检查覆盖到"裸文件名"与非代码扩展名（实测后收窄）
 
-当前 `scripts/check-doc-links.mjs:152` 的 `if (!raw.includes('/')) continue;` 是最大的盲区。`execution.md` 里的 `workflows.ts`、ADR-0019 里的 `main.tsx`、`PRD.md` 里的 `run-log-service.ts` 全部跳过。建议改为三向解析后判定存在性，解析失败再按基线豁免。
+原设想是取消 `if (!raw.includes('/')) continue;` 的跳过，并把正则扩展到 `.json .yml .css .html .md .sh`。**实施时实测了这两项，结论是它们都会把一个可用的检查变成噪声**：
+
+- **裸文件名**：全仓 54 处裸文件名引用，按"全仓是否存在该 basename"判定后剩 19 处，逐条看有 5 类误报——`browser-session.ts` 与 `postToolHook.ts` 是 skill 要求**用户项目**生成的文件，`.spec.ts` 是后缀示例，`paths.ts` 与 `run-log-service.ts` 是文档声明的**待创建**文件，ADR-0001 与 PRD.md 里的前瞻引用并非错误。
+- **非代码扩展名**：不可解析 294 处，其中 `.md` 164 处、`.json` 56 处、`.yml` 13 处，几乎全部是运行时产物（`.afk-signal.json`、`report.json`）、占位符（`NNNN-title-slug.md`）或用户项目输出（`CONTEXT.md`、`PRD.md`）。
+
+**实际采取的改动**：
+
+1. 正则补上 `.cts` 与 `.mts`——桌面端用 `preload.cts`，这两个扩展名无歧义。已用注入回归验证：指向不存在的 `.cts` 路径会让检查以退出码 1 失败并点名该路径。
+2. 把上述测量结论写进 `scripts/check-doc-links.mjs` 的注释，说明"检查什么、不检查什么、为什么"——扩检测面不是改一次正则，而是要证明新报出的每一条都是真漂移。
+3. 顺带修掉裸文件名盲区里**确属陈旧**的文档引用（ADR-0020 的失效行号与已删文件、蓝图里的 `preload.cts` 路径），这些由人工核对修正，不依赖自动检查。
+
+这样检查保持在"零误报、零基线"的状态：每一条报出都是真的。
 
 ### 5.2 引用检查覆盖到 `https://` 人工白名单
 
@@ -333,7 +344,130 @@
 - `docs/guides/workflows.md` 的阈值 100000、`--max-total-tokens` 默认 500000、QA 合并条件、`afk/backlog-123` 分支名 —— 全部准确。
 - `README.md` 的 15 条 CLI 示例、`22 Claude Code skills` —— 全部准确。
 - `AFK-ARCHITECTURE.md §6.1` 的 7 状态机与 `BacklogState` 完全一致（`packages/afk-core/src/model.ts` 的 9 值 `WorkState` 是另一个类型，不构成矛盾）。
-- `docs/architecture/execution.md:381` 的 `.afk/runs` 目录是真实实现（`packages/afk-execution/src/application/sessions/run-state.ts:22`）——**不要删 §7**。
+- ~~`docs/architecture/execution.md:381` 的 `.afk/runs` 目录是真实实现——**不要删 §7**~~ → **这条判定是错的，已撤回。** 写 `.afk/runs/` 的 `RunStateWriter` 只能从 `AgentExecutionService` 到达，而 `AgentExecutionService` 只能从它自己的测试到达：生产路径上从未有人写过那个目录。2026-10-20 该模块被删除（`refactor: the run state writer was not writing run state`），§7 随即被改写为真实的落盘布局。见 §9。
 - `docs/guides/workflows.md` 与 `.zh.md` 的标题数差 2 —— 差异来自代码块内注释行数，不是结构漂移。
 - SSH / xterm / PTY / kanban 功能均真实存在（`desktop-client/src/features/ssh/`、`desktop-client/src/features/terminal/`、`src/cli/commands/kanban.ts`）。
 - `docs/index.md` 中 `blueprints/`、`research/`、`decisions/` 的目录行已覆盖其下文件，不算漏挂。
+
+---
+
+## 8. 执行结果
+
+**执行基线**：`refactor/afk-package-boundaries` @ `e167fc9`（盘点时该分支自 `main` 领先 16 个
+提交、落后 0 个，32 分钟前仍在活跃）。清理在一条从它派生的独立分支 `docs/overdue-cleanup` 上完成，
+以免与该分支上并行的代码改动相互干扰。
+
+执行期间该分支继续推进了两次代码提交（事件链校验、交接协调器接线），并改写了
+`glossary.md`、`observability.md`、`workflows.md` 三份文档。清理分支最终 rebase 到该分支的
+最新 HEAD，两处冲突按**代码事实**而非按提交先后解决：
+
+| 冲突点 | 采用 | 依据 |
+|---|---|---|
+| handoff 文档路径 | `handoff-<backlogId>-<gen>.md` | `packages/afk-execution/src/application/workflows/handoff.ts:15` 的 `handoffDocPath()` |
+| 终止式交接的信号 | `blocked` + `hitl`，不写 issue 评论 | 同文件 `:155-156`，交接不再发评论，改由审计脊柱的 `handoff.performed` 记录 |
+| `--max-handoffs` 默认 | 10 | `src/cli/commands/run.ts:51` 配合 `goalBudget` 默认 10,000,000 |
+| `--max-total-tokens` 默认 | 10,000,000 | `src/cli/commands/run.ts:53` |
+
+**已完成**：
+
+| 批次 | 内容 | 结果 |
+|---|---|---|
+| B0 | P0：重写 ADR-0018、归档 4 份文档 | 完成 |
+| B1 | P1-A：架构文档 13 处事实修正（中英双份） | 完成 |
+| B2 | P1-B：getting-started / workflows / skills / testing（中英双份） | 完成 |
+| B3 | P1-C：索引重写、ADR 引用、研究与 PRD 状态 | 完成 |
+| B4 | P2：检查器扩展 + 基线归零 | 完成 |
+| B5 | P2：根级孤儿、归档索引、SKILL-GUIDE、CLAUDE/AGENTS 收敛 | 完成 |
+
+**验收指标实测**：
+
+| # | 指标 | 计划前 | 计划后 |
+|---|---|---|---|
+| A1 | `doc-source-paths-baseline.json` 条目数 | 50 | **0** |
+| A2 | 检查器可见的过期路径 | 48 | **0** |
+| A3 | `pnpm docs:check` | 通过（0 断裂） | 通过（0 断裂，0 基线豁免） |
+| A4 | `docs/index.md` 覆盖在用文档 | 漏 5 个 | **100%** |
+| A5 | `pnpm typecheck` | 干净克隆失败 | 通过 |
+| A6 | 损坏文档 | ADR-0018 | **0** |
+| A7 | 双语镜像结构对齐 | 5/5 对齐 | **7/7 对齐** |
+
+**校验**：`pnpm docs:check`（234 文件 0 断裂）、`pnpm architecture:check`
+（162 源文件 + 220 桌面端文件，0 隔离项）、`pnpm typecheck`（根 + 5 个包 + 测试树）、
+`pnpm test`（根 609 项 + 包级 9 项，全部通过）。
+
+## 9. 更正：`.afk/runs` 的四个条目各自去了哪里
+
+本计划最初把 `docs/architecture/execution.md` §7 的 `.afk/runs/` 目录列入**附录 B 误报清单**，
+理由是「目录是真实实现（packages/afk-execution/src/application/sessions/run-state.ts:22）——
+不要删 §7」。**这条判定是错的，已撤回。**
+
+写那个目录的 `RunStateWriter` 只能从 `AgentExecutionService` 到达，而 `AgentExecutionService`
+只能从它自己的测试到达：生产路径上从未有人创建过 `.afk/runs/`。该模块已随
+`refactor: the run state writer was not writing run state`（`refactor/afk-package-boundaries`）
+删除，§7 随即被改写为真实的落盘布局。
+
+**教训**：把"文件存在"当成"文档没过期"，是这份检查最容易犯的错。文件存在只证明它没被删，
+不证明有人在用它。把一个只被自己测试引用的模块当成"真实实现"，等于让检查为一份
+**描述没人写的树的文档**背书。
+
+同一处还犯过相反方向的第二个错：看到 `.afk/runs` 没人写，就把 `result.json` 一并判成
+"没人写、断言无法满足"，而它其实由 `TaskRuntimeStore.writeDiagnostics` 写在别处、活着。
+**两个方向的错都源于同一个偷懒：不查调用链，只看文件在不在。**
+
+### 9.1 旧树四个条目的下场
+
+删除写端之后，旧树里四个条目并没有一起消失，两个只是换了位置：
+
+| 旧位置 | 现在的下场 |
+|---|---|
+| `<worktree>/.afk/runs/<run-id>/request.json` | 无人写入——产生它的 `RunStateWriter` 只能从 `AgentExecutionService` 到达，而后者只能从它自己的测试到达 |
+| `<worktree>/.afk/runs/<run-id>/events.jsonl` | 由审计脊柱取代：`~/.afk/events/<base64url(runId)>.jsonl` |
+| `<worktree>/.afk/runs/<run-id>/result.json` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/result.json` |
+| `<worktree>/.afk/runs/<run-id>/output.log` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/output.log` |
+
+后两个由 `TaskRuntimeStore.writeDiagnostics` 写入（`task-runtime.ts:274-287`），调用方是
+`runtimeLifecycle.diagnostics(...)`（`runtime-lifecycle.ts:211-224`），由工作流引擎
+（`workflow-engine.ts:1232`）与 QA runner（`qa-runner.ts:230`）各调一次；写入发生在
+`finish()` 归档之前，所以归档记录带 `diagnosticPath`。
+
+**一处曾经的误判**：最初判定"`result.json` 没人写、断言无法满足"是错的——没有查
+`writeDiagnostics` 就下了结论。**文件存在只证明它没被删，不证明有人在用它；反过来，
+文件存在也不证明它有人在用——要看调用链。** 这条已由 §7 的迁移对照表落进正文。
+
+### 9.2 真实的三处落盘
+
+| 痕迹 | 位置 | 主人 |
+|---|---|---|
+| 审计脊柱（权威、只追加） | `~/.afk/events/<base64url(runId)>.jsonl` | `JsonlEventStore` |
+| 运行时记录（进度/心跳/阶段投影） | `~/.afk/runtime/tasks/{active,archive}/<base64url(runId)>.json`，诊断在 `diagnostics/<base64url(runId)>/` | `TaskRuntimeStore` |
+| 桌面执行工作区 | `~/.loop-workspace/<taskId>/{repositories,artifacts,runtime,logs,diagnostics}` | `execution-workspace-service` |
+
+### 9.3 一并修正的引用
+
+| 位置 | 原文 | 改后 |
+|---|---|---|
+| `docs/architecture/execution.md` §7 + `.zh.md` | `<worktree>/.afk/runs/<run-id>/{request.json,events.jsonl,result.json,output.log}` | 上表三处真实布局 |
+| `desktop-client/ARCHITECTURE.md:137` | 「运行诊断遵循 `<worktree>/.afk/runs/<run-id>/events.jsonl`」+ 指向已删模块 | 指向运行时任务存储与 `TaskRuntimeReader` |
+| `desktop-client/shared/ipc-contract.ts:7` | 「read from `.afk/runs/**/events.jsonl`」 | 保留事实，补注这是**遗留通道**——没有东西再写它，实际读到空；权威记录是 `RuntimeRunEvent` |
+| `desktop-client/src/components/EmptyState.tsx:4` | 「选择包含 `.afk/runs` 的工作区后，记录会显示在这里」 | 「运行记录保存在运行时的任务存储中。选择工作区后，已有记录会显示在这里」 |
+
+### 9.4 仍然存在、需要代码侧决定的两处
+
+删除写端之后，两处**读端**仍在扫 `.afk/runs/`，因此实际读到空：
+
+- `desktop-client/electron/services/workspace-service.ts:13` —— `readEvents()` 递归找
+  `<root>/.afk/runs/**/events.jsonl`（快照里的 `events` 通道）。
+- `desktop-client/electron/services/desktop-service.ts:382` —— `readWorkflowRuns()` 读
+  `<root>/.afk/runs/<runId>/{request.json,result.json}`，结果进快照的 `workflowRuns`。
+
+这两条读端是否删除、还是改指运行时任务存储，属于运行时重构的代码决策，不在文档清理
+的范围内，故只登记不动。
+
+**未做、留给 owner 决策**：
+
+- ADR-0020 自 2026-09-29 起挂在 `proposed`，需要一次接受／拒绝裁决。
+- ADR 编号 0002–0013 的空缺：本计划**建议不重排**（重排需同步 7 个源码文件里的引用），
+  改为在 `docs/adr/README.md` 写明"编号自 0014 起"。
+- `docs/research/RESEARCH.md` 是针对某个内部 JumpServer 实例的一次性调研，
+  是保留为参考还是归档，由 owner 判断。
+- `docs/research/dt-mdp-llm-research.md` 的 "DT-MDP" 在代码中零命中，是另一类孤儿材料。

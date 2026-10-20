@@ -55,7 +55,7 @@ or adding a desktop feature.
 | Architecture, execution design, glossary | [`docs/architecture/`](docs/architecture/overview.md) |
 | Task guides (workflows, skills, testing) | [`docs/guides/`](docs/guides/workflows.md) |
 | Architecture decision records | [`docs/adr/`](docs/adr/README.md) |
-| Desktop execution and interactive tmux access | [`ADR-0019`](docs/adr/0019-desktop-run-log-viewer-projection.md) |
+| Shared execution views and interactive tmux access | [`ADR-0019`](docs/adr/0019-desktop-run-log-viewer-projection.md) |
 | Product requirements, research | [`docs/product/`](docs/product/PRD.md), [`docs/research/`](docs/research/) |
 | Onboarding | [`docs/getting-started.md`](docs/getting-started.md) |
 
@@ -64,33 +64,13 @@ documents ship as `name.md` + `name.zh.md`; update both.
 
 ## Conventions
 
-- **The command registry is the single source of truth for the CLI surface.**
-  The supported commands, and the absence of aliases for removed groups, are
-  documented in
-  [docs/architecture/overview.md](docs/architecture/overview.md). If you change
-  a signature, a flag, or remove a command, update that table in the same
-  commit — do not add a second command list here.
-- **Work identity is a contract, not a convention you may redefine.** The
-  `BacklogItem.id` / `Run.workItemId` / `runId` / `parentId` / `dependsOn` /
-  `baseBacklogId` distinctions, and the rules for status ownership, are
-  specified in
-  [docs/architecture/overview.md](docs/architecture/overview.md#work-item-and-execution-identity).
-  Read it before touching run, backlog, or runtime code.
-- **`skills/` is the source of truth.** Never edit skills under
-  `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/` — those are
-  installed copies and edits are lost on reinstall. See
-  [`skills/SKILL-GUIDE.md`](skills/SKILL-GUIDE.md) for authoring standards.
-- **Build output is not source.** `dist/`, `dist-electron/`, `release/`, and
-  test screenshots are generated. Do not review, edit, or commit them.
-- **Add focused tests** for every extracted service or pure function. Each
-  workspace package must pass its own typecheck, build, and test — a green
-  root run must not mask a broken package.
-- **Docs stay in lockstep with code.** The link checker (`pnpm docs:check`) only
-  catches broken links; stale *prose* is on you. When a module moves, grep the
-  docs for the old path. The same command also checks the source paths the
-  documents name in backticks, against a recorded baseline of the references
-  that were already stale — a path that stops existing, or starts appearing
-  more often, fails the check.
+The rules that govern this repository are in
+[`AGENTS.md`](AGENTS.md#hard-rules) — the command registry as the CLI source of
+truth, work identity as a contract, `skills/` as the source of truth, build
+output as non-source, focused tests per extracted unit, and keeping the
+documents in lockstep with the code. They are stated once, there, on purpose:
+this file is the entry point, and a copy here is a copy that will silently
+drift.
 
 ## Workflow
 

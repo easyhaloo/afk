@@ -268,10 +268,8 @@ export type DesktopApi = {
     list: (workspace: string, options?: BacklogListOptions) => Promise<BacklogItem[]>;
     show: (workspace: string, id: string) => Promise<BacklogItem>;
     create: (workspace: string, input: BacklogCreateInput) => Promise<BacklogItem>;
-    start: (workspace: string, input: BacklogRunStartInput) => Promise<BacklogRunSummary>;
     stop: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
     recover: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
-    retry: (workspace: string, input: BacklogRunRetryInput) => Promise<BacklogRunSummary>;
     confirmMerge: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
     runs: (workspace: string, backlogId?: string) => Promise<BacklogRunSummary[]>;
     summary: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
@@ -337,10 +335,8 @@ export const IPC_CHANNELS = {
   backlogList: "afk:backlog-list",
   backlogShow: "afk:backlog-show",
   backlogCreate: "afk:backlog-create",
-  backlogStart: "afk:backlog-start",
   backlogStop: "afk:backlog-stop",
   backlogRecover: "afk:backlog-recover",
-  backlogRetry: "afk:backlog-retry",
   backlogConfirmMerge: "afk:backlog-confirm-merge",
   backlogRuns: "afk:backlog-runs",
   backlogTagAdd: "afk:backlog-tag-add",
@@ -387,8 +383,6 @@ import type {
   BacklogCreateInput,
   BacklogItem,
   BacklogListOptions,
-  BacklogRunStartInput,
-  BacklogRunRetryInput,
   BacklogRunSummary,
   BacklogRuntimeSummary,
   WorkItemInventoryOptions,

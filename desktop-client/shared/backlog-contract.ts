@@ -249,15 +249,6 @@ export type BacklogCreateInput = {
   platform?: BacklogPlatform;
 };
 
-export type BacklogRunStartInput = {
-  backlogId: string;
-  template?: string;
-};
-
-export type BacklogRunRetryInput = BacklogRunStartInput & {
-  reason: string;
-};
-
 export type BacklogRunSummary = {
   id: string;
   backlogId: string;
@@ -379,28 +370,6 @@ export function parseBacklogCreateInput(input: unknown): BacklogCreateInput {
   }
   if ("platform" in candidate) result.platform = parseBacklogPlatform(candidate.platform);
   return result;
-}
-
-export function parseBacklogRunStartInput(input: unknown): BacklogRunStartInput {
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog run input must be an object");
-  const candidate = input as Record<string, unknown>;
-  const keys = Object.keys(candidate);
-  if (keys.some((key) => key !== "backlogId" && key !== "template")) throw new Error("backlog run input has unknown fields");
-  const result: BacklogRunStartInput = { backlogId: parseBacklogId(candidate.backlogId) };
-  if (candidate.template !== undefined) {
-    if (typeof candidate.template !== "string" || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(candidate.template)) throw new Error("backlog run input: template is invalid");
-    result.template = candidate.template;
-  }
-  return result;
-}
-
-export function parseBacklogRunRetryInput(input: unknown): BacklogRunRetryInput {
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog retry input must be an object");
-  const candidate = input as Record<string, unknown>;
-  if (Object.keys(candidate).some((key) => key !== "backlogId" && key !== "template" && key !== "reason")) throw new Error("backlog retry input has unknown fields");
-  const start = parseBacklogRunStartInput({ backlogId: candidate.backlogId, ...(candidate.template === undefined ? {} : { template: candidate.template }) });
-  if (typeof candidate.reason !== "string" || !candidate.reason.trim() || /[\x00-\x1f\x7f]/.test(candidate.reason) || candidate.reason.length > 1000) throw new Error("backlog retry input: reason is invalid");
-  return { ...start, reason: candidate.reason.trim() };
 }
 
 export function parseWorkItemRunStartInput(input: unknown): WorkItemRunStartInput {

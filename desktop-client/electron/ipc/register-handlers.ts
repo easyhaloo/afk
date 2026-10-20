@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, safeStorage, shell } from "electron";
 import { IPC_CHANNELS, type SshCredentialSetInput, type SshListOptions } from "../../shared/ipc-contract.js";
 import type { SshFingerprint } from "../../shared/ssh-contract.js";
-import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseBacklogRunRetryInput, parseBacklogRunStartInput, parseWorkItemInventoryOptions, parseWorkItemRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract.js";
+import { parseBacklogCreateInput, parseBacklogId, parseBacklogListOptions, parseWorkItemInventoryOptions, parseWorkItemRunStartInput, type BacklogPlatform } from "../../shared/backlog-contract.js";
 import { parseExecutionQueryOptions, type ExecutionRunDetail } from "../../shared/execution-contract.js";
 import { exec } from "../adapters/process-executor.js";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter.js";
@@ -188,37 +188,12 @@ const backlogRuntimeService = createBacklogRuntimeService({
 const workflowGraphService = new WorkflowGraphService();
 const backlogExecutionService = createBacklogExecutionService({
   resolveWorkspace,
-  startExecution: async (workspace: string, input: { workItemId: string; template?: string }) => {
-    const workItem = (await workItemInventoryService.list()).items.find(candidate => candidate.id === input.workItemId);
-    if (!workItem) throw new Error(`工作项 ${input.workItemId} 不存在或当前账号无权访问`);
-    const associated = workItem.repositories === undefined ? [workItem.project] : workItem.repositories;
-    const baseBranch = await workflowTargetBranch(resolveWorkspace(workspace));
-    return workItemExecutionService.start({
-      workItemId: input.workItemId,
-      repositories: associated.map(repository => ({
-        ...repository,
-        checkoutPath: `repositories/${repository.name}`,
-        baseBranch,
-      })),
-      ...(input.template ? { workflow: input.template } : {}),
-    });
-  },
-  executionState: async (workspace: string, runId: string) => {
-    const runs = await workItemRunStore.load(resolveWorkspace(workspace));
-    const run = runs.find(candidate => candidate.id === runId);
-    if (!run) return "unknown" as const;
-    if (run.status === "completed") return "completed" as const;
-    if (run.status === "failed") return "failed" as const;
-    return "running" as const;
-  },
   providers: async (workspace: string) => {
     const bundle = await providerBundle(workspace);
     return { backlog: bundle.backlog, changes: bundle.changes };
   },
   targetBranch: (workspace: string) => workflowTargetBranch(workspace),
-  getBacklog: (workspace, id) => backlogService.show(workspace, id),
   getSummary: (workspace, id) => backlogRuntimeService.summary(workspace, id),
-  validateTemplate: async (workspace, template) => (await workflowGraphService.generate({ workspace: resolveWorkspace(workspace), templateId: template, format: "json" })).status.state !== "rejected",
   invalidateBacklogList: backlogService.invalidateListCache,
   store: backlogRunStore,
 });
@@ -441,10 +416,6 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     (v) => backlogWorkspace(v, "backlog.create"),
     parseBacklogCreateInput,
   ], ([workspace, input]) => backlogService.create(workspace, input));
-  registerHandlerMulti(IPC_CHANNELS.backlogStart, [
-    (v) => backlogWorkspace(v, "backlog.start"),
-    parseBacklogRunStartInput,
-  ], () => { throw new Error("USE_WORK_ITEM_EXECUTION: 请在工作项详情中启动运行"); });
   registerHandlerMulti(IPC_CHANNELS.backlogStop, [
     (v) => backlogWorkspace(v, "backlog.stop"),
     parseBacklogId,
@@ -453,10 +424,6 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
     (v) => backlogWorkspace(v, "backlog.recover"),
     parseBacklogId,
   ], ([workspace, backlogId]) => backlogExecutionService.recover(workspace, backlogId));
-  registerHandlerMulti(IPC_CHANNELS.backlogRetry, [
-    (v) => backlogWorkspace(v, "backlog.retry"),
-    parseBacklogRunRetryInput,
-  ], () => { throw new Error("USE_WORK_ITEM_EXECUTION: 请在工作项详情中重试运行"); });
   registerHandlerMulti(IPC_CHANNELS.backlogConfirmMerge, [
     (v) => backlogWorkspace(v, "backlog.confirmMerge"),
     parseBacklogId,

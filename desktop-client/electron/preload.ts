@@ -58,10 +58,8 @@ const api: DesktopApi = {
       : ipcRenderer.invoke(IPC_CHANNELS.backlogList, workspace, options),
     show: (workspace, id) => ipcRenderer.invoke(IPC_CHANNELS.backlogShow, workspace, id),
     create: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogCreate, workspace, input),
-    start: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogStart, workspace, input),
     stop: (workspace, backlogId) => ipcRenderer.invoke(IPC_CHANNELS.backlogStop, workspace, backlogId),
     recover: (workspace, backlogId) => ipcRenderer.invoke(IPC_CHANNELS.backlogRecover, workspace, backlogId),
-    retry: (workspace, input) => ipcRenderer.invoke(IPC_CHANNELS.backlogRetry, workspace, input),
     confirmMerge: (workspace, backlogId) => ipcRenderer.invoke(IPC_CHANNELS.backlogConfirmMerge, workspace, backlogId),
     runs: (workspace, backlogId) => backlogId === undefined
       ? ipcRenderer.invoke(IPC_CHANNELS.backlogRuns, workspace)

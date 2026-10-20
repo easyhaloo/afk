@@ -286,9 +286,10 @@ describe("Backlog execution IPC cutover", () => {
     registerIpcHandlers();
   });
 
-  it("rejects legacy Backlog launch channels rather than spawning another runner", async () => {
-    const sender = { senderFrame: { url: "http://localhost:5174" } };
-    await expect(mocks.handlers.get(IPC_CHANNELS.backlogStart)!(sender, process.cwd(), { backlogId: "158" })).rejects.toThrow("USE_WORK_ITEM_EXECUTION");
-    await expect(mocks.handlers.get(IPC_CHANNELS.backlogRetry)!(sender, process.cwd(), { backlogId: "158", reason: "retry" })).rejects.toThrow("USE_WORK_ITEM_EXECUTION");
+  it("does not offer the legacy Backlog launch channels", async () => {
+    // A run is started from the work item's detail. The board's channels are
+    // gone rather than registered to refuse, so nothing promises them.
+    expect(mocks.handlers.has("afk:backlog-start")).toBe(false);
+    expect(mocks.handlers.has("afk:backlog-retry")).toBe(false);
   });
 });

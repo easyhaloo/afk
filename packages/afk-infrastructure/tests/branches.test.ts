@@ -100,6 +100,25 @@ describe('IssueBranchStrategy', () => {
     const branches = (await git.raw(['branch', '--list', 'afk-issue-42'])).trim();
     expect(branches).toBe('');
   });
+
+  it('refuses to replace a branch an earlier run left behind, and leaves its worktree alone', async () => {
+    // A failed run leaves a checked-out branch + worktree behind. The
+    // branch holds that run's work, so it is not ours to replace — and the
+    // add cannot succeed while it exists, so removing the worktree first
+    // would only throw it away and fail anyway.
+    const leftover = path.join(repoPath, '.worktrees', 'issue-42');
+    await afs.mkdir(path.dirname(leftover), { recursive: true });
+    await git.raw(['worktree', 'add', '-b', 'afk-issue-42', leftover, 'main']);
+
+    const s = new IssueBranchStrategy();
+    await expect(s.prepareWorktree(git, { type: 'issue', iid: 42 }, { repoPath }))
+      .rejects.toThrow(/remove it and the worktree a previous run left behind/);
+
+    // Nothing was thrown away: the leftover worktree and its branch are
+    // still there for whoever looks at the failed run.
+    expect(fs.existsSync(leftover)).toBe(true);
+    expect((await git.raw(['branch', '--list', 'afk-issue-42'])).trim()).not.toBe('');
+  });
 });
 
 describe('NamedBranchStrategy', () => {
@@ -206,6 +225,10 @@ describe('ExistingBranchStrategy', () => {
   });
   afterEach(async () => {
     await afs.rm(repoPath, { recursive: true, force: true });
+    // The prepared-worktree guard is process-wide and keyed by branch name,
+    // so a case that prepares a branch without cleaning up would block the
+    // next case that prepares the same name.
+    _clearPreparedWorktreesForTest();
   });
 
   it('refuses to attach when the branch is checked out in another worktree', async () => {
@@ -231,6 +254,27 @@ describe('ExistingBranchStrategy', () => {
     expect(handle.isNewBranch).toBe(false);
     expect(handle.branch).toBe('preexisting');
     expect(fs.existsSync(handle.path)).toBe(true);
+  });
+
+  it('keeps the branch it attached to when the caller does not ask for it to go', async () => {
+    // The branch pre-existed the run. Deleting it would throw away work
+    // that was there before AFK touched it, so it is kept.
+    const s = new ExistingBranchStrategy();
+    const handle = await s.prepareWorktree(git, { type: 'existing', branch: 'preexisting' }, { repoPath });
+
+    await s.cleanup(git, { type: 'existing', branch: 'preexisting' }, handle);
+
+    expect(fs.existsSync(handle.path)).toBe(false);
+    expect((await git.raw(['branch', '--list', 'preexisting'])).trim()).not.toBe('');
+  });
+
+  it('deletes the branch when the caller asks for it to go', async () => {
+    const s = new ExistingBranchStrategy();
+    const handle = await s.prepareWorktree(git, { type: 'existing', branch: 'preexisting' }, { repoPath });
+
+    await s.cleanup(git, { type: 'existing', branch: 'preexisting' }, handle, { keepBranch: false });
+
+    expect((await git.raw(['branch', '--list', 'preexisting'])).trim()).toBe('');
   });
 });
 

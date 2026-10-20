@@ -24,6 +24,7 @@ import { BranchStrategyError } from './types.js';
 import {
   defaultWorktreeBaseDir,
   ensureWorktreeBaseDir,
+  gitBranchDelete,
   gitWorktreeRemove,
   checkNotShared,
   isBranchCheckedOut,
@@ -94,13 +95,13 @@ export class ExistingBranchStrategy implements BranchStrategy {
   }
 
   async cleanup(git: SimpleGit, _config: BranchStrategyConfig, handle: BranchHandle, options?: CleanupOptions): Promise<void> {
-    // For 'existing' we only remove the worktree if we attached one.
-    // Caller can pass keepBranch=true (default for 'existing' since the branch
-    // pre-existed) to preserve the branch after cleanup.
+    // The worktree is ours to remove — we attached it. The branch is not:
+    // it existed before the run, so it is kept unless the caller asks for
+    // it to go. Deleting it by default would throw away work that was
+    // there before AFK touched it.
     await gitWorktreeRemove(git, handle.path, options?.force ?? false);
-    if (!options?.keepBranch) {
-      // Default for 'existing' is keepBranch=true; explicit override only.
-      await git.raw(['branch', '-D', handle.branch]).catch(() => { /* not deleted */ });
+    if (options?.keepBranch === false) {
+      await gitBranchDelete(git, handle.branch, true);
     }
     releasePath(handle.path);
   }

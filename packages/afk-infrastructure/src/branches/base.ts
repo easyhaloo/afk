@@ -25,9 +25,17 @@ export async function ensureWorktreeBaseDir(path: string): Promise<void> {
 }
 
 /**
- * Add a new worktree. Mirrors the retry-on-stale behavior in WorktreeManager
- * (a previous failed retry leaves a checked-out branch + worktree that must
- * be cleaned before re-adding).
+ * Add a new worktree.
+ *
+ * A previous failed run can leave a worktree behind. There are two
+ * leftovers, and they are not the same problem:
+ *
+ *  - the *path* is occupied but the branch is free. That worktree belongs
+ *    to nobody now, so it is removed and the add is retried.
+ *  - the *branch* is still there too. It holds the work of the run that
+ *    failed, and the add cannot succeed while it exists, so removing the
+ *    worktree would only throw that work away and fail anyway. It is
+ *    reported instead.
  */
 export async function gitWorktreeAdd(
   git: SimpleGit,
@@ -36,18 +44,33 @@ export async function gitWorktreeAdd(
   baseBranch: string,
   kind: string,
 ): Promise<void> {
+  if (await branchExists(git, branch)) {
+    throw new BranchStrategyError(
+      `branch '${branch}' already exists; remove it and the worktree a previous run left behind before retrying`,
+      kind as never,
+    );
+  }
   try {
     await git.raw(['worktree', 'add', '-b', branch, worktreePath, baseBranch]);
   } catch (err: unknown) {
     const msg = String(err);
-    if (msg.includes('already exists') || msg.includes('already exists') || msg.includes('已经存在')) {
-      // A stale worktree path can be retried, but an existing branch is
-      // intentionally never deleted here: it may contain unpushed work.
+    if (msg.includes('already exists') || msg.includes('已经存在')) {
+      // The path is occupied by a leftover worktree and the branch is free.
       try { await git.raw(['worktree', 'remove', worktreePath, '--force']); } catch { /* ignore */ }
       await git.raw(['worktree', 'add', '-b', branch, worktreePath, baseBranch]);
     } else {
       throw new BranchStrategyError(`worktree add failed: ${msg}`, kind as never, err);
     }
+  }
+}
+
+/** Whether a local branch exists. */
+export async function branchExists(git: SimpleGit, branch: string): Promise<boolean> {
+  try {
+    await git.raw(['rev-parse', '--verify', `refs/heads/${branch}`]);
+    return true;
+  } catch {
+    return false;
   }
 }
 

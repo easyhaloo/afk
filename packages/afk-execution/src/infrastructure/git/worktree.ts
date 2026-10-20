@@ -1,7 +1,7 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { logger } from '@afk/infrastructure';
+import { gitBranchDelete, gitWorktreeRemove, logger } from '@afk/infrastructure';
 
 export type MarkerStatus = 'crashed' | 'success';
 export type WorktreeStatus = 'active' | 'completed' | 'failed';
@@ -57,8 +57,11 @@ export class WorktreeManager {
       if (msg.includes('already exists') || msg.includes('的工作区') || msg.includes('已经存在')) {
         // Stale branch + worktree from a failed retry. Remove worktree first
         // (branch can't be deleted while worktree uses it), then delete branch.
-        try { await this.git.raw(['worktree', 'remove', path, '--force']); } catch { /* ignore */ }
-        try { await this.git.raw(['branch', '-D', branch]); } catch { /* ignore */ }
+        // The branch is AFK's own (`afk-issue-<iid>`), so replacing it is
+        // safe; both removals are still best effort, and the add that
+        // follows reports anything left in the way.
+        await gitWorktreeRemove(this.git, path, true).catch(() => { /* ignore */ });
+        await gitBranchDelete(this.git, branch, true).catch(() => { /* ignore */ });
         await this.git.raw(['worktree', 'add', '-b', branch, path, baseBranch]);
       } else {
         throw err;

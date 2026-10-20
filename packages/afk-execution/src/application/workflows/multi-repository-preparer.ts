@@ -5,7 +5,7 @@ import { simpleGit } from 'simple-git';
 import type { BranchHandle } from '@afk/infrastructure';
 import type { WorkflowRunRepository } from './run-request.js';
 import type { RunOutcomeStatus } from './resource-scope.js';
-import { gitLabCloneUrl } from '@afk/infrastructure';
+import { gitBranchDelete, gitLabCloneUrl } from '@afk/infrastructure';
 
 export type RepositoryTargetState = 'missing' | 'empty' | 'nonempty';
 
@@ -566,7 +566,9 @@ async function restoreRepository(
     if (snapshot.workingBranchExisted && snapshot.workingBranchHead) {
       await git.raw(['branch', '-f', workingBranch, snapshot.workingBranchHead]);
     } else {
-      await git.raw(['branch', '-D', workingBranch]).catch(() => undefined);
+      // The run created this branch, so putting the repository back means
+      // removing it. Best effort: the restore has already happened.
+      await gitBranchDelete(git, workingBranch, true).catch(() => undefined);
     }
   }
   await git.raw(['clean', '-fd']);

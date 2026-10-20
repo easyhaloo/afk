@@ -41,6 +41,11 @@ rejects illegal relative imports, quarantines legacy files, and refuses a
 desktop client that reaches into the root package's `src/` tree. Do not add a
 dependency that inverts a layer.
 
+The constraints that govern where code lives, how a module may be moved, and
+how the desktop client reaches shared behaviour are in
+[`AGENTS.md`](AGENTS.md#package-boundaries) — read them before moving a module
+or adding a desktop feature.
+
 ## Documentation
 
 [`docs/index.md`](docs/index.md) is the full map. The live areas:

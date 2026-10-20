@@ -303,7 +303,15 @@ function isWithin(child, parent) {
  * every package boundary the guard enforces elsewhere, so it is reported
  * here — the same rule that stops a package from importing outside its own
  * root (see checkPackage).
+ *
+ * The desktop must also not spawn an AFK CLI process. It calls the shared use
+ * cases in process, through its composition root; a subprocess running `afk`
+ * would reintroduce the boundary the packages were split to remove — a second
+ * process, a second copy of the domain rules, and a JSON envelope to translate
+ * between them.
  */
+const afkSpawnPattern = /\b(?:spawn|spawnSync|exec|execFile|execFileSync|execSync)\s*\(\s*['"`]afk['"`]/;
+
 function checkDesktopImports(fullPath) {
   const source = stripComments(readFileSync(fullPath, 'utf8'));
   for (const match of source.matchAll(importPattern)) {
@@ -316,6 +324,9 @@ function checkDesktopImports(fullPath) {
     if (isWithin(resolved, root)) {
       addViolation(`${fullPath}: desktop client must not import the root package src/ tree via '${specifier}'; depend on @afk/application or @afk/infrastructure instead`);
     }
+  }
+  if (afkSpawnPattern.test(source)) {
+    addViolation(`${fullPath}: desktop client must not spawn an afk CLI process; call the shared use cases in process instead`);
   }
 }
 
@@ -396,6 +407,15 @@ function checkPackage(packageName, packageRoot) {
     for (const match of source.matchAll(importPattern)) {
       const specifier = match[2];
       if (match[1] === '`' && specifier.includes('${')) continue;
+
+      // A package must not import its own modules by its own name: that
+      // specifier resolves to the built output, so the module is loaded a
+      // second time and a mock of it never applies.
+      const ownName = `@afk/${packageName}`;
+      if (specifier === ownName || specifier.startsWith(`${ownName}/`)) {
+        addViolation(`${fullPath}: ${packageName} package must not import itself as '${specifier}'; use a relative path`);
+        continue;
+      }
 
       if (specifier.startsWith('.')) {
         const resolved = resolveImport(fullPath, specifier);

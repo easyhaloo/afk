@@ -202,4 +202,54 @@ describe('architecture guard package boundaries', () => {
     const output = result.run();
     expect(output).toContain(`Skipped optional package root: ${result.packageRoots.application}`);
   });
+
+  it('rejects a package that imports itself by its own name', () => {
+    const result = packageFixture({
+      applicationSource: "import type { ApplicationValue } from '@afk/application';\nexport type Self = ApplicationValue;\n",
+    });
+    const output = result.run();
+    expect(output).toContain("application package must not import itself as '@afk/application'");
+  });
+});
+
+describe('architecture guard desktop client boundaries', () => {
+  function desktopFixture(source: string) {
+    const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-desktop-'));
+    directories.push(directory);
+    const root = join(directory, 'src');
+    const desktop = join(directory, 'desktop-client');
+    mkdirSync(join(root, 'cli'), { recursive: true });
+    mkdirSync(join(desktop, 'electron'), { recursive: true });
+    writeFileSync(join(root, 'cli', 'entry.ts'), 'export const current = true;\n');
+    writeFileSync(join(desktop, 'electron', 'main.ts'), source);
+    const baseline = join(directory, 'baseline.json');
+    writeFileSync(baseline, JSON.stringify({ legacyFiles: [], legacyImports: {}, legacyPatterns: {} }));
+
+    const run = () => {
+      try {
+        return execFileSync(process.execPath, [
+          guard, '--root', root, '--baseline', baseline,
+          '--desktop-client-root', desktop,
+        ], { encoding: 'utf8' });
+      } catch (error) {
+        return (error as { stderr: Buffer }).stderr.toString();
+      }
+    };
+    return { run };
+  }
+
+  it('rejects a desktop client that imports the root package src/ tree', () => {
+    const output = desktopFixture("import { current } from '../../src/cli/entry';\nexport { current };\n").run();
+    expect(output).toContain('desktop client must not import the root package src/ tree');
+  });
+
+  it('rejects a desktop client that spawns an afk CLI process', () => {
+    const output = desktopFixture("import { spawn } from 'node:child_process';\nspawn('afk', ['--version']);\n").run();
+    expect(output).toContain('desktop client must not spawn an afk CLI process');
+  });
+
+  it('accepts a desktop client that calls the shared use cases in process', () => {
+    const output = desktopFixture("import { listBacklogs } from '@afk/application';\nexport const list = listBacklogs;\n").run();
+    expect(output).toContain('Architecture guard passed');
+  });
 });

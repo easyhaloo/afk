@@ -23,8 +23,8 @@
 ```bash
 git clone https://github.com/easyhaloo/afk.git
 cd afk
-npm install && npm run build
-npm link
+pnpm install && pnpm build
+pnpm link
 afk --version
 ```
 
@@ -176,10 +176,10 @@ interface TrackerProvider {
 ## 开发
 
 ```bash
-npm install
-npm run build    # 构建 TypeScript
-npm test         # 运行测试
-npm link         # 全局安装
+pnpm install
+pnpm build         # 构建 TypeScript
+pnpm test         # 运行测试
+pnpm link          # 全局安装
 ```
 
 ## 文档

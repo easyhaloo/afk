@@ -28,11 +28,11 @@ CLI 输出顺序：
 
 **正向**：
 - 单一来源 — 不需要 CLI 维护两份状态
-- `execute-work-item.ts:432` 的 reconciliation 检查升级为"列表对账"，能检测 force-push 导致的新 PR id
+- `packages/afk-execution/src/application/workflows/execute-work-item.ts:474` 的 reconciliation 检查升级为"列表对账"，能检测 force-push 导致的新 PR id
 - in-memory 测试 fixtures 改一处即可，无需双套
 
 **代价**：
-- `BacklogItem.changeRequest` 移除是破坏性变更，影响 `execute-work-item.ts:432`、`BacklogDetailDrawer.tsx:77-80`、所有 in-memory fixture
+- `BacklogItem.changeRequest` 移除是破坏性变更，影响 `packages/afk-execution/src/application/workflows/execute-work-item.ts:474`、`desktop-client/src/features/backlog/BacklogDetailDrawer.tsx:79-81`、所有 in-memory fixture
 - `desktop-client/shared/backlog-contract.ts` 的 `assertExactKeys` 必须同步更新（`BacklogItem` 的合法字段集改变）
 - 一次性发版升级需要迁移脚本或文档
 

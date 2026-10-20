@@ -31,6 +31,8 @@ name: skill-name                    # lowercase, 1-64ch, a-z/0-9/- only
 description: >-                     # 1-1024ch, what + when to use
   One sentence describing what the skill does
   and when to invoke it.
+disallowed-tools: Bash, Edit        # optional, tools the skill may not call
+disable-model-invocation: true      # optional, only the user may invoke it
 license: MIT                        # optional
 compatibility: Requires git, glab   # optional, 1-500ch
 metadata:                           # optional, arbitrary kv
@@ -42,6 +44,14 @@ metadata:                           # optional, arbitrary kv
 **Rules:**
 - `name` must match directory name exactly
 - `description` should include trigger keywords for agent matching
+- `disallowed-tools` removes tools from the skill's reach. Use it for a skill
+  that must not be able to run commands or edit files.
+- `disable-model-invocation: true` means only the user can trigger the skill;
+  the model cannot select it on its own. Use it for a skill with side effects
+  the user must ask for explicitly.
+- `license`, `compatibility`, and `metadata` are declared but rarely used in
+  this repository — one skill each. Reach for them when they carry
+  information, not as boilerplate.
 - Progressive loading: metadata (~100 token) → body on activation → files on demand
 
 ---

@@ -306,29 +306,17 @@ interface Signal {
 ### 交接流程（自动续跑）
 
 1. **请求总结**：打字纯文本交接指令（催促立即简短总结）—— ① `git add -A && git commit`（无改动可跳过）→ ② 3 个简答（已完成/正在做/接下来）→ ③ 写 `handoff_ready` 信号。60s 内无有效 `handoff_ready`（含模板占位符 `<总结>` 视为无总结）则用 pane 快照兜底。
-<<<<<<< HEAD
-2. **交接文档**：总结 + 快照 + commit sha 写入 `<worktree>/.afk/handoff/handoff-<iid>-<gen>.md`（`.afk/` 已在仓库 `.gitignore` 中，不会被 `git add -A` 提交进 MR；文档随 worktree 走，恢复时 agent 可直接读取）。
-3. **不写 issue 评论**：交接事件自己进审计脊柱（`handoff.performed`）。磁盘上的恢复文档就是交接产物；终止式交接还会把 backlog 转为 `blocked` + `hitl`，这是操作者在 tracker 里能看到的信号。
-=======
 2. **交接文档**：总结 + 快照 + commit sha 写入 `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md`（`.afk/` 已在仓库 `.gitignore` 中，不会被 `git add -A` 提交进 MR；文档随 worktree 走，恢复时 agent 可直接读取）。
-3. **恢复评论**：issue 评论记录交接进度（任务中断时的恢复文档）。终止式交接的评论**嵌入完整交接文档内容**（无文件路径引用），恢复方从评论即可获取全部信息。
->>>>>>> 98baa09 (docs: correct the guides and the getting-started pages)
+3. **不写 issue 评论**：交接事件自己进审计脊柱（`handoff.performed`）。磁盘上的恢复文档就是交接产物；终止式交接还会把 backlog 转为 `blocked` + `hitl`，这是操作者在 tracker 里能看到的信号。
 4. **重启**：杀 tmux 会话 → 清理信号文件与旧 statusline 数据 → 重建同名 session → 重启 watchdog（每代会话拥有完整的 hard timeout）。
 5. **继续**：新会话收到「继续实现/验证 issue #N（先阅读交接文档）」指令，循环直到完成信号或再次交接。
 
 ### 预算与兜底
 
-<<<<<<< HEAD
-- `--max-handoffs <n>`（默认 3）：自动续跑轮次上限，两个 phase（实现/验证）**全局共享**。
-- `--max-total-tokens <tokens>`（默认 500,000）：整个 run 跨交接代际的累计 token 上限（每次交接时把旧会话的用量累加；终止判断 = 累计 + 当前会话用量 ≥ 上限）。
-- **任一预算耗尽** → 终止式交接：backlog 转为 `blocked` + `hitl`，恢复文档写入 `<worktree>/.afk/handoff/`，会话被杀掉。worktree 保留下来供人工恢复。
-- **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（blocked + hitl，会话被杀），不落入 crash 路径。
-=======
 - `--max-handoffs <n>`（默认 `min(ceil(goalBudget / 1,000,000), 20)`，即默认 `goalBudget` 为 10,000,000 时是 **10**）：自动续跑轮次上限，两个 phase（实现/验证）**全局共享**。
 - `--max-total-tokens <tokens>`（默认 `goalBudget`，即 **10,000,000**）：整个 run 跨交接代际的累计 token 上限（每次交接时把旧会话的用量累加；终止判断 = 累计 + 当前会话用量 ≥ 上限）。
-- **任一预算耗尽** → 终止式交接：`handoff::active` label + 评论（含终止原因、**完整交接文档内容**与恢复指引），人工移除 label 后重新触发 `/afk-implement <iid>` 恢复。
-- **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（保留已发恢复评论），不落入 crash 路径。
->>>>>>> 98baa09 (docs: correct the guides and the getting-started pages)
+- **任一预算耗尽** → 终止式交接：backlog 转为 `blocked` + `hitl`，恢复文档写入 `<worktree>/.afk/handoff/`，会话被杀掉。worktree 保留下来供人工恢复。
+- **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（blocked + hitl，会话被杀），不落入 crash 路径。
 
 ## 错误处理
 

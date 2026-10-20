@@ -128,8 +128,34 @@ if (broken.length > 0) {
 // that appears more often than the baseline records, fails the check; a
 // baseline entry that no longer appears at all is reported so the baseline
 // can be tightened.
+//
+// Scope, and why it stops here:
+//
+//   checked    a backticked path with a directory component and a source-code
+//              extension (.ts .tsx .cts .mts .mjs .js). A source file either
+//              exists in the repository or the document is wrong; there is no
+//              third case, because the repository is the only thing a
+//              document of this repository can be talking about.
+//
+//   excluded   bare file names, other extensions, and paths under a runtime
+//              or user-output directory. Each of those was measured, and
+//              each produces false positives rather than findings:
+//                - bare names resolve ambiguously ("types.ts" exists in a
+//                  dozen directories) and a name that exists nowhere is
+//                  usually a file the skill asks the *user's* project to
+//                  have, such as a generated fixture or an installed hook;
+//                - .md .json .yml .css .html references are mostly runtime
+//                  artifacts (.afk-signal.json), placeholders (NNNN-*.md), or
+//                  files a skill writes into the user's project;
+//                - a path with no directory component cannot be resolved
+//                  against a document's own directory with any confidence.
+//
+//              Widening the pattern is therefore not a regex change: it needs
+//              a calibration pass that shows every newly reported reference
+//              is a real drift. The baseline is the instrument for that, and
+//              it is currently empty.
 
-const sourcePathPattern = /`([^`\s]+\.(?:ts|tsx|mjs|js))(?::\d+(?:-\d+)?)?`/g;
+const sourcePathPattern = /`([^`\s]+\.(?:ts|tsx|cts|mts|mjs|js))(?::\d+(?:-\d+)?)?`/g;
 // Paths under a build output directory. They are generated, they are not
 // tracked, and their presence depends on whether the tree was built.
 const buildOutputPattern = /(^|\/)(dist|dist-electron|release|build|coverage|node_modules|out)\//;

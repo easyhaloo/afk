@@ -31,10 +31,11 @@ export class CopilotProvider extends ProcessAgentProvider {
   readonly capabilities: ReadonlySet<AgentCapability> = CAPABILITIES;
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
-    const argv = ['copilot'];
-    if (!options.interactive) {
-      argv.push('--allow-all');
-    }
+    // `--allow-all` is not a mode: a permission prompt has nobody to answer
+    // it. The interactive mode is a terminal session a human may attach to,
+    // not a step gate, so the agent runs with its permissions allowed in
+    // either mode — the same choice claude-code and codex make.
+    const argv = ['copilot', '--allow-all'];
     return { argv, cwd: options.worktreePath };
   }
 }

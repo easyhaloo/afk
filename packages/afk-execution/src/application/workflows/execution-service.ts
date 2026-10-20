@@ -33,7 +33,6 @@ export class AgentExecutionService {
         prompt: request.prompt,
         signalType: request.signalType,
         generation: request.generation + attempt,
-        interactive: request.executionMode !== 'batch',
         executionMode: request.executionMode,
         runtime: request.runtime,
       });

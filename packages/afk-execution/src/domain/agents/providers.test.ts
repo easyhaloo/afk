@@ -19,12 +19,12 @@ import type { AgentExecution, AgentStartOptions, Sandbox } from '../../infrastru
 import type { AgentProvider, AgentCapability } from './types.js';
 
 /** Build minimal AgentCommandOptions for testing. */
-function opts(over: Partial<{ worktreePath: string; sessionId: string; goal: string; interactive: boolean }> = {}) {
+function opts(over: Partial<{ worktreePath: string; sessionId: string; goal: string; executionMode: 'interactive' | 'batch' }> = {}) {
   return {
     worktreePath: over.worktreePath ?? '/tmp/worktree',
     sessionId: over.sessionId ?? 'sess-1',
     goal: over.goal ?? 'do something',
-    interactive: over.interactive,
+    executionMode: over.executionMode,
   };
 }
 
@@ -49,7 +49,7 @@ describe('Agent providers — fixture coverage', () => {
     });
 
     it('buildCommand produces the documented argv', () => {
-      const cmd = p.buildCommand(opts({ interactive: true }));
+      const cmd = p.buildCommand(opts({ executionMode: 'interactive' }));
       expect(cmd.argv[0]).toBe('claude');
       expect(cmd.argv).toContain('--dangerously-skip-permissions');
       expect(cmd.argv).not.toContain('--no-input');
@@ -290,15 +290,17 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('usage')).toBe(true);
     });
 
-    it('buildCommand uses --print when non-interactive', () => {
-      const cmd = p.buildCommand(opts({ interactive: false }));
+    it('buildCommand prints in batch mode', () => {
+      const cmd = p.buildCommand(opts({ executionMode: 'batch' }));
       expect(cmd.argv[0]).toBe('cursor-agent');
       expect(cmd.argv).toContain('--print');
     });
 
-    it('buildCommand uses --interactive when interactive', () => {
-      const cmd = p.buildCommand(opts({ interactive: true }));
-      expect(cmd.argv).toContain('--interactive');
+    it('buildCommand leaves the agent in its terminal session in interactive mode', () => {
+      const cmd = p.buildCommand(opts({ executionMode: 'interactive' }));
+      // --print makes cursor-agent answer once and exit. In a terminal
+      // session the agent has to stay.
+      expect(cmd.argv).not.toContain('--print');
     });
 
     it('parseLine routes JSON events', () => {
@@ -318,14 +320,14 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('streaming')).toBe(true);
     });
 
-    it('buildCommand uses --non-interactive when not interactive', () => {
-      const cmd = p.buildCommand(opts({ interactive: false }));
+    it('buildCommand uses --non-interactive in batch mode', () => {
+      const cmd = p.buildCommand(opts({ executionMode: 'batch' }));
       expect(cmd.argv[0]).toBe('pi');
       expect(cmd.argv).toContain('--non-interactive');
     });
 
-    it('buildCommand omits --non-interactive when interactive', () => {
-      const cmd = p.buildCommand(opts({ interactive: true }));
+    it('buildCommand omits --non-interactive in interactive mode', () => {
+      const cmd = p.buildCommand(opts({ executionMode: 'interactive' }));
       expect(cmd.argv).not.toContain('--non-interactive');
     });
   });
@@ -342,7 +344,7 @@ describe('Agent providers — fixture coverage', () => {
     });
 
     it('builds the TUI command with auto-approve for interactive execution', () => {
-      const cmd = p.buildCommand({ ...opts({ interactive: true }), executionMode: 'interactive' });
+      const cmd = p.buildCommand({ ...opts(), executionMode: 'interactive' });
       expect(cmd.argv[0]).toBe('opencode');
       expect(cmd.argv[1]).not.toBe('run');
       expect(cmd.argv).not.toContain('--format');
@@ -383,7 +385,7 @@ describe('Agent providers — fixture coverage', () => {
     });
 
     it('resolves --model from the environment and never hardcodes one', () => {
-      const interactive = p.buildCommand({ ...opts({ interactive: true }), executionMode: 'interactive' });
+      const interactive = p.buildCommand({ ...opts(), executionMode: 'interactive' });
       expect(interactive.argv).not.toContain('--model');
 
       const batch = p.buildCommand({ ...opts(), executionMode: 'batch' });
@@ -392,7 +394,7 @@ describe('Agent providers — fixture coverage', () => {
       const modelEnv = process.env.AFK_OPENCODE_MODEL;
       process.env.AFK_OPENCODE_MODEL = 'acme/model-x';
       try {
-        const configured = p.buildCommand({ ...opts({ interactive: true }), executionMode: 'interactive' });
+        const configured = p.buildCommand({ ...opts(), executionMode: 'interactive' });
         const modelIndex = configured.argv.indexOf('--model');
         expect(modelIndex).toBeGreaterThan(-1);
         expect(configured.argv[modelIndex + 1]).toBe('acme/model-x');
@@ -446,10 +448,11 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('usage')).toBe(true);
     });
 
-    it('buildCommand uses --allow-all when non-interactive', () => {
-      const cmd = p.buildCommand(opts({ interactive: false }));
-      expect(cmd.argv[0]).toBe('copilot');
-      expect(cmd.argv).toContain('--allow-all');
+    it('buildCommand allows the tool permissions in either mode', () => {
+      // A permission prompt has nobody to answer it: the interactive mode
+      // is a terminal session a human may attach to, not a step gate.
+      expect(p.buildCommand(opts({ executionMode: 'batch' })).argv).toContain('--allow-all');
+      expect(p.buildCommand(opts({ executionMode: 'interactive' })).argv).toContain('--allow-all');
     });
   });
 });

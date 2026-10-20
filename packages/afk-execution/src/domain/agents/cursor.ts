@@ -6,9 +6,6 @@
  *   --model <name>             select model
  *   --output-format <fmt>      text | json | stream-json
  *
- * Resume: cursor-agent supports --resume <id> for session resume.
- * Capability: 'resume' included.
- *
  * Reference: https://docs.cursor.com/en/cli/reference
  */
 
@@ -43,12 +40,11 @@ export class CursorProvider extends ProcessAgentProvider {
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
     const argv = ['cursor-agent'];
+    // `--print` makes cursor-agent answer once and exit. The interactive
+    // mode runs the agent in a terminal session — a human may attach to it,
+    // and the agent has to stay for that to mean anything.
     if (options.executionMode === 'batch') {
       argv.push('--print', '--output-format', 'stream-json');
-    } else if (options.interactive) {
-      argv.push('--interactive');
-    } else {
-      argv.push('--print');
     }
     return { argv, cwd: options.worktreePath };
   }

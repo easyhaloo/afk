@@ -42,7 +42,9 @@ export class PiProvider extends ProcessAgentProvider {
 
   buildCommand(options: AgentCommandOptions): AgentCommand {
     const argv = ['pi'];
-    if (!options.interactive) argv.push('--non-interactive');
+    // `--non-interactive` takes the agent out of a session a human can
+    // drive. The interactive mode is a terminal session, not a one-shot.
+    if (options.executionMode === 'batch') argv.push('--non-interactive');
     return { argv, cwd: options.worktreePath };
   }
 

@@ -45,7 +45,6 @@ describe('AgentExecutionService', () => {
       prompt: 'do it',
       signalType: 'goal_complete',
       generation: 1,
-      interactive: false,
       executionMode: 'batch',
       runtime,
     });

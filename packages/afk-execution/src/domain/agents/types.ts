@@ -55,9 +55,14 @@ export interface AgentCommandOptions {
   sessionId: string;
   /** Initial prompt or goal text. */
   goal?: string;
-  /** Whether to attach interactively (HITL). */
-  interactive?: boolean;
-  /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
+  /**
+   * Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json).
+   *
+   * The mode is the only switch. An earlier contract carried a second flag
+   * beside it, and nothing on the live path ever set it — so the providers
+   * that read it took the branch that belonged to the other mode, and an
+   * interactive cursor run was told to print once and exit.
+   */
   executionMode?: ExecutionMode;
   /** Immutable provider runtime resolved before backlog claim. */
   runtime?: AgentRuntimeSelection;

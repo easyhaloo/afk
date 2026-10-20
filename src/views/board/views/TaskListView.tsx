@@ -43,7 +43,7 @@ export function TaskListView({ tasks, selected, scrollOffset, viewportHeight, wi
             selected={isSelected}
             status={task.status}
             statusColor={isSelected ? 'white' : 'gray'}
-            mode={task.executionMode}
+            mode={task.executionMode ?? '–'}
             id={getTaskBacklogId(task)}
             title={normalizeRowText(task.title || task.branch || '') || 'untitled task'}
             summary={summary}

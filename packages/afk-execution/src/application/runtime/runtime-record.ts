@@ -6,11 +6,16 @@
  * to one and not the other would show up as a monitor that knows one phase
  * of a run and not the other. The shape now lives here; the two runners
  * only say what is different about their phase.
+ *
+ * This is the write model: a run that publishes a record knows the sandbox
+ * it ran in, the mode it ran in and the agent it ran, so all three are
+ * always written down. A reader may still meet an older record that does
+ * not carry them, and it reads it without inventing them.
  */
 
 import type { AgentProviderName, AgentRuntimeSelection } from '../../domain/agents/types.js';
 import { runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
-import type { TaskRuntimePhase, TaskRuntimeRecord, TaskRuntimeStatus } from './task-runtime.js';
+import type { TaskRuntimePhase, TaskRuntimeRecordInput, TaskRuntimeStatus } from './task-runtime.js';
 
 export interface RuntimeRecordInput {
   runId: string;
@@ -31,7 +36,7 @@ export interface RuntimeRecordInput {
   now?: string;
 }
 
-export function runtimeRecord(input: RuntimeRecordInput): TaskRuntimeRecord {
+export function runtimeRecord(input: RuntimeRecordInput): TaskRuntimeRecordInput {
   const now = input.now ?? new Date().toISOString();
   return {
     runId: input.runId,

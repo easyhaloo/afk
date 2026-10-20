@@ -55,7 +55,7 @@ export function getBranchColor(branch: string, defaultBranch?: string): string {
   return 'cyan';
 }
 
-export function getExecutionModeIcon(mode: string): string | undefined {
+export function getExecutionModeIcon(mode: string | undefined): string | undefined {
   switch (mode) {
     case 'afk':
     case 'batch': return '⚙';
@@ -65,7 +65,7 @@ export function getExecutionModeIcon(mode: string): string | undefined {
   }
 }
 
-export function getExecutionModeColor(mode: string): string {
+export function getExecutionModeColor(mode: string | undefined): string {
   switch (mode) {
     case 'afk':
     case 'batch': return 'cyan';

@@ -158,6 +158,14 @@ status, phase, heartbeat, progress, and diagnostics. A heartbeat older than the
 freshness threshold is displayed as runtime `stale`; it does not mutate the
 Provider Backlog lifecycle state.
 
+The runtime owns the reading of these files as well as the writing. One reader
+lists the buckets, validates each record, applies the identity rule and judges
+staleness, so the run-detail view and the backlog view cannot disagree about a
+record. The write model and the read model differ on purpose: a record
+published today always carries the sandbox it ran in, the execution mode and
+the agent it ran, while an older record may not — and a record that does not
+carry them says so rather than being given a guess.
+
 Desktop's workspace-local `.afk/backlog-runs.json` contains process launch
 metadata only. It may report a PID or launch error, but it cannot infer
 `verification`, `blocked`, or `done`. Desktop joins Backlog, launch metadata,

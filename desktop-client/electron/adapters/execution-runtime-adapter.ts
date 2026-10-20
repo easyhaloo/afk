@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
-import { matchesRuntimeRecord } from "@afk/execution/application/runtime/task-runtime";
+import { TaskRuntimeReader } from "@afk/execution/application/runtime/task-runtime";
 import type { RuntimeHealthObservation } from "@afk/application";
 import type { WorkItemRunRecord } from "../../shared/backlog-contract.js";
 
@@ -11,38 +8,29 @@ export function createExecutionRuntimeAdapter(options: {
   now?: () => number;
   isPidAlive?: (pid: number) => boolean | undefined;
 }) {
-  const root = options.runtimeRoot ?? path.join(homedir(), ".afk", "runtime", "tasks");
   const isPidAlive = options.isPidAlive ?? ((pid: number) => {
     try { process.kill(pid, 0); return true; }
     catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH" ? false : undefined; }
   });
+  // One reader owns the runtime records: the bucket layout, the file names,
+  // the validation and the identity rule belong to the runtime, not to this
+  // adapter. The backlog runtime service reads through the same reader, so
+  // the two views cannot disagree about a record.
+  const reader = new TaskRuntimeReader({ root: options.runtimeRoot, now: options.now });
   return {
     async read(runId: string, workItemId: string): Promise<RuntimeHealthObservation | undefined> {
       const observedAt = new Date(options.now?.() ?? Date.now()).toISOString();
-      let observation: RuntimeHealthObservation | undefined;
-      for (const bucket of ["active", "archive"]) {
-        try {
-          const value = JSON.parse(await readFile(path.join(root, bucket, `${Buffer.from(runId).toString("base64url")}.json`), "utf8"));
-          if (typeof value !== "object" || value === null) continue;
-          // The identity rule is shared with the backlog runtime service, so
-          // the two views cannot disagree about which records belong to this
-          // work item.
-          if (!matchesRuntimeRecord(value, { workItemId })) continue;
-          if (value.runId !== runId) continue;
-          observation = {
-            runId, observedAt,
-            ...(["running", "completed", "blocked", "failed"].includes(value.status) ? { status: value.status } : {}),
-            ...(typeof value.heartbeatAt === "string" ? { heartbeatAt: value.heartbeatAt } : {}),
-            ...(typeof value.completedAt === "string" ? { completedAt: value.completedAt } : {}),
-            ...(typeof value.agentProvider === "string" ? { provider: value.agentProvider } : {}),
-            ...(typeof value.agentTransport === "string" ? { transport: value.agentTransport } : {}),
-            ...(value.executionMode === "interactive" || value.executionMode === "batch" ? { executionMode: value.executionMode } : {}),
-          };
-          break;
-        } catch (error) {
-          if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
-      }
+      const entry = await reader.find(runId, { workItemId });
+      const record = entry?.record;
+      let observation: RuntimeHealthObservation | undefined = record === undefined ? undefined : {
+        runId, observedAt,
+        status: record.status,
+        ...(typeof record.heartbeatAt === "string" ? { heartbeatAt: record.heartbeatAt } : {}),
+        ...(typeof record.completedAt === "string" ? { completedAt: record.completedAt } : {}),
+        ...(typeof record.agentProvider === "string" ? { provider: record.agentProvider } : {}),
+        ...(typeof record.agentTransport === "string" ? { transport: record.agentTransport } : {}),
+        ...(record.executionMode === "interactive" || record.executionMode === "batch" ? { executionMode: record.executionMode } : {}),
+      };
       const receipt = await options.readReceipt(runId, workItemId);
       if (receipt?.id === runId && typeof receipt.pid === "number" && Number.isSafeInteger(receipt.pid) && receipt.pid > 0) {
         const alive = receipt.status === "completed" || receipt.status === "failed" ? false : isPidAlive(receipt.pid);

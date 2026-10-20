@@ -2,14 +2,14 @@ import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { TaskRuntimeManager, TaskRuntimeStore, type TaskRuntimeRecord } from './task-runtime.js';
+import { TaskRuntimeManager, TaskRuntimeStore, type TaskRuntimeRecordInput } from './task-runtime.js';
 
 async function storeFixture() {
   const root = await mkdtemp(join(tmpdir(), 'afk-runtime-'));
   return new TaskRuntimeStore(root);
 }
 
-function record(overrides: Partial<TaskRuntimeRecord> = {}): TaskRuntimeRecord {
+function record(overrides: Partial<TaskRuntimeRecordInput> = {}): TaskRuntimeRecordInput {
   const now = new Date().toISOString();
   return {
     runId: 'run-42',

@@ -1,18 +1,8 @@
-import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { RUNTIME_STALE_AFTER_MS } from "@afk/application";
-import { matchesRuntimeRecord } from "@afk/execution/application/runtime/task-runtime";
+import { TaskRuntimeReader } from "@afk/execution/application/runtime/task-runtime";
 import type { BacklogRuntimeProjection, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract.js";
 import { parseBacklogRuntimeSummary } from "../../shared/backlog-contract.js";
 import type { createBacklogRunStore } from "./backlog-run-store.js";
-
-type RuntimeRecord = BacklogRuntimeProjection & {
-  backlogId: string;
-  workspace?: string;
-  providerRef?: string;
-  worktree?: string;
-  startedAt: string;
-};
 
 export type BacklogRuntimeServiceDeps = {
   resolveWorkspace: (input: string) => string;
@@ -42,43 +32,26 @@ export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
   ): Promise<BacklogRuntimeProjection | undefined> {
     const resolvedWorkspace = deps.resolveWorkspace(workspace);
     const root = deps.runtimeRoot?.(workspace) ?? path.join(process.env.HOME || process.env.USERPROFILE || resolvedWorkspace, ".afk", "runtime", "tasks");
-    const startedAfter = context?.startedAfter === undefined ? undefined : Date.parse(context.startedAfter);
-    const records: RuntimeRecord[] = [];
-    for (const bucket of ["active", "archive"]) {
-      const directory = path.join(root, bucket);
-      const names = await readdir(directory).catch(() => [] as string[]);
-      for (const name of names.filter(item => item.endsWith(".json"))) {
-        const raw = await readFile(path.join(directory, name), "utf8").catch(() => "");
-        if (!raw) continue;
-        try {
-          const value = JSON.parse(raw) as Partial<RuntimeRecord>;
-          if (typeof value.runId !== "string" || typeof value.status !== "string" || typeof value.phase !== "string" || typeof value.heartbeatAt !== "string" || typeof value.startedAt !== "string") continue;
-          if (!["running", "completed", "blocked", "failed"].includes(value.status) || !["implementing", "verifying"].includes(value.phase)) continue;
-          const heartbeatAt = Date.parse(value.heartbeatAt);
-          const runtimeStartedAt = Date.parse(value.startedAt);
-          if (!Number.isFinite(heartbeatAt) || !Number.isFinite(runtimeStartedAt)) continue;
-          // The identity rule is shared with the run-detail reader, so the two
-          // views cannot disagree about which records belong to this item.
-          if (!matchesRuntimeRecord(value, { backlogId, workItemId: context?.providerRef, workspace: resolvedWorkspace })) continue;
-          if (startedAfter !== undefined && Number.isFinite(startedAfter) && runtimeStartedAt < startedAfter) continue;
-          records.push(value as RuntimeRecord);
-        } catch {
-          continue;
-        }
-      }
-    }
-    const latest = records.sort((left, right) => Date.parse(right.heartbeatAt) - Date.parse(left.heartbeatAt))[0];
+    // The runtime owns the records: the buckets, the file names, the
+    // validation, the identity rule and the staleness window. This service
+    // only asks for the records of this work item and projects them.
+    const reader = new TaskRuntimeReader({ root, now });
+    const entries = await reader.list({
+      identity: { backlogId, workItemId: context?.providerRef, workspace: resolvedWorkspace },
+      ...(context?.startedAfter !== undefined ? { startedAfter: context.startedAfter } : {}),
+    });
+    const latest = entries[0];
     if (!latest) return undefined;
-    const stale = latest.status === "running" && Number.isFinite(Date.parse(latest.heartbeatAt)) && now() - Date.parse(latest.heartbeatAt) > RUNTIME_STALE_AFTER_MS;
+    const record = latest.record;
     return {
-      runId: latest.runId,
-      status: stale ? "stale" : latest.status,
-      phase: latest.phase,
-      ...(latest.progress === undefined ? {} : { progress: latest.progress }),
-      ...(latest.branch === undefined ? {} : { branch: latest.branch }),
-      ...(latest.worktree === undefined ? {} : { worktree: latest.worktree }),
-      ...(latest.diagnosticPath === undefined ? {} : { diagnosticPath: latest.diagnosticPath }),
-      heartbeatAt: latest.heartbeatAt,
+      runId: record.runId,
+      status: latest.status,
+      phase: record.phase,
+      ...(record.progress === undefined ? {} : { progress: record.progress }),
+      ...(record.branch === undefined ? {} : { branch: record.branch }),
+      ...(record.worktree === undefined ? {} : { worktree: record.worktree }),
+      ...(record.diagnosticPath === undefined ? {} : { diagnosticPath: record.diagnosticPath }),
+      heartbeatAt: record.heartbeatAt,
     };
   }
 

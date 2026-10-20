@@ -18,24 +18,52 @@ async function setup() {
   return { root, write };
 }
 
+/**
+ * A record as the runtime writes it: the run, the work item it belongs to
+ * and the moment it started. The environment a run ran in is optional
+ * because history does not always know it.
+ */
+function record(overrides: Record<string, unknown> = {}) {
+  return {
+    runId: "run-1",
+    backlogId: "42",
+    phase: "implementing",
+    status: "running",
+    providerRef: workItemId,
+    startedAt: "2026-10-15T00:00:00Z",
+    heartbeatAt: "2026-10-15T00:00:00Z",
+    ...overrides,
+  };
+}
+
 describe("execution runtime observations", () => {
   it("reads exact identities and separates stale health from the audit outcome", async () => {
     const { root, write } = await setup();
-    await write("active", { runId: "run-1", providerRef: workItemId, status: "running", heartbeatAt: "2026-10-15T00:00:00Z", agentProvider: "codex", executionMode: "batch", agentTransport: "exec" });
+    await write("active", record({ agentProvider: "codex", executionMode: "batch", agentTransport: "exec" }));
     const adapter = createExecutionRuntimeAdapter({ runtimeRoot: root, readReceipt: async () => undefined, now: () => now });
     expect(projectRuntimeHealth("run-1", await adapter.read("run-1", workItemId), now)).toMatchObject({ state: "stale", provider: "codex", executionMode: "batch" });
     expect(await adapter.read("run-1", "github:other/repo#1")).toBeUndefined();
-    await write("active", { runId: "other-run", status: "running", heartbeatAt: "2026-10-15T01:00:00Z" });
+    await write("active", record({ runId: "other-run", heartbeatAt: "2026-10-15T01:00:00Z" }));
     expect(await adapter.read("run-1", workItemId)).toBeUndefined();
   });
   it("keeps a root Runner live after an implementation archive and marks its actual exit", async () => {
     const { root, write } = await setup();
-    await write("archive", { runId: "run-1", providerRef: workItemId, status: "completed", heartbeatAt: "2026-10-15T00:59:00Z", completedAt: "2026-10-15T00:59:00Z" });
+    await write("archive", record({ status: "completed", heartbeatAt: "2026-10-15T00:59:00Z", completedAt: "2026-10-15T00:59:00Z" }));
     let alive = true;
     const receipt = { id: "run-1", status: "running", pid: 42 } as WorkItemRunRecord;
     const adapter = createExecutionRuntimeAdapter({ runtimeRoot: root, readReceipt: async () => receipt, isPidAlive: () => alive, now: () => now });
     expect(projectRuntimeHealth("run-1", await adapter.read("run-1", workItemId), now).state).toBe("live");
     alive = false;
     expect(projectRuntimeHealth("run-1", await adapter.read("run-1", workItemId), now).state).toBe("exited");
+  });
+  it("reads a record that predates the environment fields without inventing them", async () => {
+    const { root, write } = await setup();
+    await write("active", record({ status: "completed", heartbeatAt: "2026-10-15T00:59:00Z", completedAt: "2026-10-15T00:59:00Z" }));
+    const adapter = createExecutionRuntimeAdapter({ runtimeRoot: root, readReceipt: async () => undefined, now: () => now });
+    const observation = await adapter.read("run-1", workItemId);
+    expect(observation).toMatchObject({ runId: "run-1", status: "completed", heartbeatAt: "2026-10-15T00:59:00Z" });
+    expect(observation?.provider).toBeUndefined();
+    expect(observation?.transport).toBeUndefined();
+    expect(observation?.executionMode).toBeUndefined();
   });
 });

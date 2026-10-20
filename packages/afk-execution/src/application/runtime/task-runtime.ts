@@ -19,6 +19,15 @@ export interface TaskRuntimeActivity {
   detail?: string;
 }
 
+/**
+ * The read model — a runtime record as history knows it.
+ *
+ * `sandboxProvider`, `executionMode` and `agentProvider` are optional here,
+ * because history does not always know them: a record written before those
+ * fields existed is still history, and a reader that demanded them would
+ * drop it. Nothing is invented in their place — a record that does not
+ * carry them says so.
+ */
 export interface TaskRuntimeRecord {
   runId: string;
   backlogId: string;
@@ -27,9 +36,9 @@ export interface TaskRuntimeRecord {
   title?: string;
   phase: TaskRuntimePhase;
   status: TaskRuntimeStatus;
-  sandboxProvider: string;
-  executionMode: 'interactive' | 'batch';
-  agentProvider: string;
+  sandboxProvider?: string;
+  executionMode?: 'interactive' | 'batch';
+  agentProvider?: string;
   agentTransport?: 'process' | 'exec' | 'app-server';
   agentAuth?: 'chatgpt' | 'api' | 'unknown';
   agentModelProvider?: string;
@@ -44,6 +53,20 @@ export interface TaskRuntimeRecord {
   errorSummary?: string;
   completedAt?: string;
   activities?: TaskRuntimeActivity[];
+}
+
+/**
+ * The write model — what a run publishes about its environment.
+ *
+ * A run knows the sandbox it ran in, the mode it ran in and the agent it
+ * ran, so all three are required here. The read model is looser only
+ * because the past is looser; every runner publishes through
+ * `runtimeRecord()`, which always fills them in.
+ */
+export interface TaskRuntimeRecordInput extends Omit<TaskRuntimeRecord, 'sandboxProvider' | 'executionMode' | 'agentProvider'> {
+  sandboxProvider: string;
+  executionMode: 'interactive' | 'batch';
+  agentProvider: string;
 }
 
 export type ActiveTaskRuntimeRecord = Omit<TaskRuntimeRecord, 'status'> & {
@@ -108,6 +131,26 @@ function isWithinWorkspace(candidate: string, workspace: string): boolean {
   return target === root || target.startsWith(`${root}${sep}`);
 }
 
+/**
+ * Whether a record's heartbeat has gone cold.
+ *
+ * The window lives here so that every surface judges a run the same way.
+ * The desktop used to keep its own copy of the rule, and the same run could
+ * be stale in one view and live in another.
+ */
+export function isRuntimeStale(heartbeatAt: string, now: number, staleAfterMs: number): boolean {
+  const heartbeat = Date.parse(heartbeatAt);
+  return Number.isFinite(heartbeat) && now - heartbeat > staleAfterMs;
+}
+
+/**
+ * The status a record in the active bucket shows: it is still running, until
+ * its heartbeat goes cold.
+ */
+export function activeRuntimeStatus(record: TaskRuntimeRecord, now: number, staleAfterMs: number): 'running' | 'stale' {
+  return isRuntimeStale(record.heartbeatAt, now, staleAfterMs) ? 'stale' : 'running';
+}
+
 export class TaskRuntimeStore {
   private readonly mutations = new Map<string, Promise<void>>();
   readonly root: string;
@@ -124,7 +167,7 @@ export class TaskRuntimeStore {
     this.diagnosticsPath = join(this.root, 'diagnostics');
   }
 
-  async start(record: TaskRuntimeRecord): Promise<void> {
+  async start(record: TaskRuntimeRecordInput): Promise<void> {
     const startedActivity: TaskRuntimeActivity = {
       id: activityId(record.runId, record.startedAt, 'state', 'runtime started'),
       taskRunId: record.runId,
@@ -316,7 +359,7 @@ export class TaskRuntimeManager {
     this.staleAfterMs = options.staleAfterMs ?? RUNTIME_STALE_AFTER_MS;
   }
 
-  start(record: TaskRuntimeRecord): Promise<void> {
+  start(record: TaskRuntimeRecordInput): Promise<void> {
     return this.store.start(record);
   }
 
@@ -340,7 +383,7 @@ export class TaskRuntimeManager {
     const active = await this.store.listActive();
     return active.map(record => ({
       ...record,
-      status: now - Date.parse(record.heartbeatAt) > this.staleAfterMs ? 'stale' : 'running',
+      status: activeRuntimeStatus(record, now, this.staleAfterMs),
     }));
   }
 
@@ -360,16 +403,118 @@ export class TaskRuntimeManager {
   }
 }
 
+/** Which bucket a runtime record was found in. */
+export type RuntimeRecordBucket = 'active' | 'archive';
+
+/**
+ * One runtime record, as the reader found it.
+ *
+ * The record is the record as it was written: nothing is filled in, and a
+ * record that does not know its environment does not claim one. The status
+ * is what the record shows — a run in the active bucket is running until
+ * its heartbeat goes cold, and an archived run shows the status it was
+ * archived with.
+ */
+export interface RuntimeRecordEntry {
+  record: TaskRuntimeRecord;
+  bucket: RuntimeRecordBucket;
+  status: VisibleTaskRuntimeStatus;
+}
+
+/** Which records a reader is asked for. */
+export interface RuntimeRecordQuery {
+  /** The work item the records must belong to. */
+  identity?: RuntimeRecordIdentity;
+  /** Only records that started at or after this instant. */
+  startedAfter?: string;
+}
+
+export interface TaskRuntimeReaderOptions {
+  /** The runtime root the records live under. */
+  root?: string;
+  /** How long a heartbeat may go quiet before the run counts as stale. */
+  staleAfterMs?: number;
+  /** The clock, injected so a caller decides what "now" means. */
+  now?: () => number;
+}
+
+/**
+ * The one reader for the runtime task records.
+ *
+ * The desktop used to read the runtime records itself, twice, with two sets
+ * of hand-written rules: it listed the buckets, parsed the files, validated
+ * the records and judged staleness on its own. The store already owns the
+ * layout, the file names and the validation, so the reader is built on the
+ * store instead of beside it — the same identity rule, the same staleness
+ * window, one answer per record.
+ */
+export class TaskRuntimeReader {
+  readonly store: TaskRuntimeStore;
+  private readonly staleAfterMs: number;
+  private readonly now: () => number;
+
+  constructor(options: TaskRuntimeReaderOptions = {}, store: TaskRuntimeStore = new TaskRuntimeStore(options.root)) {
+    this.store = store;
+    this.staleAfterMs = options.staleAfterMs ?? RUNTIME_STALE_AFTER_MS;
+    this.now = options.now ?? Date.now;
+  }
+
+  /** Every record in both buckets, newest heartbeat first. */
+  async list(query: RuntimeRecordQuery = {}): Promise<RuntimeRecordEntry[]> {
+    const now = this.now();
+    const [active, archive] = await Promise.all([this.store.listActive(), this.store.listArchive()]);
+    const startedAfter = query.startedAfter === undefined ? undefined : Date.parse(query.startedAfter);
+    const entries = [
+      ...active.map(record => this.entry(record, 'active', now)),
+      ...archive.map(record => this.entry(record, 'archive', now)),
+    ];
+    return entries
+      .filter(entry => this.belongsTo(entry.record, query.identity))
+      .filter(entry => startedAfter === undefined
+        || !Number.isFinite(startedAfter)
+        || Date.parse(entry.record.startedAt) >= startedAfter)
+      .sort((left, right) => Date.parse(right.record.heartbeatAt) - Date.parse(left.record.heartbeatAt));
+  }
+
+  /** The record of one run: the active one wins over the archived one. */
+  async find(runId: string, identity?: RuntimeRecordIdentity): Promise<RuntimeRecordEntry | undefined> {
+    const now = this.now();
+    const active = await this.store.getActive(runId);
+    if (active && active.runId === runId && this.belongsTo(active, identity)) {
+      return this.entry(active, 'active', now);
+    }
+    const archived = await this.store.getArchived(runId);
+    if (archived && archived.runId === runId && this.belongsTo(archived, identity)) {
+      return this.entry(archived, 'archive', now);
+    }
+    return undefined;
+  }
+
+  private entry(record: TaskRuntimeRecord, bucket: RuntimeRecordBucket, now: number): RuntimeRecordEntry {
+    return {
+      record,
+      bucket,
+      status: bucket === 'active' ? activeRuntimeStatus(record, now, this.staleAfterMs) : record.status,
+    };
+  }
+
+  private belongsTo(record: TaskRuntimeRecord, identity: RuntimeRecordIdentity | undefined): boolean {
+    return identity === undefined ? true : matchesRuntimeRecord(record, identity);
+  }
+}
+
 function isTaskRuntimeRecord(value: unknown): value is TaskRuntimeRecord {
   if (!value || typeof value !== 'object') return false;
   const record = value as Partial<TaskRuntimeRecord>;
   return typeof record.runId === 'string'
     && typeof record.backlogId === 'string'
     && (record.phase === 'implementing' || record.phase === 'verifying')
-    && typeof record.status === 'string'
-    && typeof record.sandboxProvider === 'string'
-    && (record.executionMode === 'interactive' || record.executionMode === 'batch')
-    && typeof record.agentProvider === 'string'
+    && (record.status === 'running' || record.status === 'completed' || record.status === 'blocked' || record.status === 'failed')
+    // The three environment fields are the ones history does not always
+    // know; a record that carries them must still carry them honestly.
+    && (record.sandboxProvider === undefined || typeof record.sandboxProvider === 'string')
+    && (record.executionMode === undefined || record.executionMode === 'interactive' || record.executionMode === 'batch')
+    && (record.agentProvider === undefined || typeof record.agentProvider === 'string')
     && (record.agentTransport === undefined || ['process', 'exec', 'app-server'].includes(record.agentTransport))
     && (record.agentAuth === undefined || ['chatgpt', 'api', 'unknown'].includes(record.agentAuth))
     && (record.agentModelProvider === undefined || typeof record.agentModelProvider === 'string')

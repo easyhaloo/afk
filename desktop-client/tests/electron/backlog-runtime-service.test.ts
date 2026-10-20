@@ -135,7 +135,7 @@ describe("backlog runtime service", () => {
     expect(result.runtime).toBeUndefined();
   });
 
-  it("reads legacy runtime records only when their worktree is inside the workspace", async () => {
+  it("reads a runtime record written before the environment fields existed", async () => {
     const root = await fixture();
     await writeFile(path.join(root, "active", "legacy.json"), JSON.stringify({
       backlogId: "42",
@@ -149,5 +149,21 @@ describe("backlog runtime service", () => {
 
     const result = await createService(root).summary(root, "42");
     expect(result.runtime?.runId).toBe("legacy-42");
+  });
+
+  it("reads a legacy runtime record only when its worktree is inside the workspace", async () => {
+    const root = await fixture();
+    await writeFile(path.join(root, "active", "legacy.json"), JSON.stringify({
+      backlogId: "42",
+      runId: "legacy-42",
+      status: "running",
+      phase: "implementing",
+      worktree: "/another/repository/worktree",
+      startedAt: "2026-09-15T00:08:00.000Z",
+      heartbeatAt: "2026-09-15T00:09:00.000Z",
+    }));
+
+    const result = await createService(root).summary(root, "42");
+    expect(result.runtime).toBeUndefined();
   });
 });

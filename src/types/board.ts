@@ -15,9 +15,13 @@ export interface Task {
   runId: string;
   title: string;
   phase: 'implementing' | 'verifying';
-  executionMode: 'interactive' | 'batch';
-  sandboxProvider: string;
-  agentProvider: string;
+  /**
+   * The environment a run published. A record written before these fields
+   * existed does not know them, and the board does not guess.
+   */
+  executionMode?: 'interactive' | 'batch';
+  sandboxProvider?: string;
+  agentProvider?: string;
   branch?: string;
   session?: string;
   status: 'active' | 'stale';

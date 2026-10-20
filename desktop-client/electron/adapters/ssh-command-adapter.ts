@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { SshConnectionTarget, SshFingerprint } from "../../shared/ssh-contract.js";
+import { hostKeyAlgorithm, hostKeyFingerprint } from "./host-key.js";
 import { sshConnectionArgs } from "../../shared/ssh-contract.js";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
@@ -35,11 +35,10 @@ function fingerprintFromKeyLine(line: string, hostname: string, port: number): S
   const match = line.trim().match(/^(\S+)\s+(ssh-[^\s]+|ecdsa-[^\s]+)\s+(\S+)/);
   if (!match) throw new Error("SSH 主机指纹格式无效");
   const keyType = match[2];
-  const digest = createHash("sha256").update(Buffer.from(match[3], "base64")).digest("base64").replace(/=+$/, "");
   return {
-    algorithm: keyType.replace(/^ssh-/, "").replace(/^ecdsa-/, "").toUpperCase(),
+    algorithm: hostKeyAlgorithm(keyType),
     bits: keyType === "ssh-ed25519" ? 256 : undefined,
-    value: `SHA256:${digest}`,
+    value: hostKeyFingerprint(match[3]),
     hostname,
     port,
   };

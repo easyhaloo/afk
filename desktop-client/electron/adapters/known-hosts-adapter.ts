@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
-import { createHash } from "node:crypto";
 import path from "node:path";
 import type { SshFingerprint } from "../../shared/ssh-contract.js";
+import { hostKeyAlgorithm, hostKeyFingerprint } from "./host-key.js";
 
 type KnownHostsOptions = {
   home: string;
@@ -25,8 +25,8 @@ export function createKnownHostsAdapter({ home, scan, fingerprint }: KnownHostsO
         const parts = line.trim().split(/\s+/);
         if (parts.length < 3 || !hostTokens.includes(parts[0])) return false;
         found = true;
-        const algorithm = parts[1].replace(/^ssh-/, "").replace(/^ecdsa-/, "").toUpperCase();
-        const value = `SHA256:${createHash("sha256").update(Buffer.from(parts[2], "base64")).digest("base64").replace(/=+$/, "")}`;
+        const algorithm = hostKeyAlgorithm(parts[1]);
+        const value = hostKeyFingerprint(parts[2]);
         return algorithm === candidate.algorithm && value === candidate.value;
       });
       return trusted ? "trusted" as const : found ? "identity-changed" as const : "untrusted" as const;

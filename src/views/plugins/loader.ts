@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { load } from 'js-yaml';
 import { fileLogger } from '@afk/infrastructure';
 import type { LoadedTuiView, TuiPlugin } from './types.js';
-import { isTuiPlugin } from './types.js';
+import { isTuiPlugin, isSafeId } from './types.js';
 
 interface PluginConfigEntry {
   id: string;
@@ -32,7 +32,7 @@ function readPluginConfig(path: string, warn: (message: string, error?: unknown)
     return (parsed as { plugins: unknown[] }).plugins.flatMap(entry => {
       if (!entry || typeof entry !== 'object') return [];
       const candidate = entry as { id?: unknown; enabled?: unknown };
-      if (typeof candidate.id !== 'string' || !/^[A-Za-z0-9._-]+$/.test(candidate.id)) return [];
+      if (typeof candidate.id !== 'string' || !isSafeId(candidate.id)) return [];
       return [{ id: candidate.id.trim(), enabled: candidate.enabled === false ? false : true }];
     });
   } catch (error) {

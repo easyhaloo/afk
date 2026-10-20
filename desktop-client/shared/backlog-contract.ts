@@ -11,6 +11,10 @@
  */
 
 import { assertExactKeys, parseRequiredString } from "./validation.js";
+import {
+  formatWorkItemId as formatCanonicalWorkItemId,
+  parseWorkItemId as parseCanonicalWorkItemId,
+} from "@afk/application";
 import type {
   BacklogChangeRequest as AuditedBacklogChangeRequest,
   BacklogExecutionMode as AuditedBacklogExecutionMode,
@@ -407,24 +411,23 @@ export function parseBacklogId(input: unknown): string {
   return value;
 }
 
+/**
+ * The work item identity grammar is the application's: a canonical id is
+ * `platform:projectKey#issueNumber`, and what makes it canonical is the
+ * same set of rules in both places.  Writing it out again here meant two
+ * grammars to keep in step — the desktop's own test already reached for
+ * the application's formatter, so the pair was already half-crossed.
+ */
 export function formatWorkItemId(input: { platform: BacklogPlatform; projectKey: string; issueNumber: number }): WorkItemId {
-  const platform = parseRequiredBacklogPlatform(input.platform, "work item ID");
-  const projectKey = parseProjectKey(input.projectKey, "work item ID");
-  const issueNumber = parseIssueNumber(input.issueNumber, "work item ID");
-  return `${platform}:${projectKey}#${issueNumber}`;
+  return formatCanonicalWorkItemId({
+    platform: input.platform,
+    projectKey: input.projectKey,
+    issueNumber: input.issueNumber,
+  });
 }
 
 export function parseWorkItemId(input: unknown): WorkItemId {
-  if (typeof input !== "string" || input.trim() !== input) throw new Error("work item ID must be a canonical string");
-  const match = /^([^:]+):([^#]+)#([1-9]\d*)$/.exec(input);
-  if (!match) throw new Error("work item ID must use platform:projectKey#issueNumber");
-  const id = formatWorkItemId({
-    platform: parseRequiredBacklogPlatform(match[1], "work item ID"),
-    projectKey: match[2],
-    issueNumber: Number(match[3]),
-  });
-  if (id !== input) throw new Error("work item ID is not canonical");
-  return id;
+  return parseCanonicalWorkItemId(input).id;
 }
 
 const PROVIDER_PROJECT_KEYS = ["platform", "projectKey", "providerHost", "providerProjectId", "name", "defaultBranch", "webUrl"] as const;

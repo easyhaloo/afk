@@ -246,6 +246,26 @@ function checkStateMappingDuplicates() {
   }
 }
 
+/**
+ * The layers a package may carry inside its own source tree.
+ *
+ * A package that has domain/application/infrastructure sub-trees names
+ * them the way the root tree does, so the root tree's direction applies
+ * inside it: the domain holds types and seams and reaches for nothing
+ * else, the infrastructure implements what the domain describes and
+ * points inwards, and an application may reach outward for the I/O it
+ * orchestrates.  Before this rule existed, a package's internal layers
+ * were a convention with nothing behind it — a domain file could reach
+ * into the infrastructure beside it and the check said nothing.
+ */
+const packageLayerNames = ['domain', 'core', 'application', 'infrastructure', 'shared'];
+
+function packageLayerOf(sourceRoot, filePath) {
+  const pathFromPackage = relative(sourceRoot, filePath);
+  const firstSegment = pathFromPackage.split(/[\\/]/)[0];
+  return packageLayerNames.includes(firstSegment) ? firstSegment : null;
+}
+
 function checkFile(fullPath) {
   const source = stripComments(readFileSync(fullPath, 'utf8'));
   const fromLayer = layerOf(fullPath);
@@ -431,6 +451,13 @@ function checkPackage(packageName, packageRoot) {
         }
         if (!isWithin(resolved, packageRoot)) {
           addViolation(`${fullPath}: ${packageName} package must not import outside its package root via '${specifier}'`);
+        }
+        // The layers inside a package are held to the same direction as the
+        // layers of the root tree.
+        const fromLayer = packageLayerOf(sourceRoot, fullPath);
+        const toLayer = packageLayerOf(sourceRoot, resolved);
+        if (fromLayer && toLayer && !dependencyLayer(fromLayer, toLayer)) {
+          addViolation(`${fullPath}: forbidden internal dependency ${fromLayer} -> ${toLayer} via '${specifier}'`);
         }
         continue;
       }

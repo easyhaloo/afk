@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { StreamingAgentExecution } from './streaming.js';
 import { CodexProvider } from '../../../domain/agents/codex.js';
+import { ClaudeCodeProvider } from '../../../domain/agents/claude-code.js';
 import { mkdirSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -397,5 +398,43 @@ describe('StreamingAgentExecution', () => {
         `${process.env.HOME}/.claude/projects/-Users-shenggangshu--loop-workspace-github-easyhaloo-afk/${sessionId}.jsonl`,
       );
     });
+  });
+});
+
+/**
+ * Test must drive a real line through the same path production uses and
+ * assert the id surfaces in metadata — not merely that parseLine returns a
+ * session event. This mirrors the defect: codex thread_id was unit-tested
+ * but never captured at runtime.
+ *
+ * This test would have caught:
+ * - Defect 4: thread_id captured at parse time but never routed to metadata
+ */
+describe('ClaudeCodeProvider + StreamingAgentExecution — session_id surfaces in metadata', () => {
+  const p = new ClaudeCodeProvider();
+
+  it('populates metadata.threadId from the result event session_id', async () => {
+    const resultEvent = JSON.stringify({
+      type: 'result',
+      session_id: '47444657-aaaa-4000-8000-000000000000',
+      usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 5 },
+      is_error: false,
+      result: '<goal_complete>{"type":"goal_complete","summary":"claude session test"}</goal_complete>',
+    });
+
+    const execution = new StreamingAgentExecution({
+      command: command(`console.log(${JSON.stringify(resultEvent)})`),
+      prompt: 'go',
+      signalType: 'goal_complete',
+      worktreePath: process.cwd(),
+      metadata: { provider: 'claude-code', transport: 'process' },
+      parseLine: p.parseLine.bind(p),
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
+      status: 'completed',
+    });
+    expect(execution.metadata.threadId).toBe('47444657-aaaa-4000-8000-000000000000');
   });
 });

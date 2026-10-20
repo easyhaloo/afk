@@ -15,7 +15,7 @@ import {
   _resetAgentRegistry,
 } from './registry.js';
 import { createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
-import type { AgentExecution, AgentStartOptions, Sandbox } from '../../infrastructure/sandbox/types.js';
+import type { AgentExecution, AgentExecutionHost, AgentStartOptions } from './types.js';
 import type { AgentProvider, AgentCapability } from './types.js';
 
 /** Build minimal AgentCommandOptions for testing. */
@@ -74,7 +74,7 @@ describe('Agent providers — fixture coverage', () => {
     it('owns process execution creation and passes neutral parser metadata to the sandbox', async () => {
       const execution = { id: 'execution-1' } as AgentExecution;
       const startAgent = vi.fn(async (_options: AgentStartOptions) => execution);
-      const sandbox = { startAgent } as unknown as Sandbox;
+      const sandbox = { startAgent } as unknown as AgentExecutionHost;
 
       await expect(p.createExecution({
         sandbox,
@@ -195,7 +195,7 @@ describe('Agent providers — fixture coverage', () => {
       const startAgent = vi.fn(async () => execution);
 
       await p.createExecution({
-        sandbox: { startAgent } as unknown as Sandbox,
+        sandbox: { startAgent } as unknown as AgentExecutionHost,
         worktreePath: '/tmp/worktree',
         sessionId: 'sess-1',
         prompt: 'do something',
@@ -226,7 +226,7 @@ describe('Agent providers — fixture coverage', () => {
       await expect(p.createExecution({
         sandbox: {
           id: 'container', worktreePath: '/host/worktree', workspacePath: '/workspace', startAgent,
-        } as unknown as Sandbox,
+        } as unknown as AgentExecutionHost,
         worktreePath: '/host/worktree',
         sessionId: 'sess-app-server',
         prompt: 'do something',
@@ -366,7 +366,7 @@ describe('Agent providers — fixture coverage', () => {
       await p.createExecution({
         worktreePath: '/tmp/worktree',
         sessionId: 'sess-1',
-        sandbox: { startAgent } as unknown as Sandbox,
+        sandbox: { startAgent } as unknown as AgentExecutionHost,
         generation: 1,
         prompt,
         signalType: 'goal_complete',

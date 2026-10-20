@@ -46,6 +46,7 @@ function packageFixture({
   applicationPackage = { dependencies: { '@afk/core': 'workspace:*' } },
   includeCore = true,
   includeApplication = true,
+  applicationFiles = {},
 }: {
   coreSource?: string;
   applicationSource?: string;
@@ -53,6 +54,7 @@ function packageFixture({
   applicationPackage?: { dependencies: Record<string, string> };
   includeCore?: boolean;
   includeApplication?: boolean;
+  applicationFiles?: Record<string, string>;
 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-packages-'));
   directories.push(directory);
@@ -74,6 +76,10 @@ function packageFixture({
   if (includeApplication) {
     mkdirSync(join(packageRoots.application, 'src'), { recursive: true });
     writeFileSync(join(packageRoots.application, 'src', 'index.ts'), applicationSource);
+    for (const [filename, contents] of Object.entries(applicationFiles)) {
+      mkdirSync(resolve(packageRoots.application, 'src', filename, '..'), { recursive: true });
+      writeFileSync(resolve(packageRoots.application, 'src', filename), contents);
+    }
     writeFileSync(join(packageRoots.application, 'package.json'), JSON.stringify({ name: '@afk/application', ...applicationPackage }));
   }
 
@@ -216,6 +222,27 @@ describe('architecture guard package boundaries', () => {
     });
     const output = result.run();
     expect(output).toContain("application package must not import itself as '@afk/application'");
+  });
+
+  it('rejects a domain file that reaches into its own package infrastructure', () => {
+    const result = packageFixture({
+      applicationFiles: {
+        'domain/types.ts': "import { helper } from '../infrastructure/helper.js';\nexport type Value = string;\nexport { helper };\n",
+        'infrastructure/helper.ts': 'export const helper = true;\n',
+      },
+    });
+    const output = result.run();
+    expect(output).toContain('forbidden internal dependency domain -> infrastructure');
+  });
+
+  it('accepts an application file that reaches its own package infrastructure', () => {
+    const result = packageFixture({
+      applicationFiles: {
+        'application/runner.ts': "import { helper } from '../infrastructure/helper.js';\nexport const run = helper;\n",
+        'infrastructure/helper.ts': 'export const helper = true;\n',
+      },
+    });
+    expect(result.run()).toContain('Architecture guard passed');
   });
 });
 

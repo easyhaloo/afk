@@ -1,8 +1,7 @@
 import type { TrackerProvider } from '@afk/application';
 import type { BacklogProvider, QABacklogProvider } from '@afk/application';
-import { GitHubBacklogProvider } from '../backlog/github-provider.js';
-import { GitLabBacklogProvider } from '../backlog/gitlab-provider.js';
 import { ManagementBacklogProvider } from '../backlog/management-provider.js';
+import { TrackerBacklogProvider } from '../backlog/tracker-adapter.js';
 import type { AtomicClaim, ClaimLock, ClaimLockFactory } from '../backlog/claim-strategy.js';
 import type { BranchProvider } from '../git/branches/provider.js';
 import { GitBranchProvider } from '../git/branches/git-provider.js';
@@ -33,10 +32,14 @@ export function createProviderBundle(
   repoRoot: string,
   options: ProviderBundleOptions = {},
 ): ProviderBundle {
+  if (tracker.platform !== 'github' && tracker.platform !== 'gitlab') {
+    throw new Error(`createProviderBundle requires a GitHub or GitLab tracker client, got '${tracker.platform}'`);
+  }
   return {
-    backlog: tracker.platform === 'github'
-      ? new GitHubBacklogProvider(tracker, options)
-      : new GitLabBacklogProvider(tracker, options),
+    // One backlog implementation, whichever platform the tracker speaks. The
+    // two platform classes that used to sit here differed by three lines and
+    // forwarded every method without adding any behaviour.
+    backlog: new TrackerBacklogProvider(tracker, options),
     branches: new GitBranchProvider(repoRoot),
     changes: new TrackerChangeProvider(tracker),
   };

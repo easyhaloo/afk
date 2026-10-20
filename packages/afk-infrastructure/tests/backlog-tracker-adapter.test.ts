@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TrackerBacklogProvider } from '../src/backlog/tracker-adapter.js';
-import { GitHubBacklogProvider } from '../src/backlog/github-provider.js';
-import { GitLabBacklogProvider } from '../src/backlog/gitlab-provider.js';
 import { ManagementBacklogProvider } from '../src/backlog/management-provider.js';
 import { adoptBacklog } from '@afk/application';
 import type { ClaimLease } from '@afk/application';
@@ -95,9 +93,7 @@ describe('TrackerBacklogProvider', () => {
       state: 'opened', url: 'https://example/42', projectId: 'org/repo',
     };
     const t = { ...tracker(issue), platform, ensureBacklogMetadata: vi.fn(async () => {}) };
-    const provider = new ManagementBacklogProvider(platform === 'github'
-      ? new GitHubBacklogProvider(t)
-      : new GitLabBacklogProvider(t));
+    const provider = new ManagementBacklogProvider(new TrackerBacklogProvider(t));
 
     await expect(adoptBacklog(provider, '42')).resolves.toMatchObject({
       id: '42', title: issue.title, description: issue.description,

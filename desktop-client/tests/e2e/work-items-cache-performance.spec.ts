@@ -16,7 +16,7 @@ type LaunchMeasurement = {
   rowsVisibleMs: number;
 };
 
-async function launchAndMeasure(environment: NodeJS.ProcessEnv): Promise<LaunchMeasurement> {
+async function launchAndMeasure(environment: Record<string, string>): Promise<LaunchMeasurement> {
   const launchStartedAt = performance.now();
   const app = await electron.launch({
     args: [electronEntry, `--user-data-dir=${environment.AFK_E2E_USER_DATA}`],
@@ -47,19 +47,23 @@ test("loads the persisted work item model before a delayed remote synchronizatio
   mkdirSync(path.join(workspace, ".afk"), { recursive: true });
   mkdirSync(userData, { recursive: true });
 
-  const environment = {
-    ...process.env,
-    ELECTRON_RENDERER_URL: rendererUrl,
-    HOME: home,
-    USERPROFILE: home,
-    AFK_WORKSPACE: workspace,
-    PATH: `${fixtureDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
-    AFK_DESKTOP_CLI: fakeAfk,
-    FAKE_AFK_STORE: store,
-    FAKE_AFK_INVENTORY_DELAY_MS: String(inventoryDelayMs),
-    FAKE_AFK_INVENTORY_CALLS: calls,
-    AFK_E2E_USER_DATA: userData,
-  };
+  // The launcher's environment takes plain strings, while process.env
+  // carries entries that may be absent — the absent ones are dropped.
+  const environment: Record<string, string> = Object.fromEntries(
+    Object.entries({
+      ...process.env,
+      ELECTRON_RENDERER_URL: rendererUrl,
+      HOME: home,
+      USERPROFILE: home,
+      AFK_WORKSPACE: workspace,
+      PATH: `${fixtureDirectory}${path.delimiter}${process.env.PATH ?? ""}`,
+      AFK_DESKTOP_CLI: fakeAfk,
+      FAKE_AFK_STORE: store,
+      FAKE_AFK_INVENTORY_DELAY_MS: String(inventoryDelayMs),
+      FAKE_AFK_INVENTORY_CALLS: calls,
+      AFK_E2E_USER_DATA: userData,
+    }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
 
   let cold: LaunchMeasurement | undefined;
   let warm: LaunchMeasurement | undefined;

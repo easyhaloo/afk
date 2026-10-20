@@ -15,7 +15,7 @@ import { expect, test } from "./_helpers/launch";
 // inherits the browser default reads 16px at every density and proves nothing.
 const SAMPLED = [".nav-item", ".backlog-search input"] as const;
 
-async function setDensity(page: import("playwright").Page, label: string) {
+async function setDensity(page: import("@playwright/test").Page, label: string) {
   await page.locator(".primary-nav button", { hasText: "设置" }).click();
   await page.getByRole("radiogroup", { name: "字号密度" }).getByText(label).click();
   await page.waitForTimeout(250);
@@ -23,7 +23,7 @@ async function setDensity(page: import("playwright").Page, label: string) {
   await page.waitForTimeout(400);
 }
 
-function sample(page: import("playwright").Page) {
+function sample(page: import("@playwright/test").Page) {
   return page.evaluate(sels => {
     const out: Record<string, string> = {};
     for (const sel of sels) {

@@ -3,7 +3,7 @@ import { test } from "./_helpers/launch";
 const OUT = process.env.AFK_UI_EVIDENCE_DIR ?? "/tmp/afk-shots";
 const VIEWS = ["工作项", "运行中心", "工作流", "Agents", "设置"] as const;
 
-async function setTheme(page: import("playwright").Page, label: string) {
+async function setTheme(page: import("@playwright/test").Page, label: string) {
   await page.locator(".primary-nav button", { hasText: "设置" }).click();
   await page.getByRole("radiogroup", { name: "界面主题" }).getByText(label).click();
   await page.waitForTimeout(300);

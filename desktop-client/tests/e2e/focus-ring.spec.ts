@@ -14,7 +14,7 @@ import { expect, test } from "./_helpers/launch";
  * press a key first or this reads back `outline-style: none` and every
  * assertion below passes for the wrong reason.
  */
-async function ringOf(page: import("playwright").Page, selector: string) {
+async function ringOf(page: import("@playwright/test").Page, selector: string) {
   await page.keyboard.press("Tab");
   return page.locator(selector).first().evaluate(el => {
     el.focus();
@@ -29,7 +29,7 @@ function expectVisibleRing(ring: { width: string; style: string; colour: string 
   expect(parseFloat(ring.width), shown).toBeGreaterThanOrEqual(2);
 }
 
-async function openView(page: import("playwright").Page, label: string) {
+async function openView(page: import("@playwright/test").Page, label: string) {
   await page.locator(".primary-nav button", { hasText: label }).click();
   await page.waitForTimeout(300);
 }

@@ -15,15 +15,19 @@ async function seedEvents(store: JsonlEventStore) {
     correlationId: "run-seed",
     context: { traceId: "run-seed", runId: "run-seed", workItemId: "github:acme/web#1", profileId: "default", attempt: 1, actor: { kind: "cli", id: "e2e" } },
   };
-  const cases: Array<{ status: string; nextStep: string; tokens: number; hoursAgo: number }> = [
-    { status: "running", nextStep: "正在分析代码结构", tokens: 1200, hoursAgo: 1 },
-    { status: "running", nextStep: "任务空间：/tmp/workspace-a", tokens: 1320, hoursAgo: 2 },
-    { status: "awaiting_human", nextStep: "需要人工确认", tokens: 1440, hoursAgo: 3 },
-    { status: "failed", nextStep: "执行失败：超时", tokens: 1560, hoursAgo: 4 },
-    { status: "succeeded", nextStep: "任务空间：/tmp/workspace-b", tokens: 1680, hoursAgo: 5 },
-    { status: "succeeded", nextStep: "任务空间：/tmp/workspace-c", tokens: 1800, hoursAgo: 6 },
+  // A run's status comes from the audited run aggregate, and the timeline
+  // from the recorded events — neither reads a status or a next step out of
+  // a session event. What varies here is the token count and the age, which
+  // is what the stats bar's own labels are about.
+  const cases: Array<{ tokens: number; hoursAgo: number }> = [
+    { tokens: 1200, hoursAgo: 1 },
+    { tokens: 1320, hoursAgo: 2 },
+    { tokens: 1440, hoursAgo: 3 },
+    { tokens: 1560, hoursAgo: 4 },
+    { tokens: 1680, hoursAgo: 5 },
+    { tokens: 1800, hoursAgo: 6 },
   ];
-  for (const [i, { status, nextStep, tokens, hoursAgo }] of cases.entries()) {
+  for (const [i, { tokens, hoursAgo }] of cases.entries()) {
     const runId = `run-${i}`;
     const occurredAt = pastTimestamp(hoursAgo);
     const requested: RunEventDraft = {
@@ -45,8 +49,6 @@ async function seedEvents(store: JsonlEventStore) {
         kind: "agent.session_recorded",
         sessionId: `${runId}-session`,
         usage: { inputTokens: 1000 + i * 100, outputTokens: 200 + i * 20, totalTokens: tokens },
-        status,
-        nextStep,
       },
     };
     await store.append([requested, recorded]);

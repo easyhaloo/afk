@@ -4,6 +4,5 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["tests", "src"],
-  "exclude": ["tests/e2e"]
+  "include": ["tests", "src"]
 }

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { matchesRuntimeRecord } from "@afk/execution/application/runtime/task-runtime";
 import type { RuntimeHealthObservation } from "@afk/application";
 import type { WorkItemRunRecord } from "../../shared/backlog-contract.js";
 
@@ -22,7 +23,12 @@ export function createExecutionRuntimeAdapter(options: {
       for (const bucket of ["active", "archive"]) {
         try {
           const value = JSON.parse(await readFile(path.join(root, bucket, `${Buffer.from(runId).toString("base64url")}.json`), "utf8"));
-          if (value.runId !== runId || (value.providerRef !== undefined && value.providerRef !== workItemId)) continue;
+          if (typeof value !== "object" || value === null) continue;
+          // The identity rule is shared with the backlog runtime service, so
+          // the two views cannot disagree about which records belong to this
+          // work item.
+          if (!matchesRuntimeRecord(value, { workItemId })) continue;
+          if (value.runId !== runId) continue;
           observation = {
             runId, observedAt,
             ...(["running", "completed", "blocked", "failed"].includes(value.status) ? { status: value.status } : {}),

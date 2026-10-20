@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { RUNTIME_STALE_AFTER_MS } from '@afk/application';
@@ -59,6 +59,55 @@ export interface TaskRuntimeDiagnostics {
   output?: string;
 }
 
+/**
+ * Which runtime records belong to a work item.
+ *
+ * Two readers used to answer this differently: one matched on `providerRef`
+ * and ignored the workspace, the other matched on `backlogId` and required
+ * the workspace. The same record could therefore be shown by one view and
+ * hidden by the other, and the two views could answer "is this run still
+ * going?" differently for the same run.
+ *
+ * The rule is per field, and strict: a caller that knows the provider-
+ * qualified work item id requires the record's `providerRef` to match it,
+ * and a caller that knows the provider's own backlog id requires
+ * `backlogId` to match. The workspace is compared when both sides know it;
+ * a record that declares only a worktree is accepted when that worktree
+ * sits inside the workspace.
+ */
+export interface RuntimeRecordIdentity {
+  /** The provider-qualified work item id, e.g. `github:org/repo#42`. */
+  workItemId?: string;
+  /** The provider's own backlog id, e.g. `42`. */
+  backlogId?: string;
+  /** The workspace root the record must belong to. */
+  workspace?: string;
+}
+
+export function matchesRuntimeRecord(
+  record: Partial<Pick<TaskRuntimeRecord, 'runId' | 'backlogId' | 'providerRef' | 'workspace' | 'worktree'>>,
+  identity: RuntimeRecordIdentity,
+): boolean {
+  if (identity.workItemId !== undefined && record.providerRef !== undefined && record.providerRef !== identity.workItemId) return false;
+  if (identity.backlogId !== undefined && record.backlogId !== identity.backlogId) return false;
+  if (identity.workspace === undefined) return true;
+  if (record.workspace !== undefined) {
+    return resolve(identity.workspace) === resolve(record.workspace);
+  }
+  if (record.worktree !== undefined) {
+    return isWithinWorkspace(record.worktree, identity.workspace);
+  }
+  // Neither a workspace nor a worktree: the record cannot be placed, so it
+  // does not belong here.
+  return false;
+}
+
+function isWithinWorkspace(candidate: string, workspace: string): boolean {
+  const root = resolve(workspace);
+  const target = resolve(candidate);
+  return target === root || target.startsWith(`${root}${sep}`);
+}
+
 export class TaskRuntimeStore {
   private readonly mutations = new Map<string, Promise<void>>();
   readonly root: string;
@@ -95,6 +144,10 @@ export class TaskRuntimeStore {
 
   async getActive(runId: string): Promise<TaskRuntimeRecord | undefined> {
     return this.read(join(this.activePath, `${runtimeFileKey(runId)}.json`));
+  }
+
+  async getArchived(runId: string): Promise<TaskRuntimeRecord | undefined> {
+    return this.read(join(this.archivePath, `${runtimeFileKey(runId)}.json`));
   }
 
   async update(runId: string, changes: Partial<Omit<TaskRuntimeRecord, 'runId' | 'startedAt' | 'status' | 'activities'>>): Promise<TaskRuntimeRecord> {

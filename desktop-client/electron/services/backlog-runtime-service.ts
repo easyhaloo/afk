@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { RUNTIME_STALE_AFTER_MS } from "@afk/application";
+import { matchesRuntimeRecord } from "@afk/execution/application/runtime/task-runtime";
 import type { BacklogRuntimeProjection, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract.js";
 import { parseBacklogRuntimeSummary } from "../../shared/backlog-contract.js";
 import type { createBacklogRunStore } from "./backlog-run-store.js";
@@ -51,17 +52,14 @@ export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
         if (!raw) continue;
         try {
           const value = JSON.parse(raw) as Partial<RuntimeRecord>;
-          if (value.backlogId !== backlogId || typeof value.runId !== "string" || typeof value.status !== "string" || typeof value.phase !== "string" || typeof value.heartbeatAt !== "string" || typeof value.startedAt !== "string") continue;
+          if (typeof value.runId !== "string" || typeof value.status !== "string" || typeof value.phase !== "string" || typeof value.heartbeatAt !== "string" || typeof value.startedAt !== "string") continue;
           if (!["running", "completed", "blocked", "failed"].includes(value.status) || !["implementing", "verifying"].includes(value.phase)) continue;
           const heartbeatAt = Date.parse(value.heartbeatAt);
           const runtimeStartedAt = Date.parse(value.startedAt);
           if (!Number.isFinite(heartbeatAt) || !Number.isFinite(runtimeStartedAt)) continue;
-          if (typeof value.workspace === "string") {
-            if (path.resolve(value.workspace) !== path.resolve(resolvedWorkspace)) continue;
-          } else if (typeof value.worktree !== "string" || !isWithin(resolvedWorkspace, value.worktree)) {
-            continue;
-          }
-          if (context && typeof value.providerRef === "string" && value.providerRef !== context.providerRef) continue;
+          // The identity rule is shared with the run-detail reader, so the two
+          // views cannot disagree about which records belong to this item.
+          if (!matchesRuntimeRecord(value, { backlogId, workItemId: context?.providerRef, workspace: resolvedWorkspace })) continue;
           if (startedAfter !== undefined && Number.isFinite(startedAfter) && runtimeStartedAt < startedAfter) continue;
           records.push(value as RuntimeRecord);
         } catch {
@@ -102,9 +100,4 @@ export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
   }
 
   return { summary, loadRuntime };
-}
-
-function isWithin(parent: string, child: string): boolean {
-  const relative = path.relative(path.resolve(parent), path.resolve(child));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }

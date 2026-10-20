@@ -28,7 +28,12 @@ export class JsonlEventStore implements EventStorePort {
   private readonly mutations = new Map<string, Promise<void>>();
 
   constructor(options: JsonlEventStoreOptions = {}) {
-    this.root = options.root ?? join(homedir(), '.afk', 'events');
+    // One rule for every entry point: an explicit root wins, then
+    // AFK_EVENT_STORE_DIR, then the home directory. The desktop used to
+    // hard-code the home directory while the CLI honoured the environment
+    // variable, so a run started with a custom root wrote its audit trail
+    // where the desktop was not looking.
+    this.root = options.root ?? process.env.AFK_EVENT_STORE_DIR ?? join(homedir(), '.afk', 'events');
     this.now = options.now ?? (() => new Date());
   }
 

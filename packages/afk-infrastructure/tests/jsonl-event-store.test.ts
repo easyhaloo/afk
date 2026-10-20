@@ -59,6 +59,19 @@ afterEach(async () => {
 });
 
 describe('JsonlEventStore', () => {
+  it('resolves its root the same way for every entry point', () => {
+    const previous = process.env.AFK_EVENT_STORE_DIR;
+    try {
+      process.env.AFK_EVENT_STORE_DIR = join(tmpdir(), 'custom-events');
+      expect(new JsonlEventStore().root).toBe(join(tmpdir(), 'custom-events'));
+      // An explicit root still wins.
+      expect(new JsonlEventStore({ root: join(tmpdir(), 'explicit') }).root).toBe(join(tmpdir(), 'explicit'));
+    } finally {
+      if (previous === undefined) delete process.env.AFK_EVENT_STORE_DIR;
+      else process.env.AFK_EVENT_STORE_DIR = previous;
+    }
+  });
+
   it('retains history by default and prunes only terminal runs strictly older than the event-time cutoff', async () => {
     const store = new JsonlEventStore({ root: await root(), now: () => new Date('2026-10-13T00:00:00.000Z') });
     const retentionMs = 24 * 60 * 60 * 1000;

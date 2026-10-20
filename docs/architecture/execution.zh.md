@@ -402,8 +402,18 @@ Docker socket
 
 （`desktop-client/electron/services/execution-workspace-service.ts`。）
 
-不再有 `<worktree>/.afk/runs/<run-id>/` 目录。写它的那个模块只能从它自己的测试
-到达，生产路径上从未有人创建过它；与其留下一棵没人写的树的描述，不如删掉。
+本节此前描述的那棵按 run 的目录树没有了，但它的四个条目并非一起消失——活下来的两个
+只是换了位置：
+
+| 原先 | 现在 |
+|---|---|
+| `<worktree>/.afk/runs/<run-id>/request.json` | 无人写入——产生它的写者只能从它自己的测试到达 |
+| `<worktree>/.afk/runs/<run-id>/events.jsonl` | 审计脊柱 `~/.afk/events/<base64url(runId)>.jsonl` |
+| `<worktree>/.afk/runs/<run-id>/result.json` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/result.json` |
+| `<worktree>/.afk/runs/<run-id>/output.log` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/output.log` |
+
+`result.json` 与 `output.log` 由 `TaskRuntimeStore.writeDiagnostics` 写入，并由运行中心
+读取；它们原先所在的那棵树被删除，是因为生产路径上从未有人创建过它。
 
 Session 文件必须使用临时文件、校验和原子 rename，避免新 generation 读取半截 JSONL。
 

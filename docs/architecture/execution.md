@@ -409,10 +409,19 @@ of one desktop work item.
 
 (`desktop-client/electron/services/execution-workspace-service.ts`.)
 
-There is no `<worktree>/.afk/runs/<run-id>/` directory. The module that wrote
-it was reachable only from its own test, so nothing in the production path ever
-created it; it was removed rather than left behind as a description of a tree
-nobody writes.
+The per-run tree this section used to describe is gone, but its four entries
+did not all die together, and the two that survived only moved:
+
+| Was | Is now |
+|---|---|
+| `<worktree>/.afk/runs/<run-id>/request.json` | written nowhere — the writer that produced it was only reachable from its own test |
+| `<worktree>/.afk/runs/<run-id>/events.jsonl` | the audit spine, `~/.afk/events/<base64url(runId)>.jsonl` |
+| `<worktree>/.afk/runs/<run-id>/result.json` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/result.json` |
+| `<worktree>/.afk/runs/<run-id>/output.log` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/output.log` |
+
+`result.json` and `output.log` are written by `TaskRuntimeStore.writeDiagnostics`
+and are read by the run centre; the tree they lived in was removed because
+nothing in the production path ever created it.
 
 Session files must use temp files, checksums, and atomic rename to avoid new generation reading half-written JSONL.
 

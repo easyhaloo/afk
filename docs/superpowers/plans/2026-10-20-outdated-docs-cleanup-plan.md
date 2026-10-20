@@ -395,7 +395,7 @@
 （162 源文件 + 220 桌面端文件，0 隔离项）、`pnpm typecheck`（根 + 5 个包 + 测试树）、
 `pnpm test`（根 609 项 + 包级 9 项，全部通过）。
 
-## 9. 更正：`.afk/runs` 是一棵没人写的树
+## 9. 更正：`.afk/runs` 的四个条目各自去了哪里
 
 本计划最初把 `docs/architecture/execution.md` §7 的 `.afk/runs/` 目录列入**附录 B 误报清单**，
 理由是「目录是真实实现（packages/afk-execution/src/application/sessions/run-state.ts:22）——
@@ -410,7 +410,31 @@
 不证明有人在用它。把一个只被自己测试引用的模块当成"真实实现"，等于让检查为一份
 **描述没人写的树的文档**背书。
 
-### 9.1 真实的三处落盘
+同一处还犯过相反方向的第二个错：看到 `.afk/runs` 没人写，就把 `result.json` 一并判成
+"没人写、断言无法满足"，而它其实由 `TaskRuntimeStore.writeDiagnostics` 写在别处、活着。
+**两个方向的错都源于同一个偷懒：不查调用链，只看文件在不在。**
+
+### 9.1 旧树四个条目的下场
+
+删除写端之后，旧树里四个条目并没有一起消失，两个只是换了位置：
+
+| 旧位置 | 现在的下场 |
+|---|---|
+| `<worktree>/.afk/runs/<run-id>/request.json` | 无人写入——产生它的 `RunStateWriter` 只能从 `AgentExecutionService` 到达，而后者只能从它自己的测试到达 |
+| `<worktree>/.afk/runs/<run-id>/events.jsonl` | 由审计脊柱取代：`~/.afk/events/<base64url(runId)>.jsonl` |
+| `<worktree>/.afk/runs/<run-id>/result.json` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/result.json` |
+| `<worktree>/.afk/runs/<run-id>/output.log` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/output.log` |
+
+后两个由 `TaskRuntimeStore.writeDiagnostics` 写入（`task-runtime.ts:274-287`），调用方是
+`runtimeLifecycle.diagnostics(...)`（`runtime-lifecycle.ts:211-224`），由工作流引擎
+（`workflow-engine.ts:1232`）与 QA runner（`qa-runner.ts:230`）各调一次；写入发生在
+`finish()` 归档之前，所以归档记录带 `diagnosticPath`。
+
+**一处曾经的误判**：最初判定"`result.json` 没人写、断言无法满足"是错的——没有查
+`writeDiagnostics` 就下了结论。**文件存在只证明它没被删，不证明有人在用它；反过来，
+文件存在也不证明它有人在用——要看调用链。** 这条已由 §7 的迁移对照表落进正文。
+
+### 9.2 真实的三处落盘
 
 | 痕迹 | 位置 | 主人 |
 |---|---|---|
@@ -418,7 +442,7 @@
 | 运行时记录（进度/心跳/阶段投影） | `~/.afk/runtime/tasks/{active,archive}/<base64url(runId)>.json`，诊断在 `diagnostics/<base64url(runId)>/` | `TaskRuntimeStore` |
 | 桌面执行工作区 | `~/.loop-workspace/<taskId>/{repositories,artifacts,runtime,logs,diagnostics}` | `execution-workspace-service` |
 
-### 9.2 一并修正的引用
+### 9.3 一并修正的引用
 
 | 位置 | 原文 | 改后 |
 |---|---|---|
@@ -427,7 +451,7 @@
 | `desktop-client/shared/ipc-contract.ts:7` | 「read from `.afk/runs/**/events.jsonl`」 | 保留事实，补注这是**遗留通道**——没有东西再写它，实际读到空；权威记录是 `RuntimeRunEvent` |
 | `desktop-client/src/components/EmptyState.tsx:4` | 「选择包含 `.afk/runs` 的工作区后，记录会显示在这里」 | 「运行记录保存在运行时的任务存储中。选择工作区后，已有记录会显示在这里」 |
 
-### 9.3 仍然存在、需要代码侧决定的两处
+### 9.4 仍然存在、需要代码侧决定的两处
 
 删除写端之后，两处**读端**仍在扫 `.afk/runs/`，因此实际读到空：
 

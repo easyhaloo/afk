@@ -40,7 +40,10 @@ export class IssueBranchStrategy implements BranchStrategy {
     const path = join(baseDir, `issue-${config.iid}`);
 
     checkNotShared(path, branch, this.kind);
-    const baseBranch = options.baseBranch ?? 'main';
+    // HEAD, not a branch called "main": the repository's default branch
+    // is whatever it is, and a fork from one that does not exist is an
+    // error the run would not explain.
+    const baseBranch = options.baseBranch ?? 'HEAD';
     await gitWorktreeAdd(git, branch, path, baseBranch, this.kind);
 
     return { branch, path, isNewBranch: true };

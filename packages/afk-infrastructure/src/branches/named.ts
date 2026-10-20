@@ -59,7 +59,10 @@ export class NamedBranchStrategy implements BranchStrategy {
     const path = join(baseDir, dirName);
 
     checkNotShared(path, branch, this.kind);
-    const baseBranch = options.baseBranch ?? config.baseBranch ?? 'main';
+    // HEAD, not a branch called "main": the repository's default branch
+    // is whatever it is, and a fork from one that does not exist is an
+    // error the run would not explain.
+    const baseBranch = options.baseBranch ?? config.baseBranch ?? 'HEAD';
     await gitWorktreeAdd(git, branch, path, baseBranch, this.kind);
 
     return { branch, path, isNewBranch: true };

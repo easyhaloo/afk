@@ -92,6 +92,21 @@ describe('IssueBranchStrategy', () => {
     expect(fs.existsSync(path.join(handle.path, 'README.md'))).toBe(true);
   });
 
+  it('forks from HEAD when nobody names a base branch', async () => {
+    // The base branch is HEAD unless a caller names one. A branch called
+    // "main" is not a safe assumption: the repository's default branch is
+    // whatever it is, and a fork from a branch that does not exist is an
+    // error the run would not explain.
+    const { repoPath, git } = await makeRepo();
+    await git.raw(['branch', '-M', 'master']);
+
+    const s = new IssueBranchStrategy();
+    const handle = await s.prepareWorktree(git, { type: 'issue', iid: 7 }, { repoPath });
+
+    const forked = await simpleGit(handle.path).revparse(['HEAD']);
+    expect(forked.trim()).toBe((await git.revparse(['HEAD'])).trim());
+  });
+
   it('cleanup removes worktree + branch', async () => {
     const s = new IssueBranchStrategy();
     const handle = await s.prepareWorktree(git, { type: 'issue', iid: 42 }, { repoPath });

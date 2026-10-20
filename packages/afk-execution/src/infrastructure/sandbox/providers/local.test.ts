@@ -187,6 +187,35 @@ describe('LocalSandboxProvider', () => {
     await expect(access(statusPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('reports a dead agent as a failure instead of waiting out the completion timeout', async () => {
+    // The agent's session is the agent: when it ends, the agent is gone.
+    // Waiting for the completion timeout to find that out would report a
+    // crash as a timeout, hours later.
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-dead-'));
+    const tmux = {
+      createSession: vi.fn(async () => ({})),
+      sendPrompt: vi.fn(async () => {}),
+      sendKeys: vi.fn(async () => {}),
+      killSession: vi.fn(async () => {}),
+      closeSession: vi.fn(),
+      hasSession: vi.fn(async () => false),
+    };
+    const execution = new LocalAgentExecution({
+      worktreePath,
+      sessionName: 'afk-dead',
+      command: { argv: ['agent'], cwd: worktreePath },
+      generation: 1,
+      prompt: 'goal',
+      signalType: 'goal_complete',
+      metadata,
+      tmux: tmux as never,
+    });
+
+    const result = await execution.waitForResult({ completionTimeoutMs: 2_000 });
+
+    expect(result.status).toBe('failed');
+  });
+
   it('accepts an AC verification completion signal', () => {
     expect(SignalSchema.safeParse({
       type: 'goal_complete',

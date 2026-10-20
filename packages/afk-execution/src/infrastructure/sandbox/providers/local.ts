@@ -309,6 +309,22 @@ export class LocalAgentExecution implements AgentExecution {
         }
       } catch { /* ignore polling errors */ }
 
+      // The agent's session is the agent: when the session is gone, the
+      // agent ended. Waiting for the completion timeout to find that out
+      // would report a crash as a timeout, hours later.
+      if (this.tmux.hasSession && !(await this.tmux.hasSession(this.sessionName))) {
+        return {
+          version: 1,
+          runId: this.id,
+          status: 'failed',
+          provider: this.metadata.provider,
+          sessionId: this.sessionId,
+          error: { code: 'SESSION_ENDED', message: 'the agent session ended before the goal was reached' },
+          commits: [],
+          branch: this.sessionName,
+        };
+      }
+
       await this.sleep(2000);
     }
   }

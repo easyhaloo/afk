@@ -62,6 +62,14 @@ export type AgentReadiness = {
 export interface SandboxTmux {
   createSession(name: string, dir: string, command?: string): Promise<TmuxSession>;
   firstPaneId?(session: string, window: string): Promise<string | undefined>;
+  /**
+   * Whether the session is still there.
+   *
+   * The session is the agent in interactive mode: when it ends, the agent
+   * ended. An execution that can ask finds out in seconds instead of
+   * waiting out the completion timeout to find out.
+   */
+  hasSession?(session: string): Promise<boolean>;
   closeSession(): void;
   killSession(name: string): Promise<void>;
   sendPrompt(

@@ -6,6 +6,7 @@ import type { TmuxClient } from '../../infrastructure/tmux/index.js';
 import { logger, STATUS_FILENAME, clearSignal } from '@afk/infrastructure';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 import { Watchdog } from './watchdog.js';
+import { handoffDocName } from '../run-identity.js';
 
 /**
  * Path of a handoff recovery doc inside a worktree. The runner uses this to
@@ -13,7 +14,7 @@ import { Watchdog } from './watchdog.js';
  * Keeping the convention in one place stops the two from drifting.
  */
 export function handoffDocPath(worktreePath: string, backlogId: string, gen: number): string {
-  return join(worktreePath, '.afk', 'handoff', `handoff-${backlogId}-${gen}.md`);
+  return join(worktreePath, '.afk', 'handoff', handoffDocName({ iid: backlogId, generation: gen }));
 }
 
 export type HandoffMode = 'auto' | 'terminal';
@@ -224,7 +225,7 @@ export class HandoffCoordinator {
   ): Promise<{ path: string; content: string }> {
     const handoffDir = join(worktreePath, '.afk', 'handoff');
     await fs.mkdir(handoffDir, { recursive: true });
-    const docPath = join(handoffDir, `handoff-${backlogId}-${gen}.md`);
+    const docPath = join(handoffDir, handoffDocName({ iid: backlogId, generation: gen }));
     const content = [
       `# Handoff ${backlogId} (round ${gen})`,
       '',

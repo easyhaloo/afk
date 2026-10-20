@@ -24,6 +24,7 @@ import type {
   SessionStoreEntry,
 } from './types.js';
 import { SessionNotFoundError } from './types.js';
+import { handoffDocName, parseHandoffDocName, parseRunId, runIdFor } from '../run-identity.js';
 
 const HANDOFF_DIR = '.afk/handoff';
 
@@ -43,12 +44,9 @@ export class HandoffSessionStore implements SessionStore {
   }
 
   private fileForRunId(runId: string): string | null {
-    // runId convention: 'issue-<iid>-gen-<n>' OR 'issue-<iid>-terminal'
-    const m = runId.match(/^issue-(\d+)-(gen-(\d+)|terminal)$/);
-    if (!m) return null;
-    const iid = m[1];
-    const gen = m[3] ?? 'terminal';
-    return join(this.worktreePath, HANDOFF_DIR, `handoff-${iid}-${gen}.md`);
+    const identity = parseRunId(runId);
+    if (!identity) return null;
+    return join(this.worktreePath, HANDOFF_DIR, handoffDocName(identity));
   }
 
   async load(options: SessionLoadOptions): Promise<SessionSnapshot> {
@@ -66,8 +64,8 @@ export class HandoffSessionStore implements SessionStore {
       throw err;
     }
 
-    const m = options.runId.match(/^issue-(\d+)-(gen-(\d+)|terminal)$/);
-    const generation = m && m[3] ? parseInt(m[3], 10) : 0;
+    const identity = parseRunId(options.runId);
+    const generation = identity && identity.generation !== 'terminal' ? identity.generation : 0;
     const stat = await fs.stat(filePath);
 
     return {
@@ -93,11 +91,9 @@ export class HandoffSessionStore implements SessionStore {
     for (const name of entries) {
       // handoff-42-1.md  -> issue-42-gen-1
       // handoff-42-terminal.md -> issue-42-terminal
-      const m = name.match(/^handoff-(\d+)-(\d+|terminal)\.md$/);
-      if (!m) continue;
-      const iid = m[1];
-      const gen = m[2];
-      const runId = gen === 'terminal' ? `issue-${iid}-terminal` : `issue-${iid}-gen-${gen}`;
+      const identity = parseHandoffDocName(name);
+      if (!identity) continue;
+      const runId = runIdFor(identity);
       try {
         const stat = await fs.stat(join(dir, name));
         results.push({

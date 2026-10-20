@@ -22,6 +22,7 @@ import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from
 import { Watchdog, createWatchdog } from './workflows/watchdog.js';
 import type { WorkflowConfig } from '../infrastructure/config/manager.js';
 import { HandoffCoordinator, createHandoffCoordinator, handoffDocPath } from './workflows/handoff.js';
+import { runIdFor } from './run-identity.js';
 import { attemptNativeResume } from './workflows/resume.js';
 import { BudgetManager } from './workflows/budget.js';
 import { BudgetStore } from './workflows/budget-store.js';
@@ -1283,7 +1284,7 @@ export class WorkflowRunner {
           // This allows future native-resume rounds to restore from the snapshot.
           // Errors are best-effort and do not affect the handoff flow.
           const chain = this.sessionStoreChainFactory(p.wtPath);
-          const runId = `issue-${p.iid}-gen-${p.budget.used + 1}`;
+          const runId = runIdFor({ iid: String(p.iid), generation: p.budget.used + 1 });
           if (sandbox) {
             try {
               const snapshot = await execution.captureSession();

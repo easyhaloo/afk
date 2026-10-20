@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { evolve, initialRunAggregate, type ObservationContext } from '@afk/core';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
+import { RunObserver } from '@afk/execution/observability/run-observer';
 import { RunCoordinator } from './run-coordinator.js';
 
 const roots: string[] = [];
@@ -25,12 +26,9 @@ afterEach(async () => {
 describe('RunCoordinator', () => {
   it('records the decision and each effect boundary around a successful command', async () => {
     const store = new JsonlEventStore({ root: await root() });
-    let id = 0;
     const coordinator = new RunCoordinator({
-      events: store,
-      ids: { next: () => `event-${++id}` },
+      audit: new RunObserver({ events: store }),
       effects: { execute: async effect => ({ summary: `executed:${effect.kind}` }) },
-      now: () => new Date('2026-08-23T00:00:00.000Z'),
     });
     const requested = {
       id: 'event-requested', schemaVersion: 1 as const, type: 'run.requested' as const, sequence: 1,

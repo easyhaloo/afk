@@ -93,15 +93,8 @@ export async function startRun(
     };
   }
 
-  const event: RunEventDraft = {
-    id: ports.ids.next(),
-    schemaVersion: 1,
-    type: 'run.started',
-    occurredAt: ports.clock.now().toISOString(),
-    context,
-    correlationId: context.runId,
-    data: { kind: 'run.started' },
-  };
-  await ports.events.append([event]);
+  // Through the writer, so the event is stamped, logged, counted and traced
+  // the way every other audit event is.
+  await ports.audit.record(context, { kind: 'run.started' });
   return { runId: input.runId, command, state: loaded.state, decision, started: true };
 }

@@ -1,17 +1,16 @@
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { Decision, Effect, RunAggregate, RunCommand } from '@afk/core';
 import { decide } from '@afk/core';
-import type { EventStorePort, IdPort } from '@afk/core';
+import type { AuditWriter } from '@afk/application';
 
 export interface EffectExecution {
   execute(effect: Effect, context: ObservationContext): Promise<{ summary?: string }>;
 }
 
 export interface CoordinatorDependencies {
-  events: EventStorePort;
+  /** Appends audit events. The one writer, not the store. */
+  audit: AuditWriter;
   effects: EffectExecution;
-  ids: IdPort;
-  now?: () => Date;
 }
 
 /**
@@ -19,11 +18,7 @@ export interface CoordinatorDependencies {
  * implementations. The existing runners remain effect adapters during dual-write.
  */
 export class RunCoordinator {
-  private readonly now: () => Date;
-
-  constructor(private readonly deps: CoordinatorDependencies) {
-    this.now = deps.now ?? (() => new Date());
-  }
+  constructor(private readonly deps: CoordinatorDependencies) {}
 
   async dispatch(state: RunAggregate, context: ObservationContext, command: RunCommand): Promise<Decision> {
     const decision = decide(state, command);
@@ -59,16 +54,9 @@ export class RunCoordinator {
   }
 
   private async append(context: ObservationContext, data: RunEventData, idempotencyKey?: string): Promise<void> {
-    await this.deps.events.append([{
-      id: this.deps.ids.next(),
-      schemaVersion: 1,
-      type: data.kind,
-      occurredAt: this.now().toISOString(),
-      context,
-      correlationId: context.runId,
-      idempotencyKey,
-      data,
-    }]);
+    // Through the writer, so the event is stamped, logged, counted and traced
+    // the way every other audit event is.
+    await this.deps.audit.record(context, data, idempotencyKey ? { idempotencyKey } : {});
   }
 }
 

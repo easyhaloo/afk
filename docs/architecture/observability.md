@@ -82,6 +82,22 @@ JSONL store 与桌面端读适配器都用它，桌面端不再自带一份副�
 - 链断裂的 run 仍会出现在执行历史里，但带 `integrityValid: false`；它的状态只描述
   被验证过的那段前缀。
 
+### 3.2 写入契约：只有一条写事件的路
+
+审计事件只有一条写入口：`@afk/application` 的 `AuditWriter` Port。
+`@afk/execution` 的 `RunObserver` 是它的实现——盖章、落盘、记日志、报指标、
+发 trace 一次做完。事件存储的 `append` 不再是给调用方的第二扇门：自己拼一份
+`RunEventDraft` 直接 append 会跳过盖章与遥测，审计脊柱与遥测脊柱于是对同一个
+run 说法不一。
+
+- `startRun` 与 `RunCoordinator` 都经过 writer，不再自己拼 draft。
+- 合并对账路径每次 reconciliation 只构造一个 observer，不再每个事件造一个。
+
+> 目前的 `RunObserver` 默认带的是 Noop tracer 与 Noop metrics，所以
+> `afk.run_events_total` 指标与 trace 事件在生产里还没有真正发出。接入真实的
+> tracer/metrics 是一项独立能力，不在本次收敛范围内；`createRunObserver` 已经
+> 预留了注入点。
+
 `packages/afk-infrastructure/src/io/logger.ts` 导出
 `withLogContext({ runId, workItemId }, asyncFn)` 与 `getLogContext()`。
 前者用 AsyncLocalStorage 隔离异步作用域，Pino mixin 为作用域内的

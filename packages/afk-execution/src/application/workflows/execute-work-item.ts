@@ -263,7 +263,7 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
 async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies: ExecuteWorkItemDependencies, context: ObservationContext): Promise<ExecuteWorkItemResult> {
   const workItemId = parseWorkItemId(context.workItemId).id;
   const executionId = context.runId;
-  const observer = dependencies.recordAudit ? undefined : new RunObserver({ events: new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR }) });
+  const observer = dependencies.recordAudit ? undefined : createRunObserver();
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
   const audit = async (data: RunEventData) => { await recordAudit(context, data); };
   const manifest = await (dependencies.readManifest ?? readExecutionManifest)(input.manifestPath, workItemId);
@@ -479,7 +479,9 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
     if (change.state !== 'open' && change.state !== 'merged') throw new Error('provider change request is closed without merge');
     if (item.state === 'done' && change.state !== 'merged') throw new Error('backlog is done without a merged provider change request');
     await providers.changes.verifyIssueAssociation(change, workItemId);
-    const recordAudit = dependencies.recordAudit ?? ((context: ObservationContext, data: RunEventData) => new RunObserver({ events: store }).record(context, data));
+    // One writer for the whole reconciliation, not one per event.
+    const audit = dependencies.recordAudit ? undefined : new RunObserver({ events: store });
+    const recordAudit = dependencies.recordAudit ?? ((context: ObservationContext, data: RunEventData) => audit!.record(context, data));
     const context: ObservationContext = {
       traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
       attempt: 1, actor: { kind: 'system', id: 'merge-reconciliation' },

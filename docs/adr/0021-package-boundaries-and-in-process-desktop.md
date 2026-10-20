@@ -63,6 +63,42 @@ can filter server-side — a GitHub issue search per repository owner, GitLab's
 global issue feed — restricted to the projects that were discovered, with the
 per-project listing kept as the fallback. The concurrency ceiling moves from 4
 to 12 because the listing is network bound.
+
+The scoped listing draws on a much tighter pool than the per-project one.
+GitHub's issue search allows 30 requests a minute, against 5000 an hour for
+the repository endpoints the per-project listing uses. A desktop refreshing
+its inventory every few minutes spends two to four searches per refresh,
+which that pool carries comfortably; a burst of concurrent refreshes can
+still push it into a secondary limit, and the listing then falls back to the
+per-project path. The fallback is the old behaviour, so the failure costs
+latency rather than correctness — but a caller that polls hard should expect
+the scoped path to stop paying off.
+
+## What the boundary actually costs
+
+`scripts/benchmark-cli-vs-direct.mjs` measures the two call styles against
+the same provider, paired round by round so that provider latency — which
+moves by seconds between runs — cancels out. On this workspace:
+
+| Operation | in-process | spawned | paired difference |
+| --- | --- | --- | --- |
+| read the runtime version | 0ms | 35ms | +35ms |
+| the old `execute --help` capability probe | 0ms | 177ms | +177ms |
+| the global work item inventory | 5290ms | 7422ms | +1209ms (p95 +2704ms) |
+| one repository's backlog list | 6240ms | 4067ms | −2381ms, the sign moves between runs |
+
+The process boundary itself costs 35ms for a bare invocation and about
+180ms when the command module has to be loaded — and the capability probe
+ran before every work item start. Beyond that, the boundary is not what
+makes the desktop slow: on network-bound operations the difference falls
+inside the provider latency, and on the backlog list the sign is not even
+stable between runs.
+
+The larger win is the request count. Listing the inventory used to issue
+one request per project — 138 of them — and now issues one per owner. The
+removal of the subprocess bought stability, the disappearance of the probe,
+and a warm provider the desktop can keep; the request count is what bought
+the seconds.
 ## Consequences
 The desktop and the CLI now run the same code for the same operation, which is
 the invariant the blueprint asked for and which no longer depends on two

@@ -11,6 +11,7 @@ import { SshConfirmDialog } from "./SshConfirmDialog";
 import { FilterPanel } from "../../components/FilterPanel";
 import { SelectMenu } from "../../components/SelectMenu";
 import "./ssh.css";
+import { getFocusableElements } from "../../focus-trap";
 
 type SourceFilter = "all" | SshHostSource;
 type StatusFilter = "all" | SshHostStatus;
@@ -26,12 +27,6 @@ const statusLabels: Record<SshHostStatus, string> = { ready: "可连接", untrus
 const sourceLabels: Record<SshHostSource, string> = { system: "系统配置", managed: "AFK 管理" };
 const diagnosticTypeLabels: Record<string, string> = { "ssh.host-key-checking-disabled": "主机密钥校验已关闭", "ssh.known-hosts-disabled": "known_hosts 已禁用", "ssh.malformed-directive": "无法解析的配置行", "ssh.non-concrete-host": "非具体 Host" };
 const diagnosticSeverityLabels: Record<SshDiagnostic["severity"], string> = { info: "提示", warning: "警告", error: "错误" };
-const modalFocusableSelector = "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
-
-function getFocusableElements(container: HTMLElement) {
-  return Array.from(container.querySelectorAll<HTMLElement>(modalFocusableSelector)).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
-}
-
 export function filterSshHosts(hosts: SshHost[], query: string, source: SourceFilter, status: StatusFilter) {
   const normalized = query.trim().toLowerCase();
   return hosts.filter((host) => {

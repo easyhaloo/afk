@@ -20,6 +20,7 @@ import { fetchBacklogList, invalidateBacklogCache, readBacklogCache, resetBacklo
 import { BACKLOG_STATE_LABELS, backlogStateLabel, filterBacklogItems, type SourceFilter } from "./backlog-filter";
 import { getBacklogPrimaryAction, type BacklogPrimaryAction } from "./backlog-primary-action";
 import "./backlog.css";
+import { getFocusableElements } from "../../focus-trap";
 
 export { backlogStateLabel, filterBacklogItems, BACKLOG_STATE_LABELS } from "./backlog-filter";
 export type { SourceFilter } from "./backlog-filter";
@@ -54,12 +55,6 @@ const executionModeOptions: Array<{ value: BacklogExecutionMode; label: string }
 
 const EMPTY_CREATE_FORM: BacklogCreateInput = { title: "", description: "", executionMode: "afk", tags: [] };
 const BACKLOG_FORCE_REFRESH = 24 * 60 * 60 * 1000;
-const modalFocusableSelector = "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
-
-function getFocusableElements(container: HTMLElement): HTMLElement[] {
-  return Array.from(container.querySelectorAll<HTMLElement>(modalFocusableSelector)).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
-}
-
 export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—", templates = [], onOpenWorkItem }: BacklogPageProps) {
   const cached = useMemo(() => readBacklogCache(workspace), []);
   const [items, setItems] = useState<BacklogItem[]>(cached?.items ?? []);

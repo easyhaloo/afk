@@ -5,12 +5,7 @@ import type { ManagedSshHostInput, SshBastionAssetPreview, SshBastionSyncResult,
 import { SshActionButton } from "./SshActionButton";
 import { SshFormPicker } from "./SshHostsPage";
 import "./ssh.css";
-
-const modalFocusableSelector = "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
-
-function getFocusableElements(container: HTMLElement) {
-  return Array.from(container.querySelectorAll<HTMLElement>(modalFocusableSelector)).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
-}
+import { getFocusableElements } from "../../focus-trap";
 
 const jumpHostTypeLabels: Record<"none" | SshJumpHostType, string> = { none: "不使用跳板机", openssh: "OpenSSH ProxyJump", jumpserver: "JumpServer" };
 

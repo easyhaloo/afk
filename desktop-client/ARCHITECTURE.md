@@ -50,12 +50,20 @@ Execution history uses a separate direct Application path:
   `@afk/application.queryExecutionHistory`; no CLI subprocess or legacy projection
   is used for the history view. Main source is plain ESM and imports the use cases
   directly — there is no runtime CommonJS interop shim.
-- The renderer's `src/features/run-center/use-execution-history.ts` owns execution
-  list polling, pagination, and run lookup for the run center and work-item history.
+- The renderer's execution history lives in a shared query cache.
+  `src/features/run-center/execution-query-cache.ts` holds one entry per query key
+  — one in-flight request, one poll timer, many subscribers — and
+  `src/features/run-center/execution-queries.ts` binds it to the domain: the key
+  factories, the merge rule, and the invalidation seam.
+  `use-execution-history.ts` and `use-execution-detail.ts` are thin readers of that
+  cache, so the run centre and the work-item history ask for the same execution
+  history once and poll it once, instead of each keeping its own state.
   Refreshes merge by run identity and audit sequence, preserving loaded historical
   attempts and pagination progress. Scope changes and newer lookups invalidate stale
   responses. Navigation also cancels pending lookups without clearing loaded
   attempts; `useExecutionDetail` remains responsible for each attempt's detail.
+  Starting a run invalidates the history keys, so a run started in one surface
+  reaches the other without waiting for the next poll.
 - Execution summaries carry optional token `usage` projected by Application
   from verified `agent.session_recorded` events. The shared contract validates
   the three non-negative integer counts; the run-center inspector displays

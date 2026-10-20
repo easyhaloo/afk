@@ -18,6 +18,7 @@ import type {
 import type { AgentRuntime } from "../../../shared/ipc-contract";
 import { type ExecutionSummary } from "../../../shared/execution-contract";
 import { RunTimelineSection } from "../run-center/RunTimelineView";
+import { invalidateExecutionHistories } from "../run-center/execution-queries";
 import { useExecutionHistory } from "../run-center/use-execution-history";
 import {
   planRepositoryCheckoutPaths,
@@ -345,6 +346,9 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       setRunNotice(`运行已创建：${result.workspace.root}`);
       setRunSetupOpen(false);
       setDetailTab("runs");
+      // The audit history of every surface shares one entry per work item, so
+      // a started run reaches the run center without waiting for its poll.
+      invalidateExecutionHistories();
       void load(false, true);
     } catch (cause) {
       if (runRequestVersion.current !== currentRequestVersion || selectedWorkItemId.current !== workItemId) return;

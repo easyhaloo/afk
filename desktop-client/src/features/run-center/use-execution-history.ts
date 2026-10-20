@@ -1,78 +1,84 @@
 import { useEffect, useRef, useState } from "react";
 import type { ExecutionQueryOptions, ExecutionSummary } from "../../../shared/execution-contract";
+import type { QueryEntry, QuerySnapshot } from "./execution-query-cache";
+import {
+  executionHistoryCache,
+  executionHistoryKey,
+  mergeExecutionPage,
+  type ExecutionHistoryState,
+} from "./execution-queries";
 
-type Page = { executions: ExecutionSummary[]; nextCursor?: string };
-type History = Page & { workItemId?: string; error: string; paginated: boolean };
-
+/**
+ * The execution history of one work item — or of every work item.
+ *
+ * The hook is a thin reader of the shared history cache: the entry of the key
+ * holds the records, the cursor, the error, the in-flight request and the
+ * poll timer, so every surface that reads the same key reads the same truth
+ * and costs one request instead of one request per surface.
+ */
 export function useExecutionHistory(enabled: boolean, workItemId?: string) {
-  const [history, setHistory] = useState<History>({ workItemId, executions: [], error: "", paginated: false });
+  const key = executionHistoryKey(workItemId);
+  const [state, setState] = useState<{ key: string; snapshot: QuerySnapshot<ExecutionHistoryState> }>(
+    () => ({ key, snapshot: executionHistoryCache.read(key) }),
+  );
+  const observing = useRef(false);
   const generation = useRef(0);
   const lookup = useRef(0);
-  const loadingMore = useRef(false);
+  const entry = useRef<QueryEntry<ExecutionHistoryState> | undefined>(undefined);
 
-  const mergePage = (page: Page, mode: "refresh" | "more" | "lookup", version: number) => {
-    setHistory(current => {
-      if (generation.current !== version || current.workItemId !== workItemId) return current;
-      const known = new Map(current.executions.map(execution => [execution.runId, execution]));
-      const incoming = new Map<string, ExecutionSummary>();
-      for (const execution of page.executions) {
-        if (workItemId && execution.workItemId !== workItemId) continue;
-        const previous = incoming.get(execution.runId) ?? known.get(execution.runId);
-        incoming.set(execution.runId, previous && previous.sequence > execution.sequence ? previous : execution);
+  useEffect(() => {
+    const query = executionHistoryCache.entry(key);
+    entry.current = query;
+    // The refresh belongs to the entry: the poll and an invalidation from
+    // another surface reuse it instead of asking the main process again.
+    const refresh = async () => {
+      try {
+        const page = await window.afkDesktop.workItems.executions({ ...(workItemId ? { workItemId } : {}), limit: 100 });
+        if (!query.alive) return;
+        query.publish(mergeExecutionPage(query.snapshot().value, page, "refresh", workItemId));
+      } catch (cause) {
+        if (!query.alive) return;
+        query.fail(cause instanceof Error ? cause.message : String(cause));
       }
-      const executions = mode === "refresh"
-        ? [...incoming.values(), ...current.executions.filter(execution => !incoming.has(execution.runId))]
-        : [...current.executions.map(execution => incoming.get(execution.runId) ?? execution), ...[...incoming.values()].filter(execution => !known.has(execution.runId))];
-      return {
-        ...current, executions, error: "",
-        paginated: current.paginated || mode === "more",
-        nextCursor: mode === "more" || (mode === "refresh" && !current.paginated) ? page.nextCursor : current.nextCursor,
-      };
+    };
+    query.setTask(refresh);
+    const detach = query.subscribe(snapshot => {
+      if (observing.current) setState({ key, snapshot });
+    });
+    setState({ key, snapshot: query.snapshot() });
+    return () => { generation.current += 1; lookup.current += 1; detach(); };
+  }, [key, workItemId]);
+
+  useEffect(() => {
+    observing.current = enabled;
+    const query = entry.current;
+    if (!enabled || !query) return;
+    setState({ key, snapshot: query.snapshot() });
+    void query.refresh();
+    const stop = query.poll(5000);
+    return () => { generation.current += 1; stop(); };
+  }, [enabled, key]);
+
+  const loadMore = async () => {
+    const query = entry.current;
+    if (!enabled || !query) return;
+    const since = query.snapshot().value.nextCursor;
+    if (!since) return;
+    await query.request("more", async () => {
+      try {
+        const page = await window.afkDesktop.workItems.executions({ ...(workItemId ? { workItemId } : {}), limit: 100, since });
+        if (!query.alive) return;
+        query.publish(mergeExecutionPage(query.snapshot().value, page, "more", workItemId));
+      } catch (cause) {
+        if (!query.alive) return;
+        query.fail(cause instanceof Error ? cause.message : String(cause));
+      }
     });
   };
 
-  const recordError = (cause: unknown, version: number) => {
-    if (generation.current !== version) return;
-    setHistory(current => generation.current === version && current.workItemId === workItemId
-      ? { ...current, error: cause instanceof Error ? cause.message : String(cause) } : current);
-  };
-
-  useEffect(() => {
-    const version = ++generation.current;
-    loadingMore.current = false;
-    setHistory(current => current.workItemId === workItemId ? current : { workItemId, executions: [], error: "", paginated: false });
-    let refreshing = false;
-    const refresh = async () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        mergePage(await window.afkDesktop.workItems.executions({ ...(workItemId ? { workItemId } : {}), limit: 100 }), "refresh", version);
-      } catch (cause) {
-        recordError(cause, version);
-      } finally {
-        refreshing = false;
-      }
-    };
-    if (enabled) void refresh();
-    const timer = enabled ? setInterval(() => { void refresh(); }, 5000) : undefined;
-    return () => { generation.current += 1; lookup.current += 1; if (timer !== undefined) clearInterval(timer); };
-  }, [enabled, workItemId]);
-
-  const loadMore = async () => {
-    if (!enabled || history.workItemId !== workItemId || !history.nextCursor || loadingMore.current) return;
-    const version = generation.current;
-    loadingMore.current = true;
-    try {
-      const page = await window.afkDesktop.workItems.executions({ ...(workItemId ? { workItemId } : {}), limit: 100, since: history.nextCursor });
-      mergePage(page, "more", version);
-    } catch (cause) {
-      recordError(cause, version);
-    } finally {
-      if (generation.current === version) loadingMore.current = false;
-    }
-  };
-
   const find = async (runId: string, itemId = workItemId) => {
+    const query = entry.current;
+    if (!query) return undefined;
     const version = generation.current;
     const request = ++lookup.current;
     const current = () => generation.current === version && lookup.current === request;
@@ -81,7 +87,7 @@ export function useExecutionHistory(enabled: boolean, workItemId?: string) {
       do {
         const page = await window.afkDesktop.workItems.executions(options);
         if (!current()) return;
-        mergePage(page, "lookup", version);
+        if (query.alive) query.publish(mergeExecutionPage(query.snapshot().value, page, "lookup", workItemId));
         const execution = page.executions.find(candidate => candidate.runId === runId && (!itemId || candidate.workItemId === itemId));
         if (execution) return execution;
         options.since = page.nextCursor;
@@ -92,10 +98,11 @@ export function useExecutionHistory(enabled: boolean, workItemId?: string) {
     }
   };
 
+  const current = state.key === key;
   return {
-    executions: history.workItemId === workItemId ? history.executions : [],
-    nextCursor: history.workItemId === workItemId ? history.nextCursor : undefined,
-    error: history.workItemId === workItemId ? history.error : "",
+    executions: current ? state.snapshot.value.executions : [],
+    nextCursor: current ? state.snapshot.value.nextCursor : undefined,
+    error: current ? state.snapshot.error : "",
     loadMore, find,
     cancelLookup: () => { lookup.current += 1; },
   };

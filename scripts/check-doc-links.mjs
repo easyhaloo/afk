@@ -2,6 +2,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve, dirname, basename, sep } from 'node:path';
+import { isGeneratedOutputPath } from './doc-source-paths.mjs';
 
 // Resolve repo root as the parent of the directory containing this script.
 // Use fileURLToPath to avoid percent-encoding issues with .pathname on paths
@@ -151,6 +152,9 @@ for (const mdFile of mdFiles) {
     // A path, not a bare file name, and not a glob or a placeholder.
     if (!raw.includes('/')) continue;
     if (/[*<>]|\$\{/.test(raw)) continue;
+    // Build output is not source: the artifact a build produces does not
+    // exist until the build runs.
+    if (isGeneratedOutputPath(raw)) continue;
 
     // A document may name a path relative to its own directory, to the
     // repository root, or relative to the desktop client.

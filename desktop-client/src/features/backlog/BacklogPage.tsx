@@ -18,12 +18,14 @@ import { SegmentedControl } from "../../components/SegmentedControl";
 import { BacklogDetailDrawer } from "./BacklogDetailDrawer";
 import { fetchBacklogList, invalidateBacklogCache, readBacklogCache, resetBacklogCache } from "./backlog-cache";
 import { BACKLOG_STATE_LABELS, backlogStateLabel, filterBacklogItems, type SourceFilter } from "./backlog-filter";
+import { getBacklogPrimaryAction, type BacklogPrimaryAction } from "./backlog-primary-action";
 import "./backlog.css";
 
 export { backlogStateLabel, filterBacklogItems, BACKLOG_STATE_LABELS } from "./backlog-filter";
 export type { SourceFilter } from "./backlog-filter";
+export { getBacklogPrimaryAction } from "./backlog-primary-action";
+export type { BacklogPrimaryAction } from "./backlog-primary-action";
 
-export type BacklogPrimaryAction = "start" | "view-run" | "stop" | "recover" | "retry" | "confirm-merge" | "view-result" | "view";
 
 type BacklogPageProps = {
   workspace: string;
@@ -53,19 +55,6 @@ const executionModeOptions: Array<{ value: BacklogExecutionMode; label: string }
 const EMPTY_CREATE_FORM: BacklogCreateInput = { title: "", description: "", executionMode: "afk", tags: [] };
 const BACKLOG_FORCE_REFRESH = 24 * 60 * 60 * 1000;
 const modalFocusableSelector = "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])";
-
-export function getBacklogPrimaryAction(item: BacklogItem, summary?: BacklogRuntimeSummary): BacklogPrimaryAction {
-  if (summary?.runtime?.status === "stale") return "recover";
-  const localRunning = summary?.activeRun?.status === "starting" || summary?.activeRun?.status === "running";
-  const localAlive = localRunning && summary?.activeRun?.pid !== undefined;
-  if ((item.state === "in_progress" || item.state === "verification") && localAlive) return "stop";
-  if (localRunning || summary?.runtime?.status === "running") return "view-run";
-  if ((item.state === "ready" || item.state === "rework") && item.executionMode === "afk") return "start";
-  if (item.state === "blocked" && item.executionMode === "hitl") return "retry";
-  if (!item.parentId && item.state === "merge_ready" && item.executionMode === "hitl") return "confirm-merge";
-  if (item.state === "done") return "view-result";
-  return "view";
-}
 
 function getFocusableElements(container: HTMLElement): HTMLElement[] {
   return Array.from(container.querySelectorAll<HTMLElement>(modalFocusableSelector)).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");

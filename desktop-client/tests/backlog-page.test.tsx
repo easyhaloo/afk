@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
-import { BacklogPage, getBacklogPrimaryAction } from "../src/features/backlog/BacklogPage";
+import { BacklogPage } from "../src/features/backlog/BacklogPage";
 import { workflowNodeDisplayLabel } from "../src/main";
 import {
   readBacklogCache,
@@ -15,7 +15,6 @@ import {
   filterBacklogItems,
 } from "../src/features/backlog/backlog-filter";
 import type { BacklogItem } from "../shared/backlog-contract";
-import type { BacklogRunSummary } from "../shared/backlog-contract";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as { document?: unknown }).document = {
@@ -445,19 +444,6 @@ describe("BacklogPage loading states", () => {
 });
 
 describe("BacklogPage execution", () => {
-  it("selects exactly one primary action from provider, runtime, and local process state", () => {
-    const ready = items[0];
-    const activeRun: BacklogRunSummary = { id: "run-1", backlogId: ready.id, status: "running", startedAt: "2026-09-17T08:00:00.000Z", pid: 1234 };
-    expect(getBacklogPrimaryAction(ready)).toBe("start");
-    expect(getBacklogPrimaryAction(ready, { backlogId: ready.id, backlog: ready, activeRun })).toBe("view-run");
-    expect(getBacklogPrimaryAction({ ...ready, state: "in_progress" }, { backlogId: ready.id, backlog: { ...ready, state: "in_progress" }, activeRun })).toBe("stop");
-    expect(getBacklogPrimaryAction({ ...ready, state: "verification" }, { backlogId: ready.id, backlog: { ...ready, state: "verification" }, runtime: { runId: "runtime-1", status: "running", phase: "verifying", heartbeatAt: "2026-09-17T08:00:00.000Z" } })).toBe("view-run");
-    expect(getBacklogPrimaryAction({ ...ready, state: "in_progress" }, { backlogId: ready.id, backlog: { ...ready, state: "in_progress" }, runtime: { runId: "runtime-1", status: "stale", phase: "implementing", heartbeatAt: "2026-09-17T07:00:00.000Z" } })).toBe("recover");
-    expect(getBacklogPrimaryAction({ ...ready, state: "blocked", executionMode: "hitl" })).toBe("retry");
-    expect(getBacklogPrimaryAction({ ...ready, state: "merge_ready", executionMode: "hitl" })).toBe("confirm-merge");
-    expect(getBacklogPrimaryAction({ ...ready, parentId: "parent-1", state: "merge_ready", executionMode: "hitl" })).toBe("view");
-    expect(getBacklogPrimaryAction({ ...ready, state: "done", executionMode: "hitl" })).toBe("view-result");
-  });
 
   it("labels custom qa nodes as review agents without changing their type", () => {
     expect(workflowNodeDisplayLabel("qa", "QA 1")).toBe("审查 Agent");

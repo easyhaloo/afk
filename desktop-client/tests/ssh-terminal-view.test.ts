@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { StrictMode, createElement } from "react";
+import { StrictMode, createElement, type ReactElement } from "react";
 import { act, create } from "react-test-renderer";
 import type { ITheme, ITerminalAddon, ITerminalOptions } from "@xterm/xterm";
 import {
@@ -210,7 +210,7 @@ describe("SSH terminal view", () => {
       renderer = create(createElement(TestView, {
         sessionId: "session-a", output: "", disabled: false,
         onInput: vi.fn(), onResize: vi.fn(), onCopy: vi.fn(), onError: vi.fn(),
-      }), { createNodeMock: (element) => element.props.className === "ssh-terminal-host" ? host : {} });
+      }), { createNodeMock: hostNodeMock(host) });
     });
 
     expect(themeWatcher).toHaveBeenCalledTimes(1);
@@ -246,7 +246,7 @@ describe("SSH terminal view", () => {
       renderer = create(createElement(StrictMode, null,
         createElement(TestView, { sessionId: "session-a", output: "first", disabled: false, fontSize: 11, onInput: firstInput, ...commonProps }),
       ), {
-        createNodeMock: (element) => element.props.className === "ssh-terminal-host" ? host : {},
+        createNodeMock: hostNodeMock(host),
       });
     });
 
@@ -283,3 +283,17 @@ describe("SSH terminal view", () => {
     vi.unstubAllGlobals();
   });
 });
+
+/**
+ * The node mock hands the view its host element.
+ *
+ * React 19 types the props of an element as `unknown` until they are
+ * narrowed, so the class name is read through the shape the view actually
+ * renders rather than through an unchecked access.
+ */
+function hostNodeMock(host: unknown): (element: ReactElement) => unknown {
+  return (element) => {
+    const props = element.props as { className?: string };
+    return props.className === "ssh-terminal-host" ? host : {};
+  };
+}

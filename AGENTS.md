@@ -123,6 +123,18 @@ might need lives in `packages/`.
   repository, cloning it, removing it takes as long as the test that uses
   it does, so the hook gets the same budget as the test. A test that times
   out inside its own setup has still timed out.
+- **Do not hand-write the types of a package you do not own.** A
+  `declare module` block that describes a third-party API is a claim about
+  someone else's implementation, and it drifts without a compile error. Take
+  the types from the maintained `@types/*` package and let the compiler
+  compare the code against them.
+- **The desktop's component tests render with `react-test-renderer`, and the
+  pin is deliberate.** The suite runs in a `node` environment with no DOM, so
+  there is no DOM renderer to use without adding one; the package is
+  deprecated upstream and prints a warning on every suite that renders
+  through it. Migrating means a DOM environment and rewriting the
+  assertions that read the renderer's tree, so the pin moves with the React
+  version and the deprecation is a known cost rather than an accident.
 
 ## Documentation
 

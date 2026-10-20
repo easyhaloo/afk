@@ -61,7 +61,7 @@ import {
   type PreparedRepositorySet,
 } from './workflows/multi-repository-preparer.js';
 import { runtimeFieldsFromExecution } from './runtime/agent-metadata.js';
-import type { ObservationContext, RunEventData } from '@afk/core';
+import { DEFAULT_OBSERVATION_PROFILE, type ObservationContext, type RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
 import { collectAgentTelemetry } from '../infrastructure/observability/agent-telemetry.js';
 import { RuntimeLifecycle, type RuntimeLifecycleLabels } from './runtime/runtime-lifecycle.js';
@@ -1460,7 +1460,7 @@ export class WorkflowRunner {
       traceId: runId,
       runId,
       workItemId: options.observationWorkItemId ?? backlogId,
-      profileId: process.env.AFK_PROFILE ?? 'local',
+      profileId: process.env.AFK_PROFILE ?? DEFAULT_OBSERVATION_PROFILE,
       attempt: 1,
       actor: { kind: 'system', id: session },
     };

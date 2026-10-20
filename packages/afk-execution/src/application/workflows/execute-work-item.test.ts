@@ -88,6 +88,23 @@ function lockProbe(status: 'alive' | 'dead' | 'unknown', pid = 8420) {
 }
 
 describe('executeWorkItem', () => {
+  it('records the profile the audit documentation names', async () => {
+    // The profile is part of the signed identity of every event, and the
+    // audit documentation names the default. The work item entry point
+    // wrote a different one, so the same run came out of the two entry
+    // points under two profiles.
+    const { deps } = await setup();
+    const previous = process.env.AFK_PROFILE;
+    delete process.env.AFK_PROFILE;
+    try {
+      await executeWorkItem(input, deps);
+    } finally {
+      if (previous === undefined) delete process.env.AFK_PROFILE;
+      else process.env.AFK_PROFILE = previous;
+    }
+    expect(vi.mocked(deps.recordAudit!).mock.calls[0][0].profileId).toBe('local');
+  });
+
   it('loads the default execution through application ports without an injected loader', async () => {
     const { deps, directory } = await setup();
     const previous = process.env.AFK_EVENT_STORE_DIR;

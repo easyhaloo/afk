@@ -17,7 +17,7 @@ import type { GlobalWorkItem } from '@afk/application';
 import { prepareAgentRuntime } from '../../domain/agents/index.js';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { WorkflowConfig } from '../../domain/config/types.js';
-import type { ObservationContext, RunEventData } from '@afk/core';
+import { DEFAULT_OBSERVATION_PROFILE, type ObservationContext, type RunEventData } from '@afk/core';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
 import { RunObserver } from '../../observability/run-observer.js';
@@ -254,7 +254,7 @@ export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies:
   const executionId = input.executionId ?? randomUUID();
   if (!EXECUTION_ID_PATTERN.test(executionId)) throw new Error('invalid executionId');
   const context: ObservationContext = {
-    traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
+    traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? DEFAULT_OBSERVATION_PROFILE,
     attempt: 1, actor: { kind: 'system', id: 'execute' },
   };
   return withLogContext(context, () => executeWorkItemObserved(input, dependencies, context));
@@ -483,7 +483,7 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
     const audit = dependencies.recordAudit ? undefined : new RunObserver({ events: store });
     const recordAudit = dependencies.recordAudit ?? ((context: ObservationContext, data: RunEventData) => audit!.record(context, data));
     const context: ObservationContext = {
-      traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
+      traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? DEFAULT_OBSERVATION_PROFILE,
       attempt: 1, actor: { kind: 'system', id: 'merge-reconciliation' },
     };
     if (item.state === 'verification' && change.state === 'open') await providers.backlog.transition(item.id, 'merge_ready', { changeId: change.id });

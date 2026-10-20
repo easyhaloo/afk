@@ -2,6 +2,16 @@ import type { Run, RunPhase, RunStatus } from './model.js';
 
 export type ObservationActorKind = 'cli' | 'loop' | 'agent' | 'policy' | 'human' | 'system';
 
+/**
+ * The profile a run is recorded under when nobody names one.
+ *
+ * The profile is the reproducible combination a run happened under, and it
+ * is part of the signed identity of every event, so the entry points that
+ * write an observation context have to agree on it. The audit
+ * documentation names this one.
+ */
+export const DEFAULT_OBSERVATION_PROFILE = 'local';
+
 export interface ObservationContext {
   traceId: string;
   spanId?: string;

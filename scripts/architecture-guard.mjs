@@ -247,6 +247,67 @@ function checkStateMappingDuplicates() {
 }
 
 /**
+ * A rule with two homes.
+ *
+ * Two functions with the same name and the same body are the same rule
+ * written out twice, and the copies drift: the desktop's run validation
+ * had a second and weaker copy in the electron process, both credential
+ * stores carried their own atomic write while the key-value store's test
+ * said the opposite, and the tmux session name was rewritten on both
+ * sides of the package line.
+ *
+ * A body short enough to be an idiom — "is this a plain object" — is not
+ * a rule, so only bodies with some substance in them are reported.  The
+ * bodies compared here are the ones a rule would be written in: a branch
+ * name, a credential file, a session name.
+ */
+const duplicateRuleMinimumLength = 120;
+const functionDeclarationPattern = /(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\([^)]*\)\s*(?::[^{]+?)?\{/g;
+const observedRuleBodies = new Map();
+
+function recordFunctionBodies(source, file) {
+  // A test file's helper is not a rule the product declares twice; two
+  // suites building the same fixture is ordinary.
+  if (isTestFile(file)) return;
+  for (const match of source.matchAll(functionDeclarationPattern)) {
+    const start = match.index + match[0].length - 1;
+    let depth = 0;
+    let end = -1;
+    for (let index = start; index < source.length; index += 1) {
+      const character = source[index];
+      if (character === '{') depth += 1;
+      else if (character === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = index;
+          break;
+        }
+      }
+    }
+    if (end < 0) continue;
+    const body = source.slice(start, end + 1);
+    const normalized = body
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|\s)\/\/.*$/gm, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (normalized.length < duplicateRuleMinimumLength) continue;
+    const key = `${match[1]}\u0000${normalized}`;
+    const entry = observedRuleBodies.get(key) ?? { name: match[1], files: new Set() };
+    entry.files.add(file);
+    observedRuleBodies.set(key, entry);
+  }
+}
+
+function checkDuplicateRules() {
+  for (const entry of observedRuleBodies.values()) {
+    if (entry.files.size < 2) continue;
+    const files = [...entry.files].map(sourcePath).sort();
+    addViolation(`${files[0]}: the rule '${entry.name}' is written out in ${files.length} files (${files.join(', ')}); define it once and import it`);
+  }
+}
+
+/**
  * The layers a package may carry inside its own source tree.
  *
  * A package that has domain/application/infrastructure sub-trees names
@@ -288,6 +349,7 @@ function checkFile(fullPath) {
   }
 
   recordStateMappings(fullPath, source);
+  recordFunctionBodies(source, fullPath);
 
   for (const match of source.matchAll(importPattern)) {
     const specifier = match[2];
@@ -419,6 +481,7 @@ function checkPackage(packageName, packageRoot) {
   const packageFiles = collectSourceFiles(sourceRoot).filter(file => !isTestFile(file));
   for (const fullPath of packageFiles) {
     const source = stripComments(readFileSync(fullPath, 'utf8'));
+    recordFunctionBodies(source, fullPath);
     for (const globalName of domGlobals) {
       // A local binding that happens to share the name — a tmux window, a
       // document being parsed — is not the DOM global, so the file is exempt
@@ -601,11 +664,14 @@ for (const sourceFile of sourceFiles) checkFile(sourceFile);
 if (existsSync(desktopRoot) && statSync(desktopRoot).isDirectory()) {
   desktopSourceFiles.push(...collectSourceFiles(desktopRoot));
   for (const sourceFile of desktopSourceFiles) {
-    recordStateMappings(sourceFile, stripComments(readFileSync(sourceFile, 'utf8')));
+    const desktopSource = stripComments(readFileSync(sourceFile, 'utf8'));
+    recordStateMappings(sourceFile, desktopSource);
+    recordFunctionBodies(desktopSource, sourceFile);
     checkDesktopImports(sourceFile);
   }
 }
 checkStateMappingDuplicates();
+checkDuplicateRules();
 checkPackageGraph();
 checkBuildApprovals();
 if (checkPackages) {

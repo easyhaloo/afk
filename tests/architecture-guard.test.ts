@@ -163,6 +163,36 @@ describe('architecture guard migration baseline', () => {
   });
 });
 
+describe('architecture guard duplicate rules', () => {
+  const RULE = 'export function validateThing(value: unknown): string {\n'
+    + '  if (typeof value !== "string" || value.trim().length === 0 || /[\\u0000-\\u001f]/.test(value)) throw new Error("value is invalid");\n'
+    + '  return value.trim();\n'
+    + '}\n';
+
+  const SOURCE = "import { legacy } from '../lib/legacy';\nconsole.log(legacy);\n";
+
+  it('rejects a rule written out in two files', () => {
+    const duplicated = fixture(SOURCE, { 'cli/other.ts': RULE, 'cli/third.ts': RULE });
+    const output = duplicated.run();
+    expect(output).toContain("the rule 'validateThing' is written out in 2 files");
+    expect(output).toContain('define it once and import it');
+  });
+
+  it('accepts two files with different rules', () => {
+    const different = fixture(SOURCE, {
+      'cli/other.ts': RULE,
+      'cli/third.ts': RULE.replace('validateThing', 'validateOtherThing'),
+    });
+    expect(different.run()).toContain('Architecture guard passed');
+  });
+
+  it('accepts an idiom short enough not to be a rule', () => {
+    const idiom = 'function isRecord(value: unknown): boolean {\n  return Boolean(value) && typeof value === "object" && !Array.isArray(value);\n}\n';
+    const repeated = fixture(SOURCE, { 'cli/other.ts': idiom, 'cli/third.ts': idiom });
+    expect(repeated.run()).toContain('Architecture guard passed');
+  });
+});
+
 describe('architecture guard CI', () => {
   it('runs the architecture check in CI', () => {
     expect(readFileSync(resolve('.github/workflows/ci.yml'), 'utf8')).toMatch(/run: pnpm architecture:check --check-packages/);

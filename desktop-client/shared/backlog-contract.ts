@@ -11,12 +11,33 @@
  */
 
 import { assertExactKeys, parseRequiredString } from "./validation.js";
+import type {
+  BacklogChangeRequest as AuditedBacklogChangeRequest,
+  BacklogExecutionMode as AuditedBacklogExecutionMode,
+  BacklogItem as AuditedBacklogItem,
+  BacklogState as AuditedBacklogState,
+} from "@afk/application";
 import type { SshExternalTerminalId } from "./ssh-contract.js";
 import {
   validateBaseBranch,
   validateRunRepositorySelectionSet,
 } from "./work-item-run-validation.js";
 
+/** A type-level assertion: the type argument has to hold. */
+type Assert<T extends true> = T;
+
+/**
+ * The wire format is deliberately wider than the shared model — a provider
+ * AFK does not support yet can add a field without the renderer changing.
+ * But it must not be *narrower*: a field the shared model grows has to be
+ * carried, or the parser below rejects a perfectly good payload and the
+ * board stops with a list of items on screen.
+ *
+ * The checks are in that direction. The desktop may declare more than the
+ * shared model does; it may not declare less. A field the shared model
+ * gains stops this package from building, rather than stopping the board
+ * at runtime.
+ */
 export const BACKLOG_STATES = [
   "ready",
   "rework",
@@ -25,11 +46,18 @@ export const BACKLOG_STATES = [
   "merge_ready",
   "done",
   "blocked",
-] as const;
+] as const satisfies readonly AuditedBacklogState[];
+
+export type BacklogStatesCoverTheAudit = Assert<
+  Exclude<AuditedBacklogState, (typeof BACKLOG_STATES)[number]> extends never ? true : false
+>;
+
+export const BACKLOG_EXECUTION_MODES = ["afk", "hitl"] as const satisfies readonly AuditedBacklogExecutionMode[];
+export type BacklogModesCoverTheAudit = Assert<
+  Exclude<AuditedBacklogExecutionMode, (typeof BACKLOG_EXECUTION_MODES)[number]> extends never ? true : false
+>;
 
 export type BacklogState = typeof BACKLOG_STATES[number];
-
-export const BACKLOG_EXECUTION_MODES = ["afk", "hitl"] as const;
 export type BacklogExecutionMode = typeof BACKLOG_EXECUTION_MODES[number];
 export const WORK_ITEM_AGENT_IDS = ["claude", "codex", "cursor", "pi", "opencode", "copilot"] as const;
 export type WorkItemAgentId = typeof WORK_ITEM_AGENT_IDS[number];
@@ -430,10 +458,21 @@ export function parseWorkItemId(input: unknown): WorkItemId {
   return id;
 }
 
+const PROVIDER_PROJECT_KEYS = ["platform", "projectKey", "providerHost", "providerProjectId", "name", "defaultBranch", "webUrl"] as const;
+type AuditedProviderProjectRef = NonNullable<AuditedBacklogItem['project']>;
+type ProviderProjectKeysCoverTheAudit = Assert<
+  Exclude<keyof AuditedProviderProjectRef, (typeof PROVIDER_PROJECT_KEYS)[number]> extends never ? true : false
+>;
+
+const BACKLOG_CHANGE_REQUEST_KEYS = ["id", "state", "sourceBranch", "targetBranch", "url"] as const;
+type BacklogChangeRequestKeysCoverTheAudit = Assert<
+  Exclude<keyof AuditedBacklogChangeRequest, (typeof BACKLOG_CHANGE_REQUEST_KEYS)[number]> extends never ? true : false
+>;
+
 export function parseProviderProjectRef(input: unknown): ProviderProjectRef {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("provider project must be an object");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["platform", "projectKey", "providerHost", "providerProjectId", "name", "defaultBranch", "webUrl"], "provider project");
+  assertExactKeys(candidate, PROVIDER_PROJECT_KEYS, "provider project");
   const project: ProviderProjectRef = {
     platform: parseRequiredBacklogPlatform(candidate.platform, "provider project"),
     projectKey: parseProjectKey(candidate.projectKey, "provider project"),
@@ -641,10 +680,19 @@ export function parseBacklogRuntimeSummary(input: unknown): BacklogRuntimeSummar
   };
 }
 
+const BACKLOG_ITEM_KEYS = [
+  "id", "workItemId", "issueNumber", "project", "managed", "executionEligible", "title", "description",
+  "parentId", "baseBacklogId", "dependsOn", "state", "executionMode", "tags", "branchName", "providerRef",
+  "webUrl", "changeRequest",
+] as const;
+type BacklogItemKeysCoverTheAudit = Assert<
+  Exclude<keyof AuditedBacklogItem, (typeof BACKLOG_ITEM_KEYS)[number]> extends never ? true : false
+>;
+
 function parseBacklogItem(input: unknown): BacklogItem {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog runtime summary: backlog is invalid");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "workItemId", "issueNumber", "project", "managed", "executionEligible", "title", "description", "parentId", "baseBacklogId", "dependsOn", "state", "executionMode", "tags", "branchName", "providerRef", "webUrl", "changeRequest"], "backlog item");
+  assertExactKeys(candidate, BACKLOG_ITEM_KEYS, "backlog item");
   if (typeof candidate.id !== "string" || typeof candidate.title !== "string" || typeof candidate.branchName !== "string" || typeof candidate.providerRef !== "string" || !isBacklogState(candidate.state) || !isBacklogExecutionMode(candidate.executionMode)) throw new Error("backlog item has invalid identity or enum fields");
   if (!Array.isArray(candidate.dependsOn) || candidate.dependsOn.some(value => typeof value !== "string")) throw new Error("backlog item: dependsOn is invalid");
   if (!Array.isArray(candidate.tags) || candidate.tags.some(value => typeof value !== "string")) throw new Error("backlog item: tags is invalid");
@@ -667,7 +715,7 @@ function parseBacklogItem(input: unknown): BacklogItem {
 function parseBacklogChangeRequest(input: unknown): BacklogChangeRequest {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("backlog item: changeRequest is invalid");
   const candidate = input as Record<string, unknown>;
-  assertExactKeys(candidate, ["id", "state", "sourceBranch", "targetBranch", "url"], "backlog change request");
+  assertExactKeys(candidate, BACKLOG_CHANGE_REQUEST_KEYS, "backlog change request");
   if (typeof candidate.id !== "string" || !candidate.id || !["open", "merged", "closed"].includes(String(candidate.state)) || typeof candidate.sourceBranch !== "string" || typeof candidate.targetBranch !== "string") {
     throw new Error("backlog item: changeRequest has invalid fields");
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@afk/core';
 import {
-  loadWorkItemExecution, queryWorkItemExecutions, replayRun, explainExecutionRun, loadRunTimeline, listExecutionRuns, projectAgentUsage,
+  loadWorkItemExecution, queryWorkItemExecutions, replayRun, explainRun, loadRunTimeline, listExecutionRuns, projectAgentUsage,
   type WorkItemExecutionSummary, type RunEventQueryPort,
 } from '../src/index.js';
 
@@ -80,7 +80,7 @@ describe('execution queries', () => {
 
   it('replays a valid run and explains its current state without a legacy service', async () => {
     await expect(replayRun('run-1', events())).resolves.toMatchObject({ state: { run: { id: 'run-1' } } });
-    await expect(explainExecutionRun('run-1', events())).resolves.toBe("run is 'pending' without an active step");
-    await expect(explainExecutionRun('missing', { ...events(), async *read() {} })).resolves.toBe('no events recorded for this run');
+    await expect(explainRun('run-1', events())).resolves.toBe("run is 'pending' without an active step");
+    await expect(explainRun('missing', { ...events(), async *read() {} })).resolves.toBe('no events recorded for this run');
   });
 });

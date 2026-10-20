@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ObservationContext } from '@afk/core';
-import { explainExecutionRun, listExecutionRuns, loadRunTimeline, loadWorkItemExecution, queryWorkItemExecutions, replayRun } from '@afk/application';
+import { explainRun, listExecutionRuns, loadRunTimeline, loadWorkItemExecution, queryWorkItemExecutions, replayRun } from '@afk/application';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { createExecutionQueryPorts } from './query-service.js';
 
@@ -243,7 +243,7 @@ describe('execution query ports', () => {
     ]);
     const ports = createExecutionQueryPorts(store);
 
-    await expect(explainExecutionRun(context.runId, ports.events)).resolves.toBe("run finished with status 'succeeded'");
+    await expect(explainRun(context.runId, ports.events)).resolves.toBe("run finished with status 'succeeded'");
     await expect(replayRun(context.runId, ports.events)).resolves.toMatchObject({
       state: { terminal: true, run: { status: 'succeeded' } },
       timeline: { integrity: { valid: true } },

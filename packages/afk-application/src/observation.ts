@@ -24,26 +24,6 @@ export async function listRunIds(ports: RunEventQueryPort): Promise<readonly str
   return ports.listRuns();
 }
 
-export async function explainRun(runId: string, ports: RunEventQueryPort): Promise<string> {
-  const observed = await observeRun(runId, ports);
-  // A broken chain means the state below describes only the verified prefix.
-  // Saying so is the whole point — explaining the prefix as if it were the
-  // run would be a statement about a forgery.
-  if (!observed.integrity.valid) {
-    return `run event stream is not intact: ${observed.integrity.reason ?? 'integrity_mismatch'}`;
-  }
-  if (!observed.state.run) return 'no events recorded for this run';
-  if (observed.state.terminal) return `run finished with status '${observed.state.run.status}'`;
-  if (observed.state.humanGateId) return `run awaits human gate '${observed.state.humanGateId}'`;
-  if (observed.state.activeSteps.length > 0) {
-    const steps = observed.state.activeSteps.map(id => `'${id}'`).join(', ');
-    return observed.state.activeSteps.length === 1
-      ? `run executes step ${steps}`
-      : `run executes steps ${steps}`;
-  }
-  return `run is '${observed.state.run.status}' without an active step`;
-}
-
 export interface QueryExecutionHistoryInput {
   workItemId?: string;
   limit?: number;

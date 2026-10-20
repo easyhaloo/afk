@@ -58,6 +58,33 @@ export async function loadRun(runId: string, events: RunEventQueryPort): Promise
   return { events: verified.events, state: replay(verified.events), integrity: verified.integrity };
 }
 
+/**
+ * Explain what a run is doing, from the events alone.
+ *
+ * One rule, one vocabulary: the observer's explanation and the execution
+ * query's explanation used to be written out twice, and they disagreed on
+ * what to say about a run whose event chain is broken.
+ */
+export async function explainRun(runId: string, events: RunEventQueryPort): Promise<string> {
+  const loaded = await loadRun(runId, events);
+  // A broken chain means the state below describes only the verified prefix.
+  // Saying so is the whole point — explaining the prefix as if it were the
+  // run would be a statement about a forgery.
+  if (!loaded.integrity.valid) {
+    return `run event stream is not intact: ${loaded.integrity.reason ?? 'integrity_mismatch'}`;
+  }
+  if (!loaded.state.run) return 'no events recorded for this run';
+  if (loaded.state.terminal) return `run finished with status '${loaded.state.run.status}'`;
+  if (loaded.state.humanGateId) return `run awaits human gate '${loaded.state.humanGateId}'`;
+  if (loaded.state.activeSteps.length > 0) {
+    const steps = loaded.state.activeSteps.map(id => `'${id}'`).join(', ');
+    return loaded.state.activeSteps.length === 1
+      ? `run executes step ${steps}`
+      : `run executes steps ${steps}`;
+  }
+  return `run is '${loaded.state.run.status}' without an active step`;
+}
+
 export async function decideRunCommand(
   input: DecideRunCommandInput,
   ports: Pick<RunCommandPorts, 'events'>,

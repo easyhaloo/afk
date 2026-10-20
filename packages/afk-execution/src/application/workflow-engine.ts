@@ -27,7 +27,7 @@ import { BudgetManager } from './workflows/budget.js';
 import { BudgetStore } from './workflows/budget-store.js';
 import type { InitContext } from './workflows/lifecycle.js';
 import { defaultSessionStoreChain } from './sessions/chain.js';
-import { TemplateLoader } from '../domain/templates/loader.js';
+import { TemplateCatalog } from '../domain/templates/catalog.js';
 import { PlanExecutor } from './workflows/plan-executor.js';
 import {
   planSteps,
@@ -207,6 +207,12 @@ export interface RunnerDependencies {
   config?: WorkflowConfig;
   /** Typed plugin capabilities available to this run. */
   plugins?: PluginRuntime;
+  /**
+   * The template catalogue this run reads its template from. The catalogue
+   * owns the templates and the plan they compile into, so a test that
+   * registers a template registers it here and the run executes that one.
+   */
+  catalog?: TemplateCatalog;
   /** Canonical backlog/branch/change providers. */
   providers?: ProviderBundle;
   /** Local runtime projection for the read-only Tasks monitor. */
@@ -300,6 +306,7 @@ export class WorkflowRunner {
   private primaryHandle?: BranchHandle;
   private resourceScope?: RunResourceScope;
   private readonly plugins?: PluginRuntime;
+  private readonly catalog: TemplateCatalog;
   private readonly providers: ProviderBundle;
   private activeBacklog?: BacklogItem;
   private activeClaim?: BacklogClaim;
@@ -349,6 +356,12 @@ export class WorkflowRunner {
     this.watchdog = deps?.watchdog ?? createWatchdog(this.logDir);
     this.config = deps?.config ?? getWorkflowConfig();
     this.plugins = deps?.plugins;
+    this.catalog = deps?.catalog ?? new TemplateCatalog();
+    // A plugin may register a template of its own. The catalogue is where the
+    // runner reads templates from, so the plugin's templates belong there —
+    // otherwise a registered template would be a capability that promises
+    // something it cannot deliver.
+    for (const template of this.plugins?.listTemplates() ?? []) this.catalog.register(template);
     this.providers = providers;
     // The coordinator is not optional. A stub here would silently turn every
     // context handoff into "give up", which is how the whole negotiate /
@@ -527,7 +540,7 @@ export class WorkflowRunner {
     // different files. Loading it here also means a failure throws before
     // the worktree is created: a claimed backlog must never be left
     // in-progress when validation fails.
-    loadedTemplate = await new TemplateLoader({ projectRoot: this.repoRoot }).load(effectiveTemplate);
+    loadedTemplate = await this.catalog.load(effectiveTemplate, { projectRoot: this.repoRoot });
     // The template's declared default provider decides the run's provider,    // unless the caller asked for one. The graph projection reads the same
     // field, so the drawing and the run can no longer disagree about which
     // agent is going to run.
@@ -1018,10 +1031,9 @@ export class WorkflowRunner {
           return { stepId: step.id, status: 'failed', summary: (error as Error).message, startedAt, completedAt: new Date().toISOString() };
         }
       },
-      systemActions: this.plugins?.listSystemActions(),
     });
-    const plan = executor.compile(loadedTemplate);
-    const executedResults = await executor.execute(loadedTemplate, plan);
+    const plan = this.catalog.compile(loadedTemplate, { systemActions: this.plugins?.listSystemActions() });
+    const executedResults = await executor.execute(plan);
     Object.assign(stepResults, executedResults);
     // The plan's acceptance-criteria step is the one that speaks the AC
     // protocol in the verification phase; a plan that declares none has no

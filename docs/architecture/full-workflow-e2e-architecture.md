@@ -52,7 +52,7 @@ flowchart LR
     Execute --> Request
 
     Request --> Runner[WorkflowRunner]
-    Runner --> Template[TemplateLoader + compiler]
+    Runner --> Template[TemplateCatalog]
     Template --> Plan[PlanExecutor]
     Plan --> Agent[Agent Provider / Runtime]
     Plan --> System[受限 SystemActionExecutor]
@@ -172,14 +172,16 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 
 ### 4.1 加载优先级
 
-`TemplateLoader` 按以下顺序查找同名模板，并在首次加载后缓存：
+`TemplateCatalog` 按以下顺序查找同名模板：
 
 ```text
 --template 直接路径（名称包含 / 或 .yml/.yaml）
   > <project>/.afk/workflows/<name>.yml|yaml
   > ~/.afk/workflows/<name>.yml|yaml
-  > 内置 registry
+  > 内置模板
 ```
+
+目录是**实例**：它持有模板（内置模板在构造时注册，插件与测试可以再注册），也持有加载与编译。因此模板只有一处查找入口，编译出的计划也只有一种形状；插件注册的模板会被放进运行器读的那个目录，而不是一个没人读的第二张表。
 
 磁盘模板先经 YAML 解析和 `WorkflowTemplateSchema` 校验，再解析相对 prompt 文件路径。模板版本当前固定为 `1`。agent step 必须有 `role` 和 `prompt`；system step 必须有 `action`。system action 只能通过 `SystemActionExecutor` 的固定动作或已注册 plugin action 执行，不能从模板任意执行 shell 命令。
 
@@ -365,7 +367,7 @@ Issue #178 的实现、验收检查、QA 和 PR #179 发布已完成，驱动命
 - runtime heartbeat 过期会在 Desktop 投影为 `stale`，不会自动修改 Provider backlog 生命周期状态；状态修复仍需执行器、loop 或人工处理。
 - runtime `completed` 是阶段记录：实现成功交付 QA 时就归档，QA 使用独立记录。实现成功后的资源清理失败还可能在 runtime 已归档 `completed` 后将 Provider 转为 `blocked`；终态仍需核对 Provider、journal 和事件。
 - root 与 child 的终态不同：root QA PASS 只是 `merge_ready`，只有人工 merge 且审计验证通过后才能达到 `done`；“QA passed”不能直接写成“任务完成”。
-- 模板缓存按进程存在，磁盘模板更新后需要新建 loader 或显式清空 cache；生产运行不会热加载模板文件。
+- 模板按需从磁盘读取，不再有进程级缓存；同一次运行读到的模板在该次运行内不再变化，生产运行不会热加载模板文件。
 
 ## 10. 完成判定
 

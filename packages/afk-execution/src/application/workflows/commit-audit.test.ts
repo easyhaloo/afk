@@ -7,7 +7,7 @@ import type { RunEvent } from '@afk/core';
 import type { AgentExecution, AgentExecutionOptions, AgentProvider } from '../../domain/agents/types.js';
 import { createAgentProvider } from '../../domain/agents/index.js';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
-import { TemplateLoader } from '../../domain/templates/loader.js';
+import { TemplateCatalog } from '../../domain/templates/catalog.js';
 import { JsonlEventStore } from '../../../../afk-infrastructure/src/observability';
 import type { ProviderBundle } from '@afk/infrastructure';
 import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
@@ -52,7 +52,7 @@ describe('WorkflowRunner default template commit audit', () => {
     await git.commit('fixture baseline');
     const baselineSha = (await git.revparse(['HEAD'])).trim();
 
-    const loaded = await new TemplateLoader({ projectRoot: repoRoot }).loadWithSource('issue-implementation');
+    const loaded = await new TemplateCatalog({ projectRoot: repoRoot }).loadWithSource('issue-implementation');
     expect(loaded.source).toBe('builtin');
     expect(loaded.template.steps.map(step => step.id)).toEqual(['implement', 'verify-ac', 'publish', 'queue-qa']);
     const nativeSessionId = 'codex-step-session';

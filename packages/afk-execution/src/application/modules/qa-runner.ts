@@ -4,8 +4,7 @@ import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-di
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index.js';
 import { configureStatusline, logger, getLogContext, withLogContext } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
-import { TemplateLoader } from '../../domain/templates/loader.js';
-import { compileTemplate } from '../../domain/templates/compiler.js';
+import { TemplateCatalog } from '../../domain/templates/catalog.js';
 import { createAgentProvider, resolveAgentProviderName } from '../../domain/agents/index.js';
 import { createSandboxProvider } from '../../infrastructure/sandbox/index.js';
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
@@ -61,6 +60,11 @@ export interface QARunnerDependencies {
   afterPublication?: (change: ChangeRequest) => Promise<void>;
   onCommit?: (commitSha: string, branch: string) => Promise<void>;
   onSession?: (data: Extract<RunEventData, { kind: 'agent.session_recorded' }>) => Promise<void>;
+  /**
+   * The template catalogue the QA step is read from. The catalogue owns the
+   * templates and the plan they compile into.
+   */
+  catalog?: TemplateCatalog;
 }
 
 /**
@@ -88,6 +92,7 @@ export class QARunner {
   private readonly afterPublication?: QARunnerDependencies['afterPublication'];
   private readonly onCommit?: QARunnerDependencies['onCommit'];
   private readonly onSession?: QARunnerDependencies['onSession'];
+  private readonly catalog: TemplateCatalog;
 
   constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
@@ -95,6 +100,7 @@ export class QARunner {
     this.providers = providers;
     this.executionMode = deps.executionMode ?? 'batch';
     this.projectRoot = deps.projectRoot ?? process.cwd();
+    this.catalog = deps.catalog ?? new TemplateCatalog({ projectRoot: this.projectRoot });
     this.repositories = deps.repositories;
     this.prepareRepositories = deps.prepareRepositories ?? new MultiRepositoryPreparer();
     this.mergeBranchOverride = deps.mergeBranch;
@@ -179,10 +185,12 @@ export class QARunner {
         await this.logWorktreeDiagnostics(id, 'statusline-configured', worktreePath);
       }
 
-      const qaTemplate = await new TemplateLoader({ projectRoot: this.projectRoot }).load('pre-merge-qa-verification');
-      const qaStep = compileTemplate(qaTemplate).groups
-        .flatMap(group => group.steps)
-        .find(step => step.kind === 'agent');
+      // The catalogue owns the templates and the plan they compile into, and
+      // it names the QA step: the QA runner does not dig through the plan's
+      // groups to find it.
+      const qaTemplate = await this.catalog.load('pre-merge-qa-verification', { projectRoot: this.projectRoot });
+      const qaPlan = this.catalog.compile(qaTemplate);
+      const qaStep = this.catalog.selectStep(qaPlan, { kind: 'agent' });
       if (!qaStep || typeof qaStep.prompt !== 'string') {
         throw new Error('pre-merge-qa-verification template must contain an inline agent prompt');
       }

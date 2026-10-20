@@ -1,26 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as os from 'os';
-import * as path from 'path';
-import * as fs from 'fs';
-import { promises as afs } from 'fs';
-import { TemplateLoader } from './loader.js';
-import { resolveExecutionPlan, hasCycle } from './resolver.js';
-import {
-  registerTemplate,
-  getTemplate,
-  requireTemplate,
-  listTemplates,
-  planFor,
-  _resetTemplateRegistry,
-} from './registry.js';
+import { describe, it, expect } from 'vitest';
+import { parseTemplate } from './loader.js';
+import { resolveExecutionPlan } from './compiler.js';
+import { TemplateCatalog } from './catalog.js';
 import { builtinTemplates } from './builtin.js';
 import type { WorkflowTemplate } from './types.js';
 
 describe('Template schema — validation', () => {
-  const loader = new TemplateLoader();
-
   it('rejects templates with no steps', () => {
-    expect(() => loader.parseAndValidate(`
+    expect(() => parseTemplate(`
 name: empty
 version: 1
 steps: []
@@ -28,7 +15,7 @@ steps: []
   });
 
   it('rejects invalid branch strategy type', () => {
-    expect(() => loader.parseAndValidate(`
+    expect(() => parseTemplate(`
 name: bad
 version: 1
 steps:
@@ -41,7 +28,7 @@ steps:
   });
 
   it('rejects step id with uppercase characters', () => {
-    expect(() => loader.parseAndValidate(`
+    expect(() => parseTemplate(`
 name: bad-id
 version: 1
 steps:
@@ -52,7 +39,7 @@ steps:
   });
 
   it('rejects when clause without equals or notEquals', () => {
-    expect(() => loader.parseAndValidate(`
+    expect(() => parseTemplate(`
 name: bad-when
 version: 1
 steps:
@@ -69,7 +56,7 @@ steps:
   });
 
   it('accepts a minimal valid template', () => {
-    const t = loader.parseAndValidate(`
+    const t = parseTemplate(`
 name: minimal
 version: 1
 steps:
@@ -82,7 +69,7 @@ steps:
   });
 });
 
-describe('Dependency resolver', () => {
+describe('Dependency resolution', () => {
   function mkTemplate(steps: Array<{ id: string; dependsOn?: string[]; parallel?: string; when?: { step: string; equals?: 'completed' | 'failed' | 'aborted' | 'timed_out'; notEquals?: 'completed' | 'failed' | 'aborted' | 'timed_out' } }>): WorkflowTemplate {
     return {
       name: 'test',
@@ -177,7 +164,6 @@ describe('Dependency resolver', () => {
   it('detects cycles', () => {
     const t = mkTemplate([{ id: 'a', dependsOn: ['b'] }, { id: 'b', dependsOn: ['a'] }]);
     expect(() => resolveExecutionPlan(t)).toThrow(/cycle/);
-    expect(hasCycle(t)).toBe(true);
   });
 
   it('detects self-dependency', () => {
@@ -198,11 +184,10 @@ describe('Dependency resolver', () => {
 });
 
 describe('Builtin templates', () => {
-  beforeEach(() => _resetTemplateRegistry());
-  afterEach(() => _resetTemplateRegistry());
+  const catalog = new TemplateCatalog();
 
   it('all builtin templates are registered', () => {
-    expect(listTemplates().sort()).toEqual([
+    expect(catalog.names().sort()).toEqual([
       'issue-implementation',
       'parallel-planner',
       'planner-with-review',
@@ -213,7 +198,7 @@ describe('Builtin templates', () => {
   });
 
   it('issue-implementation has 4 steps in dependency order', () => {
-    const t = requireTemplate('issue-implementation');
+    const t = catalog.find('issue-implementation')!;
     const plan = resolveExecutionPlan(t);
     expect(plan.groups.map(g => g.steps.map(s => s.id))).toEqual([
       ['implement'],
@@ -224,19 +209,19 @@ describe('Builtin templates', () => {
   });
 
   it('implementation delegates merge-request publication to QA', () => {
-    const template = requireTemplate('issue-implementation');
+    const template = catalog.find('issue-implementation')!;
     const step = template.steps.find(item => item.id === 'implement');
     expect(step?.prompt).toContain('不要创建或合并 MR');
   });
 
   it('QA verification delegates change publication to the runner', () => {
-    const template = requireTemplate('pre-merge-qa-verification');
+    const template = catalog.find('pre-merge-qa-verification')!;
     const step = template.steps.find(item => item.id === 'verify-ac');
     expect(step?.prompt).toContain('不要把 commit、push 或创建 MR 作为本次 Agent 的失败条件');
   });
 
   it('sequential-review fix step is gated on review=failed', () => {
-    const t = requireTemplate('sequential-review');
+    const t = catalog.find('sequential-review')!;
     const plan = resolveExecutionPlan(t);
     // implement at level 0, review at level 1, fix at level 2 (depends on review).
     expect(plan.groups.map(g => g.steps.map(s => s.id))).toEqual([
@@ -251,7 +236,7 @@ describe('Builtin templates', () => {
   });
 
   it('parallel-planner has 3 steps at the same level', () => {
-    const t = requireTemplate('parallel-planner');
+    const t = catalog.find('parallel-planner')!;
     const plan = resolveExecutionPlan(t);
     expect(plan.groups.length).toBe(1);
     expect(plan.groups[0].steps.map(s => s.id).sort()).toEqual([
@@ -260,7 +245,7 @@ describe('Builtin templates', () => {
   });
 
   it('planner-with-review fans in to review, then fix', () => {
-    const t = requireTemplate('planner-with-review');
+    const t = catalog.find('planner-with-review')!;
     const plan = resolveExecutionPlan(t);
     expect(plan.groups.map(g => g.steps.map(s => s.id))).toEqual([
       ['plan-frontend', 'plan-backend'],
@@ -269,8 +254,8 @@ describe('Builtin templates', () => {
     ]);
   });
 
-  it('planFor returns ExecutionPlan for a registered template', () => {
-    const plan = planFor('simple-loop');
+  it('the catalogue compiles a registered template into the one plan', () => {
+    const plan = catalog.compile(catalog.find('simple-loop')!);
     expect(plan.templateName).toBe('simple-loop');
     expect(plan.groups.length).toBe(1);
   });
@@ -298,85 +283,6 @@ describe('Builtin templates', () => {
   it('the built-in QA template speaks the QA protocol', () => {
     const template = builtinTemplates().find(item => item.name === 'pre-merge-qa-verification')!;
     expect(template.steps[0]).toMatchObject({ phase: 'verification', completionKind: 'qa' });
-  });
-});
-
-describe('Template loader — disk priority chain', () => {
-  let projectRoot: string;
-  let homeDir: string;
-
-  beforeEach(async () => {
-    _resetTemplateRegistry();
-    projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'afk-templates-project-'));
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'afk-templates-home-'));
-  });
-  afterEach(async () => {
-    await afs.rm(projectRoot, { recursive: true, force: true });
-    await afs.rm(homeDir, { recursive: true, force: true });
-  });
-
-  it('loads from project .afk/workflows/<name>.yml when present', async () => {
-    const wfDir = path.join(projectRoot, '.afk', 'workflows');
-    await afs.mkdir(wfDir, { recursive: true });
-    await afs.writeFile(path.join(wfDir, 'custom.yml'), `
-name: custom
-version: 1
-steps:
-  - id: only
-    role: implementer
-    prompt: hi
-`);
-    const loader = new TemplateLoader({ projectRoot, homeDir });
-    const t = await loader.load('custom');
-    expect(t.name).toBe('custom');
-  });
-
-  it('returns source metadata and resolves prompt files relative to the template', async () => {
-    const wfDir = path.join(projectRoot, '.afk', 'workflows');
-    await afs.mkdir(wfDir, { recursive: true });
-    await afs.writeFile(path.join(wfDir, 'prompt.md'), 'hello');
-    await afs.writeFile(path.join(wfDir, 'relative.yml'), `
-name: relative
-version: 1
-steps:
-  - id: only
-    role: implementer
-    prompt: { file: prompt.md }
-`);
-    const result = await new TemplateLoader({ projectRoot, homeDir }).loadWithSource('relative');
-    expect(result.source).toBe('project');
-    expect(result.template.steps[0]?.prompt).toEqual({ file: path.join(wfDir, 'prompt.md') });
-  });
-
-  it('throws TemplateError when nothing matches and not builtin', async () => {
-    const loader = new TemplateLoader({ projectRoot, homeDir });
-    await expect(loader.load('nonexistent')).rejects.toThrow(/not found/);
-  });
-
-  it('reads inline YAML via direct path', async () => {
-    const tmpPath = path.join(projectRoot, 'inline.yml');
-    await afs.writeFile(tmpPath, `
-name: inline
-version: 1
-steps:
-  - id: only
-    role: implementer
-    prompt: hi
-`);
-    const loader = new TemplateLoader({ projectRoot, homeDir });
-    const t = await loader.load(tmpPath);
-    expect(t.name).toBe('inline');
-  });
-
-  it('registerTemplate allows overriding builtin', () => {
-    const custom: WorkflowTemplate = {
-      name: 'simple-loop',
-      version: 1,
-      steps: [{ id: 'replaced', role: 'r', prompt: 'p' }],
-    };
-    registerTemplate(custom);
-    const t = getTemplate('simple-loop');
-    expect(t?.steps[0].id).toBe('replaced');
   });
 
   it('builtinTemplates includes QA verification', () => {

@@ -1,7 +1,7 @@
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { SandboxProvider } from '../../infrastructure/sandbox/types.js';
-import type { WorkflowTemplate } from '../../domain/templates/types.js';
 import type { LifecycleModule } from '../workflows/lifecycle.js';
+import type { WorkflowTemplate } from '../../domain/templates/types.js';
 import type { BacklogProvider } from '@afk/application';
 
 export type PluginSystemAction = (input: unknown) => unknown | Promise<unknown>;
@@ -11,6 +11,8 @@ export interface PluginSetupContext {
   systemAction(name: string, action: PluginSystemAction): void;
   agentProvider(name: string, provider: AgentProvider): void;
   sandboxProvider(name: string, provider: SandboxProvider): void;
+  /** Register a workflow template. The catalogue the runner reads from will
+   *  offer it by name, so a plugin can supply a template of its own. */
   template(template: WorkflowTemplate): void;
   /** Register a provider-native backlog implementation, including atomic claim. */
   backlogProvider(name: string, provider: BacklogProvider): void;
@@ -127,7 +129,8 @@ export class PluginRuntime {
   getLifecycleModules(): LifecycleModule[] { return [...this.lifecycles]; }
   getAgentProvider(name: string): AgentProvider | undefined { return this.agents.get(name); }
   getSandboxProvider(name: string): SandboxProvider | undefined { return this.sandboxes.get(name); }
-  getTemplate(name: string): WorkflowTemplate | undefined { return this.templates.get(name); }
+  /** The templates plugins registered. The catalogue takes them from here. */
+  listTemplates(): readonly WorkflowTemplate[] { return [...this.templates.values()]; }
   listBacklogProviders(): string[] { return [...this.backlogProviders.keys()]; }
   getBacklogProvider(name: string): BacklogProvider | undefined { return this.backlogProviders.get(name); }
 

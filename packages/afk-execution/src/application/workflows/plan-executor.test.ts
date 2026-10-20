@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { replay, type RunEvent } from '@afk/core';
 import { PlanExecutor } from './plan-executor.js';
-import { requireTemplate } from '../../domain/templates/registry.js';
+import { TemplateCatalog } from '../../domain/templates/catalog.js';
 import type { WorkflowTemplate } from '../../domain/templates/types.js';
+
+/** The catalogue owns the templates and the plan they compile into. */
+const catalog = new TemplateCatalog();
+const planOf = (template: WorkflowTemplate) => catalog.compile(template);
+const builtInPlan = (name: string) => catalog.compile(catalog.find(name)!);
 
 describe('PlanExecutor', () => {
   it('runs a recovery step gated on a failed dependency', async () => {
@@ -19,7 +24,7 @@ describe('PlanExecutor', () => {
       { id: 'review', role: 'reviewer', prompt: 'review' },
       { id: 'fix', role: 'implementer', prompt: 'fix', dependsOn: ['review'], when: { step: 'review', equals: 'failed' } },
     ] };
-    await executor.execute(template);
+    await executor.execute(planOf(template));
     expect(seen).toEqual(['review', 'fix']);
   });
 
@@ -37,7 +42,7 @@ describe('PlanExecutor', () => {
       { id: 'verify', role: 'verifier', prompt: 'verify', dependsOn: ['implement'] },
     ] };
 
-    await executor.execute(template);
+    await executor.execute(planOf(template));
     expect(seen).toEqual(['implement']);
   });
 
@@ -58,7 +63,7 @@ describe('PlanExecutor', () => {
       { id: 'c', role: 'implementer', prompt: 'c', dependsOn: ['b'], when: { step: 'b', equals: 'completed' } },
     ] };
 
-    await executor.execute(template);
+    await executor.execute(planOf(template));
     expect(seen).toEqual(['a']);
   });
 
@@ -75,7 +80,7 @@ describe('PlanExecutor', () => {
       },
     });
 
-    await executor.execute(requireTemplate('issue-implementation'));
+    await executor.execute(builtInPlan('issue-implementation'));
     // 'verify-ac' never runs, so 'publish' must not push the branch and
     // 'queue-qa' must not move the backlog into verification.
     expect(seen).toEqual(['implement']);
@@ -94,7 +99,7 @@ describe('PlanExecutor', () => {
       },
     });
 
-    await executor.execute(requireTemplate('issue-implementation'));
+    await executor.execute(builtInPlan('issue-implementation'));
     expect(seen).toEqual(['implement', 'verify-ac', 'publish', 'queue-qa']);
   });
 
@@ -134,7 +139,7 @@ describe('PlanExecutor', () => {
       { id: 'plan-backend', role: 'planner', prompt: 'p' },
     ] };
 
-    await executor.execute(template);
+    await executor.execute(planOf(template));
 
     const started = events.filter(event => event.data.kind === 'step.started');
     expect(started).toHaveLength(2);

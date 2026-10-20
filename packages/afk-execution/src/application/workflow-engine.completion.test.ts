@@ -72,6 +72,23 @@ describe('WorkflowRunner completion validation', () => {
       .resolves.toEqual({ completed: true, output: { type: 'goal_complete', kind: 'task', summary: 'done' } });
   });
 
+  it('records a session that ended when the phase ran out of time as a timeout', async () => {
+    // The watchdog kills the session when the phase's budget is spent, so
+    // the execution sees it end and reports a failure. The run has to be
+    // recorded as the timeout it was — which of the two timers noticed
+    // first no longer decides.
+    const { runner, transition } = runnerReturning({
+      version: 1, runId: 'run-42', status: 'failed', provider: 'claude-code',
+      error: { code: 'SESSION_ENDED', message: 'the agent session ended before the goal was reached' },
+      commits: [],
+    });
+    (runner as any).phaseStartedAt = Date.now() - 5_000;
+
+    await expect((runner as any).runPhase(phase(BudgetManager.forTest(0, 0, 3, 1000))))
+      .resolves.toEqual({ completed: false });
+    expect(transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'workflow timeout' });
+  });
+
   it('refuses a completion that carries no payload', async () => {
     const { runner, transition } = runnerReturning({
       version: 1, runId: 'run-42', status: 'completed', provider: 'claude-code',

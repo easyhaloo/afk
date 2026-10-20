@@ -288,6 +288,12 @@ export class WorkflowRunner {
   private agentProviderName: AgentProviderName = 'claude-code';
   /** Execution mode (set in run()). */
   private executionMode: ExecutionMode = DEFAULT_EXECUTION_MODE;
+  /**
+   * When the current phase armed its watchdog — the start of the phase's
+   * time budget. The budget is what tells a timeout from a failure, so it
+   * is kept here rather than left to whichever timer happened to fire.
+   */
+  private phaseStartedAt = 0;
   private sandbox: Sandbox | undefined;
   private logDir: string;
   private modules: LifecycleModule[] = [];
@@ -974,6 +980,7 @@ export class WorkflowRunner {
     logger.info({ iid, session, worktree: wt.path, sandboxId: this.sandbox.id }, 'sandbox created');
 
     // ── Step 3: Launch watchdog (detached, no blocking) ────────────────────
+    this.phaseStartedAt = Date.now();
     this.watchdog.arm(session, hardTimeoutMs, iid, wt.path);
     logger.info({ iid, session, hardTimeoutMs }, 'watchdog armed');
 
@@ -1340,7 +1347,15 @@ export class WorkflowRunner {
           return { completed: false }; // auto-handoff flipped to manual; phase over
         }
 
-        default:
+        default: {
+          if (this.phaseBudgetSpent(p.hardTimeoutMs)) {
+            await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs);
+            return { completed: false };
+          }
+          // A session the watchdog killed when the phase ran out of time is
+          // a timeout, not a failure: the agent did not choose to stop, and
+          // the run has to be recorded as the timeout it was. Which of the
+          // two timers noticed first no longer decides.
           // 'failed', 'blocked', 'aborted' — treat as failure
           const diagnostics = formatExecutionFailure(result);
           this.runtimeErrorSummary = diagnostics;
@@ -1351,8 +1366,15 @@ export class WorkflowRunner {
           }
           await this.manualFlip(p.iid, p.session);
           return { completed: false };
+        }
       }
     }
+  }
+
+  /** Whether the phase's time budget is spent. */
+  private phaseBudgetSpent(hardTimeoutMs: number): boolean {
+    if (this.phaseStartedAt === 0) return false;
+    return Date.now() - this.phaseStartedAt >= hardTimeoutMs;
   }
 
   /**

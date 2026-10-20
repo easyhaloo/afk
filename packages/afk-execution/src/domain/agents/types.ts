@@ -189,6 +189,25 @@ export interface AgentExecution {
    * the contract rather than to a cast at the reading site.
    */
   readonly telemetryPath?: string;
+  /**
+   * Wait for the execution to end.
+   *
+   * `completionTimeoutMs` — how long to wait before giving up on the
+   * agent.
+   *
+   * `contextHighTokens` — the context size at which the run should hand
+   * the work over. The execution reports `context_high` once it reaches
+   * it, and the runner takes it from there: a native resume where the
+   * provider has one, a handoff with the session otherwise.
+   *
+   * A context size and what an agent spent are two different numbers,
+   * and only an execution that can see the first can answer this. The
+   * interactive execution reads it off the statusline. The others cannot:
+   * a container has neither a statusline nor a usage of its own, the
+   * codex app-server transport reports the turn that ended rather than
+   * the context as it grows, and the batch execution's stream carries
+   * what the agent spent. Each of them says so where it is implemented.
+   */
   waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
   interrupt(reason: InterruptReason): Promise<void>;
   kill(): Promise<void>;

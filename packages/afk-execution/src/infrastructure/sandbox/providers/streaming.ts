@@ -289,6 +289,13 @@ export class StreamingAgentExecution implements AgentExecution {
     completionTimeoutMs?: number;
     contextHighTokens?: number;
   }): Promise<ExecutionResult> {
+    // The context limit does not apply here, and the number this execution
+    // has is not the one it would be compared against. The limit is a
+    // context size — how much of the agent's window is in use — and the
+    // stream carries what the agent spent: the turn's total for the agents
+    // that report one, the last step's spend for the ones that report
+    // steps. Neither is the size of the context, and comparing spend with a
+    // context limit would hand work over for the wrong reason.
     const completionTimeoutMs = options?.completionTimeoutMs ?? 600_000;
     const start = Date.now();
 

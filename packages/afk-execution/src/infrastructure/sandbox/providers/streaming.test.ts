@@ -38,6 +38,26 @@ describe('StreamingAgentExecution', () => {
     expect(await execution.captureOutput()).not.toContain('cmd-1');
   });
 
+  it('does not read the context limit off the spend, because the spend is not the context', async () => {
+    // The limit is a context size: how much of the agent's window is in
+    // use. The stream carries what the agent spent — the turn's total for
+    // the agents that report one. A turn that spent a lot is not a turn
+    // that filled its context, and handing the work over on that number
+    // would be handing it over for the wrong reason.
+    const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: 150_000, outputTokens: 10 } });
+    const result = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
+    const execution = new StreamingAgentExecution({
+      command: command(`process.stdout.write(${JSON.stringify(usage + '\n')}); setTimeout(() => process.stdout.write(${JSON.stringify(result + '\n')}), 1500)`),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
+    });
+    execution.start();
+
+    const outcome = await execution.waitForResult({ completionTimeoutMs: 10_000, contextHighTokens: 100_000 });
+
+    expect(outcome.status).toBe('completed');
+  });
+
   it('survives a child that exits before the prompt is delivered', async () => {
     // A child that exits without reading stdin closes the pipe, and the
     // prompt write then fails with EPIPE. That is the child's own business —

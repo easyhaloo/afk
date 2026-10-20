@@ -297,6 +297,9 @@ export class ContainerAgentExecution implements AgentExecution {
   }
 
   async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
+    // The context limit does not apply here: a container has no statusline
+    // and no usage of its own, so it cannot see the context grow. The
+    // agent runs to its end.
     const timeout = options?.completionTimeoutMs ?? 600_000;
     const startedAt = Date.now();
     while (true) {

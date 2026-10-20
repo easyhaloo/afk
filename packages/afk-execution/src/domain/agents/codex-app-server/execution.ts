@@ -81,6 +81,9 @@ export class CodexAppServerExecution implements AgentExecution {
   }
 
   async waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult> {
+    // The context limit does not apply here: this transport reports the
+    // turn that ended, not the context as it grows, so it cannot say when
+    // the limit is reached. The agent runs to its end.
     const timeoutMs = options?.completionTimeoutMs ?? 600_000;
     const timer = setTimeout(() => {
       void this.finish(this.buildResult('timed_out'));

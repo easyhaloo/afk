@@ -6,6 +6,7 @@ import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { exec, executable, firstLine } from "../adapters/process-executor.js";
 import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter.js";
 import { AFK_VERSION } from "@afk/application";
+import { builtinTemplates } from "@afk/execution/domain/templates/builtin";
 import { configNumber, configString, parseConfig, type ConfigObject } from "../workflow/config-parser.js";
 import { detectAgentRuntimes } from "./runtime-service.js";
 import { projectRunScopeService } from "./project-run-scope-service.js";
@@ -74,14 +75,33 @@ async function readWorkflowConfig(root: string): Promise<WorkflowConfigSummary> 
 
 
 
-export const BUILTIN_WORKFLOW_TEMPLATES: WorkflowTemplateSummary[] = [
-  { id: "issue-implementation", name: "Issue 实现", description: "实现需求、验证 AC、发布变更并进入 QA。", source: "builtin", steps: [{ id: "implement", role: "implementer", kind: "agent", dependsOn: [] }, { id: "verify-ac", role: "verifier", kind: "agent", dependsOn: ["implement"] }, { id: "publish", role: "system", kind: "system", action: "publish-change", dependsOn: ["verify-ac"] }, { id: "queue-qa", role: "system", kind: "system", action: "queue-qa", dependsOn: ["publish"] }] },
-  { id: "pre-merge-qa-verification", name: "合并前 QA", description: "在 QA 工作树中验证验收条件与集成测试。", source: "builtin", steps: [{ id: "verify-ac", role: "verifier", kind: "agent", dependsOn: [] }] },
-  { id: "simple-loop", name: "简单循环", description: "单一 Agent 持续执行，直到任务完成。", source: "builtin", steps: [{ id: "run", role: "agent", kind: "agent", dependsOn: [] }] },
-  { id: "sequential-review", name: "顺序审查", description: "实现、审查，并在失败时修复。", source: "builtin", steps: [{ id: "implement", role: "implementer", kind: "agent", dependsOn: [] }, { id: "review", role: "reviewer", kind: "agent", dependsOn: ["implement"] }, { id: "fix", role: "implementer", kind: "agent", when: { step: "review", equals: "failed" }, dependsOn: ["review"] }] },
-  { id: "parallel-planner", name: "并行规划", description: "多个规划 Agent 并行分析同一事项。", source: "builtin", steps: [{ id: "plan-frontend", role: "planner", kind: "agent", dependsOn: [] }, { id: "plan-backend", role: "planner", kind: "agent", dependsOn: [] }, { id: "plan-infra", role: "planner", kind: "agent", dependsOn: [] }] },
-  { id: "planner-with-review", name: "规划与审查", description: "并行规划后汇总审查，失败时安排修复。", source: "builtin", steps: [{ id: "plan-frontend", role: "planner", kind: "agent", dependsOn: [] }, { id: "plan-backend", role: "planner", kind: "agent", dependsOn: [] }, { id: "review", role: "reviewer", kind: "agent", dependsOn: ["plan-frontend", "plan-backend"] }, { id: "fix", role: "implementer", kind: "agent", dependsOn: ["review"] }] },
-];
+/**
+ * The built-in templates, under the names the desktop shows them by.
+ *
+ * Only the name and the description are the desktop's: they are written for
+ * a person. The steps come from the templates AFK actually runs, so the list
+ * on screen cannot drift from the workflow that runs — and it had drifted:
+ * two steps that only run under a condition were shown as unconditional.
+ */
+const BUILTIN_TEMPLATE_LABELS: Record<string, { name: string; description: string }> = {
+  "issue-implementation": { name: "Issue 实现", description: "实现需求、验证 AC、发布变更并进入 QA。" },
+  "pre-merge-qa-verification": { name: "合并前 QA", description: "在 QA 工作树中验证验收条件与集成测试。" },
+  "simple-loop": { name: "简单循环", description: "单一 Agent 持续执行，直到任务完成。" },
+  "sequential-review": { name: "顺序审查", description: "实现、审查，并在失败时修复。" },
+  "parallel-planner": { name: "并行规划", description: "多个规划 Agent 并行分析同一事项。" },
+  "planner-with-review": { name: "规划与审查", description: "并行规划后汇总审查，失败时安排修复。" },
+};
+
+export const BUILTIN_WORKFLOW_TEMPLATES: WorkflowTemplateSummary[] = builtinTemplates().map((template) => {
+  const label = BUILTIN_TEMPLATE_LABELS[template.name];
+  return {
+    id: template.name,
+    name: label?.name ?? template.name,
+    description: label?.description ?? template.description,
+    source: "builtin",
+    steps: template.steps.map(templateStepSummary).filter((item): item is WorkflowTemplateStepSummary => item !== null),
+  };
+});
 
 function templateStepSummary(value: unknown): WorkflowTemplateStepSummary | null {
   const step = asConfigObject(value);

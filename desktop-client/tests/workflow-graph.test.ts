@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveExecutionPlan } from "@afk/execution/domain/templates/resolver";
 import { BUILTIN_WORKFLOW_TEMPLATES } from "../electron/services/desktop-service.js";
+import { builtinTemplates } from "@afk/execution/domain/templates/builtin";
 import { normalizeWorkflowSteps, workflowStepLayout, type WorkflowNodePosition } from "../src/features/workflows/graph/normalize";
 import type { WorkflowTemplateStepSummary } from "../shared/ipc-contract";
 
@@ -146,6 +147,16 @@ describe("the canvas and the resolver agree", () => {
   });
 });
 
+describe("the built-in templates are the ones the runner runs", () => {
+  it("shows every built-in template with the conditions the runner applies", () => {
+    for (const template of builtinTemplates()) {
+      const shown = BUILTIN_WORKFLOW_TEMPLATES.find((item) => item.id === template.name);
+      expect(shown?.steps.map((step) => step.id)).toEqual(template.steps.map((step) => step.id));
+      expect(shown?.steps.map((step) => step.when)).toEqual(template.steps.map((step) => step.when));
+    }
+  });
+});
+
 describe("the built-in templates keep their canvas positions", () => {
   it("draws every built-in template where it was drawn before", () => {
     const positions = Object.fromEntries(
@@ -156,7 +167,11 @@ describe("the built-in templates keep their canvas positions", () => {
       "issue-implementation": {
         implement: { x: 220, y: 54 },
         "verify-ac": { x: 410, y: 54 },
-        publish: { x: 600, y: 234 },
+        // `publish` runs only when the verification completed, so it is drawn
+        // on the conditional track. It used to be drawn on the workflow
+        // track, because the desktop's copy of the template had lost the
+        // condition.
+        publish: { x: 600, y: 414 },
         "queue-qa": { x: 790, y: 234 },
       },
       "pre-merge-qa-verification": {
@@ -179,7 +194,8 @@ describe("the built-in templates keep their canvas positions", () => {
         "plan-frontend": { x: 220, y: 54 },
         "plan-backend": { x: 220, y: 178 },
         review: { x: 410, y: 54 },
-        fix: { x: 600, y: 54 },
+        // The same: `fix` runs only when the review failed.
+        fix: { x: 600, y: 414 },
       },
     });
   });

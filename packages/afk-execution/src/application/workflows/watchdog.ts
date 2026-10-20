@@ -31,8 +31,9 @@ export class Watchdog {
   constructor(private readonly logDir: string) {}
 
   /**
-   * Arm the watchdog: after hardTimeoutMs, write a timeout signal then kill
-   * the session. Re-arming replaces any previously armed watchdog.
+   * Arm the watchdog: after hardTimeoutMs, kill the session and record the
+   * firing in the watchdog log. It writes no signal file. Re-arming replaces
+   * any previously armed watchdog.
    */
   arm(session: string, hardTimeoutMs: number, iid: number, worktreePath: string): void {
     this.disarm();

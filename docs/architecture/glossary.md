@@ -19,8 +19,10 @@ and design discussions use these terms; keep them in lockstep with the code.
   failure mode of `'auto'`. `packages/afk-execution/src/application/workflows/handoff.ts`.
 
 - **Watchdog** - Detached process-group that fires after the hard timeout:
-  writes a timeout signal, then kills the tmux session. Armed per phase /
-  generation; disarmed during handoff negotiation and on cleanup.
+  kills the tmux session and appends to `watchdog.log`. It writes no signal
+  file; the runner's `waitForResult()` polls the session state directly.
+  Armed per phase / generation; disarmed during handoff negotiation and on
+  cleanup.
   `packages/afk-execution/src/application/workflows/watchdog.ts`.
 
 - **Signal** - The interactive agent/runner communication protocol via
@@ -32,9 +34,11 @@ and design discussions use these terms; keep them in lockstep with the code.
 - **TrackerProvider** - The seam over GitLab and GitHub (issues, MRs/PRs,
   labels, comments, AC parsing). `packages/afk-application/src/tracker/types.ts`.
 
-- **LoopRunner** - Drives the full pipeline (implement -> QA -> done) for every
-  `stage::ready-for-issues` issue, continuously. Two pools (N parallel
-  WorkflowRunners, one serial QARunner) with tracker labels as source of truth.
+- **LoopRunner** - Drives one manifest-bound work item to completion
+  (implement -> QA -> done), then stops. It requires exactly one backlog ID,
+  one work item ID and one execution manifest, and delegates the run itself
+  to `executeWorkItem`. The tracker labels are the source of truth for
+  whether work is eligible at all.
   `packages/afk-execution/src/application/modules/loop-runner.ts`.
 
 ## Packages

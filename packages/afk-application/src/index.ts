@@ -16,6 +16,7 @@ export * from './provider-inventory.js';
 export * from './runtime-health.js';
 export * from './tracker/ac-types.js';
 export * from './tracker/ac.js';
+export * from './tracker/labels.js';
 export * from './tracker/types.js';
 export * from './work-items/identity.js';
 export * from './work-items/inventory.js';

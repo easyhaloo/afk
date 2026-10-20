@@ -180,10 +180,23 @@ export interface TrackerProvider {
   getRecentCommits(projectId: number, perPage?: number): Promise<Commit[]>;
 
   // Utility
+  /** The issue's acceptance criteria: the labelled ones, else the legacy ones. */
   parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria;
+  /** The retries an issue has left, from its `retry-count::N` label. */
   getRetryCount(issue: TrackedIssue): number;
+  /**
+   * The branch a run should work on: the explicit one, else the
+   * `base::prd-N` label, else the platform's default.
+   */
   detectTargetBranch(issueId: number, explicit?: string): Promise<string>;
-  uploadArtifacts(worktreePath: string): Promise<string>;
+  /**
+   * Upload the run's artifacts and return the markdown that shows them.
+   *
+   * Optional: a platform with nowhere to put artifacts does not offer it.
+   * GitLab uploads the files the worktree's `.afk/artifacts.txt` names to
+   * the project; GitHub has no equivalent and does not offer this.
+   */
+  uploadArtifacts?(worktreePath: string): Promise<string>;
 }
 
 /**

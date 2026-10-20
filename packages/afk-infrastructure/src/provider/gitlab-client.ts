@@ -21,7 +21,7 @@ import type {
   TrackerIssueComment,
   LabelDelta,
 } from '@afk/application';
-import { extractAC } from '@afk/application';
+import { extractAC, retryCountFromLabels, targetBranchFromLabels } from '@afk/application';
 import { parseWorkItemId } from '@afk/application';
 import { normalizeGitLabHost, resolveGitLabProjectKey } from '../shared/gitlab-project.js';
 
@@ -259,17 +259,13 @@ export class GitLabClient implements TrackerProvider {
   }
 
   getRetryCount(issue: TrackedIssue): number {
-    const label = issue.labels.find(l => /^retry-count::\d+$/.test(l));
-    if (!label) return 0;
-    return parseInt(label.split('::')[1], 10);
+    return retryCountFromLabels(issue.labels);
   }
 
   async detectTargetBranch(issueId: number, explicit?: string): Promise<string> {
     if (explicit) return explicit;
     const issue = await this.getIssue(issueId);
-    const prdLabel = issue.labels.find(l => /^base::prd-\d+$/.test(l));
-    if (prdLabel) return `prd/${prdLabel.replace('base::prd-', '')}`;
-    return process.env.AFK_TARGET_BRANCH || 'main';
+    return targetBranchFromLabels(issue.labels, undefined, process.env.AFK_TARGET_BRANCH || 'main');
   }
 
   async uploadArtifacts(worktreePath: string): Promise<string> {

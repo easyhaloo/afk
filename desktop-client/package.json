@@ -10,7 +10,7 @@
     "dev:raw": "concurrently -k \"pnpm run dev:main\" \"vite --port ${AFK_CONTROL_PORT:-5174}\" \"wait-on tcp:${AFK_CONTROL_PORT:-5174} file:dist-electron/electron/main.js && ELECTRON_RENDERER_URL=http://localhost:${AFK_CONTROL_PORT:-5174} electron .\"",
     "dev": "pnpm run dev:raw",
     "start": "bash scripts/start.sh",
-    "build:application": "tsc -p ../packages/afk-core/tsconfig.json && tsc -p ../packages/afk-application/tsconfig.json && tsc -p ../packages/afk-infrastructure/tsconfig.json && tsc -p ../packages/afk-execution/tsconfig.json",
+    "build:application": "tsc -p ../packages/afk-core/tsconfig.json && tsc -p ../packages/afk-application/tsconfig.json && tsc -p ../packages/afk-infrastructure/tsconfig.json && tsc -p ../packages/afk-workflow-graph/tsconfig.json && tsc -p ../packages/afk-execution/tsconfig.json",
     "typecheck": "pnpm build:application && tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "test": "pnpm build:application && node scripts/build-provider-inventory.mjs && vitest run --config vitest.config.ts",
     "test:contrast": "playwright test --config=playwright.config.ts contrast",

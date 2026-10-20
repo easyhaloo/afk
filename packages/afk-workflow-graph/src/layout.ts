@@ -1,22 +1,10 @@
 import type { GraphEdge, GraphNode, GraphSnapshot, GraphStep, GraphTrack, Rect, WorkflowGraphDefinition, WorkflowGraphPreferences } from './ir.js';
 import { normalizeDefinition } from './normalize.js';
+import { computeStepGraph } from './step-graph.js';
 import { routeEdges } from './routing.js';
 
 export const workflowNodeSize = { width: 220, height: 76 } as const;
 const defaults = { columnGap: 100, rowGap: 28, trackGap: 48, margin: 32 } as const;
-
-function depthOf(step: GraphStep, byId: ReadonlyMap<string, GraphStep>, memo: Map<string, number>, visiting = new Set<string>()): number {
-  if (memo.has(step.id)) return memo.get(step.id)!;
-  if (visiting.has(step.id)) return 0;
-  visiting.add(step.id);
-  const depth = step.dependsOn.reduce((max, dependency) => {
-    const parent = byId.get(dependency);
-    return parent ? Math.max(max, depthOf(parent, byId, memo, visiting) + 1) : max;
-  }, 0);
-  visiting.delete(step.id);
-  memo.set(step.id, depth);
-  return depth;
-}
 
 export function layoutWorkflow(definition: WorkflowGraphDefinition, preferences: WorkflowGraphPreferences = {}): GraphSnapshot {
   const normalized = normalizeDefinition(definition);
@@ -27,8 +15,11 @@ export function layoutWorkflow(definition: WorkflowGraphDefinition, preferences:
   const trackGap = preferences.trackGap ?? defaults.trackGap;
   const margin = preferences.margin ?? defaults.margin;
   const byId = new Map(normalized.steps.map((step) => [step.id, step]));
-  const depths = new Map<string, number>();
-  normalized.steps.forEach((step) => depthOf(step, byId, depths));
+  // The level formula lives in one place: the same computation decides the
+  // order the resolver runs a template in.
+  const depths = new Map(computeStepGraph(
+    normalized.steps.map(step => ({ id: step.id, dependsOn: step.dependsOn })),
+  ).levels);
   const maxDepth = Math.max(0, ...depths.values());
   const tracksByKey = new Map<string, GraphTrack>();
   const trackFor = (step: GraphStep): GraphTrack => {

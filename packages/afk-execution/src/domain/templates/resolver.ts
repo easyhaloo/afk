@@ -21,6 +21,7 @@
  * Cycles raise TemplateError.
  */
 
+import { computeStepGraph } from '@afk/workflow-graph';
 import type { WorkflowTemplate, Step } from './types.js';
 import { TemplateError } from './types.js';
 
@@ -79,44 +80,16 @@ export function resolveExecutionPlan(template: WorkflowTemplate, allStepIds?: Se
     }
   }
 
-  // Compute in-degree for Kahn's algorithm. A step's dependencies are its
-  // `dependsOn` steps plus the step its `when` clause names; a step named by
-  // both counts once.
-  const inDegree = new Map<string, number>();
-  const dependents = new Map<string, string[]>(); // dep -> [steps that depend on it]
-  for (const step of template.steps) {
-    const deps = new Set(step.dependsOn ?? []);
-    if (step.when) deps.add(step.when.step);
-    inDegree.set(step.id, deps.size);
-    if (!dependents.has(step.id)) dependents.set(step.id, []);
-    for (const dep of deps) {
-      if (!dependents.has(dep)) dependents.set(dep, []);
-      dependents.get(dep)!.push(step.id);
-    }
-  }
-
-  // BFS levels.
-  const levelByStep = new Map<string, number>();
-  const queue: string[] = template.steps.filter(s => dependenciesOf(s).length === 0).map(s => s.id);
-  for (const id of queue) levelByStep.set(id, 0);
-
-  let processed = 0;
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    processed++;
-    const myLevel = levelByStep.get(id) ?? 0;
-    for (const dep of dependents.get(id) ?? []) {
-      const next = Math.max(levelByStep.get(dep) ?? 0, myLevel + 1);
-      levelByStep.set(dep, next);
-      const remaining = (inDegree.get(dep) ?? 0) - 1;
-      inDegree.set(dep, remaining);
-      if (remaining === 0) queue.push(dep);
-    }
-  }
-
-  if (processed !== template.steps.length) {
+  // The order, the levels and the cycle question come from one computation —
+  // the same one the graph package and the desktop studio use. This resolver
+  // reports them in its own words.
+  const graph = computeStepGraph(
+    template.steps.map(step => ({ id: step.id, dependsOn: dependenciesOf(step) })),
+  );
+  if (graph.cycle) {
     throw new TemplateError(`dependency cycle detected`, template.name);
   }
+  const levelByStep = graph.levels;
 
   // A `parallel` group is a promise that its members run together. The
   // promise used to be decoration: no module read the field, and the members

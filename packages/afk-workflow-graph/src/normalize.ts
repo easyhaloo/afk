@@ -1,3 +1,4 @@
+import { computeStepGraph } from './step-graph.js';
 import type { GraphDiagnostic, GraphStep, WorkflowGraphDefinition } from './ir.js';
 
 export interface NormalizationResult {
@@ -23,49 +24,19 @@ export function normalizeDefinition(definition: WorkflowGraphDefinition): Normal
 
   const validSteps = definition.steps.filter((step) => !duplicateIds.has(step.id));
   const validIds = new Set(validSteps.map((step) => step.id));
-  const dependencies = new Map<string, string[]>();
-  const indegree = new Map<string, number>();
-  const dependents = new Map<string, string[]>();
-
   for (const step of validSteps) {
-    const deps = step.dependsOn.filter((dependency) => {
-      if (!validIds.has(dependency)) {
-        diagnostics.push({ severity: 'error', code: 'missing-dependency', stepId: step.id, message: `Missing dependency: ${dependency}` });
-        return false;
-      }
-      return true;
-    });
     if (step.when && !validIds.has(step.when.step)) {
       diagnostics.push({ severity: 'error', code: 'missing-condition-step', stepId: step.id, message: `Missing condition step: ${step.when.step}` });
     }
-    dependencies.set(step.id, deps);
-    indegree.set(step.id, deps.length);
-    for (const dependency of deps) {
-      const children = dependents.get(dependency) ?? [];
-      children.push(step.id);
-      dependents.set(dependency, children);
-    }
   }
 
-  const sourceOrder = new Map(validSteps.map((step, index) => [step.id, index]));
-  const ready = validSteps.filter((step) => indegree.get(step.id) === 0).map((step) => step.id);
-  const compare = (a: string, b: string) => (sourceOrder.get(a)! - sourceOrder.get(b)!) || a.localeCompare(b);
-  ready.sort(compare);
-  const order: string[] = [];
-  while (ready.length) {
-    const id = ready.shift()!;
-    order.push(id);
-    for (const child of dependents.get(id) ?? []) {
-      const next = indegree.get(child)! - 1;
-      indegree.set(child, next);
-      if (next === 0) {
-        ready.push(child);
-        ready.sort(compare);
-      }
-    }
+  // The order, the levels and the cycle question come from one computation.
+  const graph = computeStepGraph(validSteps.map((step) => ({ id: step.id, dependsOn: step.dependsOn })));
+  for (const missing of graph.missing) {
+    diagnostics.push({ severity: 'error', code: 'missing-dependency', stepId: missing.stepId, message: `Missing dependency: ${missing.dependencyId}` });
   }
-
-  if (order.length !== validSteps.length) {
+  const order: string[] = [...graph.order];
+  if (graph.cycle) {
     const cycleIds = validSteps.filter((step) => !order.includes(step.id)).map((step) => step.id);
     diagnostics.push({ severity: 'error', code: 'cycle', message: `Workflow contains a cycle: ${cycleIds.join(', ')}` });
   }

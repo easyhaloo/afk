@@ -1,5 +1,5 @@
 import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
-import type { SandboxProviderName } from '../../infrastructure/sandbox/types.js';
+import type { SandboxProviderName } from '../../domain/sandbox/types.js';
 import type { BranchStrategyConfig } from '@afk/infrastructure';
 import { deriveBacklogBranchName } from '@afk/application';
 import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';

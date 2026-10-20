@@ -30,7 +30,7 @@ import type {
   ExecutionResult,
   InterruptReason,
   CaptureOptions,
-} from '../types.js';
+} from '../../../domain/sandbox/types.js';
 import { extractGoalComplete } from '../../../shared/goal-complete.js';
 import { COMMON_TOKEN_USAGE, parseTokenUsage } from '../../../domain/agents/token-usage.js';
 import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js';

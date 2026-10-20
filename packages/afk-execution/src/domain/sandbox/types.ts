@@ -5,6 +5,11 @@
  * The SandboxProvider creates Sandboxes; each Sandbox runs AgentExecutions.
  * This separates "where agent runs" (Sandbox) from "which agent runs"
  * (AgentProvider) and "what workflow steps run" (WorkflowTemplate).
+ *
+ * These are the shapes the runner builds a sandbox from and reads a sandbox
+ * by, so they live in the layer that describes them.  The providers that
+ * implement them live in the infrastructure layer, where the worktrees and
+ * the containers are.
  */
 
 import type {
@@ -12,14 +17,15 @@ import type {
   AgentExecutionHost,
   AgentStartOptions,
   ExecutionMode,
-} from '../../domain/agents/types.js';
+} from '../agents/types.js';
 export type {
   AgentExecution,
   AgentStartOptions,
   CaptureOptions,
   ExecutionResult,
   InterruptReason,
-} from '../../domain/agents/types.js';
+} from '../agents/types.js';
+import type { SandboxTmux } from '../tmux/types.js';
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
@@ -36,10 +42,11 @@ export interface SandboxOptions {
   /** Env vars to inject into the sandbox. */
   env?: Record<string, string>;
   /**
-   * TmuxClient instance to use. For local provider this must be the same
-   * instance the HandoffCoordinator uses, so session lifecycle is coherent.
+   * The tmux client the sandbox drives its session with. For the local
+   * provider this must be the same instance the HandoffCoordinator uses,
+   * so the session lifecycle is coherent.
    */
-  tmux?: import('../tmux/tmux.js').TmuxClient;
+  tmux?: SandboxTmux;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
   executionMode?: ExecutionMode;
   /** Project workspace that owns this worktree; used for AFK resource registry scoping. */

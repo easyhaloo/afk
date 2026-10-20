@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentExecution, AgentProvider, ExecutionResult } from '../../domain/agents/types.js';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
-import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
+import type { Sandbox, SandboxProvider } from '../../domain/sandbox/types.js';
 import type { ProviderBundle } from '@afk/infrastructure';
 import type { RunObserver } from '../../observability/run-observer.js';
 import { WorkflowRunner } from '../workflow-engine.js';

@@ -3,24 +3,11 @@ import { Signal } from '@afk/infrastructure';
 import { readSignal, readSignalSync } from '@afk/infrastructure';
 import { ControlModeConnection } from './control-mode.js';
 import { normalizeTmuxSessionName } from './session-name.js';
-import type { AgentReadiness } from './agent-readiness.js';
+import type { AgentReadiness, TmuxCaptureOptions, TmuxSession } from '../../domain/tmux/types.js';
 
 export { normalizeTmuxSessionName };
 
-export interface TmuxSession {
-  name: string;
-  window: string;
-  dir: string;
-  status?: string;
-  created?: string;
-  /** tmux-native pane id (e.g. %0) when known — exact ADR-0019 target. */
-  paneId?: string;
-}
-
-export interface TmuxCaptureOptions {
-  lines?: number;
-  history?: number;
-}
+export type { TmuxCaptureOptions, TmuxSession };
 
 type SignalReaders = { readSignal: typeof readSignal; readSignalSync: typeof readSignalSync };
 

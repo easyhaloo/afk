@@ -23,14 +23,14 @@ import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { isAbsolute, join, relative } from 'path';
 import { clearSignal, readSignal } from '@afk/infrastructure';
-import type { Sandbox, SandboxOptions } from '../types.js';
+import type { Sandbox, SandboxOptions } from '../../../domain/sandbox/types.js';
 import type {
   AgentStartOptions,
   AgentExecution,
   ExecutionResult,
   InterruptReason,
   CaptureOptions,
-} from '../types.js';
+} from '../../../domain/agents/types.js';
 import type { ContainerProvider, ContainerExecResult } from './types.js';
 import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
 import { EnvVarAllowlist } from './env-allowlist.js';

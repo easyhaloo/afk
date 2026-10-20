@@ -10,7 +10,7 @@ import type { BacklogClaim, BacklogItem } from '@afk/application';
 import { TemplateCatalog } from '../../domain/templates/catalog.js';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import type { ProviderBundle } from '@afk/infrastructure';
-import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
+import type { Sandbox, SandboxProvider } from '../../domain/sandbox/types.js';
 import { RunObserver } from '../../observability/run-observer.js';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { BudgetStore } from './budget-store.js';

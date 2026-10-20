@@ -8,12 +8,12 @@
  *
  * Import from here rather than from individual sub-modules.
  */
-export * from './types.js';
+export * from '../../domain/sandbox/types.js';
 export * from './providers/index.js';
 
 import { LocalSandboxProvider } from './providers/local.js';
 import { ContainerSandboxProvider, DockerContainerProvider, PodmanContainerProvider } from './providers/index.js';
-import type { SandboxProviderName } from './types.js';
+import type { SandboxProviderName } from '../../domain/sandbox/types.js';
 
 /**
  * Factory: resolve a SandboxProviderName to a SandboxProvider instance.
@@ -22,7 +22,7 @@ import type { SandboxProviderName } from './types.js';
  */
 export function createSandboxProvider(
   name: SandboxProviderName,
-): import('./types.js').SandboxProvider {
+): import('../../domain/sandbox/types.js').SandboxProvider {
   switch (name) {
     case 'local':
       return new LocalSandboxProvider();

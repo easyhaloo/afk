@@ -2,7 +2,7 @@
  * ContainerSandboxProvider — SandboxProvider implementation backed by Docker
  * or Podman. Auto-detects whichever is on PATH and available.
  *
- * Implements the SandboxProvider interface (sandbox/types.ts). createWorktree()
+ * Implements the SandboxProvider interface (domain/sandbox/types.ts). createWorktree()
  * still delegates to WorktreeManager (the host-side git operations); create()
  * wraps the worktree in a long-lived container.
  *
@@ -14,7 +14,7 @@
  */
 
 import { promises as fs } from 'fs';
-import type { SandboxProvider, Sandbox, SandboxOptions, SandboxProviderName } from '../types.js';
+import type { SandboxProvider, Sandbox, SandboxOptions, SandboxProviderName } from '../../../domain/sandbox/types.js';
 import { DockerContainerProvider } from './docker.js';
 import { PodmanContainerProvider } from './podman.js';
 import { ContainerSandbox } from './sandbox.js';

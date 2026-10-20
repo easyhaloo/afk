@@ -8,7 +8,7 @@ import { TemplateCatalog } from '../../domain/templates/catalog.js';
 import { createAgentProvider, resolveAgentProviderName } from '../../domain/agents/index.js';
 import { createSandboxProvider } from '../../infrastructure/sandbox/index.js';
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
-import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../../infrastructure/sandbox/types.js';
+import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../../domain/sandbox/types.js';
 import type { ManagementProviderBundle } from '@afk/infrastructure';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { BacklogItem, NewReworkRecord } from '@afk/application';

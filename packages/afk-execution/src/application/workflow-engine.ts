@@ -12,7 +12,7 @@ import type {
   SandboxProviderName,
   AgentExecution,
   ExecutionResult,
-} from '../infrastructure/sandbox/types.js';
+} from '../domain/sandbox/types.js';
 import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
 import { getTokenUsage, configureStatusline, logger, withLogContext } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';

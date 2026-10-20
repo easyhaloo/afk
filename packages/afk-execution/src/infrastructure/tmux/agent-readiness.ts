@@ -1,32 +1,9 @@
 import { promises as fs } from 'node:fs';
 import { statusFilePath } from '@afk/infrastructure';
 import type { AgentProviderName } from '../../domain/agents/types.js';
+import type { AgentReadiness, ReadinessContext } from '../../domain/tmux/types.js';
 
-/**
- * What the agent has to show before it can be driven.
- */
-export type ReadinessContext = {
-  /** The worktree the agent runs in. */
-  worktreeDir: string;
-  /** The tmux session, when the agent runs in one. */
-  session?: string;
-  /** Whether the tmux session exists — the tmux client's own answer. */
-  sessionExists: (session: string) => Promise<boolean>;
-};
-
-/**
- * How one agent says it is up.
- *
- * The tmux session exists as soon as the shell does, which is not the same
- * as the agent being ready: the CLI has to start, and a prompt typed into a
- * shell that has not started the agent is a prompt nobody sees.
- */
-export type AgentReadiness = {
-  /** The agent the rule is about, for the message when it never comes up. */
-  agent: AgentProviderName;
-  /** Whether the agent is up yet. */
-  ready: (context: ReadinessContext) => Promise<boolean>;
-};
+export type { AgentReadiness, ReadinessContext };
 
 /**
  * Claude Code's statusline writes its payload on the first turn, and the

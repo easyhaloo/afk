@@ -17,7 +17,7 @@ import { randomUUID } from 'crypto';
 import { promises as fs, realpathSync } from 'fs';
 import { join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
-import { TmuxClient } from '../../tmux/tmux.js';
+import type { SandboxTmux } from '../../../domain/tmux/types.js';
 import { clearSignal, clearStatus, getTokenUsage, readSignal } from '@afk/infrastructure';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../tmux/session-name.js';
@@ -32,7 +32,7 @@ import {
   type InterruptReason,
   type CaptureOptions,
   type SandboxProviderName,
-} from '../types.js';
+} from '../../../domain/sandbox/types.js';
 import type { AgentCommand, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
@@ -48,7 +48,7 @@ export class LocalSandbox implements Sandbox {
   readonly id: string;
   readonly worktreePath: string;
   readonly workspacePath: string;
-  private readonly tmux: TmuxClient;
+  private readonly tmux: SandboxTmux;
   private readonly sessionName: string;
   private readonly branch?: string;
   private readonly workspaceRoot: string;
@@ -67,7 +67,7 @@ export class LocalSandbox implements Sandbox {
      * without one cannot close its session, and saying so here is better
      * than discovering it at close time.
      */
-    tmux: TmuxClient;
+    tmux: SandboxTmux;
     workspaceRoot?: string;
     runtimeRunId?: string;
   }) {
@@ -179,7 +179,7 @@ export class LocalAgentExecution implements AgentExecution {
   readonly metadata: AgentExecutionMetadata;
   private readonly worktreePath: string;
   private readonly sessionName: string;
-  private readonly tmux: TmuxClient;
+  private readonly tmux: SandboxTmux;
   private readonly generation: number;
   private readonly prompt: string;
   private readonly signalType: 'goal_complete';
@@ -194,7 +194,7 @@ export class LocalAgentExecution implements AgentExecution {
     prompt: string;
     signalType: 'goal_complete';
     metadata: AgentExecutionMetadata;
-    tmux: TmuxClient;
+    tmux: SandboxTmux;
   }) {
     this.id = randomUUID();
     this.worktreePath = opts.worktreePath;

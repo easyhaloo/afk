@@ -83,6 +83,28 @@ export class GitHubClient implements TrackerProvider {
     };
   }
 
+  /**
+   * Read every page of a GitHub list.
+   *
+   * A request here is one request: the endpoint answers with a page and no
+   * more.  The tracker asks for everything — a backlog's change request,
+   * the comments a rework record lives in — so a list that stopped at the
+   * first page was a list that was quietly short.  A page that comes back
+   * shorter than the page size is the last one.
+   */
+  private async listAllPages<T>(
+    load: (page: number) => Promise<{ data: T[] }>,
+    perPage: number,
+  ): Promise<T[]> {
+    const all: T[] = [];
+    for (let page = 1; ; page += 1) {
+      const { data } = await load(page);
+      all.push(...data);
+      if (data.length < perPage) break;
+    }
+    return all;
+  }
+
   async listIssues(options: ListOptions = {}): Promise<TrackedIssue[]> {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
@@ -95,8 +117,7 @@ export class GitHubClient implements TrackerProvider {
     // GitHub's `labels` query param is OR semantics (any label matches).
     // Enforce AND client-side so callers can require multiple labels.
     const required = options.labels ?? [];
-    const issues: TrackedIssue[] = [];
-    for (let page = 1; ; page += 1) {
+    const pages = await this.listAllPages(async (page) => {
       const { data } = await oct.request('GET /repos/{owner}/{repo}/issues', {
         owner,
         repo,
@@ -105,29 +126,25 @@ export class GitHubClient implements TrackerProvider {
         per_page: perPage,
         page,
       });
-      issues.push(...data
-        .filter(issue => !('pull_request' in issue)) // filter out PRs
-        .filter(issue => {
-          if (required.length === 0) return true;
-          const names = issue.labels.map(l => (typeof l === 'string' ? l : (l.name || '')));
-          return required.every(r => names.includes(r));
-        })
-        .map((issue): TrackedIssue => ({
-          id: issue.number,
-          platform: 'github' as const,
-          title: issue.title,
-          description: issue.body || '',
-          labels: issue.labels.map(l => (typeof l === 'string' ? l : (l.name || ''))),
-          state: issue.state === 'open' ? 'opened' : 'closed',
-          url: issue.html_url,
-          projectId: this.projectId,
-        })));
-      // A short page is the last page.  The count is of the page as it
-      // came back, not of the issues that survived the filters above: a
-      // full page of pull requests is still a full page.
-      if (data.length < perPage) break;
-    }
-    return issues;
+      return { data };
+    }, perPage);
+    return pages
+      .filter(issue => !('pull_request' in issue)) // filter out PRs
+      .filter(issue => {
+        if (required.length === 0) return true;
+        const names = issue.labels.map(l => (typeof l === 'string' ? l : (l.name || '')));
+        return required.every(r => names.includes(r));
+      })
+      .map((issue): TrackedIssue => ({
+        id: issue.number,
+        platform: 'github' as const,
+        title: issue.title,
+        description: issue.body || '',
+        labels: issue.labels.map(l => (typeof l === 'string' ? l : (l.name || ''))),
+        state: issue.state === 'open' ? 'opened' : 'closed',
+        url: issue.html_url,
+        projectId: this.projectId,
+      }));
   }
 
   async createIssue(options: CreateIssueOptions): Promise<number> {
@@ -208,7 +225,7 @@ export class GitHubClient implements TrackerProvider {
 
   async listIssueComments(id: number): Promise<TrackerIssueComment[]> {
     const { owner, repo } = this.getOwnerRepo();
-    const { data } = await this.client.issues.listComments({ owner, repo, issue_number: id, per_page: 100 });
+    const data = await this.listAllPages(page => this.client.issues.listComments({ owner, repo, issue_number: id, per_page: 100, page }), 100);
     return data.map(comment => ({ id: String(comment.id), body: comment.body ?? '' }));
   }
 
@@ -284,12 +301,14 @@ export class GitHubClient implements TrackerProvider {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const state = options.state === 'opened' ? 'open' : options.state || 'open';
-    const { data } = await oct.pulls.list({
+    const perPage = options.perPage || 100;
+    const data = await this.listAllPages(page => oct.pulls.list({
       owner,
       repo,
       state,
-      per_page: options.perPage || 20,
-    });
+      per_page: perPage,
+      page,
+    }), perPage);
     return data.map(pr => {
       // merged property exists on individual PR get but may not on list
       const merged = (pr as any).merged;
@@ -406,7 +425,7 @@ export class GitHubClient implements TrackerProvider {
   async getBranches(projectId: number): Promise<Branch[]> {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
-    const { data } = await oct.repos.listBranches({ owner, repo, per_page: 100 });
+    const data = await this.listAllPages(page => oct.repos.listBranches({ owner, repo, per_page: 100, page }), 100);
     return data.map(branch => {
       // GitHub's list-branches commit object only has sha and url
       // Cast to any to access the full commit object if available
@@ -425,7 +444,7 @@ export class GitHubClient implements TrackerProvider {
   async getTags(projectId: number): Promise<Tag[]> {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
-    const { data } = await oct.repos.listTags({ owner, repo, per_page: 20 });
+    const data = await this.listAllPages(page => oct.repos.listTags({ owner, repo, per_page: 100, page }), 100);
     return data.map(tag => ({
       name: tag.name,
       commit: tag.commit.sha.substring(0, 8),

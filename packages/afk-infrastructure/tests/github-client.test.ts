@@ -45,6 +45,59 @@ describe('GitHubClient', () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
+  it('reads every page of merge requests, not only the first', async () => {
+    const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
+    const list = vi.fn(async (_params: { page?: number }) => {
+      if ((_params.page ?? 1) === 1) {
+        return { data: [1, 2].map((number) => ({ number, title: `PR ${number}`, state: 'open', head: { ref: 'afk/backlog-1' }, base: { ref: 'main' }, html_url: `https://github.com/owner/code/pull/${number}` })) };
+      }
+      return { data: [{ number: 3, title: 'PR 3', state: 'open', head: { ref: 'afk/backlog-3' }, base: { ref: 'main' }, html_url: 'https://github.com/owner/code/pull/3' }] };
+    });
+    (client as unknown as { client: { pulls: { list: typeof list } } }).client = { pulls: { list } };
+
+    const changes = await client.listMRs({ state: 'all', perPage: 2 });
+
+    expect(changes.map((change) => change.id)).toEqual([1, 2, 3]);
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads every page of issue comments, not only the first', async () => {
+    const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
+    const listComments = vi.fn(async (_params: { page?: number }) => {
+      if ((_params.page ?? 1) === 1) {
+        return { data: Array.from({ length: 100 }, (_, index) => ({ id: index + 1, body: `comment ${index + 1}` })) };
+      }
+      return { data: [{ id: 101, body: 'comment 101' }] };
+    });
+    (client as unknown as { client: { issues: { listComments: typeof listComments } } }).client = { issues: { listComments } };
+
+    const comments = await client.listIssueComments(7);
+
+    expect(comments).toHaveLength(101);
+    expect(comments[100]).toEqual({ id: '101', body: 'comment 101' });
+    expect(listComments).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads every page of branches and tags, not only the first', async () => {
+    const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
+    const listBranches = vi.fn(async (_params: { page?: number }) => (
+      (_params.page ?? 1) === 1
+        ? { data: Array.from({ length: 100 }, (_, index) => ({ name: `branch-${index}`, commit: { sha: 'abcdef1234567890' }, protected: false })) }
+        : { data: [{ name: 'branch-100', commit: { sha: 'abcdef1234567890' }, protected: false }] }
+    ));
+    const listTags = vi.fn(async (_params: { page?: number }) => (
+      (_params.page ?? 1) === 1
+        ? { data: Array.from({ length: 100 }, (_, index) => ({ name: `v1.0.${index}`, commit: { sha: 'abcdef1234567890' } })) }
+        : { data: [{ name: 'v1.0.20', commit: { sha: 'abcdef1234567890' } }] }
+    ));
+    (client as unknown as { client: { repos: { listBranches: typeof listBranches, listTags: typeof listTags } } }).client = { repos: { listBranches, listTags } };
+
+    expect(await client.getBranches(1)).toHaveLength(101);
+    expect(await client.getTags(1)).toHaveLength(101);
+    expect(listBranches).toHaveBeenCalledTimes(2);
+    expect(listTags).toHaveBeenCalledTimes(2);
+  });
+
   it('extracts label acceptance criteria for the configured repository', () => {
     const client = new GitHubClient({ repo: 'owner/repo', auth: 'test-token' });
     expect(client.projectId).toBe('owner/repo');

@@ -115,6 +115,9 @@ export class GitLabClient implements TrackerProvider {
   }
 
   async listIssueComments(id: number): Promise<TrackerIssueComment[]> {
+    // The client follows the Link header when it is not told which page to
+    // fetch, so this reads every comment.  A hundred at a time is the most
+    // the API will serve.
     const notes = await this.client.IssueNotes.all(this.projectId, id, { perPage: 100 }) as any[];
     return notes.map(note => ({ id: String(note.id), body: note.body ?? '' }));
   }
@@ -172,7 +175,10 @@ export class GitLabClient implements TrackerProvider {
     const mrs = (await Promise.all(states.map(state => this.client.MergeRequests.all({
         projectId: this.projectId,
         state,
-        perPage: options.perPage || 20,
+        // A hundred at a time: the client follows the Link header and
+        // reads every merge request, so the page size is the number of
+        // requests it takes to read them all.
+        perPage: options.perPage || 100,
       }) as Promise<any[]>))).flat();
     return mrs.map(mr => ({
       id: mr.iid,
@@ -378,7 +384,7 @@ export class GitLabClient implements TrackerProvider {
   }
 
   async getBranches(projectId: number): Promise<Branch[]> {
-    const branches = await this.client.Branches.all(projectId as string | number) as any[];
+    const branches = await this.client.Branches.all(projectId as string | number, { perPage: 100 }) as any[];
     return branches.map(b => ({
       name: b.name,
       commit: b.commit?.id?.substring(0, 8) || '',
@@ -390,7 +396,7 @@ export class GitLabClient implements TrackerProvider {
   }
 
   async getTags(projectId: number): Promise<Tag[]> {
-    const tags = await this.client.Tags.all(projectId as string | number, { perPage: 10 }) as any[];
+    const tags = await this.client.Tags.all(projectId as string | number, { perPage: 100 }) as any[];
     return tags.map(t => ({
       name: t.name,
       commit: t.commit?.id?.substring(0, 8) || '',

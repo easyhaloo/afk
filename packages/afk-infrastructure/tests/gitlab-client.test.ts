@@ -19,6 +19,31 @@ describe('GitLabClient listIssues', () => {
   });
 });
 
+describe('GitLabClient page sizes', () => {
+  it('asks for a hundred at a time, so reading everything takes the fewest requests', async () => {
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'group/project' });
+    const all = vi.fn(async (..._args: unknown[]) => []);
+    const notes = vi.fn(async (..._args: unknown[]) => []);
+    const branches = vi.fn(async (..._args: unknown[]) => []);
+    const tags = vi.fn(async (..._args: unknown[]) => []);
+    (client as unknown as { client: Record<string, unknown> }).client = {
+      MergeRequests: { all }, IssueNotes: { all: notes }, Branches: { all: branches }, Tags: { all: tags },
+    };
+
+    await client.listMRs({ state: 'all' });
+    await client.listIssueComments(7);
+    await client.getBranches(1);
+    await client.getTags(1);
+
+    for (const call of [all, notes, branches, tags]) {
+      expect(call).toHaveBeenCalled();
+      // The options are the last argument, whatever the call's shape is.
+      const options = call.mock.calls[0][call.mock.calls[0].length - 1] as { perPage?: number } | undefined;
+      expect(options?.perPage).toBe(100);
+    }
+  });
+});
+
 describe('GitLabClient listMRs', () => {
   it('checks native closing issues by project ID and IID, failing closed on unreadable data', async () => {
     const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'team/code' });

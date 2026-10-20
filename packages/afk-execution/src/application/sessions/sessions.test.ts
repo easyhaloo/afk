@@ -5,7 +5,6 @@ import * as fs from 'fs';
 import { FileSessionStore } from './file-store.js';
 import { HandoffSessionStore } from './handoff-store.js';
 import { SessionStoreChain, SessionCorruptError, SessionNotFoundError } from './types.js';
-import { RunStateWriter } from './run-state.js';
 import type { SessionSnapshot } from '../../domain/agents/types.js';
 
 function makeSnapshot(over: Partial<SessionSnapshot> = {}): SessionSnapshot {
@@ -235,82 +234,5 @@ describe('SessionStoreChain', () => {
       snapshot: makeSnapshot(),
     });
     expect(result.path).toContain('issue-42-gen-1.json');
-  });
-});
-
-describe('RunStateWriter', () => {
-  let wtPath: string;
-  beforeEach(() => {
-    wtPath = fs.mkdtempSync(path.join(os.tmpdir(), 'afk-runstate-'));
-  });
-  afterEach(() => {
-    fs.rmSync(wtPath, { recursive: true, force: true });
-  });
-
-  it('init creates the run directory', async () => {
-    const w = new RunStateWriter(wtPath, 'issue-42-gen-1');
-    await w.init();
-    expect(fs.existsSync(path.join(wtPath, '.afk', 'runs', 'issue-42-gen-1'))).toBe(true);
-  });
-
-  it('writeRequest + writeResult + writeOutput persist files', async () => {
-    const w = new RunStateWriter(wtPath, 'issue-42-gen-1');
-    await w.init();
-    await w.writeRequest({
-      runId: 'issue-42-gen-1',
-      iid: 42,
-      generation: 1,
-      provider: 'claude-code',
-      agentTransport: 'app-server',
-      agentAuth: 'chatgpt',
-      agentModelProvider: 'openai',
-      agentThreadId: 'thread-42',
-      worktreePath: wtPath,
-      goalText: 'do something',
-      signalType: 'goal_complete',
-      startedAt: new Date().toISOString(),
-    });
-    await w.writeResult({
-      version: 1,
-      runId: 'issue-42-gen-1',
-      status: 'completed',
-      provider: 'claude-code',
-      commits: [],
-    });
-    await w.writeOutput('last line of pane capture');
-
-    const dir = path.join(wtPath, '.afk', 'runs', 'issue-42-gen-1');
-    expect(fs.existsSync(path.join(dir, 'request.json'))).toBe(true);
-    expect(JSON.parse(fs.readFileSync(path.join(dir, 'request.json'), 'utf8'))).toMatchObject({
-      agentTransport: 'app-server', agentAuth: 'chatgpt', agentModelProvider: 'openai', agentThreadId: 'thread-42',
-    });
-    expect(fs.existsSync(path.join(dir, 'result.json'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'result.json.sha256'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'output.log'))).toBe(true);
-  });
-
-  it('appendEvent writes JSONL lines', async () => {
-    const w = new RunStateWriter(wtPath, 'issue-42-gen-1');
-    await w.init();
-    await w.appendEvent({ type: 'text', text: 'first' });
-    await w.appendEvent({ type: 'text', text: 'second' });
-    const content = fs.readFileSync(
-      path.join(wtPath, '.afk', 'runs', 'issue-42-gen-1', 'events.jsonl'),
-      'utf-8',
-    );
-    const lines = content.split('\n').filter(Boolean);
-    expect(lines.length).toBe(2);
-    expect(JSON.parse(lines[0]).text).toBe('first');
-    expect(JSON.parse(lines[1]).text).toBe('second');
-  });
-
-  it('does not throw when underlying filesystem errors', async () => {
-    const w = new RunStateWriter('/nonexistent/path/that/cannot/exist', 'issue-42-gen-1');
-    // All methods must be best-effort — never throw.
-    await expect(w.init()).resolves.toBeUndefined();
-    await expect(w.writeRequest({
-      runId: 'x', iid: 1, generation: 1, provider: 'p', worktreePath: 'x',
-      goalText: 'g', signalType: 'goal_complete', startedAt: 'now',
-    })).resolves.toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { WorkItemRepositoryRef } from "../../shared/backlog-contract";
+import type { ProviderProjectRef, WorkItemRepositoryRef } from "../../shared/backlog-contract";
 import {
   defaultBaseBranch,
   planRepositoryCheckoutPaths,
@@ -155,7 +155,7 @@ describe("work item run repository validation", () => {
 
   it("checks repository association separately from structural parsing", () => {
     const associated: WorkItemRepositoryRef[] = [
-      { id: "repo-api", platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main", checkoutPath: "repositories/api" },
+      { id: "repo-api", platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "main", baseBranch: "main", checkoutPath: "repositories/api" },
     ];
     const selection = { platform: "github" as const, projectKey: "acme/api", name: "api", baseBranch: "release/1.0", checkoutPath: "repositories/api" };
     expect(validateRunRepositorySelection([selection], associated)).toEqual([selection]);
@@ -166,8 +166,11 @@ describe("work item run repository validation", () => {
   });
 
   it("uses the repository default branch and falls back to main", () => {
-    expect(defaultBaseBranch({ platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "develop" })).toBe("develop");
-    expect(defaultBaseBranch({ platform: "github", projectKey: "acme/api", name: "api" })).toBe("main");
-    expect(() => defaultBaseBranch({ platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "bad branch" })).toThrow(/defaultBranch/i);
+    const developProject: ProviderProjectRef = { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "develop" };
+    const noDefaultProject: ProviderProjectRef = { platform: "github", projectKey: "acme/api", name: "api" };
+    const invalidProject: ProviderProjectRef = { platform: "github", projectKey: "acme/api", name: "api", defaultBranch: "bad branch" };
+    expect(defaultBaseBranch(developProject)).toBe("develop");
+    expect(defaultBaseBranch(noDefaultProject)).toBe("main");
+    expect(() => defaultBaseBranch(invalidProject)).toThrow(/defaultBranch/i);
   });
 });

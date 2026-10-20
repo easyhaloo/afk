@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBacklogExecutionService } from "../../electron/services/backlog-execution-service";
-import type { BacklogItem, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract";
+import { formatWorkItemId, type BacklogItem as ProviderBacklogItem, type ReworkRecord } from "@afk/application";
+import type { BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract";
 
 describe("backlog execution service", () => {
-  function createPorts(item: BacklogItem) {
+  function createPorts(item: ProviderBacklogItem) {
     const backlog = {
       get: vi.fn(async () => item),
       list: vi.fn(async () => [item]),
@@ -13,7 +14,7 @@ describe("backlog execution service", () => {
       initialize: vi.fn(async () => undefined),
       transition: vi.fn(async () => undefined),
       setExecutionMode: vi.fn(async () => undefined),
-      createRework: vi.fn(async () => ({ id: "r1", attempt: 1, status: "open", source: "operator", summary: "rework", failedCriteria: [], requiredChecks: [], createdAt: "2026-09-17T00:00:00.000Z" })),
+      createRework: vi.fn(async (): Promise<ReworkRecord> => ({ version: 1, id: "r1", attempt: 1, status: "open", source: "operator", summary: "rework", failedCriteria: [], requiredChecks: [], createdAt: "2026-09-17T00:00:00.000Z" })),
       getActiveRework: vi.fn(async () => undefined),
       resolveRework: vi.fn(async () => undefined),
     };
@@ -34,7 +35,7 @@ describe("backlog execution service", () => {
     };
   }
 
-  function backlog(overrides: Partial<BacklogItem> = {}): BacklogItem {
+  function backlog(overrides: Partial<ProviderBacklogItem> = {}): ProviderBacklogItem {
     return {
       id: "42",
       title: "工作项",
@@ -48,8 +49,8 @@ describe("backlog execution service", () => {
     };
   }
 
-  function summary(item: BacklogItem, extra: Partial<BacklogRuntimeSummary> = {}): BacklogRuntimeSummary {
-    return { backlog: item, ...extra } as BacklogRuntimeSummary;
+  function summary(item: ProviderBacklogItem, extra: Partial<Omit<BacklogRuntimeSummary, "backlog" | "backlogId">> = {}): Omit<BacklogRuntimeSummary, "backlog"> & { backlog: ProviderBacklogItem } {
+    return { backlogId: item.id, ...extra, backlog: item };
   }
 
   it("starts the work item execution in process and records a running summary", async () => {
@@ -61,7 +62,7 @@ describe("backlog execution service", () => {
       executionState: async () => "running" as const,
       providers: async () => createPorts(backlog()),
       targetBranch: async () => "main",
-      getBacklog: async () => backlog({ workItemId: "github:acme/api#42" }),
+      getBacklog: async () => backlog({ workItemId: formatWorkItemId({ platform: "github", projectKey: "acme/api", issueNumber: 42 }) }),
       store,
     });
 

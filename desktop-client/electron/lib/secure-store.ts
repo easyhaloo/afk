@@ -3,7 +3,21 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 
-type FileSystem = Pick<typeof fs, "chmod" | "mkdir" | "rename" | "rm" | "writeFile">;
+/**
+ * The file operations this module performs. `Pick<typeof fs, ...>` would also
+ * carry fs's overloads (Buffer reads, append flags, bigint stats), which no
+ * caller here uses and which a hand-written store cannot satisfy.
+ */
+export type AtomicFileSystem = {
+  chmod(path: string, mode: number): Promise<void>;
+  mkdir(path: string, options: { recursive: true; mode: number }): Promise<unknown>;
+  readFile(path: string, encoding: "utf8"): Promise<string>;
+  rename(oldPath: string, newPath: string): Promise<void>;
+  rm(path: string, options: { force: true }): Promise<void>;
+  writeFile(path: string, data: string, options: { encoding?: "utf8"; mode: number }): Promise<void>;
+};
+
+type FileSystem = Pick<AtomicFileSystem, "chmod" | "mkdir" | "rename" | "rm" | "writeFile">;
 
 /**
  * Reads a JSON file, returning an empty default on ENOENT or parse failure.
@@ -11,7 +25,7 @@ type FileSystem = Pick<typeof fs, "chmod" | "mkdir" | "rename" | "rm" | "writeFi
 export async function readJsonFile<T>(
   file: string,
   parse: (raw: unknown) => T,
-  fileSystem: Pick<typeof fs, "readFile"> = fs,
+  fileSystem: Pick<AtomicFileSystem, "readFile"> = fs,
 ): Promise<T> {
   let raw: string;
   try {
@@ -53,7 +67,7 @@ export async function writeJsonFileAtomic(
 export async function readYamlFile<T>(
   file: string,
   parse: (raw: unknown) => T,
-  fileSystem: Pick<typeof fs, "readFile"> = fs,
+  fileSystem: Pick<AtomicFileSystem, "readFile"> = fs,
 ): Promise<T> {
   let raw: string;
   try {

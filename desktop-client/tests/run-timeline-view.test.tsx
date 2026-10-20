@@ -25,7 +25,7 @@ type Load = (runId: string, workItemId: string) => Promise<typeof detail>;
 
 describe("run timeline view", () => {
   it("loads only the expanded native details section and stops on collapse", async () => {
-    const load = vi.fn<Load>(async () => detail);
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async () => detail);
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineSection, { load, runId: detail.runId, workItemId: detail.workItemId, running: true })); });
     expect(load).not.toHaveBeenCalled();
@@ -44,7 +44,7 @@ describe("run timeline view", () => {
   });
 
   it("renders recorded events with sequence #N, kind label and workspace path", async () => {
-    const load = vi.fn<Load>(async () => detail);
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async () => detail);
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: "afk-158", workItemId: "github:easyhaloo/afk#158", expanded: true, running: false })); });
     const timeline = renderer.root.findByProps({ className: "run-timeline" });
@@ -60,7 +60,7 @@ describe("run timeline view", () => {
   });
 
   it("does not load while collapsed", async () => {
-    const load = vi.fn<Load>(async () => detail);
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async () => detail);
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: "afk-158", workItemId: "github:easyhaloo/afk#158", expanded: false, running: false })); });
     expect(load).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ describe("run timeline view", () => {
   it("polls every 5s while running and keeps the last loaded data during refresh", async () => {
     const nextDetail = { ...detail, entries: [...detail.entries, { sequence: 4, occurredAt: "2026-09-29T00:00:03.000Z", kind: "step.started", stepId: "qa", phase: "verification" }] };
     let call = 0;
-    const load = vi.fn<Load>(async () => { call += 1; return call === 1 ? detail : nextDetail; });
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async () => { call += 1; return call === 1 ? detail : nextDetail; });
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: "afk-158", workItemId: "github:easyhaloo/afk#158", expanded: true, running: true })); });
     expect(text(renderer.root.findByProps({ className: "run-timeline" }))).not.toContain("#4");
@@ -83,7 +83,7 @@ describe("run timeline view", () => {
   });
 
   it("stops polling after unmount", async () => {
-    const load = vi.fn<Load>(async () => detail);
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async () => detail);
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: "afk-158", workItemId: "github:easyhaloo/afk#158", expanded: true, running: true })); });
     expect(load).toHaveBeenCalledTimes(1);
@@ -93,7 +93,7 @@ describe("run timeline view", () => {
   });
 
   it("does not reload across parent re-renders that pass a fresh load closure", async () => {
-    const load = vi.fn<Load>(async () => detail);
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async () => detail);
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: "afk-158", workItemId: "github:easyhaloo/afk#158", expanded: true, running: false })); });
     expect(load).toHaveBeenCalledTimes(1);
@@ -107,7 +107,7 @@ describe("run timeline view", () => {
   it("ignores a stale response after the run switches", async () => {
     const stale = { ...detail, runId: "afk-old", entries: [{ ...detail.entries[0], sequence: 91 }] };
     const fresh = { ...detail, runId: "afk-new", entries: [{ ...detail.entries[0], sequence: 101 }] };
-    const load = vi.fn<Load>(async runId => {
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async runId => {
       if (runId === "afk-old") throw new Error("stale response should be ignored for old run");
       return { ...fresh, runId };
     });
@@ -122,7 +122,7 @@ describe("run timeline view", () => {
   });
 
   it("shows an honest message when the stream cannot be replayed", async () => {
-    const load = vi.fn<Load>(async () => { throw new Error("run 'afk-158' event stream is not replayable: integrity_mismatch"); });
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async () => { throw new Error("run 'afk-158' event stream is not replayable: integrity_mismatch"); });
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: "afk-158", workItemId: "github:easyhaloo/afk#158", expanded: true, running: false })); });
     expect(text(renderer.root.findByProps({ className: "run-timeline-missing" }))).toContain("不会生成替代内容");
@@ -131,7 +131,7 @@ describe("run timeline view", () => {
   });
 
   it("reports an empty stream instead of inventing entries", async () => {
-    const load = vi.fn<Load>(async () => ({ ...detail, entries: [] }));
+    const load = vi.fn<Parameters<Load>, ReturnType<Load>>(async () => ({ ...detail, entries: [] }));
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: "afk-158", workItemId: "github:easyhaloo/afk#158", expanded: true, running: false })); });
     expect(text(renderer.root.findByProps({ className: "run-timeline-missing" }))).toContain("没有已记录的事件");

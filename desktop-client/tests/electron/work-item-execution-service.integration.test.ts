@@ -23,11 +23,12 @@ describe("work item execution service integration", () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "afk-desktop-execution-integration-"));
     try {
       const project = { platform: "github" as const, projectKey: "acme/api", name: "api" };
+    const repository = { ...project, baseBranch: "main" };
       const item: GlobalWorkItem = {
         id: "WI-2026-018",
         issueNumber: 42,
         project,
-        repositories: [project],
+        repositories: [repository],
         title: "Coordinate checkout changes",
         managed: true,
         executionEligible: true,

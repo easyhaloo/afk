@@ -11,8 +11,8 @@ describe("AFK resource adapter", () => {
     const task = path.join(root, "github", "easyhaloo", "afk", "144");
     const other = path.join(root, "github", "elsewhere", "afk", "99");
     const resources = [
-      { id: "resource-144", workspace_path: task, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "afk-github:easyhaloo/afk#144-verify-ac", external_id: null, detail: null, run_id: "run-144" },
-      { workspace_path: other, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "unrelated-session", external_id: null, detail: null },
+      { id: "resource-144", workspace_path: task, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "afk-github:easyhaloo/afk#144-verify-ac", external_id: null, detail: null, status: "active" as const, worktree_path: "", run_id: "run-144", updated_at: "2026-09-20T08:00:00.000Z", metadata_json: "{}" },
+      { id: "resource-99", workspace_path: other, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "unrelated-session", external_id: null, detail: null, status: "active" as const, worktree_path: "", run_id: null, updated_at: "2026-09-20T08:00:00.000Z", metadata_json: "{}" },
     ];
     const adapter = createResourceAdapter({ readResources: () => resources, executable: async () => "/usr/bin/tmux", exec: async (_command, args) => ({
       ok: args[args.indexOf("-t") + 1] !== "unrelated-session", stdout: "1\t0", stderr: "",

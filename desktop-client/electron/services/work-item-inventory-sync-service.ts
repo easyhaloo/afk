@@ -6,8 +6,13 @@ export type WorkItemInventorySyncService = {
 export type WorkItemInventorySyncServiceDeps = {
   sync: () => Promise<unknown>;
   intervalMs?: number;
-  setInterval?: typeof globalThis.setInterval;
-  clearInterval?: typeof globalThis.clearInterval;
+  /**
+   * The scheduler seam. `typeof globalThis.setInterval` also carries the DOM
+   * overload, which returns a number while Node returns a Timeout, so the
+   * contract names the one shape this service actually uses.
+   */
+  setInterval?: (handler: () => void, timeout: number) => NodeJS.Timeout;
+  clearInterval?: (handle: NodeJS.Timeout) => void;
 };
 
 export const WORK_ITEM_INVENTORY_SYNC_INTERVAL_MS = 5 * 60 * 1000;
@@ -16,7 +21,7 @@ export function createWorkItemInventorySyncService(deps: WorkItemInventorySyncSe
   const schedule = deps.setInterval ?? globalThis.setInterval;
   const cancel = deps.clearInterval ?? globalThis.clearInterval;
   const intervalMs = deps.intervalMs ?? WORK_ITEM_INVENTORY_SYNC_INTERVAL_MS;
-  let timer: ReturnType<typeof globalThis.setInterval> | undefined;
+  let timer: NodeJS.Timeout | undefined;
   let running = false;
 
   const run = async () => {

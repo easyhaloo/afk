@@ -168,7 +168,8 @@ describe("work item execution manifest store", () => {
     await Promise.all([store.save(workspace, first), store.save(workspace, second)]);
 
     expect(new Set(temporaryFiles).size).toBe(2);
-    await expect(store.load(workspace)).resolves.toSatisfy(value => value?.workItemId === "WI-1" || value?.workItemId === "WI-2");
+    const loaded = await store.load(workspace);
+    expect(loaded?.workItemId === "WI-1" || loaded?.workItemId === "WI-2").toBe(true);
     await expect(readdir(path.dirname(manifestPath(workspace)))).resolves.toEqual(["execution-manifest.json"]);
   });
 

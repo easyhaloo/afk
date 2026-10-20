@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { describe, expect, it, vi } from "vitest";
 import { WorkItemsPage } from "../src/features/work-items/WorkItemsPage";
-import type { WorkItemInventoryResult } from "../shared/backlog-contract";
+import type { WorkItemInventoryResult, WorkItemRunStartInput } from "../shared/backlog-contract";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -81,9 +81,9 @@ const multiResourceResult: WorkItemInventoryResult = {
         },
       ],
       repositories: [
-        { id: "repo-checkout", platform: "github", projectKey: "acme/checkout-service", name: "checkout-service", defaultBranch: "main", role: "主要仓库", checkoutPath: "repositories/checkout-service" },
-        { id: "repo-console", platform: "gitlab", projectKey: "acme/merchant-console", name: "merchant-console", defaultBranch: "develop", role: "协作仓库", checkoutPath: "repositories/merchant-console" },
-        { id: "repo-config", platform: "gitlab", projectKey: "acme/deployment-config", name: "deployment-config", role: "配置仓库", checkoutPath: "repositories/deployment-config" },
+        { id: "repo-checkout", platform: "github", projectKey: "acme/checkout-service", name: "checkout-service", defaultBranch: "main", baseBranch: "main", role: "主要仓库", checkoutPath: "repositories/checkout-service" },
+        { id: "repo-console", platform: "gitlab", projectKey: "acme/merchant-console", name: "merchant-console", defaultBranch: "develop", baseBranch: "develop", role: "协作仓库", checkoutPath: "repositories/merchant-console" },
+        { id: "repo-config", platform: "gitlab", projectKey: "acme/deployment-config", name: "deployment-config", baseBranch: "main", role: "配置仓库", checkoutPath: "repositories/deployment-config" },
       ],
       executionPlan: [
         { id: "analyze", title: "分析跨仓库影响范围", detail: "读取两个外部 Issue 和三个关联仓库", status: "pending" },
@@ -190,9 +190,9 @@ describe("WorkItemsPage", () => {
 
   it("submits selected repositories in display order with independent branches and safe checkout paths", async () => {
     const repositories = [
-      { id: "repo-api", platform: "github" as const, projectKey: "acme/api", providerProjectId: "101", name: "api", defaultBranch: "main", role: "主要仓库", checkoutPath: "repositories/custom-api" },
-      { id: "repo-shared-a", platform: "gitlab" as const, projectKey: "git.corp/acme/shared-a", providerHost: "git.corp", name: "shared repo", defaultBranch: "develop", role: "协作仓库" },
-      { id: "repo-shared-b", platform: "gitlab" as const, projectKey: "acme/shared-b", name: "shared/repo", role: "配置仓库" },
+      { id: "repo-api", platform: "github" as const, projectKey: "acme/api", providerProjectId: "101", name: "api", defaultBranch: "main", baseBranch: "main", role: "主要仓库", checkoutPath: "repositories/custom-api" },
+      { id: "repo-shared-a", platform: "gitlab" as const, projectKey: "git.corp/acme/shared-a", providerHost: "git.corp", name: "shared repo", defaultBranch: "develop", baseBranch: "develop", role: "协作仓库" },
+      { id: "repo-shared-b", platform: "gitlab" as const, projectKey: "acme/shared-b", name: "shared/repo", baseBranch: "main", role: "配置仓库" },
     ];
     const inventory: WorkItemInventoryResult = {
       ...multiResourceResult,
@@ -230,7 +230,7 @@ describe("WorkItemsPage", () => {
       ...multiResourceResult,
       items: [{
         ...multiResourceResult.items[0],
-        repositories: [{ id: "repo-invalid", platform: "github", projectKey: "acme/invalid", name: "invalid", defaultBranch: "bad branch" }],
+        repositories: [{ id: "repo-invalid", platform: "github", projectKey: "acme/invalid", name: "invalid", defaultBranch: "bad branch", baseBranch: "bad branch" }],
       }],
     };
     vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => inventory), start: vi.fn() }, openExternal: vi.fn() } });
@@ -301,7 +301,7 @@ describe("WorkItemsPage", () => {
   });
 
   it("submits only checked repositories", async () => {
-    const start = vi.fn(async () => ({ runId: "run-43", workspace: { root: "/tmp/run-43" } }));
+    const start = vi.fn(async (_input: WorkItemRunStartInput) => ({ runId: "run-43", workspace: { root: "/tmp/run-43" } }));
     vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => multiResourceResult), start }, openExternal: vi.fn() } });
     let renderer: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(WorkItemsPage)); });

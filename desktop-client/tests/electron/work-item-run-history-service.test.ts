@@ -4,17 +4,18 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkItemRunHistoryService } from "../../electron/services/work-item-run-history-service";
 import { createWorkItemRunStore } from "../../electron/services/work-item-run-store";
-import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/backlog-contract";
+import type { ExecutionWorkspaceMetadata } from "../../electron/services/execution-workspace-service";
+import type { GlobalWorkItem, ProviderProjectRef, WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/backlog-contract";
 
 const root = "/tmp/work-item-run-history-test";
-const item = {
+const item: GlobalWorkItem = {
   id: "github:acme/api#1", issueNumber: 1,
   project: { platform: "github" as const, projectKey: "acme/api", name: "api" },
   title: "Issue", managed: true, executionEligible: true, state: "ready" as const,
   executionMode: "afk" as const, dependsOn: [], tags: [], branchName: "afk/1", providerRef: "github:acme/api#1",
 };
 const inventory: WorkItemInventoryResult = { items: [item], projects: [item.project], diagnostics: [], complete: true };
-const gitlabItem = {
+const gitlabItem: GlobalWorkItem = {
   ...item,
   id: "gitlab:gitlab.example/group/api#1",
   providerRef: "gitlab:gitlab.example/group/api#1",
@@ -30,6 +31,24 @@ const archiveDirectories: string[] = [];
 afterEach(() => {
   for (const directory of archiveDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
+
+/** The workspace layout the execution workspace service allocates. */
+function workspaceMetadata(rootPath: string, taskId: string, project: ProviderProjectRef, currentRunId?: string): ExecutionWorkspaceMetadata {
+  const repositoriesRoot = path.join(rootPath, "repositories");
+  return {
+    taskId,
+    root: rootPath,
+    repositoriesRoot,
+    repositories: [{ project, path: path.join(repositoriesRoot, "acme/api") }],
+    artifacts: path.join(rootPath, "artifacts"),
+    runtime: path.join(rootPath, "runtime"),
+    logs: path.join(rootPath, "logs"),
+    diagnostics: path.join(rootPath, "diagnostics"),
+    createdAt: "2026-09-23T00:00:00.000Z",
+    ...(currentRunId === undefined ? {} : { currentRunId }),
+    cleanupStatus: "active",
+  };
+}
 
 function archive(directory: string, overrides: Record<string, unknown> = {}, filename?: string) {
   const record = {
@@ -50,9 +69,9 @@ function setup(runs: WorkItemRunRecord[], alive = true, workItem = item) {
     const next = await transform(runs);
     if (next) runs.splice(0, runs.length, ...next);
   });
-  const updateRun = vi.fn(async () => undefined);
+  const updateRun = vi.fn(async (): Promise<ExecutionWorkspaceMetadata> => workspaceMetadata(root, workItem.id, workItem.project));
   const service = createWorkItemRunHistoryService({
-    workspace: { read: vi.fn(async () => ({ root, taskId: workItem.id, cleanupStatus: "active" as const, currentRunId: "desktop-1" })), updateRun },
+    workspace: { read: vi.fn(async () => workspaceMetadata(root, workItem.id, workItem.project, "desktop-1")), updateRun },
     runStore: { update },
     isPidAlive: () => alive,
     now: () => new Date("2026-09-23T01:00:00.000Z"),
@@ -117,9 +136,9 @@ describe("work item run history service", () => {
       workspace: path.join(workspaceRoot, "repositories/acme/api"),
     });
     const restartedStore = createStore();
-    const updateRun = vi.fn(async () => undefined);
+    const updateRun = vi.fn(async (): Promise<ExecutionWorkspaceMetadata> => workspaceMetadata(workspaceRoot, gitlabItem.id, gitlabItem.project));
     const service = createWorkItemRunHistoryService({
-      workspace: { read: async () => ({ root: workspaceRoot, taskId: gitlabItem.id, cleanupStatus: "active", currentRunId: run.id }), updateRun },
+      workspace: { read: async () => workspaceMetadata(workspaceRoot, gitlabItem.id, gitlabItem.project, run.id), updateRun },
       runStore: restartedStore,
       isPidAlive: () => false,
       now: () => new Date("2026-09-23T01:00:00.000Z"),

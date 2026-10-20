@@ -7,9 +7,19 @@
 declare module "react-test-renderer" {
   import type { ReactElement } from "react";
 
+  export type ReactTestRendererJSON = {
+    type: string;
+    props: Record<string, any>;
+    children: Array<ReactTestRendererNode> | null;
+  };
+
+  export type ReactTestRendererNode = ReactTestRendererJSON | string;
+
   export type ReactTestInstance = {
     children: unknown[];
     props: Record<string, any>;
+    find(predicate: (node: ReactTestInstance) => boolean): ReactTestInstance;
+    findAll(predicate: (node: ReactTestInstance) => boolean): ReactTestInstance[];
     findByType(type: unknown): ReactTestInstance;
     findAllByType(type: unknown): ReactTestInstance[];
     findByProps(props: Record<string, unknown>): ReactTestInstance;
@@ -20,8 +30,16 @@ declare module "react-test-renderer" {
     root: ReactTestInstance;
     update(element: ReactElement): void;
     unmount(): void;
+    toJSON(): ReactTestRendererJSON | ReactTestRendererJSON[] | null;
   };
 
-  export function create(element: ReactElement): TestRenderer;
+  /** The name the package itself exports for the renderer. */
+  export type ReactTestRenderer = TestRenderer;
+
+  export type TestRendererOptions = {
+    createNodeMock?: (element: ReactTestInstance) => unknown;
+  };
+
+  export function create(element: ReactElement, options?: TestRendererOptions): TestRenderer;
   export function act(callback: () => void | Promise<void>): Promise<void>;
 }

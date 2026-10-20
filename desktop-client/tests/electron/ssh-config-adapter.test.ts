@@ -18,8 +18,8 @@ async function createHome(config: string, managed = "") {
 function createInstrumentedFileSystem() {
   return {
     ...fs,
-    stat: vi.fn(fs.stat),
-    readFile: vi.fn(fs.readFile),
+    stat: vi.fn(async (file: string): Promise<{ mtimeMs: number; size: number }> => fs.stat(file)),
+    readFile: vi.fn(async (file: string, encoding: "utf8") => fs.readFile(file, encoding)),
   };
 }
 
@@ -42,7 +42,7 @@ function createControlledFileSystem(files: Map<string, ControlledConfigFile>) {
   fileSystem.stat.mockImplementation(async (file) => {
     const state = files.get(file);
     if (!state?.exists) throw missing();
-    return { mtimeMs: state.mtimeMs, size: state.size } as never;
+    return { mtimeMs: state.mtimeMs, size: state.size };
   });
   fileSystem.readFile.mockImplementation(async (file) => {
     const state = files.get(file);
@@ -202,7 +202,7 @@ describe("SSH config adapter", () => {
   it("invalidates the cache after a successful managed host upsert", async () => {
     const { home } = await createHome("Host demo\n  HostName demo.example.test\n");
     const fileSystem = createInstrumentedFileSystem();
-    fileSystem.stat.mockResolvedValue({ mtimeMs: 1, size: 1 } as never);
+    fileSystem.stat.mockResolvedValue({ mtimeMs: 1, size: 1 });
     const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
 
     await adapter.listHosts();
@@ -217,7 +217,7 @@ describe("SSH config adapter", () => {
   it("invalidates the cache after a successful managed host removal", async () => {
     const { home } = await createHome("Host demo\n  HostName demo.example.test\n", "Host managed\n  HostName managed.example.test\n");
     const fileSystem = createInstrumentedFileSystem();
-    fileSystem.stat.mockResolvedValue({ mtimeMs: 1, size: 1 } as never);
+    fileSystem.stat.mockResolvedValue({ mtimeMs: 1, size: 1 });
     const adapter = createSshConfigAdapter({ home, fileSystem, exec: async () => ({ ok: true, stdout: "", stderr: "" }) });
 
     await adapter.listHosts();

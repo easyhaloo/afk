@@ -1,15 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
 import { createJumpserverService } from "../../electron/services/jumpserver-service";
-import { JUMPSERVER_BINARY_ERROR } from "../../electron/adapters/jumpserver-cli";
+import { JUMPSERVER_BINARY_ERROR, type createJumpserverCli } from "../../electron/adapters/jumpserver-cli";
+import type { BastionInput, BastionRecord, createJumpserverStore } from "../../electron/adapters/jumpserver-store";
+import type { createJumpserverCredentialStore, JumpserverCredentialTarget } from "../../electron/services/jumpserver-credential-service";
+import type { createSshManagedHostStore } from "../../electron/adapters/ssh-managed-host-store";
+import type { ManagedSshHostInput, ManagedSshHostRecord } from "../../shared/ssh-contract";
 
-function mockBastionStore(initial = []) {
-  let bastions = [...initial];
+// The mocks implement the real adapter contracts so a mock that drifts from the
+// interface cannot silently keep passing.
+type BastionStore = ReturnType<typeof createJumpserverStore>;
+type CredentialStore = ReturnType<typeof createJumpserverCredentialStore>;
+type Cli = ReturnType<typeof createJumpserverCli>;
+type ManagedHostStore = ReturnType<typeof createSshManagedHostStore>;
+
+function mockBastionStore(initial: BastionRecord[] = []): BastionStore {
+  let bastions: BastionRecord[] = [...initial];
   return {
     list: vi.fn(() => Promise.resolve(bastions)),
-    get: vi.fn((id) => Promise.resolve(bastions.find((b) => b.id === id))),
-    upsert: vi.fn((input) => {
+    get: vi.fn((id: string) => Promise.resolve(bastions.find((b) => b.id === id))),
+    getByAlias: vi.fn((alias: string) => Promise.resolve(bastions.find((b) => b.alias === alias))),
+    upsert: vi.fn((input: BastionInput) => {
       const existing = bastions.find((b) => b.alias === input.alias);
-      const record = { ...input, id: existing?.id ?? `managed:${Math.random()}` };
+      const record: BastionRecord = { ...input, id: existing?.id ?? `managed:${Math.random()}` };
       if (existing) {
         bastions = bastions.map((b) => (b.id === existing.id ? record : b));
       } else {
@@ -17,14 +29,14 @@ function mockBastionStore(initial = []) {
       }
       return Promise.resolve(record);
     }),
-    update: vi.fn((id, partial) => {
+    update: vi.fn((id: string, partial: Partial<BastionInput>) => {
       const existing = bastions.find((b) => b.id === id);
       if (!existing) throw new Error("堡垒机不存在");
-      const updated = { ...existing, ...partial, id: existing.id };
+      const updated: BastionRecord = { ...existing, ...partial, id: existing.id };
       bastions = bastions.map((b) => (b.id === id ? updated : b));
       return Promise.resolve(updated);
     }),
-    remove: vi.fn((id) => {
+    remove: vi.fn((id: string) => {
       const existed = bastions.some((b) => b.id === id);
       bastions = bastions.filter((b) => b.id !== id);
       return Promise.resolve(existed);
@@ -32,50 +44,58 @@ function mockBastionStore(initial = []) {
   };
 }
 
-function mockCredentialService() {
-  const store = new Map();
+function mockCredentialService(): CredentialStore {
+  const store = new Map<string, { password: string; otpSecret?: string; target: JumpserverCredentialTarget }>();
   return {
-    get: vi.fn((id, target) => {
+    has: vi.fn((id: string, target: JumpserverCredentialTarget) => {
       const entry = store.get(id);
-      if (!entry || entry.target.hostname !== target.hostname) return undefined;
+      if (!entry) return Promise.resolve(false);
+      return Promise.resolve(entry.target.hostname === target.hostname);
+    }),
+    get: vi.fn((id: string, target: JumpserverCredentialTarget): Promise<{ password: string; otpSecret?: string } | undefined> => {
+      const entry = store.get(id);
+      if (!entry || entry.target.hostname !== target.hostname) return Promise.resolve(undefined);
       return Promise.resolve({ password: entry.password, otpSecret: entry.otpSecret });
     }),
-    set: vi.fn((id, password, target, otpSecret) => {
+    set: vi.fn((id: string, password: string, target: JumpserverCredentialTarget, otpSecret?: string) => {
       store.set(id, { password, target, otpSecret });
       return Promise.resolve(true);
     }),
-    remove: vi.fn((id) => {
+    remove: vi.fn((id: string) => {
       store.delete(id);
       return Promise.resolve(true);
     }),
   };
 }
 
-function mockCli() {
+function mockCli(): Cli {
   return {
     resolveBinaryPath: vi.fn(() => Promise.resolve("/usr/local/bin/jms")),
     listServers: vi.fn(() => Promise.resolve([])),
-    addServer: vi.fn(() => Promise.resolve({ ok: true, alias: "test" })),
-    removeServer: vi.fn(() => Promise.resolve(true)),
-    listAssets: vi.fn(() => Promise.resolve([])),
-    probeAssetReachability: vi.fn(() => Promise.resolve(true)),
+    addServer: vi.fn((input: { alias: string; host: string; port?: number; username: string; password: string }) => Promise.resolve({ ok: true, alias: input.alias })),
+    removeServer: vi.fn((alias: string) => Promise.resolve(true)),
+    listAssets: vi.fn((serverAlias: string, opts?: { linuxOnly?: boolean }) => Promise.resolve([])),
+    probeAssetReachability: vi.fn((input: { asset: string; serverAlias: string; command?: string }) => Promise.resolve(true)),
   };
 }
 
-function mockManagedHostStore() {
-  let hosts: Array<{ id: string; alias: string; hostname: string; port: number; user: string; jumpHost?: string; jumpHostType?: string }> = [];
+function mockManagedHostStore(): ManagedHostStore {
+  let hosts: ManagedSshHostRecord[] = [];
   return {
-    list: vi.fn(() => Promise.resolve({ hosts })),
-    upsert: vi.fn((input) => {
-      const record = { ...input, id: `managed:${Math.random()}` };
+    list: vi.fn(() => Promise.resolve(hosts)),
+    upsert: vi.fn((input: ManagedSshHostInput) => {
+      const record: ManagedSshHostRecord = { ...input, id: `managed:${Math.random()}` };
       hosts = [...hosts, record];
       return Promise.resolve(record);
     }),
-    update: vi.fn((id, input) => {
-      hosts = hosts.map((h) => (h.id === id ? { ...h, ...input } : h));
-      return Promise.resolve({ ...hosts.find((h) => h.id === id), ...input });
+    update: vi.fn((id: string, input: ManagedSshHostInput) => {
+      const existing = hosts.find((h) => h.id === id);
+      if (!existing) throw new Error("SSH 主机不存在");
+      const updated: ManagedSshHostRecord = { ...existing, ...input, id: existing.id };
+      hosts = hosts.map((h) => (h.id === id ? updated : h));
+      return Promise.resolve(updated);
     }),
-    remove: vi.fn((id) => {
+    remove: vi.fn((id: string) => {
       const existed = hosts.some((h) => h.id === id);
       hosts = hosts.filter((h) => h.id !== id);
       return Promise.resolve(existed);
@@ -203,7 +223,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       const result = await service.syncAssets("bastion-1");
@@ -247,7 +267,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       const result = await service.syncAssets("bastion-1", { linuxOnly: false });
@@ -275,7 +295,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       const result = await service.syncAssets("b-1");
@@ -298,11 +318,10 @@ describe("jumpserver service", () => {
 
       const managedHostStore = mockManagedHostStore();
       // Pre-existing host with same alias but different jumpHost
-      managedHostStore.list = vi.fn(() =>
-        Promise.resolve({
-          hosts: [{ id: "managed:existing", alias: "web-01", hostname: "1.1.1.1", port: 22, user: "root", jumpHost: "other-bastion", jumpHostType: "jumpserver" }],
-        }),
-      );
+      const existingHosts: ManagedSshHostRecord[] = [
+        { id: "managed:existing", alias: "web-01", hostname: "1.1.1.1", port: 22, user: "root", jumpHost: "other-bastion", jumpHostType: "jumpserver" },
+      ];
+      managedHostStore.list = vi.fn(() => Promise.resolve(existingHosts));
 
       const service = createJumpserverService({
         home: "/home/user",
@@ -310,7 +329,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       const result = await service.syncAssets("b-1");
@@ -332,11 +351,10 @@ describe("jumpserver service", () => {
       );
 
       const managedHostStore = mockManagedHostStore();
-      managedHostStore.list = vi.fn(() =>
-        Promise.resolve({
-          hosts: [{ id: "managed:old-id", alias: "web-01", hostname: "10.0.0.1", port: 22, user: "root", jumpHost: "prod", jumpHostType: "jumpserver" }],
-        }),
-      );
+      const existingHosts: ManagedSshHostRecord[] = [
+        { id: "managed:old-id", alias: "web-01", hostname: "10.0.0.1", port: 22, user: "root", jumpHost: "prod", jumpHostType: "jumpserver" },
+      ];
+      managedHostStore.list = vi.fn(() => Promise.resolve(existingHosts));
 
       const service = createJumpserverService({
         home: "/home/user",
@@ -344,7 +362,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       await service.syncAssets("b-1");
@@ -374,7 +392,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       const result = await service.syncAssets("b-1");
@@ -446,7 +464,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       await service.syncAssets("b-1");
@@ -466,15 +484,12 @@ describe("jumpserver service", () => {
       const credentialService = mockCredentialService();
       const cli = mockCli();
       const managedHostStore = mockManagedHostStore();
-      managedHostStore.list = vi.fn(() =>
-        Promise.resolve({
-          hosts: [
-            { id: "h-1", alias: "web-01", hostname: "10.0.0.1", port: 22, user: "root", jumpHost: "prod", jumpHostType: "jumpserver" },
-            { id: "h-2", alias: "web-02", hostname: "10.0.0.2", port: 22, user: "root", jumpHost: "prod", jumpHostType: "jumpserver" },
-            { id: "h-3", alias: "other-host", hostname: "10.0.0.3", port: 22, user: "root", jumpHost: "other", jumpHostType: "jumpserver" },
-          ],
-        }),
-      );
+      const existingHosts: ManagedSshHostRecord[] = [
+        { id: "h-1", alias: "web-01", hostname: "10.0.0.1", port: 22, user: "root", jumpHost: "prod", jumpHostType: "jumpserver" },
+        { id: "h-2", alias: "web-02", hostname: "10.0.0.2", port: 22, user: "root", jumpHost: "prod", jumpHostType: "jumpserver" },
+        { id: "h-3", alias: "other-host", hostname: "10.0.0.3", port: 22, user: "root", jumpHost: "other", jumpHostType: "jumpserver" },
+      ];
+      managedHostStore.list = vi.fn(() => Promise.resolve(existingHosts));
 
       const service = createJumpserverService({
         home: "/home/user",
@@ -482,7 +497,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       const result = await service.removeBastion("b-1");
@@ -527,7 +542,7 @@ describe("jumpserver service", () => {
         credentialService,
         cli,
         managedHostStore,
-        listManagedHosts: managedHostStore.list,
+        listManagedHosts: async () => ({ hosts: await managedHostStore.list() }),
       });
 
       await Promise.all([service.syncAssets("b-1"), service.syncAssets("b-1")]);

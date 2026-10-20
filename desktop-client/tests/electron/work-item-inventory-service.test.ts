@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createWorkItemApplicationAdapter } from "../../electron/adapters/work-item-application-adapter";
 import { createWorkItemInventoryService } from "../../electron/services/work-item-inventory-service";
+import type { WorkItemInventoryResult } from "../../shared/backlog-contract";
 
 const inventory = {
   items: [{
@@ -22,7 +23,7 @@ const inventory = {
   complete: true,
 };
 
-function application(value = inventory) {
+function application(value: WorkItemInventoryResult = inventory) {
   return createWorkItemApplicationAdapter({
     listWorkItems: vi.fn(async () => value),
   });

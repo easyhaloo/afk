@@ -11,7 +11,7 @@
     "dev": "pnpm run dev:raw",
     "start": "bash scripts/start.sh",
     "build:application": "tsc -p ../packages/afk-core/tsconfig.json && tsc -p ../packages/afk-application/tsconfig.json && tsc -p ../packages/afk-infrastructure/tsconfig.json && tsc -p ../packages/afk-workflow-graph/tsconfig.json && tsc -p ../packages/afk-execution/tsconfig.json",
-    "typecheck": "pnpm build:application && tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "typecheck": "pnpm build:application && tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
     "test": "pnpm build:application && node scripts/build-provider-inventory.mjs && vitest run --config vitest.config.ts",
     "test:contrast": "playwright test --config=playwright.config.ts contrast",
     "shots": "playwright test --config=playwright.config.ts reskin-shots",

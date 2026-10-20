@@ -9,9 +9,11 @@ describe("work item inventory sync service", () => {
     const service = createWorkItemInventorySyncService({
       sync,
       intervalMs: 1000,
-      setInterval: vi.fn(callback => {
-        scheduled = callback as () => void;
-        return 1 as unknown as ReturnType<typeof globalThis.setInterval>;
+      setInterval: vi.fn((handler: () => void, _timeout: number) => {
+        scheduled = handler;
+        const handle = setTimeout(() => undefined, 0);
+        clearTimeout(handle);
+        return handle;
       }),
       clearInterval: vi.fn(),
     });

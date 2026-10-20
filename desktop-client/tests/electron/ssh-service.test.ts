@@ -3,16 +3,25 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createSshService } from "../../electron/services/ssh-service";
+import type { ManagedSshHostInput, SshConnectionTarget, SshFingerprint } from "../../shared/ssh-contract";
 
 const host = { id: "managed:build-box", alias: "build-box", hostname: "build.example.test", port: 22, source: "managed" as const, configPath: "~/.ssh/afk_hosts", status: "untrusted" as const };
 const directHost = { ...host, configPath: "AFK 应用数据/ssh-hosts.yml" };
 
-function dependencies() {
+// The mock is typed against the service's real dependency contract so a mock that
+// drifts from the interface cannot silently keep passing.
+type SshServiceDependencies = Parameters<typeof createSshService>[0];
+// The factory always supplies a credential store; the contract lets a caller omit it.
+type TestDependencies = Omit<SshServiceDependencies, "credentialService"> & {
+  credentialService: NonNullable<SshServiceDependencies["credentialService"]>;
+};
+
+function dependencies(): TestDependencies {
   return {
     config: {
       listHosts: async () => ({ hosts: [host], diagnostics: [] }),
       upsertManagedHost: async () => host,
-      updateManagedHost: async (_hostId: string, input: typeof host) => ({ ...host, ...input, id: `managed:${input.alias}` }),
+      updateManagedHost: async (_hostId: string, input: ManagedSshHostInput) => ({ ...host, ...input, id: `managed:${input.alias}` }),
       removeManagedHost: async () => true,
       removeSystemHost: async () => true,
     },
@@ -27,13 +36,13 @@ function dependencies() {
     },
     knownHosts: {
       isTrusted: async () => false,
-      trust: async (fingerprint: typeof host & { algorithm: string; value: string }) => fingerprint,
+      trust: async (fingerprint: SshFingerprint) => fingerprint,
       remove: async () => true,
     },
     pty: {
       connect: () => ({ id: "session-1", hostId: host.id, alias: host.alias, kind: "ssh" as const, title: host.alias, state: "opening" as const }),
       generateKey: () => ({ id: "session-key", hostId: "local", alias: "keygen", kind: "keygen" as const, title: "keygen", state: "opening" as const }),
-      deployKey: (_hostId: string, _alias: string, _remoteCommand: string, _password?: string) => ({ id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy" as const, title: host.alias, state: "opening" as const }),
+      deployKey: (_hostId: string, _target: SshConnectionTarget | string, _remoteCommand: string, _password?: string) => ({ id: "session-deploy", hostId: host.id, alias: host.alias, kind: "deploy" as const, title: host.alias, state: "opening" as const }),
       input: () => true,
       resize: () => true,
       close: () => true,
@@ -48,7 +57,7 @@ function dependencies() {
       open: async () => "iTerm2" as const,
     },
     audit: () => undefined,
-  } as const;
+  };
 }
 
 describe("SSH service", () => {
@@ -161,7 +170,7 @@ describe("SSH service", () => {
     const jumpServerHost = { ...host, jumpHostType: "jumpserver" as const, jumpHost: "fangcloud-jumpserver" };
     const deps = dependencies();
     const resolvedAliases: string[] = [];
-    let connectedAlias = "";
+    let connectedTarget: SshConnectionTarget | string = "";
     deps.config.listHosts = async () => ({ hosts: [jumpServerHost], diagnostics: [] });
     deps.commands.resolve = async (alias) => {
       resolvedAliases.push(alias);
@@ -169,8 +178,9 @@ describe("SSH service", () => {
     };
     deps.knownHosts.isTrusted = async () => true;
     deps.commands.testBatch = async (alias) => { resolvedAliases.push(`test:${alias}`); return { ok: true, code: "ready" as const }; };
-    deps.pty.connect = (_hostId, alias) => {
-      connectedAlias = alias;
+    deps.pty.connect = (_hostId, target, displayAlias) => {
+      connectedTarget = target;
+      const alias = displayAlias ?? jumpServerHost.alias;
       return { id: "session-1", hostId: jumpServerHost.id, alias, kind: "ssh", title: alias, state: "opening" };
     };
     const service = createSshService(deps);
@@ -179,7 +189,7 @@ describe("SSH service", () => {
     await service.connect(jumpServerHost.id);
 
     expect(resolvedAliases).toEqual(["fangcloud-jumpserver", "test:fangcloud-jumpserver"]);
-    expect(connectedAlias).toBe("fangcloud-jumpserver");
+    expect(connectedTarget).toBe("fangcloud-jumpserver");
   });
 
   it("does not offer automatic key deployment through JumpServer", async () => {
@@ -325,10 +335,9 @@ describe("SSH service", () => {
     const home = await mkdtemp(path.join(tmpdir(), "afk-ssh-service-"));
     await mkdir(path.join(home, ".ssh"), { recursive: true });
     await writeFile(path.join(home, ".ssh", "id_ed25519_afk.pub"), "ssh-ed25519 AAAATEST afk");
-    const deps = dependencies();
+    const deps = { ...dependencies(), credentialService: undefined };
     let receivedPassword: string | undefined = "unexpected";
     deps.home = home;
-    deps.credentialService = undefined;
     deps.knownHosts.isTrusted = async () => true;
     deps.pty.deployKey = (_hostId, _alias, _remoteCommand, password) => {
       receivedPassword = password;

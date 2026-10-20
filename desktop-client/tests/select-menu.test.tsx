@@ -103,7 +103,7 @@ describe("SelectMenu", () => {
           codex: { transport: "auto", auth: "auto", provider: "openai", startupTimeoutMs: 1000 },
           canvasNodes: [template],
         }}
-        loop={{ state: "stopped", implement: { active: 0, ids: [] }, qa: { active: null, queue: [] }, totals: { completed: 0, failed: 0 } }}
+        loop={{ state: "stopped", execution: { active: 0, ids: [] }, totals: { completed: 0, failed: 0 }, lastError: {} }}
         runs={[]}
         onPatch={vi.fn()}
         onCodexPatch={vi.fn()}

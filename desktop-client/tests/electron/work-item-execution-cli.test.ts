@@ -10,11 +10,12 @@ import type { GlobalWorkItem } from "../../shared/backlog-contract";
 describe("single work-item execution", () => {
   it("hands the execution runtime the same identity the CLI parses from argv", async () => {
     const project = { platform: "github" as const, projectKey: "acme/api", name: "api" };
+    const repository = { ...project, baseBranch: "main" };
     const item: GlobalWorkItem = {
       id: "github:easyhaloo/afk#158",
       issueNumber: 158,
       project,
-      repositories: [project],
+      repositories: [repository],
       title: "Coordinate checkout changes",
       managed: true,
       executionEligible: true,

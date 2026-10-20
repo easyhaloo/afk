@@ -51,7 +51,7 @@ describe("SSH PTY adapter", () => {
   it("connects a managed host by IP while retaining the display name in the session", () => {
     const calls: Array<[string, string[]]> = [];
     const adapter = createSshPtyAdapter({
-      spawn: ((command, args) => { calls.push([command, args]); return fakeProcess(2); }) as never,
+      spawn: ((command: string, args: string[]) => { calls.push([command, args]); return fakeProcess(2); }) as never,
     });
 
     const session = adapter.connect("managed:stable-1", { hostname: "172.16.0.241", port: 22, user: "root" }, "kg演示");
@@ -65,7 +65,7 @@ describe("SSH PTY adapter", () => {
     const first = fakeProcess(1);
     const second = fakeProcess(2);
     const processes = [first, second];
-    const adapter = createSshPtyAdapter({ spawn: ((command, args) => { calls.push([command, args]); return processes.shift()!; }) as never });
+    const adapter = createSshPtyAdapter({ spawn: ((command: string, args: string[]) => { calls.push([command, args]); return processes.shift()!; }) as never });
     adapter.generateKey("/Users/tester/.ssh/id_ed25519_afk");
     expect(calls[0]).toEqual(["/usr/bin/ssh-keygen", ["-t", "ed25519", "-f", "/Users/tester/.ssh/id_ed25519_afk", "-C", "afk-managed"]]);
     first.exit(0);

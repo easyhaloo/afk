@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { StrictMode, createElement } from "react";
 import { act, create } from "react-test-renderer";
+import type { ITheme, ITerminalAddon, ITerminalOptions } from "@xterm/xterm";
 import {
   SshTerminalView,
   createSshTerminalView,
@@ -18,13 +19,17 @@ describe("SSH terminal view", () => {
   it("builds and disposes the injected xterm lifecycle", () => {
     const host = {} as HTMLElement;
     const cleanupOrder: string[] = [];
-    const addon = { fit: vi.fn(), dispose: vi.fn(() => cleanupOrder.push("addon")) };
+    const addon: ITerminalAddon & { fit(): void } = {
+      activate: vi.fn(),
+      fit: vi.fn(),
+      dispose: vi.fn(() => { cleanupOrder.push("addon"); }),
+    };
     const terminal = {
-      options: { disableStdin: false },
+      options: { disableStdin: false, theme: { background: "#101418" } } as ITerminalOptions & { theme: ITheme },
       loadAddon: vi.fn(),
       open: vi.fn(),
       focus: vi.fn(),
-      dispose: vi.fn(() => cleanupOrder.push("terminal")),
+      dispose: vi.fn(() => { cleanupOrder.push("terminal"); }),
       write: vi.fn(),
       hasSelection: vi.fn(() => false),
       getSelection: vi.fn(() => ""),
@@ -34,18 +39,18 @@ describe("SSH terminal view", () => {
     };
     const controller = { syncOutput: vi.fn(), dispose: vi.fn() };
     const observer = { observe: vi.fn(), disconnect: vi.fn() };
-    const createTerminal = vi.fn(() => terminal);
+    const createTerminal = vi.fn((options: ITerminalOptions) => terminal);
     const createController = vi.fn(() => controller);
     let resizeListener: (() => void) | undefined;
     const createResizeObserver = vi.fn((listener: () => void) => {
       resizeListener = listener;
       return observer;
     });
+    let frameListener: FrameRequestCallback | undefined;
     const requestFrame = vi.fn((listener: FrameRequestCallback) => {
-      requestFrame.listener = listener;
+      frameListener = listener;
       return 17;
     });
-    requestFrame.listener = undefined as FrameRequestCallback | undefined;
     const cancelFrame = vi.fn();
     let disabled = false;
 
@@ -89,7 +94,7 @@ describe("SSH terminal view", () => {
     resizeListener?.();
     expect(addon.fit).toHaveBeenCalledTimes(1);
 
-    requestFrame.listener?.(0);
+    frameListener?.(0);
     expect(addon.fit).toHaveBeenCalledTimes(2);
     expect(terminal.focus).toHaveBeenCalledTimes(1);
 
@@ -127,11 +132,17 @@ describe("SSH terminal view", () => {
     const onError = vi.fn();
     let controllerOptions: SshTerminalControllerOptions | undefined;
     const terminal = {
-      options: { disableStdin: false },
+      options: { disableStdin: false } as ITerminalOptions,
       loadAddon: vi.fn(),
       open: vi.fn(),
       focus: vi.fn(),
       dispose: vi.fn(),
+      write: vi.fn(),
+      hasSelection: vi.fn(() => false),
+      getSelection: vi.fn(() => ""),
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      attachCustomKeyEventHandler: vi.fn(),
     };
     const runtime = createSshTerminalRuntime({
       host: {} as HTMLElement,
@@ -143,8 +154,8 @@ describe("SSH terminal view", () => {
         onCopy: vi.fn().mockRejectedValue(copyFailure),
         onError,
       }),
-      createTerminal: vi.fn(() => terminal),
-      createFitAddon: () => ({ fit: vi.fn(), dispose: vi.fn() }),
+      createTerminal: vi.fn((options: ITerminalOptions) => terminal),
+      createFitAddon: () => ({ activate: vi.fn(), fit: vi.fn(), dispose: vi.fn() }),
       createController: vi.fn((options) => {
         controllerOptions = options;
         return { syncOutput: vi.fn(), dispose: vi.fn() };

@@ -10,8 +10,8 @@ import type {
 import { createWorkItemExecutionService } from "../../electron/services/work-item-execution-service";
 import { buildForegroundAgentCommand } from "../../electron/services/work-item-execution-service";
 
-const apiProject: WorkItemRepositoryRef = { platform: "github", projectKey: "acme/api", providerProjectId: "101", name: "api-service", role: "backend" };
-const webProject: WorkItemRepositoryRef = { platform: "gitlab", projectKey: "git.corp/platform/web", providerHost: "git.corp", providerProjectId: "202", name: "web-client", role: "frontend" };
+const apiProject: WorkItemRepositoryRef = { platform: "github", projectKey: "acme/api", providerProjectId: "101", name: "api-service", role: "backend", baseBranch: "main" };
+const webProject: WorkItemRepositoryRef = { platform: "gitlab", projectKey: "git.corp/platform/web", providerHost: "git.corp", providerProjectId: "202", name: "web-client", role: "frontend", baseBranch: "main" };
 const apiSelection: WorkItemRunRepositorySelection = {
   ...apiProject,
   checkoutPath: "repositories/api",
@@ -118,8 +118,8 @@ describe("work item execution service", () => {
     const runStore = {
       load: vi.fn(async () => [...stored]),
       save: vi.fn(async () => { throw new Error("non-atomic save"); }),
-      update: vi.fn(async (_workspace: string, transform: (runs: WorkItemRunRecord[]) => WorkItemRunRecord[] | undefined) => {
-        const next = transform([...stored]);
+      update: vi.fn(async (_workspace: string, transform: (runs: WorkItemRunRecord[]) => WorkItemRunRecord[] | undefined | Promise<WorkItemRunRecord[] | undefined>) => {
+        const next = await transform([...stored]);
         if (next) stored.splice(0, stored.length, ...next);
       }),
     };
@@ -244,7 +244,6 @@ describe("work item execution service", () => {
     const workspaceRoot = "/tmp/.loop-workspace/WI-2026-018";
     const allocate = vi.fn(async () => allocatedWorkspace(workspaceRoot, [webProject], ["frontend"]));
     const manifestStore = { save: vi.fn(async () => undefined) };
-    const child = { pid: 4321, once: vi.fn(() => child), unref: vi.fn() };
     const service = createWorkItemExecutionService({
       getWorkItem: async () => item({ id: "WI-2026-018", issueNumber: 731, repositories: [apiProject, webProject] }),
       execute: async () => ({ status: "done" as const }),

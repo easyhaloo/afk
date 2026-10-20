@@ -1,17 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { BacklogItem } from "../../../shared/backlog-contract";
-import { parseBacklogSort, sortBacklogItems } from "../src/features/backlog/backlog-sort";
+import { parseBacklogSort, sortBacklogItems, type SortableBacklogRow } from "../src/features/backlog/backlog-sort";
 
-function item(overrides: Partial<BacklogItem> = {}): BacklogItem {
+function item(overrides: Partial<SortableBacklogRow> = {}): SortableBacklogRow {
   return {
     id: "1",
     title: "Task",
-    dependsOn: [],
     state: "ready",
-    executionMode: "afk",
-    tags: [],
-    branchName: "afk/backlog-1",
-    providerRef: "stub:1",
     ...overrides,
   };
 }

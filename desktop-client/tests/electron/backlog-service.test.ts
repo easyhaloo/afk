@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BacklogManagementProvider } from "@afk/application";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import type { BacklogCreateInput, BacklogItem, BacklogListOptions, BacklogManagementProvider } from "@afk/application";
 import { BacklogServiceError } from "../../electron/services/backlog-error";
 import { createBacklogService, type BacklogServiceDeps } from "../../electron/services/backlog-service";
-import type { BacklogItem } from "../../shared/backlog-contract";
+import type { BacklogPlatform } from "../../shared/backlog-contract";
 
 function stubItem(id: string, overrides: Partial<BacklogItem> = {}): BacklogItem {
   return {
@@ -15,36 +15,38 @@ function stubItem(id: string, overrides: Partial<BacklogItem> = {}): BacklogItem
 }
 
 type StubProvider = BacklogManagementProvider & {
-  get: ReturnType<typeof vi.fn>;
-  list: ReturnType<typeof vi.fn>;
-  create: ReturnType<typeof vi.fn>;
-  addTag: ReturnType<typeof vi.fn>;
-  removeTag: ReturnType<typeof vi.fn>;
+  get: Mock<[id: string], Promise<BacklogItem>>;
+  list: Mock<[options?: BacklogListOptions], Promise<BacklogItem[]>>;
+  create: Mock<[input: BacklogCreateInput], Promise<BacklogItem>>;
+  addTag: Mock<[id: string, tag: string], Promise<void>>;
+  removeTag: Mock<[id: string, tag: string], Promise<void>>;
 };
 
 function makeDeps(overrides: Partial<BacklogServiceDeps> = {}): {
   deps: BacklogServiceDeps;
   provider: StubProvider;
-  providers: ReturnType<typeof vi.fn>;
+  providers: Mock<[workspace: string, platform?: BacklogPlatform], Promise<StubProvider>>;
 } {
   const provider: StubProvider = {
     get: vi.fn(async (id: string) => stubItem(id)),
-    list: vi.fn(async () => [stubItem("1"), stubItem("2")]),
-    create: vi.fn(async (input: { title: string }) => stubItem("new", { title: input.title })),
-    addTag: vi.fn(async () => undefined),
-    removeTag: vi.fn(async () => undefined),
+    list: vi.fn(async (_options?: BacklogListOptions) => [stubItem("1"), stubItem("2")]),
+    create: vi.fn(async (input: BacklogCreateInput) => stubItem("new", { title: input.title })),
+    addTag: vi.fn(async (_id: string, _tag: string): Promise<void> => undefined),
+    removeTag: vi.fn(async (_id: string, _tag: string): Promise<void> => undefined),
     initialize: vi.fn(async () => undefined),
   };
-  const providers = vi.fn(async () => provider);
+  const providers = vi.fn(async (_workspace: string, _platform?: BacklogPlatform) => provider);
   const deps: BacklogServiceDeps = {
-    providers: providers as unknown as BacklogServiceDeps["providers"],
+    providers,
     resolveWorkspace: (input: string) => input,
     ...overrides,
   };
   return { deps, provider, providers };
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("backlog service: list", () => {
   it("asks the workspace provider for the backlog items", async () => {
@@ -121,7 +123,9 @@ describe("backlog service: list", () => {
 });
 
 describe("backlog service: write operations invalidate list cache", () => {
-  beforeEach(() => vi.useRealTimers());
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
 
   it("create invalidates the list cache", async () => {
     const { deps, provider } = makeDeps();

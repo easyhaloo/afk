@@ -9,7 +9,7 @@ import { useExecutionHistory } from "../src/features/run-center/use-execution-hi
 type Page = { executions: ExecutionSummary[]; nextCursor?: string };
 const workItemId = "github:acme/api#1";
 const run = (runId: string, sequence = 1, itemId = workItemId): ExecutionSummary => ({
-  runId, workItemId: itemId, sequence, profileId: "default", attempt: 1, status: "running", terminal: false,
+  runId, workItemId: itemId, sequence, profileId: "default", attempt: 1, status: "running", terminal: false, integrityValid: true,
 });
 
 function deferred<Value>() {
@@ -22,7 +22,7 @@ function deferred<Value>() {
 describe("execution history", () => {
   let history!: ReturnType<typeof useExecutionHistory>;
   let renderer: ReturnType<typeof create> | undefined;
-  const load = vi.fn<(options: ExecutionQueryOptions) => Promise<Page>>();
+  const load = vi.fn<[ExecutionQueryOptions], Promise<Page>>();
 
   function History({ enabled = true, itemId }: { enabled?: boolean; itemId?: string }) {
     history = useExecutionHistory(enabled, itemId);

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { createKeyedMutex } from "../lib/async-mutex.js";
-import { writeYamlFileAtomic } from "../lib/secure-store.js";
+import { writeYamlFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
 
 export type BastionInput = {
   alias: string;
@@ -22,7 +22,7 @@ export type BastionRecord = BastionInput & { id: string };
 
 export type JumpserverStoreOptions = {
   file: string;
-  fileSystem?: Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "writeFile">;
+  fileSystem?: AtomicFileSystem;
   createId?: () => string;
 };
 
@@ -46,7 +46,7 @@ function parseDocument(value: unknown): StoreDocument {
   return { version: 1, bastions };
 }
 
-async function readDocument(fileSystem: Pick<typeof fs, "readFile">, file: string): Promise<StoreDocument> {
+async function readDocument(fileSystem: Pick<AtomicFileSystem, "readFile">, file: string): Promise<StoreDocument> {
   let raw: string;
   try {
     raw = await fileSystem.readFile(file, "utf8");
@@ -63,7 +63,7 @@ async function readDocument(fileSystem: Pick<typeof fs, "readFile">, file: strin
 }
 
 async function writeDocument(
-  fileSystem: Pick<typeof fs, "chmod" | "mkdir" | "rename" | "rm" | "writeFile">,
+  fileSystem: Pick<AtomicFileSystem, "chmod" | "mkdir" | "rename" | "rm" | "writeFile">,
   file: string,
   document: StoreDocument,
 ) {

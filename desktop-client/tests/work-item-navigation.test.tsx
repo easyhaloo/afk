@@ -15,7 +15,7 @@ describe("work item navigation", () => {
       start: vi.fn(),
     }, openExternal: vi.fn() } });
     let renderer!: ReactTestRenderer;
-    await act(async () => { renderer = create(createElement(WorkItemsPage, { focusWorkItemId: "github:easyhaloo/afk#158" })); });
+    await act(async () => { renderer = create(<WorkItemsPage focusWorkItemId="github:easyhaloo/afk#158" />); });
     expect(renderer.root.findByProps({ "aria-label": "工作项 github:easyhaloo/afk#158" })).toBeDefined();
     expect(renderer.root.findAllByProps({ "aria-label": "工作项 github:other/repo#158" })).toHaveLength(0);
     act(() => renderer.unmount());

@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ManagedSshHostInput, ManagedSshHostRecord, SshDiagnostic, SshHost, SshJumpHostType, SshListResult } from "../../shared/ssh-contract.js";
 import { validateSshHostInput } from "../security/ssh-validation.js";
+import type { AtomicFileSystem } from "../lib/secure-store.js";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
 
@@ -14,7 +15,10 @@ type SshConfigAdapterOptions = {
     update: (id: string, input: ManagedSshHostInput) => Promise<ManagedSshHostRecord>;
     remove: (id: string) => Promise<boolean>;
   };
-  fileSystem?: Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "stat" | "writeFile">;
+  // The exact file operations this adapter performs.
+  fileSystem?: AtomicFileSystem & {
+    stat(path: string): Promise<{ mtimeMs: number; size: number }>;
+  };
 };
 
 type ConfigBlock = {

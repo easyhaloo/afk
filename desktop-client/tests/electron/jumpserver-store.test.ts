@@ -188,12 +188,12 @@ describe("jumpserver store", () => {
 
     const delayedFs = {
       ...fs,
-      readFile: async (f: string, enc: BufferEncoding) => {
+      readFile: async (f: string, enc: "utf8") => {
         callLog.push(`read-${f}`);
         await new Promise((r) => setTimeout(r, 5));
         return fs.readFile(f, enc);
       },
-      writeFile: async (f: string, data: string, opts?: object) => {
+      writeFile: async (f: string, data: string, opts?: { encoding?: "utf8"; mode: number }) => {
         callLog.push(`write-${path.basename(f)}`);
         await new Promise((r) => setTimeout(r, 5));
         return fs.writeFile(f, data, opts);

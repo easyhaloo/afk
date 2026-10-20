@@ -2,6 +2,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createMutex } from "../lib/async-mutex.js";
+import type { AtomicFileSystem } from "../lib/secure-store.js";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "jumpserver-credentials.json");
 const MAX_PASSWORD_BYTES = 4096;
@@ -18,7 +19,7 @@ export type JumpserverCredentialTarget = {
   user: string;
 };
 
-type CredentialFileSystem = Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "writeFile">;
+type CredentialFileSystem = AtomicFileSystem;
 
 type CredentialRecord = {
   encrypted: string;

@@ -5,7 +5,9 @@ import { Agents, Environments, Repositories } from "../src/main";
 import { DEMO_SNAPSHOT } from "../src/mock-data";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("resource search pages", () => {
   it("filters authorized repositories without requesting provider data again", async () => {
@@ -55,7 +57,7 @@ describe("resource search pages", () => {
 
   it("searches registered environment resources and preserves session targets", () => {
     const onTerminal = vi.fn();
-    const snapshot = { ...DEMO_SNAPSHOT, sessions: [{ name: "session-special", workspace: "/tmp/project", windows: 1, attached: false, runId: "run-144", resourceId: "resource-144" }] };
+    const snapshot = { ...DEMO_SNAPSHOT, sessions: [{ name: "session-special", workspace: "/tmp/project", windows: "1", attached: false, runId: "run-144", resourceId: "resource-144" }] };
     let renderer!: ReturnType<typeof create>;
     act(() => { renderer = create(createElement(Environments, { snapshot, onTerminal })); });
     act(() => renderer.root.findByProps({ "aria-label": "搜索执行环境" }).props.onChange({ target: { value: "special" } }));

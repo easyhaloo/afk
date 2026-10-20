@@ -529,6 +529,43 @@ function checkPackageGraph() {
   for (const name of manifests.keys()) walk(name);
 }
 
+/**
+ * Every build-script approval must be a decision.
+ *
+ * pnpm writes an undecided approval as the literal text "set this to true or
+ * false". pnpm reads that text as "not allowed", so the install ends with
+ * ERR_PNPM_IGNORED_BUILDS and a fresh checkout cannot be installed at all —
+ * a failure that looks like a broken registry rather than a placeholder
+ * somebody left in a config file.
+ */
+function checkBuildApprovals() {
+  const manifestPath = join(repoRoot, 'pnpm-workspace.yaml');
+  if (!existsSync(manifestPath)) return;
+  const lines = readFileSync(manifestPath, 'utf8').split(/\r?\n/);
+  let inside = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (/^allowBuilds\s*:/.test(trimmed)) {
+      inside = true;
+      continue;
+    }
+    if (!inside) continue;
+    if (!/^\s/.test(line)) {
+      inside = false;
+      continue;
+    }
+    const entry = /^\s+(['"]?)([^:'"\s]+)\1\s*:\s*(.*?)\s*$/.exec(line);
+    if (!entry) continue;
+    const value = entry[3].replace(/^['"]|['"]$/g, '');
+    if (value !== 'true' && value !== 'false') {
+      addViolation(
+        `${relative(repoRoot, manifestPath)}: allowBuilds entry '${entry[2]}' is '${value}'; pnpm reads a non-boolean as "not allowed" and refuses to install.`,
+      );
+    }
+  }
+}
+
 walk(root);
 for (const sourceFile of sourceFiles) checkFile(sourceFile);
 // The desktop client is a separate source tree that the layering rules above
@@ -543,6 +580,7 @@ if (existsSync(desktopRoot) && statSync(desktopRoot).isDirectory()) {
 }
 checkStateMappingDuplicates();
 checkPackageGraph();
+checkBuildApprovals();
 if (checkPackages) {
   for (const packageRoot of packageRoots) {
     if (!existsSync(packageRoot.path) || !statSync(packageRoot.path).isDirectory()) {

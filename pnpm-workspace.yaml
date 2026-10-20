@@ -1,8 +1,23 @@
 packages:
   - packages/*
   - desktop-client
+# The build scripts that are allowed to run. pnpm refuses to install when a
+# dependency has a build script that is neither allowed nor refused, so every
+# entry here is a decision: `true` runs the script, `false` blocks it.
+#
+# pnpm writes an undecided entry as the literal text "set this to true or
+# false" when it finds a build script it has no answer for. That text is not
+# a boolean: pnpm reads it as "not allowed", the install fails with
+# ERR_PNPM_IGNORED_BUILDS, and a fresh checkout cannot be installed at all.
+# The architecture guard rejects a non-boolean here for that reason.
+#
+# @anthropic-ai/claude-code ships the `claude` binary as a placeholder plus a
+# platform package; its postinstall copies the native binary over the
+# placeholder. AFK spawns `claude` at runtime (the claude-code agent provider
+# and `afk retro`), so the build has to run — a blocked build leaves a stub
+# that starts and then fails.
 allowBuilds:
-  '@anthropic-ai/claude-code': set this to true or false
+  '@anthropic-ai/claude-code': true
   electron: true
   electron-winstaller: false
   esbuild: true

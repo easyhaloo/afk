@@ -29,6 +29,12 @@ before touching `desktop-client/`.
 - **The desktop client never spawns an AFK CLI process.** It calls the shared
   use cases in process. See
   [Package boundaries](#package-boundaries) below.
+- **Every build-script approval is a decision.** `pnpm-workspace.yaml` lists
+  each dependency whose install script may run as `true` or `false`. pnpm
+  writes an undecided one as the literal text `set this to true or false`;
+  pnpm reads that text as "not allowed", so the install ends with
+  `ERR_PNPM_IGNORED_BUILDS` and a fresh checkout cannot be installed at all.
+  `pnpm architecture:check` rejects a non-boolean there.
 
 ## Package boundaries
 

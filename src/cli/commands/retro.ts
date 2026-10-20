@@ -8,7 +8,7 @@ import { Command } from 'commander';
 import { z } from 'zod';
 import type { AgentToolCallSummary, RunEvent } from '@afk/core';
 import type { CommandRegistrationContext } from '../command-registry.js';
-import { JsonlEventStore } from '@afk/infrastructure/observability';
+import { JsonlEventStore, stableJson } from '@afk/infrastructure/observability';
 import { readAgentTelemetry, readAgentTools, readAgentTranscript, findCodexRollout } from '@afk/execution/infrastructure/observability/agent-telemetry';
 import { defaultSessionStoreChain } from '@afk/execution/application/sessions/chain';
 import { claudeProjectSlug } from '@afk/execution/shared/agent-transcript-path';
@@ -86,12 +86,6 @@ interface EvidenceFile {
   uri: string;
   sha256: string;
   mediaType: string;
-}
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (!value || typeof value !== 'object') return JSON.stringify(value);
-  return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
 }
 
 function sha256(value: string | Buffer): string {

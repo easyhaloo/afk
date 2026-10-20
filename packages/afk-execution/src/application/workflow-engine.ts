@@ -13,8 +13,8 @@ import type {
   AgentExecution,
   ExecutionResult,
 } from '../domain/sandbox/types.js';
-import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
-import { getTokenUsage, configureStatusline, logger, withLogContext } from '@afk/infrastructure';
+import { DEFAULT_EXECUTION_MODE, type AgentProvider, type AgentProviderName, type AgentRuntimeSelection, type ExecutionMode } from '../domain/agents/types.js';
+import { configureStatusline, logger, withLogContext } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
 import { loadModules, parseModuleParams } from './modules/_registry.js';
 import type { ModuleParams } from './modules/_registry.js';
@@ -60,7 +60,7 @@ import {
   type MultiRepositoryPreparationService,
   type PreparedRepositorySet,
 } from './workflows/multi-repository-preparer.js';
-import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtime/agent-metadata.js';
+import { runtimeFieldsFromExecution } from './runtime/agent-metadata.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
 import { collectAgentTelemetry } from '../infrastructure/observability/agent-telemetry.js';
@@ -287,7 +287,7 @@ export class WorkflowRunner {
   /** Resolved agent provider name (set in run()). */
   private agentProviderName: AgentProviderName = 'claude-code';
   /** Execution mode (set in run()). */
-  private executionMode: ExecutionMode = 'interactive';
+  private executionMode: ExecutionMode = DEFAULT_EXECUTION_MODE;
   private sandbox: Sandbox | undefined;
   private logDir: string;
   private modules: LifecycleModule[] = [];
@@ -486,7 +486,7 @@ export class WorkflowRunner {
 
     const effectiveTemplate = options.template ?? 'issue-implementation';
     this.sandboxProviderName = options.sandboxProvider ?? 'local';
-    this.executionMode = options.executionMode ?? 'batch';
+    this.executionMode = options.executionMode ?? DEFAULT_EXECUTION_MODE;
     this.repoRoot = options.repoRoot ?? process.cwd();
     // The runtime record exists for the whole run: it starts before any setup
     // can fail, so a failed setup is archived against it.
@@ -792,7 +792,7 @@ export class WorkflowRunner {
         persistBudget: ctx.persistBudget,
         prompt,
         signalType,
-        executionMode: ctx.executionMode ?? 'batch',
+        executionMode: ctx.executionMode ?? DEFAULT_EXECUTION_MODE,
         agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
         runtime: this.agentRuntime,
         sandbox,
@@ -992,7 +992,7 @@ export class WorkflowRunner {
       kind: 'workflow.recorded', name: loadedTemplate.name, version: loadedTemplate.version,
       steps: loadedTemplate.steps.map(step => ({
         id: step.id, kind: step.kind ?? 'agent', dependsOn: step.dependsOn ?? [],
-        ...(step.kind === 'system' ? {} : { provider: step.provider ?? this.agentProvider.name, executionMode: step.executionMode ?? executionMode ?? 'batch' }),
+        ...(step.kind === 'system' ? {} : { provider: step.provider ?? this.agentProvider.name, executionMode: step.executionMode ?? executionMode ?? DEFAULT_EXECUTION_MODE }),
       })),
     });
     const autoWrapupOverridden = this.autoWrapup !== WorkflowRunner.prototype.autoWrapup;

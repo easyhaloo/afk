@@ -1,5 +1,4 @@
 import { promises as fs } from 'fs';
-import { WorktreeManager } from '../../infrastructure/git/index.js';
 import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-diagnostics.js';
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index.js';
 import { configureStatusline, logger, getLogContext, withLogContext } from '@afk/infrastructure';
@@ -16,7 +15,7 @@ import type { ChangeRequest } from '@afk/infrastructure';
 import { formatExecutionFailure } from '../workflow-engine.js';
 import { buildExecutionPrompt } from '../workflows/execution-protocol.js';
 import { TaskRuntimeManager } from '../runtime/task-runtime.js';
-import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
+import { runtimeFieldsFromExecution } from '../runtime/agent-metadata.js';
 import { BudgetManager } from '../workflows/budget.js';
 import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
@@ -98,6 +97,9 @@ export class QARunner {
     this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
     this.config = config ?? getWorkflowConfig();
     this.providers = providers;
+    // The verification phase is headless by default: it checks acceptance
+    // criteria and reports, and nobody attaches to a verification agent. A
+    // caller that wants a session to watch asks for the interactive mode.
     this.executionMode = deps.executionMode ?? 'batch';
     this.projectRoot = deps.projectRoot ?? process.cwd();
     this.catalog = deps.catalog ?? new TemplateCatalog({ projectRoot: this.projectRoot });

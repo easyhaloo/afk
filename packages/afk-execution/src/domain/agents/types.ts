@@ -47,6 +47,16 @@ export interface AgentCommand {
 /** Execution mode — determines how the runner waits for agent completion. */
 export type ExecutionMode = 'interactive' | 'batch';
 
+/**
+ * The mode a run uses when nobody names one.
+ *
+ * The interactive mode is the default: the agent runs in a tmux session, so
+ * a person can attach to it and the run can hand the work over to a fresh
+ * session. The batch mode is the headless one, and a caller asks for it
+ * when it wants no session — the verification phase, for one.
+ */
+export const DEFAULT_EXECUTION_MODE: ExecutionMode = 'interactive';
+
 /** Options for building an agent command. */
 export interface AgentCommandOptions {
   /** Path the agent should operate in. */

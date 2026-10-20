@@ -1,4 +1,4 @@
-import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
+import { DEFAULT_EXECUTION_MODE, type AgentProviderName, type AgentRuntimeSelection, type ExecutionMode } from '../../domain/agents/types.js';
 import type { SandboxProviderName } from '../../domain/sandbox/types.js';
 import type { BranchStrategyConfig } from '@afk/infrastructure';
 import { deriveBacklogBranchName } from '@afk/application';
@@ -98,11 +98,10 @@ const defaults = {
   goalBudget: 10_000_000,
   sandboxProvider: 'local' as SandboxProviderName,
   agentProvider: 'claude-code' as AgentProviderName,
-  executionMode: 'interactive' as ExecutionMode,
 };
 
 function executionMode(raw: ExecutionMode | string | undefined): ExecutionMode {
-  if (raw === undefined) return defaults.executionMode;
+  if (raw === undefined) return DEFAULT_EXECUTION_MODE;
   if (raw === 'interactive' || raw === 'batch') return raw;
   throw new Error(`invalid execution-mode: ${raw}; expected interactive or batch`);
 }

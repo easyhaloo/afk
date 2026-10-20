@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentExecution, AgentProvider, ExecutionResult } from '../../domain/agents/types.js';
@@ -276,6 +276,56 @@ describe('execution manifest request to runner boundary', () => {
     expect(sandboxProvider.create).toHaveBeenCalledWith(expect.objectContaining({
       worktreePath: '/legacy/worktree', workspaceRoot,
     }));
+  });
+
+  it('runs in the mode the options name as the default, when nobody names one', async () => {
+    // The options say the default is the interactive mode, and the request
+    // resolver agrees. The runner's own fallback said the batch mode, and a
+    // run that reached it ran in a different mode than the one the options
+    // document.
+    const events: string[] = [];
+    const apiRoot = join(workspaceRoot, 'repositories', 'api');
+    await mkdir(apiRoot, { recursive: true });
+    const repositories = [
+      {
+        platform: 'github' as const, projectKey: 'acme/api', name: 'api', checkoutPath: 'repositories/api',
+        repoRoot: apiRoot, baseBranch: 'main', workingBranch: 'afk/work-item-18', primary: true,
+      },
+    ];
+    const preparedRepositories = repositories.map(repository => ({
+      ...repository,
+      handle: { branch: repository.workingBranch, path: repository.repoRoot, isNewBranch: true },
+      createdByRun: true,
+      original: { branch: repository.baseBranch, head: 'head', status: '', workingBranchExisted: false },
+    }));
+    const prepared: PreparedRepositorySet = {
+      repositories: preparedRepositories,
+      primary: preparedRepositories[0],
+      finish: vi.fn(async () => undefined),
+      release: vi.fn(async () => undefined),
+    };
+    const preparer = { prepare: vi.fn(async () => prepared) };
+    const sandbox = sandboxWith(events);
+    const sandboxProvider = providerWith(sandbox, events, 'docker');
+    const agent = agentWith(events);
+    const providers = providersForRun();
+    const runner = new WorkflowRunner(providers, {
+      observer,
+      agentProvider: agent,
+      sandboxProvider,
+      watchdog: { arm: vi.fn(), disarm: vi.fn() } as never,
+      multiRepositoryPreparer: preparer,
+      runtimeManager: runtimeManager() as never,
+    }) as any;
+    runner.autoWrapup = vi.fn(async () => ({ success: true }));
+
+    await expect(runner.run({
+      backlogId: '42', workItemId: 'github:acme/api#42', session: 'afk-github:acme/api#42', targetBranch: 'afk/work-item-18',
+      baseBranch: 'main', repoRoot: repositories[0].repoRoot, workspaceRoot, repositories,
+      sandboxProvider: 'docker', template: 'simple-loop',
+    })).resolves.toMatchObject({ success: true });
+
+    expect(vi.mocked(agent.createExecution).mock.calls[0][0].executionMode).toBe('interactive');
   });
 });
 

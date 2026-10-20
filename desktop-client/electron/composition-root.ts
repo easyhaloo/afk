@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import type { BacklogManagementProvider } from "@afk/application";
 import type { ManagementProviderBundle } from "@afk/infrastructure";
-import { configString, parseConfig } from "./workflow/config-parser.js";
+import { loadWorkflowConfig } from "@afk/execution/infrastructure/config/manager";
 import type { BacklogPlatform } from "../shared/backlog-contract.js";
 
 const requireCjs = createRequire(import.meta.url);
@@ -94,8 +94,7 @@ export async function backlogProviders(
  * here, so both agree on the target branch for a given workspace.
  */
 export async function workflowTargetBranch(workspace: string): Promise<string> {
-  const raw = await fs.readFile(path.join(workspace, ".afk", "config.yml"), "utf8").catch(() => "");
-  return configString(parseConfig(raw), "targetBranch", process.env.AFK_TARGET_BRANCH || "main");
+  return loadWorkflowConfig(workspace).targetBranch;
 }
 
 /** Test/debug helper: drop the cached provider bundles. */

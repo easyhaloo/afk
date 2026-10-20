@@ -7,7 +7,8 @@ import { exec, executable, firstLine } from "../adapters/process-executor.js";
 import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter.js";
 import { AFK_VERSION } from "@afk/application";
 import { builtinTemplates } from "@afk/execution/domain/templates/builtin";
-import { configNumber, configString, parseConfig, type ConfigObject } from "../workflow/config-parser.js";
+import { DEFAULT_WORKFLOW_CONFIG, loadWorkflowConfig, type WorkflowConfig } from "@afk/execution/infrastructure/config/manager";
+type ConfigObject = Record<string, unknown>;
 import { detectAgentRuntimes } from "./runtime-service.js";
 import { projectRunScopeService } from "./project-run-scope-service.js";
 import { readEvents, resolveWorkspace } from "./workspace-service.js";
@@ -43,33 +44,43 @@ function validSession(value: string) {
 
 
 
-async function readWorkflowConfig(root: string): Promise<WorkflowConfigSummary> {
+export async function readWorkflowConfig(root: string): Promise<WorkflowConfigSummary> {
   const configPath = path.join(root, ".afk", "config.yml");
   const raw = await fs.readFile(configPath, "utf8").catch(() => "");
-  const values = parseConfig(raw);
+  // The runner's configuration, read by the runner's reader: what this
+  // page shows is what a run will use.  A configuration the runner refuses
+  // leaves the page on the defaults rather than taking the whole overview
+  // down with it.
+  let config: WorkflowConfig;
+  try {
+    config = loadWorkflowConfig(root);
+  } catch {
+    config = DEFAULT_WORKFLOW_CONFIG;
+  }
+  const codex = config.agents.codex;
   return {
     configPath,
     source: raw ? "project" : "cli-defaults",
-    agentDefault: configString(values, "agentDefault", process.env.AFK_AGENT_DEFAULT || "claude-code"),
-    tmuxSession: configString(values, "tmuxSession", process.env.AFK_TMUX_SESSION || "afk"),
-    targetBranch: configString(values, "targetBranch", process.env.AFK_TARGET_BRANCH || "main"),
-    baseBranch: configString(values, "trackerTargetBranch", process.env.AFK_TRACKER_TARGET_BRANCH || process.env.AFK_TARGET_BRANCH || "main"),
-    maxRetries: configNumber(values, "maxRetries", Number(process.env.AFK_MAX_RETRIES) || 2),
-    hardTimeoutMs: configNumber(values, "workflowHardTimeout", Number(process.env.AFK_WORKFLOW_HARD_TIMEOUT) || 7_200_000),
-    completionTimeoutMs: configNumber(values, "completionTimeout", Number(process.env.AFK_COMPLETION_TIMEOUT) || 7_200_000),
-    contextThreshold: configNumber(values, "contextThreshold", Number(process.env.AFK_CONTEXT_THRESHOLD) || 100_000),
-    goalBudget: configNumber(values, "goalBudget", 10_000_000),
+    agentDefault: config.agentDefault,
+    tmuxSession: config.tmuxSession,
+    targetBranch: config.targetBranch,
+    baseBranch: config.trackerTargetBranch,
+    maxRetries: config.maxRetries,
+    hardTimeoutMs: config.workflowHardTimeout,
+    completionTimeoutMs: config.completionTimeout,
+    contextThreshold: config.contextThreshold,
+    goalBudget: config.goalBudget,
     codex: {
-      transport: configString(values, "agents.codex.transport", process.env.AFK_CODEX_TRANSPORT || "auto"),
-      auth: configString(values, "agents.codex.auth", process.env.AFK_CODEX_AUTH || "auto"),
-      provider: configString(values, "agents.codex.provider", process.env.AFK_CODEX_PROVIDER || "auto"),
-      profile: configString(values, "agents.codex.profile", process.env.AFK_CODEX_PROFILE || "" ) || undefined,
-      endpoint: configString(values, "agents.codex.appServer.endpoint", process.env.AFK_CODEX_APP_SERVER || "") || undefined,
-      authTokenEnv: configString(values, "agents.codex.appServer.authTokenEnv", process.env.AFK_CODEX_APP_SERVER_AUTH_ENV || "") || undefined,
-      startupTimeoutMs: configNumber(values, "agents.codex.appServer.startupTimeoutMs", Number(process.env.AFK_CODEX_APP_SERVER_STARTUP_TIMEOUT) || 30_000),
+      transport: codex.transport,
+      auth: codex.auth,
+      provider: codex.provider,
+      ...(codex.profile ? { profile: codex.profile } : {}),
+      ...(codex.appServer.endpoint ? { endpoint: codex.appServer.endpoint } : {}),
+      ...(codex.appServer.authTokenEnv ? { authTokenEnv: codex.appServer.authTokenEnv } : {}),
+      startupTimeoutMs: codex.appServer.startupTimeoutMs,
     },
-    templateName: configString(values, "template", "") || undefined,
-    canvasNodes: raw ? await readCanvasNodes(root, raw, configString(values, "template", "") || undefined) : [],
+    templateName: config.template,
+    canvasNodes: raw ? await readCanvasNodes(root, raw, config.template) : [],
   };
 }
 

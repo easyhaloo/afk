@@ -24,7 +24,7 @@ type ConfigObject = { [key: string]: unknown };
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
-const DEFAULT_WORKFLOW: WorkflowConfig = {
+export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
   agentDefault: 'claude-code',
   tmuxSession: 'afk',
   completionTimeout: 7200 * 1000,
@@ -89,28 +89,28 @@ export function loadWorkflowConfig(
 ): WorkflowConfig {
   const file = readProjectConfig(projectRoot);
   const maxQaReworkAttempts = file.maxQaReworkAttempts
-    ?? Number(env.AFK_MAX_QA_REWORK_ATTEMPTS ?? DEFAULT_WORKFLOW.maxQaReworkAttempts);
+    ?? Number(env.AFK_MAX_QA_REWORK_ATTEMPTS ?? DEFAULT_WORKFLOW_CONFIG.maxQaReworkAttempts);
   if (typeof maxQaReworkAttempts !== 'number' || !Number.isSafeInteger(maxQaReworkAttempts) || maxQaReworkAttempts < 1) {
     throw new Error('maxQaReworkAttempts must be a positive integer');
   }
   return {
-    agentDefault: configString(file.agentDefault) ?? env.AFK_AGENT_DEFAULT ?? DEFAULT_WORKFLOW.agentDefault,
-    tmuxSession: configString(file.tmuxSession) ?? env.AFK_TMUX_SESSION ?? DEFAULT_WORKFLOW.tmuxSession,
-    completionTimeout: configNumber(file.completionTimeout) ?? parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW.completionTimeout, env),
-    qaTimeout: configNumber(file.qaTimeout) ?? parseEnvMs('AFK_QA_TIMEOUT', DEFAULT_WORKFLOW.qaTimeout!, env),
-    workflowHardTimeout: configNumber(file.workflowHardTimeout) ?? parseEnvMs('AFK_WORKFLOW_HARD_TIMEOUT', DEFAULT_WORKFLOW.workflowHardTimeout, env),
-    completionPoll: configNumber(file.completionPoll) ?? parseSeconds('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW.completionPoll, env),
-    idleTimeout: configNumber(file.idleTimeout) ?? parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW.idleTimeout, env),
-    acCheckTimeout: configNumber(file.acCheckTimeout) ?? parseEnvMs('AFK_AC_CHECK_TIMEOUT', DEFAULT_WORKFLOW.acCheckTimeout, env),
-    contextThreshold: configNumber(file.contextThreshold) ?? parseIntEnv('AFK_CONTEXT_THRESHOLD', DEFAULT_WORKFLOW.contextThreshold, env),
-    promptTimeout: configNumber(file.promptTimeout) ?? parseEnvMs('AFK_PROMPT_TIMEOUT', DEFAULT_WORKFLOW.promptTimeout, env),
-    handoffTimeout: configNumber(file.handoffTimeout) ?? parseEnvMs('AFK_HANDOFF_TIMEOUT', DEFAULT_WORKFLOW.handoffTimeout, env),
-    maxRetries: configNumber(file.maxRetries) ?? parseIntEnv('AFK_MAX_RETRIES', DEFAULT_WORKFLOW.maxRetries, env),
-    maxSelfIterations: configNumber(file.maxSelfIterations) ?? parseIntEnv('AFK_MAX_SELF_ITERATIONS', DEFAULT_WORKFLOW.maxSelfIterations, env),
+    agentDefault: configString(file.agentDefault) ?? env.AFK_AGENT_DEFAULT ?? DEFAULT_WORKFLOW_CONFIG.agentDefault,
+    tmuxSession: configString(file.tmuxSession) ?? env.AFK_TMUX_SESSION ?? DEFAULT_WORKFLOW_CONFIG.tmuxSession,
+    completionTimeout: configNumber(file.completionTimeout) ?? parseEnvMs('AFK_COMPLETION_TIMEOUT', DEFAULT_WORKFLOW_CONFIG.completionTimeout, env),
+    qaTimeout: configNumber(file.qaTimeout) ?? parseEnvMs('AFK_QA_TIMEOUT', DEFAULT_WORKFLOW_CONFIG.qaTimeout!, env),
+    workflowHardTimeout: configNumber(file.workflowHardTimeout) ?? parseEnvMs('AFK_WORKFLOW_HARD_TIMEOUT', DEFAULT_WORKFLOW_CONFIG.workflowHardTimeout, env),
+    completionPoll: configNumber(file.completionPoll) ?? parseSeconds('AFK_COMPLETION_POLL', DEFAULT_WORKFLOW_CONFIG.completionPoll, env),
+    idleTimeout: configNumber(file.idleTimeout) ?? parseEnvMs('AFK_IDLE_TIMEOUT', DEFAULT_WORKFLOW_CONFIG.idleTimeout, env),
+    acCheckTimeout: configNumber(file.acCheckTimeout) ?? parseEnvMs('AFK_AC_CHECK_TIMEOUT', DEFAULT_WORKFLOW_CONFIG.acCheckTimeout, env),
+    contextThreshold: configNumber(file.contextThreshold) ?? parseIntEnv('AFK_CONTEXT_THRESHOLD', DEFAULT_WORKFLOW_CONFIG.contextThreshold, env),
+    promptTimeout: configNumber(file.promptTimeout) ?? parseEnvMs('AFK_PROMPT_TIMEOUT', DEFAULT_WORKFLOW_CONFIG.promptTimeout, env),
+    handoffTimeout: configNumber(file.handoffTimeout) ?? parseEnvMs('AFK_HANDOFF_TIMEOUT', DEFAULT_WORKFLOW_CONFIG.handoffTimeout, env),
+    maxRetries: configNumber(file.maxRetries) ?? parseIntEnv('AFK_MAX_RETRIES', DEFAULT_WORKFLOW_CONFIG.maxRetries, env),
+    maxSelfIterations: configNumber(file.maxSelfIterations) ?? parseIntEnv('AFK_MAX_SELF_ITERATIONS', DEFAULT_WORKFLOW_CONFIG.maxSelfIterations, env),
     maxQaReworkAttempts,
-    targetBranch: configString(file.targetBranch) ?? env.AFK_TARGET_BRANCH ?? DEFAULT_WORKFLOW.targetBranch,
-    trackerTargetBranch: configString(file.trackerTargetBranch) ?? env.AFK_TRACKER_TARGET_BRANCH ?? DEFAULT_WORKFLOW.trackerTargetBranch,
-    goalBudget: configNumber(file.goalBudget) ?? parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW.goalBudget, env),
+    targetBranch: configString(file.targetBranch) ?? env.AFK_TARGET_BRANCH ?? DEFAULT_WORKFLOW_CONFIG.targetBranch,
+    trackerTargetBranch: configString(file.trackerTargetBranch) ?? env.AFK_TRACKER_TARGET_BRANCH ?? DEFAULT_WORKFLOW_CONFIG.trackerTargetBranch,
+    goalBudget: configNumber(file.goalBudget) ?? parseIntEnv('AFK_GOAL_BUDGET', DEFAULT_WORKFLOW_CONFIG.goalBudget, env),
     template: configString(file.template),
     agents: { codex: loadCodexConfig(file, env) },
   };
@@ -178,7 +178,11 @@ export function getWorktreeConfig(): WorktreeConfig {
 function readProjectConfig(projectRoot: string): ConfigObject {
   const path = join(projectRoot, '.afk', 'config.yml');
   if (!existsSync(path)) return {};
-  const parsed = loadYaml(readFileSync(path, 'utf8')) as unknown;
+  const raw = readFileSync(path, 'utf8');
+  // An empty file is no configuration, not a broken one: a file that was
+  // created and never filled in should not stop a run.
+  if (!raw.trim()) return {};
+  const parsed = loadYaml(raw) as unknown;
   if (parsed === undefined || parsed === null) return {};
   if (!isRecord(parsed)) throw new Error('.afk/config.yml must contain a YAML object');
   return parsed;

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EnvVarAllowlist } from './env-allowlist.js';
 import { DockerContainerProvider } from './docker.js';
 import { PodmanContainerProvider } from './podman.js';
@@ -11,6 +11,22 @@ import * as fs from 'fs';
 import { promises as fsp } from 'fs';
 
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
+
+// The resource registry is a user-global file under the home directory. A
+// test must not write to it: it would both pollute the machine and contend
+// with anything else that has the file open.
+vi.mock('../../runtime/resource-registry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../runtime/resource-registry.js')>();
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'afk-container-registry-'));
+  let registry: InstanceType<typeof actual.AfkResourceRegistry> | undefined;
+  return {
+    ...actual,
+    getAfkResourceRegistry: () => (registry ??= new actual.AfkResourceRegistry({ databasePath: join(root, 'resources.sqlite') })),
+  };
+});
 
 describe('EnvVarAllowlist', () => {
   it('permits known defaults', () => {

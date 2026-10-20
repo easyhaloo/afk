@@ -12,6 +12,12 @@ export default defineConfig({
     // process.env that never reaches the real environment, and node-pty
     // aborts the worker on cleanup — both reasons the root suite forks.
     pool: 'forks',
+    // The root suite gives every test thirty seconds; a package must not
+    // give the same test five. Several of these tests drive real git
+    // repositories — bare remotes, clones, commits, worktrees — and a
+    // loaded machine can push a legitimate repository operation past five
+    // seconds. The ceiling only applies when a test actually hangs.
+    testTimeout: 30000,
     include: ['src/**/*.test.ts', 'src/**/*.spec.ts', 'tests/**/*.test.ts'],
   },
 });

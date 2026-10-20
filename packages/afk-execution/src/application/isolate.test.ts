@@ -1,4 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// The resource registry is a user-global file under the home directory. A
+// test must not write to it: it would both pollute the machine and contend
+// with anything else that has the file open.
+vi.mock('../infrastructure/runtime/resource-registry', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../infrastructure/runtime/resource-registry')>();
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'afk-resource-registry-'));
+  let registry: InstanceType<typeof actual.AfkResourceRegistry> | undefined;
+  return {
+    ...actual,
+    getAfkResourceRegistry: () => (registry ??= new actual.AfkResourceRegistry({ databasePath: join(root, 'resources.sqlite') })),
+  };
+});
 import { promises as fs, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';

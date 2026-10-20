@@ -90,6 +90,19 @@ type ResourceRow = {
  * query this registry first and then inspect each recorded resource by exact
  * name/ID; they must never infer ownership from global docker or tmux listings.
  */
+/**
+ * Whether the failure is SQLite reporting that the database is busy.
+ *
+ * `node:sqlite` reports the extended codes: SQLITE_BUSY is 261 and
+ * SQLITE_LOCKED is 262; the primary codes are 13 and 6.
+ */
+function isDatabaseBusy(error: unknown): boolean {
+  const candidate = error as { errcode?: number; errstr?: string; message?: string } | undefined;
+  const code = candidate?.errcode;
+  if (code === 261 || code === 262 || code === 13 || code === 6) return true;
+  return /database is locked|database table is locked/i.test(candidate?.errstr ?? candidate?.message ?? '');
+}
+
 export class AfkResourceRegistry {
   readonly databasePath: string;
   private readonly db: SQLiteDatabase;
@@ -98,8 +111,33 @@ export class AfkResourceRegistry {
     this.databasePath = resolve(options.databasePath ?? join(homedir(), '.afk', 'runtime', 'resources.sqlite'));
     mkdirSync(dirname(this.databasePath), { recursive: true });
     this.db = new DatabaseSync(this.databasePath);
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');
+    this.db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');
+    this.enableWriteAheadLog();
     this.migrate();
+  }
+
+  /**
+   * Put the database in write-ahead logging, if it is not already.
+   *
+   * Switching the journal mode needs a brief exclusive lock, and it fails
+   * when another connection is open — the busy timeout does not cover it,
+   * because the switch is not a statement. A database that is already in
+   * write-ahead mode needs no switching, and one that is not can be used
+   * in the mode it is in, so a busy registry is left alone rather than
+   * taken down with it.
+   */
+  private enableWriteAheadLog(): void {
+    if (this.journalMode() === 'wal') return;
+    try {
+      this.db.exec('PRAGMA journal_mode = WAL;');
+    } catch (error) {
+      if (!isDatabaseBusy(error)) throw error;
+    }
+  }
+
+  private journalMode(): string {
+    const row = this.db.prepare('PRAGMA journal_mode').get() as { journal_mode?: string } | undefined;
+    return (row?.journal_mode ?? '').toLowerCase();
   }
 
   register(input: RegisterAfkResource): AfkResourceRecord {

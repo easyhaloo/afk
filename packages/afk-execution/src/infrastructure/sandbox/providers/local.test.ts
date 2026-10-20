@@ -5,6 +5,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { SignalSchema } from '@afk/infrastructure';
 import { LocalAgentExecution, LocalSandboxProvider } from './local.js';
 
+// The resource registry is a user-global file under the home directory. A
+// test must not write to it: it would both pollute the machine and contend
+// with anything else that has the file open.
+vi.mock('../../runtime/resource-registry.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../runtime/resource-registry.js')>();
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const root = mkdtempSync(join(tmpdir(), 'afk-resource-registry-'));
+  let registry: InstanceType<typeof actual.AfkResourceRegistry> | undefined;
+  return {
+    ...actual,
+    getAfkResourceRegistry: () => (registry ??= new actual.AfkResourceRegistry({ databasePath: join(root, 'resources.sqlite') })),
+  };
+});
+
 describe('LocalSandboxProvider', () => {
   const metadata = { provider: 'claude-code', transport: 'process' } as const;
   it('provisions a batch sandbox without creating a tmux session', async () => {

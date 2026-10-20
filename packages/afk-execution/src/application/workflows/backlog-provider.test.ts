@@ -6,6 +6,7 @@ import type { BacklogClaim, BacklogItem } from '@afk/application';
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { RunObserver } from '../../observability/run-observer.js';
 import { registerTemplate, _resetTemplateRegistry } from '../../domain/templates/registry.js';
+import { compileTemplate } from '../../domain/templates/compiler.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 
@@ -125,8 +126,9 @@ describe('WorkflowRunner backlog provider mode', () => {
       failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }],
     };
 
-    const implementation = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 });
-    const verifier = await subject.resolveStepPrompt({ id: 'verify-ac', prompt: '/goal verify #{iid}' }, { iid: 42 });
+    // The phase selects the step that receives the correction — not its name.
+    const implementation = await subject.resolveStepPrompt({ id: 'build', prompt: '/goal implement #{iid}', phase: 'implementation' }, { iid: 42 });
+    const verifier = await subject.resolveStepPrompt({ id: 'check', prompt: '/goal verify #{iid}', phase: 'verification' }, { iid: 42 });
 
     expect(implementation).toContain('AC correction required');
     expect(implementation).toContain('/s enters search');
@@ -142,7 +144,7 @@ describe('WorkflowRunner backlog provider mode', () => {
       description: 'Create e2e-interactive-json-proof.txt with the exact required content.',
     };
 
-    const prompt = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement issue #{iid}' }, { iid: 42 });
+    const prompt = await subject.resolveStepPrompt({ id: 'build', prompt: '/goal implement issue #{iid}', phase: 'implementation' }, { iid: 42 });
 
     expect(prompt).toContain('Add interactive JSON proof');
     expect(prompt).toContain('Create e2e-interactive-json-proof.txt');
@@ -158,7 +160,7 @@ describe('WorkflowRunner backlog provider mode', () => {
       requiredChecks: [{ command: 'pnpm vitest run', expected: 'passes' }],
     };
 
-    const prompt = await subject.resolveStepPrompt({ id: 'implement', prompt: '/goal implement #{iid}' }, { iid: 42 });
+    const prompt = await subject.resolveStepPrompt({ id: 'build', prompt: '/goal implement #{iid}', phase: 'implementation' }, { iid: 42 });
 
     expect(prompt).toContain('open QA rework record (r2, attempt 2)');
     expect(prompt).toContain('/s enters search');
@@ -186,9 +188,9 @@ describe('WorkflowRunner backlog provider mode', () => {
     }));
 
     await subject.runStep(
-      { id: 'verify-ac', prompt: '/goal verify', branch: { type: 'issue', iid: 0 } },
+      { id: 'check', kind: 'agent', role: 'verifier', prompt: '/goal verify', phase: 'verification', completionKind: 'ac', completionSignal: 'goal_complete', legacy: false, branch: { type: 'issue', iid: 0 } },
       {
-        iid: 42, session: 'afk-42-verify-ac', primaryWtPath: process.cwd(), primaryBranch: 'afk/backlog-42',
+        iid: 42, session: 'afk-42-check', primaryWtPath: process.cwd(), primaryBranch: 'afk/backlog-42',
         baseBranch: 'main', hardTimeoutMs: 1_000, completionTimeoutMs: 1_000, contextHighTokens: 1_000,
         budget: {}, executionMode: 'interactive', stepIndex: 0,
       },
@@ -196,7 +198,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     );
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      worktreePath: process.cwd(), session: 'afk-42-verify-ac', executionMode: 'interactive',
+      worktreePath: process.cwd(), session: 'afk-42-check', executionMode: 'interactive',
     }));
     expect(subject.runPhase).toHaveBeenCalledWith(expect.objectContaining({ sandbox: phaseSandbox, completionKind: 'ac' }));
     expect(phaseSandbox.close).toHaveBeenCalledTimes(1);
@@ -208,38 +210,51 @@ describe('WorkflowRunner backlog provider mode', () => {
     const subject = runner(bundle) as any;
     subject.config = { ...subject.config, maxSelfIterations: 2 };
     const initial = {
-      stepId: 'verify-ac', status: 'failed', output: {
+      stepId: 'check', status: 'failed', output: {
         type: 'goal_complete', kind: 'ac_verification', result: 'FAIL', summary: 'shortcut is missing',
         failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/s is ignored' }],
       }, startedAt: '', completedAt: '',
     };
-    const results: Record<string, any> = { 'verify-ac': initial };
+    const results: Record<string, any> = { check: initial };
     subject.runStep = vi.fn()
-      .mockResolvedValueOnce({ stepId: 'implement', status: 'completed', startedAt: '', completedAt: '' })
-      .mockResolvedValueOnce({ stepId: 'verify-ac', status: 'completed', startedAt: '', completedAt: '' });
+      .mockResolvedValueOnce({ stepId: 'build', status: 'completed', startedAt: '', completedAt: '' })
+      .mockResolvedValueOnce({ stepId: 'check', status: 'completed', startedAt: '', completedAt: '' });
     subject.heartbeatRuntime = vi.fn(async () => {});
-    const template = {
-      steps: [{ id: 'implement', prompt: '/goal implement' }, { id: 'verify-ac', prompt: '/goal verify' }],
-    };
+    // The plan names its steps freely: the loop follows the declared phase
+    // and completion kind, not a step id.
+    const plan = compileTemplate({
+      name: 'retry-plan', version: 1,
+      steps: [
+        { id: 'build', role: 'implementer', phase: 'implementation', completionKind: 'task', prompt: '/goal implement' },
+        { id: 'check', role: 'verifier', phase: 'verification', completionKind: 'ac', prompt: '/goal verify', dependsOn: ['build'] },
+      ],
+    });
 
-    await expect(subject.retryFailedAcVerification(template, {
+    await expect(subject.retryFailedAcVerification(plan, {
       iid: 42, session: 'worker', baseSession: 'worker', primaryWtPath: process.cwd(), primaryBranch: 'afk/backlog-42', baseBranch: 'main',
       hardTimeoutMs: 1_000, completionTimeoutMs: 1_000, contextHighTokens: 1_000, budget: {}, executionMode: 'batch',
     }, initial, results)).resolves.toBe(true);
 
-    expect(subject.runStep).toHaveBeenNthCalledWith(1, template.steps[0], expect.objectContaining({ primaryBranch: 'afk/backlog-42', stepIndex: 1 }), results);
-    expect(subject.runStep).toHaveBeenNthCalledWith(2, template.steps[1], expect.objectContaining({ primaryBranch: 'afk/backlog-42', stepIndex: 1 }), results);
-    expect(results['verify-ac'].status).toBe('completed');
+    expect(subject.runStep).toHaveBeenNthCalledWith(1, expect.objectContaining({ id: 'build' }), expect.objectContaining({ primaryBranch: 'afk/backlog-42', stepIndex: 1 }), results);
+    expect(subject.runStep).toHaveBeenNthCalledWith(2, expect.objectContaining({ id: 'check' }), expect.objectContaining({ primaryBranch: 'afk/backlog-42', stepIndex: 1 }), results);
+    expect(results['check'].status).toBe('completed');
     expect(subject.acFeedback).toBeUndefined();
   });
 
   it('does not retry an AC failure without a complete diagnosis', async () => {
     const bundle = providers(vi.fn(async () => null));
     const subject = runner(bundle) as any;
-    const initial = { stepId: 'verify-ac', status: 'failed', output: { type: 'goal_complete', kind: 'ac_verification', result: 'FAIL' }, startedAt: '', completedAt: '' };
+    const initial = { stepId: 'check', status: 'failed', output: { type: 'goal_complete', kind: 'ac_verification', result: 'FAIL' }, startedAt: '', completedAt: '' };
     subject.runStep = vi.fn();
+    const plan = compileTemplate({
+      name: 'retry-plan', version: 1,
+      steps: [
+        { id: 'build', role: 'implementer', phase: 'implementation', completionKind: 'task', prompt: '/goal implement' },
+        { id: 'check', role: 'verifier', phase: 'verification', completionKind: 'ac', prompt: '/goal verify', dependsOn: ['build'] },
+      ],
+    });
 
-    await expect(subject.retryFailedAcVerification({ steps: [{ id: 'implement' }, { id: 'verify-ac' }] }, {
+    await expect(subject.retryFailedAcVerification(plan, {
       iid: 42, session: 'worker', baseSession: 'worker', primaryWtPath: process.cwd(), primaryBranch: 'afk/backlog-42', baseBranch: 'main',
       hardTimeoutMs: 1_000, completionTimeoutMs: 1_000, contextHighTokens: 1_000, budget: {}, executionMode: 'batch',
     }, initial, {})).resolves.toBe(false);

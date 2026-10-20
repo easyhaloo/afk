@@ -1,4 +1,4 @@
-import { compileTemplate, type CompiledAgentStep, type CompiledSystemStep } from '../../domain/templates/compiler.js';
+import { compileTemplate, type CompiledAgentStep, type CompiledExecutionPlan, type CompiledSystemStep } from '../../domain/templates/compiler.js';
 import { selectRunnable } from '../../domain/templates/runnability.js';
 import type { StepResult, WorkflowTemplate } from '../../domain/templates/types.js';
 
@@ -12,8 +12,16 @@ export interface PlanExecutorOptions {
 export class PlanExecutor {
   constructor(private readonly options: PlanExecutorOptions) {}
 
-  async execute(template: WorkflowTemplate): Promise<Record<string, StepResult>> {
-    const plan = compileTemplate(template, { systemActions: this.options.systemActions });
+  /**
+   * Compile a template into the plan the runner executes. The runner holds
+   * the compiled plan so it can select behaviour from the same steps the
+   * executor runs, instead of compiling a second copy.
+   */
+  compile(template: WorkflowTemplate): CompiledExecutionPlan {
+    return compileTemplate(template, { systemActions: this.options.systemActions });
+  }
+
+  async execute(template: WorkflowTemplate, plan: CompiledExecutionPlan = this.compile(template)): Promise<Record<string, StepResult>> {
     const results: Record<string, StepResult> = {};
     for (const group of plan.groups) {
       // The runnability rule owns both gates — the dependency gate and the

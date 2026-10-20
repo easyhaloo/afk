@@ -438,22 +438,43 @@ steps:
   - id: implement
     role: implementer
     prompt: prompts/implement.md
+    phase: implementation
+    completionKind: task
     branch:
       type: issue
 
   - id: review
     role: reviewer
     prompt: prompts/review.md
+    phase: verification
+    completionKind: task
     dependsOn:
       - implement
 
   - id: fix
     role: implementer
     prompt: prompts/fix.md
+    phase: implementation
+    completionKind: task
     dependsOn:
       - review
-    when: review.status == "failed"
+    when:
+      step: review
+      equals: failed
 ```
+
+`phase` and `completionKind` are optional. `phase` is `implementation` or
+`verification` and says where the step sits in the workflow's behaviour:
+acceptance-criteria feedback is injected into implementation steps, and the
+acceptance self-correction loop re-runs the verification phase.
+`completionKind` is `task`, `qa` or `ac` and says which completion protocol the
+agent speaks.
+
+Both are resolved by the compiler onto the compiled step, so the runner never
+compares a step id. A template that declares neither keeps working: the phase
+and the kind are derived from the step's `role`. That is why a step named
+`verify-ac` no longer decides anything by its name — the name is data, the
+declaration is behaviour.
 
 Built-in templates:
 

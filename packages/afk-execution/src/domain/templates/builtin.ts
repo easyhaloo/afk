@@ -7,6 +7,10 @@
  *   parallel-planner       — multiple planners in parallel
  *   planner-with-review    — parallel planners → review → fix
  *
+ * Every agent step declares its phase and its completion kind, so the
+ * built-ins never depend on the legacy derivation: the runner reads the
+ * decision off the step instead of off the step's name.
+ *
  * The prompt text is intentionally short — the runner interpolates the
  * template's prompt with the iid / branch / worktree at execution time.
  */
@@ -40,12 +44,16 @@ function issueImplementation(): WorkflowTemplate {
       {
         id: 'implement',
         role: 'implementer',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 实现 issue #{iid} 的功能需求。每完成一个代码或测试 AC 就提交一次。不要创建或合并 MR：基线集成、提交 QA 结果、推送和创建 MR 都由后续 QARunner 负责。',
         branch: { type: 'issue', iid: 0 },
       },
       {
         id: 'verify-ac',
         role: 'verifier',
+        phase: 'verification',
+        completionKind: 'ac',
         prompt: '/goal 验证 issue #{iid} 的 AC 全部通过。',
         branch: { type: 'issue', iid: 0 },
         dependsOn: ['implement'],
@@ -74,6 +82,7 @@ function qaVerification(): WorkflowTemplate {
     description: 'Pre-merge integration QA verification. Sync the latest baseline and verify the acceptance criteria; the QA runner commits, pushes, and publishes the mergeable change after PASS.',
     steps: [{
       id: 'verify-ac', kind: 'agent', role: 'verifier', completion: 'goal_complete',
+      phase: 'verification', completionKind: 'qa',
       prompt: '/goal 在已合并最新基线的 QA 工作树中验证 issue #{iid} 的 AC 和集成测试，并返回 PASS 或 FAIL。不要把 commit、push 或创建 MR 作为本次 Agent 的失败条件；这些由 QA runner 在 PASS 后自动完成。',
     }],
   };
@@ -94,6 +103,8 @@ function simpleLoop(): WorkflowTemplate {
       {
         id: 'run',
         role: 'agent',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 执行任务直到完成。',
       },
     ],
@@ -115,17 +126,23 @@ function sequentialReview(): WorkflowTemplate {
       {
         id: 'implement',
         role: 'implementer',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 实现需求。',
       },
       {
         id: 'review',
         role: 'reviewer',
+        phase: 'verification',
+        completionKind: 'task',
         prompt: '/goal 审查实现并报告通过 / 失败。',
         dependsOn: ['implement'],
       },
       {
         id: 'fix',
         role: 'implementer',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 根据 review 的反馈修复问题。',
         dependsOn: ['review'],
         when: { step: 'review', equals: 'failed' },
@@ -151,6 +168,8 @@ function parallelPlanner(): WorkflowTemplate {
       {
         id: 'plan-frontend',
         role: 'planner',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 规划前端实现方案。',
         parallel: 'planners',
         branch: { type: 'named', branch: 'plan-frontend' },
@@ -158,6 +177,8 @@ function parallelPlanner(): WorkflowTemplate {
       {
         id: 'plan-backend',
         role: 'planner',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 规划后端实现方案。',
         parallel: 'planners',
         branch: { type: 'named', branch: 'plan-backend' },
@@ -165,6 +186,8 @@ function parallelPlanner(): WorkflowTemplate {
       {
         id: 'plan-infra',
         role: 'planner',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 规划基础设施方案。',
         parallel: 'planners',
         branch: { type: 'named', branch: 'plan-infra' },
@@ -189,6 +212,8 @@ function plannerWithReview(): WorkflowTemplate {
       {
         id: 'plan-frontend',
         role: 'planner',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 规划前端。',
         parallel: 'planners',
         branch: { type: 'named', branch: 'plan-frontend' },
@@ -196,6 +221,8 @@ function plannerWithReview(): WorkflowTemplate {
       {
         id: 'plan-backend',
         role: 'planner',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 规划后端。',
         parallel: 'planners',
         branch: { type: 'named', branch: 'plan-backend' },
@@ -203,12 +230,16 @@ function plannerWithReview(): WorkflowTemplate {
       {
         id: 'review',
         role: 'reviewer',
+        phase: 'verification',
+        completionKind: 'task',
         prompt: '/goal 审查所有规划并报告问题。',
         dependsOn: ['plan-frontend', 'plan-backend'],
       },
       {
         id: 'fix',
         role: 'implementer',
+        phase: 'implementation',
+        completionKind: 'task',
         prompt: '/goal 修复规划中的问题。',
         dependsOn: ['review'],
         when: { step: 'review', equals: 'failed' },

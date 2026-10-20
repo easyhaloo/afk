@@ -111,7 +111,7 @@ flowchart LR
 
 实现模板明确要求 Agent 不创建或合并 MR；发布、提交 QA、创建变更请求和合并策略由后续系统动作或 `QARunner` 负责。
 
-`afk run` 本身只运行实现阶段，成功交付到 `verification`；随后需由 `executeWorkItem` 闭环或独立 `afk qa` 进入 QA。默认模板的 `publish-change` 动作在这里推送实现分支，`queue-qa` 迁移状态，并不创建 PR/MR。若 `verify-ac` 返回可解析的 AC FAIL，runner 会按 `maxSelfIterations` 上限重跑 `implement → verify-ac`；纠正成功后再发布并进入 `verification`。这属于同一次实现尝试，不是 QA FAIL 后的 backlog `rework`。
+`afk run` 本身只运行实现阶段，成功交付到 `verification`；随后需由 `executeWorkItem` 闭环或独立 `afk qa` 进入 QA。默认模板的 `publish-change` 动作在这里推送实现分支，`queue-qa` 迁移状态，并不创建 PR/MR。若验证阶段的 step 返回可解析的 AC FAIL，runner 会按 `maxSelfIterations` 上限重跑实现阶段与验证阶段（`phase: implementation` → `phase: verification`）；纠正成功后再发布并进入 `verification`。这属于同一次实现尝试，不是 QA FAIL 后的 backlog `rework`。
 
 ### 2.3 `afk loop` 的持续执行路径
 

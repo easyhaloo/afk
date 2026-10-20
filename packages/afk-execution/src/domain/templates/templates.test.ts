@@ -274,6 +274,31 @@ describe('Builtin templates', () => {
     expect(plan.templateName).toBe('simple-loop');
     expect(plan.groups.length).toBe(1);
   });
+
+  it('every built-in agent step declares its phase and its completion kind', () => {
+    // The built-ins never rely on the legacy derivation: the runner reads the
+    // decision off the step.
+    for (const template of builtinTemplates()) {
+      for (const step of template.steps) {
+        if (step.kind === 'system') continue;
+        expect(step.phase, `${template.name}/${step.id} declares no phase`).toBeDefined();
+        expect(step.completionKind, `${template.name}/${step.id} declares no completion kind`).toBeDefined();
+      }
+    }
+  });
+
+  it('the built-in acceptance-criteria step speaks the AC protocol', () => {
+    const template = builtinTemplates().find(item => item.name === 'issue-implementation')!;
+    const verification = template.steps.find(step => step.id === 'verify-ac');
+    expect(verification).toMatchObject({ phase: 'verification', completionKind: 'ac' });
+    const implementation = template.steps.find(step => step.id === 'implement');
+    expect(implementation).toMatchObject({ phase: 'implementation', completionKind: 'task' });
+  });
+
+  it('the built-in QA template speaks the QA protocol', () => {
+    const template = builtinTemplates().find(item => item.name === 'pre-merge-qa-verification')!;
+    expect(template.steps[0]).toMatchObject({ phase: 'verification', completionKind: 'qa' });
+  });
 });
 
 describe('Template loader — disk priority chain', () => {

@@ -434,22 +434,39 @@ steps:
   - id: implement
     role: implementer
     prompt: prompts/implement.md
+    phase: implementation
+    completionKind: task
     branch:
       type: issue
 
   - id: review
     role: reviewer
     prompt: prompts/review.md
+    phase: verification
+    completionKind: task
     dependsOn:
       - implement
 
   - id: fix
     role: implementer
     prompt: prompts/fix.md
+    phase: implementation
+    completionKind: task
     dependsOn:
       - review
-    when: review.status == "failed"
+    when:
+      step: review
+      equals: failed
 ```
+
+`phase` 与 `completionKind` 都是可选的。`phase` 取 `implementation` 或
+`verification`，说明这个 step 在工作流行为里处于哪一段：AC 反馈注入到实现阶段的
+step，AC 自纠正循环重跑验证阶段的 step。`completionKind` 取 `task`、`qa` 或 `ac`，
+说明这个 step 说哪种完成协议。
+
+两者由编译器解析到编译后的 step 上，因此 runner 不再比较 step id。没有声明这两项
+的模板仍然可用：阶段与协议由 step 的 `role` 推导。这正是「叫 `verify-ac` 的 step
+不再因为名字决定任何事」的原因——名字是数据，声明才是行为。
 
 内置模板：
 

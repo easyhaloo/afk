@@ -5,6 +5,8 @@
  *   id          unique within the template
  *   role        agent role (implementer / reviewer / planner / custom)
  *   prompt      either inline text OR a path to a Markdown file
+ *   phase       behaviour phase — implementation | verification
+ *   completionKind  completion protocol — task | qa | ac
  *   branch      BranchStrategyConfig (defaults to { type: 'issue', iid: <run.iid> })
  *   dependsOn   step IDs that must complete first
  *   when        conditional clause — if absent, step always runs
@@ -44,6 +46,36 @@ const WhenClauseSchema = z.object({
   { message: 'when clause must specify equals or notEquals' },
 );
 
+// ── Step behaviour vocabulary ──────────────────────────────────────────────
+
+/**
+ * The behaviour phase a step runs in.
+ *
+ * The phase is what the runner selects behaviour by: an implementation-phase
+ * step receives the rework record and the AC correction context, a
+ * verification-phase step does not, and the observation spine records the
+ * step under the phase it declares.
+ *
+ * This is not the runner's phase *loop* (the send-goal/poll cycle that
+ * `PhaseResult` reports) and not the observation spine's `RunPhase`, which
+ * also knows 'release'.
+ */
+export const StepPhaseSchema = z.enum(['implementation', 'verification']);
+
+/**
+ * The completion protocol a step speaks.
+ *
+ *   task — the agent reports a plain goal completion with a summary
+ *   qa   — the agent reports QA evidence (PASS/FAIL plus required checks)
+ *   ac   — the agent reports acceptance-criteria verification (PASS/FAIL
+ *          plus the criteria that failed)
+ *
+ * The completion *kind* is the protocol. It is not the signal *type*: the
+ * signal type is the `goal_complete` marker every protocol shares, and it
+ * stays a separate field on the step.
+ */
+export const StepCompletionKindSchema = z.enum(['task', 'qa', 'ac']);
+
 // ── Step ───────────────────────────────────────────────────────────────────
 
 const PromptSchema = z.union([
@@ -59,7 +91,23 @@ export const StepSchema = z.object({
   prompt: PromptSchema.optional(),
   /** System actions are deliberately enumerated by the compiler. */
   action: z.string().min(1).optional(),
+  /**
+   * The signal type the step's agent emits. Every protocol uses the same
+   * `goal_complete` marker, so this field never changed meaning and never
+   * will: the *protocol* is declared by `completionKind` instead.
+   */
   completion: z.literal('goal_complete').optional(),
+  /**
+   * The behaviour phase. Optional, so a template written before the phase
+   * existed still validates; the compiler resolves an absent phase through
+   * the legacy derivation.
+   */
+  phase: StepPhaseSchema.optional(),
+  /**
+   * The completion protocol. Optional, for the same reason as `phase`: the
+   * compiler resolves an absent kind through the legacy derivation.
+   */
+  completionKind: StepCompletionKindSchema.optional(),
   provider: z.enum(['claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot']).optional(),
   executionMode: z.enum(['interactive', 'batch']).optional(),
   branch: BranchStrategyConfigSchema.optional(),
@@ -98,6 +146,8 @@ export type WorkflowTemplate = z.infer<typeof WorkflowTemplateSchema>;
 export type Step = z.infer<typeof StepSchema>;
 export type WhenClause = z.infer<typeof WhenClauseSchema>;
 export type TemplateBranchStrategyConfig = z.infer<typeof BranchStrategyConfigSchema>;
+export type StepPhase = z.infer<typeof StepPhaseSchema>;
+export type StepCompletionKind = z.infer<typeof StepCompletionKindSchema>;
 
 /** Runtime step result — what the runner produces for each step. */
 export type StepStatus = 'completed' | 'failed' | 'aborted' | 'timed_out' | 'skipped';

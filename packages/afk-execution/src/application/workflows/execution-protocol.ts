@@ -1,9 +1,15 @@
 import type { ExecutionMode } from '../../domain/agents/types.js';
+import type { StepCompletionKind } from '../../domain/templates/types.js';
 export { extractGoalComplete } from '../../shared/goal-complete.js';
 
 type JsonObject = Record<string, string | number | boolean | null | object>;
 
-export type CompletionKind = 'task' | 'qa' | 'ac';
+/**
+ * The completion protocol a step speaks. The vocabulary lives with the
+ * template schema — a step declares its kind, and the runner builds the
+ * prompt for it.
+ */
+export type CompletionKind = StepCompletionKind;
 
 export interface VerificationCriterion { id: string; expected: string; actual: string; }
 export interface AcVerificationFailure {

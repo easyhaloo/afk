@@ -29,6 +29,14 @@ import type { InitContext } from './workflows/lifecycle.js';
 import { defaultSessionStoreChain } from './sessions/chain.js';
 import { TemplateLoader } from '../domain/templates/loader.js';
 import { PlanExecutor } from './workflows/plan-executor.js';
+import {
+  planSteps,
+  selectAcVerificationStep,
+  selectImplementationStep,
+  type CompiledAgentStep,
+  type CompiledExecutionPlan,
+} from '../domain/templates/compiler.js';
+import { findFailedAcVerification } from './workflows/ac-self-correction.js';
 import { SystemActionExecutor } from './workflows/system-actions.js';
 import { RunResourceScope, type RunOutcomeStatus } from './workflows/resource-scope.js';
 import {
@@ -40,7 +48,7 @@ import {
 } from './workflows/execution-protocol.js';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
-import type { Step, StepResult, WorkflowTemplate } from '../domain/templates/types.js';
+import type { Step, StepPhase, StepResult, WorkflowTemplate } from '../domain/templates/types.js';
 import type { BranchHandle, BranchStrategyConfig } from '@afk/infrastructure';
 import type { ProviderBundle } from '@afk/infrastructure';
 import type { BacklogClaim, BacklogItem, BacklogState } from '@afk/application';
@@ -641,7 +649,12 @@ export class WorkflowRunner {
 
   // ── Template execution helpers ─────────────────────────────────────────────
 
-  private async resolveStepPrompt(step: Step, ctx?: StepRunCtx): Promise<string> {
+  /**
+   * The slice of a step the prompt builder reads. The phase decides whether
+   * the step receives the rework and AC-correction context: an
+   * implementation step does, a verification step does not.
+   */
+  private async resolveStepPrompt(step: { id: string; prompt?: Step['prompt']; phase: StepPhase }, ctx?: StepRunCtx): Promise<string> {
     if (!step.prompt) throw new Error(`agent step '${step.id}' is missing prompt`);
     let prompt = typeof step.prompt === 'string' ? step.prompt : await fs.readFile(step.prompt.file, 'utf-8');
     // Variable substitution: {iid} → issue number
@@ -652,7 +665,7 @@ export class WorkflowRunner {
       const description = this.activeBacklog.description?.trim();
       prompt = `${prompt}\n\nBacklog title: ${this.activeBacklog.title}${description ? `\nBacklog description:\n${description}` : ''}`;
     }
-    if (step.id === 'implement') {
+    if (step.phase === 'implementation') {
       const rework = this.activeRework ? formatReworkContext(this.activeRework) : '';
       const acCorrection = this.acFeedback ? formatAcCorrection(this.acFeedback) : '';
       prompt = `${prompt}${rework}${acCorrection}`;
@@ -666,19 +679,16 @@ export class WorkflowRunner {
     return prompt;
   }
 
-  private resolveStepSignalType(_role: string): 'goal_complete' {
-    return 'goal_complete';
-  }
-
   private async runStep(
-    step: Step,
+    step: CompiledAgentStep,
     ctx: StepRunCtx,
     stepResults: Record<string, StepResult>,
   ): Promise<StepResult> {
     const startedAt = new Date().toISOString();
     const prompt = await this.resolveStepPrompt(step, ctx);
-    const typedStep = step as Step & { completionSignal?: 'goal_complete' };
-    const signalType = typedStep.completionSignal ?? this.resolveStepSignalType(step.role ?? 'agent');
+    // The signal type is the marker the agent emits; the completion kind is
+    // the protocol it speaks. The compiled step carries both.
+    const signalType = step.completionSignal;
     const effectiveTimeout = step.timeoutMs ?? ctx.hardTimeoutMs;
 
     // Determine worktree: reuse primary for step 0 in group 0, or when the
@@ -712,8 +722,9 @@ export class WorkflowRunner {
       this.resourceScope?.registerSandbox(sandbox);
     }
     await this.heartbeatRuntime({ worktree: branchHandle.path, branch: branchHandle.branch, progress: `running ${step.id}` });
-    const completionKind: CompletionKind = step.id === 'verify-ac' ? 'ac' : 'task';
-    const observationPhase = completionKind === 'ac' ? 'verification' : 'implementation';
+    // The step declares both: the protocol it speaks and the phase it runs in.
+    const completionKind: CompletionKind = step.completionKind;
+    const observationPhase = step.phase;
     await this.recordObservation({ kind: 'step.started', stepId: step.id, phase: observationPhase });
     let phase: PhaseResult;
     try {
@@ -970,14 +981,18 @@ export class WorkflowRunner {
       },
       systemActions: this.plugins?.listSystemActions(),
     });
-    const executedResults = await executor.execute(loadedTemplate);
+    const plan = executor.compile(loadedTemplate);
+    const executedResults = await executor.execute(loadedTemplate, plan);
     Object.assign(stepResults, executedResults);
-    const verification = stepResults['verify-ac'];
-    if (verification?.status === 'failed') {
-      const recovered = await this.retryFailedAcVerification(loadedTemplate, {
+    // The plan's acceptance-criteria step is the one that speaks the AC
+    // protocol in the verification phase; a plan that declares none has no
+    // self-correction loop.
+    const failedVerification = findFailedAcVerification(plan, stepResults);
+    if (failedVerification) {
+      const recovered = await this.retryFailedAcVerification(plan, {
         iid, session, baseSession: session, primaryWtPath: wt.path, primaryBranch: wt.branch, baseBranch,
         hardTimeoutMs, completionTimeoutMs, contextHighTokens, budget, executionMode, persistBudget,
-      }, verification, stepResults);
+      }, failedVerification.result, stepResults);
       if (recovered) {
         if (!this.preparedRepositories) {
           await this.recordImplementationCommit(wt.path, wt.branch);
@@ -1282,25 +1297,32 @@ export class WorkflowRunner {
     }
   }
 
+  /**
+   * The self-correction loop: re-run the plan's implementation step with the
+   * failed acceptance criteria, then re-run the plan's acceptance-criteria
+   * step. Both are selected by the phase and the completion kind the plan
+   * declares, never by the name of a step.
+   */
   private async retryFailedAcVerification(
-    template: import('../domain/templates/types.js').WorkflowTemplate,
+    plan: CompiledExecutionPlan,
     ctx: Omit<StepRunCtx, 'stepIndex'>,
     initial: StepResult,
     results: Record<string, StepResult>,
   ): Promise<boolean> {
     let failure = parseAcVerificationFailure(initial.output);
-    const implement = template.steps.find(step => step.id === 'implement');
-    const verify = template.steps.find(step => step.id === 'verify-ac');
-    if (!failure || !implement || !verify) return false;
+    const steps = planSteps(plan);
+    const implementation = selectImplementationStep(steps);
+    const verify = selectAcVerificationStep(steps);
+    if (!failure || !implementation || !verify) return false;
 
     for (let iteration = 1; iteration <= this.config.maxSelfIterations; iteration++) {
       this.acFeedback = failure;
       await this.heartbeatRuntime({ progress: `AC correction ${iteration}/${this.config.maxSelfIterations}` });
-      const implementation = await this.runStep(implement, { ...ctx, stepIndex: iteration }, results);
-      results.implement = implementation;
-      if (implementation.status !== 'completed') break;
+      const implementationResult = await this.runStep(implementation, { ...ctx, stepIndex: iteration }, results);
+      results[implementation.id] = implementationResult;
+      if (implementationResult.status !== 'completed') break;
       const verification = await this.runStep(verify, { ...ctx, stepIndex: iteration }, results);
-      results['verify-ac'] = verification;
+      results[verify.id] = verification;
       if (verification.status === 'completed') {
         this.acFeedback = undefined;
         return true;

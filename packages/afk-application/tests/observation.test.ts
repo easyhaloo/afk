@@ -56,7 +56,7 @@ describe('run observation facade', () => {
   it('queries summaries with work-item filtering and a cursor', async () => {
     const deps = port();
     await expect(queryExecutionHistory({ workItemId: 'work-1', limit: 1 }, deps)).resolves.toEqual({
-      executions: [{ runId: 'run-1', workItemId: 'work-1', profileId: 'profile-1', attempt: 1, status: 'running', phase: undefined, sequence: 2, terminal: false, integrityValid: true }],
+      executions: [{ runId: 'run-1', workItemId: 'work-1', profileId: 'profile-1', attempt: 1, status: 'running', phase: undefined, sequence: 2, terminal: false, startedAt: '2026-09-30T00:00:01.000Z', updatedAt: '2026-09-30T00:00:02.000Z', integrityValid: true }],
       nextCursor: undefined,
     });
   });

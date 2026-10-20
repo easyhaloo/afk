@@ -59,6 +59,9 @@ export interface ExecutionSummary {
   phase?: RunPhase;
   sequence: number;
   terminal: boolean;
+  /** When the run was first recorded, and when its last event was. */
+  startedAt?: string;
+  updatedAt?: string;
   /** False when the run's event chain is broken; the summary then describes
    *  only the prefix the chain vouches for. */
   integrityValid: boolean;
@@ -102,6 +105,8 @@ export async function queryExecutionHistory(
         phase: observed.state.run.phase,
         sequence: observed.state.sequence,
         terminal: observed.state.terminal,
+        ...(observed.events[0]?.occurredAt ? { startedAt: observed.events[0].occurredAt } : {}),
+        ...(observed.events.at(-1)?.occurredAt ? { updatedAt: observed.events.at(-1)!.occurredAt } : {}),
         integrityValid: observed.integrity.valid,
         ...(usage ? { usage } : {}),
       },

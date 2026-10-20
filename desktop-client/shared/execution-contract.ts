@@ -21,6 +21,9 @@ export type ExecutionSummary = {
   phase?: typeof EXECUTION_PHASES[number];
   sequence: number;
   terminal: boolean;
+  /** When the run was first recorded, and when its last event was. */
+  startedAt?: string;
+  updatedAt?: string;
   /** False when the run's event chain is broken. */
   integrityValid: boolean;
   usage?: AgentUsage;
@@ -77,7 +80,7 @@ export function parseExecutionQueryOptions(input: unknown): ExecutionQueryOption
 
 export function parseExecutionSummary(input: unknown): ExecutionSummary {
   const candidate = parseObject(input, "execution summary");
-  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "integrityValid", "usage"], "execution summary");
+  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "startedAt", "updatedAt", "integrityValid", "usage"], "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
   if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution summary phase is invalid");
@@ -96,6 +99,8 @@ export function parseExecutionSummary(input: unknown): ExecutionSummary {
     integrityValid: candidate.integrityValid,
   };
   if (candidate.phase !== undefined) summary.phase = candidate.phase as typeof EXECUTION_PHASES[number];
+  if (candidate.startedAt !== undefined) summary.startedAt = parseRequiredString(candidate.startedAt, "execution summary: startedAt");
+  if (candidate.updatedAt !== undefined) summary.updatedAt = parseRequiredString(candidate.updatedAt, "execution summary: updatedAt");
   if (candidate.usage !== undefined) {
     const usage = parseObject(candidate.usage, "execution usage");
     assertExactKeys(usage, ["inputTokens", "outputTokens", "totalTokens"], "execution usage");

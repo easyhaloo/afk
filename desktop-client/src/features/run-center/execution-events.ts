@@ -11,19 +11,26 @@ const resultLabels: Record<ExecutionSummary["status"], string> = {
 };
 
 export function executionEvents(executions: readonly ExecutionSummary[]): RuntimeEvent[] {
-  return executions.map(execution => ({
-    id: execution.runId,
-    timestamp: "—",
-    source: execution.workItemId,
-    status: execution.status === "pending" ? "queued"
-      : execution.status === "succeeded" ? "completed"
-        : execution.status === "failed" || execution.status === "cancelled" ? "failed"
-          : execution.status === "awaiting_human" ? "waiting_confirmation" : "running",
-    result: resultLabels[execution.status],
-    nextStep: resultLabels[execution.status],
-    raw: JSON.stringify(execution),
-    ...(execution.usage ? { usage: execution.usage } : {}),
-  }));
+  return executions.map(execution => {
+    const label = resultLabels[execution.status];
+    // A run whose event chain is broken describes only the prefix the chain
+    // vouches for. Say so rather than presenting it as a whole run.
+    const broken = execution.integrityValid === false;
+    return {
+      id: execution.runId,
+      // The run's own timestamps, not a placeholder.
+      timestamp: execution.updatedAt ?? execution.startedAt ?? "—",
+      source: execution.workItemId,
+      status: execution.status === "pending" ? "queued"
+        : execution.status === "succeeded" ? "completed"
+          : execution.status === "failed" || execution.status === "cancelled" ? "failed"
+            : execution.status === "awaiting_human" ? "waiting_confirmation" : "running",
+      result: broken ? `审计链不完整：${label}` : label,
+      nextStep: broken ? `审计链不完整，仅显示已验证部分` : label,
+      raw: JSON.stringify(execution),
+      ...(execution.usage ? { usage: execution.usage } : {}),
+    };
+  });
 }
 
 export function executionHistoryEvents(

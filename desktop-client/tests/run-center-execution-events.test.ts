@@ -5,6 +5,8 @@ import type { ExecutionSummary } from "../shared/execution-contract";
 const base: ExecutionSummary = {
   runId: "afk-run-158", workItemId: "github:easyhaloo/afk#158",
   profileId: "default", attempt: 1, status: "running", phase: "implementation", sequence: 2, terminal: false,
+  startedAt: "2026-09-29T00:00:00.000Z", updatedAt: "2026-09-29T00:05:00.000Z",
+  integrityValid: true,
 };
 
 describe("audited run center events", () => {
@@ -34,6 +36,17 @@ describe("audited run center events", () => {
     ]);
     expect(events.map(event => event.status)).toEqual(["running", "waiting_confirmation", "completed"]);
     expect(events[1].result).toContain("人工");
+  });
+
+  it("carries the run's own timestamps instead of a placeholder", () => {
+    const [event] = executionEvents([base]);
+    expect(event.timestamp).toBe("2026-09-29T00:05:00.000Z");
+  });
+
+  it("says so when the run's audit chain is broken", () => {
+    const [broken] = executionEvents([{ ...base, integrityValid: false }]);
+    expect(broken.result).toContain("审计链不完整");
+    expect(broken.nextStep).toContain("审计链不完整");
   });
 });
 

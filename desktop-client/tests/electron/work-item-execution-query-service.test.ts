@@ -33,7 +33,7 @@ describe("work item execution query", () => {
     const events = port();
     const page = await createWorkItemExecutionQueryService(events).list({ workItemId: event.context.workItemId, limit: 25 });
     expect(events.listRuns).toHaveBeenCalledOnce();
-    expect(page).toEqual({ executions: [{ runId: "afk-158", workItemId: event.context.workItemId, profileId: "default", attempt: 1, status: "pending", sequence: 1, terminal: false, integrityValid: true }] });
+    expect(page).toEqual({ executions: [{ runId: "afk-158", workItemId: event.context.workItemId, profileId: "default", attempt: 1, status: "pending", sequence: 1, terminal: false, startedAt: event.occurredAt, updatedAt: event.occurredAt, integrityValid: true }] });
   });
 
   it("uses the application filter and cursor semantics", async () => {

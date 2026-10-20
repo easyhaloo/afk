@@ -8,7 +8,7 @@
 
 AFK 实现三种主要工作流模式：
 1. **Backlog → 实现 → 变更单流水线**：手动或自动化工作项处理
-2. **调度器工作流**：后台依赖感知执行
+2. **Loop 工作流**：绑定 manifest 的后台轮询执行
 3. **Skills 工作流**：TDD 方法论集成
 
 ## Backlog → 实现 → 变更单流水线
@@ -60,7 +60,7 @@ flowchart TD
     F -->|"token ≥ 阈值"| H["上下文交接: 打断 → 总结 → 杀会话 → 重启 → 注入总结继续"]
     F -->|timeout| Z2["超时: Backlog 阻塞 + HITL, 保留 worktree"]
 
-    G -->|ac_result| I["MR/PR 创建: push 分支, 关联 Closes iid"]
+    G -->|goal_complete (ac_verification)| I["MR/PR 创建: push 分支, 关联 Closes iid"]
     G -->|"token ≥ 阈值"| H
     G -->|timeout| Z2
 
@@ -78,104 +78,23 @@ flowchart TD
     class A,C,D,E,F,G,H process
 ```
 
-## 调度器工作流
+## 已移除：无范围调度器
 
-依赖感知的后台执行系统。
+本文此前描述的依赖感知后台调度器已不存在。仓库里没有 `afk scheduler` 命令、没有
+调度器模块，也没有 worker 池。它是被移除的，而不是作为兜底保留，依赖图、任务状态机
+和并发 worker 池随之一起消失。
 
-### 架构
+取代它的是：
 
-```mermaid
-graph TD
-    Sched["调度器服务: 轮询 60s, 最大并发 3"] --> Dep["依赖图: 读取 Backlog dependsOn, 构建 DAG, 拓扑排序"]
+| 关注点 | 现在的做法 |
+| --- | --- |
+| 决定执行什么 | `afk loop` 只轮询一个绑定了执行 manifest 的 backlog ID |
+| 决定工作项何时可执行 | provider backlog 状态：`ready` 或 `rework`、执行模式 `afk`、无子项、全部 `dependsOn` 已 `done` |
+| 执行这一轮 | `executeWorkItem`，与 `afk run` 调用同一个用例 |
+| 排序 | 依赖图从 provider backlog 读取，不再由本地调度器构建 |
 
-    Dep --> Queue["任务队列: 优先级调度 high/medium/low"]
-
-    Queue --> Pool["工作池: Worker-1, Worker-2, ..."]
-
-    Pool --> W1["Worker-1: 从队列获取任务, 启动工作流, 监控完成, 更新依赖"]
-    Pool --> W2[Worker-2]
-    Pool --> W3[Worker-N]
-
-    classDef config fill:#fff4e1
-    classDef data fill:#f0e1ff
-    class Sched,Queue,Pool config
-    class Dep data
-```
-
-### 依赖解析
-
-Backlog 通过结构化字段声明依赖：
-
-```
-Backlog #10: dependsOn: [], baseBacklogId: null
-Backlog #11: dependsOn: ["10"], baseBacklogId: null
-Backlog #12: dependsOn: ["10", "11"], baseBacklogId: "11"
-```
-
-```mermaid
-graph LR
-    N10["Issue #10: 无依赖"] --> N11["Issue #11: blocks-10"]
-    N10 --> N12["Issue #12: blocks-10, blocks-11"]
-    N11 --> N12
-
-    classDef root fill:#d4edda,stroke:#28a745
-    class N10 root
-```
-
-调度器执行顺序：
-1. **#10** 首先开始（无依赖）
-2. **#11** 等待 #10 完成
-3. **#12** 等待 #10 和 #11 都完成
-
-### 并发控制
-
-```typescript
-// 伪代码
-class Scheduler {
-  maxConcurrent: number = 3;
-  activeWorkers: Set<Worker> = new Set();
-
-  async processQueue() {
-    while (activeWorkers.size < maxConcurrent) {
-      const task = queue.dequeue();  // 获取最高优先级就绪任务
-      if (!task) break;
-
-      const worker = new Worker(task);
-      activeWorkers.add(worker);
-
-      worker.on('complete', () => {
-        activeWorkers.delete(worker);
-        this.notifyDependents(task.id);  // 解锁被阻塞任务
-      });
-
-      worker.start();
-    }
-  }
-}
-```
-
-### 任务状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> PENDING: 创建任务
-    PENDING: PENDING - 初始状态，等待依赖
-    QUEUED: QUEUED - 就绪，在优先级队列中
-    RUNNING: RUNNING - 工作流正在执行
-    COMPLETED: COMPLETED - 成功，MR 已创建
-    FAILED: FAILED - AC 检查失败或错误
-    BLOCKED: BLOCKED - 无法解决的依赖或超时
-
-    PENDING --> QUEUED: 依赖已满足
-    QUEUED --> RUNNING: worker 可用
-    RUNNING --> COMPLETED: 成功
-    RUNNING --> FAILED: AC 失败
-    RUNNING --> BLOCKED: 超时/无法解决
-
-    COMPLETED --> [*]
-    FAILED --> [*]
-    BLOCKED --> [*]
-```
+一个用自己的内存状态重新推导可执行性的调度器，可能与 provider backlog 产生分歧，
+而 provider backlog 才是工作身份的唯一真源。移除它就移除了第二个真源。
 
 ## Skills 工作流
 
@@ -356,19 +275,21 @@ Issue #123: "添加用户认证"
 
 ```typescript
 type SignalType =
-  | 'goal_complete'    // Phase 1 完成：实现交付（summary 必填）
-  | 'ac_result'        // Phase 2 完成：AC 验证结果
-  | 'timeout'          // watchdog 硬超时（分离进程写入）
+  | 'goal_complete'    // Phase 完成：实现、QA 或 AC 验证
   | 'handoff_ready'    // 交接总结完成（summary 必填）
+  | 'timeout'          // watchdog 硬超时（分离进程写入）
+  | 'idle'             // agent 无事可做，处于等待
 
 interface Signal {
   type: SignalType;
   timestamp: string;
   summary?: string;        // goal_complete / handoff_ready 必填
   sha?: string;            // Git commit SHA
-  result?: 'PASS' | 'FAIL'; // ac_result
+  kind?: 'task' | 'qa' | 'ac_verification';  // 仅 goal_complete
+  result?: 'PASS' | 'FAIL';                    // 仅 goal_complete
   tests_run?: number;
   tests_passed?: number;
+  failedCriteria?: { id: string; expected: string; actual: string }[];
 }
 ```
 
@@ -379,23 +300,35 @@ interface Signal {
 ### 检测机制
 
 - **Runner 轮询 statusline**：agent 无法可靠感知自己的上下文上限（Claude Code 的 TUI 警告在渲染层不可见、压缩系统消息到达时已太迟），信号协议中不存在 context_high。Runner 是上下文溢出的唯一权威 —— 在等待周期（2s）内检查信号文件与 `<worktree>/.afk/claude-status.json` 的 token 用量（statusline 每个 turn 写入）。
-- **阈值**：绝对 token 数，默认 `CONTEXT.HIGH_THRESHOLD` = 100,000，可配置 `--context-high <tokens>`。
+- **阈值**：绝对 token 数，默认 `contextThreshold` = 100,000，可用 `--context-high <tokens>` 配置，也可在项目的 `.afk/config.yml` 中用 `contextThreshold` 覆盖。
 - **信号优先**：agent 已写完成信号时不打断（信号文件检查先于 token 检查）。
 
 ### 交接流程（自动续跑）
 
 1. **请求总结**：打字纯文本交接指令（催促立即简短总结）—— ① `git add -A && git commit`（无改动可跳过）→ ② 3 个简答（已完成/正在做/接下来）→ ③ 写 `handoff_ready` 信号。60s 内无有效 `handoff_ready`（含模板占位符 `<总结>` 视为无总结）则用 pane 快照兜底。
+<<<<<<< HEAD
 2. **交接文档**：总结 + 快照 + commit sha 写入 `<worktree>/.afk/handoff/handoff-<iid>-<gen>.md`（`.afk/` 已在仓库 `.gitignore` 中，不会被 `git add -A` 提交进 MR；文档随 worktree 走，恢复时 agent 可直接读取）。
 3. **不写 issue 评论**：交接事件自己进审计脊柱（`handoff.performed`）。磁盘上的恢复文档就是交接产物；终止式交接还会把 backlog 转为 `blocked` + `hitl`，这是操作者在 tracker 里能看到的信号。
+=======
+2. **交接文档**：总结 + 快照 + commit sha 写入 `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md`（`.afk/` 已在仓库 `.gitignore` 中，不会被 `git add -A` 提交进 MR；文档随 worktree 走，恢复时 agent 可直接读取）。
+3. **恢复评论**：issue 评论记录交接进度（任务中断时的恢复文档）。终止式交接的评论**嵌入完整交接文档内容**（无文件路径引用），恢复方从评论即可获取全部信息。
+>>>>>>> 98baa09 (docs: correct the guides and the getting-started pages)
 4. **重启**：杀 tmux 会话 → 清理信号文件与旧 statusline 数据 → 重建同名 session → 重启 watchdog（每代会话拥有完整的 hard timeout）。
 5. **继续**：新会话收到「继续实现/验证 issue #N（先阅读交接文档）」指令，循环直到完成信号或再次交接。
 
 ### 预算与兜底
 
+<<<<<<< HEAD
 - `--max-handoffs <n>`（默认 3）：自动续跑轮次上限，两个 phase（实现/验证）**全局共享**。
 - `--max-total-tokens <tokens>`（默认 500,000）：整个 run 跨交接代际的累计 token 上限（每次交接时把旧会话的用量累加；终止判断 = 累计 + 当前会话用量 ≥ 上限）。
 - **任一预算耗尽** → 终止式交接：backlog 转为 `blocked` + `hitl`，恢复文档写入 `<worktree>/.afk/handoff/`，会话被杀掉。worktree 保留下来供人工恢复。
 - **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（blocked + hitl，会话被杀），不落入 crash 路径。
+=======
+- `--max-handoffs <n>`（默认 `min(ceil(goalBudget / 1,000,000), 20)`，即默认 `goalBudget` 为 10,000,000 时是 **10**）：自动续跑轮次上限，两个 phase（实现/验证）**全局共享**。
+- `--max-total-tokens <tokens>`（默认 `goalBudget`，即 **10,000,000**）：整个 run 跨交接代际的累计 token 上限（每次交接时把旧会话的用量累加；终止判断 = 累计 + 当前会话用量 ≥ 上限）。
+- **任一预算耗尽** → 终止式交接：`handoff::active` label + 评论（含终止原因、**完整交接文档内容**与恢复指引），人工移除 label 后重新触发 `/afk-implement <iid>` 恢复。
+- **重启失败**（如 Claude 30s 内未就绪）→ 自动翻转终止式交接（保留已发恢复评论），不落入 crash 路径。
+>>>>>>> 98baa09 (docs: correct the guides and the getting-started pages)
 
 ## 错误处理
 

@@ -8,7 +8,7 @@ AFK TUI 基于 React + Ink 构建，采用分层测试策略。
 ┌─────────────────────────────────────────────────┐
 │  E2E / Integration (node-pty)                   │  ← 完整终端交互、按键模拟
 ├─────────────────────────────────────────────────┤
-│  Component (ink-testing-library + sized Box)    │  ← 组件渲染测试
+│  Component (ink renderToString + sized Box)      │  ← 组件渲染测试
 ├─────────────────────────────────────────────────┤
 │  Unit / Logic (vitest)                          │  ← 纯逻辑、状态机、reducer
 └─────────────────────────────────────────────────┘
@@ -48,24 +48,25 @@ pnpm exec vitest run src/views/shared/
 
 ---
 
-## 2. 组件测试（ink-testing-library）
+## 2. 组件测试（ink `renderToString`）
 
 **目标**：验证 TUI 组件文本输出
 
-**工具**：`ink-testing-library` + `vitest`
+**工具**：`ink` 自带的 `renderToString` + `vitest`
 
-**模式**：用 `render()` 渲染组件，通过 `lastFrame()` 检查输出
+`ink-testing-library` **不是**本仓库的依赖。十二个 `*.test.tsx` 用的是 `ink`
+自身的 `renderToString`：它把渲染结果直接返回为字符串，于是断言就是对字符串做
+`toContain`，既不需要定时器，也不需要轮询帧。
+
+**模式**：把组件渲染成字符串，对字符串断言
 
 ```typescript
-import { render } from 'ink-testing-library';
-import { Text, Box } from 'ink';
+import { renderToString } from 'ink';
+import { Text } from 'ink';
 
-beforeEach(() => vi.useRealTimers());
-
-it('renders text content', async () => {
-  const { lastFrame } = render(React.createElement(Text, null, 'Hello'));
-  await new Promise(resolve => setTimeout(resolve, 100));
-  expect(lastFrame()).toContain('Hello');
+it('renders text content', () => {
+  const output = renderToString(<Text>Hello</Text>);
+  expect(output).toContain('Hello');
 });
 ```
 
@@ -93,41 +94,37 @@ expect(lastFrame()).toContain('Test message');
 **完整示例**：
 
 ```typescript
-import { render } from 'ink-testing-library';
+import { renderToString } from 'ink';
 import { Box } from 'ink';
 import { Notification } from './Notification';
 
 describe('Notification rendering', () => {
-  beforeEach(() => vi.useRealTimers());
-
-  it('renders notification message', async () => {
+  it('renders notification message', () => {
     const notification = { type: 'info' as const, message: 'Test message' };
     const TestContainer = () => (
       <Box width={80} height={24}>
         <Notification notification={notification} animation="visible" />
       </Box>
     );
-    const { lastFrame } = render(React.createElement(TestContainer));
-    await new Promise(resolve => setTimeout(resolve, 100));
-    expect(lastFrame()).toContain('Test message');
+    const output = renderToString(<TestContainer />);
+    expect(output).toContain('Test message');
   });
 
-  it('renders nothing when notification is null', async () => {
+  it('renders nothing when notification is null', () => {
     const TestContainer = () => (
       <Box width={80} height={24}>
         <Notification notification={null} animation="hidden" />
       </Box>
     );
-    const { lastFrame } = render(React.createElement(TestContainer));
-    await new Promise(resolve => setTimeout(resolve, 100));
-    expect(lastFrame()).not.toContain('Message:');
+    const output = renderToString(<TestContainer />);
+    expect(output).not.toContain('Message:');
   });
 });
 ```
 
 **运行**：
 ```bash
-pnpm dlx vitest --run src/views/
+pnpm exec vitest run src/views/
 ```
 
 ---
@@ -170,7 +167,7 @@ describeE2E('Notification E2E', () => {
   afterEach(() => { if (proc) proc.kill(); });
 
   it('renders with absolute positioning', async () => {
-    proc = spawn(process.execPath, [distPath, 'board'], {
+    proc = spawn(process.execPath, [distPath], {
       cols: 80, rows: 24,
       env: { ...process.env, NO_TMUX: '1' },
     });
@@ -201,8 +198,8 @@ pnpm test:e2e:pty
 | 工具 | 用途 |
 |------|------|
 | `vitest` | 测试运行器 + 断言库 |
-| `ink-testing-library` | Ink 组件渲染测试 |
 | `node-pty` | PTY 进程控制（E2E） |
+| `ink` | `renderToString`，用于 Ink 组件渲染测试 |
 
 ## 目录结构
 
@@ -233,24 +230,35 @@ afk/
 ## 运行测试
 
 ```bash
-# 运行所有测试
-source ~/.nvm/nvm.sh && nvm use lts/iron && pnpm dlx vitest --run
+# 跑全部：根套件 + 每个工作区包自己的套件
+pnpm test
+
+# 只跑根套件
+pnpm exec vitest run
+
+# 只跑某个工作区包
+pnpm --filter @afk/core test
 
 # 监听模式（开发时）
-pnpm dlx vitest
-
-# 只跑单元测试
-pnpm dlx vitest --run src/domain/ src/application/ src/infrastructure/ src/shared/ src/cli/
+pnpm exec vitest
 
 # 只跑组件测试
-pnpm dlx vitest --run src/views/
+pnpm exec vitest run src/views/
 
 # 只跑 PTY E2E（需显式运行，要求真实终端）
 pnpm test:e2e:pty
 
+# Codex runtime E2E
+pnpm test:e2e:codex
+
 # 覆盖率
-pnpm dlx vitest --run --coverage
+pnpm exec vitest run --coverage
 ```
+
+`pnpm test` 是唯一能跑全的命令：它先跑根套件，再跑六个工作区包的套件
+（`@afk/core`、`@afk/application`、`@afk/infrastructure`、`@afk/execution`、
+`@afk/workflow-graph` 以及根包自身）。单独跑 `vitest run` 只覆盖根套件。
+`pnpm dlx vitest` 在这里是错的：它会下载一份独立的 vitest，而不是用仓库锁定的那份。
 
 ---
 
@@ -279,17 +287,16 @@ node -e "const {spawn}=require('node-pty');spawn('node',['--version'],{cols:80,r
 
 ## TUI 测试要点
 
-### 异步渲染需等待
+### 终端尺寸是夹具的一部分
 
-`ink-testing-library` 的 `render()` 返回同步对象，但 Ink 渲染是异步的：
+`renderToString` 按当前终端尺寸排版，因此会按宽度分支的组件必须在测试里固定尺寸：
 
 ```typescript
-beforeEach(() => vi.useRealTimers());
-
-it('renders text', async () => {
-  const { lastFrame } = render(<Text>Hello</Text>);
-  await new Promise(resolve => setTimeout(resolve, 100)); // 等待渲染完成
-  expect(lastFrame()).toContain('Hello');
+it('renders text', () => {
+  Object.defineProperty(process.stdout, 'columns', { configurable: true, value: 100 });
+  Object.defineProperty(process.stdout, 'rows', { configurable: true, value: 16 });
+  const output = renderToString(<Text>Hello</Text>);
+  expect(output).toContain('Hello');
 });
 ```
 
@@ -306,10 +313,13 @@ TUI 中常有动态内容（时间戳、随机 ID）。测试时：
 E2E 测试中指定终端尺寸：
 
 ```typescript
-proc = spawn(process.execPath, [distPath, 'board'], {
+proc = spawn(process.execPath, [distPath], {
   cols: 80, rows: 24,
 });
 ```
+
+`afk` 不带参数即启动 TUI 看板。`afk board` 不是命令：调度器会拒绝它，并提示改用
+不带参数的 `afk`。
 
 ---
 

@@ -130,6 +130,9 @@ if (broken.length > 0) {
 // can be tightened.
 
 const sourcePathPattern = /`([^`\s]+\.(?:ts|tsx|mjs|js))(?::\d+(?:-\d+)?)?`/g;
+// Paths under a build output directory. They are generated, they are not
+// tracked, and their presence depends on whether the tree was built.
+const buildOutputPattern = /(^|\/)(dist|dist-electron|release|build|coverage|node_modules|out)\//;
 const sourcePathBaselineFile = join(repoRoot, 'scripts', 'doc-source-paths-baseline.json');
 const sourcePathBaseline = existsSync(sourcePathBaselineFile)
   ? JSON.parse(readFileSync(sourcePathBaselineFile, 'utf8'))
@@ -155,6 +158,17 @@ for (const mdFile of mdFiles) {
     // Build output is not source: the artifact a build produces does not
     // exist until the build runs.
     if (isGeneratedOutputPath(raw)) continue;
+    // Scope note: this check covers backticked paths that carry a directory
+    // component and a source-code extension. It deliberately does not cover
+    // bare file names, other extensions, or paths under a runtime or
+    // user-output directory. Each of those was measured, and each produces
+    // false positives rather than findings: a bare name that exists nowhere
+    // is usually a file the skill asks the *user's* project to have, and
+    // .md/.json/.yml references are mostly runtime artefacts
+    // (.afk-signal.json), placeholders (NNNN-*.md), or files a skill writes
+    // into the user's project. Widening the pattern is not a regex change:
+    // it needs a calibration pass showing every newly reported reference is
+    // a real drift.
 
     // A document may name a path relative to its own directory, to the
     // repository root, or relative to the desktop client.

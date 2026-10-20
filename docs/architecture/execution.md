@@ -508,9 +508,13 @@ afk run --backlog-id <id>
 ```
 
 `afk run` claims one ready backlog item and drives it through the template the
-item selects. The template is resolved by
-`packages/afk-execution/src/domain/templates/builtin.ts`; there is no
-`--template` flag on the CLI, and no `afk workflow` command group.
+item selects. Templates are resolved by
+`packages/afk-execution/src/domain/templates/builtin.ts` and can be overridden
+with `--template <name>`; the related flags are `--agent`, `--sandbox`,
+`--execution-mode`, `--base-branch`, `--target-branch`, `--max-handoffs`,
+`--context-high`, `--max-total-tokens` and `--hard-timeout`. There is no
+`afk workflow` command group, and no `--iid` or `--branch-strategy` flag — the
+item is selected by `--backlog-id` and the branch by `--base-branch`.
 
 Configuration example:
 

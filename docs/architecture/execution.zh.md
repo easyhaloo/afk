@@ -500,8 +500,12 @@ afk run --backlog-id <id>
 ```
 
 `afk run` 认领一个 ready 状态的 backlog 项，并按该项选定的模板推进执行。模板由
-`packages/afk-execution/src/domain/templates/builtin.ts` 解析；CLI 上没有
-`--template` 选项，也不存在 `afk workflow` 命令组。
+`packages/afk-execution/src/domain/templates/builtin.ts` 解析，可用
+`--template <name>` 覆盖；相关选项还有 `--agent`、`--sandbox`、
+`--execution-mode`、`--base-branch`、`--target-branch`、`--max-handoffs`、
+`--context-high`、`--max-total-tokens` 与 `--hard-timeout`。不存在 `afk workflow`
+命令组，也没有 `--iid` 或 `--branch-strategy` 选项——工作项用 `--backlog-id` 选择，
+分支用 `--base-branch` 选择。
 
 配置示例：
 

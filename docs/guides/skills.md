@@ -40,6 +40,10 @@ User Request
 
 /afk-scheduler ──────→ Multi-issue Dependency-aware Scheduling
 /afk-branch-migrate ─→ Cross-branch Code Migration
+/afk-ai-prd ──────────→ AI-Friendly PRD Draft / Review / Revise
+/afk-llm-dev-guide ──→ LLM Application Design and Architecture
+/jev-agent-guard ────→ Globally Installed Agent Checkpoints
+/software-complexity-governance → Complexity Measurement and Governance
 /md-to-pdf ──────────→ Markdown to PDF
 /reasoning-guard ────→ In-session Reasoning Path Guardian
 /reasoning-watchdog ──→ Hooks-based Automatic Reasoning Monitor
@@ -271,10 +275,13 @@ Load different documents based on task type:
 
 **Why two merge gates?**
 ```
-afk/issue-<iid> ──→ prd/<N> ──→ main
-                  ↑          ↑
-                AFK gate   Human gate
+afk/backlog-<id> ──→ prd/<N> ──→ main
+                    ↑          ↑
+                  AFK gate   Human gate
 ```
+
+The work branch is derived from the provider backlog ID
+(`packages/afk-application/src/backlog/model.ts`), not from an issue number.
 - **AFK gate (prd/<N>)** — Machine-verifiable AC, automated merge
 - **Human gate (main)** — Overall business logic, UX, human review
 
@@ -748,6 +755,80 @@ Claude Code session
 
 ---
 
+### 19. afk-ai-prd
+
+**Purpose:** Create, review, or revise an AI-Friendly Product Requirements Document in Markdown — a PRD an AI can parse, question, decompose, implement, and verify
+
+**Triggering Scenarios:**
+- User wants a PRD that a coding agent can act on unattended
+- Reviewing an existing PRD for machine-checkability
+- The product and development PRDs in `docs/product/` cite this skill as their validator
+
+**Workflow:**
+1. **Draft** — Fixed Markdown sections, atomic requirements, Mermaid diagrams, stable IDs, traceability
+2. **Self-check gate** — The skill refuses to hand over a PRD that fails its own check
+
+**Design Decisions:**
+
+**Why a separate PRD skill?**
+- Requirements that a human reads and requirements that a machine can decompose are not the same artifact
+- Stable IDs and traceability are what let an issue carry a requirement back to a line in the PRD
+
+**Collaboration with Other Skills:**
+- **Complements** → **afk-to-prd** (produces the PRD), **afk-to-issues** (consumes it)
+
+---
+
+### 20. afk-llm-dev-guide
+
+**Purpose:** Guide for LLM application design — architecture, skill-driven systems, context engineering, HITL, observability, and evolvability
+
+**Triggering Scenarios:**
+- User asks how to design an LLM application rather than how to build one
+- Questions about context budget, human-in-the-loop placement, or how to keep an LLM system changeable
+
+**Collaboration with Other Skills:**
+- **Independent** — A reference skill, invoked directly
+
+---
+
+### 21. jev-agent-guard
+
+**Purpose:** Globally install Jev checkpoints for Claude Code, Codex, and OpenCode — recommend relevant Skills, monitor observable execution evidence, and reduce safe tool-output noise without replacing host permissions
+
+**Triggering Scenarios:**
+- Setting up Jev checkpoints across every agent host on a machine
+- Long-running agent sessions that need observable checkpoints
+
+**Workflow:**
+1. **Install** — `skills/jev-agent-guard/scripts/install.mjs` registers the checkpoint hook for the selected hosts (`--dry-run` first)
+2. **Run** — `skills/jev-agent-guard/scripts/jev.mjs` reads a question specification from stdin or `--input` and converts it into a native SDK question
+3. **Decide** — `skills/jev-agent-guard/scripts/jev-client.mjs` exposes `askJev`, `decideChoice`, `decideNoul`, `decideScore`
+
+**Design Decisions:**
+
+**Why not replace host permissions?**
+- The guard observes and asks; it does not widen what an agent is allowed to do
+
+**Collaboration with Other Skills:**
+- **Independent** — Installs at the host level, not per skill
+
+---
+
+### 22. software-complexity-governance
+
+**Purpose:** Assess and govern software complexity from method to repository scope — cyclomatic and cognitive complexity, code smells, coupling, module and service boundaries, duplication, change hotspots, and technical-debt priority
+
+**Triggering Scenarios:**
+- Measuring complexity of a module, a service, or the whole repository
+- Prioritizing technical debt
+- Reviewing a proposed refactor for whether it actually reduces coupling
+
+**Collaboration with Other Skills:**
+- **Independent** — A measurement skill, invoked directly
+
+---
+
 ## Skills Design Principles Summary
 
 ### 1. Single Responsibility
@@ -802,15 +883,21 @@ Methodology documents referenced by Skills are located in the `references/` dire
 references/
 ├── README.md              # Task type detection guide
 ├── tdd-feature.md         # TDD development workflow
+├── tdd-refactor.md        # TDD refactoring workflow
 ├── hard-checks.md         # Mandatory checklist
+├── hard-checks-recovery.md # Recovery procedure for a failed check
 ├── ddd.md                 # DDD design guide
 ├── architecture.md        # Architecture decision template
 ├── adr.md                 # ADR writing guide
-└── task-type/
-    ├── feature.md         # Feature development task
-    ├── refactor.md        # Refactor task
-    └── bugfix.md          # Bug fix task
+├── research.md            # Research task guide
+├── spike.md               # Spike task guide
+└── hotfix.md              # Hotfix task guide
 ```
+
+Every skill owns its own `references/` directory; there is no shared
+`skills/references/` tree, and no `task-type/` subdirectory. The task-type
+distinction is expressed by which reference file the skill reads
+(`tdd-feature.md`, `tdd-refactor.md`, `hotfix.md`, `spike.md`).
 
 **Why use references/ instead of hardcoding flows?**
 1. **Evolvable** — When methodology improves, just update documents, no skill code changes needed

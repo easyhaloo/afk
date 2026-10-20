@@ -10,14 +10,18 @@ git clone https://github.com/easyhaloo/afk.git
 cd afk
 
 # 安装依赖
-npm install
+pnpm install
 
 # 构建
-npm run build
+pnpm build
 
 # 全局安装
-npm link
+pnpm link
 ```
+
+本仓库是 pnpm workspace：根包通过 `workspace:*` 协议依赖 `@afk/core`、
+`@afk/application` 与 `@afk/workflow-graph`，`npm install` 无法解析该协议，
+请使用 pnpm。
 
 验证安装：
 ```bash
@@ -27,42 +31,71 @@ afk --help
 
 ## 配置
 
-### GitLab 项目
+AFK 从环境变量读取凭据，从项目根目录的 YAML 文件读取项目设置。
+既没有全局配置文件，也没有 `git config afk.*` 这样的配置键。
 
-创建配置文件 `~/.config/afk/.env`：
-
-```bash
-# GitLab 配置
-GITLAB_TOKEN=glpat-xxxxxxxxxxxxx
-GITLAB_BASE_URL=https://gitlab.company.com/api/v4  # 可选，默认 gitlab.com
-
-# 或使用 git config（推荐）
-cd /path/to/your/project
-git config afk.platform gitlab
-git config afk.project "mygroup/myproject"
-```
-
-### GitHub 项目
+### GitLab
 
 ```bash
-# GitHub 配置
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
-GITHUB_OWNER=your-org
-GITHUB_REPO=your-repo
-
-# 或使用 git config
-cd /path/to/your/project
-git config afk.platform github
-git config afk.owner "your-org"
-git config afk.repo "your-repo"
+export GITLAB_TOKEN=glpat-xxxxxxxxxxxxx
+export GITLAB_URL=https://gitlab.company.com   # 可选，默认 https://gitlab.com
 ```
+
+当 `GITLAB_TOKEN` 缺失时，AFK 回退读取 `glab` CLI 存放在
+`~/.config/glab-cli/config.yml` 的 token。
+
+### GitHub
+
+```bash
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx   # 也接受 GH_TOKEN
+export GITHUB_REPOSITORY=your-org/your-repo
+```
+
+仓库默认从 git remote 探测；只有 remote 不可达时才需要 `GITHUB_REPOSITORY`。
+
+### 项目设置
+
+按项目的设置写在项目根目录的 `.afk/config.yml`：
+
+```yaml
+agentDefault: claude-code
+tmuxSession: afk
+maxQaReworkAttempts: 3
+template: issue-implementation
+```
+
+每一项都有环境变量覆盖，且项目文件优先于环境变量。最常用的几项：
+
+| 配置项 | 环境变量 | 默认值 |
+|---|---|---|
+| `agentDefault` | `AFK_AGENT_DEFAULT` | `claude-code` |
+| `tmuxSession` | `AFK_TMUX_SESSION` | `afk` |
+| `maxQaReworkAttempts` | `AFK_MAX_QA_REWORK_ATTEMPTS` | `3` |
+| `workflowHardTimeout` | `AFK_WORKFLOW_HARD_TIMEOUT` | 7200000 毫秒 |
+| `qaTimeout` | `AFK_QA_TIMEOUT` | 1800000 毫秒 |
+| `contextThreshold` | `AFK_CONTEXT_THRESHOLD` | 100000 |
+| `goalBudget` | `AFK_GOAL_BUDGET` | 10000000 |
+| `maxRetries` | `AFK_MAX_RETRIES` | 2 |
+| `maxSelfIterations` | `AFK_MAX_SELF_ITERATIONS` | 3 |
+| `template` | —（仅项目文件） | `issue-implementation` |
+
+另有两个变量决定 AFK 自身状态的存放位置：
+
+| 变量 | 含义 |
+|---|---|
+| `AFK_STATE_DIR` | 持久化的租约与认领状态（默认 `~/.afk/state`） |
+| `AFK_EVENT_STORE_DIR` | 只追加的运行审计事件（默认 `~/.afk/events`） |
 
 ### 平台自动检测
 
-AFK 会自动检测平台：
-1. 检查 `TRACKER_PLATFORM` 环境变量
-2. 分析 git remote URL
-3. 检查项目配置文件（.gitlab-ci.yml 或 .github/workflows/）
+AFK 从 git remote 判定平台与项目：
+
+1. 读取当前仓库的 `remote.origin.url`。
+2. `github.com` 远端选择 GitHub，其他主机选择 GitLab。
+3. 项目即去掉主机名与 `.git` 后缀后的远端路径。
+
+也可以对任意 `afk backlog` 命令加 `--platform github` 或 `--platform gitlab`
+显式选择 provider。
 
 ## 基本使用
 
@@ -128,9 +161,10 @@ Loop 只接受一个 Backlog ID 与匹配的执行 manifest，并复用 `afk exe
 
 ## 下一步
 
-- **架构设计** → [overview.md](docs/architecture/overview.md) — 了解跨平台抽象层
-- **工作流详解** → [workflows.md](docs/guides/workflows.md) — 深入理解三种工作流
-- **Skills 系统** → [skills.md](docs/guides/skills.md) — 学习 afk skills 的设计和使用
+- **架构设计** → [overview.md](architecture/overview.md) — 了解跨平台抽象层
+- **工作流详解** → [workflows.md](guides/workflows.md) — 深入理解三种工作流
+- **Skills 系统** → [skills.md](guides/skills.md) — 学习 afk skills 的设计和使用
+- **文档地图** → [index.md](index.md) — 仓库中每一份文档及其用途
 
 ## 常见问题
 
@@ -139,7 +173,7 @@ Loop 只接受一个 Backlog ID 与匹配的执行 manifest，并复用 `afk exe
 ```bash
 # 重新链接
 cd /path/to/afk
-npm link
+pnpm link
 
 # 或直接运行
 node /path/to/afk/dist/index.js --help
@@ -147,12 +181,12 @@ node /path/to/afk/dist/index.js --help
 
 ### 平台检测错误
 
-```bash
-# 手动指定平台
-export TRACKER_PLATFORM=gitlab  # 或 github
+AFK 无法从 git remote 读出项目。确认仓库存在 `origin` 远端，或显式指定
+provider：
 
-# 或在 git config 中设置
-git config afk.platform gitlab
+```bash
+afk backlog list --platform gitlab
+afk backlog list --platform github
 ```
 
 ### API 权限错误

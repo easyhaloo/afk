@@ -10,14 +10,18 @@ git clone https://github.com/easyhaloo/afk.git
 cd afk
 
 # Install dependencies
-npm install
+pnpm install
 
 # Build
-npm run build
+pnpm build
 
 # Install globally
-npm link
+pnpm link
 ```
+
+This repository is a pnpm workspace: the root package depends on
+`@afk/core`, `@afk/application`, and `@afk/workflow-graph` through the
+`workspace:*` protocol, which `npm install` cannot resolve. Use pnpm.
 
 Verify the installation:
 ```bash
@@ -27,42 +31,74 @@ afk --help
 
 ## Configuration
 
-### GitLab Project
+AFK reads its credentials from environment variables, and its project settings
+from a YAML file in the project root. There is no global config file and no
+`git config afk.*` key.
 
-Create a config file at `~/.config/afk/.env`:
-
-```bash
-# GitLab configuration
-GITLAB_TOKEN=glpat-xxxxxxxxxxxxx
-GITLAB_BASE_URL=https://gitlab.company.com/api/v4  # Optional, defaults to gitlab.com
-
-# Or use git config (recommended)
-cd /path/to/your/project
-git config afk.platform gitlab
-git config afk.project "mygroup/myproject"
-```
-
-### GitHub Project
+### GitLab
 
 ```bash
-# GitHub configuration
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
-GITHUB_OWNER=your-org
-GITHUB_REPO=your-repo
-
-# Or use git config
-cd /path/to/your/project
-git config afk.platform github
-git config afk.owner "your-org"
-git config afk.repo "your-repo"
+export GITLAB_TOKEN=glpat-xxxxxxxxxxxxx
+export GITLAB_URL=https://gitlab.company.com   # Optional, defaults to https://gitlab.com
 ```
+
+When `GITLAB_TOKEN` is absent, AFK falls back to the token stored by the
+`glab` CLI in `~/.config/glab-cli/config.yml`.
+
+### GitHub
+
+```bash
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx   # GH_TOKEN is also accepted
+export GITHUB_REPOSITORY=your-org/your-repo
+```
+
+The repository is detected from the git remote; `GITHUB_REPOSITORY` is only
+needed when the remote is not reachable.
+
+### Project Settings
+
+Per-project settings live in `.afk/config.yml` at the project root:
+
+```yaml
+agentDefault: claude-code
+tmuxSession: afk
+maxQaReworkAttempts: 3
+template: issue-implementation
+```
+
+Every key has an environment-variable override, and the project file wins over
+the environment. The most useful ones:
+
+| Setting | Environment variable | Default |
+|---|---|---|
+| `agentDefault` | `AFK_AGENT_DEFAULT` | `claude-code` |
+| `tmuxSession` | `AFK_TMUX_SESSION` | `afk` |
+| `maxQaReworkAttempts` | `AFK_MAX_QA_REWORK_ATTEMPTS` | `3` |
+| `workflowHardTimeout` | `AFK_WORKFLOW_HARD_TIMEOUT` | 7200000 ms |
+| `qaTimeout` | `AFK_QA_TIMEOUT` | 1800000 ms |
+| `contextThreshold` | `AFK_CONTEXT_THRESHOLD` | 100000 |
+| `goalBudget` | `AFK_GOAL_BUDGET` | 10000000 |
+| `maxRetries` | `AFK_MAX_RETRIES` | 2 |
+| `maxSelfIterations` | `AFK_MAX_SELF_ITERATIONS` | 3 |
+| `template` | — (project file only) | `issue-implementation` |
+
+Two variables control where AFK keeps its own state:
+
+| Variable | Meaning |
+|---|---|
+| `AFK_STATE_DIR` | Durable lease and claim state (default `~/.afk/state`) |
+| `AFK_EVENT_STORE_DIR` | Append-only run audit events (default `~/.afk/events`) |
 
 ### Platform Auto-Detection
 
-AFK automatically detects the platform:
-1. Checks the `TRACKER_PLATFORM` environment variable
-2. Analyzes the git remote URL
-3. Checks project config files (.gitlab-ci.yml or .github/workflows/)
+AFK determines the platform and the project from the git remote:
+
+1. Reads `remote.origin.url` of the current repository.
+2. A `github.com` remote selects GitHub; any other host selects GitLab.
+3. The project is the remote path without the host and without `.git`.
+
+Pass `--platform github` or `--platform gitlab` to any `afk backlog`
+command to select the provider explicitly instead.
 
 ## Basic Usage
 
@@ -131,9 +167,10 @@ the former implementation/QA queue or schedule unrelated items without manifests
 
 ## Next Steps
 
-- **Architecture Design** → [overview.md](docs/architecture/overview.md) — Understand the cross-platform abstraction layer
-- **Workflow Details** → [workflows.md](docs/guides/workflows.md) — Deep dive into the three workflow types
-- **Skills System** → [skills.md](docs/guides/skills.md) — Learn the design and usage of afk skills
+- **Architecture Design** → [overview.md](architecture/overview.md) — Understand the cross-platform abstraction layer
+- **Workflow Details** → [workflows.md](guides/workflows.md) — Deep dive into the three workflow types
+- **Skills System** → [skills.md](guides/skills.md) — Learn the design and usage of afk skills
+- **Document Map** → [index.md](index.md) — Every document in this repository, and what each one is for
 
 ## Troubleshooting
 
@@ -142,7 +179,7 @@ the former implementation/QA queue or schedule unrelated items without manifests
 ```bash
 # Re-link
 cd /path/to/afk
-npm link
+pnpm link
 
 # Or run directly
 node /path/to/afk/dist/index.js --help
@@ -150,12 +187,12 @@ node /path/to/afk/dist/index.js --help
 
 ### Platform Detection Error
 
-```bash
-# Manually specify the platform
-export TRACKER_PLATFORM=gitlab  # or github
+AFK could not read a project from the git remote. Check that the repository
+has an `origin` remote, or select the provider explicitly:
 
-# Or set in git config
-git config afk.platform gitlab
+```bash
+afk backlog list --platform gitlab
+afk backlog list --platform github
 ```
 
 ### API Permission Error

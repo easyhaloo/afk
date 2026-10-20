@@ -61,8 +61,26 @@ describe('FileSessionStore', () => {
     await expect(store.load({ runId: 'issue-42-gen-1' })).rejects.toBeInstanceOf(SessionCorruptError);
   });
 
-  it('throws SessionCorruptError on invalid JSON', async () => {
+  it('throws SessionCorruptError when the provider checkpoint was changed', async () => {
+    // The checkpoint is provider-native nested data — the part a resumed
+    // run actually depends on. A fingerprint that only covers the top
+    // level of the snapshot does not notice it being rewritten.
     const store = new FileSessionStore(wtPath);
+    await store.save({
+      runId: 'issue-42-gen-1',
+      provider: 'claude-code',
+      snapshot: makeSnapshot({ checkpoint: { sessionDir: '/tmp/claude/session-1', messages: ['first'] } }),
+    });
+
+    const filePath = path.join(wtPath, '.afk', 'sessions', 'issue-42-gen-1.json');
+    const envelope = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    envelope.snapshot.checkpoint = { sessionDir: '/tmp/claude/session-1', messages: ['TAMPERED'] };
+    fs.writeFileSync(filePath, JSON.stringify(envelope, null, 2), 'utf-8');
+
+    await expect(store.load({ runId: 'issue-42-gen-1' })).rejects.toBeInstanceOf(SessionCorruptError);
+  });
+
+  it('throws SessionCorruptError on invalid JSON', async () => {    const store = new FileSessionStore(wtPath);
     await store.save({ runId: 'issue-42-gen-1', provider: 'claude-code', snapshot: makeSnapshot() });
 
     const filePath = path.join(wtPath, '.afk', 'sessions', 'issue-42-gen-1.json');

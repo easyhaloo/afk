@@ -21,6 +21,7 @@
 import { promises as fs } from 'fs';
 import { createHash } from 'crypto';
 import { join } from 'path';
+import { stableJson } from '@afk/infrastructure/io';
 import type { SessionSnapshot } from '../../domain/agents/types.js';
 import type {
   SessionStore,
@@ -59,9 +60,11 @@ export class FileSessionStore implements SessionStore {
 
   /** Compute sha256 of canonical JSON for `snapshot`. Stable across runs. */
   static checksumOf(snapshot: SessionSnapshot): string {
-    // Sort keys for stable hashing: snapshot has heterogeneous fields, but
-    // json.stringify with sorted keys is enough for a check fingerprint.
-    const canonical = JSON.stringify(snapshot, Object.keys(snapshot).sort());
+    // The whole snapshot is covered, nested provider state included: a
+    // checkpoint that was rewritten after the file was written has to
+    // change the fingerprint, because it is the part a resumed run acts
+    // on. Sorting only the top level would drop it.
+    const canonical = stableJson(snapshot);
     return createHash('sha256').update(canonical).digest('hex');
   }
 

@@ -2,17 +2,10 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { RunEventQueryPort } from "@afk/application";
 import type { RunEvent, RunEventDraft } from "@afk/core";
+import { stableJson } from "@afk/infrastructure/io";
 import { createWorkItemExecutionQueryService } from "../../electron/services/work-item-execution-query-service";
 
 const workItemId = "github:easyhaloo/afk#158";
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(entry => entry === undefined ? "null" : stableJson(entry)).join(",")}]`;
-  if (!value || typeof value !== "object") return JSON.stringify(value);
-  const entries = Object.entries(value).filter(([, entry]) => entry !== undefined);
-  entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
-  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(",")}}`;
-}
 
 function sign(draft: RunEventDraft & { sequence: number; observedAt: string }, previous?: RunEvent): RunEvent {
   const integrity = { prevHash: previous?.integrity.hash };

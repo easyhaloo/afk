@@ -16,15 +16,7 @@
 
 import { createHash } from 'node:crypto';
 import type { EventChainIntegrity, RunEvent, RunEventDraft } from '@afk/core';
-
-/** Canonical JSON: sorted keys, undefined values dropped. */
-export function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(entry => entry === undefined ? 'null' : stableJson(entry)).join(',')}]`;
-  if (!value || typeof value !== 'object') return JSON.stringify(value);
-  const entries: [string, unknown][] = Object.entries(value).filter(([, entry]) => entry !== undefined);
-  entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
-  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
-}
+import { stableJson } from '../io/stable-json.js';
 
 /** Sign one event, chaining it onto the previous one. */
 export function signEvent(draft: RunEventDraft & { sequence: number; observedAt: string }, previous?: RunEvent): RunEvent {

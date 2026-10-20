@@ -1,22 +1,11 @@
 import path from "node:path";
 import type { ExecutionEnvironmentQueryResult } from "../../shared/execution-environment-contract.js";
 import { formatTmuxTarget, tmuxTargetFromMetadata } from "../../shared/execution-environment-contract.js";
+import type { AfkResourceRecord } from "@afk/execution/infrastructure/runtime/resource-registry";
 
-type ResourceRow = {
-  id: string;
-  kind: string;
-  status: string;
-  name: string;
-  external_id: string | null;
-  detail: string | null;
-  workspace_path: string;
-  run_id: string | null;
-  worktree_path: string;
-  metadata_json: string;
-  updated_at: string;
-};
-
-type ResourceReader = (runId: string) => ResourceRow[];
+// The record the registry hands out, not a copy of its columns: the
+// registry owns the table and the shape of what is in it.
+type ResourceReader = (runId: string) => AfkResourceRecord[];
 
 export type ExecutionAttachServiceDeps = {
   readRunResources?: ResourceReader;
@@ -32,26 +21,17 @@ export function createExecutionAttachService(deps: ExecutionAttachServiceDeps = 
   const readRunResources = deps.readRunResources ?? (() => []);
   const verifyTargetExists = deps.verifyTargetExists ?? (async () => false);
 
-  function parseMetadata(row: ResourceRow): Record<string, unknown> {
-    try {
-      const parsed = JSON.parse(row.metadata_json) as unknown;
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
-    }
-  }
-
-  function toEnvironment(row: ResourceRow): ExecutionEnvironmentQueryResult {
-    const metadata = parseMetadata(row);
+  function toEnvironment(row: AfkResourceRecord): ExecutionEnvironmentQueryResult {
+    const metadata = row.metadata;
     if (row.status !== "active") {
-      return { available: false, unavailable: { resourceId: row.id, runId: row.run_id ?? undefined, reason: `执行环境状态为 ${row.status}，不可接管`, observedAt: row.updated_at } };
+      return { available: false, unavailable: { resourceId: row.id, runId: row.runId ?? undefined, reason: `执行环境状态为 ${row.status}，不可接管`, observedAt: row.updatedAt } };
     }
     if (row.kind !== "tmux") {
-      return { available: false, unavailable: { resourceId: row.id, runId: row.run_id ?? undefined, reason: `resource ${row.kind} 不支持终端接管`, observedAt: row.updated_at } };
+      return { available: false, unavailable: { resourceId: row.id, runId: row.runId ?? undefined, reason: `resource ${row.kind} 不支持终端接管`, observedAt: row.updatedAt } };
     }
     const tmux = tmuxTargetFromMetadata(metadata);
     if (!tmux) {
-      return { available: false, unavailable: { resourceId: row.id, runId: row.run_id ?? undefined, reason: "资源缺少已登记的 tmux 会话/窗口/窗格目标", observedAt: row.updated_at } };
+      return { available: false, unavailable: { resourceId: row.id, runId: row.runId ?? undefined, reason: "资源缺少已登记的 tmux 会话/窗口/窗格目标", observedAt: row.updatedAt } };
     }
     return {
       available: true,
@@ -60,11 +40,11 @@ export function createExecutionAttachService(deps: ExecutionAttachServiceDeps = 
         kind: "tmux",
         status: row.status as "active",
         name: row.name,
-        worktreePath: path.resolve(row.worktree_path),
-        workspacePath: path.resolve(row.workspace_path),
-        ...(row.run_id ? { runId: row.run_id } : {}),
+        worktreePath: path.resolve(row.worktreePath),
+        workspacePath: path.resolve(row.workspacePath),
+        ...(row.runId ? { runId: row.runId } : {}),
         tmux,
-        observedAt: row.updated_at,
+        observedAt: row.updatedAt,
         ...(row.detail ? { detail: row.detail } : {}),
       },
     };
@@ -73,7 +53,7 @@ export function createExecutionAttachService(deps: ExecutionAttachServiceDeps = 
   return {
     /** Resolve and validate the attach target for an exact runId. */
     async resolve(runId: string, resourceId?: string): Promise<ExecutionEnvironmentQueryResult & { attachTarget?: string }> {
-      const rows = readRunResources(runId).filter(row => row.run_id === runId && (!resourceId || row.id === resourceId));
+      const rows = readRunResources(runId).filter(row => row.runId === runId && (!resourceId || row.id === resourceId));
       if (!rows.length) {
         return { available: false, unavailable: { runId, ...(resourceId ? { resourceId } : {}), reason: "该运行没有已登记的执行环境资源" } };
       }

@@ -11,8 +11,8 @@ describe("AFK resource adapter", () => {
     const task = path.join(root, "github", "easyhaloo", "afk", "144");
     const other = path.join(root, "github", "elsewhere", "afk", "99");
     const resources = [
-      { id: "resource-144", workspace_path: task, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "afk-github:easyhaloo/afk#144-verify-ac", external_id: null, detail: null, status: "active" as const, worktree_path: "", run_id: "run-144", updated_at: "2026-09-20T08:00:00.000Z", metadata_json: "{}" },
-      { id: "resource-99", workspace_path: other, kind: "tmux" as const, origin: "local-sandbox" as const, engine: null, name: "unrelated-session", external_id: null, detail: null, status: "active" as const, worktree_path: "", run_id: null, updated_at: "2026-09-20T08:00:00.000Z", metadata_json: "{}" },
+      { id: "resource-144", resourceKey: "resource-144", workspacePath: task, kind: "tmux" as const, origin: "local-sandbox" as const, engine: undefined, name: "afk-github:easyhaloo/afk#144-verify-ac", externalId: undefined, detail: undefined, status: "active" as const, worktreePath: "", runId: "run-144", createdAt: "2026-09-20T08:00:00.000Z", updatedAt: "2026-09-20T08:00:00.000Z", metadata: {} },
+      { id: "resource-99", resourceKey: "resource-99", workspacePath: other, kind: "tmux" as const, origin: "local-sandbox" as const, engine: undefined, name: "unrelated-session", externalId: undefined, detail: undefined, status: "active" as const, worktreePath: "", runId: undefined, createdAt: "2026-09-20T08:00:00.000Z", updatedAt: "2026-09-20T08:00:00.000Z", metadata: {} },
     ];
     const adapter = createResourceAdapter({ readResources: () => resources, executable: async () => "/usr/bin/tmux", exec: async (_command, args) => ({
       ok: args[args.indexOf("-t") + 1] !== "unrelated-session", stdout: "1\t0", stderr: "",

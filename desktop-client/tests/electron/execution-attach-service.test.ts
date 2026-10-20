@@ -1,18 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { createExecutionAttachService } from "../../electron/services/execution-attach-service.js";
+import type { AfkResourceRecord } from "@afk/execution/infrastructure/runtime/resource-registry";
 
-const row = (overrides: Record<string, unknown> = {}) => ({
+const row = (overrides: Partial<AfkResourceRecord> = {}): AfkResourceRecord => ({
   id: "resource-1",
+  resourceKey: "resource-1",
   kind: "tmux",
   status: "active",
   name: "afk-run",
-  external_id: null,
-  detail: null,
-  workspace_path: "/workspace",
-  run_id: "run-1",
-  worktree_path: "/workspace/.afk/worktrees/run-1",
-  metadata_json: JSON.stringify({ tmuxSession: "afk-run", tmuxWindowId: "1", tmuxPaneId: "%0" }),
-  updated_at: "2026-10-14T00:00:00.000Z",
+  externalId: undefined,
+  detail: undefined,
+  workspacePath: "/workspace",
+  runId: "run-1",
+  worktreePath: "/workspace/.afk/worktrees/run-1",
+  origin: "local-sandbox",
+  metadata: { tmuxSession: "afk-run", tmuxWindowId: "1", tmuxPaneId: "%0" },
+  createdAt: "2026-10-14T00:00:00.000Z",
+  updatedAt: "2026-10-14T00:00:00.000Z",
   ...overrides,
 });
 
@@ -47,8 +51,8 @@ describe("execution attach service", () => {
     const service = createExecutionAttachService({
       readRunResources: () => [
         row(),
-        row({ id: "resource-2", metadata_json: JSON.stringify({ tmuxSession: "verify", tmuxWindowId: "2", tmuxPaneId: "%3" }) }),
-        row({ id: "other-run", run_id: "run-2" }),
+        row({ id: "resource-2", metadata: { tmuxSession: "verify", tmuxWindowId: "2", tmuxPaneId: "%3" } }),
+        row({ id: "other-run", runId: "run-2" }),
       ],
       verifyTargetExists: async () => true,
     });

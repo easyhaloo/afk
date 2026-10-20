@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -18,7 +18,7 @@ type SQLiteDatabase = {
 
 const requireNode = createRequire(import.meta.url);
 // Constructing the specifier avoids Vite versions that do not yet recognise node:sqlite as a builtin.
-const { DatabaseSync } = requireNode(`node:${'sqlite'}`) as { DatabaseSync: new (path: string) => SQLiteDatabase };
+const { DatabaseSync } = requireNode(`node:${'sqlite'}`) as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => SQLiteDatabase };
 
 export type AfkResourceKind = 'tmux' | 'container' | 'isolate-service';
 export type AfkResourceOrigin = 'local-sandbox' | 'container-sandbox' | 'isolate';
@@ -305,4 +305,61 @@ function rowToRecord(row: ResourceRow): AfkResourceRecord {
     updatedAt: row.updated_at,
     closedAt: row.closed_at ?? undefined,
   };
+}
+
+/**
+ * A reader for the resource registry.
+ *
+ * The registry owns the table; a reader only asks it what is in there.  It
+ * opens the database read-only, so a reader that runs before anything has
+ * written a resource does not create the file, and a reader that cannot
+ * read the table answers with nothing rather than with a guess.
+ *
+ * The rows are read through the same mapping the registry writes them
+ * with, so the two cannot drift apart.
+ */
+export function readActiveAfkResources(databasePath: string, workspaces: readonly string[]): AfkResourceRecord[] {
+  const roots = [...new Set(workspaces.map(workspace => resolve(workspace)))];
+  if (!roots.length) return [];
+  const db = openRegistryForReading(databasePath);
+  if (!db) return [];
+  try {
+    const placeholders = roots.map(() => '?').join(', ');
+    const rows = db.prepare(`
+      SELECT * FROM afk_resources
+      WHERE workspace_path IN (${placeholders}) AND status = 'active'
+      ORDER BY updated_at DESC, name ASC
+    `).all(...roots) as ResourceRow[];
+    return rows.map(rowToRecord);
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
+}
+
+export function readRunAfkResources(databasePath: string, runId: string): AfkResourceRecord[] {
+  const db = openRegistryForReading(databasePath);
+  if (!db) return [];
+  try {
+    const rows = db.prepare(`
+      SELECT * FROM afk_resources
+      WHERE run_id = ?
+      ORDER BY updated_at DESC, name ASC
+    `).all(runId) as ResourceRow[];
+    return rows.map(rowToRecord);
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
+}
+
+function openRegistryForReading(databasePath: string): SQLiteDatabase | undefined {
+  if (!existsSync(databasePath)) return undefined;
+  try {
+    return new DatabaseSync(databasePath, { readOnly: true });
+  } catch {
+    return undefined;
+  }
 }

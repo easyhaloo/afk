@@ -1,9 +1,9 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AfkResourceRegistry, getAfkResourceRegistry, workspaceRootForWorktree } from './resource-registry.js';
-import { AfkResourceRegistry as InfrastructureRegistry, getAfkResourceRegistry as getInfrastructureRegistry } from '../../infrastructure/runtime/resource-registry';
+import { AfkResourceRegistry, getAfkResourceRegistry, readActiveAfkResources, readRunAfkResources, workspaceRootForWorktree } from './resource-registry.js';
 
 async function registryFixture() {
   const root = await mkdtemp(join(tmpdir(), 'afk-resources-'));
@@ -11,11 +11,6 @@ async function registryFixture() {
 }
 
 describe('AfkResourceRegistry', () => {
-  it('shares the same registry implementation and singleton across layers', () => {
-    expect(AfkResourceRegistry).toBe(InfrastructureRegistry);
-    expect(getAfkResourceRegistry).toBe(getInfrastructureRegistry);
-  });
-
   it('retains registered resource metadata when reading it from storage', async () => {
     const registry = await registryFixture();
     registry.register({
@@ -85,6 +80,37 @@ describe('AfkResourceRegistry', () => {
     expect(registry.listByRun('run-42')).toEqual([
       expect.objectContaining({ status: 'closed' }),
     ]);
+  });
+
+  it('reads what the registry wrote, by workspace and by run', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-resources-'));
+    const databasePath = join(root, 'resources.sqlite');
+    const registry = new AfkResourceRegistry({ databasePath });
+    registry.register({
+      workspacePath: '/repo',
+      worktreePath: '/repo/.worktrees/issue-42',
+      runId: 'run-42',
+      kind: 'tmux',
+      origin: 'local-sandbox',
+      name: 'afk-42',
+      metadata: { branch: 'feature' },
+    });
+
+    expect(readActiveAfkResources(databasePath, ['/repo'])).toEqual([
+      expect.objectContaining({ name: 'afk-42', runId: 'run-42', metadata: { branch: 'feature' } }),
+    ]);
+    expect(readRunAfkResources(databasePath, 'run-42')).toEqual([
+      expect.objectContaining({ name: 'afk-42', status: 'active' }),
+    ]);
+  });
+
+  it('reads without creating the database, and answers with nothing when there is none', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-resources-'));
+    const databasePath = join(root, 'resources.sqlite');
+
+    expect(readActiveAfkResources(databasePath, ['/repo'])).toEqual([]);
+    expect(readRunAfkResources(databasePath, 'run-42')).toEqual([]);
+    expect(existsSync(databasePath)).toBe(false);
   });
 
   it('derives the selected AFK workspace from its standard worktree directory', () => {

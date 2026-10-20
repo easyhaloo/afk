@@ -4,7 +4,7 @@ import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import type { ManagedSshHostInput, ManagedSshHostRecord } from "../../shared/ssh-contract.js";
 import { validateSshHostInput, validateSshHostId } from "../security/ssh-validation.js";
-import { createMutex } from "../lib/async-mutex.js";
+import { createKeyedMutex } from "../lib/async-mutex.js";
 import { writeYamlFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
 
 
@@ -54,7 +54,7 @@ async function readDocument(fileSystem: AtomicFileSystem, file: string): Promise
 
 
 export function createSshManagedHostStore({ file, fileSystem = fs, createId = () => `managed:${randomUUID()}` }: StoreOptions) {
-  const mutex = createMutex<void>();
+  const mutex = createKeyedMutex();
 
   async function list() {
     return (await readDocument(fileSystem, file)).hosts;
@@ -62,7 +62,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
 
   async function upsert(value: ManagedSshHostInput) {
     const input = validateSshHostInput(value);
-    return mutex.run(async () => {
+    return mutex.run(file, async () => {
       const document = await readDocument(fileSystem, file);
       const existing = document.hosts.find((item) => item.alias === input.alias);
       const record = { ...input, id: existing?.id || createId() };
@@ -75,7 +75,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
   async function update(id: string, value: ManagedSshHostInput) {
     const hostId = validateSshHostId(id);
     const input = validateSshHostInput(value);
-    return mutex.run(async () => {
+    return mutex.run(file, async () => {
       const document = await readDocument(fileSystem, file);
       if (!document.hosts.some((item) => item.id === hostId)) throw new Error("SSH 主机不存在");
       if (document.hosts.some((item) => item.id !== hostId && item.alias === input.alias)) throw new Error("SSH 主机名称已存在");
@@ -87,7 +87,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
 
   async function remove(id: string) {
     const hostId = validateSshHostId(id);
-    return mutex.run(async () => {
+    return mutex.run(file, async () => {
       const document = await readDocument(fileSystem, file);
       const hosts = document.hosts.filter((item) => item.id !== hostId);
       if (hosts.length === document.hosts.length) return false;

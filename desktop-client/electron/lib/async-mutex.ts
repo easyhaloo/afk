@@ -1,32 +1,19 @@
 /**
  * Promise-chain serializers for atomic store operations.
- * ponytail: global lock — per-key locks available if throughput matters.
+ *
+ * A store that changes a document reads it, changes it and writes it
+ * back, so two writers of one document have to take turns: a read and a
+ * write that overlap lose one of the changes.  Two writers of different
+ * documents do not have to wait for each other, so the lock is per
+ * document rather than global.
  */
 
-const queues = new Map<string, Promise<void>>();
-
-export function createMutex<T>(): {
-  run: <U>(op: () => Promise<U>) => Promise<U>;
-} {
-  const key = "singleton";
-  return {
-    run<U>(op: () => Promise<U>): Promise<U> {
-      const previous = queues.get(key) ?? Promise.resolve();
-      const next = previous.then(op, op);
-      const recovered = next.then(() => undefined, () => undefined);
-      queues.set(key, recovered);
-      void recovered.then(() => {
-        if (queues.get(key) === recovered) queues.delete(key);
-      });
-      return next;
-    },
-  };
-}
+const keyedQueues = new Map<string, Promise<void>>();
 
 export function createKeyedMutex(): {
   run: <U>(key: string, op: () => Promise<U>) => Promise<U>;
 } {
-  const mutexes = new Map<string, Promise<void>>();
+  const mutexes = keyedQueues;
   return {
     run<U>(key: string, op: () => Promise<U>): Promise<U> {
       const previous = mutexes.get(key) ?? Promise.resolve();

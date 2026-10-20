@@ -86,7 +86,7 @@ export function createJumpserverStore({
   }
 
   async function upsert(input: BastionInput): Promise<BastionRecord> {
-    return keyedMutex.run(input.alias, async () => {
+    return keyedMutex.run(file, async () => {
       const document = await readDocument(fileSystem, file);
       const existing = document.bastions.find((b) => b.alias === input.alias);
       const record: BastionRecord = { ...input, id: existing?.id || createId() };
@@ -99,7 +99,7 @@ export function createJumpserverStore({
   }
 
   async function update(id: string, partial: Partial<BastionInput>): Promise<BastionRecord> {
-    return keyedMutex.run(id, async () => {
+    return keyedMutex.run(file, async () => {
       const document = await readDocument(fileSystem, file);
       const existing = document.bastions.find((b) => b.id === id);
       if (!existing) throw new Error("堡垒机不存在");
@@ -113,7 +113,7 @@ export function createJumpserverStore({
   }
 
   async function remove(id: string): Promise<boolean> {
-    return keyedMutex.run(id, async () => {
+    return keyedMutex.run(file, async () => {
       const document = await readDocument(fileSystem, file);
       if (!document.bastions.some((b) => b.id === id)) return false;
       const bastions = document.bastions.filter((b) => b.id !== id);

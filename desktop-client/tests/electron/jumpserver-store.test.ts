@@ -230,6 +230,53 @@ describe("jumpserver store", () => {
     expect(await store.list()).toHaveLength(1);
   });
 
+  it("serializes writes to the same file, so two bastions do not overwrite each other", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "afk-jms-store-"));
+    const file = path.join(root, "bastions.yml");
+
+    const delayedFs = {
+      ...fs,
+      readFile: async (f: string, enc: "utf8") => {
+        await new Promise((r) => setTimeout(r, 5));
+        return fs.readFile(f, enc);
+      },
+      writeFile: async (f: string, data: string, opts?: { encoding?: "utf8"; mode: number }) => {
+        await new Promise((r) => setTimeout(r, 5));
+        return fs.writeFile(f, data, opts);
+      },
+      mkdir: fs.mkdir,
+      rename: fs.rename,
+      chmod: fs.chmod,
+      rm: fs.rm,
+    };
+
+    const store = createJumpserverStore({ file, fileSystem: delayedFs, createId: () => `managed:${Math.random()}` });
+
+    await Promise.all([
+      store.upsert({
+        alias: "first",
+        hostname: "host-a.example.com",
+        port: 2222,
+        user: "admin",
+        syncFilter: { linuxOnly: true },
+        jmsServerAlias: "first",
+      }),
+      store.upsert({
+        alias: "second",
+        hostname: "host-b.example.com",
+        port: 2222,
+        user: "admin",
+        syncFilter: { linuxOnly: true },
+        jmsServerAlias: "second",
+      }),
+    ]);
+
+    // Two writes to one document have to take turns.  A lock on the record
+    // rather than on the file lets the second write land on a document
+    // read before the first one was written, and the first bastion is gone.
+    expect((await store.list()).map((item) => item.alias).sort()).toEqual(["first", "second"]);
+  });
+
   it("YAML round-trip preserves lastSyncedAt and lastSyncAssetCount", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "afk-jms-store-"));
     const file = path.join(root, "bastions.yml");

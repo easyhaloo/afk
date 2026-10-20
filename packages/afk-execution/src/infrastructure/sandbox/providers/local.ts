@@ -18,7 +18,7 @@ import { promises as fs, realpathSync } from 'fs';
 import { join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import { TmuxClient } from '../../tmux/tmux.js';
-import { clearSignal, getTokenUsage, readSignal } from '@afk/infrastructure';
+import { clearSignal, clearStatus, getTokenUsage, readSignal } from '@afk/infrastructure';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../tmux/session-name.js';
 import {
@@ -121,9 +121,7 @@ export class LocalSandbox implements Sandbox {
     if (!this.sessionCreated) {
       // The marker belongs to a Claude process, not the worktree. A prior
       // phase's file must not make a freshly-created tmux session look ready.
-      await fs.unlink(join(this.worktreePath, '.afk', 'claude-status.json')).catch(error => {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      });
+      await clearStatus(this.worktreePath);
       const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
       this.sessionCreated = true;
       const paneId = created.paneId

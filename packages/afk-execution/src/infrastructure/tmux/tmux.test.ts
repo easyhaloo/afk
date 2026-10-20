@@ -1,9 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readSignalSync } from '@afk/infrastructure';
+import { readSignalSync, statusFilePath } from '@afk/infrastructure';
 import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
 
 describe('normalizeTmuxSessionName', () => {
@@ -70,6 +70,21 @@ describe('TmuxClient signal readers', () => {
 });
 
 describe('TmuxClient provider readiness', () => {
+  it('waits for the file the status reader reads', async () => {
+    const client = new TmuxClient();
+    const worktree = await mkdtemp(join(tmpdir(), 'afk-status-marker-'));
+    try {
+      // The readiness marker is the statusline payload — the same file the
+      // token count comes from. A client that watched a different file would
+      // wait for a file nothing writes.
+      await mkdir(join(worktree, '.afk'), { recursive: true });
+      await writeFile(statusFilePath(worktree), '{}');
+      await expect(client.waitForPrompt(worktree, 1000, 'claude-code')).resolves.toBe(true);
+    } finally {
+      await rm(worktree, { recursive: true, force: true });
+    }
+  });
+
   it('accepts non-Claude interactive providers after their tmux session exists', async () => {
     const client = new TmuxClient();
     vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);

@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import { Signal } from '@afk/infrastructure';
-import { readSignal, readSignalSync } from '@afk/infrastructure';
+import { readSignal, readSignalSync, statusFilePath } from '@afk/infrastructure';
 import { TIMEOUTS } from '../../shared/constants.js';
 import { ControlModeConnection } from './control-mode.js';
 import { normalizeTmuxSessionName } from './session-name.js';
@@ -248,8 +248,7 @@ export class TmuxClient {
     }
 
     const { promises: fs } = await import('fs');
-    const { join } = await import('path');
-    const statusPath = join(worktreeDir, '.afk', 'claude-status.json');
+    const statusPath = statusFilePath(worktreeDir);
     const start = Date.now();
     while (Date.now() - start < timeout) {
       try {

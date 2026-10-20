@@ -52,11 +52,28 @@ export interface TokenUsage {
 export const STATUS_FILENAME = 'claude-status.json';
 
 /**
+ * Where a worktree's statusline payload lives.
+ *
+ * The file is written by the statusline command, read for the token count,
+ * watched for the agent's readiness, and removed before a fresh session so
+ * it inherits nothing. Four places, one path: the name and the directory
+ * belong to this module, not to each of them.
+ */
+export function statusFilePath(worktreeDir: string): string {
+  return join(worktreeDir, '.afk', STATUS_FILENAME);
+}
+
+/** Remove a worktree's statusline payload, if it has one. */
+export async function clearStatus(worktreeDir: string): Promise<void> {
+  await fs.rm(statusFilePath(worktreeDir), { force: true });
+}
+
+/**
  * Read the latest Claude status payload from <worktree>/.afk/claude-status.json.
  * Returns null if the file is missing or malformed.
  */
 export async function readClaudeStatus(worktreeDir: string): Promise<ClaudeStatus | null> {
-  const path = join(worktreeDir, '.afk', STATUS_FILENAME);
+  const path = statusFilePath(worktreeDir);
   try {
     const content = await fs.readFile(path, 'utf-8');
     const parsed = JSON.parse(content);

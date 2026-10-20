@@ -3,7 +3,7 @@ import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { BacklogProvider } from '@afk/application';
 import type { TmuxClient } from '../../infrastructure/tmux/index.js';
-import { logger, STATUS_FILENAME, clearSignal } from '@afk/infrastructure';
+import { logger, clearSignal, clearStatus } from '@afk/infrastructure';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 import { Watchdog } from './watchdog.js';
 import { handoffDocName } from '../run-identity.js';
@@ -126,7 +126,7 @@ export class HandoffCoordinator {
     logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: tmux killed');
     await this.tmux.closeSession();
     await clearSignal(ctx.wtPath); // stale completion signal must not end the next wait immediately
-    await fs.rm(join(ctx.wtPath, '.afk', STATUS_FILENAME), { force: true }); // fresh session must not inherit old token data
+    await clearStatus(ctx.wtPath); // fresh session must not inherit old token data
     logger.info({ backlogId: ctx.backlogId, wtPath: ctx.wtPath }, 'restartSession: statusline data cleared');
     await this.tmux.createSession(ctx.session, ctx.wtPath);
     logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: tmux created');

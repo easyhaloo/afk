@@ -5,6 +5,7 @@ const valid = {
   runId: "afk-github:easyhaloo/afk#158-abc",
   workItemId: "github:easyhaloo/afk#158",
   profileId: "default", attempt: 1, status: "running", phase: "verification", sequence: 2, terminal: false,
+  integrityValid: true,
 } as const;
 
 describe("execution summary contract", () => {

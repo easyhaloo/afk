@@ -21,6 +21,8 @@ export type ExecutionSummary = {
   phase?: typeof EXECUTION_PHASES[number];
   sequence: number;
   terminal: boolean;
+  /** False when the run's event chain is broken. */
+  integrityValid: boolean;
   usage?: AgentUsage;
 };
 
@@ -75,13 +77,14 @@ export function parseExecutionQueryOptions(input: unknown): ExecutionQueryOption
 
 export function parseExecutionSummary(input: unknown): ExecutionSummary {
   const candidate = parseObject(input, "execution summary");
-  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "usage"], "execution summary");
+  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "integrityValid", "usage"], "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
   if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution summary phase is invalid");
   if (typeof candidate.attempt !== "number" || !Number.isSafeInteger(candidate.attempt) || candidate.attempt < 1) throw new Error("execution summary attempt is invalid");
   if (typeof candidate.sequence !== "number" || !Number.isSafeInteger(candidate.sequence) || candidate.sequence < 1) throw new Error("execution summary sequence is invalid");
   if (typeof candidate.terminal !== "boolean") throw new Error("execution summary terminal is invalid");
+  if (typeof candidate.integrityValid !== "boolean") throw new Error("execution summary integrityValid is invalid");
   const summary: ExecutionSummary = {
     runId: parseRequiredString(candidate.runId, "execution summary: runId"),
     workItemId,
@@ -90,6 +93,7 @@ export function parseExecutionSummary(input: unknown): ExecutionSummary {
     status: candidate.status as ExecutionStatus,
     sequence: candidate.sequence,
     terminal: candidate.terminal,
+    integrityValid: candidate.integrityValid,
   };
   if (candidate.phase !== undefined) summary.phase = candidate.phase as typeof EXECUTION_PHASES[number];
   if (candidate.usage !== undefined) {

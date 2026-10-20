@@ -1,9 +1,9 @@
-import { createHash } from 'node:crypto';
 import { promises as fs, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { RunEvent, RunEventDraft, AppendReceipt, EventStorePort } from '@afk/core';
+import type { RunEvent, RunEventDraft, AppendReceipt, EventChainIntegrity, EventStorePort } from '@afk/core';
 import { replay } from '@afk/core';
+import { signEvent, verifyEventChain } from './event-chain.js';
 
 export class EventStoreCorruptionError extends Error {
   constructor(message: string) {
@@ -43,7 +43,7 @@ export class JsonlEventStore implements EventStorePort {
       let previous = existing.at(-1);
       const observedAt = this.now().toISOString();
       const events = drafts.map((draft, index) => {
-        const event = sign({
+        const event = signEvent({
           ...draft,
           sequence: existing.length + index + 1,
           observedAt,
@@ -89,20 +89,11 @@ export class JsonlEventStore implements EventStorePort {
       .sort((left, right) => left.localeCompare(right));
   }
 
-  async verify(runId: string): Promise<{ valid: boolean; lastSequence: number; lastHash?: string; reason?: string }> {
-    let previous: RunEvent | undefined;
-    let count = 0;
+  async verify(runId: string): Promise<EventChainIntegrity> {
     try {
-      for (const event of await this.load(runId)) {
-        count += 1;
-        if (event.context.runId !== runId) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'run_id_mismatch' };
-        if (event.sequence !== count) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'sequence_gap' };
-        if (!verify(event, previous)) return { valid: false, lastSequence: count - 1, lastHash: previous?.integrity.hash, reason: 'integrity_mismatch' };
-        previous = event;
-      }
-      return { valid: true, lastSequence: count, lastHash: previous?.integrity.hash };
+      return verifyEventChain(runId, await this.load(runId));
     } catch (error) {
-      return { valid: false, lastSequence: count, lastHash: previous?.integrity.hash, reason: error instanceof Error ? error.message : 'unknown_error' };
+      return { valid: false, lastSequence: 0, reason: error instanceof Error ? error.message : 'unknown_error' };
     }
   }
 
@@ -176,25 +167,4 @@ export class JsonlEventStore implements EventStorePort {
       if (this.mutations.get(runId) === tail) this.mutations.delete(runId);
     }
   }
-}
-
-function sign(draft: RunEventDraft & { sequence: number; observedAt: string }, previous?: RunEvent): RunEvent {
-  const integrity = { prevHash: previous?.integrity.hash };
-  const hash = createHash('sha256').update(stableJson({ ...draft, integrity })).digest('hex');
-  return { ...draft, integrity: { ...integrity, hash } } as RunEvent;
-}
-
-function verify(event: RunEvent, previous?: RunEvent): boolean {
-  if (previous?.integrity.hash !== event.integrity.prevHash) return false;
-  const { integrity: _integrity, ...draft } = event;
-  const expected = sign(draft, previous);
-  return expected.integrity.hash === event.integrity.hash;
-}
-
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(entry => entry === undefined ? 'null' : stableJson(entry)).join(',')}]`;
-  if (!value || typeof value !== 'object') return JSON.stringify(value);
-  const entries: [string, unknown][] = Object.entries(value).filter(([, entry]) => entry !== undefined);
-  entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
-  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
 }

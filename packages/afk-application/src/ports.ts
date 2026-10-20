@@ -1,5 +1,6 @@
 import type {
   AppendReceipt,
+  EventChainIntegrity,
   RunEvent,
   RunEventDraft,
   WorkItem,
@@ -24,12 +25,7 @@ export interface WorkItemInventoryPort {
 export interface RunEventQueryPort {
   read(runId: string, options?: { afterSequence?: number }): AsyncIterable<RunEvent>;
   listRuns(): Promise<readonly string[]>;
-  verify(runId: string): Promise<{
-    valid: boolean;
-    lastSequence: number;
-    lastHash?: string;
-    reason?: string;
-  }>;
+  verify(runId: string): Promise<EventChainIntegrity>;
 }
 
 export interface RunEventCommandPort extends RunEventQueryPort {

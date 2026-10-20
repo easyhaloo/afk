@@ -2,6 +2,7 @@ import {
   decide,
   replay,
   type Decision,
+  type EventChainIntegrity,
   type RunAggregate,
   type RunCommand,
   type RunEvent,
@@ -10,8 +11,11 @@ import {
 import type { RunCommandPorts, RunEventQueryPort } from './ports.js';
 
 export interface LoadedRun {
+  /** The events the hash chain vouches for — the verified prefix. */
   events: readonly RunEvent[];
   state: RunAggregate;
+  /** What the chain vouches for, and where it stops if it broke. */
+  integrity: EventChainIntegrity;
 }
 
 export interface DecideRunCommandInput {
@@ -30,10 +34,28 @@ export interface StartRunResult extends RunCommandDecision {
   started: boolean;
 }
 
-export async function loadRun(runId: string, events: RunEventQueryPort): Promise<LoadedRun> {
+/**
+ * Read a run's events, keeping only the prefix the hash chain vouches for.
+ *
+ * Verification comes first on purpose: a stream that fails its chain must not
+ * reach the reducer, because the state it produced would be a state derived
+ * from a forgery, and a reader would have no way to tell.
+ */
+export async function readVerifiedEvents(
+  runId: string,
+  events: RunEventQueryPort,
+): Promise<{ events: RunEvent[]; integrity: EventChainIntegrity }> {
+  const integrity = await events.verify(runId);
   const recorded: RunEvent[] = [];
   for await (const event of events.read(runId)) recorded.push(event);
-  return { events: recorded, state: replay(recorded) };
+  // On an intact stream the boundary is past the last event, so nothing is
+  // dropped; on a broken one it stops exactly where the chain stops.
+  return { events: recorded.filter(event => event.sequence <= integrity.lastSequence), integrity };
+}
+
+export async function loadRun(runId: string, events: RunEventQueryPort): Promise<LoadedRun> {
+  const verified = await readVerifiedEvents(runId, events);
+  return { events: verified.events, state: replay(verified.events), integrity: verified.integrity };
 }
 
 export async function decideRunCommand(

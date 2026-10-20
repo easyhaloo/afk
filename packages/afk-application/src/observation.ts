@@ -16,7 +16,7 @@ export async function observeRun(runId: string, ports: RunEventQueryPort): Promi
     runId,
     events: loaded.events,
     state: loaded.state,
-    integrity: await ports.verify(runId),
+    integrity: loaded.integrity,
   };
 }
 
@@ -26,6 +26,12 @@ export async function listRunIds(ports: RunEventQueryPort): Promise<readonly str
 
 export async function explainRun(runId: string, ports: RunEventQueryPort): Promise<string> {
   const observed = await observeRun(runId, ports);
+  // A broken chain means the state below describes only the verified prefix.
+  // Saying so is the whole point — explaining the prefix as if it were the
+  // run would be a statement about a forgery.
+  if (!observed.integrity.valid) {
+    return `run event stream is not intact: ${observed.integrity.reason ?? 'integrity_mismatch'}`;
+  }
   if (!observed.state.run) return 'no events recorded for this run';
   if (observed.state.terminal) return `run finished with status '${observed.state.run.status}'`;
   if (observed.state.humanGateId) return `run awaits human gate '${observed.state.humanGateId}'`;
@@ -48,6 +54,9 @@ export interface ExecutionSummary {
   phase?: RunPhase;
   sequence: number;
   terminal: boolean;
+  /** False when the run's event chain is broken; the summary then describes
+   *  only the prefix the chain vouches for. */
+  integrityValid: boolean;
   usage?: AgentUsage;
 }
 
@@ -88,6 +97,7 @@ export async function queryExecutionHistory(
         phase: observed.state.run.phase,
         sequence: observed.state.sequence,
         terminal: observed.state.terminal,
+        integrityValid: observed.integrity.valid,
         ...(usage ? { usage } : {}),
       },
     });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@afk/core';
-import { observeRun, queryExecutionHistory, type RunEventQueryPort } from '../src/index.js';
+import { explainRun, observeRun, queryExecutionHistory, type RunEventQueryPort } from '../src/index.js';
 
 const context = {
   traceId: 'trace-1', runId: 'run-1', workItemId: 'work-1', profileId: 'profile-1', attempt: 1,
@@ -56,8 +56,41 @@ describe('run observation facade', () => {
   it('queries summaries with work-item filtering and a cursor', async () => {
     const deps = port();
     await expect(queryExecutionHistory({ workItemId: 'work-1', limit: 1 }, deps)).resolves.toEqual({
-      executions: [{ runId: 'run-1', workItemId: 'work-1', profileId: 'profile-1', attempt: 1, status: 'running', phase: undefined, sequence: 2, terminal: false }],
+      executions: [{ runId: 'run-1', workItemId: 'work-1', profileId: 'profile-1', attempt: 1, status: 'running', phase: undefined, sequence: 2, terminal: false, integrityValid: true }],
       nextCursor: undefined,
+    });
+  });
+
+  it('does not derive a state from an event the chain does not vouch for', async () => {
+    // The second event claims the run started, but the chain says otherwise.
+    const deps: RunEventQueryPort = {
+      ...port(),
+      verify: async () => ({ valid: false, lastSequence: 1, reason: 'integrity_mismatch' }),
+    };
+    const observed = await observeRun('run-1', deps);
+    // Only the verified prefix is exposed...
+    expect(observed.events).toHaveLength(1);
+    // ...and the state says what the verified prefix says, not what the
+    // tampered event claimed.
+    expect(observed.state.run?.status).toBe('pending');
+    expect(observed.integrity).toMatchObject({ valid: false, reason: 'integrity_mismatch' });
+  });
+
+  it('reports an intact-stream problem instead of explaining a forged state', async () => {
+    const deps: RunEventQueryPort = {
+      ...port(),
+      verify: async () => ({ valid: false, lastSequence: 1, reason: 'integrity_mismatch' }),
+    };
+    await expect(explainRun('run-1', deps)).resolves.toBe('run event stream is not intact: integrity_mismatch');
+  });
+
+  it('marks a run whose chain is broken instead of hiding it', async () => {
+    const deps: RunEventQueryPort = {
+      ...port(),
+      verify: async () => ({ valid: false, lastSequence: 1, reason: 'integrity_mismatch' }),
+    };
+    await expect(queryExecutionHistory({}, deps)).resolves.toMatchObject({
+      executions: [{ runId: 'run-1', integrityValid: false }],
     });
   });
 

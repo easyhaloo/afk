@@ -1,49 +1,73 @@
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { signEvent } from "@afk/infrastructure/observability";
 import { createRunEventQueryAdapter } from "../../electron/adapters/run-event-query-adapter";
 import { createWorkItemExecutionQueryService } from "../../electron/services/work-item-execution-query-service";
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))); });
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value !== null && typeof value === "object") return `{${Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(",")}}`;
-  return JSON.stringify(value);
+const runId = "run:1";
+const context = { traceId: "trace-1", runId, workItemId: "github:team/repo#1", profileId: "default", attempt: 1, actor: { kind: "cli" as const, id: "user" } };
+
+function requested() {
+  return {
+    id: "event-1", schemaVersion: 1 as const, type: "run.requested" as const, sequence: 1,
+    occurredAt: "2026-09-29T00:00:00.000Z", observedAt: "2026-09-29T00:00:00.000Z",
+    correlationId: runId, context,
+    data: { kind: "run.requested" as const, run: { id: runId, workItemId: context.workItemId, profileId: "default", attempt: 1, status: "pending" as const } },
+  };
+}
+
+function started() {
+  return {
+    id: "event-2", schemaVersion: 1 as const, type: "run.started" as const, sequence: 2,
+    occurredAt: "2026-09-29T00:01:00.000Z", observedAt: "2026-09-29T00:01:00.000Z",
+    correlationId: runId, context,
+    data: { kind: "run.started" as const },
+  };
 }
 
 describe("desktop read-only event store", () => {
   it("reads the signed JSONL stream and queries application execution history", async () => {
     const directory = await mkdtemp(join(tmpdir(), "afk-event-query-"));
     directories.push(directory);
-    const runId = "run:1";
-    const draft = {
-      id: "event-1", schemaVersion: 1, type: "run.requested", sequence: 1,
-      occurredAt: "2026-09-29T00:00:00.000Z", observedAt: "2026-09-29T00:00:00.000Z",
-      correlationId: runId,
-      context: { traceId: "trace-1", runId, workItemId: "github:team/repo#1", profileId: "default", attempt: 1, actor: { kind: "cli", id: "user" } },
-      data: { kind: "run.requested", run: { id: runId, workItemId: "github:team/repo#1", profileId: "default", attempt: 1, status: "pending" } },
-    };
-    const hash = createHash("sha256").update(stableJson({ ...draft, integrity: {} })).digest("hex");
+    const first = signEvent(requested());
+    const second = signEvent(started(), first);
     const file = join(directory, `${Buffer.from(runId).toString("base64url")}.jsonl`);
-    await writeFile(file, `${JSON.stringify({ ...draft, integrity: { hash } })}\n`);
+    await writeFile(file, `${JSON.stringify(first)}\n${JSON.stringify(second)}\n`);
     const events = createRunEventQueryAdapter(directory);
-    expect(await events.verify(runId)).toMatchObject({ valid: true, lastSequence: 1, lastHash: hash });
+    expect(await events.verify(runId)).toMatchObject({ valid: true, lastSequence: 2, lastHash: second.integrity.hash });
     const readFile = vi.spyOn(fs, "readFile");
     const stream = [];
     for await (const event of events.read(runId)) stream.push(event);
-    expect(stream).toHaveLength(1);
+    expect(stream).toHaveLength(2);
     expect(readFile).toHaveBeenCalledTimes(1);
     readFile.mockRestore();
-    expect((await createWorkItemExecutionQueryService(events).list()).executions[0]).toMatchObject({ runId, workItemId: draft.context.workItemId, status: "pending" });
+    expect((await createWorkItemExecutionQueryService(events).list()).executions[0]).toMatchObject({ runId, workItemId: context.workItemId, status: "running", integrityValid: true });
+  });
 
-    await writeFile(file, `${JSON.stringify({ ...draft, integrity: { hash: "tampered" } })}\n`);
-    expect(await events.verify(runId)).toMatchObject({ valid: false, reason: "integrity_mismatch" });
-    await expect(createWorkItemExecutionQueryService(events).list()).resolves.toEqual({ executions: [] });
+  it("keeps a run whose tail was tampered with, marked as not intact", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "afk-event-query-"));
+    directories.push(directory);
+    const first = signEvent(requested());
+    const second = signEvent(started(), first);
+    const file = join(directory, `${Buffer.from(runId).toString("base64url")}.jsonl`);
+    // The second event's hash no longer matches what it claims to be.
+    await writeFile(file, `${JSON.stringify(first)}\n${JSON.stringify({ ...second, integrity: { ...second.integrity, hash: "tampered" } })}\n`);
+    const events = createRunEventQueryAdapter(directory);
+
+    expect(await events.verify(runId)).toMatchObject({ valid: false, reason: "integrity_mismatch", lastSequence: 1 });
+    // The run stays visible and says so. It used to vanish from the list.
+    const page = await createWorkItemExecutionQueryService(events).list();
+    expect(page.executions).toHaveLength(1);
+    expect(page.executions[0]).toMatchObject({ runId, status: "pending", integrityValid: false });
+    // The detail view refuses to replay it, and says why.
+    await expect(createWorkItemExecutionQueryService(events).detail(runId, context.workItemId))
+      .rejects.toThrow(/not replayable/);
   });
 
   it("returns an empty history when the event directory does not exist", async () => {

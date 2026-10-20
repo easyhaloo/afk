@@ -65,6 +65,23 @@ node dist/index.js observe explain <run-id>
 
 一次可解释的 run 至少拥有 `run.requested`、`run.started`、执行/QA step 边界、失败分类或变更单事实，以及 `run.finished` 或 `human_gate.opened`。事件名称低基数，动态值写入 data。
 
+### 3.1 读取契约：先校验，再回放
+
+哈希链规则只有一处实现：`packages/afk-infrastructure/src/observability/event-chain.ts`。
+JSONL store 与桌面端读适配器都用它，桌面端不再自带一份副本。
+
+读取契约统一为「先校验、后回放」：
+
+- 应用层在回放之前先 `verify()`，只使用链担保的前缀（`sequence <= lastSequence`）。
+  链断裂时，被篡改的事件不会进入 reducer，聚合状态因此只能来自被验证过的事实。
+- `lastSequence` 是链担保到的最后一个事件序号。`sequence_gap` 检查保证这个前缀是
+  连续的：被重排或拼接的事件无法混进「已验证」区间。没有这条链，截断点就是
+  攻击者可控的。
+- 损坏是**值**而不是异常：`integrity.valid = false` 连同 `reason` 随结果一起返回。
+  CLI 与桌面因此对同一条损坏流给出同一套结论，而不是一个抛错、一个沉默地丢掉这条 run。
+- 链断裂的 run 仍会出现在执行历史里，但带 `integrityValid: false`；它的状态只描述
+  被验证过的那段前缀。
+
 `packages/afk-infrastructure/src/io/logger.ts` 导出
 `withLogContext({ runId, workItemId }, asyncFn)` 与 `getLogContext()`。
 前者用 AsyncLocalStorage 隔离异步作用域，Pino mixin 为作用域内的

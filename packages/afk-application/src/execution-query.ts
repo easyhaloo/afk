@@ -1,4 +1,5 @@
 import { replay, type RunAggregate, type RunEvent, type RunEventData } from '@afk/core';
+import { readVerifiedEvents } from './execution.js';
 import type { RunEventQueryPort } from './ports.js';
 
 export interface ExecutionTimeline {
@@ -72,9 +73,8 @@ export async function listExecutionRuns(events: RunEventQueryPort): Promise<read
 }
 
 export async function loadRunTimeline(runId: string, events: RunEventQueryPort): Promise<ExecutionTimeline> {
-  const recorded: RunEvent[] = [];
-  for await (const event of events.read(runId)) recorded.push(event);
-  return { runId, events: recorded, integrity: await events.verify(runId) };
+  const verified = await readVerifiedEvents(runId, events);
+  return { runId, events: verified.events, integrity: verified.integrity };
 }
 
 export async function loadWorkItemExecution(
@@ -91,7 +91,9 @@ export async function loadWorkItemExecution(
       ...integrity, valid: false, reason: error instanceof Error ? error.message : 'unreadable_stream',
     } });
   }
-  return ports.projection.project({ runId, events: recorded, integrity });
+  // Only the prefix the chain vouches for reaches the projection.
+  const verified = recorded.filter(event => event.sequence <= integrity.lastSequence);
+  return ports.projection.project({ runId, events: verified, integrity });
 }
 
 export async function queryWorkItemExecutions(

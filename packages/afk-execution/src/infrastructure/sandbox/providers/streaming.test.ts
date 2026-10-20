@@ -126,6 +126,27 @@ describe('StreamingAgentExecution', () => {
     expect(execution.metadata).toEqual({ provider: 'codex', transport: 'exec' });
   });
 
+  it('reads the usage of a stream that carries no provider parser', async () => {
+    const usage = JSON.stringify({ type: 'usage', usage: { inputTokens: 4, outputTokens: 6 } });
+    const result = JSON.stringify({
+      type: 'result',
+      result: '<goal_complete>{"type":"goal_complete","kind":"task","summary":"fixture complete"}</goal_complete>',
+    });
+    const execution = new StreamingAgentExecution({
+      command: command(`console.log(${JSON.stringify(usage)}); console.log(${JSON.stringify(result)})`),
+      prompt: 'go',
+      signalType: 'goal_complete',
+      worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
+    });
+    execution.start();
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
+      status: 'completed',
+      usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 },
+    });
+  });
+
   it('captures thread_id from thread.started and surfaces it in metadata', async () => {
     const threadStarted = JSON.stringify({ type: 'thread.started', thread_id: '01a13312-d9c5-7033-8230-20484caff784' });
     const result = JSON.stringify({

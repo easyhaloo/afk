@@ -17,8 +17,6 @@ import type {
   AgentCapability,
   AgentCommand,
   AgentCommandOptions,
-  AgentEvent,
-  TokenUsage,
   SessionSnapshot,
   CaptureSessionOptions,
   RestoreSessionOptions,
@@ -53,21 +51,6 @@ export class CursorProvider extends ProcessAgentProvider {
       argv.push('--print');
     }
     return { argv, cwd: options.worktreePath };
-  }
-
-  parseLine(line: string): AgentEvent[] {
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed.type === 'usage' && parsed.usage) {
-        return [{ type: 'usage', usage: parsed.usage as TokenUsage }];
-      }
-      if (parsed.type === 'result') {
-        return [{ type: 'result', result: parsed.result }];
-      }
-    } catch {
-      // Not JSON — text
-    }
-    return [{ type: 'text', text: line }];
   }
 
   async captureSession(options: CaptureSessionOptions): Promise<SessionSnapshot> {

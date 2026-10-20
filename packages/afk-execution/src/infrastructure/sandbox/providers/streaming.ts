@@ -34,6 +34,7 @@ import type {
   ResumeOptions,
 } from '../types.js';
 import { extractGoalComplete } from '../../../shared/goal-complete.js';
+import { COMMON_TOKEN_USAGE, parseTokenUsage } from '../../../domain/agents/token-usage.js';
 import { collectAgentToolEvent } from '../../../domain/agents/tool-telemetry.js';
 import { claudeProjectSlug } from '../../../shared/agent-transcript-path.js';
 
@@ -227,9 +228,13 @@ export class StreamingAgentExecution implements AgentExecution {
     }
 
     switch (parsed.type) {
-      case 'usage':
-        this.usage = parsed.usage as TokenUsage;
+      case 'usage': {
+        // The same reading the provider would have used: a usage payload is
+        // read, not believed, and one that holds no number is not a usage.
+        const usage = parseTokenUsage(parsed.usage, COMMON_TOKEN_USAGE);
+        if (usage) this.usage = usage;
         break;
+      }
       case 'result': {
         const raw = String(parsed.result ?? '');
         this.lastResultOutput = raw.trim().slice(-4000);

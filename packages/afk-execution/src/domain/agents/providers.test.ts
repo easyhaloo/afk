@@ -454,6 +454,42 @@ describe('Agent providers — fixture coverage', () => {
   });
 });
 
+/**
+ * The three command providers share one stream-json protocol, so they share
+ * one way of reading a usage payload out of it.
+ *
+ * The protocol carries the numbers under more than one spelling — the Codex
+ * app server says `input_tokens`, the common shape says `inputTokens`, and
+ * AFK's own statusline reader says `input` — and a payload does not have to
+ * carry a total at all. A usage payload read by a blind cast reaches the
+ * budget with `totalTokens` missing, and the budget rejects it.
+ */
+describe('Usage reading across the agent providers', () => {
+  const providers = [
+    ['cursor', new CursorProvider()],
+    ['pi', new PiProvider()],
+    ['copilot', new CopilotProvider()],
+  ] as const;
+
+  it.each(providers)('%s reports the total of a payload that carries none', (_name, p) => {
+    expect(p.parseLine(JSON.stringify({ type: 'usage', usage: { inputTokens: 4, outputTokens: 6 } }))).toEqual([
+      { type: 'usage', usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 } },
+    ]);
+  });
+
+  it.each(providers)('%s reads a payload in the other spelling', (_name, p) => {
+    expect(p.parseLine(JSON.stringify({ type: 'usage', usage: { input: 4, output: 6, total: 10 } }))).toEqual([
+      { type: 'usage', usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 } },
+    ]);
+  });
+
+  it.each(providers)('%s reports no usage for a payload with no numbers', (_name, p) => {
+    expect(p.parseLine(JSON.stringify({ type: 'usage', usage: { note: 'unknown' } }))).toEqual([
+      { type: 'text', text: JSON.stringify({ type: 'usage', usage: { note: 'unknown' } }) },
+    ]);
+  });
+});
+
 describe('Agent registry', () => {
   beforeEach(() => {
     _resetAgentRegistry();

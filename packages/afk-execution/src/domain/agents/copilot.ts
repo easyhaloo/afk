@@ -17,8 +17,6 @@ import type {
   AgentCapability,
   AgentCommand,
   AgentCommandOptions,
-  AgentEvent,
-  TokenUsage,
 } from './types.js';
 import { ProcessAgentProvider } from './process-provider.js';
 
@@ -38,20 +36,5 @@ export class CopilotProvider extends ProcessAgentProvider {
       argv.push('--allow-all');
     }
     return { argv, cwd: options.worktreePath };
-  }
-
-  parseLine(line: string): AgentEvent[] {
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed.type === 'usage' && parsed.usage) {
-        return [{ type: 'usage', usage: parsed.usage as TokenUsage }];
-      }
-      if (parsed.type === 'result') {
-        return [{ type: 'result', result: parsed.result }];
-      }
-    } catch {
-      // Not JSON — text
-    }
-    return [{ type: 'text', text: line }];
   }
 }

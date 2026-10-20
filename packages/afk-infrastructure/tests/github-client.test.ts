@@ -61,8 +61,25 @@ describe('GitHubClient', () => {
     expect(list).toHaveBeenCalledTimes(2);
   });
 
-  it('reads every page of issue comments, not only the first', async () => {
+  it('tells a merged pull request from a closed one in the list', async () => {
+    // The list answer carries `merged_at` and not the `merged` flag the
+    // single read carries. A pull request GitHub has merged is closed as
+    // well, so without the timestamp it reads as a plain closed one.
     const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
+    const list = vi.fn(async () => ({
+      data: [
+        { number: 1, title: 'merged', state: 'closed', merged_at: '2026-09-01T00:00:00.000Z', head: { ref: 'afk/1' }, base: { ref: 'main' }, html_url: 'https://github.com/owner/code/pull/1' },
+        { number: 2, title: 'closed', state: 'closed', merged_at: null, head: { ref: 'afk/2' }, base: { ref: 'main' }, html_url: 'https://github.com/owner/code/pull/2' },
+      ],
+    }));
+    (client as unknown as { client: { pulls: { list: typeof list } } }).client = { pulls: { list } };
+
+    const changes = await client.listMRs({ state: 'all' });
+
+    expect(changes.map(change => change.state)).toEqual(['merged', 'closed']);
+  });
+
+  it('reads every page of issue comments, not only the first', async () => {    const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
     const listComments = vi.fn(async (_params: { page?: number }) => {
       if ((_params.page ?? 1) === 1) {
         return { data: Array.from({ length: 100 }, (_, index) => ({ id: index + 1, body: `comment ${index + 1}` })) };

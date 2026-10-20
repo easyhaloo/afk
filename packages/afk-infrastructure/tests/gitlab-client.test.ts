@@ -1,6 +1,30 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GitLabClient } from '../src/index.js';
 
+describe('GitLabClient merge', () => {
+  it('leaves the source branch alone unless the merge asks for it to go', async () => {
+    // GitHub's merge does not take the branch away unless it is asked to,
+    // and the option has to mean the same thing on both.
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'group/project' });
+    const accept = vi.fn(async () => ({}));
+    (client as unknown as { client: { MergeRequests: { accept: typeof accept } } }).client = { MergeRequests: { accept } };
+
+    await client.mergeMR(7);
+
+    expect(accept).toHaveBeenCalledWith('group/project', 7, expect.objectContaining({ shouldRemoveSourceBranch: false }));
+  });
+
+  it('takes the source branch away when the merge asks for it', async () => {
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'group/project' });
+    const accept = vi.fn(async () => ({}));
+    (client as unknown as { client: { MergeRequests: { accept: typeof accept } } }).client = { MergeRequests: { accept } };
+
+    await client.mergeMR(7, { deleteSourceBranch: true });
+
+    expect(accept).toHaveBeenCalledWith('group/project', 7, expect.objectContaining({ shouldRemoveSourceBranch: true }));
+  });
+});
+
 describe('GitLabClient listIssues', () => {
   it('reads every page, not only the first', async () => {
     const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'group/project' });

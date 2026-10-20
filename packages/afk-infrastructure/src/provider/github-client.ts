@@ -308,9 +308,11 @@ export class GitHubClient implements TrackerProvider {
       page,
     }), perPage);
     return data.map(pr => {
-      // merged property exists on individual PR get but may not on list
-      const merged = (pr as any).merged;
-      const prState = merged ? 'merged' : pr.state === 'open' ? 'opened' : 'closed';
+      // The list answer carries `merged_at`, not the `merged` flag the
+      // single read carries. GitHub reports a merged pull request as
+      // closed as well, so the timestamp is what tells the two apart.
+      const mergedAt = (pr as { merged_at?: string | null }).merged_at;
+      const prState = mergedAt ? 'merged' : pr.state === 'open' ? 'opened' : 'closed';
       return {
         id: pr.number,
         platform: 'github' as const,

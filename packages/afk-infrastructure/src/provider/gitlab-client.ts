@@ -207,7 +207,9 @@ export class GitLabClient implements TrackerProvider {
 
   async mergeMR(id: number, options: MergeMROptions = {}): Promise<void> {
     await this.client.MergeRequests.accept(this.projectId, id, {
-      shouldRemoveSourceBranch: options.deleteSourceBranch ?? true,
+      // GitHub's merge leaves the source branch alone unless it is asked
+      // to take it away, and the option has to mean the same thing here.
+      shouldRemoveSourceBranch: options.deleteSourceBranch ?? false,
       squash: options.squash ?? false,
       mergeCommitMessage: options.mergeCommitMessage,
     });

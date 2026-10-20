@@ -42,21 +42,19 @@ export function normalizeDefinition(definition: WorkflowGraphDefinition): Normal
   }
 
   if (!diagnostics.some((diagnostic) => diagnostic.code === 'cycle')) {
-    const rawIds = new Set(definition.steps.map((step) => step.id));
-    const visiting = new Set<string>();
-    const visited = new Set<string>();
-    const hasRawCycle = (id: string): boolean => {
-      if (visiting.has(id)) return true;
-      if (visited.has(id)) return false;
-      visiting.add(id);
-      for (const step of definition.steps.filter((candidate) => candidate.id === id)) {
-        if (step.dependsOn.some((dependency) => rawIds.has(dependency) && hasRawCycle(dependency))) return true;
-      }
-      visiting.delete(id);
-      visited.add(id);
-      return false;
-    };
-    if (definition.steps.some((step) => hasRawCycle(step.id))) {
+    // The cycle question over every step of the definition, including the
+    // ones excluded from `validSteps` by a duplicate id. The computation is
+    // the same one: a step id appears once here, with the union of the
+    // dependencies its copies declare, so the shared step graph can order
+    // them and answer the question.
+    const rawDependencies = new Map<string, string[]>();
+    for (const step of definition.steps) {
+      rawDependencies.set(step.id, [...(rawDependencies.get(step.id) ?? []), ...step.dependsOn]);
+    }
+    const rawGraph = computeStepGraph(
+      [...rawDependencies].map(([id, dependsOn]) => ({ id, dependsOn })),
+    );
+    if (rawGraph.cycle) {
       diagnostics.push({ severity: 'error', code: 'cycle', message: 'Workflow contains a cycle' });
     }
   }

@@ -76,13 +76,11 @@ export function computeStepGraph(steps: readonly StepGraphInput[]): StepGraph {
   const cycle = order.length !== steps.length;
   const levels = new Map<string, number>();
   if (!cycle) {
-    const byId = new Map(steps.map(step => [step.id, step]));
     // In topological order, so a parent is always levelled before its child.
     for (const id of order) {
       const parents = (dependencies.get(id) ?? []).map(parent => levels.get(parent) ?? 0);
       levels.set(id, parents.length ? Math.max(...parents) + 1 : 0);
     }
-    void byId;
   }
 
   return { levels, order, missing, cycle };

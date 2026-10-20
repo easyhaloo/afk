@@ -28,6 +28,25 @@ export interface EventStorePort {
   read(runId: string, options?: { afterSequence?: number }): AsyncIterable<RunEvent>;
   listRuns(): Promise<readonly string[]>;
   verify(runId: string): Promise<EventChainIntegrity>;
+
+  /**
+   * A signature of what the store holds for a run, when it can tell.
+   *
+   * A reader that caches a projection of a run asks the store whether the
+   * run has changed, rather than guessing how the store lays its files out:
+   * the signature changes when the run's stored state does. A store that
+   * cannot tell returns undefined, and the reader reads the run again.
+   */
+  revision?(runId: string): Promise<string | undefined>;
+
+  /**
+   * A directory a reader may keep a cache of this store's contents in.
+   *
+   * The cache belongs to the reader, but it belongs next to the data it
+   * describes. A store that has no such place offers none, and the reader
+   * keeps no cache.
+   */
+  cacheDirectory?(): string | undefined;
 }
 
 export interface EvidenceStorePort {

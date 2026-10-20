@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ObservationContext } from '@afk/core';
+import type { AppendReceipt, EventChainIntegrity, EventStorePort, ObservationContext, RunEvent, RunEventDraft } from '@afk/core';
 import { explainRun, listExecutionRuns, loadRunTimeline, loadWorkItemExecution, queryWorkItemExecutions, replayRun } from '@afk/application';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { createExecutionQueryPorts } from './query-service.js';
@@ -22,6 +22,27 @@ async function root(): Promise<string> {
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(path => fs.rm(path, { recursive: true, force: true })));
 });
+
+/**
+ * A store that is not the JSONL one: it keeps its runs somewhere else and
+ * says what it holds.
+ *
+ * The reader asks the store for a revision rather than guessing how the
+ * store lays its files out, so a store that can answer gets its cache — and
+ * a reader that guesses only ever works against the store it guessed.
+ */
+class ElsewhereStore implements EventStorePort {
+  readonly revisions = new Map<string, string>();
+
+  constructor(private readonly inner: JsonlEventStore, private readonly directory: string) {}
+
+  append(drafts: readonly RunEventDraft[]): Promise<AppendReceipt> { return this.inner.append(drafts); }
+  read(runId: string, options?: { afterSequence?: number }): AsyncIterable<RunEvent> { return this.inner.read(runId, options); }
+  listRuns(): Promise<readonly string[]> { return this.inner.listRuns(); }
+  verify(runId: string): Promise<EventChainIntegrity> { return this.inner.verify(runId); }
+  async revision(runId: string): Promise<string | undefined> { return this.revisions.get(runId); }
+  cacheDirectory(): string { return this.directory; }
+}
 
 describe('execution query ports', () => {
   it('carries usage through indexed queries and rebuilds legacy or malformed cached usage', async () => {
@@ -226,6 +247,24 @@ describe('execution query ports', () => {
     const broken = await loadWorkItemExecution('broken', ports);
     expect(broken.summary.status).toBe('unknown');
     expect(broken.summary.diagnostic).toContain('cannot parse event');
+  });
+
+  it('asks the store what it holds instead of guessing how the store stores it', async () => {
+    const directory = await root();
+    const inner = new JsonlEventStore({ root: await root() });
+    const store = new ElsewhereStore(inner, directory);
+    await store.append([
+      { id: 'requested', schemaVersion: 1, type: 'run.requested', occurredAt: '2026-10-13T00:00:00Z', context, correlationId: context.runId,
+        data: { kind: 'run.requested', run: { id: context.runId, workItemId: context.workItemId, profileId: 'test', attempt: 1, status: 'pending' } } },
+    ]);
+    store.revisions.set(context.runId, 'rev-1');
+
+    const query = () => queryWorkItemExecutions({}, createExecutionQueryPorts(store));
+    expect((await query()).executions[0]).toMatchObject({ runId: context.runId });
+    const verify = vi.spyOn(inner, 'verify');
+    expect((await query()).executions[0]).toMatchObject({ runId: context.runId });
+    // The store said what it holds, so the reader kept its copy.
+    expect(verify).not.toHaveBeenCalled();
   });
 
   it('rejects unbounded pagination and empty identity', async () => {

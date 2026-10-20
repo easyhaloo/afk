@@ -29,14 +29,16 @@ async function listIndexedExecutionSummaries(
   events: EventStorePort,
   projection: ExecutionQueryPorts['projection'],
 ): Promise<readonly WorkItemExecutionSummary[]> {
-  const root = (events as EventStorePort & { root?: unknown }).root;
-  const directory = typeof root === 'string' ? root : undefined;
+  // The store says where a reader may keep its cache and what it holds for
+  // each run. A reader that guessed the store's layout would silently keep
+  // no cache against every store but one.
+  const directory = events.cacheDirectory?.();
   const previous = directory ? await readIndex(join(directory, indexName)) : new Map<string, IndexedExecution>();
   const current = new Map<string, IndexedExecution>();
   const summaries: WorkItemExecutionSummary[] = [];
   let changed = false;
   for (const runId of await events.listRuns()) {
-    const signature = directory ? await fileSignature(join(directory, `${Buffer.from(runId, 'utf8').toString('base64url')}.jsonl`)) : undefined;
+    const signature = events.revision ? await events.revision(runId) : undefined;
     const cached = signature === undefined ? undefined : previous.get(runId);
     let summary: WorkItemExecutionSummary;
     if (cached && cached.signature === signature) {
@@ -50,15 +52,6 @@ async function listIndexedExecutionSummaries(
   }
   if (directory && (changed || previous.size !== current.size)) await writeIndex(join(directory, indexName), current).catch(() => undefined);
   return summaries;
-}
-
-async function fileSignature(path: string): Promise<string | undefined> {
-  try {
-    const stat = await fs.stat(path);
-    return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
-  } catch {
-    return undefined;
-  }
 }
 
 async function readIndex(path: string): Promise<Map<string, IndexedExecution>> {

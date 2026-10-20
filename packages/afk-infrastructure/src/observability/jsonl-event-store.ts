@@ -102,6 +102,28 @@ export class JsonlEventStore implements EventStorePort {
     }
   }
 
+  /**
+   * The signature of what this store holds for a run.
+   *
+   * The file's identity and its timestamps change when the run's events
+   * change, and a reader that caches a projection of the run can tell from
+   * this whether its copy is still the truth. The file's name is this
+   * store's own business; a reader never has to know it.
+   */
+  async revision(runId: string): Promise<string | undefined> {
+    try {
+      const stat = await fs.stat(this.pathFor(runId));
+      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Where a reader may keep a cache of this store's contents. */
+  cacheDirectory(): string {
+    return this.root;
+  }
+
   async prune(options: { retentionMs?: number; exclusiveAccess?: boolean } = {}): Promise<readonly string[]> {
     if (options.retentionMs === undefined) return [];
     if (!Number.isSafeInteger(options.retentionMs) || options.retentionMs < 0) {

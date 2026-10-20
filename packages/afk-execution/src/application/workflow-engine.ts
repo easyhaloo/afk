@@ -51,7 +51,7 @@ import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
 import type { Step, StepPhase, StepResult, WorkflowTemplate } from '../domain/templates/types.js';
 import type { BranchHandle, BranchStrategyConfig } from '@afk/infrastructure';
-import type { ProviderBundle } from '@afk/infrastructure';
+import type { RunnerProviderBundle } from '@afk/infrastructure';
 import type { BacklogClaim, BacklogItem, BacklogState } from '@afk/application';
 import { TaskRuntimeManager } from './runtime/task-runtime.js';
 import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request.js';
@@ -187,7 +187,7 @@ export type WorkflowRunResult =
  */
 export interface RunnerDependencies {
   coordinatorFactory?: (deps: {
-    backlog: import('@afk/application').BacklogProvider;
+    backlog: import('@afk/application').BacklogLifecycle;
     tmux: TmuxClient;
     watchdog: Watchdog;
     config: WorkflowConfig;
@@ -215,7 +215,7 @@ export interface RunnerDependencies {
    */
   catalog?: TemplateCatalog;
   /** Canonical backlog/branch/change providers. */
-  providers?: ProviderBundle;
+  providers?: RunnerProviderBundle;
   /** Local runtime projection for the read-only Tasks monitor. */
   runtimeManager?: TaskRuntimeManager;
   /** Append-only audit observer, composed and injected by the caller. */
@@ -308,7 +308,7 @@ export class WorkflowRunner {
   private resourceScope?: RunResourceScope;
   private readonly plugins?: PluginRuntime;
   private readonly catalog: TemplateCatalog;
-  private readonly providers: ProviderBundle;
+  private readonly providers: RunnerProviderBundle;
   private activeBacklog?: BacklogItem;
   private activeClaim?: BacklogClaim;
   private leaseLost = false;
@@ -350,7 +350,7 @@ export class WorkflowRunner {
     return this.sessionStoreChainFactory(worktreePath);
   }
 
-  constructor(providers: ProviderBundle, deps: RunnerDependencies) {
+  constructor(providers: RunnerProviderBundle, deps: RunnerDependencies) {
     if (!deps?.observer) throw new Error('WorkflowRunner requires an observer');
     this.tmux = deps?.tmux ?? createTmuxClient();
     this.logDir = `${process.env.HOME}/.claude/logs/afk`;

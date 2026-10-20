@@ -18,7 +18,9 @@ and design discussions use these terms; keep them in lockstep with the code.
   negotiate/persist/relaunch cluster. The manual flip is an internal
   failure mode of `'auto'`. It does not post an issue comment: the provider
   seam has no comment method, and the handoff's human signal is the
-  backlog's move to blocked/hitl.
+  backlog's move to blocked/hitl. That move is all it can make: the
+  coordinator holds a backlog lifecycle, so it cannot claim work, create a
+  backlog item or rewrite its tags.
   `packages/afk-execution/src/application/workflows/handoff.ts`.
 
 - **Watchdog** - Detached process-group that fires after the hard timeout:

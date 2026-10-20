@@ -1,5 +1,5 @@
 import type { TrackerIssueOperations, TrackerMergeReader, TrackerMergeWriter } from '@afk/application';
-import type { BacklogProvider, QABacklogProvider } from '@afk/application';
+import type { BacklogExecutionProvider, BacklogProvider, QABacklogProvider } from '@afk/application';
 import { ManagementBacklogProvider } from '../backlog/management-provider.js';
 import { TrackerBacklogProvider } from '../backlog/tracker-adapter.js';
 import type { AtomicClaim, ClaimLock, ClaimLockFactory } from '../backlog/claim-strategy.js';
@@ -18,6 +18,20 @@ export type BundleTracker = TrackerIssueOperations & TrackerMergeReader & Tracke
 
 export interface ProviderBundle {
   backlog: BacklogProvider;
+  branches: BranchProvider;
+  changes: ChangeProvider;
+}
+
+/**
+ * The providers a run needs: the backlog items it may claim and move, the
+ * branches it works on, and the change it publishes.
+ *
+ * The full bundle is the whole backlog, because the administration surface
+ * creates items and owns their tags.  A run has no business doing either,
+ * so it takes this one instead.
+ */
+export interface RunnerProviderBundle {
+  backlog: BacklogExecutionProvider;
   branches: BranchProvider;
   changes: ChangeProvider;
 }

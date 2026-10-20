@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
-import type { BacklogProvider } from '@afk/application';
+import type { BacklogLifecycle } from '@afk/application';
 import type { TmuxClient } from '../../infrastructure/tmux/index.js';
 import { agentReadiness } from '../../infrastructure/tmux/agent-readiness.js';
 import type { AgentProviderName } from '../../domain/agents/types.js';
@@ -63,7 +63,7 @@ interface HandoffSummary {
  */
 export class HandoffCoordinator {
   constructor(
-    private readonly backlog: BacklogProvider,
+    private readonly backlog: BacklogLifecycle,
     private readonly tmux: TmuxClient,
     private readonly watchdog: Watchdog,
     private readonly config: WorkflowConfig,
@@ -265,7 +265,7 @@ export class HandoffCoordinator {
  * Tests may inject a fake via RunnerDependencies.coordinatorFactory instead.
  */
 export function createHandoffCoordinator(deps: {
-  backlog: BacklogProvider;
+  backlog: BacklogLifecycle;
   tmux: TmuxClient;
   watchdog: Watchdog;
   config: WorkflowConfig;

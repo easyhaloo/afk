@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { logger } from '@afk/infrastructure';
-import type { ProviderBundle } from '@afk/infrastructure';
+import type { RunnerProviderBundle } from '@afk/infrastructure';
 import { parseWorkItemId } from '@afk/application';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
@@ -99,7 +99,7 @@ export class LoopRunner {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private statusTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly providers: ProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
+  constructor(private readonly providers: RunnerProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
     if (options.backlogIds?.length !== 1 || !options.managedExecution?.manifestPath) {
       throw new Error('loop execution requires exactly one backlog ID, work item ID, and execution manifest');
     }

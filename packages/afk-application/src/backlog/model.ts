@@ -57,6 +57,41 @@ export interface BacklogListOptions {
 }
 
 /**
+ * Moving a backlog item's lifecycle: the state it is in, and the mode it
+ * runs under.
+ *
+ * This is the narrowest write the backlog has.  A run claims an item and
+ * moves it; a handoff that has run out of road flips one to blocked/hitl.
+ * Neither of them creates a backlog item, claims one it was not handed, or
+ * rewrites its tags.
+ */
+export interface BacklogLifecycle {
+  transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void>;
+  setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void>;
+}
+
+/**
+ * The execution surface: the items a run may take, and the work it may
+ * claim.
+ */
+export interface BacklogExecutionProvider extends BacklogLifecycle {
+  get(id: string): Promise<BacklogItem>;
+  list(options?: BacklogListOptions): Promise<BacklogItem[]>;
+  claim(id: string, owner: string): Promise<BacklogClaim | null>;
+  isRunnable(item: BacklogItem): Promise<boolean>;
+  /** The rework record a run has to honour, if one is open. */
+  getActiveRework(id: string): Promise<ReworkRecord | undefined>;
+}
+
+/**
+ * Writing the rework record of one backlog item.
+ */
+export interface BacklogReworkWriter {
+  createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord>;
+  resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
+}
+
+/**
  * The non-execution surface shared by backlog administration and QA.
  * It deliberately omits claim() so callers cannot start implementation work.
  */
@@ -71,30 +106,20 @@ export interface BacklogManagementProvider {
 }
 
 /** QA may update lifecycle state, but it never claims implementation work. */
-export interface QABacklogProvider extends BacklogManagementProvider {
-  transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void>;
-  setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void>;
-  createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord>;
+export interface QABacklogProvider extends BacklogManagementProvider, BacklogLifecycle, BacklogReworkWriter {
   getActiveRework(id: string): Promise<ReworkRecord | undefined>;
-  resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
 }
 
-export interface BacklogProvider {
+/**
+ * A backlog, whole.
+ *
+ * The slices above are what a caller usually wants.  A run reads and claims
+ * items; QA writes the rework record and moves the lifecycle; the
+ * administration surface creates items and owns their tags.  A caller that
+ * depends on the whole backlog can, but the compiler will not make it.
+ */
+export interface BacklogProvider extends BacklogManagementProvider, BacklogExecutionProvider, BacklogReworkWriter {
   readonly capabilities?: BacklogProviderCapabilities;
-  get(id: string): Promise<BacklogItem>;
-  adopt?(id: string): Promise<BacklogItem>;
-  list(options?: BacklogListOptions): Promise<BacklogItem[]>;
-  create(input: BacklogCreateInput): Promise<BacklogItem>;
-  claim(id: string, owner: string): Promise<BacklogClaim | null>;
-  transition(id: string, state: BacklogState, details?: { reason?: string; changeId?: string }): Promise<void>;
-  setExecutionMode(id: string, mode: BacklogExecutionMode): Promise<void>;
-  createRework(id: string, record: NewReworkRecord): Promise<ReworkRecord>;
-  getActiveRework(id: string): Promise<ReworkRecord | undefined>;
-  resolveRework(id: string, reworkId: string, resolution: ReworkResolution): Promise<void>;
-  addTag(id: string, tag: string): Promise<void>;
-  removeTag(id: string, tag: string): Promise<void>;
-  initialize(): Promise<void>;
-  isRunnable(item: BacklogItem): Promise<boolean>;
 }
 
 export function deriveBacklogBranchName(id: string): string {

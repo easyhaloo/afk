@@ -76,14 +76,20 @@ export class LocalSandbox implements Sandbox {
     worktreePath: string;
     sessionName: string;
     branch?: string;
-    tmux?: TmuxClient;
+    /**
+     * Required. The sandbox and the handoff coordinator share one client —
+     * that is what keeps the session lifecycle coherent — so a sandbox
+     * without one cannot close its session, and saying so here is better
+     * than discovering it at close time.
+     */
+    tmux: TmuxClient;
     workspaceRoot?: string;
     runtimeRunId?: string;
   }) {
     this.id = opts.id;
     this.worktreePath = opts.worktreePath;
     this.workspacePath = opts.worktreePath; // local: workspace == worktree
-    this.tmux = opts.tmux as TmuxClient;
+    this.tmux = opts.tmux;
     this.sessionName = normalizeTmuxSessionName(opts.sessionName);
     this.branch = opts.branch;
     this.workspaceRoot = opts.workspaceRoot ?? workspaceRootForWorktree(opts.worktreePath);
@@ -450,6 +456,11 @@ export class LocalSandboxProvider implements SandboxProvider {
    */
   async create(options: SandboxOptions): Promise<Sandbox> {
     const { worktreePath, session, branch, tmux } = options;
+    if (!tmux) {
+      throw new Error(
+        'LocalSandboxProvider: a TmuxClient is required — the sandbox and the handoff coordinator share one client',
+      );
+    }
 
     // Verify worktree exists
     try {

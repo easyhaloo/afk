@@ -1,37 +1,49 @@
 import { parseWorkItemId, type WorkItemId } from "./backlog-contract.js";
 import { assertExactKeys, parseObject, parseRequiredString } from "./validation.js";
 import type { RuntimeHealth, WorkflowInstance, WorkflowInstanceStep } from "@afk/application";
+import type { AgentUsage as AuditedAgentUsage, ExecutionSummary as AuditedExecutionSummary } from "@afk/application";
+import type { RunPhase, RunStatus } from "@afk/core";
 export type { RuntimeHealth, WorkflowInstance } from "@afk/application";
+
+/** A type-level assertion: the type argument has to hold. */
+type Assert<T extends true> = T;
 
 export const EXECUTION_STATUSES = [
   "pending", "running", "awaiting_human", "succeeded", "failed", "cancelled",
-] as const;
-export const EXECUTION_PHASES = ["implementation", "verification", "release"] as const;
+] as const satisfies readonly RunStatus[];
+export const EXECUTION_PHASES = ["implementation", "verification", "release"] as const satisfies readonly RunPhase[];
+
+/**
+ * The status vocabulary is checked in both directions.
+ *
+ * Every value listed here is an audited status, and every audited status is
+ * listed here. A status the audit declares and this list omits stops the
+ * build here — not the run centre, at runtime, with a list of runs on screen.
+ */
+export type AuditedStatusesAreListed = Assert<
+  Exclude<RunStatus, (typeof EXECUTION_STATUSES)[number]> extends never ? true : false
+>;
+export type AuditedPhasesAreListed = Assert<
+  Exclude<RunPhase, (typeof EXECUTION_PHASES)[number]> extends never ? true : false
+>;
 
 export type ExecutionStatus = typeof EXECUTION_STATUSES[number];
 export type ExecutionPhase = typeof EXECUTION_PHASES[number];
 
-export type AgentUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
+export type AgentUsage = AuditedAgentUsage;
 
-export type ExecutionSummary = {
-  runId: string;
+/**
+ * The audited summary, with the work item id branded.
+ *
+ * The shape comes from the audit that produces it, so the two cannot drift:
+ * a field the audit adds is a field this contract has. The one thing this
+ * contract adds is the branding of the work item id, which the desktop
+ * validates and the audit does not.
+ */
+export type ExecutionSummary = Omit<AuditedExecutionSummary, "workItemId" | "status" | "phase"> & {
   workItemId: WorkItemId;
-  profileId: string;
-  attempt: number;
   status: ExecutionStatus;
   phase?: ExecutionPhase;
-  sequence: number;
-  terminal: boolean;
-  /** When the run was first recorded, and when its last event was. */
-  startedAt?: string;
-  updatedAt?: string;
-  /** False when the run's event chain is broken. */
-  integrityValid: boolean;
-  /** The workspace the run was prepared in, when the run recorded one. */
-  workspacePath?: string;
-  /** The branch the run worked on, when the run recorded one. */
-  workspaceBranch?: string;
-  usage?: AgentUsage;
 };
 
 export type ExecutionQueryOptions = { workItemId?: WorkItemId; limit?: number; since?: string };
@@ -83,9 +95,27 @@ export function parseExecutionQueryOptions(input: unknown): ExecutionQueryOption
   return options;
 }
 
+const EXECUTION_SUMMARY_KEYS = [
+  "runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal",
+  "startedAt", "updatedAt", "integrityValid", "workspacePath", "workspaceBranch", "usage",
+] as const;
+
+/**
+ * The parser's key list is checked against the type it parses into, in both
+ * directions: a key the type does not have is a mistake here, and a key the
+ * type has that this list omits would make the parser reject a perfectly
+ * good summary at runtime — which is how a field added to the audit used to
+ * break the run centre.
+ */
+export type ExecutionSummaryKeysAreListed = Assert<
+  Exclude<keyof ExecutionSummary, (typeof EXECUTION_SUMMARY_KEYS)[number]> extends never
+    ? Exclude<(typeof EXECUTION_SUMMARY_KEYS)[number], keyof ExecutionSummary> extends never ? true : false
+    : false
+>;
+
 export function parseExecutionSummary(input: unknown): ExecutionSummary {
   const candidate = parseObject(input, "execution summary");
-  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "startedAt", "updatedAt", "integrityValid", "workspacePath", "workspaceBranch", "usage"], "execution summary");
+  assertExactKeys(candidate, EXECUTION_SUMMARY_KEYS, "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
   if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as ExecutionPhase)) throw new Error("execution summary phase is invalid");

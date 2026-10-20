@@ -5,6 +5,7 @@ import type { ProviderBundle } from '@afk/infrastructure';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { RunObserver } from '../../observability/run-observer.js';
+import { registerTemplate, _resetTemplateRegistry } from '../../domain/templates/registry.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 
@@ -339,6 +340,32 @@ describe('WorkflowRunner backlog provider mode', () => {
     expect(runtime.finish).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
       status: 'blocked', errorSummary: expect.stringContaining('workflow setup failed'),
     }));
+  });
+
+  it('runs the provider the template declares, not a hard-coded default', async () => {
+    const { claim } = claimed();
+    const bundle = providers(vi.fn(async () => claim));
+    // No injected agent provider: the runner has to resolve one itself.
+    const subject = new WorkflowRunner(bundle, { observer }) as any;
+    subject.heartbeatRuntime = vi.fn(async () => {});
+    subject.writeRuntimeDiagnostics = vi.fn(async () => {});
+    registerTemplate({
+      name: 'provider-from-template', version: 1, defaultProvider: 'codex',
+      steps: [{ id: 'implement', role: 'implementer', prompt: 'p' }],
+    });
+    try {
+      await subject.run({
+        iid: 42, backlogId: '42', session: 'worker-a', targetBranch: 'main', baseBranch: 'main',
+        template: 'provider-from-template',
+      }).catch(() => undefined);
+
+      // The graph projection reads the same field, so the drawing and the run
+      // can no longer disagree about which agent is going to run.
+      expect(subject.agentProviderName).toBe('codex');
+      expect(subject.agentProvider.name).toBe('codex');
+    } finally {
+      _resetTemplateRegistry();
+    }
   });
 
   it('does not transition a successful run to verification after lease heartbeat loss', async () => {

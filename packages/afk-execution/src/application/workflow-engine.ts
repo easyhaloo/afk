@@ -40,7 +40,7 @@ import {
 } from './workflows/execution-protocol.js';
 import { shouldReusePrimaryWorktree } from './workflows/worktree-selection.js';
 import type { PluginRuntime } from './plugins/runtime.js';
-import type { Step, StepResult } from '../domain/templates/types.js';
+import type { Step, StepResult, WorkflowTemplate } from '../domain/templates/types.js';
 import type { BranchHandle, BranchStrategyConfig } from '@afk/infrastructure';
 import type { ProviderBundle } from '@afk/infrastructure';
 import type { BacklogClaim, BacklogItem, BacklogState } from '@afk/application';
@@ -447,10 +447,12 @@ export class WorkflowRunner {
 
     const effectiveTemplate = options.template ?? 'issue-implementation';
     this.sandboxProviderName = options.sandboxProvider ?? 'local';
-    this.agentProviderName = options.agentProvider ?? 'claude-code';
     this.executionMode = options.executionMode ?? 'batch';
     this.repoRoot = options.repoRoot ?? process.cwd();
+    // The runtime record exists for the whole run: it starts before any setup
+    // can fail, so a failed setup is archived against it.
     await this.startRuntime(options.backlogId, session);
+    let loadedTemplate!: WorkflowTemplate;
     try {
     // Bind all git/worktree operations to the explicit project root. This
     // deliberately avoids process.chdir(), which is process-global state.
@@ -465,19 +467,11 @@ export class WorkflowRunner {
       this.sandboxProvider = this.sandboxProviderByName(this.sandboxProviderName);
     }
 
-    // Resolve agent provider by name (CLI path). Agent registry must already have
-    // the named provider registered (import side-effect or explicit registration).
-    // Skip if constructor already injected one via deps (tests use this path).
-    if (!this.agentProviderInjected) {
-      this.agentProvider = createAgentProvider(this.agentProviderName);
-    }
-
     // Load lifecycle modules
     this.modules = [...await loadModules(options.ext), ...(this.plugins?.getLifecycleModules() ?? [])];
     this.lifecycleDispatcher = new LifecycleDispatcher(this.modules);
     this.extParams = parseModuleParams(options.extParams);
     this.originalCwd = process.cwd();
-    logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
 
     this.workspaceRoot = options.workspaceRoot ?? this.repoRoot;
     if (options.repositories?.length) {
@@ -486,9 +480,28 @@ export class WorkflowRunner {
       this.resourceScope?.registerExternalResource({ finish: outcome => this.finishPreparedRepositories(outcome) });
     }
 
-    // Validate template early so failures throw before worktree creation. A
-    // claimed backlog must never be left in-progress when validation fails.
-    await new TemplateLoader({ projectRoot: this.repoRoot }).load(effectiveTemplate);
+    // Load the template once. The copy that is validated is the copy that
+    // runs: two loads meant two reads of the same file, and — because the
+    // second one used the prepared primary root — they could even be
+    // different files. Loading it here also means a failure throws before
+    // the worktree is created: a claimed backlog must never be left
+    // in-progress when validation fails.
+    loadedTemplate = await new TemplateLoader({ projectRoot: this.repoRoot }).load(effectiveTemplate);
+    // The template's declared default provider decides the run's provider,    // unless the caller asked for one. The graph projection reads the same
+    // field, so the drawing and the run can no longer disagree about which
+    // agent is going to run.
+    this.agentProviderName = options.agentProvider ?? loadedTemplate.defaultProvider ?? 'claude-code';
+    // Resolve agent provider by name (CLI path). Agent registry must already have
+    // the named provider registered (import side-effect or explicit registration).
+    // Skip if constructor already injected one via deps (tests use this path).
+    if (!this.agentProviderInjected) {
+      this.agentProvider = createAgentProvider(this.agentProviderName);
+    }
+    // The runtime record was written before the template was read, so it
+    // carries a provisional provider. Correct it now that the real one is
+    // known.
+    await this.heartbeatRuntime({ agentProvider: this.agentProviderName });
+    logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
     } catch (error) {
       if (error instanceof AuditPersistenceError) {
         await this.resourceScope?.finish({ status: 'failed' });
@@ -508,7 +521,7 @@ export class WorkflowRunner {
         iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs,
         contextHighTokens, maxTotalTokens, projectName: options.projectName, repoRoot: this.repoRoot,
         workspaceRoot: this.workspaceRoot,
-        branchStrategy: options.branchStrategy, template: effectiveTemplate, executionMode: this.executionMode,
+        branchStrategy: options.branchStrategy, template: effectiveTemplate, loadedTemplate, executionMode: this.executionMode,
       });
       if (result.success && this.leaseLost) {
         await this.markBacklogBlocked('claim heartbeat failed');
@@ -818,9 +831,11 @@ export class WorkflowRunner {
     workspaceRoot: string;
     branchStrategy?: BranchStrategyConfig;
     template: string;
+    /** The template already loaded and validated by the caller. */
+    loadedTemplate: WorkflowTemplate;
     executionMode?: ExecutionMode;
   }): Promise<{ success: boolean; url?: string }> {
-    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, executionMode } = ctx;
+    const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, loadedTemplate, executionMode } = ctx;
     if (!this.activeBacklog) throw new Error('backlog is not active');
     const budgetStore = new BudgetStore(workspaceRoot, this.activeBacklog.workItemId ?? this.activeBacklog.providerRef);
     const savedBudget = await budgetStore.load();
@@ -906,7 +921,8 @@ export class WorkflowRunner {
 
     // ── Template execution: compilation + typed dispatch ─────────────────────
     logger.info({ iid, template }, 'using compiled execution plan');
-    const loadedTemplate = await new TemplateLoader({ projectRoot: repoRoot }).load(template);
+    // The template was loaded and validated by the caller — the same copy
+    // that runs, not a second read of the file.
     await this.recordObservation({
       kind: 'workflow.recorded', name: loadedTemplate.name, version: loadedTemplate.version,
       steps: loadedTemplate.steps.map(step => ({

@@ -267,7 +267,7 @@ export class TaskRuntimeManager {
     return this.store.start(record);
   }
 
-  heartbeat(runId: string, changes: Partial<Pick<TaskRuntimeRecord, 'phase' | 'progress' | 'diagnosticPath' | 'worktree' | 'branch' | 'errorSummary' | 'agentTransport' | 'agentAuth' | 'agentModelProvider' | 'agentThreadId'>> = {}): Promise<TaskRuntimeRecord> {
+  heartbeat(runId: string, changes: Partial<Pick<TaskRuntimeRecord, 'phase' | 'progress' | 'diagnosticPath' | 'worktree' | 'branch' | 'errorSummary' | 'agentProvider' | 'agentTransport' | 'agentAuth' | 'agentModelProvider' | 'agentThreadId'>> = {}): Promise<TaskRuntimeRecord> {
     return this.store.update(runId, changes);
   }
 

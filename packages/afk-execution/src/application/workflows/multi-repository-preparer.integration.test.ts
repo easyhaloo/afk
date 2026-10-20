@@ -35,6 +35,33 @@ async function cloneRemote(remote: string, target: string, branch: string, url: 
   await git.raw(['remote', 'set-url', 'origin', url]);
 }
 
+/**
+ * Redirect the canonical clone URLs to this test's own bare remotes.
+ *
+ * The redirect has to be global. A local redirect lives in the configuration
+ * of one clone, and the code under test may clone a repository that does not
+ * exist yet — a fresh clone carries no configuration of its own, so that
+ * path would reach for the real github.com and fail for reasons that have
+ * nothing to do with what is being tested. An integration test must not
+ * depend on the machine's network.
+ *
+ * Returns the undo, so the caller can restore the environment.
+ */
+function installGitUrlRedirects(entries: { remote: string; url: string }[]): () => void {
+  process.env.GIT_CONFIG_COUNT = String(entries.length);
+  entries.forEach((entry, index) => {
+    process.env[`GIT_CONFIG_KEY_${index}`] = `url.${entry.remote}.insteadOf`;
+    process.env[`GIT_CONFIG_VALUE_${index}`] = entry.url;
+  });
+  return () => {
+    delete process.env.GIT_CONFIG_COUNT;
+    for (let index = 0; index < entries.length; index += 1) {
+      delete process.env[`GIT_CONFIG_KEY_${index}`];
+      delete process.env[`GIT_CONFIG_VALUE_${index}`];
+    }
+  };
+}
+
 async function branchExists(repository: string, branch: string): Promise<boolean> {
   return simpleGit(repository).revparse([`refs/heads/${branch}`]).then(() => true, () => false);
 }
@@ -42,6 +69,7 @@ async function branchExists(repository: string, branch: string): Promise<boolean
 describe('multi-repository execution manifest integration', () => {
   it('preserves unpublished commits on existing and newly created working branches across failed retries', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-multi-repository-retry-'));
+    let restoreGitRedirects = () => {};
     try {
       const workspaceRoot = join(root, 'workspace');
       const apiRoot = join(workspaceRoot, 'repositories', 'api');
@@ -51,6 +79,10 @@ describe('multi-repository execution manifest integration', () => {
       const web = await createRemote(root, 'web', 'develop');
       await cloneRemote(api.remote, apiRoot, 'main', 'https://github.com/acme/api.git');
       await cloneRemote(web.remote, webRoot, 'develop', 'https://gitlab.com/acme/web.git');
+      restoreGitRedirects = installGitUrlRedirects([
+        { remote: api.remote, url: 'https://github.com/acme/api.git' },
+        { remote: web.remote, url: 'https://gitlab.com/acme/web.git' },
+      ]);
 
       const apiGit = simpleGit(apiRoot);
       const webGit = simpleGit(webRoot);
@@ -97,6 +129,7 @@ describe('multi-repository execution manifest integration', () => {
       expect(await branchExists(api.remote, workingBranch)).toBe(false);
       expect(await branchExists(web.remote, workingBranch)).toBe(false);
     } finally {
+      restoreGitRedirects();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -144,8 +177,31 @@ describe('multi-repository execution manifest integration', () => {
     }
   });
 
+  it('resolves the canonical clone URL to the test\'s own remote', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-multi-repository-hermetic-'));
+    try {
+      const api = await createRemote(root, 'api', 'main');
+      const restoreGitRedirects = installGitUrlRedirects([
+        { remote: api.remote, url: 'https://github.com/acme/api.git' },
+      ]);
+      // A clone made while the code under test runs carries no configuration of
+      // its own. If the redirect were only local, this would reach for the real
+      // github.com — and the test would depend on the machine's network.
+      const fresh = join(root, 'fresh');
+      await simpleGit().clone('https://github.com/acme/api.git', fresh, ['--branch', 'main']);
+      expect((await simpleGit(fresh).revparse(['HEAD'])).trim()).toBe(api.head);
+      restoreGitRedirects();
+    } finally {
+      delete process.env.GIT_CONFIG_COUNT;
+      delete process.env.GIT_CONFIG_KEY_0;
+      delete process.env.GIT_CONFIG_VALUE_0;
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('prepares both repositories from their own bases, cleans success and preserves failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-multi-repository-integration-'));
+    let restoreGitRedirects = () => {};
     try {
       const workspaceRoot = join(root, 'workspace');
       const apiRoot = join(workspaceRoot, 'repositories', 'api');
@@ -156,6 +212,10 @@ describe('multi-repository execution manifest integration', () => {
       const web = await createRemote(root, 'web', 'develop');
       await cloneRemote(api.remote, apiRoot, 'main', 'https://github.com/acme/api.git');
       await cloneRemote(web.remote, webRoot, 'develop', 'https://gitlab.com/acme/web.git');
+      restoreGitRedirects = installGitUrlRedirects([
+        { remote: api.remote, url: 'https://github.com/acme/api.git' },
+        { remote: web.remote, url: 'https://gitlab.com/acme/web.git' },
+      ]);
       await mkdir(join(workspaceRoot, '.afk'), { recursive: true });
       await writeFile(manifestPath, `${JSON.stringify({
         schemaVersion: 1,
@@ -249,6 +309,7 @@ describe('multi-repository execution manifest integration', () => {
       expect((await simpleGit(webRoot).raw(['status', '--porcelain=v1']))).toContain('A  staged.txt');
       expect(await readFile(manifestPath, 'utf8')).toContain('"primary": true');
     } finally {
+      restoreGitRedirects();
       await rm(root, { recursive: true, force: true });
     }
   });

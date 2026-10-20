@@ -35,7 +35,15 @@ interface ComposeService {
 
 // ─── Port registry (global, atomic) ─────────────────────────────────────────
 
-const REGISTRY_DIR = () => join(homedir(), '.afk', 'port-registry');
+/**
+ * Where the port registry lives.
+ *
+ * The registry remembers which ports are taken, so it belongs to the
+ * installation rather than to a run. The override lets a test keep its own
+ * copy instead of the real one — and a test that points at the real one
+ * would delete it.
+ */
+const REGISTRY_DIR = () => process.env.AFK_PORT_REGISTRY_DIR ?? join(homedir(), '.afk', 'port-registry');
 const REGISTRY_FILE = () => join(REGISTRY_DIR(), 'registry');
 const LOCK_DIR = () => join(REGISTRY_DIR(), 'lock');
 const PORT_BASE = 100; // starting offset from original port

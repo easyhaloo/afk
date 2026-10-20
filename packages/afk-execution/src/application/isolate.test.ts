@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 
 // The resource registry is a user-global file under the home directory. A
 // test must not write to it: it would both pollute the machine and contend
@@ -17,7 +17,6 @@ vi.mock('../infrastructure/runtime/resource-registry', async (importOriginal) =>
 });
 import { promises as fs, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import { IsolateManager } from './isolate.js';
 
 describe('IsolateManager', () => {
@@ -43,7 +42,20 @@ describe('IsolateManager', () => {
 // ─── Port registry tests ──────────────────────────────────────────────────
 
 describe('Port Registry', () => {
-  const REGISTRY_DIR = () => join(homedir(), '.afk', 'port-registry');
+  // The port registry lives in the home directory. A test must neither read
+  // it nor delete it — the cleanup below removes the whole directory, and on
+  // the real one that would throw away the record of which ports are taken.
+  const registryRoot = mkdtemp();
+  const previousRegistryDir = process.env.AFK_PORT_REGISTRY_DIR;
+
+  beforeAll(() => { process.env.AFK_PORT_REGISTRY_DIR = registryRoot; });
+  afterAll(() => {
+    if (previousRegistryDir === undefined) delete process.env.AFK_PORT_REGISTRY_DIR;
+    else process.env.AFK_PORT_REGISTRY_DIR = previousRegistryDir;
+    rmrf(registryRoot);
+  });
+
+  const REGISTRY_DIR = () => registryRoot;
   const REGISTRY_FILE = () => join(REGISTRY_DIR(), 'registry');
   const LOCK_DIR = () => join(REGISTRY_DIR(), 'lock');
 

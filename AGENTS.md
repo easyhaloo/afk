@@ -88,6 +88,15 @@ might need lives in `packages/`.
   home reads the developer's real one. `@afk/execution` sets
   `pool: 'forks'` for this reason; a package that starts stubbing the
   environment needs the same.
+- **A test must not write to, or delete, anything in the developer's home
+  directory.** The runtime keeps state under `~/.afk` — the resource
+  registry, the port registry, the event store — and a test that points at
+  the real one both pollutes the machine and, worse, destroys state the
+  developer is relying on: a cleanup that removes the port registry
+  directory throws away the record of which ports are taken. Give the
+  runtime an override for the directory (`AFK_PORT_REGISTRY_DIR` does this
+  for the port registry) and let the test use a temporary one. Check it
+  afterwards: the file's timestamp should not change when the suite runs.
 
 ## Documentation
 

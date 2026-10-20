@@ -2,8 +2,8 @@ import path from "node:path";
 import { isValidCredentialSecret } from "../security/credential-validation.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import { createMutex } from "../lib/async-mutex.js";
-import { writeJsonFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
+import { type AtomicFileSystem } from "../lib/secure-store.js";
+import { createCredentialDocumentStore } from "./credential-document-store.js";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "jumpserver-credentials.json");
 
@@ -38,12 +38,15 @@ type JumpserverCredentialServiceDependencies = {
   fileSystem?: CredentialFileSystem;
 };
 
+const UNAVAILABLE_MESSAGE = "JumpServer 凭据安全存储不可用";
+const CORRUPTED_MESSAGE = "JumpServer 凭据文件损坏";
+
 function unavailable() {
-  return new Error("JumpServer 凭据安全存储不可用");
+  return new Error(UNAVAILABLE_MESSAGE);
 }
 
 function corrupted() {
-  return new Error("JumpServer 凭据文件损坏");
+  return new Error(CORRUPTED_MESSAGE);
 }
 
 function invalidPassword() {
@@ -93,46 +96,26 @@ export function isSameTarget(left: JumpserverCredentialTarget, right: Jumpserver
 export function createJumpserverCredentialStore({ home, safeStorage, fileSystem = fs }: JumpserverCredentialServiceDependencies) {
   const file = path.join(home, CREDENTIAL_FILE);
   const directory = path.dirname(file);
-  const mutex = createMutex<void>();
 
-  function assertAvailable() {
-    if (!safeStorage.isEncryptionAvailable()) throw unavailable();
-  }
-
-  async function readDocument(): Promise<CredentialDocument> {
-    assertAvailable();
-    let content: string;
-    try {
-      content = await fileSystem.readFile(file, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, credentials: {} };
-      throw corrupted();
-    }
-    try {
-      const document: unknown = JSON.parse(content);
-      if (!isDocument(document)) throw corrupted();
-      return document;
-    } catch (error) {
-      if (error instanceof Error && error.message === "JumpServer 凭据文件损坏") throw error;
-      throw corrupted();
-    }
-  }
-
-  async function writeDocument(document: CredentialDocument) {
-    assertAvailable();
-    await writeJsonFileAtomic(file, document, fileSystem);
-  }
+  const store = createCredentialDocumentStore<CredentialDocument>({
+    file,
+    fileSystem,
+    encryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+    isDocument,
+    emptyDocument: () => ({ version: 1, credentials: {} }),
+    messages: { unavailable: UNAVAILABLE_MESSAGE, corrupted: CORRUPTED_MESSAGE },
+  });
 
   async function has(bastionId: string, target: JumpserverCredentialTarget) {
     const expectedTarget = normalizeTarget(target);
-    const document = await readDocument();
+    const document = await store.read();
     const entry = document.credentials[bastionId];
     return isCredentialRecord(entry) && isSameTarget(entry.bastionTarget, expectedTarget);
   }
 
   async function get(bastionId: string, target: JumpserverCredentialTarget) {
     const expectedTarget = normalizeTarget(target);
-    const document = await readDocument();
+    const document = await store.read();
     const entry = document.credentials[bastionId];
     if (!isCredentialRecord(entry) || !isSameTarget(entry.bastionTarget, expectedTarget)) return undefined;
     try {
@@ -156,9 +139,8 @@ export function createJumpserverCredentialStore({ home, safeStorage, fileSystem 
     validatePassword(password);
     if (otpSecret !== undefined && otpSecret !== "") validateOtpSecret(otpSecret);
     const expectedTarget = normalizeTarget(target);
-    return mutex.run(async () => {
-      assertAvailable();
-      const document = await readDocument();
+    return store.mutate(async () => {
+      const document = await store.read();
       let encrypted: Buffer;
       let otpEncrypted: string | undefined;
       try {
@@ -174,17 +156,17 @@ export function createJumpserverCredentialStore({ home, safeStorage, fileSystem 
         bastionTarget: expectedTarget,
         ...(otpEncrypted ? { otpEncrypted } : {}),
       };
-      await writeDocument(document);
+      await store.write(document);
       return true;
     });
   }
 
   async function remove(bastionId: string) {
-    return mutex.run(async () => {
-      const document = await readDocument();
+    return store.mutate(async () => {
+      const document = await store.read();
       if (!Object.prototype.hasOwnProperty.call(document.credentials, bastionId)) return false;
       delete document.credentials[bastionId];
-      await writeDocument(document);
+      await store.write(document);
       return true;
     });
   }

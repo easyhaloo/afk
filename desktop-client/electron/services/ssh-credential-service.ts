@@ -3,7 +3,8 @@ import { isValidCredentialSecret } from "../security/credential-validation.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { validateSshHostId } from "../security/ssh-validation.js";
-import { writeJsonFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
+import { type AtomicFileSystem } from "../lib/secure-store.js";
+import { createCredentialDocumentStore } from "./credential-document-store.js";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "ssh-credentials.json");
 
@@ -37,12 +38,15 @@ type SshCredentialServiceDependencies = {
   fileSystem?: CredentialFileSystem;
 };
 
+const UNAVAILABLE_MESSAGE = "SSH 凭据安全存储不可用";
+const CORRUPTED_MESSAGE = "SSH 凭据文件损坏";
+
 function unavailable() {
-  return new Error("SSH 凭据安全存储不可用");
+  return new Error(UNAVAILABLE_MESSAGE);
 }
 
 function corrupted() {
-  return new Error("SSH 凭据文件损坏");
+  return new Error(CORRUPTED_MESSAGE);
 }
 
 function invalidPassword() {
@@ -87,46 +91,20 @@ function sameTarget(left: SshCredentialTarget, right: SshCredentialTarget) {
 export function createSshCredentialService({ home, safeStorage, fileSystem = fs }: SshCredentialServiceDependencies) {
   const file = path.join(home, CREDENTIAL_FILE);
   const directory = path.dirname(file);
-  let mutationQueue = Promise.resolve();
 
-  function assertAvailable() {
-    if (!safeStorage.isEncryptionAvailable()) throw unavailable();
-  }
-
-  async function readDocument(): Promise<CredentialDocument> {
-    assertAvailable();
-    let content: string;
-    try {
-      content = await fileSystem.readFile(file, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { version: 1, credentials: {} };
-      throw corrupted();
-    }
-    try {
-      const document: unknown = JSON.parse(content);
-      if (!isDocument(document)) throw corrupted();
-      return document;
-    } catch (error) {
-      if (error instanceof Error && error.message === "SSH 凭据文件损坏") throw error;
-      throw corrupted();
-    }
-  }
-
-  async function writeDocument(document: CredentialDocument) {
-    assertAvailable();
-    await writeJsonFileAtomic(file, document, fileSystem);
-  }
-
-  function mutate<T>(operation: () => Promise<T>) {
-    const next = mutationQueue.then(operation, operation);
-    mutationQueue = next.then(() => undefined, () => undefined);
-    return next;
-  }
+  const store = createCredentialDocumentStore<CredentialDocument>({
+    file,
+    fileSystem,
+    encryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+    isDocument,
+    emptyDocument: () => ({ version: 1, credentials: {} }),
+    messages: { unavailable: UNAVAILABLE_MESSAGE, corrupted: CORRUPTED_MESSAGE },
+  });
 
   async function has(hostId: string, target: SshCredentialTarget) {
     const id = validateSshHostId(hostId);
     const expectedTarget = normalizeTarget(target);
-    const document = await readDocument();
+    const document = await store.read();
     const entry = document.credentials[id];
     return isCredentialRecord(entry) && sameTarget(entry.target, expectedTarget);
   }
@@ -134,7 +112,7 @@ export function createSshCredentialService({ home, safeStorage, fileSystem = fs 
   async function get(hostId: string, target: SshCredentialTarget) {
     const id = validateSshHostId(hostId);
     const expectedTarget = normalizeTarget(target);
-    const document = await readDocument();
+    const document = await store.read();
     const entry = document.credentials[id];
     if (!isCredentialRecord(entry) || !sameTarget(entry.target, expectedTarget)) return undefined;
     try {
@@ -152,9 +130,8 @@ export function createSshCredentialService({ home, safeStorage, fileSystem = fs 
     if (typeof password !== "string") throw invalidPassword();
     validatePassword(password);
     const expectedTarget = normalizeTarget(target);
-    return mutate(async () => {
-      assertAvailable();
-      const document = await readDocument();
+    return store.mutate(async () => {
+      const document = await store.read();
       let encrypted: Buffer;
       try {
         encrypted = safeStorage.encryptString(password);
@@ -162,18 +139,18 @@ export function createSshCredentialService({ home, safeStorage, fileSystem = fs 
         throw unavailable();
       }
       document.credentials[id] = { encrypted: encrypted.toString("base64"), target: expectedTarget };
-      await writeDocument(document);
+      await store.write(document);
       return true;
     });
   }
 
   async function remove(hostId: string) {
     const id = validateSshHostId(hostId);
-    return mutate(async () => {
-      const document = await readDocument();
+    return store.mutate(async () => {
+      const document = await store.read();
       if (!Object.prototype.hasOwnProperty.call(document.credentials, id)) return false;
       delete document.credentials[id];
-      await writeDocument(document);
+      await store.write(document);
       return true;
     });
   }

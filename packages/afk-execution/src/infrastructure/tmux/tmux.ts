@@ -1,7 +1,6 @@
 import { spawn } from 'child_process';
 import { Signal } from '@afk/infrastructure';
 import { readSignal, readSignalSync } from '@afk/infrastructure';
-import { TIMEOUTS } from '../../shared/constants.js';
 import { ControlModeConnection } from './control-mode.js';
 import { normalizeTmuxSessionName } from './session-name.js';
 import type { AgentReadiness } from './agent-readiness.js';
@@ -114,22 +113,6 @@ export class TmuxClient {
       return true;
     } catch {
       return false;
-    }
-  }
-
-  /**
-   * List all tmux sessions
-   */
-  async listSessions(): Promise<TmuxSession[]> {
-    try {
-      const output = await this.exec(['list-sessions', '-F', '#{session_name}:#{window_name}:#{session_dir}:#{session_status}:#{session_created}']);
-      if (!output) return [];
-      return output.split('\n').filter(Boolean).map(line => {
-        const [name, window, dir, status, created] = line.split(':');
-        return { name, window, dir, status, created };
-      });
-    } catch {
-      return [];
     }
   }
 
@@ -321,42 +304,6 @@ export class TmuxClient {
       await this.sleep(2000);
     }
     return null;
-  }
-
-  /**
-   * Wait for ANY of several signal types
-   */
-  async waitForAnySignal(
-    session: string,
-    window: string,
-    signalTypes: Signal['type'][],
-    worktreeDir: string,
-    timeout: number = TIMEOUTS.TMUX_SESSION_TIMEOUT
-  ): Promise<Signal | null> {
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-      const signal = await this.signalReaders.readSignal(worktreeDir);
-      if (signal && signalTypes.includes(signal.type)) return signal;
-      await this.sleep(2000);
-    }
-    return null;
-  }
-
-  /**
-   * Wait for tmux session to exit
-   */
-  async waitSessionExit(session: string, timeout: number = TIMEOUTS.TMUX_SESSION_TIMEOUT): Promise<number> {
-    return new Promise((resolve, reject) => {
-      const proc = spawn('bash', ['-c', `
-        while tmux has-session -t "${normalizeTmuxSessionName(session)}" 2>/dev/null; do sleep 2; done
-        echo "SESSION_EXITED"
-      `], { stdio: 'pipe' });
-      let stdout = '';
-      proc.stdout?.on('data', (data) => { stdout += data.toString(); });
-      const timer = setTimeout(() => { proc.kill(); reject(new Error(`timeout after ${timeout}ms`)); }, timeout);
-      proc.on('close', (code) => { clearTimeout(timer); resolve(code ?? 0); });
-      proc.on('error', (err) => { clearTimeout(timer); reject(err); });
-    });
   }
 
   private async exec(args: string[]): Promise<string> {

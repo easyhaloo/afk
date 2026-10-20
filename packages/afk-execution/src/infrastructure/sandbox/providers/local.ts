@@ -21,6 +21,7 @@ import { TmuxClient } from '../../tmux/tmux.js';
 import { clearSignal, clearStatus, getTokenUsage, readSignal } from '@afk/infrastructure';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../tmux/session-name.js';
+import { agentReadiness } from '../../tmux/agent-readiness.js';
 import {
   type SandboxProvider,
   type Sandbox,
@@ -214,7 +215,14 @@ export class LocalAgentExecution implements AgentExecution {
     // legacy tmux fakes and older embedders; production TmuxClient exposes
     // sendPrompt as the canonical operation.
     if (typeof (this.tmux as any).sendPrompt === 'function') {
-      await this.tmux.sendPrompt(this.worktreePath, this.sessionName, 'main', this.prompt, this.signalType, this.metadata?.provider ?? 'claude-code');
+      await this.tmux.sendPrompt(
+        this.worktreePath,
+        this.sessionName,
+        'main',
+        this.prompt,
+        this.signalType,
+        agentReadiness(this.metadata?.provider ?? 'claude-code'),
+      );
     } else if (typeof (this.tmux as any).sendGoal === 'function') {
       await (this.tmux as any).sendGoal(this.worktreePath, this.sessionName, 'main', this.prompt, this.signalType);
     } else {

@@ -1267,6 +1267,7 @@ export class WorkflowRunner {
             backlogId: this.activeBacklog?.id ?? String(p.iid),
             session: p.session,
             wtPath: p.wtPath,
+            agent: agentProvider.name,
             hardTimeoutMs: p.hardTimeoutMs,
             gen: p.budget.used + 1,
             tokens: result.usage?.totalTokens ?? 0,

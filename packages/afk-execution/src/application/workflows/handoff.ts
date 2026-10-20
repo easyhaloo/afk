@@ -3,6 +3,8 @@ import { join } from 'path';
 import { simpleGit } from 'simple-git';
 import type { BacklogProvider } from '@afk/application';
 import type { TmuxClient } from '../../infrastructure/tmux/index.js';
+import { agentReadiness } from '../../infrastructure/tmux/agent-readiness.js';
+import type { AgentProviderName } from '../../domain/agents/types.js';
 import { logger, clearSignal, clearStatus } from '@afk/infrastructure';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 import { Watchdog } from './watchdog.js';
@@ -25,6 +27,8 @@ export interface HandoffContext {
   backlogId: string;
   session: string;
   wtPath: string;
+  /** The agent that is being handed off — how it says it is up. */
+  agent: AgentProviderName;
   /** Per-generation hard timeout (ms) - re-armed on restart. */
   hardTimeoutMs: number;
   /** Generation number for the auto-handoff doc (1-based). Ignored for terminal. */
@@ -131,7 +135,7 @@ export class HandoffCoordinator {
     await this.tmux.createSession(ctx.session, ctx.wtPath);
     logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: tmux created');
     // waitForPrompt returns boolean, does NOT throw.
-    if (!await this.tmux.waitForPrompt(ctx.wtPath, this.config.promptTimeout)) {
+    if (!await this.tmux.waitForPrompt(ctx.wtPath, this.config.promptTimeout, agentReadiness(ctx.agent), ctx.session)) {
       throw new Error(`relaunch: claude not ready within ${this.config.promptTimeout}ms (${ctx.wtPath})`);
     }
     logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: prompt ready');

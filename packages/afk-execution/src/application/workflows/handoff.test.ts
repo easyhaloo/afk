@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { AgentProviderName } from '../../domain/agents/types.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -74,10 +75,11 @@ describe('HandoffCoordinator', () => {
     fs.rmSync(wtPath, { recursive: true, force: true });
   });
 
-  const ctx = (over: Partial<{ backlogId: string; gen: number; tokens: number; hardTimeoutMs: number }> = {}) => ({
+  const ctx = (over: Partial<{ backlogId: string; gen: number; tokens: number; hardTimeoutMs: number; agent: AgentProviderName }> = {}) => ({
     backlogId: '42',
     session: 'afk-backlog-42',
     wtPath,
+    agent: 'claude-code' as AgentProviderName,
     hardTimeoutMs: 60_000,
     gen: 1,
     tokens: 120_000,

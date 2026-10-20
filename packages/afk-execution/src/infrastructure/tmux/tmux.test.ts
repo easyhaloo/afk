@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readSignalSync, statusFilePath } from '@afk/infrastructure';
+import { readSignalSync } from '@afk/infrastructure';
 import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
+import type { AgentReadiness } from './agent-readiness.js';
 
 describe('normalizeTmuxSessionName', () => {
   it('rewrites colons the same way tmux stores session names', () => {
@@ -70,26 +71,21 @@ describe('TmuxClient signal readers', () => {
 });
 
 describe('TmuxClient provider readiness', () => {
-  it('waits for the file the status reader reads', async () => {
+  it('keeps waiting until the rule says the agent is up', async () => {
     const client = new TmuxClient();
-    const worktree = await mkdtemp(join(tmpdir(), 'afk-status-marker-'));
-    try {
-      // The readiness marker is the statusline payload — the same file the
-      // token count comes from. A client that watched a different file would
-      // wait for a file nothing writes.
-      await mkdir(join(worktree, '.afk'), { recursive: true });
-      await writeFile(statusFilePath(worktree), '{}');
-      await expect(client.waitForPrompt(worktree, 1000, 'claude-code')).resolves.toBe(true);
-    } finally {
-      await rm(worktree, { recursive: true, force: true });
-    }
+    vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    let calls = 0;
+    const readiness: AgentReadiness = { agent: 'claude-code', ready: async () => ++calls > 1 };
+
+    await expect(client.waitForPrompt('/missing-status', 50, readiness)).resolves.toBe(true);
+    expect(calls).toBeGreaterThan(1);
   });
 
-  it('accepts non-Claude interactive providers after their tmux session exists', async () => {
+  it('gives up when the agent never comes up', async () => {
     const client = new TmuxClient();
-    vi.spyOn(client as any, 'hasSession').mockResolvedValue(true);
     vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
+    const readiness: AgentReadiness = { agent: 'claude-code', ready: async () => false };
 
-    await expect(client.waitForPrompt('/missing-status', 10, 'codex', 'codex-session')).resolves.toBe(true);
+    await expect(client.waitForPrompt('/missing-status', 50, readiness)).resolves.toBe(false);
   });
 });

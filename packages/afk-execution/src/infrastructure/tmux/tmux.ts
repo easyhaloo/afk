@@ -1,9 +1,10 @@
 import { spawn } from 'child_process';
 import { Signal } from '@afk/infrastructure';
-import { readSignal, readSignalSync, statusFilePath } from '@afk/infrastructure';
+import { readSignal, readSignalSync } from '@afk/infrastructure';
 import { TIMEOUTS } from '../../shared/constants.js';
 import { ControlModeConnection } from './control-mode.js';
 import { normalizeTmuxSessionName } from './session-name.js';
+import type { AgentReadiness } from './agent-readiness.js';
 
 export { normalizeTmuxSessionName };
 
@@ -227,36 +228,24 @@ export class TmuxClient {
     }
   }
 
-  /** Wait for an interactive provider to be ready for input. */
+  /**
+   * Wait for the agent to be ready for input.
+   *
+   * What "ready" means is the agent's own business: the tmux wrapper asks
+   * the readiness rule, and the rule says which marker to watch. A wrapper
+   * that knew the roster would have to be changed every time the roster
+   * changed.
+   */
   async waitForPrompt(
     worktreeDir: string,
-    timeout: number = 30000,
-    provider: string = 'claude-code',
+    timeout: number,
+    readiness: AgentReadiness,
     session?: string,
   ): Promise<boolean> {
-    if (provider !== 'claude-code') {
-      if (!session) return true;
-      const start = Date.now();
-      while (Date.now() - start < timeout) {
-        if (await this.hasSession(session)) {
-          await this.sleep(500);
-          return true;
-        }
-        await this.sleep(500);
-      }
-      return false;
-    }
-
-    const { promises: fs } = await import('fs');
-    const statusPath = statusFilePath(worktreeDir);
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      try {
-        await fs.access(statusPath);
-        return true;
-      } catch {
-        await this.sleep(500);
-      }
+      if (await readiness.ready({ worktreeDir, session, sessionExists: name => this.hasSession(name) })) return true;
+      await this.sleep(500);
     }
     return false;
   }
@@ -271,10 +260,10 @@ export class TmuxClient {
     window: string,
     prompt: string,
     signalType: string = 'goal_complete',
-    provider: string = 'claude-code',
+    readiness: AgentReadiness,
   ): Promise<void> {
-    const hasPrompt = await this.waitForPrompt(worktreeDir, 30000, provider, session);
-    if (!hasPrompt) throw new Error(`Timeout waiting for ${provider} prompt`);
+    const hasPrompt = await this.waitForPrompt(worktreeDir, 30000, readiness, session);
+    if (!hasPrompt) throw new Error(`Timeout waiting for ${readiness.agent} prompt`);
 
     // Type the prompt text directly (which already contains `/goal ` prefix).
     // The text is submitted as a single line

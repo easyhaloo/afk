@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { TmuxClient } from '@afk/execution/infrastructure/tmux/tmux';
+import { agentReadiness } from '@afk/execution/infrastructure/tmux/agent-readiness';
 import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils.js';
 
 export function registerTmuxCommands(program: Command): void {
@@ -48,7 +49,7 @@ export function registerTmuxCommands(program: Command): void {
         const client = new TmuxClient();
 
         info(`Sending /goal to ${options.session}:${options.window}...`);
-        await client.sendPrompt(options.worktree, options.session, options.window, options.text);
+        await client.sendPrompt(options.worktree, options.session, options.window, options.text, 'goal_complete', agentReadiness('claude-code'));
 
         success('Goal sent successfully');
       } catch (error) {

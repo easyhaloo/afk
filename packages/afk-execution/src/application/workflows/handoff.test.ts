@@ -8,7 +8,7 @@ import type { BacklogProvider } from '@afk/application';
 import type { Signal } from '@afk/infrastructure';
 import type { TmuxClient } from '../../infrastructure/tmux/tmux.js';
 import type { Watchdog } from './watchdog.js';
-import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
+import type { WorkflowConfig } from '../../domain/config/types.js';
 
 /** Fake tmux: every method is a vi.fn with sane defaults, overridable per-test. */
 function makeTmux(overrides: Partial<TmuxClient> = {}) {

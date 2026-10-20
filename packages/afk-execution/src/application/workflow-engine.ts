@@ -20,7 +20,7 @@ import { loadModules, parseModuleParams } from './modules/_registry.js';
 import type { ModuleParams } from './modules/_registry.js';
 import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle.js';
 import { Watchdog, createWatchdog } from './workflows/watchdog.js';
-import type { WorkflowConfig } from '../infrastructure/config/manager.js';
+import type { WorkflowConfig } from '../domain/config/types.js';
 import { HandoffCoordinator, createHandoffCoordinator, handoffDocPath } from './workflows/handoff.js';
 import { runIdFor } from './run-identity.js';
 import { attemptNativeResume } from './workflows/resume.js';

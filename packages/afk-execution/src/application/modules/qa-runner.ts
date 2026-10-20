@@ -10,7 +10,7 @@ import { createSandboxProvider } from '../../infrastructure/sandbox/index.js';
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
 import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../../domain/sandbox/types.js';
 import type { ManagementProviderBundle } from '@afk/infrastructure';
-import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
+import type { WorkflowConfig } from '../../domain/config/types.js';
 import type { BacklogItem, NewReworkRecord } from '@afk/application';
 import type { ChangeRequest } from '@afk/infrastructure';
 import { formatExecutionFailure } from '../workflow-engine.js';

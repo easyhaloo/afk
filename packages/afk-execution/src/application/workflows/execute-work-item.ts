@@ -15,7 +15,8 @@ import { parseWorkItemId, encodeWorkItemIdForPath, type BacklogItem } from '@afk
 import { BACKLOG_METADATA } from '@afk/application';
 import type { GlobalWorkItem } from '@afk/application';
 import { prepareAgentRuntime } from '../../domain/agents/index.js';
-import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';
+import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
+import type { WorkflowConfig } from '../../domain/config/types.js';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';

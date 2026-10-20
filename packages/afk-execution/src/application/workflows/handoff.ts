@@ -6,7 +6,7 @@ import type { TmuxClient } from '../../infrastructure/tmux/index.js';
 import { agentReadiness } from '../../infrastructure/tmux/agent-readiness.js';
 import type { AgentProviderName } from '../../domain/agents/types.js';
 import { logger, clearSignal, clearStatus } from '@afk/infrastructure';
-import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
+import type { WorkflowConfig } from '../../domain/config/types.js';
 import { Watchdog } from './watchdog.js';
 import { handoffDocName } from '../run-identity.js';
 

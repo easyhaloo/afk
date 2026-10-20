@@ -2,6 +2,8 @@ import { getGlabToken } from '@afk/infrastructure';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as loadYaml } from 'js-yaml';
+import type { GitLabConfig, SchedulerConfig, WorkflowConfig, WorktreeConfig } from '../../domain/config/types.js';
+export type { GitLabConfig, SchedulerConfig, WorkflowConfig, WorktreeConfig } from '../../domain/config/types.js';
 import {
   assertCodexEndpoint,
   DEFAULT_CODEX_CONFIG,
@@ -14,54 +16,11 @@ type ConfigObject = { [key: string]: unknown };
 
 // ─── GitLab ───────────────────────────────────────────────────────────────────
 
-export interface GitLabConfig {
-  url: string;
-  token: string;
-}
-
 // ─── Workflow ─────────────────────────────────────────────────────────────────
-
-export interface WorkflowConfig {
-  agentDefault: string;
-  tmuxSession: string;
-  completionTimeout: number;
-  qaTimeout?: number;
-  workflowHardTimeout: number;
-  completionPoll: number;
-  idleTimeout: number;
-  acCheckTimeout: number;
-  contextThreshold: number;
-  promptTimeout: number;
-  handoffTimeout: number;
-  maxRetries: number;
-  maxSelfIterations: number;
-  maxQaReworkAttempts: number;
-  targetBranch: string;
-  trackerTargetBranch: string;
-  goalBudget: number;
-  /** Optional named AFK workflow template selected for executions. */
-  template?: string;
-  agents: {
-    codex: CodexConfig;
-  };
-}
 
 // ─── Scheduler ────────────────────────────────────────────────────────────────
 
-export interface SchedulerConfig {
-  maxConcurrent: number;
-  pollInterval: number;
-  requiredLabels: string[];
-  excludeLabels: string[];
-  waveNotify: boolean;
-  updateDashboard: boolean;
-}
-
 // ─── Worktree ─────────────────────────────────────────────────────────────────
-
-export interface WorktreeConfig {
-  baseDir: string;
-}
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 

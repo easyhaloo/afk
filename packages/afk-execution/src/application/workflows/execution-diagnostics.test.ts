@@ -7,7 +7,7 @@ describe('execution diagnostics', () => {
       version: 1,
       runId: 'run-1',
       status: 'failed',
-      provider: 'batch',
+      provider: 'claude-code',
       exitCode: 3,
       error: { code: 'NON_ZERO_EXIT', message: 'agent stderr' },
       structuredOutput: { type: 'agent_error', detail: 'bad request' },
@@ -15,7 +15,7 @@ describe('execution diagnostics', () => {
     });
 
     expect(message).toContain('status=failed');
-    expect(message).toContain('provider=batch');
+    expect(message).toContain('provider=claude-code');
     expect(message).toContain('exitCode=3');
     expect(message).toContain('NON_ZERO_EXIT: agent stderr');
     expect(message).toContain('structuredOutput={"type":"agent_error","detail":"bad request"}');

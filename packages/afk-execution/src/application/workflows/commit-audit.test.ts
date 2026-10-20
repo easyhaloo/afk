@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import type { RunEvent } from '@afk/core';
-import type { AgentExecution, AgentExecutionOptions, AgentProvider } from '../../domain/agents/types.js';
+import type { AgentExecution, AgentExecutionOptions, AgentProvider, ExecutionResult } from '../../domain/agents/types.js';
 import { createAgentProvider } from '../../domain/agents/index.js';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
 import { TemplateCatalog } from '../../domain/templates/catalog.js';
@@ -118,7 +118,7 @@ describe('WorkflowRunner default template commit audit', () => {
           },
           ...(sandboxName === 'docker' ? { telemetryPath: hostTranscriptPath } : {}),
           waitForEvent: vi.fn(async () => null),
-          waitForResult: vi.fn(async () => {
+          waitForResult: vi.fn(async (): Promise<ExecutionResult> => {
             if (implementing && createsCommit) {
               await writeFile(join(options.worktreePath, 'implementation.txt'), 'implemented\n');
               const worktreeGit = simpleGit(options.worktreePath);
@@ -126,7 +126,7 @@ describe('WorkflowRunner default template commit audit', () => {
               await worktreeGit.commit('fixture implementation');
             }
             return {
-              version: 1 as const, runId: options.sessionId, status: 'completed' as const, provider: 'test', commits: [fakeSha],
+              version: 1 as const, runId: options.sessionId, status: 'completed' as const, provider: implementing && codexOverride ? 'codex' : 'claude-code', commits: [fakeSha],
               usage: sandboxName === 'docker' ? { inputTokens: 10, outputTokens: 5, totalTokens: 15 } : undefined,
               tools: implementing && codexOverride ? undefined : [{ id: 'tool-1', name: 'Bash', result: 'failed' as const, exitCode: 2 }],
               structuredOutput: implementing

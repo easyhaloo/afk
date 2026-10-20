@@ -40,7 +40,7 @@ describe('collectAgentTelemetry', () => {
     };
   }
 
-  const result: ExecutionResult = { version: 1, runId: 'execution-1', status: 'completed', provider: 'local', commits: [] };
+  const result: ExecutionResult = { version: 1, runId: 'execution-1', status: 'completed', provider: 'claude-code', commits: [] };
 
   it('reads the transcript through the contract, not through a cast', async () => {
     // The provider knows where its transcript is and the telemetry reader

@@ -311,7 +311,7 @@ describe('ContainerAgentExecution — batch result files', () => {
 
     await expect(execution.waitForResult({ completionTimeoutMs: 100 })).resolves.toMatchObject({
       status: 'completed',
-      provider: 'container',
+      provider: 'claude-code',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'finished' },
     });
     expect(execution.metadata).toEqual(PROCESS_METADATA);
@@ -356,7 +356,7 @@ describe('ContainerAgentExecution — batch result files', () => {
 
     await expect(execution.waitForResult({ completionTimeoutMs: 100 })).resolves.toMatchObject({
       status: 'completed',
-      provider: 'container',
+      provider: 'claude-code',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'finished' },
     });
   });
@@ -513,7 +513,7 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
       });
       await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
         status: 'completed',
-        provider: 'container',
+        provider: 'claude-code',
         structuredOutput: { type: 'goal_complete', summary: 'docker sandbox' },
       });
       await sb.close();

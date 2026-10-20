@@ -17,12 +17,12 @@ function execution(result: ExecutionResult): AgentExecution {
 describe('AgentExecutionService', () => {
   it('retries failed agent steps but never retries timeout', async () => {
     const createExecution = vi.mocked(provider.createExecution)
-      .mockResolvedValueOnce(execution({ version: 1, runId: '1', status: 'failed', provider: 'local', commits: [] }))
+      .mockResolvedValueOnce(execution({ version: 1, runId: '1', status: 'failed', provider: 'claude-code', commits: [] }))
       .mockResolvedValueOnce(execution({
         version: 1,
         runId: '2',
         status: 'completed',
-        provider: 'local',
+        provider: 'claude-code',
         structuredOutput: { type: 'goal_complete' },
         commits: [],
       }));
@@ -56,7 +56,7 @@ describe('AgentExecutionService', () => {
   });
 
   it('accepts a completed batch result through the unified signal', async () => {
-    vi.mocked(provider.createExecution).mockResolvedValueOnce(execution({ version: 1, runId: '1', status: 'completed', provider: 'batch', structuredOutput: { type: 'goal_complete' }, commits: [] }));
+    vi.mocked(provider.createExecution).mockResolvedValueOnce(execution({ version: 1, runId: '1', status: 'completed', provider: 'claude-code', structuredOutput: { type: 'goal_complete' }, commits: [] }));
     const sandbox = { close: async () => {} } as unknown as Sandbox;
     const service = new AgentExecutionService();
     await expect(service.execute({ provider, sandbox, worktreePath: '/tmp/worktree', prompt: 'verify', signalType: 'goal_complete', executionMode: 'batch', generation: 1, maxRetries: 0, completionTimeoutMs: 10, contextHighTokens: 100 })).resolves.toMatchObject({ status: 'completed' });

@@ -70,7 +70,7 @@ function fixture() {
       version: 1,
       runId: 'execution-60',
       status: 'completed',
-      provider: 'batch',
+      provider: 'claude-code',
       structuredOutput: { type: 'goal_complete', kind: 'qa', result: 'PASS', summary: 'all integration checks passed' },
       commits: [],
     })),
@@ -141,7 +141,7 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
     const setExecutionMode = vi.spyOn(backlog, 'setExecutionMode');
     const createRework = vi.spyOn(backlog, 'createRework');
     f.execution.waitForResult.mockResolvedValue({
-      version: 1, runId: 'execution-60', status: 'completed', provider: 'batch', commits: [],
+      version: 1, runId: 'execution-60', status: 'completed', provider: 'claude-code', commits: [],
       structuredOutput: {
         type: 'goal_complete', kind: 'qa', result: 'FAIL', summary: 'search shortcut failed',
         failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }],
@@ -231,7 +231,7 @@ describe('QARunner execution boundary', () => {
       version: 1,
       runId: 'execution-60',
       status: 'timed_out',
-      provider: 'batch',
+      provider: 'claude-code',
       sessionId: 'agent-session-60',
       commits: [],
     });
@@ -335,7 +335,7 @@ describe('QARunner execution boundary', () => {
       version: 1,
       runId: 'execution-60',
       status: 'completed',
-      provider: 'batch',
+      provider: 'claude-code',
       structuredOutput: {
         type: 'goal_complete', kind: 'qa', result: 'FAIL', summary: 'search shortcut failed',
         failedCriteria: [{ id: 'search-shortcut', expected: '/s enters search', actual: '/ does not enter search' }],

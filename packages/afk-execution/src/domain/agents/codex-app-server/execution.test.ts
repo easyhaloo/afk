@@ -153,7 +153,7 @@ describe('CodexAppServerExecution', () => {
 
     await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
       status: 'completed',
-      provider: 'app-server',
+      provider: 'codex',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' },
       usage: { inputTokens: 12, outputTokens: 5, totalTokens: 17 },
     });

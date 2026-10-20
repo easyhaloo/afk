@@ -190,7 +190,8 @@ export class CodexAppServerExecution implements AgentExecution {
       version: 1,
       runId: this.id,
       status,
-      provider: 'app-server',
+      // The agent that ran, not the transport it ran over.
+      provider: this.metadata.provider,
       sessionId: this.sessionId,
       ...(status === 'completed' ? { structuredOutput: this.structuredOutput } : {}),
       ...(this.usage ? { usage: this.usage } : {}),

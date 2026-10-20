@@ -381,7 +381,9 @@ export class ContainerAgentExecution implements AgentExecution {
       version: 1,
       runId: this.id,
       status,
-      provider: 'container',
+      // The agent that ran, not the sandbox it ran in: the failure summary
+      // a blocked work item carries names the agent.
+      provider: this.metadata.provider,
       sessionId: this.sessionId,
       commits: [],
       ...extra,

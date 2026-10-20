@@ -59,7 +59,7 @@ function startInput(overrides: Partial<RuntimeStartInput> = {}): RuntimeStartInp
 }
 
 function executionResult(status: ExecutionResult['status'], structuredOutput?: unknown): ExecutionResult {
-  return { version: 1, runId: 'execution-1', status, provider: 'batch', commits: [], structuredOutput };
+  return { version: 1, runId: 'execution-1', status, provider: 'claude-code', commits: [], structuredOutput };
 }
 
 function fakeExecution(output = 'agent output'): AgentExecution {

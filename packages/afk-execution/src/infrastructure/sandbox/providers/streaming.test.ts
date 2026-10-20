@@ -143,6 +143,8 @@ describe('StreamingAgentExecution', () => {
 
     await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
       status: 'completed',
+      // The agent that ran, not the transport it ran over.
+      provider: 'claude-code',
       usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 },
     });
   });

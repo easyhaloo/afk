@@ -166,7 +166,14 @@ export interface ExecutionResult {
   version: 1;
   runId: string;
   status: 'completed' | 'blocked' | 'failed' | 'aborted' | 'timed_out' | 'context_high';
-  provider: string;
+  /**
+   * The agent that ran.
+   *
+   * The agent name, not the sandbox it ran in: this is the field the failure
+   * summary names, and a summary that says `local` says nothing about which
+   * agent gave up. It is the same name the execution's metadata carries.
+   */
+  provider: AgentProviderName;
   sessionId?: string;
   exitCode?: number;
   structuredOutput?: unknown;

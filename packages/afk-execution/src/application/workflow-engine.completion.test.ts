@@ -65,7 +65,7 @@ describe('WorkflowRunner completion validation', () => {
 
   it('accepts a completion that carries the expected signal', async () => {
     const { runner } = runnerReturning({
-      version: 1, runId: 'run-42', status: 'completed', provider: 'batch',
+      version: 1, runId: 'run-42', status: 'completed', provider: 'claude-code',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' },
       commits: [],
     });
@@ -75,7 +75,7 @@ describe('WorkflowRunner completion validation', () => {
 
   it('refuses a completion that carries no payload', async () => {
     const { runner, transition } = runnerReturning({
-      version: 1, runId: 'run-42', status: 'completed', provider: 'batch',
+      version: 1, runId: 'run-42', status: 'completed', provider: 'claude-code',
       structuredOutput: undefined,
       commits: [],
     });
@@ -86,7 +86,7 @@ describe('WorkflowRunner completion validation', () => {
 
   it('refuses a completion that names another signal', async () => {
     const { runner } = runnerReturning({
-      version: 1, runId: 'run-42', status: 'completed', provider: 'batch',
+      version: 1, runId: 'run-42', status: 'completed', provider: 'claude-code',
       structuredOutput: { type: 'other' },
       commits: [],
     });

@@ -221,6 +221,9 @@ describe('LocalSandboxProvider', () => {
 
     await expect(execution.waitForResult()).resolves.toMatchObject({
       status: 'completed',
+      // The agent that ran, not the sandbox it ran in: the failure summary
+      // a blocked work item carries names the agent.
+      provider: 'claude-code',
       structuredOutput: signal,
     });
   });

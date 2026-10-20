@@ -2,24 +2,37 @@
 
 ## Architecture guard
 
-`pnpm architecture:check --check-packages` enforces layer direction and checks
-the `packages/afk-core`, `packages/afk-application` and
-`packages/afk-infrastructure` roots for pure source imports and dependency
-direction. The guard also
-disallows generic records and legacy client-factory imports. The legacy migration is complete:
-`scripts/architecture-legacy-baseline.json` records zero legacy files, imports,
-and patterns. New legacy files or imports fail the check. Delete the stale
-baseline record when removing an entry.
+`pnpm architecture:check --check-packages` enforces the package dependency
+contract and the root layer direction. Five package roots are checked:
+`packages/afk-core`, `packages/afk-application`,
+`packages/afk-infrastructure`, `packages/afk-execution`, and
+`packages/afk-workflow-graph`. The contract is table-driven: `core` depends
+on nothing, `application` may reach only `@afk/core`, `infrastructure` may
+reach `core` and `application`, and `execution` may reach `core`,
+`application`, `infrastructure`, and `@afk/workflow-graph`. Neither `core`
+nor `application` may import Node built-ins. The guard also disallows
+generic records and legacy client-factory imports, and rejects a package
+that imports itself by name or reaches outside its own root. The legacy
+migration is complete: `scripts/architecture-legacy-baseline.json` records
+zero legacy files, imports, and patterns. New legacy files or imports fail
+the check. Delete the stale baseline record when removing an entry.
 
-Layer direction applies to relative imports between non-test files in
-`src/cli`, `src/domain`, `src/application`, `src/infrastructure`,
-`src/shared`, and `src/views`. Passing `--require-packages` makes a missing
-package root a failure instead of a skipped check.
+The root `src/` tree is the CLI and the TUI; the shared capabilities live in
+the packages. Layer direction applies to relative imports between non-test
+files in `src/cli`, `src/shared`, and `src/views`. The guard's layer table
+still names `domain`, `application`, and `infrastructure`, but those
+directories are empty since the move. Passing `--require-packages` makes a
+missing package root a failure instead of a skipped check.
 
 The desktop client is a separate source tree with its own contract: it may
 consume the shared `@afk/*` packages, but it must not import the root
-package's `src/` tree. A relative import that escapes the desktop root into
-`src/` is reported the same way a package importing outside its own root is.
+package's `src/` tree, and it must not spawn an `afk` CLI process. A relative
+import that escapes the desktop root into `src/` is reported the same way a
+package importing outside its own root is.
+
+`pnpm typecheck` also type-checks `tests/` through `tsconfig.tests.json`.
+The root `tsconfig.json` excludes `tests/`, so without that project a broken
+import in a test or an E2E script is invisible to the build.
 
 ## Scope and command surface
 
@@ -31,13 +44,23 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
+| `afk backlog create <title>` | Create one provider-backed backlog item |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
-| `afk run --backlog-id <id>` | Execute one claimed item |
+| `afk backlog inventory` | Inventory issues across all credential-accessible projects |
+| `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
+| `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
+| `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
+| `afk run --backlog-id <id>` | Claim and execute one backlog item |
+| `afk execute --work-item-id <id> --execution-manifest <path>` | Implement, independently verify, and publish one managed work item |
+| `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
+| `afk qa --backlog-id <id>` | Verify one backlog item and publish its change for the appropriate merge policy |
 | `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
-| `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
+| `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status, and graceful stop |
+| `afk observe` | Read append-only AFK run audit events (`runs`, `executions`, `execution`, `timeline`, `verify`, `replay`, `explain`, `doctor`) |
 | `afk retro run --run-id <id> --workspace <path>` | Analyze recorded evidence with the existing `/retro` skill and write `report.json` plus `report.html` |
 | `afk retro show <report>` | Read a generated retro report |
-| `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
+| `afk graph workflow <template>` | Generate a deterministic workflow graph |
+| `afk` (TUI), `afk board`, `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
 There are no aliases for removed command groups. Provider metadata labels are
 an adapter detail and never part of this CLI contract.

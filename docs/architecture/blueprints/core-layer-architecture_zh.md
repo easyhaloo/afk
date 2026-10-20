@@ -23,7 +23,9 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 - `packages/afk-application` 提供 inventory、run decision/start 和 observation/query
   的最小用例 facade。
 - CLI `observe executions` 直接调用 `@afk/application` 的
-  `queryExecutionHistory`，CLI 只负责参数解析和输出。
+  `queryExecutionHistory`。但 observe 的五个子命令仍在命令层内联构造
+  `JsonlEventStore`（`src/cli/commands/observe.ts:12-13,95`），所以事件存储的
+  根目录解析与构造还没有收进 `@afk/application` 的用例里。
 - Workflow 运行入口显式组装 `RunObserver` 并注入 `WorkflowRunner`；审计事件写入
   失败即停止执行，已删除 `legacy-observer` 与 `AFK_HARNESS_MODE` 分支。
 - Desktop inventory 通过 `@afk/application/provider-inventory` Port 调用进程内
@@ -67,7 +69,9 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 仍需继续收敛的部分：把执行运行时里的用例按 Port 拆开，让 `executeWorkItem`
 本身可以进入 `@afk/application`；`@afk/execution` 目前仍是"用例 + 实现"合一的
 过渡形态。Core 行为函数（`decide` / `evolve` / `replay` /
-`resolveExecutionBase`）在 Desktop 侧仍只被用作类型引用。
+`resolveExecutionBase`）在 Desktop 侧大部分仍只被用作类型引用，但 `replay`
+已经通过 `@afk/application` 的 `replayRun` 进入 Desktop 的真实调用链
+（`desktop-client/electron/services/work-item-execution-query-service.ts:63`）。
 
 ## 当前结构分析
 
@@ -90,24 +94,21 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 `packages/afk-core` 已成为正式 workspace package；根包不再维护第二份模型、
 事件、Reducer 或 Policy 实现。
 
-#### Domain 层职责过重
+#### Domain 层与 Application 层已迁空
 
-`src/domain/backlog` 同时包含：
+`src/domain` 和 `src/application` 在迁移后只剩空目录。此前混在一层的 backlog
+领域类型、Provider 接口、Provider 管理能力、Claim 与文件系统锁、内存 Provider
+和标签映射规则，已经按职责拆开：
 
-- backlog 领域类型；
-- Provider 接口；
-- Provider 管理能力；
-- Claim 和文件系统锁；
-- 内存 Provider；
-- 标签与分支映射规则。
+- 纯类型与 Port 在 `packages/afk-application`（`packages/afk-application/src/backlog/claim.ts` 等）；
+- Provider SDK、内存 Provider、文件系统 claim lock 在
+  `packages/afk-infrastructure`（`packages/afk-infrastructure/src/backlog/in-memory-provider.ts`、
+  `packages/afk-infrastructure/src/backlog/filesystem-claim-lock.ts`）；
+- 工作项执行运行时在 `packages/afk-execution`。
 
-这些内容分别属于核心规则、应用接口和基础设施实现，不应长期放在同一层。
-
-#### Application 层包含基础设施组装
-
-部分 `src/application` 模块直接创建或引用 Git、tmux、配置、日志和 Provider
-实现。这样 application 层既负责业务编排，又负责运行环境组装，CLI 和 Desktop
-难以共享同一套用例。
+"application 层既负责业务编排又负责运行环境组装"的问题随这次分离一起消失。
+仍然存在的边界问题在别处：`@afk/execution` 内部还是"用例 + 实现"合一，
+`executeWorkItem` 尚未按 Port 拆开。
 
 #### Desktop 的跨进程 DTO 仍是独立边界
 
@@ -202,9 +203,9 @@ Core 禁止依赖：
 - Commander、Ink、IPC channel 和 CLI 参数；
 - Provider 标签字符串或平台客户端。
 
-`packages/afk-execution/src/application/backlog-work-item.ts` 中把外部 backlog 模型映射为 Core 模型的逻辑
-属于 adapter/application 边界，不应让 Core 依赖 `BacklogWorkItemInput`、`afk`
-或 `hitl` 这样的外部命名。
+`packages/afk-application/src/backlog-mapping.ts` 中把外部 backlog 词汇映射为
+Core 词汇的逻辑属于 adapter/application 边界，不应让 Core 依赖
+`BacklogWorkItemInput`、`afk` 或 `hitl` 这样的外部命名。
 
 ### `@afk/application`
 

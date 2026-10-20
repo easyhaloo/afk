@@ -2,20 +2,31 @@
 
 ## 架构守卫
 
-`pnpm architecture:check --check-packages` 强制层间依赖方向，并检查
-`packages/afk-core`、`packages/afk-application` 与
-`packages/afk-infrastructure` 根目录的纯源码导入和依赖方向。
-该守卫同时禁止泛型 record 和遗留 client-factory 导入。遗留迁移已完成：
+`pnpm architecture:check --check-packages` 强制 package 依赖契约和根目录层间
+依赖方向。守卫检查五个 package 根目录：`packages/afk-core`、
+`packages/afk-application`、`packages/afk-infrastructure`、
+`packages/afk-execution` 和 `packages/afk-workflow-graph`。契约由表驱动：
+`core` 不依赖任何包，`application` 只能依赖 `@afk/core`，`infrastructure` 可以
+依赖 `core` 与 `application`，`execution` 可以依赖 `core`、`application`、
+`infrastructure` 和 `@afk/workflow-graph`。`core` 与 `application` 都不得导入
+Node 内建模块。该守卫同时禁止泛型 record 和遗留 client-factory 导入，并拒绝
+按包名自引用或越出自身根目录的包。遗留迁移已完成：
 `scripts/architecture-legacy-baseline.json` 记录零个遗留文件、导入和模式。
 新增的遗留文件或导入会导致检查失败。删除基线条目时请一并删除这条过期记录。
 
-层间方向约束适用于 `src/cli`、`src/domain`、`src/application`、
-`src/infrastructure`、`src/shared` 和 `src/views` 中非测试文件的相对导入。
-传入 `--require-packages` 会让缺失的 package 根目录导致失败，而不是跳过检查。
+根 `src/` 树现在只保留 CLI 与 TUI，共享能力都在 package 里。层间方向约束适用于
+`src/cli`、`src/shared` 和 `src/views` 中非测试文件的相对导入。守卫的层表里
+仍保留 `domain`、`application`、`infrastructure` 这几个名字，但这些目录在迁移
+之后已经空了。传入 `--require-packages` 会让缺失的 package 根目录导致失败，
+而不是跳过检查。
 
 桌面客户端是独立的源码树，有自己的依赖约定：它可以使用共享的 `@afk/*` 包，
-但不得导入根包的 `src/` 目录。逃逸到 `src/` 的相对导入，与包越界导入一样
-会被守卫报告。
+但不得导入根包的 `src/` 目录，也不得 spawn `afk` CLI 进程。逃逸到 `src/` 的
+相对导入，与包越界导入一样会被守卫报告。
+
+`pnpm typecheck` 通过 `tsconfig.tests.json` 一并检查 `tests/`。根 `tsconfig.json`
+把 `tests/` 排除在外，没有这个工程的话，测试或 E2E 脚本里的断链导入对构建
+是不可见的。
 
 ## 范围与命令
 
@@ -26,11 +37,23 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
+| `afk backlog create <title>` | 创建一个 provider 背书的 backlog 工作项 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
+| `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
+| `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
+| `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
+| `afk backlog confirm-merge` | 合并已批准的根 backlog 变更并置为 done |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
+| `afk execute --work-item-id <id> --execution-manifest <path>` | 实现、独立验证并发布一个托管工作项 |
+| `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |
+| `afk qa --backlog-id <id>` | 验证一个 backlog 工作项并按合并策略发布其变更 |
 | `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
-| `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
-| `afk`（TUI）、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
+| `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看与优雅停止 |
+| `afk observe` | 读取 append-only 的 AFK 运行审计事件（`runs`、`executions`、`execution`、`timeline`、`verify`、`replay`、`explain`、`doctor`） |
+| `afk retro run --run-id <id> --workspace <path>` | 用现有 `/retro` 技能分析已记录证据并写出 `report.json` 与 `report.html` |
+| `afk retro show <report>` | 读取已生成的复盘报告 |
+| `afk graph workflow <template>` | 生成确定性的工作流图 |
+| `afk`（TUI）、`afk board`、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
 
 已移除的命令组没有别名。provider 的元数据标签属于 adapter 内部实现，
 不是 CLI 契约。

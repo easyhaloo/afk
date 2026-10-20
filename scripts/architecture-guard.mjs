@@ -263,40 +263,46 @@ function checkStateMappingDuplicates() {
  */
 const duplicateRuleMinimumLength = 120;
 const functionDeclarationPattern = /(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*\([^)]*\)\s*(?::[^{]+?)?\{/g;
+// A rule written as a bound constant is the same rule as one written as a
+// function; the shape of the declaration does not change what it says.
+const arrowDeclarationPattern = /(?:export\s+)?const\s+(\w+)\s*(?::[^=;]*)?=\s*(?:async\s+)?(?:function\s*)?\(/g;
 const observedRuleBodies = new Map();
 
 function recordFunctionBodies(source, file) {
   // A test file's helper is not a rule the product declares twice; two
   // suites building the same fixture is ordinary.
   if (isTestFile(file)) return;
-  for (const match of source.matchAll(functionDeclarationPattern)) {
-    const start = match.index + match[0].length - 1;
-    let depth = 0;
-    let end = -1;
-    for (let index = start; index < source.length; index += 1) {
-      const character = source[index];
-      if (character === '{') depth += 1;
-      else if (character === '}') {
-        depth -= 1;
-        if (depth === 0) {
-          end = index;
-          break;
-        }
+  for (const match of source.matchAll(functionDeclarationPattern)) recordRuleBody(source, match, file);
+  for (const match of source.matchAll(arrowDeclarationPattern)) recordRuleBody(source, match, file);
+}
+
+function recordRuleBody(source, match, file) {
+  const start = match.index + match[0].length - 1;
+  let depth = 0;
+  let end = -1;
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '{') depth += 1;
+    else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        end = index;
+        break;
       }
     }
-    if (end < 0) continue;
-    const body = source.slice(start, end + 1);
-    const normalized = body
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|\s)\/\/.*$/gm, '$1')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (normalized.length < duplicateRuleMinimumLength) continue;
-    const key = `${match[1]}\u0000${normalized}`;
-    const entry = observedRuleBodies.get(key) ?? { name: match[1], files: new Set() };
-    entry.files.add(file);
-    observedRuleBodies.set(key, entry);
   }
+  if (end < 0) return;
+  const body = source.slice(start, end + 1);
+  const normalized = body
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|\s)\/\/.*$/gm, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (normalized.length < duplicateRuleMinimumLength) return;
+  const key = `${match[1]}\u0000${normalized}`;
+  const entry = observedRuleBodies.get(key) ?? { name: match[1], files: new Set() };
+  entry.files.add(file);
+  observedRuleBodies.set(key, entry);
 }
 
 function checkDuplicateRules() {

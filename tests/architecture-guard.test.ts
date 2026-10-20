@@ -178,6 +178,15 @@ describe('architecture guard duplicate rules', () => {
     expect(output).toContain('define it once and import it');
   });
 
+  it('rejects a rule written as a bound constant', () => {
+    const rule = 'export const validateThing = (value: unknown): string => {\n'
+      + '  if (typeof value !== "string" || value.trim().length === 0 || /[\\u0000-\\u001f]/.test(value)) throw new Error("value is invalid");\n'
+      + '  return value.trim();\n'
+      + '}\n';
+    const duplicated = fixture(SOURCE, { 'cli/other.ts': rule, 'cli/third.ts': rule });
+    expect(duplicated.run()).toContain("the rule 'validateThing' is written out in 2 files");
+  });
+
   it('accepts two files with different rules', () => {
     const different = fixture(SOURCE, {
       'cli/other.ts': RULE,

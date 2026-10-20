@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { BudgetManager } from './budget.js';
 import type { ProviderBundle } from '@afk/infrastructure';
-import type { BacklogClaim, BacklogItem } from '@afk/application';
+import type { BacklogClaim, BacklogItem, BacklogProvider } from '@afk/application';
 import type { AgentProvider } from '../../domain/agents/types.js';
 import type { RunObserver } from '../../observability/run-observer.js';
 import { TemplateCatalog } from '../../domain/templates/catalog.js';
@@ -15,10 +15,10 @@ vi.mock('../modules/project-resolver.js', () => ({ default: () => ({ name: 'proj
 
 const item: BacklogItem = {
   id: '42', title: 'Item', dependsOn: [], state: 'in_progress', executionMode: 'afk',
-  branchName: 'afk/backlog-42', providerRef: 'github:org/repo#42',
+  tags: [], branchName: 'afk/backlog-42', providerRef: 'github:org/repo#42',
 };
 
-function providers(claim: ReturnType<typeof vi.fn>): ProviderBundle {
+function providers(claim: BacklogProvider['claim']): ProviderBundle {
   return {
     backlog: {
       claim, transition: vi.fn(async () => {}), setExecutionMode: vi.fn(async () => {}),
@@ -30,7 +30,7 @@ function providers(claim: ReturnType<typeof vi.fn>): ProviderBundle {
   } as unknown as ProviderBundle;
 }
 
-function claimed(itemToClaim = item): { claim: BacklogClaim; release: ReturnType<typeof vi.fn> } {
+function claimed(itemToClaim = item): { claim: BacklogClaim; release: Mock<[], Promise<void>> } {
   const release = vi.fn(async () => {});
   return {
     claim: {

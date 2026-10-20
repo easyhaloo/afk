@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // factory can reference.
 import { ProjectResolverModule } from './project-resolver.js';
 import type { InitContext, LifecycleContext } from '../workflows/lifecycle';
-import type { ProjectResolver } from './project-resolver.js';
+import type { ProjectResolver } from '../project-resolver.js';
 
 function makeResolver(over: Partial<ProjectResolver> = {}): ProjectResolver {
   return {

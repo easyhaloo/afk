@@ -15,7 +15,7 @@ import {
   _resetAgentRegistry,
 } from './registry.js';
 import { createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
-import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types.js';
+import type { AgentExecution, AgentStartOptions, Sandbox } from '../../infrastructure/sandbox/types.js';
 import type { AgentProvider, AgentCapability } from './types.js';
 
 /** Build minimal AgentCommandOptions for testing. */
@@ -73,7 +73,7 @@ describe('Agent providers — fixture coverage', () => {
 
     it('owns process execution creation and passes neutral parser metadata to the sandbox', async () => {
       const execution = { id: 'execution-1' } as AgentExecution;
-      const startAgent = vi.fn(async () => execution);
+      const startAgent = vi.fn(async (_options: AgentStartOptions) => execution);
       const sandbox = { startAgent } as unknown as Sandbox;
 
       await expect(p.createExecution({

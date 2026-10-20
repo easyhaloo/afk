@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentExecution, AgentProvider } from '../../domain/agents/types.js';
+import type { AgentExecution, AgentProvider, ExecutionResult } from '../../domain/agents/types.js';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
 import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
 import type { ProviderBundle } from '@afk/infrastructure';
@@ -42,7 +42,7 @@ describe('execution manifest request to runner boundary', () => {
     });
     const claimedItem: BacklogItem = {
       id: '42', title: 'Provider issue', dependsOn: [], state: 'in_progress', executionMode: 'afk',
-      branchName: 'afk/backlog-42', providerRef: 'github:acme/api#42',
+      tags: [], branchName: 'afk/backlog-42', providerRef: 'github:acme/api#42',
     };
     const release = vi.fn(async () => undefined);
     const claim: BacklogClaim = { item: claimedItem, claimId: 'claim-42', heartbeat: async () => undefined, release };
@@ -71,6 +71,7 @@ describe('execution manifest request to runner boundary', () => {
           repositories: preparedRepositories,
           primary: preparedRepositories[0],
           finish: vi.fn(async () => undefined),
+          release: vi.fn(async () => undefined),
         })),
       },
     }) as any;
@@ -99,17 +100,18 @@ describe('execution manifest request to runner boundary', () => {
       },
     ];
     const finish = vi.fn(async () => undefined);
+    const preparedRepositories = repositories.map(repository => ({
+      ...repository,
+      handle: { branch: repository.workingBranch, path: repository.repoRoot, isNewBranch: true },
+      createdByRun: true,
+      original: { branch: repository.baseBranch, head: 'head', status: '', workingBranchExisted: false },
+    }));
     const prepared: PreparedRepositorySet = {
-      repositories: repositories.map(repository => ({
-        ...repository,
-        handle: { branch: repository.workingBranch, path: repository.repoRoot, isNewBranch: true },
-        createdByRun: true,
-        original: { branch: repository.baseBranch, head: 'head', status: '', workingBranchExisted: false },
-      })),
-      primary: undefined as never,
+      repositories: preparedRepositories,
+      primary: preparedRepositories[0],
       finish,
+      release: vi.fn(async () => undefined),
     };
-    prepared.primary = prepared.repositories[0];
     const preparer = { prepare: vi.fn(async () => { events.push('prepared'); return prepared; }) };
     const sandbox = sandboxWith(events);
     const sandboxProvider = providerWith(sandbox, events, 'docker');
@@ -187,6 +189,7 @@ describe('execution manifest request to runner boundary', () => {
       runtimeManager: runtimeManager() as never,
       multiRepositoryPreparer: { prepare: vi.fn(async () => ({
         repositories: preparedRepositories, primary: preparedRepositories[0], finish,
+        release: vi.fn(async () => undefined),
       })) },
     }) as any;
     runner.runStep = vi.fn(async (step: { id: string }) => ({ stepId: step.id, status: 'completed' }));
@@ -279,7 +282,7 @@ describe('execution manifest request to runner boundary', () => {
 function providersForRun(): ProviderBundle {
   const item: BacklogItem = {
     id: '42', title: 'Provider issue', dependsOn: [], state: 'in_progress', executionMode: 'afk',
-    branchName: 'afk/backlog-42', providerRef: 'github:acme/api#42',
+    tags: [], branchName: 'afk/backlog-42', providerRef: 'github:acme/api#42',
   };
   const claim: BacklogClaim = {
     item, claimId: 'claim-42', heartbeat: vi.fn(async () => undefined), release: vi.fn(async () => undefined),
@@ -314,7 +317,7 @@ function agentWith(events: string[]): AgentProvider {
   const execution: AgentExecution = {
     id: 'execution-1', metadata: { provider: 'claude-code', transport: 'process' },
     waitForEvent: vi.fn(async () => null),
-    waitForResult: vi.fn(async () => ({
+    waitForResult: vi.fn(async (): Promise<ExecutionResult> => ({
       version: 1, runId: 'execution-1', status: 'completed', provider: 'test', commits: [],
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' },
     })),

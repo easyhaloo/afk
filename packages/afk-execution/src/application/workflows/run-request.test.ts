@@ -21,7 +21,7 @@ describe('resolveWorkflowRequest', () => {
     const request = resolveWorkflowRequest(
       { backlogId: 'feature/auth', targetBranch: 'release', executionMode: 'batch' },
       { targetBranch: 'develop', trackerTargetBranch: 'trunk', maxRetries: 4, goalBudget: 2_000_000 },
-      { repoRoot: '/repo', projectName: 'org/repo' },
+      { repoRoot: '/repo', projectName: 'org/repo', originalCwd: '/repo' },
     );
 
     expect(request).toMatchObject({

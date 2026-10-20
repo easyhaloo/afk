@@ -137,7 +137,7 @@ describe('NamedBranchStrategy', () => {
   });
 
   it('refuses to replace an existing local branch', async () => {
-    await git.checkoutLocalBranch('feature/existing', 'main');
+    await git.checkoutBranch('feature/existing', 'main');
     await fs.writeFileSync(path.join(repoPath, 'preserve.txt'), 'keep this commit\n');
     await git.add('preserve.txt');
     const { commit } = await git.commit('existing work');

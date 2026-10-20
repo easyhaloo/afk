@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type WebSocket from 'ws';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { closeWebSocket, waitForWebSocketOpen } from './transport.js';
 
 describe('waitForWebSocketOpen', () => {
@@ -21,8 +21,8 @@ describe('closeWebSocket', () => {
   it('waits for close and terminates a peer that ignores the close frame', async () => {
     const socket = new EventEmitter() as EventEmitter & {
       readyState: number;
-      close: ReturnType<typeof vi.fn>;
-      terminate: ReturnType<typeof vi.fn>;
+      close: Mock<[], void>;
+      terminate: Mock<[], void>;
     };
     socket.readyState = 1;
     socket.close = vi.fn();

@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TrackerBacklogProvider } from '../src/backlog/tracker-adapter.js';
 import { ManagementBacklogProvider } from '../src/backlog/management-provider.js';
 import { adoptBacklog } from '@afk/application';
-import type { ClaimLease } from '@afk/application';
-import type { TrackerProvider } from '../src/branches/types.js';
+import type { ClaimLease, ExpiredClaim, TrackerProvider, TrackedIssue, TrackedMR } from '@afk/application';
 
 function tracker(issue: any): TrackerProvider {
   return {
@@ -119,7 +118,7 @@ describe('TrackerBacklogProvider', () => {
       projectId: 'org/repo',
     };
     const t = tracker(issue);
-    t.listMRs = vi.fn(async () => [{
+    t.listMRs = vi.fn(async (): Promise<TrackedMR[]> => [{
       id: 9,
       platform: 'github',
       projectId: 'org/repo',
@@ -129,7 +128,7 @@ describe('TrackerBacklogProvider', () => {
       targetBranch: 'main',
       url: 'https://example/pull/9',
     }]);
-    t.getMR = vi.fn(async () => ({
+    t.getMR = vi.fn(async (): Promise<TrackedMR> => ({
       id: 9,
       platform: 'github',
       projectId: 'org/repo',
@@ -151,11 +150,12 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('creates a child backlog with metadata, provider links, and concrete URLs in its body', async () => {
-    const parent = { id: 7, title: 'PRD', description: '', labels: [], state: 'opened', url: 'https://example/7', projectId: 'org/repo' };
-    const dependency = { id: 6, title: 'Foundation', description: '', labels: [], state: 'opened', url: 'https://example/6', projectId: 'org/repo' };
-    const created = { id: 42, title: 'Child', description: '', labels: [], state: 'opened', url: 'https://example/42', projectId: 'org/repo' };
+    const parent: TrackedIssue = { platform: 'github', id: 7, title: 'PRD', description: '', labels: [], state: 'opened', url: 'https://example/7', projectId: 'org/repo' };
+    const dependency: TrackedIssue = { platform: 'github', id: 6, title: 'Foundation', description: '', labels: [], state: 'opened', url: 'https://example/6', projectId: 'org/repo' };
+    const created: TrackedIssue = { platform: 'github', id: 42, title: 'Child', description: '', labels: [], state: 'opened', url: 'https://example/42', projectId: 'org/repo' };
     const t = tracker(created);
-    t.getIssue = vi.fn(async id => ({ [6]: dependency, [7]: parent, [42]: created }[id]!));
+    const issues: Record<number, TrackedIssue> = { 6: dependency, 7: parent, 42: created };
+    t.getIssue = vi.fn(async (id: number) => issues[id]);
     t.createIssue = vi.fn(async input => {
       created.title = input.title;
       created.description = input.description ?? '';
@@ -182,7 +182,7 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('provisions tracker-native metadata before creating a backlog', async () => {
-    const created = { id: 42, title: 'Item', description: '', labels: [], state: 'opened', url: 'https://example/42', projectId: 'org/repo' };
+    const created: TrackedIssue = { platform: 'github', id: 42, title: 'Item', description: '', labels: [], state: 'opened', url: 'https://example/42', projectId: 'org/repo' };
     const t = tracker(created);
     const ensureBacklogMetadata = vi.fn(async () => {});
     t.ensureBacklogMetadata = ensureBacklogMetadata;
@@ -298,12 +298,12 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('passes the complete canonical predicate to the atomic claim capability', async () => {
-    const dependency = { id: 9, title: 'Dependency', description: '', labels: ['stage::done'], state: 'opened', url: '', projectId: '' };
-    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'depends-on::9'], state: 'opened', url: '', projectId: '' };
+    const dependency: TrackedIssue = { platform: 'github', id: 9, title: 'Dependency', description: '', labels: ['stage::done'], state: 'opened', url: '', projectId: '' };
+    const issue: TrackedIssue = { platform: 'github', id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk', 'depends-on::9'], state: 'opened', url: '', projectId: '' };
     const atomicClaim = vi.fn(async () => { issue.labels = ['stage::afk-in-progress', 'mode::afk', 'depends-on::9']; return true; });
     const t = tracker(issue);
-    t.listIssues = vi.fn(async () => [{ ...issue }, dependency]);
-    t.getIssue = vi.fn(async id => id === 9 ? { ...dependency } : { ...issue });
+    t.listIssues = vi.fn(async () => [{ ...issue }, { ...dependency }]);
+    t.getIssue = vi.fn(async (id: number) => (id === 9 ? { ...dependency } : { ...issue }));
     const provider = new TrackerBacklogProvider(t, { atomicClaim });
     await provider.claim('42', 'worker');
     expect(atomicClaim).toHaveBeenCalledWith('42', 'worker', 'ready', {
@@ -322,8 +322,8 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('allows a parent backlog to run after every tracker child is done', async () => {
-    const parent = { id: 10, title: 'Parent', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
-    const child = { id: 42, title: 'Child', description: '', labels: ['stage::done', 'parent::10'], state: 'opened', url: '', projectId: 'org/repo' };
+    const parent: TrackedIssue = { platform: 'github', id: 10, title: 'Parent', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const child: TrackedIssue = { platform: 'github', id: 42, title: 'Child', description: '', labels: ['stage::done', 'parent::10'], state: 'opened', url: '', projectId: 'org/repo' };
     const t = tracker(parent);
     t.listIssues = vi.fn(async () => [{ ...parent }, { ...child }]);
     const provider = new TrackerBacklogProvider(t, { atomicClaim: vi.fn() });
@@ -338,7 +338,8 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('fetches MR changes once for the whole list instead of once per merge-ready item', async () => {
-    const mergeReady = (id: number) => ({
+    const mergeReady = (id: number): TrackedIssue => ({
+      platform: 'github',
       id, title: `Item ${id}`, description: '',
       labels: ['stage::merge-ready', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo',
     });
@@ -566,7 +567,7 @@ describe('TrackerBacklogProvider', () => {
   });
 
   it('blocks and releases a fallback lease when post-transition re-read throws', async () => {
-    const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
+    const issue: TrackedIssue = { platform: 'github', id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
     const t = tracker(issue);
     let reads = 0;
     t.getIssue = vi.fn(async () => {
@@ -586,10 +587,18 @@ describe('TrackerBacklogProvider', () => {
   it('blocks and routes an expired fallback lease to the exact provider-qualified backlog', async () => {
     const issue = { id: 42, title: 'Item', description: '', labels: ['stage::ready-for-issues', 'mode::afk'], state: 'opened', url: '', projectId: 'org/repo' };
     let recoveryKey: string | undefined;
-    const claimLockFactory = vi.fn((onExpiredClaim: (key: string) => Promise<boolean>) => ({
+    const expiredClaim: ExpiredClaim = {
+      claimId: 'expired-claim',
+      owner: 'worker-a',
+      createdAt: '2026-09-17T00:00:00.000Z',
+      heartbeatAt: '2026-09-17T00:00:00.000Z',
+      expiresAt: '2026-09-17T01:00:00.000Z',
+      ttlMs: 3_600_000,
+    };
+    const claimLockFactory = vi.fn((onExpiredClaim: (key: string, claim: ExpiredClaim) => Promise<boolean>) => ({
       acquire: vi.fn(async ({ key }: { key: string }): Promise<ClaimLease | null> => {
         recoveryKey = key;
-        await onExpiredClaim(key);
+        await onExpiredClaim(key, expiredClaim);
         return null;
       }),
     }));

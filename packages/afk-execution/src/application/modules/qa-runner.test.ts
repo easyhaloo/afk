@@ -4,6 +4,8 @@ import { createAgentProvider, registerAgentProvider } from '../../domain/agents/
 import { TrackerBacklogProvider } from '@afk/infrastructure';
 import { parseReworkRecord } from '@afk/application';
 import type { TrackedIssue, TrackerProvider } from '@afk/application';
+import type { ChangeRequest } from '@afk/infrastructure';
+import type { AgentCapability, AgentExecutionMetadata, ExecutionResult } from '../../domain/agents/types.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,8 +47,10 @@ function fixture() {
     resolveRework: vi.fn(async () => {}),
   };
   const changes = {
-    findForBacklog: vi.fn(async () => null),
-    create: vi.fn(async ({ sourceBranch, targetBranch }: any) => ({ id: 'pr-60', sourceBranch, targetBranch, url: 'https://example.test/pr/60' })),
+    findForBacklog: vi.fn(async (): Promise<ChangeRequest | null> => null),
+    create: vi.fn(async ({ sourceBranch, targetBranch }: { sourceBranch: string; targetBranch: string }): Promise<ChangeRequest> => ({
+      id: 'pr-60', state: 'open', sourceBranch, targetBranch, url: 'https://example.test/pr/60',
+    })),
     merge: vi.fn(async () => {}),
   };
   const branches = {
@@ -55,11 +59,14 @@ function fixture() {
     push: vi.fn(async () => {}),
     cleanup: vi.fn(async () => {}),
   };
+  const executionMetadata: AgentExecutionMetadata = { provider: 'claude-code', transport: 'process' };
+  let telemetryPath: string | undefined;
   const execution = {
     id: 'execution-60',
-    metadata: { provider: 'claude-code', transport: 'process' },
+    metadata: executionMetadata,
+    telemetryPath,
     waitForEvent: vi.fn(async () => null),
-    waitForResult: vi.fn(async () => ({
+    waitForResult: vi.fn(async (): Promise<ExecutionResult> => ({
       version: 1,
       runId: 'execution-60',
       status: 'completed',
@@ -92,7 +99,7 @@ function fixture() {
 function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttempts = 3) {
   const issue: TrackedIssue = { id: 60, platform, title: 'search mode', description: 'support /s', labels: ['stage::qa', 'mode::afk'], state: 'opened', projectId: 'org/repo', url: '' };
   const comments: Array<{ id: string; body: string }> = [];
-  const tracker = {
+  const tracker: TrackerProvider = {
     platform, projectId: 'org/repo',
     getIssue: vi.fn(async () => ({ ...issue, labels: [...issue.labels] })),
     listIssues: vi.fn(async () => [issue]),
@@ -105,10 +112,31 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
     updateIssueComment: vi.fn(async (_id, commentId, body) => {
       comments.find(comment => comment.id === commentId)!.body = body;
     }),
-  } satisfies Partial<TrackerProvider>;
+    // The rest of the tracker port is not reachable from the rework path.
+    createIssue: vi.fn(async () => 0),
+    updateIssue: vi.fn(async () => {}),
+    addLabel: vi.fn(async () => {}),
+    removeLabel: vi.fn(async () => {}),
+    linkIssues: vi.fn(async () => {}),
+    getMR: vi.fn(async () => ({ id: 0, platform, title: '', state: 'opened' as const, sourceBranch: '', targetBranch: '', url: '', projectId: 'org/repo' })),
+    isMRLinkedToIssue: vi.fn(async () => false),
+    createMR: vi.fn(async () => 0),
+    mergeMR: vi.fn(async () => {}),
+    approveMR: vi.fn(async () => {}),
+    closeMR: vi.fn(async () => {}),
+    reopenMR: vi.fn(async () => {}),
+    listProjects: vi.fn(async () => []),
+    getBranches: vi.fn(async () => []),
+    getTags: vi.fn(async () => []),
+    getRecentCommits: vi.fn(async () => []),
+    parseAC: vi.fn(() => ({ items: [], source: 'none' as const })),
+    getRetryCount: vi.fn(() => 0),
+    detectTargetBranch: vi.fn(async () => 'main'),
+    uploadArtifacts: vi.fn(async () => ''),
+  };
   const createRunner = () => {
     const f = fixture();
-    const backlog = new TrackerBacklogProvider(tracker as TrackerProvider, { atomicClaim: vi.fn() });
+    const backlog = new TrackerBacklogProvider(tracker, { atomicClaim: vi.fn() });
     const transition = vi.spyOn(backlog, 'transition');
     const setExecutionMode = vi.spyOn(backlog, 'setExecutionMode');
     const createRework = vi.spyOn(backlog, 'createRework');
@@ -136,7 +164,7 @@ describe('QARunner execution boundary', () => {
     const original = createAgentProvider('codex');
     const codex = {
       name: 'codex' as const,
-      capabilities: new Set(),
+      capabilities: new Set<AgentCapability>(),
       createExecution: vi.fn(),
     };
     registerAgentProvider(codex);
@@ -151,7 +179,9 @@ describe('QARunner execution boundary', () => {
 
   it('runs batch QA through SandboxProvider without tmux readiness calls', async () => {
     const f = fixture();
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main', url: 'https://example.test/pr/60',
+    });
     const tmux = { createSession: vi.fn(), waitForPrompt: vi.fn(), sendPrompt: vi.fn(), waitForSignal: vi.fn() };
     const runtime = {
       kind: 'codex',
@@ -221,7 +251,9 @@ describe('QARunner execution boundary', () => {
 
   it('passes tmux only to the sandbox for interactive QA', async () => {
     const f = fixture();
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main', url: 'https://example.test/pr/60',
+    });
     const tmux = {};
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,
@@ -258,7 +290,9 @@ describe('QARunner execution boundary', () => {
       provider: 'codex', transport: 'app-server', auth: 'chatgpt', modelProvider: 'openai',
       endpointKind: 'stdio', threadId: 'thread-60',
     };
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main', url: 'https://example.test/pr/60',
+    });
     const runtime = {
       start: vi.fn(async () => {}),
       heartbeat: vi.fn(async () => ({})),
@@ -601,7 +635,9 @@ describe('QARunner execution boundary', () => {
     const f = fixture();
     const child = { ...(await f.providers.backlog.get('60')), parentId: '10' };
     f.providers.backlog.get.mockResolvedValue(child);
-    f.changes.findForBacklog.mockResolvedValue({ id: 'pr-60', url: 'https://example.test/pr/60' });
+    f.changes.findForBacklog.mockResolvedValue({
+      id: 'pr-60', state: 'open', sourceBranch: 'qa-60', targetBranch: 'main', url: 'https://example.test/pr/60',
+    });
     const mergeBranch = vi.fn(async () => {});
     const runner = new QARunner(f.providers, config, {
       sandboxProvider: f.sandboxProvider,

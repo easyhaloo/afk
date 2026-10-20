@@ -48,7 +48,9 @@ describe('global provider catalog factory', () => {
         async listIssues() { return []; },
       }),
     });
-    expect((await catalogs[0].listProjects())[0].projectKey).toBe('git.corp/team/api');
+    const projects = await catalogs[0].listProjects();
+    const items = Array.isArray(projects) ? projects : projects.items;
+    expect(items[0].projectKey).toBe('git.corp/team/api');
   });
 
   it('fails with an authentication error when the requested platform has no credentials', () => {

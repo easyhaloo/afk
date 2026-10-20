@@ -1,5 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GitHubProviderCatalog, GitLabProviderCatalog } from '../src/provider/catalogs.js';
+import type { CatalogPageResult } from '@afk/application';
+
+/**
+ * Read a catalog page.
+ *
+ * A page is either the items themselves or, when a later page failed, the
+ * items collected so far plus the error.  Production reads both shapes this
+ * way, and so does this test.
+ */
+function pageItems<T>(page: CatalogPageResult<T>): T[] {
+  return Array.isArray(page) ? page : page.items;
+}
+
+/** The failed shape of a catalog page: the items so far plus the error. */
+function failedPage<T>(page: CatalogPageResult<T>): { items: T[]; error: unknown } {
+  if (Array.isArray(page)) throw new Error('expected the catalog page to have failed');
+  return page;
+}
 
 describe('provider catalogs', () => {
   it('enumerates GitHub repositories and issues across every page', async () => {
@@ -15,10 +33,14 @@ describe('provider catalogs', () => {
     ] : page === 2 ? [
       { number: 3, title: 'third', body: 'body', labels: [], state: 'closed' as const, webUrl: 'https://example/3' },
     ] : []);
-    const catalog = new GitHubProviderCatalog({ listProjectsPage, listIssuesPage }, 2);
+    const catalog = new GitHubProviderCatalog({
+      listProjectsPage,
+      listIssuesPage,
+      listIssuesByOwnerPage: vi.fn(async () => ({ items: [], totalCount: 0 })),
+    }, 2);
 
-    const projects = await catalog.listProjects();
-    const issues = await catalog.listIssues(projects[0]);
+    const projects = pageItems(await catalog.listProjects());
+    const issues = pageItems(await catalog.listIssues(projects[0]));
 
     expect(projects.map(project => project.projectKey)).toEqual(['acme/api', 'acme/web', 'tools/cli']);
     expect(issues.map(issue => issue.issueNumber)).toEqual([1, 3]);
@@ -33,10 +55,14 @@ describe('provider catalogs', () => {
     const listIssuesPage = vi.fn(async (_projectId: string, page: number) => page === 1 ? [
       { iid: 4, title: 'first', description: null, labels: ['stage::rework', 'mode::afk'], state: 'opened' as const, webUrl: 'https://gitlab.corp/platform/api/-/issues/4' },
     ] : []);
-    const catalog = new GitLabProviderCatalog('gitlab.corp', { listProjectsPage, listIssuesPage }, 100);
+    const catalog = new GitLabProviderCatalog('gitlab.corp', {
+      listProjectsPage,
+      listIssuesPage,
+      listIssuesAcrossScopePage: vi.fn(async () => []),
+    }, 100);
 
-    const projects = await catalog.listProjects();
-    const issues = await catalog.listIssues(projects[0]);
+    const projects = pageItems(await catalog.listProjects());
+    const issues = pageItems(await catalog.listIssues(projects[0]));
 
     expect(projects).toEqual([expect.objectContaining({
       platform: 'gitlab',
@@ -62,8 +88,8 @@ describe('provider catalogs', () => {
       listIssuesByOwnerPage: vi.fn(async () => ({ items: [], totalCount: 0 })),
     };
     const catalog = new GitHubProviderCatalog(client, 1);
-    const projects = await catalog.listProjects();
-    const issues = await catalog.listIssues(projects.items[0]);
+    const projects = failedPage(await catalog.listProjects());
+    const issues = failedPage(await catalog.listIssues(projects.items[0]));
 
     expect(projects.items.map(project => project.projectKey)).toEqual(['acme/api']);
     expect(projects.error).toMatchObject({ message: 'HTTP 503 projects' });
@@ -98,7 +124,7 @@ describe('provider catalogs', () => {
       { platform: 'github' as const, projectKey: 'tools/cli', providerProjectId: '2', name: 'cli' },
     ];
 
-    const scoped = await catalog.listIssuesAcrossScope(projects);
+    const scoped = pageItems(await catalog.listIssuesAcrossScope(projects));
 
     expect(listIssuesByOwnerPage).toHaveBeenCalledWith('acme', 1, 2);
     expect(listIssuesByOwnerPage).toHaveBeenCalledWith('tools', 1, 2);
@@ -119,7 +145,7 @@ describe('provider catalogs', () => {
     ]);
 
     expect(Array.isArray(scoped)).toBe(false);
-    expect((scoped as { error: Error }).error).toMatchObject({ message: /exceeds 1000 matches/ });
+    expect(failedPage(scoped).error).toMatchObject({ message: /exceeds 1000 matches/ });
   });
 
   it('lists the whole GitLab scope from the global issue feed', async () => {
@@ -133,9 +159,9 @@ describe('provider catalogs', () => {
       listIssuesAcrossScopePage,
     }, 100);
 
-    const scoped = await catalog.listIssuesAcrossScope([
+    const scoped = pageItems(await catalog.listIssuesAcrossScope([
       { platform: 'gitlab' as const, projectKey: 'gitlab.corp/platform/api', providerHost: 'gitlab.corp', providerProjectId: '21', name: 'api' },
-    ]);
+    ]));
 
     expect(listIssuesAcrossScopePage).toHaveBeenCalledWith(1, 100);
     expect(scoped.map(entry => `${entry.project.projectKey}#${entry.issue.issueNumber}`)).toEqual(['gitlab.corp/platform/api#4']);

@@ -50,7 +50,6 @@ describe('LocalSandboxProvider', () => {
       worktreePath: process.cwd(),
       session: 'interactive-test',
       executionMode: 'interactive',
-      metadata,
       tmux: tmux as never,
     });
 
@@ -156,6 +155,7 @@ describe('LocalSandboxProvider', () => {
       generation: 2,
       signalType: 'goal_complete',
       executionMode: 'interactive',
+      metadata,
     });
 
     await expect(import('@afk/infrastructure').then(({ readSignal }) => readSignal(worktreePath))).resolves.toBeNull();

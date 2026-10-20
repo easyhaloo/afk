@@ -24,8 +24,20 @@ describe('collectAgentTelemetry', () => {
 
   afterEach(() => { rmSync(directory, { recursive: true, force: true }); });
 
-  function execution(provider: AgentExecution['metadata']['provider'] = 'claude-code'): AgentExecution {
-    return { id: 'execution-1', metadata: { provider, transport: 'process' }, telemetryPath: transcriptPath } as AgentExecution;
+  /** The execution the harness reports, plus the transcript path it writes. */
+  function execution(provider: AgentExecution['metadata']['provider'] = 'claude-code'): AgentExecution & { telemetryPath?: string } {
+    return {
+      id: 'execution-1',
+      metadata: { provider, transport: 'process' },
+      waitForEvent: async () => null,
+      waitForResult: async () => result,
+      interrupt: async () => {},
+      kill: async () => {},
+      captureOutput: async () => '',
+      captureSession: async () => undefined,
+      resume: async () => { throw new Error('unsupported'); },
+      telemetryPath: transcriptPath,
+    };
   }
 
   const result: ExecutionResult = { version: 1, runId: 'execution-1', status: 'completed', provider: 'local', commits: [] };

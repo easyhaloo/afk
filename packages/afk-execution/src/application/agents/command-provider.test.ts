@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClaudeCodeProvider } from '../../domain/agents/claude-code';
-import type { AgentProvider } from '../../domain/agents/types';
+import type { AgentCapability, AgentExecution, AgentProvider } from '../../domain/agents/types';
 import { requireCommandAgentProvider } from './command-provider.js';
 
 describe('requireCommandAgentProvider', () => {
@@ -11,7 +11,21 @@ describe('requireCommandAgentProvider', () => {
   });
 
   it('rejects execution-only providers at the legacy command boundary', () => {
-    const provider = { name: 'codex', capabilities: new Set(), createExecution: async () => ({}) } as AgentProvider;
+    const provider: AgentProvider = {
+      name: 'codex',
+      capabilities: new Set<AgentCapability>(),
+      createExecution: async (): Promise<AgentExecution> => ({
+        id: 'execution-1',
+        metadata: { provider: 'codex', transport: 'process' },
+        waitForEvent: async () => null,
+        waitForResult: async () => ({ version: 1, runId: 'run-1', status: 'completed', provider: 'codex', commits: [] }),
+        interrupt: async () => {},
+        kill: async () => {},
+        captureOutput: async () => '',
+        captureSession: async () => undefined,
+        resume: async () => { throw new Error('unsupported'); },
+      }),
+    };
     expect(() => requireCommandAgentProvider(provider)).toThrow("agent provider 'codex' does not support command execution");
   });
 });

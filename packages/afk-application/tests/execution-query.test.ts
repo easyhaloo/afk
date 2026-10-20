@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@afk/core';
 import {
   loadWorkItemExecution, queryWorkItemExecutions, replayRun, explainRun, loadRunTimeline, listExecutionRuns, projectAgentUsage,
-  type WorkItemExecutionSummary, type RunEventQueryPort,
+  type WorkItemExecutionSummary, type WorkItemExecution, type ExecutionTimeline, type RunEventQueryPort,
 } from '../src/index.js';
 
 const context = { traceId: 'trace', runId: 'run-1', workItemId: 'work-1', profileId: 'profile', attempt: 1, actor: { kind: 'system' as const, id: 'test' } };
@@ -40,7 +40,7 @@ describe('execution queries', () => {
   });
 
   it('hands verified timeline to the projection port and reports unreadable streams', async () => {
-    const project = (timeline: { runId: string; integrity: { valid: boolean; reason?: string }; events: readonly RunEvent[] }) => ({
+    const project = (timeline: ExecutionTimeline): WorkItemExecution => ({
       summary: { runId: timeline.runId, executionId: timeline.runId, workItemId: 'work-1', status: 'queued' as const }, timeline,
     });
     const result = await loadWorkItemExecution('run-1', { events: events(), projection: { project } });

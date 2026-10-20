@@ -28,6 +28,10 @@ Node 内建模块。该守卫同时禁止泛型 record 和遗留 client-factory 
 把 `tests/` 排除在外，没有这个工程的话，测试或 E2E 脚本里的断链导入对构建
 是不可见的。
 
+每个 package 都有同一个工程，根 typecheck 会把它们一并跑。package 自己的
+`tsconfig.json` 把测试文件排除在外，所以一个已经对不上契约的 mock 仍会「通过」——
+而 mock 与契约对不上的测试，是不可能失败的测试。
+
 ## 范围与命令
 
 AFK 执行外部规划器已经拆分好的 backlog 工作项，不负责把工作项再拆分成更小的任务。创建 backlog 工作项属于管理操作（`afk backlog create`），不在执行流水线内。

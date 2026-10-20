@@ -232,6 +232,7 @@ describe('probeCodexReadiness', () => {
 
     const result = await probeCodexReadiness(runtime, failingRun);
     expect(result.ready).toBe(false);
+    if (result.ready) throw new Error('expected the readiness probe to report not ready');
     expect(result.message).toContain('live model probe');
     expect(result.message).not.toBe('Codex authentication is not ready');
   });

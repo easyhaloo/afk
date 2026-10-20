@@ -14,7 +14,7 @@ const observer = { record: vi.fn(async () => undefined) } as unknown as RunObser
 
 const item: BacklogItem = {
   id: '42', title: 'Item', dependsOn: [], state: 'in_progress', executionMode: 'afk',
-  branchName: 'afk/backlog-42', providerRef: 'github:org/repo#42',
+  tags: [], branchName: 'afk/backlog-42', providerRef: 'github:org/repo#42',
 };
 
 /**

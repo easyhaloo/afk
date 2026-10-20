@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { clauseMatches, isStepRunnable, selectRunnable } from './runnability.js';
 import type { StepResult } from './types.js';
+import type { RunnableStep } from './runnability.js';
 
 const OUTCOMES = ['completed', 'failed', 'aborted', 'timed_out'] as const;
 type Outcome = typeof OUTCOMES[number];
@@ -75,7 +76,7 @@ describe('runnability rule', () => {
   describe('selecting a runnable group', () => {
     it('keeps declaration order and drops the steps that cannot run', () => {
       const results = { a: result('a', 'completed'), b: result('b', 'failed') };
-      const steps = [
+      const steps: RunnableStep[] = [
         { id: 'a', dependsOn: [] },
         { id: 'b', dependsOn: [] },
         { id: 'c', dependsOn: ['b'] },

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type MockedFunction } from 'vitest';
 import {
   adoptBacklog,
   confirmBacklogMerge,
@@ -7,7 +7,7 @@ import {
   retryBacklog,
 } from '../src/index.js';
 import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from '../src/index.js';
-import { parseReworkRecord, renderReworkRecord, type ReworkRecord } from '../src/index.js';
+import { parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord } from '../src/index.js';
 import { InMemoryBacklogProvider, ManagementBacklogProvider } from '@afk/infrastructure';
 
 describe('backlog commands', () => {
@@ -199,9 +199,9 @@ function backlogItem(overrides: Partial<BacklogItem> = {}): BacklogItem {
 }
 
 function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
-  transition: ReturnType<typeof vi.fn>;
-  setExecutionMode: ReturnType<typeof vi.fn>;
-  createRework: ReturnType<typeof vi.fn>;
+  transition: MockedFunction<QABacklogProvider['transition']>;
+  setExecutionMode: MockedFunction<QABacklogProvider['setExecutionMode']>;
+  createRework: MockedFunction<QABacklogProvider['createRework']>;
 } {
   const current = { ...item };
   return {
@@ -218,7 +218,7 @@ function lifecycleProvider(item: BacklogItem): QABacklogProvider & {
     setExecutionMode: vi.fn(async (_id: string, mode: BacklogItem['executionMode']) => {
       current.executionMode = mode;
     }),
-    createRework: vi.fn(async (_id: string, input) => {
+    createRework: vi.fn(async (_id: string, input: NewReworkRecord): Promise<ReworkRecord> => {
       current.state = 'rework';
       current.executionMode = 'afk';
       return {

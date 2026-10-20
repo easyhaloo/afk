@@ -34,6 +34,11 @@ package importing outside its own root is.
 The root `tsconfig.json` excludes `tests/`, so without that project a broken
 import in a test or an E2E script is invisible to the build.
 
+Every package has the same project, and the root typecheck runs them. A
+package's own `tsconfig.json` excludes its test files, so a mock that had
+stopped matching the interface it stands in for would otherwise keep
+passing — and a test whose mock does not fit the contract cannot fail.
+
 ## Scope and command surface
 
 AFK executes backlog items that were already decomposed by an external

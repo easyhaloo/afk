@@ -4,12 +4,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { HandoffCoordinator } from './handoff.js';
 import type { BacklogProvider } from '@afk/application';
+import type { Signal } from '@afk/infrastructure';
 import type { TmuxClient } from '../../infrastructure/tmux/tmux.js';
 import type { Watchdog } from './watchdog.js';
 import type { WorkflowConfig } from '../../infrastructure/config/manager.js';
 
 /** Fake tmux: every method is a vi.fn with sane defaults, overridable per-test. */
-function makeTmux(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
+function makeTmux(overrides: Partial<TmuxClient> = {}) {
   return {
     killSession: vi.fn(async () => {}),
     closeSession: vi.fn(async () => {}),
@@ -39,9 +40,19 @@ function makeConfig(): WorkflowConfig {
     promptTimeout: 30_000,
     handoffTimeout: 60_000,
     maxRetries: 2,
+    maxSelfIterations: 2,
+    maxQaReworkAttempts: 3,
     targetBranch: 'main',
     trackerTargetBranch: 'main',
     goalBudget: 10_000_000,
+    agents: {
+      codex: {
+        transport: 'auto',
+        auth: 'auto',
+        provider: 'auto',
+        appServer: { startupTimeoutMs: 30_000 },
+      },
+    },
   };
 }
 
@@ -78,7 +89,7 @@ describe('HandoffCoordinator', () => {
   it('auto success: writes doc, restarts session, re-arms watchdog', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'implemented AC 1-3' })),
+      waitForSignal: vi.fn(async (): Promise<Signal | null> => ({ type: 'handoff_ready', timestamp: '2026-08-05T00:00:00.000Z', summary: 'implemented AC 1-3' })),
       capturePane: vi.fn(async () => 'line1\nline2'),
       waitForPrompt: vi.fn(async () => true),
     });
@@ -103,7 +114,7 @@ describe('HandoffCoordinator', () => {
   it('auto relaunch failure: flips to manual (blocked + hitl, session killed), returns terminated', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'partial work' })),
+      waitForSignal: vi.fn(async (): Promise<Signal | null> => ({ type: 'handoff_ready', timestamp: '2026-08-05T00:00:00.000Z', summary: 'partial work' })),
       waitForPrompt: vi.fn(async () => false), // relaunch: claude never ready
     });
     const watchdog = makeWatchdog();
@@ -122,7 +133,7 @@ describe('HandoffCoordinator', () => {
   it('auto no-summary (placeholder "<总结>"): doc falls back to snapshot, no summary', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: '<总结>' })),
+      waitForSignal: vi.fn(async (): Promise<Signal | null> => ({ type: 'handoff_ready', timestamp: '2026-08-05T00:00:00.000Z', summary: '<总结>' })),
       capturePane: vi.fn(async () => 'snapshot-line'),
       waitForPrompt: vi.fn(async () => true),
     });
@@ -141,7 +152,7 @@ describe('HandoffCoordinator', () => {
   it('terminal/budget: writes the terminal doc, blocks the backlog, no re-arm', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'final summary' })),
+      waitForSignal: vi.fn(async (): Promise<Signal | null> => ({ type: 'handoff_ready', timestamp: '2026-08-05T00:00:00.000Z', summary: 'final summary' })),
       capturePane: vi.fn(async () => 'final-snapshot'),
     });
     const watchdog = makeWatchdog();
@@ -165,7 +176,7 @@ describe('HandoffCoordinator', () => {
   it('terminal/tokens: surfaces the token-budget reason text', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
-      waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 's' })),
+      waitForSignal: vi.fn(async (): Promise<Signal | null> => ({ type: 'handoff_ready', timestamp: '2026-08-05T00:00:00.000Z', summary: 's' })),
       capturePane: vi.fn(async () => 'snap'),
     });
     const coord = new HandoffCoordinator(backlog, tmux, makeWatchdog(), makeConfig());

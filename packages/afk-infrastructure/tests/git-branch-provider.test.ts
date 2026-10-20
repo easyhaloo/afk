@@ -1,10 +1,11 @@
 import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { Stats } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { simpleGit } from 'simple-git';
 import { GitBranchProvider } from '../src/git/branches/git-provider.js';
-import type { BacklogItem } from '../src/index.js';
+import type { BacklogItem } from '@afk/application';
 import { _clearPreparedWorktreesForTest } from '../src/branches/base.js';
 
 const cleanupPaths: string[] = [];
@@ -57,7 +58,7 @@ describe('GitBranchProvider', () => {
     await publisher.clone(remotePath, publisherPath);
     await publisher.addConfig('user.email', 'test@example.com');
     await publisher.addConfig('user.name', 'Test');
-    await publisher.checkoutLocalBranch('afk/backlog-42', 'origin/main');
+    await publisher.checkoutBranch('afk/backlog-42', 'origin/main');
     await writeFile(join(publisherPath, 'child-result.txt'), 'merged child result\n');
     await publisher.add('child-result.txt');
     const { commit } = await publisher.commit('child result');
@@ -74,7 +75,7 @@ describe('GitBranchProvider', () => {
   it('reuses an existing local backlog branch after a prior interrupted run', async () => {
     const { repoPath } = await repository();
     const git = simpleGit(repoPath);
-    await git.checkoutLocalBranch('afk/backlog-42', 'main');
+    await git.checkoutBranch('afk/backlog-42', 'main');
     await writeFile(join(repoPath, 'interrupted-work.txt'), 'preserve this work\n');
     await git.add('interrupted-work.txt');
     await git.commit('interrupted work');
@@ -96,7 +97,7 @@ describe('GitBranchProvider', () => {
     await publisher.clone(remotePath, publisherPath);
     await publisher.addConfig('user.email', 'test@example.com');
     await publisher.addConfig('user.name', 'Test');
-    await publisher.checkoutLocalBranch('afk/backlog-42', 'origin/main');
+    await publisher.checkoutBranch('afk/backlog-42', 'origin/main');
     await writeFile(join(publisherPath, 'first-child.txt'), 'first child\n');
     await publisher.add('first-child.txt');
     await publisher.commit('first child');
@@ -131,7 +132,7 @@ describe('GitBranchProvider', () => {
     await publisher.clone(remotePath, publisherPath);
     await publisher.addConfig('user.email', 'test@example.com');
     await publisher.addConfig('user.name', 'Test');
-    await publisher.checkoutLocalBranch('afk/backlog-42', 'origin/main');
+    await publisher.checkoutBranch('afk/backlog-42', 'origin/main');
     await writeFile(join(publisherPath, 'parent-result.txt'), 'parent baseline\n');
     await publisher.add('parent-result.txt');
     await publisher.commit('parent baseline');
@@ -154,7 +155,7 @@ describe('GitBranchProvider', () => {
     const provider = new GitBranchProvider(repoPath);
     const handle = await provider.createVerificationWorktree(item(), 'main');
 
-    await expect(lstat(join(handle.worktreePath, 'node_modules'))).resolves.toSatisfy(stat => stat.isSymbolicLink());
+    await expect(lstat(join(handle.worktreePath, 'node_modules'))).resolves.toSatisfy(stat => stat instanceof Stats && stat.isSymbolicLink());
     await expect(readFile(join(handle.worktreePath, 'node_modules', 'marker.txt'), 'utf8')).resolves.toBe('shared\n');
     await writeFile(join(handle.worktreePath, 'fixture.txt'), 'fixture\n');
     await provider.commit(handle.worktreePath, 'verify fixture');

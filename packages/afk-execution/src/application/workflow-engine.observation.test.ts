@@ -4,7 +4,7 @@ import { WorkflowRunner } from './workflow-engine.js';
 import { getLogContext } from '@afk/infrastructure';
 import type { RunObserver } from '../observability/run-observer.js';
 import { RunObserver as DurableRunObserver } from '../observability/run-observer.js';
-import { JsonlEventStore } from '../../../afk-infrastructure/src/observability';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import type { ObservationContext, RunEventData } from '@afk/core';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';

@@ -10,8 +10,8 @@ describe('LifecycleDispatcher', () => {
   it('runs typed phases in deterministic order and cleanup in reverse order', async () => {
     const calls: string[] = [];
     const dispatcher = new LifecycleDispatcher([
-      { name: 'b', order: 20, onBeforeAgent: async () => calls.push('b:before'), onCleanup: async () => calls.push('b:cleanup') },
-      { name: 'a', order: 10, onBeforeAgent: async () => calls.push('a:before'), onCleanup: async () => calls.push('a:cleanup') },
+      { name: 'b', order: 20, onBeforeAgent: async () => { calls.push('b:before'); }, onCleanup: async () => { calls.push('b:cleanup'); } },
+      { name: 'a', order: 10, onBeforeAgent: async () => { calls.push('a:before'); }, onCleanup: async () => { calls.push('a:cleanup'); } },
     ]);
     await dispatcher.run('before-agent', context);
     await dispatcher.run('cleanup', context);

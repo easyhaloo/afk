@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadWorkItemExecution, replayRun } from '@afk/application';
 import { executeWorkItem, reconcileWorkItemMerge, type ExecuteWorkItemDependencies } from './execute-work-item.js';
+import type { RunnerOptions, WorkflowRunResult } from '../workflow-engine.js';
 import { encodeWorkItemIdForPath, type BacklogItem } from '@afk/application';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
+import type { ChangeRequest } from '@afk/infrastructure';
 import { RunObserver } from '../../observability/run-observer.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
 import { QARunner } from '../modules/qa-runner.js';
@@ -18,6 +20,14 @@ const item: BacklogItem = {
   managed: true, executionEligible: true, title: 'Implement', dependsOn: [],
   state: 'ready', executionMode: 'afk', tags: [], branchName: 'afk/42', providerRef: workItemId,
 };
+/** The provider change request the tracker returns for this backlog. */
+function changeRequest(over: Partial<ChangeRequest> = {}): ChangeRequest {
+  return {
+    id: '5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main',
+    url: 'https://github.com/acme/api/pull/5', ...over,
+  };
+}
+
 let directory: string;
 afterEach(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
@@ -26,11 +36,15 @@ async function setup(overrides: Partial<BacklogItem> = {}) {
   const current = { ...item, ...overrides };
   const get = vi.fn(async (id: string) => id === '42' ? current : { ...item, id, state: 'done' as const });
   const isRunnable = vi.fn(async () => true);
-  const run = vi.fn(async () => { current.state = 'verification'; return { success: true }; });
+  const run = vi.fn(async (_options: RunnerOptions): Promise<WorkflowRunResult> => {
+    current.state = 'verification';
+    return { success: true };
+  });
   const process = vi.fn(async () => { current.state = 'merge_ready'; return { success: true, autoMerged: false, mrUrl: 'https://github.com/acme/api/pull/5' }; });
   const changes = {
-    findForBacklog: vi.fn(async () => current.state === 'merge_ready' || current.state === 'done' ? {
-      id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open',
+    get: vi.fn(async (id: string): Promise<ChangeRequest> => changeRequest({ id })),
+    findForBacklog: vi.fn(async (): Promise<ChangeRequest | null> => current.state === 'merge_ready' || current.state === 'done' ? {
+      ...changeRequest({ state: 'open' }),
     } : null),
     verifyIssueAssociation: vi.fn(async () => undefined),
   };
@@ -95,12 +109,12 @@ describe('executeWorkItem', () => {
     context.request.targetBranch = 'main';
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn(async (_id: string): Promise<ChangeRequest> => changeRequest({ state: 'open' }));
     expect((await executeWorkItem(input, deps)).status).toBe('merge_ready');
     current.workItemId = undefined;
     await expect(reconcileWorkItemMerge(input, deps)).resolves.toMatchObject({ status: 'merge_ready' });
     expect(context.providers.backlog.transition).not.toHaveBeenCalled();
-    changes.get.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' });
+    changes.get.mockResolvedValue(changeRequest());
     await expect(reconcileWorkItemMerge(input, deps)).resolves.toMatchObject({ status: 'done' });
     await expect(reconcileWorkItemMerge(input, deps)).resolves.toMatchObject({ status: 'done' });
     const result = await deps.loadExecution('attempt-1');
@@ -119,9 +133,9 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn();
     deps.createContext = vi.fn(async () => context);
     await executeWorkItem(input, deps);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/other', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn(async (_id: string): Promise<ChangeRequest> => changeRequest({ url: 'https://github.com/acme/api/pull/other' }));
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/identity/);
-    changes.get.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' });
+    changes.get.mockResolvedValue(changeRequest());
     changes.verifyIssueAssociation.mockRejectedValueOnce(new Error('not linked'));
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow('not linked');
     expect(context.providers.backlog.transition).not.toHaveBeenCalled();
@@ -138,7 +152,7 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
     await executeWorkItem(input, deps);
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn(async (_id: string): Promise<ChangeRequest> => changeRequest());
     deps.recordAudit = vi.fn(async () => { throw new Error('audit unavailable'); });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow('audit unavailable');
     expect((await deps.loadExecution('attempt-1')).summary.status).toBe('awaiting_merge');
@@ -157,7 +171,7 @@ describe('executeWorkItem', () => {
     context.providers.backlog.transition = vi.fn(async (_id, state) => { current.state = state; });
     deps.createContext = vi.fn(async () => context);
     await observer.record({ traceId: 'attempt-1', runId: 'attempt-1', workItemId, profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'qa' } }, { kind: 'qa.passed' });
-    changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
+    changes.get = vi.fn(async (_id: string): Promise<ChangeRequest> => changeRequest());
     const journalDirectory = join(directory, '.afk', 'executions');
     await mkdir(journalDirectory, { recursive: true });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/awaiting a verified root PR merge/);
@@ -179,9 +193,9 @@ describe('executeWorkItem', () => {
     context.providers.backlog.setExecutionMode = vi.fn();
     deps.createContext = vi.fn(async () => context);
     await observer.record({ traceId: 'attempt-1', runId: 'attempt-1', workItemId, profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'qa' } }, { kind: 'qa.passed' });
-    const change = { id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' as const, sourceBranch: 'afk/42-qa', targetBranch: 'main' };
+    const change = changeRequest({ state: 'open' });
     changes.findForBacklog.mockResolvedValue(change);
-    changes.get = vi.fn(async () => change);
+    changes.get = vi.fn(async (_id: string): Promise<ChangeRequest> => change);
     const journalDirectory = join(directory, '.afk', 'executions');
     await mkdir(journalDirectory, { recursive: true });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/awaiting a verified root PR merge/);
@@ -197,9 +211,11 @@ describe('executeWorkItem', () => {
     const store = new JsonlEventStore({ root: join(directory, 'events') });
     const observer = new RunObserver({ events: store });
     deps.recordAudit = (context, data) => observer.record(context, data);
-    run.mockImplementation(async (options: { observationRunId: string; observationWorkItemId: string }) => {
-      const context = { traceId: options.observationRunId, runId: options.observationRunId,
-        workItemId: options.observationWorkItemId, profileId: 'test', attempt: 1,
+    run.mockImplementation(async (options: RunnerOptions) => {
+      const { observationRunId, observationWorkItemId } = options;
+      if (!observationRunId || !observationWorkItemId) throw new Error('the runner must pass the observation identity');
+      const context = { traceId: observationRunId, runId: observationRunId,
+        workItemId: observationWorkItemId, profileId: 'test', attempt: 1,
         actor: { kind: 'system' as const, id: 'implementation' } };
       await observer.record(context, { kind: 'run.requested', run: { id: context.runId, workItemId: context.workItemId,
         profileId: context.profileId, attempt: 1, status: 'pending' } });
@@ -233,7 +249,7 @@ describe('executeWorkItem', () => {
     expect(changes.verifyIssueAssociation).toHaveBeenCalledWith(expect.objectContaining({ id: '5' }), workItemId);
     expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.passed', 'change.published', 'human_gate.opened']);
     expect(vi.mocked(deps.recordAudit!).mock.calls.every(([context]) => context.runId === 'attempt-1' && context.workItemId === workItemId)).toBe(true);
-    const events = (await readFile(join(directory, '.afk', 'executions', 'attempt-1.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    const events = (await readFile(join(directory, '.afk', 'executions', 'attempt-1.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
     expect(events.map(event => event.phase)).toEqual(['requested', 'implementing', 'verifying', 'merge_ready']);
     expect(events.every(event => event.executionId === 'attempt-1' && event.workItemId === workItemId)).toBe(true);
   });
@@ -249,7 +265,7 @@ describe('executeWorkItem', () => {
     const { deps, run } = await setup(override);
     if ('dependsOn' in override) {
       const context = await deps.createContext!({} as any, input, {} as any);
-      context.providers.backlog.get = vi.fn(async (id: string) => id === '42' ? { ...item, ...override } : { ...item, state: 'ready' });
+      context.providers.backlog.get = vi.fn(async (id: string): Promise<BacklogItem> => id === '42' ? { ...item, ...override } : { ...item, state: 'ready' });
       deps.createContext = vi.fn(async () => context);
     }
     await expect(executeWorkItem(input, deps)).rejects.toThrow(message);
@@ -377,8 +393,7 @@ describe('executeWorkItem', () => {
       current.state = 'done';
       return { success: true, autoMerged: true, mrUrl: 'https://github.com/acme/api/pull/5' };
     });
-    changes.findForBacklog.mockImplementation(async () => current.state === 'done'
-      ? { id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged' } : null);
+    changes.findForBacklog.mockImplementation(async () => current.state === 'done' ? changeRequest() : null);
     expect((await executeWorkItem(input, deps)).status).toBe('done');
   });
 
@@ -393,7 +408,7 @@ describe('executeWorkItem', () => {
 
   it('reports an existing open PR rather than starting a duplicate attempt', async () => {
     const { deps, run, changes } = await setup();
-    changes.findForBacklog.mockResolvedValue({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' });
+    changes.findForBacklog.mockResolvedValue(changeRequest({ state: 'open' }));
     await expect(executeWorkItem(input, deps)).rejects.toThrow(/already has an open change request/);
     expect(run).not.toHaveBeenCalled();
   });

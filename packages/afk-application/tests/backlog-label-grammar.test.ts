@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatWorkItemId,
   projectBacklogLabels,
   renderBacklogId,
   resolveBacklogFilterId,
@@ -8,7 +9,7 @@ import {
   type BacklogLabelProjection,
   type ScopedBacklogIdentityPolicy,
 } from '../src/index.js';
-import type { WorkItemId } from '../src/index.js';
+import type { WorkItemId, WorkItemPlatform } from '../src/index.js';
 
 /**
  * The grammar table.
@@ -45,6 +46,16 @@ function projection(overrides: Partial<BacklogLabelProjection>): BacklogLabelPro
     dependsOn: [],
     ...overrides,
   };
+}
+
+/**
+ * Build a work item id the way production builds one.
+ *
+ * The identity is branded, so a plain string is not one; the constructor is
+ * the only way to make a value that production can actually produce.
+ */
+function workItemId(platform: WorkItemPlatform, projectKey: string, issueNumber: number): WorkItemId {
+  return formatWorkItemId({ platform, projectKey, issueNumber });
 }
 
 const GRAMMAR_CASES: GrammarCase[] = [
@@ -148,43 +159,43 @@ const GRAMMAR_CASES: GrammarCase[] = [
   {
     name: 'a parent label names the issue project',
     labels: ['parent::5'],
-    expected: projection({ parentId: 'github:acme/api#5' as WorkItemId }),
+    expected: projection({ parentId: workItemId('github', 'acme/api', 5) }),
   },
   {
     name: 'a parent label may name another project',
     labels: ['parent::gitlab:host/group/proj#7'],
-    expected: projection({ parentId: 'gitlab:host/group/proj#7' as WorkItemId }),
+    expected: projection({ parentId: workItemId('gitlab', 'host/group/proj', 7) }),
   },
   {
     name: 'a parent label of the provider own scope names that project',
     labels: ['parent::5'],
     policy: PROVIDER_LOCAL,
-    expected: projection({ parentId: 'github:org/repo#5' as WorkItemId }),
+    expected: projection({ parentId: workItemId('github', 'org/repo', 5) }),
   },
   {
     name: 'a base label names the execution base',
     labels: ['base::6'],
-    expected: projection({ baseBacklogId: 'github:acme/api#6' as WorkItemId }),
+    expected: projection({ baseBacklogId: workItemId('github', 'acme/api', 6) }),
   },
   {
     name: 'a depends-on label names a dependency',
     labels: ['depends-on::9'],
-    expected: projection({ dependsOn: ['github:acme/api#9'] }),
+    expected: projection({ dependsOn: [workItemId('github', 'acme/api', 9)] }),
   },
   {
     name: 'depends_on names the same relation as depends-on',
     labels: ['depends_on::9'],
-    expected: projection({ dependsOn: ['github:acme/api#9'] }),
+    expected: projection({ dependsOn: [workItemId('github', 'acme/api', 9)] }),
   },
   {
     name: 'the same dependency named twice is one dependency',
     labels: ['depends-on::9', 'depends_on::9'],
-    expected: projection({ dependsOn: ['github:acme/api#9'] }),
+    expected: projection({ dependsOn: [workItemId('github', 'acme/api', 9)] }),
   },
   {
     name: 'a dependency of another project keeps its canonical identity',
     labels: ['depends-on::gitlab:host/group/proj#7'],
-    expected: projection({ dependsOn: ['gitlab:host/group/proj#7'] }),
+    expected: projection({ dependsOn: [workItemId('gitlab', 'host/group/proj', 7)] }),
   },
   {
     name: 'a malformed parent value is dropped',
@@ -286,15 +297,15 @@ describe('backlog identity policy', () => {
   });
 
   it('writes the identity of the provider own project as its issue number', () => {
-    expect(renderBacklogId('github:org/repo#42' as WorkItemId, PROVIDER_LOCAL)).toBe('42');
+    expect(renderBacklogId(workItemId('github', 'org/repo', 42), PROVIDER_LOCAL)).toBe('42');
   });
 
   it('keeps the canonical form of an identity of another project', () => {
-    expect(renderBacklogId('gitlab:host/group/proj#7' as WorkItemId, PROVIDER_LOCAL)).toBe('gitlab:host/group/proj#7');
+    expect(renderBacklogId(workItemId('gitlab', 'host/group/proj', 7), PROVIDER_LOCAL)).toBe('gitlab:host/group/proj#7');
   });
 
   it('writes every identity canonically for a provider that reaches many projects', () => {
-    expect(renderBacklogId('github:acme/api#42' as WorkItemId, MULTI_PROJECT)).toBe('github:acme/api#42');
-    expect(renderBacklogId('github:org/repo#42' as WorkItemId, MULTI_PROJECT)).toBe('github:org/repo#42');
+    expect(renderBacklogId(workItemId('github', 'acme/api', 42), MULTI_PROJECT)).toBe('github:acme/api#42');
+    expect(renderBacklogId(workItemId('github', 'org/repo', 42), MULTI_PROJECT)).toBe('github:org/repo#42');
   });
 });

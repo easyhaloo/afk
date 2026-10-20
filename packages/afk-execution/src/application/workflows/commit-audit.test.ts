@@ -8,7 +8,7 @@ import type { AgentExecution, AgentExecutionOptions, AgentProvider } from '../..
 import { createAgentProvider } from '../../domain/agents/index.js';
 import type { BacklogClaim, BacklogItem } from '@afk/application';
 import { TemplateCatalog } from '../../domain/templates/catalog.js';
-import { JsonlEventStore } from '../../../../afk-infrastructure/src/observability';
+import { JsonlEventStore } from '@afk/infrastructure/observability';
 import type { ProviderBundle } from '@afk/infrastructure';
 import type { Sandbox, SandboxProvider } from '../../infrastructure/sandbox/types.js';
 import { RunObserver } from '../../observability/run-observer.js';
@@ -75,7 +75,7 @@ describe('WorkflowRunner default template commit audit', () => {
 
     const item: BacklogItem = {
       id: '42', title: 'Commit audit regression', dependsOn: [], state: 'in_progress', executionMode: 'afk',
-      branchName: 'afk/backlog-42', providerRef: 'github:acme/api#42',
+      tags: [], branchName: 'afk/backlog-42', providerRef: 'github:acme/api#42',
     };
     const claim: BacklogClaim = {
       item, claimId: 'claim-42', heartbeat: vi.fn(async () => undefined), release: vi.fn(async () => undefined),

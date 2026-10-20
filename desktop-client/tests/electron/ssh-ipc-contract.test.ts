@@ -292,4 +292,14 @@ describe("Backlog execution IPC cutover", () => {
     expect(mocks.handlers.has("afk:backlog-start")).toBe(false);
     expect(mocks.handlers.has("afk:backlog-retry")).toBe(false);
   });
+
+  it("does not offer the JumpServer channels the service never had", async () => {
+    // The service has no way to test a connection or list an instance's
+    // assets on its own: adding a bastion does both. The channels were
+    // registered anyway, against a seam typed `unknown` — so a call would
+    // have failed with a type error rather than a message.
+    expect(mocks.handlers.has("afk:jumpserver-test-connection")).toBe(false);
+    expect(mocks.handlers.has("afk:jumpserver-list-assets")).toBe(false);
+    expect(mocks.handlers.has("afk:jumpserver-preview-assets")).toBe(false);
+  });
 });

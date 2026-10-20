@@ -183,10 +183,7 @@ function createSshPageHarness(listImplementation: () => Promise<SshListResult> =
     credentialRemove: credentials.remove,
   };
   const jumpserver = {
-    testConnection: vi.fn(),
     addBastion: vi.fn(),
-    listAssets: vi.fn(async () => []),
-    previewAssets: vi.fn(async () => []),
     syncAssets: vi.fn(async () => ({ bastionId: "bastion-1", assetsDiscovered: 2, assetsCreated: 2, assetsSkipped: 0, skippedReasons: [], createdAssetIds: ["a1", "a2"], syncedAt: new Date().toISOString() })),
     removeBastion: vi.fn(async () => ({ ok: true, removedAssetCount: 0 })),
     listBastions: vi.fn(listBastionsImplementation),

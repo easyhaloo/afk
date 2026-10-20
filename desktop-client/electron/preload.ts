@@ -94,10 +94,7 @@ const api: DesktopApi = {
     },
   },
   jumpserver: {
-    testConnection: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverTestConnection, input),
     addBastion: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverAddBastion, input),
-    listAssets: (bastionId) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverListAssets, { bastionId }),
-    previewAssets: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverPreviewAssets, input),
     syncAssets: (input) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverSyncAssets, input),
     removeBastion: (bastionId) => ipcRenderer.invoke(IPC_CHANNELS.jumpserverRemoveBastion, { bastionId }),
     listBastions: () => ipcRenderer.invoke(IPC_CHANNELS.jumpserverListBastions),

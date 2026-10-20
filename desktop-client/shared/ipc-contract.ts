@@ -290,10 +290,7 @@ export type DesktopApi = {
     onAttachExit: (listener: (attachId: string, code: number) => void) => () => void;
   };
   jumpserver: {
-    testConnection: (input: JumpserverTestConnectionInput) => Promise<JumpserverTestConnectionResult>;
     addBastion: (input: JumpserverAddBastionInput) => Promise<JumpserverAddBastionResult>;
-    listAssets: (bastionId: string) => Promise<SshBastionAssetPreview[]>;
-    previewAssets: (input: { hostname: string; port: number; user: string; password: string; otpSecret?: string }) => Promise<SshBastionAssetPreview[]>;
     syncAssets: (input: JumpserverSyncAssetsInput) => Promise<SshBastionSyncResult>;
     removeBastion: (bastionId: string) => Promise<JumpserverRemoveBastionResult>;
     listBastions: () => Promise<SshBastion[]>;
@@ -353,10 +350,7 @@ export const IPC_CHANNELS = {
   workItemsDetach: "afk:work-items-detach",
   workItemsAttachData: "afk:work-items-attach-data",
   workItemsAttachExit: "afk:work-items-attach-exit",
-  jumpserverTestConnection: "afk:jumpserver-test-connection",
   jumpserverAddBastion: "afk:jumpserver-add-bastion",
-  jumpserverListAssets: "afk:jumpserver-list-assets",
-  jumpserverPreviewAssets: "afk:jumpserver-preview-assets",
   jumpserverSyncAssets: "afk:jumpserver-sync-assets",
   jumpserverRemoveBastion: "afk:jumpserver-remove-bastion",
   jumpserverListBastions: "afk:jumpserver-list-bastions",
@@ -403,18 +397,6 @@ export type SshCredentialSetInput = {
   hostId: string;
   password: string;
 };
-
-export type JumpserverTestConnectionInput = {
-  hostname: string;
-  port: number;
-  user: string;
-  password: string;
-  otpSecret?: string;
-};
-
-export type JumpserverTestConnectionResult =
-  | { ok: true; assets: SshBastionAssetPreview[] }
-  | { ok: false; error: string };
 
 export type JumpserverAddBastionInput = {
   alias: string;

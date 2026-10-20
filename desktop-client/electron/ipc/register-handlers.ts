@@ -108,6 +108,8 @@ const sshManagedHostStore = createSshManagedHostStore({ file: path.join(app.getP
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
 const externalUrlService = createExternalUrlService({ openExternal: (url) => shell.openExternal(url) });
 const sshCredentialService = createSshCredentialService({ home, safeStorage });
+export type JumpserverService = ReturnType<typeof createJumpserverService>;
+
 const defaultJumpserverService = createJumpserverService({
   home,
   credentialService: createJumpserverCredentialService({ home, safeStorage }),
@@ -222,7 +224,7 @@ function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
   return { hostId, password: input.password };
 }
 
-export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) {
+export function registerIpcHandlers(deps: { jumpserverService?: JumpserverService } = {}) {
   const jumpserverService = deps.jumpserverService ?? defaultJumpserverService;
   workItemInventorySyncService.start();
   if (typeof app.once === "function") app.once("before-quit", () => workItemInventorySyncService.stop());
@@ -357,46 +359,23 @@ export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) 
   }, (validated) => sshService.resize(validated.sessionId, validated.size.cols, validated.size.rows));
   registerHandler(IPC_CHANNELS.sshClose, validateSshSessionId, (sessionId) => sshService.close(sessionId));
 
-  registerHandler(IPC_CHANNELS.jumpserverTestConnection, (v: unknown) => {
-    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 测试连接参数无效");
-    const obj = v as Record<string, unknown>;
-    if (typeof obj.hostname !== "string" || !obj.hostname) throw new Error("堡垒机地址无效");
-    if (typeof obj.port !== "number" || obj.port < 1 || obj.port > 65535) throw new Error("堡垒机端口无效");
-    if (typeof obj.user !== "string" || !obj.user) throw new Error("堡垒机用户无效");
-    if (typeof obj.password !== "string" || !obj.password) throw new Error("堡垒机密码无效");
-    return { hostname: obj.hostname, port: obj.port, user: obj.user, password: obj.password, otpSecret: typeof obj.otpSecret === "string" ? obj.otpSecret : undefined };
-  }, (input) => (jumpserverService as { testConnection: (input: unknown) => unknown }).testConnection(input));
-  registerHandler(IPC_CHANNELS.jumpserverAddBastion, validateJumpserverBastionInput, (input) => (jumpserverService as { addBastion: (input: unknown) => unknown }).addBastion(input));
-  registerHandler(IPC_CHANNELS.jumpserverListAssets, (v: unknown) => {
-    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 资产列表参数无效");
-    const obj = v as Record<string, unknown>;
-    return validateJumpserverBastionId(obj.bastionId);
-  }, (bastionId) => (jumpserverService as { listAssets: (bastionId: string) => unknown }).listAssets(bastionId));
-  registerHandler(IPC_CHANNELS.jumpserverPreviewAssets, (v: unknown) => {
-    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 资产预览参数无效");
-    const obj = v as Record<string, unknown>;
-    if (typeof obj.hostname !== "string" || !obj.hostname) throw new Error("堡垒机地址无效");
-    if (typeof obj.port !== "number" || obj.port < 1 || obj.port > 65535) throw new Error("堡垒机端口无效");
-    if (typeof obj.user !== "string" || !obj.user) throw new Error("堡垒机用户无效");
-    if (typeof obj.password !== "string" || !obj.password) throw new Error("堡垒机密码无效");
-    return { hostname: obj.hostname, port: obj.port, user: obj.user, password: obj.password, otpSecret: typeof obj.otpSecret === "string" ? obj.otpSecret : undefined };
-  }, (input) => (jumpserverService as { previewAssets: (input: unknown) => unknown }).previewAssets(input));
+  registerHandler(IPC_CHANNELS.jumpserverAddBastion, validateJumpserverBastionInput, (input) => jumpserverService.addBastion(input));
   registerHandler(IPC_CHANNELS.jumpserverSyncAssets, (v: unknown) => {
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 资产同步参数无效");
     const obj = v as Record<string, unknown>;
     return { bastionId: validateJumpserverBastionId(obj.bastionId), opts: validateJumpserverSyncOptions(obj) };
-  }, (validated) => (jumpserverService as { syncAssets: (bastionId: string, opts: unknown) => unknown }).syncAssets(validated.bastionId, validated.opts));
+  }, (validated) => jumpserverService.syncAssets(validated.bastionId, validated.opts));
   registerHandler(IPC_CHANNELS.jumpserverRemoveBastion, (v: unknown) => {
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 移除堡垒机参数无效");
     const obj = v as Record<string, unknown>;
     return validateJumpserverBastionId(obj.bastionId);
-  }, (bastionId) => (jumpserverService as { removeBastion: (bastionId: string) => unknown }).removeBastion(bastionId));
-  registerHandler(IPC_CHANNELS.jumpserverListBastions, (v: unknown) => v, () => (jumpserverService as { listBastions: () => unknown }).listBastions());
+  }, (bastionId) => jumpserverService.removeBastion(bastionId));
+  registerHandler(IPC_CHANNELS.jumpserverListBastions, (v: unknown) => v, () => jumpserverService.listBastions());
   registerHandler(IPC_CHANNELS.jumpserverGetSyncLog, (v: unknown) => {
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("JumpServer 同步日志参数无效");
     const obj = v as Record<string, unknown>;
     return validateJumpserverBastionId(obj.bastionId);
-  }, (bastionId) => (jumpserverService as { getSyncLog: (bastionId: string) => unknown }).getSyncLog(bastionId));
+  }, (bastionId) => jumpserverService.getSyncLog(bastionId));
 
   registerHandlerMulti(IPC_CHANNELS.graphStatus, [
     (v) => validateWorkflowGraphWorkspace(v),

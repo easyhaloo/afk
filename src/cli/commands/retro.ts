@@ -246,7 +246,13 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
   const integrity = await store.verify(options.runId);
   const workItemId = options.workItemId ?? events.find(event => event.context.workItemId)?.context.workItemId;
   if (!workItemId) throw new Error(`cannot infer work item for run '${options.runId}'`);
-  const stateRoot = await findStateRoot(options.workspace, options.executionId);
+  // The run's own workspace is where its journal lives, and its worktree is
+  // where its session snapshot lives. The audit events say where the run
+  // was, so a run started from somewhere else — a desktop run, whose
+  // workspace is not the project directory — is still diagnosable.
+  const prepared = events.find(event => event.data.kind === 'workspace.prepared')?.data;
+  const worktreePath = prepared?.kind === 'workspace.prepared' ? prepared.workspace : undefined;
+  const stateRoot = await findStateRoot(worktreePath ?? options.workspace, options.executionId);
   const journalPath = join(stateRoot, '.afk', 'executions', `${options.executionId}.jsonl`);
   const auditPath = join(store.root, `${Buffer.from(options.runId, 'utf8').toString('base64url')}.jsonl`);
   const evidence: EvidenceFile[] = [];
@@ -277,7 +283,7 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
     sessionProjections.push({ sessionId: session.sessionId, source: indexedTranscript ? 'transcript_found' : 'transcript_unindexed', transcriptPath: path, usage, tools, transcript: transcript.uri });
   }
 
-  const sessionStore = defaultSessionStoreChain(stateRoot);
+  const sessionStore = defaultSessionStoreChain(worktreePath ?? stateRoot);
   const outcome = await sessionStore.loadFirst({ runId: options.executionId }).catch(() => ({ status: 'missing' } as const));
   const manifest = {
     version: 1,

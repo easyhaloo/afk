@@ -91,6 +91,44 @@ describe('retro command', () => {
     expect(JSON.parse(output.join(''))).toEqual({ version: 1, retroId: 'retro-1' });
   });
 
+  it('finds the journal and the session snapshot of a run that happened in another workspace', async () => {
+    // A run keeps its journal in its own workspace and its session
+    // snapshot in its worktree. The audit events say where the run was, so
+    // the caller does not have to know — and a run started from the
+    // desktop, whose workspace is not the project directory, is still
+    // diagnosable.
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-elsewhere-'));
+    roots.push(root);
+    const eventRoot = join(root, 'events');
+    const executionWorkspace = join(root, 'loop-workspace', 'work-1');
+    const worktree = join(executionWorkspace, 'repositories', 'api');
+    await fs.mkdir(join(executionWorkspace, '.afk', 'executions'), { recursive: true });
+    await fs.writeFile(join(executionWorkspace, '.afk', 'executions', 'run-1.jsonl'), 'retry\n');
+    await fs.mkdir(join(worktree, '.afk', 'sessions'), { recursive: true });
+    await fs.writeFile(join(worktree, '.afk', 'sessions', 'run-1.json'), JSON.stringify({
+      version: 1, runId: 'run-1', provider: 'claude-code', capturedAt: '2026-10-17T00:00:00.000Z',
+      snapshot: { sessionId: 'agent-session', generation: 1, checkpoint: null, summary: 'done', capturedAt: '2026-10-17T00:00:00.000Z' },
+    }));
+    const store = new JsonlEventStore({ root: eventRoot });
+    await store.append([{
+      id: 'event-1', schemaVersion: 1, type: 'workflow.recorded',
+      occurredAt: '2026-10-17T00:00:00.000Z',
+      context: { traceId: 'trace-1', runId: 'run-1', workItemId: 'work-1', profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'runner' } },
+      correlationId: 'run-1',
+      data: { kind: 'workspace.prepared', branch: 'afk/work-1', workspace: worktree, baseBranch: 'main' },
+    }]);
+    childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
+
+    const { runRetro } = await import('./retro.js');
+    const report = await runRetro({
+      runId: 'run-1', executionId: 'run-1', workItemId: 'work-1',
+      workspace: join(root, 'the-project-directory'), root: eventRoot, provider: 'claude-code',
+    });
+
+    // The journal was read: its "retry" line is what the count comes from.
+    expect(report.metrics.retryCount).toBe(1);
+  });
+
   it('uses the indexed transcript path when the AFK session id differs from the provider id', async () => {
     const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-indexed-'));
     roots.push(root);

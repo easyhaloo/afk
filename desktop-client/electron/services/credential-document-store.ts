@@ -1,5 +1,5 @@
 import path from "node:path";
-import { writeJsonFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
+import { writeJsonFileAtomic, type AtomicFileSystem } from "@afk/infrastructure";
 
 /**
  * The mechanics of a credential document on disk.

@@ -3,7 +3,7 @@ import { isValidCredentialSecret } from "../security/credential-validation.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { validateSshHostId } from "../security/ssh-validation.js";
-import { type AtomicFileSystem } from "../lib/secure-store.js";
+import { type AtomicFileSystem } from "@afk/infrastructure";
 import { createCredentialDocumentStore } from "./credential-document-store.js";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "ssh-credentials.json");

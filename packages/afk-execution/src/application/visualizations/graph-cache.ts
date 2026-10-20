@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { writeFileAtomic } from '@afk/infrastructure';
 import type { WorkflowGraphResult } from './workflow-graph.js';
 import type { WorkflowGraphFormat } from './workflow-graph.js';
 
@@ -13,12 +14,6 @@ function assertSafeOutput(projectRoot: string, output: string): string {
   return resolved;
 }
 
-async function atomicWrite(path: string, content: string): Promise<void> {
-  const temp = `${path}.tmp-${process.pid}`;
-  await fs.writeFile(temp, content, 'utf8');
-  await fs.rename(temp, path);
-}
-
 export async function writeGraphCache(projectRoot: string, result: WorkflowGraphResult, format: WorkflowGraphFormat, output?: string): Promise<GraphCacheResult> {
   const base = resolve(projectRoot, '.afk', 'cache', 'archify', 'workflow', result.definition.templateId, result.receipt.inputHash);
   const directory = output ? assertSafeOutput(projectRoot, output) : base;
@@ -27,9 +22,9 @@ export async function writeGraphCache(projectRoot: string, result: WorkflowGraph
   const receiptPath = join(directory, 'receipt.json');
   const indexPath = join(directory, 'index.json');
   const archifyPath = format === 'archify-json' ? join(directory, 'archify.workflow.json') : undefined;
-  await atomicWrite(graphPath, `${JSON.stringify(result.snapshot, null, 2)}\n`);
-  await atomicWrite(receiptPath, `${JSON.stringify(result.receipt, null, 2)}\n`);
-  if (archifyPath && result.archify) await atomicWrite(archifyPath, `${JSON.stringify(result.archify, null, 2)}\n`);
-  await atomicWrite(indexPath, `${JSON.stringify({ templateId: result.definition.templateId, inputHash: result.receipt.inputHash, format, graph: graphPath, receipt: receiptPath, ...(archifyPath ? { archify: archifyPath } : {}) }, null, 2)}\n`);
+  await writeFileAtomic(graphPath, `${JSON.stringify(result.snapshot, null, 2)}\n`, fs);
+  await writeFileAtomic(receiptPath, `${JSON.stringify(result.receipt, null, 2)}\n`, fs);
+  if (archifyPath && result.archify) await writeFileAtomic(archifyPath, `${JSON.stringify(result.archify, null, 2)}\n`, fs);
+  await writeFileAtomic(indexPath, `${JSON.stringify({ templateId: result.definition.templateId, inputHash: result.receipt.inputHash, format, graph: graphPath, receipt: receiptPath, ...(archifyPath ? { archify: archifyPath } : {}) }, null, 2)}\n`, fs);
   return { directory, indexPath, graphPath, receiptPath, ...(archifyPath ? { archifyPath } : {}) };
 }

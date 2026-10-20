@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { writeJsonFileAtomic } from "../lib/secure-store.js";
+import { writeJsonFileAtomic } from "@afk/infrastructure";
 
 export type JsonKvStore<T> = {
   read(key: string): Promise<T | null>;

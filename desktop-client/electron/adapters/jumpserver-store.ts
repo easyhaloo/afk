@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { createKeyedMutex } from "../lib/async-mutex.js";
-import { writeYamlFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
+import { writeYamlFileAtomic, type AtomicFileSystem } from "@afk/infrastructure";
 
 export type BastionInput = {
   alias: string;

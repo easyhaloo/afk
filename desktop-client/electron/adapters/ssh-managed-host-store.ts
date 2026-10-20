@@ -5,7 +5,7 @@ import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import type { ManagedSshHostInput, ManagedSshHostRecord } from "../../shared/ssh-contract.js";
 import { validateSshHostInput, validateSshHostId } from "../security/ssh-validation.js";
 import { createKeyedMutex } from "../lib/async-mutex.js";
-import { writeYamlFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
+import { writeYamlFileAtomic, type AtomicFileSystem } from "@afk/infrastructure";
 
 
 type StoreDocument = {

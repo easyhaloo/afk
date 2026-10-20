@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ManagedSshHostInput, ManagedSshHostRecord, SshDiagnostic, SshHost, SshJumpHostType, SshListResult } from "../../shared/ssh-contract.js";
 import { validateSshHostInput } from "../security/ssh-validation.js";
-import type { AtomicFileSystem } from "../lib/secure-store.js";
+import { writeFileAtomic, type AtomicFileSystem } from "@afk/infrastructure";
 
 type ExecResult = { ok: boolean; stdout: string; stderr: string };
 
@@ -211,13 +211,6 @@ async function readOrEmpty(fileSystem: NonNullable<SshConfigAdapterOptions["file
   return fileSystem.readFile(file, "utf8").catch(() => "");
 }
 
-async function atomicWrite(fileSystem: NonNullable<SshConfigAdapterOptions["fileSystem"]>, file: string, content: string, mode = 0o600) {
-  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`;
-  await fileSystem.writeFile(temporary, content, { mode });
-  await fileSystem.chmod(temporary, mode);
-  try { await fileSystem.rename(temporary, file); } catch (error) { await fileSystem.rm(temporary, { force: true }); throw error; }
-}
-
 export function createSshConfigAdapter({ home, exec, managedStore, fileSystem = fs }: SshConfigAdapterOptions) {
   const configPath = userConfigPath(home);
   const managedPath = managedConfigPath(home);
@@ -278,7 +271,7 @@ export function createSshConfigAdapter({ home, exec, managedStore, fileSystem = 
     const raw = await readOrEmpty(fileSystem, configPath);
     if (raw.split(/\r?\n/).some((line) => line.trim() === includeLine)) return;
     const existing = raw.replace(/^\s+|\s+$/g, "");
-    await atomicWrite(fileSystem, configPath, existing ? `${includeLine}\n\n${existing}\n` : `${includeLine}\n`);
+    await writeFileAtomic(configPath, existing ? `${includeLine}\n\n${existing}\n` : `${includeLine}\n`, fileSystem);
     invalidateConfigCache();
   }
 
@@ -320,7 +313,7 @@ export function createSshConfigAdapter({ home, exec, managedStore, fileSystem = 
     await ensureInclude();
     const raw = await readOrEmpty(fileSystem, managedPath);
     const next = replaceBlock(raw, input.alias, managedBlock(input));
-    await atomicWrite(fileSystem, managedPath, next);
+    await writeFileAtomic(managedPath, next, fileSystem);
     invalidateConfigCache();
     const result = await listHosts();
     const host = result.hosts.find((item) => item.id === `managed:${input.alias}`);
@@ -340,7 +333,7 @@ export function createSshConfigAdapter({ home, exec, managedStore, fileSystem = 
     if (oldAlias !== input.alias && new RegExp(`^\\s*Host\\s+${input.alias.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\s*$`, "im").test(raw)) throw new Error("SSH 主机别名已存在");
     const withoutOld = replaceBlock(raw, oldAlias, null);
     const next = replaceBlock(withoutOld, input.alias, managedBlock(input));
-    await atomicWrite(fileSystem, managedPath, next);
+    await writeFileAtomic(managedPath, next, fileSystem);
     invalidateConfigCache();
     const result = await listHosts();
     const host = result.hosts.find((item) => item.id === `managed:${input.alias}`);
@@ -354,7 +347,7 @@ export function createSshConfigAdapter({ home, exec, managedStore, fileSystem = 
     const alias = id.slice("managed:".length);
     if (!isConcreteAlias(alias)) throw new Error("SSH 主机 ID 无效");
     const raw = await readOrEmpty(fileSystem, managedPath);
-    await atomicWrite(fileSystem, managedPath, replaceBlock(raw, alias, null));
+    await writeFileAtomic(managedPath, replaceBlock(raw, alias, null), fileSystem);
     invalidateConfigCache();
     return true;
   }
@@ -364,7 +357,7 @@ export function createSshConfigAdapter({ home, exec, managedStore, fileSystem = 
     const alias = id.slice("system:".length);
     if (!isConcreteAlias(alias)) throw new Error("SSH 主机 ID 无效");
     const raw = await readOrEmpty(fileSystem, configPath);
-    await atomicWrite(fileSystem, configPath, replaceBlock(raw, alias, null));
+    await writeFileAtomic(configPath, replaceBlock(raw, alias, null), fileSystem);
     invalidateConfigCache();
     return true;
   }

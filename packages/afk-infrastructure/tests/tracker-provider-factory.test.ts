@@ -38,6 +38,23 @@ describe('global provider catalog factory', () => {
     expect(createGitLabCatalog).toHaveBeenNthCalledWith(2, 'gitlab.com', 'https://gitlab.com', 'one');
   });
 
+  it('keeps the path a GitLab is installed under', () => {
+    const createGitLabCatalog = vi.fn((host: string) => ({ platform: 'gitlab', scopeKey: host } as ProviderCatalog));
+
+    createGlobalWorkItemCatalogs('gitlab', {
+      env: { GITLAB_TOKEN: 'token', GITLAB_URL: 'https://gitlab.corp/gitlab' },
+      readGhToken: vi.fn(() => null),
+      listGlabTokens: vi.fn(() => []),
+      createGitHubCatalog: vi.fn(),
+      createGitLabCatalog,
+    });
+
+    // A GitLab can live under a path, and its API lives under that path
+    // too. The single-project client kept the path; the catalog did not, so
+    // the two rules disagreed about what an instance's URL is.
+    expect(createGitLabCatalog).toHaveBeenCalledWith('gitlab.corp', 'https://gitlab.corp/gitlab', 'token');
+  });
+
   it('uses the configured GitLab host as the canonical identity when api_host differs', async () => {
     const catalogs = createGlobalWorkItemCatalogs('gitlab', {
       env: {}, readGhToken: vi.fn(() => null),

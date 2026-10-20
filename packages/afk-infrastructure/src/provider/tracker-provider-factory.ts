@@ -19,7 +19,7 @@ import {
   type GitHubScopedPageResult,
 } from './catalogs.js';
 import type { ProviderCatalog } from '@afk/application';
-import { normalizeGitLabHost } from '../shared/gitlab-project.js';
+import { gitLabApiUrl, gitLabBaseUrl, normalizeGitLabHost } from '../shared/gitlab-project.js';
 
 function readGhToken(): string | null {
   try {
@@ -47,7 +47,7 @@ function resolveGitLabAuth(preferredHost?: string): { url: string; token: string
     if (requestedHost && requestedHost !== envHost) {
       throw new Error(`GITLAB_TOKEN host ${envHost} does not match requested GitLab host ${requestedHost}`);
     }
-    return { url: gitLabUrl(envUrl), token: envToken };
+    return { url: gitLabBaseUrl(envUrl), token: envToken };
   }
 
   const glab = getGlabToken(requestedHost);
@@ -55,13 +55,8 @@ function resolveGitLabAuth(preferredHost?: string): { url: string; token: string
     throw new Error(`GitLab authentication requires a matching glab token for host ${requestedHost ?? 'default'}`);
   }
 
-  const url = gitLabUrl(glab.apiHost);
+  const url = gitLabBaseUrl(glab.apiHost);
   return { url, token: glab.token };
-}
-
-function gitLabUrl(preferredHost?: string): string {
-  const host = preferredHost ?? 'gitlab.com';
-  return /^https?:\/\//i.test(host) ? host : `https://${host}`;
 }
 
 export async function createGitHubTracker(repo?: string, cwd?: string): Promise<GitHubClient> {
@@ -168,17 +163,17 @@ function configuredGitLabTokens(
   glabTokens: GlabTokenConfig[],
 ): Array<{ host: string; url: string; token: string }> {
   const configured = [
-    ...(env.GITLAB_TOKEN ? [{ host: new URL(normalizeProviderUrl(env.GITLAB_URL ?? 'https://gitlab.com')).host,
-      url: env.GITLAB_URL ?? 'https://gitlab.com', token: env.GITLAB_TOKEN }] : []),
+    ...(env.GITLAB_TOKEN ? [{ host: normalizeGitLabHost(gitLabBaseUrl(env.GITLAB_URL)),
+      url: gitLabBaseUrl(env.GITLAB_URL), token: env.GITLAB_TOKEN }] : []),
     ...glabTokens.map(entry => ({
-      host: new URL(normalizeProviderUrl(entry.host)).host,
-      url: `${entry.apiProtocol}://${entry.apiHost}`,
+      host: normalizeGitLabHost(entry.host),
+      url: gitLabBaseUrl(`${entry.apiProtocol}://${entry.apiHost}`),
       token: entry.token,
     })),
   ];
   const unique = new Map<string, { host: string; url: string; token: string }>();
   for (const entry of configured) {
-    const url = normalizeProviderUrl(entry.url);
+    const url = gitLabBaseUrl(entry.url);
     if (!unique.has(entry.host)) unique.set(entry.host, { host: entry.host, url, token: entry.token });
   }
   return [...unique.values()].sort((left, right) => left.host.localeCompare(right.host));
@@ -246,7 +241,7 @@ function createGitHubProviderCatalog(token: string): ProviderCatalog {
 }
 
 function createGitLabProviderCatalog(host: string, url: string, token: string): ProviderCatalog {
-  const baseUrl = normalizeProviderUrl(url);
+  const baseUrl = gitLabBaseUrl(url);
   return new GitLabProviderCatalog(host, {
     listProjectsPage: (page, perPage) => fetchGitLabPage<GitLabProjectResponse>(
       baseUrl,
@@ -314,14 +309,11 @@ async function fetchGitLabPage<T>(
   pathname: string,
   query: Record<string, string>,
 ): Promise<T[]> {
-  const target = new URL(pathname, `${baseUrl}/`);
+  const target = new URL(gitLabApiUrl(baseUrl, pathname));
   for (const [key, value] of Object.entries(query)) target.searchParams.set(key, value);
   const response = await fetch(target, { headers: { 'PRIVATE-TOKEN': token } });
   if (!response.ok) throw new Error(`GitLab API HTTP ${response.status}: ${response.statusText}`);
   return response.json() as Promise<T[]>;
 }
 
-function normalizeProviderUrl(value: string): string {
-  const url = new URL(value.includes('://') ? value : `https://${value}`);
-  return url.origin;
-}
+

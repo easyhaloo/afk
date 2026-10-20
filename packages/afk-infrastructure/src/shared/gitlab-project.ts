@@ -9,6 +9,31 @@ export function normalizeGitLabHost(value: string | undefined): string {
   return url.host.toLowerCase();
 }
 
+/**
+ * The base URL of a GitLab instance.
+ *
+ * A GitLab can be installed under a path — `https://example.com/gitlab` —
+ * and its API lives under that path too. Reducing an instance to its origin
+ * drops the path and sends every API call to the wrong place, so the base
+ * keeps it.
+ */
+export function gitLabBaseUrl(value: string | undefined): string {
+  const raw = value?.trim() || 'https://gitlab.com';
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return withScheme.replace(/\/+$/, '');
+}
+
+/**
+ * The URL of an API path on a GitLab instance.
+ *
+ * The path is resolved against the instance's base, not against its origin,
+ * so an instance under a path is asked under that path.
+ */
+export function gitLabApiUrl(baseUrl: string, pathname: string): string {
+  const base = gitLabBaseUrl(baseUrl);
+  return new URL(pathname.replace(/^\/+/, ''), `${base}/`).toString();
+}
+
 export function resolveGitLabProjectKey(projectKey: string, providerHost?: string): GitLabProjectLocation {
   const raw = projectKey.trim();
   const host = normalizeGitLabHost(providerHost);

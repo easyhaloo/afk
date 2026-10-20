@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gitLabCloneUrl, resolveGitLabProjectKey } from '../src/shared/gitlab-project.js';
+import { gitLabApiUrl, gitLabBaseUrl, gitLabCloneUrl, resolveGitLabProjectKey } from '../src/shared/gitlab-project.js';
 
 describe('GitLab project key resolution', () => {
   it.each([
@@ -24,5 +24,25 @@ describe('GitLab project key resolution', () => {
   it('builds clone URLs from the explicit provider host', () => {
     expect(gitLabCloneUrl('group/subgroup/repo')).toBe('https://gitlab.com/group/subgroup/repo.git');
     expect(gitLabCloneUrl('git.corp/group/repo', 'git.corp')).toBe('https://git.corp/group/repo.git');
+  });
+});
+
+describe('GitLab instance URL', () => {
+  it('keeps the path an instance is installed under', () => {
+    expect(gitLabBaseUrl('https://gitlab.corp/gitlab')).toBe('https://gitlab.corp/gitlab');
+    expect(gitLabBaseUrl('gitlab.corp/gitlab')).toBe('https://gitlab.corp/gitlab');
+    expect(gitLabBaseUrl('https://gitlab.corp/gitlab/')).toBe('https://gitlab.corp/gitlab');
+  });
+
+  it('defaults to gitlab.com', () => {
+    expect(gitLabBaseUrl(undefined)).toBe('https://gitlab.com');
+    expect(gitLabBaseUrl('')).toBe('https://gitlab.com');
+  });
+
+  it('asks an instance under a path for its API under that path', () => {
+    expect(gitLabApiUrl(gitLabBaseUrl('https://gitlab.corp/gitlab'), '/api/v4/projects'))
+      .toBe('https://gitlab.corp/gitlab/api/v4/projects');
+    expect(gitLabApiUrl(gitLabBaseUrl('https://gitlab.com'), '/api/v4/projects'))
+      .toBe('https://gitlab.com/api/v4/projects');
   });
 });

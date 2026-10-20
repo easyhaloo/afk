@@ -1,6 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GitLabClient } from '../src/index.js';
 
+describe('GitLabClient listIssues', () => {
+  it('reads every page, not only the first', async () => {
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'group/project' });
+    const all = vi.fn(async (params: { page?: number; perPage?: number }) => {
+      if ((params.page ?? 1) === 1) {
+        return [1, 2].map((iid) => ({ iid, title: `Issue ${iid}`, description: '', labels: [], state: 'opened', web_url: `https://gitlab.example.test/group/project/-/issues/${iid}` }));
+      }
+      return [{ iid: 3, title: 'Issue 3', description: '', labels: [], state: 'opened', web_url: 'https://gitlab.example.test/group/project/-/issues/3' }];
+    });
+    (client as unknown as { client: { Issues: { all: typeof all } } }).client = { Issues: { all } };
+
+    const issues = await client.listIssues({ state: 'all', perPage: 2 });
+
+    expect(issues.map((issue) => issue.id)).toEqual([1, 2, 3]);
+    expect(all).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('GitLabClient listMRs', () => {
   it('checks native closing issues by project ID and IID, failing closed on unreadable data', async () => {
     const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'team/code' });

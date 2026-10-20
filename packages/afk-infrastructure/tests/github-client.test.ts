@@ -29,6 +29,22 @@ describe('GitHubClient', () => {
     expect(() => new GitHubClient({ repo: 'owner/repo' })).toThrow(/requires auth token/);
   });
 
+  it('reads every page of issues, not only the first', async () => {
+    const client = new GitHubClient({ repo: 'owner/code', auth: 'test-token' });
+    const request = vi.fn(async (_route: string, params: { page?: number }) => {
+      if ((params.page ?? 1) === 1) {
+        return { data: [1, 2].map((number) => ({ number, title: `Issue ${number}`, body: '', labels: [], state: 'open', html_url: `https://github.com/owner/code/issues/${number}` })) };
+      }
+      return { data: [{ number: 3, title: 'Issue 3', body: '', labels: [], state: 'open', html_url: 'https://github.com/owner/code/issues/3' }] };
+    });
+    (client as unknown as { client: { request: typeof request } }).client = { request };
+
+    const issues = await client.listIssues({ state: 'all', perPage: 2 });
+
+    expect(issues.map((issue) => issue.id)).toEqual([1, 2, 3]);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
   it('extracts label acceptance criteria for the configured repository', () => {
     const client = new GitHubClient({ repo: 'owner/repo', auth: 'test-token' });
     expect(client.projectId).toBe('owner/repo');

@@ -63,12 +63,23 @@ export class GitLabClient implements TrackerProvider {
   }
 
   async listIssues(options: ListOptions = {}): Promise<TrackedIssue[]> {
-    const issues = await this.client.Issues.all({
-      projectId: this.projectId,
-      labels: options.labels?.join(','),
-      state: options.state || 'opened',
-      perPage: options.perPage || 20,
-    }) as any[];
+    // The client follows the Link header on its own when it is not told
+    // which page to fetch, and it did read every issue that way — twenty
+    // at a time.  Asking for the pages here instead reads a hundred at a
+    // time, which is five times fewer requests for the same list.
+    const perPage = options.perPage || 100;
+    const issues: any[] = [];
+    for (let page = 1; ; page += 1) {
+      const current = await this.client.Issues.all({
+        projectId: this.projectId,
+        labels: options.labels?.join(','),
+        state: options.state || 'opened',
+        perPage,
+        page,
+      }) as any[];
+      issues.push(...current);
+      if (current.length < perPage) break;
+    }
     return issues.map(issue => ({
       id: issue.iid as number,
       platform: 'gitlab' as const,

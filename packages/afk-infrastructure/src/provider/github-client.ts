@@ -87,33 +87,47 @@ export class GitHubClient implements TrackerProvider {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
     const state = options.state === 'opened' ? 'open' : options.state || 'open';
-    const { data } = await oct.request('GET /repos/{owner}/{repo}/issues', {
-      owner,
-      repo,
-      state,
-      labels: options.labels?.join(','),
-      per_page: options.perPage || 100,
-    });
+    // The caller asked for every issue, and a request here is one
+    // request: the repository's issues endpoint answers with a page and
+    // no more.  A repository with more issues than that in it was
+    // silently short, and the backlog board showed the first hundred.
+    const perPage = options.perPage || 100;
     // GitHub's `labels` query param is OR semantics (any label matches).
     // Enforce AND client-side so callers can require multiple labels.
     const required = options.labels ?? [];
-    return data
-      .filter(issue => !('pull_request' in issue)) // filter out PRs
-      .filter(issue => {
-        if (required.length === 0) return true;
-        const names = issue.labels.map(l => (typeof l === 'string' ? l : (l.name || '')));
-        return required.every(r => names.includes(r));
-      })
-      .map(issue => ({
-        id: issue.number,
-        platform: 'github' as const,
-        title: issue.title,
-        description: issue.body || '',
-        labels: issue.labels.map(l => (typeof l === 'string' ? l : (l.name || ''))),
-        state: issue.state === 'open' ? 'opened' : 'closed',
-        url: issue.html_url,
-        projectId: this.projectId,
-      }));
+    const issues: TrackedIssue[] = [];
+    for (let page = 1; ; page += 1) {
+      const { data } = await oct.request('GET /repos/{owner}/{repo}/issues', {
+        owner,
+        repo,
+        state,
+        labels: options.labels?.join(','),
+        per_page: perPage,
+        page,
+      });
+      issues.push(...data
+        .filter(issue => !('pull_request' in issue)) // filter out PRs
+        .filter(issue => {
+          if (required.length === 0) return true;
+          const names = issue.labels.map(l => (typeof l === 'string' ? l : (l.name || '')));
+          return required.every(r => names.includes(r));
+        })
+        .map((issue): TrackedIssue => ({
+          id: issue.number,
+          platform: 'github' as const,
+          title: issue.title,
+          description: issue.body || '',
+          labels: issue.labels.map(l => (typeof l === 'string' ? l : (l.name || ''))),
+          state: issue.state === 'open' ? 'opened' : 'closed',
+          url: issue.html_url,
+          projectId: this.projectId,
+        })));
+      // A short page is the last page.  The count is of the page as it
+      // came back, not of the issues that survived the filters above: a
+      // full page of pull requests is still a full page.
+      if (data.length < perPage) break;
+    }
+    return issues;
   }
 
   async createIssue(options: CreateIssueOptions): Promise<number> {

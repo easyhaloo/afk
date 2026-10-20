@@ -11,7 +11,14 @@ export type RuntimeEvent = {
   id: string;
   timestamp: string;
   source: string;
-  status?: string;
+  /**
+   * The status the raw event line recorded, if it recorded one.
+   *
+   * This is the diagnostic stream, not the run centre's rows: the value is
+   * whatever the recorded line happened to carry, and it is not the audited
+   * status — that one is `RuntimeRunEvent.status`, and it is the authority.
+   */
+  recordedStatus?: string;
   result: string;
   nextStep: string;
   raw: string;

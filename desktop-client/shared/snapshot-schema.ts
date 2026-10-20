@@ -123,7 +123,11 @@ const runtimeEventSchema = z.object({
   id: z.string(),
   timestamp: z.string(),
   source: z.string(),
-  status: z.string().optional(),
+  /**
+   * The status the raw event line recorded, if it recorded one. Not the
+   * audited status — that is the run row's, and it is the authority.
+   */
+  recordedStatus: z.string().optional(),
   result: z.string(),
   nextStep: z.string(),
   raw: z.string(),

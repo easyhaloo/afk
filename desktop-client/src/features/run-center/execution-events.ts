@@ -33,7 +33,7 @@ function legacyEvent(row: RuntimeRunEvent): RuntimeEvent {
     id: row.id,
     timestamp: row.timestamp,
     source: row.source,
-    status: legacyStatuses[row.status],
+    recordedStatus: legacyStatuses[row.status],
     result: row.result,
     nextStep: row.nextStep,
     raw: row.raw,

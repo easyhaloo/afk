@@ -15,7 +15,7 @@ describe("audited run center events", () => {
     const [recorded, missing, zero] = executionEvents([
       { ...base, usage }, base, { ...base, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
     ]);
-    expect(recorded).toMatchObject({ usage, status: "running" });
+    expect(recorded).toMatchObject({ usage, recordedStatus: "running" });
     expect(JSON.parse(recorded.raw).usage).toEqual(usage);
     expect(missing).not.toHaveProperty("usage");
     expect(zero.usage?.totalTokens).toBe(0);
@@ -25,7 +25,7 @@ describe("audited run center events", () => {
     const [event] = executionEvents([base, { ...base, runId: "afk-retry-158" }]);
     expect(event.id).toBe(base.runId);
     expect(event.source).toBe(base.workItemId);
-    expect(event.status).toBe("running");
+    expect(event.recordedStatus).toBe("running");
   });
 
   it("does not show implementation success or invalid audit as completed", () => {
@@ -34,7 +34,7 @@ describe("audited run center events", () => {
       { ...base, runId: "pending-158", status: "awaiting_human" },
       { ...base, runId: "done-158", status: "succeeded" },
     ]);
-    expect(events.map(event => event.status)).toEqual(["running", "waiting_confirmation", "completed"]);
+    expect(events.map(event => event.recordedStatus)).toEqual(["running", "waiting_confirmation", "completed"]);
     expect(events[1].result).toContain("人工");
   });
 

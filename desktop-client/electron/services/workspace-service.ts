@@ -40,7 +40,7 @@ export async function readEvents(root: string): Promise<RuntimeEvent[]> {
         id: `${source}-${createHash("sha1").update(raw).digest("hex").slice(0, 12)}`,
         timestamp: text("timestamp") || text("at") || text("time") || "—",
         source,
-        status: text("status") || text("state") || text("phase") || text("event"),
+        recordedStatus: text("status") || text("state") || text("phase") || text("event"),
         result: text("message") || text("event") || text("type") || "AFK 运行事件",
         nextStep: text("nextStep") || text("next_step") || "打开运行检查器查看详情",
         raw,

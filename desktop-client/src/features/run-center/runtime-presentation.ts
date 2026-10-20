@@ -63,15 +63,15 @@ const recordStatuses: Record<string, RecordStatus> = {
   created: "queued",
 };
 
-export function snapshotRecordStatus(event: { status?: string }): RecordStatus {
-  const recorded = String(event.status ?? "").trim().toLowerCase().replaceAll("-", "_");
+export function snapshotRecordStatus(event: { recordedStatus?: string }): RecordStatus {
+  const recorded = String(event.recordedStatus ?? "").trim().toLowerCase().replaceAll("-", "_");
   return recordStatuses[recorded] ?? "queued";
 }
 
-export function searchRuntimeEvents<T extends RuntimeEventLike & { result: string; nextStep: string; status?: string }>(events: T[], query: string): T[] {
+export function searchRuntimeEvents<T extends RuntimeEventLike & { result: string; nextStep: string; recordedStatus?: string }>(events: T[], query: string): T[] {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return events;
-  return groupRuntimeEvents(events).filter(group => group.events.some(event => `${event.id ?? ""} ${event.source} ${event.status ?? ""} ${event.result} ${event.nextStep}`.toLowerCase().includes(normalized))).flatMap(group => group.events);
+  return groupRuntimeEvents(events).filter(group => group.events.some(event => `${event.id ?? ""} ${event.source} ${event.recordedStatus ?? ""} ${event.result} ${event.nextStep}`.toLowerCase().includes(normalized))).flatMap(group => group.events);
 }
 
 export type RuntimeEventGroup<T extends RuntimeEventLike = RuntimeEventLike> = {

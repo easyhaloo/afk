@@ -8,17 +8,17 @@ import {
   resolveCodexRuntime,
   type CodexRuntimeSelection,
   type CodexTransport,
-} from '../../src/domain/agents/index';
+} from '@afk/execution/domain/agents';
 import { BACKLOG_METADATA } from '@afk/application';
-import { getWorkflowConfig } from '../../src/infrastructure/config/manager';
+import { getWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
 import { createProviderBundle as assembleProviderBundle } from '@afk/infrastructure';
 import { createTracker } from '@afk/infrastructure';
-import { LoopRunner } from '../../src/application/modules/loop-runner';
-import { TaskRuntimeManager } from '../../src/application/runtime/task-runtime';
+import { LoopRunner } from '@afk/execution/application/modules/loop-runner';
+import { TaskRuntimeManager } from '@afk/execution/application/runtime/task-runtime';
 import { deriveBacklogBranchName } from '@afk/application';
 import { formatWorkItemId } from '@afk/application';
 import { toGlobalWorkItem } from '@afk/application';
-import { executeWorkItem } from '../../src/application/workflows/execute-work-item';
+import { executeWorkItem } from '@afk/execution/application/workflows/execute-work-item';
 import { waitForTerminal } from './codex-runtime-wait';
 
 const E2E_PHASE_TIMEOUT_MS = positiveInteger(process.env.AFK_CODEX_E2E_TIMEOUT_MS) ?? 30 * 60_000;
@@ -30,7 +30,7 @@ async function main(): Promise<void> {
   workflow.agentDefault = 'codex';
   workflow.agents.codex.transport = transport;
   if (transport === 'app-server') workflow.agents.codex.appServer.endpoint = 'stdio://';
-  const unresolvedRuntime = resolveCodexRuntime({
+  const runtime = resolveCodexRuntime({
     cli: {
       transport,
       ...(transport === 'app-server' ? { endpoint: 'stdio://' } : {}),
@@ -39,7 +39,13 @@ async function main(): Promise<void> {
   });
 
   // Readiness must happen before a tracker client or backlog is created.
-  const runtime = await prepareAgentRuntime(unresolvedRuntime);
+  await prepareAgentRuntime(runtime);
+  // The runtime selection is carried by the workflow config, not by the
+  // runner call, so write the resolved values back before execution.
+  workflow.agents.codex.transport = runtime.transport;
+  // `unknown` means the probe could not tell; the configured value stays.
+  if (runtime.auth !== 'unknown') workflow.agents.codex.auth = runtime.auth;
+  workflow.agents.codex.provider = runtime.provider;
   const tracker = await createTracker(undefined, process.cwd());
   const providers = assembleProviderBundle(tracker, process.cwd());
   await providers.backlog.initialize();
@@ -106,9 +112,10 @@ async function main(): Promise<void> {
     }],
   }, null, 2));
   const runner = new LoopRunner(providers, {
-    providers,
-    agentProvider: 'codex',
-    agentRuntime: runtime,
+    pollIntervalMs: 10_000,
+    statusIntervalMs: 10_000,
+    shutdownTimeoutMs: 30_000,
+    maxIterations: 1,
     backlogIds: [backlogId],
     managedExecution: { workItemId, manifestPath },
     template: 'issue-implementation',
@@ -118,16 +125,6 @@ async function main(): Promise<void> {
         return inventoryItem;
       },
     }),
-    readinessProbe: async selected => ({
-      ready: true,
-      auth: selected.auth,
-      provider: selected.provider,
-    }),
-    maxConcurrent: 1,
-    maxIterations: 1,
-    pollIntervalMs: 10_000,
-    statusIntervalMs: 10_000,
-    shutdownTimeoutMs: 30_000,
     pidFilePath: join(runtimeDir, 'loop.pid'),
     statusFilePath: join(runtimeDir, 'loop-status.json'),
   });

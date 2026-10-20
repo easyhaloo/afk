@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeCodeProvider } from '@afk/execution/domain/agents/claude-code';
 import { LocalSandboxProvider } from '@afk/execution/infrastructure/sandbox/providers/local';
 import { buildExecutionPrompt } from '@afk/execution/application/workflows/execution-protocol';
-import { fetchTasks } from '../../views/board/data/fetcher.js';
+import { fetchTasks } from '../../src/views/board/data/fetcher.js';
 import { TaskRuntimeManager, TaskRuntimeStore } from '@afk/execution/application/runtime/task-runtime';
 
 class NoToolClaudeCodeProvider extends ClaudeCodeProvider {

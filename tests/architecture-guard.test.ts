@@ -46,6 +46,13 @@ function packageFixture({
   applicationPackage = { dependencies: { '@afk/core': 'workspace:*' } },
   includeCore = true,
   includeApplication = true,
+}: {
+  coreSource?: string;
+  applicationSource?: string;
+  corePackage?: { dependencies: Record<string, string> };
+  applicationPackage?: { dependencies: Record<string, string> };
+  includeCore?: boolean;
+  includeApplication?: boolean;
 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-packages-'));
   directories.push(directory);

@@ -3,8 +3,9 @@
  * and the React renderer. The desktop client treats these as wire format
  * only — no Node / Electron / React / DOM / filesystem imports allowed.
  *
- * The shape mirrors the AFK CLI domain (src/domain/backlog/types.ts) but
- * is intentionally decoupled: a future provider that AFK supports
+ * The shape mirrors the shared backlog model
+ * (packages/afk-application/src/backlog/model.ts) but is intentionally
+ * decoupled: a future provider that AFK supports
  * (Linear, Jira) can be added here without touching the renderer code
  * beyond an icon and a label.
  */
@@ -36,6 +37,11 @@ export type WorkItemTerminalId = SshExternalTerminalId;
 
 export const BACKLOG_PLATFORMS = ["github", "gitlab"] as const;
 export type BacklogPlatform = typeof BACKLOG_PLATFORMS[number];
+// A work item identity reaches the desktop in two dialects: the canonical
+// provider-qualified form (`github:acme/api#1`) and the manual, locally
+// minted form (`WI-2026-018`). `@afk/application` brands only the canonical
+// one, so the wire format keeps the wide type on purpose — narrowing it here
+// would hide one dialect behind the other's name.
 export type WorkItemId = string;
 
 export type ProviderProjectRef = {

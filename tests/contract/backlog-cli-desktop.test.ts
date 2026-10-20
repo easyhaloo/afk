@@ -3,16 +3,18 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogManagementProvider } from '@afk/application';
+import type { BacklogItem, BacklogManagementProvider } from '@afk/application';
 import {
   createBacklogService,
   type BacklogServiceDeps,
 } from '../../desktop-client/electron/services/backlog-service';
-import type { BacklogItem } from '../../desktop-client/shared/backlog-contract';
 import { COMMANDS } from '../../src/command-registry';
 import { COMMANDS as CLI_COMMANDS } from '../../src/cli/command-registry';
 import { registerBacklogCommands } from '../../src/cli/commands/backlog';
 
+// The stub answers the shared provider Port, so it is modelled with the
+// shared `BacklogItem`. The desktop's own wire type is a structurally
+// compatible projection of the same record.
 function stubItem(id: string, overrides: Partial<BacklogItem> = {}): BacklogItem {
   return {
     id,

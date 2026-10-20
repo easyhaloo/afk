@@ -22,7 +22,7 @@ import { createRunObserver } from '../../infrastructure/observability/run-observ
 import { RunObserver } from '../../observability/run-observer.js';
 import { projectWorkItemExecution } from '../../observability/work-item-execution-projection.js';
 import { readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
-import { resolveWorkflowRunRequest, type WorkflowRunRequest } from './run-request.js';
+import { EXECUTION_ID_PATTERN, resolveWorkflowRunRequest, type WorkflowRunRequest } from './run-request.js';
 import { withLogContext } from '@afk/infrastructure';
 
 export interface ExecuteWorkItemInput {
@@ -65,7 +65,6 @@ interface LockOwner extends LockIdentity {
 }
 
 const execFileAsync = promisify(execFile);
-const executionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const defaultLockProbe: LockProbe = {
@@ -113,7 +112,7 @@ function parseLockOwner(raw: string, workItemId: string, host: string): LockOwne
   const owner = value as LockOwner;
   if (Object.keys(owner).sort().join(',') !== 'executionId,host,nonce,pid,processStart,version,workItemId'
     || owner.version !== 1 || owner.host !== host || owner.workItemId !== workItemId
-    || !executionIdPattern.test(owner.executionId) || !uuidPattern.test(owner.nonce)) {
+    || !EXECUTION_ID_PATTERN.test(owner.executionId) || !uuidPattern.test(owner.nonce)) {
     throw new Error(`cannot verify lock owner identity for ${workItemId}`);
   }
   return owner;
@@ -252,7 +251,7 @@ function validateItem(item: BacklogItem, inventoryItem: GlobalWorkItem, manifest
 export async function executeWorkItem(input: ExecuteWorkItemInput, dependencies: ExecuteWorkItemDependencies = {}): Promise<ExecuteWorkItemResult> {
   const workItemId = parseWorkItemId(input.workItemId).id;
   const executionId = input.executionId ?? randomUUID();
-  if (!executionIdPattern.test(executionId)) throw new Error('invalid executionId');
+  if (!EXECUTION_ID_PATTERN.test(executionId)) throw new Error('invalid executionId');
   const context: ObservationContext = {
     traceId: executionId, runId: executionId, workItemId, profileId: process.env.AFK_PROFILE ?? 'default',
     attempt: 1, actor: { kind: 'system', id: 'execute' },
@@ -426,7 +425,7 @@ async function journalPublication(manifest: ResolvedExecutionManifest, execution
 export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, dependencies: ExecuteWorkItemDependencies = {}): Promise<ExecuteWorkItemResult> {
   const workItemId = parseWorkItemId(input.workItemId).id;
   const executionId = input.executionId;
-  if (!executionId || !executionIdPattern.test(executionId)) throw new Error('valid executionId is required');
+  if (!executionId || !EXECUTION_ID_PATTERN.test(executionId)) throw new Error('valid executionId is required');
   const manifest = await (dependencies.readManifest ?? readExecutionManifest)(input.manifestPath, workItemId);
   const lockPath = join(manifest.workspaceRoot, '.afk', 'executions', `${encodeWorkItemIdForPath(workItemId)}.lock`);
   await mkdir(join(manifest.workspaceRoot, '.afk', 'executions'), { recursive: true });

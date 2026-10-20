@@ -2,18 +2,18 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { generateWorkflowGraph, writeGraphCache } from "@afk/execution";
 import type { WorkflowGraphGenerateRequest, WorkflowGraphGenerateResult, WorkflowGraphStatus } from '../../shared/ipc-contract.js';
-
-const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+import { validateWorkflowGraphTemplateId } from '../security/graph-validation.js';
 
 function validateRequest(request: WorkflowGraphGenerateRequest): void {
   if (!request.workspace || path.isAbsolute(request.workspace) === false) throw new Error('workspace must be an absolute path');
-  if (!idPattern.test(request.templateId)) throw new Error('templateId must be kebab-case');
+  validateWorkflowGraphTemplateId(request.templateId);
   if (request.format && request.format !== 'json' && request.format !== 'archify-json') throw new Error('unsupported graph format');
 }
 
 export class WorkflowGraphService {
   async status(workspace: string, templateId: string): Promise<WorkflowGraphStatus> {
-    if (!path.isAbsolute(workspace) || !idPattern.test(templateId)) throw new Error('invalid graph status request');
+    if (!path.isAbsolute(workspace)) throw new Error('invalid graph status request');
+    validateWorkflowGraphTemplateId(templateId);
     const root = path.join(workspace, '.afk', 'cache', 'archify', 'workflow', templateId);
     const candidates = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
     const trusted = candidates.filter((entry) => entry.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))[0];

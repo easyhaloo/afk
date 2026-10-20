@@ -111,13 +111,20 @@ function deriveBranchStrategy(backlogId: string, raw?: BranchStrategyConfig): Br
   return { type: 'named', branch: deriveBacklogBranchName(backlogId) };
 }
 
+/**
+ * What an execution id has to look like: a safe identifier, short enough
+ * to be a name and not a payload.  The run request and the executor agree on
+ * it, so it is written once.
+ */
+export const EXECUTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
 export function validateObservationIdentity(input: {
   observationRunId?: string;
   observationWorkItemId?: string;
   auditRequired?: boolean;
 }): void {
   if (input.observationRunId === undefined && input.observationWorkItemId === undefined && !input.auditRequired) return;
-  if (!input.observationRunId || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(input.observationRunId)) {
+  if (!input.observationRunId || !EXECUTION_ID_PATTERN.test(input.observationRunId)) {
     throw new Error('observationRunId must be a safe, nonempty execution run ID');
   }
   if (!input.observationWorkItemId) throw new Error('observationWorkItemId is required with observationRunId');

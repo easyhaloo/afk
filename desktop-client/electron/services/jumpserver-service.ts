@@ -4,9 +4,7 @@ import type { BastionInput, BastionRecord } from "../adapters/jumpserver-store.j
 import { createJumpserverStore } from "../adapters/jumpserver-store.js";
 import { JUMPSERVER_BINARY_ERROR, createJumpserverCli } from "../adapters/jumpserver-cli.js";
 import { createJumpserverCredentialStore } from "./jumpserver-credential-service.js";
-
-// Must match OPENSSH_ALIAS_PATTERN in ../security/ssh-validation.ts
-const ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
+import { OPENSSH_ALIAS_PATTERN } from "../security/ssh-validation.js";
 
 export type SyncResult = {
   bastionId: string;
@@ -183,7 +181,7 @@ export function createJumpserverService(deps: JumpserverServiceDeps) {
 
     for (const asset of rawAssets) {
       // Validate alias
-      if (!ALIAS_PATTERN.test(asset.name)) {
+      if (!OPENSSH_ALIAS_PATTERN.test(asset.name)) {
         skippedReasons.push({ name: asset.name, reason: "资产名称非法" });
         continue;
       }

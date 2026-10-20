@@ -2,7 +2,12 @@ import path from "node:path";
 import type { SshCredentialSetInput, SshListOptions } from "../../shared/ipc-contract.js";
 import type { ManagedSshHostInput, SshExternalTerminalId, SshFingerprint, SshJumpHostType } from "../../shared/ssh-contract.js";
 
-const OPENSSH_ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
+/**
+ * What an OpenSSH alias may look like.  The bastion alias and the
+ * JumpServer asset names are checked against the same rule, so it is
+ * written once.
+ */
+export const OPENSSH_ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 const HOSTNAME_PATTERN = /^\S{1,253}$/u;
 
 function requiredString(value: unknown, message: string) {

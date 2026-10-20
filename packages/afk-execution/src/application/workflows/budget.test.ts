@@ -127,8 +127,8 @@ describe('WorkflowRunner budget guard', () => {
       observer: { record: vi.fn() } as unknown as RunObserver,
       agentProvider: { name: 'claude-code', capabilities: new Set(['resume']), createExecution, restoreSession: vi.fn() } as unknown as AgentProvider,
     }) as any;
-    runner.heartbeatRuntime = vi.fn();
-    runner.writeRuntimeDiagnostics = vi.fn();
+    vi.spyOn(runner.runtimeLifecycle, 'heartbeat').mockResolvedValue(undefined);
+    vi.spyOn(runner.runtimeLifecycle, 'diagnostics').mockResolvedValue(undefined);
     runner.sessionStoreChainFactory = () => ({ saveFirst: vi.fn(), loadFirst: vi.fn(async () => ({ snapshot: {}, storeName: 'file' })) });
     const result = await runner.runPhase({
       iid: 42, session: 'session-42', wtPath: '/tmp/worktree', hardTimeoutMs: 1000, completionTimeoutMs: 1000,

@@ -67,8 +67,8 @@ describe('WorkflowRunner backlog provider mode', () => {
     const agent = { name: 'codex', capabilities: new Set(), createExecution } as unknown as AgentProvider;
     const sandbox = { id: 'sandbox-42' };
     const subject = new WorkflowRunner(bundle, { agentProvider: agent, agentRuntime: runtime, observer }) as any;
-    subject.heartbeatRuntime = vi.fn(async () => {});
-    subject.writeRuntimeDiagnostics = vi.fn(async () => {});
+    vi.spyOn(subject.runtimeLifecycle, 'heartbeat').mockResolvedValue(undefined);
+    vi.spyOn(subject.runtimeLifecycle, 'diagnostics').mockResolvedValue(undefined);
 
     await expect(subject.runPhase({
       iid: 42,
@@ -98,7 +98,7 @@ describe('WorkflowRunner backlog provider mode', () => {
       executionMode: 'batch',
       runtime,
     });
-    expect(subject.heartbeatRuntime).toHaveBeenCalledWith(expect.objectContaining({
+    expect(subject.runtimeLifecycle.heartbeat).toHaveBeenCalledWith(expect.objectContaining({
       agentTransport: 'exec',
     }));
   });
@@ -181,7 +181,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     subject.sandbox = primarySandbox;
     subject.resourceScope = { registerSandbox: vi.fn() };
     subject.sandboxProvider = { create };
-    subject.heartbeatRuntime = vi.fn(async () => {});
+    vi.spyOn(subject.runtimeLifecycle, 'heartbeat').mockResolvedValue(undefined);
     subject.runPhase = vi.fn(async () => ({
       completed: true,
       output: { type: 'goal_complete', kind: 'ac_verification', result: 'PASS', summary: 'verified' },
@@ -219,7 +219,7 @@ describe('WorkflowRunner backlog provider mode', () => {
     subject.runStep = vi.fn()
       .mockResolvedValueOnce({ stepId: 'build', status: 'completed', startedAt: '', completedAt: '' })
       .mockResolvedValueOnce({ stepId: 'check', status: 'completed', startedAt: '', completedAt: '' });
-    subject.heartbeatRuntime = vi.fn(async () => {});
+    vi.spyOn(subject.runtimeLifecycle, 'heartbeat').mockResolvedValue(undefined);
     // The plan names its steps freely: the loop follows the declared phase
     // and completion kind, not a step id.
     const plan = compileTemplate({
@@ -362,8 +362,8 @@ describe('WorkflowRunner backlog provider mode', () => {
     const bundle = providers(vi.fn(async () => claim));
     // No injected agent provider: the runner has to resolve one itself.
     const subject = new WorkflowRunner(bundle, { observer }) as any;
-    subject.heartbeatRuntime = vi.fn(async () => {});
-    subject.writeRuntimeDiagnostics = vi.fn(async () => {});
+    vi.spyOn(subject.runtimeLifecycle, 'heartbeat').mockResolvedValue(undefined);
+    vi.spyOn(subject.runtimeLifecycle, 'diagnostics').mockResolvedValue(undefined);
     registerTemplate({
       name: 'provider-from-template', version: 1, defaultProvider: 'codex',
       steps: [{ id: 'implement', role: 'implementer', prompt: 'p' }],

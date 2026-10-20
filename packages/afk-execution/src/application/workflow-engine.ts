@@ -63,8 +63,23 @@ import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtim
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
 import { collectAgentTelemetry } from '../infrastructure/observability/agent-telemetry.js';
-import { runtimeRecord } from './runtime/runtime-record.js';
+import { RuntimeLifecycle, type RuntimeLifecycleLabels } from './runtime/runtime-lifecycle.js';
 import { carriesExpectedSignal } from '../shared/goal-complete.js';
+
+/**
+ * The labels a workflow run logs its runtime lifecycle under. They are the
+ * runner's own words: a workflow run and a QA run are not the same run, and
+ * the monitor should be able to tell them apart in the log.
+ */
+const WORKFLOW_RUNTIME_LABELS: RuntimeLifecycleLabels = {
+  publish: 'failed to publish workflow runtime',
+  heartbeat: 'failed to update workflow runtime',
+  archive: 'failed to archive workflow runtime',
+  diagnostics: 'failed to persist workflow runtime diagnostics',
+};
+
+/** The summary a blocked workflow run records when it has none of its own. */
+const WORKFLOW_RUNTIME_ERROR_SUMMARY = 'workflow execution failed';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -290,7 +305,7 @@ export class WorkflowRunner {
   private activeClaim?: BacklogClaim;
   private leaseLost = false;
   private readonly runtimeManager: TaskRuntimeManager;
-  private runtimeRunId?: string;
+  private readonly runtimeLifecycle: RuntimeLifecycle;
   private runtimeErrorSummary?: string;
   private acFeedback?: AcVerificationFailure;
   private activeRework?: import('@afk/application').ReworkRecord;
@@ -349,6 +364,7 @@ export class WorkflowRunner {
     // Default to the standard chain: FileSessionStore (native) -> HandoffSessionStore (Markdown fallback).
     this.sessionStoreChainFactory = deps?.sessionStoreChain ?? defaultSessionStoreChain;
     this.runtimeManager = deps?.runtimeManager ?? new TaskRuntimeManager();
+    this.runtimeLifecycle = new RuntimeLifecycle({ store: this.runtimeManager, labels: WORKFLOW_RUNTIME_LABELS });
     this.observer = deps.observer;
     this.multiRepositoryPreparer = deps?.multiRepositoryPreparer ?? new MultiRepositoryPreparer();
   }
@@ -385,7 +401,7 @@ export class WorkflowRunner {
     this.activeBacklog = undefined;
     this.activeClaim = undefined;
     this.leaseLost = false;
-    this.runtimeRunId = undefined;
+    this.runtimeLifecycle.reset();
     this.runtimeErrorSummary = undefined;
     this.preparedRepositories = undefined;
     this.preparedRepositoryFinish = undefined;
@@ -460,7 +476,23 @@ export class WorkflowRunner {
     this.repoRoot = options.repoRoot ?? process.cwd();
     // The runtime record exists for the whole run: it starts before any setup
     // can fail, so a failed setup is archived against it.
-    await this.startRuntime(options.backlogId, session);
+    await this.runtimeLifecycle.start({
+      runId: this.observationContext?.runId ?? `${session}-${Date.now()}`,
+      phase: 'implementing',
+      record: {
+        backlogId: options.backlogId,
+        workspace: this.repoRoot,
+        ...(this.activeBacklog?.providerRef !== undefined ? { providerRef: this.activeBacklog.providerRef } : {}),
+        ...(this.activeBacklog?.title !== undefined ? { title: this.activeBacklog.title } : {}),
+        sandboxProvider: this.sandboxProviderName,
+        executionMode: this.executionMode,
+        agentProvider: this.agentProviderName,
+        runtime: this.agentRuntime,
+        session,
+        ...(this.activeBacklog?.branchName !== undefined ? { branch: this.activeBacklog.branchName } : {}),
+        progress: 'claimed',
+      },
+    });
     let loadedTemplate!: WorkflowTemplate;
     try {
     // Bind all git/worktree operations to the explicit project root. This
@@ -509,7 +541,7 @@ export class WorkflowRunner {
     // The runtime record was written before the template was read, so it
     // carries a provisional provider. Correct it now that the real one is
     // known.
-    await this.heartbeatRuntime({ agentProvider: this.agentProviderName });
+    await this.runtimeLifecycle.heartbeat({ agentProvider: this.agentProviderName });
     logger.info({ iid, session, modules: this.modules.map(m => m.name), extParams: this.extParams, sandbox: this.sandboxProviderName, agent: this.agentProviderName }, 'WorkflowRunner initialized');
     } catch (error) {
       if (error instanceof AuditPersistenceError) {
@@ -521,7 +553,12 @@ export class WorkflowRunner {
       await this.recordObservation({ kind: 'run.finished', outcome: 'failed', reason: 'workflow setup failed' });
       await this.markBacklogBlocked(`workflow setup failed: ${(error as Error).message}`);
       await this.resourceScope?.finish({ status: 'failed' });
-      await this.finishRuntime('blocked', 'workflow setup failed');
+      await this.runtimeLifecycle.finish({
+        status: 'blocked',
+        progress: 'workflow setup failed',
+        errorSummary: this.runtimeErrorSummary,
+        defaultErrorSummary: WORKFLOW_RUNTIME_ERROR_SUMMARY,
+      });
       throw error;
     }
 
@@ -592,10 +629,12 @@ export class WorkflowRunner {
       this.watchdog.disarm();
       this.activeClaim = undefined;
       this.activeRework = undefined;
-      await this.finishRuntime(
-        terminalOutcome === 'success' ? 'completed' : 'blocked',
-        terminalOutcome === 'success' ? 'implementation handed to QA' : 'implementation stopped',
-      );
+      await this.runtimeLifecycle.finish({
+        status: terminalOutcome === 'success' ? 'completed' : 'blocked',
+        progress: terminalOutcome === 'success' ? 'implementation handed to QA' : 'implementation stopped',
+        errorSummary: this.runtimeErrorSummary,
+        defaultErrorSummary: WORKFLOW_RUNTIME_ERROR_SUMMARY,
+      });
       if (scopeError !== undefined) {
         await this.markBacklogBlocked('resource cleanup failed');
         throw scopeError;
@@ -715,13 +754,13 @@ export class WorkflowRunner {
     // Claude is still returning from the previous one, losing that prompt.
     const needsDedicatedSandbox = ctx.executionMode === 'interactive' || branchHandle.path !== ctx.primaryWtPath;
     const sandbox = needsDedicatedSandbox
-      ? await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode, workspaceRoot: this.workspaceRoot, runtimeRunId: this.runtimeRunId })
+      ? await this.sandboxProvider.create({ worktreePath: branchHandle.path, session: ctx.session, branch: branchHandle.branch, tmux: this.tmux, executionMode: ctx.executionMode, workspaceRoot: this.workspaceRoot, runtimeRunId: this.runtimeLifecycle.runId })
       : this.sandbox!;
     if (sandbox !== this.sandbox) {
       this.stepSandboxes.push(sandbox);
       this.resourceScope?.registerSandbox(sandbox);
     }
-    await this.heartbeatRuntime({ worktree: branchHandle.path, branch: branchHandle.branch, progress: `running ${step.id}` });
+    await this.runtimeLifecycle.heartbeat({ worktree: branchHandle.path, branch: branchHandle.branch, progress: `running ${step.id}` });
     // The step declares both: the protocol it speaks and the phase it runs in.
     const completionKind: CompletionKind = step.completionKind;
     const observationPhase = step.phase;
@@ -915,7 +954,7 @@ export class WorkflowRunner {
       tmux: this.tmux,
       executionMode: this.executionMode,
       workspaceRoot,
-      runtimeRunId: this.runtimeRunId,
+      runtimeRunId: this.runtimeLifecycle.runId,
     });
     this.resourceScope?.registerSandbox(this.sandbox);
     logger.info({ iid, session, worktree: wt.path, sandboxId: this.sandbox.id }, 'sandbox created');
@@ -1168,16 +1207,21 @@ export class WorkflowRunner {
         runtime: p.runtime,
       });
       resumedExecution = undefined;
-      await this.heartbeatRuntime(runtimeFieldsFromExecution(execution.metadata));
+      await this.runtimeLifecycle.heartbeat(runtimeFieldsFromExecution(execution.metadata));
       this.resourceScope?.registerExecution(execution);
-      await this.heartbeatRuntime({ phase: 'implementing', progress: `agent generation ${round}` });
+      await this.runtimeLifecycle.heartbeat({ phase: 'implementing', progress: `agent generation ${round}` });
       logger.info({ iid: p.iid, round, signalType: p.signalType }, 'goal sent');
 
       const result = await execution.waitForResult({
         completionTimeoutMs: p.completionTimeoutMs,
         contextHighTokens: p.contextHighTokens,
       });
-      await this.writeRuntimeDiagnostics(result, execution);
+      await this.runtimeLifecycle.diagnostics({
+        result,
+        execution,
+        failed: { kind: 'error', message: 'acceptance verification failed' },
+        completed: { kind: 'test', message: 'acceptance verification completed' },
+      });
 
       const telemetry = await this.recordAgentTelemetry(execution, result);
       if (telemetry) {
@@ -1317,7 +1361,7 @@ export class WorkflowRunner {
 
     for (let iteration = 1; iteration <= this.config.maxSelfIterations; iteration++) {
       this.acFeedback = failure;
-      await this.heartbeatRuntime({ progress: `AC correction ${iteration}/${this.config.maxSelfIterations}` });
+      await this.runtimeLifecycle.heartbeat({ progress: `AC correction ${iteration}/${this.config.maxSelfIterations}` });
       const implementationResult = await this.runStep(implementation, { ...ctx, stepIndex: iteration }, results);
       results[implementation.id] = implementationResult;
       if (implementationResult.status !== 'completed') break;
@@ -1433,71 +1477,6 @@ export class WorkflowRunner {
       logger.info({ runId: this.observationContext.runId, err }, 'agent.session_recorded: telemetry not persisted (non-fatal)');
     }
     return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;
-  }
-
-  private async startRuntime(backlogId: string, session: string): Promise<void> {
-    if (this.runtimeRunId) return;
-    const now = new Date().toISOString();
-    this.runtimeRunId = this.observationContext?.runId ?? `${session}-${Date.now()}`;
-    try {
-      await this.runtimeManager.start(runtimeRecord({
-        runId: this.runtimeRunId,
-        backlogId,
-        workspace: this.repoRoot,
-        ...(this.activeBacklog?.providerRef !== undefined ? { providerRef: this.activeBacklog.providerRef } : {}),
-        ...(this.activeBacklog?.title !== undefined ? { title: this.activeBacklog.title } : {}),
-        phase: 'implementing',
-        sandboxProvider: this.sandboxProviderName,
-        executionMode: this.executionMode,
-        agentProvider: this.agentProviderName,
-        runtime: this.agentRuntime,
-        session,
-        ...(this.activeBacklog?.branchName !== undefined ? { branch: this.activeBacklog.branchName } : {}),
-        now,
-        progress: 'claimed',
-      }));
-    } catch (error) {
-      logger.warn({ backlogId, error }, 'failed to publish workflow runtime');
-      this.runtimeRunId = undefined;
-    }
-  }
-
-  private async heartbeatRuntime(changes: Parameters<TaskRuntimeManager['heartbeat']>[1]): Promise<void> {
-    if (!this.runtimeRunId) return;
-    try {
-      await this.runtimeManager.heartbeat(this.runtimeRunId, changes);
-    } catch (error) {
-      logger.warn({ runId: this.runtimeRunId, error }, 'failed to update workflow runtime');
-    }
-  }
-
-  private async finishRuntime(status: 'completed' | 'blocked', progress: string): Promise<void> {
-    if (!this.runtimeRunId) return;
-    try {
-      await this.runtimeManager.finish(this.runtimeRunId, {
-        status,
-        progress,
-        errorSummary: status === 'blocked' ? this.runtimeErrorSummary ?? 'workflow execution failed' : undefined,
-      });
-    } catch (error) {
-      logger.warn({ runId: this.runtimeRunId, error }, 'failed to archive workflow runtime');
-    }
-  }
-
-  private async writeRuntimeDiagnostics(result: ExecutionResult, execution: AgentExecution): Promise<void> {
-    if (!this.runtimeRunId) return;
-    try {
-      const output = await execution.captureOutput({ lines: 200, history: 2_000 });
-      await this.runtimeManager.writeDiagnostics(this.runtimeRunId, { result, output });
-      const structured = result.structuredOutput as { result?: string; summary?: string } | undefined;
-      const failed = result.status !== 'completed' || structured?.result === 'FAIL';
-      await this.runtimeManager.appendActivity(this.runtimeRunId, {
-        kind: failed ? 'error' : 'test',
-        message: structured?.summary ?? (failed ? 'acceptance verification failed' : 'acceptance verification completed'),
-      });
-    } catch (error) {
-      logger.warn({ runId: this.runtimeRunId, error }, 'failed to persist workflow runtime diagnostics');
-    }
   }
 
 }

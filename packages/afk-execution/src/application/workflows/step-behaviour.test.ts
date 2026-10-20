@@ -51,7 +51,7 @@ describe('a template that names its steps freely', () => {
     const check = selectAcVerificationStep(planSteps(plan))!;
     const subject = runner() as any;
     subject.observationContext = { traceId: 'run-42', runId: 'run-42', workItemId: '42', profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'test' } };
-    subject.heartbeatRuntime = vi.fn(async () => {});
+    vi.spyOn(subject.runtimeLifecycle, 'heartbeat').mockResolvedValue(undefined);
     subject.sandbox = { id: 'primary' };
     subject.resourceScope = { registerSandbox: vi.fn() };
     subject.runPhase = vi.fn(async () => ({
@@ -70,7 +70,7 @@ describe('a template that names its steps freely', () => {
     const check = selectAcVerificationStep(planSteps(plan))!;
     const subject = runner() as any;
     subject.observationContext = { traceId: 'run-42', runId: 'run-42', workItemId: '42', profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'test' } };
-    subject.heartbeatRuntime = vi.fn(async () => {});
+    vi.spyOn(subject.runtimeLifecycle, 'heartbeat').mockResolvedValue(undefined);
     subject.sandbox = { id: 'primary' };
     subject.resourceScope = { registerSandbox: vi.fn() };
     subject.runPhase = vi.fn(async () => ({ completed: true, output: {} }));
@@ -112,7 +112,7 @@ describe('a template that names its steps freely', () => {
     const plan = compileTemplate(renamedTemplate);
     const subject = runner() as any;
     subject.config = { ...subject.config, maxSelfIterations: 2 };
-    subject.heartbeatRuntime = vi.fn(async () => {});
+    vi.spyOn(subject.runtimeLifecycle, 'heartbeat').mockResolvedValue(undefined);
     subject.runStep = vi.fn()
       .mockResolvedValueOnce({ stepId: 'build', status: 'completed', startedAt: '', completedAt: '' })
       .mockResolvedValueOnce({ stepId: 'check', status: 'completed', startedAt: '', completedAt: '' });

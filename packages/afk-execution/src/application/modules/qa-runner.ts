@@ -22,9 +22,24 @@ import { BudgetManager } from '../workflows/budget.js';
 import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
 import { BudgetStore } from '../workflows/budget-store.js';
-import { runtimeRecord } from '../runtime/runtime-record.js';
+import { RuntimeLifecycle, type RuntimeLifecycleLabels } from '../runtime/runtime-lifecycle.js';
 import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import type { RunEventData } from '@afk/core';
+
+/**
+ * The labels a QA run logs its runtime lifecycle under. They are the runner's
+ * own words: a workflow run and a QA run are not the same run, and the
+ * monitor should be able to tell them apart in the log.
+ */
+const QA_RUNTIME_LABELS: RuntimeLifecycleLabels = {
+  publish: 'failed to publish QA runtime',
+  heartbeat: 'failed to update QA runtime',
+  archive: 'failed to archive QA runtime',
+  diagnostics: 'failed to persist QA runtime diagnostics',
+};
+
+/** The summary a blocked QA run records when it has none of its own. */
+const QA_RUNTIME_ERROR_SUMMARY = 'QA execution failed';
 
 type QAResultObject = { [key: string]: unknown };
 type QAFailureCriterion = { id: string; expected: string; actual: string };
@@ -107,7 +122,9 @@ export class QARunner {
     let execution: AgentExecution | undefined;
     let workspace: PreparedRepositorySet | undefined;
     const runtimeRunId = `${session}-runtime`;
-    let runtimeStarted = false;
+    // One lifecycle per QA run: the record, its heartbeats and its archive
+    // belong to the run that is happening now.
+    const runtime = new RuntimeLifecycle({ store: this.runtimeManager, labels: QA_RUNTIME_LABELS });
     let runtimeErrorSummary: string | undefined;
 
     try {
@@ -124,13 +141,28 @@ export class QARunner {
         return { success: false, summary };
       }
       const baselineBranch = await this.resolveExecutionBranch(backlog);
-      await this.startRuntime(runtimeRunId, backlog, session);
-      runtimeStarted = true;
+      await runtime.start({
+        runId: runtimeRunId,
+        phase: 'verifying',
+        record: {
+          backlogId: backlog.id,
+          workspace: this.projectRoot,
+          providerRef: backlog.providerRef,
+          title: backlog.title,
+          sandboxProvider: this.sandboxProvider.name,
+          executionMode: this.executionMode,
+          agentProvider: this.agentProvider.name,
+          runtime: this.agentRuntime,
+          ...(this.executionMode === 'interactive' ? { session } : {}),
+          branch: backlog.branchName,
+          progress: 'QA starting',
+        },
+      });
       workspace = await this.prepareWorkspace(id);
       const handle = await this.providers.branches.createVerificationWorktree(backlog, baselineBranch);
       worktreePath = handle.worktreePath;
       await this.logWorktreeDiagnostics(id, 'worktree-created', worktreePath);
-      await this.heartbeatRuntime(runtimeRunId, { worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
+      await runtime.heartbeat({ worktree: worktreePath, branch: handle.branchName, progress: 'QA worktree created' });
       logger.info({ backlogId: id, worktree: worktreePath, baselineBranch }, 'QA worktree created');
 
       const featureBranch = backlog.branchName;
@@ -180,14 +212,19 @@ export class QARunner {
         executionMode: this.executionMode,
         runtime: this.agentRuntime,
       });
-      await this.heartbeatRuntime(runtimeRunId, runtimeFieldsFromExecution(execution.metadata));
-      await this.heartbeatRuntime(runtimeRunId, { progress: 'QA agent running' });
+      await runtime.heartbeat(runtimeFieldsFromExecution(execution.metadata));
+      await runtime.heartbeat({ progress: 'QA agent running' });
       logger.info({ backlogId: id, session, event: 'qa-start' }, 'QA verification started');
 
       const result = await execution.waitForResult({ completionTimeoutMs: this.config.qaTimeout ?? this.config.completionTimeout });
       await this.recordBudgetUsage(budgetStore, budget, execution, result);
       await this.logWorktreeDiagnostics(id, 'agent-completed', worktreePath);
-      await this.writeRuntimeDiagnostics(runtimeRunId, result, execution);
+      await runtime.diagnostics({
+        result,
+        execution,
+        failed: { kind: 'error', message: 'QA execution failed' },
+        completed: { kind: 'qa', message: 'QA execution completed' },
+      });
       logger.info({ backlogId: id, diagnostics: formatExecutionFailure(result) }, 'QA execution result received');
       if (result.status !== 'completed') {
         const summary = `QA ${result.status}: ${formatExecutionFailure(result)}`;
@@ -236,9 +273,13 @@ export class QARunner {
           logger.warn({ backlogId: id, error }, 'failed to release QA workspace');
         }
       }
-      if (runtimeStarted) {
-        await this.finishRuntime(runtimeRunId, runtimeErrorSummary ? 'blocked' : 'completed', runtimeErrorSummary);
-      }
+      const status = runtimeErrorSummary ? 'blocked' : 'completed';
+      await runtime.finish({
+        status,
+        progress: status === 'completed' ? 'QA completed' : 'QA stopped',
+        errorSummary: runtimeErrorSummary,
+        defaultErrorSummary: QA_RUNTIME_ERROR_SUMMARY,
+      });
     }
   }
 
@@ -370,65 +411,6 @@ export class QARunner {
     const { sessionId, usage } = telemetry;
     if (usage && budget.recordSession(sessionId, usage.totalTokens)) await store.save(budget.snapshot());
     await this.onSession?.({ kind: 'agent.session_recorded', ...telemetry });
-  }
-
-  private async startRuntime(runId: string, backlog: BacklogItem, session: string): Promise<void> {
-    const now = new Date().toISOString();
-    try {
-      await this.runtimeManager.start(runtimeRecord({
-        runId,
-        backlogId: backlog.id,
-        workspace: this.projectRoot,
-        providerRef: backlog.providerRef,
-        title: backlog.title,
-        phase: 'verifying',
-        sandboxProvider: this.sandboxProvider.name,
-        executionMode: this.executionMode,
-        agentProvider: this.agentProvider.name,
-        runtime: this.agentRuntime,
-        ...(this.executionMode === 'interactive' ? { session } : {}),
-        branch: backlog.branchName,
-        now,
-        progress: 'QA starting',
-      }));
-    } catch (error) {
-      logger.warn({ backlogId: backlog.id, error }, 'failed to publish QA runtime');
-    }
-  }
-
-  private async heartbeatRuntime(runId: string, changes: Parameters<TaskRuntimeManager['heartbeat']>[1]): Promise<void> {
-    try {
-      await this.runtimeManager.heartbeat(runId, changes);
-    } catch (error) {
-      logger.warn({ runId, error }, 'failed to update QA runtime');
-    }
-  }
-
-  private async finishRuntime(runId: string, status: 'completed' | 'blocked', errorSummary?: string): Promise<void> {
-    try {
-      await this.runtimeManager.finish(runId, {
-        status,
-        progress: status === 'completed' ? 'QA completed' : 'QA stopped',
-        errorSummary,
-      });
-    } catch (error) {
-      logger.warn({ runId, error }, 'failed to archive QA runtime');
-    }
-  }
-
-  private async writeRuntimeDiagnostics(runId: string, result: ExecutionResult, execution: AgentExecution): Promise<void> {
-    try {
-      const output = await execution.captureOutput({ lines: 200, history: 2_000 });
-      await this.runtimeManager.writeDiagnostics(runId, { result, output });
-      const structured = result.structuredOutput as { result?: string; summary?: string } | undefined;
-      const failed = result.status !== 'completed' || structured?.result === 'FAIL';
-      await this.runtimeManager.appendActivity(runId, {
-        kind: failed ? 'error' : 'qa',
-        message: structured?.summary ?? (failed ? 'QA execution failed' : 'QA execution completed'),
-      });
-    } catch (error) {
-      logger.warn({ runId, error }, 'failed to persist QA runtime diagnostics');
-    }
   }
 
   private async logWorktreeDiagnostics(backlogId: string, phase: string, worktreePath: string): Promise<void> {

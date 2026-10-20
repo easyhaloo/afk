@@ -18,6 +18,10 @@ import {
   validateBaseBranch,
   validateRunRepositorySelectionSet,
 } from "../../shared/work-item-run-validation.js";
+import type {
+  ExecutionManifest,
+  ExecutionManifestRepository,
+} from "@afk/execution/application/workflows/execution-manifest";
 
 const MANIFEST_FILE = "execution-manifest.json";
 const MANIFEST_SCHEMA_VERSION = 1;
@@ -49,6 +53,35 @@ export type WorkItemExecutionManifest = {
   workingBranch: string;
   repositories: WorkItemExecutionManifestRepository[];
 };
+
+/** A type-level assertion: the type argument has to hold. */
+type Assert<T extends true> = T;
+
+/**
+ * The manifest is the contract between the desktop and the runner: the
+ * desktop writes it, the runner reads it.  The two shapes have to be the
+ * same shape, and this says so where the desktop's copy is declared — the
+ * same way the IPC contract checks itself against the audit.  A field
+ * added to one side and not the other stops the build.
+ */
+type ManifestIsTheRunnersManifest = Assert<
+  WorkItemExecutionManifest extends ExecutionManifest ? true : false
+>;
+type ManifestKeysCoverTheRunner = Assert<
+  Exclude<keyof WorkItemExecutionManifest, keyof ExecutionManifest> extends never ? true : false
+>;
+type RunnerManifestKeysCoverTheDesktop = Assert<
+  Exclude<keyof ExecutionManifest, keyof WorkItemExecutionManifest> extends never ? true : false
+>;
+type ManifestRepositoryIsTheRunnersRepository = Assert<
+  WorkItemExecutionManifestRepository extends ExecutionManifestRepository ? true : false
+>;
+type ManifestRepositoryKeysCoverTheRunner = Assert<
+  Exclude<keyof WorkItemExecutionManifestRepository, keyof ExecutionManifestRepository> extends never ? true : false
+>;
+type RunnerManifestRepositoryKeysCoverTheDesktop = Assert<
+  Exclude<keyof ExecutionManifestRepository, keyof WorkItemExecutionManifestRepository> extends never ? true : false
+>;
 
 export type WorkItemExecutionManifestStoreFs = {
   mkdir: (directory: string, options: { recursive: true }) => Promise<unknown>;

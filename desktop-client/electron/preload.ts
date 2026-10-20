@@ -1,7 +1,15 @@
+/**
+ * The renderer's only bridge into the main process.
+ *
+ * The wire names come from the shared contract's single table: the preload
+ * has no channel literal of its own, so the table cannot drift away from
+ * the channels the main process registers. The source is an ES module
+ * because the shared contract is one; the artifact is still CommonJS,
+ * because `scripts/build-main.mjs` bundles this file with esbuild's
+ * `format: 'cjs'` — sandboxed preloads must be CommonJS.
+ */
 import { contextBridge, ipcRenderer } from "electron";
-import type { DesktopApi } from "../shared/ipc-contract.js";
-
-import { IPC_CHANNELS } from "./preload-channels.cjs";
+import { IPC_CHANNELS, type DesktopApi } from "../shared/ipc-contract.js";
 
 const api: DesktopApi = {
   copyText: (text) => ipcRenderer.invoke(IPC_CHANNELS.copyText, text),

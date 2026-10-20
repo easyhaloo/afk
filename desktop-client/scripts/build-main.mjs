@@ -9,6 +9,11 @@
 //   main.js    ESM, with @afk/* inlined
 //   preload.cjs CommonJS, because sandboxed preloads must be CJS
 //
+// The preload source is an ES module: it shares the channel table with the
+// main process, and that table lives in the ESM shared contract. esbuild
+// lowers the module to CommonJS on the way out, so the artifact stays
+// loadable by a sandboxed preload.
+//
 // `electron` and `node-pty` stay external: the first is provided by the
 // runtime, the second is a native module that electron-builder rebuilds.
 import { createRequire } from 'node:module';
@@ -55,7 +60,7 @@ const configs = [
   },
   {
     ...common,
-    entryPoints: [join(desktop, 'electron/preload.cts')],
+    entryPoints: [join(desktop, 'electron/preload.ts')],
     outfile: join(desktop, 'dist-electron/electron/preload.cjs'),
     format: 'cjs',
   },

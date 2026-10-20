@@ -32,13 +32,20 @@ export type CliCapability = {
   available: boolean;
 };
 
+/**
+ * The agent ids a canvas node may name. The set is declared once here so the
+ * desktop's editable-provider check and the wire contract cannot disagree.
+ */
+export const AGENT_PROVIDER_IDS = ["claude-code", "codex", "cursor", "pi", "opencode", "copilot"] as const;
+export type AgentProviderId = typeof AGENT_PROVIDER_IDS[number];
+
 export type CanvasTemplateNode = {
   id: string;
   template: "agent" | "qa";
   label: string;
   description: string;
   prompt: string;
-  provider?: "claude-code" | "codex" | "cursor" | "pi" | "opencode" | "copilot";
+  provider?: AgentProviderId;
   x: number;
   y: number;
 };

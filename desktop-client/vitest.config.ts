@@ -1,9 +1,10 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  // electron/preload.cts is TypeScript that must compile to CommonJS (Electron
-  // requires sandboxed preloads to be CJS). Vite's default esbuild include
-  // pattern does not cover .cts, so it would be parsed as plain JavaScript.
+  // electron/ and shared/ hold TypeScript that must compile to CommonJS
+  // (Electron requires sandboxed preloads to be CJS) or that resolves
+  // NodeNext-style `.js` specifiers. Vite's default esbuild include pattern
+  // does not cover .cts/.mts, so it would parse them as plain JavaScript.
   esbuild: { include: /\.(m?[jt]s|[cm]?tsx?)$/ },
   test: {
     environment: "node",

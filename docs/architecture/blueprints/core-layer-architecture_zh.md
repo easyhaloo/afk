@@ -40,9 +40,15 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 - Electron main 与 `@afk/*` 统一为 ESM。`desktop-client` 的 `type` 改为 `module`，
   main 源码直接 `import` Application 用例，不再经过运行期 CommonJS 桥接产物
   `application.cjs`；`loadApplication()` shim 已删除。沙箱 preload 按 Electron
-  要求保持 CJS，源码以 `preload.cts` 表达（`.cts` 恒定产出 `.cjs`），
-  因此 `sandbox: true` 未被削弱。ESM 内需要访问 CJS 产物或原生模块时
-  统一用 `createRequire`。
+  要求保持 CJS：源码为 ES 模块 `preload.ts`（与共享契约同为 ESM，
+  因此可直接复用 `shared/ipc-contract.ts` 的唯一通道表），由
+  `scripts/build-main.mjs` 以 esbuild `format: 'cjs'` 打成
+  `dist-electron/electron/preload.cjs`，因此 `sandbox: true` 未被削弱。
+  预加载不再持有自己的通道名副本，通道表只有一份，漂移无从发生。
+  ESM 内需要访问 CJS 产物或原生模块时统一用 `createRequire`。
+- Desktop 快照 DTO 在主进程边界由 `desktop-client/shared/snapshot-schema.ts`
+  校验后才交给渲染进程，校验失败时该通道拒绝返回而不是放行未校验数据；
+  契约与 TypeScript 类型之间有编译期断言锁住，两者不会各走各的。
 - **开发期与打包期的形态不同，这是有意的**。开发期 main 是逐文件 ESM，直接解析
   workspace 包；打包期 `scripts/build-main.mjs` 用 esbuild 把 main 与 `@afk/*`
   一起打成自包含的 `dist-electron/electron/main.js`（`electron` 与 `node-pty`

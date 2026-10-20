@@ -1,3 +1,5 @@
+import { parseSnapshot } from "../shared/snapshot-schema";
+
 export const DEMO_SNAPSHOT: Snapshot = {
   workspace: {
     root: "/Users/demo/Projects/afk-release-ops",
@@ -186,5 +188,8 @@ export const DEMO_TMUX_PANES: Record<string, string> = {
 export function presentationSnapshot(live: Snapshot): { snapshot: Snapshot; demo: boolean } {
   // Live IPC data is authoritative. Demo fixtures remain available to tests,
   // but must never appear automatically when a workspace has no events.
-  return { snapshot: live, demo: false };
+  // The main process checks the payload before it hands it over; the renderer
+  // checks it again, so a payload that lost its shape on the way across is
+  // reported instead of drawn.
+  return { snapshot: parseSnapshot(live), demo: false };
 }

@@ -70,7 +70,7 @@ describe("SSH external terminal IPC contract", () => {
     process.env.ELECTRON_RENDERER_URL = "http://localhost:5174";
     const { registerIpcHandlers } = await import("../../electron/ipc/register-handlers");
     registerIpcHandlers();
-    await import("../../electron/preload.cts");
+    await import("../../electron/preload.ts");
   });
 
   it("registers a fixed external-terminal channel", () => {
@@ -232,7 +232,7 @@ describe("SSH credential IPC contract", () => {
   beforeAll(async () => {
     const { registerIpcHandlers } = await import("../../electron/ipc/register-handlers");
     registerIpcHandlers();
-    await import("../../electron/preload.cts");
+    await import("../../electron/preload.ts");
   });
 
   it("registers typed credential channels and exposes status management without get", () => {

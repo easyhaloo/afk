@@ -12,8 +12,8 @@ electron/services/                workspace, runtime, appearance, snapshot/workf
 electron/adapters/                execFile, tmux/container/resource, OpenSSH, known_hosts, PTY adapters
 electron/workflow/                schema-aware config parsing and validation
 electron/security/                sender-origin and navigation guards
-electron/preload.cts              fixed contextBridge whitelist (CJS: sandboxed preloads must be)
-shared/                           Node/Electron-free IPC DTOs and channel constants
+electron/preload.ts               fixed contextBridge whitelist (CJS: sandboxed preloads must be)
+shared/                           Node/Electron-free IPC DTOs, channel constants and the snapshot schema
 src/features/                     renderer feature components and pure graph functions
 tests/                            desktop package unit tests
 ```

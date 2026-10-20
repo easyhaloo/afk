@@ -10,61 +10,19 @@ import { configNumber, configString, parseConfig, type ConfigObject } from "../w
 import { detectAgentRuntimes } from "./runtime-service.js";
 import { projectRunScopeService } from "./project-run-scope-service.js";
 import { readEvents, resolveWorkspace } from "./workspace-service.js";
-
-type CliCapability = {
-  id: string;
-  label: string;
-  command: string;
-  description: string;
-  available: boolean;
-};
-
-type CanvasTemplateNode = { id: string; template: "agent" | "qa"; label: string; description: string; prompt: string; provider?: string; x: number; y: number };
-
-type WorkflowTemplateStepSummary = { id: string; role: string; kind: "agent" | "system"; provider?: string; action?: string; when?: { step: string; equals: string }; dependsOn: string[] };
-type WorkflowTemplateSummary = { id: string; name: string; description: string; source: "builtin" | "project" | "managed"; steps: WorkflowTemplateStepSummary[]; canvasNodes?: CanvasTemplateNode[] };
-
-type WorkflowConfigSummary = {
-  configPath: string;
-  source: "project" | "cli-defaults";
-  agentDefault: string;
-  tmuxSession: string;
-  targetBranch: string;
-  baseBranch: string;
-  maxRetries: number;
-  hardTimeoutMs: number;
-  completionTimeoutMs: number;
-  contextThreshold: number;
-  goalBudget: number;
-  codex: { transport: string; auth: string; provider: string; profile?: string; endpoint?: string; authTokenEnv?: string; startupTimeoutMs: number };
-  canvasNodes: CanvasTemplateNode[];
-  templateName?: string;
-};
-
-type WorkflowRunSummary = {
-  id: string;
-  status: "running" | "completed" | "blocked" | "failed" | "aborted" | "timed_out" | "context_high";
-  startedAt: string;
-  goal: string;
-  provider: string;
-  transport?: string;
-  auth?: string;
-  modelProvider?: string;
-  worktreePath: string;
-  sessionId?: string;
-  branch?: string;
-  error?: string;
-};
-
-type LoopStatus = {
-  state: "running" | "stopped";
-  pid?: number;
-  execution: { active: number; ids: string[] };
-  totals: { completed: number; failed: number };
-  startedAt?: number;
-  lastUpdateAt?: number;
-  lastError: Record<string, string>;
-};
+import {
+  AGENT_PROVIDER_IDS,
+  type AgentProviderId,
+  type CanvasTemplateNode,
+  type CliCapability,
+  type LoopStatus,
+  type Snapshot,
+  type WorkflowConfigSummary,
+  type WorkflowRunSummary,
+  type WorkflowTemplateStepSummary,
+  type WorkflowTemplateSummary,
+} from "../../shared/ipc-contract.js";
+import { parseSnapshot } from "../../shared/snapshot-schema.js";
 
 const AFK_CAPABILITY_DEFINITIONS: Omit<CliCapability, "available">[] = [
   { id: "run", label: "单次工作流", command: "afk run", description: "领取并执行一个 backlog 项目" },
@@ -169,9 +127,18 @@ type WorkflowConfigPatch = {
   templateName?: string;
 };
 
-const EDITABLE_AGENT_PROVIDERS = new Set(["claude-code", "codex", "cursor", "pi", "opencode", "copilot"]);
+const EDITABLE_AGENT_PROVIDERS = new Set<string>(AGENT_PROVIDER_IDS);
 const EDITABLE_CODEX_TRANSPORTS = new Set(["auto", "exec", "app-server"]);
 const EDITABLE_CODEX_AUTHS = new Set(["auto", "chatgpt", "api"]);
+
+function isAgentProviderId(value: string): value is AgentProviderId {
+  return EDITABLE_AGENT_PROVIDERS.has(value);
+}
+
+function parseAgentProviderId(value: string): AgentProviderId {
+  if (!isAgentProviderId(value)) throw new Error("节点 Agent 不受当前 AFK CLI 支持");
+  return value;
+}
 
 function asConfigObject(value: unknown): ConfigObject {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as ConfigObject : {};
@@ -262,8 +229,7 @@ function cleanCanvasNodes(value: unknown): CanvasTemplateNode[] {
     const description = optionalTextField(node.description, "画布节点说明", 180) || (template === "qa" ? "验证验收条件与集成质量" : "实现当前工作项并提交执行摘要");
     const prompt = optionalTextField(node.prompt, "画布节点执行指令", 1_600) || (template === "qa" ? "Verify the implemented backlog change against its acceptance criteria. Report concise PASS or FAIL evidence before completion." : "Implement the assigned backlog item in the current AFK worktree. Follow the repository conventions, run relevant checks, and leave a concise completion summary.");
     const provider = optionalTextField(node.provider, "节点 Agent", 40);
-    if (provider && !EDITABLE_AGENT_PROVIDERS.has(provider)) throw new Error("节点 Agent 不受当前 AFK CLI 支持");
-    return { id, template, label: textField(node.label, "画布节点名称", 80), description, prompt, provider, x: positiveInteger(node.x, "画布节点横向位置", 0, 1400), y: positiveInteger(node.y, "画布节点纵向位置", 0, 440) } as CanvasTemplateNode;
+    return { id, template, label: textField(node.label, "画布节点名称", 80), description, prompt, provider: provider === undefined ? undefined : parseAgentProviderId(provider), x: positiveInteger(node.x, "画布节点横向位置", 0, 1400), y: positiveInteger(node.y, "画布节点纵向位置", 0, 440) };
   });
 }
 
@@ -446,7 +412,17 @@ async function readLoopStatus(): Promise<LoopStatus> {
   };
 }
 
-export async function snapshot(workspace?: string) {
+/**
+ * Assemble the snapshot the renderer draws from.
+ *
+ * This is the seam where the payload leaves the main process, so the
+ * contract is checked here rather than trusted: the inputs come from YAML
+ * config, the JSONL audit spine and `tmux` / `docker` output, none of which
+ * the program controls. A payload that does not hold the contract is
+ * reported and refused instead of being handed over as if it were sound —
+ * the caller sees the failure and the app keeps running.
+ */
+export async function snapshot(workspace?: string): Promise<Snapshot> {
   const root = resolveWorkspace(workspace);
   const resourceWorkspaces = await projectRunScopeService.workspaces(root);
   // The desktop client embeds the runtime, so it reports the version it runs
@@ -464,7 +440,7 @@ export async function snapshot(workspace?: string) {
     readWorkflowTemplates(root),
   ]);
   const afkAvailable = true;
-  return {
+  const assembled = {
     workspace: { root, afkDirectoryPresent: existsSync(path.join(root, ".afk")), eventCount: events.length + workItemRuns.length },
     afk: { available: afkAvailable, executable: afkPath, summary: `AFK 已就绪（${AFK_VERSION}）` },
     capabilities: AFK_CAPABILITY_DEFINITIONS.map(item => ({ ...item, available: afkAvailable })),
@@ -478,4 +454,10 @@ export async function snapshot(workspace?: string) {
     containers,
     sessions,
   };
+  try {
+    return parseSnapshot(assembled);
+  } catch (error) {
+    console.error("AFK Control 快照不符合契约", error);
+    throw error;
+  }
 }

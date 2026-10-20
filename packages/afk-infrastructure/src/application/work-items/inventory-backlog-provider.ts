@@ -10,6 +10,7 @@ import { parseWorkItemId } from '@afk/application';
 import { collectGlobalWorkItemInventory } from '@afk/application';
 import { toGlobalWorkItem } from '@afk/application';
 import type { ProviderCatalog, ProviderIssue } from '@afk/application';
+import { resolveBacklogFilterId, type BacklogIdentityPolicy } from '@afk/application';
 import {
   createGitHubTracker,
   createGitLabTracker,
@@ -64,6 +65,16 @@ function toBacklogItem(item: GlobalWorkItem): BacklogItem {
 }
 
 /**
+ * The identity grammar this provider publishes in.
+ *
+ * The inventory reaches every project the credentials reach, so it names
+ * identities by canonical work item id.  An unqualified issue number would
+ * name an unknown number of identities here and is rejected rather than
+ * quietly selecting nothing.
+ */
+const IDENTITY: BacklogIdentityPolicy = { kind: 'work-item' };
+
+/**
  * Credential-scoped backlog provider: discovery and reads work from any
  * directory because projects come from gh/glab auth, never a local git remote.
  * Write operations target one project and require the repo-scoped CLI path.
@@ -81,11 +92,18 @@ export class InventoryBacklogProvider implements BacklogManagementProvider {
 
   async list(options: BacklogListOptions = {}): Promise<BacklogItem[]> {
     const inventory = await collectGlobalWorkItemInventory(this.catalogs());
+    // The filter argument is an opaque string; resolving it through the
+    // identity policy is what makes an id read from another provider mean
+    // the same thing here.  An argument this scope cannot name is an error,
+    // never an empty list.
+    const parentId = options.parentId === undefined
+      ? undefined
+      : resolveBacklogFilterId(options.parentId, IDENTITY);
     return inventory.items
       .filter(item => item.managed)
       .filter(item => options.state === undefined || item.state === options.state)
       .filter(item => options.executionMode === undefined || item.executionMode === options.executionMode)
-      .filter(item => options.parentId === undefined || item.parentId === options.parentId)
+      .filter(item => parentId === undefined || item.parentId === parentId)
       .filter(item => options.tag === undefined || item.tags.includes(options.tag))
       .map(toBacklogItem);
   }
@@ -109,7 +127,8 @@ export class InventoryBacklogProvider implements BacklogManagementProvider {
       title: issue.title,
       description: issue.description,
       labels: issue.labels,
-      state: issue.state === 'closed' ? 'closed' : 'opened',
+      // A merged issue is finished work, exactly as a closed one is.
+      state: issue.state === 'closed' || issue.state === 'merged' ? 'closed' : 'opened',
       webUrl: issue.url,
     };
     return toBacklogItem(toGlobalWorkItem(project, providerIssue));

@@ -12,6 +12,13 @@ import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabi
 import { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from '@afk/application';
 import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from '@afk/application';
 import type { LabelDelta, TrackerProvider, TrackedIssue } from '@afk/application';
+import {
+  projectBacklogLabels,
+  renderBacklogId,
+  resolveBacklogFilterId,
+  type BacklogProjectScope,
+  type ScopedBacklogIdentityPolicy,
+} from '@afk/application';
 
 const STATE_LABELS: Record<BacklogState, string> = BACKLOG_METADATA.stateLabels;
 const MODE_LABELS = BACKLOG_METADATA.executionModeLabels;
@@ -35,10 +42,20 @@ export class TrackerBacklogProvider implements BacklogProvider {
   readonly capabilities: BacklogProviderCapabilities;
   private readonly atomicClaim?: TrackerBacklogAdapterOptions['atomicClaim'];
   private readonly claimStrategy: NativeOrLockedClaimStrategy;
+  /**
+   * The identity grammar this adapter publishes in.
+   *
+   * The adapter is scoped to one platform and one project, so it names
+   * identities by that project's issue numbers.  The scope is also what
+   * turns a canonical work item id — the identity the global inventory
+   * publishes — into the local number this adapter compares against.
+   */
+  private readonly identity: ScopedBacklogIdentityPolicy;
 
   constructor(private readonly tracker: TrackerProvider, options: TrackerBacklogAdapterOptions = {}) {
     this.options = options;
     this.atomicClaim = options.atomicClaim;
+    this.identity = { kind: 'provider-local', scope: trackerScope(this.tracker) };
     const onExpiredClaim = (key: string, claim: ExpiredClaim) => this.recoverExpiredClaim(key, claim);
     const claimLock = options.claimLock
       ?? options.claimLockFactory?.(onExpiredClaim)
@@ -60,7 +77,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
   async get(id: string): Promise<BacklogItem> {
     const issue = await this.tracker.getIssue(this.issueId(id));
     const changes = await this.tracker.listMRs({ state: 'all' });
-    return this.withChangeRequest(toBacklogItem(issue), issue.labels, changes);
+    return this.withChangeRequest(toBacklogItem(issue, this.identity), issue.labels, changes);
   }
 
   async adopt(id: string): Promise<BacklogItem> {
@@ -94,10 +111,17 @@ export class TrackerBacklogProvider implements BacklogProvider {
     // including completed children and dependencies.
     const issues = await this.tracker.listIssues({ state: 'all' });
     const changes = await this.tracker.listMRs({ state: 'all' });
-    const items = (await Promise.all(issues.map(issue => this.withChangeRequest(toBacklogItem(issue), issue.labels, changes)))).filter(item =>
+    // The filter argument is an opaque string; resolving it through the
+    // identity policy is what makes an id read from another provider mean
+    // the same thing here.  An argument this scope cannot name is an error,
+    // never an empty list.
+    const parentId = options.parentId === undefined
+      ? undefined
+      : renderBacklogId(resolveBacklogFilterId(options.parentId, this.identity), this.identity);
+    const items = (await Promise.all(issues.map(issue => this.withChangeRequest(toBacklogItem(issue, this.identity), issue.labels, changes)))).filter(item =>
       (options.state === undefined || item.state === options.state) &&
       (options.executionMode === undefined || item.executionMode === options.executionMode) &&
-      (options.parentId === undefined || item.parentId === options.parentId) &&
+      (parentId === undefined || item.parentId === parentId) &&
       (options.tag === undefined || item.tags.includes(options.tag)),
     );
     return items;
@@ -378,19 +402,29 @@ function labelDelta(current: readonly string[], desired: readonly string[], isWo
   };
 }
 
-function toBacklogItem(issue: TrackedIssue): BacklogItem {
-  const parentId = issue.labels.find(label => /^parent::[^:]+$/.test(label))?.slice('parent::'.length);
-  const baseBacklogId = issue.labels.find(label => /^base::[^:]+$/.test(label))?.slice('base::'.length);
-  const dependsOn = issue.labels
-    .filter(label => /^depends-on::[^:]+$/.test(label) || /^depends_on::[^:]+$/.test(label))
-    .map(label => label.split('::')[1]);
-  const labeledState = Object.entries(STATE_LABELS).find(([, label]) => issue.labels.includes(label))?.[0] as BacklogState | undefined;
-  const state = issue.state === 'closed' || issue.state === 'merged' ? 'done' : labeledState ?? 'ready';
-  const executionMode: BacklogExecutionMode = issue.labels.includes(MODE_LABELS.hitl) ? 'hitl' : 'afk';
+function toBacklogItem(issue: TrackedIssue, identity: ScopedBacklogIdentityPolicy): BacklogItem {
+  const projection = projectBacklogLabels(issue.labels, issue.state, identity);
+  const parentId = projection.parentId === undefined ? undefined : renderBacklogId(projection.parentId, identity);
+  const baseBacklogId = projection.baseBacklogId === undefined ? undefined : renderBacklogId(projection.baseBacklogId, identity);
   return {
     id: String(issue.id), title: issue.title, description: issue.description,
-    parentId, baseBacklogId, dependsOn, state: state ?? 'ready', executionMode, tags: extractBacklogTags(issue.labels),
+    parentId, baseBacklogId,
+    dependsOn: projection.dependsOn.map(dependency => renderBacklogId(dependency, identity)),
+    state: projection.state, executionMode: projection.executionMode, tags: extractBacklogTags(issue.labels),
     branchName: deriveBacklogBranchName(String(issue.id)), providerRef: `${issue.platform}:${issue.projectId}#${issue.id}`,
     webUrl: issue.url,
   };
+}
+
+/**
+ * The project this tracker is scoped to, in the grammar the global
+ * inventory publishes: a GitHub repository is `owner/repo`, a GitLab
+ * project is `host/group/project`.
+ */
+function trackerScope(tracker: TrackerProvider): BacklogProjectScope {
+  const projectId = String(tracker.projectId);
+  const projectKey = tracker.platform === 'gitlab' && tracker.providerHost
+    ? `${tracker.providerHost}/${projectId}`
+    : projectId;
+  return { platform: tracker.platform, projectKey };
 }

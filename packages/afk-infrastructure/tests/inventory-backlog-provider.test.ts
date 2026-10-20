@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InventoryBacklogProvider, isProjectDetectionFailure } from './inventory-backlog-provider.js';
+import { InventoryBacklogProvider, isProjectDetectionFailure } from '../src/application/work-items/inventory-backlog-provider.js';
 import type { ProviderCatalog } from '@afk/application';
 import type { ProviderProjectRef } from '@afk/application';
 import { BACKLOG_METADATA } from '@afk/application';

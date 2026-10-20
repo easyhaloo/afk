@@ -1,14 +1,22 @@
-import { BACKLOG_METADATA } from '../backlog/initialization.js';
-import type { BacklogExecutionMode, BacklogState } from '../backlog-mapping.js';
 import { deriveBacklogBranchName } from '../backlog/model.js';
 import { extractBacklogTags } from '../backlog/tags.js';
-import { formatWorkItemId, parseWorkItemId } from './identity.js';
+import { formatWorkItemId } from './identity.js';
 import type { GlobalWorkItem, ProviderProjectRef } from './types.js';
-import type { WorkItemId } from './identity.js';
 import type { ProviderIssue } from './provider-types.js';
+import { projectBacklogLabels, type ScopedBacklogIdentityPolicy } from '../backlog/label-grammar.js';
 
-const stateLabels = BACKLOG_METADATA.stateLabels;
-const modeLabels = BACKLOG_METADATA.executionModeLabels;
+/**
+ * The inventory projection reads one issue's labels through the shared
+ * grammar.  Its identity policy is `work-item`: the inventory spans every
+ * project the credentials reach, so it publishes canonical work item ids
+ * and an unqualified issue number names no single identity there.
+ */
+function identityOf(project: ProviderProjectRef): ScopedBacklogIdentityPolicy {
+  return {
+    kind: 'work-item',
+    scope: { platform: project.platform, projectKey: project.projectKey },
+  };
+}
 
 export function toGlobalWorkItem(project: ProviderProjectRef, issue: ProviderIssue): GlobalWorkItem {
   const id = formatWorkItemId({
@@ -16,13 +24,7 @@ export function toGlobalWorkItem(project: ProviderProjectRef, issue: ProviderIss
     projectKey: project.projectKey,
     issueNumber: issue.issueNumber,
   });
-  const labeledState = Object.entries(stateLabels)
-    .find(([, label]) => issue.labels.includes(label))?.[0] as BacklogState | undefined;
-  const labeledMode = Object.entries(modeLabels)
-    .find(([, label]) => issue.labels.includes(label))?.[0] as BacklogExecutionMode | undefined;
-  const managed = labeledState !== undefined && labeledMode !== undefined;
-  const state = issue.state === 'closed' ? 'done' : labeledState ?? 'blocked';
-  const executionMode = labeledMode ?? 'hitl';
+  const projection = projectBacklogLabels(issue.labels, issue.state, identityOf(project));
 
   return {
     id,
@@ -30,59 +32,15 @@ export function toGlobalWorkItem(project: ProviderProjectRef, issue: ProviderIss
     project,
     title: issue.title,
     description: issue.description,
-    managed,
-    executionEligible: managed
-      && (state === 'ready' || state === 'rework'),
-    state,
-    executionMode,
-    parentId: relationId(project, issue.labels, ['parent::']),
-    dependsOn: relationIds(project, issue.labels, ['depends-on::', 'depends_on::']),
+    managed: projection.managed,
+    executionEligible: projection.executionEligible,
+    state: projection.state,
+    executionMode: projection.executionMode,
+    parentId: projection.parentId,
+    dependsOn: [...projection.dependsOn],
     tags: extractBacklogTags(issue.labels),
     branchName: deriveBacklogBranchName(String(issue.issueNumber)),
     providerRef: id,
     webUrl: issue.webUrl,
   };
-}
-
-function relationId(
-  project: ProviderProjectRef,
-  labels: readonly string[],
-  prefixes: readonly string[],
-): WorkItemId | undefined {
-  for (const label of labels) {
-    const prefix = prefixes.find(candidate => label.startsWith(candidate));
-    if (!prefix) continue;
-    const parsed = parseRelationValue(project, label.slice(prefix.length));
-    if (parsed) return parsed;
-  }
-  return undefined;
-}
-
-function relationIds(
-  project: ProviderProjectRef,
-  labels: readonly string[],
-  prefixes: readonly string[],
-): WorkItemId[] {
-  const values = labels.flatMap(label => {
-    const prefix = prefixes.find(candidate => label.startsWith(candidate));
-    if (!prefix) return [];
-    const parsed = parseRelationValue(project, label.slice(prefix.length));
-    return parsed ? [parsed] : [];
-  });
-  return [...new Set(values)];
-}
-
-function parseRelationValue(project: ProviderProjectRef, value: string): WorkItemId | undefined {
-  if (/^[1-9]\d*$/.test(value)) {
-    return formatWorkItemId({
-      platform: project.platform,
-      projectKey: project.projectKey,
-      issueNumber: Number(value),
-    });
-  }
-  try {
-    return parseWorkItemId(value).id;
-  } catch {
-    return undefined;
-  }
 }

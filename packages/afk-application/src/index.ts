@@ -2,6 +2,7 @@ export * from './backlog-mapping.js';
 export * from './backlog/claim.js';
 export * from './backlog/commands.js';
 export * from './backlog/initialization.js';
+export * from './backlog/label-grammar.js';
 export * from './backlog/model.js';
 export * from './backlog/rework-record.js';
 export * from './backlog/tags.js';

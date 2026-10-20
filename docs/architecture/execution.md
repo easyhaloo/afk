@@ -359,19 +359,60 @@ Flow:
 9. continue current workflow step
 ```
 
-Run state directory:
+Handoff recovery documents are written to
+`<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
+(`packages/afk-execution/src/application/workflows/handoff.ts`).
+
+### What is written where
+
+A run leaves three kinds of trace, in three different places, written by three
+different owners. They are not interchangeable: one is authoritative, one is a
+projection, one is the desktop's own scratch space.
+
+**The audit spine** — the authoritative, append-only record of the run. One
+JSONL file per run, hash-chained, verified before it is replayed.
 
 ```text
-<worktree>/.afk/runs/<run-id>/
-├── request.json
-├── events.jsonl
-├── result.json
-└── output.log
+~/.afk/events/<base64url(runId)>.jsonl
 ```
 
-Handoff recovery documents are not part of the run directory. They are written
-to `<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
-(`packages/afk-execution/src/application/workflows/handoff.ts`).
+`AFK_EVENT_STORE_DIR` moves the root
+(`packages/afk-infrastructure/src/observability/jsonl-event-store.ts`).
+
+**The runtime record** — what the TUI and the desktop read to show progress,
+heartbeat and phase. One file per run, moved from `active/` to `archive/` when
+the run reaches a terminal state.
+
+```text
+~/.afk/runtime/tasks/
+├── active/<base64url(runId)>.json
+├── archive/<base64url(runId)>.json
+└── diagnostics/<base64url(runId)>/
+    ├── runtime.json
+    ├── result.json
+    └── output.log
+```
+
+(`packages/afk-execution/src/application/runtime/task-runtime.ts`.)
+
+**The desktop execution workspace** — the checkout, the artifacts and the logs
+of one desktop work item.
+
+```text
+~/.loop-workspace/<taskId>/
+├── repositories/<project>/...
+├── artifacts/
+├── runtime/
+├── logs/
+└── diagnostics/
+```
+
+(`desktop-client/electron/services/execution-workspace-service.ts`.)
+
+There is no `<worktree>/.afk/runs/<run-id>/` directory. The module that wrote
+it was reachable only from its own test, so nothing in the production path ever
+created it; it was removed rather than left behind as a description of a tree
+nobody writes.
 
 Session files must use temp files, checksums, and atomic rename to avoid new generation reading half-written JSONL.
 

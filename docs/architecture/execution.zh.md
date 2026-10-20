@@ -355,19 +355,55 @@ Docker socket
 9. 继续当前 workflow step
 ```
 
-运行状态目录：
-
-```text
-<worktree>/.afk/runs/<run-id>/
-├── request.json
-├── events.jsonl
-├── result.json
-└── output.log
-```
-
-交接恢复文档不属于 run 目录，它写入
+交接恢复文档写入
 `<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
 （`packages/afk-execution/src/application/workflows/handoff.ts`）。
+
+### 东西分别写在哪里
+
+一次执行会留下三类痕迹，落在三个不同的地方，由三个不同的主人写入。三者不可互换：
+一个是权威记录，一个是投影，一个是桌面端自己的暂存空间。
+
+**审计脊柱** —— 一次执行的权威、只追加记录。每个 run 一个 JSONL 文件，带 hash 链，
+回放前先校验。
+
+```text
+~/.afk/events/<base64url(runId)>.jsonl
+```
+
+根目录可由 `AFK_EVENT_STORE_DIR` 改写
+（`packages/afk-infrastructure/src/observability/jsonl-event-store.ts`）。
+
+**运行时记录** —— TUI 与桌面端读它来展示进度、心跳与阶段。每个 run 一个文件，
+到达终态时从 `active/` 移到 `archive/`。
+
+```text
+~/.afk/runtime/tasks/
+├── active/<base64url(runId)>.json
+├── archive/<base64url(runId)>.json
+└── diagnostics/<base64url(runId)>/
+    ├── runtime.json
+    ├── result.json
+    └── output.log
+```
+
+（`packages/afk-execution/src/application/runtime/task-runtime.ts`。）
+
+**桌面执行工作区** —— 一个桌面工作项的检出目录、产物与日志。
+
+```text
+~/.loop-workspace/<taskId>/
+├── repositories/<project>/...
+├── artifacts/
+├── runtime/
+├── logs/
+└── diagnostics/
+```
+
+（`desktop-client/electron/services/execution-workspace-service.ts`。）
+
+不再有 `<worktree>/.afk/runs/<run-id>/` 目录。写它的那个模块只能从它自己的测试
+到达，生产路径上从未有人创建过它；与其留下一棵没人写的树的描述，不如删掉。
 
 Session 文件必须使用临时文件、校验和原子 rename，避免新 generation 读取半截 JSONL。
 

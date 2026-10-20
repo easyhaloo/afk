@@ -115,7 +115,7 @@
 | P1-3 | `architecture/execution.md:702` | "默认超时遵循 src/lib/constants.ts" | 文件不存在；超时是 `afk run --hard-timeout`（`run.ts:26`） |
 | P1-4 | `architecture/execution.md:612` | 引用 `workflows.ts` 的阶段 | 该文件不存在；模板在 `packages/afk-execution/src/domain/templates/builtin.ts` |
 | P1-5 | `architecture/execution.md:468-475` | 5 个内置模板 | `builtinTemplates()` 返回 **6** 个（多 `parallel-planner`、`planner-with-review`） |
-| P1-6 | `architecture/execution.md:381` | handoff 文档写入 `<worktree>/.afk/runs/<run-id>/handoff/handoff-1.md` | 实际写入 `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md`（`packages/afk-execution/src/application/workflows/handoff.ts:15-16`） |
+| P1-6 | `architecture/execution.md:381` | handoff 文档写入 `<worktree>/.afk/runs/<run-id>/handoff/handoff-1.md` | 实际写入 `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md`（`packages/afk-execution/src/application/workflows/handoff.ts:15-16`）。**后续**：§7 整段重写——原写的 `.afk/runs/` 树没有任何生产代码在写，见 §9 |
 | P1-7 | `architecture/glossary.md:27` | 信号种类含 `ac_result` | 实际 union 为 `goal_complete \| handoff_ready \| timeout \| idle`（`packages/afk-infrastructure/src/schemas.ts:3-40`） |
 | P1-8 | `architecture/glossary.md:40-46` | Packages 只列 `@afk/core`、`@afk/application` | 漏 `@afk/workflow-graph`（承载 `afk graph workflow`） |
 | P1-9 | `architecture/observability.md:17,207` | `confirm-merge` 标为"未切换 / 下一阶段工作" | `afk reconcile`（`command-registry.ts:32`）与 `afk backlog confirm-merge` 均已上线并产出 `change.merge_verified` 事件 |
@@ -344,7 +344,7 @@
 - `docs/guides/workflows.md` 的阈值 100000、`--max-total-tokens` 默认 500000、QA 合并条件、`afk/backlog-123` 分支名 —— 全部准确。
 - `README.md` 的 15 条 CLI 示例、`22 Claude Code skills` —— 全部准确。
 - `AFK-ARCHITECTURE.md §6.1` 的 7 状态机与 `BacklogState` 完全一致（`packages/afk-core/src/model.ts` 的 9 值 `WorkState` 是另一个类型，不构成矛盾）。
-- `docs/architecture/execution.md:381` 的 `.afk/runs` 目录是真实实现（`packages/afk-execution/src/application/sessions/run-state.ts:22`）——**不要删 §7**。
+- ~~`docs/architecture/execution.md:381` 的 `.afk/runs` 目录是真实实现——**不要删 §7**~~ → **这条判定是错的，已撤回。** 写 `.afk/runs/` 的 `RunStateWriter` 只能从 `AgentExecutionService` 到达，而 `AgentExecutionService` 只能从它自己的测试到达：生产路径上从未有人写过那个目录。2026-10-20 该模块被删除（`refactor: the run state writer was not writing run state`），§7 随即被改写为真实的落盘布局。见 §9。
 - `docs/guides/workflows.md` 与 `.zh.md` 的标题数差 2 —— 差异来自代码块内注释行数，不是结构漂移。
 - SSH / xterm / PTY / kanban 功能均真实存在（`desktop-client/src/features/ssh/`、`desktop-client/src/features/terminal/`、`src/cli/commands/kanban.ts`）。
 - `docs/index.md` 中 `blueprints/`、`research/`、`decisions/` 的目录行已覆盖其下文件，不算漏挂。
@@ -394,6 +394,50 @@
 **校验**：`pnpm docs:check`（234 文件 0 断裂）、`pnpm architecture:check`
 （162 源文件 + 220 桌面端文件，0 隔离项）、`pnpm typecheck`（根 + 5 个包 + 测试树）、
 `pnpm test`（根 609 项 + 包级 9 项，全部通过）。
+
+## 9. 更正：`.afk/runs` 是一棵没人写的树
+
+本计划最初把 `docs/architecture/execution.md` §7 的 `.afk/runs/` 目录列入**附录 B 误报清单**，
+理由是「目录是真实实现（packages/afk-execution/src/application/sessions/run-state.ts:22）——
+不要删 §7」。**这条判定是错的，已撤回。**
+
+写那个目录的 `RunStateWriter` 只能从 `AgentExecutionService` 到达，而 `AgentExecutionService`
+只能从它自己的测试到达：生产路径上从未有人创建过 `.afk/runs/`。该模块已随
+`refactor: the run state writer was not writing run state`（`refactor/afk-package-boundaries`）
+删除，§7 随即被改写为真实的落盘布局。
+
+**教训**：把"文件存在"当成"文档没过期"，是这份检查最容易犯的错。文件存在只证明它没被删，
+不证明有人在用它。把一个只被自己测试引用的模块当成"真实实现"，等于让检查为一份
+**描述没人写的树的文档**背书。
+
+### 9.1 真实的三处落盘
+
+| 痕迹 | 位置 | 主人 |
+|---|---|---|
+| 审计脊柱（权威、只追加） | `~/.afk/events/<base64url(runId)>.jsonl` | `JsonlEventStore` |
+| 运行时记录（进度/心跳/阶段投影） | `~/.afk/runtime/tasks/{active,archive}/<base64url(runId)>.json`，诊断在 `diagnostics/<base64url(runId)>/` | `TaskRuntimeStore` |
+| 桌面执行工作区 | `~/.loop-workspace/<taskId>/{repositories,artifacts,runtime,logs,diagnostics}` | `execution-workspace-service` |
+
+### 9.2 一并修正的引用
+
+| 位置 | 原文 | 改后 |
+|---|---|---|
+| `docs/architecture/execution.md` §7 + `.zh.md` | `<worktree>/.afk/runs/<run-id>/{request.json,events.jsonl,result.json,output.log}` | 上表三处真实布局 |
+| `desktop-client/ARCHITECTURE.md:137` | 「运行诊断遵循 `<worktree>/.afk/runs/<run-id>/events.jsonl`」+ 指向已删模块 | 指向运行时任务存储与 `TaskRuntimeReader` |
+| `desktop-client/shared/ipc-contract.ts:7` | 「read from `.afk/runs/**/events.jsonl`」 | 保留事实，补注这是**遗留通道**——没有东西再写它，实际读到空；权威记录是 `RuntimeRunEvent` |
+| `desktop-client/src/components/EmptyState.tsx:4` | 「选择包含 `.afk/runs` 的工作区后，记录会显示在这里」 | 「运行记录保存在运行时的任务存储中。选择工作区后，已有记录会显示在这里」 |
+
+### 9.3 仍然存在、需要代码侧决定的两处
+
+删除写端之后，两处**读端**仍在扫 `.afk/runs/`，因此实际读到空：
+
+- `desktop-client/electron/services/workspace-service.ts:13` —— `readEvents()` 递归找
+  `<root>/.afk/runs/**/events.jsonl`（快照里的 `events` 通道）。
+- `desktop-client/electron/services/desktop-service.ts:382` —— `readWorkflowRuns()` 读
+  `<root>/.afk/runs/<runId>/{request.json,result.json}`，结果进快照的 `workflowRuns`。
+
+这两条读端是否删除、还是改指运行时任务存储，属于运行时重构的代码决策，不在文档清理
+的范围内，故只登记不动。
 
 **未做、留给 owner 决策**：
 

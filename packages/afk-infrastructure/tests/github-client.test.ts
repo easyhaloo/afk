@@ -98,13 +98,6 @@ describe('GitHubClient', () => {
     expect(listTags).toHaveBeenCalledTimes(2);
   });
 
-  it('extracts label acceptance criteria for the configured repository', () => {
-    const client = new GitHubClient({ repo: 'owner/repo', auth: 'test-token' });
-    expect(client.projectId).toBe('owner/repo');
-    expect(client.parseAC({ labels: ['ac::1::Checks pass'], description: '## AC\n- [ ] Ignored fallback' }))
-      .toEqual({ source: 'labels', items: [{ index: 1, text: 'Checks pass', evidenceType: 'none', checkCommand: '' }] });
-  });
-
   it('does not offer artifact upload, because GitHub has nowhere to put it', () => {
     const client = new GitHubClient({ repo: 'owner/repo', auth: 'test-token' });
     // The interface says the capability is optional and that GitHub does

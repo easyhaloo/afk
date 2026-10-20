@@ -11,7 +11,6 @@ import type {
   CreateMROptions,
   MergeMROptions,
   CloseMROptions,
-  AcceptanceCriteria,
   LinkType,
   Project,
   Branch,
@@ -20,7 +19,6 @@ import type {
   TrackerIssueComment,
   LabelDelta,
 } from '@afk/application';
-import { extractAC, retryCountFromLabels, targetBranchFromLabels } from '@afk/application';
 import { parseWorkItemId } from '@afk/application';
 import { normalizeGitLabHost, resolveGitLabProjectKey } from '../shared/gitlab-project.js';
 
@@ -222,20 +220,6 @@ export class GitLabClient implements TrackerProvider {
     if (options.comment) {
       await this.addMRComment(id, options.comment);
     }
-  }
-
-  parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria {
-    return extractAC(issue);
-  }
-
-  getRetryCount(issue: TrackedIssue): number {
-    return retryCountFromLabels(issue.labels);
-  }
-
-  async detectTargetBranch(issueId: number, explicit?: string): Promise<string> {
-    if (explicit) return explicit;
-    const issue = await this.getIssue(issueId);
-    return targetBranchFromLabels(issue.labels, undefined, process.env.AFK_TARGET_BRANCH || 'main');
   }
 
   async uploadArtifacts(worktreePath: string): Promise<string> {

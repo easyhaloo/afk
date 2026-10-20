@@ -125,7 +125,6 @@ export interface TrackedMR {
   pipeline?: { status: string };  // GitLab only
 }
 
-import type { ACItem, AcceptanceCriteria } from './ac-types.js';
 import type { BacklogMetadataLabel } from '../backlog/initialization.js';
 
 /**
@@ -166,21 +165,6 @@ export interface TrackerIssueOperations extends TrackerIssueReader {
 }
 
 /**
- * What AFK reads off a tracker issue besides its state.
- */
-export interface TrackerIssueReading extends TrackerIdentity {
-  /** The issue's acceptance criteria: the labelled ones, else the legacy ones. */
-  parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria;
-  /** The retries an issue has left, from its `retry-count::N` label. */
-  getRetryCount(issue: TrackedIssue): number;
-  /**
-   * The branch a run should work on: the explicit one, else the
-   * `base::prd-N` label, else the platform's default.
-   */
-  detectTargetBranch(issueId: number, explicit?: string): Promise<string>;
-}
-
-/**
  * The merge requests of a tracker, read.
  */
 export interface TrackerMergeReader extends TrackerIdentity {
@@ -216,7 +200,7 @@ export interface TrackerProjectReader extends TrackerIdentity {
  * requests, the board reads projects. A caller that depends on the whole
  * tracker can, but the compiler will not make it.
  */
-export interface TrackerProvider extends TrackerIssueOperations, TrackerIssueReading, TrackerMergeReader, TrackerMergeWriter, TrackerProjectReader {
+export interface TrackerProvider extends TrackerIssueOperations, TrackerMergeReader, TrackerMergeWriter, TrackerProjectReader {
   /**
    * Upload the run's artifacts and return the markdown that shows them.
    *

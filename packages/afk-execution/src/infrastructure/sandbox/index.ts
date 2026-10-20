@@ -14,7 +14,6 @@ export * from './providers/index.js';
 import { LocalSandboxProvider } from './providers/local.js';
 import { ContainerSandboxProvider, DockerContainerProvider, PodmanContainerProvider } from './providers/index.js';
 import type { SandboxProviderName } from './types.js';
-import type { WorktreeManager } from '../git/index.js';
 
 /**
  * Factory: resolve a SandboxProviderName to a SandboxProvider instance.
@@ -23,11 +22,10 @@ import type { WorktreeManager } from '../git/index.js';
  */
 export function createSandboxProvider(
   name: SandboxProviderName,
-  deps: { worktreeManager: WorktreeManager },
 ): import('./types.js').SandboxProvider {
   switch (name) {
     case 'local':
-      return new LocalSandboxProvider(deps.worktreeManager);
+      return new LocalSandboxProvider();
     case 'docker':
       return new ContainerSandboxProvider({ provider: new DockerContainerProvider() });
     case 'podman':

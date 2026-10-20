@@ -25,16 +25,6 @@ export type {
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
-export type IsolationLevel = 'workspace' | 'process' | 'filesystem' | 'vm';
-
-export type SandboxCapability =
-  | 'streaming-exec'       // Provider supports streaming output from exec
-  | 'interrupt-process'    // Provider can interrupt (not kill) the agent process
-  | 'kill-process'         // Provider can forcibly terminate the agent process
-  | 'persistent-filesystem' // Provider preserves filesystem across agent restarts
-  | 'copy-files'           // Provider supports file copy into sandbox
-  | 'session-transfer';    // Provider supports session capture/restore
-
 /** Options passed to SandboxProvider.create() */
 export interface SandboxOptions {
   /** Path to the worktree / workspace directory. */
@@ -79,25 +69,15 @@ export interface Sandbox extends AgentExecutionHost {
   close(): Promise<void>;
 }
 
-/** Minimal worktree info returned by createWorktree — avoids circular dep with core/git/worktree. */
-export interface WorktreeInfo {
-  iid: number;
-  path: string;
-  branch: string;
-}
-
-/** Sandbox provider interface — factory for Sandboxes. */
+/**
+ * Sandbox provider interface — factory for Sandboxes.
+ *
+ * A provider is given a worktree that already exists: the branch provider
+ * creates it, and the sandbox runs the agent inside it. A provider that
+ * created worktrees as well would have two owners for one directory.
+ */
 export interface SandboxProvider {
   readonly name: SandboxProviderName;
-  readonly isolation: IsolationLevel;
-  readonly capabilities: ReadonlySet<SandboxCapability>;
-
-  /**
-   * Create a git worktree for the given issue.
-   * Called BEFORE lifecycle modules run; create() is called AFTER.
-   * Container providers that don't use host worktrees may be no-op.
-   */
-  createWorktree(options: { iid: number; baseBranch: string }): Promise<WorktreeInfo>;
 
   /**
    * Create a new sandbox for the given options.

@@ -13,9 +13,8 @@
  * session-transfer}. No 'streaming-exec' yet (Phase 7/8 will add stream-json).
  */
 
-import { WorktreeManager } from '../../git/index.js';
 import { promises as fs } from 'fs';
-import type { SandboxProvider, Sandbox, SandboxOptions, SandboxProviderName, IsolationLevel, SandboxCapability, WorktreeInfo } from '../types.js';
+import type { SandboxProvider, Sandbox, SandboxOptions, SandboxProviderName } from '../types.js';
 import { DockerContainerProvider } from './docker.js';
 import { PodmanContainerProvider } from './podman.js';
 import { ContainerSandbox } from './sandbox.js';
@@ -24,26 +23,13 @@ import { EnvVarAllowlist } from './env-allowlist.js';
 import { homedir } from 'os';
 import { join } from 'path';
 
-const CONTAINER_CAPABILITIES: ReadonlySet<SandboxCapability> = new Set([
-  'persistent-filesystem',
-  'copy-files',
-  'kill-process',
-  'interrupt-process',
-  'session-transfer',
-] as const);
-
-const ISOLATION: IsolationLevel = 'filesystem';
-
 /** Default image + user — overridable per provider instance. */
 const DEFAULT_IMAGE = 'afk-sandbox-claude:node22';
 const DEFAULT_USER = '1000:1000';
 
 export class ContainerSandboxProvider implements SandboxProvider {
   readonly name: SandboxProviderName = 'docker'; // provider name = engine name for now
-  readonly isolation: IsolationLevel = ISOLATION;
-  readonly capabilities: ReadonlySet<SandboxCapability> = CONTAINER_CAPABILITIES;
 
-  private readonly worktreeManager: WorktreeManager;
   private readonly provider: ContainerProvider;
   private readonly image: string;
   private readonly user: string;
@@ -51,7 +37,6 @@ export class ContainerSandboxProvider implements SandboxProvider {
   private readonly hostClaudeConfigFile: string;
 
   constructor(opts?: {
-    worktreeManager?: WorktreeManager;
     /** Force a specific container engine. Defaults to first available of docker/podman. */
     provider?: ContainerProvider;
     image?: string;
@@ -61,18 +46,12 @@ export class ContainerSandboxProvider implements SandboxProvider {
     /** Host Claude auth/config file mounted read-only into the sandbox. */
     hostClaudeConfigFile?: string;
   }) {
-    this.worktreeManager = opts?.worktreeManager ?? new WorktreeManager();
     this.provider = opts?.provider ?? (globalThis as { __afkContainerProvider?: ContainerProvider }).__afkContainerProvider ?? new DockerContainerProvider();
     this.image = opts?.image ?? (process.env.AFK_SANDBOX_IMAGE?.trim() || DEFAULT_IMAGE);
     this.user = opts?.user ?? DEFAULT_USER;
     this.hostClaudeConfigDir = opts?.hostClaudeConfigDir ?? join(homedir(), '.claude');
     this.hostClaudeConfigFile = opts?.hostClaudeConfigFile ?? join(homedir(), '.claude.json');
     this.name = this.provider.engine === 'podman' ? 'podman' : 'docker';
-  }
-
-  async createWorktree(options: { iid: number; baseBranch: string }): Promise<WorktreeInfo> {
-    const wt = await this.worktreeManager.create(options.iid, options.baseBranch);
-    return { iid: wt.iid, path: wt.path, branch: wt.branch };
   }
 
   async create(options: SandboxOptions): Promise<Sandbox> {

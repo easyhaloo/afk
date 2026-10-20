@@ -109,7 +109,7 @@ export class QARunner {
     this.afterPublication = deps.afterPublication;
     this.onCommit = deps.onCommit;
     this.onSession = deps.onSession;
-    this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: new WorktreeManager() });
+    this.sandboxProvider = deps.sandboxProvider ?? createSandboxProvider('local');
     this.agentProvider = deps.agentProvider ?? createAgentProvider(resolveAgentProviderName(this.config.agentDefault));
     this.agentRuntime = deps.agentRuntime;
     this.tmux = deps.tmux ?? (this.executionMode === 'interactive' ? createTmuxClient() : undefined);

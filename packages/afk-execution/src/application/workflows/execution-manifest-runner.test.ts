@@ -308,7 +308,7 @@ function sandboxWith(events: string[]): Sandbox {
 
 function providerWith(sandbox: Sandbox, events: string[], name: 'local' | 'docker' = 'local'): SandboxProvider {
   return {
-    name, isolation: 'workspace', capabilities: new Set(), createWorktree: vi.fn(),
+    name,
     create: vi.fn(async () => { events.push('sandbox'); return sandbox; }),
   } as unknown as SandboxProvider;
 }

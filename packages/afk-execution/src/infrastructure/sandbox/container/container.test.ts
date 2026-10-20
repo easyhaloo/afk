@@ -363,15 +363,6 @@ describe('ContainerAgentExecution — batch result files', () => {
 });
 
 describe('ContainerSandboxProvider — auto engine detection', () => {
-  it('exposes correct isolation + capabilities', () => {
-    // Construct without calling detectProvider (which would require real engine)
-    const wp = new (class extends ContainerSandboxProvider { constructor() { super({ provider: undefined as unknown as ContainerProvider }); } })();
-    expect(wp.isolation).toBe('filesystem');
-    expect(wp.capabilities.has('kill-process')).toBe(true);
-    expect(wp.capabilities.has('interrupt-process')).toBe(true);
-    expect(wp.capabilities.has('persistent-filesystem')).toBe(true);
-  });
-
   it('detectProvider returns null when neither docker nor podman is available', async () => {
     // We can't simulate 'neither available' without PATH manipulation; just
     // assert the function returns a ContainerProvider-or-null type.

@@ -370,7 +370,7 @@ export class WorkflowRunner {
     this.coordinator = deps?.coordinatorFactory
       ? deps.coordinatorFactory({ backlog: providers.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config })
       : createHandoffCoordinator({ backlog: providers.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config });
-    this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: this.worktree });
+    this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local');
     this.sandboxProviderInjected = deps?.sandboxProvider !== undefined;
     this.agentProviderInjected = deps?.agentProvider !== undefined;
     this.agentProvider = deps?.agentProvider ?? createAgentProvider(this.agentProviderName);
@@ -658,7 +658,7 @@ export class WorkflowRunner {
 
   /** Resolve sandbox provider name to a SandboxProvider instance. */
   private sandboxProviderByName(name: SandboxProviderName): SandboxProvider {
-    return createSandboxProvider(name, { worktreeManager: this.worktree });
+    return createSandboxProvider(name);
   }
 
   /**

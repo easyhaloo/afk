@@ -104,7 +104,7 @@ describe('WorkflowRunner default template commit audit', () => {
       startAgent: vi.fn(), close: vi.fn(async () => undefined),
     };
     const sandboxProvider: SandboxProvider = {
-      name: sandboxName, isolation: 'workspace', capabilities: new Set(), createWorktree: vi.fn(),
+      name: sandboxName,
       create: vi.fn(async () => sandbox),
     };
     const agent: AgentProvider = {

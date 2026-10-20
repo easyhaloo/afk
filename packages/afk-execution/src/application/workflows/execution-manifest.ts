@@ -1,5 +1,6 @@
 import { readFile as readFileFromFs } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { validateBaseBranch, validateCheckoutPath } from '@afk/application';
 
 const MANIFEST_KEYS = new Set(['schemaVersion', 'workItemId', 'providerBacklogId', 'tracker', 'workingBranch', 'repositories']);
 const TRACKER_KEYS = new Set(['platform', 'projectKey', 'providerHost', 'providerProjectId']);
@@ -15,7 +16,6 @@ const REPOSITORY_KEYS = new Set([
   'workingBranch',
   'primary',
 ]);
-const WINDOWS_RESERVED_DEVICE_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 type UnknownObject = { [key: string]: unknown };
 
@@ -118,7 +118,7 @@ function parseManifest(value: unknown, backlogId: string): ExecutionManifest {
   if (workItemId !== backlogId) throw new Error(`workItemId must match --backlog-id ${backlogId}`);
   const providerBacklogId = positiveIntegerString(candidate.providerBacklogId, 'providerBacklogId');
   const tracker = parseTracker(candidate.tracker);
-  const workingBranch = branchValue(candidate.workingBranch, 'workingBranch');
+  const workingBranch = validateBaseBranch(candidate.workingBranch, 'workingBranch');
   if (!Array.isArray(candidate.repositories) || candidate.repositories.length === 0) {
     throw new Error('repositories must be a non-empty array');
   }
@@ -146,7 +146,7 @@ function parseRepository(value: unknown, index: number, workingBranch: string): 
   const label = `repositories[${index}]`;
   const candidate = objectValue(value, label);
   assertExactKeys(candidate, REPOSITORY_KEYS, label);
-  const repositoryWorkingBranch = branchValue(candidate.workingBranch, `${label}.workingBranch`);
+  const repositoryWorkingBranch = validateBaseBranch(candidate.workingBranch, `${label}.workingBranch`);
   if (repositoryWorkingBranch !== workingBranch) throw new Error(`${label}.workingBranch must match workingBranch`);
   if (typeof candidate.primary !== 'boolean') throw new Error(`${label}.primary must be a boolean`);
   const platform = candidate.platform;
@@ -162,8 +162,8 @@ function parseRepository(value: unknown, index: number, workingBranch: string): 
       ? {}
       : { providerProjectId: textValue(candidate.providerProjectId, `${label}.providerProjectId`) }),
     name: textValue(candidate.name, `${label}.name`),
-    checkoutPath: checkoutPathValue(candidate.checkoutPath, `${label}.checkoutPath`),
-    baseBranch: branchValue(candidate.baseBranch, `${label}.baseBranch`),
+    checkoutPath: validateCheckoutPath(candidate.checkoutPath, `${label}.checkoutPath`),
+    baseBranch: validateBaseBranch(candidate.baseBranch, `${label}.baseBranch`),
     ...(candidate.role === undefined ? {} : { role: textValue(candidate.role, `${label}.role`) }),
     workingBranch: repositoryWorkingBranch,
     primary: candidate.primary,
@@ -192,41 +192,6 @@ function resolveRepositoryRoot(workspaceRoot: string, checkoutPath: string, mani
     throw new Error(`Execution manifest at ${manifestPath}: repositories[${index}].checkoutPath escapes the execution workspace`);
   }
   return repoRoot;
-}
-
-function checkoutPathValue(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value || value.trim() !== value || /[\x00-\x1f\x7f]/.test(value)) {
-    throw new Error(`${label} is invalid`);
-  }
-  if (/^[A-Za-z]:/.test(value)) throw new Error(`${label} must not use a drive prefix`);
-  if (value.startsWith('/') || value.startsWith('\\')) throw new Error(`${label} must be relative`);
-  if (value.endsWith('/') || value.endsWith('\\')) throw new Error(`${label} must not end with a separator`);
-  const segments = value.replace(/\\/g, '/').split('/');
-  if (segments.some(segment => segment === '.' || segment === '..')) throw new Error(`${label} must not traverse directories`);
-  if (segments.some(segment => segment.endsWith('.') || segment.endsWith(' '))) {
-    throw new Error(`${label} has a non-portable path segment`);
-  }
-  if (segments.some(segment => /[<>:"|?*]/.test(segment))) throw new Error(`${label} contains an invalid Windows path character`);
-  if (segments.some(segment => WINDOWS_RESERVED_DEVICE_NAME.test(segment))) {
-    throw new Error(`${label} uses a reserved Windows device name`);
-  }
-  return value;
-}
-
-function branchValue(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)) throw new Error(`${label} is invalid`);
-  const segments = value.split('/');
-  if (
-    value === '@'
-    || value.includes('..')
-    || value.includes('@{')
-    || value.includes('//')
-    || /[\\ ~^:?*[\x00-\x1f\x7f]/.test(value)
-    || segments.some(segment => !segment || segment.startsWith('.') || segment.endsWith('.') || segment.endsWith('.lock'))
-  ) {
-    throw new Error(`${label} is invalid`);
-  }
-  return value;
 }
 
 function projectKeyValue(value: unknown, label: string): string {

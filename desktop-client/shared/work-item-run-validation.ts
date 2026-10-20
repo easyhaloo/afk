@@ -9,38 +9,15 @@ const BACKLOG_PLATFORM_VALUES: Record<BacklogPlatform, true> = {
   gitlab: true,
 };
 const SELECTION_KEYS = new Set(["platform", "projectKey", "providerHost", "providerProjectId", "name", "checkoutPath", "baseBranch", "role"]);
-const WINDOWS_RESERVED_DEVICE_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 
 type RepositoryCheckoutPathSource = Pick<ProviderProjectRef, "name" | "projectKey"> & { checkoutPath?: string };
 
-export function validateBaseBranch(value: unknown, label = "baseBranch"): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)) throw new Error(`${label} is invalid`);
-  const segments = value.split("/");
-  if (
-    value === "@"
-    || value.includes("..")
-    || value.includes("@{")
-    || value.includes("//")
-    || /[\\ ~^:?*[\x00-\x1f\x7f]/.test(value)
-    || segments.some(segment => !segment || segment.startsWith(".") || segment.endsWith(".") || segment.endsWith(".lock"))
-  ) {
-    throw new Error(`${label} is invalid`);
-  }
-  return value;
-}
+// The branch and checkout path rules live in the application package, next
+// to the work item model they belong to; the execution manifest reader
+// uses the same ones.
+import { validateBaseBranch, validateCheckoutPath } from "@afk/application";
 
-export function validateCheckoutPath(value: unknown, label = "checkoutPath"): string {
-  if (typeof value !== "string" || !value || value.trim() !== value || /[\x00-\x1f\x7f]/.test(value)) throw new Error(`${label} is invalid`);
-  if (/^[A-Za-z]:/.test(value)) throw new Error(`${label} must not use a drive prefix`);
-  if (value.startsWith("/") || value.startsWith("\\")) throw new Error(`${label} must be relative`);
-  if (value.endsWith("/") || value.endsWith("\\")) throw new Error(`${label} must not end with a separator`);
-  const segments = value.replace(/\\/g, "/").split("/");
-  if (segments.some(segment => segment === "." || segment === "..")) throw new Error(`${label} must not traverse directories`);
-  if (segments.some(segment => segment.endsWith(".") || segment.endsWith(" "))) throw new Error(`${label} has a non-portable path segment`);
-  if (segments.some(segment => /[<>:"|?*]/.test(segment))) throw new Error(`${label} contains an invalid Windows path character`);
-  if (segments.some(segment => WINDOWS_RESERVED_DEVICE_NAME.test(segment))) throw new Error(`${label} uses a reserved Windows device name`);
-  return value;
-}
+export { validateBaseBranch, validateCheckoutPath };
 
 export function planRepositoryCheckoutPaths(repositories: readonly RepositoryCheckoutPathSource[]): string[] {
   const used = new Set<string>();

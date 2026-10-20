@@ -115,6 +115,13 @@ Relationships have separate meanings: `parentId` is organizational grouping,
 `dependsOn` controls scheduling, and `baseBacklogId` selects an explicit Git
 execution base. Neither parent nor dependency edges implicitly select a branch.
 
+The grammar of that identity — the platform list, the project key rule, the
+issue number rule, and the shape and rules of the execution manifest — has one
+home: `@afk/application`, in `packages/afk-application/src/work-items/identity.ts` and
+`packages/afk-application/src/work-items/execution-manifest.ts`. The desktop client and the execution
+runtime read the manifest through it, so a document one of them accepts is a
+document the other one can read.
+
 ## Backlog lifecycle
 
 ```text

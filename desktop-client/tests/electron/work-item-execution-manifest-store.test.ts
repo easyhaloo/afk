@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parseExecutionManifest } from "@afk/execution/application/workflows/execution-manifest";
 import {
   createWorkItemExecutionManifestStore,
   type WorkItemExecutionManifest,
@@ -163,13 +164,13 @@ describe("work item execution manifest store", () => {
     const ids = ["first", "second"];
     const store = createWorkItemExecutionManifestStore({ fs, randomUUID: () => ids.shift() ?? "unexpected" });
     const first = createManifest();
-    const second = { ...createManifest(), workItemId: "WI-2", workingBranch: "afk/work-item-2", repositories: createManifest().repositories.map(repository => ({ ...repository, workingBranch: "afk/work-item-2" })) };
+    const second = { ...createManifest(), workItemId: "github:acme/api#2", workingBranch: "afk/work-item-2", repositories: createManifest().repositories.map(repository => ({ ...repository, workingBranch: "afk/work-item-2" })) };
 
     await Promise.all([store.save(workspace, first), store.save(workspace, second)]);
 
     expect(new Set(temporaryFiles).size).toBe(2);
     const loaded = await store.load(workspace);
-    expect(loaded?.workItemId === "WI-1" || loaded?.workItemId === "WI-2").toBe(true);
+    expect(loaded?.workItemId === "github:acme/api#1" || loaded?.workItemId === "github:acme/api#2").toBe(true);
     await expect(readdir(path.dirname(manifestPath(workspace)))).resolves.toEqual(["execution-manifest.json"]);
   });
 
@@ -193,7 +194,7 @@ describe("work item execution manifest store", () => {
       },
     };
     const store = createWorkItemExecutionManifestStore({ fs, randomUUID: () => `${failure}-failure` });
-    const replacement = { ...createManifest(), workItemId: "WI-2" };
+    const replacement = { ...createManifest(), workItemId: "github:acme/api#2" };
 
     const error = await rejectedError(store.save(workspace, replacement));
 
@@ -202,6 +203,42 @@ describe("work item execution manifest store", () => {
     expect(error.cause).toBe(operationFailure);
     await expect(readFile(target, "utf8")).resolves.toBe(`${JSON.stringify(original, null, 2)}\n`);
     await expect(readdir(path.dirname(target))).resolves.toEqual(["execution-manifest.json"]);
+  });
+});
+
+/**
+ * The manifest is the contract between the desktop and the runner: the
+ * desktop writes it, the runner reads it.  A manifest the desktop accepts
+ * but the runner refuses is a run that dies after it has already started,
+ * so the two have to judge the same document the same way — there is one
+ * grammar for the manifest, and both sides use it.
+ */
+describe("the desktop and the runner judge a manifest the same way", () => {
+  it.each([
+    ["a tracker project key with an empty path segment", { tracker: { platform: "github", projectKey: "acme//api", providerProjectId: "101" } }],
+    ["a tracker project key with a colon", { tracker: { platform: "github", projectKey: "acme:api", providerProjectId: "101" } }],
+    ["a work item id the runner cannot parse", { workItemId: "WI-1" }],
+  ])("refuses %s", async (_label, patch) => {
+    const workspace = await createWorkspace();
+    const manifest = { ...createManifest(), ...patch } as WorkItemExecutionManifest;
+    const target = manifestPath(workspace);
+
+    const runnerAccepts = await accepts(() => parseExecutionManifest(manifest, { manifestPath: target, workItemId: manifest.workItemId }));
+    const desktopAccepts = await accepts(() => createWorkItemExecutionManifestStore().save(workspace, manifest));
+
+    expect(desktopAccepts).toBe(runnerAccepts);
+    expect(desktopAccepts).toBe(false);
+  });
+
+  it("writes a manifest the runner can read", async () => {
+    const workspace = await createWorkspace();
+    const target = manifestPath(workspace);
+    const manifest = createManifest();
+
+    await createWorkItemExecutionManifestStore().save(workspace, manifest);
+
+    const written = JSON.parse(await readFile(target, "utf8")) as unknown;
+    expect(() => parseExecutionManifest(written, { manifestPath: target, workItemId: manifest.workItemId })).not.toThrow();
   });
 });
 
@@ -225,10 +262,19 @@ async function rejectedError(promise: Promise<unknown>): Promise<Error> {
   throw new Error("Expected promise to reject");
 }
 
+async function accepts(run: () => unknown | Promise<unknown>): Promise<boolean> {
+  try {
+    await run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function createManifest(): WorkItemExecutionManifest {
   return {
     schemaVersion: 1,
-    workItemId: "WI-1",
+    workItemId: "github:acme/api#1",
     providerBacklogId: "42",
     tracker: { platform: "github", projectKey: "acme/api", providerProjectId: "101" },
     workingBranch: "afk/work-item-1",

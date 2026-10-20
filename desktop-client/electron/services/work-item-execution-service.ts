@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isCanonicalWorkItemId } from "@afk/application";
 import { quoteShellArgument } from "@afk/infrastructure";
 import path from "node:path";
 import type {
@@ -181,6 +182,15 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
       ? await deps.resolveAgent?.(input.foreground.agent)
       : undefined;
     if (input.foreground && (!foregroundAgent || !deps.openTerminalCommand)) throw new Error("前台执行能力不可用，请检查 Agent 和终端配置");
+
+    // The execution runtime names the work item with the canonical identity
+    // grammar before it runs one, so a work item without a provider-qualified
+    // id has no run behind it. A foreground run hands the work item to an
+    // agent in a terminal and does not go through the runtime, so it is not
+    // held to that.
+    if (!input.foreground && !isCanonicalWorkItemId(input.workItemId)) {
+      throw new Error(`工作项 ${input.workItemId} 不是 Provider 关联的工作项，无法执行`);
+    }
 
     const associated = item.repositories === undefined ? [item.project] : item.repositories;
     const selected = validateRunRepositorySelection(input.repositories, associated);

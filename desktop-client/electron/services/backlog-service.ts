@@ -8,6 +8,7 @@ import {
   type BacklogManagementProvider,
 } from "@afk/application";
 import { BacklogServiceError } from "./backlog-error.js";
+import { BACKLOG_PLATFORMS } from "../../shared/backlog-contract.js";
 import type {
   BacklogCreateInput,
   BacklogItem,
@@ -34,7 +35,7 @@ export type BacklogServiceOptions = {
 
 type CacheEntry = { value: BacklogItem[]; expiresAt: number };
 
-const PLATFORMS = new Set<BacklogPlatform>(["github", "gitlab"]);
+const PLATFORMS = new Set<BacklogPlatform>(BACKLOG_PLATFORMS);
 
 function asPlatform(value: unknown): BacklogPlatform | undefined {
   return typeof value === "string" && PLATFORMS.has(value as BacklogPlatform) ? (value as BacklogPlatform) : undefined;

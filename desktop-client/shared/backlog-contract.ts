@@ -12,14 +12,20 @@
 
 import { assertExactKeys, parseRequiredString } from "./validation.js";
 import {
+  WORK_ITEM_PLATFORMS,
   formatWorkItemId as formatCanonicalWorkItemId,
+  isWorkItemPlatform,
   parseWorkItemId as parseCanonicalWorkItemId,
+  validateWorkItemIssueNumber,
+  validateWorkItemPlatform,
+  validateWorkItemProjectKey,
 } from "@afk/application";
 import type {
   BacklogChangeRequest as AuditedBacklogChangeRequest,
   BacklogExecutionMode as AuditedBacklogExecutionMode,
   BacklogItem as AuditedBacklogItem,
   BacklogState as AuditedBacklogState,
+  WorkItemPlatform,
 } from "@afk/application";
 import type { SshExternalTerminalId } from "./ssh-contract.js";
 import {
@@ -67,13 +73,27 @@ export const WORK_ITEM_AGENT_IDS = ["claude", "codex", "cursor", "pi", "opencode
 export type WorkItemAgentId = typeof WORK_ITEM_AGENT_IDS[number];
 export type WorkItemTerminalId = SshExternalTerminalId;
 
-export const BACKLOG_PLATFORMS = ["github", "gitlab"] as const;
-export type BacklogPlatform = typeof BACKLOG_PLATFORMS[number];
+/**
+ * The platforms a backlog item can come from.
+ *
+ * The list itself belongs to the application package, where the identity
+ * grammar reads it; the desktop names it in its own vocabulary and does
+ * not keep a second copy of it.  A platform the application gains is a
+ * platform the desktop accepts, with no second list to keep in step.
+ */
+export const BACKLOG_PLATFORMS = WORK_ITEM_PLATFORMS;
+export type BacklogPlatform = WorkItemPlatform;
 // A work item identity reaches the desktop in two dialects: the canonical
 // provider-qualified form (`github:acme/api#1`) and the manual, locally
 // minted form (`WI-2026-018`). `@afk/application` brands only the canonical
 // one, so the wire format keeps the wide type on purpose — narrowing it here
 // would hide one dialect behind the other's name.
+//
+// Only the canonical dialect can be executed: the runtime names every work
+// item with the identity grammar before it runs one, so a manually minted
+// id names no provider issue and has no run behind it. The desktop refuses
+// to start a background run for one rather than writing a manifest the
+// runtime rejects.
 export type WorkItemId = string;
 
 export type ProviderProjectRef = {
@@ -446,8 +466,8 @@ export function parseProviderProjectRef(input: unknown): ProviderProjectRef {
   const candidate = input as Record<string, unknown>;
   assertExactKeys(candidate, PROVIDER_PROJECT_KEYS, "provider project");
   const project: ProviderProjectRef = {
-    platform: parseRequiredBacklogPlatform(candidate.platform, "provider project"),
-    projectKey: parseProjectKey(candidate.projectKey, "provider project"),
+    platform: validateWorkItemPlatform(candidate.platform, "provider project: platform"),
+    projectKey: validateWorkItemProjectKey(candidate.projectKey, "provider project: projectKey"),
     name: parseRequiredString(candidate.name, "provider project: name"),
   };
   for (const key of ["providerHost", "providerProjectId", "defaultBranch", "webUrl"] as const) {
@@ -461,7 +481,7 @@ export function parseGlobalWorkItem(input: unknown): GlobalWorkItem {
   const candidate = input as Record<string, unknown>;
   assertExactKeys(candidate, ["id", "issueNumber", "project", "title", "description", "managed", "executionEligible", "state", "executionMode", "parentId", "dependsOn", "tags", "branchName", "providerRef", "webUrl", "sources", "repositories", "executionPlan", "runs", "owner", "priority", "updatedAt"], "global work item");
   const id = parseGlobalWorkItemIdentity(candidate.id, "global work item: id");
-  const issueNumber = parseIssueNumber(candidate.issueNumber, "global work item");
+  const issueNumber = validateWorkItemIssueNumber(candidate.issueNumber, "global work item: issueNumber");
   const project = parseProviderProjectRef(candidate.project);
   if (typeof candidate.managed !== "boolean" || typeof candidate.executionEligible !== "boolean") throw new Error("global work item: managed and executionEligible must be booleans");
   if (candidate.executionEligible && !candidate.managed) throw new Error("global work item: unmanaged items cannot be execution eligible");
@@ -522,9 +542,9 @@ function parseWorkItemSource(input: unknown): WorkItemSourceRef {
     reference: parseRequiredString(candidate.reference, "work item source: reference"),
   };
   if (candidate.role !== undefined) result.role = parseRequiredString(candidate.role, "work item source: role");
-  if (candidate.platform !== undefined) result.platform = parseRequiredBacklogPlatform(candidate.platform, "work item source");
-  if (candidate.projectKey !== undefined) result.projectKey = parseProjectKey(candidate.projectKey, "work item source");
-  if (candidate.issueNumber !== undefined) result.issueNumber = parseIssueNumber(candidate.issueNumber, "work item source");
+  if (candidate.platform !== undefined) result.platform = validateWorkItemPlatform(candidate.platform, "work item source: platform");
+  if (candidate.projectKey !== undefined) result.projectKey = validateWorkItemProjectKey(candidate.projectKey, "work item source: projectKey");
+  if (candidate.issueNumber !== undefined) result.issueNumber = validateWorkItemIssueNumber(candidate.issueNumber, "work item source: issueNumber");
   if (candidate.webUrl !== undefined) result.webUrl = parseRequiredString(candidate.webUrl, "work item source: webUrl");
   return result;
 }
@@ -591,7 +611,7 @@ export function parseWorkItemInventoryOptions(input: unknown): WorkItemInventory
   assertExactKeys(candidate, ["platform", "state", "executionMode", "tag", "project"], "work item inventory options");
   const result: WorkItemInventoryOptions = {};
   if (candidate.platform !== undefined) {
-    if (candidate.platform !== "all" && !isBacklogPlatform(candidate.platform)) throw new Error("work item inventory options: invalid platform");
+    if (candidate.platform !== "all" && !isWorkItemPlatform(candidate.platform)) throw new Error("work item inventory options: invalid platform");
     result.platform = candidate.platform;
   }
   if (candidate.state !== undefined) {
@@ -618,10 +638,10 @@ export function parseWorkItemInventoryResult(input: unknown): WorkItemInventoryR
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("work item inventory diagnostic must be an object");
     const diagnostic = value as Record<string, unknown>;
     assertExactKeys(diagnostic, ["platform", "projectKey", "code", "message", "retryable"], "work item inventory diagnostic");
-    if (!isBacklogPlatform(diagnostic.platform) || typeof diagnostic.retryable !== "boolean") throw new Error("work item inventory diagnostic has invalid fields");
+    if (!isWorkItemPlatform(diagnostic.platform) || typeof diagnostic.retryable !== "boolean") throw new Error("work item inventory diagnostic has invalid fields");
     return {
       platform: diagnostic.platform,
-      ...(diagnostic.projectKey === undefined ? {} : { projectKey: parseProjectKey(diagnostic.projectKey, "work item inventory diagnostic") }),
+      ...(diagnostic.projectKey === undefined ? {} : { projectKey: validateWorkItemProjectKey(diagnostic.projectKey, "work item inventory diagnostic: projectKey") }),
       code: parseRequiredString(diagnostic.code, "work item inventory diagnostic: code"),
       message: parseRequiredString(diagnostic.message, "work item inventory diagnostic: message"),
       retryable: diagnostic.retryable,
@@ -676,7 +696,7 @@ function parseBacklogItem(input: unknown): BacklogItem {
   if (globalFields.some(key => candidate[key] !== undefined)) {
     if (globalFields.some(key => candidate[key] === undefined)) throw new Error("backlog item: global identity fields must be provided together");
     const workItemId = parseWorkItemId(candidate.workItemId);
-    const issueNumber = parseIssueNumber(candidate.issueNumber, "backlog item");
+    const issueNumber = validateWorkItemIssueNumber(candidate.issueNumber, "backlog item: issueNumber");
     const project = parseProviderProjectRef(candidate.project);
     if (typeof candidate.managed !== "boolean" || typeof candidate.executionEligible !== "boolean") throw new Error("backlog item: managed and executionEligible must be booleans");
     if (candidate.executionEligible && !candidate.managed) throw new Error("backlog item: unmanaged items cannot be execution eligible");
@@ -736,26 +756,6 @@ export function parseBacklogPlatform(value: unknown): BacklogPlatform | undefine
 export function isBacklogState(value: unknown): value is BacklogState {
   return typeof value === "string" && (BACKLOG_STATES as readonly string[]).includes(value);
 }
-
-export function isBacklogPlatform(value: unknown): value is BacklogPlatform {
-  return typeof value === "string" && (BACKLOG_PLATFORMS as readonly string[]).includes(value);
-}
-
-function parseRequiredBacklogPlatform(value: unknown, label: string): BacklogPlatform {
-  if (!isBacklogPlatform(value)) throw new Error(`${label}: platform must be one of: ${BACKLOG_PLATFORMS.join(", ")}`);
-  return value;
-}
-
-function parseProjectKey(value: unknown, label: string): string {
-  if (typeof value !== "string" || !value || value.trim() !== value || /[:#\s\x00-\x1f\x7f]/.test(value) || value.split("/").some(segment => segment === "." || segment === "..")) throw new Error(`${label}: projectKey is invalid`);
-  return value;
-}
-
-function parseIssueNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) throw new Error(`${label}: issueNumber must be a positive safe integer`);
-  return value;
-}
-
 
 function parseMultilineString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.includes("\0")) throw new Error(`${label} is invalid`);

@@ -25,7 +25,7 @@ describe("work item execution service integration", () => {
       const project = { platform: "github" as const, projectKey: "acme/api", name: "api" };
     const repository = { ...project, baseBranch: "main" };
       const item: GlobalWorkItem = {
-        id: "WI-2026-018",
+        id: "github:acme/api#42",
         issueNumber: 42,
         project,
         repositories: [repository],

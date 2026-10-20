@@ -1,13 +1,9 @@
 import type {
-  BacklogPlatform,
   ProviderProjectRef,
   WorkItemRunRepositorySelection,
 } from "./backlog-contract.js";
+import { isWorkItemPlatform, validateWorkItemProjectKey } from "@afk/application";
 
-const BACKLOG_PLATFORM_VALUES: Record<BacklogPlatform, true> = {
-  github: true,
-  gitlab: true,
-};
 const SELECTION_KEYS = new Set(["platform", "projectKey", "providerHost", "providerProjectId", "name", "checkoutPath", "baseBranch", "role"]);
 
 type RepositoryCheckoutPathSource = Pick<ProviderProjectRef, "name" | "projectKey"> & { checkoutPath?: string };
@@ -83,19 +79,11 @@ function parseSelection(value: unknown, index: number): WorkItemRunRepositorySel
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
   const candidate = value as Record<string, unknown>;
   for (const key of Object.keys(candidate)) if (!SELECTION_KEYS.has(key)) throw new Error(`${label} has unknown field: ${key}`);
-  if (!isBacklogPlatform(candidate.platform)) throw new Error(`${label}: platform is invalid`);
-  if (
-    typeof candidate.projectKey !== "string"
-    || !candidate.projectKey
-    || candidate.projectKey.trim() !== candidate.projectKey
-    || /[:#\s\x00-\x1f\x7f]/.test(candidate.projectKey)
-    || candidate.projectKey.split("/").some(segment => !segment || segment === "." || segment === "..")
-  ) {
-    throw new Error(`${label}: projectKey is invalid`);
-  }
+  if (!isWorkItemPlatform(candidate.platform)) throw new Error(`${label}: platform is invalid`);
+  const projectKey = validateWorkItemProjectKey(candidate.projectKey, `${label}: projectKey`);
   return {
     platform: candidate.platform,
-    projectKey: candidate.projectKey,
+    projectKey,
     ...(candidate.providerHost === undefined ? {} : { providerHost: validateText(candidate.providerHost, `${label}.providerHost`) }),
     ...(candidate.providerProjectId === undefined ? {} : { providerProjectId: validateText(candidate.providerProjectId, `${label}.providerProjectId`) }),
     name: validateText(candidate.name, `${label}.name`),
@@ -122,8 +110,4 @@ function validRepositoryCheckoutPath(value: string | undefined): string | undefi
 
 function checkoutPathKey(value: string): string {
   return value.replace(/[\\/]+/g, "/").toLowerCase();
-}
-
-function isBacklogPlatform(value: unknown): value is BacklogPlatform {
-  return typeof value === "string" && Object.prototype.hasOwnProperty.call(BACKLOG_PLATFORM_VALUES, value);
 }

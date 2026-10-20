@@ -57,6 +57,14 @@ describe('work-item identity', () => {
     expect(() => parseWorkItemId(value)).toThrow();
   });
 
+  it('rejects a project key with an empty path segment', () => {
+    // The runner's manifest reader and the desktop's repository selection
+    // both refuse a key like "acme//api".  The identity grammar is the one
+    // answer to "what is a project key", so it has to refuse it too.
+    expect(() => parseWorkItemId('github:acme//api#1')).toThrow(/project key/i);
+    expect(() => formatWorkItemId({ platform: 'github', projectKey: 'acme//api', issueNumber: 1 })).toThrow(/project key/i);
+  });
+
   it('encodes canonical identities as filesystem-safe directory names', () => {
     const id = formatWorkItemId({
       platform: 'gitlab',

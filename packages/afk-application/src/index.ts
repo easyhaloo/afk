@@ -16,6 +16,7 @@ export * from './ports.js';
 export * from './provider-inventory.js';
 export * from './runtime-health.js';
 export * from './tracker/types.js';
+export * from './work-items/execution-manifest.js';
 export * from './work-items/identity.js';
 export * from './work-items/inventory.js';
 export * from './work-items/metadata.js';

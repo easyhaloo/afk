@@ -181,11 +181,11 @@ describe("work item execution service", () => {
     const execute = vi.fn(async () => {
       expect(stored).toEqual([expect.objectContaining({ status: "starting" })]);
       expect(stored[0]).not.toHaveProperty("pid");
-      expect(updateRun).toHaveBeenCalledWith("WI-2026-018", stored[0]?.id);
+      expect(updateRun).toHaveBeenCalledWith("github:acme/api#42", stored[0]?.id);
       return { status: "done" as const };
     });
     const service = createWorkItemExecutionService({
-      getWorkItem: async () => item({ id: "WI-2026-018", repositories: [apiProject, webProject], branchName: "afk/work-item-18" }),
+      getWorkItem: async () => item({ id: "github:acme/api#42", repositories: [apiProject, webProject], branchName: "afk/work-item-18" }),
       execute,
       workspace: { allocate, updateRun },
       manifestStore,
@@ -194,7 +194,7 @@ describe("work item execution service", () => {
     });
 
     const result = await service.start({
-      workItemId: "WI-2026-018",
+      workItemId: "github:acme/api#42",
       repositories: [
         { ...webSelection, providerProjectId: "202", name: "forged-web", checkoutPath: "forged/web", role: "forged-role" },
         { ...apiSelection, providerProjectId: "101", name: "forged-api", checkoutPath: "forged/api", role: "forged-role" },
@@ -204,10 +204,10 @@ describe("work item execution service", () => {
     });
 
     const manifestPath = path.join(workspaceRoot, ".afk", "execution-manifest.json");
-    expect(allocate).toHaveBeenCalledWith("WI-2026-018", [webProject, apiProject]);
+    expect(allocate).toHaveBeenCalledWith("github:acme/api#42", [webProject, apiProject]);
     expect(manifestStore.save).toHaveBeenCalledWith(workspaceRoot, {
       schemaVersion: 1,
-      workItemId: "WI-2026-018",
+      workItemId: "github:acme/api#42",
       providerBacklogId: "42",
       tracker: { platform: "github", projectKey: "acme/api", providerProjectId: "101" },
       workingBranch: "afk/work-item-18",
@@ -218,12 +218,12 @@ describe("work item execution service", () => {
     });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenCalledWith({
-      workItemId: "WI-2026-018",
+      workItemId: "github:acme/api#42",
       manifestPath,
       template: "standard-development",
       executionId: result.runId,
     });
-    expect(updateRun).toHaveBeenCalledWith("WI-2026-018", expect.any(String));
+    expect(updateRun).toHaveBeenCalledWith("github:acme/api#42", expect.any(String));
     expect(result.runId).toMatch(/^desktop-[a-f\d-]{36}$/);
     expect(result.workspace).toEqual({ root: workspaceRoot });
     expect(stored).toEqual([expect.objectContaining({
@@ -245,18 +245,18 @@ describe("work item execution service", () => {
     const allocate = vi.fn(async () => allocatedWorkspace(workspaceRoot, [webProject], ["frontend"]));
     const manifestStore = { save: vi.fn(async () => undefined) };
     const service = createWorkItemExecutionService({
-      getWorkItem: async () => item({ id: "WI-2026-018", issueNumber: 731, repositories: [apiProject, webProject] }),
+      getWorkItem: async () => item({ id: "github:acme/api#731", issueNumber: 731, repositories: [apiProject, webProject] }),
       execute: async () => ({ status: "done" as const }),
       workspace: { allocate, updateRun: vi.fn(async () => undefined) },
       manifestStore,
       runStore: createStoredRunStore().runStore,
     });
 
-    await service.start({ workItemId: "WI-2026-018", repositories: [webSelection] });
+    await service.start({ workItemId: "github:acme/api#731", repositories: [webSelection] });
 
-    expect(allocate).toHaveBeenCalledWith("WI-2026-018", [webProject]);
+    expect(allocate).toHaveBeenCalledWith("github:acme/api#731", [webProject]);
     expect(manifestStore.save).toHaveBeenCalledWith(workspaceRoot, expect.objectContaining({
-      workItemId: "WI-2026-018",
+      workItemId: "github:acme/api#731",
       providerBacklogId: "731",
       tracker: { platform: "github", projectKey: "acme/api", providerProjectId: "101" },
       repositories: [expect.objectContaining({
@@ -352,6 +352,29 @@ describe("work item execution service", () => {
     await expect(service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] })).rejects.toThrow("不可执行");
     expect(allocate).not.toHaveBeenCalled();
     expect(manifestStore.save).not.toHaveBeenCalled();
+  });
+
+  it("refuses a background run for a work item the execution runtime cannot name", async () => {
+    // The runtime parses every work item id with the canonical identity
+    // grammar before it runs one. A hand-minted id names no provider
+    // issue, so the desktop says so at the click rather than writing a
+    // manifest the runtime refuses and dying inside it.
+    const allocate = vi.fn();
+    const manifestStore = { save: vi.fn() };
+    const execute = vi.fn(async () => ({ status: "done" as const }));
+    const service = createWorkItemExecutionService({
+      getWorkItem: async () => item({ id: "WI-2026-018" }),
+      workspace: { allocate, updateRun: vi.fn(async () => undefined) },
+      execute,
+      manifestStore,
+      runStore: { load: async () => [], save: async () => undefined },
+    });
+
+    await expect(service.start({ workItemId: "WI-2026-018", repositories: [apiSelection] }))
+      .rejects.toThrow(/Provider/);
+    expect(allocate).not.toHaveBeenCalled();
+    expect(manifestStore.save).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("rejects an empty repository selection before allocating or saving", async () => {

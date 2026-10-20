@@ -257,7 +257,7 @@ describe('multi-repository execution manifest integration', () => {
       await mkdir(join(workspaceRoot, '.afk'), { recursive: true });
       await writeFile(manifestPath, `${JSON.stringify({
         schemaVersion: 1,
-        workItemId: 'WI-2026-018',
+        workItemId: 'github:acme/api#18',
         providerBacklogId: '42',
         tracker: { platform: 'github', projectKey: 'acme/api' },
         workingBranch,
@@ -274,7 +274,7 @@ describe('multi-repository execution manifest integration', () => {
       }, null, 2)}\n`, 'utf8');
 
       const request = await resolveWorkflowRunRequest({
-        backlogId: 'WI-2026-018',
+        backlogId: 'github:acme/api#18',
         executionManifestPath: manifestPath,
       }, {}, { cwd: workspaceRoot });
 
@@ -316,7 +316,7 @@ describe('multi-repository execution manifest integration', () => {
       expect((await simpleGit(webRoot).revparse(['--abbrev-ref', 'HEAD'])).trim()).toBe('develop');
       expect(await branchExists(apiRoot, workingBranch)).toBe(false);
       expect(await branchExists(webRoot, workingBranch)).toBe(false);
-      expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({ workItemId: 'WI-2026-018' });
+      expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toMatchObject({ workItemId: 'github:acme/api#18' });
 
       const remoteHeadsBeforeFailure = [
         (await simpleGit(api.remote).revparse([`refs/heads/${workingBranch}`])).trim(),

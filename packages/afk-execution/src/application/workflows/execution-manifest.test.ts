@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { parseExecutionManifest, readExecutionManifest } from './execution-manifest.js';
 
 const manifestPath = '/workspace/.afk/execution-manifest.json';
-const backlogId = 'github:acme/api#42';
+const workItemId = 'github:acme/api#42';
 
 function validManifest() {
   return {
     schemaVersion: 1,
-    workItemId: backlogId,
+    workItemId,
     providerBacklogId: '42',
     tracker: { platform: 'github', projectKey: 'acme/api', providerProjectId: '101' },
     workingBranch: 'afk/work-item-42',
@@ -42,11 +42,11 @@ describe('parseExecutionManifest', () => {
   Reflect.deleteProperty(missingTracker, 'tracker');
 
   it('parses a schemaVersion 1 multi-repository manifest', () => {
-    const manifest = parseExecutionManifest(validManifest(), { manifestPath, backlogId });
+    const manifest = parseExecutionManifest(validManifest(), { manifestPath, workItemId });
 
     expect(manifest).toMatchObject({
       schemaVersion: 1,
-      workItemId: backlogId,
+      workItemId,
       providerBacklogId: '42',
       workingBranch: 'afk/work-item-42',
       repositories: [
@@ -61,7 +61,7 @@ describe('parseExecutionManifest', () => {
     value.repositories[0].primary = false;
     value.repositories[1].primary = true;
 
-    expect(parseExecutionManifest(value, { manifestPath, backlogId })).toMatchObject({
+    expect(parseExecutionManifest(value, { manifestPath, workItemId })).toMatchObject({
       providerBacklogId: '42',
       tracker: { platform: 'github', projectKey: 'acme/api', providerProjectId: '101' },
       repositories: [
@@ -82,7 +82,7 @@ describe('parseExecutionManifest', () => {
     ['invalid provider backlog id', { ...validManifest(), providerBacklogId: 'WI-42' }, /providerBacklogId.*positive integer/],
     ['missing tracker', missingTracker, /tracker must be an object/],
     ['malformed tracker', { ...validManifest(), tracker: null }, /tracker must be an object/],
-    ['invalid tracker platform', { ...validManifest(), tracker: { platform: 'bitbucket', projectKey: 'acme/api' } }, /tracker\.platform must be github or gitlab/],
+    ['invalid tracker platform', { ...validManifest(), tracker: { platform: 'bitbucket', projectKey: 'acme/api' } }, /tracker\.platform must be one of: github, gitlab/],
     ['missing tracker project key', { ...validManifest(), tracker: { platform: 'github' } }, /tracker\.projectKey/],
     ['empty repositories', { ...validManifest(), repositories: [] }, /repositories must be a non-empty array/],
     ['zero primary repositories', {
@@ -121,17 +121,17 @@ describe('parseExecutionManifest', () => {
       ...validManifest(),
       repositories: [{ ...validManifest().repositories[0], workingBranch: 'other' }],
     }, /repositories\[0\]\.workingBranch must match workingBranch/],
-    ['work item mismatch', validManifest(), /workItemId must match --backlog-id other-id/],
+    ['work item mismatch', validManifest(), /workItemId must match the requested work item id other-id/],
   ])('rejects %s with path and field context', (_name, value, pattern) => {
-    const expectedBacklogId = _name === 'work item mismatch' ? 'other-id' : backlogId;
-    expect(() => parseExecutionManifest(value, { manifestPath, backlogId: expectedBacklogId }))
+    const expectedWorkItemId = _name === 'work item mismatch' ? 'other-id' : workItemId;
+    expect(() => parseExecutionManifest(value, { manifestPath, workItemId: expectedWorkItemId }))
       .toThrow(new RegExp(`${manifestPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*${pattern.source}`, 'i'));
   });
 });
 
 describe('readExecutionManifest', () => {
   it('resolves repository roots from the execution workspace containing the manifest', async () => {
-    const manifest = await readExecutionManifest(manifestPath, backlogId, {
+    const manifest = await readExecutionManifest(manifestPath, workItemId, {
       readFile: async () => JSON.stringify(validManifest()),
     });
 
@@ -144,14 +144,14 @@ describe('readExecutionManifest', () => {
 
   it('diagnoses missing files with the resolved manifest path', async () => {
     const error = Object.assign(new Error('missing'), { code: 'ENOENT' });
-    await expect(readExecutionManifest('relative/manifest.json', backlogId, {
+    await expect(readExecutionManifest('relative/manifest.json', workItemId, {
       cwd: '/invocation',
       readFile: async () => { throw error; },
     })).rejects.toThrow(/\/invocation\/relative\/manifest\.json.*does not exist/i);
   });
 
   it('diagnoses invalid JSON with the manifest path', async () => {
-    await expect(readExecutionManifest(manifestPath, backlogId, {
+    await expect(readExecutionManifest(manifestPath, workItemId, {
       readFile: async () => '{bad json',
     })).rejects.toThrow(/\/workspace\/\.afk\/execution-manifest\.json.*invalid JSON/i);
   });

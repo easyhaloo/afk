@@ -79,12 +79,12 @@ describe('resolveWorkflowRequest', () => {
 
   it('projects the primary manifest repository while preserving the normalized collection', async () => {
     const request = await resolveWorkflowRunRequest(
-      { backlogId: 'WI-2026-018', executionManifestPath: '/workspace/.afk/execution-manifest.json', template: 'custom' },
+      { backlogId: 'github:acme/api#42', executionManifestPath: '/workspace/.afk/execution-manifest.json', template: 'custom' },
       {},
       {
         readFile: async () => JSON.stringify({
           schemaVersion: 1,
-          workItemId: 'WI-2026-018',
+          workItemId: 'github:acme/api#42',
           providerBacklogId: '42',
           tracker: { platform: 'github', projectKey: 'acme/api' },
           workingBranch: 'afk/work-item-42',
@@ -105,8 +105,8 @@ describe('resolveWorkflowRequest', () => {
 
     expect(request).toMatchObject({
       backlogId: '42',
-      workItemId: 'WI-2026-018',
-      session: 'afk-WI-2026-018',
+      workItemId: 'github:acme/api#42',
+      session: 'afk-github:acme/api#42',
       projectName: 'acme/api',
       trackerPlatform: 'github',
       trackerProjectId: 'acme/api',
@@ -149,13 +149,13 @@ describe('resolveWorkflowRequest', () => {
 
   it('rejects an explicit branch strategy that conflicts with the manifest branch', async () => {
     await expect(resolveWorkflowRunRequest({
-      backlogId: 'WI-2026-018',
+      backlogId: 'github:acme/api#42',
       executionManifestPath: '/workspace/.afk/execution-manifest.json',
       branchStrategy: { type: 'named', branch: 'other', baseBranch: 'main' },
     }, {}, {
       readFile: async () => JSON.stringify({
         schemaVersion: 1,
-        workItemId: 'WI-2026-018',
+        workItemId: 'github:acme/api#42',
         providerBacklogId: '42',
         tracker: { platform: 'github', projectKey: 'acme/api' },
         workingBranch: 'afk/work-item-42',
@@ -169,12 +169,12 @@ describe('resolveWorkflowRequest', () => {
 
   it('derives explicit self-hosted GitLab tracker context without a git remote', async () => {
     const request = await resolveWorkflowRunRequest({
-      backlogId: 'WI-2026-019',
+      backlogId: 'gitlab:git.corp/team/platform/api#19',
       executionManifestPath: '/workspace/.afk/execution-manifest.json',
     }, {}, {
       readFile: async () => JSON.stringify({
         schemaVersion: 1,
-        workItemId: 'WI-2026-019',
+        workItemId: 'gitlab:git.corp/team/platform/api#19',
         providerBacklogId: '77',
         tracker: { platform: 'gitlab', projectKey: 'git.corp/team/platform/api', providerHost: 'git.corp' },
         workingBranch: 'afk/work-item-19',
@@ -187,7 +187,7 @@ describe('resolveWorkflowRequest', () => {
 
     expect(request).toMatchObject({
       backlogId: '77',
-      workItemId: 'WI-2026-019',
+      workItemId: 'gitlab:git.corp/team/platform/api#19',
       trackerPlatform: 'gitlab',
       trackerProjectId: 'team/platform/api',
       trackerHost: 'git.corp',
@@ -214,10 +214,10 @@ describe('resolveWorkflowRequest', () => {
 
   it('never infers a GitLab host from a dotted namespace path', async () => {
     const request = await resolveWorkflowRunRequest(
-      { backlogId: 'WI-1', executionManifestPath: '/workspace/.afk/execution-manifest.json' },
+      { backlogId: 'gitlab:team.platform/subgroup/repo#1', executionManifestPath: '/workspace/.afk/execution-manifest.json' },
       {},
       { readFile: async () => JSON.stringify({
-        schemaVersion: 1, workItemId: 'WI-1', providerBacklogId: '1', workingBranch: 'afk/wi-1',
+        schemaVersion: 1, workItemId: 'gitlab:team.platform/subgroup/repo#1', providerBacklogId: '1', workingBranch: 'afk/wi-1',
         tracker: { platform: 'gitlab', projectKey: 'team.platform/subgroup/repo' },
         repositories: [{
           platform: 'gitlab', projectKey: 'team.platform/subgroup/repo', name: 'repo', checkoutPath: 'repositories/repo',

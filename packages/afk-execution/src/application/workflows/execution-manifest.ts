@@ -1,54 +1,19 @@
 import { readFile as readFileFromFs } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
-import { isMissingFileError, validateBaseBranch, validateCheckoutPath } from '@afk/application';
+import { isMissingFileError } from '@afk/application';
+import {
+  parseExecutionManifestDocument,
+  type ExecutionManifest,
+  type ExecutionManifestRepository,
+  type ExecutionManifestTracker,
+} from '@afk/application';
 
-const MANIFEST_KEYS = new Set(['schemaVersion', 'workItemId', 'providerBacklogId', 'tracker', 'workingBranch', 'repositories']);
-const TRACKER_KEYS = new Set(['platform', 'projectKey', 'providerHost', 'providerProjectId']);
-const REPOSITORY_KEYS = new Set([
-  'platform',
-  'projectKey',
-  'providerHost',
-  'providerProjectId',
-  'name',
-  'checkoutPath',
-  'baseBranch',
-  'role',
-  'workingBranch',
-  'primary',
-]);
-
-type UnknownObject = { [key: string]: unknown };
-
-export type ExecutionManifestPlatform = 'github' | 'gitlab';
-
-export interface ExecutionManifestTracker {
-  platform: ExecutionManifestPlatform;
-  projectKey: string;
-  providerHost?: string;
-  providerProjectId?: string;
-}
-
-export interface ExecutionManifestRepository {
-  platform: ExecutionManifestPlatform;
-  projectKey: string;
-  providerHost?: string;
-  providerProjectId?: string;
-  name: string;
-  checkoutPath: string;
-  baseBranch: string;
-  role?: string;
-  workingBranch: string;
-  primary: boolean;
-}
-
-export interface ExecutionManifest {
-  schemaVersion: 1;
-  workItemId: string;
-  providerBacklogId: string;
-  tracker: ExecutionManifestTracker;
-  workingBranch: string;
-  repositories: ExecutionManifestRepository[];
-}
+export type {
+  ExecutionManifest,
+  ExecutionManifestPlatform,
+  ExecutionManifestRepository,
+  ExecutionManifestTracker,
+} from '@afk/application';
 
 export interface ResolvedExecutionManifestRepository extends ExecutionManifestRepository {
   repoRoot: string;
@@ -62,7 +27,8 @@ export interface ResolvedExecutionManifest extends Omit<ExecutionManifest, 'repo
 
 export interface ParseExecutionManifestOptions {
   manifestPath: string;
-  backlogId: string;
+  /** The work item the caller asked for; the manifest has to name it. */
+  workItemId: string;
 }
 
 export interface ReadExecutionManifestDependencies {
@@ -70,9 +36,21 @@ export interface ReadExecutionManifestDependencies {
   readFile?: (file: string, encoding: 'utf8') => Promise<string>;
 }
 
+/**
+ * Read a manifest the caller already has in hand.
+ *
+ * The rules for what a manifest may say live in the application package,
+ * next to the identity grammar they are made of — the desktop client
+ * writes manifests through the same rules, so a document one side
+ * accepts is a document the other side reads.
+ */
 export function parseExecutionManifest(value: unknown, options: ParseExecutionManifestOptions): ExecutionManifest {
   try {
-    return parseManifest(value, options.backlogId);
+    const manifest = parseExecutionManifestDocument(value);
+    if (manifest.workItemId !== options.workItemId) {
+      throw new Error(`workItemId must match the requested work item id ${options.workItemId}`);
+    }
+    return manifest;
   } catch (error) {
     throw manifestError(options.manifestPath, error);
   }
@@ -80,7 +58,7 @@ export function parseExecutionManifest(value: unknown, options: ParseExecutionMa
 
 export async function readExecutionManifest(
   manifestPath: string,
-  backlogId: string,
+  workItemId: string,
   dependencies: ReadExecutionManifestDependencies = {},
 ): Promise<ResolvedExecutionManifest> {
   const absoluteManifestPath = resolve(dependencies.cwd ?? process.cwd(), manifestPath);
@@ -100,7 +78,7 @@ export async function readExecutionManifest(
     throw new Error(`Execution manifest at ${absoluteManifestPath}: invalid JSON: ${errorMessage(error)}`, { cause: error });
   }
 
-  const manifest = parseExecutionManifest(value, { manifestPath: absoluteManifestPath, backlogId });
+  const manifest = parseExecutionManifest(value, { manifestPath: absoluteManifestPath, workItemId });
   const manifestDirectory = dirname(absoluteManifestPath);
   const workspaceRoot = basename(manifestDirectory) === '.afk' ? dirname(manifestDirectory) : manifestDirectory;
   const repositories = manifest.repositories.map((repository, index) => ({
@@ -108,81 +86,6 @@ export async function readExecutionManifest(
     repoRoot: resolveRepositoryRoot(workspaceRoot, repository.checkoutPath, absoluteManifestPath, index),
   }));
   return { ...manifest, manifestPath: absoluteManifestPath, workspaceRoot, repositories };
-}
-
-function parseManifest(value: unknown, backlogId: string): ExecutionManifest {
-  const candidate = objectValue(value, 'manifest');
-  assertExactKeys(candidate, MANIFEST_KEYS, 'manifest');
-  if (candidate.schemaVersion !== 1) throw new Error('schemaVersion must be 1');
-  const workItemId = textValue(candidate.workItemId, 'workItemId', true);
-  if (workItemId !== backlogId) throw new Error(`workItemId must match --backlog-id ${backlogId}`);
-  const providerBacklogId = positiveIntegerString(candidate.providerBacklogId, 'providerBacklogId');
-  const tracker = parseTracker(candidate.tracker);
-  const workingBranch = validateBaseBranch(candidate.workingBranch, 'workingBranch');
-  if (!Array.isArray(candidate.repositories) || candidate.repositories.length === 0) {
-    throw new Error('repositories must be a non-empty array');
-  }
-
-  const repositories = candidate.repositories.map((repository, index) => parseRepository(repository, index, workingBranch));
-  const primaryCount = repositories.filter(repository => repository.primary).length;
-  if (primaryCount !== 1) throw new Error('repositories must contain exactly one primary repository');
-  assertUniqueRepositories(repositories);
-  return { schemaVersion: 1, workItemId, providerBacklogId, tracker, workingBranch, repositories };
-}
-
-function parseTracker(value: unknown): ExecutionManifestTracker {
-  const candidate = objectValue(value, 'tracker');
-  assertExactKeys(candidate, TRACKER_KEYS, 'tracker');
-  if (candidate.platform !== 'github' && candidate.platform !== 'gitlab') throw new Error('tracker.platform must be github or gitlab');
-  return {
-    platform: candidate.platform,
-    projectKey: projectKeyValue(candidate.projectKey, 'tracker.projectKey'),
-    ...(candidate.providerHost === undefined ? {} : { providerHost: textValue(candidate.providerHost, 'tracker.providerHost', true) }),
-    ...(candidate.providerProjectId === undefined ? {} : { providerProjectId: textValue(candidate.providerProjectId, 'tracker.providerProjectId') }),
-  };
-}
-
-function parseRepository(value: unknown, index: number, workingBranch: string): ExecutionManifestRepository {
-  const label = `repositories[${index}]`;
-  const candidate = objectValue(value, label);
-  assertExactKeys(candidate, REPOSITORY_KEYS, label);
-  const repositoryWorkingBranch = validateBaseBranch(candidate.workingBranch, `${label}.workingBranch`);
-  if (repositoryWorkingBranch !== workingBranch) throw new Error(`${label}.workingBranch must match workingBranch`);
-  if (typeof candidate.primary !== 'boolean') throw new Error(`${label}.primary must be a boolean`);
-  const platform = candidate.platform;
-  if (platform !== 'github' && platform !== 'gitlab') throw new Error(`${label}.platform must be github or gitlab`);
-
-  return {
-    platform,
-    projectKey: projectKeyValue(candidate.projectKey, `${label}.projectKey`),
-    ...(candidate.providerHost === undefined
-      ? {}
-      : { providerHost: textValue(candidate.providerHost, `${label}.providerHost`, true) }),
-    ...(candidate.providerProjectId === undefined
-      ? {}
-      : { providerProjectId: textValue(candidate.providerProjectId, `${label}.providerProjectId`) }),
-    name: textValue(candidate.name, `${label}.name`),
-    checkoutPath: validateCheckoutPath(candidate.checkoutPath, `${label}.checkoutPath`),
-    baseBranch: validateBaseBranch(candidate.baseBranch, `${label}.baseBranch`),
-    ...(candidate.role === undefined ? {} : { role: textValue(candidate.role, `${label}.role`) }),
-    workingBranch: repositoryWorkingBranch,
-    primary: candidate.primary,
-  };
-}
-
-function assertUniqueRepositories(repositories: readonly ExecutionManifestRepository[]): void {
-  const identities = new Set<string>();
-  const checkoutPaths = new Set<string>();
-  for (const repository of repositories) {
-    const identity = `${repository.platform}:${repository.projectKey}`;
-    if (identities.has(identity)) throw new Error(`repositories contain duplicate repository: ${identity}`);
-    const checkoutPath = repository.checkoutPath.replace(/[\\/]+/g, '/').toLowerCase();
-    if (checkoutPaths.has(checkoutPath)) {
-      throw new Error(`repositories contain duplicate checkoutPath: ${repository.checkoutPath}`);
-    }
-    identities.add(identity);
-    checkoutPaths.add(checkoutPath);
-  }
 }
 
 function resolveRepositoryRoot(workspaceRoot: string, checkoutPath: string, manifestPath: string, index: number): string {
@@ -194,49 +97,6 @@ function resolveRepositoryRoot(workspaceRoot: string, checkoutPath: string, mani
   return repoRoot;
 }
 
-function projectKeyValue(value: unknown, label: string): string {
-  if (
-    typeof value !== 'string'
-    || !value
-    || value.trim() !== value
-    || /[:#\s\x00-\x1f\x7f]/.test(value)
-    || value.split('/').some(segment => !segment || segment === '.' || segment === '..')
-  ) {
-    throw new Error(`${label} is invalid`);
-  }
-  return value;
-}
-
-function textValue(value: unknown, label: string, trimmed = false): string {
-  if (
-    typeof value !== 'string'
-    || !value.trim()
-    || /[\x00-\x1f\x7f]/.test(value)
-    || (trimmed && value.trim() !== value)
-  ) {
-    throw new Error(`${label} is invalid`);
-  }
-  return value;
-}
-
-function positiveIntegerString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) {
-    throw new Error(`${label} must be a positive integer string`);
-  }
-  return value;
-}
-
-function objectValue(value: unknown, label: string): UnknownObject {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`);
-  return value as UnknownObject;
-}
-
-function assertExactKeys(candidate: UnknownObject, allowed: ReadonlySet<string>, label: string): void {
-  for (const key of Object.keys(candidate)) {
-    if (!allowed.has(key)) throw new Error(`${label} has unknown field: ${key}`);
-  }
-}
-
 function manifestError(manifestPath: string, error: unknown): Error {
   return new Error(`Invalid execution manifest at ${manifestPath}: ${errorMessage(error)}`, { cause: error });
 }
@@ -244,4 +104,3 @@ function manifestError(manifestPath: string, error: unknown): Error {
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-

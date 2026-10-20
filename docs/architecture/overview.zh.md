@@ -98,6 +98,11 @@ TUI 投影和 Desktop 摘要之间原样传递。`runId` 标识一次执行尝�
 各关系字段含义互不相同：`parentId` 表示组织分组，`dependsOn` 控制调度顺序，
 `baseBacklogId` 选择显式的 Git 执行基线。父级边和依赖边都不会隐式选择分支。
 
+这套身份的文法 —— 平台清单、project key 规则、issue number 规则，以及执行
+manifest 的形状与规则 —— 只有一个家：`@afk/application` 的
+`packages/afk-application/src/work-items/identity.ts` 与 `packages/afk-application/src/work-items/execution-manifest.ts`。桌面端与执行
+运行时都经由它读取 manifest，所以一方接受的文档，另一方也读得懂。
+
 ## Backlog 生命周期
 
 ```text

@@ -25,12 +25,12 @@ vi.mock('simple-git', async importOriginal => ({
 describe('execution manifest request to runner boundary', () => {
   it('claims the provider backlog id and keeps the manifest working branch', async () => {
     const request = await resolveWorkflowRunRequest({
-      backlogId: 'WI-2026-018',
+      backlogId: 'github:acme/api#42',
       executionManifestPath: '/workspace/.afk/execution-manifest.json',
     }, {}, {
       readFile: async () => JSON.stringify({
         schemaVersion: 1,
-        workItemId: 'WI-2026-018',
+        workItemId: 'github:acme/api#42',
         providerBacklogId: '42',
         tracker: { platform: 'github', projectKey: 'acme/api' },
         workingBranch: 'afk/work-item-18',
@@ -79,7 +79,7 @@ describe('execution manifest request to runner boundary', () => {
 
     await expect(runner.run(request)).resolves.toMatchObject({ success: true });
 
-    expect(claimBacklog).toHaveBeenCalledWith('42', 'afk-WI-2026-018');
+    expect(claimBacklog).toHaveBeenCalledWith('42', 'afk-github:acme/api#42');
     expect(runner.activeBacklog).toMatchObject({ id: '42', branchName: 'afk/work-item-18' });
     expect(runner.runBody).toHaveBeenCalledWith(expect.objectContaining({
       branchStrategy: { type: 'named', branch: 'afk/work-item-18', baseBranch: 'main' },
@@ -129,7 +129,7 @@ describe('execution manifest request to runner boundary', () => {
     runner.autoWrapup = vi.fn(async () => ({ success: true }));
 
     await expect(runner.run({
-      backlogId: '42', workItemId: 'WI-2026-018', session: 'afk-WI-2026-018', targetBranch: 'afk/work-item-18',
+      backlogId: '42', workItemId: 'github:acme/api#42', session: 'afk-github:acme/api#42', targetBranch: 'afk/work-item-18',
       baseBranch: 'main', repoRoot: repositories[0].repoRoot, workspaceRoot, repositories,
       sandboxProvider: 'docker', template: 'simple-loop', executionMode: 'batch',
     })).resolves.toMatchObject({ success: true });

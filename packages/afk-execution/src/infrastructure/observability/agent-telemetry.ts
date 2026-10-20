@@ -90,7 +90,7 @@ export async function collectAgentTelemetry(
   const transcript = sandboxKind === 'local' && (provider === 'claude-code' || provider === 'codex' || provider === 'opencode')
     ? await resolveAgentTranscript({
       provider,
-      telemetryPath: (execution as { telemetryPath?: string }).telemetryPath,
+      telemetryPath: execution.telemetryPath,
       threadId: execution.metadata.threadId,
     })
     : undefined;

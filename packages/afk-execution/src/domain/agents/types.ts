@@ -181,6 +181,13 @@ export interface AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
   readonly metadata: AgentExecutionMetadata;
+  /**
+   * Where the agent's own transcript lives, when the provider writes one.
+   *
+   * The provider knows it and the telemetry reader needs it, so it belongs to
+   * the contract rather than to a cast at the reading site.
+   */
+  readonly telemetryPath?: string;
   waitForEvent(): Promise<ExecutionEvent | null>;
   waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
   interrupt(reason: InterruptReason): Promise<void>;

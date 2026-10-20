@@ -25,7 +25,7 @@ describe('collectAgentTelemetry', () => {
   afterEach(() => { rmSync(directory, { recursive: true, force: true }); });
 
   /** The execution the harness reports, plus the transcript path it writes. */
-  function execution(provider: AgentExecution['metadata']['provider'] = 'claude-code'): AgentExecution & { telemetryPath?: string } {
+  function execution(provider: AgentExecution['metadata']['provider'] = 'claude-code'): AgentExecution {
     return {
       id: 'execution-1',
       metadata: { provider, transport: 'process' },
@@ -41,6 +41,21 @@ describe('collectAgentTelemetry', () => {
   }
 
   const result: ExecutionResult = { version: 1, runId: 'execution-1', status: 'completed', provider: 'local', commits: [] };
+
+  it('reads the transcript through the contract, not through a cast', async () => {
+    // The provider knows where its transcript is and the telemetry reader
+    // needs it, so the path is on the contract — the reader asks for it
+    // there, and a provider that has none simply does not offer one.
+    const usage = { inputTokens: 10, outputTokens: 5, totalTokens: 15 };
+    await expect(collectAgentTelemetry(execution(), { ...result, usage, tools: [] }, 'local')).resolves.toMatchObject({
+      transcriptPath,
+      usage,
+    });
+    const withoutTranscript: AgentExecution = { ...execution(), telemetryPath: undefined };
+    const read = await collectAgentTelemetry(withoutTranscript, { ...result, usage, tools: [] }, 'local');
+    expect(read.usage).toEqual(usage);
+    expect(read).not.toHaveProperty('transcriptPath');
+  });
 
   it('preserves explicit zero usage and empty tools over transcript data', async () => {
     const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };

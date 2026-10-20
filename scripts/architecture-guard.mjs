@@ -90,6 +90,7 @@ const nodeBuiltins = new Set([
 ]);
 const domGlobals = ['document', 'window', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'Element'];
 const desktopRoot = option('--desktop-client-root', resolve(new URL('../desktop-client/', import.meta.url).pathname));
+const repoRoot = resolve(new URL('../', import.meta.url).pathname);
 const buildOutputDirectories = new Set(['dist', 'dist-electron', 'node_modules', 'coverage', 'release', 'test-results', 'screenshots']);
 const backlogStateKeys = new Set(['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked']);
 const requiredStateMappingKeys = ['in_progress', 'verification', 'merge_ready'];
@@ -108,6 +109,11 @@ const observedStateMappings = new Map();
 const observedLegacyStateMappings = new Map();
 const skippedPackageRoots = [];
 const desktopSourceFiles = [];
+const dependencyFieldLabels = {
+  dependencies: 'a dependency',
+  devDependencies: 'a devDependency',
+  optionalDependencies: 'an optional dependency',
+};
 
 function addViolation(message) {
   violations.add(message);
@@ -454,6 +460,75 @@ if (!existsSync(root)) {
   process.exit(1);
 }
 
+/**
+ * The workspace package graph must be acyclic.
+ *
+ * pnpm builds its task graph from the package graph, devDependencies
+ * included: a package that depends on a sibling which depends back on it
+ * makes `pnpm -r <task>` fail with ERR_PNPM_TASK_CYCLE before it runs a
+ * single task. A test-only back-edge is still an edge — the application
+ * package reaching for an infrastructure implementation in one test file
+ * was enough to make the whole workspace impossible to run recursively.
+ */
+function checkPackageGraph() {
+  const candidates = [];
+  const packagesDirectory = join(repoRoot, 'packages');
+  if (existsSync(packagesDirectory) && statSync(packagesDirectory).isDirectory()) {
+    for (const entry of readdirSync(packagesDirectory)) {
+      const manifestPath = join(packagesDirectory, entry, 'package.json');
+      if (existsSync(manifestPath)) candidates.push(manifestPath);
+    }
+  }
+  const desktopManifest = join(repoRoot, 'desktop-client', 'package.json');
+  if (existsSync(desktopManifest)) candidates.push(desktopManifest);
+
+  const manifests = new Map();
+  for (const manifestPath of candidates) {
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    } catch {
+      continue;
+    }
+    if (!manifest?.name) continue;
+    const edges = new Map();
+    for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      for (const specifier of Object.keys(manifest[field] ?? {})) {
+        if (specifier.startsWith('@afk/')) edges.set(specifier, field);
+      }
+    }
+    manifests.set(manifest.name, { path: manifestPath, edges });
+  }
+
+  const visiting = new Set();
+  const visited = new Set();
+  const stack = [];
+  const walk = name => {
+    if (visited.has(name)) return;
+    if (visiting.has(name)) {
+      const cycle = stack.slice(stack.indexOf(name));
+      const edges = [];
+      for (let index = 0; index < cycle.length; index += 1) {
+        const from = cycle[index];
+        const to = cycle[(index + 1) % cycle.length];
+        const field = manifests.get(from)?.edges.get(to);
+        if (field) edges.push(`${from} -> ${to} as ${dependencyFieldLabels[field] ?? field}`);
+      }
+      addViolation(
+        `workspace package graph has a cycle: ${cycle.join(' -> ')} -> ${cycle[0]}; ${edges.join(', ')}. pnpm builds its task graph from this graph, so 'pnpm -r' fails with ERR_PNPM_TASK_CYCLE.`,
+      );
+      return;
+    }
+    visiting.add(name);
+    stack.push(name);
+    for (const dependency of manifests.get(name)?.edges.keys() ?? []) walk(dependency);
+    stack.pop();
+    visiting.delete(name);
+    visited.add(name);
+  };
+  for (const name of manifests.keys()) walk(name);
+}
+
 walk(root);
 for (const sourceFile of sourceFiles) checkFile(sourceFile);
 // The desktop client is a separate source tree that the layering rules above
@@ -467,6 +542,7 @@ if (existsSync(desktopRoot) && statSync(desktopRoot).isDirectory()) {
   }
 }
 checkStateMappingDuplicates();
+checkPackageGraph();
 if (checkPackages) {
   for (const packageRoot of packageRoots) {
     if (!existsSync(packageRoot.path) || !statSync(packageRoot.path).isDirectory()) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { InMemoryBacklogProvider } from '../src/index.js';
+import { InMemoryBacklogProvider, ManagementBacklogProvider } from '../src/index.js';
 import { deriveBacklogBranchName, type BacklogItem } from '@afk/application';
 
 const item = (overrides: Partial<BacklogItem> = {}): BacklogItem => ({
@@ -127,5 +127,13 @@ describe('backlog provider', () => {
     await expect(provider.get('123')).resolves.toMatchObject({ tags: ['api', 'urgent', 'frontend'] });
     await provider.removeTag('123', 'urgent');
     await expect(provider.get('123')).resolves.toMatchObject({ tags: ['api', 'frontend'] });
+  });
+
+  it('does not offer adoption, and the management provider refuses it in turn', async () => {
+    const provider = new InMemoryBacklogProvider([item()]);
+    expect('adopt' in provider).toBe(false);
+
+    const management = new ManagementBacklogProvider(provider);
+    await expect(management.adopt('123')).rejects.toThrow('does not support explicit issue adoption');
   });
 });

@@ -236,9 +236,6 @@ importers:
         specifier: workspace:*
         version: link:../afk-core
     devDependencies:
-      '@afk/infrastructure':
-        specifier: workspace:*
-        version: link:../afk-infrastructure
       '@types/node':
         specifier: ^20.11.0
         version: 20.19.43

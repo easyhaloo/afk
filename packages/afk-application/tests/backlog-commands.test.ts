@@ -8,13 +8,10 @@ import {
 } from '../src/index.js';
 import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from '../src/index.js';
 import { parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord } from '../src/index.js';
-import { InMemoryBacklogProvider, ManagementBacklogProvider } from '@afk/infrastructure';
 
 describe('backlog commands', () => {
   it('rejects adoption when the provider has no optional adoption capability', async () => {
-    const provider = new InMemoryBacklogProvider();
-    await expect(adoptBacklog(provider, '42')).rejects.toThrow('does not support explicit issue adoption');
-    await expect(adoptBacklog(new ManagementBacklogProvider(provider), '42')).rejects.toThrow('does not support explicit issue adoption');
+    await expect(adoptBacklog(providerWithoutAdoption(), '42')).rejects.toThrow('does not support explicit issue adoption');
   });
 
   it('creates a backlog item and returns its canonical URL', async () => {
@@ -182,6 +179,20 @@ describe('backlog commands', () => {
     await expect(confirmBacklogMerge(lifecycleProvider(backlogItem({ state: 'done', executionMode: 'hitl' })), { findForBacklog: vi.fn(), merge: vi.fn(), get: vi.fn() }, '42', 'main')).resolves.toMatchObject({ state: 'done' });
   });
 });
+
+/**
+ * A management provider that does not offer the optional adoption capability.
+ *
+ * The stub stands in for every real provider that cannot adopt an issue. The
+ * application package asserts against the port, not against an
+ * implementation: which providers can adopt is a fact of
+ * `@afk/infrastructure`, and it is asserted there.
+ */
+function providerWithoutAdoption(): BacklogManagementProvider {
+  return {
+    get: vi.fn(), list: vi.fn(), create: vi.fn(), addTag: vi.fn(), removeTag: vi.fn(), initialize: vi.fn(),
+  };
+}
 
 function backlogItem(overrides: Partial<BacklogItem> = {}): BacklogItem {
   return {

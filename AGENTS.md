@@ -52,6 +52,15 @@ might need lives in `packages/`.
   copy of the module and silently defeats `vi.mock` and mock-based
   assertions. `pnpm architecture:check` rejects a package that imports
   itself.
+- **The package graph must be acyclic, and a test is not an exception.** pnpm
+  builds its task graph from the package graph, devDependencies included, so
+  a package that depends on a sibling which depends back on it makes
+  `pnpm -r <task>` fail with `ERR_PNPM_TASK_CYCLE` before it runs a single
+  task. One test file reaching for an implementation in the package below it
+  was enough to make the whole workspace impossible to run recursively.
+  A test that needs an implementation asserts it where the implementation
+  lives, and the package that owns the behaviour asserts its own port
+  against a stub. `pnpm architecture:check` rejects a cycle.
 
 ## Moving a module
 

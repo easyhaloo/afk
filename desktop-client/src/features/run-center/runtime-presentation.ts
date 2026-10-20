@@ -19,10 +19,59 @@ export type RuntimeEventLike = {
   timestamp: string;
 };
 
-export function searchRuntimeEvents<T extends RuntimeEventLike & { result: string; nextStep: string }>(events: T[], query: string): T[] {
+/**
+ * The status a snapshot diagnostic records, read from the field the record
+ * carries. The table is the whole vocabulary: an unrecognized record reads
+ * as "queued" rather than being guessed at out of the record's prose.
+ */
+export type RecordStatus = "queued" | "running" | "waiting_confirmation" | "completed" | "failed";
+
+export const recordStatusLabel: Record<RecordStatus, string> = {
+  queued: "待执行",
+  running: "运行中",
+  waiting_confirmation: "待确认",
+  completed: "已完成",
+  failed: "失败",
+};
+
+const recordStatuses: Record<string, RecordStatus> = {
+  waiting_confirmation: "waiting_confirmation",
+  awaiting_confirmation: "waiting_confirmation",
+  attention_required: "waiting_confirmation",
+  hitl_requested: "waiting_confirmation",
+  blocked: "waiting_confirmation",
+  needs_confirmation: "waiting_confirmation",
+  running: "running",
+  active: "running",
+  agent_exec: "running",
+  tool_start: "running",
+  in_progress: "running",
+  completed: "completed",
+  complete: "completed",
+  success: "completed",
+  verify_pass: "completed",
+  passed: "completed",
+  done: "completed",
+  tool_result: "completed",
+  failed: "failed",
+  error: "failed",
+  cancelled: "failed",
+  aborted: "failed",
+  timed_out: "failed",
+  queued: "queued",
+  pending: "queued",
+  created: "queued",
+};
+
+export function snapshotRecordStatus(event: { status?: string }): RecordStatus {
+  const recorded = String(event.status ?? "").trim().toLowerCase().replaceAll("-", "_");
+  return recordStatuses[recorded] ?? "queued";
+}
+
+export function searchRuntimeEvents<T extends RuntimeEventLike & { result: string; nextStep: string; status?: string }>(events: T[], query: string): T[] {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return events;
-  return groupRuntimeEvents(events).filter(group => group.events.some(event => `${event.id ?? ""} ${event.source} ${event.result} ${event.nextStep}`.toLowerCase().includes(normalized))).flatMap(group => group.events);
+  return groupRuntimeEvents(events).filter(group => group.events.some(event => `${event.id ?? ""} ${event.source} ${event.status ?? ""} ${event.result} ${event.nextStep}`.toLowerCase().includes(normalized))).flatMap(group => group.events);
 }
 
 export type RuntimeEventGroup<T extends RuntimeEventLike = RuntimeEventLike> = {
@@ -47,6 +96,12 @@ export function runtimeStateMeta(phase: RuntimeVisualState): RuntimeStateVisual 
   return stateMeta[phase];
 }
 
+/**
+ * The legacy sentence form of a workspace path. The run centre reads the
+ * workspace path from the run row's own field (see run-centre.ts); nothing on
+ * the run centre's path calls this. It stays for the desktop's own contract
+ * test, which pins the old record's shape.
+ */
 export function runtimeWorkspacePath(nextStep: string): string | null {
   return nextStep.startsWith("任务空间：") ? nextStep.slice("任务空间：".length) : null;
 }

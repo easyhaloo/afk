@@ -1,12 +1,44 @@
-import type { AgentUsage, ExecutionQueryOptions, ExecutionRunDetail, ExecutionSummary } from "./execution-contract.js";
+import type { AgentUsage, ExecutionPhase, ExecutionQueryOptions, ExecutionRunDetail, ExecutionStatus, ExecutionSummary } from "./execution-contract.js";
 import type { WorkItemAgentId } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
 
+/**
+ * The snapshot pipeline's record: one free-form diagnostic line read from
+ * `.afk/runs/**\/events.jsonl`. Its status is whatever the log says, so the
+ * renderer reads it as a diagnostic and never as a business fact.
+ */
 export type RuntimeEvent = {
   id: string;
   timestamp: string;
   source: string;
   status?: string;
+  result: string;
+  nextStep: string;
+  raw: string;
+  usage?: AgentUsage;
+};
+
+/**
+ * A run row for the run centre. The audited status and phase cross the
+ * boundary as the audited types, and the workspace path is a path of its own
+ * — not a sentence that contains one.
+ *
+ * This is the run centre's contract; `RuntimeEvent` stays the snapshot
+ * pipeline's diagnostic record.
+ */
+export type RuntimeRunEvent = {
+  id: string;
+  timestamp: string;
+  source: string;
+  /** The audited status. The one authority for what the run is doing. */
+  status: ExecutionStatus;
+  /** The audited phase. */
+  phase?: ExecutionPhase;
+  /** False when the run's event chain is broken. Absent when unknown. */
+  integrityValid?: boolean;
+  /** The run's workspace path, when it is known. */
+  workspacePath?: string;
+  /** Display text. */
   result: string;
   nextStep: string;
   raw: string;

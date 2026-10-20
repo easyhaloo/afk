@@ -9,6 +9,7 @@ export const EXECUTION_STATUSES = [
 export const EXECUTION_PHASES = ["implementation", "verification", "release"] as const;
 
 export type ExecutionStatus = typeof EXECUTION_STATUSES[number];
+export type ExecutionPhase = typeof EXECUTION_PHASES[number];
 
 export type AgentUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
 
@@ -18,7 +19,7 @@ export type ExecutionSummary = {
   profileId: string;
   attempt: number;
   status: ExecutionStatus;
-  phase?: typeof EXECUTION_PHASES[number];
+  phase?: ExecutionPhase;
   sequence: number;
   terminal: boolean;
   /** When the run was first recorded, and when its last event was. */
@@ -35,7 +36,7 @@ export type ExecutionTimelineEntry = {
   sequence: number;
   occurredAt: string;
   kind: string;
-  phase?: typeof EXECUTION_PHASES[number];
+  phase?: ExecutionPhase;
   stepId?: string;
   outcome?: "succeeded" | "failed" | "cancelled";
   failureSummary?: string;
@@ -52,7 +53,7 @@ export type ExecutionRunDetail = {
   runId: string;
   workItemId: WorkItemId;
   status?: ExecutionStatus;
-  phase?: typeof EXECUTION_PHASES[number];
+  phase?: ExecutionPhase;
   integrityValid: boolean;
   integrityReason?: string;
   health?: RuntimeHealth;
@@ -83,7 +84,7 @@ export function parseExecutionSummary(input: unknown): ExecutionSummary {
   assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "startedAt", "updatedAt", "integrityValid", "usage"], "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
-  if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution summary phase is invalid");
+  if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as ExecutionPhase)) throw new Error("execution summary phase is invalid");
   if (typeof candidate.attempt !== "number" || !Number.isSafeInteger(candidate.attempt) || candidate.attempt < 1) throw new Error("execution summary attempt is invalid");
   if (typeof candidate.sequence !== "number" || !Number.isSafeInteger(candidate.sequence) || candidate.sequence < 1) throw new Error("execution summary sequence is invalid");
   if (typeof candidate.terminal !== "boolean") throw new Error("execution summary terminal is invalid");
@@ -98,7 +99,7 @@ export function parseExecutionSummary(input: unknown): ExecutionSummary {
     terminal: candidate.terminal,
     integrityValid: candidate.integrityValid,
   };
-  if (candidate.phase !== undefined) summary.phase = candidate.phase as typeof EXECUTION_PHASES[number];
+  if (candidate.phase !== undefined) summary.phase = candidate.phase as ExecutionPhase;
   if (candidate.startedAt !== undefined) summary.startedAt = parseRequiredString(candidate.startedAt, "execution summary: startedAt");
   if (candidate.updatedAt !== undefined) summary.updatedAt = parseRequiredString(candidate.updatedAt, "execution summary: updatedAt");
   if (candidate.usage !== undefined) {
@@ -140,7 +141,7 @@ export function parseExecutionTimelineEntry(input: unknown): ExecutionTimelineEn
   if (typeof candidate.sequence !== "number" || !Number.isSafeInteger(candidate.sequence) || candidate.sequence < 1) throw new Error("execution timeline entry sequence is invalid");
   if (typeof candidate.occurredAt !== "string" || !Number.isFinite(Date.parse(candidate.occurredAt))) throw new Error("execution timeline entry occurredAt is invalid");
   if (typeof candidate.kind !== "string" || !(EXECUTION_TIMELINE_KINDS as readonly string[]).includes(candidate.kind)) throw new Error("execution timeline entry kind is invalid");
-  if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution timeline entry phase is invalid");
+  if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as ExecutionPhase)) throw new Error("execution timeline entry phase is invalid");
   if (candidate.outcome !== undefined && candidate.outcome !== "succeeded" && candidate.outcome !== "failed" && candidate.outcome !== "cancelled") throw new Error("execution timeline entry outcome is invalid");
   const entry: ExecutionTimelineEntry = {
     sequence: candidate.sequence,
@@ -150,7 +151,7 @@ export function parseExecutionTimelineEntry(input: unknown): ExecutionTimelineEn
   for (const key of ["phase", "stepId", "outcome", "failureSummary", "changeId", "changeUrl", "commitSha", "branch", "workspacePath", "workspaceBranch", "reason"] as const) {
     const value = optionalString(candidate, key);
     if (value !== undefined) {
-      if (key === "phase") entry.phase = value as typeof EXECUTION_PHASES[number];
+      if (key === "phase") entry.phase = value as ExecutionPhase;
       else if (key === "outcome") entry.outcome = value as "succeeded" | "failed";
       else entry[key] = value;
     }
@@ -163,7 +164,7 @@ export function parseExecutionRunDetail(input: unknown): ExecutionRunDetail {
   assertExactKeys(candidate, ["runId", "workItemId", "status", "phase", "integrityValid", "integrityReason", "entries", "health", "workflow", "workspacePath", "workspaceBranch", "startedAt", "updatedAt"], "execution run detail");
   if (typeof candidate.integrityValid !== "boolean") throw new Error("execution run detail integrityValid is invalid");
   if (candidate.status !== undefined && !EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution run detail status is invalid");
-  if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution run detail phase is invalid");
+  if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as ExecutionPhase)) throw new Error("execution run detail phase is invalid");
   if (!Array.isArray(candidate.entries)) throw new Error("execution run detail entries is invalid");
   const detail: ExecutionRunDetail = {
     runId: parseRequiredString(candidate.runId, "execution run detail: runId"),
@@ -172,7 +173,7 @@ export function parseExecutionRunDetail(input: unknown): ExecutionRunDetail {
     integrityValid: candidate.integrityValid,
     entries: candidate.entries.map(entry => parseExecutionTimelineEntry(entry)),
   };
-  if (candidate.phase !== undefined) detail.phase = candidate.phase as typeof EXECUTION_PHASES[number];
+  if (candidate.phase !== undefined) detail.phase = candidate.phase as ExecutionPhase;
   if (candidate.integrityReason !== undefined) detail.integrityReason = parseRequiredString(candidate.integrityReason, "execution run detail: integrityReason", true);
   if (candidate.health !== undefined) detail.health = parseRuntimeHealth(candidate.health);
   if (candidate.workflow !== undefined) detail.workflow = parseWorkflowInstance(candidate.workflow);

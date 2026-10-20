@@ -35,17 +35,17 @@ import { BacklogPage } from "./features/backlog/BacklogPage";
 import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
-import { groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
-import { executionHistoryEvents } from "./features/run-center/execution-events";
+import { groupRuntimeEvents, parseRuntimeSource, recordStatusLabel, runtimeStateMeta, searchRuntimeEvents, snapshotRecordStatus, type RecordStatus, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
+import { auditedRunRows, buildRunCentre, filterRunRows, runLanes, runVisualState, runWorkspacePath, type RunFilter, type RunLanes } from "./features/run-center/run-centre";
 import { useExecutionHistory } from "./features/run-center/use-execution-history";
 import { RunTimelineSection } from "./features/run-center/RunTimelineView";
 import { WorkflowInstancesPage, type ExecutionSelection } from "./features/workflows/WorkflowInstancesPage";
 import type { ProviderProjectRef } from "../shared/backlog-contract";
 import type { ExecutionRunDetail, ExecutionSummary } from "../shared/execution-contract";
+import type { RuntimeRunEvent } from "../shared/ipc-contract";
 import type { SshSession } from "../shared/ssh-contract";
 
 type Phase = "ready" | "active" | "verify" | "attention";
-type RecordStatus = "queued" | "running" | "waiting_confirmation" | "completed" | "failed";
 type View = "queue" | "board" | "workflows" | "workflowInstances" | "agents" | "repositories" | "containers" | "events" | "ssh" | "backlog" | "projectBacklog" | "settings";
 type NavigationItem = [View, string, typeof LayoutList];
 
@@ -56,39 +56,7 @@ const label: Record<Phase, string> = {
   attention: "待处理",
 };
 
-const recordStatusLabel: Record<RecordStatus, string> = {
-  queued: "待执行",
-  running: "运行中",
-  waiting_confirmation: "待确认",
-  completed: "已完成",
-  failed: "失败",
-};
-
 const defaultAppearance: AppearancePreferences = { locale: "system", fontFamily: "system", fontScale: "medium", handDrawnHeaders: true, theme: "dark" };
-
-function eventStatus(event: RuntimeEvent): RecordStatus {
-  const structured = String(event.status ?? "").trim().toLowerCase().replaceAll("-", "_");
-  if (["waiting_confirmation", "awaiting_confirmation", "attention_required", "hitl_requested", "blocked", "needs_confirmation"].includes(structured)) return "waiting_confirmation";
-  if (["running", "active", "agent_exec", "tool_start", "in_progress"].includes(structured)) return "running";
-  if (["completed", "complete", "success", "verify_pass", "passed", "done", "tool_result"].includes(structured)) return "completed";
-  if (["failed", "error", "cancelled", "aborted", "timed_out"].includes(structured)) return "failed";
-  if (["queued", "pending", "created"].includes(structured)) return "queued";
-
-  const text = (event.status + " " + event.result + " " + event.nextStep + " " + event.raw).toLowerCase();
-  if (/等待确认|待确认|需要确认|配置异常|attention_required|hitl|handoff/.test(text)) return "waiting_confirmation";
-  if (/失败|错误|异常|无法|error|fail|blocked|timeout/.test(text)) return "failed";
-  if (/已完成|完成|已通过|通过|success|pass|completed/.test(text)) return "completed";
-  if (/正在|执行中|运行中|agent|exec|validate|分析中/.test(text)) return "running";
-  return "queued";
-}
-
-function phaseOf(event: RuntimeEvent): Phase {
-  const status = eventStatus(event);
-  if (status === "running") return "active";
-  if (status === "completed") return "verify";
-  if (status === "waiting_confirmation" || status === "failed") return "attention";
-  return "ready";
-}
 
 function Track({ phase, index, variant = "full", live = false, fresh = false }: { phase: Phase; index: number; variant?: "compact" | "card" | "full" | "archive"; live?: boolean; fresh?: boolean }) {
   const position = phase === "active" ? 61 : phase === "verify" ? 83 : phase === "attention" ? 45 : 18;
@@ -127,13 +95,16 @@ function App() {
   const [focusTemplateId, setFocusTemplateId] = useState<string>();
   const [environmentSelection, setEnvironmentSelection] = useState<ExecutionSelection>();
   const [runMode, setRunMode] = useState<"queue" | "board">("queue");
-  const [runFilter, setRunFilter] = useState<"all" | "open" | "fail">("all");
+  const [runFilter, setRunFilter] = useState<RunFilter>("all");
   const [runQuery, setRunQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const { executions: auditedExecutions, error: auditError, find: findExecution, cancelLookup } = useExecutionHistory(view === "queue" || view === "board" || view === "workflowInstances");
   const setView = (nextView: View) => { cancelLookup(); setCurrentView(nextView); };
-  const [selected, setSelected] = useState<RuntimeEvent | null>(null);
+  // The run centre selects an audited run; the activity log selects a
+  // snapshot diagnostic. Two kinds of record, two selections.
+  const [selectedRun, setSelectedRun] = useState<RuntimeRunEvent | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<RuntimeEvent | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState("");
@@ -168,7 +139,7 @@ function App() {
         freshTimer.current = window.setTimeout(() => setFreshIds(new Set()), 1400);
       }
       setWorkspace(next.workspace.root);
-      setSelected((current) => current ? next.events.find((item) => item.id === current.id) ?? current : null);
+      setSelectedEvent((current) => current ? next.events.find((item) => item.id === current.id) ?? current : null);
       setReplayRun((current) => next.events.some((item) => item.source === current) ? current : next.events[0]?.source ?? "");
       if (!session && next.sessions[0]) {
         setSession(next.sessions[0].name);
@@ -217,39 +188,23 @@ function App() {
     root.dataset.afkScale = appearance.fontScale;
   }, [appearance]);
 
-  const events = useMemo(() => view === "events" ? snapshot?.events ?? [] : [
-    ...executionHistoryEvents(auditedExecutions, snapshot?.workItemRuns ?? []),
-  ], [snapshot, auditedExecutions, view]);
+  // The activity log reads the snapshot pipeline's diagnostics.
+  const events = useMemo(() => snapshot?.events ?? [], [snapshot]);
+  // The run centre reads the audited summaries. The header counts and the
+  // lanes come out of the same rows, so a count and a row cannot disagree.
+  const runCentre = useMemo(() => buildRunCentre(auditedExecutions, snapshot?.workItemRuns ?? []), [auditedExecutions, snapshot]);
   const visibleRunEvents = useMemo(() => {
-    const searched = searchRuntimeEvents(events, runQuery);
-    if (runFilter === "all") return searched;
-    if (runFilter === "open") return searched.filter(e => { const s = eventStatus(e); return s === "running" || s === "waiting_confirmation"; });
-    return searched.filter(e => eventStatus(e) === "failed");
-  }, [events, runQuery, runFilter]);
+    const searched = searchRuntimeEvents(runCentre.rows, runQuery);
+    return filterRunRows(searched, runFilter);
+  }, [runCentre, runQuery, runFilter]);
 
-  const runStats = useMemo(() => {
-    // Compute from auditedExecutions (which has accurate run status) rather than
-    // snapshot.events, which only carries queued/initial statuses from the snapshot pipeline.
-    // "pending" is a queued work item, not a run in flight — the prototype
-    // gives 排队中 its own state and counts it in none of the five tiles, so
-    // folding it in here made every queued item read as 运行中.
-    const running = auditedExecutions.filter(ex => ex.status === "running").length;
-    const waiting = auditedExecutions.filter(ex => ex.status === "awaiting_human").length;
-    const failed = auditedExecutions.filter(ex => ex.status === "failed" || ex.status === "cancelled").length;
-    const done = auditedExecutions.filter(ex => ex.status === "succeeded").length;
-    const tokens = auditedExecutions.reduce((sum, ex) => sum + (ex.usage?.totalTokens ?? 0), 0);
-    return { running, waiting, failed, done, tokens };
-  }, [auditedExecutions]);
+  const runStats = runCentre.counts;
 
-  const groups = useMemo(() => {
-    const value: Record<Phase, RuntimeEvent[]> = { ready: [], active: [], verify: [], attention: [] };
-    groupRuntimeEvents(visibleRunEvents).forEach((group) => value[phaseOf(group.events[0])].push(group.events[0]));
-    return value;
-  }, [visibleRunEvents]);
+  const groups = useMemo(() => runLanes(visibleRunEvents), [visibleRunEvents]);
   const selectedHistory = useMemo(() => {
-    if (!selected) return [];
-    return groupRuntimeEvents(events).find((group) => group.source === selected.source)?.events ?? [selected];
-  }, [events, selected]);
+    if (!selectedRun) return [];
+    return groupRuntimeEvents(runCentre.rows).find((group) => group.source === selectedRun.source)?.events ?? [selectedRun];
+  }, [runCentre, selectedRun]);
 
   const openSession = async (name: string, targetWorkspace = workspace) => {
     activeSshSessionId.current = null;
@@ -265,7 +220,7 @@ function App() {
     }
   };
 
-  const openEventTerminal = async (event: RuntimeEvent) => {
+  const openEventTerminal = async (event: RuntimeRunEvent) => {
     await openExecutionTerminal(event.id);
   };
 
@@ -343,8 +298,9 @@ function App() {
   const unavailableRuntimeCount = runtimes.filter((runtime) => !runtime.available).length;
   const activateView = (nextView: View) => {
     setView(nextView);
-    if (nextView === "events" && selected) setReplayRun(selected.source);
-    setSelected(null);
+    if (nextView === "events" && selectedEvent) setReplayRun(selectedEvent.source);
+    setSelectedRun(null);
+    setSelectedEvent(null);
     if (nextView === "containers") setEnvironmentSelection(undefined);
     if (nextView === "workflows") setFocusTemplateId(undefined);
   };
@@ -355,7 +311,7 @@ function App() {
   const openRun = async (selection: ExecutionSelection) => {
     const execution = await findExecution(selection.runId, selection.workItemId);
     if (!execution) return;
-    setSelected(executionHistoryEvents([execution], [])[0]);
+    setSelectedRun(auditedRunRows([execution], [])[0]);
     setRunQuery(selection.runId);
     setInspectorCollapsed(false);
     setView("queue");
@@ -372,7 +328,11 @@ function App() {
     setView("workflows");
   };
   const openEventDetails = (event: RuntimeEvent) => {
-    setSelected(event);
+    setSelectedEvent(event);
+    setInspectorCollapsed(false);
+  };
+  const openRunDetails = (row: RuntimeRunEvent) => {
+    setSelectedRun(row);
     setInspectorCollapsed(false);
   };
   const updateAppearance = (patch: Partial<AppearancePreferences>) => {
@@ -409,9 +369,9 @@ function App() {
             display:contents keeps the host from generating a box. */}
         <div id="afk-overlay-root" style={{ display: "contents" }} />
         <div className="workspace">
-          {view === "queue" || view === "board" ? <div className="run-center-toolbar"><div className="stats"><div><b>{runStats.running}</b><span>运行中</span></div><div className="hot"><b>{runStats.waiting}</b><span>等待确认</span></div><div className="bad"><b>{runStats.failed}</b><span>失败</span></div><div className="ok"><b>{runStats.done}</b><span>今日完成</span></div></div><div className="resource-toolbar run-resource-toolbar"><SegmentedControl label="运行筛选" value={runFilter} options={[{ value: "all", label: "全部", count: events.length }, { value: "open", label: "进行中", count: runStats.running + runStats.waiting }, { value: "fail", label: "失败", count: runStats.failed }]} onChange={v => setRunFilter(v as typeof runFilter)} /><ResourceSearch label="搜索运行、工作项或事件" value={runQuery} onChange={setRunQuery} /></div></div> : null}
-          {view === "queue" ? <Queue events={visibleRunEvents} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
-          {view === "board" ? <Board groups={groups} selected={selected} freshIds={freshIds} onSelect={openEventDetails} /> : null}
+          {view === "queue" || view === "board" ? <div className="run-center-toolbar"><div className="stats"><div><b>{runStats.running}</b><span>运行中</span></div><div className="hot"><b>{runStats.waiting}</b><span>等待确认</span></div><div className="bad"><b>{runStats.failed}</b><span>失败</span></div><div className="ok"><b>{runStats.done}</b><span>今日完成</span></div></div><div className="resource-toolbar run-resource-toolbar"><SegmentedControl label="运行筛选" value={runFilter} options={[{ value: "all", label: "全部", count: runCentre.rows.length }, { value: "open", label: "进行中", count: runStats.running + runStats.waiting }, { value: "fail", label: "失败", count: runStats.failed }]} onChange={v => setRunFilter(v as RunFilter)} /><ResourceSearch label="搜索运行、工作项或事件" value={runQuery} onChange={setRunQuery} /></div></div> : null}
+          {view === "queue" ? <Queue events={visibleRunEvents} selected={selectedRun} freshIds={freshIds} onSelect={openRunDetails} /> : null}
+          {view === "board" ? <Board lanes={groups} selected={selectedRun} freshIds={freshIds} onSelect={openRunDetails} /> : null}
           {view === "agents" ? <Agents snapshot={snapshot} loading={loading} lastCheckedAt={lastCheckedAt} onRefresh={() => void refresh()} /> : null}
           {view === "repositories" ? <Repositories /> : null}
           {view === "containers" ? <Environments snapshot={snapshot} selection={environmentSelection} onWorkflow={runId => void openEnvironmentWorkflow(runId).catch(cause => setError(String(cause)))} onTerminal={(name, targetWorkspace, runId, resourceId) => runId ? void openExecutionTerminal(runId, resourceId) : void openSession(name, targetWorkspace)} /> : null}
@@ -420,10 +380,10 @@ function App() {
           {view === "projectBacklog" ? <BacklogPage workspace={workspace} refreshVersion={backlogRefreshVersion} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} onOpenWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
           {view === "workflows" ? <Workflows key={`${workspace}:${focusTemplateId ?? ""}`} snapshot={snapshot} focusTemplateId={focusTemplateId} onSave={saveWorkflowConfig} /> : null}
           {view === "workflowInstances" ? <WorkflowInstancesPage executions={auditedExecutions} selection={workflowSelection} onSelect={selection => openWorkflowInstance(selection.runId, selection.workItemId)} onRun={selection => void openRun(selection).catch(cause => setError(String(cause)))} onWorkItem={workItemId => { setFocusWorkItemId(workItemId); setView("backlog"); }} onEnvironment={selection => { setEnvironmentSelection(selection); setView("containers"); }} onAttach={runId => void openExecutionTerminal(runId)} onDefinition={detail => void openDefinition(detail)} /> : null}
-          {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
+          {view === "events" ? <Replay events={events} selected={selectedEvent} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelectedEvent(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}
         </div>
-        {selected && (view === "queue" || view === "board") ? <Inspector event={events.find(event => event.id === selected.id) ?? selected} execution={auditedExecutions.find(run => run.runId === selected.id && run.workItemId === selected.source)} history={selectedHistory} fresh={freshIds.has(selected.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openEventDetails} onTerminal={() => void openEventTerminal(selected)} onWorkflow={openWorkflowInstance} onWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
+        {selectedRun && (view === "queue" || view === "board") ? <Inspector event={runCentre.rows.find(row => row.id === selectedRun.id) ?? selectedRun} execution={auditedExecutions.find(run => run.runId === selectedRun.id && run.workItemId === selectedRun.source)} history={selectedHistory} fresh={freshIds.has(selectedRun.id)} collapsed={inspectorCollapsed} onToggle={() => setInspectorCollapsed((current) => !current)} onSelect={openRunDetails} onTerminal={() => void openEventTerminal(selectedRun)} onWorkflow={openWorkflowInstance} onWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
         </div>
       </section>
       {terminal.open ? <TerminalSheet mode={terminal.mode} session={terminal.attachId ?? session} pane={terminal.pane} line={line} confirmed={confirmed} sshSession={terminal.sshSession} onClose={closeTerminal} onLine={setLine} onConfirmed={setConfirmed} onSend={() => void sendInput()} onAttachInput={(data) => terminal.attachId ? window.afkDesktop.workItems.attachInput(terminal.attachId, data) : undefined} onAttachResize={(cols, rows) => terminal.attachId ? window.afkDesktop.workItems.attachResize(terminal.attachId, cols, rows) : undefined} onSshInput={(data) => {
@@ -439,29 +399,28 @@ function App() {
   );
 }
 
-function Queue({ events, selected, freshIds, onSelect }: { events: RuntimeEvent[]; selected: RuntimeEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeEvent) => void }) {
-  const phases: Phase[] = ["active", "ready", "verify", "attention"];
+function Queue({ events, selected, freshIds, onSelect }: { events: RuntimeRunEvent[]; selected: RuntimeRunEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeRunEvent) => void }) {
+  const states: RuntimeVisualState[] = ["active", "ready", "verify", "attention", "failed"];
   const grouped = groupRuntimeEvents(events);
-  const orderedGroups = phases.flatMap((phase) => grouped.filter((group) => phaseOf(group.events[0]) === phase));
+  const orderedGroups = states.flatMap((state) => grouped.filter((group) => runVisualState(group.events[0].status) === state));
   if (!events.length) return <Empty />;
   return <section className="queue" aria-label="运行队列"><div className="run-col-head" aria-hidden="true"><span></span><span>运行</span><span>更新</span></div><div className="queue-stream">{orderedGroups.map((group) => { const event = group.events[0]; return <EventRow key={group.source} event={event} historyCount={group.events.length} fresh={freshIds.has(event.id)} selected={selected?.id === event.id} onSelect={onSelect} />; })}</div></section>;
 }
 
-function EventRow({ event, historyCount, fresh, selected, onSelect }: { event: RuntimeEvent; historyCount: number; fresh: boolean; selected: boolean; onSelect: (event: RuntimeEvent) => void }) {
-  const phase = phaseOf(event);
-  const visualState = eventStatus(event) === "failed" ? "failed" : phase;
+function EventRow({ event, historyCount, fresh, selected, onSelect }: { event: RuntimeRunEvent; historyCount: number; fresh: boolean; selected: boolean; onSelect: (event: RuntimeRunEvent) => void }) {
+  const visualState = runVisualState(event.status);
   const state = runtimeStateMeta(visualState);
-  return <button className={`event-row ${selected ? "selected" : ""} ${visualState}${fresh ? " fresh" : ""}`} onClick={() => onSelect(event)} aria-label={`查看${state.ariaLabel}运行 ${event.source} 的详情`}><StateGlyph phase={visualState} /><div className="run-main"><RuntimeSource source={event.source} /><span className="event-copy"><strong>{event.result}</strong><small>{historyCount > 1 ? `${historyCount} 次运行 · ` : ""}{runtimeWorkspacePath(event.nextStep) ? "最近完成" : event.nextStep}</small></span></div><time className="event-time" dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></button>;
+  return <button className={`event-row ${selected ? "selected" : ""} ${visualState}${fresh ? " fresh" : ""}`} onClick={() => onSelect(event)} aria-label={`查看${state.ariaLabel}运行 ${event.source} 的详情`}><StateGlyph phase={visualState} /><div className="run-main"><RuntimeSource source={event.source} /><span className="event-copy"><strong>{event.result}</strong><small>{historyCount > 1 ? `${historyCount} 次运行 · ` : ""}{runWorkspacePath(event) ? "最近完成" : event.nextStep}</small></span></div><time className="event-time" dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></button>;
 }
 
-function Board({ groups, selected, freshIds, onSelect }: { groups: Record<Phase, RuntimeEvent[]>; selected: RuntimeEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeEvent) => void }) {
-  const columns: { state: RuntimeVisualState; events: RuntimeEvent[] }[] = [
-    { state: "active", events: groups.active },
-    { state: "verify", events: groups.verify },
-    { state: "attention", events: [...groups.ready, ...groups.attention.filter((event) => eventStatus(event) !== "failed")] },
-    { state: "failed", events: groups.attention.filter((event) => eventStatus(event) === "failed") },
+function Board({ lanes, selected, freshIds, onSelect }: { lanes: RunLanes; selected: RuntimeRunEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeRunEvent) => void }) {
+  const columns: { state: RuntimeVisualState; events: RuntimeRunEvent[] }[] = [
+    { state: "active", events: lanes.active },
+    { state: "verify", events: lanes.verify },
+    { state: "attention", events: [...lanes.ready, ...lanes.attention] },
+    { state: "failed", events: lanes.failed },
   ];
-  return <section className="board" aria-label="运行看板">{columns.map(({ state, events }) => <article className={`board-column ${state}${events.length ? "" : " is-empty"}`} key={state}><header aria-label={runtimeStateMeta(state).ariaLabel}><StateGlyph phase={state} size={14} muted={!events.length} /><em>{events.length}</em></header>{groupRuntimeEvents(events).map((group) => { const event = group.events[0]; const visualState = eventStatus(event) === "failed" ? "failed" : phaseOf(event); return <button className={`board-card ${visualState}${selected?.id === event.id ? " selected" : ""}${freshIds.has(event.id) ? " fresh" : ""}`} key={group.source} onClick={() => onSelect(event)} aria-label={`查看${runtimeStateMeta(visualState).ariaLabel}运行 ${event.source} 的详情`}><div><RuntimeSource source={event.source} /><small>{group.events.length > 1 ? `${group.events.length} 次运行 · ` : ""}<time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></small></div><strong>{event.result}</strong>{!runtimeWorkspacePath(event.nextStep) ? <p>{event.nextStep}</p> : null}<span className="board-detail-affordance"><ChevronRight size={13} /></span></button>; })}</article>)}</section>;
+  return <section className="board" aria-label="运行看板">{columns.map(({ state, events }) => <article className={`board-column ${state}${events.length ? "" : " is-empty"}`} key={state}><header aria-label={runtimeStateMeta(state).ariaLabel}><StateGlyph phase={state} size={14} muted={!events.length} /><em>{events.length}</em></header>{groupRuntimeEvents(events).map((group) => { const event = group.events[0]; const visualState = runVisualState(event.status); return <button className={`board-card ${visualState}${selected?.id === event.id ? " selected" : ""}${freshIds.has(event.id) ? " fresh" : ""}`} key={group.source} onClick={() => onSelect(event)} aria-label={`查看${runtimeStateMeta(visualState).ariaLabel}运行 ${event.source} 的详情`}><div><RuntimeSource source={event.source} /><small>{group.events.length > 1 ? `${group.events.length} 次运行 · ` : ""}<time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></small></div><strong>{event.result}</strong>{!runWorkspacePath(event) ? <p>{event.nextStep}</p> : null}<span className="board-detail-affordance"><ChevronRight size={13} /></span></button>; })}</article>)}</section>;
 }
 
 function RuntimeProductIcon({ id }: { id: AgentRuntime["id"] }) {
@@ -860,7 +819,7 @@ function Replay({ events, selected, freshIds, activeRun, onRunChange, onSelect, 
   const runs = replayRuns(events).filter(run => `${run.source} ${run.events.map(event => `${event.result} ${event.nextStep}`).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
   const currentRun = runs.find((run) => run.source === activeRun) ?? runs[0];
   if (!currentRun) return <section className="record-page" aria-label="运行记录">{searchField}<p role="status">没有匹配的活动记录</p></section>;
-  const currentStatus = eventStatus(currentRun.latest);
+  const currentStatus = snapshotRecordStatus(currentRun.latest);
   const detailEvent = selected && currentRun.events.some((event) => event.id === selected.id) ? selected : null;
   const chooseRun = (source: string) => {
     onRunChange(source);
@@ -870,7 +829,7 @@ function Replay({ events, selected, freshIds, activeRun, onRunChange, onSelect, 
   return <section className="record-page" aria-label="运行记录">
     {searchField}
     <header className="record-page-header">
-      {runs.length > 1 ? <SelectMenu label="选择运行" value={currentRun.source} search={{ label: "搜索运行" }} options={runs.map(run => ({ value: run.source, label: run.source, description: `${recordStatusLabel[eventStatus(run.latest)]} · ${run.events.length} 条记录 · ${displayTimestamp(run.latest.timestamp)}` }))} onChange={chooseRun} /> : <div className="record-run-identity"><b>{currentRun.source}</b><small>{displayTimestamp(currentRun.latest.timestamp)}</small></div>}
+      {runs.length > 1 ? <SelectMenu label="选择运行" value={currentRun.source} search={{ label: "搜索运行" }} options={runs.map(run => ({ value: run.source, label: run.source, description: `${recordStatusLabel[snapshotRecordStatus(run.latest)]} · ${run.events.length} 条记录 · ${displayTimestamp(run.latest.timestamp)}` }))} onChange={chooseRun} /> : <div className="record-run-identity"><b>{currentRun.source}</b><small>{displayTimestamp(currentRun.latest.timestamp)}</small></div>}
       {currentRun.events.length > 1 ? <RecordStatus status={currentStatus} /> : null}
     </header>
     {currentRun.events.length === 1 ? <RecordCard event={currentRun.latest} fresh={freshIds.has(currentRun.latest.id)} onDetails={() => onSelect(currentRun.latest)} /> : <RecordList events={currentRun.events} selected={detailEvent} freshIds={freshIds} onSelect={onSelect} />}
@@ -883,19 +842,19 @@ function RecordStatus({ status }: { status: RecordStatus }) {
 }
 
 function RecordCard({ event, fresh, onDetails }: { event: RuntimeEvent; fresh: boolean; onDetails: () => void }) {
-  const status = eventStatus(event);
+  const status = snapshotRecordStatus(event);
   return <article className={"record-card " + status + (fresh ? " fresh" : "")}><div className="record-card-main"><RecordStatus status={status} /><h1>{event.result}</h1><p>{event.nextStep}</p></div><footer><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time><button onClick={onDetails}>查看详情 <ChevronRight size={15} /></button></footer></article>;
 }
 
 function RecordList({ events, selected, freshIds, onSelect }: { events: RuntimeEvent[]; selected: RuntimeEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeEvent) => void }) {
   return <div className="record-list">{events.map((event) => {
-    const status = eventStatus(event);
+    const status = snapshotRecordStatus(event);
     return <button className={"record-list-item " + status + (selected?.id === event.id ? " selected" : "") + (freshIds.has(event.id) ? " fresh" : "")} key={event.id} onClick={() => onSelect(event)}><time dateTime={event.timestamp} title={event.timestamp}>{replayTime(event.timestamp)}</time><RecordStatus status={status} /><span><b>{event.result}</b><small>{event.nextStep}</small></span><ChevronRight size={15} /></button>;
   })}</div>;
 }
 
 function RecordDrawer({ event, onClose }: { event: RuntimeEvent; onClose: () => void }) {
-  const status = eventStatus(event);
+  const status = snapshotRecordStatus(event);
   const drawerRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const dismiss = (pointerEvent: PointerEvent) => {
@@ -909,8 +868,8 @@ function RecordDrawer({ event, onClose }: { event: RuntimeEvent; onClose: () => 
   return <Overlay><aside className="record-drawer" ref={drawerRef} role="complementary" aria-label="记录详情"><header><span>记录详情</span><button className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={16} /></button></header><div className="record-drawer-body"><RecordStatus status={status} /><h2>{event.result}</h2><p className="record-drawer-next">{event.nextStep}</p><dl><div><dt>运行</dt><dd>{event.source}</dd></div><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div></dl><details className="record-debug"><summary><Braces size={15} />调试信息</summary><pre>{event.raw}</pre></details></div></aside></Overlay>;
 }
 
-function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSelect, onTerminal, onWorkItem, onWorkflow }: { event: RuntimeEvent; execution?: ExecutionSummary; history: RuntimeEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (event: RuntimeEvent) => void; onTerminal: () => void; onWorkItem: (id: string) => void; onWorkflow: (runId: string, workItemId: string) => void }) {
-  const phase = phaseOf(event);
+function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSelect, onTerminal, onWorkItem, onWorkflow }: { event: RuntimeRunEvent; execution?: ExecutionSummary; history: RuntimeRunEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (id: RuntimeRunEvent) => void; onTerminal: () => void; onWorkItem: (id: string) => void; onWorkflow: (runId: string, workItemId: string) => void }) {
+  const visualState = runVisualState(event.status);
   useEffect(() => {
     if (collapsed) return;
     const dismissOnEscape = (keyEvent: KeyboardEvent) => { if (keyEvent.key === "Escape") onToggle(); };
@@ -918,15 +877,15 @@ function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSe
     return () => document.removeEventListener("keydown", dismissOnEscape);
   }, [collapsed, onToggle]);
   const cornerIcon = <svg className="inspector-corner-mark" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M11.5 3.5H5.6A1.1 1.1 0 0 0 4.5 4.6v6.9" /></svg>;
-  const visualState = eventStatus(event) === "failed" ? "failed" : phase;
   const state = runtimeStateMeta(visualState);
-  const workspacePath = runtimeWorkspacePath(event.nextStep);
+  // The workspace path is a field of the run, not a sentence that contains one.
+  const workspacePath = runWorkspacePath(event);
   return <>
     {!collapsed ? <aside className={`inspector${fresh ? " fresh" : ""}`} aria-label="运行详情">
       <header><button className="inspector-toggle" onClick={onToggle} aria-label="收起详情">{cornerIcon}<span className="inspector-tooltip" role="tooltip">收起详情</span></button><span><ClipboardList size={13} aria-hidden="true" />详情</span></header>
       <div className="inspector-surface"><div className="inspector-body">
         <div className="inspector-title"><small><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time> · <RuntimeSource source={event.source} /></small><h2>{event.result}</h2></div>
-        <div className={`inspector-flow ${visualState}`} aria-label="运行状态"><StateGlyph phase={visualState} size={13} /><span>{state.ariaLabel}</span><span className="inspector-flow-line" /><span>{phase === "active" ? "正在执行" : phase === "verify" ? "最近完成" : "需要处理"}</span></div>
+        <div className={`inspector-flow ${visualState}`} aria-label="运行状态"><StateGlyph phase={visualState} size={13} /><span>{state.ariaLabel}</span><span className="inspector-flow-line" /><span>{visualState === "active" ? "正在执行" : visualState === "verify" ? "最近完成" : "需要处理"}</span></div>
         <dl><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div>{workspacePath ? <div className="inspector-workspace"><dt>任务空间</dt><dd title={workspacePath}>{workspacePath}</dd></div> : <div className="inspector-workspace"><dt>后续操作</dt><dd>{event.nextStep}</dd></div>}</dl>
         <dl aria-label="Agent token 用量">
           <div><dt>输入 Tokens</dt><dd>{event.usage?.inputTokens ?? "未采集"}</dd></div>
@@ -935,7 +894,7 @@ function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSe
         </dl>
         {execution ? <div className="inspector-actions"><button type="button" className="icon-button" aria-label={`打开工作项 ${execution.workItemId}`} title="打开工作项" onClick={() => onWorkItem(execution.workItemId)}><ClipboardList size={16} /></button><button type="button" className="icon-button" aria-label="查看本次工作流实例" title="工作流实例" onClick={() => onWorkflow(execution.runId, execution.workItemId)}><Workflow size={16} /></button></div> : null}
         {execution ? <RunTimelineSection key={execution.runId} runId={execution.runId} workItemId={execution.workItemId} running={execution.status === "running"} load={(id, itemId) => window.afkDesktop.workItems.executionRunDetail(id, itemId)} /> : null}
-        {history.length > 1 ? <details className="inspector-history"><summary><span className="history-summary-label">运行历史 <b>{history.length}</b></span></summary><div>{history.map((item) => <button type="button" className={item.id === event.id ? "selected" : ""} key={item.id} onClick={() => onSelect(item)}><StateGlyph phase={eventStatus(item) === "failed" ? "failed" : phaseOf(item)} size={13} /><span><b>{item.result}</b><small><time dateTime={item.timestamp} title={item.timestamp}>{displayTimestamp(item.timestamp)}</time></small></span></button>)}</div></details> : null}
+        {history.length > 1 ? <details className="inspector-history"><summary><span className="history-summary-label">运行历史 <b>{history.length}</b></span></summary><div>{history.map((item) => <button type="button" className={item.id === event.id ? "selected" : ""} key={item.id} onClick={() => onSelect(item)}><StateGlyph phase={runVisualState(item.status)} size={13} /><span><b>{item.result}</b><small><time dateTime={item.timestamp} title={item.timestamp}>{displayTimestamp(item.timestamp)}</time></small></span></button>)}</div></details> : null}
         <details className="inspector-debug"><summary>原始 JSON</summary><pre>{event.raw}</pre></details>
         <button className="takeover" onClick={onTerminal}><TerminalSquare size={15} />打开终端</button>
       </div></div>

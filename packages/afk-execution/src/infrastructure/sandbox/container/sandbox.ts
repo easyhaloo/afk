@@ -37,6 +37,7 @@ import type { ContainerProvider, ContainerExecResult } from './types.js';
 import type { AgentEvent, AgentExecutionMetadata, SessionSnapshot } from '../../../domain/agents/types.js';
 import { EnvVarAllowlist } from './env-allowlist.js';
 import { getAfkResourceRegistry, workspaceRootForWorktree } from '../../runtime/resource-registry.js';
+import { extractGoalComplete } from '../../../shared/goal-complete.js';
 
 export class ContainerSandbox implements Sandbox {
   readonly id: string;
@@ -393,10 +394,10 @@ export class ContainerAgentExecution implements AgentExecution {
       const events = this.parseLine?.(line) ?? [];
       for (const event of events) {
         if (event.type !== 'result') continue;
-        const parsed = parseGoalComplete(String(event.result ?? ''));
+        const parsed = extractGoalComplete(String(event.result ?? ''));
         if (parsed) return parsed;
       }
-      const parsed = parseGoalComplete(line);
+      const parsed = extractGoalComplete(line);
       if (parsed) return parsed;
     }
     return undefined;
@@ -417,16 +418,6 @@ async function readExitCode(path: string): Promise<number | undefined> {
   if (raw === undefined) return undefined;
   const parsed = Number.parseInt(raw.trim(), 10);
   return Number.isInteger(parsed) ? parsed : undefined;
-}
-
-function parseGoalComplete(value: string): unknown {
-  const match = value.match(/<goal_complete>([\s\S]*?)<\/goal_complete>/);
-  if (!match) return undefined;
-  try {
-    return JSON.parse(match[1]);
-  } catch {
-    return undefined;
-  }
 }
 
 function sleep(ms: number): Promise<void> {

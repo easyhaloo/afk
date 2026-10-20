@@ -27,6 +27,21 @@ describe('batch execution prompt protocol', () => {
     )).toEqual({ type: 'goal_complete', kind: 'task', summary: 'done' });
   });
 
+  it('treats a payload without a type as a goal_complete', () => {
+    // The batch transport accepted this and the container transport rejected
+    // it, so the same agent output completed on one sandbox and failed on
+    // another. One parser means one answer.
+    expect(extractGoalComplete(
+      '<goal_complete>{"kind":"task","summary":"done"}</goal_complete>',
+    )).toEqual({ type: 'goal_complete', kind: 'task', summary: 'done' });
+  });
+
+  it('rejects a payload that names another signal type', () => {
+    expect(extractGoalComplete(
+      '<goal_complete>{"type":"other","summary":"done"}</goal_complete>',
+    )).toBeUndefined();
+  });
+
   it('requires QA to report its PASS or FAIL outcome in the unified completion payload', () => {
     const prompt = buildBatchPrompt('/goal verify issue #60', 'qa');
 

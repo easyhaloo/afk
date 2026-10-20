@@ -1,6 +1,7 @@
 import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types';
 import type { ExecutionResult, Sandbox } from '../../infrastructure/sandbox/types';
 import { RunStateWriter } from '../sessions/run-state.js';
+import { carriesExpectedSignal } from '../../shared/goal-complete.js';
 
 export interface AgentStepExecutionRequest {
   provider: AgentProvider;
@@ -61,14 +62,11 @@ export class AgentExecutionService {
 
   private validateCompletion(result: ExecutionResult, request: AgentStepExecutionRequest): ExecutionResult {
     if (result.status !== 'completed' || request.executionMode !== 'batch') return result;
-    const output = result.structuredOutput;
-    if (!output || typeof output !== 'object' || !('type' in output) || (output as { type?: unknown }).type !== request.signalType) {
-      return {
-        ...result,
-        status: 'failed',
-        error: { code: 'SIGNAL_MISMATCH', message: `expected ${request.signalType} structured result` },
-      };
-    }
-    return result;
+    if (carriesExpectedSignal(result.structuredOutput, request.signalType)) return result;
+    return {
+      ...result,
+      status: 'failed',
+      error: { code: 'SIGNAL_MISMATCH', message: `expected ${request.signalType} structured result` },
+    };
   }
 }

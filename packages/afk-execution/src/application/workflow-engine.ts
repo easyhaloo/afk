@@ -55,6 +55,7 @@ import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtim
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
 import { collectAgentTelemetry } from '../infrastructure/observability/agent-telemetry.js';
+import { carriesExpectedSignal } from '../shared/goal-complete.js';
 
 export class AuditPersistenceError extends Error {
   constructor(eventType: string, cause?: unknown) {
@@ -1153,8 +1154,20 @@ export class WorkflowRunner {
       }
 
       switch (result.status) {
-        case 'completed':
+        case 'completed': {
+          // Every transport checks the signal before reporting a completion.
+          // The runner checks it again: a transport that forgot would
+          // otherwise turn "the agent said nothing" into a completed step.
+          if (!carriesExpectedSignal(result.structuredOutput, p.signalType)) {
+            const diagnostics = `expected ${p.signalType} structured result`;
+            this.runtimeErrorSummary = diagnostics;
+            logger.warn({ iid: p.iid, round, diagnostics }, 'execution completed without the expected structured result');
+            if (round === 1) throw new Error(`execution failed: ${diagnostics}`);
+            await this.manualFlip(p.iid, p.session);
+            return { completed: false };
+          }
           return { completed: true, output: result.structuredOutput };
+        }
 
         case 'timed_out':
           await this.handleTimeout(p.iid, p.wtPath, p.session, p.hardTimeoutMs);

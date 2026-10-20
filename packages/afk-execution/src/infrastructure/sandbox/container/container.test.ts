@@ -300,6 +300,50 @@ describe('ContainerAgentExecution — batch result files', () => {
     });
     expect(execution.metadata).toEqual(PROCESS_METADATA);
   });
+
+  it('accepts a completion payload that omits the type, like the batch transport does', async () => {
+    const root = await fsp.mkdtemp(join(os.tmpdir(), 'afk-container-untyped-'));
+    const outputPath = join(root, 'agent.stdout');
+    const errorPath = join(root, 'agent.stderr');
+    const exitPath = join(root, 'agent.exit');
+    // No "type" field: the batch transport accepts this, so the container has
+    // to accept it too — the same agent output must not complete on one
+    // sandbox and fail on another.
+    await fsp.writeFile(outputPath, '{"type":"result","result":"<goal_complete>{\\"kind\\":\\"task\\",\\"summary\\":\\"finished\\"}</goal_complete>"}\n');
+    await fsp.writeFile(errorPath, '');
+    await fsp.writeFile(exitPath, '0\n');
+
+    const provider: ContainerProvider = {
+      engine: 'docker', binary: 'docker', isAvailable: async () => true,
+      create: async () => ({ id: 'cid', name: 'cid', engine: 'docker' }),
+      exec: async () => ({ execId: 'exec-1' }), killExec: async () => {},
+      killContainer: async () => {}, remove: async () => {},
+      inspect: async id => ({ id, name: id, status: 'running' }),
+    };
+    const execution = new ContainerAgentExecution({
+      provider,
+      containerId: 'cid',
+      worktreePath: root,
+      sessionName: 'sandbox-1',
+      generation: 1,
+      signalType: 'goal_complete',
+      execId: 'exec-1',
+      outputPath,
+      errorPath,
+      exitPath,
+      metadata: PROCESS_METADATA,
+      parseLine: line => {
+        const parsed = JSON.parse(line);
+        return [{ type: 'result', result: parsed.result }];
+      },
+    });
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 100 })).resolves.toMatchObject({
+      status: 'completed',
+      provider: 'container',
+      structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'finished' },
+    });
+  });
 });
 
 describe('ContainerSandboxProvider — auto engine detection', () => {

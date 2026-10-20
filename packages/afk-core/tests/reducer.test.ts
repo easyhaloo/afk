@@ -43,7 +43,7 @@ describe('Run reducer', () => {
       steps: [{ id: 'implement', kind: 'agent', dependsOn: [], provider: 'opencode', executionMode: 'interactive' }],
     })]);
     expect(state).toMatchObject({ sequence: 2, terminal: false, run: { status: 'pending' } });
-    expect(state.activeStep).toBeUndefined();
+    expect(state.activeSteps).toEqual([]);
   });
   it('replays an implementation, human gate, and completion timeline deterministically', () => {
     const state = replay([
@@ -63,8 +63,54 @@ describe('Run reducer', () => {
     });
   });
 
-  it('allows a not-claimed pending run to terminate as cancelled', () => {
+  it('replays a level of concurrent steps', () => {
+    // The template system runs a level concurrently, so a run's event stream
+    // can hold more than one active step. A single-step model rejected the
+    // second `step.started` as "already active" and left the run
+    // unreplayable.
     const state = replay([
+      requested(),
+      event(2, { kind: 'run.started' }),
+      event(3, { kind: 'step.started', stepId: 'plan-frontend', phase: 'implementation' }),
+      event(4, { kind: 'step.started', stepId: 'plan-backend', phase: 'implementation' }),
+      event(5, { kind: 'step.completed', stepId: 'plan-backend', outcome: 'succeeded' }),
+      event(6, { kind: 'step.completed', stepId: 'plan-frontend', outcome: 'succeeded' }),
+    ]);
+    expect(state.activeSteps).toEqual([]);
+    expect(state.sequence).toBe(6);
+  });
+
+  it('rejects the same step starting twice', () => {
+    expect(() => replay([
+      requested(),
+      event(2, { kind: 'run.started' }),
+      event(3, { kind: 'step.started', stepId: 'implement', phase: 'implementation' }),
+      event(4, { kind: 'step.started', stepId: 'implement', phase: 'implementation' }),
+    ])).toThrow(/already active/);
+  });
+
+  it('rejects completing a step that is not active', () => {
+    expect(() => replay([
+      requested(),
+      event(2, { kind: 'run.started' }),
+      event(3, { kind: 'step.started', stepId: 'implement', phase: 'implementation' }),
+      event(4, { kind: 'step.completed', stepId: 'other', outcome: 'succeeded' }),
+    ])).toThrow(/not active/);
+  });
+
+  it('refuses to open a human gate or finish a run while a step is active', () => {
+    const running = [
+      requested(),
+      event(2, { kind: 'run.started' }),
+      event(3, { kind: 'step.started', stepId: 'implement', phase: 'implementation' }),
+    ];
+    expect(() => replay([...running, event(4, { kind: 'human_gate.opened', gateId: 'g', reason: 'r' })]))
+      .toThrow(/while a step is active/);
+    expect(() => replay([...running, event(4, { kind: 'run.finished', outcome: 'succeeded' })]))
+      .toThrow(/while a step is active/);
+  });
+
+  it('allows a not-claimed pending run to terminate as cancelled', () => {    const state = replay([
       requested(),
       event(2, { kind: 'run.finished', outcome: 'cancelled', reason: 'not_claimed' }),
     ]);

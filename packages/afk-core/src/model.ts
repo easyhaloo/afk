@@ -50,13 +50,23 @@ export interface RunAggregate {
   run?: Run;
   sequence: number;
   terminal: boolean;
-  activeStep?: string;
+  /**
+   * The steps running right now.
+   *
+   * A plan may run several steps at once — the template system models a
+   * level as a concurrent group — so this is a list and not a single step.
+   * A single-step model cannot represent a parallel level at all: the second
+   * `step.started` of a level would be rejected as "already active", and the
+   * run's event stream could no longer be replayed.
+   */
+  activeSteps: readonly string[];
   humanGateId?: string;
 }
 
 export const initialRunAggregate = (): RunAggregate => ({
   sequence: 0,
   terminal: false,
+  activeSteps: [],
 });
 
 export type Effect =
@@ -91,7 +101,7 @@ export function decide(state: RunAggregate, command: RunCommand): Decision {
         ? { accepted: true, effects: [{ kind: 'start_run', runId: command.runId }] }
         : { accepted: false, reason: 'run_not_pending', effects: [] };
     case 'start_step':
-      return state.run.status === 'running' && !state.activeStep
+      return state.run.status === 'running' && !state.activeSteps.includes(command.stepId)
         ? { accepted: true, effects: [{ kind: 'start_step', runId: command.runId, stepId: command.stepId, phase: command.phase }] }
         : { accepted: false, reason: 'step_not_runnable', effects: [] };
     case 'request_human_gate':
@@ -99,7 +109,7 @@ export function decide(state: RunAggregate, command: RunCommand): Decision {
         ? { accepted: true, effects: [{ kind: 'open_human_gate', runId: command.runId, gateId: command.gateId, reason: command.reason }] }
         : { accepted: false, reason: 'human_gate_not_runnable', effects: [] };
     case 'finish':
-      return state.run.status === 'running' && !state.activeStep
+      return state.run.status === 'running' && state.activeSteps.length === 0
         ? { accepted: true, effects: [{ kind: 'finish_run', runId: command.runId, outcome: command.outcome }] }
         : { accepted: false, reason: 'run_not_finishable', effects: [] };
   }

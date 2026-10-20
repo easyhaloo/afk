@@ -35,7 +35,12 @@ export async function explainRun(runId: string, ports: RunEventQueryPort): Promi
   if (!observed.state.run) return 'no events recorded for this run';
   if (observed.state.terminal) return `run finished with status '${observed.state.run.status}'`;
   if (observed.state.humanGateId) return `run awaits human gate '${observed.state.humanGateId}'`;
-  if (observed.state.activeStep) return `run executes step '${observed.state.activeStep}'`;
+  if (observed.state.activeSteps.length > 0) {
+    const steps = observed.state.activeSteps.map(id => `'${id}'`).join(', ');
+    return observed.state.activeSteps.length === 1
+      ? `run executes step ${steps}`
+      : `run executes steps ${steps}`;
+  }
   return `run is '${observed.state.run.status}' without an active step`;
 }
 

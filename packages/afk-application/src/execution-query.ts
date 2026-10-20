@@ -131,6 +131,11 @@ export async function explainExecutionRun(runId: string, events: RunEventQueryPo
   if (!result.state?.run) return 'no events recorded for this run';
   if (result.state.terminal) return `run finished with status '${result.state.run.status}'`;
   if (result.state.humanGateId) return `run awaits human gate '${result.state.humanGateId}'`;
-  if (result.state.activeStep) return `run executes step '${result.state.activeStep}'`;
+  if (result.state.activeSteps.length > 0) {
+    const steps = result.state.activeSteps.map(id => `'${id}'`).join(', ');
+    return result.state.activeSteps.length === 1
+      ? `run executes step ${steps}`
+      : `run executes steps ${steps}`;
+  }
   return `run is '${result.state.run.status}' without an active step`;
 }

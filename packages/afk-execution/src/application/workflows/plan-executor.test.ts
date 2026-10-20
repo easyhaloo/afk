@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { replay, type RunEvent } from '@afk/core';
 import { PlanExecutor } from './plan-executor.js';
 import { requireTemplate } from '../../domain/templates/registry.js';
 import type { WorkflowTemplate } from '../../domain/templates/types.js';
@@ -95,5 +96,51 @@ describe('PlanExecutor', () => {
 
     await executor.execute(requireTemplate('issue-implementation'));
     expect(seen).toEqual(['implement', 'verify-ac', 'publish', 'queue-qa']);
+  });
+
+  it('produces an event stream the core reducer can replay when a level runs concurrently', async () => {
+    // A plan level runs its steps at the same time, so the run's event stream
+    // holds two active steps at once. The reducer used to model one active
+    // step, so the second `step.started` was rejected and the run's spine
+    // could no longer be replayed at all.
+    const context = {
+      traceId: 'trace-1', runId: 'run-1', workItemId: 'work-1',
+      profileId: 'default', attempt: 1, actor: { kind: 'system' as const, id: 'runner' },
+    };
+    const events: RunEvent[] = [];
+    const record = (data: RunEvent['data']) => {
+      const sequence = events.length + 1;
+      events.push({
+        id: `event-${sequence}`, schemaVersion: 1, type: data.kind, sequence,
+        occurredAt: 'now', observedAt: 'now', context, correlationId: context.runId,
+        data, integrity: { hash: `hash-${sequence}` },
+      } as RunEvent);
+    };
+    record({ kind: 'run.requested', run: { id: context.runId, workItemId: context.workItemId, profileId: context.profileId, attempt: 1, status: 'pending' } });
+    record({ kind: 'run.started' });
+
+    const executor = new PlanExecutor({
+      executeAgent: async step => {
+        record({ kind: 'step.started', stepId: step.id, phase: 'implementation' });
+        // Yield, so the other step of the level starts before this one ends.
+        await new Promise(resolve => setTimeout(resolve, 1));
+        record({ kind: 'step.completed', stepId: step.id, outcome: 'succeeded' });
+        return { stepId: step.id, status: 'completed', startedAt: 'now', completedAt: 'now' };
+      },
+      executeSystem: async step => ({ stepId: step.id, status: 'completed', startedAt: 'now', completedAt: 'now' }),
+    });
+    const template: WorkflowTemplate = { name: 'parallel', version: 1, steps: [
+      { id: 'plan-frontend', role: 'planner', prompt: 'p' },
+      { id: 'plan-backend', role: 'planner', prompt: 'p' },
+    ] };
+
+    await executor.execute(template);
+
+    const started = events.filter(event => event.data.kind === 'step.started');
+    expect(started).toHaveLength(2);
+    // Both steps were active at the same time — the case the reducer used to reject.
+    expect(events.findIndex(event => event.data.kind === 'step.started' && event.data.stepId === 'plan-backend'))
+      .toBeLessThan(events.findIndex(event => event.data.kind === 'step.completed'));
+    expect(() => replay(events)).not.toThrow();
   });
 });

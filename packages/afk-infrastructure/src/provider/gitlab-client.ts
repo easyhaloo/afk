@@ -10,7 +10,6 @@ import type {
   ListMROptions,
   CreateMROptions,
   MergeMROptions,
-  ApproveMROptions,
   CloseMROptions,
   AcceptanceCriteria,
   LinkType,
@@ -122,18 +121,6 @@ export class GitLabClient implements TrackerProvider {
     await this.client.Issues.edit(this.projectId, id, editData);
   }
 
-  async addLabel(id: number, label: string): Promise<void> {
-    const issue = await this.getIssue(id);
-    const newLabels = [...new Set([...issue.labels, label])];
-    await this.updateIssue(id, { labels: newLabels });
-  }
-
-  async removeLabel(id: number, label: string): Promise<void> {
-    const issue = await this.getIssue(id);
-    const newLabels = issue.labels.filter(l => l !== label);
-    await this.updateIssue(id, { labels: newLabels });
-  }
-
   async addComment(id: number, body: string): Promise<void> {
     await this.client.IssueNotes.create(this.projectId, id, body);
   }
@@ -233,12 +220,6 @@ export class GitLabClient implements TrackerProvider {
     });
   }
 
-  async approveMR(id: number, options: ApproveMROptions = {}): Promise<void> {
-    await this.client.MergeRequestApprovals.approve(this.projectId, id, {
-      sha: options.sha,
-    });
-  }
-
   async closeMR(id: number, options: CloseMROptions = {}): Promise<void> {
     await this.client.MergeRequests.edit(this.projectId, id, {
       state_event: 'close',
@@ -246,12 +227,6 @@ export class GitLabClient implements TrackerProvider {
     if (options.comment) {
       await this.addMRComment(id, options.comment);
     }
-  }
-
-  async reopenMR(id: number): Promise<void> {
-    await this.client.MergeRequests.edit(this.projectId, id, {
-      state_event: 'reopen',
-    });
   }
 
   parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria {
@@ -308,12 +283,6 @@ export class GitLabClient implements TrackerProvider {
     const remove = [...new Set(delta.remove)];
     const add = [...new Set(delta.add.filter(label => !remove.includes(label)))];
     await this.updateLabelsBatch(iid, add, remove);
-  }
-
-  async addLabelsToIssue(iid: number, labels: string[]): Promise<void> {
-    const issue = await this.getIssue(iid);
-    const newLabels = [...new Set([...issue.labels, ...labels])];
-    await this.updateIssue(iid, { labels: newLabels });
   }
 
   async updateLabelsBatch(iid: number, add: string[], remove: string[]): Promise<void> {

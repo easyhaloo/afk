@@ -68,13 +68,6 @@ export interface MergeMROptions {
 }
 
 /**
- * Approve MR/PR options
- */
-export interface ApproveMROptions {
-  sha?: string;  // GitLab: approve specific commit SHA
-}
-
-/**
  * Close MR/PR options
  */
 export interface CloseMROptions {
@@ -149,8 +142,6 @@ export interface TrackerProvider {
   createIssue(options: CreateIssueOptions): Promise<number>;
   updateIssue(id: number, updates: UpdateIssueOptions): Promise<void>;
   updateLabels(id: number, delta: LabelDelta): Promise<void>;
-  addLabel(id: number, label: string): Promise<void>;
-  removeLabel(id: number, label: string): Promise<void>;
   addComment(id: number, body: string): Promise<void>;
   listIssueComments(id: number): Promise<TrackerIssueComment[]>;
   updateIssueComment(id: number, commentId: string, body: string): Promise<void>;
@@ -169,9 +160,7 @@ export interface TrackerProvider {
   listMRs(options?: ListMROptions): Promise<TrackedMR[]>;
   createMR(options: CreateMROptions): Promise<number>;
   mergeMR(id: number, options?: MergeMROptions): Promise<void>;
-  approveMR(id: number, options?: ApproveMROptions): Promise<void>;
   closeMR(id: number, options?: CloseMROptions): Promise<void>;
-  reopenMR(id: number): Promise<void>;
 
   // Projects
   listProjects(options?: { page?: number; perPage?: number }): Promise<Project[]>;

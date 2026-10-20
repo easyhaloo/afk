@@ -9,7 +9,6 @@ import type {
   ListMROptions,
   CreateMROptions,
   MergeMROptions,
-  ApproveMROptions,
   CloseMROptions,
   AcceptanceCriteria,
   LinkType,
@@ -182,29 +181,6 @@ export class GitHubClient implements TrackerProvider {
     }
   }
 
-  async addLabel(id: number, label: string): Promise<void> {
-    const issue = await this.getIssue(id);
-    const newLabels = [...new Set([...issue.labels, label])];
-    await this.updateIssueLabels(id, newLabels);
-  }
-
-  async removeLabel(id: number, label: string): Promise<void> {
-    const issue = await this.getIssue(id);
-    const newLabels = issue.labels.filter(l => l !== label);
-    await this.updateIssueLabels(id, newLabels);
-  }
-
-  private async updateIssueLabels(id: number, labels: string[]): Promise<void> {
-    const oct = this.client;
-    const { owner, repo } = this.getOwnerRepo();
-    await oct.issues.update({
-      owner,
-      repo,
-      issue_number: id,
-      labels,
-    });
-  }
-
   async addComment(id: number, body: string): Promise<void> {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
@@ -371,19 +347,6 @@ export class GitHubClient implements TrackerProvider {
     }
   }
 
-  async approveMR(id: number, options: ApproveMROptions = {}): Promise<void> {
-    const oct = this.client;
-    const { owner, repo } = this.getOwnerRepo();
-
-    await oct.pulls.createReview({
-      owner,
-      repo,
-      pull_number: id,
-      event: 'APPROVE',
-      commit_id: options.sha,
-    });
-  }
-
   async closeMR(id: number, options: CloseMROptions = {}): Promise<void> {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
@@ -403,18 +366,6 @@ export class GitHubClient implements TrackerProvider {
         body: options.comment,
       });
     }
-  }
-
-  async reopenMR(id: number): Promise<void> {
-    const oct = this.client;
-    const { owner, repo } = this.getOwnerRepo();
-
-    await oct.pulls.update({
-      owner,
-      repo,
-      pull_number: id,
-      state: 'open',
-    });
   }
 
   // ============ Projects ============

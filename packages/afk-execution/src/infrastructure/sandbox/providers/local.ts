@@ -20,7 +20,7 @@ import { WorktreeManager } from '../../git/index.js';
 import type { SandboxTmux } from '../../../domain/tmux/types.js';
 import { clearSignal, clearStatus, getTokenUsage, readSignal } from '@afk/infrastructure';
 import { StreamingAgentExecution } from './streaming.js';
-import { normalizeTmuxSessionName } from '../../tmux/session-name.js';
+import { normalizeTmuxSessionName } from '../../../domain/tmux/session-name.js';
 import { agentReadiness } from '../../tmux/agent-readiness.js';
 import {
   type SandboxProvider,

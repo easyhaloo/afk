@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { Signal } from '@afk/infrastructure';
 import { readSignal, readSignalSync } from '@afk/infrastructure';
 import { ControlModeConnection } from './control-mode.js';
-import { normalizeTmuxSessionName } from './session-name.js';
+import { normalizeTmuxSessionName } from '../../domain/tmux/session-name.js';
 import type { AgentReadiness, TmuxCaptureOptions, TmuxSession } from '../../domain/tmux/types.js';
 
 export { normalizeTmuxSessionName };

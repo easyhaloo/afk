@@ -36,6 +36,7 @@ import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
 import { groupRuntimeEvents, parseRuntimeSource, recordStatusLabel, runtimeStateMeta, searchRuntimeEvents, snapshotRecordStatus, type RecordStatus, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
+import { executionHistoryEvents } from "./features/run-center/execution-events";
 import { auditedRunRows, buildRunCentre, filterRunRows, runLanes, runVisualState, runWorkspacePath, type RunFilter, type RunLanes } from "./features/run-center/run-centre";
 import { useExecutionHistory } from "./features/run-center/use-execution-history";
 import { RunTimelineSection } from "./features/run-center/RunTimelineView";
@@ -130,17 +131,8 @@ function App() {
     try {
       const liveSnapshot = await window.afkDesktop.snapshot(target);
       const { snapshot: next } = presentationSnapshot(liveSnapshot);
-      const priorIds = new Set(snapshot?.events.map((item) => item.id) ?? []);
-      const addedIds = snapshot ? next.events.filter((item) => !priorIds.has(item.id)).map((item) => item.id) : [];
       setSnapshot(next);
-      if (addedIds.length) {
-        setFreshIds(new Set(addedIds));
-        if (freshTimer.current) window.clearTimeout(freshTimer.current);
-        freshTimer.current = window.setTimeout(() => setFreshIds(new Set()), 1400);
-      }
       setWorkspace(next.workspace.root);
-      setSelectedEvent((current) => current ? next.events.find((item) => item.id === current.id) ?? current : null);
-      setReplayRun((current) => next.events.some((item) => item.source === current) ? current : next.events[0]?.source ?? "");
       if (!session && next.sessions[0]) {
         setSession(next.sessions[0].name);
         setSessionWorkspace(next.sessions[0].workspace);
@@ -155,6 +147,7 @@ function App() {
       setLoading(false);
     }
   };
+
 
   useEffect(() => () => { if (freshTimer.current) window.clearTimeout(freshTimer.current); }, []);
   useEffect(() => { void refresh(""); }, []);
@@ -188,8 +181,26 @@ function App() {
     root.dataset.afkScale = appearance.fontScale;
   }, [appearance]);
 
-  // The activity log reads the snapshot pipeline's diagnostics.
-  const events = useMemo(() => snapshot?.events ?? [], [snapshot]);
+  // The activity log reads the audited run records, projected into the
+  // shape the log shows.  It used to read the snapshot pipeline's
+  // diagnostics — a channel nothing writes, so the page was always empty.
+  const events = useMemo(() => executionHistoryEvents(auditedExecutions, snapshot?.workItemRuns ?? []), [auditedExecutions, snapshot]);
+
+  // A record that was not there a moment ago is a new one.  The audited
+  // records arrive on their own query, so the marks are marked here rather
+  // than where the snapshot is read.
+  const knownEventIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set(events.map((event) => event.id));
+    const added = [...ids].filter((id) => !knownEventIds.current.has(id));
+    knownEventIds.current = ids;
+    if (!added.length) return;
+    setFreshIds(new Set(added));
+    if (freshTimer.current) window.clearTimeout(freshTimer.current);
+    freshTimer.current = window.setTimeout(() => setFreshIds(new Set()), 1400);
+    setSelectedEvent((current) => current ? events.find((event) => event.id === current.id) ?? current : null);
+    setReplayRun((current) => events.some((event) => event.source === current) ? current : events[0]?.source ?? "");
+  }, [events]);
   // The run centre reads the audited summaries. The header counts and the
   // lanes come out of the same rows, so a count and a row cannot disagree.
   const runCentre = useMemo(() => buildRunCentre(auditedExecutions, snapshot?.workItemRuns ?? []), [auditedExecutions, snapshot]);

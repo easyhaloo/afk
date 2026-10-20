@@ -11,7 +11,7 @@ import { DEFAULT_WORKFLOW_CONFIG, loadWorkflowConfig, type WorkflowConfig } from
 type ConfigObject = Record<string, unknown>;
 import { detectAgentRuntimes } from "./runtime-service.js";
 import { projectRunScopeService } from "./project-run-scope-service.js";
-import { readEvents, resolveWorkspace } from "./workspace-service.js";
+import { resolveWorkspace } from "./workspace-service.js";
 import {
   AGENT_PROVIDER_IDS,
   type AgentProviderId,
@@ -461,8 +461,7 @@ export async function snapshot(workspace?: string): Promise<Snapshot> {
   // The desktop client embeds the runtime, so it reports the version it runs
   // rather than probing a CLI that may not be installed.
   const afkPath = "in-process";
-  const [events, workItemRuns, containers, sessions, agentRuntimes, workflow, workflowRuns, loop, workflowTemplates] = await Promise.all([
-    readEvents(root),
+  const [workItemRuns, containers, sessions, agentRuntimes, workflow, workflowRuns, loop, workflowTemplates] = await Promise.all([
     projectRunScopeService.runs(root, resourceWorkspaces),
     listAfkContainers(resourceWorkspaces),
     listAfkTmux(resourceWorkspaces),
@@ -474,7 +473,7 @@ export async function snapshot(workspace?: string): Promise<Snapshot> {
   ]);
   const afkAvailable = true;
   const assembled = {
-    workspace: { root, afkDirectoryPresent: existsSync(path.join(root, ".afk")), eventCount: events.length + workItemRuns.length },
+    workspace: { root, afkDirectoryPresent: existsSync(path.join(root, ".afk")), eventCount: workItemRuns.length },
     afk: { available: afkAvailable, executable: afkPath, summary: `AFK 已就绪（${AFK_VERSION}）` },
     capabilities: AFK_CAPABILITY_DEFINITIONS.map(item => ({ ...item, available: afkAvailable })),
     workflow,
@@ -482,7 +481,6 @@ export async function snapshot(workspace?: string): Promise<Snapshot> {
     workflowRuns,
     loop,
     agentRuntimes,
-    events,
     workItemRuns,
     containers,
     sessions,

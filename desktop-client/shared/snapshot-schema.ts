@@ -129,25 +129,6 @@ const agentRuntimeSchema = z.object({
   installation: z.object({ source: z.string(), version: z.string(), checkedAt: z.string() }),
 });
 
-const runtimeEventSchema = z.object({
-  id: z.string(),
-  timestamp: z.string(),
-  source: z.string(),
-  /**
-   * The status the raw event line recorded, if it recorded one. Not the
-   * audited status — that is the run row's, and it is the authority.
-   */
-  recordedStatus: z.string().optional(),
-  result: z.string(),
-  nextStep: z.string(),
-  raw: z.string(),
-  usage: z.object({
-    inputTokens: z.number(),
-    outputTokens: z.number(),
-    totalTokens: z.number(),
-  }).optional(),
-});
-
 const projectRunSchema = z.object({
   id: z.string(),
   workItemId: z.string(),
@@ -175,7 +156,6 @@ export const snapshotSchema = z.object({
   workflowRuns: z.array(workflowRunSummarySchema),
   loop: loopStatusSchema,
   agentRuntimes: z.array(agentRuntimeSchema),
-  events: z.array(runtimeEventSchema),
   workItemRuns: z.array(projectRunSchema),
   containers: z.array(z.object({
     engine: z.string(),

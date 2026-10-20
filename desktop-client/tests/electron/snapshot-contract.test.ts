@@ -95,11 +95,6 @@ beforeEach(async () => {
   await mkdir(path.join(directory, ".afk", "runs", "build-1"), { recursive: true });
   await mkdir(path.join(directory, ".afk", "workflows"), { recursive: true });
   await writeFile(
-    path.join(directory, ".afk", "runs", "build-1", "events.jsonl"),
-    `${JSON.stringify({ timestamp: "2026-08-22T09:18:37+08:00", event: "run.started", message: "运行已开始" })}\n`,
-    "utf8",
-  );
-  await writeFile(
     path.join(directory, ".afk", "runs", "build-1", "request.json"),
     JSON.stringify({ runId: "build-1", startedAt: "2026-08-22T09:18:37+08:00", goalText: "发布桌面端", provider: "codex", worktreePath: "/tmp/afk-worktree" }),
     "utf8",
@@ -138,7 +133,6 @@ describe("snapshot contract at the main-process edge", () => {
     expect(live.workflow.canvasNodes.map(node => node.provider)).toEqual(["codex"]);
     expect(live.workflowTemplates.find(template => template.id === "afk-control-workflow")?.canvasNodes).toHaveLength(1);
     expect(live.workflowRuns.map(run => run.status)).toEqual(["completed"]);
-    expect(live.events).toHaveLength(1);
     expect(live.loop.lastError).toEqual({ "42": "execution-blocked" });
     expect(live.agentRuntimes[0].installation.version).toBe("2.1.18");
   });

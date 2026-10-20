@@ -3,15 +3,14 @@ import type { WorkItemAgentId } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
 
 /**
- * The snapshot pipeline's record: one free-form diagnostic line read from
- * `.afk/runs/**\/events.jsonl`. Its status is whatever the log says, so the
- * renderer reads it as a diagnostic and never as a business fact.
+ * One record in the activity log.
  *
- * This is a legacy channel. Nothing writes `.afk/runs/` any more — the
- * writer was reachable only from its own test and was removed — so the
- * stream reads empty in practice. The authoritative run records are
- * `RuntimeRunEvent`, read from the runtime task store
- * (`~/.afk/runtime/tasks`).
+ * The records are the audited run records — `RuntimeRunEvent`, read from
+ * the runtime task store — projected into the shape the log shows. The
+ * log used to read a file of free-form diagnostic lines instead, and
+ * nothing had written that file for a long time, so the page was always
+ * empty. The status on a record is the audited status the run carries,
+ * under the name the log has always used for it.
  */
 export type RuntimeEvent = {
   id: string;
@@ -212,7 +211,6 @@ export type Snapshot = {
   workflowRuns: WorkflowRunSummary[];
   loop: LoopStatus;
   agentRuntimes: AgentRuntime[];
-  events: RuntimeEvent[];
   workItemRuns: ProjectRun[];
   containers: Array<{ engine: string; name: string; image: string; status: string }>;
   sessions: Array<{ name: string; workspace: string; windows: string; attached: boolean; runId?: string; resourceId?: string }>;

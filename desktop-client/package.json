@@ -62,6 +62,7 @@
     "@afk/core": "workspace:*",
     "@afk/execution": "workspace:*",
     "@afk/infrastructure": "workspace:*",
+    "@afk/workflow-graph": "workspace:*",
     "@playwright/test": "1.62.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",

@@ -38,9 +38,9 @@ assembles the provider ports, and the services call the same
 `@afk/application` and `@afk/execution` use cases the CLI calls: the backlog
 read and control commands, the work item execution, the workflow graph
 generation and the runtime version. The desktop therefore depends on
-`@afk/application`, `@afk/core`, `@afk/infrastructure` and `@afk/execution`,
-and the architecture guard rejects any import that reaches the root package's
-`src/` tree.
+`@afk/application`, `@afk/core`, `@afk/infrastructure`, `@afk/execution` and
+`@afk/workflow-graph`, and the architecture guard rejects any import that
+reaches the root package's `src/` tree.
 
 Execution history uses a separate direct Application path:
 
@@ -83,6 +83,17 @@ while all filesystem, process, YAML, and SQLite operations stay behind main
 process services and adapters. Workflow graph normalization and layout are
 pure functions so malformed dependencies and cycles can produce diagnostics
 without crashing React.
+
+The renderer's workflow graph is the one place the renderer loads a workspace
+package at runtime, so it loads it through a renderer-safe entry:
+`@afk/workflow-graph/step-graph`. That entry computes the facts — the level
+each step runs at, the order, the missing dependencies, the cycle question —
+and the canvas reports them in its own words (`semantic/missing-dependency`,
+`semantic/cycle`, the track bands, the positions). The canvas feeds the
+resolver's edge set: a step waits for its `dependsOn` steps *and* for the
+step its `when` clause names, so the canvas cannot draw a level the template
+resolver would not run. The entry must stay free of node builtins; the graph
+package's test proves that on the built artifact.
 
 Workflow definition saving and discovery belong to
 `electron/services/desktop-service.ts`. After saving, the renderer uses the

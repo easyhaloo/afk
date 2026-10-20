@@ -181,6 +181,9 @@ importers:
       '@afk/infrastructure':
         specifier: workspace:*
         version: link:../packages/afk-infrastructure
+      '@afk/workflow-graph':
+        specifier: workspace:*
+        version: link:../packages/afk-workflow-graph
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1

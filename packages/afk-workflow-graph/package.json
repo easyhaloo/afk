@@ -7,13 +7,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./step-graph": {
+      "types": "./dist/step-graph.d.ts",
+      "import": "./dist/step-graph.js"
     }
   },
   "files": ["dist"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --config vitest.config.ts"
+    "test": "tsc -p tsconfig.json && vitest run --config vitest.config.ts"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

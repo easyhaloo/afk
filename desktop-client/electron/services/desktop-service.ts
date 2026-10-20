@@ -74,7 +74,7 @@ async function readWorkflowConfig(root: string): Promise<WorkflowConfigSummary> 
 
 
 
-const BUILTIN_WORKFLOW_TEMPLATES: WorkflowTemplateSummary[] = [
+export const BUILTIN_WORKFLOW_TEMPLATES: WorkflowTemplateSummary[] = [
   { id: "issue-implementation", name: "Issue 实现", description: "实现需求、验证 AC、发布变更并进入 QA。", source: "builtin", steps: [{ id: "implement", role: "implementer", kind: "agent", dependsOn: [] }, { id: "verify-ac", role: "verifier", kind: "agent", dependsOn: ["implement"] }, { id: "publish", role: "system", kind: "system", action: "publish-change", dependsOn: ["verify-ac"] }, { id: "queue-qa", role: "system", kind: "system", action: "queue-qa", dependsOn: ["publish"] }] },
   { id: "pre-merge-qa-verification", name: "合并前 QA", description: "在 QA 工作树中验证验收条件与集成测试。", source: "builtin", steps: [{ id: "verify-ac", role: "verifier", kind: "agent", dependsOn: [] }] },
   { id: "simple-loop", name: "简单循环", description: "单一 Agent 持续执行，直到任务完成。", source: "builtin", steps: [{ id: "run", role: "agent", kind: "agent", dependsOn: [] }] },

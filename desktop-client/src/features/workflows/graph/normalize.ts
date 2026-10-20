@@ -1,3 +1,18 @@
+/**
+ * The canvas's vocabulary for the workflow graph.
+ *
+ * The facts — which steps wait for which, what level a step runs at, whether
+ * a template can be ordered at all — are computed once, by the shared step
+ * graph. This module reports them in the studio's own words: the
+ * `semantic/…` diagnostic codes, the track bands, the canvas positions.
+ *
+ * The desktop used to keep its own copy of the level formula, its own cycle
+ * detection and its own topological order. That copy could disagree with the
+ * one the template resolver runs on, which is how a canvas draws a level the
+ * resolver would never run.
+ */
+
+import { computeStepGraph } from "@afk/workflow-graph/step-graph";
 import type { WorkflowTemplateStepSummary } from "../../../../shared/ipc-contract";
 
 export type GraphDiagnostic = {
@@ -10,6 +25,9 @@ export type GraphDiagnostic = {
 export type NormalizedWorkflow = {
   steps: WorkflowTemplateStepSummary[];
   order: string[];
+  /** The level each step runs at: 0 for a step with no dependencies, one more
+   *  than its deepest dependency otherwise. */
+  levels: ReadonlyMap<string, number>;
   diagnostics: GraphDiagnostic[];
 };
 
@@ -30,67 +48,44 @@ export function workflowStepTrack(step?: WorkflowTemplateStepSummary): WorkflowC
   return step?.when ? "conditional" : step?.kind === "system" ? "system" : "agent";
 }
 
+/**
+ * The steps a step waits for: its declared dependencies plus the step its
+ * `when` clause names. This is the edge set the template resolver feeds the
+ * shared computation, so the canvas cannot draw a level the resolver would
+ * not run.
+ */
+function stepEdges(step: WorkflowTemplateStepSummary): string[] {
+  const edges = new Set(step.dependsOn);
+  if (step.when) edges.add(step.when.step);
+  return [...edges];
+}
+
 export function normalizeWorkflowSteps(input: readonly WorkflowTemplateStepSummary[]): NormalizedWorkflow {
   const steps = input.map((step) => ({ ...step, dependsOn: [...step.dependsOn] }));
-  const byId = new Map(steps.map((step) => [step.id, step]));
-  const diagnostics: GraphDiagnostic[] = [];
+  const graph = computeStepGraph(steps.map((step) => ({ id: step.id, dependsOn: stepEdges(step) })));
 
-  for (const step of steps) {
-    for (const dependencyId of step.dependsOn) {
-      if (!byId.has(dependencyId)) {
-        diagnostics.push({
-          code: "semantic/missing-dependency",
-          stepId: step.id,
-          dependencyId,
-          message: `${step.id} depends on missing step ${dependencyId}`,
-        });
-      }
-    }
-  }
+  const diagnostics: GraphDiagnostic[] = graph.missing.map((missing) => ({
+    code: "semantic/missing-dependency",
+    stepId: missing.stepId,
+    dependencyId: missing.dependencyId,
+    message: `${missing.stepId} depends on missing step ${missing.dependencyId}`,
+  }));
 
-  const order: string[] = [];
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  let hasCycle = false;
-  const visit = (step: WorkflowTemplateStepSummary) => {
-    if (visited.has(step.id)) return;
-    if (visiting.has(step.id)) {
-      hasCycle = true;
-      return;
-    }
-    visiting.add(step.id);
-    for (const dependencyId of step.dependsOn) {
-      const dependency = byId.get(dependencyId);
-      if (dependency) visit(dependency);
-    }
-    visiting.delete(step.id);
-    visited.add(step.id);
-    order.push(step.id);
-  };
-  steps.forEach(visit);
-  if (hasCycle) {
+  if (graph.cycle) {
     diagnostics.push({ code: "semantic/cycle", stepId: "", message: "workflow template contains a dependency cycle" });
-    return { steps, order: [], diagnostics };
+    return { steps, order: [], levels: graph.levels, diagnostics };
   }
-  return { steps, order, diagnostics };
+  return { steps, order: [...graph.order], levels: graph.levels, diagnostics };
 }
 
 export function workflowStepLayout(input: readonly WorkflowTemplateStepSummary[]): Map<string, WorkflowNodePosition> {
   const normalized = normalizeWorkflowSteps(input);
   if (normalized.diagnostics.some((diagnostic) => diagnostic.code === "semantic/cycle")) return new Map();
-  const byId = new Map(normalized.steps.map((step) => [step.id, step]));
-  const depth = new Map<string, number>();
-  const depthOf = (step: WorkflowTemplateStepSummary): number => {
-    const cached = depth.get(step.id);
-    if (cached !== undefined) return cached;
-    const parents = step.dependsOn.map((id) => byId.get(id)).filter((item): item is WorkflowTemplateStepSummary => Boolean(item));
-    const value = parents.length ? Math.max(...parents.map(depthOf)) + 1 : 0;
-    depth.set(step.id, value);
-    return value;
-  };
+  // The level of a step is the shared computation's; where it sits on the
+  // canvas is the studio's own arithmetic.
   const layers = new Map<number, WorkflowTemplateStepSummary[]>();
   normalized.steps.forEach((step) => {
-    const layer = depthOf(step);
+    const layer = normalized.levels.get(step.id) ?? 0;
     layers.set(layer, [...(layers.get(layer) ?? []), step]);
   });
   const positions = new Map<string, WorkflowNodePosition>();

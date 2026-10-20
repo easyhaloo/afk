@@ -203,6 +203,30 @@ describe("BacklogPage initial render", () => {
     act(() => { renderer.unmount(); });
   });
 
+  it("does not keep the previous workspace's rows while the new workspace loads", async () => {
+    // A backlog belongs to one workspace. The previous workspace's rows
+    // must not stay on screen under the new workspace's name — not even
+    // while the new one is still loading.
+    let resolveSecond!: (value: BacklogItem[]) => void;
+    const list = vi.fn()
+      .mockResolvedValueOnce([items[0]])
+      .mockImplementationOnce(() => new Promise<BacklogItem[]>((resolve) => { resolveSecond = resolve; }));
+    const { renderer } = await renderBacklogPage("/repo", list);
+    expect(renderer.root.findAllByProps({ className: "backlog-row" })).toHaveLength(1);
+
+    await act(async () => {
+      renderer.update(createElement(BacklogPage, { workspace: "/other" }));
+      await flushReactUpdates();
+    });
+
+    expect(renderer.root.findAllByProps({ className: "backlog-row" })).toHaveLength(0);
+
+    resolveSecond([items[1]]);
+    await act(async () => { await flushReactUpdates(); });
+    expect(renderer.root.findAllByProps({ className: "backlog-row" })).toHaveLength(1);
+    act(() => { renderer.unmount(); });
+  });
+
   it("renders one row per item with localized state and a leading mode icon", async () => {
     const { renderer } = await renderBacklogPage();
     const rows = renderer.root.findAllByProps({ className: "backlog-row" });

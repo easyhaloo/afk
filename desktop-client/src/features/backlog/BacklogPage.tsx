@@ -56,7 +56,7 @@ const executionModeOptions: Array<{ value: BacklogExecutionMode; label: string }
 const EMPTY_CREATE_FORM: BacklogCreateInput = { title: "", description: "", executionMode: "afk", tags: [] };
 const BACKLOG_FORCE_REFRESH = 24 * 60 * 60 * 1000;
 export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—", templates = [], onOpenWorkItem }: BacklogPageProps) {
-  const cached = useMemo(() => readBacklogCache(workspace), []);
+  const cached = useMemo(() => readBacklogCache(workspace), [workspace]);
   const [items, setItems] = useState<BacklogItem[]>(cached?.items ?? []);
   const [state, setState] = useState<SourceFilter>("all");
   const [query, setQuery] = useState("");
@@ -130,6 +130,13 @@ export function BacklogPage({ workspace, refreshVersion = 0, defaultAgent = "—
       if (isCurrentRequest()) setBusy(false);
     }
   }, [platform, workspace]);
+
+  useEffect(() => {
+    // A different workspace is a different backlog. The previous one's
+    // rows must not stay on screen under the new workspace's name while
+    // the new one loads — and they must not stay if it fails to load.
+    setItems(readBacklogCache(workspace)?.items ?? []);
+  }, [workspace]);
 
   useEffect(() => {
     const force = handledRefreshVersionRef.current !== refreshVersion;

@@ -63,6 +63,34 @@ describe("backlog-cache", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps each workspace's backlog to itself", async () => {
+    // The cache is keyed by the workspace it holds. Switching workspaces
+    // must not show the previous one's backlog, not even inside the TTL.
+    const first = vi.fn(async () => [stubItem("first")]);
+    const second = vi.fn(async () => [stubItem("second")]);
+
+    await fetchBacklogList("workspace-a", first);
+    const items = await fetchBacklogList("workspace-b", second);
+
+    expect(items).toEqual([stubItem("second")]);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(readBacklogCache("workspace-a")?.items).toEqual([stubItem("first")]);
+  });
+
+  it("does not share an in-flight fetch between workspaces", async () => {
+    let resolveFirst!: (value: BacklogItem[]) => void;
+    const first = vi.fn(() => new Promise<BacklogItem[]>((resolve) => { resolveFirst = resolve; }));
+    const second = vi.fn(async () => [stubItem("second")]);
+
+    const inflight = fetchBacklogList("workspace-a", first);
+    const other = await fetchBacklogList("workspace-b", second);
+
+    expect(other).toEqual([stubItem("second")]);
+    expect(second).toHaveBeenCalledTimes(1);
+    resolveFirst([stubItem("first")]);
+    await expect(inflight).resolves.toEqual([stubItem("first")]);
+  });
+
   it("invalidateBacklogCache clears entries", async () => {
     const fetcher = vi.fn(async () => [stubItem("1")]);
     await fetchBacklogList("k1", fetcher);

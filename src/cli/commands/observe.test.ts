@@ -31,6 +31,7 @@ describe('observe execution queries', () => {
             status: 'pending',
             sequence: 1,
             terminal: false,
+            integrityValid: true,
           }],
         };
       },

@@ -24,7 +24,7 @@ async function createRetroFixture(options: { indexedPath?: string; workspace: st
   await fs.writeFile(join(options.workspace, '.afk', 'executions', 'run-1.jsonl'), '');
   const store = new JsonlEventStore({ root: options.eventRoot });
   await store.append([{
-    id: 'event-1', schemaVersion: 1, type: 'agent.session_recorded', sequence: 0,
+    id: 'event-1', schemaVersion: 1, type: 'agent.session_recorded',
     occurredAt: '2026-10-17T00:00:00.000Z', context: { traceId: 'trace-1', runId: 'run-1', workItemId: 'work-1', profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'agent' } },
     correlationId: 'run-1', data: { kind: 'agent.session_recorded', sessionId: options.sessionId, ...(options.indexedPath ? { transcriptPath: options.indexedPath } : {}) },
   }]);

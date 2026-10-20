@@ -35,8 +35,8 @@ async function runCommand(register: (program: Command) => void, ...args: string[
 }
 
 describe('canonical command provider wiring', () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(() => vi.restoreAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); });
 
   it('uses the canonical management bundle for backlog administration', async () => {
     const initialize = vi.fn().mockResolvedValue(undefined);

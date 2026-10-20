@@ -8,6 +8,11 @@
     "declarationMap": false,
     "types": ["node"]
   },
-  "include": ["tests/**/*.ts"],
+  "include": [
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ],
   "exclude": ["node_modules", "dist"]
 }

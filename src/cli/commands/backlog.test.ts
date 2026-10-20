@@ -140,12 +140,13 @@ describe('explicit backlog adoption', () => {
     }
   });
 
-  it.each([
+  const invalidAdoptionScopes: string[][] = [
     ['--project', 'org/repo', '--platform', 'github'],
     ['--id', '42', '--platform', 'github'],
     ['--id', '42', '--project', 'org/repo'],
     ['--id', '42', '--project', 'org/repo', '--platform', 'all'],
-  ])('rejects invalid or missing adoption scope before provider creation: %j', async flags => {
+  ];
+  it.each(invalidAdoptionScopes)('rejects invalid or missing adoption scope before provider creation: %j', async flags => {
     const argv = ['node', 'afk', 'backlog', 'adopt', ...flags, '--json'];
     const program = new Command().name('afk').exitOverride();
     registerBacklogCommands(program, { argv });

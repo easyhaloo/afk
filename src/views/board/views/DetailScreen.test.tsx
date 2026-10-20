@@ -8,8 +8,8 @@ const backlog: BacklogViewModel = {
   id: 'BL-42',
   title: 'Ship the operational detail view',
   description: '## Acceptance\n\n- **compact** metadata',
-  state: 'open',
-  executionMode: 'serial',
+  state: 'in_progress',
+  executionMode: 'afk',
   parentId: 'BL-1',
   dependsOn: ['BL-7'],
   tags: ['tui', 'ops'],
@@ -42,8 +42,8 @@ describe('DetailScreen', () => {
     );
 
     expect(output).toContain('Ship the operational detail view');
-    expect(output).toContain('state · open');
-    expect(output).toContain('executionMode · serial');
+    expect(output).toContain('state · in_progress');
+    expect(output).toContain('executionMode · afk');
     expect(output).toContain('parent · BL-1');
     expect(output).toContain('dependsOn · BL-7');
     expect(output).toContain('tags · tui, ops');

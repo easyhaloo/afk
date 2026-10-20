@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BacklogItem } from '@afk/application';
-import type { TaskRuntimeRecord } from '@afk/execution/application/runtime/task-runtime';
+import type { ActiveTaskRuntimeRecord, TaskRuntimeRecord } from '@afk/execution/application/runtime/task-runtime';
 import { projectWorkItems } from './work-item-projection.js';
 
 const backlog = (overrides: Partial<BacklogItem> = {}): BacklogItem => ({
@@ -31,12 +31,19 @@ const runtime = (overrides: Partial<TaskRuntimeRecord> = {}): TaskRuntimeRecord 
   ...overrides,
 });
 
+/** A record in the active bucket: its status is running or stale, never terminal. */
+const activeRuntime = (overrides: Partial<ActiveTaskRuntimeRecord> = {}): ActiveTaskRuntimeRecord => ({
+  ...runtime(),
+  ...overrides,
+  status: overrides.status ?? 'running',
+});
+
 describe('work-item projection', () => {
   it('joins active and archived runtime records by exact string backlogId', () => {
     const result = projectWorkItems({
       now: Date.parse('2026-08-09T10:02:30.000Z'),
       backlogs: [backlog({ id: '42' })],
-      active: [runtime({ runId: 'run-42', heartbeatAt: '2026-08-09T10:02:00.000Z' })],
+      active: [activeRuntime({ runId: 'run-42', heartbeatAt: '2026-08-09T10:02:00.000Z' })],
       archive: [runtime({ runId: 'run-42-old', backlogId: '42', status: 'completed' })],
     });
 
@@ -55,7 +62,7 @@ describe('work-item projection', () => {
       now: Date.parse('2026-08-09T10:10:00.000Z'),
       staleAfterMs: 60_000,
       backlogs: [backlog({ state: 'in_progress' })],
-      active: [runtime({ heartbeatAt: '2026-08-09T10:00:00.000Z' })],
+      active: [activeRuntime({ heartbeatAt: '2026-08-09T10:00:00.000Z' })],
       archive: [],
     });
 
@@ -65,7 +72,7 @@ describe('work-item projection', () => {
   it('selects the run with the newest heartbeat for one backlog', () => {
     const result = projectWorkItems({
       backlogs: [backlog()],
-      active: [runtime({ runId: 'run-old', heartbeatAt: '2026-08-09T10:01:00.000Z' })],
+      active: [activeRuntime({ runId: 'run-old', heartbeatAt: '2026-08-09T10:01:00.000Z' })],
       archive: [runtime({ runId: 'run-new', status: 'failed', phase: 'verifying', heartbeatAt: '2026-08-09T10:03:00.000Z' })],
     });
 
@@ -75,7 +82,7 @@ describe('work-item projection', () => {
   it('keeps a backlog with no runtime and an orphan runtime visible', () => {
     const result = projectWorkItems({
       backlogs: [backlog({ id: 'blocked-only' })],
-      active: [runtime({ backlogId: 'runtime-only', runId: 'orphan-run' })],
+      active: [activeRuntime({ backlogId: 'runtime-only', runId: 'orphan-run' })],
       archive: [],
     });
 
@@ -89,7 +96,7 @@ describe('work-item projection', () => {
     const result = projectWorkItems({
       workspace: '/workspace/org-repo',
       backlogs: [backlog()],
-      active: [runtime({ workspace: '/workspace/other-repo', providerRef: 'github:other/repo#42' })],
+      active: [activeRuntime({ workspace: '/workspace/other-repo', providerRef: 'github:other/repo#42' })],
       archive: [],
     });
 

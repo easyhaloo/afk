@@ -9,7 +9,7 @@ describe('workflow plugin runtime', () => {
       id: 'acme.audit',
       version: '1.0.0',
       setup(ctx) {
-        ctx.lifecycle({ name: 'audit', onRunStart: async () => {} });
+        ctx.lifecycle({ name: 'audit', onInit: async () => {} });
         ctx.systemAction('audit-report', async () => ({ ok: true }));
       },
     };

@@ -31,7 +31,7 @@ vi.mock('../cli-utils', () => ({
 import { registerRunCommands } from './run.js';
 
 describe('run command', () => {
-  afterEach(() => vi.clearAllMocks());
+  afterEach(() => { vi.clearAllMocks(); });
 
   it('accepts --execution-manifest and passes it to runWorkflowCli', async () => {
     const program = new Command().name('afk').exitOverride();

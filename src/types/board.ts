@@ -8,8 +8,14 @@ export function getTaskBacklogId(task: Pick<Task, 'backlogId'>): string {
 }
 
 export interface Task {
-  /** Canonical identity used to join runtime records to backlog items. */
-  backlogId: string;
+  /**
+   * Canonical identity used to join runtime records to backlog items.
+   *
+   * A record that does not know its backlog item has none, and the join
+   * skips it rather than guessing from the legacy aliases — so the field is
+   * optional, and the code that reads it says so.
+   */
+  backlogId?: string;
   /** Deprecated compatibility alias for backlogId. */
   iid?: string;
   runId: string;

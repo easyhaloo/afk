@@ -54,6 +54,7 @@ describe('BoardLane', () => {
     const output = renderToString(
       <BoardLane
         label="Verification"
+        kind="primary"
         state="verification"
         items={[
           backlog,

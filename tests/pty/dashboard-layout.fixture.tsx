@@ -4,8 +4,10 @@ import { AppContent } from '../../src/views/app/AppContent';
 import { StateProvider } from '../../src/views/app/state/StateContext';
 
 const tasks = [{
-  iid: 17,
+  iid: '17',
+  runId: 'run-17',
   title: 'Exercise responsive task navigation',
+  phase: 'implementing' as const,
   status: 'active' as const,
   session: 'afk-e2e-task',
   branch: 'afk/e2e-layout',

@@ -8,7 +8,7 @@ Call login API, extract token from response, use in Authorization header for sub
 
 ## Usage
 
-Use `utils/auth.ts` from templates:
+Use `../../templates/utils/auth.ts` from templates:
 
 ```typescript
 import { login } from '../utils/auth';

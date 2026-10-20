@@ -1,3 +1,7 @@
+> **归档说明（2026-10-20）**：本方案的方向**已被明确否决**。它提议把 Archify CLI 作为运行时依赖、引入 `afk-archify://` 协议与 `ArchifyViewerWindow`；同期的原生图引擎蓝图明确拒绝"进入最终用户的运行时依赖链"。
+> 仅其中的 IR 投影思路存活，实现为 `packages/afk-execution/src/application/visualizations/archify-adapter.ts` 与 `--format archify-json` 输出。
+> **当前生效的图能力方案见 [`docs/architecture/blueprints/target-directory-layout.md`](../../architecture/blueprints/target-directory-layout.md) 与已实现的 `packages/afk-workflow-graph/`。**
+
 # Archify × AFK 集成方案：将可验证技术地图纳入本地工作流体系
 
 **作者：Manus AI**  

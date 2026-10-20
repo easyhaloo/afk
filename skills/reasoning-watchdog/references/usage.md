@@ -15,7 +15,7 @@ cd ~/.claude/reasoning-watchdog && npm run uninstall
 
 ## Tuning Thresholds
 
-Edit `src/postToolHook.ts`:
+Edit the project's `postToolHook.ts` (under `src/`):
 
 ```typescript
 // Repeat operations threshold

@@ -144,10 +144,10 @@ afk/
 
 | 位置 | 装什么 | 现状 |
 | --- | --- | --- |
-| `src/**/*.test.ts` | 单元 / 组件测试，与源码同目录 | ✅ 115 个，保持不变 |
+| `src/**/*.test.ts` + `packages/*/src/**/*.test.ts` | 单元 / 组件测试，与源码同目录 | ✅ 155 个，保持不变 |
 | `src/domain`、`src/application` 内部 | 纯函数与 reducer 测试 | ✅ 保持 |
-| `packages/*/tests/` | **收归**为 colocated，上移到 `packages/*/src/` | ❌ 15 个待迁移 |
-| `tests/` | 仓库级不变量：架构守卫、跨层契约、E2E、fixtures | ⚠️ 9 个，需收窄职责并命名区分 |
+| `packages/*/tests/` | **收归**为 colocated，上移到 `packages/*/src/` | ❌ 41 个待迁移 |
+| `tests/` | 仓库级不变量：架构守卫、跨层契约、E2E、fixtures | ⚠️ 17 个，需收窄职责并命名区分 |
 | `desktop-client/tests/` | Electron 进程边界测试 | 独立包，维持现状 |
 
 例外理由：只有**不属于任一源文件**的测试（架构规则、契约、E2E）才放 `tests/`。
@@ -172,7 +172,7 @@ afk/
 
 ### 5.3 测试布局归一
 
-`packages/*/tests/` 15 个文件上移为 colocated；根 `tests/` 收窄为不变量测试，
+`packages/*/tests/` 41 个文件上移为 colocated；根 `tests/` 收窄为不变量测试，
 文件名加前缀区分（`contract-*` / `e2e-*` / `architecture-*`）。
 
 ### 5.4 拆解 `src/types/`
@@ -183,8 +183,10 @@ afk/
 
 ### 5.5 `docs/` 归并
 
-`docs/decisions/observability-2026-08-02.md`（标题实为 "AFK Observability Survey"）
-→ `docs/research/observability-survey-2026-08-02.md`。删除 `docs/decisions/`。
+**已执行（2026-10-20）**：该文件是一份针对**另一套代码库**（`src/lib/**` 布局、
+`afk issue` / `afk worktree` 等不存在的命令）的可观测性普查，其核心结论已被
+ADR-0016 推翻，因此不迁往 `docs/research/`，而是归档到
+`docs/_archive/decisions/observability-2026-08-02.md`，`docs/decisions/` 随之取消。
 决策类内容一律进 `docs/adr/`（编号）或 `docs/architecture/blueprints/`（提案）。
 
 ### 5.6 `modules/` → `runners/`
@@ -205,7 +207,7 @@ afk/
 ## 6. 执法缺口：声明与现实相反
 
 `AGENTS.md` 写「`src/domain/` — Pure types, reducers, provider seams — **no I/O**」。
-实测 `src/domain/` 有 **12 个文件** import node 内置模块，其中 **4 个**真的起进程：
+实测 `packages/*/src/domain/` 有 **8 个文件** import node 内置模块，其中 **3 个**真的起进程：
 
 | 文件 | I/O |
 | --- | --- |
@@ -215,19 +217,19 @@ afk/
 | `packages/afk-execution/src/domain/templates/loader.ts` | `fs`、`os`、`path` |
 
 **为什么没被拦住**：`architecture-guard.mjs` 的 `nodeBuiltins` 黑名单只作用于
-`packages/*/`（第 262 行）；`src/**` 只检查**相对导入**的层方向，而这 12 个文件
-import 的是 `node:*`，直接绕过检查。
+`packages/*/`（定义在第 85 行，判定在第 440 行）；`src/**` 只检查**相对导入**的层方向，
+而这些文件 import 的是 `node:*`，直接绕过检查。
 
 **这是本提案最重要的发现**：原则写在了文档里，却既没被代码遵守，也没被工具兜住。
-目标布局要求全部 I/O 收敛到 `src/infrastructure/`。修复分两步：
+目标布局要求全部 I/O 收敛到基础设施层。修复分两步：
 
-1. **立即**：给 `architecture-guard.mjs` 增加规则——`src/domain/` 与 `src/application/`
+1. **立即**：给 `architecture-guard.mjs` 增加规则——`packages/*/src/domain/`
    禁止 `nodeBuiltins`。让它先变红。
-2. **随后**：按报错把 `claim.ts`、`loader.ts`、`transport.ts` 等迁到 `infrastructure/`，
-   在 `domain/` 只留端口定义。
+2. **随后**：按报错把 `loader.ts`、`transport.ts`、`codex-runtime.ts` 等迁到
+   `packages/afk-execution/src/infrastructure/`，在 `domain/` 只留端口定义。
 
 这一步会触及较深的 import 链，且当前工作区正处于同方向的重构中
-（`src/application/providers.ts` 已删除），建议独立分支推进。
+（provider 契约已抽到 `packages/afk-application/src/ports.ts`），建议独立分支推进。
 
 ---
 

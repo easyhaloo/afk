@@ -1,7 +1,7 @@
 # User-level host integration
 
 Install from any working directory using the absolute path to the source
-`scripts/install.mjs`. Run `--dry-run` first. By default, install targets all
+`../scripts/install.mjs`. Run `--dry-run` first. By default, install targets all
 three hosts; select a subset with `--host=claude-code,codex,opencode`.
 
 The POSIX runtime lives at `${XDG_DATA_HOME:-$HOME/.local/share}/jev-agent-guard/current/`.

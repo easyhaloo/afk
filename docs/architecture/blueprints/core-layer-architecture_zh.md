@@ -128,57 +128,75 @@ Desktop 的 Main 通过 Application adapter 获取工作项数据，并在
 架构检查同时扫描 `@afk/core`、`@afk/application` package 和根包层之间的
 依赖，阻止 Core 依赖 application、infrastructure、Electron 或其他运行时实现。
 
-## 目标结构
+## 目标结构（实现后已收敛为扁平布局）
 
-第一阶段保留现有根目录布局，只新增可复用 package：
+本节最初设想用 `work-item/` `run/` `lifecycle/` `policy/` 这样的子目录切分
+`@afk/core`，用 `backlog/` `execution/` `observation/` `workflow/` 切分
+`@afk/application`。**实现时没有采用这套嵌套**：`@afk/core` 最终保持扁平，
+因为它的领域类型之间高度耦合，拆目录只会制造跨目录 import 而不产生边界。
+
+落地后的实际布局：
 
 ```text
 packages/
-  afk-core/
+  afk-core/                 # 零依赖领域内核
     src/
-      work-item/
-      run/
-      lifecycle/
-      policy/
-      events/
-      ports/
+      model.ts
+      reducer.ts
+      events.ts
+      ports.ts
+      execution-base-policy.ts
       index.ts
 
-  afk-application/
+  afk-application/          # 用例层，只依赖 @afk/core
     src/
-      backlog/
-      execution/
-      observation/
-      workflow/
+      backlog/              # backlog 领域模型与 provider 契约
+      tracker/
+      work-items/
+      backlog-mapping.ts
+      errors.ts
+      version.ts
+      execution.ts
+      execution-query.ts
+      inventory.ts
+      observation.ts
+      provider-inventory.ts
+      ports.ts
+      runtime-health.ts
+      workflow-instance.ts
       index.ts
 
-src/
-  infrastructure/
-    github/
-    gitlab/
-    git/
-    sandbox/
-    observability/
-    process/
+  afk-infrastructure/       # 基础设施适配层
+    src/
+      backlog/  branches/  git/  io/  observability/  provider/  shared/  tracker/
 
-  cli/
-    commands/
-    presentation/
-    composition-root.ts
+  afk-execution/            # 执行运行时
+    src/
+      application/          # agents、loop、modules、plugins、runtime、sessions、visualizations、workflows
+      domain/               # agents、templates
+      infrastructure/       # config、git、observability、process、runtime、sandbox、tmux
+      observability/  shared/
+
+  afk-workflow-graph/       # 图引擎
+    src/
+
+src/                        # 根层：CLI 与 TUI
+  cli/                      # commands/、composition-root.ts、command-registry.ts
+  views/                    # Ink TUI
+  coordinator/
+  plugin-sdk/
+  shared/
+  types/
 
 desktop-client/
   electron/
-    adapters/
-    services/
-    ipc/
-    composition-root.ts
+    adapters/  services/  ipc/  lib/  security/  window/  workflow/
   shared/
-    ipc-contracts/
   src/
     features/
 ```
 
-`packages/afk-core` 和 `packages/afk-application` 都应是 workspace package，
+`packages/afk-core` 和 `packages/afk-application` 都是 workspace package，
 采用仓库中 `packages/afk-workflow-graph` 已使用的 package 构建方式。
 
 ## 分层职责

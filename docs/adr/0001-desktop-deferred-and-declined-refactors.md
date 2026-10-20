@@ -8,7 +8,7 @@
 ### S4 — atomic-write ceremony duplication across 4 stores
 **Claim**: Same mkdir+tmp+writeFile+chmod+rename+rm-on-error pattern repeated 4x.
 **Declined because**: Each instance has subtle but intentional differences:
-- json-snapshot-store: simple JSON serialization
+- json-kv-store: simple JSON serialization
 - ssh-managed-host-store + jumpserver-store: YAML serialization, fileSystem parameter for testability, post-rename chmod
 - jumpserver-credential-service: safeStorage availability check inside the write path
 Extracting a common helper would either lose these differences or grow the helper into a leaky abstraction. Ponytail: don't refactor for symmetry when the apparent duplication encodes real variation.
@@ -24,7 +24,8 @@ Extracting a common helper would either lose these differences or grow the helpe
 ## Deferred (will revisit when triggered)
 
 ### S2 — async mutex duplication
-**Trigger**: A new store or service needs mutex-based mutation serialization beyond the 4 existing sites. Then extract `electron/lib/async-mutex.ts` for that use case.
+**Status**: Done. The mutex was extracted to `desktop-client/electron/lib/async-mutex.ts` by the PR immediately following this ADR, so the deferral was resolved before it was ever triggered.
+**Trigger** (no longer applies): A new store or service needs mutex-based mutation serialization beyond the 4 existing sites.
 
 ### S6 — renderer-side `legacyIssueSource` synthesis
 **Trigger**: When the inventory service gains additional shape normalizations, fold `legacyIssueSource` into the inventory service so the renderer is a dumb consumer.
@@ -33,7 +34,7 @@ Extracting a common helper would either lose these differences or grow the helpe
 **Trigger**: If a window.open flow ever returns a non-default target, set it explicitly. Until then, default is fine.
 
 ### S13 — hard-coded filesystem paths in services
-**Trigger**: When the storage layout changes (e.g., cross-platform XDG paths, macOS bundle ID), centralize in `electron/lib/paths.ts`. Five file changes for that future refactor is acceptable.
+**Trigger**: When the storage layout changes (e.g., cross-platform XDG paths, macOS bundle ID), centralize in a shared `paths.ts` under `desktop-client/electron/lib/`. Five file changes for that future refactor is acceptable.
 
 ### S14 — SSH key path error message clarity
 **Trigger**: User feedback that `assertAllowedSshPath` rejects `~/.ssh` without explanation.

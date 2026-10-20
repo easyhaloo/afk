@@ -14,7 +14,8 @@
 | RunCoordinator | 已实现基础能力 | 已有 command → decision → effect audit 解释器；尚未接管所有 runner 的 effect 执行。 |
 | Trusted profile / capability manifest | 已实现 | 可解析能力、拒绝缺失与冲突；当前为仓库内可信组合，不下载远程插件。 |
 | 查询 CLI | 已实现 | `observe runs|timeline|verify|replay|explain|doctor`。 |
-| OTLP、跨进程 fencing、投影替换、confirm-merge | 未切换 | 下一阶段工作，保持为明确的生产门禁。 |
+| 受控 `confirm-merge` | 已实现 | `afk reconcile` 经 ChangePort 验证外部 PR/MR 已合并且目标正确，追加 `change.merge_verified` 并把工作项推进到 `done`。 |
+| OTLP、跨进程 fencing、投影替换 | 未切换 | 下一阶段工作，保持为明确的生产门禁。 |
 
 ## 2. 审计配置
 
@@ -204,7 +205,7 @@ and rebuilt from event streams when its schema or cached usage is invalid.
 1. 以 `RunCoordinator` 替换 Workflow、Loop、QA 之间的直接状态编排，并将 runtime JSON/TUI 转为 event projections。
 2. 将 JSONL store 接入 LeasePort/fencing，覆盖多 worker、崩溃重启、重复回调和 event append 故障注入。
 3. 接入 OTLP traces、logs 与 metrics；将 `afk.observability.coverage_ratio`、event append latency、run stale、lease expiry、approval aging 设为 SLO。
-4. 实现受控 `confirm-merge`：先经 ChangePort 验证外部 PR/MR 已合并且目标正确，再追加 `HumanGateSatisfied` 与 terminal `done` event。
+4. ~~实现受控 `confirm-merge`~~ —— **已完成**：`afk reconcile` 与 `afk backlog confirm-merge` 先经 ChangePort 验证外部 PR/MR 已合并且目标正确，再追加 `change.merge_verified` 事件并把工作项推进到 `done`。
 5. 持续让 Workflow/QA 通过 core `ExecutionBasePolicy` 使用 `baseBacklogId`，不得用 `parentId` 或 `dependsOn` 推断 Git 基线。
 6. 执行隔离 GitHub/GitLab 真实 E2E：Issue → claim → agent → QA → PR/MR → human merge → dependency unlock → timeline → dry-run replay。
 

@@ -9,7 +9,8 @@ Pick the mode based on **where the test runs**, not on the auth scheme:
 | **CI** — no interactive login, scripted setup only | `storage-state` |
 
 Never silently fall back between modes. The selected mode's fixture is
-copied into the target project as `fixtures/browser-session.ts`.
+copied into the target project under `fixtures/` as `browser-session.ts`,
+from the matching template in `../../templates/fixtures/`.
 
 ## Mode Selection (Fail-Closed)
 
@@ -30,20 +31,20 @@ into isolated contexts for each test.
 
 ### Setup (one of the following, selected during generation)
 
-**API setup** (`setup/auth-api.setup.ts`):
+**API setup** (`auth-api.setup.ts` under `setup/`, from `../../templates/setup/auth-api.setup.ts`):
 - Use `request.newContext()` to call the discovered login endpoint.
 - Call `request.storageState({ path: AUTH_STATE_FILE })` to persist.
 - Enable `indexedDB: true` only when the application stores auth tokens in
   IndexedDB (e.g., Firebase Authentication).
 
-**UI setup** (`setup/auth-ui.setup.ts`):
+**UI setup** (`auth-ui.setup.ts` under `setup/`, from `../../templates/setup/auth-ui.setup.ts`):
 - Navigate to the login page, fill credentials, submit.
 - Wait for the post-login URL or stable authenticated UI element.
 - Call `page.context().storageState({ path: AUTH_STATE_FILE })`.
 
 ### Generated Fixture
 
-`fixtures/browser-session.ts` exposes `sessionContext` and `sessionPage`
+The generated `browser-session.ts` fixture exposes `sessionContext` and `sessionPage`
 as aliases for the Playwright built-in isolated context/page. The config
 loads `AUTH_STATE_FILE` via `use.storageState`.
 
@@ -99,7 +100,7 @@ in the profile directory and reused across runs without re-auth.
 
 ### Generated Fixture
 
-`fixtures/browser-session.ts`:
+The generated `browser-session.ts` fixture:
 
 - Reads `CDP_ENDPOINT` (required, default `http://127.0.0.1:9222`).
 - Validates the endpoint: `http` or `ws` protocol, explicit port, no

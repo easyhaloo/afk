@@ -1,3 +1,7 @@
+> **归档说明（2026-10-20）**：本蓝图**已被采纳并完整实现**为 `packages/afk-workflow-graph/`（`ir.ts` / `project.ts` / `normalize.ts` / `layout.ts` / `routing.ts` / `validate.ts` / `receipt.ts`），命令入口为 `afk graph workflow`。
+> 与原提案的偏差（实现时确认为有意为之）：适配器落在 `packages/afk-execution/src/application/visualizations/workflow-graph.ts`，未创建 `theme.ts`，未落地 `desktop-client/src/workflow-graph/` 界面。
+> 保留本文作为"已采纳蓝图"的设计依据；**当前架构说明见 [`docs/architecture/overview.md`](../../architecture/overview.md)。**
+
 # AFK Native Graph Engine：以 TypeScript 内建 Archify 式可验证工作流图能力
 
 **作者：Manus AI**  

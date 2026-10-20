@@ -62,7 +62,7 @@ terminal.
   selectable) to clipboard as a Markdown table suitable for pasting
   into a ticket.
 - **US4.** As an operator, when the run-log section is empty, it shows
-  a hint pointing at `afk observe timeline --runId <id>` for manual
+  a hint pointing at `afk observe timeline <runId>` for manual
   diagnosis (so the feature degrades to "give me the terminal command"
   instead of "blank").
 

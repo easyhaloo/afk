@@ -2,6 +2,12 @@
 
 按读者 × 生命周期组织。仓库根的 `README.md` / `CLAUDE.md` 仍然是入口。
 
+## 上手（getting-started/）
+
+| 文档 | 说明 |
+|---|---|
+| [getting-started.md](getting-started.md) | 安装、配置与第一个工作项 |
+
 ## 架构（architecture/）
 
 | 文档 | 说明 |
@@ -13,7 +19,10 @@
 | [design-system.md](architecture/design-system.md) | Desktop 设计标准 |
 | [glossary.md](architecture/glossary.md) | 领域词汇表（原仓库根 `CONTEXT.md`） |
 | [full-workflow-e2e-architecture.md](architecture/full-workflow-e2e-architecture.md) | 任务派发、Loop、模板与 QA 闭环的 E2E 架构和证据规范 |
-| [blueprints/](architecture/blueprints/) | 蓝图与未采纳方案（草稿） |
+| [blueprints/](architecture/blueprints/) | 仍在生效的提案（草稿）：见各文件抬头 |
+
+`blueprints/` 只保留**尚未被采纳也未被否决**的提案。已被实现或已被否决的蓝图会移入
+`docs/_archive/blueprints/`，并在归档件抬头写明结论。
 
 ## 指南（guides/）
 
@@ -36,6 +45,10 @@
 | [0017](adr/0017-capability-profiles-and-ports.md) | Capability profiles and ports | accepted |
 | [0018](adr/0018-evidence-classification-and-redaction.md) | Evidence classification and redaction | accepted |
 | [0019](adr/0019-desktop-run-log-viewer-projection.md) | Shared execution views and interactive tmux access | in progress |
+| [0020](adr/0020-backlog-item-drop-singular-change-request.md) | Backlog item drop = singular change request | proposed |
+| [0021](adr/0021-package-boundaries-and-in-process-desktop.md) | Package boundaries and the in-process desktop client | accepted |
+
+编号自 0014 起；0002–0013 从未被分配（见 `adr/README.md`）。
 
 ## 产品与研究
 
@@ -43,17 +56,18 @@
 |---|---|
 | [product/PRD.md](product/PRD.md) | 产品需求文档 |
 | [product/PRD-retro-feedback-loop.md](product/PRD-retro-feedback-loop.md) | AFK 执行复盘反馈闭环 PRD |
+| [product/PRD-work-items-reverse-sort-2026-10-15.md](product/PRD-work-items-reverse-sort-2026-10-15.md) | 工作项倒序排序 PRD（**部分实现**） |
 | [research/](research/) | 研究材料与方法论文档 |
 
-## 决策日志
+## 文档治理
 
 | 路径 | 内容 |
 |---|---|
-| [decisions/](decisions/) | 阶段性决策记录（observability harness 历史基线等） |
+| [superpowers/plans/2026-10-20-outdated-docs-cleanup-plan.md](superpowers/plans/2026-10-20-outdated-docs-cleanup-plan.md) | 过时文档盘点与清理计划（分级处置清单、时序与验收标准） |
 
 ## 归档
 
-`_archive/` 下保留历史材料，不在主文档流中：
+`_archive/` 下保留历史材料。**归档件描述的是当时的仓库，不是当前指引**：
 
 | 路径 | 内容 |
 |---|---|
@@ -61,6 +75,8 @@
 | `_archive/design-demos/` | 历史 design demo 与截图 |
 | `_archive/superpowers/plans/` | 过去的实施计划 |
 | `_archive/superpowers/specs/` | 过去的设计规格 |
+| `_archive/blueprints/` | 已被实现或已被否决的蓝图 |
+| `_archive/decisions/` | 针对已不存在的代码结构的阶段性调研 |
 
 ## 可观测性 profile 示例
 
@@ -70,4 +86,5 @@
 
 ## 双语版本
 
-英文为主语言的文件提供 `_zh` 平铺版本（例：`overview.md` / `overview.zh.md`）。
+英文为主语言的文件提供 `_zh` 平译版本（例：`overview.md` / `overview.zh.md`）。
+两版必须同步更新——改一份就改另一份。

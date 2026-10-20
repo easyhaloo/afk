@@ -104,66 +104,56 @@ Agents should no longer actively write control signals via prompt. The new contr
 
 Old signal compatible reading is preserved during migration.
 
-## 3. Target Directory Structure
+## 3. Directory Structure
 
 ```text
-src/lib/
-├── agents/
-│   ├── types.ts
-│   ├── provider.ts
-│   ├── registry.ts
-│   ├── runner.ts
-│   ├── claude-code.ts
-│   ├── codex.ts
-│   ├── cursor.ts
-│   ├── pi.ts
-│   ├── opencode.ts
-│   └── copilot.ts
+packages/
+├── afk-core/                     # 纯领域：模型、reducer、事件、端口；无 Node/Electron/DOM 依赖
+│   └── src/
+│       ├── model.ts
+│       ├── reducer.ts
+│       ├── events.ts
+│       ├── ports.ts
+│       └── execution-base-policy.ts
 │
-├── sandbox/
-│   ├── types.ts
-│   ├── factory.ts
-│   ├── registry.ts
-│   ├── local.ts
-│   ├── docker.ts
-│   └── podman.ts
+├── afk-application/              # 用例层：只允许依赖 @afk/core
+│   └── src/
+│       ├── backlog/
+│       ├── tracker/
+│       └── work-items/
 │
-├── execution/
-│   ├── types.ts
-│   ├── events.ts
-│   ├── handle.ts
-│   ├── process.ts
-│   ├── lifecycle.ts
-│   └── errors.ts
+├── afk-infrastructure/           # 基础设施：可依赖 core 与 application
+│   └── src/
+│       ├── backlog/
+│       ├── branches/             # base、issue、named、merge-to-head、existing
+│       ├── git/
+│       ├── io/
+│       ├── observability/
+│       ├── provider/
+│       ├── shared/
+│       └── tracker/
 │
-├── sessions/
-│   ├── types.ts
-│   ├── store.ts
-│   ├── local.ts
-│   ├── file-transfer.ts
-│   └── handoff.ts
+├── afk-execution/                # 执行运行时：可依赖 core、application、infrastructure、workflow-graph
+│   └── src/
+│       ├── application/          # agents、loop、modules、plugins、runtime、sessions、visualizations、workflows
+│       ├── domain/               # agents、templates
+│       ├── infrastructure/       # config、git、observability、process、runtime、sandbox、tmux
+│       ├── observability/
+│       └── shared/
 │
-├── branches/
-│   ├── types.ts
-│   ├── strategy.ts
-│   ├── issue.ts
-│   ├── named.ts
-│   ├── merge-to-head.ts
-│   └── existing.ts
-│
-└── templates/
-    ├── types.ts
-    ├── registry.ts
-    ├── loader.ts
-    └── builtin/
-        ├── issue-implementation/
-        ├── simple-loop/
-        ├── sequential-review/
-        ├── parallel-planner/
-        └── planner-with-review/
+└── afk-workflow-graph/           # 图引擎：ir、project、normalize、layout、routing、validate、receipt
+    └── src/
+
+src/                             # 根层：CLI 与 TUI
+├── cli/                         # Commander 装配与命令注册表
+├── views/                       # Ink TUI
+├── coordinator/
+├── plugin-sdk/
+├── shared/
+└── types/
 ```
 
-Existing `WorktreeManager`, `TmuxClient`, `WorkflowRunner`, `HandoffCoordinator`, and `Watchdog` are connected via adapters first, without large-scale file reorganization.
+The five package roots above are the enforced boundary (`pnpm architecture:check --check-packages`). `core` depends on nothing, `application` may reach only `@afk/core`, `infrastructure` may reach core and application, and `execution` may reach core, application, infrastructure, and `@afk/workflow-graph`. `WorktreeManager`, `TmuxClient`, `WorkflowRunner`, `HandoffCoordinator`, and `Watchdog` are wired through adapters inside `packages/afk-execution/`.
 
 ## 4. Core Interfaces
 
@@ -376,11 +366,12 @@ Run state directory:
 ├── request.json
 ├── events.jsonl
 ├── result.json
-├── output.log
-└── handoff/
-    ├── handoff-1.md
-    └── handoff-2.md
+└── output.log
 ```
+
+Handoff recovery documents are not part of the run directory. They are written
+to `<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
+(`packages/afk-execution/src/application/workflows/handoff.ts`).
 
 Session files must use temp files, checksums, and atomic rename to avoid new generation reading half-written JSONL.
 
@@ -468,6 +459,7 @@ Built-in templates:
 
 ```text
 issue-implementation
+pre-merge-qa-verification
 simple-loop
 sequential-review
 parallel-planner
@@ -491,13 +483,13 @@ CLI specified path → project-level .afk/workflows → user-level ~/.afk/workfl
 CLI example:
 
 ```bash
-afk workflow run \
-  --iid 42 \
-  --agent claude-code \
-  --sandbox local \
-  --branch-strategy issue \
-  --template issue-implementation
+afk run --backlog-id <id>
 ```
+
+`afk run` claims one ready backlog item and drives it through the template the
+item selects. The template is resolved by
+`packages/afk-execution/src/domain/templates/builtin.ts`; there is no
+`--template` flag on the CLI, and no `afk workflow` command group.
 
 Configuration example:
 
@@ -609,7 +601,7 @@ Acceptance: templates can express dependencies, conditions, execution modes, Age
 
 Prerequisite: all new workflows and default Provider use ExecutionResult.
 
-- Delete signal writing requirements from new prompts (`templates/builtin.ts`, `workflows.ts` phases)
+- Delete signal writing requirements from new prompts (`packages/afk-execution/src/domain/templates/builtin.ts`, the workflow phases)
 - Runner still reads signal as backward-compatible fallback (`packages/afk-execution/src/infrastructure/tmux/tmux.ts`)
 - Clean up legacy signal CLI/schema/tests (preserve readSignal/writeSignal/clearSignal + unit tests; CLI/skills have no independent signal subcommand yet)
 - Update skills, README, and architecture docs (`CLAUDE.md` contains Phase status table)
@@ -699,12 +691,12 @@ Also fix implementation drift in existing architecture docs:
 
 - Scheduler is actually an in-memory queue, not BullMQ/Redis
 - AC verification docs need to match current WorkflowRunner actual flow
-- Default timeout follows `src/lib/constants.ts`
+- Default timeout follows the `--hard-timeout` option of `afk run` (`src/cli/commands/run.ts`)
 
 ## 15. Final Architecture
 
 ```text
-afk workflow run
+afk run --backlog-id <id>
         │
         ▼
 WorkflowTemplate

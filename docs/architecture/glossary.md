@@ -26,8 +26,9 @@ and design discussions use these terms; keep them in lockstep with the code.
   `packages/afk-execution/src/application/workflows/watchdog.ts`.
 
 - **Signal** - The interactive agent/runner communication protocol via
-  `.afk-signal.json`: `goal_complete`, `ac_result`, `handoff_ready`, `timeout`,
-  `idle`. Batch agents use `ExecutionResult` instead. Context overflow is NOT a
+  `.afk-signal.json`: `goal_complete`, `handoff_ready`, `timeout`, `idle`.
+  Acceptance-criteria verification is not a separate signal kind: it is a
+  `goal_complete` whose `kind` is `ac_verification`. Batch agents use `ExecutionResult` instead. Context overflow is NOT a
   signal: the runner is the sole authority, polling statusline token usage
   directly. `packages/afk-infrastructure/src/io/signal.ts`.
 
@@ -48,3 +49,15 @@ and design discussions use these terms; keep them in lockstep with the code.
 
 - **@afk/application** - Use-case layer over @afk/core: execution, inventory,
   observation, provider-inventory. `packages/afk-application/`.
+
+- **@afk/infrastructure** - Adapters and ports implementations: git, tmux,
+  observability, provider clients. `packages/afk-infrastructure/`.
+
+- **@afk/execution** - The execution runtime: agents, sandbox, workflow engine,
+  sessions, and the `afk run` / `afk loop` / `afk qa` commands. It may reach
+  core, application, infrastructure, and @afk/workflow-graph.
+  `packages/afk-execution/`.
+
+- **@afk/workflow-graph** - The native graph engine: IR projection, layout,
+  routing, validation, and the `afk graph workflow` command.
+  `packages/afk-workflow-graph/`.

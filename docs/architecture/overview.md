@@ -36,9 +36,11 @@ import in a test or an E2E script is invisible to the build.
 
 ## Scope and command surface
 
-AFK executes backlog items that were already created and decomposed by an
-external planner. It does not create or split work. The command registry is the
-single source of truth for the supported surface:
+AFK executes backlog items that were already decomposed by an external
+planner. It does not decompose or split work into smaller items. Creating a
+backlog item is a management operation (`afk backlog create`), not part of the
+execution pipeline. The command registry is the single source of truth for the
+supported surface:
 
 | Command | Responsibility |
 | --- | --- |

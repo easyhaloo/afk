@@ -1,3 +1,7 @@
+> **归档说明（2026-10-20）**：本计划描述的分层结构（`src/domain/observability/retro-types.ts`、`src/application/retrospectives/*`、`src/infrastructure/observability/retro-*.ts` 共 17 个文件）**最终未按此实现**。复盘功能已上线，但实现形态是内联在 `src/cli/commands/retro.ts` 的单文件流程。
+> 归档原因：本仓库约定历史实施计划统一存放在 `docs/_archive/superpowers/plans/`，与本文件同批归档的其余 60 份计划保持一致。
+> **当前复盘能力说明见 [`docs/product/PRD-retro-feedback-loop.md`](../../../product/PRD-retro-feedback-loop.md)。**
+
 # Retro Feedback Loop Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

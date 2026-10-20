@@ -100,66 +100,56 @@ TUI 前移除开头的 `/goal` 命令前缀，将完整工作项正文和完成�
 
 迁移期间保留旧 signal 兼容读取。
 
-## 3. 目标目录结构
+## 3. 目录结构
 
 ```text
-src/lib/
-├── agents/
-│   ├── types.ts
-│   ├── provider.ts
-│   ├── registry.ts
-│   ├── runner.ts
-│   ├── claude-code.ts
-│   ├── codex.ts
-│   ├── cursor.ts
-│   ├── pi.ts
-│   ├── opencode.ts
-│   └── copilot.ts
+packages/
+├── afk-core/                     # 纯领域：模型、reducer、事件、端口；无 Node/Electron/DOM 依赖
+│   └── src/
+│       ├── model.ts
+│       ├── reducer.ts
+│       ├── events.ts
+│       ├── ports.ts
+│       └── execution-base-policy.ts
 │
-├── sandbox/
-│   ├── types.ts
-│   ├── factory.ts
-│   ├── registry.ts
-│   ├── local.ts
-│   ├── docker.ts
-│   └── podman.ts
+├── afk-application/              # 用例层：只允许依赖 @afk/core
+│   └── src/
+│       ├── backlog/
+│       ├── tracker/
+│       └── work-items/
 │
-├── execution/
-│   ├── types.ts
-│   ├── events.ts
-│   ├── handle.ts
-│   ├── process.ts
-│   ├── lifecycle.ts
-│   └── errors.ts
+├── afk-infrastructure/           # 基础设施：可依赖 core 与 application
+│   └── src/
+│       ├── backlog/
+│       ├── branches/             # base、issue、named、merge-to-head、existing
+│       ├── git/
+│       ├── io/
+│       ├── observability/
+│       ├── provider/
+│       ├── shared/
+│       └── tracker/
 │
-├── sessions/
-│   ├── types.ts
-│   ├── store.ts
-│   ├── local.ts
-│   ├── file-transfer.ts
-│   └── handoff.ts
+├── afk-execution/                # 执行运行时：可依赖 core、application、infrastructure、workflow-graph
+│   └── src/
+│       ├── application/          # agents、loop、modules、plugins、runtime、sessions、visualizations、workflows
+│       ├── domain/               # agents、templates
+│       ├── infrastructure/       # config、git、observability、process、runtime、sandbox、tmux
+│       ├── observability/
+│       └── shared/
 │
-├── branches/
-│   ├── types.ts
-│   ├── strategy.ts
-│   ├── issue.ts
-│   ├── named.ts
-│   ├── merge-to-head.ts
-│   └── existing.ts
-│
-└── templates/
-    ├── types.ts
-    ├── registry.ts
-    ├── loader.ts
-    └── builtin/
-        ├── issue-implementation/
-        ├── simple-loop/
-        ├── sequential-review/
-        ├── parallel-planner/
-        └── planner-with-review/
+└── afk-workflow-graph/           # 图引擎：ir、project、normalize、layout、routing、validate、receipt
+    └── src/
+
+src/                             # 根层：CLI 与 TUI
+├── cli/                         # Commander 装配与命令注册表
+├── views/                       # Ink TUI
+├── coordinator/
+├── plugin-sdk/
+├── shared/
+└── types/
 ```
 
-现有 `WorktreeManager`、`TmuxClient`、`WorkflowRunner`、`HandoffCoordinator` 和 `Watchdog` 先通过 adapter 接入，不进行大规模文件移动。
+上述五个包根是强制的边界（`pnpm architecture:check --check-packages`）：`core` 不依赖任何包，`application` 只能依赖 `@afk/core`，`infrastructure` 可依赖 core 与 application，`execution` 可依赖 core、application、infrastructure 与 `@afk/workflow-graph`。`WorktreeManager`、`TmuxClient`、`WorkflowRunner`、`HandoffCoordinator` 和 `Watchdog` 通过 adapter 接入 `packages/afk-execution/`。
 
 ## 4. 核心接口
 
@@ -372,11 +362,12 @@ Docker socket
 ├── request.json
 ├── events.jsonl
 ├── result.json
-├── output.log
-└── handoff/
-    ├── handoff-1.md
-    └── handoff-2.md
+└── output.log
 ```
+
+交接恢复文档不属于 run 目录，它写入
+`<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
+（`packages/afk-execution/src/application/workflows/handoff.ts`）。
 
 Session 文件必须使用临时文件、校验和原子 rename，避免新 generation 读取半截 JSONL。
 
@@ -464,6 +455,7 @@ steps:
 
 ```text
 issue-implementation
+pre-merge-qa-verification
 simple-loop
 sequential-review
 parallel-planner
@@ -487,13 +479,12 @@ CLI 指定路径 → 项目级 .afk/workflows → 用户级 ~/.afk/workflows →
 CLI 示例：
 
 ```bash
-afk workflow run \
-  --iid 42 \
-  --agent claude-code \
-  --sandbox local \
-  --branch-strategy issue \
-  --template issue-implementation
+afk run --backlog-id <id>
 ```
+
+`afk run` 认领一个 ready 状态的 backlog 项，并按该项选定的模板推进执行。模板由
+`packages/afk-execution/src/domain/templates/builtin.ts` 解析；CLI 上没有
+`--template` 选项，也不存在 `afk workflow` 命令组。
 
 配置示例：
 
@@ -605,7 +596,7 @@ workflow:
 
 前提：所有新 workflow 和默认 Provider 已使用 ExecutionResult。
 
-- ✅ 删除新 prompt 中的 signal 写入要求 (`templates/builtin.ts`, `workflows.ts` phases)
+- ✅ 删除新 prompt 中的 signal 写入要求 (`packages/afk-execution/src/domain/templates/builtin.ts` 与工作流阶段)
 - ✅ Runner 仍读取 signal 作为向后兼容 fallback (`packages/afk-execution/src/infrastructure/tmux/tmux.ts`)
 - ⏳ 清理 legacy signal CLI/schema/tests（保留 readSignal/writeSignal/clearSignal + 单元测试；CLI/技能暂无独立 signal 子命令）
 - ✅ 更新 skills、README 和架构文档（`CLAUDE.md` 含 Phase 状态表）
@@ -695,12 +686,12 @@ Issue
 
 - Scheduler 实际是内存队列，不是 BullMQ/Redis
 - AC 验证文档需要与当前 WorkflowRunner 实际流程一致
-- 默认 timeout 以 `src/lib/constants.ts` 为准
+- 默认 timeout 以 `afk run` 的 `--hard-timeout` 选项为准（`src/cli/commands/run.ts`）
 
 ## 15. 最终架构
 
 ```text
-afk workflow run
+afk run --backlog-id <id>
         │
         ▼
 WorkflowTemplate

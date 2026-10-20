@@ -30,7 +30,7 @@ Node 内建模块。该守卫同时禁止泛型 record 和遗留 client-factory 
 
 ## 范围与命令
 
-AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创建或拆分任务。
+AFK 执行外部规划器已经拆分好的 backlog 工作项，不负责把工作项再拆分成更小的任务。创建 backlog 工作项属于管理操作（`afk backlog create`），不在执行流水线内。
 命令注册表是唯一命令来源：
 
 | 命令 | 职责 |

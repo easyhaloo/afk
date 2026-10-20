@@ -42,23 +42,48 @@ export async function readJsonFile<T>(
 }
 
 /**
- * Writes data to a JSON file atomically: mkdir 0o700, tmp file, mode 0o600, rename, chmod, rm tmp on error.
+ * Write a file atomically: a reader sees either the old file or the new
+ * one, never half of either.
+ *
+ * The rule every store follows, in one place:
+ *
+ *   - the directory is created 0o700 and then tightened to 0o700, so a
+ *     directory that already existed with looser permissions does not keep
+ *     them;
+ *   - the content goes to a temporary file created 0o600 and tightened to
+ *     0o600 *before* the rename;
+ *   - the rename is the atomic step, and nothing fallible happens after
+ *     it.  A chmod that failed there would report a write that had
+ *     already succeeded as a failure, and the caller would retry it.
  */
-export async function writeJsonFileAtomic(
+async function writeFileAtomic(
   file: string,
-  data: unknown,
-  fileSystem: Pick<typeof fs, "chmod" | "mkdir" | "rename" | "rm" | "writeFile"> = fs,
+  contents: string,
+  fileSystem: FileSystem,
 ): Promise<void> {
-  await fileSystem.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  const directory = path.dirname(file);
+  await fileSystem.mkdir(directory, { recursive: true, mode: 0o700 });
+  await fileSystem.chmod(directory, 0o700);
   const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await fileSystem.writeFile(temporary, `${JSON.stringify(data)}\n`, { encoding: "utf8", mode: 0o600 });
+    await fileSystem.writeFile(temporary, contents, { encoding: "utf8", mode: 0o600 });
     await fileSystem.chmod(temporary, 0o600);
     await fileSystem.rename(temporary, file);
   } catch (error) {
     await fileSystem.rm(temporary, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * Writes data to a JSON file atomically: mkdir 0o700, tmp file, mode 0o600, rename.
+ */
+export async function writeJsonFileAtomic(
+  file: string,
+  data: unknown,
+  fileSystem: FileSystem = fs as FileSystem,
+): Promise<void> {
+  await writeFileAtomic(file, `${JSON.stringify(data)}\n`, fileSystem);
 }
 
 /**
@@ -84,22 +109,12 @@ export async function readYamlFile<T>(
 }
 
 /**
- * Writes data to a YAML file atomically: mkdir 0o700, tmp file, mode 0o600, rename, chmod, rm tmp on error.
+ * Writes data to a YAML file atomically: mkdir 0o700, tmp file, mode 0o600, rename.
  */
 export async function writeYamlFileAtomic(
   file: string,
   data: unknown,
   fileSystem: FileSystem = fs as FileSystem,
 ): Promise<void> {
-  await fileSystem.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await fileSystem.writeFile(temporary, dumpYaml(data, { noRefs: true, lineWidth: -1 }), { encoding: "utf8", mode: 0o600 });
-    await fileSystem.chmod(temporary, 0o600);
-    await fileSystem.rename(temporary, file);
-    await fileSystem.chmod(file, 0o600);
-  } catch (error) {
-    await fileSystem.rm(temporary, { force: true }).catch(() => undefined);
-    throw error;
-  }
+  await writeFileAtomic(file, dumpYaml(data, { noRefs: true, lineWidth: -1 }), fileSystem);
 }

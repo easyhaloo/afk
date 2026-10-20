@@ -5,9 +5,8 @@ import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import type { ManagedSshHostInput, ManagedSshHostRecord } from "../../shared/ssh-contract.js";
 import { validateSshHostInput, validateSshHostId } from "../security/ssh-validation.js";
 import { createMutex } from "../lib/async-mutex.js";
-import { writeYamlFileAtomic } from "../lib/secure-store.js";
+import { writeYamlFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
 
-type FileSystem = Pick<typeof fs, "chmod" | "mkdir" | "readFile" | "rename" | "rm" | "writeFile">;
 
 type StoreDocument = {
   version: 1;
@@ -16,7 +15,7 @@ type StoreDocument = {
 
 type StoreOptions = {
   file: string;
-  fileSystem?: FileSystem;
+  fileSystem?: AtomicFileSystem;
   createId?: () => string;
 };
 
@@ -36,7 +35,7 @@ function parseDocument(value: unknown): StoreDocument {
   return { version: 1, hosts };
 }
 
-async function readDocument(fileSystem: FileSystem, file: string): Promise<StoreDocument> {
+async function readDocument(fileSystem: AtomicFileSystem, file: string): Promise<StoreDocument> {
   let raw: string;
   try {
     raw = await fileSystem.readFile(file, "utf8");
@@ -52,13 +51,7 @@ async function readDocument(fileSystem: FileSystem, file: string): Promise<Store
   }
 }
 
-async function writeDocument(
-  fileSystem: Pick<typeof fs, "chmod" | "mkdir" | "rename" | "rm" | "writeFile">,
-  file: string,
-  document: StoreDocument,
-) {
-  await writeYamlFileAtomic(file, document, fileSystem);
-}
+
 
 export function createSshManagedHostStore({ file, fileSystem = fs, createId = () => `managed:${randomUUID()}` }: StoreOptions) {
   const mutex = createMutex<void>();
@@ -74,7 +67,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
       const existing = document.hosts.find((item) => item.alias === input.alias);
       const record = { ...input, id: existing?.id || createId() };
       const hosts = existing ? document.hosts.map((item) => item.id === existing.id ? record : item) : [...document.hosts, record];
-      await writeDocument(fileSystem, file, { version: 1, hosts });
+      await writeYamlFileAtomic(file, { version: 1, hosts });
       return record;
     });
   }
@@ -87,7 +80,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
       if (!document.hosts.some((item) => item.id === hostId)) throw new Error("SSH 主机不存在");
       if (document.hosts.some((item) => item.id !== hostId && item.alias === input.alias)) throw new Error("SSH 主机名称已存在");
       const record = { ...input, id: hostId };
-      await writeDocument(fileSystem, file, { version: 1, hosts: document.hosts.map((item) => item.id === hostId ? record : item) });
+      await writeYamlFileAtomic(file, { version: 1, hosts: document.hosts.map((item) => item.id === hostId ? record : item) }, fileSystem);
       return record;
     });
   }
@@ -98,7 +91,7 @@ export function createSshManagedHostStore({ file, fileSystem = fs, createId = ()
       const document = await readDocument(fileSystem, file);
       const hosts = document.hosts.filter((item) => item.id !== hostId);
       if (hosts.length === document.hosts.length) return false;
-      await writeDocument(fileSystem, file, { version: 1, hosts });
+      await writeYamlFileAtomic(file, { version: 1, hosts }, fileSystem);
       return true;
     });
   }

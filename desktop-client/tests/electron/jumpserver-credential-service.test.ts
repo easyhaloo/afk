@@ -93,7 +93,22 @@ describe("Jumpserver credential service", () => {
     expect([...deps.files.values()].some((content) => content.includes("first") || content.includes("second"))).toBe(false);
     expect(deps.fileSystem.rename).toHaveBeenCalled();
     expect(deps.fileSystem.chmod).toHaveBeenCalledWith("/home/test/.config/afk", 0o700);
-    expect(deps.fileSystem.chmod).toHaveBeenCalledWith("/home/test/.config/afk/jumpserver-credentials.json", 0o600);
+    // The file ends up 0o600.  It gets there before the rename, not after it.
+    expect(deps.modes.get("/home/test/.config/afk/jumpserver-credentials.json")).toBe(0o600);
+  });
+
+  it("does not run a fallible chmod after the atomic rename", async () => {
+    const deps = dependencies();
+    // A chmod that failed once the rename had happened would report a write
+    // that had already succeeded as a failure, and the caller would retry it.
+    deps.fileSystem.chmod.mockImplementation(async (file: string) => {
+      if (file === "/home/test/.config/afk/jumpserver-credentials.json") throw new Error("post-rename chmod failed");
+      return undefined;
+    });
+    const service = createJumpserverCredentialStore({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+
+    await expect(service.set("bastion:one", "first", targetOne)).resolves.toBe(true);
+    await expect(service.get("bastion:one", targetOne)).resolves.toEqual({ password: "first" });
   });
 
   it("serializes concurrent writes so both credentials survive", async () => {

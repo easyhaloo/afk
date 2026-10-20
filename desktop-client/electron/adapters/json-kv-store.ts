@@ -1,6 +1,5 @@
 import { promises as fs } from "node:fs";
-import { randomUUID } from "node:crypto";
-import path from "node:path";
+import { writeJsonFileAtomic } from "../lib/secure-store.js";
 
 export type JsonKvStore<T> = {
   read(key: string): Promise<T | null>;
@@ -71,16 +70,7 @@ export function createJsonKvStore<T>({ file, version, parseEntry }: StoreOptions
   }
 
   async function writeDocument(document: StoreDocument): Promise<void> {
-    await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      await fs.writeFile(temporary, `${JSON.stringify(document)}\n`, { encoding: "utf8", mode: 0o600 });
-      await fs.chmod(temporary, 0o600);
-      await fs.rename(temporary, file);
-    } catch (error) {
-      await fs.rm(temporary, { force: true }).catch(() => undefined);
-      throw error;
-    }
+    await writeJsonFileAtomic(file, document);
   }
 
   function mutate<Result>(operation: () => Promise<Result>): Promise<Result> {

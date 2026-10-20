@@ -3,7 +3,7 @@ import { isValidCredentialSecret } from "../security/credential-validation.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createMutex } from "../lib/async-mutex.js";
-import type { AtomicFileSystem } from "../lib/secure-store.js";
+import { writeJsonFileAtomic, type AtomicFileSystem } from "../lib/secure-store.js";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "jumpserver-credentials.json");
 
@@ -120,17 +120,7 @@ export function createJumpserverCredentialStore({ home, safeStorage, fileSystem 
 
   async function writeDocument(document: CredentialDocument) {
     assertAvailable();
-    await fileSystem.mkdir(directory, { recursive: true, mode: 0o700 });
-    await fileSystem.chmod(directory, 0o700);
-    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-    try {
-      await fileSystem.writeFile(temporary, `${JSON.stringify(document)}\n`, { encoding: "utf8", mode: 0o600 });
-      await fileSystem.rename(temporary, file);
-      await fileSystem.chmod(file, 0o600);
-    } catch (error) {
-      await fileSystem.rm(temporary, { force: true }).catch(() => undefined);
-      throw error;
-    }
+    await writeJsonFileAtomic(file, document, fileSystem);
   }
 
   async function has(bastionId: string, target: JumpserverCredentialTarget) {

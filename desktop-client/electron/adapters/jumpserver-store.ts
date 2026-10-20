@@ -62,13 +62,7 @@ async function readDocument(fileSystem: Pick<AtomicFileSystem, "readFile">, file
   }
 }
 
-async function writeDocument(
-  fileSystem: Pick<AtomicFileSystem, "chmod" | "mkdir" | "rename" | "rm" | "writeFile">,
-  file: string,
-  document: StoreDocument,
-) {
-  await writeYamlFileAtomic(file, document, fileSystem);
-}
+
 
 export function createJumpserverStore({
   file,
@@ -99,7 +93,7 @@ export function createJumpserverStore({
       const bastions = existing
         ? document.bastions.map((b) => (b.id === existing.id ? record : b))
         : [...document.bastions, record];
-      await writeDocument(fileSystem, file, { version: 1, bastions });
+      await writeYamlFileAtomic(file, { version: 1, bastions }, fileSystem);
       return record;
     });
   }
@@ -110,10 +104,10 @@ export function createJumpserverStore({
       const existing = document.bastions.find((b) => b.id === id);
       if (!existing) throw new Error("堡垒机不存在");
       const record: BastionRecord = { ...existing, ...partial, id: existing.id };
-      await writeDocument(fileSystem, file, {
+      await writeYamlFileAtomic(file, {
         version: 1,
         bastions: document.bastions.map((b) => (b.id === id ? record : b)),
-      });
+      }, fileSystem);
       return record;
     });
   }
@@ -123,7 +117,7 @@ export function createJumpserverStore({
       const document = await readDocument(fileSystem, file);
       if (!document.bastions.some((b) => b.id === id)) return false;
       const bastions = document.bastions.filter((b) => b.id !== id);
-      await writeDocument(fileSystem, file, { version: 1, bastions });
+      await writeYamlFileAtomic(file, { version: 1, bastions }, fileSystem);
       return true;
     });
   }

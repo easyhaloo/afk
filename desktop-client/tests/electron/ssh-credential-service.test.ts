@@ -60,7 +60,22 @@ describe("SSH credential service", () => {
     expect([...deps.files.values()].some((content) => content.includes("p@ssword") || content.includes("another"))).toBe(false);
     expect(deps.fileSystem.rename).toHaveBeenCalled();
     expect(deps.fileSystem.chmod).toHaveBeenCalledWith("/home/test/.config/afk", 0o700);
-    expect(deps.fileSystem.chmod).toHaveBeenCalledWith("/home/test/.config/afk/ssh-credentials.json", 0o600);
+    // The file ends up 0o600.  It gets there before the rename, not after it.
+    expect(deps.modes.get("/home/test/.config/afk/ssh-credentials.json")).toBe(0o600);
+  });
+
+  it("does not run a fallible chmod after the atomic rename", async () => {
+    const deps = dependencies();
+    // A chmod that failed once the rename had happened would report a write
+    // that had already succeeded as a failure, and the caller would retry it.
+    deps.fileSystem.chmod.mockImplementation(async (file: string) => {
+      if (file === "/home/test/.config/afk/ssh-credentials.json") throw new Error("post-rename chmod failed");
+      return undefined;
+    });
+    const service = createSshCredentialService({ home: "/home/test", safeStorage: deps.safeStorage, fileSystem: deps.fileSystem });
+
+    await expect(service.set("managed:one", "p@ssword", targetOne)).resolves.toBe(true);
+    await expect(service.get("managed:one", targetOne)).resolves.toBe("p@ssword");
   });
 
   it("removes one host credential without affecting another host", async () => {

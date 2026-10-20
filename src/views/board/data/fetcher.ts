@@ -3,7 +3,7 @@ import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecor
 import type { BacklogItem } from '@afk/application';
 import { createGitLabTracker } from '@afk/infrastructure';
 import { resolveGitLabProject } from '@afk/infrastructure';
-import type { Project, Branch, Tag, Commit } from '@afk/application';
+import type { Project, Branch, Tag, Commit, TrackerProjectReader } from '@afk/application';
 import { fileLogger } from '@afk/infrastructure';
 import { projectWorkItems } from './work-item-projection.js';
 
@@ -103,7 +103,7 @@ export async function fetchGitLabProjects(options: { page?: number; perPage?: nu
 
   // Use projectId if available, otherwise fallback to first accessible project
   const effectiveProjectId = projectId || 'glab';
-  const client = new (await import('@afk/infrastructure')).GitLabClient({
+  const client: TrackerProjectReader = new (await import('@afk/infrastructure')).GitLabClient({
     url,
     token,
     projectId: effectiveProjectId,
@@ -124,8 +124,14 @@ export async function fetchProjects(options: { page?: number; perPage?: number }
   }
 }
 
-export async function fetchProjectDetail(projectId: number): Promise<{ branches: Branch[]; tags: Tag[]; commits: Commit[] }> {
-  const client = await createGitLabTracker();
+export async function fetchProjectDetail(
+  projectId: number,
+  read?: TrackerProjectReader,
+): Promise<{ branches: Branch[]; tags: Tag[]; commits: Commit[] }> {
+  // The board reads a project's branches, tags and commits — nothing else
+  // of the tracker.  The reader is a parameter so the board's dependency
+  // on a tracker is the one it declares.
+  const client: TrackerProjectReader = read ?? await createGitLabTracker();
   const [branches, tags, commits] = await Promise.all([
     client.getBranches(projectId),
     client.getTags(projectId),

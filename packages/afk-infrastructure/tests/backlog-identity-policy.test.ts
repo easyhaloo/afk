@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TrackerBacklogProvider } from '../src/backlog/tracker-adapter.js';
 import { InventoryBacklogProvider } from '../src/application/work-items/inventory-backlog-provider.js';
-import type { ProviderCatalog, ProviderProjectRef, TrackerProvider, TrackedIssue } from '@afk/application';
+import type { ProviderCatalog, ProviderProjectRef, TrackerIssueOperations, TrackerMergeReader, TrackedIssue } from '@afk/application';
 
 const PROJECT: ProviderProjectRef = {
   platform: 'github',
@@ -16,7 +16,7 @@ interface IssueSeed {
   readonly state?: TrackedIssue['state'];
 }
 
-function trackerOf(seeds: readonly IssueSeed[]): TrackerProvider {
+function trackerOf(seeds: readonly IssueSeed[]): TrackerIssueOperations & TrackerMergeReader {
   const issues: TrackedIssue[] = seeds.map(seed => ({
     id: seed.id,
     platform: 'github',
@@ -37,7 +37,7 @@ function trackerOf(seeds: readonly IssueSeed[]): TrackerProvider {
     }),
     listIssues: vi.fn(async () => issues.map(issue => ({ ...issue }))),
     listMRs: vi.fn(async () => []),
-  } as unknown as TrackerProvider;
+  } as unknown as TrackerIssueOperations & TrackerMergeReader;
 }
 
 function catalogOf(seeds: readonly IssueSeed[]): ProviderCatalog {

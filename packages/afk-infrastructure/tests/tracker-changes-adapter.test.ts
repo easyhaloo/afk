@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { BacklogItem, TrackerProvider } from '@afk/application';
+import type { BacklogItem, TrackerMergeReader, TrackerMergeWriter } from '@afk/application';
 import { renderChangeDescription, TrackerChangeProvider } from '../src/tracker/changes/tracker-adapter.js';
 
 describe('TrackerChangeProvider', () => {
@@ -21,7 +21,7 @@ describe('TrackerChangeProvider', () => {
       platform: 'github', projectId: 'owner/code',
       createMR: vi.fn().mockResolvedValue(9),
       getMR: vi.fn().mockResolvedValue({ id: 9, state: 'opened', sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' }),
-    } as unknown as TrackerProvider;
+    } as unknown as TrackerMergeReader & TrackerMergeWriter;
     await new TrackerChangeProvider(tracker).create({
       backlog: { id: '158', title: 'Item', description: '# PRD secret', workItemId: 'github:owner/issues#158' } as BacklogItem,
       sourceBranch: 'qa', targetBranch: 'main',
@@ -34,7 +34,7 @@ describe('TrackerChangeProvider', () => {
       platform: 'github', projectId: 'owner/code',
       getMR: vi.fn().mockResolvedValue({ id: 9, state: 'opened', sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' }),
       isMRLinkedToIssue: vi.fn().mockResolvedValue(true),
-    } as unknown as TrackerProvider;
+    } as unknown as TrackerMergeReader & TrackerMergeWriter;
     const change = { id: '9', state: 'open' as const, sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' };
     const provider = new TrackerChangeProvider(tracker);
     await expect(provider.verifyIssueAssociation(change, 'github:owner/issues#158')).resolves.toBeUndefined();
@@ -67,7 +67,7 @@ describe('TrackerChangeProvider', () => {
         targetBranch: 'main',
         url: 'https://example.test/pull/159',
       }),
-    } as unknown as TrackerProvider;
+    } as unknown as TrackerMergeReader & TrackerMergeWriter;
     const backlog = {
       id: '158',
       title: '工作项列表排序',
@@ -103,7 +103,7 @@ describe('TrackerChangeProvider', () => {
         mergeable: true,
         url: 'https://example.test/mr/9',
       }),
-    } as unknown as TrackerProvider;
+    } as unknown as TrackerMergeReader & TrackerMergeWriter;
     const backlog = { id: '42', branchName: 'afk/backlog-42' } as BacklogItem;
 
     await expect(new TrackerChangeProvider(tracker).findForBacklog(backlog)).resolves.toMatchObject({
@@ -129,7 +129,7 @@ describe('TrackerChangeProvider', () => {
         mergeable: true,
         url: 'https://example.test/mr/9',
       }),
-    } as unknown as TrackerProvider;
+    } as unknown as TrackerMergeReader & TrackerMergeWriter;
     const backlog = { id: '42', branchName: 'afk/backlog-42' } as BacklogItem;
 
     await expect(new TrackerChangeProvider(tracker).findForBacklog(backlog)).resolves.toMatchObject({

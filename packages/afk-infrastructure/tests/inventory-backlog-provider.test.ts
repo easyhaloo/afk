@@ -3,7 +3,7 @@ import { InventoryBacklogProvider, isProjectDetectionFailure } from '../src/appl
 import type { ProviderCatalog } from '@afk/application';
 import type { ProviderProjectRef } from '@afk/application';
 import { BACKLOG_METADATA } from '@afk/application';
-import type { TrackerProvider } from '@afk/application';
+import type { TrackerIssueReader } from '@afk/application';
 
 const project: ProviderProjectRef = {
   platform: 'github',
@@ -69,7 +69,7 @@ describe('InventoryBacklogProvider', () => {
   });
 
   it('resolves a canonical backlog id through a project-scoped tracker', async () => {
-    const tracker: TrackerProvider = {
+    const tracker: TrackerIssueReader = {
       platform: 'github',
       projectId: 'acme/app',
       getIssue: vi.fn(async () => ({
@@ -82,7 +82,7 @@ describe('InventoryBacklogProvider', () => {
         url: 'https://github.com/acme/app/issues/7',
         projectId: 'acme/app',
       })),
-    } as unknown as TrackerProvider;
+    } as unknown as TrackerIssueReader;
     const provider = new InventoryBacklogProvider({
       catalogs: () => [],
       trackerFor: async () => tracker,

@@ -3,7 +3,7 @@ import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
 import { TrackerBacklogProvider } from '@afk/infrastructure';
 import { parseReworkRecord } from '@afk/application';
-import type { TrackedIssue, TrackerProvider } from '@afk/application';
+import type { TrackedIssue, TrackerIssueOperations, TrackerMergeReader, TrackerMergeWriter } from '@afk/application';
 import type { ChangeRequest } from '@afk/infrastructure';
 import type { AgentCapability, AgentExecutionMetadata, ExecutionResult } from '../../domain/agents/types.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -98,7 +98,7 @@ function fixture() {
 function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttempts = 3) {
   const issue: TrackedIssue = { id: 60, platform, title: 'search mode', description: 'support /s', labels: ['stage::qa', 'mode::afk'], state: 'opened', projectId: 'org/repo', url: '' };
   const comments: Array<{ id: string; body: string }> = [];
-  const tracker: TrackerProvider = {
+  const tracker: TrackerIssueOperations & TrackerMergeReader & TrackerMergeWriter = {
     platform, projectId: 'org/repo',
     getIssue: vi.fn(async () => ({ ...issue, labels: [...issue.labels] })),
     listIssues: vi.fn(async () => [issue]),
@@ -120,14 +120,6 @@ function persistentReworkFixture(platform: 'github' | 'gitlab', maxQaReworkAttem
     createMR: vi.fn(async () => 0),
     mergeMR: vi.fn(async () => {}),
     closeMR: vi.fn(async () => {}),
-    listProjects: vi.fn(async () => []),
-    getBranches: vi.fn(async () => []),
-    getTags: vi.fn(async () => []),
-    getRecentCommits: vi.fn(async () => []),
-    parseAC: vi.fn(() => ({ items: [], source: 'none' as const })),
-    getRetryCount: vi.fn(() => 0),
-    detectTargetBranch: vi.fn(async () => 'main'),
-    uploadArtifacts: vi.fn(async () => ''),
   };
   const createRunner = () => {
     const f = fixture();

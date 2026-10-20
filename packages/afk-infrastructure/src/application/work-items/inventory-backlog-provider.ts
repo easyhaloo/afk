@@ -1,4 +1,4 @@
-import type { TrackerProvider } from '@afk/application';
+import type { TrackerIssueReader } from '@afk/application';
 import type {
   BacklogCreateInput,
   BacklogItem,
@@ -21,7 +21,7 @@ import {
 export type InventoryBacklogProviderDeps = {
   platform?: GlobalTrackerPlatform;
   catalogs?: () => ProviderCatalog[];
-  trackerFor?: (project: ProviderProjectRef) => Promise<TrackerProvider>;
+  trackerFor?: (project: ProviderProjectRef) => Promise<TrackerIssueReader>;
 };
 
 export function isProjectDetectionFailure(error: unknown): boolean {
@@ -37,7 +37,7 @@ function gitLabApiProject(project: ProviderProjectRef): { projectId: string; hos
   return { projectId, host };
 }
 
-async function defaultTrackerFor(project: ProviderProjectRef): Promise<TrackerProvider> {
+async function defaultTrackerFor(project: ProviderProjectRef): Promise<TrackerIssueReader> {
   if (project.platform === 'github') return createGitHubTracker(project.projectKey);
   const { projectId, host } = gitLabApiProject(project);
   return createGitLabTracker(projectId, undefined, host);
@@ -82,7 +82,7 @@ const IDENTITY: BacklogIdentityPolicy = { kind: 'work-item' };
 export class InventoryBacklogProvider implements BacklogManagementProvider {
   private readonly platform: GlobalTrackerPlatform;
   private readonly catalogs: () => ProviderCatalog[];
-  private readonly trackerFor: (project: ProviderProjectRef) => Promise<TrackerProvider>;
+  private readonly trackerFor: (project: ProviderProjectRef) => Promise<TrackerIssueReader>;
 
   constructor(deps: InventoryBacklogProviderDeps = {}) {
     this.platform = deps.platform ?? 'all';

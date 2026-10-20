@@ -36,7 +36,11 @@ and design discussions use these terms; keep them in lockstep with the code.
   directly. `packages/afk-infrastructure/src/io/signal.ts`.
 
 - **TrackerProvider** - The seam over GitLab and GitHub (issues, MRs/PRs,
-  labels, comments, AC parsing). `packages/afk-application/src/tracker/types.ts`.
+  labels, comments, AC parsing). It is a set of slices — identity, issue
+  reading and writing, merge-request reading and writing, project reading —
+  and each caller takes the slice it actually uses, so the compiler is
+  there when a caller reaches for something it never declared.
+  `packages/afk-application/src/tracker/types.ts`.
 
 - **LoopRunner** - Drives one manifest-bound work item to completion
   (implement -> QA -> done), then stops. It requires exactly one backlog ID,

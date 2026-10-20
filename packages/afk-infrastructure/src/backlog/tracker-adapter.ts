@@ -11,7 +11,7 @@ import {
 import { BACKLOG_METADATA, backlogMetadataLabelSpecs, type BacklogProviderCapabilities } from '@afk/application';
 import { extractBacklogTags, isInternalBacklogLabel, isWorkflowMetadataLabel, validateBusinessTag } from '@afk/application';
 import { latestOpenRework, parseReworkRecord, renderReworkRecord, type NewReworkRecord, type ReworkRecord, type ReworkResolution } from '@afk/application';
-import type { LabelDelta, TrackerProvider, TrackedIssue } from '@afk/application';
+import type { LabelDelta, TrackerIdentity, TrackerIssueOperations, TrackerMergeReader, TrackedIssue, TrackedMR } from '@afk/application';
 import {
   projectBacklogLabels,
   renderBacklogId,
@@ -52,7 +52,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
    */
   private readonly identity: ScopedBacklogIdentityPolicy;
 
-  constructor(private readonly tracker: TrackerProvider, options: TrackerBacklogAdapterOptions = {}) {
+  constructor(private readonly tracker: TrackerIssueOperations & TrackerMergeReader, options: TrackerBacklogAdapterOptions = {}) {
     this.options = options;
     this.atomicClaim = options.atomicClaim;
     this.identity = { kind: 'provider-local', scope: trackerScope(this.tracker) };
@@ -178,7 +178,7 @@ export class TrackerBacklogProvider implements BacklogProvider {
     if (state === 'done') await this.tracker.updateIssue(issueId, { state: 'closed' });
   }
 
-  private async withChangeRequest(item: BacklogItem, labels: readonly string[], changes: Awaited<ReturnType<TrackerProvider['listMRs']>>): Promise<BacklogItem> {
+  private async withChangeRequest(item: BacklogItem, labels: readonly string[], changes: TrackedMR[]): Promise<BacklogItem> {
     if (!labels.includes(STATE_LABELS.merge_ready) && !labels.includes(STATE_LABELS.done)) return item;
     const candidate = changes.find(change => change.sourceBranch === `${item.branchName}-qa`)
       ?? changes.find(change => change.sourceBranch === item.branchName);
@@ -421,7 +421,7 @@ function toBacklogItem(issue: TrackedIssue, identity: ScopedBacklogIdentityPolic
  * inventory publishes: a GitHub repository is `owner/repo`, a GitLab
  * project is `host/group/project`.
  */
-function trackerScope(tracker: TrackerProvider): BacklogProjectScope {
+function trackerScope(tracker: TrackerIdentity): BacklogProjectScope {
   const projectId = String(tracker.projectId);
   const projectKey = tracker.platform === 'gitlab' && tracker.providerHost
     ? `${tracker.providerHost}/${projectId}`

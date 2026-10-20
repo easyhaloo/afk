@@ -129,16 +129,26 @@ import type { ACItem, AcceptanceCriteria } from './ac-types.js';
 import type { BacklogMetadataLabel } from '../backlog/initialization.js';
 
 /**
- * TrackerProvider interface — unified for GitLab and GitHub
+ * Which tracker, and which project on it.
  */
-export interface TrackerProvider {
+export interface TrackerIdentity {
   readonly platform: Platform;
   readonly projectId: string | number;
   readonly providerHost?: string;
+}
 
-  // Issues
+/**
+ * Reading the issues of a tracker.
+ */
+export interface TrackerIssueReader extends TrackerIdentity {
   getIssue(id: number): Promise<TrackedIssue>;
   listIssues(options?: ListOptions): Promise<TrackedIssue[]>;
+}
+
+/**
+ * Reading and writing the issues of a tracker.
+ */
+export interface TrackerIssueOperations extends TrackerIssueReader {
   createIssue(options: CreateIssueOptions): Promise<number>;
   updateIssue(id: number, updates: UpdateIssueOptions): Promise<void>;
   updateLabels(id: number, delta: LabelDelta): Promise<void>;
@@ -153,22 +163,12 @@ export interface TrackerProvider {
    * ends are assumed to be in `this.projectId` (same-repo link).
    */
   linkIssues(sourceId: number, targetId: number, type: LinkType, targetProjectId?: string): Promise<void>;
+}
 
-  // MR/PR
-  getMR(id: number): Promise<TrackedMR>;
-  isMRLinkedToIssue(id: number, canonicalWorkItemId: string): Promise<boolean>;
-  listMRs(options?: ListMROptions): Promise<TrackedMR[]>;
-  createMR(options: CreateMROptions): Promise<number>;
-  mergeMR(id: number, options?: MergeMROptions): Promise<void>;
-  closeMR(id: number, options?: CloseMROptions): Promise<void>;
-
-  // Projects
-  listProjects(options?: { page?: number; perPage?: number }): Promise<Project[]>;
-  getBranches(projectId: number): Promise<Branch[]>;
-  getTags(projectId: number): Promise<Tag[]>;
-  getRecentCommits(projectId: number, perPage?: number): Promise<Commit[]>;
-
-  // Utility
+/**
+ * What AFK reads off a tracker issue besides its state.
+ */
+export interface TrackerIssueReading extends TrackerIdentity {
   /** The issue's acceptance criteria: the labelled ones, else the legacy ones. */
   parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria;
   /** The retries an issue has left, from its `retry-count::N` label. */
@@ -178,6 +178,45 @@ export interface TrackerProvider {
    * `base::prd-N` label, else the platform's default.
    */
   detectTargetBranch(issueId: number, explicit?: string): Promise<string>;
+}
+
+/**
+ * The merge requests of a tracker, read.
+ */
+export interface TrackerMergeReader extends TrackerIdentity {
+  getMR(id: number): Promise<TrackedMR>;
+  isMRLinkedToIssue(id: number, canonicalWorkItemId: string): Promise<boolean>;
+  listMRs(options?: ListMROptions): Promise<TrackedMR[]>;
+}
+
+/**
+ * The merge requests of a tracker, written.
+ */
+export interface TrackerMergeWriter extends TrackerIdentity {
+  createMR(options: CreateMROptions): Promise<number>;
+  mergeMR(id: number, options?: MergeMROptions): Promise<void>;
+  closeMR(id: number, options?: CloseMROptions): Promise<void>;
+}
+
+/**
+ * The projects of a tracker.
+ */
+export interface TrackerProjectReader extends TrackerIdentity {
+  listProjects(options?: { page?: number; perPage?: number }): Promise<Project[]>;
+  getBranches(projectId: number): Promise<Branch[]>;
+  getTags(projectId: number): Promise<Tag[]>;
+  getRecentCommits(projectId: number, perPage?: number): Promise<Commit[]>;
+}
+
+/**
+ * A tracker, whole.
+ *
+ * The slices above are what a caller usually wants: the backlog adapter
+ * reads issues and merge requests, the changes adapter writes merge
+ * requests, the board reads projects. A caller that depends on the whole
+ * tracker can, but the compiler will not make it.
+ */
+export interface TrackerProvider extends TrackerIssueOperations, TrackerIssueReading, TrackerMergeReader, TrackerMergeWriter, TrackerProjectReader {
   /**
    * Upload the run's artifacts and return the markdown that shows them.
    *

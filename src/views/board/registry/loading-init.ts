@@ -6,6 +6,7 @@
  */
 import { LoadingPhaseRegistry } from './loading.js';
 import { fetchTasks } from '../data/fetcher.js';
+import type { TrackerProjectReader } from '@afk/application';
 
 export function registerAllLoadingPhases(): void {
   const registry = LoadingPhaseRegistry.getInstance();
@@ -45,8 +46,9 @@ export function registerAllLoadingPhases(): void {
     icon: '🔗',
     fetch: async (setDetail) => {
       const { createTracker } = await import('@afk/infrastructure');
-      const tracker = await createTracker();
-      const projects = await tracker.listProjects({ perPage: 1 });
+      const tracker: TrackerProjectReader = await createTracker();
+      // Listing a page is the connection check; the board never shows it.
+      await tracker.listProjects({ perPage: 1 });
       setDetail('connect', tracker.platform);
       return tracker.platform;
     },

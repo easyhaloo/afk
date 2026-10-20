@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { TrackerBacklogProvider } from '../src/backlog/tracker-adapter.js';
 import { ManagementBacklogProvider } from '../src/backlog/management-provider.js';
 import { adoptBacklog } from '@afk/application';
-import type { ClaimLease, ExpiredClaim, TrackerProvider, TrackedIssue, TrackedMR } from '@afk/application';
+import type { ClaimLease, ExpiredClaim, TrackerIssueOperations, TrackerMergeReader, TrackedIssue, TrackedMR } from '@afk/application';
 
-function tracker(issue: any): TrackerProvider {
+function tracker(issue: any): TrackerIssueOperations & TrackerMergeReader {
   return {
     platform: 'github', projectId: 'org/repo',
     getIssue: vi.fn(async () => ({ ...issue })),
@@ -21,7 +21,7 @@ function tracker(issue: any): TrackerProvider {
     }),
     listMRs: vi.fn(async () => []),
     getMR: vi.fn(),
-  } as unknown as TrackerProvider;
+  } as unknown as TrackerIssueOperations & TrackerMergeReader;
 }
 
 describe('TrackerBacklogProvider', () => {

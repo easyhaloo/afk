@@ -1,4 +1,4 @@
-import type { TrackerProvider } from '@afk/application';
+import type { TrackerIssueOperations, TrackerMergeReader, TrackerMergeWriter } from '@afk/application';
 import type { BacklogProvider, QABacklogProvider } from '@afk/application';
 import { ManagementBacklogProvider } from '../backlog/management-provider.js';
 import { TrackerBacklogProvider } from '../backlog/tracker-adapter.js';
@@ -7,6 +7,14 @@ import type { BranchProvider } from '../git/branches/provider.js';
 import { GitBranchProvider } from '../git/branches/git-provider.js';
 import type { ChangeProvider } from '../tracker/changes/provider.js';
 import { TrackerChangeProvider } from '../tracker/changes/tracker-adapter.js';
+
+/**
+ * The tracker this bundle needs: the backlog adapter reads and writes
+ * issues and reads merge requests; the changes adapter writes merge
+ * requests.  The bundle says so once, and neither adapter has to ask for
+ * the whole tracker to get it.
+ */
+export type BundleTracker = TrackerIssueOperations & TrackerMergeReader & TrackerMergeWriter;
 
 export interface ProviderBundle {
   backlog: BacklogProvider;
@@ -28,7 +36,7 @@ export interface ProviderBundleOptions {
 }
 
 export function createProviderBundle(
-  tracker: TrackerProvider,
+  tracker: BundleTracker,
   repoRoot: string,
   options: ProviderBundleOptions = {},
 ): ProviderBundle {
@@ -46,7 +54,7 @@ export function createProviderBundle(
 }
 
 export function createManagementProviderBundle(
-  tracker: TrackerProvider,
+  tracker: BundleTracker,
   repoRoot: string,
 ): ManagementProviderBundle {
   return {

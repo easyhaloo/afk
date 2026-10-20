@@ -1,10 +1,10 @@
 import type { BacklogItem } from '@afk/application';
 import type { ChangeProvider, ChangeRequest } from './provider.js';
-import type { TrackerProvider } from '@afk/application';
+import type { TrackerIdentity, TrackerMergeReader, TrackerMergeWriter } from '@afk/application';
 import { parseWorkItemId } from '@afk/application';
 import { resolveGitLabProjectKey } from '../../shared/gitlab-project.js';
 
-export function renderChangeDescription(backlog: BacklogItem, tracker?: Pick<TrackerProvider, 'platform' | 'projectId' | 'providerHost'>): string {
+export function renderChangeDescription(backlog: BacklogItem, tracker?: Pick<TrackerIdentity, 'platform' | 'projectId' | 'providerHost'>): string {
   const issue = backlog.workItemId ?? (/^(github|gitlab):/.test(backlog.providerRef ?? '') ? backlog.providerRef : undefined);
   const issueNumber = Number(backlog.id);
   if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) throw new Error('backlog issue number is invalid');
@@ -26,7 +26,7 @@ export function renderChangeDescription(backlog: BacklogItem, tracker?: Pick<Tra
 }
 
 export class TrackerChangeProvider implements ChangeProvider {
-  constructor(private readonly tracker: TrackerProvider) {}
+  constructor(private readonly tracker: TrackerMergeReader & TrackerMergeWriter) {}
 
   async create(input: { backlog: BacklogItem; sourceBranch: string; targetBranch: string; draft?: boolean }): Promise<ChangeRequest> {
     const id = await this.tracker.createMR({

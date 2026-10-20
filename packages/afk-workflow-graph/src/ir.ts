@@ -35,8 +35,12 @@ export interface OrthogonalRoute {
 }
 
 export interface WorkflowCondition {
+  /** The step whose outcome the condition is about. */
   readonly step: string;
-  readonly equals: string;
+  /** The outcome the named step must have produced. */
+  readonly equals?: string;
+  /** The outcome the named step must NOT have produced. */
+  readonly notEquals?: string;
 }
 
 export interface GraphStep {

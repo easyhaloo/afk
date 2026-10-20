@@ -28,7 +28,13 @@ export async function generateWorkflowGraph(options: { readonly projectRoot?: st
       role: step.role,
       provider: step.provider ?? loaded.template.defaultProvider,
       action: step.action,
-      when: step.when && 'equals' in step.when && step.when.equals ? { step: step.when.step, equals: step.when.equals } : undefined,
+      when: step.when
+        ? {
+          step: step.when.step,
+          ...(step.when.equals !== undefined ? { equals: step.when.equals } : {}),
+          ...(step.when.notEquals !== undefined ? { notEquals: step.when.notEquals } : {}),
+        }
+        : undefined,
       dependsOn: step.dependsOn ?? [],
       label: step.id,
     })),

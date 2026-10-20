@@ -1,10 +1,22 @@
-import type { GraphEdge, GraphNode, GraphSnapshot, GraphStep, GraphTrack, Rect, WorkflowGraphDefinition, WorkflowGraphPreferences } from './ir.js';
+import type { GraphEdge, GraphNode, GraphSnapshot, GraphStep, GraphTrack, Rect, WorkflowCondition, WorkflowGraphDefinition, WorkflowGraphPreferences } from './ir.js';
 import { normalizeDefinition } from './normalize.js';
 import { computeStepGraph } from './step-graph.js';
 import { routeEdges } from './routing.js';
 
 export const workflowNodeSize = { width: 220, height: 76 } as const;
 const defaults = { columnGap: 100, rowGap: 28, trackGap: 48, margin: 32 } as const;
+
+/**
+ * The edge label that says what a condition says.
+ *
+ * A condition says either what must have happened or what must not have,
+ * and the two read differently: `review = failed` and `review != failed`.
+ */
+function conditionLabel(condition: WorkflowCondition): string {
+  if (condition.equals !== undefined) return `${condition.step} = ${condition.equals}`;
+  if (condition.notEquals !== undefined) return `${condition.step} != ${condition.notEquals}`;
+  return condition.step;
+}
 
 export function layoutWorkflow(definition: WorkflowGraphDefinition, preferences: WorkflowGraphPreferences = {}): GraphSnapshot {
   const normalized = normalizeDefinition(definition);
@@ -55,7 +67,7 @@ export function layoutWorkflow(definition: WorkflowGraphDefinition, preferences:
     source: `node-${dependency}`,
     target: `node-${step.id}`,
     kind: step.when ? 'conditional' : 'dependency',
-    ...(step.when ? { label: `${step.when.step} = ${step.when.equals}` } : {}),
+    ...(step.when ? { label: conditionLabel(step.when) } : {}),
   })));
   const rowCount = Math.max(1, ...rowCountByDepth.values());
   const bounds: Rect = { x: 0, y: 0, width: margin * 2 + (maxDepth + 1) * nodeWidth + maxDepth * columnGap, height: margin * 2 + rowCount * nodeHeight + (rowCount - 1) * rowGap };

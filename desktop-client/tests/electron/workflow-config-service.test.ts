@@ -81,6 +81,31 @@ describe("workflow definition persistence", () => {
     expect(await readFile(templatePath, "utf8")).toBe(templateBefore);
   });
 
+  it("keeps a condition that says what must not happen", async () => {
+    const workflows = path.join(directory, ".afk", "workflows");
+    await mkdir(workflows, { recursive: true });
+    await writeFile(path.join(workflows, "guarded.yml"), [
+      "name: guarded",
+      "version: 1",
+      "steps:",
+      "  - id: implement",
+      "    role: implementer",
+      "  - id: fix",
+      "    role: implementer",
+      "    dependsOn: [implement]",
+      "    when:",
+      "      step: implement",
+      "      notEquals: failed",
+      "",
+    ].join("\n"), "utf8");
+
+    const reopened = await snapshot(directory);
+    // The condition says the step runs unless the other one failed. A list
+    // that dropped it would show a step that always runs.
+    expect(reopened.workflowTemplates.find(template => template.id === "guarded")?.steps.find(step => step.id === "fix")?.when)
+      .toEqual({ step: "implement", notEquals: "failed" });
+  });
+
   it("preserves unrelated project configuration when saving a definition", async () => {
     await mkdir(path.join(directory, ".afk"));
     await writeFile(path.join(directory, ".afk", "config.yml"), "tracker:\n  platform: github\n  projectKey: acme/api\n");

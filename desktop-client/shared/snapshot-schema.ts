@@ -45,7 +45,17 @@ const workflowTemplateStepSummarySchema = z.object({
   kind: z.enum(["agent", "system"]),
   provider: z.string().optional(),
   action: z.string().optional(),
-  when: z.object({ step: z.string(), equals: z.string() }).optional(),
+  when: z.object({
+    step: z.string(),
+    equals: z.string().optional(),
+    notEquals: z.string().optional(),
+  })
+    // A condition that says neither what must have happened nor what must
+    // not have is not a condition. The template schema refuses one too.
+    .refine((when) => when.equals !== undefined || when.notEquals !== undefined, {
+      message: "when clause must specify equals or notEquals",
+    })
+    .optional(),
   dependsOn: z.array(z.string()),
 });
 

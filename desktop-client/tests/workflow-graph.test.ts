@@ -19,7 +19,8 @@ const conditional = (id: string, when: string, dependsOn: string[] = []): Workfl
 
 /** The results a `when` clause may name; the resolver's vocabulary. */
 const RESULTS = ["completed", "failed", "aborted", "timed_out"] as const;
-const isResult = (value: string): value is (typeof RESULTS)[number] => (RESULTS as readonly string[]).includes(value);
+const isResult = (value: string | undefined): value is (typeof RESULTS)[number] =>
+  value !== undefined && (RESULTS as readonly string[]).includes(value);
 
 /** The plan the template resolver runs for the same steps. */
 const resolverPlan = (steps: readonly WorkflowTemplateStepSummary[]) =>
@@ -31,7 +32,15 @@ const resolverPlan = (steps: readonly WorkflowTemplateStepSummary[]) =>
       role: step.role,
       kind: step.kind,
       dependsOn: [...step.dependsOn],
-      ...(step.when && isResult(step.when.equals) ? { when: { step: step.when.step, equals: step.when.equals } } : {}),
+      ...(step.when
+        ? {
+            when: {
+              step: step.when.step,
+              ...(isResult(step.when.equals) ? { equals: step.when.equals } : {}),
+              ...(isResult(step.when.notEquals) ? { notEquals: step.when.notEquals } : {}),
+            },
+          }
+        : {}),
     })),
   });
 

@@ -25,4 +25,28 @@ describe('workflow graph application', () => {
     expect(JSON.parse(await readFile(cache.graphPath, 'utf8')).nodes).toHaveLength(2);
     expect(JSON.parse(await readFile(cache.receiptPath, 'utf8')).inputHash).toBe(result.receipt.inputHash);
   });
+
+  it('keeps a condition that says what must not happen', async () => {
+    const project = await projectWithTemplate([
+      'name: review',
+      'version: 1',
+      'steps:',
+      '  - id: implement',
+      '    role: implementer',
+      '    prompt: implement',
+      '  - id: fix',
+      '    role: implementer',
+      '    prompt: fix',
+      '    dependsOn: [implement]',
+      '    when:',
+      '      step: implement',
+      '      notEquals: failed',
+      '',
+    ].join('\n'));
+    const result = await generateWorkflowGraph({ projectRoot: project, template: 'review', generatedAt: '2026-01-01T00:00:00.000Z' });
+
+    // The condition says the step runs unless the other one failed. A graph
+    // that dropped it would draw a step that always runs.
+    expect(result.definition.steps.find(step => step.id === 'fix')?.when).toEqual({ step: 'implement', notEquals: 'failed' });
+  });
 });

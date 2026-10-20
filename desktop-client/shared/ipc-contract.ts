@@ -95,7 +95,9 @@ export type WorkflowTemplateStepSummary = {
   kind: "agent" | "system";
   provider?: string;
   action?: string;
-  when?: { step: string; equals: string };
+  /** The condition a step runs under: what the named step must have produced,
+   *  or must not have produced. */
+  when?: { step: string; equals?: string; notEquals?: string };
   dependsOn: string[];
 };
 

@@ -108,7 +108,9 @@ function templateStepSummary(value: unknown): WorkflowTemplateStepSummary | null
   const id = typeof step.id === "string" ? step.id : "";
   if (!id) return null;
   const when = asConfigObject(step.when);
-  return { id, role: typeof step.role === "string" ? step.role : "system", kind: step.kind === "system" ? "system" : "agent", provider: typeof step.provider === "string" ? step.provider : undefined, action: typeof step.action === "string" ? step.action : undefined, when: typeof when.step === "string" && typeof when.equals === "string" ? { step: when.step, equals: when.equals } : undefined, dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn.filter((item): item is string => typeof item === "string") : [] };
+  return { id, role: typeof step.role === "string" ? step.role : "system", kind: step.kind === "system" ? "system" : "agent", provider: typeof step.provider === "string" ? step.provider : undefined, action: typeof step.action === "string" ? step.action : undefined, when: typeof when.step === "string" && (typeof when.equals === "string" || typeof when.notEquals === "string")
+        ? { step: when.step, ...(typeof when.equals === "string" ? { equals: when.equals } : {}), ...(typeof when.notEquals === "string" ? { notEquals: when.notEquals } : {}) }
+        : undefined, dependsOn: Array.isArray(step.dependsOn) ? step.dependsOn.filter((item): item is string => typeof item === "string") : [] };
 }
 
 async function readWorkflowTemplates(root: string): Promise<WorkflowTemplateSummary[]> {

@@ -22,6 +22,7 @@ import { BudgetManager } from '../workflows/budget.js';
 import { MultiRepositoryPreparer, type MultiRepositoryPreparationService, type PreparedRepositorySet } from '../workflows/multi-repository-preparer.js';
 import type { WorkflowRunRepository } from '../workflows/run-request.js';
 import { BudgetStore } from '../workflows/budget-store.js';
+import { runtimeRecord } from '../runtime/runtime-record.js';
 import { collectAgentTelemetry } from '../../infrastructure/observability/agent-telemetry.js';
 import type { RunEventData } from '@afk/core';
 
@@ -374,24 +375,22 @@ export class QARunner {
   private async startRuntime(runId: string, backlog: BacklogItem, session: string): Promise<void> {
     const now = new Date().toISOString();
     try {
-      await this.runtimeManager.start({
+      await this.runtimeManager.start(runtimeRecord({
         runId,
         backlogId: backlog.id,
         workspace: this.projectRoot,
         providerRef: backlog.providerRef,
         title: backlog.title,
         phase: 'verifying',
-        status: 'running',
         sandboxProvider: this.sandboxProvider.name,
         executionMode: this.executionMode,
         agentProvider: this.agentProvider.name,
-        ...runtimeFieldsFromSelection(this.agentProvider.name, this.agentRuntime),
-        session: this.executionMode === 'interactive' ? session : undefined,
+        runtime: this.agentRuntime,
+        ...(this.executionMode === 'interactive' ? { session } : {}),
         branch: backlog.branchName,
-        startedAt: now,
-        heartbeatAt: now,
+        now,
         progress: 'QA starting',
-      });
+      }));
     } catch (error) {
       logger.warn({ backlogId: backlog.id, error }, 'failed to publish QA runtime');
     }

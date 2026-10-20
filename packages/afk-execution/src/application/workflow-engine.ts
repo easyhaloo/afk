@@ -55,6 +55,7 @@ import { runtimeFieldsFromExecution, runtimeFieldsFromSelection } from './runtim
 import type { ObservationContext, RunEventData } from '@afk/core';
 import type { RunObserver } from '../observability/run-observer.js';
 import { collectAgentTelemetry } from '../infrastructure/observability/agent-telemetry.js';
+import { runtimeRecord } from './runtime/runtime-record.js';
 import { carriesExpectedSignal } from '../shared/goal-complete.js';
 
 export class AuditPersistenceError extends Error {
@@ -1417,24 +1418,22 @@ export class WorkflowRunner {
     const now = new Date().toISOString();
     this.runtimeRunId = this.observationContext?.runId ?? `${session}-${Date.now()}`;
     try {
-      await this.runtimeManager.start({
+      await this.runtimeManager.start(runtimeRecord({
         runId: this.runtimeRunId,
         backlogId,
         workspace: this.repoRoot,
-        providerRef: this.activeBacklog?.providerRef,
-        title: this.activeBacklog?.title,
+        ...(this.activeBacklog?.providerRef !== undefined ? { providerRef: this.activeBacklog.providerRef } : {}),
+        ...(this.activeBacklog?.title !== undefined ? { title: this.activeBacklog.title } : {}),
         phase: 'implementing',
-        status: 'running',
         sandboxProvider: this.sandboxProviderName,
         executionMode: this.executionMode,
         agentProvider: this.agentProviderName,
-        ...runtimeFieldsFromSelection(this.agentProviderName, this.agentRuntime),
+        runtime: this.agentRuntime,
         session,
-        branch: this.activeBacklog?.branchName,
-        startedAt: now,
-        heartbeatAt: now,
+        ...(this.activeBacklog?.branchName !== undefined ? { branch: this.activeBacklog.branchName } : {}),
+        now,
         progress: 'claimed',
-      });
+      }));
     } catch (error) {
       logger.warn({ backlogId, error }, 'failed to publish workflow runtime');
       this.runtimeRunId = undefined;

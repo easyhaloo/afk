@@ -83,7 +83,7 @@ steps:
 });
 
 describe('Dependency resolver', () => {
-  function mkTemplate(steps: Array<{ id: string; dependsOn?: string[]; when?: { step: string; equals?: 'completed' | 'failed' | 'aborted' | 'timed_out'; notEquals?: 'completed' | 'failed' | 'aborted' | 'timed_out' } }>): WorkflowTemplate {
+  function mkTemplate(steps: Array<{ id: string; dependsOn?: string[]; parallel?: string; when?: { step: string; equals?: 'completed' | 'failed' | 'aborted' | 'timed_out'; notEquals?: 'completed' | 'failed' | 'aborted' | 'timed_out' } }>): WorkflowTemplate {
     return {
       name: 'test',
       version: 1,
@@ -92,6 +92,7 @@ describe('Dependency resolver', () => {
         role: 'r',
         prompt: 'p',
         dependsOn: s.dependsOn,
+        parallel: s.parallel,
         when: s.when,
       })),
     };
@@ -128,6 +129,24 @@ describe('Dependency resolver', () => {
     ]);
     const plan = resolveExecutionPlan(t);
     expect(plan.groups.map(g => g.steps.map(s => s.id))).toEqual([['a'], ['b']]);
+  });
+
+  it('accepts a parallel group whose members share a level', () => {
+    const t = mkTemplate([
+      { id: 'a', parallel: 'group' },
+      { id: 'b', parallel: 'group' },
+    ]);
+    const plan = resolveExecutionPlan(t);
+    expect(plan.groups).toHaveLength(1);
+    expect(plan.groups[0].steps.map(s => s.id)).toEqual(['a', 'b']);
+  });
+
+  it('rejects a parallel group whose members depend on each other', () => {
+    const t = mkTemplate([
+      { id: 'a', parallel: 'group' },
+      { id: 'b', parallel: 'group', dependsOn: ['a'] },
+    ]);
+    expect(() => resolveExecutionPlan(t)).toThrow(/parallel group 'group' is split across levels/);
   });
 
   it('detects a when-clause that references itself', () => {

@@ -118,6 +118,28 @@ export function resolveExecutionPlan(template: WorkflowTemplate, allStepIds?: Se
     throw new TemplateError(`dependency cycle detected`, template.name);
   }
 
+  // A `parallel` group is a promise that its members run together. The
+  // promise used to be decoration: no module read the field, and the members
+  // happened to run concurrently only because nothing made them depend on
+  // each other. Now it is checked — a template that declares a parallel
+  // group and then serialises it is a template whose declaration and its
+  // dependencies disagree.
+  const parallelLevels = new Map<string, Set<number>>();
+  for (const step of template.steps) {
+    if (!step.parallel) continue;
+    const levels = parallelLevels.get(step.parallel) ?? new Set<number>();
+    levels.add(levelByStep.get(step.id) ?? 0);
+    parallelLevels.set(step.parallel, levels);
+  }
+  for (const [group, levels] of parallelLevels) {
+    if (levels.size > 1) {
+      throw new TemplateError(
+        `parallel group '${group}' is split across levels (${[...levels].sort((left, right) => left - right).join(', ')}); its steps must not depend on each other`,
+        template.name,
+      );
+    }
+  }
+
   // Group by level.
   const maxLevel = Math.max(0, ...levelByStep.values());
   const groups: ExecutionGroup[] = [];

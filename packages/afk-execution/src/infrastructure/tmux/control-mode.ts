@@ -65,6 +65,15 @@ export class ControlModeConnection {
     });
 
     this.stdin = this.proc.stdin!;
+    // The tmux session can go away while a command is on its way, and the
+    // broken pipe that follows is the answer rather than a crash: the close
+    // handler above reports the exit. Unhandled, it would take the process
+    // down with it.
+    this.proc.stdin?.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED') {
+        this.flushPending(error);
+      }
+    });
     // stdout is Readable but we use 'data' event which works on Readable
     (this.stdout as any) = this.proc.stdout!;
 

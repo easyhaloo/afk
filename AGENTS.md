@@ -97,6 +97,17 @@ might need lives in `packages/`.
   runtime an override for the directory (`AFK_PORT_REGISTRY_DIR` does this
   for the port registry) and let the test use a temporary one. Check it
   afterwards: the file's timestamp should not change when the suite runs.
+- **A test that waits for a real process must budget for it.** Spawning a
+  process, letting it write, and reading the result takes longer on a
+  loaded machine than the operation looks like it should. A one-second
+  budget for a test that spawns a process is a flake waiting to happen: it
+  fails on a busy machine and passes on an idle one. Give those waits the
+  same ceiling the suite has, and keep the deliberately short ones — a
+  timeout of five milliseconds is a test *about* timing out.
+- **The same ceiling belongs to the setup and the teardown.** Creating a
+  repository, cloning it, removing it takes as long as the test that uses
+  it does, so the hook gets the same budget as the test. A test that times
+  out inside its own setup has still timed out.
 
 ## Documentation
 

@@ -20,7 +20,10 @@ describe('TmuxClient with special-character session names', () => {
 
   it.skipIf(!hasTmux)('round-trips a backlog-id session name through create/lookup/kill', async () => {
     const client = new TmuxClient();
-    const raw = `afk-test-github:proj#144-${Date.now()}`;
+    // The name has to be unique across processes, not just within one:
+    // a timestamp alone collides when two workers start in the same
+    // millisecond, and the second session then fails as a duplicate.
+    const raw = `afk-test-github:proj#144-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const normalized = normalizeTmuxSessionName(raw);
     try {
       const session = await client.createSession(raw, tmpdir(), 'sleep 30');

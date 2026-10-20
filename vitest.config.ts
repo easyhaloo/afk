@@ -10,6 +10,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     testTimeout: 30000,
+    // The setup and teardown of a test can take as long as the test itself,
+    // so the hook gets the same ceiling.
+    hookTimeout: 30000,
     pool: 'forks',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.spec.ts', 'tests/**/*.test.ts'],
     exclude: [...configDefaults.exclude, 'tests/pty/**'],

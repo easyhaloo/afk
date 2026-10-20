@@ -105,8 +105,22 @@ export class StreamingAgentExecution implements AgentExecution {
 
     // Send prompt via stdin
     if (this.proc.stdin) {
-      this.proc.stdin.write(`${this.prompt}\n`);
-      this.proc.stdin.end();
+      // An agent that exits without reading the prompt closes its stdin, and
+      // the write then fails with EPIPE. That is the child's own business —
+      // the exit handling below reports the outcome — but with nothing
+      // listening for the error it was unhandled, and it took the runner down
+      // with it.
+      this.proc.stdin.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED') {
+          this.stderrBuffer += `prompt delivery failed: ${error.message}\n`;
+        }
+      });
+      try {
+        this.proc.stdin.write(`${this.prompt}\n`);
+        this.proc.stdin.end();
+      } catch (error) {
+        this.stderrBuffer += `prompt delivery failed: ${(error as Error).message}\n`;
+      }
     }
 
     if (this.proc.stdout) {

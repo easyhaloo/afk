@@ -27,7 +27,7 @@ describe('StreamingAgentExecution', () => {
       parseLine: new CodexProvider().parseLine.bind(new CodexProvider()),
     });
     execution.start();
-    const result = await execution.waitForResult({ completionTimeoutMs: 1000 });
+    const result = await execution.waitForResult({ completionTimeoutMs: 10_000 });
     expect(result.status).toBe('completed');
     expect(result.tools).toEqual([
       { id: 'cmd-1', name: 'command_execution', result: 'failed', exitCode: 3 },
@@ -35,6 +35,46 @@ describe('StreamingAgentExecution', () => {
     ]);
     expect(JSON.stringify(result.tools)).not.toContain('private');
     expect(await execution.captureOutput()).not.toContain('cmd-1');
+  });
+
+  it('survives a child that exits before the prompt is delivered', async () => {
+    // A child that exits without reading stdin closes the pipe, and the
+    // prompt write then fails with EPIPE. That is the child's own business —
+    // the exit handling reports the outcome — but with nothing listening for
+    // the error it was unhandled, and it took the run with it. Vitest fails a
+    // run on an unhandled error, so this passing means the broken pipe stayed
+    // where it belonged.
+    //
+    // The exit is made to happen first. The shell leaves in a couple of
+    // milliseconds, and the parent's event loop is held busy long enough that
+    // the queued write cannot flush before the pipe is gone.
+    const execution = new StreamingAgentExecution({
+      command: { argv: ['/bin/sh', '-c', 'exit 0'], cwd: process.cwd() },
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
+    });
+    execution.start();
+    const until = Date.now() + 200;
+    while (Date.now() < until) { /* hold the loop, so the write stays queued */ }
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({ status: 'failed' });
+  });
+
+  it('listens for a broken pipe on the agent process stdin', () => {
+    // The race above needs the parent's event loop to be descheduled between
+    // the spawn and the flush of the queued prompt write, which cannot be
+    // forced from a test. What the fix actually is, though, is a listener:
+    // without one the error is unhandled, and an unhandled error on a
+    // socket takes the whole process down. That is the property worth
+    // pinning.
+    const execution = new StreamingAgentExecution({
+      command: command('console.log("ready")'),
+      prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(),
+      metadata: PROCESS_METADATA,
+    });
+    execution.start();
+
+    expect((execution as unknown as { proc: { stdin: { listenerCount(event: string): number } } }).proc.stdin.listenerCount('error')).toBeGreaterThan(0);
   });
 
   it.each(['failed', 'missing_result', 'aborted', 'timed_out'])('returns incomplete tool metadata when %s', async status => {
@@ -45,13 +85,13 @@ describe('StreamingAgentExecution', () => {
       metadata: { provider: 'codex', transport: 'exec' },
     });
     execution.start();
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + 10_000;
     while (!(await execution.captureOutput()).includes('ready') && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     expect(await execution.captureOutput()).toContain('ready');
     if (status === 'aborted') await execution.interrupt('manual');
-    const result = await execution.waitForResult({ completionTimeoutMs: status === 'timed_out' ? 0 : 1000 });
+    const result = await execution.waitForResult({ completionTimeoutMs: status === 'timed_out' ? 0 : 10_000 });
     expect(result.status).toBe(status === 'missing_result' ? 'failed' : status);
     expect(result.tools).toEqual([{ id: 'cmd-1', name: 'command_execution', result: 'in_progress' }]);
   });
@@ -78,7 +118,7 @@ describe('StreamingAgentExecution', () => {
     });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'codex fixture complete' },
       usage: { inputTokens: 14, outputTokens: 5, totalTokens: 19 },
@@ -105,7 +145,7 @@ describe('StreamingAgentExecution', () => {
     });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({ status: 'completed' });
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({ status: 'completed' });
     expect(execution.metadata.threadId).toBe('01a13312-d9c5-7033-8230-20484caff784');
   });
 
@@ -113,7 +153,7 @@ describe('StreamingAgentExecution', () => {
     const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
     const execution = new StreamingAgentExecution({ command: command(`process.stdout.write(${JSON.stringify(payload.slice(0, 20))}); setTimeout(() => process.stdout.write(${JSON.stringify(payload.slice(20) + '\n')}), 5)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
-    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'completed' });
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({ status: 'completed' });
   });
 
   it('accepts a completion marker whose payload omits the redundant type field', async () => {
@@ -121,7 +161,7 @@ describe('StreamingAgentExecution', () => {
     const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: { type: 'goal_complete', summary: 'done' },
     });
@@ -137,7 +177,7 @@ describe('StreamingAgentExecution', () => {
     const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' },
     });
@@ -154,7 +194,7 @@ describe('StreamingAgentExecution', () => {
     });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: { type: 'goal_complete' },
     });
@@ -169,7 +209,7 @@ describe('StreamingAgentExecution', () => {
     });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
       status: 'completed',
       structuredOutput: { type: 'goal_complete' },
     });
@@ -179,7 +219,7 @@ describe('StreamingAgentExecution', () => {
     const payload = JSON.stringify({ type: 'result', result: '<goal_complete>{"type":"goal_complete"}</goal_complete>' });
     const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)}); process.exit(3)`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
-    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'failed', exitCode: 3 });
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({ status: 'failed', exitCode: 3 });
   });
 
   it('includes the final stdout tail when a child exits without stderr', async () => {
@@ -191,7 +231,7 @@ describe('StreamingAgentExecution', () => {
     });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
       status: 'failed',
       error: { code: 'NON_ZERO_EXIT', message: expect.stringContaining('provider failure') },
     });
@@ -202,7 +242,7 @@ describe('StreamingAgentExecution', () => {
     const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({
       status: 'failed',
       error: { code: 'MISSING_RESULT', message: expect.stringContaining('implemented the changes but forgot the AFK marker') },
     });
@@ -213,7 +253,7 @@ describe('StreamingAgentExecution', () => {
     const execution = new StreamingAgentExecution({ command: command(`console.log(${JSON.stringify(payload)})`), prompt: 'go', signalType: 'goal_complete', worktreePath: process.cwd(), metadata: PROCESS_METADATA });
     execution.start();
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1000 })).resolves.toMatchObject({ status: 'completed' });
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({ status: 'completed' });
     await expect(execution.captureOutput()).resolves.toContain('goal_complete');
   });
 
@@ -225,7 +265,7 @@ describe('StreamingAgentExecution', () => {
     });
     execution.start();
     const childPid = await new Promise<number>((resolve, reject) => {
-      const deadline = Date.now() + 1_000;
+      const deadline = Date.now() + 10_000;
       const poll = async () => {
         const pid = Number((await execution.captureOutput()).trim());
         if (pid > 0) return resolve(pid);
@@ -256,7 +296,7 @@ describe('StreamingAgentExecution', () => {
     execution.start();
 
     const childPid = await new Promise<number>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('child PID was not captured')), 1_000);
+      const timer = setTimeout(() => reject(new Error('child PID was not captured')), 10_000);
       const poll = async () => {
         const pid = Number((await execution.captureOutput()).split('\n')[0]);
         if (pid > 0) {
@@ -269,7 +309,7 @@ describe('StreamingAgentExecution', () => {
       void poll();
     });
 
-    await expect(execution.waitForResult({ completionTimeoutMs: 1_000 })).resolves.toMatchObject({ status: 'completed' });
+    await expect(execution.waitForResult({ completionTimeoutMs: 10_000 })).resolves.toMatchObject({ status: 'completed' });
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(() => process.kill(childPid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
   });

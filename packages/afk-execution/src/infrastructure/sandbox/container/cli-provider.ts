@@ -93,6 +93,14 @@ export abstract class CliContainerProvider implements ContainerProvider {
         });
       });
       if (options.stdin !== undefined) {
+        // The container can exit before it reads what we wrote, and the close
+        // handler reports its exit code. A broken pipe is therefore not a
+        // failure of this call — but it must not become an unhandled error.
+        child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+          if (error.code !== 'EPIPE' && error.code !== 'ERR_STREAM_DESTROYED') {
+            reject(new ContainerError(`stdin write failed: ${error.message}`, this.engine, error));
+          }
+        });
         child.stdin.write(options.stdin);
         child.stdin.end();
       }

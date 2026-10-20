@@ -102,10 +102,6 @@ export function runtimeStateMeta(phase: RuntimeVisualState): RuntimeStateVisual 
  * the run centre's path calls this. It stays for the desktop's own contract
  * test, which pins the old record's shape.
  */
-export function runtimeWorkspacePath(nextStep: string): string | null {
-  return nextStep.startsWith("任务空间：") ? nextStep.slice("任务空间：".length) : null;
-}
-
 function normalizedWorkspacePath(value: string): string {
   const trimmed = value.trim();
   return trimmed.length > 1 ? trimmed.replace(/[\\/]+$/, "") : trimmed;

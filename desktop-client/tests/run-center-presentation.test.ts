@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents } from "../src/features/run-center/runtime-presentation";
+import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, searchRuntimeEvents } from "../src/features/run-center/runtime-presentation";
 
 describe("searchRuntimeEvents", () => {
   it("matches history without replacing the latest run status", () => {
@@ -71,11 +71,6 @@ describe("run center presentation", () => {
     expect(runtimeStateMeta("verify")).toMatchObject({ icon: "verify", ariaLabel: "已完成" });
     expect(runtimeStateMeta("attention")).toMatchObject({ icon: "attention", ariaLabel: "待处理" });
     expect(runtimeStateMeta("failed")).toMatchObject({ icon: "failed", ariaLabel: "失败" });
-  });
-
-  it("recognizes task workspace metadata without hiding actionable next steps", () => {
-    expect(runtimeWorkspacePath("任务空间：/tmp/afk/144")).toBe("/tmp/afk/144");
-    expect(runtimeWorkspacePath("等待负责人确认")).toBeNull();
   });
 
   it("matches a terminal session to the selected run workspace before using the fallback", () => {

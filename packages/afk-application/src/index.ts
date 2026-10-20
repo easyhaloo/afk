@@ -1,4 +1,5 @@
 export * from './backlog-mapping.js';
+export * from './fs-errors.js';
 export * from './backlog/claim.js';
 export * from './backlog/commands.js';
 export * from './backlog/initialization.js';

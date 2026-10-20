@@ -18,7 +18,7 @@ import { promises as fs, realpathSync } from 'fs';
 import { join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import type { SandboxTmux } from '../../../domain/tmux/types.js';
-import { clearSignal, clearStatus, getTokenUsage, readSignal } from '@afk/infrastructure';
+import { clearSignal, clearStatus, getTokenUsage, quoteShellArgument, readSignal } from '@afk/infrastructure';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../../domain/tmux/session-name.js';
 import { agentReadiness } from '../../tmux/agent-readiness.js';
@@ -107,7 +107,7 @@ export class LocalSandbox implements Sandbox {
       // The marker belongs to a Claude process, not the worktree. A prior
       // phase's file must not make a freshly-created tmux session look ready.
       await clearStatus(this.worktreePath);
-      const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));
+      const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(quoteShellArgument).join(' '));
       this.sessionCreated = true;
       const paneId = created.paneId
         ?? await this.tmux.firstPaneId?.(created.name, created.window).catch(() => undefined);
@@ -427,6 +427,3 @@ export class LocalSandboxProvider implements SandboxProvider {
   }
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}

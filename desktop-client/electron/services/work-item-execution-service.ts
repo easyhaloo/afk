@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { quoteShellArgument } from "@afk/infrastructure";
 import path from "node:path";
 import type {
   GlobalWorkItem,
@@ -60,9 +61,6 @@ export type WorkItemExecutionServiceDeps = {
   reportError?: (error: unknown) => void;
 };
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
 
 export function buildForegroundAgentCommand(item: GlobalWorkItem, agent: ForegroundAgent, workspaceRoot: string): string {
   const issueReference = item.webUrl ?? item.providerRef;
@@ -75,7 +73,7 @@ export function buildForegroundAgentCommand(item: GlobalWorkItem, agent: Foregro
     "任务完成后，请在对应的 GitHub 或 GitLab Issue 上附上一条进度评论，说明完成内容、验证结果和后续事项。",
   ].join("\n\n");
   const args = agent.id === "claude" ? ["--dangerously-skip-permissions", prompt] : [prompt];
-  return `cd ${shellQuote(workspaceRoot)} && ${[agent.executable || agent.command, ...args].map(shellQuote).join(" ")}`;
+  return `cd ${quoteShellArgument(workspaceRoot)} && ${[agent.executable || agent.command, ...args].map(quoteShellArgument).join(" ")}`;
 }
 
 function repositoryKey(repository: Pick<ProviderProjectRef, "platform" | "projectKey">): string {

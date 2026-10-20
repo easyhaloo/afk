@@ -1,11 +1,11 @@
 import path from "node:path";
+import { isValidCredentialSecret } from "../security/credential-validation.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createMutex } from "../lib/async-mutex.js";
 import type { AtomicFileSystem } from "../lib/secure-store.js";
 
 const CREDENTIAL_FILE = path.join(".config", "afk", "jumpserver-credentials.json");
-const MAX_PASSWORD_BYTES = 4096;
 
 type SecureStorage = {
   isEncryptionAvailable: () => boolean;
@@ -51,11 +51,11 @@ function invalidPassword() {
 }
 
 function validatePassword(password: string) {
-  if (!password || password.includes("\0") || password.includes("\r") || password.includes("\n") || Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) throw invalidPassword();
+  if (!isValidCredentialSecret(password)) throw invalidPassword();
 }
 
 function validateOtpSecret(otpSecret: string) {
-  if (otpSecret && (otpSecret.includes("\0") || otpSecret.includes("\r") || otpSecret.includes("\n") || Buffer.byteLength(otpSecret, "utf8") > MAX_PASSWORD_BYTES)) throw invalidPassword();
+  if (otpSecret && !isValidCredentialSecret(otpSecret)) throw invalidPassword();
 }
 
 function normalizeTarget(target: JumpserverCredentialTarget): JumpserverCredentialTarget {

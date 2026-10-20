@@ -1,6 +1,6 @@
 import { readFile as readFileFromFs } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
-import { validateBaseBranch, validateCheckoutPath } from '@afk/application';
+import { isMissingFileError, validateBaseBranch, validateCheckoutPath } from '@afk/application';
 
 const MANIFEST_KEYS = new Set(['schemaVersion', 'workItemId', 'providerBacklogId', 'tracker', 'workingBranch', 'repositories']);
 const TRACKER_KEYS = new Set(['platform', 'projectKey', 'providerHost', 'providerProjectId']);
@@ -89,7 +89,7 @@ export async function readExecutionManifest(
   try {
     raw = await readFile(absoluteManifestPath, 'utf8');
   } catch (error) {
-    const detail = isMissingFile(error) ? 'file does not exist' : errorMessage(error);
+    const detail = isMissingFileError(error) ? 'file does not exist' : errorMessage(error);
     throw new Error(`Execution manifest at ${absoluteManifestPath}: ${detail}`, { cause: error });
   }
 
@@ -245,6 +245,3 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isMissingFile(error: unknown): boolean {
-  return !!error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
-}

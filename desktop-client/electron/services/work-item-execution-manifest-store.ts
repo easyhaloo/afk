@@ -1,4 +1,5 @@
 import { randomUUID as createRandomUUID } from "node:crypto";
+import { isMissingFileError } from "@afk/application";
 import {
   mkdir,
   readFile,
@@ -80,7 +81,7 @@ export function createWorkItemExecutionManifestStore(deps: WorkItemExecutionMani
     try {
       raw = await fs.readFile(target, "utf8");
     } catch (error) {
-      if (isMissingFile(error)) return null;
+      if (isMissingFileError(error)) return null;
       throw withPath(`Failed to read execution manifest`, target, error);
     }
     try {
@@ -197,9 +198,6 @@ function parseProviderBacklogId(value: unknown): string {
   return value;
 }
 
-function isMissingFile(error: unknown): boolean {
-  return !!error && typeof error === "object" && "code" in error && error.code === "ENOENT";
-}
 
 function withPath(prefix: string, file: string, error: unknown): Error {
   const detail = error instanceof Error ? error.message : String(error);

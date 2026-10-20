@@ -1,4 +1,5 @@
 import { execFile as nodeExecFile } from "node:child_process";
+import { quoteShellArgument } from "@afk/infrastructure";
 import { promisify } from "node:util";
 import type { SshConnectionTarget, SshExternalTerminalId } from "../../shared/ssh-contract.js";
 import { sshConnectionArgs } from "../../shared/ssh-contract.js";
@@ -96,9 +97,6 @@ const STRUCTURED_WARP_SCRIPT = `on run argv
   end tell
 end run`;
 
-function shellQuote(value: string) {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
 
 async function defaultExecFile(file: string, args: readonly string[]) {
   const { stdout, stderr } = await runExecFile(file, [...args]);
@@ -159,16 +157,16 @@ export function createExternalTerminalAdapter(options: ExternalTerminalAdapterOp
         if (structured && terminalId === "ghostty") {
           await execFile("/usr/bin/open", ["-na", "Ghostty.app", "--args", "-e", "/usr/bin/ssh", ...sshConnectionArgs(targetOrAlias)]);
         } else if (structured && terminalId === "cmux") {
-          const command = ["/usr/bin/ssh", ...sshConnectionArgs(targetOrAlias)].map(shellQuote).join(" ");
+          const command = ["/usr/bin/ssh", ...sshConnectionArgs(targetOrAlias)].map(quoteShellArgument).join(" ");
           await execFile(CMUX_CLI, ["new-workspace", "--command", command]);
         } else if (structured) {
-          const command = ["/usr/bin/ssh", ...sshConnectionArgs(targetOrAlias)].map(shellQuote).join(" ");
+          const command = ["/usr/bin/ssh", ...sshConnectionArgs(targetOrAlias)].map(quoteShellArgument).join(" ");
           const script = terminalId === "iterm2" ? STRUCTURED_ITERM2_SCRIPT : terminalId === "warp" ? STRUCTURED_WARP_SCRIPT : STRUCTURED_TERMINAL_SCRIPT;
           await execFile("/usr/bin/osascript", ["-e", script, "--", command]);
         } else if (terminalId === "ghostty") {
           await execFile("/usr/bin/open", ["-na", "Ghostty.app", "--args", "-e", "/usr/bin/ssh", "--", alias]);
         } else if (terminalId === "cmux") {
-          await execFile(CMUX_CLI, ["new-workspace", "--command", `/usr/bin/ssh -- ${shellQuote(alias)}`]);
+          await execFile(CMUX_CLI, ["new-workspace", "--command", `/usr/bin/ssh -- ${quoteShellArgument(alias)}`]);
         } else {
           const script = terminalId === "iterm2" ? ITERM2_SCRIPT : terminalId === "warp" ? WARP_SCRIPT : TERMINAL_SCRIPT;
           await execFile("/usr/bin/osascript", ["-e", script, "--", alias]);

@@ -16,4 +16,5 @@ export * from './observability/index.js';
 export * from './provider/index.js';
 export * from './schemas.js';
 export * from './shared/gitlab-project.js';
+export * from './shared/shell.js';
 export * from './tracker/index.js';

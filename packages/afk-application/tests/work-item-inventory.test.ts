@@ -180,6 +180,29 @@ describe('global work item inventory', () => {
     expect(result.complete).toBe(true);
   });
 
+  it('keeps a scope-wide listing inside the scope it asked about', async () => {
+    const project = { platform: 'github' as const, projectKey: 'acme/api', name: 'api' };
+    const other = { platform: 'github' as const, projectKey: 'acme/other', name: 'other' };
+    const source: ProviderCatalog = {
+      platform: 'github', scopeKey: 'github.com',
+      async listProjects() { return [project]; },
+      async listIssues() { throw new Error('the per-project path must not be used'); },
+      // A platform's scoped search answers with every issue it can see.
+      async listIssuesAcrossScope() {
+        return [
+          { issue: { issueNumber: 7, title: 'scoped', labels: [], state: 'opened' }, project },
+          { issue: { issueNumber: 8, title: 'someone else', labels: [], state: 'opened' }, project: other },
+        ];
+      },
+    };
+
+    const result = await collectGlobalWorkItemInventory([source]);
+
+    // The scope is the boundary: a listing that widens it is not a listing
+    // of the scope.
+    expect(result.items.map(item => item.id)).toEqual(['github:acme/api#7']);
+  });
+
   it('falls back to the per-project listing when the scope-wide listing fails', async () => {
     const project = { platform: 'github' as const, projectKey: 'acme/api', name: 'api' };
     const source: ProviderCatalog = {

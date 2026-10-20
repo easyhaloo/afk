@@ -91,7 +91,14 @@ async function collectIssues(
     if (catalog.listIssuesAcrossScope) {
       const result = await catalog.listIssuesAcrossScope(entries.map(entry => entry.project));
       if (Array.isArray(result)) {
-        groups.push(result.map(entry => toGlobalWorkItem(entry.project, entry.issue)));
+        // A platform's scoped search answers with every issue it can see,
+        // not with the issues of the projects in the scope. The listing is
+        // narrowed here, so a scope-wide listing cannot widen the
+        // inventory — whatever the platform's answer contains.
+        const inScope = new Set(entries.map(entry => entry.project.projectKey));
+        groups.push(result
+          .filter(entry => inScope.has(entry.project.projectKey))
+          .map(entry => toGlobalWorkItem(entry.project, entry.issue)));
         return;
       }
       diagnostics.push(toDiagnostic(catalog.platform, catalog.scopeKey, 'scope_issue_list_failed', result.error));

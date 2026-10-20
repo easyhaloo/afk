@@ -22,9 +22,10 @@ export interface ProviderCatalog {
    * a global issue feed). Platforms without this capability fall back to one
    * request per project, which is the slow path.
    *
-   * The result carries the owning project for every issue and must be
-   * restricted to the projects that were passed in, so that a scope-wide
-   * listing never widens the inventory.
+   * The result carries the owning project for every issue. A platform's
+   * scoped search answers with every issue it can see, so the caller
+   * narrows the result to the projects that were passed in: a scope-wide
+   * listing must never widen the inventory.
    */
   listIssuesAcrossScope?(projects: readonly ProviderProjectRef[]): Promise<CatalogPageResult<ScopedProviderIssue>>;
 }

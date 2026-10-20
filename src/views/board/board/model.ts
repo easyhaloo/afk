@@ -152,7 +152,3 @@ export function getBoardSelectionTarget(
   const targetIndex = Math.min(position.itemIndex, targetItems.length - 1);
   return targetItems[targetIndex]?.id ?? selectedId;
 }
-
-export function getFocusedColumnIndex(columns: BoardColumn[], selectedId: string | undefined): number {
-  return findPosition(columns, selectedId)?.columnIndex ?? 0;
-}

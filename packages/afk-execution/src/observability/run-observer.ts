@@ -88,11 +88,12 @@ export class RunObserver {
     });
   }
 }
-
-export function loggerFor(context: ObservationContext, base: Logger = logger): Logger {
-  return base.child(contextLogFields(context));
-}
-
+/**
+ * The identity of one observation, as log fields.
+ *
+ * Every event carries the same identity, so it is written out once here
+ * rather than spelled again at each call site.
+ */
 export function contextLogFields(context: ObservationContext): Record<string, string | number | undefined> {
   return {
     trace_id: context.traceId,

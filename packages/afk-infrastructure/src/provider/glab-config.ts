@@ -131,18 +131,3 @@ export function listGlabTokens(config: GlabConfig | null = readGlabConfig()): Gl
       apiProtocol: hostConfig.api_protocol || 'https',
     }));
 }
-
-/**
- * Sync wrapper: resolves GitLab host/token from env or glab config.
- */
-export function applyGlabConfig(): { host: string; token: string } | null {
-  const url = process.env.GITLAB_URL;
-  const token = process.env.GITLAB_TOKEN;
-  if (token) {
-    return { host: url || 'https://gitlab.com', token };
-  }
-  const glab = getGlabToken(url);
-  if (!glab) return null;
-  const host = glab.apiHost.startsWith('http') ? glab.apiHost : `https://${glab.apiHost}`;
-  return { host, token: glab.token };
-}

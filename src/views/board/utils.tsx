@@ -103,31 +103,6 @@ export function parseMarkdownLine(line: string): React.ReactNode[] | null {
 
   return parts.length > 0 && parts.some(p => typeof p !== 'string') ? parts : null;
 }
-
-/**
- * Render a markdown string into Ink Text nodes (first line only, for list view).
- * Returns the original text if no markdown is detected.
- */
-export function renderMarkdown(text: string | undefined, max: number): React.ReactNode {
-  if (!text) return '…';
-
-  // Check first line (descriptions often start with ## headings)
-  const firstLine = text.split('\n')[0];
-  const trimmed = firstLine.trim();
-
-  if (!trimmed) return '…';
-
-  const parsed = parseMarkdownLine(trimmed);
-  if (parsed) {
-    // Apply truncation to the rendered markdown
-    const plainText = truncate(text, max);
-    return <>{parsed}</>;
-  }
-
-  // No markdown detected — use plain truncated text
-  return truncate(text, max);
-}
-
 export function formatRelativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();
   const h = Math.floor(diff / 3600000);

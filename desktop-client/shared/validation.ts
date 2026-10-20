@@ -18,8 +18,3 @@ export function parseRequiredString(input: unknown, label: string, allowEmpty = 
   if (typeof input !== "string" || (!allowEmpty && !input.trim()) || /[\x00-\x1f\x7f]/.test(input)) throw new Error(`${label} is invalid`);
   return input;
 }
-
-export function parsePort(input: unknown, label: string): number {
-  if (typeof input !== "number" || !Number.isSafeInteger(input) || input < 1 || input > 65535) throw new Error(`${label} is invalid`);
-  return input;
-}

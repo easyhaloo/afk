@@ -48,9 +48,6 @@ export type ExecutionEnvironmentUnavailable = {
 export type ExecutionEnvironmentQueryResult =
   | { available: true; environment: ExecutionEnvironment }
   | { available: false; unavailable: ExecutionEnvironmentUnavailable };
-
-const TMUX_METADATA_KEYS = ["tmuxSession", "tmuxWindowId", "tmuxWindowName", "tmuxPaneId"] as const;
-
 export function parseTmuxAttachTarget(input: unknown): TmuxAttachTarget {
   const candidate = parseObject(input, "tmux attach target");
   assertExactKeys(candidate, ["session", "windowId", "windowName", "paneId"], "tmux attach target");
@@ -87,39 +84,4 @@ export function tmuxTargetFromMetadata(metadata: Record<string, unknown>): TmuxA
   if (typeof metadata.tmuxWindowName === "string") target.windowName = metadata.tmuxWindowName;
   if (typeof metadata.tmuxPaneId === "string") target.paneId = metadata.tmuxPaneId;
   return target;
-}
-
-export function parseExecutionEnvironment(input: unknown): ExecutionEnvironment {
-  const candidate = parseObject(input, "execution environment");
-  assertExactKeys(candidate, ["resourceId", "kind", "status", "name", "worktreePath", "workspacePath", "runId", "tmux", "observedAt", "detail"], "execution environment");
-  if (candidate.kind !== "tmux" && candidate.kind !== "container" && candidate.kind !== "isolate-service") throw new Error("execution environment kind is invalid");
-  if (candidate.status !== "active" && candidate.status !== "closed" && candidate.status !== "missing" && candidate.status !== "failed") throw new Error("execution environment status is invalid");
-  if (typeof candidate.observedAt !== "string" || !candidate.observedAt) throw new Error("execution environment observedAt is invalid");
-  const environment: ExecutionEnvironment = {
-    resourceId: parseRequiredString(candidate.resourceId, "execution environment: resourceId"),
-    kind: candidate.kind as ExecutionEnvironment["kind"],
-    status: candidate.status as ExecutionEnvironment["status"],
-    name: parseRequiredString(candidate.name, "execution environment: name"),
-    worktreePath: parseRequiredString(candidate.worktreePath, "execution environment: worktreePath"),
-    workspacePath: parseRequiredString(candidate.workspacePath, "execution environment: workspacePath"),
-    observedAt: candidate.observedAt,
-  };
-  if (candidate.runId !== undefined) {
-    if (typeof candidate.runId !== "string" || !candidate.runId) throw new Error("execution environment: runId must be a non-empty string");
-    environment.runId = candidate.runId;
-  }
-  if (candidate.tmux !== undefined) {
-    if (environment.kind !== "tmux") throw new Error("execution environment: tmux target is only valid on tmux resources");
-    environment.tmux = parseTmuxAttachTarget(candidate.tmux);
-  }
-  if (candidate.detail !== undefined) {
-    if (typeof candidate.detail !== "string") throw new Error("execution environment: detail must be a string");
-    environment.detail = candidate.detail;
-  }
-  return environment;
-}
-
-/** Validate the metadata keys referenced by {@link tmuxTargetFromMetadata}. */
-export function isTmuxMetadataKey(key: string): boolean {
-  return (TMUX_METADATA_KEYS as readonly string[]).includes(key);
 }

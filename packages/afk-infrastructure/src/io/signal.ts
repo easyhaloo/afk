@@ -64,9 +64,13 @@ export async function clearSignal(dir: string = process.cwd()): Promise<void> {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 }
-
 /**
- * Wait for signal file to contain a specific type (polling-based).
+ * Wait for the signal file to carry a specific type (polling-based).
+ *
+ * This is the `afk signal wait` command's wait: it watches the file and
+ * fails when the signal does not arrive in time.  The runtime waits for a
+ * signal through the tmux client instead, which can also see a signal
+ * that arrives over Control Mode rather than on disk.
  */
 export async function waitForSignal(
   expectedType: Signal['type'],

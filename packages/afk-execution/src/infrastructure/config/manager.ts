@@ -2,8 +2,9 @@ import { getGlabToken } from '@afk/infrastructure';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as loadYaml } from 'js-yaml';
-import type { GitLabConfig, SchedulerConfig, WorkflowConfig, WorktreeConfig } from '../../domain/config/types.js';
-export type { GitLabConfig, SchedulerConfig, WorkflowConfig, WorktreeConfig } from '../../domain/config/types.js';
+import type { GitLabConfig, SchedulerConfig, WorkflowConfig } from '../../domain/config/types.js';
+export type { GitLabConfig, SchedulerConfig, WorkflowConfig } from '../../domain/config/types.js';
+
 import {
   assertCodexEndpoint,
   DEFAULT_CODEX_CONFIG,
@@ -57,10 +58,6 @@ const DEFAULT_SCHEDULER: SchedulerConfig = {
   excludeLabels: ['stage::afk-in-progress', 'stage::qa', 'stage::done', 'mode::hitl'],
   waveNotify: true,
   updateDashboard: true,
-};
-
-const DEFAULT_WORKTREE: WorktreeConfig = {
-  baseDir: '/tmp/afk-worktrees',
 };
 
 // ─── Loaders ──────────────────────────────────────────────────────────────────
@@ -126,13 +123,6 @@ function loadSchedulerConfig(): SchedulerConfig {
     updateDashboard: (process.env.AFK_SCHEDULER_UPDATE_DASHBOARD ?? String(DEFAULT_SCHEDULER.updateDashboard)).toLowerCase() !== 'false',
   };
 }
-
-function loadWorktreeConfig(): WorktreeConfig {
-  return {
-    baseDir: process.env.AFK_WORKTREE_DIR || DEFAULT_WORKTREE.baseDir,
-  };
-}
-
 function parseEnvMs(key: string, fallback: number, env: NodeJS.ProcessEnv = process.env): number {
   const val = env[key];
   if (!val) return fallback;
@@ -157,8 +147,6 @@ function parseIntEnv(key: string, fallback: number, env: NodeJS.ProcessEnv = pro
 let _gitlab: GitLabConfig | null = null;
 let _workflow: WorkflowConfig | null = null;
 let _scheduler: SchedulerConfig | null = null;
-let _worktree: WorktreeConfig | null = null;
-
 export function getGitLabConfig(): GitLabConfig {
   return _gitlab ??= loadGitLabConfig();
 }
@@ -170,11 +158,6 @@ export function getWorkflowConfig(): WorkflowConfig {
 export function getSchedulerConfig(): SchedulerConfig {
   return _scheduler ??= loadSchedulerConfig();
 }
-
-export function getWorktreeConfig(): WorktreeConfig {
-  return _worktree ??= loadWorktreeConfig();
-}
-
 function readProjectConfig(projectRoot: string): ConfigObject {
   const path = join(projectRoot, '.afk', 'config.yml');
   if (!existsSync(path)) return {};

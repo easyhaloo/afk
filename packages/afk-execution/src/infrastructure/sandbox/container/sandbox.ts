@@ -414,12 +414,3 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Convenience: build a ContainerSandbox from SandboxOptions. Used by
- *  ContainerSandboxProvider.create() and by tests. */
-export function buildContainerSandboxOptions(
-  sandboxOptions: SandboxOptions,
-  image: string,
-  user: string,
-): { worktreePath: string; image: string; user: string } {
-  return { worktreePath: sandboxOptions.worktreePath, image, user };
-}

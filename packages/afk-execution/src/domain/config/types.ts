@@ -47,7 +47,3 @@ export interface SchedulerConfig {
   waveNotify: boolean;
   updateDashboard: boolean;
 }
-
-export interface WorktreeConfig {
-  baseDir: string;
-}

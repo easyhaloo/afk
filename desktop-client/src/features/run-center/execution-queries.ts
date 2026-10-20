@@ -74,7 +74,3 @@ export function invalidateExecutionHistories(): void {
   executionHistoryCache.invalidateAll();
 }
 
-/** Refetch the detail of one run. */
-export function invalidateExecutionDetail(runId: string, workItemId: string): void {
-  executionDetailCache.invalidate(executionDetailKey(runId, workItemId));
-}

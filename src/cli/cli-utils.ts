@@ -2,11 +2,6 @@ import chalk from 'chalk';
 import { logger } from '@afk/infrastructure';
 export { openInBrowser } from '@afk/execution/shared/browser';
 
-/** Parse comma-separated string into trimmed array. */
-export function parseCommaSeparated(input: string): string[] {
-  return input.split(',').map(item => item.trim()).filter(Boolean);
-}
-
 /** Format JSON output consistently. */
 export function formatJson(data: unknown): void {
   console.log(JSON.stringify(data, null, 2));

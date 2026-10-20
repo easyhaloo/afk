@@ -72,15 +72,6 @@ export async function resolveAgentTranscript(options: {
   }
   return undefined;
 }
-
-export async function resolveAgentTranscriptPath(options: {
-  provider: 'claude-code' | 'codex' | 'opencode';
-  telemetryPath?: string;
-  threadId?: string;
-}): Promise<string | undefined> {
-  return (await resolveAgentTranscript(options))?.path;
-}
-
 export async function collectAgentTelemetry(
   execution: AgentExecution,
   result: ExecutionResult,

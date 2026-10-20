@@ -39,22 +39,6 @@ export function getStatusColor(status: string): string {
     default: return 'white';
   }
 }
-
-export function getProjectPlatformIcon(platform: 'github' | 'gitlab' | undefined): string {
-  return platform === 'github' ? GITHUB_ICON : GITLAB_ICON;
-}
-
-export function getProjectPlatformColor(platform: 'github' | 'gitlab' | undefined): string {
-  return platform === 'github' ? 'white' : 'magenta';
-}
-
-export function getBranchColor(branch: string, defaultBranch?: string): string {
-  if (!branch || branch === '–' || branch === '-') return 'yellow';
-  if (defaultBranch && branch === defaultBranch) return 'green';
-  if (/^(feature|bugfix|hotfix|release)\//.test(branch)) return 'blue';
-  return 'cyan';
-}
-
 export function getExecutionModeIcon(mode: string | undefined): string | undefined {
   switch (mode) {
     case 'afk':

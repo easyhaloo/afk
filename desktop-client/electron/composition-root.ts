@@ -1,7 +1,6 @@
 import { createRequire } from "node:module";
 import { app } from "electron";
 import path from "node:path";
-import { promises as fs } from "node:fs";
 import type { BacklogManagementProvider } from "@afk/application";
 import type { ManagementProviderBundle } from "@afk/infrastructure";
 import { loadWorkflowConfig } from "@afk/execution/infrastructure/config/manager";
@@ -97,7 +96,3 @@ export async function workflowTargetBranch(workspace: string): Promise<string> {
   return loadWorkflowConfig(workspace).targetBranch;
 }
 
-/** Test/debug helper: drop the cached provider bundles. */
-export function resetProviderBundles(): void {
-  bundles.clear();
-}

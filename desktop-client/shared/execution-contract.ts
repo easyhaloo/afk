@@ -27,6 +27,10 @@ export type ExecutionSummary = {
   updatedAt?: string;
   /** False when the run's event chain is broken. */
   integrityValid: boolean;
+  /** The workspace the run was prepared in, when the run recorded one. */
+  workspacePath?: string;
+  /** The branch the run worked on, when the run recorded one. */
+  workspaceBranch?: string;
   usage?: AgentUsage;
 };
 
@@ -81,7 +85,7 @@ export function parseExecutionQueryOptions(input: unknown): ExecutionQueryOption
 
 export function parseExecutionSummary(input: unknown): ExecutionSummary {
   const candidate = parseObject(input, "execution summary");
-  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "startedAt", "updatedAt", "integrityValid", "usage"], "execution summary");
+  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "startedAt", "updatedAt", "integrityValid", "workspacePath", "workspaceBranch", "usage"], "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
   if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as ExecutionPhase)) throw new Error("execution summary phase is invalid");
@@ -102,6 +106,8 @@ export function parseExecutionSummary(input: unknown): ExecutionSummary {
   if (candidate.phase !== undefined) summary.phase = candidate.phase as ExecutionPhase;
   if (candidate.startedAt !== undefined) summary.startedAt = parseRequiredString(candidate.startedAt, "execution summary: startedAt");
   if (candidate.updatedAt !== undefined) summary.updatedAt = parseRequiredString(candidate.updatedAt, "execution summary: updatedAt");
+  if (candidate.workspacePath !== undefined) summary.workspacePath = parseRequiredString(candidate.workspacePath, "execution summary: workspacePath");
+  if (candidate.workspaceBranch !== undefined) summary.workspaceBranch = parseRequiredString(candidate.workspaceBranch, "execution summary: workspaceBranch");
   if (candidate.usage !== undefined) {
     const usage = parseObject(candidate.usage, "execution usage");
     assertExactKeys(usage, ["inputTokens", "outputTokens", "totalTokens"], "execution usage");

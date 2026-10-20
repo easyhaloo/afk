@@ -98,6 +98,16 @@ describe("a run whose audit chain is broken", () => {
 });
 
 describe("the workspace path", () => {
+  it("carries the audited workspace path into the row", () => {
+    const rows = auditedRunRows([summary("succeeded", { workspacePath: "/tmp/afk/144" })], []);
+    expect(runWorkspacePath(rows[0]!)).toBe("/tmp/afk/144");
+  });
+
+  it("leaves the row without a path when the summary never recorded one", () => {
+    const rows = auditedRunRows([summary("succeeded")], []);
+    expect(runWorkspacePath(rows[0]!)).toBeNull();
+  });
+
   it("is read from the row's field, never out of prose", () => {
     const [row] = auditedRunRows([summary("succeeded")], []);
     expect(runWorkspacePath(row)).toBeNull();

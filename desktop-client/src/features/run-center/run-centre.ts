@@ -99,6 +99,8 @@ function auditedRow(execution: ExecutionSummary): RuntimeRunEvent {
     status: execution.status,
     ...(execution.phase ? { phase: execution.phase } : {}),
     integrityValid: execution.integrityValid,
+    // The run recorded the workspace it prepared; the path is a field.
+    ...(execution.workspacePath ? { workspacePath: execution.workspacePath } : {}),
     result: broken ? `审计链不完整：${label}` : label,
     nextStep: broken ? "审计链不完整，仅显示已验证部分" : label,
     raw: JSON.stringify(execution),

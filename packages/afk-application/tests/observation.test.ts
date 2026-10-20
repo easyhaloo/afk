@@ -44,6 +44,26 @@ describe('run observation facade', () => {
     expect((await queryExecutionHistory({}, port([event(1, 'run.requested'), event(2, 'run.started'), otherExecution]))).executions[0]).not.toHaveProperty('usage');
   });
 
+  it('carries the workspace the run prepared into the summary', async () => {
+    const prepared: RunEvent = {
+      ...event(3, 'run.started'),
+      type: 'workspace.prepared',
+      data: { kind: 'workspace.prepared', branch: 'afk/144', workspace: '/tmp/afk/144', baseBranch: 'main' },
+    } as RunEvent;
+    const deps = port([event(1, 'run.requested'), event(2, 'run.started'), prepared]);
+
+    // The run's detail already knew the path; its summary did not, and the
+    // summary is what the list shows.
+    expect((await queryExecutionHistory({}, deps)).executions[0]).toMatchObject({
+      workspacePath: '/tmp/afk/144',
+      workspaceBranch: 'afk/144',
+    });
+  });
+
+  it('leaves the summary without a workspace when the run never prepared one', async () => {
+    expect((await queryExecutionHistory({}, port())).executions[0]).not.toHaveProperty('workspacePath');
+  });
+
   it('returns the verified event timeline and replayed state', async () => {
     await expect(observeRun('run-1', port())).resolves.toMatchObject({
       runId: 'run-1',

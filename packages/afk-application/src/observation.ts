@@ -24,6 +24,23 @@ export async function listRunIds(ports: RunEventQueryPort): Promise<readonly str
   return ports.listRuns();
 }
 
+/**
+ * The workspace a run was prepared in, read from the event that prepared it.
+ *
+ * The run's own detail already reads this event, so the run centre's detail
+ * knew the path while its list did not — and the list is what the board
+ * shows. The path is a fact about the run, so it belongs in the summary.
+ */
+function preparedWorkspace(
+  events: Awaited<ReturnType<typeof loadRun>>['events'],
+): { path: string; branch: string } | undefined {
+  for (const event of events) {
+    if (event.data.kind !== 'workspace.prepared') continue;
+    return { path: event.data.workspace, branch: event.data.branch };
+  }
+  return undefined;
+}
+
 export interface QueryExecutionHistoryInput {
   workItemId?: string;
   limit?: number;
@@ -45,6 +62,10 @@ export interface ExecutionSummary {
   /** False when the run's event chain is broken; the summary then describes
    *  only the prefix the chain vouches for. */
   integrityValid: boolean;
+  /** The workspace the run was prepared in, when the run recorded one. */
+  workspacePath?: string;
+  /** The branch the run worked on, when the run recorded one. */
+  workspaceBranch?: string;
   usage?: AgentUsage;
 }
 
@@ -74,6 +95,7 @@ export async function queryExecutionHistory(
     const usage = observed.integrity.valid ? projectAgentUsage(observed.events.filter(event =>
       event.sequence <= observed.integrity.lastSequence && event.context.workItemId === observed.state.run!.workItemId
       && event.correlationId === observed.events[0]?.correlationId)) : undefined;
+    const workspace = preparedWorkspace(observed.events);
     matching.push({
       sortKey: observed.events[0]?.occurredAt ?? '',
       summary: {
@@ -88,6 +110,7 @@ export async function queryExecutionHistory(
         ...(observed.events[0]?.occurredAt ? { startedAt: observed.events[0].occurredAt } : {}),
         ...(observed.events.at(-1)?.occurredAt ? { updatedAt: observed.events.at(-1)!.occurredAt } : {}),
         integrityValid: observed.integrity.valid,
+        ...(workspace ? { workspacePath: workspace.path, workspaceBranch: workspace.branch } : {}),
         ...(usage ? { usage } : {}),
       },
     });

@@ -445,11 +445,6 @@ export class GitHubClient implements TrackerProvider {
     const issue = await this.getIssue(issueId);
     return targetBranchFromLabels(issue.labels, undefined, process.env.AFK_TARGET_BRANCH || 'main');
   }
-
-  async uploadArtifacts(worktreePath: string): Promise<string> {
-    // TODO: implement GitHub release asset upload
-    return '';
-  }
 }
 
 function statusCode(error: unknown): number | undefined {

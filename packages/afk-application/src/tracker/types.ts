@@ -183,7 +183,10 @@ export interface TrackerProvider {
    *
    * Optional: a platform with nowhere to put artifacts does not offer it.
    * GitLab uploads the files the worktree's `.afk/artifacts.txt` names to
-   * the project; GitHub has no equivalent and does not offer this.
+   * the project; GitHub has no equivalent, so the GitLab adapter has this
+   * method and the GitHub adapter simply does not — asking it to publish
+   * artifacts finds no method, rather than an empty answer that looks
+   * like a successful upload of nothing.
    */
   uploadArtifacts?(worktreePath: string): Promise<string>;
 }

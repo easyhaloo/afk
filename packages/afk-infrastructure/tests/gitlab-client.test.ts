@@ -57,4 +57,9 @@ describe('GitLabClient listMRs', () => {
 
     await expect(client.getMR(9)).resolves.toMatchObject({ mergeable: false });
   });
+
+  it('offers artifact upload, because GitLab has a project to put them in', () => {
+    const client = new GitLabClient({ url: 'https://gitlab.example.test', token: 'token', projectId: 'group/project' });
+    expect(typeof client.uploadArtifacts).toBe('function');
+  });
 });

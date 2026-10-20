@@ -35,4 +35,12 @@ describe('GitHubClient', () => {
     expect(client.parseAC({ labels: ['ac::1::Checks pass'], description: '## AC\n- [ ] Ignored fallback' }))
       .toEqual({ source: 'labels', items: [{ index: 1, text: 'Checks pass', evidenceType: 'none', checkCommand: '' }] });
   });
+
+  it('does not offer artifact upload, because GitHub has nowhere to put it', () => {
+    const client = new GitHubClient({ repo: 'owner/repo', auth: 'test-token' });
+    // The interface says the capability is optional and that GitHub does
+    // not offer it.  A method that returns an empty string is not an
+    // offer — it is a promise the adapter cannot keep.
+    expect('uploadArtifacts' in client).toBe(false);
+  });
 });

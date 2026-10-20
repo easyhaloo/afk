@@ -1,5 +1,6 @@
 import path from "node:path";
-import type { ManagedSshHostInput, SshExternalTerminalId, SshJumpHostType } from "../../shared/ssh-contract.js";
+import type { SshCredentialSetInput, SshListOptions } from "../../shared/ipc-contract.js";
+import type { ManagedSshHostInput, SshExternalTerminalId, SshFingerprint, SshJumpHostType } from "../../shared/ssh-contract.js";
 
 const OPENSSH_ALIAS_PATTERN = /^[A-Za-z0-9_.-]{1,100}$/;
 const HOSTNAME_PATTERN = /^\S{1,253}$/u;
@@ -146,4 +147,31 @@ export function validateJumpserverSyncOptions(value: unknown): JumpserverSyncOpt
 export function validateJumpserverBastionId(value: unknown): string {
   const id = requiredString(value, "JumpServer 堡垒机 ID 无效");
   return id;
+}
+
+/** The fingerprint of a host the person is about to trust. */
+export function sshFingerprintInput(value: unknown): SshFingerprint {
+  if (!value || typeof value !== "object") throw new Error("SSH 指纹参数无效");
+  const input = value as Record<string, unknown>;
+  if (typeof input.algorithm !== "string" || typeof input.value !== "string" || typeof input.hostname !== "string" || typeof input.port !== "number") throw new Error("SSH 指纹参数无效");
+  return { algorithm: input.algorithm, value: input.value, hostname: input.hostname, port: input.port, bits: typeof input.bits === "number" ? input.bits : undefined };
+}
+
+/** The options a host listing may be asked for. */
+export function sshListOptions(value: unknown): SshListOptions | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("SSH 列表参数无效");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some((key) => key !== "forceRefresh") || ("forceRefresh" in input && typeof input.forceRefresh !== "boolean")) throw new Error("SSH 列表参数无效");
+  return "forceRefresh" in input ? { forceRefresh: input.forceRefresh as boolean } : {};
+}
+
+/** The password a deploy key is set with. */
+export function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("SSH 凭据参数无效");
+  const input = value as Record<string, unknown>;
+  if (Object.keys(input).some((key) => key !== "hostId" && key !== "password") || !Object.prototype.hasOwnProperty.call(input, "hostId") || !Object.prototype.hasOwnProperty.call(input, "password")) throw new Error("SSH 凭据参数无效");
+  const hostId = validateSshHostId(input.hostId);
+  if (typeof input.password !== "string" || !input.password || input.password.includes("\0") || input.password.includes("\r") || input.password.includes("\n") || Buffer.byteLength(input.password, "utf8") > 4096) throw new Error("SSH 部署密码无效");
+  return { hostId, password: input.password };
 }

@@ -353,9 +353,20 @@
 
 ## 8. 执行结果
 
-**执行基线**：`refactor/afk-package-boundaries` @ `e167fc9`（分支自 `main` 领先 16 个提交、
-落后 0 个，32 分钟前仍在活跃）。清理在一条从它派生的独立分支 `docs/overdue-cleanup` 上完成，
+**执行基线**：`refactor/afk-package-boundaries` @ `e167fc9`（盘点时该分支自 `main` 领先 16 个
+提交、落后 0 个，32 分钟前仍在活跃）。清理在一条从它派生的独立分支 `docs/overdue-cleanup` 上完成，
 以免与该分支上并行的代码改动相互干扰。
+
+执行期间该分支继续推进了两次代码提交（事件链校验、交接协调器接线），并改写了
+`glossary.md`、`observability.md`、`workflows.md` 三份文档。清理分支最终 rebase 到该分支的
+最新 HEAD，两处冲突按**代码事实**而非按提交先后解决：
+
+| 冲突点 | 采用 | 依据 |
+|---|---|---|
+| handoff 文档路径 | `handoff-<backlogId>-<gen>.md` | `packages/afk-execution/src/application/workflows/handoff.ts:15` 的 `handoffDocPath()` |
+| 终止式交接的信号 | `blocked` + `hitl`，不写 issue 评论 | 同文件 `:155-156`，交接不再发评论，改由审计脊柱的 `handoff.performed` 记录 |
+| `--max-handoffs` 默认 | 10 | `src/cli/commands/run.ts:51` 配合 `goalBudget` 默认 10,000,000 |
+| `--max-total-tokens` 默认 | 10,000,000 | `src/cli/commands/run.ts:53` |
 
 **已完成**：
 

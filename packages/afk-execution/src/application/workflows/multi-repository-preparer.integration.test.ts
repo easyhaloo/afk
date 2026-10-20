@@ -66,14 +66,44 @@ async function branchExists(repository: string, branch: string): Promise<boolean
   return simpleGit(repository).revparse([`refs/heads/${branch}`]).then(() => true, () => false);
 }
 
+/**
+ * What the repositories looked like at the moment an assertion failed.
+ *
+ * The failure arrives as a diff between two revisions, and a diff says
+ * nothing about which side moved. The refs, the worktrees and the status
+ * are the only evidence, so they are captured into the failure message
+ * before the temporary directory is removed — otherwise the next
+ * occurrence leaves nothing to look at.
+ */
+async function repositoryState(repositories: { name: string; root: string }[]): Promise<string> {
+  const lines: string[] = [];
+  for (const repository of repositories) {
+    const git = simpleGit(repository.root);
+    lines.push(`--- ${repository.name} (${repository.root})`);
+    for (const [label, command] of [
+      ['head', ['rev-parse', 'HEAD']],
+      ['refs', ['show-ref']],
+      ['worktrees', ['worktree', 'list']],
+      ['status', ['status', '--porcelain=v1']],
+    ] as const) {
+      try {
+        lines.push(`${label}: ${(await git.raw([...command])).trim()}`);
+      } catch (error) {
+        lines.push(`${label}: (${(error as Error).message.split('\n')[0]})`);
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
 describe('multi-repository execution manifest integration', () => {
   it('preserves unpublished commits on existing and newly created working branches across failed retries', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-multi-repository-retry-'));
+    const workspaceRoot = join(root, 'workspace');
+    const apiRoot = join(workspaceRoot, 'repositories', 'api');
+    const webRoot = join(workspaceRoot, 'repositories', 'web');
     let restoreGitRedirects = () => {};
     try {
-      const workspaceRoot = join(root, 'workspace');
-      const apiRoot = join(workspaceRoot, 'repositories', 'api');
-      const webRoot = join(workspaceRoot, 'repositories', 'web');
       const workingBranch = 'afk/work-item-retry';
       const api = await createRemote(root, 'api', 'main');
       const web = await createRemote(root, 'web', 'develop');
@@ -128,6 +158,14 @@ describe('multi-repository execution manifest integration', () => {
       expect(await readFile(join(webRoot, 'first-web.txt'), 'utf8')).toBe('first attempt\n');
       expect(await branchExists(api.remote, workingBranch)).toBe(false);
       expect(await branchExists(web.remote, workingBranch)).toBe(false);
+    } catch (error) {
+      throw new Error(
+        `${(error as Error).message}\n\nrepository state at the moment of the failure:\n${await repositoryState([
+          { name: 'api', root: apiRoot },
+          { name: 'web', root: webRoot },
+        ])}`,
+        { cause: error },
+      );
     } finally {
       restoreGitRedirects();
       await rm(root, { recursive: true, force: true });
@@ -201,11 +239,11 @@ describe('multi-repository execution manifest integration', () => {
 
   it('prepares both repositories from their own bases, cleans success and preserves failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-multi-repository-integration-'));
+    const workspaceRoot = join(root, 'workspace');
+    const apiRoot = join(workspaceRoot, 'repositories', 'api');
+    const webRoot = join(workspaceRoot, 'repositories', 'web');
     let restoreGitRedirects = () => {};
     try {
-      const workspaceRoot = join(root, 'workspace');
-      const apiRoot = join(workspaceRoot, 'repositories', 'api');
-      const webRoot = join(workspaceRoot, 'repositories', 'web');
       const manifestPath = join(workspaceRoot, '.afk', 'execution-manifest.json');
       const workingBranch = 'afk/work-item-18';
       const api = await createRemote(root, 'api', 'main');
@@ -308,6 +346,14 @@ describe('multi-repository execution manifest integration', () => {
       expect((await simpleGit(webRoot).raw(['status', '--porcelain=v1']))).toContain(' M web.txt');
       expect((await simpleGit(webRoot).raw(['status', '--porcelain=v1']))).toContain('A  staged.txt');
       expect(await readFile(manifestPath, 'utf8')).toContain('"primary": true');
+    } catch (error) {
+      throw new Error(
+        `${(error as Error).message}\n\nrepository state at the moment of the failure:\n${await repositoryState([
+          { name: 'api', root: apiRoot },
+          { name: 'web', root: webRoot },
+        ])}`,
+        { cause: error },
+      );
     } finally {
       restoreGitRedirects();
       await rm(root, { recursive: true, force: true });

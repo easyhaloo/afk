@@ -75,7 +75,7 @@ describe('HandoffCoordinator', () => {
 
   // ── auto ───────────────────────────────────────────────────────────────────
 
-  it('auto success: writes doc, posts comment, restarts session, re-arms watchdog', async () => {
+  it('auto success: writes doc, restarts session, re-arms watchdog', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'implemented AC 1-3' })),
@@ -100,7 +100,7 @@ describe('HandoffCoordinator', () => {
     expect(doc).toContain('line1');
   });
 
-  it('auto relaunch failure: flips to manual (handoff::active + killed), returns terminated', async () => {
+  it('auto relaunch failure: flips to manual (blocked + hitl, session killed), returns terminated', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'partial work' })),
@@ -138,7 +138,7 @@ describe('HandoffCoordinator', () => {
 
   // ── terminal ───────────────────────────────────────────────────────────────
 
-  it('terminal/budget: embeds terminal doc in comment, labels handoff::active, no re-arm', async () => {
+  it('terminal/budget: writes the terminal doc, blocks the backlog, no re-arm', async () => {
     const backlog = makeBacklog();
     const tmux = makeTmux({
       waitForSignal: vi.fn(async () => ({ type: 'handoff_ready', summary: 'final summary' })),

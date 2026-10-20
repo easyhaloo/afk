@@ -21,7 +21,7 @@ import type { ModuleParams } from './modules/_registry.js';
 import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle.js';
 import { Watchdog, createWatchdog } from './workflows/watchdog.js';
 import type { WorkflowConfig } from '../infrastructure/config/manager.js';
-import { HandoffCoordinator, handoffDocPath } from './workflows/handoff.js';
+import { HandoffCoordinator, createHandoffCoordinator, handoffDocPath } from './workflows/handoff.js';
 import { attemptNativeResume } from './workflows/resume.js';
 import { BudgetManager } from './workflows/budget.js';
 import { BudgetStore } from './workflows/budget-store.js';
@@ -325,9 +325,12 @@ export class WorkflowRunner {
     this.config = deps?.config ?? getWorkflowConfig();
     this.plugins = deps?.plugins;
     this.providers = providers;
+    // The coordinator is not optional. A stub here would silently turn every
+    // context handoff into "give up", which is how the whole negotiate /
+    // persist / relaunch cluster stayed dead code in the only running path.
     this.coordinator = deps?.coordinatorFactory
-      ? deps.coordinatorFactory({ backlog: providers?.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config } as never)
-      : ({ handoff: async () => 'terminal' } as unknown as HandoffCoordinator);
+      ? deps.coordinatorFactory({ backlog: providers.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config })
+      : createHandoffCoordinator({ backlog: providers.backlog, tmux: this.tmux, watchdog: this.watchdog, config: this.config });
     this.sandboxProvider = deps?.sandboxProvider ?? createSandboxProvider('local', { worktreeManager: this.worktree });
     this.sandboxProviderInjected = deps?.sandboxProvider !== undefined;
     this.agentProviderInjected = deps?.agentProvider !== undefined;
@@ -1168,7 +1171,10 @@ export class WorkflowRunner {
           };
 
           if (p.budget.isExhausted()) {
-            await this.coordinator.handoff(hctx, 'terminal', p.budget.exhaustionReason()!);
+            const reason = p.budget.exhaustionReason()!;
+            const outcome = await this.coordinator.handoff(hctx, 'terminal', reason);
+            // A handoff that leaves no trace is a handoff nobody can explain.
+            await this.recordObservation({ kind: 'handoff.performed', mode: 'terminal', outcome, reason });
             return { completed: false };
           }
 
@@ -1222,7 +1228,9 @@ export class WorkflowRunner {
           // After it returns, the loop continues and sends the continued goal in the next iteration.
           // This mirrors the original behavior exactly.
           await reserveHandoff();
-          if ((await this.coordinator.handoff(hctx, 'auto')) === 'continued') {
+          const outcome = await this.coordinator.handoff(hctx, 'auto');
+          await this.recordObservation({ kind: 'handoff.performed', mode: 'auto', outcome });
+          if (outcome === 'continued') {
             logger.info({ iid: p.iid, round, generation: p.budget.used + 1 }, 'handoff continued; looping to send continued goal');
             continue;
           }

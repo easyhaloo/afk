@@ -13,10 +13,13 @@ and design discussions use these terms; keep them in lockstep with the code.
 
 - **HandoffCoordinator** - Owns every way a context handoff resolves (auto
   relaunch, terminal, manual flip): negotiate summary, persist recovery doc,
-  post issue comment, restart or terminate the session. One interface -
+  restart or terminate the session. One interface -
   `handoff(ctx, mode: 'auto' | 'terminal', reason?)` - hides the
-  negotiate/persist/notify/relaunch cluster. The manual flip is an internal
-  failure mode of `'auto'`. `packages/afk-execution/src/application/workflows/handoff.ts`.
+  negotiate/persist/relaunch cluster. The manual flip is an internal
+  failure mode of `'auto'`. It does not post an issue comment: the provider
+  seam has no comment method, and the handoff's human signal is the
+  backlog's move to blocked/hitl.
+  `packages/afk-execution/src/application/workflows/handoff.ts`.
 
 - **Watchdog** - Detached process-group that fires after the hard timeout:
   kills the tmux session and appends to `watchdog.log`. It writes no signal

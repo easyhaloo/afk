@@ -21,12 +21,20 @@ import type {
 } from './types.js';
 import { ProcessAgentProvider } from './process-provider.js';
 
-/** Claude Code capabilities */
+/**
+ * Claude Code capabilities.
+ *
+ * 'resume' is deliberately absent. The session restore is not implemented:
+ * `restoreSession` does nothing and `captureSession` returns a placeholder.
+ * Declaring the capability would let the runner believe a context had been
+ * restored when it had not, and the run would re-send the same prompt until
+ * the handoff budget ran out. A capability is a promise the provider has to
+ * keep.
+ */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set([
   'streaming',
   'structured-output',
   'usage',
-  'resume',
   'interactive',
 ]);
 

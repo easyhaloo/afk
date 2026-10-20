@@ -52,6 +52,7 @@ export function evolve(state: RunAggregate, event: RunEvent): RunAggregate {
     case 'failure.classified':
     case 'agent.session_recorded':
     case 'commit.recorded':
+    case 'handoff.performed':
       if (!state.run) throw new RunEventTransitionError(`event '${event.type}' requires a requested run`);
       return next;
     case 'step.started':

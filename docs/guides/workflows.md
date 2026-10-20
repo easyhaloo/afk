@@ -77,7 +77,7 @@ flowchart TD
     G -->|timeout| Z2
 
     H --> E
-    H -.->|"Budget exhausted / Restart failed"| Z3["Termination Handoff: handoff::active, manual recovery"]
+    H -.->|"Budget exhausted / Restart failed"| Z3["Termination Handoff: blocked + hitl, recovery doc"
 
     I --> J["Cleanup: Backlog verification, delete worktree"]
 
@@ -398,7 +398,7 @@ When context approaches its limit, the workflow **automatically interrupts the c
 
 1. **Request summary**: Type plain text handoff instructions (urge immediate brief summary) — ① `git add -A && git commit` (skip if no changes) → ② 3 quick answers (done/doing/next) → ③ write `handoff_ready` signal. If no valid `handoff_ready` within 60s (template placeholder `<summary>` counts as no summary), use pane snapshot as fallback.
 2. **Handoff document**: Summary + snapshot + commit sha written to `<worktree>/.afk/handoff/handoff-<iid>-<gen>.md` (`.afk/` is already in the repo's `.gitignore`, so it won't be committed to the MR via `git add -A`; the document travels with the worktree, and the recovering agent can read it directly on resume).
-3. **Recovery comment**: Issue comment records handoff progress (recovery document at time of task interruption). For termination handoffs, the comment **embeds the complete handoff document content** (no file path reference) — the recovering party gets all information from the comment alone.
+3. **No issue comment**: the handoff records itself in the audit spine (`handoff.performed`). The recovery document on disk is the handover artefact; a termination handoff also moves the backlog to `blocked` + `hitl`, which is the signal an operator sees in the tracker.
 4. **Restart**: Kill tmux session → clear signal files and old statusline data → recreate session with same name → restart watchdog (each generation gets a full hard timeout).
 5. **Continue**: New session receives instructions to "continue implementing/verifying issue #N (read handoff document first)", looping until completion signal or another handoff.
 
@@ -406,8 +406,8 @@ When context approaches its limit, the workflow **automatically interrupts the c
 
 - `--max-handoffs <n>` (default 3): Auto-resume round limit, shared **globally** across both phases (implementation/verification).
 - `--max-total-tokens <tokens>` (default 500,000): Cumulative token limit across the entire run spanning handoff generations (each handoff adds the old session's usage; termination check = cumulative + current session usage >= limit).
-- **Either budget exhausted** → Termination handoff: `handoff::active` label + comment (with termination reason, **complete handoff document content**, and recovery instructions). After manually removing the label, re-trigger `/afk-implement <iid>` to resume.
-- **Restart failure** (e.g., Claude not ready within 30s) → Automatically flip to termination handoff (keep recovery comment sent), avoid crash path.
+- **Either budget exhausted** → Termination handoff: the backlog moves to `blocked` + `hitl`, the recovery document is written to `<worktree>/.afk/handoff/`, and the session is killed. The worktree is retained for a manual resume.
+- **Restart failure** (e.g., Claude not ready within 30s) → Automatically flip to termination handoff (blocked + hitl, session killed), avoid crash path.
 
 ## Error Handling
 

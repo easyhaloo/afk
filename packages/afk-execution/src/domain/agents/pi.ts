@@ -24,10 +24,17 @@ import type {
 } from './types.js';
 import { ProcessAgentProvider } from './process-provider.js';
 
+/**
+ * Pi capabilities.
+ *
+ * 'resume' is deliberately absent: `restoreSession` does nothing and the
+ * command never carries a session flag, so there is no way to restore a
+ * context. Declaring the capability would make the runner re-send the same
+ * prompt against an unrestored context.
+ */
 const CAPABILITIES: ReadonlySet<AgentCapability> = new Set<AgentCapability>([
   'streaming',
   'usage',
-  'resume',
   'interactive',
 ] as const);
 

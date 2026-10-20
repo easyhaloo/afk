@@ -63,6 +63,7 @@ export type RunEventData =
   | { kind: 'human_gate.approved'; gateId: string; approverId: string }
   | { kind: 'run.finished'; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'>; reason?: string; reasonCode?: RunFailureReasonCode }
   | { kind: 'failure.classified'; failureClass: string; summary: string }
+  | { kind: 'handoff.performed'; mode: 'auto' | 'terminal'; outcome: 'continued' | 'terminated'; reason?: string }
   | { kind: 'agent.session_recorded'; sessionId: string; transcriptPath?: string; usage?: { inputTokens: number; outputTokens: number; totalTokens: number }; tools?: AgentToolCallSummary[] };
 
 export type RunEventType = RunEventData['kind'];

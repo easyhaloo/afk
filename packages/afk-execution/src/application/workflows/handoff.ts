@@ -28,7 +28,7 @@ export interface HandoffContext {
   hardTimeoutMs: number;
   /** Generation number for the auto-handoff doc (1-based). Ignored for terminal. */
   gen: number;
-  /** Token count that triggered the handoff (advisory, surfaces in the comment). */
+  /** Token count that triggered the handoff (advisory; recorded in the audit event). */
   tokens: number;
 }
 
@@ -44,12 +44,17 @@ interface HandoffSummary {
  *
  * The runner's phase loop decides WHEN to hand off (context_high, budget
  * exhausted); this module decides HOW: negotiate a summary with the agent,
- * persist a recovery doc, post an issue comment, then either relaunch the
- * session (auto) or terminate with a full handoff doc (terminal).
+ * persist a recovery doc, then either relaunch the session (auto) or
+ * terminate with a full handoff doc (terminal).
  *
- * One interface - {@link handoff} - hides the negotiation/persist/notify/
- * relaunch cluster. The manual-flip fallback is an internal failure mode of
- * 'auto' (returns 'terminated'); the runner never sees it as a distinct case.
+ * One interface - {@link handoff} - hides the negotiate/persist/relaunch
+ * cluster. The manual-flip fallback is an internal failure mode of 'auto'
+ * (returns 'terminated'); the runner never sees it as a distinct case.
+ *
+ * There is no issue comment. The provider seam has no comment method, and a
+ * handoff that only flipped the backlog to blocked/hitl would be visible in
+ * the tracker; inventing a comment capability is a separate change, not
+ * something this class can quietly assume.
  */
 export class HandoffCoordinator {
   constructor(
@@ -62,12 +67,12 @@ export class HandoffCoordinator {
   /**
    * Perform a handoff.
    *
-   * - 'auto': disarm the watchdog, negotiate a summary, write a doc + comment,
+   * - 'auto': disarm the watchdog, negotiate a summary, write a doc,
    *   relaunch the session. Returns 'continued' on a clean relaunch, or
    *   'terminated' after flipping to the manual-resume protocol on relaunch
    *   failure.
-   * - 'terminal': disarm, negotiate, write a terminal doc, embed it in a
-   *   comment, kill the session. Always returns 'terminated'.
+   * - 'terminal': disarm, negotiate, write a terminal doc, flip the backlog
+   *   to blocked/hitl, kill the session. Always returns 'terminated'.
    */
   async handoff(
     ctx: HandoffContext,
@@ -137,10 +142,8 @@ export class HandoffCoordinator {
 
   /**
    * Terminal handoff (handoff budget or total-token budget exhausted):
-   * handoff::active label + recovery comment, session killed. The recovery
-   * comment EMBEDS the full handoff doc (no file-path reference) - the
-   * resume path reads everything from the issue. The worktree (with the doc
-   * on disk) is retained for manual resume.
+   * the backlog moves to blocked/hitl and the session is killed. The recovery
+   * doc stays on disk in the worktree, which is retained for a manual resume.
    */
   private async terminalHandoff(ctx: HandoffContext, reason?: TerminalReason): Promise<HandoffOutcome> {
     this.watchdog.disarm(); // stale watchdog must not later write a timeout signal into the retained worktree

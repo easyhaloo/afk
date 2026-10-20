@@ -16,7 +16,7 @@ import {
 } from './registry.js';
 import { createAgentProvider, ensureBuiltinAgentProviders } from './index.js';
 import type { AgentExecution, Sandbox } from '../../infrastructure/sandbox/types.js';
-import type { AgentProvider } from './types.js';
+import type { AgentProvider, AgentCapability } from './types.js';
 
 /** Build minimal AgentCommandOptions for testing. */
 function opts(over: Partial<{ worktreePath: string; sessionId: string; goal: string; interactive: boolean }> = {}) {
@@ -41,7 +41,10 @@ describe('Agent providers — fixture coverage', () => {
       expect(p.capabilities.has('streaming')).toBe(true);
       expect(p.capabilities.has('structured-output')).toBe(true);
       expect(p.capabilities.has('usage')).toBe(true);
-      expect(p.capabilities.has('resume')).toBe(true);
+      // The session restore is not implemented, so the capability is not
+      // claimed. Claiming it made the runner re-send the same prompt against
+      // an unrestored context until the handoff budget ran out.
+      expect(p.capabilities.has('resume')).toBe(false);
       expect(p.capabilities.has('interactive')).toBe(true);
     });
 
@@ -278,9 +281,11 @@ describe('Agent providers — fixture coverage', () => {
   describe('CursorProvider', () => {
     const p = new CursorProvider();
 
-    it('exposes correct name and capabilities (HAS resume)', () => {
+    it('exposes correct name and capabilities (NO resume)', () => {
       expect(p.name).toBe('cursor');
-      expect(p.capabilities.has('resume')).toBe(true);
+      // `restoreSession` does nothing and the command carries no resume
+      // flag, so there is no way to restore a context.
+      expect(p.capabilities.has('resume')).toBe(false);
       expect(p.capabilities.has('streaming')).toBe(true);
       expect(p.capabilities.has('usage')).toBe(true);
     });
@@ -305,9 +310,11 @@ describe('Agent providers — fixture coverage', () => {
   describe('PiProvider', () => {
     const p = new PiProvider();
 
-    it('exposes correct name and capabilities (HAS resume)', () => {
+    it('exposes correct name and capabilities (NO resume)', () => {
       expect(p.name).toBe('pi');
-      expect(p.capabilities.has('resume')).toBe(true);
+      // `restoreSession` does nothing and the command carries no session
+      // flag, so there is no way to restore a context.
+      expect(p.capabilities.has('resume')).toBe(false);
       expect(p.capabilities.has('streaming')).toBe(true);
     });
 
@@ -483,7 +490,22 @@ describe('Agent registry', () => {
 });
 
 describe('Resume capability gating', () => {
-  const resumeProvider = new ClaudeCodeProvider(); // HAS resume
+  // No built-in provider can restore a context today — the three that used to
+  // claim the capability could not keep the promise — so the resume path is
+  // exercised through a provider that actually keeps it.
+  const resumeProvider: AgentProvider = {
+    name: 'claude-code',
+    capabilities: new Set<AgentCapability>(['resume']),
+    createExecution: async () => { throw new Error('not used'); },
+    restoreSession: async () => {},
+    captureSession: async () => ({
+      sessionId: 'x',
+      generation: 1,
+      checkpoint: null,
+      summary: '',
+      capturedAt: new Date().toISOString(),
+    }),
+  };
   const noResumeProvider = new CodexProvider();   // NO resume
 
   it('guardedRestoreSession throws for non-resume provider', async () => {
@@ -500,7 +522,7 @@ describe('Resume capability gating', () => {
   });
 
   it('guardedRestoreSession succeeds for resume-capable provider', async () => {
-    // ClaudeCodeProvider.restoreSession is a no-op; should not throw.
+    // The provider declares 'resume' and implements the restore.
     await expect(guardedRestoreSession(resumeProvider, {
       snapshot: {
         sessionId: 'x',

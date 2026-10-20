@@ -11,6 +11,13 @@
  *   3. Group steps by level. Steps at the same level run concurrently.
  *   4. Within a level, preserve declaration order for deterministic scheduling.
  *
+ * A step depends on its `dependsOn` steps AND on the step its `when` clause
+ * names. The second edge is what makes a clause decidable: by the time a step
+ * is evaluated, the step it names has already run — or has been excluded, in
+ * which case it deliberately has no result. Without that edge "no result"
+ * would mean both "has not run yet" and "will never run", and the two have
+ * to be told apart.
+ *
  * Cycles raise TemplateError.
  */
 
@@ -26,6 +33,16 @@ export interface ExecutionGroup {
 export interface ExecutionPlan {
   templateName: string;
   groups: ExecutionGroup[];
+}
+
+/**
+ * The steps a step waits for: its declared dependencies plus the step its
+ * `when` clause names. A step named by both is one dependency, not two.
+ */
+function dependenciesOf(step: Step): string[] {
+  const deps = new Set(step.dependsOn ?? []);
+  if (step.when) deps.add(step.when.step);
+  return [...deps];
 }
 
 /**
@@ -57,14 +74,20 @@ export function resolveExecutionPlan(template: WorkflowTemplate, allStepIds?: Se
     if ((step.dependsOn ?? []).includes(step.id)) {
       throw new TemplateError(`step '${step.id}' depends on itself`, template.name);
     }
+    if (step.when?.step === step.id) {
+      throw new TemplateError(`step '${step.id}' references itself in its when-clause`, template.name);
+    }
   }
 
-  // Compute in-degree for Kahn's algorithm.
+  // Compute in-degree for Kahn's algorithm. A step's dependencies are its
+  // `dependsOn` steps plus the step its `when` clause names; a step named by
+  // both counts once.
   const inDegree = new Map<string, number>();
   const dependents = new Map<string, string[]>(); // dep -> [steps that depend on it]
   for (const step of template.steps) {
-    const deps = step.dependsOn ?? [];
-    inDegree.set(step.id, deps.length);
+    const deps = new Set(step.dependsOn ?? []);
+    if (step.when) deps.add(step.when.step);
+    inDegree.set(step.id, deps.size);
     if (!dependents.has(step.id)) dependents.set(step.id, []);
     for (const dep of deps) {
       if (!dependents.has(dep)) dependents.set(dep, []);
@@ -74,7 +97,7 @@ export function resolveExecutionPlan(template: WorkflowTemplate, allStepIds?: Se
 
   // BFS levels.
   const levelByStep = new Map<string, number>();
-  const queue: string[] = template.steps.filter(s => (s.dependsOn ?? []).length === 0).map(s => s.id);
+  const queue: string[] = template.steps.filter(s => dependenciesOf(s).length === 0).map(s => s.id);
   for (const id of queue) levelByStep.set(id, 0);
 
   let processed = 0;

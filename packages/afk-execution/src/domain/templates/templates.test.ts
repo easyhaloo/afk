@@ -5,7 +5,6 @@ import * as fs from 'fs';
 import { promises as afs } from 'fs';
 import { TemplateLoader } from './loader.js';
 import { resolveExecutionPlan, hasCycle } from './resolver.js';
-import { evaluateWhen } from './when-evaluator.js';
 import {
   registerTemplate,
   getTemplate,
@@ -15,7 +14,7 @@ import {
   _resetTemplateRegistry,
 } from './registry.js';
 import { builtinTemplates } from './builtin.js';
-import type { WorkflowTemplate, StepResult } from './types.js';
+import type { WorkflowTemplate } from './types.js';
 
 describe('Template schema — validation', () => {
   const loader = new TemplateLoader();
@@ -84,7 +83,7 @@ steps:
 });
 
 describe('Dependency resolver', () => {
-  function mkTemplate(steps: Array<{ id: string; dependsOn?: string[] }>): WorkflowTemplate {
+  function mkTemplate(steps: Array<{ id: string; dependsOn?: string[]; when?: { step: string; equals?: 'completed' | 'failed' | 'aborted' | 'timed_out'; notEquals?: 'completed' | 'failed' | 'aborted' | 'timed_out' } }>): WorkflowTemplate {
     return {
       name: 'test',
       version: 1,
@@ -93,6 +92,7 @@ describe('Dependency resolver', () => {
         role: 'r',
         prompt: 'p',
         dependsOn: s.dependsOn,
+        when: s.when,
       })),
     };
   }
@@ -108,6 +108,39 @@ describe('Dependency resolver', () => {
     const t = mkTemplate([{ id: 'a' }, { id: 'b', dependsOn: ['a'] }, { id: 'c', dependsOn: ['b'] }]);
     const plan = resolveExecutionPlan(t);
     expect(plan.groups.map(g => g.steps.map(s => s.id))).toEqual([['a'], ['b'], ['c']]);
+  });
+
+  it('orders a step after the step its when-clause names', () => {
+    // A forward reference: 'b' decides on 'c', so 'c' has to run first.
+    const t = mkTemplate([
+      { id: 'a' },
+      { id: 'b', when: { step: 'c', equals: 'completed' } },
+      { id: 'c' },
+    ]);
+    const plan = resolveExecutionPlan(t);
+    expect(plan.groups.map(g => g.steps.map(s => s.id))).toEqual([['a', 'c'], ['b']]);
+  });
+
+  it('counts a step named by both dependsOn and when once', () => {
+    const t = mkTemplate([
+      { id: 'a' },
+      { id: 'b', dependsOn: ['a'], when: { step: 'a', equals: 'completed' } },
+    ]);
+    const plan = resolveExecutionPlan(t);
+    expect(plan.groups.map(g => g.steps.map(s => s.id))).toEqual([['a'], ['b']]);
+  });
+
+  it('detects a when-clause that references itself', () => {
+    const t = mkTemplate([{ id: 'a', when: { step: 'a', equals: 'completed' } }]);
+    expect(() => resolveExecutionPlan(t)).toThrow(/itself/);
+  });
+
+  it('detects a cycle formed across dependsOn and a when-clause', () => {
+    const t = mkTemplate([
+      { id: 'a', dependsOn: ['b'] },
+      { id: 'b', when: { step: 'a', equals: 'completed' } },
+    ]);
+    expect(() => resolveExecutionPlan(t)).toThrow(/cycle/);
   });
 
   it('groups parallel steps at the same level', () => {
@@ -142,41 +175,6 @@ describe('Dependency resolver', () => {
     const t = mkTemplate([{ id: 'z' }, { id: 'a' }, { id: 'm' }]);
     const plan = resolveExecutionPlan(t);
     expect(plan.groups[0].steps.map(s => s.id)).toEqual(['z', 'a', 'm']);
-  });
-});
-
-describe('When-clause evaluator', () => {
-  const results: Record<string, StepResult> = {
-    review: {
-      stepId: 'review',
-      status: 'completed',
-      startedAt: 'now',
-      completedAt: 'now',
-    },
-    broken: {
-      stepId: 'broken',
-      status: 'failed',
-      startedAt: 'now',
-      completedAt: 'now',
-    },
-  };
-
-  it('returns true when no clause', () => {
-    expect(evaluateWhen(undefined, results)).toBe(true);
-  });
-
-  it('returns true when referenced step has not run yet (forward reference)', () => {
-    expect(evaluateWhen({ step: 'future', equals: 'completed' }, results)).toBe(true);
-  });
-
-  it('matches equals clause', () => {
-    expect(evaluateWhen({ step: 'review', equals: 'completed' }, results)).toBe(true);
-    expect(evaluateWhen({ step: 'broken', equals: 'completed' }, results)).toBe(false);
-  });
-
-  it('matches notEquals clause', () => {
-    expect(evaluateWhen({ step: 'review', notEquals: 'failed' }, results)).toBe(true);
-    expect(evaluateWhen({ step: 'broken', notEquals: 'failed' }, results)).toBe(false);
   });
 });
 

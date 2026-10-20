@@ -185,12 +185,14 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 
 ### 4.2 编译规则
 
-`resolveExecutionPlan` 先校验依赖和 `when` 引用，再用 Kahn 算法计算依赖层级。相同层级的 runnable steps 由 `PlanExecutor` 通过 `Promise.all` 并发执行；有依赖的层级按顺序推进。
+`resolveExecutionPlan` 先校验依赖和 `when` 引用，再用 Kahn 算法计算依赖层级。层级同时考虑 `dependsOn` 和 `when` 引用的 step：被 `when` 引用的 step 一定排在引用者之前，这样条件在被判断时已经有了确定的结果。相同层级的 runnable steps 由 `PlanExecutor` 通过 `Promise.all` 并发执行；有依赖的层级按顺序推进。
 
-条件语义是：
+条件语义由 `packages/afk-execution/src/domain/templates/runnability.ts` 统一定义：
 
 - 没有 `when` 时，所有 `dependsOn` 必须为 `completed` 才运行。
-- 有 `when` 时先由 `evaluateWhen` 判断条件；显式条件可以有意从失败依赖中恢复，例如 `review=failed` 时执行 `fix`。
+- 有 `when` 时，条件只能由**已记录的结果**满足；被引用的 step 从未运行过就没有结果，条件不成立，引用者也不运行。
+- 依赖必须运行过。依赖没有运行说明前置条件从未满足，引用者同样不运行。
+- 依赖运行了但没有 `completed` 时，只有当 step 自己的 `when` 显式点名这个依赖、并且条件与依赖的实际结果相符时，才允许恢复（例如 `review=failed` 时执行 `fix`）。条件指向别的 step 不能替某个失败的依赖豁免。
 - step 结果保存在以 step ID 为键的结果表中，后续 step 只能依赖已记录结果。
 
 ## 5. 内置模板覆盖矩阵

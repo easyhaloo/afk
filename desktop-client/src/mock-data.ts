@@ -1,4 +1,8 @@
 import { parseSnapshot } from "../shared/snapshot-schema";
+// The type is imported rather than taken from the renderer's global
+// alias: the global is only in scope under the desktop's own tsconfig,
+// and a file that leans on it stops type-checking anywhere else.
+import type { Snapshot } from "../shared/ipc-contract";
 
 export const DEMO_SNAPSHOT: Snapshot = {
   workspace: {

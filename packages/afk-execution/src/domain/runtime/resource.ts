@@ -1,3 +1,5 @@
+import { CONTAINER_ENGINES, type ContainerEngine } from '../sandbox/types.js';
+
 /**
  * The resources a run registers.
  *
@@ -28,9 +30,9 @@ export const AFK_RESOURCE_STATUSES = ['active', 'closed', 'missing', 'failed'] a
 export type AfkResourceStatus = (typeof AFK_RESOURCE_STATUSES)[number];
 
 /** The container engines a registered container can run on. */
-export const AFK_RESOURCE_ENGINES = ['docker', 'podman'] as const;
+export const AFK_RESOURCE_ENGINES = CONTAINER_ENGINES;
 
-export type AfkResourceEngine = (typeof AFK_RESOURCE_ENGINES)[number];
+export type AfkResourceEngine = ContainerEngine;
 
 /**
  * The values of a column, quoted the way SQL wants them.

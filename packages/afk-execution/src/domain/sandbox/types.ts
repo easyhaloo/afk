@@ -30,6 +30,17 @@ import type { SandboxTmux } from '../tmux/types.js';
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
 /**
+ * The container engines a run can use.
+ *
+ * The engines are a sandbox question, not a registry one: a resource
+ * row records the engine a container ran on, and the registry took the
+ * names from a second list of its own.
+ */
+export const CONTAINER_ENGINES = ['docker', 'podman'] as const;
+
+export type ContainerEngine = (typeof CONTAINER_ENGINES)[number];
+
+/**
  * The kinds a sandbox runs in.
  *
  * A provider that runs a container is a container, whatever it is

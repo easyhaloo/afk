@@ -22,7 +22,9 @@
  * the docker socket, or sibling repos; the allowlist is enforced here.
  */
 
-export type ContainerEngine = 'docker' | 'podman';
+import { CONTAINER_ENGINES, type ContainerEngine } from '../../../domain/sandbox/types.js';
+
+export { CONTAINER_ENGINES, type ContainerEngine };
 
 export type ContainerStatus = 'created' | 'running' | 'exited' | 'dead' | 'unknown';
 

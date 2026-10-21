@@ -279,7 +279,7 @@ describe('LoopRunner exits when the work item leaves machine states', () => {
     internals.emitEvent = vi.fn();
     const stop = vi.spyOn(subject, 'stop').mockResolvedValue();
     await internals.runManagedChain('42');
-    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith('work-left-machine');
   });
 
   it.each(['rework', 'ready'] as const)('keeps polling when the item is back to %s', async state => {
@@ -333,6 +333,6 @@ describe('LoopRunner exits when the work item leaves machine states', () => {
     internals.emitEvent = vi.fn();
     const stop = vi.spyOn(subject, 'stop').mockResolvedValue();
     await internals.runManagedChain('42');
-    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith('max-iterations');
   });
 });

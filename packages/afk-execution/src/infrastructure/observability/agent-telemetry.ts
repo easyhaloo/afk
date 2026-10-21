@@ -6,6 +6,7 @@
 
 import type { AgentToolCallSummary } from '@afk/core';
 import type { AgentExecution, ExecutionResult, TokenUsage } from '../../domain/agents/types.js';
+import type { SandboxKind } from '../../domain/sandbox/types.js';
 import { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
 export { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
 
@@ -92,10 +93,10 @@ export async function resolveAgentTranscript(options: {
 export async function collectAgentTelemetry(
   execution: AgentExecution,
   result: ExecutionResult,
-  sandboxKind: 'local' | 'container',
+  sandboxKind: SandboxKind,
 ): Promise<{ sessionId: string; transcriptPath?: string; usage?: TokenUsage; tools?: AgentToolCallSummary[] }> {
   const provider = execution.metadata.provider;
-  const transcript = sandboxKind === 'local' && (provider === 'claude-code' || provider === 'codex' || provider === 'opencode')
+  const transcript = sandboxKind === 'local' && isAgentTelemetryProvider(provider)
     ? await resolveAgentTranscript({
       provider,
       telemetryPath: execution.telemetryPath,
@@ -104,7 +105,7 @@ export async function collectAgentTelemetry(
     : undefined;
   let usage = result.usage;
   let tools = result.tools;
-  if (transcript && (provider === 'claude-code' || provider === 'codex' || provider === 'opencode')) {
+  if (transcript && isAgentTelemetryProvider(provider)) {
     const options = { provider, transcriptPath: transcript.path, sandboxKind };
     if (!usage) usage = await readAgentTelemetry(options);
     if (!tools) tools = await readAgentTools(options);
@@ -270,7 +271,7 @@ function isEventMsgWithTokenCount(v: unknown): v is { type: 'event_msg'; payload
 export interface ReadTelemetryOptions {
   provider: AgentTelemetryProvider;
   transcriptPath: string;
-  sandboxKind: 'local' | 'container';
+  sandboxKind: SandboxKind;
 }
 
 /**

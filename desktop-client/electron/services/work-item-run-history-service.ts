@@ -5,7 +5,7 @@ import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/ba
 import type { createExecutionWorkspaceService } from "./execution-workspace-service.js";
 import type { createWorkItemRunStore } from "./work-item-run-store.js";
 import { isAgentExecutionMode, type AgentExecutionMode } from "@afk/core";
-import { TASK_RUNTIME_PHASES } from "@afk/execution/domain/runtime/phase";
+import { TASK_RUNTIME_PHASES, type TaskRuntimePhase } from "@afk/execution/domain/runtime/phase";
 import { probeProcess } from "@afk/infrastructure";
 
 type HistoryDeps = {
@@ -24,7 +24,7 @@ type RuntimeTerminal = {
   providerRef: string;
   workspace: string;
   session: string;
-  phase: "implementing" | "verifying";
+  phase: TaskRuntimePhase;
   sandboxProvider: string;
   executionMode: AgentExecutionMode;
   agentProvider: string;

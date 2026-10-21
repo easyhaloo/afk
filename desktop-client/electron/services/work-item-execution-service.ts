@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isCanonicalWorkItemId } from "@afk/application";
+import { isSuccessfulExecuteWorkItemStatus, type ExecuteWorkItemStatus } from "@afk/execution";
 import { quoteShellArgument } from "@afk/infrastructure";
 import path from "node:path";
 import type {
@@ -34,9 +35,16 @@ type Workspace = {
 };
 type ForegroundAgent = { id: WorkItemAgentId; label: string; command: string; executable: string };
 
-/** The outcome of one work item execution, as reported by the execution runtime. */
+/**
+ * The outcome of one work item execution, as reported by the execution
+ * runtime.
+ *
+ * The status is the runtime's own: the desktop reads it rather than
+ * naming the five states again, so an outcome the runtime added reaches
+ * the board instead of being a state nothing knows.
+ */
 export type WorkItemExecutionOutcome = {
-  status: "merge_ready" | "done" | "rework" | "blocked" | "not_claimed";
+  status: ExecuteWorkItemStatus;
   changeUrl?: string;
 };
 
@@ -306,7 +314,7 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
       executionId: runId,
     }).then(
       outcome => {
-        const succeeded = outcome.status === "merge_ready" || outcome.status === "done";
+        const succeeded = isSuccessfulExecuteWorkItemStatus(outcome.status);
         recordTerminal({
           ...running,
           status: succeeded ? "completed" : "failed",

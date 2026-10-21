@@ -36,6 +36,21 @@ export interface ExecuteWorkItemInput {
 }
 
 export type ExecuteWorkItemStatus = 'merge_ready' | 'done' | 'rework' | 'blocked' | 'not_claimed';
+
+/**
+ * The statuses that mean the execution finished the work.
+ *
+ * The rule lives next to the status it reads, because the desktop asks
+ * the same question - did this execution succeed - and used to answer it
+ * with its own copy of the two names. A status the runtime added would
+ * have been a success to one and not to the other.
+ */
+export const EXECUTE_WORK_ITEM_SUCCESS_STATUSES = ['merge_ready', 'done'] as const;
+
+/** Whether an execution outcome means the work was finished. */
+export function isSuccessfulExecuteWorkItemStatus(status: ExecuteWorkItemStatus): boolean {
+  return (EXECUTE_WORK_ITEM_SUCCESS_STATUSES as readonly string[]).includes(status);
+}
 export interface ExecuteWorkItemResult {
   executionId: string;
   workItemId: string;
@@ -363,7 +378,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
         const status: ExecuteWorkItemStatus = qaResult.success && published && (rootPublished || childMerged)
           ? childMerged ? 'done' : 'merge_ready'
           : qaResult.rework ? 'rework' : 'blocked';
-        if (status === 'merge_ready' || status === 'done') {
+        if (isSuccessfulExecuteWorkItemStatus(status)) {
           await audit({ kind: 'change.published', changeId: String(change!.id), url: change!.url! });
           if (status === 'done') {
             await audit({ kind: 'change.merge_verified', changeId: String(change!.id), targetBranch: request.targetBranch, child: true });

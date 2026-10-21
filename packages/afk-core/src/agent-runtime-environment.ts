@@ -34,6 +34,11 @@ export const AGENT_AUTHS = ['chatgpt', 'api', 'unknown'] as const;
 
 export type AgentAuth = (typeof AGENT_AUTHS)[number];
 
+/** Whether a value names a way an agent run can authenticate. */
+export function isAgentAuth(value: unknown): value is AgentAuth {
+  return typeof value === 'string' && (AGENT_AUTHS as readonly string[]).includes(value);
+}
+
 /** The kinds of endpoint an agent can be reached on. */
 export const AGENT_ENDPOINT_KINDS = ['stdio', 'unix', 'ws', 'wss'] as const;
 

@@ -13,6 +13,7 @@ import type {
   AgentExecution,
   ExecutionResult,
 } from '../domain/sandbox/types.js';
+import { sandboxKindOf } from '../domain/sandbox/types.js';
 import { DEFAULT_AGENT_EXECUTION_MODE, type AgentProvider, type AgentProviderName, type AgentRuntimeSelection, type AgentExecutionMode, type InterruptReason } from '../domain/agents/types.js';
 import { configureStatusline, logger, withLogContext } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
@@ -1516,8 +1517,7 @@ export class WorkflowRunner {
   }
 
   private async recordAgentTelemetry(execution: AgentExecution, result: ExecutionResult): Promise<{ sessionId: string; totalTokens: number } | undefined> {
-    const sandboxKind: 'local' | 'container' =
-      this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman' ? 'container' : 'local';
+    const sandboxKind = sandboxKindOf(this.sandboxProvider.name);
     const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
     const { sessionId, usage } = telemetry;
     if (!this.observationContext) return usage ? { sessionId, totalTokens: usage.totalTokens } : undefined;

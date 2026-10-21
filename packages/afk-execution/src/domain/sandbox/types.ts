@@ -29,6 +29,27 @@ import type { SandboxTmux } from '../tmux/types.js';
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
 
+/**
+ * The kinds a sandbox runs in.
+ *
+ * A provider that runs a container is a container, whatever it is
+ * called. The rule lives here because two runners asked the same
+ * question - where a run's transcript can be read from - and each
+ * wrote the answer down. A provider added to one and not the other
+ * would have its run read from the wrong place.
+ */
+export const SANDBOX_KINDS = ['local', 'container'] as const;
+
+export type SandboxKind = (typeof SANDBOX_KINDS)[number];
+
+/** The sandbox providers that run a container. */
+const CONTAINER_SANDBOX_PROVIDERS: readonly SandboxProviderName[] = ['docker', 'podman'];
+
+/** The kind a sandbox provider runs in. */
+export function sandboxKindOf(provider: SandboxProviderName): SandboxKind {
+  return CONTAINER_SANDBOX_PROVIDERS.includes(provider) ? 'container' : 'local';
+}
+
 /** Options passed to SandboxProvider.create() */
 export interface SandboxOptions {
   /** Path to the worktree / workspace directory. */

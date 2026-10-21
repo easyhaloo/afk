@@ -1,4 +1,5 @@
 import type { WorkItemPlatform } from "@afk/application";
+import type { ExecuteWorkItemStatus } from "@afk/execution";
 import { createRequire } from "node:module";
 import { app } from "electron";
 import path from "node:path";
@@ -37,7 +38,7 @@ type RuntimeBundle = {
   }) => Promise<{
     executionId: string;
     workItemId: string;
-    status: "merge_ready" | "done" | "rework" | "blocked" | "not_claimed";
+    status: ExecuteWorkItemStatus;
     changeUrl?: string;
   }>;
 };

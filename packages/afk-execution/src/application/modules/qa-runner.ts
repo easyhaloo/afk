@@ -7,7 +7,7 @@ import { TemplateCatalog } from '../../domain/templates/catalog.js';
 import { createAgentProvider, resolveAgentProviderName } from '../../domain/agents/index.js';
 import { createSandboxProvider } from '../../infrastructure/sandbox/index.js';
 import type { AgentProvider, AgentRuntimeSelection, AgentExecutionMode } from '../../domain/agents/types.js';
-import type { AgentExecution, Sandbox, SandboxProvider, ExecutionResult } from '../../domain/sandbox/types.js';
+import { sandboxKindOf, type AgentExecution, type Sandbox, type SandboxProvider, type ExecutionResult } from '../../domain/sandbox/types.js';
 import type { ManagementProviderBundle } from '@afk/infrastructure';
 import type { WorkflowConfig } from '../../domain/config/types.js';
 import type { BacklogItem, NewReworkRecord } from '@afk/application';
@@ -416,7 +416,7 @@ export class QARunner {
   }
 
   private async recordBudgetUsage(store: BudgetStore, budget: BudgetManager, execution: AgentExecution, result: ExecutionResult): Promise<void> {
-    const sandboxKind = this.sandboxProvider.name === 'docker' || this.sandboxProvider.name === 'podman' ? 'container' : 'local';
+    const sandboxKind = sandboxKindOf(this.sandboxProvider.name);
     const telemetry = await collectAgentTelemetry(execution, result, sandboxKind);
     const { sessionId, usage } = telemetry;
     if (usage && budget.recordSession(sessionId, usage.totalTokens)) await store.save(budget.snapshot());

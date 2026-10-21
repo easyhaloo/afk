@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES, type AgentAuth, type AgentTransportChoice, type AgentAuthChoice } from '@afk/core';
+import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES, isAgentAuth, type AgentAuth, type AgentTransportChoice, type AgentAuthChoice } from '@afk/core';
 import type { AgentRuntimeSelection, CodexRuntimeSelection } from './types.js';
 
 type RuntimeObject = { [key: string]: unknown };
@@ -416,7 +416,7 @@ function readinessFailure(
 }
 
 function normalizeAuth(value: unknown): AgentAuth | undefined {
-  if (value === 'chatgpt' || value === 'api' || value === 'unknown') return value;
+  if (isAgentAuth(value)) return value;
   if (value === 'api_key') return 'api';
   return undefined;
 }

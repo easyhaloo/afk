@@ -24,7 +24,6 @@ export interface CommandEntry {
 export const COMMANDS: CommandEntry[] = [
   { names: ['signal'], loader: () => import('./commands/signal.js').then(m => m.registerSignalCommands) },
   { names: ['tmux'], loader: () => import('./commands/tmux.js').then(m => m.registerTmuxCommands) },
-  { names: ['board'], loader: () => import('./commands/board.js').then(m => m.registerBoardCommands) },
   { names: ['kanban'], loader: () => import('./commands/kanban.js').then(m => m.registerKanbanCommands) },
   { names: ['debug'], loader: () => import('./commands/debug.js').then(m => m.registerDebugCommands) },
   { names: ['isolate'], loader: () => import('./commands/isolate.js').then(m => m.registerIsolateCommands) },

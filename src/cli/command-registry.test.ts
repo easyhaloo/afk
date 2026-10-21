@@ -8,7 +8,6 @@ describe('CLI hard cutover registry', () => {
     expect(names).toEqual(expect.arrayContaining([
       'signal',
       'tmux',
-      'board',
       'kanban',
       'debug',
       'isolate',

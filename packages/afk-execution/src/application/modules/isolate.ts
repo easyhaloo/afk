@@ -2,7 +2,7 @@
  * Isolate module — provides isolated database/redis/es containers per worktree.
  *
  * Lifecycle:
- *   onBeforeAgent → IsolateManager.up() → write .env → write .afk/isolate.json
+ *   onBeforeAgent → IsolateManager.up() → start compose → write .afk/isolate.json
  *   onAfterAgent  → IsolateManager.discard() → cleanup
  *
  * Agent discovers isolate connection info by reading `.afk/isolate.json` in the

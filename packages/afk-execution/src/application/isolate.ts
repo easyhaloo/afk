@@ -116,11 +116,12 @@ async function releasePortOffset(projectHash: string): Promise<void> {
 
 // ─── Docker helpers ──────────────────────────────────────────────────────────
 
-function dc(args: string[], cwd?: string): { status: number | null; stdout: string; stderr: string } {
+function dc(args: string[], cwd?: string, env?: Record<string, string>): { status: number | null; stdout: string; stderr: string } {
   const r = spawnSync('docker', args, {
     encoding: 'utf-8',
     shell: false,
     cwd,
+    ...(env ? { env: { ...process.env, ...env } } : {}),
   });
   return { status: r.status, stdout: r.stdout as string, stderr: r.stderr as string };
 }
@@ -142,6 +143,53 @@ interface ParsedService {
   hostPort: number;
   containerPort: number;
   healthTimeout: number;
+}
+
+/**
+ * The marker an older AFK left in the worktree's .env.
+ *
+ * The file belongs to the user - it can hold the credentials their stack
+ * needs - and AFK no longer writes to it. The marker is only here so a
+ * file an older version left behind can be cleaned up without touching
+ * the user's own content.
+ */
+const ISOLATE_ENV_MARKER = '# AFK isolate — do not edit';
+
+/**
+ * The port overrides the compose file substitutes into its port mappings.
+ *
+ * They are handed to compose as environment variables, which take
+ * precedence over the project's own .env. That file belongs to the user:
+ * writing to it replaced it, because a rename over an existing file
+ * succeeds on POSIX and the "merge when there is one" fallback never
+ * ran.
+ */
+export function composePortOverrides(
+  services: readonly { name: string; hostPort: number }[],
+  offset: number,
+): Record<string, string> {
+  const overrides: Record<string, string> = {};
+  for (const svc of services) {
+    const offsetPort = svc.hostPort + offset;
+    const name = svc.name.toUpperCase();
+    overrides[`${name}_PORT`] = String(offsetPort);
+    overrides[`${name}_ISOLATE_PORT`] = String(offsetPort);
+    overrides[`ISOLATE_${name}_PORT`] = String(offsetPort);
+    // "3306" → "3406" style overrides
+    overrides[`ISOLATE_PORT_${svc.hostPort}`] = String(offsetPort);
+  }
+  return overrides;
+}
+
+/**
+ * Remove what an older AFK wrote from a .env, keeping the user's own
+ * content. AFK always wrote its block last, so the block runs from the
+ * marker to the end of the file.
+ */
+export function withoutIsolateBlock(content: string): string {
+  const begin = content.indexOf(ISOLATE_ENV_MARKER);
+  if (begin === -1) return content;
+  return content.slice(0, begin);
 }
 
 function parseComposePorts(worktreeRoot: string): ParsedService[] {
@@ -254,11 +302,11 @@ export class IsolateManager {
     // Assign port offset
     this.offset = await assignPortOffset(this.projectHash);
 
-    // Write .env to worktree root
-    await this.writeEnv();
-
-    // docker compose up -d
-    const { status, stderr } = dc(['compose', '--project-name', this.composeProjectName, 'up', '-d'], this.worktreeRoot);
+    // docker compose up -d. The port overrides travel as environment
+    // variables: compose prefers them over the project's .env, so the
+    // user's file is neither read into nor written to.
+    const overrides = composePortOverrides(this.services, this.offset);
+    const { status, stderr } = dc(['compose', '--project-name', this.composeProjectName, 'up', '-d'], this.worktreeRoot, overrides);
     if (status !== 0) {
       throw new Error(`docker compose up failed: ${stderr}`);
     }
@@ -297,13 +345,17 @@ export class IsolateManager {
       console.error('docker compose down warning:', stderr);
     }
 
-    // Remove .env if it was created by us (has ISOLATE_ prefix marker)
+    // Clean up a .env an older AFK left behind. AFK no longer writes
+    // one; the file in the worktree belongs to the user, so only what
+    // AFK put there is removed - and only if the rest is empty.
     const envFile = join(this.worktreeRoot, '.env');
     if (existsSync(envFile)) {
       try {
         const content = await fs.readFile(envFile, 'utf-8');
-        if (content.includes('# AFK isolate — do not edit')) {
-          await fs.rm(envFile);
+        const remaining = withoutIsolateBlock(content).replace(/\s+$/, '');
+        if (remaining !== content.replace(/\s+$/, '')) {
+          if (remaining === '') await fs.rm(envFile);
+          else await fs.writeFile(envFile, remaining + '\n', 'utf-8');
         }
       } catch { /* */ }
     }
@@ -335,68 +387,6 @@ export class IsolateManager {
       worktreeRoot: this.worktreeRoot,
       services,
     };
-  }
-
-  /**
-   * Write .env to worktree root so docker-compose picks it up automatically.
-   * The .env contains port overrides that docker-compose substitutes into
-   * its port mappings. Format:
-   *
-   *   # AFK isolate — do not edit
-   *   MYSQL_PORT=3406
-   *   REDIS_PORT=6380
-   *
-   * docker-compose.yml should reference these via ${MYSQL_PORT:-3306}.
-   * If the compose file doesn't use env vars, the original port is used.
-   * This is a best-effort: the port offset is still applied via the ISOLATE_*
-   * env vars that docker-compose picks up.
-   */
-  private async writeEnv(): Promise<void> {
-    if (this.offset === null) {
-      throw new Error('Cannot write env before assigning offset');
-    }
-
-    // Build env vars: for each service, write the offset port
-    // docker-compose automatically reads .env from the project directory
-    const lines: string[] = [
-      '# AFK isolate — do not edit',
-      `# Generated by afk isolate (offset: ${this.offset})`,
-      '',
-    ];
-
-    for (const svc of this.services) {
-      const offsetPort = svc.hostPort + this.offset;
-      // Write both lowercased (common convention) and UPPERCASED variants
-      const name = svc.name.toUpperCase();
-      lines.push(`${name}_PORT=${offsetPort}`);
-      lines.push(`${name}_ISOLATE_PORT=${offsetPort}`);
-      lines.push(`ISOLATE_${name}_PORT=${offsetPort}`);
-    }
-
-    // Also write raw docker-compose port overrides
-    // docker-compose can use ${VAR} syntax in port mappings
-    for (const svc of this.services) {
-      const offsetPort = svc.hostPort + this.offset;
-      // Map "3306" → "3406" style overrides
-      const key = `ISOLATE_PORT_${svc.hostPort}`;
-      lines.push(`${key}=${offsetPort}`);
-    }
-
-    lines.push('');
-
-    const envFile = join(this.worktreeRoot, '.env');
-    // Write atomically: temp file + rename
-    const tmp = envFile + '.tmp';
-    await fs.writeFile(tmp, lines.join('\n'), 'utf-8');
-    try {
-      await fs.rename(tmp, envFile);
-    } catch {
-      // If .env already exists, merge with it
-      const existing = await fs.readFile(envFile, 'utf-8');
-      const merged = existing.endsWith('\n') ? existing + lines.join('\n') : existing + '\n' + lines.join('\n');
-      await fs.writeFile(envFile, merged, 'utf-8');
-      try { await fs.rm(tmp); } catch { /* */ }
-    }
   }
 }
 

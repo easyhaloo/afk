@@ -1,0 +1,1695 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>终端编码 Agent Runtime 对比 · 软件工程视角</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
+<style>
+:root{
+  --bg:#f7f5f0; --card:#fff; --line:#e9e3d6; --line-soft:#f0ebe0;
+  --ink:#14171e; --body:#3a4256; --muted:#7c7a72;
+  --cc:#2f6f5e; --cx:#c97b3f; --oc:#b06367;
+  --cc-bg:rgba(47,111,94,.08); --cx-bg:rgba(201,123,63,.09); --oc-bg:rgba(176,99,103,.08);
+  --sans:'Outfit','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  --serif:'DM Serif Display','Songti SC','Source Han Serif SC',serif;
+  --mono:'JetBrains Mono','SFMono-Regular',Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--body); font-family:var(--sans);
+  font-size:14.5px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  position:relative; overflow-x:hidden;
+}
+body::before{
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background:
+    radial-gradient(60rem 40rem at 12% -8%, rgba(47,111,94,.055), transparent 60%),
+    radial-gradient(50rem 34rem at 92% 4%, rgba(201,123,63,.05), transparent 60%);
+}
+.wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 24px}
+section{padding:44px 0}
+section+section{border-top:1px solid var(--line)}
+
+.hero{padding:60px 0 44px}
+.eyebrow{
+  font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--cc);display:flex;align-items:center;gap:8px;margin-bottom:14px;
+}
+h1{
+  font-family:var(--serif);font-weight:400;font-size:34px;line-height:1.18;
+  color:var(--ink);letter-spacing:-.01em;margin-bottom:14px;
+}
+h1 em{font-style:normal;color:var(--cc)}
+.lede{font-size:16px;line-height:1.6;color:var(--body);max-width:66ch;margin-bottom:20px}
+.lede b{color:var(--ink);font-weight:600}
+.meta{
+  display:flex;flex-wrap:wrap;gap:8px 18px;font-family:var(--mono);font-size:11.5px;
+  color:var(--muted);padding-top:16px;border-top:1px solid var(--line);
+}
+.meta b{color:var(--body);font-weight:500}
+
+.thesis{
+  background:var(--card);border:1px solid var(--line);border-radius:16px;
+  padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04);
+}
+.thesis p{font-size:15.5px;line-height:1.62;color:var(--ink)}
+.thesis strong{color:var(--cc);font-weight:600}
+code{font-family:var(--mono);font-size:.9em}
+
+.sec-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:22px}
+.sec-head svg{flex:none;width:21px;height:21px;color:var(--cc);margin-top:3px}
+h2{font-family:var(--serif);font-weight:400;font-size:24px;line-height:1.25;color:var(--ink);letter-spacing:-.005em}
+.sec-sub{font-size:13.5px;color:var(--muted);margin-top:5px;line-height:1.55}
+.tag{
+  display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+  color:var(--cc);background:var(--cc-bg);padding:3px 8px;border-radius:6px;margin-left:9px;
+  vertical-align:3px;font-weight:500;
+}
+.tag.w{color:var(--cx);background:var(--cx-bg)}
+
+/* ---- 定位修正:control plane 职责 ---- */
+.roles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.role{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 16px;box-shadow:0 2px 8px rgba(0,0,0,.035)}
+.role .n{font-family:var(--mono);font-size:10.5px;color:var(--cc);font-weight:600;letter-spacing:.08em;margin-bottom:9px;display:block}
+.role h4{font-size:13.5px;font-weight:600;color:var(--ink);margin-bottom:6px;line-height:1.35}
+.role p{font-size:12px;color:var(--body);line-height:1.5}
+
+/* ---- 转换成本链 ---- */
+.chain{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+.chain-node{
+  flex:1 1 0;min-width:112px;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;padding:11px 10px;text-align:center;position:relative;
+}
+.chain-node .s{font-family:var(--mono);font-size:10px;color:var(--muted);display:block;margin-bottom:5px}
+.chain-node .t{font-size:12px;color:var(--ink);font-weight:500;line-height:1.35;display:block}
+.chain-node.cx .t{color:var(--cx)}
+.chain-arrow{
+  align-self:center;flex:none;width:20px;height:20px;color:var(--line);margin:0 -1px;
+}
+
+/* ---- bench bars ---- */
+.bench-card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.bench-group{margin-bottom:18px}
+.bench-group:last-child{margin-bottom:0}
+.bench-title{font-size:12px;font-weight:600;color:var(--ink);margin-bottom:8px;font-family:var(--mono);letter-spacing:.04em}
+.bench{display:grid;grid-template-columns:150px 1fr 64px;gap:12px;align-items:center;padding:5px 0}
+.bench-label{font-size:12.5px;color:var(--body);display:flex;align-items:center;gap:7px}
+.bench-track{height:18px;background:var(--line-soft);border-radius:6px;overflow:hidden}
+.bench-fill{height:100%;border-radius:6px}
+.bench-val{font-family:var(--mono);font-size:12.5px;color:var(--ink);text-align:right;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dot.cc{background:var(--cc)} .dot.cx{background:var(--cx)} .dot.oc{background:var(--oc)}
+
+/* ---- stacked bar ---- */
+.stack{height:30px;border-radius:8px;overflow:hidden;display:flex;border:1px solid var(--line)}
+.stack div{height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:12px}
+.legend-item{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--body)}
+.legend-item .swatch{width:11px;height:11px;border-radius:3px;flex:none}
+.legend-item .pct{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink);font-weight:500}
+
+/* ---- tool chips ---- */
+.tool-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.tool-col{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.tool-col h3{font-size:15px;font-weight:600;color:var(--ink);margin-bottom:4px;display:flex;align-items:center;gap:8px}
+.tool-col .cnt{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:14px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--mono);font-size:11.5px;padding:4px 9px;border-radius:6px;background:rgba(0,0,0,.035);color:var(--body);border:1px solid transparent}
+.chip.has{background:var(--cc-bg);color:var(--cc);border-color:rgba(47,111,94,.18)}
+.chip.no{background:rgba(176,99,103,.07);color:var(--oc);border-color:rgba(176,99,103,.2);text-decoration:line-through;text-decoration-thickness:1px}
+
+/* ---- stat band ---- */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.stat .v{font-family:var(--serif);font-size:30px;line-height:1;color:var(--ink);margin-bottom:7px}
+.stat .v small{font-size:16px;font-family:var(--sans);color:var(--muted);margin-left:3px}
+.stat .l{font-size:12.5px;color:var(--body);line-height:1.45}
+.stat.cc .v{color:var(--cc)} .stat.cx .v{color:var(--cx)}
+
+/* ---- poll grid ---- */
+.polls{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.poll-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11px,1fr));gap:3px;margin:14px 0 12px}
+.pcell{aspect-ratio:1;border-radius:2px;background:rgba(0,0,0,.055)}
+.pcell.f{background:var(--cx);opacity:.85}
+.poll-cap{font-size:12.5px;color:var(--body);display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.poll-cap b{color:var(--ink);font-family:var(--mono);font-weight:500}
+
+/* ---- json ---- */
+.code-pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.code-card{background:#1c1f26;border-radius:14px;padding:16px 18px;overflow:hidden}
+.code-card .hdr{font-family:var(--mono);font-size:11px;color:#8b93a5;margin-bottom:11px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.code-card .hdr b{color:#e8eaee;font-weight:500}
+.code-card pre{font-family:var(--mono);font-size:11.5px;line-height:1.65;color:#c8cdd8;white-space:pre-wrap;word-break:break-word}
+.k{color:#8ec9c0} .s{color:#e5c07b} .n{color:#7fb3d5}
+
+/* ---- 机制流程 ---- */
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;align-items:stretch}
+.step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 16px;position:relative;box-shadow:0 2px 8px rgba(0,0,0,.035)}
+.step .sn{font-family:var(--mono);font-size:10.5px;color:var(--cc);font-weight:600;letter-spacing:.08em;margin-bottom:8px;display:block}
+.step h4{font-size:13.5px;font-weight:600;color:var(--ink);margin-bottom:6px;line-height:1.35}
+.step p{font-size:12px;color:var(--body);line-height:1.52}
+.step .arrow{position:absolute;right:-16px;top:50%;transform:translateY(-50%);z-index:2;width:22px;height:22px;color:var(--line)}
+
+/* ---- callout ---- */
+.callout{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--cc);border-radius:0 14px 14px 0;padding:16px 20px;box-shadow:0 2px 8px rgba(0,0,0,.035)}
+.callout.warn{border-left-color:var(--cx)}
+.callout.dark{background:#1c1f26;border-color:#1c1f26;color:#c8cdd8}
+.callout.dark h4{color:#e8eaee}
+.callout.dark code{color:#e5c07b}
+.callout h4{font-size:13.5px;font-weight:600;color:var(--ink);margin-bottom:7px}
+.callout p{font-size:13px;color:var(--body);line-height:1.58}
+.callout.dark p{color:#c8cdd8}
+.callout ul{margin:8px 0 0 16px;font-size:13px;line-height:1.65}
+.callout li{margin-bottom:5px}
+
+/* ---- table ---- */
+.tbl-wrap{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:11px 16px;background:rgba(0,0,0,.022);color:var(--ink);font-weight:600;font-size:12px;border-bottom:1px solid var(--line)}
+td{padding:11px 16px;border-bottom:1px solid var(--line-soft);color:var(--body);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.num{font-family:var(--mono);color:var(--ink);font-weight:500;white-space:nowrap}
+td strong{color:var(--ink);font-weight:600}
+
+/* ---- limits ---- */
+.limits{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.limits ol{margin-left:18px;font-size:13px;line-height:1.68}
+.limits li{margin-bottom:9px}
+.limits li:last-child{margin-bottom:0}
+.limits b{color:var(--ink);font-weight:600}
+
+footer{padding:32px 0 48px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+footer p{margin-bottom:5px}
+footer a{color:var(--cc);text-decoration:none;border-bottom:1px solid rgba(47,111,94,.3)}
+
+@media(max-width:768px){
+  .wrap{padding:0 18px}
+  h1{font-size:27px} h2{font-size:21px}
+  .roles,.findings,.tool-grid,.stats,.code-pair,.flow{grid-template-columns:1fr}
+  .bench{grid-template-columns:96px 1fr 56px;gap:9px}
+  .step .arrow{display:none}
+  .chain-arrow{transform:rotate(90deg);margin:4px 0}
+  .chain-node{flex:1 1 44%}
+  .poll-grid{grid-template-columns:repeat(auto-fill,minmax(9px,1fr))}
+  table{font-size:12px} th,td{padding:9px 11px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ============ HERO ============ -->
+<div class="hero">
+  <div class="eyebrow">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+    Terminal Coding Agent · 软件工程视角
+  </div>
+  <h1>CLI 不是 agent,<br>它们是 agent 的 <em>runtime</em></h1>
+  <p class="lede">
+    对比 <b>Claude Code</b> / <b>Codex CLI</b> / <b>opencode</b> 三个 control plane。
+    "谁更快"的正确形式不是"谁的模型更强",而是:<b>哪个 runtime 的每轮 RPC 开销更低,
+    以及它往模型的工作集里塞了什么。</b>
+  </p>
+  <div class="meta">
+    <span>快照 <b>2026-10-20</b></span>
+    <span>codex <b>0.163.0</b></span>
+    <span>claude <b>2.1.300</b></span>
+    <span>opencode <b>1.18.31</b></span>
+    <span>样本 <b>97 + 157</b> 个会话</span>
+  </div>
+</div>
+
+<!-- ============ 0. 定位修正 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+    <div>
+      <h2>定位修正:control plane 的四项职责</h2>
+      <p class="sec-sub">agent 是模型;CLI 是 runtime / driver,承担下面四件事。</p>
+    </div>
+  </div>
+
+  <div class="roles">
+    <div class="role">
+      <span class="n">01</span>
+      <h4>反序列化</h4>
+      <p>把模型输出的意图解析成可执行调用。文本 → 结构化调用是每次往返的固定成本。</p>
+    </div>
+    <div class="role">
+      <span class="n">02</span>
+      <h4>授权</h4>
+      <p>施加 capability。审批若落在热路径上,吞吐上限就是人的响应时间。</p>
+    </div>
+    <div class="role">
+      <span class="n">03</span>
+      <h4>执行并回灌</h4>
+      <p>执行调用、捕获结果、重新序列化后写回上下文。决定工作集里放什么。</p>
+    </div>
+    <div class="role">
+      <span class="n">04</span>
+      <h4>状态检查点</h4>
+      <p>上下文超限时做有损压缩。损失率取决于被压缩内容的性质。</p>
+    </div>
+  </div>
+
+  <div style="height:18px"></div>
+
+  <div class="thesis">
+    <p>
+      <strong>结论先行。</strong>Claude Code 的优势来自<strong>少走弯路</strong>,不是跑得更快:
+      它把 21.0% 的调用分流到意图级工具,每个任务只花中位 5.0 次 RPC;
+      Codex 100% 压在命令式原语上,连读文件都要现编 shell,中位 13.1 次。
+      而两者上下文里"模型自述"的占比是 0.9% vs 15.1% —— 这解释了长任务为何漂移。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 1. 接口设计 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>
+    <div>
+      <h2>接口设计:意图级 API vs 命令式原语</h2>
+      <p class="sec-sub">Codex 暴露 <code>shell</code> ≈ 让模型用脚本库手写一套 SDK。</p>
+    </div>
+  </div>
+
+  <div class="tool-grid">
+    <div class="tool-col">
+      <h3><span class="dot cc"></span>Claude Code</h3>
+      <div class="cnt">30 个工具标识符 · 意图级 · 全部存在</div>
+      <div class="chips">
+        <span class="chip has">Read</span><span class="chip has">Write</span><span class="chip has">Edit</span>
+        <span class="chip has">MultiEdit</span><span class="chip has">Glob</span><span class="chip has">Grep</span>
+        <span class="chip has">Bash</span><span class="chip has">TodoWrite</span><span class="chip has">Task</span>
+        <span class="chip has">Agent</span><span class="chip has">Skill</span><span class="chip has">TeamCreate</span>
+        <span class="chip has">Workflow</span><span class="chip has">WebFetch</span><span class="chip has">BashOutput</span>
+      </div>
+    </div>
+    <div class="tool-col">
+      <h3><span class="dot cx"></span>Codex</h3>
+      <div class="cnt">14 个标识符 · 命令式 · 读写全靠现编</div>
+      <div class="chips">
+        <span class="chip has">ShellTool</span><span class="chip has">ApplyPatchTool</span><span class="chip has">AgentTool</span>
+        <span class="chip has">unified_exec</span><span class="chip has">apply_patch</span><span class="chip has">view_image</span>
+        <span class="chip has">update_plan</span><span class="chip has">write_stdin</span>
+        <span class="chip no">ReadFileTool</span><span class="chip no">GrepTool</span><span class="chip no">GlobTool</span>
+        <span class="chip no">EditTool</span><span class="chip no">TodoWrite</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="height:16px"></div>
+
+  <div class="bench-card" style="margin-bottom:12px">
+    <div class="bench-title" style="margin-bottom:12px">边界上的转换成本 · 每条 shell 命令要走的完整路径</div>
+    <div class="chain">
+      <div class="chain-node"><span class="s">OUTPUT</span><span class="t">模型输出文本</span></div>
+      <svg class="chain-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      <div class="chain-node"><span class="s">PARSE</span><span class="t">解析成结构化调用</span></div>
+      <svg class="chain-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      <div class="chain-node cx"><span class="s">FORK/EXEC</span><span class="t">进程创建 + shell</span></div>
+      <svg class="chain-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      <div class="chain-node"><span class="s">CAPTURE</span><span class="t">捕获 stdout</span></div>
+      <svg class="chain-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      <div class="chain-node cx"><span class="s">RE-PARSE</span><span class="t">模型重新解析</span></div>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--body);line-height:1.55">
+      专用工具走同一趟,但省掉<strong>命令书写</strong>与<strong>输出再解析</strong>两笔。
+      抽象层数不是问题,边界上的转换才是。
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <h4>抽象被绕过的证据</h4>
+    <p>
+      Codex 的 <code>apply_patch</code> <strong>作为工具存在,却从未被调用过</strong> —
+      276 个任务里 564 次出现全部塞在 <code>exec_command</code> 里。
+      一个已经建好的高层抽象被绕回到底层原语,多付一整层。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 2. 通信代价 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+    <div>
+      <h2>通信代价:往返是 RPC,不是"步骤"</h2>
+      <p class="sec-sub">固定开销落在首 token 之前 → 轮次数量是主导项。</p>
+    </div>
+  </div>
+
+  <div class="stats" style="margin-bottom:14px">
+    <div class="stat cx"><div class="v">~1<small>s</small></div><div class="l">Opus 5 / 5.5 单轮固定开销<br><span style="color:var(--muted)">Sonnet 5 约 0.5s</span></div></div>
+    <div class="stat cx"><div class="v">2.6<small>×</small></div><div class="l">Codex 的 RPC 次数倍数<br><span style="color:var(--muted)">中位 13.1 vs 5.0</span></div></div>
+    <div class="stat"><div class="v" style="color:var(--muted)">40<small> vs 80+</small></div><div class="l">短/长回复实测 tok/s<br><span style="color:var(--muted)">固定开销摊薄所致</span></div></div>
+  </div>
+
+  <div class="bench-card">
+    <div class="bench-group">
+      <div class="bench-title">中位数 · 每个任务的 RPC 次数</div>
+      <div class="bench"><span class="bench-label"><span class="dot cx"></span>Codex</span><div class="bench-track"><div class="bench-fill" style="width:100%;background:var(--cx)"></div></div><span class="bench-val">13.1</span></div>
+      <div class="bench"><span class="bench-label"><span class="dot cc"></span>Claude Code</span><div class="bench-track"><div class="bench-fill" style="width:38%;background:var(--cc)"></div></div><span class="bench-val">5.0</span></div>
+    </div>
+    <div class="bench-group">
+      <div class="bench-title">均值</div>
+      <div class="bench"><span class="bench-label"><span class="dot cx"></span>Codex</span><div class="bench-track"><div class="bench-fill" style="width:100%;background:var(--cx)"></div></div><span class="bench-val">24.8</span></div>
+      <div class="bench"><span class="bench-label"><span class="dot cc"></span>Claude Code</span><div class="bench-track"><div class="bench-fill" style="width:27%;background:var(--cc)"></div></div><span class="bench-val">6.8</span></div>
+    </div>
+    <div class="bench-group">
+      <div class="bench-title">p90(长尾)</div>
+      <div class="bench"><span class="bench-label"><span class="dot cx"></span>Codex</span><div class="bench-track"><div class="bench-fill" style="width:100%;background:var(--cx)"></div></div><span class="bench-val">36.0</span></div>
+      <div class="bench"><span class="bench-label"><span class="dot cc"></span>Claude Code</span><div class="bench-track"><div class="bench-fill" style="width:39%;background:var(--cc)"></div></div><span class="bench-val">14.0</span></div>
+    </div>
+  </div>
+
+  <div style="height:16px"></div>
+
+  <div class="polls">
+    <div class="bench-title">忙等轮询(busy-wait polling)的代价 · 943 次 <code>write_stdin</code> 的实际内容</div>
+    <div class="poll-grid">
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell f"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+      <span class="pcell"></span>
+    </div>
+    <div class="poll-cap">
+      <span><span style="display:inline-block;width:11px;height:11px;border-radius:3px;background:var(--cx);margin-right:8px;vertical-align:-1px"></span>实际写入了内容(19 次)<span style="color:var(--muted)"> · 924 次为纯空轮询</span></span>
+      <b>98% 是忙等</b>
+    </div>
+  </div>
+
+  <div style="height:14px"></div>
+
+  <div class="callout warn">
+    <h4>教科书级的反模式</h4>
+    <p>
+      每次空轮询都是一次完整的模型往返:上传请求 → 模型生成 → 工具返回。正确写法是
+      <strong>await 一个 future / 完成通知</strong>。Codex 自己有 <code>spawn_agent</code> / <code>wait_agent</code>
+      这些异步原语 —— <strong>主循环只是选择了轮询</strong>。占全部调用 13.8%,100% 是纯等待。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 3. 控制回路 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+    <div>
+      <h2>控制回路:验证/编辑比 = CI 策略</h2>
+      <p class="sec-sub">迭代次数取决于质量门禁的范围:全量回归 vs 增量验证。</p>
+    </div>
+  </div>
+
+  <div class="stats" style="margin-bottom:14px">
+    <div class="stat cx"><div class="v">1.9<small>: 1</small></div><div class="l">Codex 验证 / 编辑比<br><span style="color:var(--muted)">1064 次验证 ÷ 564 次编辑</span></div></div>
+    <div class="stat"><div class="v" style="color:var(--muted)">0.9<small>: 1</small></div><div class="l">Claude Code 验证 / 编辑比<br><span style="color:var(--muted)">1440 ÷ 1531</span></div></div>
+    <div class="stat cc"><div class="v">4.5<small>: 1</small></div><div class="l">读放大(Codex)<br><span style="color:var(--muted)">读/浏览 47.8%,编辑 10.7%</span></div></div>
+  </div>
+
+  <div class="bench-card" style="margin-bottom:12px">
+    <div class="bench-title" style="margin-bottom:10px">CODEX · 6833 次调用的构成 &nbsp;<span style="color:var(--cx)">其中 90.7% 压在 shell</span></div>
+    <div class="stack">
+      <div style="width:76.9%;background:var(--cx)"></div>
+      <div style="width:13.8%;background:rgba(201,123,63,.42)"></div>
+      <div style="width:9.3%;background:rgba(0,0,0,.09)"></div>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="swatch" style="background:var(--cx)"></span>exec_command<span class="pct">76.9%</span></span>
+      <span class="legend-item"><span class="swatch" style="background:rgba(201,123,63,.42)"></span>write_stdin<span class="pct">13.8%</span></span>
+      <span class="legend-item"><span class="swatch" style="background:rgba(0,0,0,.09)"></span>其他<span class="pct">9.3%</span></span>
+    </div>
+  </div>
+
+  <div class="bench-card" style="margin-bottom:14px">
+    <div class="bench-title" style="margin-bottom:10px">CLAUDE CODE · 14082 次调用的构成</div>
+    <div class="stack">
+      <div style="width:70.2%;background:var(--cc)"></div>
+      <div style="width:21.0%;background:rgba(47,111,94,.45)"></div>
+      <div style="width:8.8%;background:rgba(0,0,0,.09)"></div>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="swatch" style="background:var(--cc)"></span>Bash<span class="pct">70.2%</span></span>
+      <span class="legend-item"><span class="swatch" style="background:rgba(47,111,94,.45)"></span>Read / Edit / Write(意图级)<span class="pct">21.0%</span></span>
+      <span class="legend-item"><span class="swatch" style="background:rgba(0,0,0,.09)"></span>其他<span class="pct">8.8%</span></span>
+    </div>
+  </div>
+
+  <div class="bench-card">
+    <div class="bench-title" style="margin-bottom:10px">CODEX · 5252 次 exec_command 的首动词(读放大 4.5:1)</div>
+    <div class="bench"><span class="bench-label" style="font-family:var(--mono);font-size:12px">sed</span><div class="bench-track"><div class="bench-fill" style="width:100%;background:var(--cx)"></div></div><span class="bench-val">15.9%</span></div>
+    <div class="bench"><span class="bench-label" style="font-family:var(--mono);font-size:12px">rg</span><div class="bench-track"><div class="bench-fill" style="width:81%;background:var(--cx);opacity:.82"></div></div><span class="bench-val">12.9%</span></div>
+    <div class="bench"><span class="bench-label" style="font-family:var(--mono);font-size:12px">apply_patch</span><div class="bench-track"><div class="bench-fill" style="width:67%;background:var(--cx);opacity:.64"></div></div><span class="bench-val">10.7%</span></div>
+    <div class="bench"><span class="bench-label" style="font-family:var(--mono);font-size:12px">cat</span><div class="bench-track"><div class="bench-fill" style="width:64%;background:var(--cx);opacity:.5"></div></div><span class="bench-val">10.2%</span></div>
+    <div class="bench"><span class="bench-label" style="font-family:var(--mono);font-size:12px">git</span><div class="bench-track"><div class="bench-fill" style="width:52%;background:var(--cx);opacity:.4"></div></div><span class="bench-val">8.3%</span></div>
+    <div class="bench"><span class="bench-label" style="font-family:var(--mono);font-size:12px">pnpm</span><div class="bench-track"><div class="bench-fill" style="width:32%;background:var(--cx);opacity:.3"></div></div><span class="bench-val">5.1%</span></div>
+  </div>
+
+  <div style="height:16px"></div>
+
+  <div class="callout">
+    <h4>三个 harness,三个目标函数</h4>
+    <ul>
+      <li><b>Codex</b> — 偏全量回归,验证/编辑比 1.9:1。优化<b>缺陷逃逸率</b>。</li>
+      <li><b>Claude Code</b> — 偏定向验证,比值 0.9:1。优化<b>交付延迟</b>。</li>
+      <li><b>opencode</b> — 写 94 个测试 + 跑全量套件(对照:Claude Code 73 个 + 只验改动的)。买的是<b>回归安全边际</b>,代价是 makespan。</li>
+    </ul>
+    <p style="margin-top:10px">这是 CI 的两种策略。<strong>两个不同的目标函数,不能拿同一个指标衡量。</strong></p>
+  </div>
+</section>
+
+<!-- ============ 4. 上下文即工作集 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+    <div>
+      <h2>上下文即工作集:state 还是 log</h2>
+      <p class="sec-sub">工具输出是不可变事实;模型推理是可变状态。谁占着工作集?</p>
+    </div>
+  </div>
+
+  <div class="bench-card" style="margin-bottom:14px">
+    <div class="bench-title" style="margin-bottom:12px">上下文构成 · 按字符量</div>
+
+    <div style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--body);margin-bottom:6px">
+        <span><span class="dot cx" style="display:inline-block;margin-right:6px"></span>Codex · 180.4 MB</span>
+        <span style="font-family:var(--mono);color:var(--ink);font-weight:500">自述 0.9%</span>
+      </div>
+      <div class="stack">
+        <div style="width:80.1%;background:var(--cx)"></div>
+        <div style="width:6.0%;background:rgba(0,0,0,.16)"></div>
+        <div style="width:0.9%;background:var(--ink)"></div>
+        <div style="width:13.0%;background:rgba(0,0,0,.05)"></div>
+      </div>
+      <div class="legend">
+        <span class="legend-item"><span class="swatch" style="background:var(--cx)"></span>工具输出(事实)<span class="pct">80.1%</span></span>
+        <span class="legend-item"><span class="swatch" style="background:rgba(0,0,0,.16)"></span>注入指令<span class="pct">6.0%</span></span>
+        <span class="legend-item"><span class="swatch" style="background:var(--ink)"></span>模型自述回流<span class="pct">0.9%</span></span>
+        <span class="legend-item"><span class="swatch" style="background:rgba(0,0,0,.05)"></span>推理全文(仅事件日志,从不回灌)<span class="pct">13.0%</span></span>
+      </div>
+    </div>
+
+    <div>
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--body);margin-bottom:6px">
+        <span><span class="dot cc" style="display:inline-block;margin-right:6px"></span>Claude Code · 82.7 MB</span>
+        <span style="font-family:var(--mono);color:var(--ink);font-weight:500">自述 15.1%</span>
+      </div>
+      <div class="stack">
+        <div style="width:82.5%;background:var(--cc)"></div>
+        <div style="width:2.4%;background:rgba(0,0,0,.16)"></div>
+        <div style="width:15.1%;background:var(--ink)"></div>
+      </div>
+      <div class="legend">
+        <span class="legend-item"><span class="swatch" style="background:var(--cc)"></span>工具输出(事实)<span class="pct">82.5%</span></span>
+        <span class="legend-item"><span class="swatch" style="background:rgba(0,0,0,.16)"></span>注入指令<span class="pct">2.4%</span></span>
+        <span class="legend-item"><span class="swatch" style="background:var(--ink)"></span>模型自述回流<span class="pct">15.1%</span></span>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--body);line-height:1.55">
+      <b style="color:var(--ink)">17 倍差距的来源</b> —— Codex 算出的推理有 13.0% 落在事件日志里,永远不回流;
+      Claude Code 把 <code>thinking</code> 全文原样回传,每一轮都带着上一轮自己的推演继续想。
+    </div>
+  </div>
+
+  <div class="code-pair" style="margin-bottom:16px">
+    <div class="code-card">
+      <div class="hdr"><b>Claude Code</b><span>有状态重放</span></div>
+<pre>{
+  <span class="k">"type"</span>: <span class="s">"thinking"</span>,
+  <span class="k">"thinking"</span>: <span class="s">"Let me understand the task..."</span>,
+  <span class="k">"signature"</span>: <span class="s">"399b1ba2217854bff..."</span>
+}</pre>
+      <div style="margin-top:12px;font-size:12px;color:#8b93a5;line-height:1.55">
+        带签名 → API 强制原样回传。<br>中位 618 / 均值 1297 / p90 2986 字符
+      </div>
+    </div>
+    <div class="code-card">
+      <div class="hdr"><b>Codex</b><span>write-only log</span></div>
+<pre>{
+  <span class="k">"type"</span>: <span class="s">"Reasoning"</span>,
+  <span class="k">"summary_text"</span>: [<span class="s">"**Clarifying task..."</span>],
+  <span class="k">"raw_content"</span>: []
+}</pre>
+      <div style="margin-top:12px;font-size:12px;color:#8b93a5;line-height:1.55">
+        raw_content 恒为空 → 推理不进上下文。<br>完整推理只进事件日志,中位 2 字符
+      </div>
+    </div>
+  </div>
+
+  <div class="flow" style="margin-bottom:16px">
+    <div class="step">
+      <span class="sn">MECHANISM 1</span>
+      <h4>假设残留</h4>
+      <p>被写进工作集的假设此后每轮都被重新加权。模型没有"撤销"语义,只看到断言躺在那里。</p>
+      <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+    </div>
+    <div class="step">
+      <span class="sn">MECHANISM 2</span>
+      <h4>叙事惯性</h4>
+      <p>第一人称向前推进的文体,让"继续跑偏"显得自然,回到原任务反而像跑题。</p>
+      <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+    </div>
+    <div class="step">
+      <span class="sn">MECHANISM 3</span>
+      <h4>单调累积</h4>
+      <p>"模型以为自己在做什么"与"实际真相"的比例单调上升,直到工具结果到来。</p>
+      <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+    </div>
+    <div class="step">
+      <span class="sn">OUTCOME</span>
+      <h4>漂移</h4>
+      <p>工具结果能重置事实,但重置不了故事。上下文与原始任务逐渐脱钩。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <h4>三个工程后果</h4>
+    <ul>
+      <li><b>非幂等</b> —— 同一个任务在第 1 轮和第 30 轮行为不同,取决于工作集里堆了多少自述。系统失去"重放即复现"的性质。</li>
+      <li><b>自指正反馈</b> —— 模型读到自己上一轮的假设 → 假设被重新加权 → 下一轮更倾向沿用。控制论上是正反馈,LLM 上叫 confirmation bias amplification。</li>
+      <li><b>GC 回收不了活着的错误</b> —— 上下文压缩能回收冗余,但回收不掉"still alive 的错误断言"。</li>
+    </ul>
+  </div>
+
+  <div style="height:12px"></div>
+
+  <div class="callout warn">
+    <h4>注入上下文:与 prompt injection 同源</h4>
+    <p>
+      Claude Code 另有 <strong>1201 条</strong> harness / model 撰写的注入内容(2602 KB),含
+      <code>stop_hook_summary</code> 583 条、<code>away_summary</code> 251 条。
+      机制上和 prompt injection 同源,只是来源是自己,而且<strong>被当作可信状态采信</strong> ——
+      一次错误的自我总结会被后续每一轮无条件继承。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 5. 状态检查点 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+    <div>
+      <h2>状态检查点:有损压缩的损失率</h2>
+      <p class="sec-sub">上下文压缩 = log compaction。触发频率接近,被压的原料不同。</p>
+    </div>
+  </div>
+
+  <div class="tbl-wrap" style="margin-bottom:14px">
+    <table>
+      <thead><tr><th>维度</th><th>Claude Code</th><th>Codex</th></tr></thead>
+      <tbody>
+        <tr><td><strong>发生压缩的会话</strong></td><td class="num">27 / 150(18%)</td><td class="num">16 / 97(16.5%)</td></tr>
+        <tr><td><strong>触发</strong></td><td><code>auto</code>,观测到 preTokens 166,979 / 187,178 / 238,751 / 270,375 / 316,463 / 368,389</td><td><code>compacted</code> 事件,带 <code>replacement_history</code> / <code>message</code> / <code>window_number</code></td></tr>
+        <tr><td><strong>被压的原料</strong></td><td><strong>15% 叙述 + 71.5% 事实</strong>的混合体</td><td>近乎纯事实</td></tr>
+        <tr><td><strong>检查点内容</strong></td><td>一段<strong>故事</strong></td><td>一份<strong>状态清单</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <h4>核心结论</h4>
+    <p>
+      <strong>对事实做有损压缩,丢的是冗余;对叙述做有损压缩,丢的是原始任务。</strong>
+      故事在摘要里会被改写、软化,甚至把原始诉求丢掉;状态清单不会。
+      而且 Claude Code 的检查点输入本身已被上一节的注入内容污染 —— 等于压缩前先做了一次不可信的数据规整。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 6. 授权在热路径 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+    <div>
+      <h2>授权在热路径上</h2>
+      <p class="sec-sub">权限模型就是 capability-based access control。Codex 从二进制里能直接读到按工具类型分离的审批通道。</p>
+    </div>
+  </div>
+
+  <div class="callout dark" style="margin-bottom:14px">
+<pre style="font-family:var(--mono);font-size:12px;line-height:1.7;color:#c8cdd8;white-space:pre-wrap">
+command execution approval is not supported in exec mode ...
+apply_patch approval      is not supported in exec mode ...
+request_user_input approval is not supported in exec mode ...
+permissions approval       is not supported in exec mode ...</pre>
+  </div>
+
+  <div class="tbl-wrap" style="margin-bottom:14px">
+    <table>
+      <thead><tr><th>Runtime</th><th>授权模型</th><th>后果</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Codex</strong></td><td>按工具类型分离的通道 + 默认沙箱 + <strong>网络关闭</strong></td><td>每次出网调用都要重新提权 = 一次人工 RTT</td></tr>
+        <tr><td><strong>Claude Code</strong></td><td>首次询问后记住 = <strong>会话级 capability 缓存</strong></td><td>权限只付一次成本</td></tr>
+        <tr><td><strong>opencode</strong></td><td>有序规则集,默认 <code>ask</code>;<code>--auto</code> 一次性放行</td><td>两种极端,可调</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <h4>可自动化性</h4>
+    <p>
+      <strong>没有彻底关闭人工确认的开关,就没有可自动化性,只有吞吐上限 = 人的响应时间。</strong>
+      这是无人值守流水线的先决条件,不是优化项。
+    </p>
+  </div>
+</section>
+
+<!-- ============ 7. 工作负载路由 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+    <div>
+      <h2>工作负载路由,不是选边</h2>
+      <p class="sec-sub">像选行存 vs 列存、向量执行 vs 解释执行 —— 没有通用赢家,只有工作负载匹配。</p>
+    </div>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>工作负载特征</th><th>选</th><th>因为</th></tr></thead>
+      <tbody>
+        <tr><td><strong>往返次数敏感</strong><br><span style="color:var(--muted);font-size:12px">探索型、读多写少</span></td><td>意图级 API harness</td><td>专用工具省掉命令书写与输出再解析</td></tr>
+        <tr><td><strong>缺陷逃逸率敏感</strong><br><span style="color:var(--muted);font-size:12px">高覆盖率模块重构</span></td><td>全量验证 harness</td><td>增量验证买不到需要的回归安全边际</td></tr>
+        <tr><td><strong>需要 provider 灵活 / 数据驻留</strong></td><td>opencode</td><td>75+ provider,另两家是模型锁定</td></tr>
+        <tr><td><strong>长自主任务、状态污染敏感</strong></td><td>推理不回灌的 harness</td><td>上下文里 15% 自述 = 非幂等</td></tr>
+        <tr><td><strong>单文件、边界清晰</strong></td><td>Codex</td><td>反应式循环成本低,中位墙钟 41s vs 48s</td></tr>
+        <tr><td><strong>多文件改动</strong></td><td>Claude Code</td><td>一次过率 87% vs 74%(多文件任务)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 8. Goodhart ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M2 12h20"/><circle cx="12" cy="12" r="10"/></svg>
+    <div>
+      <h2>方法论:Goodhart 定律</h2>
+      <p class="sec-sub">"Claude Code 更快"是代理指标被当成目标的经典案例。</p>
+    </div>
+  </div>
+
+  <div class="thesis" style="margin-bottom:14px">
+    <p>
+      Builder.io 那个对照测的不是"效率",它测的是<strong>两个不同的程序</strong>:
+      <code>生成草稿</code> vs <code>生成草稿 + 全量 QA + 94 个测试</code>。
+      差的那部分时间里,绝大部分是<strong>被测系统替用户承担的验证工作</strong>。
+      把它记成"慢",等于把质量保证成本从账上划掉了 —— 这是<strong>成本归因错误</strong>,不是性能差异。
+    </p>
+  </div>
+
+  <div class="callout">
+    <h4>正确的问题</h4>
+    <p>
+      不是"谁更快",而是:<strong>"在什么工作负载下,哪个 runtime 的每轮 RPC 开销更低、上下文污染更少 ——
+      以及我愿意为缺陷逃逸率付多少 makespan?"</strong>
+    </p>
+  </div>
+
+  <div style="height:12px"></div>
+
+  <div class="callout warn">
+    <h4>可证伪的工程假设</h4>
+    <p>
+      若漂移源于"自述回灌"而非模型能力,则<strong>降低 Claude Code 的自动压缩窗口</strong>
+      (<code>--autocompact 100k</code>,低于默认 <code>auto</code>)会<strong>单调地</strong>降低漂移率 ——
+      因为检查点的原料里叙述占比更小、且更早被压掉。
+    </p>
+    <p style="margin-top:9px">测出来 → 机制解释成立;测不出来 → "自述回流"只是相关而非因果,得换方向找(比如 harness 注入通道,或工具粒度本身)。</p>
+  </div>
+</section>
+
+<!-- ============ 9. 局限 ============ -->
+<section>
+  <div class="sec-head">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+    <div><h2>必须说明的局限</h2></div>
+  </div>
+
+  <div class="limits">
+    <ol>
+      <li><b>漂移本身没有被直接测量。</b>本报告测的是预示漂移的结构;漂移率需要人工标注或 LLM-as-judge。"Codex 不易漂移"是现场经验,机制解释与之相容。</li>
+      <li><b>任务单位不完全对等。</b>Codex 每会话 2.8 个任务 vs Claude Code 每会话 13.3 次输入,后者混入大量短追问。"13.1 vs 5.0" 建议按七折理解;工具构成的差异不受影响。</li>
+      <li><b>二进制字符串探测是间接证据。</b>能证明标识符存在,不能单独证明它被暴露为工具(靠 <code>*Tool</code> 后缀与集合自洽性提高可信度)。</li>
+      <li><b>外部对照实验时效有限。</b>Builder.io 用 Sonnet 4.5、单仓库、每任务单次、n=4;Respan trace 采集于 2026 年 4 月;opencode 版本快照 1.18.31,发布节奏很快。</li>
+      <li><b>本机状态占用存疑。</b><code>opencode.db</code> 单文件 5.94 GiB,推测与启动延迟相关,但未实测启动耗时。对照:~/.claude 1.6 GB、~/.codex 4.5 GB。</li>
+      <li><b>样本来源偏斜。</b>本机数据来自 afk-loop 编排工作流,任务形态与日常开发不同。</li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <p><b>完整报告(含全部数据表与复现脚本)</b>:<a href="agent-cli-comparison.zh.md">docs/research/agent-cli-comparison.zh.md</a> · <a href="agent-cli-comparison.md">agent-cli-comparison.md</a></p>
+  <p>外部来源:Builder.io · Respan · SyFI TraceLab(665,453 步)· AgentsRoom(20,408 轮)· AICoderScope</p>
+  <p>快照 2026-10-20 · 本机实测 · 未提交</p>
+</footer>
+
+</div>
+</body>
+</html>

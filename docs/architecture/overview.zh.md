@@ -21,10 +21,22 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
+| `afk backlog create <title>` | 创建一个 provider 背书的 backlog 工作项 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
+| `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
+| `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
+| `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
+| `afk backlog confirm-merge` | 合并已批准的根 backlog 变更并置为 done |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
-| `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
+| `afk execute --work-item-id <id> --execution-manifest <path>` | 实现、独立验证并发布一个托管工作项 |
+| `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
+| `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
+| `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看与优雅停止 |
+| `afk observe` | 读取 append-only 的 AFK 运行审计事件（`runs`、`executions`、`execution`、`timeline`、`verify`、`replay`、`explain`、`doctor`） |
+| `afk retro run --run-id <id> --workspace <path>` | 用现有 `/retro` 技能分析已记录证据并写出 `report.json` 与 `report.html` |
+| `afk retro show <report>` | 读取已生成的复盘报告 |
+| `afk graph workflow <template>` | 生成确定性的工作流图 |
 | `afk`（TUI）、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
 
 已移除的命令组没有别名。provider 的元数据标签属于 adapter 内部实现，

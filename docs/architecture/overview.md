@@ -25,12 +25,22 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
+| `afk backlog create <title>` | Create one provider-backed backlog item |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
+| `afk backlog inventory` | Inventory issues across all credential-accessible projects |
+| `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
+| `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
+| `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
 | `afk run --backlog-id <id>` | Execute one claimed item |
-| `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
+| `afk execute --work-item-id <id> --execution-manifest <path>` | Implement, independently verify, and publish one managed work item |
+| `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
+| `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
+| `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status, and graceful stop |
+| `afk observe` | Read append-only AFK run audit events (`runs`, `executions`, `execution`, `timeline`, `verify`, `replay`, `explain`, `doctor`) |
 | `afk retro run --run-id <id> --workspace <path>` | Analyze recorded evidence with the existing `/retro` skill and write `report.json` plus `report.html` |
 | `afk retro show <report>` | Read a generated retro report |
+| `afk graph workflow <template>` | Generate a deterministic workflow graph |
 | `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
 There are no aliases for removed command groups. Provider metadata labels are

@@ -20,7 +20,7 @@ export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
   // A run is failed because its process exited only when the probe says
   // so. An inconclusive probe - a process that belongs to another user
   // refuses the signal - is not evidence that the run is over.
-  const isPidAlive = deps.isPidAlive ?? ((pid: number) => probeProcess(pid) === false);
+  const isPidAlive = deps.isPidAlive ?? ((pid: number) => probeProcess(pid) !== false);
 
   async function loadRuntime(
     workspace: string,

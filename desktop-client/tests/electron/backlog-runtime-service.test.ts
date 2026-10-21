@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -38,6 +39,26 @@ function createService(root: string, runs: BacklogRunSummary[] = [], now = Date.
   });
 }
 
+/** The service with no liveness probe injected: its own probe decides. */
+function createServiceWithDefaultProbe(root: string, runs: BacklogRunSummary[]) {
+  return createBacklogRuntimeService({
+    resolveWorkspace: value => value,
+    getBacklog: async () => backlog,
+    runStore: runStore(runs),
+    runtimeRoot: () => root,
+    now: () => Date.parse("2026-09-15T00:10:00.000Z"),
+  });
+}
+
+/** The pid of a process that has already exited. */
+function exitedPid(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+    child.on("exit", () => resolve(child.pid ?? 0));
+    child.on("error", reject);
+  });
+}
+
 describe("backlog runtime service", () => {
   it("joins the latest active runtime by backlogId", async () => {
     const root = await fixture();
@@ -66,6 +87,24 @@ describe("backlog runtime service", () => {
     const root = await fixture();
     const result = await createService(root, [{ id: "launch-42", backlogId: "42", status: "running", startedAt: "2026-09-15T00:00:00.000Z", pid: 1234 }], undefined, () => false).summary(root, "42");
     expect(result.activeRun).toMatchObject({ status: "failed", error: expect.stringContaining("canonical runtime") });
+  });
+
+  it("judges a live process by its own probe, not by an assumption", async () => {
+    const root = await fixture();
+    const dead = await exitedPid();
+
+    // No probe is injected here: the service has to work out for itself
+    // whether the process is still there. A run whose process is alive is
+    // not a failed run, and one whose process is gone is.
+    const live = await createServiceWithDefaultProbe(root, [
+      { id: "launch-42", backlogId: "42", status: "running", startedAt: "2026-09-15T00:00:00.000Z", pid: process.pid },
+    ]).summary(root, "42");
+    expect(live.activeRun?.status).not.toBe("failed");
+
+    const gone = await createServiceWithDefaultProbe(root, [
+      { id: "launch-42", backlogId: "42", status: "running", startedAt: "2026-09-15T00:00:00.000Z", pid: dead },
+    ]).summary(root, "42");
+    expect(gone.activeRun).toMatchObject({ status: "failed", error: expect.stringContaining("canonical runtime") });
   });
 
   it("does not treat a clean process exit without a runtime record as completed work", async () => {

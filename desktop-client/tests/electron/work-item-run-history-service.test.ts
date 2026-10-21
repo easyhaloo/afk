@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -62,6 +63,15 @@ function archive(directory: string, overrides: Record<string, unknown> = {}, fil
   writeFileSync(path.join(directory, filename ?? `${Buffer.from(String(record.runId)).toString("base64url")}.json`), JSON.stringify(record));
 }
 
+/** The pid of a process that has already exited. */
+function exitedPid(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+    child.on("exit", () => resolve(child.pid ?? 0));
+    child.on("error", reject);
+  });
+}
+
 function setup(runs: WorkItemRunRecord[], alive = true, workItem = item) {
   const runtimeArchiveDirectory = mkdtempSync(path.join(tmpdir(), "afk-runtime-history-"));
   archiveDirectories.push(runtimeArchiveDirectory);
@@ -89,6 +99,35 @@ describe("work item run history service", () => {
     expect(inventory.items[0].runs).toBeUndefined();
     expect(update).toHaveBeenCalledOnce();
     expect(updateRun).not.toHaveBeenCalled();
+  });
+
+  it("judges a live process by its own probe, not by an assumption", async () => {
+    const runtimeArchiveDirectory = mkdtempSync(path.join(tmpdir(), "afk-runtime-history-"));
+    archiveDirectories.push(runtimeArchiveDirectory);
+    const dead = await exitedPid();
+    const service = (runs: WorkItemRunRecord[]) => {
+      const update = vi.fn(async (_root: string, transform: (current: WorkItemRunRecord[]) => Promise<WorkItemRunRecord[] | undefined> | WorkItemRunRecord[] | undefined) => {
+        const next = await transform(runs);
+        if (next) runs.splice(0, runs.length, ...next);
+      });
+      return createWorkItemRunHistoryService({
+        workspace: { read: vi.fn(async () => workspaceMetadata(root, item.id, item.project, "desktop-1")), updateRun: vi.fn(async () => workspaceMetadata(root, item.id, item.project)) },
+        runStore: { update },
+        now: () => new Date("2026-09-23T01:00:00.000Z"),
+        runtimeArchiveDirectory,
+      });
+    };
+
+    // No probe is injected: the service works out for itself whether the
+    // process is still there. A run whose process is alive is not a failed
+    // run, and one whose process is gone is.
+    const live = [{ ...running, pid: process.pid }];
+    const liveResult = await service(live).merge(inventory);
+    expect(liveResult.items[0].runs?.[0]?.status).toBe("running");
+
+    const gone = [{ ...running, pid: dead }];
+    const goneResult = await service(gone).merge(inventory);
+    expect(goneResult.items[0].runs?.[0]).toMatchObject({ status: "failed" });
   });
 
   it("reconciles a dead process after restart, persists failure, and clears its current run", async () => {

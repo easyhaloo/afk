@@ -15,6 +15,7 @@ import { projectRunScopeService } from "./project-run-scope-service.js";
 import { resolveWorkspace } from "./workspace-service.js";
 import {
   AGENT_PROVIDER_IDS,
+  WORKFLOW_RUN_STATUSES,
   type AgentProviderId,
   type CanvasTemplateNode,
   type CliCapability,
@@ -22,6 +23,7 @@ import {
   type Snapshot,
   type WorkflowConfigSummary,
   type WorkflowRunSummary,
+  type WorkflowRunStatus,
   type WorkflowTemplateStepSummary,
   type WorkflowTemplateSummary,
 } from "../../shared/ipc-contract.js";
@@ -390,7 +392,7 @@ function textValue(record: Record<string, unknown>, key: string) {
   return typeof value === "string" ? value : undefined;
 }
 
-async function readWorkflowRuns(root: string): Promise<WorkflowRunSummary[]> {
+export async function readWorkflowRuns(root: string): Promise<WorkflowRunSummary[]> {
   const runRoot = path.join(root, ".afk", "runs");
   const directories = await fs.readdir(runRoot, { withFileTypes: true }).catch(() => [] as import("node:fs").Dirent[]);
   const runs: WorkflowRunSummary[] = [];
@@ -399,8 +401,15 @@ async function readWorkflowRuns(root: string): Promise<WorkflowRunSummary[]> {
     const request = jsonRecord(await fs.readFile(path.join(dir, "request.json"), "utf8").catch(() => ""));
     const result = jsonRecord(await fs.readFile(path.join(dir, "result.json"), "utf8").catch(() => ""));
     if (!Object.keys(request).length && !Object.keys(result).length) continue;
-    const rawStatus = textValue(result, "status");
-    const status = rawStatus === "completed" || rawStatus === "blocked" || rawStatus === "failed" || rawStatus === "aborted" || rawStatus === "timed_out" || rawStatus === "context_high" ? rawStatus : "running";
+    const rawStatus = textValue(result, "status") ?? "";
+    // A run with no result yet is still going. A run whose recorded
+    // status the desktop does not know is not the same thing: reporting
+    // it as running would claim the desktop cannot back.
+    const status: WorkflowRunStatus = rawStatus === ""
+      ? "running"
+      : (WORKFLOW_RUN_STATUSES as readonly string[]).includes(rawStatus)
+        ? rawStatus as WorkflowRunStatus
+        : "unknown";
     const error = result.error;
     runs.push({
       id: textValue(request, "runId") || textValue(result, "runId") || entry.name,

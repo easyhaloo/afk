@@ -15,7 +15,7 @@
  */
 import { z } from "zod";
 import { WORK_ITEM_AGENT_IDS } from "./backlog-contract.js";
-import { AGENT_PROVIDER_IDS, type Snapshot } from "./ipc-contract.js";
+import { AGENT_PROVIDER_IDS, WORKFLOW_RUN_STATUSES, type Snapshot } from "./ipc-contract.js";
 
 const agentProviderIdSchema = z.enum(AGENT_PROVIDER_IDS);
 const workItemAgentIdSchema = z.enum(WORK_ITEM_AGENT_IDS);
@@ -95,7 +95,7 @@ const workflowConfigSummarySchema = z.object({
 
 const workflowRunSummarySchema = z.object({
   id: z.string(),
-  status: z.enum(["running", "completed", "blocked", "failed", "aborted", "timed_out", "context_high"]),
+  status: z.enum(WORKFLOW_RUN_STATUSES),
   startedAt: z.string(),
   goal: z.string(),
   provider: z.string(),

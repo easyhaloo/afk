@@ -137,9 +137,33 @@ export type WorkflowConfigSummary = {
   templateName?: string;
 };
 
+/**
+ * The states a workflow run can be in.
+ *
+ * The list is declared once, so the desktop's own reading of a run, the
+ * wire contract and the snapshot schema cannot disagree about which
+ * state a run is in.
+ *
+ * It carries an explicit "unknown". A run whose recorded status the
+ * desktop does not recognise has not been shown to be running, and
+ * reporting it as running is a claim the desktop cannot make.
+ */
+export const WORKFLOW_RUN_STATUSES = [
+  "running",
+  "completed",
+  "blocked",
+  "failed",
+  "aborted",
+  "timed_out",
+  "context_high",
+  "unknown",
+] as const;
+
+export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
+
 export type WorkflowRunSummary = {
   id: string;
-  status: "running" | "completed" | "blocked" | "failed" | "aborted" | "timed_out" | "context_high";
+  status: WorkflowRunStatus;
   startedAt: string;
   goal: string;
   provider: string;

@@ -511,7 +511,7 @@ function durationLabel(milliseconds: number) {
 }
 
 function workflowStatusLabel(status: WorkflowRunSummary["status"]) {
-  const labels: Record<WorkflowRunSummary["status"], string> = { running: "运行中", completed: "已完成", blocked: "已阻塞", failed: "失败", aborted: "已中止", timed_out: "已超时", context_high: "上下文阈值" };
+  const labels: Record<WorkflowRunSummary["status"], string> = { running: "运行中", completed: "已完成", blocked: "已阻塞", failed: "失败", aborted: "已中止", timed_out: "已超时", context_high: "上下文阈值", unknown: "未知" };
   return labels[status];
 }
 

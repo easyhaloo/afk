@@ -505,6 +505,7 @@
 /* Blocked and context-pressure runs read amber, the prototype's --warn, so a
    stalled run never looks like a healthy one. Same token .stats .hot uses. */
 .status-pill.blocked, .status-pill.timed_out, .status-pill.aborted, .status-pill.context_high { background: var(--warn); color: var(--afk-panel); border-color: var(--warn); }
+.status-pill.unknown { background: var(--warn); color: var(--afk-panel); border-color: var(--warn); }
 .workflow-studio-topbar { grid-template-columns: 112px minmax(0, 1fr) auto; min-height: 56px; padding: 0 16px; border-bottom-color: var(--afk-border); }
 .workflow-back { padding: 5px 0; font-size: calc(9px * var(--afk-scale)); }
 .workflow-studio-title > span { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }

@@ -16,6 +16,7 @@
  * a structured message (Zod issues are flattened into the error message).
  */
 
+import { AFK_WORKFLOW_DIRECTORY } from '@afk/core';
 import { promises as fs } from 'fs';
 import { dirname, isAbsolute, join, resolve } from 'path';
 import * as YAML from 'js-yaml';
@@ -45,10 +46,10 @@ export function templateCandidates(name: string, roots: TemplateSearchRoots): Ar
   if (name.includes('/') || name.endsWith('.yml') || name.endsWith('.yaml')) {
     candidates.push({ path: name, source: 'cli' });
   }
-  candidates.push({ path: join(roots.projectRoot, '.afk', 'workflows', `${name}.yml`), source: 'project' });
-  candidates.push({ path: join(roots.projectRoot, '.afk', 'workflows', `${name}.yaml`), source: 'project' });
-  candidates.push({ path: join(roots.homeDir, '.afk', 'workflows', `${name}.yml`), source: 'user' });
-  candidates.push({ path: join(roots.homeDir, '.afk', 'workflows', `${name}.yaml`), source: 'user' });
+  candidates.push({ path: join(roots.projectRoot, AFK_WORKFLOW_DIRECTORY, `${name}.yml`), source: 'project' });
+  candidates.push({ path: join(roots.projectRoot, AFK_WORKFLOW_DIRECTORY, `${name}.yaml`), source: 'project' });
+  candidates.push({ path: join(roots.homeDir, AFK_WORKFLOW_DIRECTORY, `${name}.yml`), source: 'user' });
+  candidates.push({ path: join(roots.homeDir, AFK_WORKFLOW_DIRECTORY, `${name}.yaml`), source: 'user' });
   return candidates;
 }
 

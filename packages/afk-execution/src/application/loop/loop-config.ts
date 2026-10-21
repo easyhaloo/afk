@@ -1,3 +1,4 @@
+import { AFK_CONFIG_FILE } from '@afk/core';
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '@afk/infrastructure';
@@ -10,7 +11,7 @@ const DEFAULT_LOOP_CONFIG: LoopConfig = { moduleTriggers: {} };
 
 /** Load provider-neutral loop module triggers from .afk/config.yml. */
 export function loadLoopConfig(cwd: string = process.cwd()): LoopConfig {
-  const configPath = path.join(cwd, '.afk', 'config.yml');
+  const configPath = path.join(cwd, AFK_CONFIG_FILE);
   const result: LoopConfig = {
     moduleTriggers: {},
   };

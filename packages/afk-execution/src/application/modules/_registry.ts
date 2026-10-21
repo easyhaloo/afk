@@ -7,6 +7,7 @@
  *   2. .afk/config.yml → workflow.modules
  *   3. AFK_MODULES env var
  */
+import { AFK_CONFIG_FILE } from '@afk/core';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { load } from 'js-yaml';
@@ -79,7 +80,7 @@ export function parseModuleParams(params: string[] | undefined): ModuleParams {
 }
 
 function loadConfigModules(): string[] {
-  const configPath = join(process.cwd(), '.afk', 'config.yml');
+  const configPath = join(process.cwd(), AFK_CONFIG_FILE);
   if (!existsSync(configPath)) return [];
 
   try {

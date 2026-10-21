@@ -1,4 +1,5 @@
 /** AFK Control security: only the main process runs a fixed, non-user-configurable diagnostics whitelist. */
+import { AFK_CONFIG_FILE, AFK_WORKFLOW_DIRECTORY } from '@afk/core';
 import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -50,7 +51,7 @@ function validSession(value: string) {
 
 
 export async function readWorkflowConfig(root: string): Promise<WorkflowConfigSummary> {
-  const configPath = path.join(root, ".afk", "config.yml");
+  const configPath = path.join(root, AFK_CONFIG_FILE);
   const raw = await fs.readFile(configPath, "utf8").catch(() => "");
   // The runner's configuration, read by the runner's reader: what this
   // page shows is what a run will use.  A configuration the runner refuses
@@ -130,10 +131,10 @@ function templateStepSummary(value: unknown): WorkflowTemplateStepSummary | null
 }
 
 async function readWorkflowTemplates(root: string): Promise<WorkflowTemplateSummary[]> {
-  const directory = path.join(root, ".afk", "workflows");
+  const directory = path.join(root, AFK_WORKFLOW_DIRECTORY);
   const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => [] as import("node:fs").Dirent[]);
   const projectTemplates: WorkflowTemplateSummary[] = [];
-  const configRaw = await fs.readFile(path.join(root, ".afk", "config.yml"), "utf8").catch(() => "");
+  const configRaw = await fs.readFile(path.join(root, AFK_CONFIG_FILE), "utf8").catch(() => "");
   for (const entry of entries.filter(item => item.isFile() && /\.ya?ml$/i.test(item.name)).sort((a, b) => a.name.localeCompare(b.name))) {
     try {
       const document = asConfigObject(loadYaml(await fs.readFile(path.join(directory, entry.name), "utf8")));
@@ -290,7 +291,7 @@ function canvasLayoutNodes(raw: string): CanvasTemplateNode[] {
 async function readCanvasNodes(root: string, raw: string, templateName: string | undefined): Promise<CanvasTemplateNode[]> {
   const layout = canvasLayoutNodes(raw);
   if (!templateName || !layout.length) return [];
-  const templatePath = path.join(root, ".afk", "workflows", templateName + ".yml");
+  const templatePath = path.join(root, AFK_WORKFLOW_DIRECTORY, templateName + ".yml");
   try {
     const document = asConfigObject(loadYaml(await fs.readFile(templatePath, "utf8")));
     const steps = Array.isArray(document.steps) ? document.steps : [];
@@ -315,7 +316,7 @@ function managedTemplateDocument(templateName: string, nodes: CanvasTemplateNode
 }
 
 async function saveManagedTemplate(root: string, templateName: string, nodes: CanvasTemplateNode[], provider: string) {
-  const directory = path.join(root, ".afk", "workflows");
+  const directory = path.join(root, AFK_WORKFLOW_DIRECTORY);
   const templatePath = path.join(directory, templateName + ".yml");
   await fs.mkdir(directory, { recursive: true });
   const temporaryPath = templatePath + ".tmp-" + process.pid + "-" + Date.now();
@@ -332,7 +333,7 @@ export async function saveWorkflowConfig(workspace: string, value: unknown): Pro
   const root = resolveWorkspace(workspace);
   const patch = cleanWorkflowPatch(value);
   if (patch.templateName === MANAGED_WORKFLOW_TEMPLATE_NAME && !patch.canvasNodes.length) throw new Error("自定义工作流至少需要一个步骤");
-  const configPath = path.join(root, ".afk", "config.yml");
+  const configPath = path.join(root, AFK_CONFIG_FILE);
   const existingRaw = await fs.readFile(configPath, "utf8").catch(() => "");
   let existing: ConfigObject = {};
   if (existingRaw) {

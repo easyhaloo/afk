@@ -1,3 +1,4 @@
+import { AFK_CONFIG_FILE } from '@afk/core';
 import { getGlabToken } from '@afk/infrastructure';
 import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from '@afk/core';
 import { existsSync, readFileSync } from 'node:fs';
@@ -160,7 +161,7 @@ export function getSchedulerConfig(): SchedulerConfig {
   return _scheduler ??= loadSchedulerConfig();
 }
 function readProjectConfig(projectRoot: string): ConfigObject {
-  const path = join(projectRoot, '.afk', 'config.yml');
+  const path = join(projectRoot, AFK_CONFIG_FILE);
   if (!existsSync(path)) return {};
   const raw = readFileSync(path, 'utf8');
   // An empty file is no configuration, not a broken one: a file that was

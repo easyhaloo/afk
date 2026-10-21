@@ -2,6 +2,7 @@ export * from './agent-execution-mode.js';
 export * from './agent-provider-names.js';
 export * from './agent-runtime-environment.js';
 export * from './workflow-steps.js';
+export * from './workspace-layout.js';
 export * from './events.js';
 export * from './execution-base-policy.js';
 export * from './model.js';

@@ -26,11 +26,11 @@ import {
 } from "../../shared/ipc-contract.js";
 import { parseSnapshot } from "../../shared/snapshot-schema.js";
 
-const AFK_CAPABILITY_DEFINITIONS: Omit<CliCapability, "available">[] = [
+export const AFK_CAPABILITY_DEFINITIONS: Omit<CliCapability, "available">[] = [
   { id: "run", label: "单次工作流", command: "afk run", description: "领取并执行一个 backlog 项目" },
   { id: "loop", label: "持续循环", command: "afk loop", description: "轮询并执行 manifest 绑定工作项的守护工作流" },
   { id: "qa", label: "质量验证", command: "afk qa", description: "运行 AFK 质量检查与验证流程" },
-  { id: "board", label: "任务看板", command: "afk board", description: "读取和维护工作项状态" },
+  { id: "board", label: "任务看板", command: "afk", description: "读取和维护工作项状态" },
   { id: "isolate", label: "隔离环境", command: "afk isolate", description: "管理 worktree 的 Compose 隔离服务" },
   { id: "tmux", label: "终端会话", command: "afk tmux", description: "管理 AFK 工作流的 tmux 会话" },
   { id: "debug", label: "调试循环", command: "afk debug", description: "复现、诊断、修复与验证问题" },

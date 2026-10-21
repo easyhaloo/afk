@@ -15,7 +15,7 @@ export const DEMO_SNAPSHOT: Snapshot = {
     { id: "run", label: "单次工作流", command: "afk run", description: "领取并执行一个 backlog 项目", available: true },
     { id: "loop", label: "持续循环", command: "afk loop", description: "轮询、实现、QA 与完成的守护工作流", available: true },
     { id: "qa", label: "质量验证", command: "afk qa", description: "运行 AFK 质量检查与验证流程", available: true },
-    { id: "board", label: "任务看板", command: "afk board", description: "读取和维护工作项状态", available: true },
+    { id: "board", label: "任务看板", command: "afk", description: "读取和维护工作项状态", available: true },
     { id: "isolate", label: "隔离环境", command: "afk isolate", description: "管理 worktree 的 Compose 隔离服务", available: true },
     { id: "tmux", label: "终端会话", command: "afk tmux", description: "管理 AFK 工作流的 tmux 会话", available: true },
   ],

@@ -141,6 +141,12 @@ tmux 词表、资源记录、token 用量、运行记录、运行所处的阶段
 不依赖任何东西。架构守卫把这条写成规则：桌面 `shared/` 或 `src/` 下 import
 执行运行时的文件会被报告，因为桌面契约不能依赖一个 renderer 加载不了的模块。
 
+端口收的是入口这一侧：入口不再直接伸手去拿适配器，它只说自己需要什么，由组合根
+说明接到了什么。接下来是用例，蓝图里记着这个次序——执行运行时的用例也按 Port 拆开，
+让 `executeWorkItem` 本身能够进入 `@afk/application`；在那之前 `@afk/execution`
+仍是「用例 + 实现」合一的过渡形态。整张图见
+[`docs/architecture/blueprints/core-layer-architecture_zh.md`](docs/architecture/blueprints/core-layer-architecture_zh.md)。
+
 ## 停止一次运行
 
 一次运行的 agent 是终端会话里的一个进程，而这次运行住在另一个进程里。从外面

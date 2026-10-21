@@ -71,10 +71,41 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
   本来就不被当前 CLI 接受，改为委派给工作项执行后该路径才真正可用。
 - 工作项清单改为 scope 级列举：平台能服务端过滤时按 owner/全局 feed 一次取回，
   否则回退到逐项目请求。并发上限从 4 提到 12。
+- 执行运行时的能力端口声明在 `@afk/application`：`ConfigurationPort`、
+  `TmuxPort`、`LoopProcessPort`、`AgentTelemetryPort`、`BrowserPort`、
+  `ResourceRegistryPort`、`RunSessionPort`、`TaskRuntimePort`
+  （`packages/afk-application/src/runtime-ports.ts`、
+  `packages/afk-application/src/workflow-config.ts`、
+  `packages/afk-application/src/task-runtime-port.ts`）。
+- 端口点名的共享词表下沉到 `@afk/core`：信号形状
+  （`packages/afk-core/src/workflow-signal.ts`）、tmux 词表与命名规则
+  （`packages/afk-core/src/tmux.ts`）、资源记录
+  （`packages/afk-core/src/afk-resources.ts`）、运行记录与阶段
+  （`packages/afk-core/src/task-runtime.ts`）、图格式
+  （`packages/afk-core/src/workflow-graph.ts`）、token 用量
+  （`packages/afk-core/src/agent-usage.ts`）、sandbox 种类
+  （`packages/afk-core/src/sandbox.ts`）。
+- 实现留在执行包的 infrastructure 层，一个端口一个模块。入口直摸适配器从 18 处
+  降到 0，只剩两个组合根：`src/cli/composition-root.ts`、
+  `desktop-client/electron/composition-root.ts`。
+- 架构守卫（`scripts/architecture-guard.mjs`）新增两条规则：入口 import
+  `@afk/execution/infrastructure` 会被报告；桌面 `shared/`、`src/` import 执行包
+  也会被报告（测试文件豁免，豁免的理由写在规则注释里）。
+- 桌面 renderer 侧对执行包的引用归零，只加载零依赖的 core。
+- 运行记录收进 `TaskRuntimePort`
+  （`packages/afk-application/src/task-runtime-port.ts`）；停止一次运行 = 写 worktree
+  中断请求（`packages/afk-execution/src/infrastructure/runtime/interrupt-file.ts`）
+  + 杀该 run 登记的 tmux 会话，运行时以 `manual` 中断。
+- loop 的两条硬约束：只接 `ready`/`rework`（`LOOP_PICKUP_STATES`），接缝里没有能
+  合并的 provider（`LoopProviderBundle`），合并永远由人做
+  （`packages/afk-execution/src/application/modules/loop-runner.ts`）。
 
 仍需继续收敛的部分：把执行运行时里的用例按 Port 拆开，让 `executeWorkItem`
 本身可以进入 `@afk/application`；`@afk/execution` 目前仍是"用例 + 实现"合一的
-过渡形态。Core 行为函数（`decide` / `evolve` / `replay` /
+过渡形态。这一条与上面刚记下的那一轮不是同一件事：那一轮收的是入口侧——入口不再
+直摸适配器；这一条收的是用例侧——用例本身还没有从执行包搬进 `@afk/application`。
+入口侧已经收口，用例侧还在路上，所以整件事并没有因为端口声明完成而结束。
+Core 行为函数（`decide` / `evolve` / `replay` /
 `resolveExecutionBase`）在 Desktop 侧大部分仍只被用作类型引用，但 `replay`
 已经通过 `@afk/application` 的 `replayRun` 进入 Desktop 的真实调用链
 （`desktop-client/electron/services/work-item-execution-query-service.ts:63`）。

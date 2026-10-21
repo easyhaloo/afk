@@ -174,6 +174,15 @@ says so: a file under the desktop's `shared/` or `src/` that imports the
 execution runtime is reported, because the desktop's wire contract cannot
 depend on a module the renderer is unable to load.
 
+The ports close the entry side: an entry point no longer reaches for an
+adapter, it states what it needs, and a composition root says what answers it.
+The use cases come next, and the blueprint keeps the order. The execution
+runtime's use cases are split by Port as well, so that `executeWorkItem`
+itself can enter `@afk/application`; until that happens `@afk/execution` is a
+transitional shape, use cases and implementations in one package. The whole
+picture is in
+[`docs/architecture/blueprints/core-layer-architecture_zh.md`](docs/architecture/blueprints/core-layer-architecture_zh.md).
+
 ## Stopping a run
 
 A run's agent is a process in a terminal session, and a run lives in another

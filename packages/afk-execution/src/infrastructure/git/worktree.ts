@@ -100,7 +100,7 @@ export class WorktreeManager {
   private async hasActiveSession(wt: Worktree): Promise<boolean> {
     if (!wt.sessionId) return false;
     const { spawn } = await import('child_process');
-    const { normalizeTmuxSessionName } = await import('../../domain/tmux/session-name.js');
+    const { normalizeTmuxSessionName } = await import('@afk/core');
     return new Promise(resolve => {
       const proc = spawn('tmux', ['has-session', '-t', normalizeTmuxSessionName(wt.sessionId!)], { stdio: 'pipe' });
       proc.on('close', code => resolve(code === 0));
@@ -179,7 +179,7 @@ export class WorktreeManager {
       if (wt.status === 'active' && wt.sessionId) {
         try {
           const { spawn } = await import('child_process');
-          const { normalizeTmuxSessionName } = await import('../../domain/tmux/session-name.js');
+          const { normalizeTmuxSessionName } = await import('@afk/core');
           const proc = spawn('tmux', ['has-session', '-t', normalizeTmuxSessionName(wt.sessionId)], { stdio: 'pipe' });
           await new Promise((resolve, reject) => { proc.on('close', (code) => { if (code !== 0) orphaned.push(wt); resolve(code); }); proc.on('error', (err) => { orphaned.push(wt); resolve(err); }); });
         } catch { orphaned.push(wt); }

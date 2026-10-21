@@ -25,24 +25,17 @@ vi.mock('@afk/core', async importOriginal => {
   return {
     ...original,
     GOAL_COMPLETE_RESULTS: [...original.GOAL_COMPLETE_RESULTS, 'SKIP'],
-  };
-});
-
-import { WORKFLOW_GRAPH_FORMATS } from '@afk/execution';
-import { GOAL_COMPLETE_RESULTS } from '@afk/core';
-import { registerGraphCommands } from '../../src/cli/commands/graph';
-import { registerSignalCommands } from '../../src/cli/commands/signal';
-
-vi.mock('@afk/execution/application/visualizations/workflow-graph', async importOriginal => {
-  const original = await importOriginal<typeof import('@afk/execution/application/visualizations/workflow-graph')>();
-  return {
-    ...original,
     WORKFLOW_GRAPH_FORMATS: [...original.WORKFLOW_GRAPH_FORMATS, 'receipt'],
   };
 });
 
+import { WORKFLOW_GRAPH_FORMATS } from '@afk/core';
+import { GOAL_COMPLETE_RESULTS } from '@afk/core';
+import { registerGraphCommands } from '../../src/cli/commands/graph';
+import { registerSignalCommands } from '../../src/cli/commands/signal';
+
 describe('The entry points answer with the vocabularies their owners publish', () => {
-  it('names every graph format the execution package declares', () => {
+  it('names every graph format the core package declares', () => {
     const program = new Command();
     registerGraphCommands(program);
     const workflow = program.commands

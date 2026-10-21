@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { normalizeTmuxSessionName } from '../../domain/tmux/session-name.js';
+import { normalizeTmuxSessionName } from '@afk/core';
 
 export interface ControlModeOptions {
   session: string;

@@ -22,7 +22,7 @@ import { clearSignal, clearStatus, getTokenUsage, quoteShellArgument, readSignal
 import { clearInterruptRequest, readInterruptRequest } from '../../runtime/interrupt-file.js';
 import type { Signal } from '@afk/core';
 import { StreamingAgentExecution } from './streaming.js';
-import { normalizeTmuxSessionName } from '../../../domain/tmux/session-name.js';
+import { normalizeTmuxSessionName } from '@afk/core';
 import { agentReadiness } from '../../tmux/agent-readiness.js';
 import {
   type SandboxProvider,

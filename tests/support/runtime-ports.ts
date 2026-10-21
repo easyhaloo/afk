@@ -17,6 +17,7 @@ import type {
   ResourceRegistryPort,
   RunSessionPort,
   SchedulerConfig,
+  TaskRuntimePort,
   TmuxPort,
   WorkflowConfig,
 } from '@afk/application';
@@ -29,6 +30,7 @@ export interface InMemoryRuntimePorts {
   browser: BrowserPort;
   resources: ResourceRegistryPort;
   runSession: RunSessionPort;
+  taskRuntime: TaskRuntimePort;
 }
 
 /** The configuration a run is shaped by, when nothing configures it. */
@@ -121,6 +123,12 @@ export function inMemoryRuntimePorts(): InMemoryRuntimePorts {
     },
     runSession: {
       stop: async () => false,
+    },
+    taskRuntime: {
+      listActive: async () => [],
+      listArchive: async () => [],
+      list: async () => [],
+      find: async () => undefined,
     },
   };
 }

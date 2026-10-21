@@ -6,8 +6,8 @@ import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/ba
 import type { createExecutionWorkspaceService } from "./execution-workspace-service.js";
 import type { createWorkItemRunStore } from "./work-item-run-store.js";
 import { isAgentExecutionMode, type AgentExecutionMode } from "@afk/core";
-import { tmuxSessionNameFor } from "@afk/execution/domain/tmux/session-name";
-import { TASK_RUNTIME_PHASES, type TaskRuntimePhase } from "@afk/execution/domain/runtime/phase";
+import { TASK_RUNTIME_PHASES, tmuxSessionNameFor, type TaskRuntimePhase } from "@afk/core";
+
 import { probeProcess } from "@afk/infrastructure";
 
 type HistoryDeps = {

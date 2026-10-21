@@ -21,14 +21,14 @@
 import { logger } from '@afk/infrastructure';
 import type { AgentExecution, ExecutionResult } from '../../domain/agents/types.js';
 import { runtimeRecord, type RuntimeRecordInput } from './runtime-record.js';
+import type { TaskRuntimeDiagnostics } from './task-runtime.js';
 import type {
   TaskRuntimeActivity,
   TaskRuntimeActivityKind,
-  TaskRuntimeDiagnostics,
   TaskRuntimePhase,
   TaskRuntimeRecord,
   TaskRuntimeRecordInput,
-} from './task-runtime.js';
+} from '@afk/core';
 
 /** The fields a heartbeat may change on a live record. */
 export type RuntimeHeartbeatChanges = Partial<Pick<

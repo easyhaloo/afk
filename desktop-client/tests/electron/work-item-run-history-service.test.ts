@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkItemRunHistoryService } from "../../electron/services/work-item-run-history-service";
-import { tmuxSessionNameFor } from "@afk/execution/domain/tmux/session-name";
+import { tmuxSessionNameFor } from "@afk/core";
 import { createWorkItemRunStore } from "../../electron/services/work-item-run-store";
 import type { ExecutionWorkspaceMetadata } from "../../electron/services/execution-workspace-service";
 import type { GlobalWorkItem, ProviderProjectRef, WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/backlog-contract";

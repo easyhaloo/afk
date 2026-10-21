@@ -16,7 +16,7 @@
 import type { AgentExecutionMode } from '@afk/core';
 import type { AgentProviderName, AgentRuntimeSelection } from '../../domain/agents/types.js';
 import { runtimeFieldsFromSelection } from '../runtime/agent-metadata.js';
-import type { TaskRuntimePhase, TaskRuntimeRecordInput, TaskRuntimeStatus } from './task-runtime.js';
+import type { TaskRuntimePhase, TaskRuntimeRecordInput, TaskRuntimeStatus } from '@afk/core';
 
 export interface RuntimeRecordInput {
   runId: string;

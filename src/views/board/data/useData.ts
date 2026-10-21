@@ -24,7 +24,7 @@ import {
   type BacklogViewModel,
   type TuiManagementProviderBundle,
 } from './backlog-adapter.js';
-import type { TaskRuntimeManager } from '@afk/execution/application/runtime/task-runtime';
+import type { TaskRuntimePort } from '@afk/application';
 
 const PER_PAGE = 50;
 
@@ -36,10 +36,10 @@ export function loadDashboardBacklogs(
 }
 
 export async function loadDashboardTasks(
+  runtime: TaskRuntimePort,
   backlogs: readonly BacklogViewModel[],
-  manager?: TaskRuntimeManager,
 ): Promise<Awaited<ReturnType<typeof fetchTasks>>> {
-  return fetchTasks(manager, backlogs);
+  return fetchTasks(runtime, backlogs);
 }
 
 export function projectBacklogRuntime(backlogs: BacklogViewModel[], tasks: Task[]): BacklogViewModel[] {
@@ -66,7 +66,8 @@ export function projectBacklogRuntime(backlogs: BacklogViewModel[], tasks: Task[
  */
 export function useData(
   currentView: View,
-  management?: TuiManagementProviderBundle | null,
+  management: TuiManagementProviderBundle | null | undefined,
+  runtime: TaskRuntimePort,
 ) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [backlogs, setBacklogs] = useState<BacklogViewModel[]>([]);
@@ -84,10 +85,10 @@ export function useData(
   backlogsRef.current = backlogs;
 
   const reloadTasks = useCallback(async (backlogRows = backlogsRef.current) => {
-    const data = await loadDashboardTasks(backlogRows);
+    const data = await loadDashboardTasks(runtime, backlogRows);
     setTasks(data.active);
     return data;
-  }, []);
+  }, [runtime]);
 
   useEffect(() => {
     void reloadTasks().catch(err => {

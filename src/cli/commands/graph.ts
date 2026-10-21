@@ -1,5 +1,6 @@
 import { Command } from 'commander';
-import { generateWorkflowGraph, WORKFLOW_GRAPH_FORMATS } from '@afk/execution/application/visualizations/workflow-graph';
+import { generateWorkflowGraph } from '@afk/execution/application/visualizations/workflow-graph';
+import { WORKFLOW_GRAPH_FORMATS } from '@afk/core';
 import { writeGraphCache } from '@afk/execution/application/visualizations/graph-cache';
 
 

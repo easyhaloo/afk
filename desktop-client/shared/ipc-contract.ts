@@ -243,7 +243,7 @@ export type AppearancePreferences = {
  * The type comes from the execution package that writes the graph, so the
  * desktop's wire contract cannot offer a shape the writer would refuse.
  */
-import type { WorkflowGraphFormat } from "@afk/execution/application/visualizations/workflow-graph";
+import type { WorkflowGraphFormat } from "@afk/core";
 export type { WorkflowGraphFormat };
 
 export type WorkflowGraphDiagnostic = {

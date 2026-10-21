@@ -1,19 +1,17 @@
 import { Task } from '../../../types/board.js';
-import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecord } from '@afk/execution/application/runtime/task-runtime';
-import type { BacklogItem } from '@afk/application';
+import type { ActiveTaskRuntimeRecord, TaskRuntimeRecord } from '@afk/core';
+import type { BacklogItem, TaskRuntimePort } from '@afk/application';
 import { createGitLabTracker } from '@afk/infrastructure';
 import { resolveGitLabProject } from '@afk/infrastructure';
 import type { Project, Branch, Tag, Commit, TrackerProjectReader } from '@afk/application';
 import { fileLogger } from '@afk/infrastructure';
 import { projectWorkItems } from './work-item-projection.js';
 
-const runtimeManager = new TaskRuntimeManager();
-
 export async function fetchTasks(
-  manager: TaskRuntimeManager = runtimeManager,
+  runtime: TaskRuntimePort,
   backlogs: readonly Pick<BacklogItem, 'id' | 'title' | 'state' | 'providerRef'>[] = [],
 ): Promise<{ active: Task[]; completed: Task[] }> {
-  const [active, archive] = await Promise.all([manager.listActive(), manager.listArchive()]);
+  const [active, archive] = await Promise.all([runtime.listActive(), runtime.listArchive()]);
   const projections = projectWorkItems({ backlogs, active, archive, workspace: process.cwd() });
   const tasks = projections
     .filter((projection): projection is typeof projection & { runtime: TaskRuntimeRecord | ActiveTaskRuntimeRecord } => projection.runtime !== undefined)

@@ -372,6 +372,19 @@ describe('architecture guard desktop renderer boundaries', () => {
     expect(output).toContain('the desktop renderer must not load node builtin');
   });
 
+  it('rejects a renderer that loads the execution runtime', () => {
+    // The renderer runs in a browser, and the execution runtime is not a
+    // module a browser can load. A shared vocabulary the renderer needs
+    // has to live in the core package.
+    const output = rendererFixture("import { WORKFLOW_GRAPH_FORMATS } from '@afk/execution';\nexport const formats = WORKFLOW_GRAPH_FORMATS;\n").run();
+    expect(output).toContain('the desktop renderer must not load the execution runtime');
+  });
+
+  it('accepts a renderer that reads a shared vocabulary from the core package', () => {
+    const output = rendererFixture("import { TASK_RUNTIME_PHASES } from '@afk/core';\nexport const phases = TASK_RUNTIME_PHASES;\n").run();
+    expect(output).toContain('Architecture guard passed');
+  });
+
   it('accepts a renderer that only names a type from that module', () => {
     // A type is erased at compile time, so the renderer never loads the
     // module and never reaches the filesystem.

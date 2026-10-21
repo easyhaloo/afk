@@ -110,6 +110,7 @@ const workItemInventorySyncService = createWorkItemInventorySyncService({
 const executionWorkspaceService = createExecutionWorkspaceService();
 const workItemRunStore = createWorkItemRunStore({ resolveWorkspace });
 const workItemExecutionQueryService = createWorkItemExecutionQueryService(createRunEventQueryAdapter(), createExecutionRuntimeAdapter({
+  taskRuntime: desktopRuntimePorts.taskRuntime,
   readReceipt: async (runId, workItemId) => {
     const metadata = await executionWorkspaceService.read(workItemId);
     if (!metadata || metadata.taskId !== workItemId) return undefined;
@@ -138,6 +139,7 @@ const backlogRuntimeService = createBacklogRuntimeService({
   resolveWorkspace,
   getBacklog: (workspace, id) => backlogService.show(workspace, id),
   runStore: backlogRunStore,
+  taskRuntime: desktopRuntimePorts.taskRuntime,
 });
 const workflowGraphService = new WorkflowGraphService();
 const backlogExecutionService = createBacklogExecutionService({

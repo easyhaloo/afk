@@ -1,7 +1,6 @@
 import type { AgentExecutionMode } from '@afk/core';
 import type { BacklogState } from '@afk/application';
-import type { TaskRuntimeActivity, TaskRuntimeStatus } from '@afk/execution/application/runtime/task-runtime';
-import type { TaskRuntimePhase } from '@afk/execution/domain/runtime/phase';
+import type { TaskRuntimeActivity, TaskRuntimePhase, TaskRuntimeStatus } from '@afk/core';
 
 export type TaskActivity = Omit<TaskRuntimeActivity, 'at'> & { at: Date };
 

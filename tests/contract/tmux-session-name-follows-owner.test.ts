@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveWorkflowRequest } from "@afk/execution/application/workflows/run-request";
-import { tmuxSessionNameFor } from "@afk/execution/domain/tmux/session-name";
+import { tmuxSessionNameFor } from "@afk/core";
 
 /**
  * The session a work item runs in is named by the runtime and recognised

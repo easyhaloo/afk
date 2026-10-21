@@ -11,8 +11,7 @@
  */
 
 import { assertExactKeys, parseRequiredString } from "./validation.js";
-import { TASK_RUNTIME_PHASES } from "@afk/execution/domain/runtime/phase";
-import type { TaskRuntimePhase } from "@afk/execution/domain/runtime/phase";
+import { TASK_RUNTIME_PHASES, type TaskRuntimePhase } from "@afk/core";
 import {
   WORK_ITEM_PLATFORMS,
   BACKLOG_STATES as APPLICATION_BACKLOG_STATES,

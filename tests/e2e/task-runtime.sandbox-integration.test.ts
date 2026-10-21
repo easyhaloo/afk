@@ -7,6 +7,7 @@ import { LocalSandboxProvider } from '@afk/execution/infrastructure/sandbox/prov
 import { buildExecutionPrompt } from '@afk/execution/application/workflows/execution-protocol';
 import { fetchTasks } from '../../src/views/board/data/fetcher.js';
 import { TaskRuntimeManager, TaskRuntimeStore } from '@afk/execution/application/runtime/task-runtime';
+import { createTaskRuntimePort } from '@afk/execution/application/runtime/task-runtime-port';
 
 const temporaryRoots: string[] = [];
 
@@ -62,7 +63,7 @@ describe.runIf(process.env.AFK_REAL_CLAUDE_E2E === '1')('task runtime sandbox in
       await manager.heartbeat(runId, { progress: 'agent completed' });
 
       expect(result).toMatchObject({ status: 'completed', structuredOutput: { type: 'goal_complete' } });
-      await expect(fetchTasks(manager)).resolves.toEqual({
+      await expect(fetchTasks(createTaskRuntimePort({ root: manager.store.root }))).resolves.toEqual({
         active: [expect.objectContaining({
           iid: 'INT-42', runId, status: 'active', executionMode: 'batch', progress: 'agent completed',
         })],
@@ -73,7 +74,7 @@ describe.runIf(process.env.AFK_REAL_CLAUDE_E2E === '1')('task runtime sandbox in
       await expect(readFile(join(active[0]!.diagnosticPath!, 'output.log'), 'utf8')).resolves.toContain('goal_complete');
 
       await manager.finish(runId, { status: 'completed', progress: 'finished' });
-      await expect(fetchTasks(manager)).resolves.toEqual({ active: [], completed: [] });
+      await expect(fetchTasks(createTaskRuntimePort({ root: manager.store.root }))).resolves.toEqual({ active: [], completed: [] });
     } finally {
       await sandbox.close();
     }

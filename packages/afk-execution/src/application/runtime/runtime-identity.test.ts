@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { matchesRuntimeRecord, type TaskRuntimeRecord } from './task-runtime.js';
+import { matchesRuntimeRecord } from './task-runtime.js';
+import type { TaskRuntimeRecord } from '@afk/core';
 
 function record(overrides: Partial<TaskRuntimeRecord> = {}): TaskRuntimeRecord {
   return {

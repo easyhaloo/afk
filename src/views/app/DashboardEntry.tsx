@@ -63,7 +63,7 @@ export function DashboardEntry({ ports }: Props) {
     return () => { cancelled = true; };
   }, [isReady]);
 
-  const data = useData(currentView, management);
+  const data = useData(currentView, management, ports.taskRuntime);
 
   const attachSession = useCallback(async (task: Task) => {
     if (task.executionMode !== 'interactive' || !task.session) return;

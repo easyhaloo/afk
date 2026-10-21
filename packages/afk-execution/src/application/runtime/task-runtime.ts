@@ -5,14 +5,26 @@ import { join, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { RUNTIME_STALE_AFTER_MS } from '@afk/application';
-import { TASK_RUNTIME_PHASES, type TaskRuntimePhase } from '../../domain/runtime/phase.js';
 import {
   AGENT_AUTHS,
   AGENT_TRANSPORTS,
+  TASK_RUNTIME_PHASES,
   isAgentExecutionMode,
+  type ActiveTaskRuntimeRecord,
   type AgentAuth,
   type AgentExecutionMode,
   type AgentTransport,
+  type RuntimeRecordBucket,
+  type RuntimeRecordEntry,
+  type RuntimeRecordIdentity,
+  type RuntimeRecordQuery,
+  type TaskRuntimeActivity,
+  type TaskRuntimeActivityKind,
+  type TaskRuntimePhase,
+  type TaskRuntimeRecord,
+  type TaskRuntimeRecordInput,
+  type TaskRuntimeStatus,
+  type VisibleTaskRuntimeStatus,
 } from '@afk/core';
 
 /**
@@ -21,74 +33,6 @@ import {
  * The rule lives in the domain layer, where the desktop's renderer can
  * read it too, and the record module names it from there.
  */
-export { TASK_RUNTIME_PHASES } from '../../domain/runtime/phase.js';
-export type { TaskRuntimePhase } from '../../domain/runtime/phase.js';
-export type TaskRuntimeStatus = 'running' | 'completed' | 'blocked' | 'failed';
-export type VisibleTaskRuntimeStatus = TaskRuntimeStatus | 'stale';
-export type TaskRuntimeActivityKind = 'agent' | 'tool' | 'test' | 'state' | 'qa' | 'error';
-
-export interface TaskRuntimeActivity {
-  id: string;
-  taskRunId: string;
-  at: string;
-  kind: TaskRuntimeActivityKind;
-  message: string;
-  detail?: string;
-}
-
-/**
- * The read model — a runtime record as history knows it.
- *
- * `sandboxProvider`, `executionMode` and `agentProvider` are optional here,
- * because history does not always know them: a record written before those
- * fields existed is still history, and a reader that demanded them would
- * drop it. Nothing is invented in their place — a record that does not
- * carry them says so.
- */
-export interface TaskRuntimeRecord {
-  runId: string;
-  backlogId: string;
-  workspace?: string;
-  providerRef?: string;
-  title?: string;
-  phase: TaskRuntimePhase;
-  status: TaskRuntimeStatus;
-  sandboxProvider?: string;
-  executionMode?: AgentExecutionMode;
-  agentProvider?: string;
-  agentTransport?: AgentTransport;
-  agentAuth?: AgentAuth;
-  agentModelProvider?: string;
-  agentThreadId?: string;
-  session?: string;
-  worktree?: string;
-  branch?: string;
-  startedAt: string;
-  heartbeatAt: string;
-  progress?: string;
-  diagnosticPath?: string;
-  errorSummary?: string;
-  completedAt?: string;
-  activities?: TaskRuntimeActivity[];
-}
-
-/**
- * The write model — what a run publishes about its environment.
- *
- * A run knows the sandbox it ran in, the mode it ran in and the agent it
- * ran, so all three are required here. The read model is looser only
- * because the past is looser; every runner publishes through
- * `runtimeRecord()`, which always fills them in.
- */
-export interface TaskRuntimeRecordInput extends Omit<TaskRuntimeRecord, 'sandboxProvider' | 'executionMode' | 'agentProvider'> {
-  sandboxProvider: string;
-  executionMode: AgentExecutionMode;
-  agentProvider: string;
-}
-
-export type ActiveTaskRuntimeRecord = Omit<TaskRuntimeRecord, 'status'> & {
-  status: 'running' | 'stale';
-};
 
 export interface TaskRuntimeStoreOptions {
   root?: string;
@@ -115,14 +59,6 @@ export interface TaskRuntimeDiagnostics {
  * a record that declares only a worktree is accepted when that worktree
  * sits inside the workspace.
  */
-export interface RuntimeRecordIdentity {
-  /** The provider-qualified work item id, e.g. `github:org/repo#42`. */
-  workItemId?: string;
-  /** The provider's own backlog id, e.g. `42`. */
-  backlogId?: string;
-  /** The workspace root the record must belong to. */
-  workspace?: string;
-}
 
 export function matchesRuntimeRecord(
   record: Partial<Pick<TaskRuntimeRecord, 'runId' | 'backlogId' | 'providerRef' | 'workspace' | 'worktree'>>,
@@ -432,7 +368,6 @@ export class TaskRuntimeManager {
 }
 
 /** Which bucket a runtime record was found in. */
-export type RuntimeRecordBucket = 'active' | 'archive';
 
 /**
  * One runtime record, as the reader found it.
@@ -443,19 +378,6 @@ export type RuntimeRecordBucket = 'active' | 'archive';
  * its heartbeat goes cold, and an archived run shows the status it was
  * archived with.
  */
-export interface RuntimeRecordEntry {
-  record: TaskRuntimeRecord;
-  bucket: RuntimeRecordBucket;
-  status: VisibleTaskRuntimeStatus;
-}
-
-/** Which records a reader is asked for. */
-export interface RuntimeRecordQuery {
-  /** The work item the records must belong to. */
-  identity?: RuntimeRecordIdentity;
-  /** Only records that started at or after this instant. */
-  startedAfter?: string;
-}
 
 export interface TaskRuntimeReaderOptions {
   /** The runtime root the records live under. */

@@ -7,7 +7,7 @@ import {
   type RuntimeLifecycleStore,
   type RuntimeStartInput,
 } from './runtime-lifecycle.js';
-import type { TaskRuntimeRecord, TaskRuntimeRecordInput } from './task-runtime.js';
+import type { TaskRuntimeRecord, TaskRuntimeRecordInput } from '@afk/core';
 
 const LABELS: RuntimeLifecycleLabels = {
   publish: 'failed to publish workflow runtime',

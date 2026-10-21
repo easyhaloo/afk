@@ -1,4 +1,4 @@
-import type { BrowserPort, ConfigurationPort, TmuxPort } from '@afk/application';
+import type { BrowserPort, ConfigurationPort, TaskRuntimePort, TmuxPort } from '@afk/application';
 
 /**
  * What the board asks of the runtime.
@@ -18,4 +18,6 @@ export interface BoardRuntimePorts {
   tmux: Pick<TmuxPort, 'attach'>;
   /** The operating system's browser, for the links the board shows. */
   browser: Pick<BrowserPort, 'open'>;
+  /** The records of the runs the runtime is tracking, which the board lists. */
+  taskRuntime: TaskRuntimePort;
 }

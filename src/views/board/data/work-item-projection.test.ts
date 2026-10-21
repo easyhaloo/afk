@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BacklogItem } from '@afk/application';
-import type { ActiveTaskRuntimeRecord, TaskRuntimeRecord } from '@afk/execution/application/runtime/task-runtime';
+import type { ActiveTaskRuntimeRecord, TaskRuntimeRecord } from '@afk/core';
 import { projectWorkItems } from './work-item-projection.js';
 
 const backlog = (overrides: Partial<BacklogItem> = {}): BacklogItem => ({

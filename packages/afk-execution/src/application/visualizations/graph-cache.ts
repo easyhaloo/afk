@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { writeFileAtomic } from '@afk/infrastructure';
 import type { WorkflowGraphResult } from './workflow-graph.js';
-import type { WorkflowGraphFormat } from './workflow-graph.js';
+import type { WorkflowGraphFormat } from '@afk/core';
 
 export interface GraphCacheResult { readonly directory: string; readonly indexPath: string; readonly graphPath: string; readonly receiptPath: string; readonly archifyPath?: string; }
 

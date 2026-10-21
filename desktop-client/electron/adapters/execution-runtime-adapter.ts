@@ -1,11 +1,10 @@
 import { isAgentExecutionMode } from "@afk/core";
 import { probeProcess } from "@afk/infrastructure";
-import { TaskRuntimeReader } from "@afk/execution/application/runtime/task-runtime";
-import type { RuntimeHealthObservation } from "@afk/application";
+import type { RuntimeHealthObservation, TaskRuntimePort } from "@afk/application";
 import type { WorkItemRunRecord } from "../../shared/backlog-contract.js";
 
 export function createExecutionRuntimeAdapter(options: {
-  runtimeRoot?: string;
+  taskRuntime: TaskRuntimePort;
   readReceipt: (runId: string, workItemId: string) => Promise<WorkItemRunRecord | undefined>;
   now?: () => number;
   isPidAlive?: (pid: number) => boolean | undefined;
@@ -15,13 +14,12 @@ export function createExecutionRuntimeAdapter(options: {
   const isPidAlive = options.isPidAlive ?? ((pid: number) => probeProcess(pid));
   // One reader owns the runtime records: the bucket layout, the file names,
   // the validation and the identity rule belong to the runtime, not to this
-  // adapter. The backlog runtime service reads through the same reader, so
+  // adapter. The backlog runtime service reads through the same port, so
   // the two views cannot disagree about a record.
-  const reader = new TaskRuntimeReader({ root: options.runtimeRoot, now: options.now });
   return {
     async read(runId: string, workItemId: string): Promise<RuntimeHealthObservation | undefined> {
       const observedAt = new Date(options.now?.() ?? Date.now()).toISOString();
-      const entry = await reader.find(runId, { workItemId });
+      const entry = await options.taskRuntime.find(runId, { workItemId });
       const record = entry?.record;
       let observation: RuntimeHealthObservation | undefined = record === undefined ? undefined : {
         runId, observedAt,

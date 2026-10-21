@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from '@afk/application';
-import { mergeProjects, projectDetailKey, toRuntimeTask } from './fetcher.js';
-import type { ActiveTaskRuntimeRecord } from '@afk/execution/application/runtime/task-runtime';
+import { fetchTasks, mergeProjects, projectDetailKey, toRuntimeTask } from './fetcher.js';
+import type { ActiveTaskRuntimeRecord } from '@afk/core';
+import type { TaskRuntimePort } from '@afk/application';
 
 function project(id: number, platform: Project['platform'], path: string): Project {
   return {
@@ -34,6 +35,26 @@ describe('project dashboard data', () => {
 });
 
 describe('runtime task data', () => {
+  it('lists the runs it is handed, not the runs on this machine', async () => {
+    // The board lists the runs the runtime is tracking, and it asks for
+    // them through a port. A board that opened the runtime's files itself
+    // would list whatever is on this machine instead.
+    const at = '2026-08-09T10:20:30.000Z';
+    const runtime: TaskRuntimePort = {
+      listActive: async () => [{
+        runId: 'port-only-run', backlogId: '42', title: 'Add search', phase: 'implementing',
+        status: 'running' as const, workspace: process.cwd(), startedAt: at, heartbeatAt: at,
+      }],
+      listArchive: async () => [],
+      list: async () => [],
+      find: async () => undefined,
+    };
+
+    const result = await fetchTasks(runtime);
+
+    expect(result.active).toEqual([expect.objectContaining({ runId: 'port-only-run', backlogId: '42' })]);
+  });
+
   it('maps structured runtime activity into the task read model', () => {
     const at = '2026-08-09T10:20:30.000Z';
     const runtime: ActiveTaskRuntimeRecord = {

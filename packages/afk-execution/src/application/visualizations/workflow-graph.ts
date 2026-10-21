@@ -1,17 +1,8 @@
 import { createReceipt, layoutWorkflow, projectWorkflow, toArchifyWorkflow, validateSnapshot, type ArchifyWorkflowDocument, type GraphReceipt, type GraphSnapshot } from '@afk/workflow-graph';
 import { TemplateCatalog, type LoadedTemplate } from '../../domain/templates/catalog.js';
+import { WORKFLOW_GRAPH_FORMATS, type WorkflowGraphFormat } from '@afk/core';
 
-/**
- * The shapes a workflow graph can be written in.
- *
- * The list is named so the command that writes a graph, the desktop's
- * graph service and the desktop's request validation all read the same
- * answer. Writing the formats down in each of them meant a new format
- * was offered by one and refused by the others.
- */
-export const WORKFLOW_GRAPH_FORMATS = ['json', 'archify-json'] as const;
 
-export type WorkflowGraphFormat = (typeof WORKFLOW_GRAPH_FORMATS)[number];
 
 export interface WorkflowGraphResult {
   readonly template: LoadedTemplate;

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { WORKFLOW_GRAPH_FORMATS } from "@afk/execution";
+import { WORKFLOW_GRAPH_FORMATS } from "@afk/core";
 import type { WorkflowGraphGenerateRequest, WorkflowGraphFormat } from "../../shared/ipc-contract.js";
 
 const templateIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

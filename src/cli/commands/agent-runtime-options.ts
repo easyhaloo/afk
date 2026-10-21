@@ -1,6 +1,7 @@
 import { Command, InvalidArgumentError } from 'commander';
 import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from '@afk/core';
-import type { AgentRuntimeSelection, AgentProviderName } from '@afk/execution/domain/agents/types';
+import type { AgentRuntimeSelection } from '@afk/execution/domain/agents/types';
+import type { AgentProviderName } from '@afk/core';
 import {
   resolveCodexRuntime,
   type CodexAuth,

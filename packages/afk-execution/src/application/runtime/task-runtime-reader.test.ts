@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runtimeRecord } from './runtime-record.js';
-import { TaskRuntimeReader, TaskRuntimeStore, type TaskRuntimeRecord } from './task-runtime.js';
+import { TaskRuntimeReader, TaskRuntimeStore } from './task-runtime.js';
+import type { TaskRuntimeRecord } from '@afk/core';
 
 const now = Date.parse('2026-10-15T01:00:00.000Z');
 const workItemId = 'github:org/repo#42';

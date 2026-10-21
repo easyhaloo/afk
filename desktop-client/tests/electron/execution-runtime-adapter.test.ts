@@ -1,3 +1,4 @@
+import { createTaskRuntimePort } from "@afk/execution/application/runtime/task-runtime-port";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -40,7 +41,7 @@ describe("execution runtime observations", () => {
   it("reads exact identities and separates stale health from the audit outcome", async () => {
     const { root, write } = await setup();
     await write("active", record({ agentProvider: "codex", executionMode: "batch", agentTransport: "exec" }));
-    const adapter = createExecutionRuntimeAdapter({ runtimeRoot: root, readReceipt: async () => undefined, now: () => now });
+    const adapter = createExecutionRuntimeAdapter({ taskRuntime: createTaskRuntimePort({ root, now: () => now }), readReceipt: async () => undefined, now: () => now });
     expect(projectRuntimeHealth("run-1", await adapter.read("run-1", workItemId), now)).toMatchObject({ state: "stale", provider: "codex", executionMode: "batch" });
     expect(await adapter.read("run-1", "github:other/repo#1")).toBeUndefined();
     await write("active", record({ runId: "other-run", heartbeatAt: "2026-10-15T01:00:00Z" }));
@@ -51,7 +52,7 @@ describe("execution runtime observations", () => {
     await write("archive", record({ status: "completed", heartbeatAt: "2026-10-15T00:59:00Z", completedAt: "2026-10-15T00:59:00Z" }));
     let alive = true;
     const receipt = { id: "run-1", status: "running", pid: 42 } as WorkItemRunRecord;
-    const adapter = createExecutionRuntimeAdapter({ runtimeRoot: root, readReceipt: async () => receipt, isPidAlive: () => alive, now: () => now });
+    const adapter = createExecutionRuntimeAdapter({ taskRuntime: createTaskRuntimePort({ root, now: () => now }), readReceipt: async () => receipt, isPidAlive: () => alive, now: () => now });
     expect(projectRuntimeHealth("run-1", await adapter.read("run-1", workItemId), now).state).toBe("live");
     alive = false;
     expect(projectRuntimeHealth("run-1", await adapter.read("run-1", workItemId), now).state).toBe("exited");
@@ -59,7 +60,7 @@ describe("execution runtime observations", () => {
   it("reads a record that predates the environment fields without inventing them", async () => {
     const { root, write } = await setup();
     await write("active", record({ status: "completed", heartbeatAt: "2026-10-15T00:59:00Z", completedAt: "2026-10-15T00:59:00Z" }));
-    const adapter = createExecutionRuntimeAdapter({ runtimeRoot: root, readReceipt: async () => undefined, now: () => now });
+    const adapter = createExecutionRuntimeAdapter({ taskRuntime: createTaskRuntimePort({ root, now: () => now }), readReceipt: async () => undefined, now: () => now });
     const observation = await adapter.read("run-1", workItemId);
     expect(observation).toMatchObject({ runId: "run-1", status: "completed", heartbeatAt: "2026-10-15T00:59:00Z" });
     expect(observation?.provider).toBeUndefined();

@@ -558,11 +558,33 @@ function reachesNodeBuiltin(file, seen = new Set()) {
   return hit;
 }
 
+/**
+ * The desktop's renderer loads the shared vocabulary, not the runtime.
+ *
+ * The renderer runs in a browser: what it loads has to be a module the
+ * browser can load, and the execution runtime is not one - it reaches the
+ * filesystem, the process and the provider SDKs. A vocabulary that lives
+ * in the runtime therefore cannot be read by the renderer at all, so a
+ * contract the renderer needs has to live in the core package, which is
+ * dependency-free and the one layer every consumer can load.
+ */
+const executionPackageImportPattern = /^@afk\/execution(?:\/|$)/;
+
 function checkDesktopRendererImports() {
   for (const fullPath of desktopSourceFiles) {
     if (isTestFile(fullPath)) continue;
     const relativePath = relative(desktopRoot, fullPath).split(sep).join('/');
     if (!relativePath.startsWith('src/') && !relativePath.startsWith('shared/')) continue;
+    const source = stripComments(readFileSync(fullPath, 'utf8'));
+    for (const match of source.matchAll(importPattern)) {
+      const specifier = match[2];
+      if (match[1] === '`' && specifier.includes('${')) continue;
+      if (executionPackageImportPattern.test(specifier)) {
+        addViolation(
+          `${fullPath}: the desktop renderer must not load the execution runtime ('${specifier}'); keep a shared vocabulary in the core package, which the renderer can load`,
+        );
+      }
+    }
     const hit = reachesNodeBuiltin(fullPath);
     if (hit) {
       addViolation(`${fullPath}: the desktop renderer must not load node builtin '${hit.specifier}' via ${sourcePath(hit.file)}; keep a shared vocabulary in a module the renderer can load`);

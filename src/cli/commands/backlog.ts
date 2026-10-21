@@ -40,7 +40,6 @@ import {
 } from '@afk/application';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
-import { TaskRuntimeReader, defaultRuntimeTasksRoot } from '@afk/execution/application/runtime/task-runtime';
 import {
   classifyError,
   emitFailure,
@@ -521,8 +520,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       try {
         const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
         await runBacklogInterrupt(providers.backlog, options.id, options.reason, options, async backlogId => {
-          const reader = new TaskRuntimeReader({ root: defaultRuntimeTasksRoot() });
-          const entries = await reader.list({ identity: { backlogId, workspace: process.cwd() } });
+          const entries = await context.ports.taskRuntime.list({ identity: { backlogId, workspace: process.cwd() } });
           const runId = entries[0]?.record.runId;
           if (runId) await context.ports.runSession.stop(runId);
         });

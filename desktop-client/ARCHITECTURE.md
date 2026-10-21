@@ -66,6 +66,16 @@ request into the run's worktree and kills the run's registered session, so
 the runtime finds the request and ends the run as an interruption rather than
 as a crash.
 
+The renderer loads the shared vocabulary and nothing else. It runs in a
+browser, so it can only load a module the browser can load: the execution
+runtime reaches the filesystem, the process and the provider SDKs, and a
+shared contract that lived there could not be read by the renderer at all.
+The vocabularies the wire contract needs — the phases a run is in, the
+normalisation of a session name, the shapes a workflow graph can be written
+in — therefore live in `@afk/core`, which depends on nothing, and the
+architecture guard reports any file under `shared/` or `src/` that imports
+the execution runtime.
+
 Execution history uses a separate direct Application path:
 
 - Electron Main injects `electron/adapters/run-event-query-adapter.ts`, a read-only

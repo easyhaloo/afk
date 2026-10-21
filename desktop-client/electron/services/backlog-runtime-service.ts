@@ -1,5 +1,5 @@
 import { probeProcess } from "@afk/infrastructure";
-import { TaskRuntimeReader, defaultRuntimeTasksRoot } from "@afk/execution/application/runtime/task-runtime";
+import type { TaskRuntimePort } from "@afk/application";
 import type { BacklogRuntimeProjection, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract.js";
 import { parseBacklogRuntimeSummary } from "../../shared/backlog-contract.js";
 import type { createBacklogRunStore } from "./backlog-run-store.js";
@@ -8,7 +8,15 @@ export type BacklogRuntimeServiceDeps = {
   resolveWorkspace: (input: string) => string;
   getBacklog: (workspace: string, id: string) => Promise<BacklogRuntimeSummary["backlog"]>;
   runStore: ReturnType<typeof createBacklogRunStore>;
-  runtimeRoot?: (workspace: string) => string;
+  /**
+   * The runtime's records.
+   *
+   * The reader that owns the bucket layout, the file names, the
+   * validation and the identity rule belongs to the runtime, and this
+   * service reads the records through the port rather than opening the
+   * runtime's files itself.
+   */
+  taskRuntime: TaskRuntimePort;
   now?: () => number;
   isPidAlive?: (pid: number) => boolean;
 };
@@ -27,12 +35,10 @@ export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
     context?: { providerRef: string; startedAfter?: string },
   ): Promise<BacklogRuntimeProjection | undefined> {
     const resolvedWorkspace = deps.resolveWorkspace(workspace);
-    const root = deps.runtimeRoot?.(workspace) ?? defaultRuntimeTasksRoot();
     // The runtime owns the records: the buckets, the file names, the
     // validation, the identity rule and the staleness window. This service
     // only asks for the records of this work item and projects them.
-    const reader = new TaskRuntimeReader({ root, now });
-    const entries = await reader.list({
+    const entries = await deps.taskRuntime.list({
       identity: { backlogId, workItemId: context?.providerRef, workspace: resolvedWorkspace },
       ...(context?.startedAfter !== undefined ? { startedAfter: context.startedAfter } : {}),
     });

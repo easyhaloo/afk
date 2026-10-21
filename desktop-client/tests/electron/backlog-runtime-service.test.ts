@@ -1,3 +1,4 @@
+import { createTaskRuntimePort } from "@afk/execution/application/runtime/task-runtime-port";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -33,7 +34,7 @@ function createService(root: string, runs: BacklogRunSummary[] = [], now = Date.
     resolveWorkspace: value => value,
     getBacklog: async () => backlog,
     runStore: runStore(runs),
-    runtimeRoot: () => root,
+    taskRuntime: createTaskRuntimePort({ root, now: () => now }),
     now: () => now,
     isPidAlive,
   });
@@ -45,7 +46,7 @@ function createServiceWithDefaultProbe(root: string, runs: BacklogRunSummary[]) 
     resolveWorkspace: value => value,
     getBacklog: async () => backlog,
     runStore: runStore(runs),
-    runtimeRoot: () => root,
+    taskRuntime: createTaskRuntimePort({ root, now: () => Date.parse("2026-09-15T00:10:00.000Z") }),
     now: () => Date.parse("2026-09-15T00:10:00.000Z"),
   });
 }

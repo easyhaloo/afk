@@ -141,6 +141,7 @@ infrastructure layer, one module per port.
 | `BrowserPort` | The operating system's default browser. |
 | `ResourceRegistryPort` | The registry of the resources runs handed out. |
 | `RunSessionPort` | The terminal session a run's agent works in, and the way to stop it. |
+| `TaskRuntimePort` | The records of the runs the runtime is tracking. |
 
 A command, a view or a service states what it needs; a composition root says
 what it is wired to. The CLI and the TUI are wired in
@@ -153,9 +154,18 @@ Moving a vocabulary to `@afk/core` is part of declaring a port: a port whose
 shapes live in the implementation cannot be named by a package that does not
 depend on that implementation, and a second copy of a shape is a second
 answer to the same question. The signal grammar, the tmux vocabulary, the
-resource record and the token usage are therefore vocabulary in
-`@afk/core`, and the infrastructure package validates a signal file against
-the shapes the core package declares rather than deriving them itself.
+resource record, the token usage, the runtime records, the phase a run is in
+and the graph formats are therefore vocabulary in `@afk/core`, and the
+infrastructure package validates a signal file against the shapes the core
+package declares rather than deriving them itself.
+
+The desktop's renderer reads some of these vocabularies, and the renderer
+runs in a browser: it can only load a module the browser can load, and the
+execution runtime is not one. A shared vocabulary the renderer needs has to
+live in the core package, which depends on nothing. The architecture guard
+says so: a file under the desktop's `shared/` or `src/` that imports the
+execution runtime is reported, because the desktop's wire contract cannot
+depend on a module the renderer is unable to load.
 
 ## Stopping a run
 

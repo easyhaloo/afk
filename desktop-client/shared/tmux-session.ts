@@ -8,4 +8,4 @@
  * runner applies it too. The desktop re-exports it so both sides name the
  * same rewrite.
  */
-export { normalizeTmuxSessionName } from "@afk/execution/domain/tmux/session-name";
+export { normalizeTmuxSessionName } from "@afk/core";

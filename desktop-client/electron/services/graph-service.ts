@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { generateWorkflowGraph, writeGraphCache, WORKFLOW_GRAPH_FORMATS } from "@afk/execution";
+import { generateWorkflowGraph, writeGraphCache } from "@afk/execution";
+import { WORKFLOW_GRAPH_FORMATS } from "@afk/core";
 import type { WorkflowGraphGenerateRequest, WorkflowGraphGenerateResult, WorkflowGraphStatus } from '../../shared/ipc-contract.js';
 import { validateWorkflowGraphTemplateId } from '../security/graph-validation.js';
 

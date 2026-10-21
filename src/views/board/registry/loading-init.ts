@@ -61,7 +61,7 @@ export function registerAllLoadingPhases(ports: BoardRuntimePorts): void {
     label: 'Loading tasks...',
     icon: '●',
     fetch: async (setDetail) => {
-      const { active, completed } = await fetchTasks();
+      const { active, completed } = await fetchTasks(ports.taskRuntime);
       setDetail('tasks', `${active.length} active, ${completed.length} done`);
       return `${active.length} active, ${completed.length} done`;
     },

@@ -17,7 +17,7 @@ import {
 } from './execution-manifest.js';
 import { resolveGitLabProjectKey } from '@afk/infrastructure';
 import { parseWorkItemId } from '@afk/application';
-import { tmuxSessionNameFor } from '../../domain/tmux/session-name.js';
+import { tmuxSessionNameFor } from '@afk/core';
 
 export type WorkflowRunRepository = ResolvedExecutionManifestRepository;
 

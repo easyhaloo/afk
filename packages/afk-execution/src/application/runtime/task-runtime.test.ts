@@ -2,7 +2,8 @@ import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { TaskRuntimeManager, TaskRuntimeStore, type TaskRuntimeRecordInput } from './task-runtime.js';
+import { TaskRuntimeManager, TaskRuntimeStore } from './task-runtime.js';
+import type { TaskRuntimeRecordInput } from '@afk/core';
 
 async function storeFixture() {
   const root = await mkdtemp(join(tmpdir(), 'afk-runtime-'));

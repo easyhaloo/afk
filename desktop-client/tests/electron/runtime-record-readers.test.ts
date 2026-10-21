@@ -1,3 +1,4 @@
+import { createTaskRuntimePort } from "@afk/execution/application/runtime/task-runtime-port";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -63,12 +64,12 @@ async function write(root: string, bucket: "active" | "archive", name: string, v
 }
 
 function surfaces(root: string) {
-  const adapter = createExecutionRuntimeAdapter({ runtimeRoot: root, readReceipt: async () => undefined, now: () => now });
+  const adapter = createExecutionRuntimeAdapter({ taskRuntime: createTaskRuntimePort({ root, now: () => now }), readReceipt: async () => undefined, now: () => now });
   const service = createBacklogRuntimeService({
     resolveWorkspace: value => value,
     getBacklog: async () => backlog,
     runStore: { load: async () => [] as BacklogRunSummary[] } as never,
-    runtimeRoot: () => root,
+    taskRuntime: createTaskRuntimePort({ root, now: () => now }),
     now: () => now,
   });
   return { adapter, service };

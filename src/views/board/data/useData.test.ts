@@ -5,6 +5,7 @@ import type { BacklogItem } from '@afk/application';
 import { loadDashboardBacklogs, loadDashboardTasks, projectBacklogRuntime, toRuntimeTask } from './useData.js';
 import { useData } from './useData.js';
 import { fetchTasks } from './fetcher.js';
+import type { TaskRuntimePort } from '@afk/application';
 
 vi.mock('./fetcher', async importOriginal => {
   const actual = await importOriginal<typeof import('./fetcher.js')>();
@@ -67,21 +68,22 @@ describe('dashboard task runtime data flow', () => {
     }));
     const list = vi.fn(async () => [backlog]);
     const management = { backlog: { list } } as never;
+    const runtime = { listActive: vi.fn(async () => []), listArchive: vi.fn(async () => []), list: vi.fn(async () => []), find: vi.fn(async () => undefined) } as unknown as TaskRuntimePort;
     let latest: ReturnType<typeof useData> | undefined;
     function Probe() {
-      latest = useData('backlogs', management);
+      latest = useData('backlogs', management, runtime);
       return React.createElement(Text, null, latest.backlogs.map(item => `${item.id}:${item.runStatus ?? 'no-runtime'}:${item.phase ?? '-'}`).join('|'));
     }
 
     const app = render(React.createElement(Probe));
     try {
       await new Promise(resolve => setTimeout(resolve, 50));
-      expect(fetchTasksMock).toHaveBeenLastCalledWith(undefined, [expect.objectContaining({ id: '42' })]);
+      expect(fetchTasksMock).toHaveBeenLastCalledWith(runtime, [expect.objectContaining({ id: '42' })]);
       expect(latest?.backlogs[0]).toMatchObject({ id: '42', runStatus: 'running', phase: 'verifying', progress: '75%' });
 
       await latest!.refreshBacklogs();
       await new Promise(resolve => setTimeout(resolve, 20));
-      expect(fetchTasksMock).toHaveBeenLastCalledWith(undefined, [expect.objectContaining({ id: '42' })]);
+      expect(fetchTasksMock).toHaveBeenLastCalledWith(runtime, [expect.objectContaining({ id: '42' })]);
       expect(latest?.backlogs[0]).toMatchObject({ id: '42', runStatus: 'running', phase: 'verifying', progress: '75%' });
     } finally {
       app.unmount();
@@ -99,7 +101,7 @@ describe('dashboard task runtime data flow', () => {
       listArchive: vi.fn(async () => []),
     };
 
-    const result = await loadDashboardTasks([backlog], manager as never);
+    const result = await loadDashboardTasks(manager as never, [backlog]);
 
     expect(result.active[0]).toMatchObject({ backlogId: '42', title: 'Fix API', runStatus: 'running' });
     expect(fetchTasks).toHaveBeenCalledWith(manager, [backlog]);

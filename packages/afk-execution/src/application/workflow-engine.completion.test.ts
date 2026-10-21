@@ -26,7 +26,6 @@ describe('WorkflowRunner completion validation', () => {
             id: 'execution-1',
             sessionId: 'run-42',
             metadata: { provider: 'claude-code' as const, transport: 'exec' as const },
-            waitForEvent: async () => null,
             waitForResult: async () => result,
             interrupt: async () => {},
             kill: async () => {},

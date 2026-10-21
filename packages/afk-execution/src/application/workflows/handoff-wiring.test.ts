@@ -12,19 +12,18 @@ import type { RunObserver } from '../../observability/run-observer.js';
  * coordinator is the real one, and the handoff reaches the audit spine.
  */
 describe('Handoff wiring', () => {
-  function fakeExecution(status: 'context_high' | 'completed') {
+  function fakeExecution(status: 'context_high' | 'completed', interrupt = vi.fn(async () => {})) {
     return {
       id: 'execution-1',
       sessionId: 'run-42',
       metadata: { provider: 'claude-code' as const, transport: 'exec' as const },
-      waitForEvent: async () => null,
       waitForResult: async () => ({
         status,
         summary: '',
         structuredOutput: undefined,
         commits: [],
       }),
-      interrupt: async () => {},
+      interrupt,
       kill: async () => {},
       captureOutput: async () => '',
       captureSession: async () => undefined,
@@ -38,6 +37,7 @@ describe('Handoff wiring', () => {
   }) {
     const transition = vi.fn(async () => {});
     const setExecutionMode = vi.fn(async () => {});
+    const interrupt = vi.fn(async () => {});
     const runner = new WorkflowRunner(
       { backlog: { transition, setExecutionMode } } as unknown as ProviderBundle,
       {
@@ -45,7 +45,7 @@ describe('Handoff wiring', () => {
         agentProvider: {
           name: 'claude-code',
           capabilities: new Set(),
-          createExecution: async () => fakeExecution('context_high'),
+          createExecution: async () => fakeExecution('context_high', interrupt),
         } as unknown as AgentProvider,
         ...(options.coordinatorFactory ? { coordinatorFactory: options.coordinatorFactory as never } : {}),
       },
@@ -57,7 +57,7 @@ describe('Handoff wiring', () => {
       traceId: 'trace-1', runId: 'run-42', workItemId: 'work-1',
       profileId: 'default', attempt: 1, actor: { kind: 'system', id: 'runner' },
     };
-    return { runner, transition, setExecutionMode };
+    return { runner, transition, setExecutionMode, interrupt };
   }
 
   it('wires a real coordinator instead of a stub', () => {
@@ -92,5 +92,34 @@ describe('Handoff wiring', () => {
       expect.anything(),
       expect.objectContaining({ kind: 'handoff.performed', mode: 'auto', outcome: 'terminated' }),
     );
+  });
+
+  it('stops the agent before the handoff asks it for a summary', async () => {
+    const record = vi.fn();
+    const handoff = vi.fn(async () => 'terminated' as const);
+    const { runner, interrupt } = runnerWith({ record, coordinatorFactory: () => ({ handoff }) as never });
+
+    await (runner as any).runPhase({
+      iid: 42,
+      session: 'run-42',
+      wtPath: '/tmp/worktree',
+      hardTimeoutMs: 1000,
+      completionTimeoutMs: 1000,
+      contextHighTokens: 100,
+      budget: BudgetManager.forTest(0, 100, 1, 1000),
+      persistBudget: vi.fn(),
+      prompt: 'work',
+      signalType: 'goal_complete',
+      executionMode: 'batch',
+      completionKind: 'task',
+      sandbox: {},
+    });
+
+    // The agent is mid-turn when its context runs out, and the handoff
+    // request is typed into the same session: it cannot answer while it
+    // is busy. The session is restarted right after, so the turn ends
+    // either way - stopping it first is what makes the summary arrive.
+    expect(interrupt).toHaveBeenCalledWith('context-high');
+    expect(interrupt.mock.invocationCallOrder[0]).toBeLessThan(handoff.mock.invocationCallOrder[0]);
   });
 });

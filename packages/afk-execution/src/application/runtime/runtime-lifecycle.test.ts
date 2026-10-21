@@ -66,7 +66,6 @@ function fakeExecution(output = 'agent output'): AgentExecution {
   return {
     id: 'execution-1',
     metadata: { provider: 'claude-code', transport: 'process' },
-    waitForEvent: async () => null,
     waitForResult: async () => executionResult('completed'),
     interrupt: async () => {},
     kill: async () => {},

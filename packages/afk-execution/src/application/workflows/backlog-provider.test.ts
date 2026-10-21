@@ -61,7 +61,7 @@ describe('WorkflowRunner backlog provider mode', () => {
         version: 1, runId: 'execution-42', status: 'completed', provider: 'batch',
         structuredOutput: { type: 'goal_complete', kind: 'task', summary: 'done' }, commits: [],
       })),
-      waitForEvent: vi.fn(async () => null), interrupt: vi.fn(), kill: vi.fn(),
+      interrupt: vi.fn(), kill: vi.fn(),
       captureOutput: vi.fn(async () => ''), captureSession: vi.fn(async () => undefined),
     };
     const createExecution = vi.fn(async () => execution);

@@ -13,7 +13,7 @@ import type {
   AgentExecution,
   ExecutionResult,
 } from '../domain/sandbox/types.js';
-import { DEFAULT_EXECUTION_MODE, type AgentProvider, type AgentProviderName, type AgentRuntimeSelection, type ExecutionMode } from '../domain/agents/types.js';
+import { DEFAULT_EXECUTION_MODE, type AgentProvider, type AgentProviderName, type AgentRuntimeSelection, type ExecutionMode, type InterruptReason } from '../domain/agents/types.js';
 import { configureStatusline, logger, withLogContext } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
 import { loadModules, parseModuleParams } from './modules/_registry.js';
@@ -1263,6 +1263,11 @@ export class WorkflowRunner {
           return { completed: false };
 
         case 'context_high': {
+          // The agent is still working: its context ran out mid-turn. Stop
+          // it before the handoff asks it for a summary - it cannot answer
+          // while it is busy, and the handoff restarts the session right
+          // after, so the turn ends either way.
+          await this.interruptForHandoff(execution, 'context-high');
           const hctx = {
             backlogId: this.activeBacklog?.id ?? String(p.iid),
             session: p.session,
@@ -1491,6 +1496,22 @@ export class WorkflowRunner {
       // wrapped here, so both reach the caller in one voice.
       if (error instanceof AuditPersistenceError) throw error;
       throw new AuditPersistenceError(data.kind, error);
+    }
+  }
+
+  /**
+   * Stop the agent before a handoff asks it for a summary.
+   *
+   * The handoff request is typed into the session the agent is working in.
+   * An agent mid-turn cannot answer it, and the session is restarted right
+   * after the summary - so the turn is over either way. Stopping it first
+   * is what makes the summary arrive.
+   */
+  private async interruptForHandoff(execution: AgentExecution, reason: InterruptReason): Promise<void> {
+    try {
+      await execution.interrupt(reason);
+    } catch (error) {
+      logger.info({ err: error }, 'stopping the agent for the handoff failed; continuing anyway');
     }
   }
 

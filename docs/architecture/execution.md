@@ -252,16 +252,21 @@ export interface Sandbox {
 export interface AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
+  readonly metadata: AgentExecutionMetadata;
+  /** Where the agent's own transcript lives, when the provider writes one. */
+  readonly telemetryPath?: string;
 
-  waitForEvent(): Promise<ExecutionEvent>;
-  waitForResult(): Promise<ExecutionResult>;
+  waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
   interrupt(reason: InterruptReason): Promise<void>;
   kill(): Promise<void>;
   captureOutput(options?: CaptureOptions): Promise<string>;
   captureSession(): Promise<SessionSnapshot | undefined>;
-  resume(options: ResumeOptions): Promise<AgentExecution>;
 }
 ```
+
+The execution does not resume itself and it emits no events of its own. A
+native resume restores the provider's session and starts a *new* execution
+(`attemptNativeResume`); the handoff document is the other path.
 
 `interrupt()` and `kill()` must be distinguished:
 
@@ -281,25 +286,33 @@ create
   → start Agent
   → return AgentExecution
 
-interrupt
+interrupt (on the execution)
   → tmux send Ctrl-C
   → wait for Agent flush
-  → capture session
-  → preserve worktree
+  → preserve worktree and session
 
-resume
-  → new generation tmux session
-  → restore session or read handoff
-  → continue execution
+kill (on the execution)
+  → force-terminate the session
+  → session state is not preserved
 
-close
+close (on the sandbox)
   → close tmux
   → close control mode
   → update worktree state
   → cleanup per branch strategy
 ```
 
-`interrupt()` does not clean up worktree or delete session; `close()` is the final resource release.
+`interrupt()` does not clean up worktree or delete session; `close()` is the
+final resource release.
+
+The runner stops the agent before a handoff asks it for a summary: the
+handoff request is typed into the session the agent is working in, and an
+agent mid-turn cannot answer it. The session is restarted right after the
+summary, so the turn ends either way.
+
+A native resume restores the provider's session and starts a new generation
+(`attemptNativeResume`); when the provider cannot resume, the handoff
+document carries the state into the new generation.
 
 Local mode provides task isolation and real-time control, but is not a security isolation boundary: it cannot prevent Agent from accessing other host files, processes, or environment variables.
 

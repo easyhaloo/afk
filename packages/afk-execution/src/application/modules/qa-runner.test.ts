@@ -65,7 +65,6 @@ function fixture() {
     id: 'execution-60',
     metadata: executionMetadata,
     telemetryPath,
-    waitForEvent: vi.fn(async () => null),
     waitForResult: vi.fn(async (): Promise<ExecutionResult> => ({
       version: 1,
       runId: 'execution-60',

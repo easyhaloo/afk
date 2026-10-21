@@ -248,16 +248,20 @@ export interface Sandbox {
 export interface AgentExecution {
   readonly id: string;
   readonly sessionId?: string;
+  readonly metadata: AgentExecutionMetadata;
+  /** provider 自己写 transcript 时的位置。 */
+  readonly telemetryPath?: string;
 
-  waitForEvent(): Promise<ExecutionEvent>;
-  waitForResult(): Promise<ExecutionResult>;
+  waitForResult(options?: { completionTimeoutMs?: number; contextHighTokens?: number }): Promise<ExecutionResult>;
   interrupt(reason: InterruptReason): Promise<void>;
   kill(): Promise<void>;
   captureOutput(options?: CaptureOptions): Promise<string>;
   captureSession(): Promise<SessionSnapshot | undefined>;
-  resume(options: ResumeOptions): Promise<AgentExecution>;
 }
 ```
+
+execution 自己不 resume，也不发自己的事件。原生 resume 恢复 provider 的 session
+并启动**新的** execution（`attemptNativeResume`）；另一条路是交接文档。
 
 `interrupt()` 和 `kill()` 必须区分：
 
@@ -277,18 +281,16 @@ create
   → 启动 Agent
   → 返回 AgentExecution
 
-interrupt
+interrupt（在 execution 上）
   → tmux 发送 Ctrl-C
   → 等待 Agent flush
-  → capture session
-  → 保留 worktree
+  → 保留 worktree 与 session
 
-resume
-  → 新 generation tmux session
-  → restore session 或读取 handoff
-  → 继续执行
+kill（在 execution 上）
+  → 强制结束 session
+  → session 状态不再保留
 
-close
+close（在 sandbox 上）
   → 关闭 tmux
   → close control mode
   → 更新 worktree 状态
@@ -296,6 +298,13 @@ close
 ```
 
 `interrupt()` 不清理 worktree、不删除 session；`close()` 才是最终资源释放。
+
+交接向 agent 要总结之前，runner 会先把它停住：交接请求是打进 agent 正在用的那个
+session 里的，忙着的 agent 看不见也答不了。而交接之后 session 本来就要重启，这一轮
+无论如何都会结束。
+
+原生 resume 恢复 provider 的 session 并启动新的 generation（`attemptNativeResume`）；
+provider 无法 resume 时，交接文档把状态带进新的 generation。
 
 Local 模式提供任务隔离和实时控制，但不是安全隔离边界：它不能阻止 Agent 访问其他宿主文件、进程或环境变量。
 

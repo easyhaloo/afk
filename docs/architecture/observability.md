@@ -43,6 +43,8 @@ changes the Provider Backlog state. Desktop launch records in
 | `AFK_EVENT_STORE_DIR` | `~/.afk/events` | JSONL audit stream 根目录。 |
 | `AFK_PROFILE` | `local` | 写入 `ObservationContext.profileId` 的可复现运行组合标识。 |
 
+profile 的兜底只有一处（`observationProfile`）：环境变量为空或只有空白时按 `local` 记 —— 一次 `AFK_PROFILE=` 的空值不会让审计链落在一个没人叫得出名字的 profile 上。`afk observe doctor` 会报出事件目录与当前 profile。
+
 ## 3. 审计、重放与诊断
 
 所有查询都是只读的，不会申请 backlog、启动 agent、创建 worktree 或修改远程 tracker。

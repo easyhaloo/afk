@@ -12,6 +12,19 @@ export type ObservationActorKind = 'cli' | 'loop' | 'agent' | 'policy' | 'human'
  */
 export const DEFAULT_OBSERVATION_PROFILE = 'local';
 
+/**
+ * The profile a run is recorded under.
+ *
+ * The environment names it; a blank name names nothing, so it falls back
+ * to the default the audit documentation names. Every entry point that
+ * writes an observation context resolves it here, so they cannot disagree
+ * about what the audit trail will be called.
+ */
+export function observationProfile(named: string | undefined): string {
+  const trimmed = named?.trim();
+  return trimmed ? trimmed : DEFAULT_OBSERVATION_PROFILE;
+}
+
 export interface ObservationContext {
   traceId: string;
   spanId?: string;

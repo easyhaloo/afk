@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { explainRun, listRunIds, observeRun } from '@afk/application';
+import { observationProfile } from '@afk/core';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import type { CliApplicationFactory } from '../composition-root.js';
@@ -88,11 +89,16 @@ export function registerObserveCommands(program: Command, composition: ObserveCo
     });
 
   observe.command('doctor')
-    .description('Report the current Harness observation mode and event-store location')
+    .description('Report where the audit trail lives and the profile it is recorded under')
     .option('--root <path>', 'Event-store root')
     .option('--json', 'Emit JSON')
     .action(async options => {
       const store = new JsonlEventStore({ root: options.root });
-      emit({ eventStoreRoot: store.root }, options.json);
+      emit({
+        eventStoreRoot: store.root,
+        // The profile is part of every event's identity, so a person
+        // checking the audit trail wants to know which one it is under.
+        profile: observationProfile(process.env.AFK_PROFILE),
+      }, options.json);
     });
 }

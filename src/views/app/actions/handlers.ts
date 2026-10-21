@@ -1,20 +1,27 @@
-import { openInBrowser } from '@afk/execution/shared/browser';
 import type { BacklogViewModel } from '../../board/data/backlog-adapter.js';
 import type { StateContextValue } from '../state/StateContext.js';
+import type { BoardRuntimePorts } from '../runtime-ports.js';
 
 export type UrlOpener = (url: string) => Promise<void>;
 
 /** Open only a provider-supplied URL; IDs and provider references are not URLs. */
 export async function openBacklogUrl(
   item: Pick<BacklogViewModel, 'id' | 'webUrl'>,
-  opener: UrlOpener = openInBrowser,
+  opener: UrlOpener,
 ): Promise<boolean> {
   if (!item.webUrl) return false;
   await opener(item.webUrl);
   return true;
 }
 
-export function createActions(ctx: StateContextValue) {
+/**
+ * The actions the board offers, and the runtime they reach.
+ *
+ * The browser is a port rather than a function the board imports, because
+ * opening a link is something the operating system does. Which browser, and
+ * how it is opened, is the composition root's decision.
+ */
+export function createActions(ctx: StateContextValue, ports: BoardRuntimePorts) {
   const { state, dispatch } = ctx;
   const notify = (message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') => {
     dispatch({ type: 'notification:show', payload: { message, type } });
@@ -43,7 +50,7 @@ export function createActions(ctx: StateContextValue) {
     selectionBottom: (length: number) => dispatch({ type: 'selection:bottom', payload: { length } }),
     openInBrowser: async (url: string, label?: string) => {
       try {
-        await openInBrowser(url);
+        await ports.browser.open(url);
         notify(`opened ${label ?? url}`, 'success');
         return true;
       } catch {
@@ -53,7 +60,7 @@ export function createActions(ctx: StateContextValue) {
     },
     openBacklog: async (item: Pick<BacklogViewModel, 'id' | 'webUrl'>) => {
       try {
-        const opened = await openBacklogUrl(item);
+        const opened = await openBacklogUrl(item, url => ports.browser.open(url));
         notify(opened ? `opened backlog ${item.id}` : 'no browser URL', opened ? 'success' : 'warning');
         return opened;
       } catch {

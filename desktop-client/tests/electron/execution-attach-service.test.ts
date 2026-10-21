@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createExecutionAttachService } from "../../electron/services/execution-attach-service.js";
-import type { AfkResourceRecord } from "@afk/execution/infrastructure/runtime/resource-registry";
+import type { AfkResourceRecord } from "@afk/core";
 
 const row = (overrides: Partial<AfkResourceRecord> = {}): AfkResourceRecord => ({
   id: "resource-1",

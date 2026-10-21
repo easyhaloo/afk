@@ -22,10 +22,13 @@ import type { View } from '../board/types.js';
 import { PluginViewBoundary } from '../plugins/PluginViewBoundary.js';
 import type { LoadedTuiView, TuiPluginContext } from '../plugins/types.js';
 import { isBuiltinView } from '../plugins/types.js';
+import type { BoardRuntimePorts } from './runtime-ports.js';
 
 initRegistry();
 
 interface Props {
+  /** What the board asks of the runtime. */
+  ports: BoardRuntimePorts;
   tasks: Task[];
   backlogs: BacklogViewModel[];
   projects: Project[];
@@ -47,6 +50,7 @@ interface Props {
 }
 
 export function AppContent({
+  ports,
   tasks,
   backlogs,
   projects,
@@ -67,7 +71,7 @@ export function AppContent({
   workspace,
 }: Props) {
   const { state, dispatch, currentView, currentContext, isDetailMode } = useAppState();
-  const actions = createActions({ state, dispatch, currentView, currentContext, isDetailMode });
+  const actions = createActions({ state, dispatch, currentView, currentContext, isDetailMode }, ports);
   const pluginView = pluginViews.find(view => view.id === currentView);
   const [dimensions, setDimensions] = useState({ width: process.stdout.columns || 80, height: process.stdout.rows || 24 });
 

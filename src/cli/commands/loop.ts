@@ -6,19 +6,12 @@ import * as path from 'path';
 import { createWorkflowProviders } from '@afk/infrastructure';
 import { LoopRunner } from '@afk/execution/application/modules/loop-runner';
 import { installLoopSignalHandlers } from './loop-signals.js';
-import { getSchedulerConfig } from '@afk/execution/infrastructure/config/manager';
+import type { CommandRegistrationContext } from '../command-registry.js';
+import type { LoopProcessPort } from '@afk/application';
 import { parseWorkItemId } from '@afk/application';
 import { loadLoopConfig } from '@afk/execution/application/loop/loop-config';
 import { logger, redirectStdioToLog, resolveLogPath } from '@afk/infrastructure';
 import { handleCommandError, success, info, warning, fail, detail } from '../cli-utils.js';
-import { spawnDetached, waitForProcessPid } from '@afk/execution/infrastructure/process/daemon';
-import {
-  LOOP_PID_FILE,
-  readPid,
-  removePidFile,
-  ensurePidDirectory,
-  isProcessAlive,
-} from '@afk/execution/infrastructure/process/pid-file';
 import { addLoopStartOptions, parsePositiveInt, type LoopStartOptions } from './loop-options.js';
 
 const AFK_HOME = path.join(os.homedir(), '.afk');
@@ -37,43 +30,43 @@ export function resolveManagedLoopExecution(
   return { workItemId: parseWorkItemId(options.workItemId).id, manifestPath: options.executionManifest };
 }
 
-export function registerLoopCommands(program: Command): void {
+export function registerLoopCommands(program: Command, context: CommandRegistrationContext): void {
   const loop = program.command('loop').description('Continuous manifest-bound work item execution').usage('[command] [options]');
   addLoopStartOptions(loop);
   loop.action(async (options: LoopStartOptions) => {
-    try { await startLoop(options); } catch (error) { handleCommandError(error); }
+    try { await startLoop(options, context); } catch (error) { handleCommandError(error); }
   });
 
   const start = loop.command('start').description('Start the loop (foreground by default; -d runs in background)').usage('[options]');
   addLoopStartOptions(start);
   start.action(async (options: LoopStartOptions) => {
-    try { await startLoop(options); } catch (error) { handleCommandError(error); }
+    try { await startLoop(options, context); } catch (error) { handleCommandError(error); }
   });
 
   loop.command('status').description('Show status of the running loop daemon').action(() => {
-    try { showStatus(); } catch (error) { handleCommandError(error); }
+    try { showStatus(context.ports.loopProcess); } catch (error) { handleCommandError(error); }
   });
 
   loop.command('stop').description('Stop the running loop daemon (SIGTERM, then SIGKILL after timeout)')
     .option('-t, --timeout <seconds>', 'Max wait for graceful shutdown before SIGKILL', parsePositiveInt)
     .action(async (options: { timeout?: number }) => {
-      try { await stopLoop(options.timeout ?? 30); } catch (error) { handleCommandError(error); }
+      try { await stopLoop(options.timeout ?? 30, context.ports.loopProcess); } catch (error) { handleCommandError(error); }
     });
 }
 
-async function startLoop(options: LoopStartOptions): Promise<void> {
+async function startLoop(options: LoopStartOptions, context: CommandRegistrationContext): Promise<void> {
   resolveManagedLoopExecution(options, loadLoopConfig().moduleTriggers);
   if (options.daemon && process.env.AFK_LOOP_CHILD !== '1') {
-    await startDaemon(process.argv.slice(2));
+    await startDaemon(process.argv.slice(2), context.ports.loopProcess);
     return;
   }
-  await runLoop(options);
+  await runLoop(options, context);
 }
 
-async function runLoop(options: LoopStartOptions): Promise<void> {
+async function runLoop(options: LoopStartOptions, context: CommandRegistrationContext): Promise<void> {
   if (process.env.AFK_LOOP_CHILD === '1') redirectStdioToLog();
 
-  const schedulerConfig = getSchedulerConfig();
+  const schedulerConfig = context.ports.configuration.scheduler();
   const loopConfig = loadLoopConfig();
   const managedExecution = resolveManagedLoopExecution(options, loopConfig.moduleTriggers);
   const pollIntervalMs = (options.pollInterval ?? schedulerConfig.pollInterval) * 1000;
@@ -117,37 +110,37 @@ function printStartup(pollIntervalMs: number, statusIntervalMs: number, shutdown
   console.log(chalk.dim('\nPress Ctrl+C to stop (will drain in-flight work)\n'));
 }
 
-async function startDaemon(args: string[]): Promise<void> {
-  const existingPid = readPid();
-  if (existingPid !== null && isProcessAlive(existingPid)) {
+async function startDaemon(args: string[], loop: LoopProcessPort): Promise<void> {
+  const existingPid = loop.readPid();
+  if (existingPid !== null && loop.isAlive(existingPid)) {
     handleCommandError(new Error(`afk loop: already running (pid=${existingPid})`), 'use `afk loop stop` to stop it first');
     return;
   }
-  if (existingPid !== null) removePidFile();
-  ensurePidDirectory();
-  const child = spawnDetached({
+  if (existingPid !== null) loop.removePidFile();
+  loop.ensurePidDirectory();
+  const childPid = loop.spawnDaemon({
     executable: process.execPath,
     script: process.argv[1],
     args: args.filter(argument => argument !== '--daemon' && argument !== '-d'),
     env: { ...process.env, AFK_LOOP_CHILD: '1' },
   });
-  const pid = await waitForProcessPid(readPid, isProcessAlive, 2_000);
+  const pid = await loop.waitForPid(2_000);
   if (pid !== null) {
     success('afk loop daemonized');
     detail(`pid:        ${pid}`);
     detail(`log:        ${resolveLogPath()}`);
-    detail(`pid-file:   ${LOOP_PID_FILE}`);
+    detail(`pid-file:   ${loop.pidFile()}`);
   } else {
-    warning(`afk loop: child spawned (pid=${child.pid}) but no pid file appeared`);
+    warning(`afk loop: child spawned (pid=${childPid}) but no pid file appeared`);
     detail(`check log: ${resolveLogPath()}`);
   }
   process.exit(0);
 }
 
-function showStatus(): void {
-  const pid = readPid();
-  if (pid === null) { warning('afk loop: not running (no pid file)'); detail(`expected: ${LOOP_PID_FILE}`); return; }
-  if (!isProcessAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); removePidFile(); return; }
+function showStatus(loop: LoopProcessPort): void {
+  const pid = loop.readPid();
+  if (pid === null) { warning('afk loop: not running (no pid file)'); detail(`expected: ${loop.pidFile()}`); return; }
+  if (!loop.isAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); loop.removePidFile(); return; }
   success('afk loop: running');
   detail(`pid:        ${pid}`);
   detail(`log:        ${resolveLogPath()}`);
@@ -165,17 +158,17 @@ function showStatus(): void {
   } catch { detail('(status file not yet written — wait for first status tick)'); }
 }
 
-async function stopLoop(timeoutSeconds: number): Promise<void> {
-  const pid = readPid();
+async function stopLoop(timeoutSeconds: number, loop: LoopProcessPort): Promise<void> {
+  const pid = loop.readPid();
   if (pid === null) { warning('afk loop: not running (no pid file)'); return; }
-  if (!isProcessAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); removePidFile(); return; }
+  if (!loop.isAlive(pid)) { fail(`afk loop: pid=${pid} not alive (stale pid file, cleaning up)`); loop.removePidFile(); return; }
   info(`afk loop: sending SIGTERM to pid=${pid} (waiting up to ${timeoutSeconds}s)...`);
-  try { process.kill(pid, 'SIGTERM'); } catch (error) { handleCommandError(new Error(`failed to send signal: ${(error as Error).message}`)); return; }
+  try { loop.terminate(pid, 'SIGTERM'); } catch (error) { handleCommandError(new Error(`failed to send signal: ${(error as Error).message}`)); return; }
   const deadline = Date.now() + timeoutSeconds * 1000;
-  while (Date.now() < deadline && isProcessAlive(pid)) await new Promise(resolve => setTimeout(resolve, 200));
-  if (isProcessAlive(pid)) {
+  while (Date.now() < deadline && loop.isAlive(pid)) await new Promise(resolve => setTimeout(resolve, 200));
+  if (loop.isAlive(pid)) {
     warning(`afk loop: pid=${pid} did not exit within ${timeoutSeconds}s, sending SIGKILL`);
-    try { process.kill(pid, 'SIGKILL'); } catch { /* process already exited */ }
+    try { loop.terminate(pid, 'SIGKILL'); } catch { /* process already exited */ }
     return;
   }
   success(`afk loop: pid=${pid} exited`);

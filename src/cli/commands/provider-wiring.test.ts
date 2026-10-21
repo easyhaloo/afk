@@ -4,6 +4,8 @@ import { registerBacklogCommands } from './backlog.js';
 import { registerQACommands } from './qa.js';
 import { createManagementProviders } from '@afk/infrastructure';
 import { QARunner } from '@afk/execution/application/modules/qa-runner';
+import type { CommandRegistrationContext } from '../command-registry.js';import { inMemoryRuntimePorts } from '../../../tests/support/runtime-ports.js';
+
 
 vi.mock('@afk/infrastructure', async importOriginal => ({
   ...await importOriginal<typeof import('@afk/infrastructure')>(),
@@ -12,10 +14,6 @@ vi.mock('@afk/infrastructure', async importOriginal => ({
 vi.mock('../cli-utils', () => ({
   handleCommandError: (error: unknown) => { throw error; },
   success: vi.fn(), info: vi.fn(), warning: vi.fn(), fail: vi.fn(), detail: vi.fn(),
-}));
-vi.mock('@afk/execution/infrastructure/config/manager', () => ({
-  getSchedulerConfig: () => ({ maxConcurrent: 3, pollInterval: 60 }),
-  getWorkflowConfig: () => ({}),
 }));
 vi.mock('@afk/execution/domain/agents/index', () => ({
   createAgentProvider: vi.fn(),
@@ -28,9 +26,9 @@ vi.mock('./agent-runtime-options', () => ({
 }));
 vi.mock('@afk/execution/application/modules/qa-runner', () => ({ QARunner: vi.fn() }));
 
-async function runCommand(register: (program: Command) => void, ...args: string[]): Promise<void> {
+async function runCommand(register: (program: Command, context: CommandRegistrationContext) => void, ...args: string[]): Promise<void> {
   const program = new Command().exitOverride();
-  register(program);
+  register(program, { ports: inMemoryRuntimePorts() });
   await program.parseAsync(['node', 'afk', ...args]);
 }
 

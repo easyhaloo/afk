@@ -7,19 +7,17 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Command } from 'commander';
 import { z } from 'zod';
-import type { AgentToolCallSummary, RunEvent } from '@afk/core';
+import {
+  AGENT_TELEMETRY_PROVIDERS,
+  isAgentTelemetryProvider,
+  type AgentTelemetryProvider,
+  type AgentToolCallSummary,
+  type RunEvent,
+} from '@afk/core';
+import type { AgentTelemetryPort } from '@afk/application';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { stableJson } from '@afk/infrastructure/io';
-import {
-  readAgentTelemetry,
-  readAgentTools,
-  readAgentTranscript,
-  findCodexRollout,
-  isAgentTelemetryProvider,
-  AGENT_TELEMETRY_PROVIDERS,
-  type AgentTelemetryProvider,
-} from '@afk/execution/infrastructure/observability/agent-telemetry';
 import { defaultSessionStoreChain } from '@afk/execution/application/sessions/chain';
 import { claudeProjectSlug } from '@afk/execution/shared/agent-transcript-path';
 
@@ -158,8 +156,8 @@ async function fileEvidence(kind: string, path: string, mediaType: string): Prom
   }
 }
 
-async function transcriptEvidence(provider: RetroOptions['provider'], path: string): Promise<EvidenceFile | undefined> {
-  const content = await readAgentTranscript({ provider, transcriptPath: path, sandboxKind: 'local' });
+async function transcriptEvidence(provider: RetroOptions['provider'], path: string, telemetry: AgentTelemetryPort): Promise<EvidenceFile | undefined> {
+  const content = await telemetry.readTranscript({ provider, transcriptPath: path, sandboxKind: 'local' });
   if (content === undefined) return undefined;
   const hash = sha256(content);
   return { kind: 'transcript', path, uri: `evidence://${hash}`, sha256: hash, mediaType: 'application/x-ndjson' };
@@ -180,8 +178,8 @@ async function findStateRoot(workspace: string, executionId: string): Promise<st
   return workspace;
 }
 
-async function transcriptPath(workspace: string, provider: RetroOptions['provider'], sessionId: string): Promise<string | undefined> {
-  if (provider === 'codex') return findCodexRollout(sessionId);
+async function transcriptPath(workspace: string, provider: RetroOptions['provider'], sessionId: string, telemetry: AgentTelemetryPort): Promise<string | undefined> {
+  if (provider === 'codex') return telemetry.findRollout(sessionId);
   if (provider === 'opencode') return `opencode://session/${encodeURIComponent(sessionId)}`;
   let realWorkspace = workspace;
   try { realWorkspace = realpathSync(workspace); } catch { /* workspace may be a fixture */ }
@@ -249,7 +247,7 @@ function sessionEvents(events: readonly Event[]): Array<{ sessionId: string; tra
   }] : []);
 }
 
-async function runRetro(options: RetroOptions): Promise<RetroReport> {
+async function runRetro(options: RetroOptions, telemetry: AgentTelemetryPort): Promise<RetroReport> {
   const store = new JsonlEventStore({ root: options.root });
   const events = await readEvents(store, options.runId);
   const integrity = await store.verify(options.runId);
@@ -277,9 +275,9 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
     const recordedPath = options.transcript ?? session.transcriptPath;
     const archivedRoot = join(homedir(), '.afk', 'transcripts') + '/';
     const indexedPath = recordedPath && !recordedPath.startsWith(archivedRoot) ? recordedPath : undefined;
-    const indexedTranscript = indexedPath ? await transcriptEvidence(options.provider, indexedPath) : undefined;
-    const path = indexedTranscript ? indexedPath : await transcriptPath(options.workspace, options.provider, session.sessionId);
-    const transcript = indexedTranscript ?? (path ? await transcriptEvidence(options.provider, path) : undefined);
+    const indexedTranscript = indexedPath ? await transcriptEvidence(options.provider, indexedPath, telemetry) : undefined;
+    const path = indexedTranscript ? indexedPath : await transcriptPath(options.workspace, options.provider, session.sessionId, telemetry);
+    const transcript = indexedTranscript ?? (path ? await transcriptEvidence(options.provider, path, telemetry) : undefined);
     if (!path || !transcript) {
       missing.push(`transcript:${session.sessionId}`);
       sessionProjections.push({ sessionId: session.sessionId, source: 'transcript_missing', ...(path ? { transcriptPath: path } : {}), tools: undefined, usage: undefined });
@@ -287,7 +285,7 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
     }
     evidence.push(transcript);
     const telemetryOptions = { provider: options.provider, transcriptPath: path, sandboxKind: 'local' as const };
-    const [usage, tools] = await Promise.all([readAgentTelemetry(telemetryOptions), readAgentTools(telemetryOptions)]);
+    const [usage, tools] = await Promise.all([telemetry.readUsage(telemetryOptions), telemetry.readTools(telemetryOptions)]);
     if (!usage && !tools) missing.push(`telemetry:${session.sessionId}`);
     sessionProjections.push({ sessionId: session.sessionId, source: indexedTranscript ? 'transcript_found' : 'transcript_unindexed', transcriptPath: path, usage, tools, transcript: transcript.uri });
   }
@@ -372,7 +370,7 @@ function emit(value: unknown, json?: boolean): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-export function registerRetroCommands(program: Command, _context: CommandRegistrationContext = {}): void {
+export function registerRetroCommands(program: Command, context: CommandRegistrationContext): void {
   const retro = program.command('retro').description('Analyze an AFK run with the existing retro skill');
   retro.command('run')
     .description('Read a completed run and generate a retro report')
@@ -392,7 +390,7 @@ export function registerRetroCommands(program: Command, _context: CommandRegistr
         throw new Error(`invalid retro provider: ${options.provider}; expected ${AGENT_TELEMETRY_PROVIDERS.join(', ')}`);
       }
       const executionId = options.executionId ?? options.runId;
-      const report = await runRetro({ ...options, executionId });
+      const report = await runRetro({ ...options, executionId }, context.ports.agentTelemetry);
       const stateRoot = await findStateRoot(options.workspace, executionId);
       emit({ ...report, htmlPath: join(stateRoot, '.afk', 'retro', report.retroId, reportHtmlFile) }, options.json);
     });

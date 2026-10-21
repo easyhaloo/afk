@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseSnapshot, SnapshotContractError } from "../../shared/snapshot-schema";
+import { stubConfigurationPort, stubResourceAdapter, stubWorkflowConfig } from "./port-stubs";
 
 const mocks = vi.hoisted(() => ({
   agentRuntimes: [] as Record<string, unknown>[],
@@ -18,10 +19,6 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 vi.mock("../../electron/adapters/process-executor", () => ({ executable: async () => undefined, firstLine: () => "" }));
-vi.mock("../../electron/adapters/resource-adapter", () => ({
-  listAfkContainers: async () => [{ engine: "docker", name: "afk-runner", image: "ghcr.io/afk/runner:0.1.0", status: "Up 18 minutes" }],
-  listAfkTmux: async () => [{ name: "afk-release", workspace: "/tmp/afk", windows: "1", attached: true }],
-}));
 vi.mock("../../electron/services/runtime-service", () => ({ detectAgentRuntimes: async () => mocks.agentRuntimes }));
 vi.mock("../../electron/services/project-run-scope-service", () => ({
   projectRunScopeService: {
@@ -30,7 +27,20 @@ vi.mock("../../electron/services/project-run-scope-service", () => ({
   },
 }));
 
-const { snapshot } = await import("../../electron/services/desktop-service");
+const { createDesktopService } = await import("../../electron/services/desktop-service");
+
+// The service reads the runner's configuration through the port the
+// application package declares, so the test states the configuration
+// instead of writing a file the runner would have to read.
+const { snapshot } = createDesktopService({
+  configuration: stubConfigurationPort({
+    workflow: () => stubWorkflowConfig({ template: "afk-control-workflow" }),
+  }),
+  resourceAdapter: stubResourceAdapter({
+    listAfkContainers: async () => [{ engine: "docker", name: "afk-runner", image: "ghcr.io/afk/runner:0.1.0", status: "Up 18 minutes" }],
+    listAfkTmux: async () => [{ name: "afk-release", workspace: "/tmp/afk", windows: "1", attached: true }],
+  }),
+});
 
 let directory: string;
 

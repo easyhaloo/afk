@@ -9,6 +9,7 @@ import { render } from 'ink';
 import React from 'react';
 import { DashboardEntry } from '../../views/app/index.js';
 import { handleCommandError } from '../cli-utils.js';
+import { createCliRuntimePorts } from '../composition-root.js';
 
 export async function startDashboard() {
   if (!process.stdin.isTTY) {
@@ -20,7 +21,11 @@ export async function startDashboard() {
 
   process.stdout.write('\x1b[?1049h');
 
-  const { waitUntilExit } = render(React.createElement(DashboardEntry), {
+  // The board reads the tracker, attaches a terminal and opens a link.
+  // Each of those is the runtime's, and the board asks for it through a
+  // port; which implementation answers is chosen here.
+  const ports = await createCliRuntimePorts();
+  const { waitUntilExit } = render(React.createElement(DashboardEntry, { ports }), {
     exitOnCtrlC: true,
     patchConsole: false,
     interactive: true,

@@ -1,14 +1,38 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { load } from "js-yaml";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { saveWorkflowConfig, snapshot } from "../../electron/services/desktop-service";
+import { createDesktopService } from "../../electron/services/desktop-service";
+import { stubConfigurationPort, stubResourceAdapter, stubWorkflowConfig } from "./port-stubs";
 
 vi.mock("../../electron/adapters/process-executor", () => ({ executable: async () => undefined, firstLine: () => "" }));
-vi.mock("../../electron/adapters/resource-adapter", () => ({ listAfkContainers: async () => [], listAfkTmux: async () => [] }));
 vi.mock("../../electron/services/runtime-service", () => ({ detectAgentRuntimes: async () => [] }));
 vi.mock("../../electron/services/project-run-scope-service", () => ({ projectRunScopeService: { workspaces: async (root: string) => [root], runs: async () => [] } }));
+
+/**
+ * The template the workspace selected, as the runner's reader reports it.
+ *
+ * The runner's reader knows which template the workspace runs; the desktop
+ * asks for it through the port. The test's port answers with what the file
+ * the desktop wrote says, which is the same answer the reader gives.
+ */
+function selectedTemplate(root: string): string | undefined {
+  try {
+    const raw = load(readFileSync(path.join(root, ".afk", "config.yml"), "utf8")) as { template?: unknown };
+    return typeof raw.template === "string" ? raw.template : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const { snapshot, saveWorkflowConfig } = createDesktopService({
+  configuration: stubConfigurationPort({
+    workflow: (root) => stubWorkflowConfig({ template: selectedTemplate(root) }),
+  }),
+  resourceAdapter: stubResourceAdapter(),
+});
 
 let directory: string;
 const node = { id: "implement", template: "agent" as const, label: "实现", description: "实现工作项", prompt: "Implement the work item.", provider: "codex", x: 220, y: 74 };

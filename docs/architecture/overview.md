@@ -30,6 +30,18 @@ package's `src/` tree, and it must not spawn an `afk` CLI process. A relative
 import that escapes the desktop root into `src/` is reported the same way a
 package importing outside its own root is.
 
+The execution runtime is reached through ports, and the guard says so. A
+command, a view or a service that imports `@afk/execution/infrastructure`
+directly has taken on the runtime's knowledge of how it is built — which
+class to construct, which file to read, which process to signal — and the
+CLI and the desktop can then drift apart on what the configuration or the
+resource registry means. Two files may import the runtime's adapters:
+`src/cli/composition-root.ts` and `desktop-client/electron/composition-root.ts`.
+They are the composition roots: they say what is behind each port. Test
+files are exempt, and that is a decision rather than an oversight — a test
+that exercises an adapter against a real file needs the adapter, and a test
+that exercises a command needs a port.
+
 `pnpm typecheck` also type-checks `tests/` through `tsconfig.tests.json`.
 The root `tsconfig.json` excludes `tests/`, so without that project a broken
 import in a test or an E2E script is invisible to the build.
@@ -103,6 +115,46 @@ then adds only the missing ready/afk labels with no removals. An already ready/a
 item is a no-write success; closed, blocked, HITL and other lifecycle states are
 rejected without writes. Project and platform are required, and `--json` emits
 the `backlog.adopt` envelope. Execution and loop never invoke adoption implicitly.
+
+## Runtime ports
+
+The execution runtime does real work outside the process: it reads the
+configuration file, drives tmux, spawns the loop daemon, reads a harness's
+transcript, opens a browser, and keeps the registry of the resources runs
+handed out. An entry point that reaches for one of those directly has to
+know how it is done, and that knowledge belongs to the runtime rather than
+to the command, the view or the service that happens to need it.
+
+So the runtime is described by the ports it answers to. The ports are
+declared in `@afk/application`
+(`packages/afk-application/src/runtime-ports.ts` and
+`packages/afk-application/src/workflow-config.ts`), the vocabulary they name
+lives in `@afk/core`, and the implementations live in the execution package's
+infrastructure layer, one module per port.
+
+| Port | What it answers |
+| --- | --- |
+| `ConfigurationPort` | The configuration a run is shaped by: the workflow settings, the defaults, the scheduler settings, the tracker connection. |
+| `TmuxPort` | The terminal sessions a run is driven through. |
+| `LoopProcessPort` | The loop daemon's process, and the pid file that records it. |
+| `AgentTelemetryPort` | The harness transcripts AFK reads. AFK only reads them; the harness owns what happened in the run. |
+| `BrowserPort` | The operating system's default browser. |
+| `ResourceRegistryPort` | The registry of the resources runs handed out. |
+
+A command, a view or a service states what it needs; a composition root says
+what it is wired to. The CLI and the TUI are wired in
+`src/cli/composition-root.ts`, the desktop client in
+`desktop-client/electron/composition-root.ts`. Those two files are the only
+ones that may import the runtime's adapters, and the architecture guard
+reports any other that does.
+
+Moving a vocabulary to `@afk/core` is part of declaring a port: a port whose
+shapes live in the implementation cannot be named by a package that does not
+depend on that implementation, and a second copy of a shape is a second
+answer to the same question. The signal grammar, the tmux vocabulary, the
+resource record and the token usage are therefore vocabulary in
+`@afk/core`, and the infrastructure package validates a signal file against
+the shapes the core package declares rather than deriving them itself.
 
 ## Work-item and execution identity
 

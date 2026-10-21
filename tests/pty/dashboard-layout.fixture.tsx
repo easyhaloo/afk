@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, render } from 'ink';
 import { AppContent } from '../../src/views/app/AppContent';
 import { StateProvider } from '../../src/views/app/state/StateContext';
+import { inMemoryRuntimePorts } from '../support/runtime-ports.js';
 
 const tasks = [{
   iid: '17',
@@ -44,6 +45,7 @@ function DashboardFixture() {
     <Box flexDirection="column">
       <StateProvider>
         <AppContent
+          ports={inMemoryRuntimePorts()}
           tasks={tasks}
           backlogs={backlogs}
           projects={projects}

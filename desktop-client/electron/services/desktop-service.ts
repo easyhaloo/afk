@@ -5,12 +5,11 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { exec, executable, firstLine } from "../adapters/process-executor.js";
-import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter.js";
-import { AFK_VERSION } from "@afk/application";
+import type { ResourceAdapter } from "../adapters/resource-adapter.js";
+import { AFK_VERSION, type ConfigurationPort, type WorkflowConfig } from "@afk/application";
 import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from "@afk/core";
 import { probeProcess } from "@afk/infrastructure";
 import { builtinTemplates } from "@afk/execution/domain/templates/builtin";
-import { DEFAULT_WORKFLOW_CONFIG, loadWorkflowConfig, type WorkflowConfig } from "@afk/execution/infrastructure/config/manager";
 type ConfigObject = Record<string, unknown>;
 import { detectAgentRuntimes } from "./runtime-service.js";
 import { projectRunScopeService } from "./project-run-scope-service.js";
@@ -50,7 +49,29 @@ function validSession(value: string) {
 
 
 
-export async function readWorkflowConfig(root: string): Promise<WorkflowConfigSummary> {
+export type DesktopServiceDeps = {
+  configuration: ConfigurationPort;
+  resourceAdapter: ResourceAdapter;
+};
+
+/**
+ * The desktop's configuration and snapshot service.
+ *
+ * The runner's configuration is read through the port the application
+ * package declares, and the registered resources through the adapter built
+ * on the runtime's registry port. The service states what it needs; the
+ * composition root says what it is wired to, and the channels use the
+ * instance assembled there.
+ */
+export function createDesktopService(deps: DesktopServiceDeps) {
+  return {
+    readWorkflowConfig: (root: string) => readWorkflowConfig(root, deps.configuration),
+    saveWorkflowConfig: (workspace: string, value: unknown) => saveWorkflowConfig(workspace, value, deps.configuration),
+    snapshot: (workspace?: string) => snapshot(workspace, deps.configuration, deps.resourceAdapter),
+  };
+}
+
+async function readWorkflowConfig(root: string, configuration: ConfigurationPort): Promise<WorkflowConfigSummary> {
   const configPath = path.join(root, AFK_CONFIG_FILE);
   const raw = await fs.readFile(configPath, "utf8").catch(() => "");
   // The runner's configuration, read by the runner's reader: what this
@@ -59,9 +80,9 @@ export async function readWorkflowConfig(root: string): Promise<WorkflowConfigSu
   // down with it.
   let config: WorkflowConfig;
   try {
-    config = loadWorkflowConfig(root);
+    config = configuration.workflow(root);
   } catch {
-    config = DEFAULT_WORKFLOW_CONFIG;
+    config = configuration.defaults();
   }
   const codex = config.agents.codex;
   return {
@@ -329,7 +350,7 @@ function assignOptional(target: ConfigObject, key: string, value: string | undef
   else target[key] = value;
 }
 
-export async function saveWorkflowConfig(workspace: string, value: unknown): Promise<WorkflowConfigSummary> {
+async function saveWorkflowConfig(workspace: string, value: unknown, configuration: ConfigurationPort): Promise<WorkflowConfigSummary> {
   const root = resolveWorkspace(workspace);
   const patch = cleanWorkflowPatch(value);
   if (patch.templateName === MANAGED_WORKFLOW_TEMPLATE_NAME && !patch.canvasNodes.length) throw new Error("自定义工作流至少需要一个步骤");
@@ -380,7 +401,7 @@ export async function saveWorkflowConfig(workspace: string, value: unknown): Pro
   const temporaryPath = configPath + ".tmp-" + process.pid + "-" + Date.now();
   await fs.writeFile(temporaryPath, dumpYaml(next, { noRefs: true, lineWidth: 100 }), "utf8");
   await fs.rename(temporaryPath, configPath);
-  return readWorkflowConfig(root);
+  return readWorkflowConfig(root, configuration);
 }
 
 function jsonRecord(value: string): Record<string, unknown> {
@@ -472,7 +493,7 @@ async function readLoopStatus(): Promise<LoopStatus> {
  * reported and refused instead of being handed over as if it were sound —
  * the caller sees the failure and the app keeps running.
  */
-export async function snapshot(workspace?: string): Promise<Snapshot> {
+async function snapshot(workspace: string | undefined, configuration: ConfigurationPort, resourceAdapter: ResourceAdapter): Promise<Snapshot> {
   const root = resolveWorkspace(workspace);
   const resourceWorkspaces = await projectRunScopeService.workspaces(root);
   // The desktop client embeds the runtime, so it reports the version it runs
@@ -480,10 +501,10 @@ export async function snapshot(workspace?: string): Promise<Snapshot> {
   const afkPath = "in-process";
   const [workItemRuns, containers, sessions, agentRuntimes, workflow, workflowRuns, loop, workflowTemplates] = await Promise.all([
     projectRunScopeService.runs(root, resourceWorkspaces),
-    listAfkContainers(resourceWorkspaces),
-    listAfkTmux(resourceWorkspaces),
+    resourceAdapter.listAfkContainers(resourceWorkspaces),
+    resourceAdapter.listAfkTmux(resourceWorkspaces),
     detectAgentRuntimes(),
-    readWorkflowConfig(root),
+    readWorkflowConfig(root, configuration),
     readWorkflowRuns(root),
     readLoopStatus(),
     readWorkflowTemplates(root),

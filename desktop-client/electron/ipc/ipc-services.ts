@@ -9,14 +9,15 @@ import { createSshConfigAdapter } from "../adapters/ssh-config-adapter.js";
 import { createSshManagedHostStore } from "../adapters/ssh-managed-host-store.js";
 import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter.js";
 import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter.js";
-import { listRunResources } from "../adapters/resource-adapter.js";
+import { createResourceAdapter } from "../adapters/resource-adapter.js";
 import { createTmuxAttachPtyAdapter } from "../adapters/tmux-pty-adapter.js";
 import { createExecutionAttachService } from "../services/execution-attach-service.js";
 import { createExecutionRuntimeAdapter } from "../adapters/execution-runtime-adapter.js";
 import { createRunEventQueryAdapter } from "../adapters/run-event-query-adapter.js";
 import { readAppearance, saveAppearance } from "../services/appearance-service.js";
 import { createBacklogService } from "../services/backlog-service.js";
-import { backlogProviders, executeWorkItem, providerBundle, workflowTargetBranch } from "../composition-root.js";
+import { backlogProviders, desktopRuntimePorts, executeWorkItem, providerBundle, workflowTargetBranch } from "../composition-root.js";
+import { createDesktopService } from "../services/desktop-service.js";
 import { createBacklogExecutionService } from "../services/backlog-execution-service.js";
 import { createBacklogRunStore } from "../services/backlog-run-store.js";
 import { createBacklogRuntimeService } from "../services/backlog-runtime-service.js";
@@ -85,6 +86,12 @@ const backlogService = createBacklogService({
   providers: (workspace, platform) => backlogProviders(workspace, platform),
   resolveWorkspace,
 });
+// The runtime's resources, read through the port the composition root
+// chose, and the configuration service built on the runtime's
+// configuration port. Neither the adapter nor the service knows which
+// implementation it is wired to.
+const resourceAdapter = createResourceAdapter({ registry: desktopRuntimePorts.resources });
+const desktopService = createDesktopService({ configuration: desktopRuntimePorts.configuration, resourceAdapter });
 const workItemInventoryService = createWorkItemInventoryService({
   application: createWorkItemApplicationAdapter(createProviderWorkItemApplicationFacade()),
   store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
@@ -94,7 +101,7 @@ const tmuxAttachPty = createTmuxAttachPtyAdapter({
   onExit: (attachId, code) => broadcast(IPC_CHANNELS.workItemsAttachExit, attachId, code),
 });
 const executionAttachService = createExecutionAttachService({
-  readRunResources: listRunResources,
+  readRunResources: resourceAdapter.listRunResources,
   verifyTargetExists: async (target) => (await exec("tmux", ["has-session", "-t", target])).ok,
 });
 const workItemInventorySyncService = createWorkItemInventorySyncService({
@@ -151,8 +158,10 @@ export {
   backlogRuntimeService,
   clipboardService,
   defaultJumpserverService,
+  desktopService,
   executionAttachService,
   externalUrlService,
+  resourceAdapter,
   sshService,
   tmuxAttachPty,
   workflowGraphService,

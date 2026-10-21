@@ -20,8 +20,8 @@ vi.mock('@afk/execution', async importOriginal => {
   };
 });
 
-vi.mock('@afk/infrastructure', async importOriginal => {
-  const original = await importOriginal<typeof import('@afk/infrastructure')>();
+vi.mock('@afk/core', async importOriginal => {
+  const original = await importOriginal<typeof import('@afk/core')>();
   return {
     ...original,
     GOAL_COMPLETE_RESULTS: [...original.GOAL_COMPLETE_RESULTS, 'SKIP'],
@@ -29,7 +29,7 @@ vi.mock('@afk/infrastructure', async importOriginal => {
 });
 
 import { WORKFLOW_GRAPH_FORMATS } from '@afk/execution';
-import { GOAL_COMPLETE_RESULTS } from '@afk/infrastructure';
+import { GOAL_COMPLETE_RESULTS } from '@afk/core';
 import { registerGraphCommands } from '../../src/cli/commands/graph';
 import { registerSignalCommands } from '../../src/cli/commands/signal';
 
@@ -54,7 +54,7 @@ describe('The entry points answer with the vocabularies their owners publish', (
     }
   });
 
-  it('names every signal result the infrastructure package declares', () => {
+  it('names every signal result the core package declares', () => {
     const program = new Command();
     registerSignalCommands(program);
     const signal = program.commands.find(command => command.name() === 'signal');

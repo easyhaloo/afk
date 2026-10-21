@@ -1,7 +1,7 @@
 import { Command, InvalidArgumentError } from 'commander';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import { runWorkflowCli } from '@afk/execution/application/workflows/run-cmd';
-import { getWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
+import type { CommandRegistrationContext } from '../command-registry.js';
 import { resolveAgentProviderName } from '@afk/execution/domain/agents/index';
 import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
 
@@ -12,7 +12,7 @@ function positiveInt(value: string): number {
   }
   return parsed;
 }
-export function registerRunCommands(program: Command): void {
+export function registerRunCommands(program: Command, context: CommandRegistrationContext): void {
   const command = program
     .command('run')
     .description('Claim and execute one backlog item')
@@ -36,7 +36,7 @@ export function registerRunCommands(program: Command): void {
   addAgentRuntimeOptions(command)
     .action(async options => {
       try {
-        const cfg = getWorkflowConfig();
+        const cfg = context.ports.configuration.workflow(process.cwd());
         const agentProvider = resolveAgentProviderName(options.agent ?? cfg.agentDefault);
         const goalBudget = cfg.goalBudget || 500_000;
         const result = await runWorkflowCli({

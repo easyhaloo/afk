@@ -4,6 +4,7 @@
 import { Command } from 'commander';
 import { AFK_VERSION } from '@afk/application';
 import { COMMANDS } from './command-registry.js';
+import { createCliRuntimePorts } from './composition-root.js';
 
 export async function lazyLoad(cmd: string, extraArgs: string[]) {
   for (const entry of COMMANDS) {
@@ -13,7 +14,8 @@ export async function lazyLoad(cmd: string, extraArgs: string[]) {
       const register = await entry.loader();
       const program = new Command();
       program.name('afk').version(AFK_VERSION).exitOverride();
-      register(program, { argv: ['node', 'afk', cmd, ...extraArgs] });
+      const ports = await createCliRuntimePorts();
+      register(program, { argv: ['node', 'afk', cmd, ...extraArgs], ports });
 
       // Parse on the command that owns the remaining args. Commander 12
       // routes multi-level subcommands poorly from a synthetic argv on the

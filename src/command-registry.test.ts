@@ -5,7 +5,8 @@ import { COMMANDS as CLI_COMMANDS } from './cli/command-registry.js';
 import { lazyLoad } from './lazy-loader.js';
 import { lazyLoad as cliLazyLoad } from './cli/lazy-loader.js';
 import { runFullCLI } from './full-cli.js';
-import { runFullCLI as runCanonicalFullCLI } from './cli/full-cli.js';
+import { runFullCLI as runCanonicalFullCLI } from './cli/full-cli.js';import { inMemoryRuntimePorts } from '../tests/support/runtime-ports.js';
+
 
 describe('CLI hard cutover registry', () => {
   it('delegates the public registry to the canonical CLI registry', () => {
@@ -38,7 +39,7 @@ describe('CLI hard cutover registry', () => {
 
     const program = new Command().name('afk').exitOverride();
     const register = await entry!.loader();
-    register(program);
+    register(program, { ports: inMemoryRuntimePorts() });
 
     expect(program.commands.map(command => command.name())).toContain(name);
   });
@@ -47,8 +48,8 @@ describe('CLI hard cutover registry', () => {
     const program = new Command().name('afk').exitOverride();
     const backlogEntry = COMMANDS.find(entry => entry.names.includes('backlog'))!;
     const runEntry = COMMANDS.find(entry => entry.names.includes('run'))!;
-    (await backlogEntry.loader())(program);
-    (await runEntry.loader())(program);
+    (await backlogEntry.loader())(program, { ports: inMemoryRuntimePorts() });
+    (await runEntry.loader())(program, { ports: inMemoryRuntimePorts() });
 
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const run = program.commands.find(command => command.name() === 'run');

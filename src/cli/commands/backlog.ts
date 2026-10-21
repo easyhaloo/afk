@@ -38,7 +38,6 @@ import {
   type BacklogChangeProvider,
   type BacklogManagementProvider,
 } from '@afk/application';
-import { getWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import {
@@ -350,7 +349,7 @@ async function runLifecycleAction(
   }
 }
 
-export function registerBacklogCommands(program: Command, context: CommandRegistrationContext = {}): void {
+export function registerBacklogCommands(program: Command, context: CommandRegistrationContext): void {
   const argv = context.argv ?? process.argv;
   const inheritedOutput = program.configureOutput();
   const inheritedOutputError = inheritedOutput.outputError;
@@ -545,7 +544,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .action(async options => {
       try {
         const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
-        await runBacklogConfirmMerge(providers.backlog, providers.changes, options.id, getWorkflowConfig().targetBranch, options);
+        await runBacklogConfirmMerge(providers.backlog, providers.changes, options.id, context.ports.configuration.workflow(process.cwd()).targetBranch, options);
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.confirm-merge', classifyError(error), (error as Error).message);

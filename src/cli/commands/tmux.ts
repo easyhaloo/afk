@@ -1,18 +1,25 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { TmuxClient } from '@afk/execution/infrastructure/tmux/tmux';
-import { agentReadiness } from '@afk/execution/infrastructure/tmux/agent-readiness';
+import type { CommandRegistrationContext } from '../command-registry.js';
 import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils.js';
 
-export function registerTmuxCommands(program: Command): void {
-  const tmux = program
+/**
+ * The tmux sessions, driven from the command line.
+ *
+ * The command says what the user asked for - make a session, send a goal,
+ * read the pane - and the runtime says how a session is made. The command
+ * never holds a tmux client, so it can be exercised without one.
+ */
+export function registerTmuxCommands(program: Command, context: CommandRegistrationContext): void {
+  const tmux = context.ports.tmux;
+  const tmuxCommand = program
     .command('tmux')
     .description('Tmux session management for Claude agent');
 
   /**
    * create-session command
    */
-  tmux
+  tmuxCommand
     .command('create-session')
     .description('Create new tmux session for Claude')
     .requiredOption('-n, --name <name>', 'Session name')
@@ -20,8 +27,7 @@ export function registerTmuxCommands(program: Command): void {
     .option('-c, --command <cmd>', 'Command to run', 'claude')
     .action(async (options) => {
       try {
-        const client = new TmuxClient();
-        const session = await client.createSession(options.name, options.dir, options.command);
+        const session = await tmux.createSession(options.name, options.dir, options.command);
 
         success('Tmux session created');
         detail(`Name: ${session.name}`);
@@ -37,7 +43,7 @@ export function registerTmuxCommands(program: Command): void {
   /**
    * send-goal command
    */
-  tmux
+  tmuxCommand
     .command('send-goal')
     .description('Send /goal command to Claude session')
     .requiredOption('-s, --session <name>', 'Session name')
@@ -46,10 +52,8 @@ export function registerTmuxCommands(program: Command): void {
     .requiredOption('-d, --worktree <path>', 'Worktree path (used for prompt-ready detection)')
     .action(async (options) => {
       try {
-        const client = new TmuxClient();
-
         info(`Sending /goal to ${options.session}:${options.window}...`);
-        await client.sendPrompt(options.worktree, options.session, options.window, options.text, 'goal_complete', agentReadiness('claude-code'));
+        await tmux.sendPrompt(options.worktree, options.session, options.window, options.text, 'goal_complete', tmux.readiness('claude-code'));
 
         success('Goal sent successfully');
       } catch (error) {
@@ -60,7 +64,7 @@ export function registerTmuxCommands(program: Command): void {
   /**
    * capture command
    */
-  tmux
+  tmuxCommand
     .command('capture')
     .description('Capture pane content')
     .requiredOption('-s, --session <name>', 'Session name')
@@ -69,8 +73,7 @@ export function registerTmuxCommands(program: Command): void {
     .option('--history <n>', 'History size to read from', '100')
     .action(async (options) => {
       try {
-        const client = new TmuxClient();
-        const content = await client.capturePane(
+        const content = await tmux.capturePane(
           options.session,
           options.window,
           {
@@ -88,7 +91,7 @@ export function registerTmuxCommands(program: Command): void {
   /**
    * wait-signal command
    */
-  tmux
+  tmuxCommand
     .command('wait-signal')
     .description('Wait for signal file or pane marker')
     .requiredOption('-s, --session <name>', 'Session name')
@@ -98,10 +101,8 @@ export function registerTmuxCommands(program: Command): void {
     .option('--timeout <ms>', 'Timeout in milliseconds', '300000')
     .action(async (options) => {
       try {
-        const client = new TmuxClient();
-
         info(`Waiting for ${options.type} signal...`);
-        const signal = await client.waitForSignal(
+        const signal = await tmux.waitForSignal(
           options.session,
           options.window,
           options.type,
@@ -124,14 +125,13 @@ export function registerTmuxCommands(program: Command): void {
   /**
    * kill-session command
    */
-  tmux
+  tmuxCommand
     .command('kill-session')
     .description('Kill tmux session')
     .argument('<name>', 'Session name')
     .action(async (name: string) => {
       try {
-        const client = new TmuxClient();
-        await client.killSession(name);
+        await tmux.killSession(name);
 
         success(`Session ${name} killed`);
       } catch (error) {
@@ -142,14 +142,13 @@ export function registerTmuxCommands(program: Command): void {
   /**
    * has-session command
    */
-  tmux
+  tmuxCommand
     .command('has-session')
     .description('Check if session exists')
     .argument('<name>', 'Session name')
     .action(async (name: string) => {
       try {
-        const client = new TmuxClient();
-        const exists = await client.hasSession(name);
+        const exists = await tmux.hasSession(name);
 
         if (exists) {
           success(`Session ${name} exists`);

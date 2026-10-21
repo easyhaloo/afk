@@ -2,10 +2,9 @@ import { app, dialog, ipcMain, shell } from "electron";
 import { IPC_CHANNELS } from "../../../shared/ipc-contract.js";
 import { assertTrustedSender } from "../../security/sender-guard.js";
 import { readAppearance, saveAppearance } from "../../services/appearance-service.js";
-import { saveWorkflowConfig, snapshot } from "../../services/desktop-service.js";
 import { saveWorkspacePreference } from "../../services/workspace-preference-service.js";
 import { registerHandler, registerHandlerMulti } from "../handler-registry.js";
-import { clipboardService, externalUrlService } from "../ipc-services.js";
+import { clipboardService, desktopService, externalUrlService } from "../ipc-services.js";
 import { workspaceArgument } from "../ipc-arguments.js";
 
 /**
@@ -27,11 +26,11 @@ export function registerWorkspaceHandlers() {
     process.env.AFK_WORKSPACE = workspace;
     return workspace;
   });
-  registerHandler(IPC_CHANNELS.snapshot, (v: unknown) => workspaceArgument(v, "snapshot"), (workspace) => snapshot(workspace));
+  registerHandler(IPC_CHANNELS.snapshot, (v: unknown) => workspaceArgument(v, "snapshot"), (workspace) => desktopService.snapshot(workspace));
   registerHandler(IPC_CHANNELS.appearance, (v: unknown) => v, () => readAppearance());
   registerHandler(IPC_CHANNELS.appearanceSave, (v: unknown) => v, (appearance) => saveAppearance(appearance));
   registerHandlerMulti(IPC_CHANNELS.workflowSave, [
     (v) => workspaceArgument(v, "workflowSave"),
     (v) => v,
-  ], ([workspace, workflow]) => saveWorkflowConfig(workspace, workflow));
+  ], ([workspace, workflow]) => desktopService.saveWorkflowConfig(workspace, workflow));
 }

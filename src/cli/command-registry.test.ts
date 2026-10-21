@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
-import { COMMANDS } from './command-registry.js';
+import { COMMANDS } from './command-registry.js';import { inMemoryRuntimePorts } from '../../tests/support/runtime-ports.js';
+
 
 describe('CLI hard cutover registry', () => {
   it('exposes the canonical public command registry without duplicate routes', () => {
@@ -31,7 +32,7 @@ describe('CLI hard cutover registry', () => {
 
     const program = new Command().name('afk').exitOverride();
     const register = await entry!.loader();
-    register(program);
+    register(program, { ports: inMemoryRuntimePorts() });
 
     expect(program.commands.map(command => command.name())).toContain(name);
   });
@@ -40,7 +41,7 @@ describe('CLI hard cutover registry', () => {
     const backlogEntry = COMMANDS.find(entry => entry.names.includes('backlog'))!;
     const registerBacklog = await backlogEntry.loader();
     const program = new Command().name('afk').exitOverride();
-    registerBacklog(program);
+    registerBacklog(program, { ports: inMemoryRuntimePorts() });
 
     const backlog = program.commands.find(command => command.name() === 'backlog');
     const create = backlog?.commands.filter(command => command.name() === 'create');
@@ -70,7 +71,7 @@ describe('CLI hard cutover registry', () => {
   it('characterizes the current run command contract', async () => {
     const program = new Command().name('afk').exitOverride();
     const runEntry = COMMANDS.find(entry => entry.names.includes('run'))!;
-    (await runEntry.loader())(program);
+    (await runEntry.loader())(program, { ports: inMemoryRuntimePorts() });
 
     const run = program.commands.find(command => command.name() === 'run');
     expect(run?.options.find(option => option.long === '--backlog-id')).toMatchObject({ required: true });

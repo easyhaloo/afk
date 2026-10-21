@@ -3,7 +3,7 @@ import { createManagementProviders } from '@afk/infrastructure';
 import { AGENT_EXECUTION_MODES, isAgentExecutionMode } from '@afk/core';
 import { QARunner } from '@afk/execution/application/modules/qa-runner';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
-import { getWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
+import type { CommandRegistrationContext } from '../command-registry.js';
 import { createAgentProvider, prepareAgentRuntime, resolveAgentProviderName } from '@afk/execution/domain/agents/index';
 import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
 
@@ -12,7 +12,7 @@ import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runt
  * QARunner service after implementation; this command is its manual retry and
  * diagnostic entry point.
  */
-export function registerQACommands(program: Command): void {
+export function registerQACommands(program: Command, context: CommandRegistrationContext): void {
   const command = program
     .command('qa')
     .description('Verify one backlog item and publish its change for the appropriate merge policy')
@@ -26,7 +26,7 @@ export function registerQACommands(program: Command): void {
         if (!isAgentExecutionMode(options.mode)) {
           throw new Error(`invalid QA execution mode: ${options.mode}`);
         }
-        const config = getWorkflowConfig();
+        const config = context.ports.configuration.workflow(process.cwd());
         const agentProviderName = resolveAgentProviderName(options.agent ?? config.agentDefault);
         const agentRuntime = await prepareAgentRuntime(resolveAgentRuntimeOptions(agentProviderName, config, options));
         const agentProvider = createAgentProvider(agentProviderName);

@@ -24,7 +24,8 @@ vi.mock('@afk/core', async importOriginal => {
 });
 
 import { AGENT_EXECUTION_MODES } from '@afk/core';
-import { registerQACommands } from '../../src/cli/commands/qa';
+import { registerQACommands } from '../../src/cli/commands/qa';import { inMemoryRuntimePorts } from '../support/runtime-ports.js';
+
 import { parseRuntimeHealth, parseWorkflowInstance } from '../../desktop-client/shared/execution-contract';
 
 vi.mock('@afk/infrastructure', async importOriginal => ({
@@ -47,14 +48,14 @@ vi.mock('@afk/execution/application/modules/qa-runner', () => ({ QARunner: vi.fn
 
 async function runQa(...args: string[]): Promise<void> {
   const program = new Command().exitOverride();
-  registerQACommands(program);
+  registerQACommands(program, { ports: inMemoryRuntimePorts() });
   await program.parseAsync(['node', 'afk', 'qa', ...args]);
 }
 
 describe('The entry points answer with the agent mode vocabulary the core publishes', () => {
   it('names the modes the core package declares in the QA command', () => {
     const program = new Command();
-    registerQACommands(program);
+    registerQACommands(program, { ports: inMemoryRuntimePorts() });
     const qa = program.commands.find(command => command.name() === 'qa');
     const mode = qa?.options.find(option => option.long === '--mode');
     for (const value of AGENT_EXECUTION_MODES) {

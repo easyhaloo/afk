@@ -23,24 +23,27 @@ vi.mock("electron", () => ({
   },
 }));
 
-vi.mock("../../electron/services/desktop-service", () => ({
-  snapshot: mocks.snapshot,
-  saveWorkflowConfig: vi.fn(),
-}));
-
-vi.mock("../../electron/services/ssh-service", () => ({
-  createSshService: () => ({
-    listHosts: vi.fn(), addHost: vi.fn(), updateHost: vi.fn(), removeHost: vi.fn(),
-    trust: vi.fn(), generateKey: vi.fn(), deployKey: vi.fn(), test: vi.fn(), upload: vi.fn(),
-    connect: vi.fn(), openExternal: vi.fn(), hasCredential: vi.fn(), setCredential: vi.fn(),
-    removeCredential: vi.fn(), input: vi.fn(), resize: vi.fn(), close: vi.fn(),
-  }),
-}));
-
-vi.mock("../../electron/services/ssh-credential-service", () => ({
-  createSshCredentialService: () => ({
-    has: vi.fn(), set: vi.fn(), remove: vi.fn(),
-  }),
+// The services are assembled once, in the IPC layer, and the channels use
+// the ones assembled there. The test replaces that layer so it can make
+// the snapshot refuse.
+vi.mock("../../electron/ipc/ipc-services", () => ({
+  clipboardService: { copyText: vi.fn() },
+  defaultJumpserverService: {},
+  desktopService: { snapshot: mocks.snapshot, saveWorkflowConfig: vi.fn() },
+  externalUrlService: { open: vi.fn() },
+  resourceAdapter: { isAfkTmuxSession: () => false, listAfkTmux: async () => [] },
+  workflowGraphService: { status: vi.fn(), generate: vi.fn() },
+  sshService: {},
+  backlogService: {},
+  backlogExecutionService: {},
+  backlogRuntimeService: {},
+  executionAttachService: {},
+  tmuxAttachPty: {},
+  workItemExecutionQueryService: {},
+  workItemExecutionService: {},
+  workItemInventoryService: {},
+  workItemInventorySyncService: { start: vi.fn(), stop: vi.fn() },
+  workItemRunHistoryService: {},
 }));
 
 const trustedSender = { senderFrame: { url: "http://localhost:5174" } };

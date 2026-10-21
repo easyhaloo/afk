@@ -1,6 +1,5 @@
 import chalk from 'chalk';
 import { logger } from '@afk/infrastructure';
-export { openInBrowser } from '@afk/execution/shared/browser';
 
 /** Format JSON output consistently. */
 export function formatJson(data: unknown): void {

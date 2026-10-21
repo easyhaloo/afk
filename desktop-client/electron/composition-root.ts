@@ -5,7 +5,8 @@ import { app } from "electron";
 import path from "node:path";
 import type { BacklogManagementProvider } from "@afk/application";
 import type { ManagementProviderBundle } from "@afk/infrastructure";
-import { loadWorkflowConfig } from "@afk/execution/infrastructure/config/manager";
+import { fileConfigurationPort } from "@afk/execution/infrastructure/config/manager";
+import { resourceRegistryPort } from "@afk/execution/infrastructure/runtime/resource-registry-port";
 import type { BacklogPlatform } from "../shared/backlog-contract.js";
 
 const requireCjs = createRequire(import.meta.url);
@@ -55,6 +56,20 @@ function loadRuntimeBundle(): RuntimeBundle {
   return runtimeBundle;
 }
 
+/**
+ * The runtime ports the desktop is wired to.
+ *
+ * The runner's configuration and the runner's resource registry are reached
+ * through the ports the application package declares, so the desktop does
+ * not inherit the file layout, the constructor arguments or the failure
+ * modes of the adapters that implement them. The choice of an adapter is
+ * made here, once; the rest of the desktop states what it needs.
+ */
+export const desktopRuntimePorts = {
+  configuration: fileConfigurationPort,
+  resources: resourceRegistryPort,
+};
+
 const bundles = new Map<string, Promise<ManagementProviderBundle>>();
 
 export function providerBundle(
@@ -95,6 +110,6 @@ export async function backlogProviders(
  * here, so both agree on the target branch for a given workspace.
  */
 export async function workflowTargetBranch(workspace: string): Promise<string> {
-  return loadWorkflowConfig(workspace).targetBranch;
+  return desktopRuntimePorts.configuration.workflow(workspace).targetBranch;
 }
 

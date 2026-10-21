@@ -7,6 +7,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { claudeProjectSlug } from '@afk/execution/shared/agent-transcript-path';
 import { registerRetroCommands, renderRetroHtml, reportSchema } from './retro.js';
+import { agentTelemetryPort } from '@afk/execution/infrastructure/observability/agent-telemetry-port';
+import { inMemoryRuntimePorts } from '../../../tests/support/runtime-ports.js';
+
+/**
+ * The retro's own ports, with the real transcript reader behind them.
+ *
+ * The retro gathers its evidence from the harness's transcript, and this
+ * suite writes a transcript and then reads the report back - so the
+ * reader under test has to be the one that reads. Everything else the
+ * retro touches is answered from memory.
+ */
+const retroPorts = { ...inMemoryRuntimePorts(), agentTelemetry: agentTelemetryPort };
 
 const childProcessMocks = vi.hoisted(() => ({ execFile: vi.fn() }));
 vi.mock('node:child_process', () => ({ execFile: childProcessMocks.execFile }));
@@ -69,7 +81,7 @@ describe('retro command', () => {
 
   it('registers run and show with the required run inputs', () => {
     const program = new Command().name('afk').exitOverride();
-    registerRetroCommands(program);
+    registerRetroCommands(program, { ports: retroPorts });
     const retro = program.commands.find(command => command.name() === 'retro');
     const run = retro?.commands.find(command => command.name() === 'run');
     const show = retro?.commands.find(command => command.name() === 'show');
@@ -86,7 +98,7 @@ describe('retro command', () => {
     const output: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation(chunk => { output.push(String(chunk)); return true; });
     const program = new Command().name('afk');
-    registerRetroCommands(program);
+    registerRetroCommands(program, { ports: retroPorts });
     await program.parseAsync(['node', 'afk', 'retro', 'show', reportPath, '--json']);
     expect(JSON.parse(output.join(''))).toEqual({ version: 1, retroId: 'retro-1' });
   });
@@ -123,7 +135,7 @@ describe('retro command', () => {
     const report = await runRetro({
       runId: 'run-1', executionId: 'run-1', workItemId: 'work-1',
       workspace: join(root, 'the-project-directory'), root: eventRoot, provider: 'claude-code',
-    });
+    }, agentTelemetryPort);
 
     // The journal was read: its "retry" line is what the count comes from.
     expect(report.metrics.retryCount).toBe(1);
@@ -141,7 +153,7 @@ describe('retro command', () => {
     childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
 
     const { runRetro } = await import('./retro.js');
-    const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
+    const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' }, agentTelemetryPort);
 
     expect(report.sessions).toEqual([{ sessionId: 'synthetic-session', source: 'transcript_found', transcriptPath }]);
     expect(report.metrics.toolCallCount).toBe(1);
@@ -167,18 +179,18 @@ describe('retro command', () => {
       childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
 
       const { runRetro } = await import('./retro.js');
-      const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
+      const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' }, agentTelemetryPort);
 
       expect(report.sessions?.[0]).toMatchObject({ sessionId: 'agent-session', transcriptPath });
       expect(report.metrics.toolCallCount).toBe(1);
 
       await fs.appendFile(transcriptPath, JSON.stringify({ type: 'assistant', sessionId: 'agent-session', message: { content: [{ type: 'tool_use', id: 'tool-2', name: 'Bash', input: {} }] } }) + '\n');
-      const updated = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
+      const updated = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' }, agentTelemetryPort);
       expect(updated.metrics.toolCallCount).toBe(2);
       expect(updated.retroId).not.toBe(report.retroId);
 
       await fs.unlink(transcriptPath);
-      const missing = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
+      const missing = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' }, agentTelemetryPort);
       expect(missing.sessions?.[0]?.source).toBe('transcript_missing');
       expect(missing.metrics.toolCallCount).toBe(0);
     } finally {
@@ -205,7 +217,7 @@ describe('retro command', () => {
       childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
 
       const { runRetro } = await import('./retro.js');
-      const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' });
+      const report = await runRetro({ runId: 'run-1', executionId: 'run-1', workItemId: 'work-1', workspace, root: eventRoot, provider: 'claude-code' }, agentTelemetryPort);
 
       expect(report.sessions?.[0]?.source).toBe('transcript_missing');
       expect(report.metrics.toolCallCount).toBe(0);
@@ -226,7 +238,7 @@ describe('retro command', () => {
 
     const run = async (provider: string) => {
       const program = new Command().name('afk');
-      registerRetroCommands(program);
+      registerRetroCommands(program, { ports: retroPorts });
       return program.parseAsync([
         'node', 'afk', 'retro', 'run',
         '--run-id', 'run-1', '--workspace', workspace, '--root', eventRoot, '--provider', provider,

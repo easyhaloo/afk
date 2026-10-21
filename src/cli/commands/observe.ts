@@ -2,11 +2,20 @@ import { Command } from 'commander';
 import { explainRun, listRunIds, observeRun } from '@afk/application';
 import { observationProfile } from '@afk/core';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
-import type { CommandRegistrationContext } from '../command-registry.js';
 import type { CliApplicationFactory } from '../composition-root.js';
 import { createCliApplication } from '../composition-root.js';
 
-export interface ObserveCommandComposition extends CommandRegistrationContext {
+/**
+ * What the observe command is composed from.
+ *
+ * The application is a use case the command drives, and the command may
+ * be handed a different one - a fixture, or a facade over a different
+ * event store. The runtime's ports are not among them: observing a run
+ * reads the audit spine, and the audit spine is not the runtime.
+ */
+export interface ObserveCommandComposition {
+  /** The argv the command parses, when the caller has one of its own. */
+  argv?: readonly string[];
   createApplication?: CliApplicationFactory;
 }
 

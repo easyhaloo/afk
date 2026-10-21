@@ -7,8 +7,9 @@
 import { LoadingPhaseRegistry } from './loading.js';
 import { fetchTasks } from '../data/fetcher.js';
 import type { TrackerProjectReader } from '@afk/application';
+import type { BoardRuntimePorts } from '../../app/runtime-ports.js';
 
-export function registerAllLoadingPhases(): void {
+export function registerAllLoadingPhases(ports: BoardRuntimePorts): void {
   const registry = LoadingPhaseRegistry.getInstance();
 
   registry.register({
@@ -16,9 +17,10 @@ export function registerAllLoadingPhases(): void {
     label: 'Loading configuration...',
     icon: '⚙',
     fetch: async (setDetail) => {
-      const { getGitLabConfig } = await import('@afk/execution/infrastructure/config/manager');
+      // The tracker URL is read through the configuration port, so the board
+      // never has to know which file the configuration came from.
       try {
-        const config = getGitLabConfig();
+        const config = ports.configuration.gitLab();
         setDetail('config', `${config.url || 'default'}`);
         return `${config.url || 'default'}`;
       } catch {

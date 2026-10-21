@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Command } from "commander";
 
 /**
@@ -24,13 +24,14 @@ vi.mock("@afk/core", async importOriginal => {
 });
 
 vi.mock("../../desktop-client/electron/adapters/process-executor", () => ({ executable: async () => undefined, firstLine: () => "" }));
-vi.mock("../../desktop-client/electron/adapters/resource-adapter", () => ({ listAfkContainers: async () => [], listAfkTmux: async () => [] }));
 vi.mock("../../desktop-client/electron/services/runtime-service", () => ({ detectAgentRuntimes: async () => [] }));
 vi.mock("../../desktop-client/electron/services/project-run-scope-service", () => ({ projectRunScopeService: { workspaces: async (root: string) => [root], runs: async () => [] } }));
 
 import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from "@afk/core";
 import { addAgentRuntimeOptions } from "../../src/cli/commands/agent-runtime-options";
-import { saveWorkflowConfig, snapshot } from "../../desktop-client/electron/services/desktop-service";
+import { createDesktopService } from "../../desktop-client/electron/services/desktop-service";
+import { fileConfigurationPort } from "@afk/execution/infrastructure/config/manager";
+import { stubResourceAdapter } from "../../desktop-client/tests/electron/port-stubs";
 
 let directory: string;
 
@@ -64,9 +65,13 @@ describe("The entry points answer with the agent environment vocabulary the core
   });
 
   it("lets the desktop save every transport the core package declares", async () => {
-    const current = await snapshot(directory);
+    // The desktop reads the configuration through the port, so what it
+    // writes and what it reads back are the same configuration - the one
+    // the runner would read.
+    const desktop = createDesktopService({ configuration: fileConfigurationPort, resourceAdapter: stubResourceAdapter() });
+    const current = await desktop.snapshot(directory);
     for (const transport of AGENT_TRANSPORT_CHOICES) {
-      const saved = await saveWorkflowConfig(directory, {
+      const saved = await desktop.saveWorkflowConfig(directory, {
         ...current.workflow,
         codex: { ...current.workflow.codex, transport },
       });
@@ -75,9 +80,10 @@ describe("The entry points answer with the agent environment vocabulary the core
   });
 
   it("lets the desktop save every authentication mode the core package declares", async () => {
-    const current = await snapshot(directory);
+    const desktop = createDesktopService({ configuration: fileConfigurationPort, resourceAdapter: stubResourceAdapter() });
+    const current = await desktop.snapshot(directory);
     for (const auth of AGENT_AUTH_CHOICES) {
-      const saved = await saveWorkflowConfig(directory, {
+      const saved = await desktop.saveWorkflowConfig(directory, {
         ...current.workflow,
         codex: { ...current.workflow.codex, auth },
       });

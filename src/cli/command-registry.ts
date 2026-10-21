@@ -1,11 +1,23 @@
 import { Command } from 'commander';
 import { AFK_VERSION } from '@afk/application';
+import type { CliRuntimePorts } from './composition-root.js';
+import { createCliRuntimePorts } from './composition-root.js';
 
 export interface CommandRegistrationContext {
+  /** The argv the command parses, when the caller has one of its own. */
   argv?: readonly string[];
+  /**
+   * The runtime the command is driven through.
+   *
+   * A command is a driver: it turns what the user asked for into a call
+   * on a use case. It does not know how the configuration file is read or
+   * which class talks to tmux - the composition root does, and hands the
+   * result over here.
+   */
+  ports: CliRuntimePorts;
 }
 
-export type RegisterFn = (p: Command, context?: CommandRegistrationContext) => void;
+export type RegisterFn = (p: Command, context: CommandRegistrationContext) => void;
 
 export interface CommandEntry {
   /** Command name(s) that route to this loader. Hidden aliases (e.g. __complete) go here too. */
@@ -52,7 +64,8 @@ export const COMMANDS: CommandEntry[] = [
 export async function buildCommandProgram(): Promise<Command> {
   const program = new Command();
   program.name('afk').version(AFK_VERSION);
+  const ports = await createCliRuntimePorts();
   const registerFns = await Promise.all(COMMANDS.map(command => command.loader()));
-  for (const register of registerFns) register(program);
+  for (const register of registerFns) register(program, { ports });
   return program;
 }

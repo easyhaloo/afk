@@ -5,7 +5,8 @@ import { loadLoopConfig } from '@afk/execution/application/loop/loop-config';
 import { registerLoopCommands, resolveManagedLoopExecution } from './loop.js';
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
-import { Command } from 'commander';
+import { Command } from 'commander';import { inMemoryRuntimePorts } from '../../../tests/support/runtime-ports.js';
+
 
 const CONFIG_DIR = path.join('/tmp', `afk-loop-config-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 const CONFIG_PATH = path.join(CONFIG_DIR, '.afk', 'config.yml');
@@ -91,7 +92,7 @@ describe('loadLoopConfig', () => {
 describe('loop option parsing', () => {
   it('accepts the explicit managed work item and manifest flags on both loop entries', () => {
     const program = new Command().exitOverride();
-    registerLoopCommands(program);
+    registerLoopCommands(program, { ports: inMemoryRuntimePorts() });
     const loop = program.commands.find(command => command.name() === 'loop')!;
     for (const command of [loop, loop.commands.find(child => child.name() === 'start')!]) {
       expect(command.options.map(option => option.long)).toEqual(expect.arrayContaining(['--work-item-id', '--execution-manifest']));
@@ -119,7 +120,7 @@ describe('loop option parsing', () => {
 
   it('does not expose options for the removed execution chain', () => {
     const program = new Command().exitOverride();
-    registerLoopCommands(program);
+    registerLoopCommands(program, { ports: inMemoryRuntimePorts() });
     const loop = program.commands.find(command => command.name() === 'loop')!;
     for (const command of [loop, loop.commands.find(child => child.name() === 'start')!]) {
       expect(command.options.map(option => option.long)).not.toContain('--agent');
@@ -130,7 +131,7 @@ describe('loop option parsing', () => {
 
   it('parses repeated backlog scope values', () => {
     const program = new Command().exitOverride();
-    registerLoopCommands(program);
+    registerLoopCommands(program, { ports: inMemoryRuntimePorts() });
     const loop = program.commands.find(command => command.name() === 'loop')!;
     const scope = loop.options.find(option => option.long === '--backlog-id')!;
 
@@ -140,9 +141,9 @@ describe('loop option parsing', () => {
 
   it('keeps Codex runtime overrides on run and qa, not on the manifest-bound loop', () => {
     const program = new Command().exitOverride();
-    registerRunCommands(program);
-    registerLoopCommands(program);
-    registerQACommands(program);
+    registerRunCommands(program, { ports: inMemoryRuntimePorts() });
+    registerLoopCommands(program, { ports: inMemoryRuntimePorts() });
+    registerQACommands(program, { ports: inMemoryRuntimePorts() });
     const commands = [
       program.commands.find(command => command.name() === 'run')!,
       program.commands.find(command => command.name() === 'qa')!,

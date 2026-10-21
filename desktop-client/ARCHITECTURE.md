@@ -42,6 +42,20 @@ generation and the runtime version. The desktop therefore depends on
 `@afk/workflow-graph`, and the architecture guard rejects any import that
 reaches the root package's `src/` tree.
 
+The execution runtime's own capabilities are reached through the ports the
+application package declares. `electron/composition-root.ts` is the only file
+that names an implementation: it builds the configuration port
+(`ConfigurationPort`) and the resource registry port (`ResourceRegistryPort`)
+and exports them as `desktopRuntimePorts`. A service states what it needs —
+`createDesktopService({ configuration, resourceAdapter })` reads the runner's
+configuration through the port and the registered resources through the
+adapter built on the registry port — and `electron/ipc/ipc-services.ts`
+assembles the services and the adapter once, so a channel never reaches for an
+implementation itself. The desktop therefore does not inherit the runtime's
+file layout, its constructor arguments or its failure modes: another entry
+point may wire the same ports to another implementation without the desktop's
+services knowing.
+
 Execution history uses a separate direct Application path:
 
 - Electron Main injects `electron/adapters/run-event-query-adapter.ts`, a read-only

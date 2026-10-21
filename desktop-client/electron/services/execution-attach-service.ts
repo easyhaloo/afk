@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { ExecutionEnvironmentQueryResult } from "../../shared/execution-environment-contract.js";
 import { formatTmuxTarget, tmuxTargetFromMetadata } from "../../shared/execution-environment-contract.js";
-import type { AfkResourceRecord } from "@afk/execution/infrastructure/runtime/resource-registry";
+import type { AfkResourceRecord } from "@afk/core";
 
 // The record the registry hands out, not a copy of its columns: the
 // registry owns the table and the shape of what is in it.

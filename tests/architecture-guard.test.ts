@@ -15,8 +15,13 @@ function fixture(source: string, extraFiles: Record<string, string> = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-'));
   directories.push(directory);
   const root = join(directory, 'src');
+  // The fixture is a repository of its own: the desktop client it is
+  // checked against is the one inside it, not the one this file happens
+  // to sit next to.
+  const desktop = join(directory, 'desktop-client');
   mkdirSync(join(root, 'lib'), { recursive: true });
   mkdirSync(join(root, 'cli'), { recursive: true });
+  mkdirSync(join(desktop, 'electron'), { recursive: true });
   writeFileSync(join(root, 'lib', 'legacy.ts'), 'export const legacy = true;\n');
   writeFileSync(join(root, 'cli', 'entry.ts'), source);
   for (const [filename, contents] of Object.entries(extraFiles)) {
@@ -31,7 +36,7 @@ function fixture(source: string, extraFiles: Record<string, string> = {}) {
   }));
   const run = (...args: string[]) => {
     try {
-      return execFileSync(process.execPath, [guard, '--root', root, '--baseline', baseline, ...args], { encoding: 'utf8' });
+      return execFileSync(process.execPath, [guard, '--root', root, '--baseline', baseline, '--desktop-client-root', desktop, ...args], { encoding: 'utf8' });
     } catch (error) {
       return (error as { stderr: Buffer }).stderr.toString();
     }
@@ -325,6 +330,11 @@ describe('architecture guard desktop client boundaries', () => {
     const output = desktopFixture("import { listBacklogs } from '@afk/application';\nexport const list = listBacklogs;\n").run();
     expect(output).toContain('Architecture guard passed');
   });
+
+  it('rejects a desktop service that imports the execution runtime adapter', () => {
+    const output = desktopFixture("import { resourceRegistryPort } from '@afk/execution/infrastructure/runtime/resource-registry-port';\nexport const resources = resourceRegistryPort;\n").run();
+    expect(output).toContain("must not import the execution runtime's adapter");
+  });
 });
 
 describe('architecture guard desktop renderer boundaries', () => {
@@ -371,6 +381,35 @@ describe('architecture guard desktop renderer boundaries', () => {
 
   it('accepts a renderer that loads a module with no node builtin', () => {
     const output = rendererFixture("import { read } from '../pure.js';\nexport const value = read;\n").run();
+    expect(output).toContain('Architecture guard passed');
+  });
+});
+
+describe('architecture guard runtime ports', () => {
+  const ADAPTER_IMPORT = "import { fileConfigurationPort } from '@afk/execution/infrastructure/config/manager';\n";
+
+  it('rejects an entry point that imports the execution runtime adapter', () => {
+    // The runtime's adapters are implementations. An entry point that
+    // reaches for one has taken on the runtime's knowledge of how it is
+    // built, and the CLI and the desktop can then drift apart on what the
+    // configuration means.
+    const output = fixture(`import { legacy } from '../lib/legacy';\n${ADAPTER_IMPORT}console.log(legacy, fileConfigurationPort);\n`).run();
+    expect(output).toContain("must not import the execution runtime's adapter");
+  });
+
+  it('accepts a composition root that chooses the implementation', () => {
+    const output = fixture("import { legacy } from '../lib/legacy';\nconsole.log(legacy);\n", {
+      'cli/composition-root.ts': `${ADAPTER_IMPORT}export const ports = { configuration: fileConfigurationPort };\n`,
+    }).run();
+    expect(output).toContain('Architecture guard passed');
+  });
+
+  it('accepts a test that exercises the adapter itself', () => {
+    // A test that drives an adapter against a real file needs the
+    // adapter. The exemption is narrow: only files named as tests.
+    const output = fixture("import { legacy } from '../lib/legacy';\nconsole.log(legacy);\n", {
+      'cli/entry.test.ts': `${ADAPTER_IMPORT}export const ports = { configuration: fileConfigurationPort };\n`,
+    }).run();
     expect(output).toContain('Architecture guard passed');
   });
 });

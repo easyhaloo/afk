@@ -1,27 +1,27 @@
-import { AFK_RUNTIME_RESOURCES_FILE } from '@afk/core';
-import { homedir } from "node:os";
+import type { ResourceRegistryPort } from "@afk/application";
+import type { AfkResourceRecord } from "@afk/core";
 import path from "node:path";
-import {
-  readActiveAfkResources,
-  readRunAfkResources,
-  type AfkResourceRecord,
-} from "@afk/execution/infrastructure/runtime/resource-registry";
 import { exec as defaultExec, executable as defaultExecutable } from "./process-executor.js";
 import { normalizeTmuxSessionName } from "../../shared/tmux-session.js";
 
-type ResourceAdapterDeps = {
-  databasePath?: string;
+export type ResourceAdapterDeps = {
+  registry: ResourceRegistryPort;
   readResources?: (workspaces: readonly string[]) => AfkResourceRecord[];
   exec?: typeof defaultExec;
   executable?: typeof defaultExecutable;
 };
 
-export function createResourceAdapter(deps: ResourceAdapterDeps = {}) {
-  const databasePath = deps.databasePath ?? path.join(homedir(), AFK_RUNTIME_RESOURCES_FILE);
-  // The registry owns the table and the rows in it; this asks it what is
-  // there rather than writing the query out again here, where a change to
-  // the table would leave this reading a column that is no longer there.
-  const readResources = deps.readResources ?? ((workspaces: readonly string[]) => readActiveAfkResources(databasePath, workspaces));
+/**
+ * The registered resources of the runtime, read through its port.
+ *
+ * The registry owns the table and the rows in it; this asks it what is
+ * there rather than writing the query out again here, where a change to
+ * the table would leave this reading a column that is no longer there.
+ * Where the registry keeps its table is the registry's business, so the
+ * path is not this adapter's to choose.
+ */
+export function createResourceAdapter(deps: ResourceAdapterDeps) {
+  const readResources = deps.readResources ?? ((workspaces: readonly string[]) => deps.registry.readActive(workspaces));
   const exec = deps.exec ?? defaultExec;
   const executable = deps.executable ?? defaultExecutable;
 
@@ -68,14 +68,10 @@ export function createResourceAdapter(deps: ResourceAdapterDeps = {}) {
 
   /** Run-scoped resource reader for the ADR-0019 exact attach target path. */
   function listRunResources(runId: string): AfkResourceRecord[] {
-    return readRunAfkResources(databasePath, runId);
+    return deps.registry.readRun(runId);
   }
 
   return { listAfkContainers, listAfkTmux, isAfkTmuxSession, listRunResources };
 }
 
-const resourceAdapter = createResourceAdapter();
-export const listAfkContainers = resourceAdapter.listAfkContainers;
-export const listAfkTmux = resourceAdapter.listAfkTmux;
-export const isAfkTmuxSession = resourceAdapter.isAfkTmuxSession;
-export const listRunResources = resourceAdapter.listRunResources;
+export type ResourceAdapter = ReturnType<typeof createResourceAdapter>;

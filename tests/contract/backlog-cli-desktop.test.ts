@@ -10,7 +10,8 @@ import {
 } from '../../desktop-client/electron/services/backlog-service';
 import { COMMANDS } from '../../src/command-registry';
 import { COMMANDS as CLI_COMMANDS } from '../../src/cli/command-registry';
-import { registerBacklogCommands } from '../../src/cli/commands/backlog';
+import { registerBacklogCommands } from '../../src/cli/commands/backlog';import { inMemoryRuntimePorts } from '../support/runtime-ports.js';
+
 
 // The stub answers the shared provider Port, so it is modelled with the
 // shared `BacklogItem`. The desktop's own wire type is a structurally
@@ -63,7 +64,7 @@ function desktopService(): ReturnType<typeof createBacklogService> {
 /** Run a CLI command and capture the JSON envelope it writes to stdout. */
 async function runCli(args: string[]): Promise<{ ok: boolean; kind: string; data: unknown }> {
   const program = new Command().name('afk').exitOverride();
-  registerBacklogCommands(program);
+  registerBacklogCommands(program, { ports: inMemoryRuntimePorts() });
   const captured: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = (chunk: string | Uint8Array): boolean => {
@@ -83,7 +84,7 @@ async function publicCommandTree(): Promise<Command> {
   for (const name of ['backlog', 'run', 'loop']) {
     const entry = COMMANDS.find(candidate => candidate.names.includes(name));
     expect(entry).toBeDefined();
-    (await entry!.loader())(program);
+    (await entry!.loader())(program, { ports: inMemoryRuntimePorts() });
   }
   return program;
 }

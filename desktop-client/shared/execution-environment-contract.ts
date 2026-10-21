@@ -1,5 +1,5 @@
 import { normalizeTmuxSessionName } from "./tmux-session.js";
-import type { AfkResourceKind, AfkResourceStatus } from "@afk/execution/domain/runtime/resource";
+import type { AfkResourceKind, AfkResourceStatus } from "@afk/core";
 
 /**
  * Shared Application execution read model (ADR-0019 §1).

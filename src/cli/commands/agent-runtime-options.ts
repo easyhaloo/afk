@@ -7,7 +7,7 @@ import {
   type CodexRuntimeOverrides,
   type CodexTransport,
 } from '@afk/execution/domain/agents/codex-runtime';
-import type { WorkflowConfig } from '@afk/execution/infrastructure/config/manager';
+import type { WorkflowConfig } from '@afk/application';
 
 export interface AgentRuntimeCommandOptions {
   agentTransport?: CodexTransport;

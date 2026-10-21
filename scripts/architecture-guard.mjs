@@ -90,7 +90,10 @@ const nodeBuiltins = new Set([
 ]);
 const domGlobals = ['document', 'window', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'Element'];
 const desktopRoot = option('--desktop-client-root', resolve(new URL('../desktop-client/', import.meta.url).pathname));
-const repoRoot = resolve(new URL('../', import.meta.url).pathname);
+// The repository the source root belongs to. It is the parent of the
+// source root, so a check run against a fixture tree looks at that tree's
+// own packages rather than at the ones this script happens to sit next to.
+const repoRoot = resolve(root, '..');
 const buildOutputDirectories = new Set(['dist', 'dist-electron', 'node_modules', 'coverage', 'release', 'test-results', 'screenshots']);
 const backlogStateKeys = new Set(['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked']);
 const requiredStateMappingKeys = ['in_progress', 'verification', 'merge_ready'];
@@ -405,6 +408,52 @@ function isWithin(child, parent) {
  * between them.
  */
 const afkSpawnPattern = /\b(?:spawn|spawnSync|exec|execFile|execFileSync|execSync)\s*\(\s*['"`]afk['"`]/;
+
+/**
+ * The entry points reach the execution runtime through its ports.
+ *
+ * The runtime's adapters are implementations: they know which class to
+ * construct, which file to read, which process to signal. A command, a
+ * view or a service that reaches for one of them has taken that knowledge
+ * on, and the CLI and the desktop can then drift apart on what the
+ * configuration or the resource registry means. The ports are what an
+ * entry point should reach for; a composition root is what says what is
+ * behind a port.
+ *
+ * Test files are exempt, and that is a decision rather than an oversight:
+ * a test that exercises an adapter against a real file needs the adapter,
+ * and a test that exercises a command needs a port. The exemption is
+ * narrow - only files named as tests - so renaming a source file to look
+ * like a test is the only way through it.
+ */
+const runtimeAdapterImportPattern = /^@afk\/execution\/infrastructure(?:\/|$)/;
+// The composition roots, named by where they sit in their own tree: the
+// CLI's is the root tree's, the desktop's is the desktop tree's. Naming
+// them by tree rather than by repository keeps the rule honest when the
+// guard is pointed at a fixture that has trees of its own.
+const runtimeCompositionRootsInSourceTree = new Set(['cli/composition-root.ts']);
+const runtimeCompositionRootsInDesktopTree = new Set(['electron/composition-root.ts']);
+
+function isRuntimeCompositionRoot(fullPath) {
+  const fromSourceTree = relative(root, fullPath).split(sep).join('/');
+  if (runtimeCompositionRootsInSourceTree.has(fromSourceTree)) return true;
+  const fromDesktopTree = relative(desktopRoot, fullPath).split(sep).join('/');
+  return runtimeCompositionRootsInDesktopTree.has(fromDesktopTree);
+}
+
+function checkRuntimeAdapterImports(fullPath) {
+  if (isTestFile(fullPath)) return;
+  if (isRuntimeCompositionRoot(fullPath)) return;
+  const source = stripComments(readFileSync(fullPath, 'utf8'));
+  for (const match of source.matchAll(importPattern)) {
+    const specifier = match[2];
+    if (match[1] === '`' && specifier.includes('${')) continue;
+    if (!runtimeAdapterImportPattern.test(specifier)) continue;
+    addViolation(
+      `${fullPath}: must not import the execution runtime's adapter '${specifier}'; reach for the port in @afk/application and let a composition root choose the implementation`,
+    );
+  }
+}
 
 function checkDesktopImports(fullPath) {
   const source = stripComments(readFileSync(fullPath, 'utf8'));
@@ -760,7 +809,10 @@ function checkBuildApprovals() {
 }
 
 walk(root);
-for (const sourceFile of sourceFiles) checkFile(sourceFile);
+for (const sourceFile of sourceFiles) {
+  checkFile(sourceFile);
+  checkRuntimeAdapterImports(sourceFile);
+}
 // The desktop client is a separate source tree that the layering rules above
 // do not govern, but it is exactly where a second copy of a shared mapping
 // table tends to appear, so it feeds the duplicate-mapping rule only.
@@ -771,6 +823,7 @@ if (existsSync(desktopRoot) && statSync(desktopRoot).isDirectory()) {
     recordStateMappings(sourceFile, desktopSource);
     recordFunctionBodies(desktopSource, sourceFile);
     checkDesktopImports(sourceFile);
+    checkRuntimeAdapterImports(sourceFile);
   }
 }
 checkStateMappingDuplicates();

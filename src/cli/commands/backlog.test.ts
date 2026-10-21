@@ -17,14 +17,16 @@ import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { registerLoopCommands } from './loop.js';
 import type { BacklogItem, QABacklogProvider } from '@afk/application';
+import type { CommandRegistrationContext } from '../command-registry.js';
 import type { ProviderCatalog } from '@afk/application';
 import { emitSuccess, emitFailure } from '../json-output.js';
-import * as providerFactory from '@afk/infrastructure';
+import * as providerFactory from '@afk/infrastructure';import { inMemoryRuntimePorts } from '../../../tests/support/runtime-ports.js';
 
-function commandTree(register: (program: Command) => void): Command {
+
+function commandTree(register: (program: Command, context: CommandRegistrationContext) => void): Command {
   const program = new Command();
   program.name('afk').exitOverride();
-  register(program);
+  register(program, { ports: inMemoryRuntimePorts() });
   return program;
 }
 
@@ -149,7 +151,7 @@ describe('explicit backlog adoption', () => {
   it.each(invalidAdoptionScopes)('rejects invalid or missing adoption scope before provider creation: %j', async flags => {
     const argv = ['node', 'afk', 'backlog', 'adopt', ...flags, '--json'];
     const program = new Command().name('afk').exitOverride();
-    registerBacklogCommands(program, { argv });
+    registerBacklogCommands(program, { argv, ports: inMemoryRuntimePorts() });
     const factory = vi.spyOn(providerFactory, 'createManagementProviders');
     const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
     const previousExitCode = process.exitCode;
@@ -340,7 +342,7 @@ describe('json-output helpers', () => {
     const originalWrite = process.stdout.write.bind(process.stdout);
     const originalError = process.stderr.write.bind(process.stderr);
     const previousExitCode = process.exitCode;
-    registerBacklogCommands(program, { argv: ['node', 'afk', 'backlog', 'show', '--json'] });
+    registerBacklogCommands(program, { argv: ['node', 'afk', 'backlog', 'show', '--json'], ports: inMemoryRuntimePorts() });
     process.stdout.write = (chunk: string | Uint8Array): boolean => {
       captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
       return true;

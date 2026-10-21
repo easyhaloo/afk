@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
+import { inMemoryRuntimePorts } from '../support/runtime-ports.js';
 
 /**
  * The platforms a work item can come from are a vocabulary with one
@@ -33,7 +34,7 @@ vi.mock("@afk/infrastructure", async importOriginal => ({
 
 function adoptCommand(): Command {
   const program = new Command().exitOverride();
-  registerBacklogCommands(program);
+  registerBacklogCommands(program, { ports: inMemoryRuntimePorts() });
   const backlog = program.commands.find(command => command.name() === "backlog");
   return backlog?.commands.find(command => command.name() === "adopt") as Command;
 }
@@ -49,7 +50,7 @@ describe("The command answers with the platforms the application publishes", () 
   it("accepts every platform the application declares", async () => {
     for (const value of WORK_ITEM_PLATFORMS) {
       const program = new Command().exitOverride();
-      registerBacklogCommands(program);
+      registerBacklogCommands(program, { ports: inMemoryRuntimePorts() });
       let failure: unknown;
       try {
         await program.parseAsync(['node', 'afk', 'backlog', 'adopt', '--id', '42', '--project', 'acme/api', '--platform', value]);

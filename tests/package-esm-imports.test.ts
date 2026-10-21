@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMMANDS } from '../src/cli/command-registry.js';
 
@@ -25,6 +25,15 @@ const PUBLISHED_ROOTS = [
 ];
 
 const RELATIVE_SPECIFIER = /(?:from\s+|import\s*\(\s*|import\s+)['"](\.[^'"]*)['"]/g;
+
+/** The packages that are published, and the manifest that declares them. */
+const PUBLISHED_MANIFESTS = [
+  'packages/afk-core',
+  'packages/afk-application',
+  'packages/afk-infrastructure',
+  'packages/afk-execution',
+  'packages/afk-workflow-graph',
+];
 
 /** The built packages, as they are published. */
 const PUBLISHED_DISTS = [
@@ -116,3 +125,37 @@ describe('the published packages', () => {
     expect(stale).toEqual([]);
   });
 });
+
+describe('the published packages', () => {
+  it('ships every subpath it declares', () => {
+    // A declared subpath that no file backs fails at the consumer's
+    // import, not here: `@afk/infrastructure/backlog` pointed at a
+    // `dist/backlog/index.js` that no source ever produced, and nobody
+    // imports it, so nothing noticed.
+    const missing: string[] = [];
+
+    for (const manifest of PUBLISHED_MANIFESTS) {
+      const directory = fileURLToPath(new URL(`../${manifest}/`, import.meta.url));
+      const data = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')) as {
+        exports?: Record<string, unknown>;
+      };
+      for (const [subpath, node] of Object.entries(data.exports ?? {})) {
+        for (const target of exportTargets(node)) {
+          if (target.includes('*')) continue;
+          if (!existsSync(resolve(directory, target))) missing.push(`${manifest} ${subpath} -> ${target}`);
+        }
+      }
+    }
+
+    expect(missing).toEqual([]);
+  });
+});
+
+/** The file targets of one exports entry. */
+function exportTargets(node: unknown): string[] {
+  if (typeof node === 'string') return [node];
+  if (!node || typeof node !== 'object') return [];
+  const targets: string[] = [];
+  for (const value of Object.values(node as Record<string, unknown>)) targets.push(...exportTargets(value));
+  return targets;
+}

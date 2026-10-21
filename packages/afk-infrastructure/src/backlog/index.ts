@@ -5,6 +5,10 @@
  * in `@afk/application` as `backlog/model.ts`. This directory holds the
  * implementations behind that Port: the platform providers, the tracker
  * adapter, the claim strategy and the filesystem-backed claim lock.
+ *
+ * It is the directory's index, like `provider/`, `io/` and `observability/`:
+ * the `./backlog` subpath of this package is declared, and it has to point
+ * at something.
  */
 export * from './claim-strategy.js';
 export * from './filesystem-claim-lock.js';

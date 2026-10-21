@@ -190,4 +190,24 @@ describe('GitBranchProvider', () => {
     expect(sha).toBe((await git.revparse(['HEAD'])).trim());
     expect((await git.raw(['rev-list', '--parents', '-n', '1', 'HEAD'])).trim().split(' ')).toHaveLength(3);
   });
+
+  it('commits the agent\'s work without the files AFK leaves in the worktree', async () => {
+    const { repoPath } = await repository();
+    const provider = new GitBranchProvider(repoPath);
+    const handle = await provider.createBranch(item(), 'main');
+    const worktreeGit = simpleGit(handle.worktreePath);
+
+    await writeFile(join(handle.worktreePath, 'feature.ts'), 'export const done = true;\n');
+    // The completion signal the agent writes, and the handoff documents
+    // the runner writes. Neither is the user's work.
+    await writeFile(join(handle.worktreePath, '.afk-signal.json'), '{"type":"goal_complete"}\n');
+    await mkdir(join(handle.worktreePath, '.afk', 'handoff'), { recursive: true });
+    await writeFile(join(handle.worktreePath, '.afk', 'handoff', 'handoff-42-1.md'), 'handoff\n');
+
+    const sha = await provider.commit(handle.worktreePath, 'QA: verify backlog 42');
+
+    expect(sha).not.toBe('');
+    const committed = await worktreeGit.raw(['show', '--name-only', '--format=', sha]);
+    expect(committed.split('\n').map(line => line.trim()).filter(Boolean)).toEqual(['feature.ts']);
+  });
 });

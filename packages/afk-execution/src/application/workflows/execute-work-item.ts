@@ -8,6 +8,7 @@ import { loadWorkItemExecution, type WorkItemExecution } from '@afk/application'
 import { WorkflowRunner } from '../workflow-engine.js';
 import { QARunner } from '../modules/qa-runner.js';
 import { createGlobalWorkItemCatalogs, createTracker } from '@afk/infrastructure';
+import { excludeAfkArtefacts } from '@afk/infrastructure';
 import { collectGlobalWorkItemInventory } from '@afk/application';
 import { createProviderBundle, type ProviderBundle, type ManagementProviderBundle } from '@afk/infrastructure';
 import { ManagementBacklogProvider } from '@afk/infrastructure';
@@ -269,6 +270,9 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
   const manifest = await (dependencies.readManifest ?? readExecutionManifest)(input.manifestPath, workItemId);
   const directory = join(manifest.workspaceRoot, '.afk', 'executions');
   await mkdir(directory, { recursive: true });
+  // The journal lands in the user's workspace. Keep it - and the rest of
+  // AFK's working files - out of the commits made there.
+  await excludeAfkArtefacts(manifest.workspaceRoot).catch(() => { /* not a repository */ });
   const lockPath = join(directory, `${encodeWorkItemIdForPath(workItemId)}.lock`);
   const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
   try {

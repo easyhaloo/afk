@@ -468,6 +468,23 @@ export type BranchStrategy =
 
 必须明确：session fork 不等于 branch fork，branch fork 不等于 sandbox fork。并行步骤必须显式使用独立 branch/worktree。
 
+### 9.1 AFK 在仓库里留下什么
+
+AFK 在用户的仓库里工作，所以它会把自己的文件留在那里：创建的 worktree
+（`<repo>/.worktrees/`）、执行流水与交接文档（`<repo>/.afk/`）、agent 写的
+完成信号（`<repo>/.afk-signal.json`），以及本地 Claude Code 配置
+（`<repo>/.claude/settings.local.json`）。
+
+这些都不是用户的工作，而 `git add -A` 会把它们一起带上 —— AFK 在提交 agent
+的工作时自己就跑 `git add -A`。其中 worktree 最糟：它会被当成「嵌入式仓库」
+提交，变成别人拉不到的 gitlink。
+
+这份产物的唯一清单在
+`packages/afk-infrastructure/src/git/repo-exclude.ts`，并被写进仓库自己的
+exclude 文件（`.git/info/exclude`）。该文件只属于本地、永远不会被提交，所以
+用户的历史保持干净，又不用动他们自己跟踪的文件 —— 而且 git 对该仓库的每个
+检出都读它，所以写一次就同时覆盖主检出与各个 worktree。
+
 ## 10. 工作流模板
 
 模板使用 YAML 描述步骤，prompt 独立存储：

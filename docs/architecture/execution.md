@@ -476,6 +476,27 @@ Strategy responsibilities:
 
 Must be explicit: session fork does not equal branch fork, branch fork does not equal sandbox fork. Parallel steps must explicitly use independent branch/worktree.
 
+### 9.1 What AFK leaves in the repository
+
+AFK works inside the user's repository, so it leaves its own files there:
+the worktrees it creates (`<repo>/.worktrees/`), the execution journal and
+handoff documents (`<repo>/.afk/`), the completion signal the agent writes
+(`<repo>/.afk-signal.json`), and the local Claude Code settings
+(`<repo>/.claude/settings.local.json`).
+
+None of them are the user's work, and `git add -A` picks them up — AFK runs
+`git add -A` itself when it commits the agent's work. The worktree in
+particular would be committed as an embedded repository: a gitlink nobody
+else can fetch.
+
+The one list of these artefacts lives in
+`packages/afk-infrastructure/src/git/repo-exclude.ts`, and it is written
+into the repository's own exclude file (`.git/info/exclude`). That file is
+local to the repository and is never committed, so the user's history stays
+clean without touching a file they track — and because git reads it for
+every checkout of the repository, one write covers the main checkout and
+the worktrees alike.
+
 ## 10. Workflow Template
 
 Templates use YAML to describe steps, with prompts stored separately:

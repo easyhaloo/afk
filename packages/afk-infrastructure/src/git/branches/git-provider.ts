@@ -5,6 +5,8 @@ import type { BacklogItem } from '@afk/application';
 import type { BranchProvider, ProviderBranchHandle } from './provider.js';
 import { strategyForConfig } from '../../branches/registry.js';
 import type { BranchHandle as StrategyHandle } from '../../branches/types.js';
+import { excludeAfkArtefacts } from '../repo-exclude.js';
+import { logger } from '../../io/index.js';
 
 export class GitBranchProvider implements BranchProvider {
   private readonly handles = new Map<string, StrategyHandle>();
@@ -12,6 +14,7 @@ export class GitBranchProvider implements BranchProvider {
   constructor(private readonly repoRoot: string) {}
 
   async createBranch(item: BacklogItem, baseBranch: string): Promise<ProviderBranchHandle> {
+    await this.protectRepo();
     const git = simpleGit(this.repoRoot);
     if (await refExists(git, item.branchName)) {
       const config = {
@@ -35,6 +38,7 @@ export class GitBranchProvider implements BranchProvider {
   }
 
   async createVerificationWorktree(item: BacklogItem, baseBranch: string): Promise<ProviderBranchHandle> {
+    await this.protectRepo();
     const git = simpleGit(this.repoRoot);
     const verificationBase = await this.resolveVerificationBaseBranch(git, baseBranch);
     const config = { type: 'named' as const, branch: `${item.branchName}-qa`, baseBranch: verificationBase };
@@ -77,6 +81,21 @@ export class GitBranchProvider implements BranchProvider {
     const config = { type: 'named' as const, branch: handle.branch };
     await strategyForConfig(config).cleanup(simpleGit(this.repoRoot), config, handle, { force: true });
     this.handles.delete(worktreePath);
+  }
+
+  /**
+   * Keep AFK's own files out of the repository's commits.
+   *
+   * AFK writes its working files into the repository it works in, and
+   * `git add -A` - which this provider runs itself when it commits the
+   * agent's work - would put them in the user's branch and in the change
+   * request. The exclusion is written once per repository and covers the
+   * main checkout and the worktrees alike.
+   */
+  private async protectRepo(): Promise<void> {
+    await excludeAfkArtefacts(this.repoRoot).catch(error =>
+      logger.warn({ repoRoot: this.repoRoot, err: error }, 'could not keep AFK artefacts out of the repository commits'),
+    );
   }
 
   private async resolveBaseBranch(branchName: string, fallback: string): Promise<string> {

@@ -1,7 +1,7 @@
 import { simpleGit, SimpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { gitBranchDelete, gitWorktreeRemove, logger } from '@afk/infrastructure';
+import { gitBranchDelete, gitWorktreeRemove, excludeAfkArtefacts, logger } from '@afk/infrastructure';
 
 export type MarkerStatus = 'crashed' | 'success';
 export type WorktreeStatus = 'active' | 'completed' | 'failed';
@@ -70,6 +70,12 @@ export class WorktreeManager {
 
     const worktree: Worktree = { iid, path, branch, createdAt: new Date(), status: 'active' };
     await this.saveWorktree(worktree);
+    // The worktree and AFK's own files live inside the repository the
+    // user works in. `git add -A` would otherwise pick them up - and the
+    // worktree would be committed as an embedded repository.
+    await excludeAfkArtefacts(this.repoPath).catch(error =>
+      logger.warn({ repoPath: this.repoPath, err: error }, 'could not keep AFK artefacts out of the repository commits'),
+    );
     return worktree;
   }
 

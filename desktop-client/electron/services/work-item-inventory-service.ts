@@ -1,3 +1,4 @@
+import { RUNTIME_STALE_AFTER_MS } from "@afk/application";
 import type { WorkItemPlatform } from "@afk/application";
 import type { WorkItemApplicationAdapter } from "../adapters/work-item-application-adapter.js";
 import {
@@ -17,7 +18,7 @@ export function createWorkItemInventoryService(deps: WorkItemInventoryServiceDep
   const cache = new Map<string, WorkItemInventoryResult>();
   const syncedAt = new Map<string, number>();
   const refreshes = new Map<string, Promise<WorkItemInventoryResult>>();
-  const staleAfterMs = deps.staleAfterMs ?? 5 * 60 * 1000;
+  const staleAfterMs = deps.staleAfterMs ?? RUNTIME_STALE_AFTER_MS;
 
   return {
     async list(rawOptions?: WorkItemInventoryOptions, force = false): Promise<WorkItemInventoryResult> {

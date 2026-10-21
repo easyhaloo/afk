@@ -6,7 +6,16 @@ const CACHE_DIR = path.join(os.homedir(), '.afk');
 const CACHE_FILE = path.join(CACHE_DIR, 'board-cache.json');
 
 const LIST_TTL_MS = 5 * 60 * 1000;
-const DETAIL_TTL_MS = 60 * 1000;
+
+/**
+ * How long a cached project detail stays fresh.
+ *
+ * The disk cache and the memory cache in front of it are one cache with
+ * two tiers, and the tier in front used to carry its own copy of the
+ * window. A minute in one and two minutes in the other would serve a
+ * stale detail for a minute longer than the cache says it does.
+ */
+export const DETAIL_TTL_MS = 60 * 1000;
 
 interface ListEntry<T> {
   items: T[];

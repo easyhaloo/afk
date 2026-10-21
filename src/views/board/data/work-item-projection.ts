@@ -1,3 +1,4 @@
+import { RUNTIME_STALE_AFTER_MS } from '@afk/application';
 import type { BacklogItem } from '@afk/application';
 import type {
   ActiveTaskRuntimeRecord,
@@ -28,7 +29,6 @@ export interface WorkItemProjectionInput {
   staleAfterMs?: number;
 }
 
-const DEFAULT_STALE_AFTER_MS = 5 * 60 * 1000;
 
 export function projectWorkItems({
   backlogs,
@@ -36,7 +36,7 @@ export function projectWorkItems({
   archive = [],
   workspace,
   now = Date.now(),
-  staleAfterMs = DEFAULT_STALE_AFTER_MS,
+  staleAfterMs = RUNTIME_STALE_AFTER_MS,
 }: WorkItemProjectionInput): WorkItemProjection[] {
   const backlogById = new Map<string, BacklogProjectionItem>();
   const ids: string[] = [];

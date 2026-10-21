@@ -17,6 +17,7 @@ import {
   readDetail,
   writeDetail,
   clearDetailCache as clearDiskDetailCache,
+  DETAIL_TTL_MS,
 } from '../cache.js';
 import {
   loadBacklogViewModels,
@@ -26,7 +27,6 @@ import {
 import type { TaskRuntimeManager } from '@afk/execution/application/runtime/task-runtime';
 
 const PER_PAGE = 50;
-const DETAIL_TTL_MS = 60_000;
 
 /** Keep the provider call separately testable from React lifecycle code. */
 export function loadDashboardBacklogs(

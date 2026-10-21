@@ -326,3 +326,51 @@ describe('architecture guard desktop client boundaries', () => {
     expect(output).toContain('Architecture guard passed');
   });
 });
+
+describe('architecture guard desktop renderer boundaries', () => {
+  function rendererFixture(source: string) {
+    const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-renderer-'));
+    directories.push(directory);
+    const root = join(directory, 'src');
+    const desktop = join(directory, 'desktop-client');
+    mkdirSync(join(root, 'cli'), { recursive: true });
+    mkdirSync(join(desktop, 'shared'), { recursive: true });
+    writeFileSync(join(root, 'cli', 'entry.ts'), 'export const current = true;\n');
+    // Modules outside the renderer's directories: one reads files, one
+    // does not. The renderer reaches them through the shared contract.
+    writeFileSync(join(desktop, 'heavy.ts'), "import { readFileSync } from 'node:fs';\nexport const read = readFileSync;\n");
+    writeFileSync(join(desktop, 'pure.ts'), 'export const read = (value: string) => value;\n');
+    writeFileSync(join(desktop, 'shared', 'contract.ts'), source);
+    const baseline = join(directory, 'baseline.json');
+    writeFileSync(baseline, JSON.stringify({ legacyFiles: [], legacyImports: {}, legacyPatterns: {} }));
+
+    const run = () => {
+      try {
+        return execFileSync(process.execPath, [
+          guard, '--root', root, '--baseline', baseline,
+          '--desktop-client-root', desktop,
+        ], { encoding: 'utf8' });
+      } catch (error) {
+        return (error as { stderr: Buffer }).stderr.toString();
+      }
+    };
+    return { run };
+  }
+
+  it('rejects a renderer that loads a module reaching a node builtin', () => {
+    const output = rendererFixture("import { read } from '../heavy.js';\nexport const value = read;\n").run();
+    expect(output).toContain('the desktop renderer must not load node builtin');
+  });
+
+  it('accepts a renderer that only names a type from that module', () => {
+    // A type is erased at compile time, so the renderer never loads the
+    // module and never reaches the filesystem.
+    const output = rendererFixture("import type { read } from '../heavy.js';\nexport type Value = typeof read;\n").run();
+    expect(output).toContain('Architecture guard passed');
+  });
+
+  it('accepts a renderer that loads a module with no node builtin', () => {
+    const output = rendererFixture("import { read } from '../pure.js';\nexport const value = read;\n").run();
+    expect(output).toContain('Architecture guard passed');
+  });
+});

@@ -4,6 +4,7 @@ import { join, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { RUNTIME_STALE_AFTER_MS } from '@afk/application';
+import { TASK_RUNTIME_PHASES, type TaskRuntimePhase } from '../../domain/runtime/phase.js';
 import {
   AGENT_AUTHS,
   AGENT_TRANSPORTS,
@@ -13,7 +14,14 @@ import {
   type AgentTransport,
 } from '@afk/core';
 
-export type TaskRuntimePhase = 'implementing' | 'verifying';
+/**
+ * The phases a task runtime record can be in.
+ *
+ * The rule lives in the domain layer, where the desktop's renderer can
+ * read it too, and the record module names it from there.
+ */
+export { TASK_RUNTIME_PHASES } from '../../domain/runtime/phase.js';
+export type { TaskRuntimePhase } from '../../domain/runtime/phase.js';
 export type TaskRuntimeStatus = 'running' | 'completed' | 'blocked' | 'failed';
 export type VisibleTaskRuntimeStatus = TaskRuntimeStatus | 'stale';
 export type TaskRuntimeActivityKind = 'agent' | 'tool' | 'test' | 'state' | 'qa' | 'error';
@@ -516,7 +524,7 @@ function isTaskRuntimeRecord(value: unknown): value is TaskRuntimeRecord {
   const record = value as Partial<TaskRuntimeRecord>;
   return typeof record.runId === 'string'
     && typeof record.backlogId === 'string'
-    && (record.phase === 'implementing' || record.phase === 'verifying')
+    && (record.phase !== undefined && (TASK_RUNTIME_PHASES as readonly string[]).includes(record.phase))
     && (record.status === 'running' || record.status === 'completed' || record.status === 'blocked' || record.status === 'failed')
     // The three environment fields are the ones history does not always
     // know; a record that carries them must still carry them honestly.

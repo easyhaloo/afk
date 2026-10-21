@@ -1,6 +1,7 @@
 import type { AgentExecutionMode } from '@afk/core';
 import type { BacklogState } from '@afk/application';
 import type { TaskRuntimeActivity, TaskRuntimeStatus } from '@afk/execution/application/runtime/task-runtime';
+import type { TaskRuntimePhase } from '@afk/execution/domain/runtime/phase';
 
 export type TaskActivity = Omit<TaskRuntimeActivity, 'at'> & { at: Date };
 
@@ -21,7 +22,7 @@ export interface Task {
   iid?: string;
   runId: string;
   title: string;
-  phase: 'implementing' | 'verifying';
+  phase: TaskRuntimePhase;
   /**
    * The environment a run published. A record written before these fields
    * existed does not know them, and the board does not guess.

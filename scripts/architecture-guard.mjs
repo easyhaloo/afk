@@ -424,6 +424,103 @@ function checkDesktopImports(fullPath) {
   }
 }
 
+/**
+ * The desktop's renderer runs in a browser. A module the renderer loads
+ * that reaches a node builtin cannot be bundled: the bundler
+ * externalizes the builtin and the build fails on the first use of it.
+ *
+ * The desktop's shared contract is loaded by both sides of the process
+ * seam, so a shared vocabulary that lives in a module which reads files
+ * drags the filesystem into the renderer. The vocabulary belongs in a
+ * module the renderer can load - the pure part of a package - and this
+ * rule is what says so before the bundler does.
+ */
+function isNodeBuiltinSpecifier(specifier) {
+  if (specifier.startsWith('node:')) return true;
+  const name = specifier.startsWith('node:') ? specifier.slice(5) : specifier;
+  return nodeBuiltins.has(name.split('/')[0]);
+}
+
+/**
+ * The imports of a module that survive compilation.
+ *
+ * `import type` and a named import whose every binding is `type` are
+ * erased, so a module that only names a type never loads. The two
+ * forms are the difference between a shared type and a shared value.
+ */
+function runtimeImportSpecifiers(source) {
+  const specifiers = [];
+  for (const match of source.matchAll(/import\s+([\s\S]*?)\s+from\s+(['"`])([^'"`]+)\2\s*;?/g)) {
+    const clause = match[1].trim();
+    if (/^type\b/.test(clause)) continue;
+    const named = clause.match(/\{([\s\S]*?)\}/);
+    if (named) {
+      const bindings = named[1].split(',').map(binding => binding.trim()).filter(Boolean);
+      if (bindings.length > 0 && bindings.every(binding => /^type\s/.test(binding))) continue;
+    }
+    specifiers.push(match[3]);
+  }
+  for (const match of source.matchAll(/import\s+(['"`])([^'"`]+)\1\s*;?/g)) {
+    specifiers.push(match[2]);
+  }
+  return specifiers;
+}
+
+/** The source file a package specifier names, so the rule reads source. */
+function packageSourceFile(specifier) {
+  const match = specifier.match(/^@afk\/([a-z-]+)(?:\/(.*))?$/);
+  if (!match) return null;
+  const packageRoot = join(repoRoot, 'packages', `afk-${match[1]}`);
+  const sourceRoot = join(packageRoot, 'src');
+  if (match[2] === undefined) {
+    const entry = join(sourceRoot, 'index.ts');
+    return existsSync(entry) ? entry : null;
+  }
+  const base = join(sourceRoot, match[2]);
+  const candidates = [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')];
+  return candidates.find(candidate => existsSync(candidate) && statSync(candidate).isFile()) ?? null;
+}
+
+function resolveSourceImport(fromFile, specifier) {
+  if (specifier.startsWith('.')) return resolveImport(fromFile, specifier);
+  return packageSourceFile(specifier);
+}
+
+const builtinReachCache = new Map();
+
+/** The first node builtin a module reaches, or null when it reaches none. */
+function reachesNodeBuiltin(file, seen = new Set()) {
+  if (builtinReachCache.has(file)) return builtinReachCache.get(file);
+  if (seen.has(file)) return null;
+  seen.add(file);
+  const source = stripComments(readFileSync(file, 'utf8'));
+  let hit = null;
+  for (const specifier of runtimeImportSpecifiers(source)) {
+    if (isNodeBuiltinSpecifier(specifier)) {
+      hit = { file, specifier };
+      break;
+    }
+    const resolved = resolveSourceImport(file, specifier);
+    if (!resolved) continue;
+    hit = reachesNodeBuiltin(resolved, seen);
+    if (hit) break;
+  }
+  builtinReachCache.set(file, hit);
+  return hit;
+}
+
+function checkDesktopRendererImports() {
+  for (const fullPath of desktopSourceFiles) {
+    if (isTestFile(fullPath)) continue;
+    const relativePath = relative(desktopRoot, fullPath).split(sep).join('/');
+    if (!relativePath.startsWith('src/') && !relativePath.startsWith('shared/')) continue;
+    const hit = reachesNodeBuiltin(fullPath);
+    if (hit) {
+      addViolation(`${fullPath}: the desktop renderer must not load node builtin '${hit.specifier}' via ${sourcePath(hit.file)}; keep a shared vocabulary in a module the renderer can load`);
+    }
+  }
+}
+
 function packageSourceRoot(packageRoot) {
   const srcRoot = join(packageRoot, 'src');
   if (existsSync(srcRoot) && statSync(srcRoot).isDirectory()) return srcRoot;
@@ -680,6 +777,7 @@ checkStateMappingDuplicates();
 checkDuplicateRules();
 checkPackageGraph();
 checkBuildApprovals();
+checkDesktopRendererImports();
 if (checkPackages) {
   for (const packageRoot of packageRoots) {
     if (!existsSync(packageRoot.path) || !statSync(packageRoot.path).isDirectory()) {

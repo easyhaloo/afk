@@ -11,6 +11,8 @@
  */
 
 import { assertExactKeys, parseRequiredString } from "./validation.js";
+import { TASK_RUNTIME_PHASES } from "@afk/execution/domain/runtime/phase";
+import type { TaskRuntimePhase } from "@afk/execution/domain/runtime/phase";
 import {
   WORK_ITEM_PLATFORMS,
   BACKLOG_STATES as APPLICATION_BACKLOG_STATES,
@@ -310,7 +312,7 @@ export type BacklogRuntimeStatus = (typeof BACKLOG_RUNTIME_STATUSES)[number];
 export type BacklogRuntimeProjection = {
   runId: string;
   status: BacklogRuntimeStatus;
-  phase: "implementing" | "verifying";
+  phase: TaskRuntimePhase;
   progress?: string;
   branch?: string;
   worktree?: string;
@@ -755,7 +757,7 @@ function parseBacklogRuntimeProjection(input: unknown): BacklogRuntimeProjection
   assertExactKeys(candidate, ["runId", "status", "phase", "progress", "branch", "worktree", "diagnosticPath", "heartbeatAt"], "runtime projection");
   if (typeof candidate.runId !== "string" || typeof candidate.heartbeatAt !== "string") throw new Error("runtime projection has invalid identity fields");
   if (!(BACKLOG_RUNTIME_STATUSES as readonly string[]).includes(candidate.status as string)) throw new Error("runtime projection has invalid status");
-  if (candidate.phase !== "implementing" && candidate.phase !== "verifying") throw new Error("runtime projection has invalid phase");
+  if (typeof candidate.phase !== "string" || !(TASK_RUNTIME_PHASES as readonly string[]).includes(candidate.phase)) throw new Error("runtime projection has invalid phase");
   for (const key of ["progress", "branch", "worktree", "diagnosticPath"] as const) {
     if (candidate[key] !== undefined && typeof candidate[key] !== "string") throw new Error(`runtime projection: ${key} is invalid`);
   }

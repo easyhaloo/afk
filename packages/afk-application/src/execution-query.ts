@@ -8,7 +8,28 @@ export interface ExecutionTimeline {
   integrity: Awaited<ReturnType<RunEventQueryPort['verify']>>;
 }
 
-export type WorkItemExecutionStatus = 'queued' | 'implementing' | 'verifying' | 'publishing' | 'awaiting_merge' | 'rework' | 'blocked' | 'failed' | 'done' | 'unknown';
+/**
+ * The states a work item execution can be in.
+ *
+ * The list is named so the query service that indexes executions reads
+ * the same answer the type gives. Writing the states down a second time
+ * meant a state the projection could produce was dropped from the
+ * index, and the run it described became invisible.
+ */
+export const WORK_ITEM_EXECUTION_STATUSES = [
+  'queued',
+  'implementing',
+  'verifying',
+  'publishing',
+  'awaiting_merge',
+  'rework',
+  'blocked',
+  'failed',
+  'done',
+  'unknown',
+] as const;
+
+export type WorkItemExecutionStatus = (typeof WORK_ITEM_EXECUTION_STATUSES)[number];
 
 export type AgentUsage = NonNullable<Extract<RunEventData, { kind: 'agent.session_recorded' }>['usage']>;
 

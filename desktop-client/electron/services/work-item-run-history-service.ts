@@ -5,6 +5,7 @@ import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/ba
 import type { createExecutionWorkspaceService } from "./execution-workspace-service.js";
 import type { createWorkItemRunStore } from "./work-item-run-store.js";
 import { isAgentExecutionMode, type AgentExecutionMode } from "@afk/core";
+import { TASK_RUNTIME_PHASES } from "@afk/execution/domain/runtime/phase";
 import { probeProcess } from "@afk/infrastructure";
 
 type HistoryDeps = {
@@ -42,7 +43,7 @@ function terminalRecord(value: unknown): value is RuntimeTerminal {
     && typeof record.providerRef === "string"
     && typeof record.workspace === "string" && path.isAbsolute(record.workspace)
     && typeof record.session === "string"
-    && (record.phase === "implementing" || record.phase === "verifying")
+    && (record.phase !== undefined && (TASK_RUNTIME_PHASES as readonly string[]).includes(record.phase))
     && typeof record.sandboxProvider === "string"
     && isAgentExecutionMode(record.executionMode)
     && typeof record.agentProvider === "string"

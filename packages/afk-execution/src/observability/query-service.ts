@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
-import { isAgentUsage, loadWorkItemExecution, type ExecutionQueryPorts, type WorkItemExecutionSummary } from '@afk/application';
+import { isAgentUsage, loadWorkItemExecution, WORK_ITEM_EXECUTION_STATUSES, type ExecutionQueryPorts, type WorkItemExecutionSummary } from '@afk/application';
 import type { EventStorePort } from '@afk/core';
 import { projectWorkItemExecution } from './work-item-execution-projection.js';
 
@@ -12,9 +12,7 @@ interface IndexedExecution {
 
 const indexName = '.execution-query-index.json';
 const indexVersion = 2;
-const executionStatuses = new Set<WorkItemExecutionSummary['status']>([
-  'queued', 'implementing', 'verifying', 'publishing', 'awaiting_merge', 'rework', 'blocked', 'failed', 'done', 'unknown',
-]);
+const executionStatuses = new Set<string>(WORK_ITEM_EXECUTION_STATUSES);
 
 export function createExecutionQueryPorts(events: EventStorePort): ExecutionQueryPorts {
   const projection = { project: projectWorkItemExecution };

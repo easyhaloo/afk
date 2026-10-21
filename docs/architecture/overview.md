@@ -204,6 +204,13 @@ in particular is waiting for someone to read the change before it is
 merged, and a loop that took it over would be merging on a person's
 behalf without their having read it.
 
+The loop also exits on its own. After each execution chain it re-reads the
+bound work item's real state from the provider: still `ready` or `rework`
+(QA sent it back) and it keeps polling; any other state (`merge_ready`,
+`done`, `blocked`, ...) means the machine has no work left and the loop
+stops. A failed read is logged and polling continues. It never exits while
+the item is `in_progress`.
+
 Merging is a person's decision, so the loop never makes it. The loop runs
 work; it does not merge work, and the provider that merges is deliberately
 not in the loop's seam: the capability is not there to be used by

@@ -50,6 +50,8 @@ export interface LoopRunnerOptions {
   statusFilePath?: string;
 }
 
+export type LoopStopReason = 'max-iterations' | 'work-left-machine' | 'stopped';
+
 export interface ChainContext {
   iid: string;
   session: string;
@@ -115,6 +117,7 @@ export class LoopRunner {
   private stopping = false;
   private stopResolve: (() => void) | null = null;
   private stopPromise?: Promise<void>;
+  private reason: LoopStopReason | undefined;
 
   // Timers
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -146,7 +149,7 @@ export class LoopRunner {
 
   /**
    * Start the loop: initial poll, then arm polling and status timers.
-   * Resolves when the loop exits (--max-iterations reached or stop() called).
+   * Resolves when the loop exits (--max-iterations reached, the work item left the machine states, or stop() called).
    */
   async start(): Promise<void> {
     if (this.running || this.stopPromise) {
@@ -203,8 +206,13 @@ export class LoopRunner {
    * Stop the loop: flip running=false, clear timers, drain in-flight up to
    * shutdownTimeoutMs, then resolve.
    */
-  stop(): Promise<void> {
+  get stopReason(): LoopStopReason | undefined {
+    return this.reason;
+  }
+
+  stop(reason: LoopStopReason = 'stopped'): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
+    this.reason = reason;
     this.stopping = true;
     this.stopPromise = this.drain();
     return this.stopPromise;
@@ -400,8 +408,25 @@ export class LoopRunner {
       this.inExecution.delete(iid);
       this.inFlight.delete(iid);
       if (this.opts.maxIterations !== undefined && this.completed >= this.opts.maxIterations) {
-        void this.stop();
+        void this.stop('max-iterations');
+      } else {
+        await this.stopWhenWorkLeftMachine(iid);
       }
+    }
+  }
+
+  /** Re-read the provider's real state after the chain ends; a failed read is not "no work left". */
+  private async stopWhenWorkLeftMachine(iid: string): Promise<void> {
+    try {
+      const { state } = await this.providers.backlog.get(iid);
+      if ((LOOP_PICKUP_STATES as readonly string[]).includes(state)) return;
+      this.emitEvent(`${iid} left machine states (state=${state}); loop exiting`);
+      void this.stop('work-left-machine');
+    } catch (error) {
+      const message = (error as Error).message;
+      this.lastError.set(iid, `state-read: ${message}`);
+      this.emitEvent(`${iid} state read failed: ${message} (continuing to poll)`);
+      logger.error({ iid, err: error }, 'post-execution state read failed');
     }
   }
 

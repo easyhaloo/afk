@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ClaudeCodeProvider } from '../../domain/agents/claude-code';
-import type { AgentCapability, AgentExecution, AgentProvider } from '../../domain/agents/types';
+import { ClaudeCodeProvider } from '../../domain/agents/claude-code.js';
+import type { AgentCapability, AgentExecution, AgentProvider } from '../../domain/agents/types.js';
 import { requireCommandAgentProvider } from './command-provider.js';
 
 describe('requireCommandAgentProvider', () => {

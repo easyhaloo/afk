@@ -12,8 +12,8 @@
  * assume cwd is the target repo. Doing it here means no other code has to
  * think about cross-project dispatch.
  */
-import { JumpProjectResolver } from '../project-resolver';
-import type { InitContext, LifecycleContext, LifecycleModule } from '../workflows/lifecycle';
+import { JumpProjectResolver } from '../project-resolver.js';
+import type { InitContext, LifecycleContext, LifecycleModule } from '../workflows/lifecycle.js';
 import { logger } from '@afk/infrastructure';
 
 export class ProjectResolverModule implements LifecycleModule {

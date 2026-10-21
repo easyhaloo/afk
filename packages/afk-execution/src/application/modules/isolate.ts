@@ -11,7 +11,7 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { IsolateManager, isolateGc } from '../isolate.js';
-import type { LifecycleContext } from '../workflows/lifecycle';
+import type { LifecycleContext } from '../workflows/lifecycle.js';
 
 export default () => ({
   name: 'isolate',

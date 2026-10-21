@@ -1,7 +1,7 @@
 import { Command, InvalidArgumentError, Option } from 'commander';
 import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
-import { getCurrentTimestamp, SIGNAL_TYPES, type Signal } from '@afk/infrastructure';
+import { getCurrentTimestamp, GOAL_COMPLETE_RESULTS, SIGNAL_TYPES, type GoalCompleteResult, type Signal } from '@afk/infrastructure';
 import { writeSignal, readSignal, clearSignal, waitForSignal } from '@afk/infrastructure';
 import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils.js';
 
@@ -51,15 +51,15 @@ export function registerSignalCommands(program: Command): void {
     });
 
   signal.command('qa-complete')
-    .description('Signal QA completion with a PASS or FAIL result')
-    .requiredOption('-r, --result <result>', 'Result: PASS or FAIL')
+    .description(`Signal QA completion with a ${GOAL_COMPLETE_RESULTS.join(' or ')} result`)
+    .requiredOption('-r, --result <result>', `Result: ${GOAL_COMPLETE_RESULTS.join(' or ')}`)
     .requiredOption('-s, --summary <text>', 'Summary of test results')
     .option('--tests-run <n>', 'Number of tests run', parseNonNegativeInt)
     .option('--tests-passed <n>', 'Number of tests passed', parseNonNegativeInt)
     .option('--dir <path>', 'Working directory', process.cwd())
     .action(async options => {
       try {
-        if (!['PASS', 'FAIL'].includes(options.result)) throw new Error('Result must be PASS or FAIL');
+        if (!(GOAL_COMPLETE_RESULTS as readonly string[]).includes(options.result)) throw new Error(`Result must be ${GOAL_COMPLETE_RESULTS.join(' or ')}`);
         if (options.testsPassed !== undefined && options.testsRun !== undefined && options.testsPassed > options.testsRun) {
           throw new Error('tests-passed cannot exceed tests-run');
         }
@@ -67,7 +67,7 @@ export function registerSignalCommands(program: Command): void {
           type: 'goal_complete',
           timestamp: getCurrentTimestamp(),
           kind: 'qa',
-          result: options.result as 'PASS' | 'FAIL',
+          result: options.result as GoalCompleteResult,
           summary: options.summary,
           tests_run: options.testsRun,
           tests_passed: options.testsPassed,

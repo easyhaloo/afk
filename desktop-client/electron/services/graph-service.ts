@@ -1,13 +1,13 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { generateWorkflowGraph, writeGraphCache } from "@afk/execution";
+import { generateWorkflowGraph, writeGraphCache, WORKFLOW_GRAPH_FORMATS } from "@afk/execution";
 import type { WorkflowGraphGenerateRequest, WorkflowGraphGenerateResult, WorkflowGraphStatus } from '../../shared/ipc-contract.js';
 import { validateWorkflowGraphTemplateId } from '../security/graph-validation.js';
 
 function validateRequest(request: WorkflowGraphGenerateRequest): void {
   if (!request.workspace || path.isAbsolute(request.workspace) === false) throw new Error('workspace must be an absolute path');
   validateWorkflowGraphTemplateId(request.templateId);
-  if (request.format && request.format !== 'json' && request.format !== 'archify-json') throw new Error('unsupported graph format');
+  if (request.format && !(WORKFLOW_GRAPH_FORMATS as readonly string[]).includes(request.format)) throw new Error('unsupported graph format');
 }
 
 export class WorkflowGraphService {

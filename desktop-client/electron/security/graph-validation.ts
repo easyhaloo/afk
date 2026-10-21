@@ -1,4 +1,5 @@
 import path from "node:path";
+import { WORKFLOW_GRAPH_FORMATS } from "@afk/execution";
 import type { WorkflowGraphGenerateRequest, WorkflowGraphFormat } from "../../shared/ipc-contract.js";
 
 const templateIdPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -15,8 +16,8 @@ export function validateWorkflowGraphTemplateId(value: unknown): string {
 
 function validateWorkflowGraphFormat(value: unknown): WorkflowGraphFormat | undefined {
   if (value === undefined) return undefined;
-  if (value !== "json" && value !== "archify-json") throw new Error("unsupported workflow graph format");
-  return value;
+  if (typeof value !== "string" || !(WORKFLOW_GRAPH_FORMATS as readonly string[]).includes(value)) throw new Error("unsupported workflow graph format");
+  return value as WorkflowGraphFormat;
 }
 
 export function parseWorkflowGraphGenerateRequest(value: unknown): WorkflowGraphGenerateRequest {

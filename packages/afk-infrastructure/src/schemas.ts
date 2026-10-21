@@ -1,10 +1,21 @@
 import { z } from 'zod';
 
+/**
+ * The results a QA signal can carry.
+ *
+ * The list is named so the signal schema and the command that writes a
+ * QA signal read the same answer. Writing the results down in each of
+ * them meant the command refused a result the signal file accepted.
+ */
+export const GOAL_COMPLETE_RESULTS = ['PASS', 'FAIL'] as const;
+
+export type GoalCompleteResult = (typeof GOAL_COMPLETE_RESULTS)[number];
+
 export const GoalCompleteSignalSchema = z.object({
   type: z.literal('goal_complete'),
   timestamp: z.string().datetime(),
   kind: z.enum(['task', 'qa', 'ac_verification']).optional(),
-  result: z.enum(['PASS', 'FAIL']).optional(),
+  result: z.enum(GOAL_COMPLETE_RESULTS).optional(),
   sha: z.string().optional(),
   summary: z.string().min(1, 'Summary is required'),
   tests_run: z.number().int().nonnegative().optional(),

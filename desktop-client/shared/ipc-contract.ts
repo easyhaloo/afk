@@ -194,7 +194,14 @@ export type AppearancePreferences = {
   theme: "light" | "dark";
 };
 
-export type WorkflowGraphFormat = "json" | "archify-json";
+/**
+ * The shapes a workflow graph can be written in.
+ *
+ * The type comes from the execution package that writes the graph, so the
+ * desktop's wire contract cannot offer a shape the writer would refuse.
+ */
+import type { WorkflowGraphFormat } from "@afk/execution/application/visualizations/workflow-graph";
+export type { WorkflowGraphFormat };
 
 export type WorkflowGraphDiagnostic = {
   severity: "info" | "warning" | "error";

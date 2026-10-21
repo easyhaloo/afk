@@ -10,5 +10,5 @@
 export { executeWorkItem, reconcileWorkItemMerge } from './application/workflows/execute-work-item.js';
 export { LoopRunner } from './application/modules/loop-runner.js';
 export { WorkflowRunner } from './application/workflow-engine.js';
-export { generateWorkflowGraph } from './application/visualizations/workflow-graph.js';
+export { generateWorkflowGraph, WORKFLOW_GRAPH_FORMATS } from './application/visualizations/workflow-graph.js';
 export { writeGraphCache } from './application/visualizations/graph-cache.js';

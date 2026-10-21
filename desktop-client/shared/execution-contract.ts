@@ -1,6 +1,7 @@
 import { parseWorkItemId, type WorkItemId } from "./backlog-contract.js";
 import { assertExactKeys, parseObject, parseRequiredString } from "./validation.js";
 import { RUNTIME_HEALTH_STATES } from "@afk/application";
+import { isWorkflowStepKind } from "@afk/core";
 import type { RuntimeHealth, WorkflowInstance, WorkflowInstanceStep } from "@afk/application";
 import type { AgentUsage as AuditedAgentUsage, ExecutionSummary as AuditedExecutionSummary } from "@afk/application";
 import { isAgentExecutionMode, type RunPhase, type RunStatus } from "@afk/core";
@@ -245,7 +246,7 @@ export function parseWorkflowInstance(input: unknown): WorkflowInstance {
   const steps = value.steps.map(inputStep => {
     const step = parseObject(inputStep, "workflow instance step");
     assertExactKeys(step, ["id", "kind", "dependsOn", "provider", "executionMode", "status"], "workflow instance step");
-    if ((step.kind !== "agent" && step.kind !== "system") || !Array.isArray(step.dependsOn) || !["pending", "running", "succeeded", "failed", "cancelled"].includes(step.status as string)) throw new Error("workflow instance step is invalid");
+    if (!isWorkflowStepKind(step.kind) || !Array.isArray(step.dependsOn) || !["pending", "running", "succeeded", "failed", "cancelled"].includes(step.status as string)) throw new Error("workflow instance step is invalid");
     const parsed: WorkflowInstanceStep = { id: parseRequiredString(step.id, "workflow step id"), kind: step.kind, dependsOn: step.dependsOn.map(dependency => parseRequiredString(dependency, "workflow dependency")), status: step.status as WorkflowInstanceStep["status"] };
     if (step.provider !== undefined) parsed.provider = parseRequiredString(step.provider, "workflow provider");
     if (step.executionMode !== undefined) {

@@ -14,6 +14,7 @@
  * validates what it received. It therefore imports no Node built-in.
  */
 import { z } from "zod";
+import { WORKFLOW_STEP_KINDS } from "@afk/core";
 import { WORK_ITEM_AGENT_IDS, WORK_ITEM_RUN_STATUSES } from "./backlog-contract.js";
 import { AGENT_PROVIDER_IDS, WORKFLOW_RUN_STATUSES, type Snapshot } from "./ipc-contract.js";
 
@@ -42,7 +43,7 @@ const canvasTemplateNodeSchema = z.object({
 const workflowTemplateStepSummarySchema = z.object({
   id: z.string(),
   role: z.string(),
-  kind: z.enum(["agent", "system"]),
+  kind: z.enum(WORKFLOW_STEP_KINDS),
   provider: z.string().optional(),
   action: z.string().optional(),
   when: z.object({

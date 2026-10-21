@@ -17,7 +17,7 @@
  *   "模板能表达依赖、条件、执行模式、Agent、分支策略和结构化输出"
  */
 
-import { AGENT_EXECUTION_MODES, AGENT_PROVIDER_NAMES } from '@afk/core';
+import { AGENT_EXECUTION_MODES, AGENT_PROVIDER_NAMES, WORKFLOW_STEP_KINDS } from '@afk/core';
 import { z } from 'zod';
 
 // ── Branch strategy (re-exported from branches module) ─────────────────────
@@ -87,7 +87,7 @@ const PromptSchema = z.union([
 export const StepSchema = z.object({
   id: z.string().min(1).regex(/^[a-z0-9-]+$/, 'step id must be kebab-case'),
   /** Omitted means legacy v1 agent step. */
-  kind: z.enum(['agent', 'system']).optional(),
+  kind: z.enum(WORKFLOW_STEP_KINDS).optional(),
   role: z.string().min(1).optional(),
   prompt: PromptSchema.optional(),
   /** System actions are deliberately enumerated by the compiler. */

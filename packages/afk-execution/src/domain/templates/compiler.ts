@@ -28,6 +28,7 @@
  */
 
 import { computeStepGraph } from '@afk/workflow-graph';
+import type { WorkflowStepKind } from '@afk/core';
 import { deriveStepCompletionKind, deriveStepPhase } from './step-behaviour.js';
 import { TemplateError, type Step, type StepCompletionKind, type StepPhase, type WorkflowTemplate } from './types.js';
 
@@ -220,7 +221,7 @@ export interface StepSelector {
   /** The step's id. */
   id?: string;
   /** The step's kind. */
-  kind?: 'agent' | 'system';
+  kind?: WorkflowStepKind;
   /** The behaviour phase. Only an agent step has one. */
   phase?: StepPhase;
   /** The completion protocol. Only an agent step has one. */

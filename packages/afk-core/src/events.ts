@@ -1,4 +1,5 @@
 import type { AgentExecutionMode } from './agent-execution-mode.js';
+import type { WorkflowStepKind } from './workflow-steps.js';
 import type { Run, RunPhase, RunStatus } from './model.js';
 
 export type ObservationActorKind = 'cli' | 'loop' | 'agent' | 'policy' | 'human' | 'system';
@@ -69,7 +70,7 @@ export type RunEventData =
   | { kind: 'run.started' }
   | { kind: 'lease.granted'; leaseId?: string }
   | { kind: 'workspace.prepared'; branch: string; workspace: string; baseBranch: string }
-  | { kind: 'workflow.recorded'; name: string; version: 1; steps: Array<{ id: string; kind: 'agent' | 'system'; dependsOn: readonly string[]; provider?: string; executionMode?: AgentExecutionMode }> }
+  | { kind: 'workflow.recorded'; name: string; version: 1; steps: Array<{ id: string; kind: WorkflowStepKind; dependsOn: readonly string[]; provider?: string; executionMode?: AgentExecutionMode }> }
   | { kind: 'change.created'; changeId: string; targetBranch: string; url?: string }
   | { kind: 'change.merge_verified'; changeId: string; targetBranch: string; child?: boolean }
   | { kind: 'qa.started' }

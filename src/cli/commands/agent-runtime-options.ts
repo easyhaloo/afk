@@ -1,4 +1,5 @@
 import { Command, InvalidArgumentError } from 'commander';
+import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from '@afk/core';
 import type { AgentRuntimeSelection, AgentProviderName } from '@afk/execution/domain/agents/types';
 import {
   resolveCodexRuntime,
@@ -19,8 +20,8 @@ export interface AgentRuntimeCommandOptions {
 
 export function addAgentRuntimeOptions(command: Command): Command {
   return command
-    .option('--agent-transport <transport>', 'Agent transport: auto | exec | app-server', enumValue('transport', ['auto', 'exec', 'app-server']))
-    .option('--agent-auth <auth>', 'Agent authentication: auto | chatgpt | api', enumValue('auth', ['auto', 'chatgpt', 'api']))
+    .option('--agent-transport <transport>', `Agent transport: ${AGENT_TRANSPORT_CHOICES.join(' | ')}`, enumValue('transport', AGENT_TRANSPORT_CHOICES))
+    .option('--agent-auth <auth>', `Agent authentication: ${AGENT_AUTH_CHOICES.join(' | ')}`, enumValue('auth', AGENT_AUTH_CHOICES))
     .option('--agent-provider <provider>', 'Agent model provider')
     .option('--agent-profile <profile>', 'Agent host configuration profile')
     .option('--agent-app-server <endpoint>', 'Codex app-server endpoint')

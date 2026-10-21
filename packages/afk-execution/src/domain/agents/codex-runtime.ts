@@ -1,12 +1,18 @@
 import { spawn } from 'node:child_process';
+import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES, type AgentAuth, type AgentTransportChoice, type AgentAuthChoice } from '@afk/core';
 import type { AgentRuntimeSelection, CodexRuntimeSelection } from './types.js';
 
 type RuntimeObject = { [key: string]: unknown };
 import { AppServerClient } from './codex-app-server/client.js';
 import { createAppServerTransport, type AppServerTransport } from './codex-app-server/transport.js';
 
-export type CodexTransport = 'auto' | 'exec' | 'app-server';
-export type CodexAuth = 'auto' | 'chatgpt' | 'api';
+/**
+ * The transports and the authentication modes a person can choose for a
+ * codex run. The lists live in the core package, next to the recorded
+ * values they resolve to.
+ */
+export type CodexTransport = AgentTransportChoice;
+export type CodexAuth = AgentAuthChoice;
 
 export interface CodexConfig {
   transport: CodexTransport;
@@ -31,7 +37,7 @@ export interface CodexRuntimeOverrides {
 }
 
 export interface CodexHostDiagnostics {
-  auth?: Exclude<CodexAuth, 'auto'> | 'unknown';
+  auth?: AgentAuth;
   provider?: string;
 }
 
@@ -81,7 +87,7 @@ export function resolveCodexRuntime(input: {
 }
 
 export type CodexReadiness =
-  | { ready: true; auth: 'chatgpt' | 'api' | 'unknown'; provider: string }
+  | { ready: true; auth: AgentAuth; provider: string }
   | {
     ready: false;
     code: 'CLI_NOT_FOUND' | 'AUTH_INVALID' | 'PROVIDER_INVALID' | 'ENDPOINT_UNREACHABLE';
@@ -322,7 +328,7 @@ function runCodexDoctor(
 
 function parseDoctorOutput(stdout: string): {
   ready?: boolean;
-  auth?: 'chatgpt' | 'api' | 'unknown';
+  auth?: AgentAuth;
   provider?: string;
   code?: string;
 } {
@@ -409,20 +415,20 @@ function readinessFailure(
   return { ready: false, code: 'AUTH_INVALID', message: `Codex readiness probe failed: ${cause}` };
 }
 
-function normalizeAuth(value: unknown): 'chatgpt' | 'api' | 'unknown' | undefined {
+function normalizeAuth(value: unknown): AgentAuth | undefined {
   if (value === 'chatgpt' || value === 'api' || value === 'unknown') return value;
   if (value === 'api_key') return 'api';
   return undefined;
 }
 
 function assertTransport(value: string): asserts value is CodexTransport {
-  if (value !== 'auto' && value !== 'exec' && value !== 'app-server') {
+  if (!(AGENT_TRANSPORT_CHOICES as readonly string[]).includes(value)) {
     throw new Error(`Invalid Codex transport: ${value}`);
   }
 }
 
 function assertAuth(value: string): asserts value is CodexAuth {
-  if (value !== 'auto' && value !== 'chatgpt' && value !== 'api') {
+  if (!(AGENT_AUTH_CHOICES as readonly string[]).includes(value)) {
     throw new Error(`Invalid Codex auth mode: ${value}`);
   }
 }

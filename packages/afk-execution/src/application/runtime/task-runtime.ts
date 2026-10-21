@@ -4,7 +4,14 @@ import { join, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { RUNTIME_STALE_AFTER_MS } from '@afk/application';
-import { isAgentExecutionMode, type AgentExecutionMode } from '@afk/core';
+import {
+  AGENT_AUTHS,
+  AGENT_TRANSPORTS,
+  isAgentExecutionMode,
+  type AgentAuth,
+  type AgentExecutionMode,
+  type AgentTransport,
+} from '@afk/core';
 
 export type TaskRuntimePhase = 'implementing' | 'verifying';
 export type TaskRuntimeStatus = 'running' | 'completed' | 'blocked' | 'failed';
@@ -40,8 +47,8 @@ export interface TaskRuntimeRecord {
   sandboxProvider?: string;
   executionMode?: AgentExecutionMode;
   agentProvider?: string;
-  agentTransport?: 'process' | 'exec' | 'app-server';
-  agentAuth?: 'chatgpt' | 'api' | 'unknown';
+  agentTransport?: AgentTransport;
+  agentAuth?: AgentAuth;
   agentModelProvider?: string;
   agentThreadId?: string;
   session?: string;
@@ -516,8 +523,8 @@ function isTaskRuntimeRecord(value: unknown): value is TaskRuntimeRecord {
     && (record.sandboxProvider === undefined || typeof record.sandboxProvider === 'string')
     && (record.executionMode === undefined || isAgentExecutionMode(record.executionMode))
     && (record.agentProvider === undefined || typeof record.agentProvider === 'string')
-    && (record.agentTransport === undefined || ['process', 'exec', 'app-server'].includes(record.agentTransport))
-    && (record.agentAuth === undefined || ['chatgpt', 'api', 'unknown'].includes(record.agentAuth))
+    && (record.agentTransport === undefined || (AGENT_TRANSPORTS as readonly string[]).includes(record.agentTransport))
+    && (record.agentAuth === undefined || (AGENT_AUTHS as readonly string[]).includes(record.agentAuth))
     && (record.agentModelProvider === undefined || typeof record.agentModelProvider === 'string')
     && (record.agentThreadId === undefined || typeof record.agentThreadId === 'string')
     && (record.workspace === undefined || typeof record.workspace === 'string')

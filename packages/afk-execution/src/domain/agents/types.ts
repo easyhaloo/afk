@@ -8,7 +8,14 @@
  * - Session capture/restore (capability: resume)
  */
 
-import type { AgentExecutionMode, AgentProviderName, AgentToolCallSummary } from '@afk/core';
+import type {
+  AgentAuth,
+  AgentEndpointKind,
+  AgentExecutionMode,
+  AgentProviderName,
+  AgentToolCallSummary,
+  AgentTransport,
+} from '@afk/core';
 
 /**
  * The agent providers AFK can drive.
@@ -88,17 +95,17 @@ export interface AgentCommandOptions {
 
 export interface AgentExecutionMetadata {
   provider: AgentProviderName;
-  transport: 'process' | 'exec' | 'app-server';
-  auth?: 'chatgpt' | 'api' | 'unknown';
+  transport: AgentTransport;
+  auth?: AgentAuth;
   modelProvider?: string;
-  endpointKind?: 'stdio' | 'unix' | 'ws' | 'wss';
+  endpointKind?: AgentEndpointKind;
   threadId?: string;
 }
 
 export interface CodexRuntimeSelection {
   kind: 'codex';
-  transport: 'exec' | 'app-server';
-  auth: 'chatgpt' | 'api' | 'unknown';
+  transport: Extract<AgentTransport, 'exec' | 'app-server'>;
+  auth: AgentAuth;
   provider: string;
   profile?: string;
   endpoint?: string;

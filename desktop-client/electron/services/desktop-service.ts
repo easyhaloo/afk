@@ -6,6 +6,7 @@ import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { exec, executable, firstLine } from "../adapters/process-executor.js";
 import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter.js";
 import { AFK_VERSION } from "@afk/application";
+import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from "@afk/core";
 import { probeProcess } from "@afk/infrastructure";
 import { builtinTemplates } from "@afk/execution/domain/templates/builtin";
 import { DEFAULT_WORKFLOW_CONFIG, loadWorkflowConfig, type WorkflowConfig } from "@afk/execution/infrastructure/config/manager";
@@ -164,8 +165,8 @@ type WorkflowConfigPatch = {
 };
 
 const EDITABLE_AGENT_PROVIDERS = new Set<string>(AGENT_PROVIDER_IDS);
-const EDITABLE_CODEX_TRANSPORTS = new Set(["auto", "exec", "app-server"]);
-const EDITABLE_CODEX_AUTHS = new Set(["auto", "chatgpt", "api"]);
+const EDITABLE_CODEX_TRANSPORTS = new Set<string>(AGENT_TRANSPORT_CHOICES);
+const EDITABLE_CODEX_AUTHS = new Set<string>(AGENT_AUTH_CHOICES);
 
 function isAgentProviderId(value: string): value is AgentProviderId {
   return EDITABLE_AGENT_PROVIDERS.has(value);

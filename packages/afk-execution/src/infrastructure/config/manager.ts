@@ -1,4 +1,5 @@
 import { getGlabToken } from '@afk/infrastructure';
+import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from '@afk/core';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as loadYaml } from 'js-yaml';
@@ -184,8 +185,8 @@ function loadCodexConfig(file: ConfigObject, env: NodeJS.ProcessEnv): CodexConfi
     ?? durationMs(env.AFK_CODEX_APP_SERVER_STARTUP_TIMEOUT)
     ?? DEFAULT_CODEX_CONFIG.appServer.startupTimeoutMs;
 
-  if (!['auto', 'exec', 'app-server'].includes(transport)) throw new Error(`Invalid Codex transport: ${transport}`);
-  if (!['auto', 'chatgpt', 'api'].includes(auth)) throw new Error(`Invalid Codex auth mode: ${auth}`);
+  if (!(AGENT_TRANSPORT_CHOICES as readonly string[]).includes(transport)) throw new Error(`Invalid Codex transport: ${transport}`);
+  if (!(AGENT_AUTH_CHOICES as readonly string[]).includes(auth)) throw new Error(`Invalid Codex auth mode: ${auth}`);
   if (endpoint) assertCodexEndpoint(endpoint);
 
   return {

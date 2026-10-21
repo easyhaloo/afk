@@ -401,7 +401,24 @@ export class LoopRunner {
       this.inFlight.delete(iid);
       if (this.opts.maxIterations !== undefined && this.completed >= this.opts.maxIterations) {
         void this.stop();
+      } else {
+        await this.stopWhenWorkLeftMachine(iid);
       }
+    }
+  }
+
+  /** Re-read the provider's real state after the chain ends; a failed read is not "no work left". */
+  private async stopWhenWorkLeftMachine(iid: string): Promise<void> {
+    try {
+      const { state } = await this.providers.backlog.get(iid);
+      if ((LOOP_PICKUP_STATES as readonly string[]).includes(state)) return;
+      this.emitEvent(`${iid} left machine states (state=${state}); loop exiting`);
+      void this.stop();
+    } catch (error) {
+      const message = (error as Error).message;
+      this.lastError.set(iid, `state-read: ${message}`);
+      this.emitEvent(`${iid} state read failed: ${message} (continuing to poll)`);
+      logger.error({ iid, err: error }, 'post-execution state read failed');
     }
   }
 

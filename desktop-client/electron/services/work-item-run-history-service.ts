@@ -5,6 +5,7 @@ import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/ba
 import type { createExecutionWorkspaceService } from "./execution-workspace-service.js";
 import type { createWorkItemRunStore } from "./work-item-run-store.js";
 import { isAgentExecutionMode, type AgentExecutionMode } from "@afk/core";
+import { tmuxSessionNameFor } from "@afk/execution/domain/tmux/session-name";
 import { TASK_RUNTIME_PHASES, type TaskRuntimePhase } from "@afk/execution/domain/runtime/phase";
 import { probeProcess } from "@afk/infrastructure";
 
@@ -98,7 +99,7 @@ function matchesRuntime(
   return Number.isFinite(startedAt)
     && record.backlogId === String(item.issueNumber)
     && matchesProviderRef(record.providerRef, item)
-    && record.session === `afk-${item.id}`
+    && record.session === tmuxSessionNameFor(item.id)
     && record.workspace === repository
     && runtimeStartedAt >= startedAt && runtimeStartedAt < nextRunStartedAt
     && Date.parse(record.completedAt) <= checkedAt;

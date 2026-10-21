@@ -13,3 +13,17 @@
 export function normalizeTmuxSessionName(name: string): string {
   return name.replace(/:/g, '_');
 }
+
+/**
+ * The tmux session a work item runs in.
+ *
+ * The runtime names the session and the desktop recognises it by the
+ * name. Each of them used to spell the name out, and the runtime
+ * spelled it with two different work item identities - the canonical
+ * one where it had it and the tracker's number where it did not. A
+ * change on either side left the other unable to recognise the sessions
+ * the first had just created.
+ */
+export function tmuxSessionNameFor(workItemId: string): string {
+  return `afk-${workItemId}`;
+}

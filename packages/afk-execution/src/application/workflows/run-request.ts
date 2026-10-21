@@ -17,6 +17,7 @@ import {
 } from './execution-manifest.js';
 import { resolveGitLabProjectKey } from '@afk/infrastructure';
 import { parseWorkItemId } from '@afk/application';
+import { tmuxSessionNameFor } from '../../domain/tmux/session-name.js';
 
 export type WorkflowRunRepository = ResolvedExecutionManifestRepository;
 
@@ -163,7 +164,7 @@ export function resolveWorkflowRequest(
     trackerProjectId: input.trackerProjectId,
     trackerHost: input.trackerHost,
     originalCwd: context.originalCwd,
-    session: input.session ?? `afk-${input.workItemId ?? backlogId}`,
+    session: input.session ?? tmuxSessionNameFor(input.workItemId ?? backlogId),
     targetBranch: input.targetBranch ?? config.targetBranch ?? defaults.targetBranch,
     baseBranch: input.baseBranch ?? config.trackerTargetBranch ?? config.targetBranch ?? defaults.baseBranch,
     maxRetries: input.maxRetries ?? config.maxRetries ?? defaults.maxRetries,

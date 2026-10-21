@@ -2,10 +2,31 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { logger, probeProcess } from '@afk/infrastructure';
-import type { RunnerProviderBundle } from '@afk/infrastructure';
-import { parseWorkItemId } from '@afk/application';
+import { parseWorkItemId, type BacklogExecutionProvider } from '@afk/application';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
+
+/**
+ * What the loop is allowed to ask for.
+ *
+ * The loop runs work; it does not merge it. A merge is a person's
+ * decision about a change they have not read, so the provider that merges
+ * is deliberately not in the loop's hand: the capability is not there to
+ * be used by accident.
+ */
+export type LoopProviderBundle = { backlog: BacklogExecutionProvider };
+
+/**
+ * The states the loop picks work up from.
+ *
+ * Both are machine-owned: a ready item, and a rework item - one whose QA
+ * asked for another try. The states that are not here belong to a person.
+ * Verification and blocked are a person's calls, and a merge_ready item
+ * in particular is waiting for someone to read the change before it is
+ * merged: a loop that took it over would be merging on a person's
+ * behalf without their having read it.
+ */
+export const LOOP_PICKUP_STATES = ['ready', 'rework'] as const;
 
 export interface LoopRunnerOptions {
   /** Backlog polling interval in ms. */
@@ -99,7 +120,7 @@ export class LoopRunner {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private statusTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly providers: RunnerProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
+  constructor(private readonly providers: LoopProviderBundle, options: Partial<LoopRunnerOptions> = {}) {
     if (options.backlogIds?.length !== 1 || !options.managedExecution?.manifestPath) {
       throw new Error('loop execution requires exactly one backlog ID, work item ID, and execution manifest');
     }
@@ -291,11 +312,10 @@ export class LoopRunner {
       // instead of making rework look like ready: the active rework record
       // remains the source of implementation feedback, while the loop owns
       // the same claim/execute lifecycle for both states.
-      const [readyIssues, reworkIssues] = await Promise.all([
-        this.providers.backlog.list({ state: 'ready', executionMode: 'afk' }),
-        this.providers.backlog.list({ state: 'rework', executionMode: 'afk' }),
-      ]);
-      const issues = [...readyIssues, ...reworkIssues]
+      const listed = await Promise.all(
+        LOOP_PICKUP_STATES.map(state => this.providers.backlog.list({ state, executionMode: 'afk' })),
+      );
+      const issues = listed.flat()
         .filter((issue, index, all) => all.findIndex(candidate => candidate.id === issue.id) === index)
         .filter(issue => this.opts.backlogIds.has(String(issue.id)));
       logger.info({ candidates: issues.length, candidateIds: issues.map(i => i.id) }, 'poll candidates listed');

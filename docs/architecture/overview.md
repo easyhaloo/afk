@@ -42,6 +42,13 @@ files are exempt, and that is a decision rather than an oversight — a test
 that exercises an adapter against a real file needs the adapter, and a test
 that exercises a command needs a port.
 
+The desktop's renderer loads the shared vocabulary and nothing else. It runs
+in a browser, so it can only load a module the browser can load, and the
+execution runtime is not one: it reaches the filesystem, the process and the
+provider SDKs. A file under the desktop's `shared/` or `src/` that imports
+the execution runtime is therefore reported — a wire contract that lived
+there could not be read by the renderer at all.
+
 `pnpm typecheck` also type-checks `tests/` through `tsconfig.tests.json`.
 The root `tsconfig.json` excludes `tests/`, so without that project a broken
 import in a test or an E2E script is invisible to the build.
@@ -187,6 +194,23 @@ run as an interruption rather than reporting a crash - or waiting out the
 completion timeout to find out. The session is the runtime's own: it is
 found in the resource registry, so a stop cannot end a session that belongs
 to something else.
+
+## The loop's scope
+
+`afk loop` picks up only the work a machine owns: `ready`, and `rework` —
+an item whose QA asked for another try. `verification`, `merge_ready` and
+`blocked` belong to a person and are not among them. A `merge_ready` item
+in particular is waiting for someone to read the change before it is
+merged, and a loop that took it over would be merging on a person's
+behalf without their having read it.
+
+Merging is a person's decision, so the loop never makes it. The loop runs
+work; it does not merge work, and the provider that merges is deliberately
+not in the loop's seam: the capability is not there to be used by
+accident. A root item's QA passes, the item stops at `merge_ready` and
+switches to `hitl`, and the merge is `afk backlog confirm-merge`. A child
+item's change is merged into its parent's branch and the item becomes
+`done` on its own — that part is the machine's.
 
 ## Work-item and execution identity
 

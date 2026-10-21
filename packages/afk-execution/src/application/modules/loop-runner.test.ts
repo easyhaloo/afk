@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LoopRunner } from './loop-runner.js';
+import { LoopRunner, type LoopProviderBundle } from './loop-runner.js';
 import type { ProviderBundle } from '@afk/infrastructure';
 import type { BacklogItem } from '@afk/application';
 
@@ -71,6 +71,50 @@ describe('LoopRunner manifest-bound execution', () => {
     });
     expect(subject.getStatus().execution).toEqual({ active: 0, ids: [] });
     expect(internals.inFlight.has('42')).toBe(false);
+  });
+
+  it('asks only for the states a person does not own', async () => {
+    // A merge_ready item is waiting for someone to read the change before
+    // it is merged. A loop that picked it up would be merging on a
+    // person's behalf without their having read it.
+    const { providers, backlog } = providersFor();
+    const subject = new LoopRunner(providers, {
+      ...selection, readManifest,
+      executeManagedWorkItem: vi.fn(async () => ({ status: 'merge_ready' } as any)),
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    await internals.poll();
+
+    const asked = (backlog.list as any).mock.calls.map(([options]: [any]) => options);
+    expect(asked).toEqual([
+      { state: 'ready', executionMode: 'afk' },
+      { state: 'rework', executionMode: 'afk' },
+    ]);
+    expect(asked.map((options: any) => options.state)).not.toContain('merge_ready');
+  });
+
+  it('does not merge what it ran, even handed a merge-capable provider', async () => {
+    // The loop runs work; merging is a person's decision about a change
+    // they have not read. Its seam does not carry a merge provider, and a
+    // loop that had one would still not use it.
+    const { providers, backlog } = providersFor();
+    const merge = vi.fn();
+    const bundle = { backlog, changes: { merge } } as unknown as LoopProviderBundle;
+    const subject = new LoopRunner(bundle, {
+      ...selection, readManifest,
+      executeManagedWorkItem: vi.fn(async () => ({ status: 'merge_ready' } as any)),
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    await internals.poll();
+    await vi.waitFor(() => expect(subject.getStatus().totals.completed).toBe(1));
+
+    expect(merge).not.toHaveBeenCalled();
   });
 
   it('refuses another provider project even with the same issue number', async () => {

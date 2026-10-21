@@ -24,6 +24,20 @@ Node 内建模块。该守卫同时禁止泛型 record 和遗留 client-factory 
 但不得导入根包的 `src/` 目录，也不得 spawn `afk` CLI 进程。逃逸到 `src/` 的
 相对导入，与包越界导入一样会被守卫报告。
 
+执行运行时经由端口接入，守卫把这条写成规则。直接 import
+`@afk/execution/infrastructure` 的命令、视图或服务，等于替运行时承担了「它
+是怎么造出来的」这份知识——该构造哪个类、该读哪个文件、该给哪个进程发信号
+——于是 CLI 与桌面就可能对「配置」或「资源注册表」各说各话。只有两个文件可以
+import 运行时的适配器：`src/cli/composition-root.ts` 与
+`desktop-client/electron/composition-root.ts`，它们就是组合根，说明每个端口背后
+是什么。测试文件豁免，这是决定而非疏忽——要拿真实文件验适配器的测试需要适配器，
+要验命令的测试需要端口。
+
+桌面的 renderer 只加载共享词表，别的一概不加载。它跑在浏览器里，只能加载浏览器
+能加载的模块，而执行运行时不是：它要碰文件系统、进程和 provider SDK。因此桌面
+`shared/` 或 `src/` 下 import 执行运行时的文件会被报告——契约住在那里，renderer
+根本读不到。
+
 `pnpm typecheck` 通过 `tsconfig.tests.json` 一并检查 `tests/`。根 `tsconfig.json`
 把 `tests/` 排除在外，没有这个工程的话，测试或 E2E 脚本里的断链导入对构建
 是不可见的。
@@ -87,6 +101,74 @@ AFK 元数据，以及格式非法或指向自身的父级、执行基线和依�
 ready/afk 标签，不移除任何标签。已 ready/afk 项无写入地幂等成功；closed、
 blocked、HITL 和其他生命周期状态无写入地拒绝。项目与平台必须显式提供，
 `--json` 输出 `backlog.adopt` envelope。execute 和 loop 不会隐式调用接管。
+
+## 运行时端口
+
+执行运行时在进程之外做实事：读配置文件、驱动 tmux、拉起 loop 守护进程、读
+harness 的 transcript、开浏览器，并维护运行登记出去的资源注册表。直接伸手去拿
+其中任何一样，入口就得知道这事是怎么做的——而这份知识属于运行时，不属于恰好
+需要它的命令、视图或服务。
+
+所以运行时由它回答的端口来描述。端口声明在 `@afk/application`
+（`packages/afk-application/src/runtime-ports.ts` 与
+`packages/afk-application/src/workflow-config.ts`），端口点名的词表住在
+`@afk/core`，实现住在执行包的 infrastructure 层，一个端口一个模块。
+
+| 端口 | 回答什么 |
+| --- | --- |
+| `ConfigurationPort` | 一次运行被什么配置塑形：工作流设置、默认值、调度器设置、tracker 连接。 |
+| `TmuxPort` | 运行被驱动着走的终端会话。 |
+| `LoopProcessPort` | loop 守护进程的进程，以及记录它的 pid 文件。 |
+| `AgentTelemetryPort` | AFK 读取的 harness transcript。AFK 只读；这次运行里发生了什么由 harness 说了算。 |
+| `BrowserPort` | 操作系统的默认浏览器。 |
+| `ResourceRegistryPort` | 运行登记出去的资源注册表。 |
+| `RunSessionPort` | 运行里 agent 所在的那个终端会话，以及停掉它的办法。 |
+| `TaskRuntimePort` | 运行时正在跟踪的那些运行记录。 |
+
+命令、视图或服务只说自己需要什么；组合根说明它接到了什么。CLI 与 TUI 在
+`src/cli/composition-root.ts` 接线，桌面客户端在
+`desktop-client/electron/composition-root.ts`。只有这两个文件可以导入运行时的
+适配器，架构守卫会报告任何别的文件这样做。
+
+把词表挪进 `@afk/core` 是声明端口的一部分：形状住在实现里的端口，包不在那个
+实现里就没法命名它；而形状的第二份拷贝，就是同一个问题的第二个答案。信号文法、
+tmux 词表、资源记录、token 用量、运行记录、运行所处的阶段以及图的格式，因此
+都是 `@afk/core` 里的词表；infrastructure 包按 core 声明的形状校验信号文件，
+而不是自己再推一份。
+
+桌面 renderer 要读其中一些词表，而 renderer 跑在浏览器里：它只能加载浏览器能
+加载的模块，执行运行时不是。renderer 需要的共享词表只能住在 core 包里——core
+不依赖任何东西。架构守卫把这条写成规则：桌面 `shared/` 或 `src/` 下 import
+执行运行时的文件会被报告，因为桌面契约不能依赖一个 renderer 加载不了的模块。
+
+## 停止一次运行
+
+一次运行的 agent 是终端会话里的一个进程，而这次运行住在另一个进程里。从外面
+停掉它的人——桌面客户端、或运维——没法直接调用正在跑的 agent，所以这个请求必须
+经由双方都看得见的东西传过去。
+
+停一次运行必须真的停掉那个进程。tracker 说这次运行被阻塞了、而 agent 还在干活，
+不叫停了；agent 还在花本该被这次停止终结掉的预算。所以停止是两件事，按这个顺序：
+先把请求写进这次运行自己的 worktree——就放在 agent 自己写的信号文件旁边——再杀掉
+这次运行登记的会话。
+
+运行时等 agent 的时候一直在轮询那个 worktree，于是它会发现这个请求，以 `manual`
+为由中断 agent，并把这次运行以「被中断」结束，而不是报一次崩溃，也不是拖到完成
+超时才发现。会话是运行时自己的：它在资源注册表里查到，所以一次停止不会终结属于
+别的东西的会话。
+
+## loop 的边界
+
+`afk loop` 只接机器自己拥有的活：`ready`，以及 `rework`——QA 判定需要再来一次的
+工作项。`verification`、`merge_ready`、`blocked` 属于人，不在其中；`merge_ready`
+尤其如此，它在等一个人读完那份变更再合，而 loop 若是把它接过来，等于替人合并了
+一份没人读过的变更。
+
+合并永远由人做。loop 跑工作，不合并工作：合并是一个人对还没读过的变更做的决定，
+所以能合并的 provider 刻意不在 loop 的接缝里——这个能力不在它手上，不会被顺手
+用掉。根工作项的 QA 通过后停在 `merge_ready` 并切到 `hitl`，要合的人跑
+`afk backlog confirm-merge`；子工作项（带 parent）的变更合进父分支后该项直接
+`done`——那一段是机器该做的。
 
 ## 工作项与执行身份
 

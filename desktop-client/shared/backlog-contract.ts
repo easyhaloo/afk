@@ -25,6 +25,7 @@ import {
   validateWorkItemProjectKey,
 } from "@afk/application";
 import type {
+  BacklogChangeRequestState,
   BacklogChangeRequest as AuditedBacklogChangeRequest,
   BacklogItem as AuditedBacklogItem,
   WorkItemPlatform,
@@ -286,7 +287,7 @@ export type BacklogItem = {
 
 export type BacklogChangeRequest = {
   id: string;
-  state: "open" | "merged" | "closed";
+  state: BacklogChangeRequestState;
   sourceBranch: string;
   targetBranch: string;
   url?: string;

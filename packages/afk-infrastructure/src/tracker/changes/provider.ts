@@ -1,8 +1,8 @@
-import type { BacklogItem } from '@afk/application';
+import type { BacklogChangeRequestState, BacklogItem } from '@afk/application';
 
 export interface ChangeRequest {
   id: string;
-  state: 'open' | 'merged' | 'closed';
+  state: BacklogChangeRequestState;
   sourceBranch: string;
   targetBranch: string;
   mergeable?: boolean;

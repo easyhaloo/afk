@@ -1,3 +1,4 @@
+import type { BacklogChangeRequestState } from './model.js';
 import type {
   BacklogCreateInput,
   BacklogListOptions,
@@ -38,9 +39,9 @@ export async function removeBacklogTag(provider: BacklogManagementProvider, id: 
 }
 
 export interface BacklogChangeProvider {
-  findForBacklog(backlog: BacklogItem): Promise<{ id: string; state: 'open' | 'merged' | 'closed'; sourceBranch: string; targetBranch: string; mergeable?: boolean } | null>;
+  findForBacklog(backlog: BacklogItem): Promise<{ id: string; state: BacklogChangeRequestState; sourceBranch: string; targetBranch: string; mergeable?: boolean } | null>;
   merge(id: string): Promise<void>;
-  get(id: string): Promise<{ id: string; state: 'open' | 'merged' | 'closed'; sourceBranch: string; targetBranch: string; mergeable?: boolean }>;
+  get(id: string): Promise<{ id: string; state: BacklogChangeRequestState; sourceBranch: string; targetBranch: string; mergeable?: boolean }>;
 }
 
 export async function interruptBacklog(

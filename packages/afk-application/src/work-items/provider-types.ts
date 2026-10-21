@@ -1,4 +1,5 @@
 import type { BacklogExecutionMode, BacklogState } from '../backlog-mapping.js';
+import type { TrackerIssueState } from '../tracker/types.js';
 import type { GlobalWorkItem, ProviderProjectRef } from './types.js';
 import type { WorkItemPlatform } from './identity.js';
 
@@ -7,7 +8,7 @@ export interface ProviderIssue {
   title: string;
   description?: string;
   labels: string[];
-  state: 'opened' | 'closed';
+  state: Exclude<TrackerIssueState, 'merged'>;
   webUrl?: string;
 }
 

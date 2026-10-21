@@ -1,4 +1,5 @@
 import type { BacklogExecutionMode, BacklogState } from '../backlog-mapping.js';
+import type { TrackerIssueState } from '../tracker/types.js';
 import { formatWorkItemId, parseWorkItemId } from '../work-items/identity.js';
 import type { WorkItemId, WorkItemPlatform, ParsedWorkItemId } from '../work-items/identity.js';
 import { BACKLOG_METADATA } from './initialization.js';
@@ -46,7 +47,7 @@ export type BacklogIdentityPolicy =
 export type ScopedBacklogIdentityPolicy = BacklogIdentityPolicy & { readonly scope: BacklogProjectScope };
 
 /** The issue states a tracker can report. */
-export type BacklogIssueState = 'opened' | 'closed' | 'merged';
+export type BacklogIssueState = TrackerIssueState;
 
 /**
  * The state an issue carries when no state label says otherwise.

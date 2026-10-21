@@ -5,9 +5,20 @@ import type { NewReworkRecord, ReworkRecord, ReworkResolution } from './rework-r
 import type { ProviderProjectRef } from '../work-items/types.js';
 import type { WorkItemId } from '../work-items/identity.js';
 
+/**
+ * The states a change request can be in.
+ *
+ * The list is named because the backlog's model, its port, the tracker
+ * adapter and the desktop's wire contract all describe a change
+ * request, and each of them wrote the three names down.
+ */
+export const BACKLOG_CHANGE_REQUEST_STATES = ['open', 'merged', 'closed'] as const;
+
+export type BacklogChangeRequestState = (typeof BACKLOG_CHANGE_REQUEST_STATES)[number];
+
 export type BacklogChangeRequest = {
   id: string;
-  state: 'open' | 'merged' | 'closed';
+  state: BacklogChangeRequestState;
   sourceBranch: string;
   targetBranch: string;
   url?: string;

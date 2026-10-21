@@ -1,7 +1,23 @@
+import type { WorkItemPlatform } from '../work-items/identity.js';
+
 /**
  * Platform type
+ *
+ * The platforms are the ones a work item can come from, so the list
+ * lives there and this names it for the tracker's own vocabulary.
  */
-export type Platform = 'gitlab' | 'github';
+export type Platform = WorkItemPlatform;
+
+/**
+ * The states a tracker can report an issue in.
+ *
+ * The list is named because the tracker's issue, its merge request and
+ * the backlog's label grammar each wrote the three names down, and in
+ * two different orders.
+ */
+export const TRACKER_ISSUE_STATES = ['opened', 'closed', 'merged'] as const;
+
+export type TrackerIssueState = (typeof TRACKER_ISSUE_STATES)[number];
 
 /**
  * Common list options
@@ -87,7 +103,7 @@ export interface TrackedIssue {
   title: string;
   description: string;
   labels: string[];
-  state: 'opened' | 'closed' | 'merged';
+  state: TrackerIssueState;
   url: string;          // web_url (GitLab) / html_url (GitHub)
   projectId: string;   // GitLab: path, GitHub: owner/repo
 }
@@ -104,7 +120,7 @@ export interface TrackedMR {
   id: number;
   platform: Platform;
   title: string;
-  state: 'opened' | 'merged' | 'closed';
+  state: TrackerIssueState;
   sourceBranch: string;
   targetBranch: string;
   url: string;
@@ -114,7 +130,6 @@ export interface TrackedMR {
 }
 
 import type { BacklogMetadataLabel } from '../backlog/initialization.js';
-import type { WorkItemPlatform } from '../work-items/identity.js';
 
 /**
  * Which tracker, and which project on it.

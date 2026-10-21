@@ -1,4 +1,6 @@
 import { AGENT_PROVIDER_NAMES } from '@afk/core';
+import type { WorkflowStepKind } from "@afk/core";
+import type { DiagnosticSeverity } from "@afk/workflow-graph";
 import type { AgentUsage, ExecutionPhase, ExecutionQueryOptions, ExecutionRunDetail, ExecutionStatus, ExecutionSummary } from "./execution-contract.js";
 import type { WorkItemAgentId, WorkItemRunStatus } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
@@ -133,7 +135,7 @@ export type CanvasTemplateNode = {
 export type WorkflowTemplateStepSummary = {
   id: string;
   role: string;
-  kind: "agent" | "system";
+  kind: WorkflowStepKind;
   provider?: string;
   action?: string;
   /** The condition a step runs under: what the named step must have produced,
@@ -245,7 +247,7 @@ import type { WorkflowGraphFormat } from "@afk/execution/application/visualizati
 export type { WorkflowGraphFormat };
 
 export type WorkflowGraphDiagnostic = {
-  severity: "info" | "warning" | "error";
+  severity: DiagnosticSeverity;
   code: string;
   message: string;
 };

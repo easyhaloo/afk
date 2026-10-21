@@ -69,17 +69,25 @@ export const initialRunAggregate = (): RunAggregate => ({
   activeSteps: [],
 });
 
+/**
+ * How a run ended.
+ *
+ * The three outcomes a run can end in, named once so the timeline that
+ * records them and the commands that set them agree.
+ */
+export type RunOutcome = Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'>;
+
 export type Effect =
   | { kind: 'start_run'; runId: string }
   | { kind: 'start_step'; runId: string; stepId: string; phase: RunPhase }
   | { kind: 'open_human_gate'; runId: string; gateId: string; reason: string }
-  | { kind: 'finish_run'; runId: string; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'> };
+  | { kind: 'finish_run'; runId: string; outcome: RunOutcome };
 
 export type RunCommand =
   | { type: 'start'; runId: string }
   | { type: 'start_step'; runId: string; stepId: string; phase: RunPhase }
   | { type: 'request_human_gate'; runId: string; gateId: string; reason: string }
-  | { type: 'finish'; runId: string; outcome: Extract<RunStatus, 'succeeded' | 'failed' | 'cancelled'> };
+  | { type: 'finish'; runId: string; outcome: RunOutcome };
 
 export interface Decision {
   accepted: boolean;

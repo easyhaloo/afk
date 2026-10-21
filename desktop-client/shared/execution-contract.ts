@@ -1,6 +1,7 @@
 import { parseWorkItemId, type WorkItemId } from "./backlog-contract.js";
 import { assertExactKeys, parseObject, parseRequiredString } from "./validation.js";
 import { RUNTIME_HEALTH_STATES } from "@afk/application";
+import type { RunOutcome } from "@afk/core";
 import { isWorkflowStepKind } from "@afk/core";
 import type { RuntimeHealth, WorkflowInstance, WorkflowInstanceStep } from "@afk/application";
 import type { AgentUsage as AuditedAgentUsage, ExecutionSummary as AuditedExecutionSummary } from "@afk/application";
@@ -56,7 +57,7 @@ export type ExecutionTimelineEntry = {
   kind: string;
   phase?: ExecutionPhase;
   stepId?: string;
-  outcome?: "succeeded" | "failed" | "cancelled";
+  outcome?: RunOutcome;
   failureSummary?: string;
   changeId?: string;
   changeUrl?: string;

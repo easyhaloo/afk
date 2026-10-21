@@ -1,3 +1,4 @@
+import { AFK_EXECUTIONS_DIRECTORY } from '@afk/core';
 import { createHash } from 'node:crypto';
 import { promises as fs, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -168,7 +169,7 @@ async function findStateRoot(workspace: string, executionId: string): Promise<st
   let current = workspace;
   for (let depth = 0; depth < 8; depth += 1) {
     try {
-      await fs.access(join(current, '.afk', 'executions', `${executionId}.jsonl`));
+      await fs.access(join(current, AFK_EXECUTIONS_DIRECTORY, `${executionId}.jsonl`));
       return current;
     } catch {
       const parent = dirname(current);
@@ -261,7 +262,7 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
   const prepared = events.find(event => event.data.kind === 'workspace.prepared')?.data;
   const worktreePath = prepared?.kind === 'workspace.prepared' ? prepared.workspace : undefined;
   const stateRoot = await findStateRoot(worktreePath ?? options.workspace, options.executionId);
-  const journalPath = join(stateRoot, '.afk', 'executions', `${options.executionId}.jsonl`);
+  const journalPath = join(stateRoot, AFK_EXECUTIONS_DIRECTORY, `${options.executionId}.jsonl`);
   const auditPath = join(store.root, `${Buffer.from(options.runId, 'utf8').toString('base64url')}.jsonl`);
   const evidence: EvidenceFile[] = [];
   for (const item of [

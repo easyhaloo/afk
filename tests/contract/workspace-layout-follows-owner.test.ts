@@ -1,19 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { AFK_CONFIG_FILE, AFK_WORKFLOW_DIRECTORY } from "@afk/core";
+import { AFK_CONFIG_FILE, AFK_EXECUTIONS_DIRECTORY, AFK_WORKFLOW_DIRECTORY } from "@afk/core";
 
 /**
  * Where AFK keeps its files is one answer. The desktop writes the
- * configuration and the workflow templates, and the runner reads them.
- * Each side spelled the path out, so the desktop could save a
- * configuration the runner never read, and write templates the runner
- * never found - while the desktop read back its own and the board
- * showed them as if they were runnable.
+ * configuration and the workflow templates, and the runner reads them
+ * and writes the execution journal the retro reads back. Each side
+ * spelled the path out, so the desktop could save a configuration the
+ * runner never read, and write templates the runner never found -
+ * while the desktop read back its own and the board showed them as if
+ * they were runnable.
  *
  * This test moves the layout the core package publishes and then asks
- * the runner where it looks.
+ * the runner where it looks, and it holds the sides to reading the
+ * layout rather than spelling the paths out again.
  */
 vi.mock("@afk/core", async importOriginal => {
   const original = await importOriginal<typeof import("@afk/core")>();
@@ -21,11 +24,21 @@ vi.mock("@afk/core", async importOriginal => {
     ...original,
     AFK_CONFIG_FILE: ".afk/afk-config.yml",
     AFK_WORKFLOW_DIRECTORY: ".afk/afk-workflows",
+    AFK_EXECUTIONS_DIRECTORY: ".afk/afk-executions",
   };
 });
 
 import { findTemplateFile, templateCandidates } from "@afk/execution/domain/templates/loader";
 import { loadWorkflowConfig } from "@afk/execution/infrastructure/config/manager";
+
+const SHARED_SOURCES = [
+  "packages/afk-execution/src/domain/templates/loader.ts",
+  "packages/afk-execution/src/infrastructure/config/manager.ts",
+  "packages/afk-execution/src/application/loop/loop-config.ts",
+  "packages/afk-execution/src/application/workflows/execute-work-item.ts",
+  "src/cli/commands/retro.ts",
+  "desktop-client/electron/services/desktop-service.ts",
+];
 
 describe("where AFK keeps its files", () => {
   it("is where the runner looks for a template", async () => {
@@ -53,7 +66,19 @@ describe("where AFK keeps its files", () => {
     // come from one list, so they cannot drift apart.
     expect(AFK_CONFIG_FILE).toBe(".afk/afk-config.yml");
     expect(AFK_WORKFLOW_DIRECTORY).toBe(".afk/afk-workflows");
+    expect(AFK_EXECUTIONS_DIRECTORY).toBe(".afk/afk-executions");
     expect(templateCandidates("review", { projectRoot: "/root", homeDir: "/home" })[0]?.path)
       .toBe(path.join("/root", ".afk", "afk-workflows", "review.yml"));
+  });
+
+  it("is not spelled out again where the sides share it", () => {
+    // One place says where AFK keeps its files. Another place is a copy,
+    // and a copy is how the desktop ends up writing somewhere the runner
+    // never looks.
+    const root = process.cwd();
+    for (const source of SHARED_SOURCES) {
+      const text = readFileSync(path.join(root, source), 'utf8');
+      expect(text).not.toMatch(/'\.afk',\s*'(executions|workflows|config\.yml)'/);
+    }
   });
 });

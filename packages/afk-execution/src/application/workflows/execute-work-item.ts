@@ -1,3 +1,4 @@
+import { AFK_EXECUTIONS_DIRECTORY } from '@afk/core';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { hostname } from 'node:os';
@@ -279,7 +280,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
   const audit = async (data: RunEventData) => { await recordAudit(context, data); };
   const manifest = await (dependencies.readManifest ?? readExecutionManifest)(input.manifestPath, workItemId);
-  const directory = join(manifest.workspaceRoot, '.afk', 'executions');
+  const directory = join(manifest.workspaceRoot, AFK_EXECUTIONS_DIRECTORY);
   await mkdir(directory, { recursive: true });
   // The journal lands in the user's workspace. Keep it - and the rest of
   // AFK's working files - out of the commits made there.
@@ -411,7 +412,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
 async function journalPublication(manifest: ResolvedExecutionManifest, executionId: string, workItemId: string): Promise<{ requested: boolean; published?: { id: string; url: string } }> {
   let contents: string;
   try {
-    contents = await readFile(join(manifest.workspaceRoot, '.afk', 'executions', `${executionId}.jsonl`), 'utf8');
+    contents = await readFile(join(manifest.workspaceRoot, AFK_EXECUTIONS_DIRECTORY, `${executionId}.jsonl`), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { requested: false };
     throw error;
@@ -443,8 +444,8 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
   const executionId = input.executionId;
   if (!executionId || !EXECUTION_ID_PATTERN.test(executionId)) throw new Error('valid executionId is required');
   const manifest = await (dependencies.readManifest ?? readExecutionManifest)(input.manifestPath, workItemId);
-  const lockPath = join(manifest.workspaceRoot, '.afk', 'executions', `${encodeWorkItemIdForPath(workItemId)}.lock`);
-  await mkdir(join(manifest.workspaceRoot, '.afk', 'executions'), { recursive: true });
+  const lockPath = join(manifest.workspaceRoot, AFK_EXECUTIONS_DIRECTORY, `${encodeWorkItemIdForPath(workItemId)}.lock`);
+  await mkdir(join(manifest.workspaceRoot, AFK_EXECUTIONS_DIRECTORY), { recursive: true });
   const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
   try {
     const store = new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR });

@@ -22,3 +22,13 @@ export const AFK_CONFIG_FILE = '.afk/config.yml';
  * as if they were runnable.
  */
 export const AFK_WORKFLOW_DIRECTORY = '.afk/workflows';
+
+/**
+ * Where the execution journal lives.
+ *
+ * The runtime writes the journal and the retro command reads it, and
+ * each side spelled the directory out. A change to it left the retro
+ * reporting on a run whose journal it could not find - a report with
+ * the evidence missing and nothing saying why.
+ */
+export const AFK_EXECUTIONS_DIRECTORY = '.afk/executions';

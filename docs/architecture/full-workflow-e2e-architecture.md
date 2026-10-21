@@ -262,6 +262,7 @@ FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 
 | 闭环 journal | `<manifest.workspaceRoot>/.afk/executions/<executionId>.jsonl` | `requested`、`implementing`、`verifying`、发布/合并及最终状态；每行包含 `executionId` 和 `workItemId` |
 | 实现超时日志 | `$HOME/.claude/logs/afk/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
 | QA 超时日志 | `$HOME/.claude/logs/afk/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
+| 看门狗触发记录 | `$HOME/.claude/logs/afk/watchdog.log` | 硬超时看门狗每次触发的 `iid`、会话名与超时毫秒数 |
 | loop 状态 | `~/.afk/loop-status.json` | active execution、完成/失败计数、uptime、启动时间和最近状态 |
 | loop PID | `~/.afk/loop.pid` | daemon 控制和单实例检查 |
 

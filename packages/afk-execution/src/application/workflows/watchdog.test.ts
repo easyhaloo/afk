@@ -31,6 +31,16 @@ describe('Watchdog', () => {
     expect(cmd).toContain('/tmp/afk-logs-test/watchdog.log');
   });
 
+  it('creates the log directory, so the record of a firing is never lost', () => {
+    // The watchdog fires before the timeout handler has ever run, so
+    // nothing else has created the directory its record goes into.
+    const wd = new Watchdog('/tmp/afk-logs-test');
+    wd.arm('afk-gh-42', 60_000, 42, '/tmp/wt-42');
+
+    const cmd = (spawn as ReturnType<typeof vi.fn>).mock.calls[0][1][1] as string;
+    expect(cmd).toContain('mkdir -p "/tmp/afk-logs-test"');
+  });
+
   it('disarm sends SIGTERM to the process group (negative pid)', () => {
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
     const wd = new Watchdog('/tmp/afk-logs-test');

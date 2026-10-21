@@ -27,7 +27,10 @@ export function withLogContext<T>(context: LogContext, asyncFn: () => Promise<T>
 // ── Unified day-rotated log file ────────────────────────────────────────────
 
 /**
- * The single log file all of afk writes to: `~/.afk/logs/afk-YYYY-MM-DD.log`.
+ * The single log file the logger writes to: `~/.afk/logs/afk-YYYY-MM-DD.log`.
+ * The timeout logs are a different thing and live elsewhere: they are
+ * per-run captures of what the agent had on screen, under
+ * `$HOME/.claude/logs/afk/`.
  * One file per day — the date in the name IS the rotation: when the date
  * changes, writes switch to a new file (no renaming, nothing to clean up).
  * Files older than 7 days are pruned when a new file is opened.

@@ -37,7 +37,11 @@ export class Watchdog {
    */
   arm(session: string, hardTimeoutMs: number, iid: number, worktreePath: string): void {
     this.disarm();
+    // The log directory is created here, not by the timeout handler: the
+    // watchdog fires before anything else has run, and its record of the
+    // firing is the only sign that the session was killed on a deadline.
     const shellCmd =
+      `mkdir -p "${this.logDir}"; ` +
       `sleep ${hardTimeoutMs / 1000} && ` +
       `tmux kill-session -t "${normalizeTmuxSessionName(session)}" 2>/dev/null || true; ` +
       `echo "WATCHDOG:${iid}:${session}:${hardTimeoutMs}" >> "${this.logDir}/watchdog.log"`;

@@ -51,6 +51,22 @@ export interface AuditWriter {
   ): Promise<AppendReceipt>;
 }
 
+/**
+ * The audit event could not be persisted.
+ *
+ * This is the writer's failure vocabulary, and it belongs beside the port
+ * because the port is what promises it: whichever entry point wrote the
+ * event - the runner, the coordinator, a managed work item - the failure
+ * reads the same way, and a caller can tell it apart from a workflow that
+ * failed for another reason.
+ */
+export class AuditPersistenceError extends Error {
+  constructor(eventType: string, cause?: unknown) {
+    super(`required audit event '${eventType}' could not be persisted: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = 'AuditPersistenceError';
+  }
+}
+
 export interface RunCommandPorts {
   events: RunEventCommandPort;
   /** Appends audit events. The one writer, not the store. */

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import { logger } from '@afk/infrastructure';
+import { AuditPersistenceError } from '@afk/application';
 import type { ObservationContext, RunEventData, RunEventDraft, AppendReceipt, ClockPort, EventStorePort, IdPort, MetricsPort, TracerPort } from '@afk/core';
 
 export class SystemClock implements ClockPort {
@@ -75,7 +76,12 @@ export class RunObserver {
         data,
         evidence: options.evidence,
       };
-      const receipt = await this.deps.events.append([draft]);
+      const receipt = await this.deps.events.append([draft]).catch(error => {
+        // The writer states the failure, so every entry point reads it the
+        // same way: an event that could not be persisted is not a workflow
+        // that failed for another reason.
+        throw new AuditPersistenceError(data.kind, error);
+      });
       const fields = contextLogFields(context);
       this.log.info({ ...fields, event_type: data.kind, event_sequence: receipt.lastSequence }, 'run event persisted');
       this.metrics.counter('afk.run_events_total', 1, {

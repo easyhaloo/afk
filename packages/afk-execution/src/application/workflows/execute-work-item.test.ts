@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loadWorkItemExecution, replayRun } from '@afk/application';
+import { AuditPersistenceError, loadWorkItemExecution, replayRun } from '@afk/application';
+import pino from 'pino';
 import { executeWorkItem, reconcileWorkItemMerge, type ExecuteWorkItemDependencies } from './execute-work-item.js';
 import type { RunnerOptions, WorkflowRunResult } from '../workflow-engine.js';
 import { encodeWorkItemIdForPath, type BacklogItem } from '@afk/application';
@@ -157,6 +158,25 @@ describe('executeWorkItem', () => {
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow('not linked');
     expect(context.providers.backlog.transition).not.toHaveBeenCalled();
     expect((await deps.loadExecution('attempt-1')).summary.status).toBe('awaiting_merge');
+  });
+
+  it('names the audit failure the way the runner names it', async () => {
+    const { deps } = await setup();
+    const observer = new RunObserver({
+      events: {
+        append: async () => { throw new Error('EACCES: permission denied'); },
+        read: async function* () { /* the store holds nothing */ },
+        listRuns: async () => [],
+        verify: async () => ({ valid: true, lastSequence: 0 }),
+      },
+      log: pino({ enabled: false }),
+    });
+    deps.recordAudit = (context, data) => observer.record(context, data);
+
+    // The managed path writes audit events of its own - qa.started,
+    // qa.passed, change.published, run.finished - outside the runner.
+    // A failure there has to read the same as a failure inside it.
+    await expect(executeWorkItem(input, deps)).rejects.toThrow(AuditPersistenceError);
   });
 
   it('keeps the audit awaiting merge if recording fails and can safely retry', async () => {

@@ -52,7 +52,7 @@ import type { PluginRuntime } from './plugins/runtime.js';
 import type { Step, StepPhase, StepResult, WorkflowTemplate } from '../domain/templates/types.js';
 import type { BranchHandle, BranchStrategyConfig } from '@afk/infrastructure';
 import type { RunnerProviderBundle } from '@afk/infrastructure';
-import type { BacklogClaim, BacklogItem, BacklogState } from '@afk/application';
+import { AuditPersistenceError, type BacklogClaim, type BacklogItem, type BacklogState } from '@afk/application';
 import { TaskRuntimeManager } from './runtime/task-runtime.js';
 import { validateObservationIdentity, type WorkflowRunRepository } from './workflows/run-request.js';
 import {
@@ -81,13 +81,6 @@ const WORKFLOW_RUNTIME_LABELS: RuntimeLifecycleLabels = {
 
 /** The summary a blocked workflow run records when it has none of its own. */
 const WORKFLOW_RUNTIME_ERROR_SUMMARY = 'workflow execution failed';
-
-export class AuditPersistenceError extends Error {
-  constructor(eventType: string, cause?: unknown) {
-    super(`required audit event '${eventType}' could not be persisted: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
-    this.name = 'AuditPersistenceError';
-  }
-}
 
 /**
  * Preserve the provider boundary details when an agent execution fails.
@@ -1494,6 +1487,9 @@ export class WorkflowRunner {
       await this.observer.record(this.observationContext, data);
     } catch (error) {
       logger.error({ runId: this.observationContext.runId, eventType: data.kind, err: error }, 'failed to persist run audit event');
+      // The writer already names the failure; an observer that did not is
+      // wrapped here, so both reach the caller in one voice.
+      if (error instanceof AuditPersistenceError) throw error;
       throw new AuditPersistenceError(data.kind, error);
     }
   }

@@ -30,6 +30,8 @@ node dist/index.js run --backlog-id 123 --execution-mode batch
 
 `WorkflowRunner` 在 `AFK_EVENT_STORE_DIR` 追加 JSONL 审计事件；不能持久化事件时抛出 `AuditPersistenceError`，不会静默跳过审计。
 
+`AuditPersistenceError` 定义在 `@afk/application` 的 `AuditWriter` 端口旁，由写入方（`RunObserver`）抛出。哪个入口写的事件都用同一种说法：runner、coordinator、托管工作项（`qa.passed`、`change.published`、`run.finished` 等由托管路径自己写的那些）读到的都是同一个错误类型，而不是原始的文件系统错误 —— 操作者据此能把「审计写不下去」与「工作流因别的原因失败」分开。
+
 Provider Backlog owns business identity and lifecycle. `BacklogItem.id` is
 recorded as `Run.workItemId` and runtime/event `backlogId`; `runId` identifies
 only one attempt. Runtime heartbeat freshness is diagnostic: `stale` never

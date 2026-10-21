@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { MetricsPort } from '@afk/core';
+import { AuditPersistenceError } from '@afk/application';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { RunObserver } from './run-observer.js';
 
@@ -54,5 +55,35 @@ describe('RunObserver', () => {
       name: 'afk.run_events_total',
       attributes: { event_type: 'run.requested', profile_id: 'local-github-codex', actor_kind: 'loop' },
     }]);
+  });
+
+  it('names the failure when the event cannot be persisted', async () => {
+    const observer = new RunObserver({
+      events: {
+        append: async () => { throw new Error('EACCES: permission denied'); },
+        read: async function* () { /* the store holds nothing */ },
+        listRuns: async () => [],
+        verify: async () => ({ valid: true, lastSequence: 0 }),
+      },
+      log: pino({ enabled: false }),
+    });
+    const context = {
+      traceId: 'trace-1',
+      runId: 'run-1',
+      workItemId: '42',
+      profileId: 'local',
+      attempt: 1,
+      actor: { kind: 'loop' as const, id: 'loop-1' },
+    };
+
+    // The writer states the failure, so every entry point reads it the
+    // same way - a managed work item included.
+    const failure = observer.record(context, {
+      kind: 'run.requested',
+      run: { id: 'run-1', workItemId: '42', profileId: 'local', attempt: 1, status: 'pending' },
+    });
+
+    await expect(failure).rejects.toBeInstanceOf(AuditPersistenceError);
+    await expect(failure).rejects.toThrow("required audit event 'run.requested' could not be persisted");
   });
 });

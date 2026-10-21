@@ -452,11 +452,14 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
   // Real-Docker integration test gated by env var. Default: skipped.
   const enabled = process.env.AFK_DOCKER_E2E === '1';
 
-  it.skipIf(!enabled)('a file written inside /workspace is visible on the host worktree', async () => {
+  it.skipIf(!enabled)('a file written inside /workspace is visible on the host worktree', async (ctx) => {
     const wtPath = fs.mkdtempSync(join(os.tmpdir(), 'afk-docker-e2e-'));
     try {
       const provider = new DockerContainerProvider();
-      if (!(await provider.isAvailable())) return; // silently skip
+      // Skipped, not passed: an engine that is not running exercises
+      // nothing, and a test that reports success without having run is
+      // a lie about the coverage.
+      if (!(await provider.isAvailable())) ctx.skip();
 
       const sb = new ContainerSandbox({ worktreePath: wtPath, image: 'alpine:3.20', user: '1000:1000' });
       sb.bindProvider(provider);
@@ -478,11 +481,11 @@ describe('Container sandbox integration — write/read inside bind mount', () =>
     }
   });
 
-  it.skipIf(!enabled)('runs a detached sandbox execution and observes goal_complete', async () => {
+  it.skipIf(!enabled)('runs a detached sandbox execution and observes goal_complete', async (ctx) => {
     const wtPath = fs.mkdtempSync(join(os.tmpdir(), 'afk-docker-agent-e2e-'));
     try {
       const provider = new DockerContainerProvider();
-      if (!(await provider.isAvailable())) return;
+      if (!(await provider.isAvailable())) ctx.skip();
 
       const sb = new ContainerSandbox({
         worktreePath: wtPath,

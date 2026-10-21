@@ -18,6 +18,7 @@ import { build } from 'esbuild';
 import { globSync } from 'glob';
 import { rmSync } from 'fs';
 import { resolve } from 'path';
+import { writeBuildStamp } from './build-sources.mjs';
 
 const entryPoints = globSync('src/**/*.{ts,tsx}', {
   ignore: ['src/**/*.d.ts', 'src/**/*.test.ts', 'src/**/*.spec.ts']
@@ -38,6 +39,10 @@ try {
     bundle: false,
     logLevel: 'warning',
   });
+
+  // Record what this build was made from, so the freshness check can tell
+  // a current dist from one left over from an earlier source.
+  writeBuildStamp('.');
 
   console.log('✓ Build completed successfully');
 } catch (error) {

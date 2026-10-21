@@ -14,6 +14,7 @@ import { rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { writeBuildStamp } from './build-sources.mjs';
 
 const packageDirectory = process.argv[2];
 if (!packageDirectory) {
@@ -33,5 +34,11 @@ const result = spawnSync(tsc, ['-p', 'tsconfig.json'], {
   stdio: 'inherit',
   shell: process.platform === 'win32',
 });
+
+if (result.status === 0) {
+  // Record what this build was made from, so the freshness check can tell
+  // a current dist from one left over from an earlier source.
+  writeBuildStamp(packageDirectory);
+}
 
 process.exit(result.status ?? 1);

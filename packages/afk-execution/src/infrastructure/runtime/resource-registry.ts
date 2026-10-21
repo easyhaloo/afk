@@ -1,3 +1,4 @@
+import { AFK_RUNTIME_RESOURCES_FILE } from '@afk/core';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -133,7 +134,7 @@ export class AfkResourceRegistry {
   private readonly db: SQLiteDatabase;
 
   constructor(options: AfkResourceRegistryOptions = {}) {
-    this.databasePath = resolve(options.databasePath ?? join(homedir(), '.afk', 'runtime', 'resources.sqlite'));
+    this.databasePath = resolve(options.databasePath ?? join(homedir(), AFK_RUNTIME_RESOURCES_FILE));
     mkdirSync(dirname(this.databasePath), { recursive: true });
     this.db = new DatabaseSync(this.databasePath);
     this.db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');

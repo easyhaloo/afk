@@ -1,3 +1,4 @@
+import { AFK_RUNTIME_RESOURCES_FILE } from '@afk/core';
 import { homedir } from "node:os";
 import path from "node:path";
 import {
@@ -16,7 +17,7 @@ type ResourceAdapterDeps = {
 };
 
 export function createResourceAdapter(deps: ResourceAdapterDeps = {}) {
-  const databasePath = deps.databasePath ?? path.join(homedir(), ".afk", "runtime", "resources.sqlite");
+  const databasePath = deps.databasePath ?? path.join(homedir(), AFK_RUNTIME_RESOURCES_FILE);
   // The registry owns the table and the rows in it; this asks it what is
   // there rather than writing the query out again here, where a change to
   // the table would leave this reading a column that is no longer there.

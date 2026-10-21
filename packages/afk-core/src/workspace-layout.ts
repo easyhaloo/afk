@@ -32,3 +32,19 @@ export const AFK_WORKFLOW_DIRECTORY = '.afk/workflows';
  * the evidence missing and nothing saying why.
  */
 export const AFK_EXECUTIONS_DIRECTORY = '.afk/executions';
+
+/**
+ * Where the runtime keeps the records of the runs it is tracking.
+ *
+ * The runtime writes the records and the desktop reads them - the live
+ * ones and the archive of the finished ones - and each side spelled the
+ * path out. A path that moved left the desktop showing no run history
+ * at all, with nothing saying the records had gone missing.
+ */
+export const AFK_RUNTIME_TASKS_DIRECTORY = '.afk/runtime/tasks';
+
+/** Where the runtime archives the records of the runs that have finished. */
+export const AFK_RUNTIME_ARCHIVE_DIRECTORY = 'archive';
+
+/** Where the runtime keeps the registry of the resources it handed out. */
+export const AFK_RUNTIME_RESOURCES_FILE = '.afk/runtime/resources.sqlite';

@@ -1,3 +1,4 @@
+import { AFK_RUNTIME_TASKS_DIRECTORY, AFK_RUNTIME_ARCHIVE_DIRECTORY } from '@afk/core';
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -130,7 +131,7 @@ function pidAlive(pid: number): boolean {
 export function createWorkItemRunHistoryService(deps: HistoryDeps) {
   const isPidAlive = deps.isPidAlive ?? pidAlive;
   const now = deps.now ?? (() => new Date());
-  const runtimeArchiveDirectory = deps.runtimeArchiveDirectory ?? path.join(homedir(), ".afk", "runtime", "tasks", "archive");
+  const runtimeArchiveDirectory = deps.runtimeArchiveDirectory ?? path.join(homedir(), AFK_RUNTIME_TASKS_DIRECTORY, AFK_RUNTIME_ARCHIVE_DIRECTORY);
 
   return {
     async merge(inventory: WorkItemInventoryResult): Promise<WorkItemInventoryResult> {

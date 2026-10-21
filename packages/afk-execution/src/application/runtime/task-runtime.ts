@@ -1,3 +1,4 @@
+import { AFK_RUNTIME_TASKS_DIRECTORY, AFK_RUNTIME_ARCHIVE_DIRECTORY } from '@afk/core';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -177,9 +178,9 @@ export class TaskRuntimeStore {
   constructor(options: string | TaskRuntimeStoreOptions = {}) {
     this.root = typeof options === 'string'
       ? options
-      : options.root ?? join(homedir(), '.afk', 'runtime', 'tasks');
+      : options.root ?? join(homedir(), AFK_RUNTIME_TASKS_DIRECTORY);
     this.activePath = join(this.root, 'active');
-    this.archivePath = join(this.root, 'archive');
+    this.archivePath = join(this.root, AFK_RUNTIME_ARCHIVE_DIRECTORY);
     this.diagnosticsPath = join(this.root, 'diagnostics');
   }
 

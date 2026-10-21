@@ -3,7 +3,14 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { AFK_CONFIG_FILE, AFK_EXECUTIONS_DIRECTORY, AFK_WORKFLOW_DIRECTORY } from "@afk/core";
+import {
+  AFK_CONFIG_FILE,
+  AFK_EXECUTIONS_DIRECTORY,
+  AFK_RUNTIME_ARCHIVE_DIRECTORY,
+  AFK_RUNTIME_RESOURCES_FILE,
+  AFK_RUNTIME_TASKS_DIRECTORY,
+  AFK_WORKFLOW_DIRECTORY,
+} from "@afk/core";
 
 /**
  * Where AFK keeps its files is one answer. The desktop writes the
@@ -36,8 +43,13 @@ const SHARED_SOURCES = [
   "packages/afk-execution/src/infrastructure/config/manager.ts",
   "packages/afk-execution/src/application/loop/loop-config.ts",
   "packages/afk-execution/src/application/workflows/execute-work-item.ts",
+  "packages/afk-execution/src/application/runtime/task-runtime.ts",
+  "packages/afk-execution/src/infrastructure/runtime/resource-registry.ts",
   "src/cli/commands/retro.ts",
   "desktop-client/electron/services/desktop-service.ts",
+  "desktop-client/electron/adapters/resource-adapter.ts",
+  "desktop-client/electron/services/backlog-runtime-service.ts",
+  "desktop-client/electron/services/work-item-run-history-service.ts",
 ];
 
 describe("where AFK keeps its files", () => {
@@ -61,6 +73,15 @@ describe("where AFK keeps its files", () => {
     expect(config.agentDefault).toBe("codex");
   });
 
+  it("is where the runtime keeps the records the desktop reads", () => {
+    // The runtime writes the run records and the resource registry, and
+    // the desktop reads both. A path that moved left the desktop showing
+    // no run history and no resources, with nothing saying why.
+    expect(AFK_RUNTIME_TASKS_DIRECTORY).toBe(".afk/runtime/tasks");
+    expect(AFK_RUNTIME_ARCHIVE_DIRECTORY).toBe("archive");
+    expect(AFK_RUNTIME_RESOURCES_FILE).toBe(".afk/runtime/resources.sqlite");
+  });
+
   it("is the same layout the desktop writes", async () => {
     // The paths the desktop joins and the paths the runner looks under
     // come from one list, so they cannot drift apart.
@@ -78,7 +99,7 @@ describe("where AFK keeps its files", () => {
     const root = process.cwd();
     for (const source of SHARED_SOURCES) {
       const text = readFileSync(path.join(root, source), 'utf8');
-      expect(text).not.toMatch(/'\.afk',\s*'(executions|workflows|config\.yml)'/);
+      expect(text).not.toMatch(/['"]\.afk['"],\s*['"](executions|workflows|config\.yml|runtime)/);
     }
   });
 });

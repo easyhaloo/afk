@@ -1,3 +1,4 @@
+import { AFK_HANDOFF_DIRECTORY } from '@afk/core';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
@@ -16,7 +17,7 @@ import { handoffDocName } from '../run-identity.js';
  * Keeping the convention in one place stops the two from drifting.
  */
 export function handoffDocPath(worktreePath: string, backlogId: string, gen: number): string {
-  return join(worktreePath, '.afk', 'handoff', handoffDocName({ iid: backlogId, generation: gen }));
+  return join(worktreePath, AFK_HANDOFF_DIRECTORY, handoffDocName({ iid: backlogId, generation: gen }));
 }
 
 export type HandoffMode = 'auto' | 'terminal';
@@ -233,7 +234,7 @@ export class HandoffCoordinator {
     gen: number | 'terminal',
     info: HandoffSummary,
   ): Promise<{ path: string; content: string }> {
-    const handoffDir = join(worktreePath, '.afk', 'handoff');
+    const handoffDir = join(worktreePath, AFK_HANDOFF_DIRECTORY);
     await fs.mkdir(handoffDir, { recursive: true });
     const docPath = join(handoffDir, handoffDocName({ iid: backlogId, generation: gen }));
     const content = [

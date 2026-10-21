@@ -12,6 +12,7 @@
  * Markdown is for human + agent eyes, not for native restore).
  */
 
+import { AFK_HANDOFF_DIRECTORY } from '@afk/core';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import type { SessionSnapshot } from '../../domain/agents/types.js';
@@ -26,7 +27,7 @@ import type {
 import { SessionNotFoundError } from './types.js';
 import { handoffDocName, parseHandoffDocName, parseRunId, runIdFor } from '../run-identity.js';
 
-const HANDOFF_DIR = '.afk/handoff';
+
 
 export class HandoffSessionStore implements SessionStore {
   readonly name = 'handoff-md';
@@ -46,7 +47,7 @@ export class HandoffSessionStore implements SessionStore {
   private fileForRunId(runId: string): string | null {
     const identity = parseRunId(runId);
     if (!identity) return null;
-    return join(this.worktreePath, HANDOFF_DIR, handoffDocName(identity));
+    return join(this.worktreePath, AFK_HANDOFF_DIRECTORY, handoffDocName(identity));
   }
 
   async load(options: SessionLoadOptions): Promise<SessionSnapshot> {
@@ -78,7 +79,7 @@ export class HandoffSessionStore implements SessionStore {
   }
 
   async list(options: SessionListOptions = {}): Promise<SessionStoreEntry[]> {
-    const dir = join(this.worktreePath, HANDOFF_DIR);
+    const dir = join(this.worktreePath, AFK_HANDOFF_DIRECTORY);
     let entries: string[];
     try {
       entries = await fs.readdir(dir);

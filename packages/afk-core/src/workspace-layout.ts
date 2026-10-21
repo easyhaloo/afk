@@ -34,6 +34,17 @@ export const AFK_WORKFLOW_DIRECTORY = '.afk/workflows';
 export const AFK_EXECUTIONS_DIRECTORY = '.afk/executions';
 
 /**
+ * Where the handoff documents live inside a worktree.
+ *
+ * The runner writes the documents and the session store reads them back
+ * as a fallback, and each side spelled the directory out - one of them
+ * spelling it in pieces and the other as one string. A directory that
+ * moved left the recovery document written where the store did not
+ * look, and the handoff was lost.
+ */
+export const AFK_HANDOFF_DIRECTORY = '.afk/handoff';
+
+/**
  * Where the runtime keeps the records of the runs it is tracking.
  *
  * The runtime writes the records and the desktop reads them - the live

@@ -38,6 +38,14 @@ vi.mock("@afk/core", async importOriginal => {
 import { findTemplateFile, templateCandidates } from "@afk/execution/domain/templates/loader";
 import { loadWorkflowConfig } from "@afk/execution/infrastructure/config/manager";
 
+/** The code of a file, without its comments: a comment may name a path
+ *  for the reader, but it does not decide where anything lives. */
+function codeOf(file: string): string {
+  return readFileSync(file, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|\s)\/\/.*$/gm, "$1");
+}
+
 const SHARED_SOURCES = [
   "packages/afk-execution/src/domain/templates/loader.ts",
   "packages/afk-execution/src/infrastructure/config/manager.ts",
@@ -98,7 +106,7 @@ describe("where AFK keeps its files", () => {
     // never looks.
     const root = process.cwd();
     for (const source of SHARED_SOURCES) {
-      const text = readFileSync(path.join(root, source), 'utf8');
+      const text = codeOf(path.join(root, source));
       expect(text).not.toMatch(/['"]\.afk['"],\s*['"](executions|workflows|config\.yml|runtime)/);
     }
   });

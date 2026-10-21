@@ -262,3 +262,77 @@ describe('LoopRunner manifest-bound execution', () => {
   });
 
 });
+
+describe('LoopRunner exits when the work item leaves machine states', () => {
+  it.each(['merge_ready', 'done', 'blocked'] as const)('stops when the item is %s', async state => {
+    const { providers, backlog } = providersFor();
+    const subject = new LoopRunner(providers, {
+      ...selection, readManifest,
+      executeManagedWorkItem: vi.fn(async () => {
+        (backlog.get as any).mockResolvedValue({ ...item, state });
+        return { status: 'merge_ready' } as any;
+      }),
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    const stop = vi.spyOn(subject, 'stop').mockResolvedValue();
+    await internals.runManagedChain('42');
+    expect(stop).toHaveBeenCalledWith('work-left-machine');
+  });
+
+  it.each(['rework', 'ready'] as const)('keeps polling when the item is back to %s', async state => {
+    const { providers, backlog } = providersFor();
+    const subject = new LoopRunner(providers, {
+      ...selection, readManifest,
+      executeManagedWorkItem: vi.fn(async () => {
+        (backlog.get as any).mockResolvedValue({ ...item, state });
+        return { status: 'rework' } as any;
+      }),
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    const stop = vi.spyOn(subject, 'stop').mockResolvedValue();
+    await internals.runManagedChain('42');
+    expect(stop).not.toHaveBeenCalled();
+    await internals.poll();
+    expect(backlog.list).toHaveBeenCalledWith({ state: 'rework', executionMode: 'afk' });
+  });
+
+  it('does not exit when the state read fails; records the error', async () => {
+    const { providers, backlog } = providersFor();
+    const subject = new LoopRunner(providers, {
+      ...selection, readManifest,
+      executeManagedWorkItem: vi.fn(async () => {
+        (backlog.get as any).mockRejectedValue(new Error('503'));
+        return { status: 'rework' } as any;
+      }),
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    const stop = vi.spyOn(subject, 'stop').mockResolvedValue();
+    await internals.runManagedChain('42');
+    expect(stop).not.toHaveBeenCalled();
+    expect(subject.getStatus().lastError['42']).toMatch(/503/);
+  });
+
+  it('still stops after N successful completions', async () => {
+    const { providers } = providersFor();
+    const subject = new LoopRunner(providers, {
+      ...selection, readManifest, maxIterations: 1,
+      executeManagedWorkItem: vi.fn(async () => ({ status: 'merge_ready' } as any)),
+    });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+    const stop = vi.spyOn(subject, 'stop').mockResolvedValue();
+    await internals.runManagedChain('42');
+    expect(stop).toHaveBeenCalledWith('max-iterations');
+  });
+});

@@ -95,7 +95,12 @@ async function runLoop(options: LoopStartOptions, context: CommandRegistrationCo
   } finally {
     removeSignals();
   }
-  success('Loop finished (max-iterations reached)');
+  const reasons = {
+    'max-iterations': 'max-iterations reached',
+    'work-left-machine': 'work item left the loop\'s states',
+    stopped: 'stopped',
+  } as const;
+  success(`Loop finished (${reasons[runner.stopReason ?? 'stopped']})`);
   process.exit(0);
 }
 

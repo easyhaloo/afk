@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * Direct entry point for afk board — renders App without Commander overhead.
- * Run via: node dist/cli/commands/board-entry.js
+ * The TUI board — renders App without Commander overhead.
+ *
+ * `afk` with no arguments lands here. There is no `afk board` command:
+ * the dispatcher refuses it and points at this path.
  */
 import { render } from 'ink';
 import React from 'react';

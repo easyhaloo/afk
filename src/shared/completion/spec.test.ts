@@ -1,9 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { buildCompletionTree } from '../../cli/completion/tree.js';
-import { extractSpec } from './spec.js';
+import { extractSpec, type CompletionSpec } from './spec.js';
 
 describe('extractSpec', () => {
-  const spec = extractSpec(buildCompletionTree());
+  let spec: CompletionSpec;
+
+  beforeAll(async () => {
+    spec = extractSpec(await buildCompletionTree());
+  });
 
   it('includes the backlog command with its management subcommands', () => {
     const backlog = spec.commands.find(c => c.name === 'backlog');

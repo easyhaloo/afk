@@ -67,7 +67,7 @@ supported surface:
 | `afk retro run --run-id <id> --workspace <path>` | Analyze recorded evidence with the existing `/retro` skill and write `report.json` plus `report.html` |
 | `afk retro show <report>` | Read a generated retro report |
 | `afk graph workflow <template>` | Generate a deterministic workflow graph |
-| `afk` (TUI), `afk board`, `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
+| `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
 There are no aliases for removed command groups. Provider metadata labels are
 an adapter detail and never part of this CLI contract.

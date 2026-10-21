@@ -57,7 +57,7 @@ AFK 执行外部规划器已经拆分好的 backlog 工作项，不负责把工�
 | `afk retro run --run-id <id> --workspace <path>` | 用现有 `/retro` 技能分析已记录证据并写出 `report.json` 与 `report.html` |
 | `afk retro show <report>` | 读取已生成的复盘报告 |
 | `afk graph workflow <template>` | 生成确定性的工作流图 |
-| `afk`（TUI）、`afk board`、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
+| `afk`（TUI）、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
 
 已移除的命令组没有别名。provider 的元数据标签属于 adapter 内部实现，
 不是 CLI 契约。

@@ -21,8 +21,8 @@ function detectShell(): Shell | undefined {
   return isShell(base) ? base : undefined;
 }
 
-function emitScript(shell: Shell): string {
-  const spec = extractSpec(buildCompletionTree());
+async function emitScript(shell: Shell): Promise<string> {
+  const spec = extractSpec(await buildCompletionTree());
   switch (shell) {
     case 'zsh': return emitZsh(spec);
     case 'bash': return emitBash(spec);
@@ -55,7 +55,7 @@ interface InstallResult {
   rcUpdated: boolean;
 }
 
-function installCompletion(shell?: string): InstallResult {
+async function installCompletion(shell?: string): Promise<InstallResult> {
   let resolved: Shell;
   if (shell) {
     if (!isShell(shell)) throw new Error(`Unsupported shell '${shell}'. Supported: ${SHELLS.join(', ')}.`);
@@ -69,7 +69,7 @@ function installCompletion(shell?: string): InstallResult {
   const file = completionFilePath(resolved);
   mkdirSync(dirname(file), { recursive: true });
   const fileCreated = !existsSync(file);
-  writeFileSync(file, emitScript(resolved));
+  writeFileSync(file, await emitScript(resolved));
 
   const rc = rcFile(resolved);
   let rcUpdated = false;
@@ -83,8 +83,8 @@ function installCompletion(shell?: string): InstallResult {
   return { file, rc, fileCreated, rcUpdated };
 }
 
-function printScript(shell: string): void {
-  const spec = extractSpec(buildCompletionTree());
+async function printScript(shell: string): Promise<void> {
+  const spec = extractSpec(await buildCompletionTree());
   switch (shell) {
     case 'zsh': process.stdout.write(emitZsh(spec)); return;
     case 'bash': process.stdout.write(emitBash(spec)); return;
@@ -98,10 +98,10 @@ export function registerCompletionCommands(program: Command): void {
     .command('completion [shell]')
     .description('Print a shell completion script, or install it with --install.')
     .option('--install', 'Write the completion script to a file and wire it into the shell rc.')
-    .action(function (this: Command, shell: string | undefined, options: { install?: boolean }) {
+    .action(async function (this: Command, shell: string | undefined, options: { install?: boolean }) {
       if (options.install) {
         try {
-          const { file, rc, fileCreated, rcUpdated } = installCompletion(shell);
+          const { file, rc, fileCreated, rcUpdated } = await installCompletion(shell);
           console.log(`${fileCreated ? 'Wrote' : 'Refreshed'} completion script: ${file}`);
           if (rc) {
             console.log(rcUpdated ? `Added source line to ${rc}` : `${rc} already sources it`);
@@ -118,7 +118,7 @@ export function registerCompletionCommands(program: Command): void {
         this.error('Specify a shell (zsh, bash, fish) or use --install.', { exitCode: 1 });
         return;
       }
-      try { printScript(shell); }
+      try { await printScript(shell); }
       catch (error) { this.error((error as Error).message, { exitCode: 1 }); }
     });
 

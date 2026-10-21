@@ -7,7 +7,12 @@ import { registerCompletionCommands } from './completion.js';
 import { buildCompletionTree } from '../completion/tree.js';
 import { COMMANDS } from '../command-registry.js';
 
-function run(args: string[]): { stdout: string; exitCode: number | undefined } {
+/**
+ * The command writes its script from the registry's program, so the action
+ * is asynchronous - and the parse has to await it, or the error it reports
+ * for an unsupported shell never reaches the caller.
+ */
+async function run(args: string[]): Promise<{ stdout: string; exitCode: number | undefined }> {
   const program = new Command();
   program.exitOverride();
   registerCompletionCommands(program);
@@ -18,7 +23,7 @@ function run(args: string[]): { stdout: string; exitCode: number | undefined } {
   });
   let exitCode: number | undefined;
   try {
-    program.parse(['node', 'afk', ...args]);
+    await program.parseAsync(['node', 'afk', ...args]);
   } catch (e) {
     exitCode = (e as { exitCode?: number }).exitCode;
   }
@@ -33,8 +38,8 @@ describe('registerCompletionCommands', () => {
     expect(await entry?.loader()).toBe(registerCompletionCommands);
   });
 
-  it('includes every public nested command needed by shell completion', () => {
-    const program = buildCompletionTree();
+  it('includes every public nested command needed by shell completion', async () => {
+    const program = await buildCompletionTree();
     const names = program.commands.map(command => command.name());
 
     expect(names).toEqual(expect.arrayContaining(['backlog', 'run', 'qa', 'loop', 'observe']));
@@ -43,28 +48,28 @@ describe('registerCompletionCommands', () => {
     expect(backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name())).toEqual(['add', 'remove']);
   });
 
-  it('completion zsh prints a #compdef afk script', () => {
-    const { stdout } = run(['completion', 'zsh']);
+  it('completion zsh prints a #compdef afk script', async () => {
+    const { stdout } = await run(['completion', 'zsh']);
     expect(stdout).toContain('#compdef afk');
   });
 
-  it('completion bash prints a complete -F binding', () => {
-    const { stdout } = run(['completion', 'bash']);
+  it('completion bash prints a complete -F binding', async () => {
+    const { stdout } = await run(['completion', 'bash']);
     expect(stdout).toContain('complete -F _afk afk');
   });
 
-  it('completion fish prints complete -c afk declarations', () => {
-    const { stdout } = run(['completion', 'fish']);
+  it('completion fish prints complete -c afk declarations', async () => {
+    const { stdout } = await run(['completion', 'fish']);
     expect(stdout).toContain('complete -c afk');
   });
 
-  it('completion <invalid shell> exits non-zero', () => {
-    const { exitCode } = run(['completion', 'powershell']);
+  it('completion <invalid shell> exits non-zero', async () => {
+    const { exitCode } = await run(['completion', 'powershell']);
     expect(exitCode).toBe(1);
   });
 
-  it('__complete returns no candidates (pre-wired, currently empty)', () => {
-    const { stdout } = run(['__complete', 'issue', 'get']);
+  it('__complete returns no candidates (pre-wired, currently empty)', async () => {
+    const { stdout } = await run(['__complete', 'issue', 'get']);
     expect(stdout).toBe('');
   });
 });
@@ -82,8 +87,8 @@ describe('completion --install', () => {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it('writes the script to ~/.afk/completion/afk.zsh and sources it from ~/.zshrc', () => {
-    const r1 = run(['completion', 'zsh', '--install']);
+  it('writes the script to ~/.afk/completion/afk.zsh and sources it from ~/.zshrc', async () => {
+    const r1 = await run(['completion', 'zsh', '--install']);
     expect(r1.exitCode).toBeUndefined();
     const scriptFile = path.join(tmpHome, '.afk', 'completion', 'afk.zsh');
     expect(fs.readFileSync(scriptFile, 'utf8')).toContain('#compdef afk');
@@ -94,27 +99,27 @@ describe('completion --install', () => {
     expect(rcContent).not.toContain('eval "$(afk completion'); // no per-startup spawn
 
     // re-run refreshes the file but must not duplicate the rc block
-    run(['completion', 'zsh', '--install']);
+    await run(['completion', 'zsh', '--install']);
     const count = (fs.readFileSync(zshrc, 'utf8').match(/>>> afk completion >>>/g) || []).length;
     expect(count).toBe(1);
   });
 
-  it('auto-detects shell from $SHELL when --install is given without a shell', () => {
+  it('auto-detects shell from $SHELL when --install is given without a shell', async () => {
     vi.stubEnv('SHELL', '/bin/bash');
-    run(['completion', '--install']);
+    await run(['completion', '--install']);
     expect(fs.readFileSync(path.join(tmpHome, '.afk', 'completion', 'afk.bash'), 'utf8')).toContain('complete -F _afk afk');
     expect(fs.readFileSync(path.join(tmpHome, '.bashrc'), 'utf8')).toContain('source "');
   });
 
-  it('fish writes to the auto-load dir and does not edit any rc file', () => {
-    run(['completion', 'fish', '--install']);
+  it('fish writes to the auto-load dir and does not edit any rc file', async () => {
+    await run(['completion', 'fish', '--install']);
     expect(fs.readFileSync(path.join(tmpHome, '.config', 'fish', 'completions', 'afk.fish'), 'utf8')).toContain('complete -c afk');
     // no config.fish should be created/modified
     expect(fs.existsSync(path.join(tmpHome, '.config', 'fish', 'config.fish'))).toBe(false);
   });
 
-  it('errors on unsupported shell with --install', () => {
-    const { exitCode } = run(['completion', 'powershell', '--install']);
+  it('errors on unsupported shell with --install', async () => {
+    const { exitCode } = await run(['completion', 'powershell', '--install']);
     expect(exitCode).toBe(1);
   });
 });

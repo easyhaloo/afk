@@ -28,11 +28,13 @@ export interface CompletionSpec {
   commands: CommandSpec[];
 }
 
-/** Skip commander's auto-generated `help` subcommand. The introspected tree
- * never contains hidden commands (`__complete` is registered separately, not
- * via buildCompletionTree), so a name check is sufficient. */
+/**
+ * Skip the commands a person does not type: commander's auto-generated
+ * `help`, and the hidden `__complete` alias - which the tree now carries,
+ * because it is registered by the same command as `completion`.
+ */
 function isUserCommand(cmd: Command): boolean {
-  return cmd.name() !== 'help';
+  return cmd.name() !== 'help' && cmd.name() !== '__complete';
 }
 
 function extractArgument(arg: Argument): ArgumentSpec {

@@ -30,10 +30,10 @@ export async function lazyLoad(cmd: string, extraArgs: string[]) {
       if (matched) {
         const sub = matched.commands.find(c => c.name() === extraArgs[0]);
         const target = sub ?? matched;
-        target.parse(buildLazyArgv(cmd, extraArgs, sub?.name()));
+        await target.parseAsync(buildLazyArgv(cmd, extraArgs, sub?.name()));
         return;
       }
-      program.parse(['afk', cmd, ...extraArgs]);
+      await program.parseAsync(['afk', cmd, ...extraArgs]);
       return;
     } catch (err: unknown) {
       // With exitOverride(), Commander throws CommanderError instead of calling

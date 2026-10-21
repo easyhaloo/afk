@@ -1,4 +1,5 @@
-import type { Command } from 'commander';
+import { Command } from 'commander';
+import { AFK_VERSION } from '@afk/application';
 
 export interface CommandRegistrationContext {
   argv?: readonly string[];
@@ -24,7 +25,6 @@ export interface CommandEntry {
 export const COMMANDS: CommandEntry[] = [
   { names: ['signal'], loader: () => import('./commands/signal.js').then(m => m.registerSignalCommands) },
   { names: ['tmux'], loader: () => import('./commands/tmux.js').then(m => m.registerTmuxCommands) },
-  { names: ['board'], loader: () => import('./commands/board.js').then(m => m.registerBoardCommands) },
   { names: ['kanban'], loader: () => import('./commands/kanban.js').then(m => m.registerKanbanCommands) },
   { names: ['debug'], loader: () => import('./commands/debug.js').then(m => m.registerDebugCommands) },
   { names: ['isolate'], loader: () => import('./commands/isolate.js').then(m => m.registerIsolateCommands) },
@@ -38,3 +38,21 @@ export const COMMANDS: CommandEntry[] = [
   { names: ['graph'], loader: () => import('./commands/graph.js').then(m => m.registerGraphCommands) },
   { names: ['completion', '__complete'], loader: () => import('./commands/completion.js').then(m => m.registerCompletionCommands) },
 ];
+
+/**
+ * A program with every command registered.
+ *
+ * The full CLI and the completion tree both need one, and a command that
+ * one of them knows about and the other does not is a command the product
+ * only half offers: the completion tree used to carry its own list, and it
+ * had already fallen behind - `execute`, `reconcile`, `retro` and
+ * `completion` were missing from the shell completion while the registry
+ * and the documentation both offered them.
+ */
+export async function buildCommandProgram(): Promise<Command> {
+  const program = new Command();
+  program.name('afk').version(AFK_VERSION);
+  const registerFns = await Promise.all(COMMANDS.map(command => command.loader()));
+  for (const register of registerFns) register(program);
+  return program;
+}

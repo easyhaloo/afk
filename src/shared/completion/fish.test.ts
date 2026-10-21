@@ -3,7 +3,7 @@ import { buildCompletionTree } from '../../cli/completion/tree.js';
 import { extractSpec } from './spec.js';
 import { emitFish } from './shells.js';
 
-const script = emitFish(extractSpec(buildCompletionTree()));
+const script = emitFish(extractSpec(await buildCompletionTree()));
 
 describe('emitFish', () => {
   it('uses complete -c afk declarations', () => {

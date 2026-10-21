@@ -3,7 +3,7 @@ import { buildCompletionTree } from '../../cli/completion/tree.js';
 import { extractSpec } from './spec.js';
 import { emitZsh } from './shells.js';
 
-const script = emitZsh(extractSpec(buildCompletionTree()));
+const script = emitZsh(extractSpec(await buildCompletionTree()));
 
 describe('emitZsh', () => {
   it('produces a #compdef afk script wired with compdef', () => {

@@ -3,7 +3,7 @@ import { buildCompletionTree } from '../../cli/completion/tree.js';
 import { extractSpec } from './spec.js';
 import { emitBash } from './shells.js';
 
-const script = emitBash(extractSpec(buildCompletionTree()));
+const script = emitBash(extractSpec(await buildCompletionTree()));
 
 describe('emitBash', () => {
   it('registers a complete -F _afk afk binding', () => {

@@ -17,7 +17,15 @@ export type RuntimeHealthObservation = {
   observedAt: string;
 };
 
-export type RuntimeHealthState = 'live' | 'stale' | 'exited' | 'unknown';
+/**
+ * The states a run's health can be in.
+ *
+ * The list is named so a reader can check a state against it rather
+ * than writing the states down a second time.
+ */
+export const RUNTIME_HEALTH_STATES = ['live', 'stale', 'exited', 'unknown'] as const;
+
+export type RuntimeHealthState = (typeof RUNTIME_HEALTH_STATES)[number];
 
 export type RuntimeHealth = {
   state: RuntimeHealthState;

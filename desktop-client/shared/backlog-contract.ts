@@ -143,9 +143,20 @@ export type WorkItemExecutionStep = {
   status?: "pending" | "running" | "completed" | "blocked";
 };
 
+/**
+ * The states a work item run can be in.
+ *
+ * The list is declared once, so the run record, the run summary, the
+ * project run, the snapshot schema and the parsers that read them
+ * cannot disagree about which state a run is in.
+ */
+export const WORK_ITEM_RUN_STATUSES = ["starting", "running", "completed", "failed"] as const;
+
+export type WorkItemRunStatus = (typeof WORK_ITEM_RUN_STATUSES)[number];
+
 export type WorkItemRunRecord = {
   id: string;
-  status: "starting" | "running" | "completed" | "failed";
+  status: WorkItemRunStatus;
   startedAt: string;
   completedAt?: string;
   workflow?: string;
@@ -282,14 +293,19 @@ export type BacklogCreateInput = {
 export type BacklogRunSummary = {
   id: string;
   backlogId: string;
-  status: "starting" | "running" | "completed" | "failed";
+  status: WorkItemRunStatus;
   startedAt: string;
   template?: string;
   pid?: number;
   error?: string;
 };
 
-export type BacklogRuntimeStatus = "running" | "stale" | "completed" | "blocked" | "failed";
+/**
+ * The states a backlog runtime projection can be in.
+ */
+export const BACKLOG_RUNTIME_STATUSES = ["running", "stale", "completed", "blocked", "failed"] as const;
+
+export type BacklogRuntimeStatus = (typeof BACKLOG_RUNTIME_STATUSES)[number];
 
 export type BacklogRuntimeProjection = {
   runId: string;
@@ -594,7 +610,7 @@ export function parseWorkItemRunRecord(input: unknown): WorkItemRunRecord {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("work item run record must be an object");
   const candidate = input as Record<string, unknown>;
   assertExactKeys(candidate, ["id", "status", "startedAt", "completedAt", "workflow", "workingBranch", "repositories", "workspacePath", "pid", "error"], "work item run record");
-  if (typeof candidate.status !== "string" || !["starting", "running", "completed", "failed"].includes(candidate.status)) throw new Error("work item run record: status is invalid");
+  if (typeof candidate.status !== "string" || !(WORK_ITEM_RUN_STATUSES as readonly string[]).includes(candidate.status)) throw new Error("work item run record: status is invalid");
   if (candidate.pid !== undefined && (typeof candidate.pid !== "number" || !Number.isInteger(candidate.pid) || candidate.pid <= 0)) throw new Error("work item run record: pid is invalid");
   return {
     id: parseRequiredString(candidate.id, "work item run record: id"),
@@ -726,7 +742,7 @@ function parseBacklogRunSummary(input: unknown): BacklogRunSummary {
   const candidate = input as Record<string, unknown>;
   assertExactKeys(candidate, ["id", "backlogId", "status", "startedAt", "template", "pid", "error"], "backlog run summary");
   if (typeof candidate.id !== "string" || typeof candidate.backlogId !== "string" || typeof candidate.startedAt !== "string") throw new Error("backlog run summary has invalid identity fields");
-  if (!["starting", "running", "completed", "failed"].includes(candidate.status as string)) throw new Error("backlog run summary has invalid status");
+  if (!(WORK_ITEM_RUN_STATUSES as readonly string[]).includes(candidate.status as string)) throw new Error("backlog run summary has invalid status");
   if (candidate.template !== undefined && typeof candidate.template !== "string") throw new Error("backlog run summary: template is invalid");
   if (candidate.pid !== undefined && typeof candidate.pid !== "number") throw new Error("backlog run summary: pid is invalid");
   if (candidate.error !== undefined && typeof candidate.error !== "string") throw new Error("backlog run summary: error is invalid");
@@ -738,7 +754,7 @@ function parseBacklogRuntimeProjection(input: unknown): BacklogRuntimeProjection
   const candidate = input as Record<string, unknown>;
   assertExactKeys(candidate, ["runId", "status", "phase", "progress", "branch", "worktree", "diagnosticPath", "heartbeatAt"], "runtime projection");
   if (typeof candidate.runId !== "string" || typeof candidate.heartbeatAt !== "string") throw new Error("runtime projection has invalid identity fields");
-  if (!["running", "stale", "completed", "blocked", "failed"].includes(candidate.status as string)) throw new Error("runtime projection has invalid status");
+  if (!(BACKLOG_RUNTIME_STATUSES as readonly string[]).includes(candidate.status as string)) throw new Error("runtime projection has invalid status");
   if (candidate.phase !== "implementing" && candidate.phase !== "verifying") throw new Error("runtime projection has invalid phase");
   for (const key of ["progress", "branch", "worktree", "diagnosticPath"] as const) {
     if (candidate[key] !== undefined && typeof candidate[key] !== "string") throw new Error(`runtime projection: ${key} is invalid`);

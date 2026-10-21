@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   BACKLOG_STATES,
   BACKLOG_EXECUTION_MODES,
+  WORK_ITEM_RUN_STATUSES,
+  BACKLOG_RUNTIME_STATUSES,
   type BacklogItem,
   type BacklogState,
   type BacklogExecutionMode,
@@ -23,6 +25,26 @@ describe("Backlog shared contract", () => {
       "ready", "rework", "in_progress", "verification", "merge_ready", "done", "blocked",
     ]);
     expect(BACKLOG_EXECUTION_MODES).toEqual(["afk", "hitl"]);
+  });
+
+  it("reads a run record in every state the shared list names, and no other", () => {
+    for (const status of WORK_ITEM_RUN_STATUSES) {
+      const parsed = parseWorkItemRunRecord({ id: "run-1", status, startedAt: "2026-09-15T00:00:00.000Z" });
+      expect(parsed.status).toBe(status);
+    }
+    expect(() => parseWorkItemRunRecord({ id: "run-1", status: "quantum", startedAt: "2026-09-15T00:00:00.000Z" }))
+      .toThrow(/status/i);
+  });
+
+  it("reads a runtime projection in every state the shared list names, and no other", () => {
+    for (const status of BACKLOG_RUNTIME_STATUSES) {
+      const parsed = parseBacklogRuntimeSummary({
+        backlogId: "42",
+        backlog: { id: "42", title: "demo", description: "demo", dependsOn: [], state: "ready", executionMode: "afk", tags: [], branchName: "afk/backlog-42", providerRef: "stub:42" },
+        runtime: { runId: "run-1", status, phase: "implementing", heartbeatAt: "2026-09-15T00:00:00.000Z" },
+      });
+      expect(parsed.runtime?.status).toBe(status);
+    }
   });
 
   it("does not leak secret material through BacklogItem DTO", () => {

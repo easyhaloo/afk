@@ -1,6 +1,6 @@
 import { AGENT_PROVIDER_NAMES } from '@afk/core';
 import type { AgentUsage, ExecutionPhase, ExecutionQueryOptions, ExecutionRunDetail, ExecutionStatus, ExecutionSummary } from "./execution-contract.js";
-import type { WorkItemAgentId } from "./backlog-contract.js";
+import type { WorkItemAgentId, WorkItemRunStatus } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
 
 /**
@@ -225,7 +225,7 @@ export type WorkflowGraphGenerateResult = {
 export type ProjectRun = {
   id: string;
   workItemId: string;
-  status: "starting" | "running" | "completed" | "failed";
+  status: WorkItemRunStatus;
   startedAt: string;
   completedAt?: string;
   workspacePath: string;

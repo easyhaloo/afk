@@ -14,7 +14,7 @@
  * validates what it received. It therefore imports no Node built-in.
  */
 import { z } from "zod";
-import { WORK_ITEM_AGENT_IDS } from "./backlog-contract.js";
+import { WORK_ITEM_AGENT_IDS, WORK_ITEM_RUN_STATUSES } from "./backlog-contract.js";
 import { AGENT_PROVIDER_IDS, WORKFLOW_RUN_STATUSES, type Snapshot } from "./ipc-contract.js";
 
 const agentProviderIdSchema = z.enum(AGENT_PROVIDER_IDS);
@@ -132,7 +132,7 @@ const agentRuntimeSchema = z.object({
 const projectRunSchema = z.object({
   id: z.string(),
   workItemId: z.string(),
-  status: z.enum(["starting", "running", "completed", "failed"]),
+  status: z.enum(WORK_ITEM_RUN_STATUSES),
   startedAt: z.string(),
   completedAt: z.string().optional(),
   workspacePath: z.string(),

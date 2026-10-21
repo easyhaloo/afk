@@ -1,5 +1,6 @@
 import { parseWorkItemId, type WorkItemId } from "./backlog-contract.js";
 import { assertExactKeys, parseObject, parseRequiredString } from "./validation.js";
+import { RUNTIME_HEALTH_STATES } from "@afk/application";
 import type { RuntimeHealth, WorkflowInstance, WorkflowInstanceStep } from "@afk/application";
 import type { AgentUsage as AuditedAgentUsage, ExecutionSummary as AuditedExecutionSummary } from "@afk/application";
 import { isAgentExecutionMode, type RunPhase, type RunStatus } from "@afk/core";
@@ -222,7 +223,7 @@ export function parseExecutionRunDetail(input: unknown): ExecutionRunDetail {
 export function parseRuntimeHealth(input: unknown): RuntimeHealth {
   const value = parseObject(input, "runtime health");
   assertExactKeys(value, ["state", "observedAt", "reason", "heartbeatAt", "completedAt", "provider", "transport", "executionMode", "runnerPid"], "runtime health");
-  if (!["live", "stale", "exited", "unknown"].includes(value.state as string)) throw new Error("runtime health state is invalid");
+  if (!(RUNTIME_HEALTH_STATES as readonly string[]).includes(value.state as string)) throw new Error("runtime health state is invalid");
   const health: RuntimeHealth = { state: value.state as RuntimeHealth["state"], observedAt: parseRequiredString(value.observedAt, "health observedAt"), reason: parseRequiredString(value.reason, "health reason") };
   for (const key of ["heartbeatAt", "completedAt", "provider", "transport"] as const) if (value[key] !== undefined) health[key] = parseRequiredString(value[key], `health ${key}`);
   for (const key of ["observedAt", "heartbeatAt", "completedAt"] as const) if (health[key] !== undefined && !Number.isFinite(Date.parse(health[key]!))) throw new Error(`health ${key} is invalid`);

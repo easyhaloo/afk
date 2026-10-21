@@ -17,6 +17,16 @@ export const WORK_ITEM_PLATFORMS = ['github', 'gitlab'] as const;
 
 export type WorkItemPlatform = typeof WORK_ITEM_PLATFORMS[number];
 
+/**
+ * The platforms a query can span.
+ *
+ * 'all' means every platform there is. It is a query and not a place a
+ * work item can come from, so it is not part of the identity grammar.
+ */
+export const GLOBAL_WORK_ITEM_PLATFORMS = [...WORK_ITEM_PLATFORMS, 'all'] as const;
+
+export type GlobalWorkItemPlatform = typeof GLOBAL_WORK_ITEM_PLATFORMS[number];
+
 declare const workItemIdBrand: unique symbol;
 
 export type WorkItemId = string & { readonly [workItemIdBrand]: 'WorkItemId' };

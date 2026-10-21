@@ -1,3 +1,4 @@
+import type { WorkItemPlatform } from "@afk/application";
 import type { WorkItemApplicationAdapter } from "../adapters/work-item-application-adapter.js";
 import {
   parseWorkItemInventoryOptions,
@@ -88,7 +89,7 @@ function isStale(timestamp: number | undefined, staleAfterMs: number): boolean {
   return timestamp === undefined || !Number.isFinite(timestamp) || Date.now() - timestamp >= staleAfterMs;
 }
 
-function projectInventory(inventory: WorkItemInventoryResult, platform: "github" | "gitlab"): WorkItemInventoryResult {
+function projectInventory(inventory: WorkItemInventoryResult, platform: WorkItemPlatform): WorkItemInventoryResult {
   const items = inventory.items.filter(item => item.sources?.some(source => source.platform === platform) ?? item.project.platform === platform);
   return {
     ...inventory,

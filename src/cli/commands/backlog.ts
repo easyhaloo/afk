@@ -12,6 +12,8 @@ import {
   BACKLOG_STATES,
   collectGlobalWorkItemInventory,
   filterGlobalWorkItemInventory,
+  isWorkItemPlatform,
+  WORK_ITEM_PLATFORMS,
 } from '@afk/application';
 import type {
   BacklogCreateInput,
@@ -46,7 +48,7 @@ import {
 } from '../json-output.js';
 
 function asPlatform(value: unknown): TrackerPlatform | undefined {
-  return value === 'github' || value === 'gitlab' ? value : undefined;
+  return isWorkItemPlatform(value) ? value : undefined;
 }
 
 function providerFor(project?: string, platform?: unknown): Promise<BacklogManagementProvider> {
@@ -366,7 +368,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .description('Explicitly adopt an open manual issue into ready AFK work')
     .requiredOption('--id <id>', 'Backlog ID')
     .requiredOption('--project <project>', 'Provider project/repository')
-    .addOption(new Option('--platform <platform>', 'Provider platform').choices(['github', 'gitlab']).makeOptionMandatory())
+    .addOption(new Option('--platform <platform>', 'Provider platform').choices([...WORK_ITEM_PLATFORMS]).makeOptionMandatory())
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {

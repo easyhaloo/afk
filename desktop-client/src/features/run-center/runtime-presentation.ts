@@ -1,6 +1,8 @@
+import type { WorkItemPlatform } from "@afk/application";
+
 export type RuntimePhase = "ready" | "active" | "verify" | "attention";
 export type RuntimeVisualState = RuntimePhase | "failed";
-export type RuntimeProvider = "github" | "gitlab";
+export type RuntimeProvider = WorkItemPlatform;
 
 export type RuntimeSourcePresentation = {
   provider?: RuntimeProvider;

@@ -1,25 +1,28 @@
+import type { BacklogExecutionMode, BacklogState } from './backlog-mapping.js';
+import type { GlobalWorkItemPlatform, WorkItemPlatform } from './work-items/identity.js';
+
 export interface ProviderInventoryQuery {
-  platform?: 'github' | 'gitlab' | 'all';
-  state?: string;
-  executionMode?: string;
+  platform?: GlobalWorkItemPlatform;
+  state?: BacklogState;
+  executionMode?: BacklogExecutionMode;
   tag?: string;
   project?: string;
 }
 
 export interface ProviderInventoryItem {
-  project: { platform: 'github' | 'gitlab'; projectKey: string };
-  state: string;
-  executionMode: string;
+  project: { platform: WorkItemPlatform; projectKey: string };
+  state: BacklogState;
+  executionMode: BacklogExecutionMode;
   tags: readonly string[];
 }
 
 export interface ProviderInventoryProject {
-  platform: 'github' | 'gitlab';
+  platform: WorkItemPlatform;
   projectKey: string;
 }
 
 export interface ProviderInventoryDiagnostic {
-  platform: 'github' | 'gitlab';
+  platform: WorkItemPlatform;
   projectKey?: string;
   code: string;
 }
@@ -32,7 +35,7 @@ export interface ProviderInventorySnapshot<Item extends ProviderInventoryItem, P
 }
 
 export interface ProviderInventoryPort<Item extends ProviderInventoryItem, Project extends ProviderInventoryProject, Diagnostic extends ProviderInventoryDiagnostic> {
-  list(platform: 'github' | 'gitlab' | 'all'): Promise<ProviderInventorySnapshot<Item, Project, Diagnostic>>;
+  list(platform: GlobalWorkItemPlatform): Promise<ProviderInventorySnapshot<Item, Project, Diagnostic>>;
 }
 
 export async function queryProviderInventory<Item extends ProviderInventoryItem, Project extends ProviderInventoryProject, Diagnostic extends ProviderInventoryDiagnostic>(

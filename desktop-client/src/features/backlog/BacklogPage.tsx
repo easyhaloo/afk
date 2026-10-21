@@ -11,6 +11,7 @@ import type {
   BacklogRuntimeSummary,
 } from "../../../shared/backlog-contract";
 import type { WorkflowTemplateSummary } from "../../../shared/ipc-contract";
+import type { ProviderIconName } from "../../components/ProviderIcon";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { SelectMenu } from "../../components/SelectMenu";
 import { FilterPanel } from "../../components/FilterPanel";
@@ -42,7 +43,7 @@ const sourceOptions: Array<{ value: SourceFilter; label: string }> = [
   ...Object.entries(BACKLOG_STATE_LABELS).map(([value, label]) => ({ value: value as SourceFilter, label })),
 ];
 
-const platformOptions: Array<{ value: "auto" | BacklogPlatform; label: string; icon?: "github" | "gitlab"; triggerLabel?: string }> = [
+const platformOptions: Array<{ value: "auto" | BacklogPlatform; label: string; icon?: ProviderIconName; triggerLabel?: string }> = [
   { value: "auto", label: "自动探测" },
   { value: "github", label: "GitHub", icon: "github", triggerLabel: "" },
   { value: "gitlab", label: "GitLab", icon: "gitlab", triggerLabel: "" },

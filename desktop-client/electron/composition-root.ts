@@ -1,3 +1,4 @@
+import type { WorkItemPlatform } from "@afk/application";
 import { createRequire } from "node:module";
 import { app } from "electron";
 import path from "node:path";
@@ -25,7 +26,7 @@ type RuntimeBundle = {
   createManagementProviders: (
     projectId: string | undefined,
     cwd: string,
-    platform?: "github" | "gitlab",
+    platform?: WorkItemPlatform,
   ) => Promise<ManagementProviderBundle>;
   executeWorkItem: (input: {
     workItemId: string;

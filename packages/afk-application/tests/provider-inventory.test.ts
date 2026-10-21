@@ -4,7 +4,7 @@ import { queryProviderInventory } from '../src/provider-inventory.js';
 describe('provider inventory query', () => {
   it('filters rich provider records without losing project diagnostics', async () => {
     const port = { list: vi.fn(async () => ({
-      items: [{ project: { platform: 'github' as const, projectKey: 'acme/api' }, state: 'ready', executionMode: 'afk', tags: ['urgent'], title: 'Keep' }],
+      items: [{ project: { platform: 'github' as const, projectKey: 'acme/api' }, state: 'ready' as const, executionMode: 'afk' as const, tags: ['urgent'], title: 'Keep' }],
       projects: [{ platform: 'github' as const, projectKey: 'acme/api' }],
       diagnostics: [{ platform: 'github' as const, projectKey: 'github.com', code: 'project_list_failed', message: 'rate limit' }],
       complete: false,

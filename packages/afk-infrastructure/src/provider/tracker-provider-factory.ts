@@ -8,6 +8,7 @@ import {
   resolveTrackerProject,
 } from './tracker-resolver.js';
 import { getGlabToken, listGlabTokens, type GlabTokenConfig } from './glab-config.js';
+import { isWorkItemPlatform, WORK_ITEM_PLATFORMS } from '@afk/application';
 import type { TrackerProvider } from '@afk/application';
 import { createManagementProviderBundle, createProviderBundle } from './providers.js';
 import type { ManagementProviderBundle, ProviderBundle, ProviderBundleOptions } from './providers.js';
@@ -81,7 +82,7 @@ export async function createGitLabTracker(projectId?: string, cwd?: string, pref
  * where the catalogs are built: a caller that validates a platform reads it
  * rather than keeping a copy of its own.
  */
-export const TRACKER_PLATFORMS = ['github', 'gitlab'] as const;
+export const TRACKER_PLATFORMS = WORK_ITEM_PLATFORMS;
 export type TrackerPlatform = (typeof TRACKER_PLATFORMS)[number];
 
 /** The platforms a global inventory can be collected from, plus the aggregate. */
@@ -120,7 +121,7 @@ export function createGlobalWorkItemCatalogs(
 }
 
 function asTrackerPlatform(value: unknown): TrackerPlatform | undefined {
-  return value === 'github' || value === 'gitlab' ? value : undefined;
+  return isWorkItemPlatform(value) ? value : undefined;
 }
 
 export async function createTracker(

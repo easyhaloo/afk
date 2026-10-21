@@ -1,7 +1,8 @@
+import type { WorkItemPlatform } from "@afk/application";
 import githubIcon from "../assets/provider-icons/github.svg";
 import gitlabIcon from "../assets/provider-icons/gitlab.svg";
 
-export type ProviderIconName = "github" | "gitlab";
+export type ProviderIconName = WorkItemPlatform;
 
 type ProviderIconProps = {
   provider: ProviderIconName;

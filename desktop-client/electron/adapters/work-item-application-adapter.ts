@@ -1,3 +1,4 @@
+import type { GlobalWorkItemPlatform } from "@afk/application";
 import { queryProviderInventory } from "@afk/application";
 import { app } from "electron";
 import {
@@ -18,7 +19,7 @@ export type WorkItemApplicationAdapter = {
 };
 
 type WorkItemApplicationProviderDeps = {
-  loadSnapshot: (platform: "github" | "gitlab" | "all") => Promise<WorkItemInventoryResult>;
+  loadSnapshot: (platform: GlobalWorkItemPlatform) => Promise<WorkItemInventoryResult>;
 };
 
 const requireCjs = createRequire(import.meta.url);
@@ -31,10 +32,10 @@ const requireCjs = createRequire(import.meta.url);
 // a bundle, so every inlined module shares one URL and module-relative depth
 // no longer means anything. getAppPath() resolves to the app dir in development
 // and the asar root once packaged.
-function loadProviderSnapshot(platform: "github" | "gitlab" | "all"): Promise<WorkItemInventoryResult> {
+function loadProviderSnapshot(platform: GlobalWorkItemPlatform): Promise<WorkItemInventoryResult> {
   const bundle = path.join(app.getAppPath(), "dist-electron/provider-inventory.cjs");
   const provider = requireCjs(bundle) as {
-    collectProviderInventory: (platform: "github" | "gitlab" | "all") => Promise<WorkItemInventoryResult>;
+    collectProviderInventory: (platform: GlobalWorkItemPlatform) => Promise<WorkItemInventoryResult>;
   };
   return provider.collectProviderInventory(platform);
 }

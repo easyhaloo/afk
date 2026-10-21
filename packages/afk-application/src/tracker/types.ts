@@ -114,6 +114,7 @@ export interface TrackedMR {
 }
 
 import type { BacklogMetadataLabel } from '../backlog/initialization.js';
+import type { WorkItemPlatform } from '../work-items/identity.js';
 
 /**
  * Which tracker, and which project on it.
@@ -208,7 +209,7 @@ export interface TrackerProvider extends TrackerIssueOperations, TrackerMergeRea
 export interface Project {
   id: number;
   /** Provider identity used by the multi-provider dashboard. */
-  platform?: 'github' | 'gitlab';
+  platform?: WorkItemPlatform;
   name: string;
   path_with_namespace: string;
   description?: string;

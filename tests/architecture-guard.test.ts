@@ -39,6 +39,17 @@ function fixture(source: string, extraFiles: Record<string, string> = {}) {
   return { run, root, baseline };
 }
 
+interface PackageFixtureOptions {
+  coreSource?: string;
+  applicationSource?: string;
+  /** Package manifests accept arbitrary dependency names — the guard is the
+   *  thing under test, so the fixture must be able to declare any of them. */
+  corePackage?: { dependencies?: Record<string, string> };
+  applicationPackage?: { dependencies?: Record<string, string> };
+  includeCore?: boolean;
+  includeApplication?: boolean;
+}
+
 function packageFixture({
   coreSource = 'export type CoreValue = string;\n',
   applicationSource = "import type { CoreValue } from '@afk/core';\nexport type ApplicationValue = CoreValue;\n",
@@ -46,7 +57,7 @@ function packageFixture({
   applicationPackage = { dependencies: { '@afk/core': 'workspace:*' } },
   includeCore = true,
   includeApplication = true,
-} = {}) {
+}: PackageFixtureOptions = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-packages-'));
   directories.push(directory);
   const root = join(directory, 'src');

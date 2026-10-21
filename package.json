@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc -p packages/afk-core/tsconfig.json && tsc -p packages/afk-application/tsconfig.json && tsc -p packages/afk-workflow-graph/tsconfig.json && node scripts/build.mjs && tsc --emitDeclarationOnly",
-    "typecheck": "tsc -p packages/afk-core/tsconfig.json && tsc -p packages/afk-application/tsconfig.json && tsc -p packages/afk-workflow-graph/tsconfig.json && tsc --noEmit",
+    "typecheck": "tsc -p packages/afk-core/tsconfig.json && tsc -p packages/afk-application/tsconfig.json && tsc -p packages/afk-workflow-graph/tsconfig.json && tsc --noEmit && tsc -p tsconfig.tests.json",
     "architecture:check": "node scripts/architecture-guard.mjs --check-packages",
     "application:typecheck": "pnpm --filter @afk/application typecheck",
     "application:build": "pnpm --filter @afk/application build",

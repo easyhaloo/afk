@@ -43,7 +43,7 @@ import { RunTimelineSection } from "./features/run-center/RunTimelineView";
 import { WorkflowInstancesPage, type ExecutionSelection } from "./features/workflows/WorkflowInstancesPage";
 import type { ProviderProjectRef } from "../shared/backlog-contract";
 import type { ExecutionRunDetail, ExecutionSummary } from "../shared/execution-contract";
-import { AGENT_PROVIDER_IDS } from "../shared/ipc-contract";
+import { AGENT_PROVIDER_IDS, MANAGED_WORKFLOW_TEMPLATE_NAME } from "../shared/ipc-contract";
 import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from "@afk/core";
 import type { RuntimeRunEvent } from "../shared/ipc-contract";
 import type { SshSession } from "../shared/ssh-contract";
@@ -530,7 +530,7 @@ const DEFAULT_WORKFLOW_NODE_POSITIONS: Record<WorkflowCanvasNodeId, WorkflowNode
 };
 
 function validateWorkflowDraft(workflow: WorkflowConfigSummary): string | null {
-  if (workflow.templateName === "afk-control-workflow" && !workflow.canvasNodes.length) return "自定义工作流至少需要一个步骤";
+  if (workflow.templateName === MANAGED_WORKFLOW_TEMPLATE_NAME && !workflow.canvasNodes.length) return "自定义工作流至少需要一个步骤";
   if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(workflow.tmuxSession)) return "tmux 会话只能包含字母、数字、点、下划线、连字符或冒号。";
   for (const [label, value] of [["目标分支", workflow.targetBranch], ["基准分支", workflow.baseBranch]] as const) if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value) || value.includes("..") || value.endsWith("/")) return label + "不是有效 Git 分支名。";
   const limits: Array<[string, number, number, number]> = [["工作流超时", workflow.hardTimeoutMs, 1_000, 86_400_000], ["完成等待", workflow.completionTimeoutMs, 1_000, 86_400_000], ["最大重试", workflow.maxRetries, 0, 20], ["上下文阈值", workflow.contextThreshold, 1_000, 10_000_000], ["总令牌预算", workflow.goalBudget, 1_000, 100_000_000]];
@@ -566,14 +566,14 @@ function Workflows({ snapshot, onSave, focusTemplateId }: { snapshot: Snapshot |
   if (!snapshot) return <Empty />;
   const { workflow, workflowRuns, loop, workflowTemplates: templates } = snapshot;
   const model = draft ?? workflow;
-  const activeTemplate = templates.find(template => template.id === model.templateName) ?? (model.templateName === "afk-control-workflow" ? { id: "afk-control-workflow", name: "自定义工作流", description: "由 AFK Control 管理的项目级可执行模板。", source: "managed" as const, steps: [] } : undefined);
+  const activeTemplate = templates.find(template => template.id === model.templateName) ?? (model.templateName === MANAGED_WORKFLOW_TEMPLATE_NAME ? { id: MANAGED_WORKFLOW_TEMPLATE_NAME, name: "自定义工作流", description: "由 AFK Control 管理的项目级可执行模板。", source: "managed" as const, steps: [] } : undefined);
   const openTemplate = (template: WorkflowTemplateSummary) => {
     setDraft({ ...workflow, templateName: template.id, canvasNodes: template.canvasNodes ?? [] });
     setSelected("start");
     setMode("editor");
   };
   const createCustom = () => {
-    setDraft({ ...workflow, templateName: "afk-control-workflow", canvasNodes: [] });
+    setDraft({ ...workflow, templateName: MANAGED_WORKFLOW_TEMPLATE_NAME, canvasNodes: [] });
     setSelected("start");
     setMode("editor");
   };
@@ -669,11 +669,11 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
   const removeTemplate = (id: string) => { onDraft(current => { const baseline = current ?? workflow; return { ...baseline, canvasNodes: baseline.canvasNodes.filter(node => node.id !== id) }; }); setSaveError(null); if (selected === id) selectNode("start"); };
   const addTemplate = (template: CanvasTemplateNode["template"]) => {
     const id = template + "-" + Date.now();
-    onDraft(current => { const baseline = current ?? workflow; const index = baseline.canvasNodes.filter(node => node.template === template).length + 1; const defaults = template === "qa" ? { description: "验证验收条件、测试结果与合并前质量。", prompt: "Verify the implemented backlog change against its acceptance criteria. Report concise PASS or FAIL evidence before completion." } : { description: "实现当前工作项，并留下简洁的执行与验证摘要。", prompt: "Implement the assigned backlog item in the current AFK worktree. Follow the repository conventions, run relevant checks, and leave a concise completion summary." }; const next: CanvasTemplateNode = { id, template, label: template === "agent" ? "Agent " + index : "审查 Agent", provider: baseline.agentDefault as CanvasTemplateNode["provider"], x: 0, y: 0, ...defaults }; const canvasNodes = insertCanvasNodeAfter(baseline.canvasNodes, selected, next); return { ...baseline, canvasNodes: layoutCanvasNodes(canvasNodes), templateName: "afk-control-workflow" }; });
+    onDraft(current => { const baseline = current ?? workflow; const index = baseline.canvasNodes.filter(node => node.template === template).length + 1; const defaults = template === "qa" ? { description: "验证验收条件、测试结果与合并前质量。", prompt: "Verify the implemented backlog change against its acceptance criteria. Report concise PASS or FAIL evidence before completion." } : { description: "实现当前工作项，并留下简洁的执行与验证摘要。", prompt: "Implement the assigned backlog item in the current AFK worktree. Follow the repository conventions, run relevant checks, and leave a concise completion summary." }; const next: CanvasTemplateNode = { id, template, label: template === "agent" ? "Agent " + index : "审查 Agent", provider: baseline.agentDefault as CanvasTemplateNode["provider"], x: 0, y: 0, ...defaults }; const canvasNodes = insertCanvasNodeAfter(baseline.canvasNodes, selected, next); return { ...baseline, canvasNodes: layoutCanvasNodes(canvasNodes), templateName: MANAGED_WORKFLOW_TEMPLATE_NAME }; });
     setSaveError(null); selectNode(id);
     setAddMenuOpen(false);
   };
-  const builtinSteps = model.templateName === "afk-control-workflow" ? [] : activeTemplate?.steps ?? [];
+  const builtinSteps = model.templateName === MANAGED_WORKFLOW_TEMPLATE_NAME ? [] : activeTemplate?.steps ?? [];
   const graphDiagnostics = normalizeWorkflowSteps(builtinSteps).diagnostics;
   const builtinLayout = workflowStepLayout(builtinSteps);
   const rootPositions = builtinSteps.filter(step => !step.dependsOn.length).map(step => builtinLayout.get(step.id)).filter((position): position is WorkflowNodePosition => Boolean(position));

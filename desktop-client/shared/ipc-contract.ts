@@ -142,6 +142,16 @@ export type WorkflowTemplateStepSummary = {
   dependsOn: string[];
 };
 
+/**
+ * The name of the workflow template the desktop manages.
+ *
+ * The desktop writes this template under this name, edits it under this
+ * name, and shows it under this name. The name was written in seven
+ * places across two files, so a change to it left the desktop unable
+ * to find the template it had just written.
+ */
+export const MANAGED_WORKFLOW_TEMPLATE_NAME = "afk-control-workflow";
+
 export type WorkflowTemplateSummary = {
   id: string;
   name: string;

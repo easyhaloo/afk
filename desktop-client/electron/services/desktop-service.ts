@@ -28,6 +28,7 @@ import {
   type WorkflowTemplateStepSummary,
   type WorkflowTemplateSummary,
 } from "../../shared/ipc-contract.js";
+import { MANAGED_WORKFLOW_TEMPLATE_NAME } from "../../shared/ipc-contract.js";
 import { parseSnapshot } from "../../shared/snapshot-schema.js";
 
 export const AFK_CAPABILITY_DEFINITIONS: Omit<CliCapability, "available">[] = [
@@ -140,7 +141,7 @@ async function readWorkflowTemplates(root: string): Promise<WorkflowTemplateSumm
       if (!/^[a-z0-9][a-z0-9-]*$/.test(id)) continue;
       const steps = Array.isArray(document.steps) ? document.steps.map(templateStepSummary).filter((item): item is WorkflowTemplateStepSummary => item !== null) : [];
       if (!steps.length) continue;
-      projectTemplates.push({ id, name: id === "afk-control-workflow" ? "自定义工作流" : id, description: typeof document.description === "string" ? document.description : "项目级 AFK 工作流模板", source: id === "afk-control-workflow" ? "managed" : "project", steps, ...(id === "afk-control-workflow" ? { canvasNodes: await readCanvasNodes(root, configRaw, id) } : {}) });
+      projectTemplates.push({ id, name: id === MANAGED_WORKFLOW_TEMPLATE_NAME ? "自定义工作流" : id, description: typeof document.description === "string" ? document.description : "项目级 AFK 工作流模板", source: id === MANAGED_WORKFLOW_TEMPLATE_NAME ? "managed" : "project", steps, ...(id === MANAGED_WORKFLOW_TEMPLATE_NAME ? { canvasNodes: await readCanvasNodes(root, configRaw, id) } : {}) });
     } catch { /* A malformed project template stays outside the selectable list. */ }
   }
   const merged = new Map(BUILTIN_WORKFLOW_TEMPLATES.map(item => [item.id, item]));
@@ -330,7 +331,7 @@ function assignOptional(target: ConfigObject, key: string, value: string | undef
 export async function saveWorkflowConfig(workspace: string, value: unknown): Promise<WorkflowConfigSummary> {
   const root = resolveWorkspace(workspace);
   const patch = cleanWorkflowPatch(value);
-  if (patch.templateName === "afk-control-workflow" && !patch.canvasNodes.length) throw new Error("自定义工作流至少需要一个步骤");
+  if (patch.templateName === MANAGED_WORKFLOW_TEMPLATE_NAME && !patch.canvasNodes.length) throw new Error("自定义工作流至少需要一个步骤");
   const configPath = path.join(root, ".afk", "config.yml");
   const existingRaw = await fs.readFile(configPath, "utf8").catch(() => "");
   let existing: ConfigObject = {};
@@ -362,7 +363,7 @@ export async function saveWorkflowConfig(workspace: string, value: unknown): Pro
   agents.codex = codex;
   next.agents = agents;
   if (patch.canvasNodes.length) {
-    const templateName = patch.templateName || "afk-control-workflow";
+    const templateName = patch.templateName || MANAGED_WORKFLOW_TEMPLATE_NAME;
     await saveManagedTemplate(root, templateName, patch.canvasNodes, patch.agentDefault);
     next.template = templateName;
   } else if (patch.templateName) {

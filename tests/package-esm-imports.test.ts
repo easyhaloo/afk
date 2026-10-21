@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,15 +26,24 @@ const PUBLISHED_ROOTS = [
 
 const RELATIVE_SPECIFIER = /(?:from\s+|import\s*\(\s*|import\s+)['"](\.[^'"]*)['"]/g;
 
+/** The built packages, as they are published. */
+const PUBLISHED_DISTS = [
+  'packages/afk-core/dist',
+  'packages/afk-application/dist',
+  'packages/afk-infrastructure/dist',
+  'packages/afk-execution/dist',
+  'packages/afk-workflow-graph/dist',
+];
+
 /** Every command the registry advertises, minus the hidden alias. */
 const COMMAND_NAMES = COMMANDS.flatMap(entry => entry.names).filter(name => name !== '__complete');
 
-function sourceFiles(directory: string): string[] {
+function sourceFiles(directory: string, extension = '.ts'): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(directory)) {
     const path = join(directory, entry);
-    if (statSync(path).isDirectory()) found.push(...sourceFiles(path));
-    else if (path.endsWith('.ts') && !path.endsWith('.d.ts')) found.push(path);
+    if (statSync(path).isDirectory()) found.push(...sourceFiles(path, extension));
+    else if (path.endsWith(extension) && !path.endsWith('.d.ts')) found.push(path);
   }
   return found;
 }
@@ -79,5 +88,31 @@ describe('the built CLI', () => {
     }
 
     expect(broken).toEqual([]);
+  });
+});
+
+describe('the published packages', () => {
+  it('ships exactly the modules the source says', () => {
+    // `tsc` overwrites the files it emits and leaves everything else
+    // alone, so a module that moved keeps its old copy in dist/ unless the
+    // build cleans it. The published package then ships a file that
+    // points at a path that no longer exists - the resource registry once
+    // did, and loading it failed with ERR_MODULE_NOT_FOUND.
+    //
+    // The check is on the file list rather than on loading: the test
+    // runner resolves imports the node runtime does not, so a load check
+    // here would pass a module that node cannot load.
+    const stale: string[] = [];
+
+    for (const root of PUBLISHED_DISTS) {
+      const directory = fileURLToPath(new URL(`../${root}/`, import.meta.url));
+      const source = fileURLToPath(new URL(`../${root.replace('/dist', '/src')}/`, import.meta.url));
+      for (const file of sourceFiles(directory, '.js')) {
+        const counterpart = join(source, relative(directory, file).replace(/\.js$/, '.ts'));
+        if (!existsSync(counterpart)) stale.push(relative(directory, file));
+      }
+    }
+
+    expect(stale).toEqual([]);
   });
 });

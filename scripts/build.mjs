@@ -8,6 +8,11 @@
  * extensions; it was removed so that what ships matches what is committed.
  * Root `tsconfig.json` uses moduleResolution "bundler" and will NOT catch a
  * missing extension — a mistake surfaces only when Node loads dist/.
+ *
+ * The workspace packages are built by `scripts/build-package.mjs`, which
+ * cleans their dist first: a module that moved keeps its old copy
+ * otherwise, and the published package ships a file that points at a path
+ * that no longer exists.
  */
 import { build } from 'esbuild';
 import { globSync } from 'glob';

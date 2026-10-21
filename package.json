@@ -7,7 +7,7 @@
     "afk": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p packages/afk-core/tsconfig.json && tsc -p packages/afk-application/tsconfig.json && tsc -p packages/afk-infrastructure/tsconfig.json && tsc -p packages/afk-workflow-graph/tsconfig.json && tsc -p packages/afk-execution/tsconfig.json && node scripts/build.mjs && tsc --emitDeclarationOnly",
+    "build": "node scripts/build-package.mjs packages/afk-core && node scripts/build-package.mjs packages/afk-application && node scripts/build-package.mjs packages/afk-infrastructure && node scripts/build-package.mjs packages/afk-workflow-graph && node scripts/build-package.mjs packages/afk-execution && node scripts/build.mjs && tsc --emitDeclarationOnly",
     "typecheck": "tsc -p packages/afk-core/tsconfig.json && tsc -p packages/afk-application/tsconfig.json && tsc -p packages/afk-infrastructure/tsconfig.json && tsc -p packages/afk-workflow-graph/tsconfig.json && tsc -p packages/afk-execution/tsconfig.json && tsc -p packages/afk-core/tsconfig.tests.json --noEmit && tsc -p packages/afk-application/tsconfig.tests.json --noEmit && tsc -p packages/afk-infrastructure/tsconfig.tests.json --noEmit && tsc -p packages/afk-workflow-graph/tsconfig.tests.json --noEmit && tsc -p packages/afk-execution/tsconfig.tests.json --noEmit && tsc --noEmit && tsc -p tsconfig.tests.json",
     "architecture:check": "node scripts/architecture-guard.mjs --check-packages",
     "application:typecheck": "pnpm --filter @afk/application typecheck",

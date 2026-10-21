@@ -27,6 +27,7 @@ import {
 import type {
   BacklogChangeRequestState,
   BacklogChangeRequest as AuditedBacklogChangeRequest,
+  ErrorCode,
   BacklogItem as AuditedBacklogItem,
   WorkItemPlatform,
 } from "@afk/application";
@@ -347,12 +348,15 @@ export type BacklogRuntimeSummary = {
   runtime?: BacklogRuntimeProjection;
 };
 
-export type BacklogErrorCode =
-  | "auth"
-  | "not_found"
-  | "validation"
-  | "provider"
-  | "unknown";
+/**
+ * The code a failed backlog operation carries.
+ *
+ * The codes belong to the use cases: the application package classifies
+ * a thrown error once, and the desktop renders the answer. The desktop
+ * used to spell the five names out again, which meant a code the use
+ * cases added had nowhere to go and was quietly turned into "unknown".
+ */
+export type BacklogErrorCode = ErrorCode;
 
 export type BacklogError = {
   code: BacklogErrorCode;

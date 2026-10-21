@@ -64,9 +64,11 @@ export function createBacklogService(deps: BacklogServiceDeps, options: BacklogS
     try {
       return await action(provider);
     } catch (error) {
-      const code = classifyError(error);
+      // The use cases classify the failure once. The desktop renders the
+      // answer it is given; it does not decide for itself which kinds of
+      // failure it knows about.
       throw new BacklogServiceError(
-        code === "auth" || code === "not_found" || code === "validation" || code === "provider" ? code : "unknown",
+        classifyError(error),
         error instanceof Error ? error.message : String(error),
       );
     }

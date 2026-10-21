@@ -166,7 +166,7 @@
 |---|---|---|
 | P2-1 | `AFK-ARCHITECTURE.md` + `AFK-ARCHITECTURE.pdf` | **已执行**：手册并非纯重复——它的 §7 十条架构决策（D-01…D-10）在 `system-architecture-design.md` 中并不存在。因此**迁入** `docs/architecture/architecture-handbook.md` 并挂进 `docs/index.md`；PDF 没有生成脚本、无法随正文重生成，**从仓库移除** |
 | P2-2 | `tsconfig.tests.json` | **未跟踪但被 `package.json:11` 的 typecheck 引用** —— 干净克隆上 `pnpm typecheck` 直接失败。分支 `acd68f5` 已把它入库 → 合入分支即可 |
-| P2-3 | src/cli/commands/board.ts | 工作区已删除未提交。`afk board` 的移除是有意的（`src/index.ts:26-30`）→ 提交该删除，避免"文档说 board 被删、代码里还在"的分裂 |
+| P2-3 | src/cli/commands/board.ts | **已执行**：`afk board` 的移除是有意的（`src/index.ts` 直接报错退出）→ 删除已提交，注册表、守卫测试与 `overview.md` 的命令表也一并归位，不再有"文档说 board 被删、代码里还在"的分裂 |
 | P2-4 | `scripts/check-doc-links.mjs` | 扩检测面（**已执行，实测后收窄**）：① 正则补上无歧义的 `.cts` / `.mts`；② 裸文件名与 `.json/.yml/.css/.html/.md/.sh` 经实测会引入 294 处误报，改为在检查器注释中写明校准结论，而非扩大正则；③ `https://` 链接做一次人工白名单检查（已发现并修复 `docs/adr/README.md:4`） |
 | P2-5 | `scripts/doc-source-paths-baseline.json` | **目标归零**。50 条白名单是"冻结过时"的机制；清零是本计划的硬验收指标 |
 | P2-6 | `docs/_archive/` | **已执行**：新增 `README.md`，说明"归档 = 当时仓库的快照，不是当前指引"，并把 88 份历史计划与规格按 SSH／Backlog／TUI／执行运行时四组归类；`docs/index.md` 的归档说明同步修正 |

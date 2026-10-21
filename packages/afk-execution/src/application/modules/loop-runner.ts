@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { logger } from '@afk/infrastructure';
+import { logger, probeProcess } from '@afk/infrastructure';
 import type { RunnerProviderBundle } from '@afk/infrastructure';
 import { parseWorkItemId } from '@afk/application';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
@@ -504,15 +504,14 @@ function readPidFile(filePath: string): number | null {
   }
 }
 
-/** True if a process with this pid exists (signal 0 probe). */
+/**
+ * True if a process with this pid exists, or if we could not tell.
+ *
+ * The pid file is taken over only when the process is provably gone: a
+ * probe that was refused is not evidence of anything.
+ */
 function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    // EPERM = process exists but not ours; still alive
-    return (err as NodeJS.ErrnoException).code === 'EPERM';
-  }
+  return probeProcess(pid) !== false;
 }
 
 function formatTimestamp(): string {

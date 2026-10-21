@@ -8,7 +8,7 @@ import { loadWorkItemExecution, type WorkItemExecution } from '@afk/application'
 import { WorkflowRunner } from '../workflow-engine.js';
 import { QARunner } from '../modules/qa-runner.js';
 import { createGlobalWorkItemCatalogs, createTracker } from '@afk/infrastructure';
-import { excludeAfkArtefacts } from '@afk/infrastructure';
+import { excludeAfkArtefacts, probeProcess } from '@afk/infrastructure';
 import { collectGlobalWorkItemInventory } from '@afk/application';
 import { createProviderBundle, type ProviderBundle, type ManagementProviderBundle } from '@afk/infrastructure';
 import { ManagementBacklogProvider } from '@afk/infrastructure';
@@ -83,14 +83,10 @@ const defaultLockProbe: LockProbe = {
     return processStart ? { pid: process.pid, host: hostname(), processStart } : undefined;
   },
   async status(pid) {
-    try {
-      process.kill(pid, 0);
-      return 'alive';
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'dead';
-      if ((error as NodeJS.ErrnoException).code === 'EPERM') return 'alive';
-      return 'unknown';
-    }
+    const alive = probeProcess(pid);
+    if (alive === true) return 'alive';
+    if (alive === false) return 'dead';
+    return 'unknown';
   },
 };
 

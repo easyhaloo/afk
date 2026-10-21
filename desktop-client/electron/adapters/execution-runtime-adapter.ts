@@ -1,3 +1,4 @@
+import { probeProcess } from "@afk/infrastructure";
 import { TaskRuntimeReader } from "@afk/execution/application/runtime/task-runtime";
 import type { RuntimeHealthObservation } from "@afk/application";
 import type { WorkItemRunRecord } from "../../shared/backlog-contract.js";
@@ -8,10 +9,9 @@ export function createExecutionRuntimeAdapter(options: {
   now?: () => number;
   isPidAlive?: (pid: number) => boolean | undefined;
 }) {
-  const isPidAlive = options.isPidAlive ?? ((pid: number) => {
-    try { process.kill(pid, 0); return true; }
-    catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH" ? false : undefined; }
-  });
+  // The probe can be inconclusive, and the observation says so rather than
+  // claiming the runner is alive or gone.
+  const isPidAlive = options.isPidAlive ?? ((pid: number) => probeProcess(pid));
   // One reader owns the runtime records: the bucket layout, the file names,
   // the validation and the identity rule belong to the runtime, not to this
   // adapter. The backlog runtime service reads through the same reader, so

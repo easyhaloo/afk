@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { simpleGit } from 'simple-git';
+import { probeProcess } from '@afk/infrastructure';
 import type { BranchHandle } from '@afk/infrastructure';
 import type { WorkflowRunRepository } from './run-request.js';
 import type { RunOutcomeStatus } from './resource-scope.js';
@@ -419,14 +420,11 @@ function defaultWorkspaceLockDependencies(): WorkspaceLockDependencies {
     rename: (from, to) => fs.rename(from, to),
     removeDirectory: path => fs.rm(path, { recursive: true, force: true }),
     processAlive: async pid => {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch (error) {
-        if (hasCode(error, 'EPERM')) return true;
-        if (hasCode(error, 'ESRCH')) return false;
-        throw error;
-      }
+      // A probe that came back inconclusive is not an answer this port
+      // can give, so it stays an error rather than a guess.
+      const alive = probeProcess(pid);
+      if (alive === undefined) throw new Error(`cannot tell whether process ${pid} is alive`);
+      return alive;
     },
     pid: process.pid,
     now: () => new Date(),

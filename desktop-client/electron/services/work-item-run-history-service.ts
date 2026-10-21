@@ -4,6 +4,7 @@ import path from "node:path";
 import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/backlog-contract.js";
 import type { createExecutionWorkspaceService } from "./execution-workspace-service.js";
 import type { createWorkItemRunStore } from "./work-item-run-store.js";
+import { probeProcess } from "@afk/infrastructure";
 
 type HistoryDeps = {
   workspace: Pick<ReturnType<typeof createExecutionWorkspaceService>, "read" | "updateRun">;
@@ -112,13 +113,15 @@ function matchesProviderRef(providerRef: string, item: WorkItemInventoryResult["
     && providerRef === `gitlab:${project.providerProjectId}#${item.issueNumber}`;
 }
 
+/**
+ * Only a process that is provably gone ends a run.
+ *
+ * The probe can come back inconclusive - a process that belongs to
+ * another user refuses the signal - and a run that is still going must
+ * not be failed on an inconclusive answer.
+ */
 function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
+  return probeProcess(pid) !== false;
 }
 
 export function createWorkItemRunHistoryService(deps: HistoryDeps) {

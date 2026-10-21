@@ -1,3 +1,4 @@
+import { probeProcess } from '../io/process.js';
 import { lstat, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -357,12 +358,7 @@ function isGateOwnerAlive(gate: StoredOperationGate): boolean {
   // The fallback lock is intentionally single-host. A gate from another host
   // is conservatively treated as live because this process cannot verify it.
   if (gate.hostname !== hostname() || !Number.isSafeInteger(gate.pid) || gate.pid <= 0) return true;
-  try {
-    process.kill(gate.pid, 0);
-    return true;
-  } catch (error: unknown) {
-    return !(typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH');
-  }
+  return probeProcess(gate.pid) !== false;
 }
 
 async function inspectGate(gatePath: string): Promise<GateSnapshot | null> {

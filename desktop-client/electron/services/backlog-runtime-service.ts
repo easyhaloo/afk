@@ -1,3 +1,4 @@
+import { probeProcess } from "@afk/infrastructure";
 import path from "node:path";
 import { TaskRuntimeReader } from "@afk/execution/application/runtime/task-runtime";
 import type { BacklogRuntimeProjection, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract.js";
@@ -16,14 +17,10 @@ export type BacklogRuntimeServiceDeps = {
 
 export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
   const now = deps.now ?? Date.now;
-  const isPidAlive = deps.isPidAlive ?? ((pid: number) => {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
-  });
+  // A run is failed because its process exited only when the probe says
+  // so. An inconclusive probe - a process that belongs to another user
+  // refuses the signal - is not evidence that the run is over.
+  const isPidAlive = deps.isPidAlive ?? ((pid: number) => probeProcess(pid) === false);
 
   async function loadRuntime(
     workspace: string,

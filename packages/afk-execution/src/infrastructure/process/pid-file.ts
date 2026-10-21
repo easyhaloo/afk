@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { probeProcess } from '@afk/infrastructure';
 
 const AFK_HOME = path.join(os.homedir(), '.afk');
 export const LOOP_PID_FILE = path.join(AFK_HOME, 'loop.pid');
@@ -27,11 +28,5 @@ export function removePidFile(): void {
 }
 
 export function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM means the process exists but is not owned by this user.
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
+  return probeProcess(pid) !== false;
 }

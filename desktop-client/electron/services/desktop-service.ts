@@ -6,6 +6,7 @@ import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { exec, executable, firstLine } from "../adapters/process-executor.js";
 import { listAfkContainers, listAfkTmux } from "../adapters/resource-adapter.js";
 import { AFK_VERSION } from "@afk/application";
+import { probeProcess } from "@afk/infrastructure";
 import { builtinTemplates } from "@afk/execution/domain/templates/builtin";
 import { DEFAULT_WORKFLOW_CONFIG, loadWorkflowConfig, type WorkflowConfig } from "@afk/execution/infrastructure/config/manager";
 type ConfigObject = Record<string, unknown>;
@@ -419,8 +420,12 @@ async function readWorkflowRuns(root: string): Promise<WorkflowRunSummary[]> {
   return runs.sort((left, right) => Date.parse(right.startedAt || "0") - Date.parse(left.startedAt || "0"));
 }
 
+/**
+ * A process that cannot be signalled still exists, so the loop is not
+ * reported as gone on an inconclusive answer.
+ */
 function processAlive(pid: number) {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  return probeProcess(pid) !== false;
 }
 
 export function parseLoopLastError(value: unknown): Record<string, string> {

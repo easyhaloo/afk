@@ -149,6 +149,30 @@ describe('HandoffCoordinator', () => {
     expect(doc).toContain('snapshot-line');
   });
 
+  it('tells the agent one way to write the signal: the command, not a raw-JSON heredoc', async () => {
+    const backlog = makeBacklog();
+    const sendKeys = vi.fn(async (_session: string, _window: string, _keys: string | string[]) => {});
+    const tmux = makeTmux({
+      sendKeys,
+      waitForSignal: vi.fn(async (): Promise<Signal | null> => ({ type: 'handoff_ready', timestamp: '2026-08-05T00:00:00.000Z', summary: 'ok' })),
+      waitForPrompt: vi.fn(async () => true),
+    });
+    const watchdog = makeWatchdog();
+    const coord = new HandoffCoordinator(backlog, tmux, watchdog, makeConfig());
+
+    await coord.handoff(ctx(), 'auto');
+
+    const typed = sendKeys.mock.calls.map(call => String(call[2])).join('\n');
+    // The documented command goes through the one writer, which renames the
+    // file into place.
+    expect(typed).toContain('afk signal handoff-ready --summary');
+    // A heredoc with raw JSON in it is the form the completion protocol
+    // refuses: a summary holding a quote makes the signal unparseable, and
+    // an unparseable signal is invisible to every reader.
+    expect(typed).not.toContain('.afk-signal.json');
+    expect(typed).not.toContain('<<EOF');
+  });
+
   // ── terminal ───────────────────────────────────────────────────────────────
 
   it('terminal/budget: writes the terminal doc, blocks the backlog, no re-arm', async () => {

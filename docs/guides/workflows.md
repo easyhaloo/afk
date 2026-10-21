@@ -320,7 +320,7 @@ When context approaches its limit, the workflow **automatically interrupts the c
 
 ### Handoff Flow (Auto-Resume)
 
-1. **Request summary**: Type plain text handoff instructions (urge immediate brief summary) — ① `git add -A && git commit` (skip if no changes) → ② 3 quick answers (done/doing/next) → ③ write `handoff_ready` signal. If no valid `handoff_ready` within 60s (template placeholder `<summary>` counts as no summary), use pane snapshot as fallback.
+1. **Request summary**: Type plain text handoff instructions (urge immediate brief summary) — ① `git add -A && git commit` (skip if no changes) → ② 3 quick answers (done/doing/next) → ③ write the `handoff_ready` signal with `afk signal handoff-ready --summary "<总结>"`. If no valid `handoff_ready` within 60s (template placeholder `<总结>` counts as no summary), use pane snapshot as fallback.
 2. **Handoff document**: Summary + snapshot + commit sha written to `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md` (`.afk/` is already in the repo's `.gitignore`, so it won't be committed to the MR via `git add -A`; the document travels with the worktree, and the recovering agent can read it directly on resume).
 3. **No issue comment**: the handoff records itself in the audit spine (`handoff.performed`). The recovery document on disk is the handover artefact; a termination handoff also moves the backlog to `blocked` + `hitl`, which is the signal an operator sees in the tracker.
 4. **Restart**: Kill tmux session → clear signal files and old statusline data → recreate session with same name → restart watchdog (each generation gets a full hard timeout).

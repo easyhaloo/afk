@@ -187,15 +187,21 @@ export class HandoffCoordinator {
 
   /** Type the plain-text handoff request (commit first, then 3 short questions, then signal template). */
   private async typeHandoffRequest(session: string): Promise<void> {
+    // The signal is written by the agent, so the request has to say how.
+    // It used to spell out a shell heredoc with raw JSON in it — the one
+    // form the completion protocol explicitly refuses, because a summary
+    // holding a quote makes the JSON unparseable and the signal then
+    // invisible to every reader. The command is the documented way to
+    // write a signal (README, `afk signal --help`): it goes through the
+    // one writer, which renames the file into place, so a reader never
+    // sees half a signal either.
     const lines = [
       '上下文接近上限，AFK 需要交接。请立即完成以下操作，保持简短：',
       '0. 先提交：git add -A && git commit -m "handoff checkpoint"（无改动可跳过）',
       '1. 已完成的工作（一行）',
       '2. 正在做什么（一句话）',
       '3. 接下来做什么（一句话）',
-      '完成后创建信号：cat > .afk-signal.json <<EOF',
-      '{"type":"handoff_ready","timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","summary":"<总结>"}',
-      'EOF',
+      '完成后创建信号：afk signal handoff-ready --summary "<总结>"',
     ];
     for (const line of lines) {
       await this.tmux.sendKeys(session, 'main', line);

@@ -144,6 +144,34 @@ describe("work item execution service", () => {
     expect(runStore.save).not.toHaveBeenCalled();
   });
 
+  it("names the process that runs the work item, so the run history can tell a live run from a dead one", async () => {
+    const stored: WorkItemRunRecord[] = [];
+    const execution = deferred<{ status: "done" }>();
+    const runStore = {
+      load: vi.fn(async () => [...stored]),
+      save: vi.fn(async () => undefined),
+      update: vi.fn(async (_workspace: string, transform: (runs: WorkItemRunRecord[]) => WorkItemRunRecord[] | undefined | Promise<WorkItemRunRecord[] | undefined>) => {
+        const next = await transform([...stored]);
+        if (next) stored.splice(0, stored.length, ...next);
+      }),
+    };
+    const service = createWorkItemExecutionService({
+      getWorkItem: async () => item(),
+      workspace: { allocate: async () => allocatedWorkspace("/tmp/task", [apiProject]), updateRun: vi.fn(async () => undefined) },
+      execute: () => execution.promise,
+      manifestStore: { save: async () => undefined },
+      runStore,
+    });
+
+    await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection] });
+
+    // The desktop runs the work item in its own process, so the record
+    // names that process. The run history judges a running record by the
+    // liveness of the process that owns it: a record without one reads
+    // as "the process exited" while the work is still going.
+    expect(stored[0]?.pid).toBe(process.pid);
+  });
+
   it("rejects another run while one is active and preserves the current run", async () => {
     const { runStore } = createStoredRunStore();
     const execution = deferred<{ status: "done" }>();
@@ -180,7 +208,9 @@ describe("work item execution service", () => {
     const { stored, runStore } = createStoredRunStore();
     const execute = vi.fn(async () => {
       expect(stored).toEqual([expect.objectContaining({ status: "starting" })]);
-      expect(stored[0]).not.toHaveProperty("pid");
+      // The record names the process that runs the work item: the
+      // desktop runs it in its own process.
+      expect(stored[0]?.pid).toBe(process.pid);
       expect(updateRun).toHaveBeenCalledWith("github:acme/api#42", stored[0]?.id);
       return { status: "done" as const };
     });
@@ -510,7 +540,7 @@ describe("work item execution service", () => {
       completedAt: "2026-09-21T08:00:00.000Z",
       error: "workspace update failed",
     })]);
-    expect(stored[0]).not.toHaveProperty("pid");
+    expect(stored[0]?.pid).toBe(process.pid);
     expect(updateRun).toHaveBeenNthCalledWith(1, "github:acme/api#42", expect.any(String));
     expect(updateRun).toHaveBeenNthCalledWith(2, "github:acme/api#42", undefined, expect.any(String));
     expect(updateRun).toHaveBeenCalledTimes(2);

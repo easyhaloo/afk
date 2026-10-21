@@ -153,6 +153,13 @@ export type WorkItemRunRecord = {
   workingBranch?: string;
   repositories?: WorkItemRunRepositorySelection[];
   workspacePath?: string;
+  /**
+   * The process that runs the work item.
+   *
+   * The run history judges a running record by the liveness of this
+   * process. The desktop runs the work item in its own process, so this
+   * is the desktop's own pid.
+   */
   pid?: number;
   error?: string;
 };

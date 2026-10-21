@@ -68,6 +68,14 @@ Execution history uses a separate direct Application path:
   from verified `agent.session_recorded` events. The shared contract validates
   the three non-negative integer counts; the run-center inspector displays
   recorded counts or `未采集`, preserving explicit zero and execution status.
+- The work-item run record (`.afk/work-item-runs.json`) names the process
+  that runs the work item. The desktop runs it in its own process, so the
+  record carries the desktop's own pid, and `work-item-run-history-service.ts`
+  judges a running record by the liveness of that process — which is what the
+  work-item list reconcile asks on every read. A record without an owning
+  process is a leftover from a desktop that is gone: it is failed rather than
+  left running for ever, so the work item is not blocked by a run nobody is
+  doing.
 - **Development vs packaging differ on purpose.** In development
   `dist-electron/electron/main.js` is transpiled per file and resolves the
   workspace packages through symlinks. `scripts/build-main.mjs` then bundles

@@ -237,6 +237,17 @@ describe("work item run history service", () => {
     expect(runs[0].status).toBe("starting");
   });
 
+  it("fails a running run that names no owning process: the desktop that owned it is gone", async () => {
+    // The desktop records the process that runs the work item. A record
+    // without one is a leftover from a desktop that is no longer running,
+    // and it must not keep the work item busy for ever.
+    const orphan = { ...running, status: "running" as const, pid: undefined };
+    const runs = [orphan];
+    const { service, updateRun } = setup(runs);
+    expect((await service.merge(inventory)).items[0].runs?.[0].status).toBe("failed");
+    expect(updateRun).toHaveBeenCalledWith(item.id, undefined, "desktop-1");
+  });
+
   it("retains provider history and replaces matching IDs with authoritative local state", async () => {
     const { service } = setup([running]);
     const provider = { ...inventory, items: [{ ...item, runs: [{ ...running, status: "starting" as const }, { ...running, id: "older", status: "completed" as const }] }] };

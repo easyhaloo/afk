@@ -235,6 +235,11 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
       workingBranch,
       repositories,
       workspacePath: workspace.root,
+      // The process that runs the work item. The desktop runs it in its
+      // own process, so this is the desktop's own pid - and it is what
+      // the run history judges liveness by. A record without one reads
+      // as "the process exited" while the work is still going.
+      pid: process.pid,
     };
     await update(workspace.root, starting);
     try {

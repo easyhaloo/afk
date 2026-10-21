@@ -6,6 +6,7 @@ import { createExecutionWorkspaceService } from "../../electron/services/executi
 import { createWorkItemExecutionManifestStore } from "../../electron/services/work-item-execution-manifest-store";
 import { createWorkItemExecutionService } from "../../electron/services/work-item-execution-service";
 import { createWorkItemRunStore } from "../../electron/services/work-item-run-store";
+import { createWorkItemRunHistoryService } from "../../electron/services/work-item-run-history-service";
 import type { GlobalWorkItem, WorkItemRunRecord } from "../../shared/backlog-contract";
 
 async function waitFor<T>(read: () => Promise<T | undefined>, timeoutMs = 5_000): Promise<T> {
@@ -77,7 +78,10 @@ describe("work item execution service integration", () => {
 
       const running = (await persistedRunStore.load(result.workspace.root))[0];
       expect(running).toMatchObject({ id: result.runId, status: "running" });
-      expect(running).not.toHaveProperty("pid");
+      // The execution runs in this process, so the record names this
+      // process: the run history judges a running record by the liveness
+      // of the process that owns it.
+      expect(running?.pid).toBe(process.pid);
       expect(observedStatuses).toContain("starting");
       expect(observedStatuses).toContain("running");
       expect(await manifestStore.load(result.workspace.root)).toMatchObject({
@@ -109,6 +113,61 @@ describe("work item execution service integration", () => {
       // status to terminal, so it lands asynchronously — read it under waitFor
       // like the surrounding assertions, otherwise this races under load.
       await waitFor(async () => ((await workspace.read(item.id))?.currentRunId === undefined ? true : undefined));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a run this desktop is still executing out of the reconcile's reach", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "afk-desktop-execution-live-"));
+    try {
+      const project = { platform: "github" as const, projectKey: "acme/api", name: "api" };
+      const item: GlobalWorkItem = {
+        id: "github:acme/api#42",
+        issueNumber: 42,
+        project,
+        repositories: [{ ...project, baseBranch: "main" }],
+        title: "Coordinate checkout changes",
+        managed: true,
+        executionEligible: true,
+        state: "ready",
+        executionMode: "afk",
+        dependsOn: [],
+        tags: [],
+        branchName: "afk/work-item-18",
+        providerRef: "github:acme/api#42",
+      };
+      const workspace = createExecutionWorkspaceService({ baseDirectory: path.join(root, "workspaces") });
+      const manifestStore = createWorkItemExecutionManifestStore();
+      const persistedRunStore = createWorkItemRunStore({ resolveWorkspace: value => value });
+      const archiveDirectory = await mkdtemp(path.join(os.tmpdir(), "afk-desktop-execution-archive-"));
+      const service = createWorkItemExecutionService({
+        getWorkItem: async () => item,
+        workspace,
+        manifestStore,
+        runStore: persistedRunStore,
+        // The execution is still running: it settles when the test says so.
+        execute: () => new Promise(() => undefined),
+      });
+      const history = createWorkItemRunHistoryService({
+        workspace: { read: workspace.read, updateRun: workspace.updateRun },
+        runStore: persistedRunStore,
+        isPidAlive: () => true,
+        runtimeArchiveDirectory: archiveDirectory,
+      });
+
+      const result = await service.start({
+        workItemId: item.id,
+        repositories: [{ ...project, checkoutPath: "repositories/api", baseBranch: "main" }],
+      });
+
+      // The work items list reconciles the persisted runs on every read. A
+      // run this desktop is still executing has to survive that: the
+      // reconcile used to read a record without an owning process as "the
+      // process exited" and fail a run that was still going.
+      const merged = await history.merge({ items: [item], projects: [project], diagnostics: [], complete: true });
+      expect(merged.items[0].runs?.[0]).toMatchObject({ id: result.runId, status: "running" });
+      expect((await persistedRunStore.load(result.workspace.root))[0]).toMatchObject({ status: "running" });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

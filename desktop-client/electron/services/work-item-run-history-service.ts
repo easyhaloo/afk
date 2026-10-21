@@ -154,7 +154,11 @@ export function createWorkItemRunHistoryService(deps: HistoryDeps) {
               .filter(record => matchesRuntime(record, run, item, workspace.root, nextRunStartedAt, checkedAt.getTime()))
               .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0];
             if (terminal) {
-              const { pid: _pid, error: _error, ...previous } = run;
+              // The pid stays on the record: it names the process that ran
+              // the work item, and the run store refuses an update that
+              // drops the pid of a running run - which would leave this
+              // terminal state unwritten.
+              const { error: _error, ...previous } = run;
               return {
                 ...previous, status: terminal.status === "completed" ? "completed" : "failed",
                 completedAt: terminal.completedAt,

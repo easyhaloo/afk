@@ -168,6 +168,17 @@ export function activeRuntimeStatus(record: TaskRuntimeRecord, now: number, stal
   return isRuntimeStale(record.heartbeatAt, now, staleAfterMs) ? 'stale' : 'running';
 }
 
+/**
+ * Where the runtime keeps the records of the runs it is tracking.
+ *
+ * The records are the runtime's own, and they live in one place: the
+ * reader that looks a run up and the reader that stops a run's agent
+ * have to be looking at the same records, or a stop finds nothing.
+ */
+export function defaultRuntimeTasksRoot(): string {
+  return join(homedir(), AFK_RUNTIME_TASKS_DIRECTORY);
+}
+
 export class TaskRuntimeStore {
   private readonly mutations = new Map<string, Promise<void>>();
   readonly root: string;
@@ -178,7 +189,7 @@ export class TaskRuntimeStore {
   constructor(options: string | TaskRuntimeStoreOptions = {}) {
     this.root = typeof options === 'string'
       ? options
-      : options.root ?? join(homedir(), AFK_RUNTIME_TASKS_DIRECTORY);
+      : options.root ?? defaultRuntimeTasksRoot();
     this.activePath = join(this.root, 'active');
     this.archivePath = join(this.root, AFK_RUNTIME_ARCHIVE_DIRECTORY);
     this.diagnosticsPath = join(this.root, 'diagnostics');

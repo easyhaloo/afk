@@ -19,6 +19,7 @@ import { join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import type { SandboxTmux } from '@afk/core';
 import { clearSignal, clearStatus, getTokenUsage, quoteShellArgument, readSignal } from '@afk/infrastructure';
+import { clearInterruptRequest, readInterruptRequest } from '../../runtime/interrupt-file.js';
 import type { Signal } from '@afk/core';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../../domain/tmux/session-name.js';
@@ -104,6 +105,8 @@ export class LocalSandbox implements Sandbox {
     if (options.executionMode !== 'interactive') throw new Error('execution mode is required');
     if (!this.tmux) throw new Error('interactive local execution requires tmux');
     await clearSignal(this.worktreePath);
+    // A run that starts does not inherit the last one's stop request.
+    await clearInterruptRequest(this.worktreePath);
     if (!this.sessionCreated) {
       // The marker belongs to a Claude process, not the worktree. A prior
       // phase's file must not make a freshly-created tmux session look ready.
@@ -255,6 +258,13 @@ export class LocalAgentExecution implements AgentExecution {
         };
       }
 
+      // Somebody asked for this run to stop. The request is in the
+      // worktree because the run lives in another process: the desktop
+      // client cannot call into the agent, and the agent cannot hear it.
+      if (await readInterruptRequest(this.worktreePath)) {
+        await this.interrupt('manual');
+      }
+
       // Check hard timeout
       if (Date.now() - start >= completionTimeoutMs) {
         this.done = true;
@@ -329,6 +339,13 @@ export class LocalAgentExecution implements AgentExecution {
       // agent ended. Waiting for the completion timeout to find that out
       // would report a crash as a timeout, hours later.
       if (this.tmux.hasSession && !(await this.tmux.hasSession(this.sessionName))) {
+        // A session that is gone because somebody stopped the run is a
+        // stop, not a crash. The request is written before the session is
+        // killed, so it is already there when the session is not.
+        if (await readInterruptRequest(this.worktreePath)) {
+          await this.interrupt('manual');
+          continue;
+        }
         return {
           version: 1,
           runId: this.id,

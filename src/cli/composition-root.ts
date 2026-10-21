@@ -4,6 +4,7 @@ import type {
   BrowserPort,
   ConfigurationPort,
   LoopProcessPort,
+  RunSessionPort,
   TmuxPort,
 } from '@afk/application';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
@@ -37,6 +38,7 @@ export interface CliRuntimePorts {
   loopProcess: LoopProcessPort;
   agentTelemetry: AgentTelemetryPort;
   browser: BrowserPort;
+  runSession: RunSessionPort;
 }
 
 /**
@@ -48,12 +50,13 @@ export interface CliRuntimePorts {
  * as exactly that: an import in a file that has no business making one.
  */
 export async function createCliRuntimePorts(): Promise<CliRuntimePorts> {
-  const [configuration, tmux, loopProcess, agentTelemetry, browser] = await Promise.all([
+  const [configuration, tmux, loopProcess, agentTelemetry, browser, runSession] = await Promise.all([
     import('@afk/execution/infrastructure/config/manager'),
     import('@afk/execution/infrastructure/tmux/tmux-port'),
     import('@afk/execution/infrastructure/process/loop-process-port'),
     import('@afk/execution/infrastructure/observability/agent-telemetry-port'),
     import('@afk/execution/infrastructure/browser/browser-port'),
+    import('@afk/execution/infrastructure/runtime/run-session-port'),
   ]);
   return {
     configuration: configuration.fileConfigurationPort,
@@ -61,5 +64,6 @@ export async function createCliRuntimePorts(): Promise<CliRuntimePorts> {
     loopProcess: loopProcess.loopProcessPort,
     agentTelemetry: agentTelemetry.agentTelemetryPort,
     browser: browser.browserPort,
+    runSession: runSession.runSessionPort,
   };
 }

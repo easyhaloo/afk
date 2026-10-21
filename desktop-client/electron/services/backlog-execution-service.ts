@@ -22,6 +22,15 @@ export type BacklogExecutionServiceDeps = {
   }>;
   /** The branch a confirmed merge must target. */
   targetBranch: (workspace: string) => Promise<string>;
+  /**
+   * Stop the agent of a run.
+   *
+   * The run lives in another process, and its agent is a process in a
+   * terminal session. Handing the backlog to an operator is not the same
+   * as stopping the agent: an agent that keeps working keeps spending
+   * the budget the stop was meant to end.
+   */
+  stopRun?: (runId: string) => Promise<boolean>;
   getSummary?: (workspace: string, id: string) => Promise<BacklogRuntimeSummary>;
   invalidateBacklogList?: () => void;
   store: ReturnType<typeof createBacklogRunStore>;
@@ -89,6 +98,9 @@ export function createBacklogExecutionService(deps: BacklogExecutionServiceDeps)
       if (run) await update(workspace, { ...run, status: "failed", error: "用户从桌面停止执行" });
       const current = await summary(workspace, backlogId);
       if (current.backlog.state === "in_progress" || current.backlog.state === "verification") {
+        // The agent first: a run whose agent is still working is not
+        // stopped, whatever the tracker says about it afterwards.
+        if (current.runtime?.runId && deps.stopRun) await deps.stopRun(current.runtime.runId);
         await runIntent(workspace, ports => interruptBacklog(ports.backlog, backlogId, "用户从桌面停止执行"));
         return summary(workspace, backlogId);
       }

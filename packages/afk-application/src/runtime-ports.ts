@@ -164,3 +164,26 @@ export interface ResourceRegistryPort {
   /** The resources one run handed out. */
   readRun(runId: string): AfkResourceRecord[];
 }
+
+/**
+ * The environment a run is in, and the way to stop it.
+ *
+ * A run's agent is a process in a terminal session, and a run lives in
+ * another process. Somebody who stops the run from outside - the desktop
+ * client, an operator - cannot call into the running agent, so the request
+ * has to travel through something both sides can see.
+ *
+ * Stopping a run has to stop that process. A tracker that says the run is
+ * blocked while the agent keeps working is a run that is not stopped, and
+ * the agent keeps spending the budget the stop was meant to end.
+ */
+export interface RunSessionPort {
+  /**
+   * Stop the agent of a run.
+   *
+   * The run's own session is the one that is stopped, and only that one.
+   * A run that has no session - because it never started one, or because
+   * it already ended - has nothing to stop, and that is not a failure.
+   */
+  stop(runId: string): Promise<boolean>;
+}

@@ -147,6 +147,7 @@ const backlogExecutionService = createBacklogExecutionService({
     return { backlog: bundle.backlog, changes: bundle.changes };
   },
   targetBranch: (workspace: string) => workflowTargetBranch(workspace),
+  stopRun: (runId: string) => desktopRuntimePorts.runSession.stop(runId),
   getSummary: (workspace, id) => backlogRuntimeService.summary(workspace, id),
   invalidateBacklogList: backlogService.invalidateListCache,
   store: backlogRunStore,

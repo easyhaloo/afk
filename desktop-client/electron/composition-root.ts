@@ -7,6 +7,7 @@ import type { BacklogManagementProvider } from "@afk/application";
 import type { ManagementProviderBundle } from "@afk/infrastructure";
 import { fileConfigurationPort } from "@afk/execution/infrastructure/config/manager";
 import { resourceRegistryPort } from "@afk/execution/infrastructure/runtime/resource-registry-port";
+import { runSessionPort } from "@afk/execution/infrastructure/runtime/run-session-port";
 import type { BacklogPlatform } from "../shared/backlog-contract.js";
 
 const requireCjs = createRequire(import.meta.url);
@@ -68,6 +69,7 @@ function loadRuntimeBundle(): RuntimeBundle {
 export const desktopRuntimePorts = {
   configuration: fileConfigurationPort,
   resources: resourceRegistryPort,
+  runSession: runSessionPort,
 };
 
 const bundles = new Map<string, Promise<ManagementProviderBundle>>();

@@ -40,6 +40,7 @@ import {
 } from '@afk/application';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
+import { TaskRuntimeReader, defaultRuntimeTasksRoot } from '@afk/execution/application/runtime/task-runtime';
 import {
   classifyError,
   emitFailure,
@@ -291,13 +292,27 @@ export async function runBacklogTagRemove(
   }
 }
 
+/**
+ * Stop a running backlog item.
+ *
+ * Handing the backlog to an operator is not the same as stopping the
+ * agent: the run lives in another process, and an agent that keeps
+ * working keeps spending the budget the stop was meant to end. The
+ * agent is stopped first, and the backlog is handed over afterwards.
+ */
 export async function runBacklogInterrupt(
   provider: QABacklogProvider,
   id: string,
   reason: string,
   options: JsonMode = {},
+  stopAgent?: (backlogId: string) => Promise<void>,
 ): Promise<void> {
-  await runLifecycleAction('backlog.interrupt', options, () => interruptBacklog(provider, id, reason), `Backlog ${id} interrupted`);
+  await runLifecycleAction('backlog.interrupt', options, async () => {
+    // The agent first: a run whose agent is still working is not stopped,
+    // whatever the tracker says about it afterwards.
+    if (stopAgent) await stopAgent(id);
+    return interruptBacklog(provider, id, reason);
+  }, `Backlog ${id} interrupted`);
 }
 
 export async function runBacklogAdopt(
@@ -505,7 +520,12 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .action(async options => {
       try {
         const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
-        await runBacklogInterrupt(providers.backlog, options.id, options.reason, options);
+        await runBacklogInterrupt(providers.backlog, options.id, options.reason, options, async backlogId => {
+          const reader = new TaskRuntimeReader({ root: defaultRuntimeTasksRoot() });
+          const entries = await reader.list({ identity: { backlogId, workspace: process.cwd() } });
+          const runId = entries[0]?.record.runId;
+          if (runId) await context.ports.runSession.stop(runId);
+        });
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.interrupt', classifyError(error), (error as Error).message);

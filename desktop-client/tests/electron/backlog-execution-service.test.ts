@@ -72,6 +72,31 @@ describe("backlog execution service", () => {
     expect(ports.backlog.transition).toHaveBeenCalledWith("42", "blocked", { reason: "用户从桌面停止执行" });
   });
 
+  it("stops the run's agent when the user stops it", async () => {
+    // Handing the backlog to an operator is not the same as stopping the
+    // agent: the run lives in another process, and an agent that keeps
+    // working keeps spending the budget the stop was meant to end.
+    const store = createMemoryStore();
+    await store.save("/repo", [{ id: "desktop-42", backlogId: "42", status: "running", startedAt: "2026-09-17T00:00:00.000Z" }]);
+    const active = backlog({ state: "in_progress" });
+    const ports = createPorts(active);
+    const stopRun = vi.fn(async () => true);
+    const service = createBacklogExecutionService({
+      resolveWorkspace: (workspace) => workspace,
+      providers: async () => ports,
+      targetBranch: async () => "main",
+      stopRun,
+      getSummary: vi.fn()
+        .mockResolvedValueOnce(summary(active, { runtime: { runId: "run-42", status: "running", phase: "implementing", heartbeatAt: "2026-09-17T00:00:00.000Z" } }))
+        .mockResolvedValueOnce(summary(backlog({ state: "blocked", executionMode: "hitl" }))),
+      store,
+    });
+
+    await service.stop("/repo", "42");
+
+    expect(stopRun).toHaveBeenCalledWith("run-42");
+  });
+
   it("confirms a root merge through the intent command", async () => {
     const mergeReady = backlog({ state: "merge_ready", executionMode: "hitl" });
     const done = summary(backlog({ state: "done", executionMode: "hitl" }));

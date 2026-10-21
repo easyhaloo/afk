@@ -66,7 +66,7 @@ supported surface:
 | `afk backlog create <title>` | Create one provider-backed backlog item |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
-| `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
+| `afk backlog interrupt` | Stop the run that is executing a backlog item and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
 | `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
 | `afk run --backlog-id <id>` | Claim and execute one backlog item |
@@ -140,6 +140,7 @@ infrastructure layer, one module per port.
 | `AgentTelemetryPort` | The harness transcripts AFK reads. AFK only reads them; the harness owns what happened in the run. |
 | `BrowserPort` | The operating system's default browser. |
 | `ResourceRegistryPort` | The registry of the resources runs handed out. |
+| `RunSessionPort` | The terminal session a run's agent works in, and the way to stop it. |
 
 A command, a view or a service states what it needs; a composition root says
 what it is wired to. The CLI and the TUI are wired in
@@ -155,6 +156,27 @@ answer to the same question. The signal grammar, the tmux vocabulary, the
 resource record and the token usage are therefore vocabulary in
 `@afk/core`, and the infrastructure package validates a signal file against
 the shapes the core package declares rather than deriving them itself.
+
+## Stopping a run
+
+A run's agent is a process in a terminal session, and a run lives in another
+process. Somebody who stops the run from outside - the desktop client, an
+operator - cannot call into the running agent, so the request has to travel
+through something both sides can see.
+
+Stopping a run has to stop that process. A tracker that says the run is
+blocked while the agent keeps working is a run that is not stopped, and the
+agent keeps spending the budget the stop was meant to end. The stop is
+therefore two things, in this order: the request is written into the run's
+own worktree, beside the signal file the agent itself writes, and then the
+run's registered session is killed.
+
+The runtime polls that worktree while it waits for the agent, so it finds
+the request, interrupts the agent with the reason `manual`, and ends the
+run as an interruption rather than reporting a crash - or waiting out the
+completion timeout to find out. The session is the runtime's own: it is
+found in the resource registry, so a stop cannot end a session that belongs
+to something else.
 
 ## Work-item and execution identity
 

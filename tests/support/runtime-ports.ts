@@ -15,6 +15,7 @@ import type {
   GitLabConfig,
   LoopProcessPort,
   ResourceRegistryPort,
+  RunSessionPort,
   SchedulerConfig,
   TmuxPort,
   WorkflowConfig,
@@ -27,6 +28,7 @@ export interface InMemoryRuntimePorts {
   agentTelemetry: AgentTelemetryPort;
   browser: BrowserPort;
   resources: ResourceRegistryPort;
+  runSession: RunSessionPort;
 }
 
 /** The configuration a run is shaped by, when nothing configures it. */
@@ -116,6 +118,9 @@ export function inMemoryRuntimePorts(): InMemoryRuntimePorts {
     resources: {
       readActive: () => [],
       readRun: () => [],
+    },
+    runSession: {
+      stop: async () => false,
     },
   };
 }

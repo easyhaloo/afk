@@ -20,7 +20,8 @@ import type { BacklogItem, QABacklogProvider } from '@afk/application';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import type { ProviderCatalog } from '@afk/application';
 import { emitSuccess, emitFailure } from '../json-output.js';
-import * as providerFactory from '@afk/infrastructure';import { inMemoryRuntimePorts } from '../../../tests/support/runtime-ports.js';
+import * as providerFactory from '@afk/infrastructure';
+import { inMemoryRuntimePorts } from '../../../tests/support/runtime-ports.js';
 
 
 function commandTree(register: (program: Command, context: CommandRegistrationContext) => void): Command {
@@ -572,6 +573,25 @@ describe('backlog action handlers (JSON envelope mode)', () => {
       kind: 'backlog.interrupt',
       data: { id: '42', state: 'blocked', executionMode: 'hitl' },
     });
+  });
+
+  it('runBacklogInterrupt stops the run\'s agent before it hands the backlog over', async () => {
+    // Handing the backlog to an operator is not the same as stopping the
+    // agent: the run lives in another process, and an agent that keeps
+    // working keeps spending the budget the stop was meant to end.
+    const order: string[] = [];
+    const provider = stubProvider([{ ...stubItem, state: 'in_progress', executionMode: 'afk' }]);
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (): boolean => true;
+    try {
+      await runBacklogInterrupt(provider, '42', 'operator stop', { json: true }, async (backlogId) => {
+        order.push(`stopped:${backlogId}`);
+      });
+    } finally {
+      process.stdout.write = original;
+    }
+    order.push('handed-over');
+    expect(order).toEqual(['stopped:42', 'handed-over']);
   });
 
   it('runBacklogRetry emits the rework afk backlog', async () => {

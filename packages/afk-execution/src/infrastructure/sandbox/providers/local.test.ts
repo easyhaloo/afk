@@ -279,4 +279,34 @@ describe('LocalSandboxProvider', () => {
       error: { code: 'INVALID_SIGNAL_FILE' },
     });
   });
+
+  it('stops the agent when a person asked for the run to stop', async () => {
+    // The run lives in another process, so the request to stop it travels
+    // through the worktree. Without it the agent keeps working and the
+    // run reports a timeout, hours later, for a stop somebody asked for.
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-interrupt-'));
+    await writeFile(
+      join(worktreePath, '.afk-interrupt.json'),
+      JSON.stringify({ reason: 'manual', requestedAt: new Date().toISOString() }),
+    );
+    const tmux = {
+      sendKeys: vi.fn(async () => {}),
+      hasSession: vi.fn(async () => true),
+    };
+    const execution = new LocalAgentExecution({
+      worktreePath,
+      sessionName: 'afk-interrupted',
+      command: { argv: ['agent'], cwd: worktreePath },
+      generation: 1,
+      prompt: 'verify acceptance criteria',
+      signalType: 'goal_complete',
+      metadata: { provider: 'claude-code', transport: 'process' },
+      tmux: tmux as never,
+    });
+
+    await expect(execution.waitForResult({ completionTimeoutMs: 30_000 })).resolves.toMatchObject({
+      status: 'aborted',
+    });
+    expect(tmux.sendKeys).toHaveBeenCalled();
+  });
 });

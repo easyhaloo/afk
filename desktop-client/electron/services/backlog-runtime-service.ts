@@ -1,8 +1,5 @@
-import { homedir } from "node:os";
-import { AFK_RUNTIME_TASKS_DIRECTORY } from '@afk/core';
 import { probeProcess } from "@afk/infrastructure";
-import path from "node:path";
-import { TaskRuntimeReader } from "@afk/execution/application/runtime/task-runtime";
+import { TaskRuntimeReader, defaultRuntimeTasksRoot } from "@afk/execution/application/runtime/task-runtime";
 import type { BacklogRuntimeProjection, BacklogRuntimeSummary, BacklogRunSummary } from "../../shared/backlog-contract.js";
 import { parseBacklogRuntimeSummary } from "../../shared/backlog-contract.js";
 import type { createBacklogRunStore } from "./backlog-run-store.js";
@@ -30,7 +27,7 @@ export function createBacklogRuntimeService(deps: BacklogRuntimeServiceDeps) {
     context?: { providerRef: string; startedAfter?: string },
   ): Promise<BacklogRuntimeProjection | undefined> {
     const resolvedWorkspace = deps.resolveWorkspace(workspace);
-    const root = deps.runtimeRoot?.(workspace) ?? path.join(homedir(), AFK_RUNTIME_TASKS_DIRECTORY);
+    const root = deps.runtimeRoot?.(workspace) ?? defaultRuntimeTasksRoot();
     // The runtime owns the records: the buckets, the file names, the
     // validation, the identity rule and the staleness window. This service
     // only asks for the records of this work item and projects them.

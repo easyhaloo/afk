@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { simpleGit } from 'simple-git';
+import { SIGNAL_FILE } from '../io/signal.js';
 
 /**
  * The files AFK leaves inside a repository it works in.
@@ -20,7 +21,7 @@ import { simpleGit } from 'simple-git';
 export const AFK_REPO_ARTEFACTS: readonly string[] = [
   '/.worktrees/',
   '/.afk/',
-  '/.afk-signal.json*',
+  `/${SIGNAL_FILE}*`,
   '/.claude/settings.local.json',
 ];
 

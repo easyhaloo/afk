@@ -3,8 +3,8 @@ import type { BacklogItem } from '../../src/domain/backlog/index';
 import { waitForTerminal } from './codex-runtime-wait';
 
 describe('Codex E2E phase deadlines', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
 
   it('gives QA its own deadline after implementation consumes most of its budget', async () => {
     let state: BacklogItem['state'] = 'in_progress';

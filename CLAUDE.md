@@ -59,8 +59,8 @@ or adding a desktop feature.
 | Product requirements, research | [`docs/product/`](docs/product/PRD.md), [`docs/research/`](docs/research/) |
 | Onboarding | [`docs/getting-started.md`](docs/getting-started.md) |
 
-`docs/_archive/` is a historical holding area, not current guidance. Bilingual
-documents ship as `name.md` + `name.zh.md`; update both.
+`docs/_archive/` is a historical holding area, not current guidance. The
+bilingual-pairing rule is in [`AGENTS.md`](AGENTS.md#hard-rules).
 
 ## Conventions
 

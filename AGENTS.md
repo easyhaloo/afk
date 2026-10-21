@@ -36,6 +36,17 @@ before touching `desktop-client/`.
   pnpm reads that text as "not allowed", so the install ends with
   `ERR_PNPM_IGNORED_BUILDS` and a fresh checkout cannot be installed at all.
   `pnpm architecture:check` rejects a non-boolean there.
+- **Bilingual documents change in pairs.** Seven documents have a Chinese
+  twin, and the convention covers exactly those seven:
+  `docs/architecture/overview.md`, `docs/architecture/execution.md`,
+  `docs/getting-started.md`, `docs/guides/skills.md`,
+  `docs/guides/testing.md`, `docs/guides/workflows.md` (each with a `.zh.md`
+  twin) and the repository's `README.md` (with `README_zh.md`). Changing one
+  side means changing the other in the same commit, and the twins must keep
+  the same sections at the same depth: the headings are translated, so the
+  structure is the only thing that can be compared. A stale twin reads as
+  current guidance and sends the next reader after a design that no longer
+  exists. `pnpm docs:check` verifies the pairing.
 
 ## Package boundaries
 

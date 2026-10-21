@@ -1,4 +1,5 @@
 import { normalizeTmuxSessionName } from "./tmux-session.js";
+import type { AfkResourceKind, AfkResourceStatus } from "@afk/execution/domain/runtime/resource";
 
 /**
  * Shared Application execution read model (ADR-0019 §1).
@@ -10,9 +11,16 @@ import { normalizeTmuxSessionName } from "./tmux-session.js";
  *   - resourceId: registered execution environment resource
  *   - session:    provider-native identity, which need not be a tmux session
  */
-export type ExecutionEnvironmentKind = "tmux" | "container" | "isolate-service";
+/**
+ * The kinds and states a registered resource can be in.
+ *
+ * The registry owns them - it writes the rows and the desktop reads
+ * them - so the desktop names them from the registry's domain layer
+ * rather than writing the same three names down again.
+ */
+export type ExecutionEnvironmentKind = AfkResourceKind;
 
-export type ExecutionEnvironmentStatus = "active" | "closed" | "missing" | "failed";
+export type ExecutionEnvironmentStatus = AfkResourceStatus;
 
 /** Exact registered tmux control target. A session name alone is not one. */
 export type TmuxAttachTarget = {

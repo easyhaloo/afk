@@ -20,9 +20,34 @@ const requireNode = createRequire(import.meta.url);
 // Constructing the specifier avoids Vite versions that do not yet recognise node:sqlite as a builtin.
 const { DatabaseSync } = requireNode(`node:${'sqlite'}`) as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => SQLiteDatabase };
 
-export type AfkResourceKind = 'tmux' | 'container' | 'isolate-service';
-export type AfkResourceOrigin = 'local-sandbox' | 'container-sandbox' | 'isolate';
-export type AfkResourceStatus = 'active' | 'closed' | 'missing' | 'failed';
+/**
+ * The resource vocabulary lives in the domain layer, so the desktop's
+ * wire contract and this table's check constraints are written from the
+ * same answer.
+ */
+import {
+  AFK_RESOURCE_ENGINES,
+  AFK_RESOURCE_KINDS,
+  AFK_RESOURCE_ORIGINS,
+  AFK_RESOURCE_STATUSES,
+  sqlValueList,
+  type AfkResourceEngine,
+  type AfkResourceKind,
+  type AfkResourceOrigin,
+  type AfkResourceStatus,
+} from '../../domain/runtime/resource.js';
+
+export {
+  AFK_RESOURCE_ENGINES,
+  AFK_RESOURCE_KINDS,
+  AFK_RESOURCE_ORIGINS,
+  AFK_RESOURCE_STATUSES,
+  sqlValueList,
+  type AfkResourceEngine,
+  type AfkResourceKind,
+  type AfkResourceOrigin,
+  type AfkResourceStatus,
+} from '../../domain/runtime/resource.js';
 
 export interface AfkResourceMetadata {
   [key: string]: unknown;
@@ -236,12 +261,12 @@ export class AfkResourceRegistry {
         workspace_path TEXT NOT NULL,
         run_id TEXT,
         worktree_path TEXT NOT NULL,
-        kind TEXT NOT NULL CHECK(kind IN ('tmux', 'container', 'isolate-service')),
-        origin TEXT NOT NULL CHECK(origin IN ('local-sandbox', 'container-sandbox', 'isolate')),
-        engine TEXT CHECK(engine IN ('docker', 'podman')),
+        kind TEXT NOT NULL CHECK(kind IN (${sqlValueList(AFK_RESOURCE_KINDS)})),
+        origin TEXT NOT NULL CHECK(origin IN (${sqlValueList(AFK_RESOURCE_ORIGINS)})),
+        engine TEXT CHECK(engine IN (${sqlValueList(AFK_RESOURCE_ENGINES)})),
         name TEXT NOT NULL,
         external_id TEXT,
-        status TEXT NOT NULL CHECK(status IN ('active', 'closed', 'missing', 'failed')),
+        status TEXT NOT NULL CHECK(status IN (${sqlValueList(AFK_RESOURCE_STATUSES)})),
         detail TEXT,
         metadata_json TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL,

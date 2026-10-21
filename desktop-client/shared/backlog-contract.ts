@@ -13,6 +13,8 @@
 import { assertExactKeys, parseRequiredString } from "./validation.js";
 import {
   WORK_ITEM_PLATFORMS,
+  BACKLOG_STATES as APPLICATION_BACKLOG_STATES,
+  BACKLOG_EXECUTION_MODES as APPLICATION_BACKLOG_EXECUTION_MODES,
   formatWorkItemId as formatCanonicalWorkItemId,
   isWorkItemPlatform,
   parseWorkItemId as parseCanonicalWorkItemId,
@@ -22,9 +24,7 @@ import {
 } from "@afk/application";
 import type {
   BacklogChangeRequest as AuditedBacklogChangeRequest,
-  BacklogExecutionMode as AuditedBacklogExecutionMode,
   BacklogItem as AuditedBacklogItem,
-  BacklogState as AuditedBacklogState,
   WorkItemPlatform,
 } from "@afk/application";
 import type { SshExternalTerminalId } from "./ssh-contract.js";
@@ -48,24 +48,23 @@ type Assert<T extends true> = T;
  * gains stops this package from building, rather than stopping the board
  * at runtime.
  */
-export const BACKLOG_STATES = [
-  "ready",
-  "rework",
-  "in_progress",
-  "verification",
-  "merge_ready",
-  "done",
-  "blocked",
-] as const satisfies readonly AuditedBacklogState[];
-
-export type BacklogStatesCoverTheAudit = Assert<
-  Exclude<AuditedBacklogState, (typeof BACKLOG_STATES)[number]> extends never ? true : false
->;
-
-export const BACKLOG_EXECUTION_MODES = ["afk", "hitl"] as const satisfies readonly AuditedBacklogExecutionMode[];
-export type BacklogModesCoverTheAudit = Assert<
-  Exclude<AuditedBacklogExecutionMode, (typeof BACKLOG_EXECUTION_MODES)[number]> extends never ? true : false
->;
+/**
+ * The states and execution modes a work item can carry.
+ *
+ * The lists belong to the application package, where the backlog -> core
+ * vocabulary mapping is read. The desktop names them in its own vocabulary
+ * and does not keep a second copy of either: a state the application gains
+ * is a state the desktop accepts, and a mode the application gains is a mode
+ * the desktop accepts, with no second list to keep in step.
+ *
+ * The wire format stays wider than the shared model in the places where
+ * width buys something - the fields a provider AFK does not support yet can
+ * add without the renderer changing. A closed enumeration is not one of
+ * those places: no producer of a work item can carry a value the
+ * application does not model.
+ */
+export const BACKLOG_STATES = APPLICATION_BACKLOG_STATES;
+export const BACKLOG_EXECUTION_MODES = APPLICATION_BACKLOG_EXECUTION_MODES;
 
 export type BacklogState = typeof BACKLOG_STATES[number];
 export type BacklogExecutionMode = typeof BACKLOG_EXECUTION_MODES[number];

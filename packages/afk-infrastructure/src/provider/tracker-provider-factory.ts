@@ -76,8 +76,17 @@ export async function createGitLabTracker(projectId?: string, cwd?: string, pref
   return new GitLabClient({ url: auth.url, token: auth.token, projectId: project });
 }
 
-export type TrackerPlatform = 'github' | 'gitlab';
-export type GlobalTrackerPlatform = TrackerPlatform | 'all';
+/**
+ * The platforms a tracker can live on. The list belongs here because this is
+ * where the catalogs are built: a caller that validates a platform reads it
+ * rather than keeping a copy of its own.
+ */
+export const TRACKER_PLATFORMS = ['github', 'gitlab'] as const;
+export type TrackerPlatform = (typeof TRACKER_PLATFORMS)[number];
+
+/** The platforms a global inventory can be collected from, plus the aggregate. */
+export const GLOBAL_TRACKER_PLATFORMS = [...TRACKER_PLATFORMS, 'all'] as const;
+export type GlobalTrackerPlatform = (typeof GLOBAL_TRACKER_PLATFORMS)[number];
 
 export interface GlobalWorkItemCatalogDependencies {
   env: Record<string, string | undefined>;

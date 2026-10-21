@@ -3,16 +3,24 @@ import chalk from 'chalk';
 import {
   createGlobalWorkItemCatalogs,
   createManagementProviders,
+  GLOBAL_TRACKER_PLATFORMS,
   type GlobalTrackerPlatform,
   type TrackerPlatform,
 } from '@afk/infrastructure';
 import {
+  BACKLOG_EXECUTION_MODES,
+  BACKLOG_STATES,
   collectGlobalWorkItemInventory,
   filterGlobalWorkItemInventory,
 } from '@afk/application';
 import type {
+  BacklogCreateInput,
+  BacklogExecutionMode,
+  BacklogItem,
+  BacklogState,
   GlobalWorkItemInventoryResult,
   ProviderCatalog,
+  QABacklogProvider,
 } from '@afk/application';
 import {
   addBacklogTag,
@@ -28,8 +36,6 @@ import {
   type BacklogChangeProvider,
   type BacklogManagementProvider,
 } from '@afk/application';
-import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '@afk/application';
-import type { BacklogExecutionMode } from '@afk/application';
 import { getWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
@@ -38,10 +44,6 @@ import {
   emitFailure,
   emitSuccess,
 } from '../json-output.js';
-
-const states: BacklogState[] = ['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked'];
-const modes: BacklogExecutionMode[] = ['afk', 'hitl'];
-const inventoryPlatforms: GlobalTrackerPlatform[] = ['github', 'gitlab', 'all'];
 
 function asPlatform(value: unknown): TrackerPlatform | undefined {
   return value === 'github' || value === 'gitlab' ? value : undefined;
@@ -95,13 +97,13 @@ export async function runBacklogInventory(
   const kind = 'backlog.inventory';
   try {
     const platform = options.platform ?? 'all';
-    if (!inventoryPlatforms.includes(platform as GlobalTrackerPlatform)) {
+    if (!GLOBAL_TRACKER_PLATFORMS.includes(platform as GlobalTrackerPlatform)) {
       throw new Error(`invalid inventory platform: ${platform}`);
     }
-    if (options.state && !states.includes(options.state as BacklogState)) {
+    if (options.state && !BACKLOG_STATES.includes(options.state as BacklogState)) {
       throw new Error(`invalid backlog state: ${options.state}`);
     }
-    if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
+    if (options.mode && !BACKLOG_EXECUTION_MODES.includes(options.mode as BacklogExecutionMode)) {
       throw new Error(`invalid execution mode: ${options.mode}`);
     }
     const result = filterGlobalWorkItemInventory(
@@ -145,10 +147,10 @@ export async function runBacklogList(
 ): Promise<void> {
   const kind = 'backlog.list';
   try {
-    if (options.state && !states.includes(options.state as BacklogState)) {
+    if (options.state && !BACKLOG_STATES.includes(options.state as BacklogState)) {
       throw new Error(`invalid backlog state: ${options.state}`);
     }
-    if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
+    if (options.mode && !BACKLOG_EXECUTION_MODES.includes(options.mode as BacklogExecutionMode)) {
       throw new Error(`invalid execution mode: ${options.mode}`);
     }
     const items = await listBacklogs(provider, {
@@ -202,7 +204,7 @@ export async function runBacklogCreate(
   const kind = 'backlog.create';
   try {
     if (!options.title) throw new Error('backlog title is required');
-    if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
+    if (options.mode && !BACKLOG_EXECUTION_MODES.includes(options.mode as BacklogExecutionMode)) {
       throw new Error(`invalid execution mode: ${options.mode}`);
     }
     const description = options.description ?? await readDescription(options.descriptionFile);
@@ -411,8 +413,8 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
   backlog.command('inventory')
     .description('Inventory issues across all credential-accessible projects')
     .option('--platform <platform>', 'Provider scope (github|gitlab|all)', 'all')
-    .option('--state <state>', `Filter by state (${states.join('|')})`)
-    .option('--mode <mode>', `Filter by execution mode (${modes.join('|')})`)
+    .option('--state <state>', `Filter by state (${BACKLOG_STATES.join('|')})`)
+    .option('--mode <mode>', `Filter by execution mode (${BACKLOG_EXECUTION_MODES.join('|')})`)
     .option('--tag <tag>', 'Filter by business tag')
     .option('--project <project>', 'Filter by canonical provider project key')
     .option('--json', 'Emit structured JSON envelope to stdout')
@@ -430,8 +432,8 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
 
   backlog.command('list')
     .description('List backlog items')
-    .option('--state <state>', `Filter by state (${states.join('|')})`)
-    .option('--mode <mode>', `Filter by execution mode (${modes.join('|')})`)
+    .option('--state <state>', `Filter by state (${BACKLOG_STATES.join('|')})`)
+    .option('--mode <mode>', `Filter by execution mode (${BACKLOG_EXECUTION_MODES.join('|')})`)
     .option('--tag <tag>', 'Filter by business tag')
     .option('--parent <id>', 'Filter by parent backlog ID')
     .option('--project <project>', 'Provider project/repository')
@@ -475,7 +477,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--parent <id>', 'Organizational parent backlog ID (does not select a git base branch)')
     .option('--base-backlog <id>', 'Backlog ID whose unmerged branch is the explicit execution base')
     .option('-d, --depends-on <id>', 'Backlog ID that must complete first', (value: string, previous: string[]) => [...previous, value], [])
-    .option('--mode <mode>', `Execution mode (${modes.join('|')})`, 'afk')
+    .option('--mode <mode>', `Execution mode (${BACKLOG_EXECUTION_MODES.join('|')})`, 'afk')
     .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])
     .option('--project <project>', 'Provider project/repository')
     .option('--platform <platform>', 'Override provider detection (github|gitlab)')

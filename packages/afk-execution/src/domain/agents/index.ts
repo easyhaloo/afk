@@ -9,6 +9,7 @@ import { CursorProvider } from './cursor.js';
 import { PiProvider } from './pi.js';
 import { OpenCodeProvider } from './opencode.js';
 import { CopilotProvider } from './copilot.js';
+export { AGENT_PROVIDER_NAMES } from '@afk/core';
 export { registerAgentProvider, getAgentProvider, requireAgentProvider } from './registry.js';
 export { ProcessAgentProvider } from './process-provider.js';
 export { DEFAULT_CODEX_CONFIG, prepareAgentRuntime, probeCodexReadiness, resolveCodexRuntime } from './codex-runtime.js';

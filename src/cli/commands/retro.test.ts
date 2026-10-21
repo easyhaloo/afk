@@ -215,4 +215,28 @@ describe('retro command', () => {
       else process.env.HOME = previousHome;
     }
   });
+
+  it('refuses a provider whose transcript it cannot read', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'afk-retro-provider-'));
+    roots.push(root);
+    const workspace = join(root, 'workspace');
+    const eventRoot = join(root, 'events');
+    await createRetroFixture({ workspace, eventRoot, sessionId: 'synthetic-session' });
+    childProcessMocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: (error: null, result: { stdout: string; stderr: string }) => void) => callback(null, { stdout: JSON.stringify({ summary: 'ok', findings: [] }), stderr: '' }));
+
+    const run = async (provider: string) => {
+      const program = new Command().name('afk');
+      registerRetroCommands(program);
+      return program.parseAsync([
+        'node', 'afk', 'retro', 'run',
+        '--run-id', 'run-1', '--workspace', workspace, '--root', eventRoot, '--provider', provider,
+      ]);
+    };
+
+    // A provider AFK has no transcript reader for is refused outright.
+    // Accepting it produced a retro with the evidence missing and nothing
+    // saying why the report was empty.
+    await expect(run('gemini')).rejects.toThrow(/invalid retro provider/);
+    await expect(run('claude-code')).resolves.toBeDefined();
+  });
 });

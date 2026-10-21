@@ -8,15 +8,17 @@
  * - Session capture/restore (capability: resume)
  */
 
-import type { AgentExecutionMode, AgentToolCallSummary } from '@afk/core';
+import type { AgentExecutionMode, AgentProviderName, AgentToolCallSummary } from '@afk/core';
 
-export type AgentProviderName =
-  | 'claude-code'
-  | 'codex'
-  | 'cursor'
-  | 'pi'
-  | 'opencode'
-  | 'copilot';
+/**
+ * The agent providers AFK can drive.
+ *
+ * The list and the type live in the core package, where the desktop
+ * client can read them from a renderer that cannot load this package.
+ * The execution runtime names them from there rather than writing a
+ * second answer down.
+ */
+export type { AgentProviderName };
 
 /** Capabilities that a provider may support. */
 export type AgentCapability =

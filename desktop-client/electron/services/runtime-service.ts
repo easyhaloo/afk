@@ -5,7 +5,15 @@ import { exec, executable, firstLine } from "../adapters/process-executor.js";
 
 type AgentRuntimeDefinition = Pick<AgentRuntime, "id" | "label" | "command"> & { versionArgs: string[] };
 
-const DEFINITIONS: AgentRuntimeDefinition[] = [
+/**
+ * The agents the desktop can offer a work item to.
+ *
+ * The ids come from the shared work item vocabulary, so a definition
+ * naming an agent nobody else knows is a compile error. The other
+ * direction - an agent the vocabulary names that has no definition - is
+ * what the test next to this file holds up.
+ */
+export const AGENT_RUNTIME_DEFINITIONS: AgentRuntimeDefinition[] = [
   { id: "claude", label: "Claude Code", command: "claude", versionArgs: ["--version"] },
   { id: "codex", label: "Codex", command: "codex", versionArgs: ["--version"] },
   { id: "cursor", label: "Cursor Agent", command: "cursor-agent", versionArgs: ["--version"] },
@@ -25,7 +33,7 @@ function installationSource(executablePath: string) {
 }
 
 export async function detectAgentRuntimes(): Promise<AgentRuntime[]> {
-  return Promise.all(DEFINITIONS.map(async (definition) => {
+  return Promise.all(AGENT_RUNTIME_DEFINITIONS.map(async (definition) => {
     const checkedAt = new Date().toISOString();
     const executablePath = await executable(definition.command);
     const installation = { source: executablePath ? installationSource(executablePath) : "—", version: "", checkedAt };

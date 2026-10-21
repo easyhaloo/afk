@@ -10,7 +10,15 @@ import type { AgentToolCallSummary, RunEvent } from '@afk/core';
 import type { CommandRegistrationContext } from '../command-registry.js';
 import { JsonlEventStore } from '@afk/infrastructure/observability';
 import { stableJson } from '@afk/infrastructure/io';
-import { readAgentTelemetry, readAgentTools, readAgentTranscript, findCodexRollout } from '@afk/execution/infrastructure/observability/agent-telemetry';
+import {
+  readAgentTelemetry,
+  readAgentTools,
+  readAgentTranscript,
+  findCodexRollout,
+  isAgentTelemetryProvider,
+  AGENT_TELEMETRY_PROVIDERS,
+  type AgentTelemetryProvider,
+} from '@afk/execution/infrastructure/observability/agent-telemetry';
 import { defaultSessionStoreChain } from '@afk/execution/application/sessions/chain';
 import { claudeProjectSlug } from '@afk/execution/shared/agent-transcript-path';
 
@@ -77,7 +85,7 @@ interface RetroOptions {
   workItemId?: string;
   workspace: string;
   root?: string;
-  provider: 'claude-code' | 'codex' | 'opencode';
+  provider: AgentTelemetryProvider;
   transcript?: string;
 }
 
@@ -371,11 +379,17 @@ export function registerRetroCommands(program: Command, _context: CommandRegistr
     .requiredOption('--workspace <path>', 'Workspace containing .afk state')
     .option('--execution-id <id>', 'Execution journal ID; defaults to run ID')
     .option('--work-item-id <id>', 'Canonical work item ID')
-    .option('--provider <provider>', 'claude-code, codex, or opencode', 'claude-code')
+    .option('--provider <provider>', `Provider whose transcript is read (${AGENT_TELEMETRY_PROVIDERS.join(', ')})`, 'claude-code')
     .option('--transcript <path>', 'Explicit transcript path for fixture/replay runs')
     .option('--root <path>', 'AFK event-store root')
     .option('--json', 'Emit JSON')
     .action(async options => {
+      // A provider AFK cannot read a transcript for is not a provider the
+      // command can report on. Taking it silently would produce a retro
+      // with the evidence missing and nothing saying why.
+      if (!isAgentTelemetryProvider(options.provider)) {
+        throw new Error(`invalid retro provider: ${options.provider}; expected ${AGENT_TELEMETRY_PROVIDERS.join(', ')}`);
+      }
       const executionId = options.executionId ?? options.runId;
       const report = await runRetro({ ...options, executionId });
       const stateRoot = await findStateRoot(options.workspace, executionId);

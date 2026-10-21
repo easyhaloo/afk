@@ -1,3 +1,4 @@
+import { AGENT_PROVIDER_NAMES } from '@afk/core';
 import type { AgentUsage, ExecutionPhase, ExecutionQueryOptions, ExecutionRunDetail, ExecutionStatus, ExecutionSummary } from "./execution-contract.js";
 import type { WorkItemAgentId } from "./backlog-contract.js";
 import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
@@ -77,10 +78,14 @@ export type CliCapability = {
 };
 
 /**
- * The agent ids a canvas node may name. The set is declared once here so the
- * desktop's editable-provider check and the wire contract cannot disagree.
+ * The agent ids a canvas node may name.
+ *
+ * The list belongs to the core package, where the execution runtime
+ * registers the providers it can drive. The desktop names it from there
+ * rather than keeping a second copy, so the editable-provider check and
+ * the wire contract cannot disagree with the runtime.
  */
-export const AGENT_PROVIDER_IDS = ["claude-code", "codex", "cursor", "pi", "opencode", "copilot"] as const;
+export const AGENT_PROVIDER_IDS = AGENT_PROVIDER_NAMES;
 export type AgentProviderId = typeof AGENT_PROVIDER_IDS[number];
 
 export type CanvasTemplateNode = {

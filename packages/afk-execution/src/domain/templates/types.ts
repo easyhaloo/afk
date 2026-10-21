@@ -17,7 +17,7 @@
  *   "模板能表达依赖、条件、执行模式、Agent、分支策略和结构化输出"
  */
 
-import { AGENT_EXECUTION_MODES } from '@afk/core';
+import { AGENT_EXECUTION_MODES, AGENT_PROVIDER_NAMES } from '@afk/core';
 import { z } from 'zod';
 
 // ── Branch strategy (re-exported from branches module) ─────────────────────
@@ -109,7 +109,7 @@ export const StepSchema = z.object({
    * compiler resolves an absent kind through the legacy derivation.
    */
   completionKind: StepCompletionKindSchema.optional(),
-  provider: z.enum(['claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot']).optional(),
+  provider: z.enum(AGENT_PROVIDER_NAMES).optional(),
   executionMode: z.enum(AGENT_EXECUTION_MODES).optional(),
   branch: BranchStrategyConfigSchema.optional(),
   dependsOn: z.array(z.string()).optional(),
@@ -136,9 +136,7 @@ export const WorkflowTemplateSchema = z.object({
   /** Default branch strategy for steps that don't specify their own. */
   defaultBranch: BranchStrategyConfigSchema.optional(),
   /** Default agent provider for steps. */
-  defaultProvider: z.enum([
-    'claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot',
-  ]).optional(),
+  defaultProvider: z.enum(AGENT_PROVIDER_NAMES).optional(),
   steps: z.array(StepSchema).min(1),
 });
 

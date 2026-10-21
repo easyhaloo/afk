@@ -20,6 +20,23 @@ import type {
   LabelDelta,
 } from '@afk/application';
 import { parseWorkItemId } from '@afk/application';
+import type { TrackerIssueState } from '@afk/application';
+
+/**
+ * GitLab already speaks AFK's vocabulary for a state: an issue it
+ * reports as "opened" is "opened" here.
+ *
+ * The client reads a state in four places, and each of them spelled the
+ * rule out. A copy left behind reports an open issue as a closed one -
+ * a backlog item nobody can act on.
+ */
+function toTrackedState(gitlabState: string): TrackerIssueState {
+  return gitlabState === 'opened' ? 'opened' : 'closed';
+}
+
+function toTrackedMergeRequestState(gitlabState: string): TrackerIssueState {
+  return gitlabState === 'merged' ? 'merged' : toTrackedState(gitlabState);
+}
 import { normalizeGitLabHost, resolveGitLabProjectKey } from '../shared/gitlab-project.js';
 
 export interface GitLabConfig {
@@ -54,7 +71,7 @@ export class GitLabClient implements TrackerProvider {
       title: issue.title,
       description: issue.description || '',
       labels: issue.labels as string[],
-      state: issue.state === 'opened' ? 'opened' : 'closed',
+      state: toTrackedState(issue.state),
       url: issue.web_url,
       projectId: String(this.projectId),
     };
@@ -84,7 +101,7 @@ export class GitLabClient implements TrackerProvider {
       title: issue.title as string,
       description: (issue.description || '') as string,
       labels: (issue.labels || []) as string[],
-      state: issue.state === 'opened' ? 'opened' : 'closed',
+      state: toTrackedState(issue.state),
       url: issue.web_url as string,
       projectId: String(this.projectId),
     }));
@@ -154,7 +171,7 @@ export class GitLabClient implements TrackerProvider {
       id: mr.iid,
       platform: 'gitlab',
       title: mr.title,
-      state: mr.state === 'merged' ? 'merged' : mr.state === 'opened' ? 'opened' : 'closed',
+      state: toTrackedMergeRequestState(mr.state),
       sourceBranch: mr.source_branch,
       targetBranch: mr.target_branch,
       mergeable: mergeStatus === 'mergeable' || mergeStatus === 'can_be_merged'
@@ -182,7 +199,7 @@ export class GitLabClient implements TrackerProvider {
       id: mr.iid,
       platform: 'gitlab' as const,
       title: mr.title as string,
-      state: mr.state === 'merged' ? 'merged' : mr.state === 'opened' ? 'opened' : 'closed',
+      state: toTrackedMergeRequestState(mr.state),
       sourceBranch: mr.source_branch as string,
       targetBranch: mr.target_branch as string,
       url: mr.web_url as string,

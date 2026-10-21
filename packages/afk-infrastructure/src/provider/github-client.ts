@@ -19,6 +19,29 @@ import type {
   LabelDelta,
 } from '@afk/application';
 import type { BacklogMetadataLabel } from '@afk/application';
+import type { TrackerIssueFilterState, TrackerIssueState } from '@afk/application';
+
+/**
+ * GitHub calls an open issue "open"; AFK calls it "opened".
+ *
+ * The client reads a state in four places and asks for one in two, and
+ * each of them used to spell the rule out. A copy of the rule left
+ * behind reports an open issue as a closed one - a backlog item nobody
+ * can act on - and the copies can disagree with each other.
+ */
+function toTrackedState(githubState: string): TrackerIssueState {
+  return githubState === 'open' ? 'opened' : 'closed';
+}
+
+function toTrackedMergeRequestState(githubState: string, merged: boolean): TrackerIssueState {
+  return merged ? 'merged' : toTrackedState(githubState);
+}
+
+/** The state AFK asks GitHub for. */
+function toGithubState(state: TrackerIssueFilterState | undefined): 'open' | 'closed' | 'all' {
+  if (state === 'all') return 'all';
+  return state === 'closed' ? 'closed' : 'open';
+}
 import { logger } from '../io/index.js';
 import { parseWorkItemId } from '@afk/application';
 
@@ -75,7 +98,7 @@ export class GitHubClient implements TrackerProvider {
       title: data.title,
       description: data.body || '',
       labels: data.labels.map(l => (typeof l === 'string' ? l : (l.name || ''))),
-      state: data.state === 'open' ? 'opened' : 'closed',
+      state: toTrackedState(data.state),
       url: data.html_url,
       projectId: this.projectId,
     };
@@ -106,7 +129,7 @@ export class GitHubClient implements TrackerProvider {
   async listIssues(options: ListOptions = {}): Promise<TrackedIssue[]> {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
-    const state = options.state === 'opened' ? 'open' : options.state || 'open';
+    const state = toGithubState(options.state);
     // The caller asked for every issue, and a request here is one
     // request: the repository's issues endpoint answers with a page and
     // no more.  A repository with more issues than that in it was
@@ -139,7 +162,7 @@ export class GitHubClient implements TrackerProvider {
         title: issue.title,
         description: issue.body || '',
         labels: issue.labels.map(l => (typeof l === 'string' ? l : (l.name || ''))),
-        state: issue.state === 'open' ? 'opened' : 'closed',
+        state: toTrackedState(issue.state),
         url: issue.html_url,
         projectId: this.projectId,
       }));
@@ -281,7 +304,7 @@ export class GitHubClient implements TrackerProvider {
       repo,
       pull_number: id,
     });
-    const state = data.merged ? 'merged' : data.state === 'open' ? 'opened' : 'closed';
+    const state = toTrackedMergeRequestState(data.state, data.merged);
     return {
       id: data.number,
       platform: 'github',
@@ -298,7 +321,7 @@ export class GitHubClient implements TrackerProvider {
   async listMRs(options: ListMROptions = {}): Promise<TrackedMR[]> {
     const oct = this.client;
     const { owner, repo } = this.getOwnerRepo();
-    const state = options.state === 'opened' ? 'open' : options.state || 'open';
+    const state = toGithubState(options.state);
     const perPage = options.perPage || 100;
     const data = await this.listAllPages(page => oct.pulls.list({
       owner,
@@ -312,7 +335,7 @@ export class GitHubClient implements TrackerProvider {
       // single read carries. GitHub reports a merged pull request as
       // closed as well, so the timestamp is what tells the two apart.
       const mergedAt = (pr as { merged_at?: string | null }).merged_at;
-      const prState = mergedAt ? 'merged' : pr.state === 'open' ? 'opened' : 'closed';
+      const prState = toTrackedMergeRequestState(pr.state, !!mergedAt);
       return {
         id: pr.number,
         platform: 'github' as const,

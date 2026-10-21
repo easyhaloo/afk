@@ -20,11 +20,21 @@ export const TRACKER_ISSUE_STATES = ['opened', 'closed', 'merged'] as const;
 export type TrackerIssueState = (typeof TRACKER_ISSUE_STATES)[number];
 
 /**
+ * The states a tracker listing can be filtered by.
+ *
+ * A filter is not a state an issue reports - "every state" is not
+ * something an issue can be - so it is a list of its own.
+ */
+export const TRACKER_ISSUE_FILTER_STATES = ['opened', 'closed', 'all'] as const;
+
+export type TrackerIssueFilterState = (typeof TRACKER_ISSUE_FILTER_STATES)[number];
+
+/**
  * Common list options
  */
 export interface ListOptions {
   labels?: string[];
-  state?: 'opened' | 'closed' | 'all';
+  state?: TrackerIssueFilterState;
   perPage?: number;
   projectId?: string;
 }
@@ -57,7 +67,7 @@ export interface LabelDelta {
  * List MR/PR options
  */
 export interface ListMROptions {
-  state?: 'opened' | 'closed' | 'all';
+  state?: TrackerIssueFilterState;
   perPage?: number;
   projectId?: string;
 }

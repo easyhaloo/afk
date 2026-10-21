@@ -9,6 +9,10 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
+    // The runtime registry is a file under the user's home. Point it
+    // somewhere disposable for the whole run, so no test can write into
+    // the developer's machine by forgetting to.
+    setupFiles: ['./tests/setup-runtime-registry.ts'],
     testTimeout: 30000,
     // The setup and teardown of a test can take as long as the test itself,
     // so the hook gets the same ceiling.

@@ -134,7 +134,16 @@ export class AfkResourceRegistry {
   private readonly db: SQLiteDatabase;
 
   constructor(options: AfkResourceRegistryOptions = {}) {
-    this.databasePath = resolve(options.databasePath ?? join(homedir(), AFK_RUNTIME_RESOURCES_FILE));
+    // The registry is a file under the user's home. A test that registers a
+    // resource without saying where the registry lives writes into the
+    // developer's own machine, and the rows accumulate there until somebody
+    // clears them by hand. The environment variable is the seam that lets a
+    // whole test run point the registry somewhere disposable.
+    this.databasePath = resolve(
+      options.databasePath
+      ?? process.env.AFK_RUNTIME_REGISTRY_PATH
+      ?? join(homedir(), AFK_RUNTIME_RESOURCES_FILE),
+    );
     mkdirSync(dirname(this.databasePath), { recursive: true });
     this.db = new DatabaseSync(this.databasePath);
     this.db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');

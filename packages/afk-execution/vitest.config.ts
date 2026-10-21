@@ -7,6 +7,10 @@ export default defineConfig({
   root: packageRoot,
   test: {
     environment: 'node',
+    // The runtime registry is a file under the user's home. Point it
+    // somewhere disposable for the whole run, so no test can write into
+    // the developer's machine by forgetting to.
+    setupFiles: ['../../tests/setup-runtime-registry.ts'],
     // A forked child shares the parent's environment, so a test that stubs
     // HOME sees it through os.homedir(). A worker thread gets a copy of
     // process.env that never reaches the real environment, and node-pty

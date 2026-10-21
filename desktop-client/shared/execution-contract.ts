@@ -2,7 +2,7 @@ import { parseWorkItemId, type WorkItemId } from "./backlog-contract.js";
 import { assertExactKeys, parseObject, parseRequiredString } from "./validation.js";
 import type { RuntimeHealth, WorkflowInstance, WorkflowInstanceStep } from "@afk/application";
 import type { AgentUsage as AuditedAgentUsage, ExecutionSummary as AuditedExecutionSummary } from "@afk/application";
-import type { RunPhase, RunStatus } from "@afk/core";
+import { isAgentExecutionMode, type RunPhase, type RunStatus } from "@afk/core";
 export type { RuntimeHealth, WorkflowInstance } from "@afk/application";
 
 /** A type-level assertion: the type argument has to hold. */
@@ -227,7 +227,7 @@ export function parseRuntimeHealth(input: unknown): RuntimeHealth {
   for (const key of ["heartbeatAt", "completedAt", "provider", "transport"] as const) if (value[key] !== undefined) health[key] = parseRequiredString(value[key], `health ${key}`);
   for (const key of ["observedAt", "heartbeatAt", "completedAt"] as const) if (health[key] !== undefined && !Number.isFinite(Date.parse(health[key]!))) throw new Error(`health ${key} is invalid`);
   if (value.executionMode !== undefined) {
-    if (value.executionMode !== "interactive" && value.executionMode !== "batch") throw new Error("health executionMode is invalid");
+    if (!isAgentExecutionMode(value.executionMode)) throw new Error("health executionMode is invalid");
     health.executionMode = value.executionMode;
   }
   if (value.runnerPid !== undefined) {
@@ -248,7 +248,7 @@ export function parseWorkflowInstance(input: unknown): WorkflowInstance {
     const parsed: WorkflowInstanceStep = { id: parseRequiredString(step.id, "workflow step id"), kind: step.kind, dependsOn: step.dependsOn.map(dependency => parseRequiredString(dependency, "workflow dependency")), status: step.status as WorkflowInstanceStep["status"] };
     if (step.provider !== undefined) parsed.provider = parseRequiredString(step.provider, "workflow provider");
     if (step.executionMode !== undefined) {
-      if (step.executionMode !== "interactive" && step.executionMode !== "batch") throw new Error("workflow executionMode is invalid");
+      if (!isAgentExecutionMode(step.executionMode)) throw new Error("workflow executionMode is invalid");
       parsed.executionMode = step.executionMode;
     }
     return parsed;

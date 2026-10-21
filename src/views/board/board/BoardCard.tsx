@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { BacklogViewModel } from '../data/backlog-adapter.js';
 import { backlogStateColor } from '../views/BacklogRow.js';
-import { getExecutionModeColor, getExecutionModeIcon, getStatusIcon } from '../views/display.js';
+import { getBacklogExecutionModeColor, getBacklogExecutionModeIcon, getStatusIcon } from '../views/display.js';
 
 import { displayWidth, truncateByWidth } from '../../shared/display-width.js';
 
@@ -26,7 +26,7 @@ export function BoardCard({ backlog, selected, width }: BoardCardProps) {
         {selected ? '▶ ' : '  '}
         <Text color={stateColor}>{getStatusIcon(backlog.state)}</Text>
         <Text bold> #{backlog.id}</Text>
-        <Text color={getExecutionModeColor(backlog.executionMode)}> {getExecutionModeIcon(backlog.executionMode)}</Text>
+        <Text color={getBacklogExecutionModeColor(backlog.executionMode)}> {getBacklogExecutionModeIcon(backlog.executionMode)}</Text>
         <Text dimColor> · {backlog.state} · {backlog.runStatus ?? 'no-runtime'}</Text>
       </Text>
       <Text wrap="truncate" bold={selected}>{title}</Text>

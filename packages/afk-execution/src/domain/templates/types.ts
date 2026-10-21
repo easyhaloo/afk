@@ -17,6 +17,7 @@
  *   "模板能表达依赖、条件、执行模式、Agent、分支策略和结构化输出"
  */
 
+import { AGENT_EXECUTION_MODES } from '@afk/core';
 import { z } from 'zod';
 
 // ── Branch strategy (re-exported from branches module) ─────────────────────
@@ -109,7 +110,7 @@ export const StepSchema = z.object({
    */
   completionKind: StepCompletionKindSchema.optional(),
   provider: z.enum(['claude-code', 'codex', 'cursor', 'pi', 'opencode', 'copilot']).optional(),
-  executionMode: z.enum(['interactive', 'batch']).optional(),
+  executionMode: z.enum(AGENT_EXECUTION_MODES).optional(),
   branch: BranchStrategyConfigSchema.optional(),
   dependsOn: z.array(z.string()).optional(),
   when: WhenClauseSchema.optional(),

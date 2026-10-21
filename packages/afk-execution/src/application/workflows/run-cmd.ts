@@ -8,7 +8,7 @@ import { createTracker } from '@afk/infrastructure';
 import { createProviderBundle } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import type { SandboxProviderName } from '../../domain/sandbox/types.js';
-import type { AgentProviderName, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
+import type { AgentProviderName, AgentRuntimeSelection, AgentExecutionMode } from '../../domain/agents/types.js';
 import { prepareAgentRuntime } from '../../domain/agents/codex-runtime.js';
 import type { BranchStrategyConfig } from '@afk/infrastructure';
 import { resolveWorkflowRunRequest } from './run-request.js';
@@ -29,7 +29,7 @@ export interface RunWorkflowCliOpts {
   sandboxProvider?: SandboxProviderName;
   agentProvider?: AgentProviderName;
   agentRuntime?: AgentRuntimeSelection;
-  executionMode?: ExecutionMode;
+  executionMode?: AgentExecutionMode;
   branchStrategy?: BranchStrategyConfig;
   template?: string;
   executionManifestPath?: string;

@@ -13,7 +13,7 @@ export { registerAgentProvider, getAgentProvider, requireAgentProvider } from '.
 export { ProcessAgentProvider } from './process-provider.js';
 export { DEFAULT_CODEX_CONFIG, prepareAgentRuntime, probeCodexReadiness, resolveCodexRuntime } from './codex-runtime.js';
 export type { CodexAuth, CodexConfig, CodexDoctorRunner, CodexEndpointProbe, CodexHostDiagnostics, CodexReadiness, CodexReadinessProbe, CodexRuntimeOverrides, CodexTransport } from './codex-runtime.js';
-export type { AgentProvider, AgentProviderName, AgentCapability, AgentCommand, AgentEvent, AgentSession, TokenUsage, SessionSnapshot, AgentCommandOptions, AgentExecutionMetadata, AgentExecutionOptions, AgentRuntimeSelection, CodexRuntimeSelection, CaptureSessionOptions, RestoreSessionOptions } from './types.js';
+export type { AgentExecutionMode, AgentProvider, AgentProviderName, AgentCapability, AgentCommand, AgentEvent, AgentSession, TokenUsage, SessionSnapshot, AgentCommandOptions, AgentExecutionMetadata, AgentExecutionOptions, AgentRuntimeSelection, CodexRuntimeSelection, CaptureSessionOptions, RestoreSessionOptions } from './types.js';
 
 /** Register all bundled providers on demand. Safe after test registry resets. */
 export function ensureBuiltinAgentProviders(): void {

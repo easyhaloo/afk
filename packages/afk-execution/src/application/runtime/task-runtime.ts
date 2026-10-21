@@ -4,6 +4,7 @@ import { join, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
 import { RUNTIME_STALE_AFTER_MS } from '@afk/application';
+import { isAgentExecutionMode, type AgentExecutionMode } from '@afk/core';
 
 export type TaskRuntimePhase = 'implementing' | 'verifying';
 export type TaskRuntimeStatus = 'running' | 'completed' | 'blocked' | 'failed';
@@ -37,7 +38,7 @@ export interface TaskRuntimeRecord {
   phase: TaskRuntimePhase;
   status: TaskRuntimeStatus;
   sandboxProvider?: string;
-  executionMode?: 'interactive' | 'batch';
+  executionMode?: AgentExecutionMode;
   agentProvider?: string;
   agentTransport?: 'process' | 'exec' | 'app-server';
   agentAuth?: 'chatgpt' | 'api' | 'unknown';
@@ -65,7 +66,7 @@ export interface TaskRuntimeRecord {
  */
 export interface TaskRuntimeRecordInput extends Omit<TaskRuntimeRecord, 'sandboxProvider' | 'executionMode' | 'agentProvider'> {
   sandboxProvider: string;
-  executionMode: 'interactive' | 'batch';
+  executionMode: AgentExecutionMode;
   agentProvider: string;
 }
 
@@ -513,7 +514,7 @@ function isTaskRuntimeRecord(value: unknown): value is TaskRuntimeRecord {
     // The three environment fields are the ones history does not always
     // know; a record that carries them must still carry them honestly.
     && (record.sandboxProvider === undefined || typeof record.sandboxProvider === 'string')
-    && (record.executionMode === undefined || record.executionMode === 'interactive' || record.executionMode === 'batch')
+    && (record.executionMode === undefined || isAgentExecutionMode(record.executionMode))
     && (record.agentProvider === undefined || typeof record.agentProvider === 'string')
     && (record.agentTransport === undefined || ['process', 'exec', 'app-server'].includes(record.agentTransport))
     && (record.agentAuth === undefined || ['chatgpt', 'api', 'unknown'].includes(record.agentAuth))

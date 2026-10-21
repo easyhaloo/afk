@@ -1,11 +1,11 @@
-import type { RunEvent } from '@afk/core';
+import type { AgentExecutionMode, RunEvent } from '@afk/core';
 
 export type WorkflowInstanceStep = {
   id: string;
   kind: 'agent' | 'system';
   dependsOn: readonly string[];
   provider?: string;
-  executionMode?: 'interactive' | 'batch';
+  executionMode?: AgentExecutionMode;
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 };
 

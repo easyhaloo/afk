@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  getExecutionModeColor,
-  getExecutionModeIcon,
+  getAgentExecutionModeColor,
+  getAgentExecutionModeIcon,
+  getBacklogExecutionModeColor,
+  getBacklogExecutionModeIcon,
   getStatusColor,
   getStatusIcon,
 } from './display.js';
@@ -29,13 +31,12 @@ describe('global status display', () => {
     expect(getStatusColor('stale')).toBe('red');
   });
 
-  it('uses the same icons for AFK/batch and HITL/interactive modes', () => {
-    expect(getExecutionModeIcon('afk')).toBe('⚙');
-    expect(getExecutionModeIcon('batch')).toBe('⚙');
-    expect(getExecutionModeIcon('hitl')).toBe('◇');
-    expect(getExecutionModeIcon('interactive')).toBe('◇');
-    expect(getExecutionModeColor('afk')).toBe('cyan');
-    expect(getExecutionModeColor('interactive')).toBe('yellow');
-    expect(getExecutionModeIcon('main')).toBeUndefined();
+  it('uses the same icons for the work item mode and the agent run mode', () => {
+    expect(getBacklogExecutionModeIcon('afk')).toBe('⚙');
+    expect(getAgentExecutionModeIcon('batch')).toBe('⚙');
+    expect(getBacklogExecutionModeIcon('hitl')).toBe('◇');
+    expect(getAgentExecutionModeIcon('interactive')).toBe('◇');
+    expect(getBacklogExecutionModeColor('afk')).toBe('cyan');
+    expect(getAgentExecutionModeColor('interactive')).toBe('yellow');
   });
 });

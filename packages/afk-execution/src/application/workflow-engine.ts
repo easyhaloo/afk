@@ -13,7 +13,7 @@ import type {
   AgentExecution,
   ExecutionResult,
 } from '../domain/sandbox/types.js';
-import { DEFAULT_EXECUTION_MODE, type AgentProvider, type AgentProviderName, type AgentRuntimeSelection, type ExecutionMode, type InterruptReason } from '../domain/agents/types.js';
+import { DEFAULT_AGENT_EXECUTION_MODE, type AgentProvider, type AgentProviderName, type AgentRuntimeSelection, type AgentExecutionMode, type InterruptReason } from '../domain/agents/types.js';
 import { configureStatusline, logger, withLogContext } from '@afk/infrastructure';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
 import { loadModules, parseModuleParams } from './modules/_registry.js';
@@ -163,7 +163,7 @@ export interface RunnerOptions {
   /** Workflow template name to run instead of the default two-phase flow. */
   template?: string;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). Default: 'interactive'. */
-  executionMode?: ExecutionMode;
+  executionMode?: AgentExecutionMode;
   /** Lease heartbeat cadence for providers using a durable claim. */
   claimHeartbeatIntervalMs?: number;
 }
@@ -257,7 +257,7 @@ interface StepRunCtx {
   budget: BudgetManager;
   persistBudget: () => Promise<void>;
   stepIndex: number;
-  executionMode?: ExecutionMode;
+  executionMode?: AgentExecutionMode;
 }
 
 interface PhaseResult {
@@ -280,7 +280,7 @@ export class WorkflowRunner {
   /** Resolved agent provider name (set in run()). */
   private agentProviderName: AgentProviderName = 'claude-code';
   /** Execution mode (set in run()). */
-  private executionMode: ExecutionMode = DEFAULT_EXECUTION_MODE;
+  private executionMode: AgentExecutionMode = DEFAULT_AGENT_EXECUTION_MODE;
   /**
    * When the current phase armed its watchdog — the start of the phase's
    * time budget. The budget is what tells a timeout from a failure, so it
@@ -485,7 +485,7 @@ export class WorkflowRunner {
 
     const effectiveTemplate = options.template ?? 'issue-implementation';
     this.sandboxProviderName = options.sandboxProvider ?? 'local';
-    this.executionMode = options.executionMode ?? DEFAULT_EXECUTION_MODE;
+    this.executionMode = options.executionMode ?? DEFAULT_AGENT_EXECUTION_MODE;
     this.repoRoot = options.repoRoot ?? process.cwd();
     // The runtime record exists for the whole run: it starts before any setup
     // can fail, so a failed setup is archived against it.
@@ -791,7 +791,7 @@ export class WorkflowRunner {
         persistBudget: ctx.persistBudget,
         prompt,
         signalType,
-        executionMode: ctx.executionMode ?? DEFAULT_EXECUTION_MODE,
+        executionMode: ctx.executionMode ?? DEFAULT_AGENT_EXECUTION_MODE,
         agentProvider: step.provider ? createAgentProvider(step.provider) : this.agentProvider,
         runtime: this.agentRuntime,
         sandbox,
@@ -897,7 +897,7 @@ export class WorkflowRunner {
     template: string;
     /** The template already loaded and validated by the caller. */
     loadedTemplate: WorkflowTemplate;
-    executionMode?: ExecutionMode;
+    executionMode?: AgentExecutionMode;
   }): Promise<{ success: boolean; url?: string }> {
     const { iid, session, targetBranch, baseBranch, hardTimeoutMs, completionTimeoutMs, maxHandoffs, contextHighTokens, maxTotalTokens, projectName, repoRoot, workspaceRoot, branchStrategy, template, loadedTemplate, executionMode } = ctx;
     if (!this.activeBacklog) throw new Error('backlog is not active');
@@ -992,7 +992,7 @@ export class WorkflowRunner {
       kind: 'workflow.recorded', name: loadedTemplate.name, version: loadedTemplate.version,
       steps: loadedTemplate.steps.map(step => ({
         id: step.id, kind: step.kind ?? 'agent', dependsOn: step.dependsOn ?? [],
-        ...(step.kind === 'system' ? {} : { provider: step.provider ?? this.agentProvider.name, executionMode: step.executionMode ?? executionMode ?? DEFAULT_EXECUTION_MODE }),
+        ...(step.kind === 'system' ? {} : { provider: step.provider ?? this.agentProvider.name, executionMode: step.executionMode ?? executionMode ?? DEFAULT_AGENT_EXECUTION_MODE }),
       })),
     });
     const autoWrapupOverridden = this.autoWrapup !== WorkflowRunner.prototype.autoWrapup;
@@ -1186,7 +1186,7 @@ export class WorkflowRunner {
     persistBudget: () => Promise<void>;
     prompt: string;
     signalType: 'goal_complete';
-    executionMode?: ExecutionMode;
+    executionMode?: AgentExecutionMode;
     agentProvider?: AgentProvider;
     runtime?: AgentRuntimeSelection;
     sandbox?: Sandbox;

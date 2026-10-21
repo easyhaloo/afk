@@ -1,3 +1,5 @@
+import { isAgentExecutionMode, type AgentExecutionMode } from '@afk/core';
+
 export const RUNTIME_STALE_AFTER_MS = 5 * 60 * 1000;
 
 export type RuntimeHealthObservationStatus = 'running' | 'completed' | 'blocked' | 'failed';
@@ -9,7 +11,7 @@ export type RuntimeHealthObservation = {
   status?: RuntimeHealthObservationStatus;
   provider?: string;
   transport?: string;
-  executionMode?: 'interactive' | 'batch';
+  executionMode?: AgentExecutionMode;
   runnerPid?: number;
   runnerAlive?: boolean;
   observedAt: string;
@@ -25,7 +27,7 @@ export type RuntimeHealth = {
   completedAt?: string;
   provider?: string;
   transport?: string;
-  executionMode?: 'interactive' | 'batch';
+  executionMode?: AgentExecutionMode;
   runnerPid?: number;
 };
 
@@ -43,8 +45,8 @@ function echoString(value: string | undefined): string | undefined {
   return typeof value === 'string' && value.trim() !== '' && !/[\x00-\x1f\x7f]/.test(value) ? value : undefined;
 }
 
-function echoExecutionMode(value: 'interactive' | 'batch' | undefined): 'interactive' | 'batch' | undefined {
-  return value === 'interactive' || value === 'batch' ? value : undefined;
+function echoExecutionMode(value: AgentExecutionMode | undefined): AgentExecutionMode | undefined {
+  return isAgentExecutionMode(value) ? value : undefined;
 }
 
 export function projectRuntimeHealth(

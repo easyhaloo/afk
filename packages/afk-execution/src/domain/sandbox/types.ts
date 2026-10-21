@@ -16,7 +16,7 @@ import type {
   AgentExecution,
   AgentExecutionHost,
   AgentStartOptions,
-  ExecutionMode,
+  AgentExecutionMode,
 } from '../agents/types.js';
 export type {
   AgentExecution,
@@ -48,7 +48,7 @@ export interface SandboxOptions {
    */
   tmux?: SandboxTmux;
   /** Execution mode: 'interactive' (tmux + signal file) or 'batch' (stream-json). */
-  executionMode?: ExecutionMode;
+  executionMode?: AgentExecutionMode;
   /** Project workspace that owns this worktree; used for AFK resource registry scoping. */
   workspaceRoot?: string;
   /** Durable TaskRuntimeRecord runId when one has already been created. */

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/backlog-contract.js";
 import type { createExecutionWorkspaceService } from "./execution-workspace-service.js";
 import type { createWorkItemRunStore } from "./work-item-run-store.js";
+import { isAgentExecutionMode, type AgentExecutionMode } from "@afk/core";
 import { probeProcess } from "@afk/infrastructure";
 
 type HistoryDeps = {
@@ -24,7 +25,7 @@ type RuntimeTerminal = {
   session: string;
   phase: "implementing" | "verifying";
   sandboxProvider: string;
-  executionMode: "interactive" | "batch";
+  executionMode: AgentExecutionMode;
   agentProvider: string;
   heartbeatAt: string;
   status: "completed" | "failed" | "blocked";
@@ -43,7 +44,7 @@ function terminalRecord(value: unknown): value is RuntimeTerminal {
     && typeof record.session === "string"
     && (record.phase === "implementing" || record.phase === "verifying")
     && typeof record.sandboxProvider === "string"
-    && (record.executionMode === "interactive" || record.executionMode === "batch")
+    && isAgentExecutionMode(record.executionMode)
     && typeof record.agentProvider === "string"
     && typeof record.heartbeatAt === "string" && Number.isFinite(Date.parse(record.heartbeatAt))
     && (record.status === "completed" || record.status === "blocked" || record.status === "failed")

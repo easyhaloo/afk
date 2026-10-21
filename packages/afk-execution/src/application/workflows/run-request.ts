@@ -1,4 +1,5 @@
-import { DEFAULT_EXECUTION_MODE, type AgentProviderName, type AgentRuntimeSelection, type ExecutionMode } from '../../domain/agents/types.js';
+import { DEFAULT_AGENT_EXECUTION_MODE, type AgentProviderName, type AgentRuntimeSelection, type AgentExecutionMode } from '../../domain/agents/types.js';
+import { isAgentExecutionMode } from '@afk/core';
 import type { SandboxProviderName } from '../../domain/sandbox/types.js';
 import type { BranchStrategyConfig } from '@afk/infrastructure';
 import { deriveBacklogBranchName } from '@afk/application';
@@ -45,7 +46,7 @@ export interface WorkflowRunRequest {
   provider: AgentProviderName;
   agentProvider: AgentProviderName;
   sandboxProvider: SandboxProviderName;
-  executionMode: ExecutionMode;
+  executionMode: AgentExecutionMode;
   agentRuntime: AgentRuntimeSelection;
   branchStrategy: BranchStrategyConfig;
   repositories?: WorkflowRunRepository[];
@@ -75,7 +76,7 @@ export interface WorkflowRunCliInput {
   sandboxProvider?: SandboxProviderName;
   agentProvider?: AgentProviderName;
   provider?: AgentProviderName;
-  executionMode?: ExecutionMode | string;
+  executionMode?: AgentExecutionMode | string;
   agentRuntime?: AgentRuntimeSelection;
   branchStrategy?: BranchStrategyConfig;
   executionManifestPath?: string;
@@ -100,9 +101,9 @@ const defaults = {
   agentProvider: 'claude-code' as AgentProviderName,
 };
 
-function executionMode(raw: ExecutionMode | string | undefined): ExecutionMode {
-  if (raw === undefined) return DEFAULT_EXECUTION_MODE;
-  if (raw === 'interactive' || raw === 'batch') return raw;
+function executionMode(raw: AgentExecutionMode | string | undefined): AgentExecutionMode {
+  if (raw === undefined) return DEFAULT_AGENT_EXECUTION_MODE;
+  if (isAgentExecutionMode(raw)) return raw;
   throw new Error(`invalid execution-mode: ${raw}; expected interactive or batch`);
 }
 

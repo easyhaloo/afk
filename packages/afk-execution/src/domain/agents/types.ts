@@ -8,7 +8,7 @@
  * - Session capture/restore (capability: resume)
  */
 
-import type { AgentToolCallSummary } from '@afk/core';
+import type { AgentExecutionMode, AgentToolCallSummary } from '@afk/core';
 
 export type AgentProviderName =
   | 'claude-code'
@@ -44,8 +44,14 @@ export interface AgentCommand {
   cwd?: string;
 }
 
-/** Execution mode — determines how the runner waits for agent completion. */
-export type ExecutionMode = 'interactive' | 'batch';
+/**
+ * How the runner waits for agent completion.
+ *
+ * The list and the type live in the core package, where the audit spine
+ * records the mode and every entry point can reach them. The execution
+ * runtime names them from there rather than writing a second answer down.
+ */
+export type { AgentExecutionMode };
 
 /**
  * The mode a run uses when nobody names one.
@@ -55,7 +61,7 @@ export type ExecutionMode = 'interactive' | 'batch';
  * session. The batch mode is the headless one, and a caller asks for it
  * when it wants no session — the verification phase, for one.
  */
-export const DEFAULT_EXECUTION_MODE: ExecutionMode = 'interactive';
+export const DEFAULT_AGENT_EXECUTION_MODE: AgentExecutionMode = 'interactive';
 
 /** Options for building an agent command. */
 export interface AgentCommandOptions {
@@ -73,7 +79,7 @@ export interface AgentCommandOptions {
    * that read it took the branch that belonged to the other mode, and an
    * interactive cursor run was told to print once and exit.
    */
-  executionMode?: ExecutionMode;
+  executionMode?: AgentExecutionMode;
   /** Immutable provider runtime resolved before backlog claim. */
   runtime?: AgentRuntimeSelection;
 }
@@ -130,7 +136,7 @@ export interface AgentStartOptions {
   generation: number;
   prompt: string;
   signalType: 'goal_complete';
-  executionMode?: ExecutionMode;
+  executionMode?: AgentExecutionMode;
   parseLine?: (line: string) => AgentEvent[];
 }
 

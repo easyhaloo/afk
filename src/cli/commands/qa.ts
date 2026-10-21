@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { createManagementProviders } from '@afk/infrastructure';
+import { AGENT_EXECUTION_MODES, isAgentExecutionMode } from '@afk/core';
 import { QARunner } from '@afk/execution/application/modules/qa-runner';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import { getWorkflowConfig } from '@afk/execution/infrastructure/config/manager';
@@ -17,12 +18,12 @@ export function registerQACommands(program: Command): void {
     .description('Verify one backlog item and publish its change for the appropriate merge policy')
     .requiredOption('--backlog-id <id>', 'Backlog ID')
     .option('--project <project>', 'Provider project/repository')
-    .option('--mode <mode>', 'Agent execution mode: batch or interactive', 'batch')
+    .option('--mode <mode>', `Agent execution mode: ${AGENT_EXECUTION_MODES.join(' or ')}`, 'batch')
     .option('--agent <name>', 'Agent provider');
   addAgentRuntimeOptions(command)
     .action(async options => {
       try {
-        if (options.mode !== 'batch' && options.mode !== 'interactive') {
+        if (!isAgentExecutionMode(options.mode)) {
           throw new Error(`invalid QA execution mode: ${options.mode}`);
         }
         const config = getWorkflowConfig();

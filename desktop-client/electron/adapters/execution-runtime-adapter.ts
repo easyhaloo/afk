@@ -1,3 +1,4 @@
+import { isAgentExecutionMode } from "@afk/core";
 import { probeProcess } from "@afk/infrastructure";
 import { TaskRuntimeReader } from "@afk/execution/application/runtime/task-runtime";
 import type { RuntimeHealthObservation } from "@afk/application";
@@ -29,7 +30,7 @@ export function createExecutionRuntimeAdapter(options: {
         ...(typeof record.completedAt === "string" ? { completedAt: record.completedAt } : {}),
         ...(typeof record.agentProvider === "string" ? { provider: record.agentProvider } : {}),
         ...(typeof record.agentTransport === "string" ? { transport: record.agentTransport } : {}),
-        ...(record.executionMode === "interactive" || record.executionMode === "batch" ? { executionMode: record.executionMode } : {}),
+        ...(isAgentExecutionMode(record.executionMode) ? { executionMode: record.executionMode } : {}),
       };
       const receipt = await options.readReceipt(runId, workItemId);
       if (receipt?.id === runId && typeof receipt.pid === "number" && Number.isSafeInteger(receipt.pid) && receipt.pid > 0) {

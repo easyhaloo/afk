@@ -1,4 +1,4 @@
-import type { ExecutionMode } from '../../domain/agents/types.js';
+import type { AgentExecutionMode } from '../../domain/agents/types.js';
 import type { StepCompletionKind } from '../../domain/templates/types.js';
 export { extractGoalComplete } from '../../shared/goal-complete.js';
 
@@ -70,7 +70,7 @@ export function buildInteractivePrompt(prompt: string, kind: CompletionKind = 't
   return `${prompt.trim()} AFK interactive completion protocol: work only on the current checked-out branch. Do not switch branches or reset the branch. When the task is complete, atomically write a valid JSON ${payload} to .afk-signal.json using a temporary file and rename. Construct the payload with JSON.stringify (or an equivalent JSON serializer); do not embed raw JSON in a shell printf command, because unescaped control characters make the signal invalid. After the rename, validate the exact file with JSON.parse before reporting completion. Use result PASS when QA passes, FAIL when QA fails, the actual current ISO-8601 timestamp, and a non-empty summary. Do not only print the completion marker.`;
 }
 
-export function buildExecutionPrompt(prompt: string, executionMode: ExecutionMode | undefined, kind: CompletionKind = 'task'): string {
+export function buildExecutionPrompt(prompt: string, executionMode: AgentExecutionMode | undefined, kind: CompletionKind = 'task'): string {
   if (executionMode === 'batch') return buildBatchPrompt(prompt, kind);
   if (executionMode === 'interactive') return buildInteractivePrompt(prompt, kind);
   return prompt;

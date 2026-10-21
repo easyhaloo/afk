@@ -1,4 +1,4 @@
-import type { AgentProvider, AgentRuntimeSelection, ExecutionMode } from '../../domain/agents/types.js';
+import type { AgentProvider, AgentRuntimeSelection, AgentExecutionMode } from '../../domain/agents/types.js';
 import type { Sandbox, AgentExecution } from '../../domain/sandbox/types.js';
 import type { SessionStoreChain } from '../sessions/types.js';
 import { logger } from '@afk/infrastructure';
@@ -11,7 +11,7 @@ export interface ResumeContext {
   generation: number;
   signalType: 'goal_complete';
   prompt: string;
-  executionMode?: ExecutionMode;
+  executionMode?: AgentExecutionMode;
   runtime?: AgentRuntimeSelection;
 }
 

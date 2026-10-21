@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { getTaskBacklogId, type Task, type TaskActivity } from '../../../types/board.js';
 import { formatRelativeTime, truncateByVisualWidth } from '../utils.js';
-import { getExecutionModeColor, getExecutionModeIcon, getStatusColor, getStatusIcon } from '../views/display.js';
+import { getAgentExecutionModeColor, getAgentExecutionModeIcon, getStatusColor, getStatusIcon } from '../views/display.js';
 import { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, truncateTaskText } from './model.js';
 
 interface Props {
@@ -38,10 +38,10 @@ export function TaskCockpit({ tasks, selectedIndex, viewportHeight, width, termi
   const phase = getTaskPhaseLabel(focused);
   const status = focused.errorSummary ? 'error' : focused.status === 'stale' ? 'stale' : 'active';
   const statusColor = getStatusColor(status);
-  const modeIcon = getExecutionModeIcon(focused.executionMode);
+  const modeIcon = focused.executionMode ? getAgentExecutionModeIcon(focused.executionMode) : undefined;
   const runtimeContext = [
     focused.executionMode
-      ? { text: `${modeIcon ? `${modeIcon} ` : ''}${focused.executionMode}`, color: getExecutionModeColor(focused.executionMode) }
+      ? { text: `${modeIcon ? `${modeIcon} ` : ''}${focused.executionMode}`, color: getAgentExecutionModeColor(focused.executionMode) }
       : undefined,
     focused.agentProvider ? { text: focused.agentProvider } : undefined,
     focused.sandboxProvider ? { text: focused.sandboxProvider } : undefined,

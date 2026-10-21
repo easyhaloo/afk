@@ -1,4 +1,5 @@
 import type { WorkflowTemplateStepSummary } from "../../../../shared/ipc-contract";
+import { CANVAS_NODE_WIDTH } from "./canvas-layout";
 
 export type GraphDiagnostic = {
   code: "semantic/missing-dependency" | "semantic/cycle";
@@ -17,17 +18,15 @@ export type WorkflowNodePosition = { x: number; y: number };
 
 export type WorkflowCanvasTrack = "agent" | "system" | "conditional";
 
-/** Each track owns a canvas row, so its lane band never overlaps another track's. */
-const TRACKS: readonly WorkflowCanvasTrack[] = ["agent", "system", "conditional"];
-
-const LAYER_GAP = 190;
-const ROW_GAP = 124;
-/** Track pitch: a within-track row gap plus the 28px band padding above and below,
- *  so one band's box can never reach the next track's. */
-const TRACK_GAP = 180;
+const LAYER_GAP = 244;
+const ROW_GAP = 184;
 
 export function workflowStepTrack(step?: WorkflowTemplateStepSummary): WorkflowCanvasTrack {
   return step?.when ? "conditional" : step?.kind === "system" ? "system" : "agent";
+}
+
+export function workflowConditionLabelWidth(when: WorkflowTemplateStepSummary["when"]): number {
+  return when ? Math.max(72, `${when.step} = ${when.equals}`.length * 7 + 14) : 0;
 }
 
 export function normalizeWorkflowSteps(input: readonly WorkflowTemplateStepSummary[]): NormalizedWorkflow {
@@ -94,13 +93,15 @@ export function workflowStepLayout(input: readonly WorkflowTemplateStepSummary[]
     layers.set(layer, [...(layers.get(layer) ?? []), step]);
   });
   const positions = new Map<string, WorkflowNodePosition>();
-  [...layers.entries()].sort(([left], [right]) => left - right).forEach(([layer, steps]) => {
-    const rowsInTrack = new Map<WorkflowCanvasTrack, number>();
-    steps.forEach((step) => {
-      const track = workflowStepTrack(step);
-      const row = rowsInTrack.get(track) ?? 0;
-      rowsInTrack.set(track, row + 1);
-      positions.set(step.id, { x: 220 + layer * LAYER_GAP, y: 54 + TRACKS.indexOf(track) * TRACK_GAP + row * ROW_GAP });
+  const maxRows = Math.max(1, ...[...layers.values()].map((steps) => steps.length));
+  let columnX = 292 - LAYER_GAP;
+  [...layers.entries()].sort(([left], [right]) => left - right).forEach(([, steps]) => {
+    const labelWidth = Math.max(0, ...steps.map(step => workflowConditionLabelWidth(step.when)));
+    columnX += Math.max(LAYER_GAP, CANVAS_NODE_WIDTH + labelWidth + 40);
+    const tracks: WorkflowCanvasTrack[] = ["agent", "system", "conditional"];
+    steps.sort((left, right) => tracks.indexOf(workflowStepTrack(left)) - tracks.indexOf(workflowStepTrack(right)));
+    steps.forEach((step, row) => {
+      positions.set(step.id, { x: columnX, y: 94 + ((maxRows - steps.length) / 2 + row) * ROW_GAP });
     });
   });
   return positions;

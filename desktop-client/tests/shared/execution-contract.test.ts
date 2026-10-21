@@ -12,6 +12,15 @@ describe("execution summary contract", () => {
     expect(parseExecutionSummary(valid)).toEqual(valid);
   });
 
+  it("accepts recorded start times while preserving older summaries", () => {
+    const startedAt = "2026-10-19T12:16:17.270Z";
+    expect(parseExecutionSummary({ ...valid, startedAt })).toEqual({ ...valid, startedAt });
+    expect(parseExecutionSummary(valid)).not.toHaveProperty("startedAt");
+    for (const invalid of ["", "invalid-time", 123, null]) {
+      expect(() => parseExecutionSummary({ ...valid, startedAt: invalid })).toThrow(/startedAt/);
+    }
+  });
+
   it("preserves recorded token usage, including a real zero", () => {
     for (const usage of [{ inputTokens: 10, outputTokens: 2, totalTokens: 12 }, { inputTokens: 0, outputTokens: 0, totalTokens: 0 }]) {
       expect(parseExecutionSummary({ ...valid, usage })).toEqual({ ...valid, usage });

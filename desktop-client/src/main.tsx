@@ -16,14 +16,16 @@ import "./layout.css";
 import "./control.css";
 import "./chrome.css";
 import "./selection.css";
+import "./features/run-center/execution.css";
+import "./features/workflows/workflow-studio.css";
 import claudeIcon from "./assets/runtime-icons/claude-official.ico";
 import codexIcon from "./assets/runtime-icons/codex-openai-official.png";
 import geminiIcon from "./assets/runtime-icons/gemini-cli-official.png";
 import openCodeIcon from "./assets/runtime-icons/opencode-official.svg";
 import { presentationSnapshot } from "./mock-data";
-import { normalizeWorkflowSteps, workflowStepLayout, workflowStepTrack } from "./features/workflows/graph/normalize";
+import { normalizeWorkflowSteps, workflowConditionLabelWidth, workflowStepLayout, workflowStepTrack } from "./features/workflows/graph/normalize";
 import type { WorkflowCanvasTrack } from "./features/workflows/graph/normalize";
-import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH, CANVAS_WORLD_HEIGHT, CANVAS_WORLD_WIDTH, clampCanvasPosition, hasCanvasNodeCollisions, insertCanvasNodeAfter, layoutCanvasNodes, zoomCanvasViewportAtPoint } from "./features/workflows/graph/canvas-layout";
+import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH, CANVAS_WORLD_HEIGHT, CANVAS_WORLD_WIDTH, clampCanvasPosition, fitCanvasViewport, hasCanvasNodeCollisions, insertCanvasNodeAfter, layoutCanvasNodes, zoomCanvasViewportAtPoint } from "./features/workflows/graph/canvas-layout";
 import { Empty } from "./components/EmptyState";
 import { ProviderIcon } from "./components/ProviderIcon";
 import { SelectMenu } from "./components/SelectMenu";
@@ -35,7 +37,7 @@ import { BacklogPage } from "./features/backlog/BacklogPage";
 import { WorkItemsPage } from "./features/work-items/WorkItemsPage";
 import { TerminalSheet } from "./features/terminal/TerminalSheet";
 import { applySshSessionEvents, createEarlySshSessionBuffer, type SshTerminalState } from "./features/terminal/ssh-session-buffer";
-import { groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
+import { groupRuntimeEvents, parseRuntimeSource, runtimeEventTitle, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents, type RuntimeVisualState } from "./features/run-center/runtime-presentation";
 import { executionHistoryEvents } from "./features/run-center/execution-events";
 import { useExecutionHistory } from "./features/run-center/use-execution-history";
 import { RunTimelineSection } from "./features/run-center/RunTimelineView";
@@ -131,7 +133,8 @@ function App() {
   const [runQuery, setRunQuery] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const { executions: auditedExecutions, error: auditError, find: findExecution, cancelLookup } = useExecutionHistory(view === "queue" || view === "board" || view === "workflowInstances");
+  const [workItemTitles, setWorkItemTitles] = useState<Record<string, string>>({});
+  const { executions: auditedExecutions, error: auditError, find: findExecution, cancelLookup, nextCursor: executionCursor, loadMore: loadMoreExecutions } = useExecutionHistory(view === "queue" || view === "board" || view === "workflowInstances");
   const setView = (nextView: View) => { cancelLookup(); setCurrentView(nextView); };
   const [selected, setSelected] = useState<RuntimeEvent | null>(null);
   const [loading, setLoading] = useState(false);
@@ -188,6 +191,15 @@ function App() {
   useEffect(() => () => { if (freshTimer.current) window.clearTimeout(freshTimer.current); }, []);
   useEffect(() => { void refresh(""); }, []);
   useEffect(() => {
+    if (view !== "queue" && view !== "board" && view !== "events") return;
+    let current = true;
+    void window.afkDesktop.workItems.list().then(inventory => {
+      if (!current) return;
+      setWorkItemTitles(Object.fromEntries(inventory.items.map(item => [item.id, item.title])));
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [view]);
+  useEffect(() => {
     if (view !== "containers") return;
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, 5000);
@@ -217,9 +229,10 @@ function App() {
     root.dataset.afkScale = appearance.fontScale;
   }, [appearance]);
 
-  const events = useMemo(() => view === "events" ? snapshot?.events ?? [] : [
-    ...executionHistoryEvents(auditedExecutions, snapshot?.workItemRuns ?? []),
-  ], [snapshot, auditedExecutions, view]);
+  const events = useMemo(() => {
+    const source = view === "events" ? snapshot?.events ?? [] : executionHistoryEvents(auditedExecutions, snapshot?.workItemRuns ?? []);
+    return source.map(event => ({ ...event, title: workItemTitles[event.source] }));
+  }, [snapshot, auditedExecutions, view, workItemTitles]);
   const visibleRunEvents = useMemo(() => {
     const searched = searchRuntimeEvents(events, runQuery);
     if (runFilter === "all") return searched;
@@ -336,7 +349,7 @@ function App() {
   const nav = navGroups.flatMap((group) => group.items);
   const activeNav = view === "board" ? "queue" : view === "workflowInstances" ? "workflows" : view;
   const title = nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
-  const subtitle = activeNav === "queue" ? "本机正在跑的任务，按最近更新排序" : activeNav === "workflows" ? "模板库与项目级可执行模板" : activeNav === "repositories" ? "已授权 Provider 中可访问的仓库" : "";
+  const subtitle = view === "workflowInstances" ? "每次运行的工作流快照与执行记录" : activeNav === "queue" ? "本机正在跑的任务，按最近更新排序" : activeNav === "workflows" ? "模板库与项目级可执行模板" : activeNav === "repositories" ? "已授权 Provider 中可访问的仓库" : "";
   const runtimes = snapshot?.agentRuntimes ?? [];
   const availableRuntimeCount = runtimes.filter((runtime) => runtime.available).length;
   const runtimeTotal = runtimes.length || 4;
@@ -403,7 +416,7 @@ function App() {
           {view === "workflows" || view === "workflowInstances" ? <SegmentedControl label="工作流视图" value={view} options={[{ value: "workflows", label: "定义" }, { value: "workflowInstances", label: "运行实例" }]} onChange={value => setView(value as View)} /> : null}
         </header>
         {error ? <div className="error-banner"><X size={15} />{error}</div> : null}
-        {auditError && (view === "queue" || view === "board") ? <div className="error-banner"><X size={15} />运行审计查询失败：{auditError}</div> : null}
+        {auditError && (view === "queue" || view === "board" || view === "workflowInstances") ? <div className="error-banner"><X size={15} />运行审计查询失败：{auditError}</div> : null}
         <div className={view === "queue" || view === "board" ? "run-center-layout" : "view-layout"}>
         {/* Overlays portal here, beside .workspace rather than inside it — see src/overlay.tsx.
             display:contents keeps the host from generating a box. */}
@@ -419,7 +432,7 @@ function App() {
           {view === "backlog" ? <WorkItemsPage focusWorkItemId={focusWorkItemId} agentRuntimes={snapshot?.agentRuntimes} defaultAgent={snapshot?.workflow.agentDefault} onAttach={(runId) => void openExecutionTerminal(runId)} onWorkflow={openWorkflowInstance} onCreate={() => setView("projectBacklog")} onReviewMerge={() => { setBacklogRefreshVersion(version => version + 1); setView("projectBacklog"); }} /> : null}
           {view === "projectBacklog" ? <BacklogPage workspace={workspace} refreshVersion={backlogRefreshVersion} defaultAgent={snapshot?.workflow.agentDefault ?? "claude-code"} defaultTemplate={snapshot?.workflow.templateName} templates={snapshot?.workflowTemplates ?? []} onOpenWorkItem={(workItemId) => { setFocusWorkItemId(workItemId); setView("backlog"); }} /> : null}
           {view === "workflows" ? <Workflows key={`${workspace}:${focusTemplateId ?? ""}`} snapshot={snapshot} focusTemplateId={focusTemplateId} onSave={saveWorkflowConfig} /> : null}
-          {view === "workflowInstances" ? <WorkflowInstancesPage executions={auditedExecutions} selection={workflowSelection} onSelect={selection => openWorkflowInstance(selection.runId, selection.workItemId)} onRun={selection => void openRun(selection).catch(cause => setError(String(cause)))} onWorkItem={workItemId => { setFocusWorkItemId(workItemId); setView("backlog"); }} onEnvironment={selection => { setEnvironmentSelection(selection); setView("containers"); }} onAttach={runId => void openExecutionTerminal(runId)} onDefinition={detail => void openDefinition(detail)} /> : null}
+          {view === "workflowInstances" ? <WorkflowInstancesPage executions={auditedExecutions} selection={workflowSelection} hasMore={!!executionCursor} onLoadMore={() => void loadMoreExecutions()} onSelect={selection => openWorkflowInstance(selection.runId, selection.workItemId)} onRun={selection => void openRun(selection).catch(cause => setError(String(cause)))} onWorkItem={workItemId => { setFocusWorkItemId(workItemId); setView("backlog"); }} onEnvironment={selection => { setEnvironmentSelection(selection); setView("containers"); }} onAttach={runId => void openExecutionTerminal(runId)} onDefinition={detail => void openDefinition(detail)} /> : null}
           {view === "events" ? <Replay events={events} selected={selected} freshIds={freshIds} activeRun={replayRun} onRunChange={setReplayRun} onSelect={openEventDetails} onClose={() => setSelected(null)} /> : null}
           {view === "settings" ? <Settings appearance={appearance} onChange={updateAppearance} /> : null}
         </div>
@@ -451,7 +464,8 @@ function EventRow({ event, historyCount, fresh, selected, onSelect }: { event: R
   const phase = phaseOf(event);
   const visualState = eventStatus(event) === "failed" ? "failed" : phase;
   const state = runtimeStateMeta(visualState);
-  return <button className={`event-row ${selected ? "selected" : ""} ${visualState}${fresh ? " fresh" : ""}`} onClick={() => onSelect(event)} aria-label={`查看${state.ariaLabel}运行 ${event.source} 的详情`}><StateGlyph phase={visualState} /><div className="run-main"><RuntimeSource source={event.source} /><span className="event-copy"><strong>{event.result}</strong><small>{historyCount > 1 ? `${historyCount} 次运行 · ` : ""}{runtimeWorkspacePath(event.nextStep) ? "最近完成" : event.nextStep}</small></span></div><time className="event-time" dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></button>;
+  const detail = runtimeWorkspacePath(event.nextStep) || event.nextStep === event.result ? "" : event.nextStep;
+  return <button className={`event-row ${selected ? "selected" : ""} ${visualState}${fresh ? " fresh" : ""}`} onClick={() => onSelect(event)} aria-label={`查看${state.ariaLabel}运行 ${event.source} 的详情`}><StateGlyph phase={visualState} /><div className="run-main"><span className="event-copy"><strong>{runtimeEventTitle(event)}</strong></span><div className="run-row-meta"><RuntimeSource source={event.source} /><small>{[recordStatusLabel[eventStatus(event)], historyCount > 1 ? `${historyCount} 次运行` : "", detail].filter(Boolean).join(" · ")}</small></div></div><time className="event-time" dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></button>;
 }
 
 function Board({ groups, selected, freshIds, onSelect }: { groups: Record<Phase, RuntimeEvent[]>; selected: RuntimeEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeEvent) => void }) {
@@ -461,7 +475,7 @@ function Board({ groups, selected, freshIds, onSelect }: { groups: Record<Phase,
     { state: "attention", events: [...groups.ready, ...groups.attention.filter((event) => eventStatus(event) !== "failed")] },
     { state: "failed", events: groups.attention.filter((event) => eventStatus(event) === "failed") },
   ];
-  return <section className="board" aria-label="运行看板">{columns.map(({ state, events }) => <article className={`board-column ${state}${events.length ? "" : " is-empty"}`} key={state}><header aria-label={runtimeStateMeta(state).ariaLabel}><StateGlyph phase={state} size={14} muted={!events.length} /><em>{events.length}</em></header>{groupRuntimeEvents(events).map((group) => { const event = group.events[0]; const visualState = eventStatus(event) === "failed" ? "failed" : phaseOf(event); return <button className={`board-card ${visualState}${selected?.id === event.id ? " selected" : ""}${freshIds.has(event.id) ? " fresh" : ""}`} key={group.source} onClick={() => onSelect(event)} aria-label={`查看${runtimeStateMeta(visualState).ariaLabel}运行 ${event.source} 的详情`}><div><RuntimeSource source={event.source} /><small>{group.events.length > 1 ? `${group.events.length} 次运行 · ` : ""}<time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></small></div><strong>{event.result}</strong>{!runtimeWorkspacePath(event.nextStep) ? <p>{event.nextStep}</p> : null}<span className="board-detail-affordance"><ChevronRight size={13} /></span></button>; })}</article>)}</section>;
+  return <section className="board" aria-label="运行看板">{columns.map(({ state, events }) => <article className={`board-column ${state}${events.length ? "" : " is-empty"}`} key={state}><header aria-label={runtimeStateMeta(state).ariaLabel}><StateGlyph phase={state} size={14} muted={!events.length} /><em>{events.length}</em></header>{groupRuntimeEvents(events).map((group) => { const event = group.events[0]; const visualState = eventStatus(event) === "failed" ? "failed" : phaseOf(event); return <button className={`board-card ${visualState}${selected?.id === event.id ? " selected" : ""}${freshIds.has(event.id) ? " fresh" : ""}`} key={group.source} onClick={() => onSelect(event)} aria-label={`查看${runtimeStateMeta(visualState).ariaLabel}运行 ${event.source} 的详情`}><div><RuntimeSource source={event.source} /><small>{recordStatusLabel[eventStatus(event)]} · {group.events.length > 1 ? `${group.events.length} 次运行 · ` : ""}<time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></small></div><strong>{runtimeEventTitle(event)}</strong>{!runtimeWorkspacePath(event.nextStep) ? <p>{event.nextStep}</p> : null}<span className="board-detail-affordance"><ChevronRight size={13} /></span></button>; })}</article>)}</section>;
 }
 
 function RuntimeProductIcon({ id }: { id: AgentRuntime["id"] }) {
@@ -580,7 +594,7 @@ function workflowSourceIcon(source: WorkflowTemplateSummary["source"]) {
 }
 
 export function workflowNodeDisplayLabel(template: CanvasTemplateNode["template"], label: string) {
-  return template === "qa" ? "审查 Agent" : label;
+  return template === "qa" && /^QA(?: \d+)?$/i.test(label) ? "审查 Agent" : label;
 }
 
 
@@ -672,6 +686,7 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [traceToken, setTraceToken] = useState(0);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const graphNodesRef = useRef<WorkflowNodePosition[]>([]);
   const addMenuRef = useRef<HTMLDivElement | null>(null);
   const panStart = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const nodeDrag = useRef<{ id: string; x: number; y: number; left: number; top: number; custom?: boolean } | null>(null);
@@ -705,45 +720,45 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
   const graphDiagnostics = normalizeWorkflowSteps(builtinSteps).diagnostics;
   const builtinLayout = workflowStepLayout(builtinSteps);
   const rootPositions = builtinSteps.filter(step => !step.dependsOn.length).map(step => builtinLayout.get(step.id)).filter((position): position is WorkflowNodePosition => Boolean(position));
-  const rootY = rootPositions.length ? Math.round(rootPositions.reduce((total, position) => total + position.y, 0) / rootPositions.length) : Math.round((CANVAS_WORLD_HEIGHT - CANVAS_NODE_HEIGHT) / 2);
+  const rootY = laidOutCanvasNodes[0]?.y ?? (rootPositions.length ? Math.round(rootPositions.reduce((total, position) => total + position.y, 0) / rootPositions.length) : Math.round((CANVAS_WORLD_HEIGHT - CANVAS_NODE_HEIGHT) / 2));
   const withPositionOverride = (node: WorkflowCanvasNode): WorkflowCanvasNode => ({ ...node, ...nodePositionOverrides[node.id] });
   const startNode: WorkflowCanvasNode = withPositionOverride({ id: "start", number: "00", title: "开始", caption: activeTemplate?.name || "选择模板", state: dirty ? "active" : "ready", x: 48, y: rootY });
   const customNodes: WorkflowCanvasNode[] = laidOutCanvasNodes.map((node, index) => ({ id: node.id, number: node.template === "agent" ? "A" + (index + 1) : "Q" + (index + 1), title: workflowNodeDisplayLabel(node.template, node.label), caption: node.description, state: "ready", x: node.x, y: node.y, template: node.template, custom: node }));
-  const customLanes = model.canvasNodes.length ? [...new Map(laidOutCanvasNodes.map(node => [node.y, { y: node.y - 30, height: CANVAS_NODE_HEIGHT + 60, label: "阶段 " + String(Math.round((node.y - 74) / 154) + 1).padStart(2, "0") }])).values()] : [];
+  const customLanes = model.canvasNodes.length ? [...new Map(laidOutCanvasNodes.map(node => [node.y, { y: node.y - 30, height: CANVAS_NODE_HEIGHT + 30, label: "阶段 " + String(Math.round((node.y - 74) / 154) + 1).padStart(2, "0") }])).values()] : [];
   const builtinNodes: WorkflowCanvasNode[] = builtinSteps.map((step, index) => { const position = builtinLayout.get(step.id) ?? { x: 220, y: 202 }; const role = step.kind === "system" ? (step.action || "system") : step.role; const condition = step.when ? " · 仅当 " + step.when.step + "=" + step.when.equals : ""; return withPositionOverride({ id: "step-" + step.id, number: String(index + 1).padStart(2, "0"), title: step.id, caption: role + condition, state: "ready", ...position, step }); });
-  const builtinTracks = (["agent", "system", "conditional"] as WorkflowCanvasTrack[]).map(track => {
-    const trackNodes = builtinNodes.filter(node => workflowStepTrack(node.step) === track);
-    if (!trackNodes.length) return null;
-    const minY = Math.min(...trackNodes.map(node => node.y));
-    const maxY = Math.max(...trackNodes.map(node => node.y + CANVAS_NODE_HEIGHT));
-    return { id: track, label: workflowTrackLabel(track), y: minY - 28, height: maxY - minY + 56 };
-  }).filter((track): track is { id: WorkflowCanvasTrack; label: string; y: number; height: number } => Boolean(track));
-  const builtinPhases = [...new Map(builtinNodes.map(node => [node.x, { x: node.x, label: "阶段 " + node.number }])).values()];
+  const trackGroups = new Map<string, WorkflowCanvasNode[]>();
+  builtinNodes.forEach(node => {
+    const key = node.x + ":" + workflowStepTrack(node.step);
+    trackGroups.set(key, [...(trackGroups.get(key) ?? []), node]);
+  });
+  const builtinTracks: Array<{ id: string; track: WorkflowCanvasTrack; label: string; x: number; y: number; width: number; height: number }> = [];
+  [...trackGroups.values()].sort((left, right) => left[0].x - right[0].x).forEach(group => {
+    const track = workflowStepTrack(group[0].step);
+    const minY = Math.min(...group.map(node => node.y));
+    const maxY = Math.max(...group.map(node => node.y));
+    const band = { id: group[0].id, track, label: workflowTrackLabel(track), x: group[0].x - 14, y: minY - 42, width: CANVAS_NODE_WIDTH + 28, height: maxY - minY + CANVAS_NODE_HEIGHT + 62 };
+    const previous = builtinTracks.find(item => item.track === track && item.y === band.y && item.height === band.height && Math.abs(item.x + item.width + 16 - band.x) < 1);
+    if (previous) previous.width = band.x + band.width - previous.x;
+    else builtinTracks.push(band);
+  });
+  const builtinPhases = [...new Set(builtinNodes.map(node => node.x))].sort((left, right) => left - right).map((x, index) => ({ x, label: "阶段 " + String(index + 1).padStart(2, "0") }));
   const templateNodes = customNodes.length ? customNodes : builtinNodes;
   const nodes = [startNode, ...templateNodes];
+  graphNodesRef.current = nodes;
+  const worldWidth = Math.max(CANVAS_WORLD_WIDTH, ...nodes.map(node => node.x + CANVAS_NODE_WIDTH + 22));
+  const worldHeight = Math.max(CANVAS_WORLD_HEIGHT, ...nodes.map(node => node.y + CANVAS_NODE_HEIGHT + 22));
   const selectedNode = nodes.find(node => node.id === selected) ?? startNode;
+  const fitStage = () => {
+    const stage = stageRef.current;
+    if (stage) setViewport(fitCanvasViewport(graphNodesRef.current, stage.getBoundingClientRect()));
+  };
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || !nodes.length) return;
-    const frame = window.requestAnimationFrame(() => {
-      const rect = stage.getBoundingClientRect();
-      const minX = Math.min(...nodes.map(node => node.x));
-      const maxX = Math.max(...nodes.map(node => node.x + CANVAS_NODE_WIDTH));
-      const minY = Math.min(...nodes.map(node => node.y));
-      const maxY = Math.max(...nodes.map(node => node.y + CANVAS_NODE_HEIGHT));
-      const graphWidth = Math.max(1, maxX - minX);
-      const graphHeight = Math.max(1, maxY - minY);
-      const padX = Math.min(96, Math.max(36, rect.width * .1));
-      const padY = Math.min(92, Math.max(32, rect.height * .12));
-      const inspectorReserve = inspectorOpen && rect.width >= 980 ? 332 : 0;
-      const visibleWidth = Math.max(1, rect.width - inspectorReserve);
-      const scale = Math.max(.72, Math.min(1.12, (visibleWidth - padX * 2) / graphWidth, (rect.height - padY * 2) / graphHeight));
-      // 0.36 matches the prototype's fitStage(): the graph sits above centre so it
-      // does not float alone in the middle of the stage.
-      const targetCenterY = Math.max(padY + graphHeight * scale / 2, Math.min(rect.height * .36, rect.height - padY - graphHeight * scale / 2));
-      setViewport({ scale: Math.round(scale * 100) / 100, x: Math.round((visibleWidth - graphWidth * scale) / 2 - minX * scale), y: Math.round(targetCenterY - (minY + graphHeight / 2) * scale) });
-    });
-    return () => window.cancelAnimationFrame(frame);
+    const frame = window.requestAnimationFrame(fitStage);
+    const observer = new ResizeObserver(fitStage);
+    observer.observe(stage);
+    return () => { window.cancelAnimationFrame(frame); observer.disconnect(); };
   }, [activeTemplate?.id, inspectorOpen, model.templateName, model.canvasNodes.length]);
   const byId = (id: string) => nodes.find(node => node.id === id);
   const edgeElbowX = (from: WorkflowCanvasNode, to: WorkflowCanvasNode) => {
@@ -757,7 +772,7 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
     const elbowX = edgeElbowX(from, to);
     return "M" + startX + " " + startY + " H " + elbowX + " V " + endY + " H " + endX;
   };
-  const edgeLabelPosition = (from: WorkflowCanvasNode, to: WorkflowCanvasNode) => ({ x: edgeElbowX(from, to) + 8, y: Math.round((from.y + CANVAS_NODE_HEIGHT / 2 + to.y + CANVAS_NODE_HEIGHT / 2) / 2 - 9) });
+  const edgeLabelPosition = (to: WorkflowCanvasNode) => ({ x: to.x - workflowConditionLabelWidth(to.step?.when) - 13, y: to.y + CANVAS_NODE_HEIGHT / 2 - 9 });
   const templateEdges: WorkflowCanvasEdge[] = customNodes.length ? customNodes.map((node, index) => ({ from: index === 0 ? startNode : customNodes[index - 1], to: node })) : builtinNodes.flatMap(node => { const dependencies = node.step?.dependsOn ?? []; if (!dependencies.length) return [{ from: startNode, to: node }]; return dependencies.map((id): WorkflowCanvasEdge | null => { const from = byId("step-" + id); return from ? { from, to: node, when: node.step?.when } : null; }).filter((edge): edge is WorkflowCanvasEdge => edge !== null); });
   const relatedNodeIds = new Set(templateEdges.flatMap(({ from, to }) => from.id === selected || to.id === selected ? [from.id, to.id] : []));
   const save = async () => { const localError = validateWorkflowDraft(model); if (localError) { setSaveError(localError); return; } setSaving(true); setSaveError(null); try { const saved = await onSave(model); onDraft(saved); } catch (error) { setSaveError(error instanceof Error ? error.message : String(error)); } finally { setSaving(false); } };
@@ -769,26 +784,27 @@ function WorkflowStudio({ workflow, model, activeTemplate, loop, workflowRuns, o
   };
   const zoomOut = () => zoomAtStageCenter(-.1);
   const zoomIn = () => zoomAtStageCenter(.1);
-  const resetViewport = () => setViewport({ x: 0, y: 0, scale: 1 });
+  const resetViewport = fitStage;
   const autoLayout = () => {
     if (model.canvasNodes.length) onDraft(current => { const baseline = current ?? workflow; return { ...baseline, canvasNodes: layoutCanvasNodes(baseline.canvasNodes) }; });
     setNodePositionOverrides({});
-    setViewport({ x: 0, y: 0, scale: 1 });
+    window.requestAnimationFrame(fitStage);
     setTraceToken(token => token + 1);
     setSaveError(null);
   };
   return <section className="workflow-studio-page" aria-label="工作流画布编辑器">
     {graphDiagnostics.length ? <div className="workflow-graph-warning" role="alert">工作流模板存在 {graphDiagnostics.length} 个结构问题，已隐藏无效连线。</div> : null}
-    <header className="workflow-studio-topbar"><button className="workflow-back" onClick={onBack}><ChevronLeft size={16} />工作流</button><div className="workflow-studio-title"><span>{activeTemplate ? workflowSourceLabel(activeTemplate.source) : "AFK 工作流"}</span><b>{activeTemplate?.name || "未选择模板"}</b><small>{activeTemplate?.description || "选择一个模板或新建自定义工作流。"}</small></div><div className="workflow-studio-actions">{dirty ? <span className="workflow-dirty"><span aria-hidden="true" />未保存</span> : null}<button className="workflow-save" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "保存中…" : "保存"}</button></div></header>
-    <div className="workflow-studio-shell">
+    {!inspectorOpen && saveError ? <p className="workflow-save-error" role="alert">{saveError}</p> : null}
+    <header className="workflow-studio-topbar"><button className="workflow-back" onClick={onBack} aria-label="返回工作流列表" title="返回工作流列表"><ChevronLeft size={16} /></button><div className="workflow-studio-title"><span>{activeTemplate ? workflowSourceLabel(activeTemplate.source) : "AFK 工作流"}</span><b>{activeTemplate?.name || "未选择模板"}</b><small>{activeTemplate?.description || "选择一个模板或新建自定义工作流。"}</small></div><div className="workflow-studio-actions">{dirty ? <span className="workflow-dirty"><span aria-hidden="true" />未保存</span> : null}<button className="workflow-save" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "保存中…" : "保存"}</button></div></header>
+    <div className={"workflow-studio-shell" + (inspectorOpen ? " has-inspector" : "")}>
       <section className="workflow-studio-canvas" aria-label="工作流画布">
-        <header><div><b>执行画布</b><small>{model.canvasNodes.length ? "自定义节点会写入当前项目的 AFK 模板；拖动可调整画布布局。" : "当前展示所选模板的真实步骤。添加自定义节点会创建项目级可执行模板。"}</small></div><div ref={addMenuRef} className="workflow-studio-toolbar"><button className="workflow-toolbar-button" onClick={() => setAddMenuOpen(open => !open)} aria-label="添加工作流步骤" aria-expanded={addMenuOpen} aria-haspopup="menu" title="添加工作流步骤"><Plus size={14} aria-hidden="true" /></button>{addMenuOpen ? <div className="workflow-add-menu" role="menu" aria-label="添加工作流步骤"><button className="workflow-add-option agent" role="menuitem" aria-label="添加 Agent 步骤" onClick={() => addTemplate("agent")}><span className="workflow-add-option-icon"><Bot size={15} aria-hidden="true" /></span><span className="workflow-add-option-copy"><b>Agent 步骤</b><small>执行实现、分析或自动化任务</small></span><ChevronRight size={14} aria-hidden="true" /></button><button className="workflow-add-option qa" role="menuitem" aria-label="添加审查 Agent" onClick={() => addTemplate("qa")}><span className="workflow-add-option-icon"><CircleCheck size={15} aria-hidden="true" /></span><span className="workflow-add-option-copy"><b>审查 Agent</b><small>验证验收条件与交付质量</small></span><ChevronRight size={14} aria-hidden="true" /></button></div> : null}</div></header>
-        <div ref={stageRef} className={"workflow-editor-stage" + (draggingNode ? " is-dragging" : "") + (panning ? " is-panning" : "")} onWheel={event => { const target = event.target as Element; if (target.closest(".workflow-canvas-controls") || target.closest(".workflow-studio-inspector") || target.closest(".workflow-inspector-trigger")) return; const rect = stageRef.current?.getBoundingClientRect(); if (!rect) return; event.preventDefault(); const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top }; setViewport(current => zoomCanvasViewportAtPoint(current, pointer, Math.round((current.scale - event.deltaY * .001) * 100) / 100)); }} onPointerDown={event => { const target = event.target as Element; if (!target.closest(".workflow-editor-node") && !target.closest(".workflow-canvas-controls") && !target.closest(".workflow-studio-inspector") && !target.closest(".workflow-inspector-trigger")) { panStart.current = { x: event.clientX, y: event.clientY, offsetX: viewport.x, offsetY: viewport.y }; setPanning(true); event.currentTarget.setPointerCapture(event.pointerId); } }} onPointerMove={event => { const dragging = nodeDrag.current; if (dragging) { const x = clampCanvasPosition(dragging.left + (event.clientX - dragging.x) / viewport.scale, 22, CANVAS_WORLD_WIDTH - CANVAS_NODE_WIDTH - 22); const y = clampCanvasPosition(dragging.top + (event.clientY - dragging.y) / viewport.scale, 22, CANVAS_WORLD_HEIGHT - CANVAS_NODE_HEIGHT - 22); if (dragging.custom) updateTemplate(dragging.id, { x, y }); else setNodePositionOverrides(current => ({ ...current, [dragging.id]: { x, y } })); const rect = stageRef.current?.getBoundingClientRect(); if (rect) { const edge = 54; const panX = event.clientX < rect.left + edge ? Math.ceil((rect.left + edge - event.clientX) / 9) : event.clientX > rect.right - edge ? -Math.ceil((event.clientX - (rect.right - edge)) / 9) : 0; const panY = event.clientY < rect.top + edge ? Math.ceil((rect.top + edge - event.clientY) / 9) : event.clientY > rect.bottom - edge ? -Math.ceil((event.clientY - (rect.bottom - edge)) / 9) : 0; if (panX || panY) setViewport(current => ({ ...current, x: current.x + panX, y: current.y + panY })); } return; } const start = panStart.current; if (!start) return; setViewport(current => ({ ...current, x: start.offsetX + event.clientX - start.x, y: start.offsetY + event.clientY - start.y })); }} onPointerUp={() => { panStart.current = null; nodeDrag.current = null; setDraggingNode(null); setPanning(false); }} onPointerCancel={() => { panStart.current = null; nodeDrag.current = null; setDraggingNode(null); setPanning(false); }}>
-          <div className="workflow-editor-world" style={{ transform: "translate(" + viewport.x + "px, " + viewport.y + "px) scale(" + viewport.scale + ")" }}>{customLanes.length ? <div className="workflow-canvas-lanes" aria-hidden="true">{customLanes.map(lane => <div key={lane.y} className="workflow-canvas-lane" style={{ top: lane.y, height: lane.height }}><span>{lane.label}</span><small>EXECUTION PATH</small></div>)}</div> : null}{!customNodes.length && builtinNodes.length ? <><div className="workflow-canvas-phases" aria-hidden="true">{builtinPhases.map(phase => <span key={phase.x} style={{ left: phase.x }}>{phase.label}</span>)}</div><div className="workflow-canvas-tracks" aria-hidden="true">{builtinTracks.map(track => <div key={track.id} className={"workflow-canvas-track track-" + track.id} style={{ top: track.y, height: track.height }}><span>{track.label}</span></div>)}</div></> : null}<svg className="workflow-editor-edges" viewBox={"0 0 " + CANVAS_WORLD_WIDTH + " " + CANVAS_WORLD_HEIGHT} aria-hidden="true"><defs><marker id="workflow-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L0,7 L6,3.5 z" /></marker></defs>{templateEdges.map(({ from, to, when }) => { const path = edgePath(from, to); const linked = selected === from.id || selected === to.id; const condition = when ? when.step + " = " + when.equals : null; const label = condition ? edgeLabelPosition(from, to) : null; const labelWidth = condition ? Math.max(72, condition.length * 5 + 14) : 0; return <g className={"workflow-edge" + (linked ? " linked" : "") + (condition ? " conditional" : "")} key={from.id + "-" + to.id + "-" + traceToken}><path className="workflow-edge-base" d={path} /><path className="workflow-edge-flow" d={path} />{condition && label ? <g className="workflow-edge-label" transform={"translate(" + label.x + " " + label.y + ")"}><rect x="-7" y="-8" width={labelWidth} height="16" rx="3" /><text x="0" y="3">{condition}</text></g> : null}</g>; })}</svg>{nodes.map(node => <button key={node.id} className={"workflow-editor-node " + node.state + (selected === node.id ? " selected" : "") + (relatedNodeIds.has(node.id) ? " related" : "") + (node.id === "start" ? " origin-node" : "") + (node.template ? " template-" + node.template : "") + (node.custom ? " custom-node" : "") + (node.step ? " track-" + workflowStepTrack(node.step) : "") + (node.step?.kind === "agent" ? " agent-node" : "") + (node.step?.kind === "system" ? " system-node" : "") + (draggingNode === node.id ? " dragging" : "")} style={{ left: node.x, top: node.y }} onPointerDown={event => { event.stopPropagation(); selectNode(node.id); nodeDrag.current = { id: node.id, x: event.clientX, y: event.clientY, left: node.x, top: node.y, custom: Boolean(node.custom) }; setDraggingNode(node.id); event.currentTarget.setPointerCapture(event.pointerId); }} onClick={() => selectNode(node.id)} aria-pressed={selected === node.id}><i>{node.number}</i><span className="workflow-editor-node-copy"><b>{node.title}</b><small>{node.caption}</small></span><span className={"workflow-node-status " + node.state}><span aria-hidden="true" />{workflowNodeStateLabel(node.state)}<span className="workflow-node-kind" aria-label={node.custom ? "自定义步骤" : node.step?.kind === "system" ? "系统步骤" : node.step ? "执行步骤" : "工作流起点"} /></span></button>)}</div>
-          <div className={"workflow-canvas-controls" + (inspectorOpen ? " has-inspector" : "")}><span className="workflow-canvas-caption">{activeTemplate?.name || "未选择模板"}</span><button className="workflow-canvas-control" onClick={autoLayout} aria-label="自动整理画布" title="自动整理"><RefreshCw size={13} /></button><div className="workflow-canvas-zoom"><button className="workflow-canvas-control" onClick={zoomOut} aria-label="缩小"><Minus size={13} /></button><span className="workflow-canvas-zoom-label">{Math.round(viewport.scale * 100)}%</span><button className="workflow-canvas-control" onClick={zoomIn} aria-label="放大"><Plus size={13} /></button></div><button className="workflow-canvas-control" onClick={resetViewport} aria-label="重置画布"><Move size={14} /></button></div>{inspectorOpen ? <WorkflowStudioInspector node={selectedNode} workflow={model} loop={loop} runs={workflowRuns} onPatch={patch} onCodexPatch={patchCodex} onTemplatePatch={updateTemplate} onDeleteTemplate={removeTemplate} dirty={dirty} saving={saving} error={saveError} onSave={save} onReset={() => { onDraft(workflow); setSaveError(null); }} onCollapse={() => setInspectorOpen(false)} /> : <button className="workflow-inspector-trigger" onClick={() => setInspectorOpen(true)} aria-label={selectedNode.title + " 配置"}><Settings2 size={15} /><span>配置</span></button>}
+        <header><div><b>执行画布</b><small>{templateNodes.length} 个步骤 · 依赖从左向右执行</small></div><div ref={addMenuRef} className="workflow-studio-toolbar"><button className="workflow-toolbar-button" onClick={() => setAddMenuOpen(open => !open)} aria-label="添加工作流步骤" aria-expanded={addMenuOpen} aria-haspopup="menu" title="添加工作流步骤"><Plus size={14} aria-hidden="true" /></button>{addMenuOpen ? <div className="workflow-add-menu" role="menu" aria-label="添加工作流步骤"><button className="workflow-add-option agent" role="menuitem" aria-label="添加 Agent 步骤" onClick={() => addTemplate("agent")}><span className="workflow-add-option-icon"><Bot size={15} aria-hidden="true" /></span><span className="workflow-add-option-copy"><b>Agent 步骤</b><small>执行实现、分析或自动化任务</small></span><ChevronRight size={14} aria-hidden="true" /></button><button className="workflow-add-option qa" role="menuitem" aria-label="添加审查 Agent" onClick={() => addTemplate("qa")}><span className="workflow-add-option-icon"><CircleCheck size={15} aria-hidden="true" /></span><span className="workflow-add-option-copy"><b>审查 Agent</b><small>验证验收条件与交付质量</small></span><ChevronRight size={14} aria-hidden="true" /></button></div> : null}<button className="workflow-toolbar-button" onClick={() => setInspectorOpen(open => !open)} aria-label={inspectorOpen ? "收起配置栏" : "展开配置栏"} title={inspectorOpen ? "收起配置栏" : "展开配置栏"}><Settings2 size={14} aria-hidden="true" /></button></div></header>
+        <div ref={stageRef} className={"workflow-editor-stage" + (draggingNode ? " is-dragging" : "") + (panning ? " is-panning" : "")} onWheel={event => { const target = event.target as Element; if (target.closest(".workflow-canvas-controls") || target.closest(".workflow-studio-inspector") || target.closest(".workflow-inspector-trigger")) return; const rect = stageRef.current?.getBoundingClientRect(); if (!rect) return; event.preventDefault(); const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top }; setViewport(current => zoomCanvasViewportAtPoint(current, pointer, Math.round((current.scale - event.deltaY * .001) * 100) / 100)); }} onPointerDown={event => { const target = event.target as Element; if (!target.closest(".workflow-editor-node") && !target.closest(".workflow-canvas-controls") && !target.closest(".workflow-studio-inspector") && !target.closest(".workflow-inspector-trigger")) { panStart.current = { x: event.clientX, y: event.clientY, offsetX: viewport.x, offsetY: viewport.y }; setPanning(true); event.currentTarget.setPointerCapture(event.pointerId); } }} onPointerMove={event => { const dragging = nodeDrag.current; if (dragging) { const x = clampCanvasPosition(dragging.left + (event.clientX - dragging.x) / viewport.scale, 22, dragging.custom ? 1400 : worldWidth - CANVAS_NODE_WIDTH - 22); const y = clampCanvasPosition(dragging.top + (event.clientY - dragging.y) / viewport.scale, 22, dragging.custom ? 440 : worldHeight - CANVAS_NODE_HEIGHT - 22); if (dragging.custom) updateTemplate(dragging.id, { x: Math.round(x), y: Math.round(y) }); else setNodePositionOverrides(current => ({ ...current, [dragging.id]: { x, y } })); const rect = stageRef.current?.getBoundingClientRect(); if (rect) { const edge = 54; const panX = event.clientX < rect.left + edge ? Math.ceil((rect.left + edge - event.clientX) / 9) : event.clientX > rect.right - edge ? -Math.ceil((event.clientX - (rect.right - edge)) / 9) : 0; const panY = event.clientY < rect.top + edge ? Math.ceil((rect.top + edge - event.clientY) / 9) : event.clientY > rect.bottom - edge ? -Math.ceil((event.clientY - (rect.bottom - edge)) / 9) : 0; if (panX || panY) setViewport(current => ({ ...current, x: current.x + panX, y: current.y + panY })); } return; } const start = panStart.current; if (!start) return; setViewport(current => ({ ...current, x: start.offsetX + event.clientX - start.x, y: start.offsetY + event.clientY - start.y })); }} onPointerUp={() => { panStart.current = null; nodeDrag.current = null; setDraggingNode(null); setPanning(false); }} onPointerCancel={() => { panStart.current = null; nodeDrag.current = null; setDraggingNode(null); setPanning(false); }}>
+          <div className="workflow-editor-world" style={{ width: worldWidth, height: worldHeight, transform: "translate(" + viewport.x + "px, " + viewport.y + "px) scale(" + viewport.scale + ")" }}>{customLanes.length ? <div className="workflow-canvas-lanes" aria-hidden="true">{customLanes.map(lane => <div key={lane.y} className="workflow-canvas-lane" style={{ top: lane.y, height: lane.height }}><span>{lane.label}</span><small>EXECUTION PATH</small></div>)}</div> : null}{!customNodes.length && builtinNodes.length ? <><div className="workflow-canvas-phases" aria-hidden="true">{builtinPhases.map(phase => <span key={phase.x} style={{ left: phase.x }}>{phase.label}</span>)}</div><div className="workflow-canvas-tracks" aria-hidden="true">{builtinTracks.map(track => <div key={track.id} className={"workflow-canvas-track track-" + track.track} style={{ left: track.x, top: track.y, width: track.width, height: track.height }}><span>{track.label}</span></div>)}</div></> : null}<svg className="workflow-editor-edges" viewBox={"0 0 " + worldWidth + " " + worldHeight} style={{ width: worldWidth, height: worldHeight }} aria-hidden="true"><defs><marker id="workflow-arrow" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L0,7 L6,3.5 z" /></marker></defs>{templateEdges.map(({ from, to, when }) => { const path = edgePath(from, to); const linked = selected === from.id || selected === to.id; const condition = when ? when.step + " = " + when.equals : null; const label = condition ? edgeLabelPosition(to) : null; const labelWidth = workflowConditionLabelWidth(when); return <g className={"workflow-edge" + (linked ? " linked" : "") + (condition ? " conditional" : "")} key={from.id + "-" + to.id + "-" + traceToken}><path className="workflow-edge-base" d={path} /><path className="workflow-edge-flow" d={path} />{condition && label ? <g className="workflow-edge-label" transform={"translate(" + label.x + " " + label.y + ")"}><rect x="-7" y="-8" width={labelWidth} height="16" rx="3" /><text x="0" y="3">{condition}</text></g> : null}</g>; })}</svg>{nodes.map(node => <button key={node.id} className={"workflow-editor-node " + node.state + (selected === node.id ? " selected" : "") + (relatedNodeIds.has(node.id) ? " related" : "") + (node.id === "start" ? " origin-node" : "") + (node.template ? " template-" + node.template : "") + (node.custom ? " custom-node" : "") + (node.step ? " track-" + workflowStepTrack(node.step) : "") + (node.step?.kind === "agent" ? " agent-node" : "") + (node.step?.kind === "system" ? " system-node" : "") + (draggingNode === node.id ? " dragging" : "")} style={{ left: node.x, top: node.y }} onPointerDown={event => { event.stopPropagation(); selectNode(node.id); nodeDrag.current = { id: node.id, x: event.clientX, y: event.clientY, left: node.x, top: node.y, custom: Boolean(node.custom) }; setDraggingNode(node.id); event.currentTarget.setPointerCapture(event.pointerId); }} onClick={() => selectNode(node.id)} aria-pressed={selected === node.id}><i>{node.number}</i><span className="workflow-editor-node-copy"><b>{node.title}</b><small>{node.caption}</small></span><span className={"workflow-node-status " + node.state}>{node.step?.kind === "system" ? "System" : node.step || node.custom ? "Agent" : "配置"}<span className="workflow-node-kind" aria-label={node.custom ? "自定义步骤" : node.step?.kind === "system" ? "系统步骤" : node.step ? "执行步骤" : "工作流起点"} /></span></button>)}</div>
+          <div className="workflow-canvas-controls"><button className="workflow-canvas-control" onClick={autoLayout} aria-label="自动整理画布" title="自动整理"><RefreshCw size={13} /></button><div className="workflow-canvas-zoom"><button className="workflow-canvas-control" onClick={zoomOut} aria-label="缩小"><Minus size={13} /></button><span className="workflow-canvas-zoom-label">{Math.round(viewport.scale * 100)}%</span><button className="workflow-canvas-control" onClick={zoomIn} aria-label="放大"><Plus size={13} /></button></div><button className="workflow-canvas-control" onClick={resetViewport} aria-label="重置画布"><Move size={14} /></button></div>
         </div>
-        <footer><span>{model.templateName ? "模板：" + model.templateName : "未选择模板"}</span><span>{model.canvasNodes.length ? "自定义节点 " + model.canvasNodes.length : "模板步骤 " + (activeTemplate?.steps.length || 0)}</span></footer>
       </section>
+      {inspectorOpen ? <WorkflowStudioInspector node={selectedNode} workflow={model} loop={loop} runs={workflowRuns} onPatch={patch} onCodexPatch={patchCodex} onTemplatePatch={updateTemplate} onDeleteTemplate={removeTemplate} dirty={dirty} saving={saving} error={saveError} onSave={save} onReset={() => { onDraft(workflow); setSaveError(null); }} onCollapse={() => setInspectorOpen(false)} /> : null}
     </div>
   </section>;
 }
@@ -801,15 +817,18 @@ export function WorkflowStudioInspector({ node, workflow, loop, runs, onPatch, o
   const template = node.custom;
   let content: Array<ReturnType<typeof field>>;
   if (template) content = [field("节点名称", template.label, value => onTemplatePatch(template.id, { label: value })), field("执行 Agent", template.provider || "", value => onTemplatePatch(template.id, { provider: (value || undefined) as CanvasTemplateNode["provider"] }), ["", "claude-code", "codex", "cursor", "pi", "opencode", "copilot"]), textareaField("节点说明", template.description, value => onTemplatePatch(template.id, { description: value })), textareaField("执行指令", template.prompt, value => onTemplatePatch(template.id, { prompt: value })), numberField("横向位置", template.x, value => onTemplatePatch(template.id, { x: value })), numberField("纵向位置", template.y, value => onTemplatePatch(template.id, { y: value }))];
-  else if (node.step) content = [readOnly("步骤 ID", node.step.id), readOnly("角色", node.step.role), readOnly("类型", node.step.kind === "agent" ? "Agent" : "系统操作"), readOnly("执行者", node.step.provider || (node.step.kind === "agent" ? workflow.agentDefault : "AFK CLI")), ...(node.step.action ? [readOnly("系统动作", node.step.action)] : []), ...(node.step.when ? [readOnly("执行条件", node.step.when.step + " = " + node.step.when.equals)] : []), readOnly("依赖", node.step.dependsOn.length ? node.step.dependsOn.join(" · ") : "从开始节点")];
-  else if (node.id === "start") content = [field("默认 Agent", workflow.agentDefault, value => onPatch({ agentDefault: value }), ["claude-code", "codex", "cursor", "pi", "opencode", "copilot"]), field("tmux 会话", workflow.tmuxSession, value => onPatch({ tmuxSession: value })), field("目标分支", workflow.targetBranch, value => onPatch({ targetBranch: value })), field("基准分支", workflow.baseBranch, value => onPatch({ baseBranch: value })), numberField("最大重试", workflow.maxRetries, value => onPatch({ maxRetries: value })), numberField("工作流超时（ms）", workflow.hardTimeoutMs, value => onPatch({ hardTimeoutMs: value }))];
+  else if (node.step) content = [readOnly("步骤 ID", node.step.id), readOnly("角色", node.step.role), readOnly("类型", node.step.kind === "agent" ? "Agent" : "系统操作"), readOnly("执行者", node.step.provider || (node.step.kind === "agent" ? workflow.agentDefault : "AFK CLI")), ...(node.step.action ? [readOnly("系统动作", node.step.action)] : []), ...(node.step.when ? [readOnly("执行条件", node.step.when.step + " = " + node.step.when.equals)] : []), <section className="workflow-config-section" aria-label="前置依赖" key="dependencies"><h3>前置依赖 <small>DEPENDS ON</small></h3><div className="workflow-dependency-list">{node.step.dependsOn.length ? node.step.dependsOn.map(dependency => <span className="workflow-dependency-chip" key={dependency}>{dependency}</span>) : <span>无前置步骤</span>}</div><p>{node.step.dependsOn.length > 1 ? "全部依赖完成后执行。" : node.step.dependsOn.length ? "依赖完成后执行。" : "工作流开始后执行此步骤。"}</p></section>];
+  else if (node.id === "start") content = [
+    <section className="workflow-config-section" aria-label="执行环境" key="environment"><h3>执行环境</h3>{field("默认 Agent", workflow.agentDefault, value => onPatch({ agentDefault: value }), ["claude-code", "codex", "cursor", "pi", "opencode", "copilot"])}{field("tmux 会话", workflow.tmuxSession, value => onPatch({ tmuxSession: value }))}<div className="workflow-field-row">{field("目标分支", workflow.targetBranch, value => onPatch({ targetBranch: value }))}{field("基准分支", workflow.baseBranch, value => onPatch({ baseBranch: value }))}</div></section>,
+    <section className="workflow-config-section" aria-label="重试与超时" key="limits"><h3>重试与超时</h3>{numberField("最大重试", workflow.maxRetries, value => onPatch({ maxRetries: value }))}<label className="workflow-field"><span>工作流超时（分钟）</span><input type="number" min={1 / 60} max="1440" step="any" value={workflow.hardTimeoutMs / 60_000} onChange={event => onPatch({ hardTimeoutMs: Math.round(Number(event.target.value) * 60_000) })} /></label></section>,
+  ];
   else if (node.id === "execute") content = [field("默认 Agent", workflow.agentDefault, value => onPatch({ agentDefault: value }), ["claude-code", "codex", "cursor", "pi", "opencode", "copilot"]), field("Codex 传输", workflow.codex.transport, value => onCodexPatch({ transport: value }), ["auto", "exec", "app-server"]), field("Codex 鉴权", workflow.codex.auth, value => onCodexPatch({ auth: value }), ["auto", "chatgpt", "api"]), field("模型提供方", workflow.codex.provider, value => onCodexPatch({ provider: value })), field("Profile", workflow.codex.profile || "", value => onCodexPatch({ profile: value || undefined })), field("App Server", workflow.codex.endpoint || "", value => onCodexPatch({ endpoint: value || undefined })), field("Token 环境变量", workflow.codex.authTokenEnv || "", value => onCodexPatch({ authTokenEnv: value || undefined })), numberField("Codex 启动超时（ms）", workflow.codex.startupTimeoutMs, value => onCodexPatch({ startupTimeoutMs: value }))];
   else if (node.id === "guardrails") content = [numberField("工作流超时（ms）", workflow.hardTimeoutMs, value => onPatch({ hardTimeoutMs: value })), numberField("完成等待（ms）", workflow.completionTimeoutMs, value => onPatch({ completionTimeoutMs: value })), numberField("最大重试", workflow.maxRetries, value => onPatch({ maxRetries: value })), numberField("上下文阈值", workflow.contextThreshold, value => onPatch({ contextThreshold: value })), numberField("总令牌预算", workflow.goalBudget, value => onPatch({ goalBudget: value }))];
   else if (node.id === "loop") content = [readOnly("状态", loop.state === "running" ? "运行中" : "未运行"), readOnly("进程", loop.pid ? String(loop.pid) : "—"), readOnly("执行中", loop.execution.active ? loop.execution.ids.join(" · ") : "无活动任务")];
   else if (node.id === "prepare") content = [readOnly("Sandbox", "local（AFK CLI 默认）"), readOnly("执行模式", "interactive（AFK CLI 默认）"), readOnly("目标分支", workflow.targetBranch), readOnly("基准分支", workflow.baseBranch)];
   else content = [readOnly("完成总数", String(loop.totals.completed)), readOnly("失败总数", String(loop.totals.failed)), readOnly("执行中", String(loop.execution.active)), readOnly("最近结果", runs[0] ? workflowStatusLabel(runs[0].status) : "暂无")];
   const editable = Boolean(template) || node.id === "start";
-  return <aside className="workflow-studio-inspector" aria-label={node.title + " 配置"}><header><span>{node.number}</span><div><small>{template ? "自定义可执行节点" : editable ? "工作流配置" : node.step ? "模板步骤" : "运行时状态"}</small><b>{node.title}</b></div><button className="workflow-inspector-collapse" onClick={onCollapse} aria-label="收起配置"><ChevronRight size={15} /></button></header><p>{node.caption}</p><div className="workflow-inspector-fields">{content}</div>{error ? <p className="workflow-save-error" role="alert">{error}</p> : null}{editable ? <footer>{template ? <button className="workflow-reset destructive" disabled={saving} onClick={() => onDeleteTemplate(template.id)}>移除节点</button> : <button className="workflow-reset" disabled={!dirty || saving} onClick={onReset}>还原</button>}<button className="workflow-save" disabled={!dirty || saving} onClick={() => void onSave()}>{saving ? "保存中…" : "保存"}</button><small>{template ? "节点信息会写入项目级 AFK 模板，并在下次工作流执行时生效。" : "保存会原子写入 .afk/config.yml；无关配置项会保留。"}</small></footer> : <footer><small>{node.step ? "这是 AFK 模板的只读步骤摘要。新增自定义 Agent 或审查 Agent 会创建项目级可编辑模板。" : "该节点代表 AFK CLI 的运行时状态。请选择可编辑节点以修改配置。"}</small></footer>}</aside>;
+  return <aside className="workflow-studio-inspector" aria-label={node.title + " 配置"}><header><span>{node.number}</span><div><small>{template ? "自定义可执行节点" : editable ? "工作流配置" : node.step ? "模板步骤" : "运行时状态"}</small><b>{node.title}</b></div><button className="workflow-inspector-collapse" onClick={onCollapse} aria-label="收起配置"><ChevronRight size={15} /></button></header><p>{node.caption}</p><div className="workflow-inspector-fields">{content}</div>{error ? <p className="workflow-save-error" role="alert">{error}</p> : null}{editable ? <footer>{template ? <button className="workflow-reset destructive" disabled={saving} onClick={() => onDeleteTemplate(template.id)}>移除节点</button> : <button className="workflow-reset" disabled={!dirty || saving} onClick={onReset}>还原</button>}<small>{template ? "节点信息会写入项目级 AFK 模板，并在下次工作流执行时生效。" : "保存会原子写入 .afk/config.yml；无关配置项会保留。"}</small></footer> : <footer><small>{node.step ? "这是 AFK 模板的只读步骤摘要。新增自定义 Agent 或审查 Agent 会创建项目级可编辑模板。" : "该节点代表 AFK CLI 的运行时状态。请选择可编辑节点以修改配置。"}</small></footer>}</aside>;
 }
 
 function ConfigItem({ label, value }: { label: string; value: string }) {
@@ -857,7 +876,7 @@ function Replay({ events, selected, freshIds, activeRun, onRunChange, onSelect, 
   const [query, setQuery] = useState("");
   const searchField = <div className="resource-toolbar"><ResourceSearch label="搜索活动记录" value={query} onChange={setQuery} /></div>;
   if (!events.length) return <Empty />;
-  const runs = replayRuns(events).filter(run => `${run.source} ${run.events.map(event => `${event.result} ${event.nextStep}`).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const runs = replayRuns(events).filter(run => `${run.source} ${run.events.map(event => `${runtimeEventTitle(event)} ${event.result} ${event.nextStep}`).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
   const currentRun = runs.find((run) => run.source === activeRun) ?? runs[0];
   if (!currentRun) return <section className="record-page" aria-label="运行记录">{searchField}<p role="status">没有匹配的活动记录</p></section>;
   const currentStatus = eventStatus(currentRun.latest);
@@ -870,7 +889,7 @@ function Replay({ events, selected, freshIds, activeRun, onRunChange, onSelect, 
   return <section className="record-page" aria-label="运行记录">
     {searchField}
     <header className="record-page-header">
-      {runs.length > 1 ? <SelectMenu label="选择运行" value={currentRun.source} search={{ label: "搜索运行" }} options={runs.map(run => ({ value: run.source, label: run.source, description: `${recordStatusLabel[eventStatus(run.latest)]} · ${run.events.length} 条记录 · ${displayTimestamp(run.latest.timestamp)}` }))} onChange={chooseRun} /> : <div className="record-run-identity"><b>{currentRun.source}</b><small>{displayTimestamp(currentRun.latest.timestamp)}</small></div>}
+      {runs.length > 1 ? <SelectMenu label="选择运行" value={currentRun.source} search={{ label: "搜索运行" }} options={runs.map(run => ({ value: run.source, label: runtimeEventTitle(run.latest), description: `${recordStatusLabel[eventStatus(run.latest)]} · ${run.events.length} 条记录 · ${displayTimestamp(run.latest.timestamp)}` }))} onChange={chooseRun} /> : <div className="record-run-identity"><b>{runtimeEventTitle(currentRun.latest)}</b><small>{currentRun.source} · {displayTimestamp(currentRun.latest.timestamp)}</small></div>}
       {currentRun.events.length > 1 ? <RecordStatus status={currentStatus} /> : null}
     </header>
     {currentRun.events.length === 1 ? <RecordCard event={currentRun.latest} fresh={freshIds.has(currentRun.latest.id)} onDetails={() => onSelect(currentRun.latest)} /> : <RecordList events={currentRun.events} selected={detailEvent} freshIds={freshIds} onSelect={onSelect} />}
@@ -884,13 +903,13 @@ function RecordStatus({ status }: { status: RecordStatus }) {
 
 function RecordCard({ event, fresh, onDetails }: { event: RuntimeEvent; fresh: boolean; onDetails: () => void }) {
   const status = eventStatus(event);
-  return <article className={"record-card " + status + (fresh ? " fresh" : "")}><div className="record-card-main"><RecordStatus status={status} /><h1>{event.result}</h1><p>{event.nextStep}</p></div><footer><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time><button onClick={onDetails}>查看详情 <ChevronRight size={15} /></button></footer></article>;
+  return <article className={"record-card " + status + (fresh ? " fresh" : "")}><div className="record-card-main"><RecordStatus status={status} /><h1>{runtimeEventTitle(event)}</h1><p>{event.nextStep}</p></div><footer><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time><button onClick={onDetails}>查看详情 <ChevronRight size={15} /></button></footer></article>;
 }
 
 function RecordList({ events, selected, freshIds, onSelect }: { events: RuntimeEvent[]; selected: RuntimeEvent | null; freshIds: Set<string>; onSelect: (event: RuntimeEvent) => void }) {
   return <div className="record-list">{events.map((event) => {
     const status = eventStatus(event);
-    return <button className={"record-list-item " + status + (selected?.id === event.id ? " selected" : "") + (freshIds.has(event.id) ? " fresh" : "")} key={event.id} onClick={() => onSelect(event)}><time dateTime={event.timestamp} title={event.timestamp}>{replayTime(event.timestamp)}</time><RecordStatus status={status} /><span><b>{event.result}</b><small>{event.nextStep}</small></span><ChevronRight size={15} /></button>;
+    return <button className={"record-list-item " + status + (selected?.id === event.id ? " selected" : "") + (freshIds.has(event.id) ? " fresh" : "")} key={event.id} onClick={() => onSelect(event)}><time dateTime={event.timestamp} title={event.timestamp}>{replayTime(event.timestamp)}</time><RecordStatus status={status} /><span><b>{runtimeEventTitle(event)}</b><small>{event.nextStep}</small></span><ChevronRight size={15} /></button>;
   })}</div>;
 }
 
@@ -906,7 +925,7 @@ function RecordDrawer({ event, onClose }: { event: RuntimeEvent; onClose: () => 
     document.addEventListener("keydown", dismissOnEscape);
     return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", dismissOnEscape); };
   }, [onClose]);
-  return <Overlay><aside className="record-drawer" ref={drawerRef} role="complementary" aria-label="记录详情"><header><span>记录详情</span><button className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={16} /></button></header><div className="record-drawer-body"><RecordStatus status={status} /><h2>{event.result}</h2><p className="record-drawer-next">{event.nextStep}</p><dl><div><dt>运行</dt><dd>{event.source}</dd></div><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div></dl><details className="record-debug"><summary><Braces size={15} />调试信息</summary><pre>{event.raw}</pre></details></div></aside></Overlay>;
+  return <Overlay><aside className="record-drawer" ref={drawerRef} role="complementary" aria-label="记录详情"><header><span>记录详情</span><button className="icon-button" onClick={onClose} aria-label="关闭详情"><X size={16} /></button></header><div className="record-drawer-body"><RecordStatus status={status} /><h2>{runtimeEventTitle(event)}</h2><p className="record-drawer-next">{event.nextStep}</p><dl><div><dt>运行</dt><dd>{event.source}</dd></div><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div></dl><details className="record-debug"><summary><Braces size={15} />调试信息</summary><pre>{event.raw}</pre></details></div></aside></Overlay>;
 }
 
 function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSelect, onTerminal, onWorkItem, onWorkflow }: { event: RuntimeEvent; execution?: ExecutionSummary; history: RuntimeEvent[]; fresh: boolean; collapsed: boolean; onToggle: () => void; onSelect: (event: RuntimeEvent) => void; onTerminal: () => void; onWorkItem: (id: string) => void; onWorkflow: (runId: string, workItemId: string) => void }) {
@@ -925,17 +944,17 @@ function Inspector({ event, execution, history, fresh, collapsed, onToggle, onSe
     {!collapsed ? <aside className={`inspector${fresh ? " fresh" : ""}`} aria-label="运行详情">
       <header><button className="inspector-toggle" onClick={onToggle} aria-label="收起详情">{cornerIcon}<span className="inspector-tooltip" role="tooltip">收起详情</span></button><span><ClipboardList size={13} aria-hidden="true" />详情</span></header>
       <div className="inspector-surface"><div className="inspector-body">
-        <div className="inspector-title"><small><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time> · <RuntimeSource source={event.source} /></small><h2>{event.result}</h2></div>
+        <div className="inspector-title"><small><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time> · <RuntimeSource source={event.source} /></small><h2>{runtimeEventTitle(event)}</h2></div>
         <div className={`inspector-flow ${visualState}`} aria-label="运行状态"><StateGlyph phase={visualState} size={13} /><span>{state.ariaLabel}</span><span className="inspector-flow-line" /><span>{phase === "active" ? "正在执行" : phase === "verify" ? "最近完成" : "需要处理"}</span></div>
+        {execution ? <div className="inspector-actions"><button type="button" className="icon-button" aria-label={`打开工作项 ${execution.workItemId}`} title="打开工作项" onClick={() => onWorkItem(execution.workItemId)}><ClipboardList size={16} /></button><button type="button" className="icon-button" aria-label="查看本次工作流实例" title="工作流实例" onClick={() => onWorkflow(execution.runId, execution.workItemId)}><Workflow size={16} /></button></div> : null}
+        {execution ? <RunTimelineSection key={execution.runId} runId={execution.runId} workItemId={execution.workItemId} running={execution.status === "running"} load={(id, itemId) => window.afkDesktop.workItems.executionRunDetail(id, itemId)} /> : null}
         <dl><div><dt>时间</dt><dd><time dateTime={event.timestamp} title={event.timestamp}>{displayTimestamp(event.timestamp)}</time></dd></div>{workspacePath ? <div className="inspector-workspace"><dt>任务空间</dt><dd title={workspacePath}>{workspacePath}</dd></div> : <div className="inspector-workspace"><dt>后续操作</dt><dd>{event.nextStep}</dd></div>}</dl>
         <dl aria-label="Agent token 用量">
           <div><dt>输入 Tokens</dt><dd>{event.usage?.inputTokens ?? "未采集"}</dd></div>
           <div><dt>输出 Tokens</dt><dd>{event.usage?.outputTokens ?? "未采集"}</dd></div>
           <div><dt>总 Tokens</dt><dd>{event.usage?.totalTokens ?? "未采集"}</dd></div>
         </dl>
-        {execution ? <div className="inspector-actions"><button type="button" className="icon-button" aria-label={`打开工作项 ${execution.workItemId}`} title="打开工作项" onClick={() => onWorkItem(execution.workItemId)}><ClipboardList size={16} /></button><button type="button" className="icon-button" aria-label="查看本次工作流实例" title="工作流实例" onClick={() => onWorkflow(execution.runId, execution.workItemId)}><Workflow size={16} /></button></div> : null}
-        {execution ? <RunTimelineSection key={execution.runId} runId={execution.runId} workItemId={execution.workItemId} running={execution.status === "running"} load={(id, itemId) => window.afkDesktop.workItems.executionRunDetail(id, itemId)} /> : null}
-        {history.length > 1 ? <details className="inspector-history"><summary><span className="history-summary-label">运行历史 <b>{history.length}</b></span></summary><div>{history.map((item) => <button type="button" className={item.id === event.id ? "selected" : ""} key={item.id} onClick={() => onSelect(item)}><StateGlyph phase={eventStatus(item) === "failed" ? "failed" : phaseOf(item)} size={13} /><span><b>{item.result}</b><small><time dateTime={item.timestamp} title={item.timestamp}>{displayTimestamp(item.timestamp)}</time></small></span></button>)}</div></details> : null}
+        {history.length > 1 ? <details className="inspector-history"><summary><span className="history-summary-label">运行历史 <b>{history.length}</b></span></summary><div>{history.map((item) => <button type="button" className={item.id === event.id ? "selected" : ""} key={item.id} onClick={() => onSelect(item)}><StateGlyph phase={eventStatus(item) === "failed" ? "failed" : phaseOf(item)} size={13} /><span><b>{runtimeEventTitle(item)}</b><small><time dateTime={item.timestamp} title={item.timestamp}>{displayTimestamp(item.timestamp)}</time></small></span></button>)}</div></details> : null}
         <details className="inspector-debug"><summary>原始 JSON</summary><pre>{event.raw}</pre></details>
         <button className="takeover" onClick={onTerminal}><TerminalSquare size={15} />打开终端</button>
       </div></div>

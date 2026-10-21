@@ -6,6 +6,7 @@ export type RuntimeEvent = {
   id: string;
   timestamp: string;
   source: string;
+  title?: string;
   status?: string;
   result: string;
   nextStep: string;

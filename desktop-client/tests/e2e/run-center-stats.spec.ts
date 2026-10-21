@@ -15,15 +15,15 @@ async function seedEvents(store: JsonlEventStore) {
     correlationId: "run-seed",
     context: { traceId: "run-seed", runId: "run-seed", workItemId: "github:acme/web#1", profileId: "default", attempt: 1, actor: { kind: "cli", id: "e2e" } },
   };
-  const cases: Array<{ status: string; nextStep: string; tokens: number; hoursAgo: number }> = [
-    { status: "running", nextStep: "正在分析代码结构", tokens: 1200, hoursAgo: 1 },
-    { status: "running", nextStep: "任务空间：/tmp/workspace-a", tokens: 1320, hoursAgo: 2 },
-    { status: "awaiting_human", nextStep: "需要人工确认", tokens: 1440, hoursAgo: 3 },
-    { status: "failed", nextStep: "执行失败：超时", tokens: 1560, hoursAgo: 4 },
-    { status: "succeeded", nextStep: "任务空间：/tmp/workspace-b", tokens: 1680, hoursAgo: 5 },
-    { status: "succeeded", nextStep: "任务空间：/tmp/workspace-c", tokens: 1800, hoursAgo: 6 },
+  const cases: Array<{ status: "running" | "awaiting_human" | "failed" | "succeeded"; tokens: number; hoursAgo: number }> = [
+    { status: "running", tokens: 1200, hoursAgo: 1 },
+    { status: "running", tokens: 1320, hoursAgo: 2 },
+    { status: "awaiting_human", tokens: 1440, hoursAgo: 3 },
+    { status: "failed", tokens: 1560, hoursAgo: 4 },
+    { status: "succeeded", tokens: 1680, hoursAgo: 5 },
+    { status: "succeeded", tokens: 1800, hoursAgo: 6 },
   ];
-  for (const [i, { status, nextStep, tokens, hoursAgo }] of cases.entries()) {
+  for (const [i, { status, tokens, hoursAgo }] of cases.entries()) {
     const runId = `run-${i}`;
     const occurredAt = pastTimestamp(hoursAgo);
     const requested: RunEventDraft = {
@@ -45,11 +45,12 @@ async function seedEvents(store: JsonlEventStore) {
         kind: "agent.session_recorded",
         sessionId: `${runId}-session`,
         usage: { inputTokens: 1000 + i * 100, outputTokens: 200 + i * 20, totalTokens: tokens },
-        status,
-        nextStep,
       },
     };
-    await store.append([requested, recorded]);
+    const events: RunEventDraft[] = [requested, { ...recorded, id: `${runId}-started`, type: "run.started", data: { kind: "run.started" } }, recorded];
+    if (status === "awaiting_human") events.push({ ...recorded, id: `${runId}-gate`, type: "human_gate.opened", data: { kind: "human_gate.opened", gateId: `${runId}-gate`, reason: "需要人工确认" } });
+    if (status === "failed" || status === "succeeded") events.push({ ...recorded, id: `${runId}-finished`, type: "run.finished", data: { kind: "run.finished", outcome: status } });
+    await store.append(events);
   }
 }
 
@@ -125,4 +126,39 @@ test("column header sits on the same columns as the rows beneath it", async ({ p
   // data — which is exactly how the first pass shipped a four-track header over
   // five-track rows with every test green.
   await expectColumnsAligned(page, ".run-col-head", ".queue .event-row");
+});
+
+test("matches the sketch panel and two-line run rows in both themes", async ({ page }) => {
+  const store = new JsonlEventStore({ root: path.join(E2E_HOME_PATH, ".afk", "events") });
+  await seedEvents(store);
+
+  for (const theme of ["浅色", "深色"]) {
+    await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+    await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: theme }).click();
+    await page.locator(".primary-nav").getByRole("button", { name: "运行中心", exact: true }).click();
+    const row = page.locator(".queue .event-row").first();
+    await expect(row).toBeVisible();
+    await expect(page.locator(".stats > div:not(.ok) b")).toHaveText(["2", "1", "1"]);
+    await expect(page.locator(".stats")).toHaveCSS("border-top-style", "solid");
+    await expect(page.locator(".queue")).toHaveCSS("border-top-style", "solid");
+    const alignment = await page.evaluate(() => {
+      const selectors = [".stats", ".run-resource-toolbar", ".queue"];
+      return selectors.map(selector => Math.round(document.querySelector(selector)!.getBoundingClientRect().left));
+    });
+    expect(new Set(alignment).size).toBe(1);
+    await expectColumnsAligned(page, ".run-col-head", ".queue .event-row");
+    await expect(row).toHaveCSS("background-image", "none");
+    const title = await row.locator(".event-copy strong").boundingBox();
+    const source = await row.locator(".runtime-source").boundingBox();
+    expect(title!.y).toBeLessThan(source!.y);
+    await expect(row.locator(".event-copy small")).toHaveCount(0);
+    if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/run-center-${theme}.png`, animations: "disabled" });
+    await page.getByRole("searchbox", { name: "搜索运行、工作项或事件" }).fill("acme/web#1");
+    await expect(page.locator(".queue .event-row")).toHaveCount(1);
+    await page.getByRole("searchbox", { name: "搜索运行、工作项或事件" }).fill("");
+    await page.locator(".header-run-mode").getByRole("button", { name: "看板", exact: true }).click();
+    await expect(page.getByRole("region", { name: "运行看板" })).toBeVisible();
+    await expect(page.locator(".board-card")).toHaveCount(6);
+    if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/run-board-${theme}.png`, animations: "disabled" });
+  }
 });

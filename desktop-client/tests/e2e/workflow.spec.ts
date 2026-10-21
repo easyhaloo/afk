@@ -1,7 +1,61 @@
 import { test, expect } from "./_helpers/launch";
 import { expectOccupiesSpace } from "./_helpers/geometry";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 test.describe("Workflow studio", () => {
+  test("shows real parallel dependencies in a separate inspector without a footer", async ({ page }) => {
+    const snapshot = await page.evaluate(() => window.afkDesktop.snapshot(""));
+    const directory = path.join(snapshot.workspace.root, ".afk", "workflows");
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, "parallel-layout.yml"), JSON.stringify({
+      name: "parallel-layout", version: 1, description: "Parallel workflow layout regression",
+      steps: [
+        { id: "implement", kind: "agent", role: "implementer", dependsOn: [] },
+        { id: "verify-ac", kind: "agent", role: "verifier", dependsOn: ["implement"] },
+        { id: "review", kind: "agent", role: "reviewer", dependsOn: ["implement"] },
+        { id: "publish", kind: "system", role: "system", action: "publish-changes", dependsOn: ["verify-ac", "review"] },
+        { id: "queue-qa", kind: "system", role: "system", action: "queue-qa", dependsOn: ["publish"] },
+      ],
+    }));
+    await page.reload();
+    await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+    await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: "浅色" }).click();
+    await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
+    await page.locator(".workflow-library-card").filter({ hasText: "parallel-layout" }).click();
+    await expect(page.locator(".workflow-editor-node")).toHaveCount(6);
+    await expect(page.locator(".workflow-edge")).toHaveCount(6);
+    await expect(page.locator(".workflow-studio-canvas > footer")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "保存", exact: true })).toHaveCount(1);
+    const inspector = page.locator(".workflow-studio-shell > .workflow-studio-inspector");
+    await expect(inspector).toBeVisible();
+    const publish = page.locator(".workflow-editor-node").filter({ hasText: "publish" });
+    await publish.click();
+    const dependencies = page.getByRole("region", { name: "前置依赖", exact: true });
+    await expect(dependencies.locator(".workflow-dependency-chip")).toHaveText(["verify-ac", "review"]);
+    await expect(dependencies.locator("p")).toHaveText("全部依赖完成后执行。");
+    await expect(dependencies.locator("svg")).toHaveCount(0);
+    for (const width of [1680, 1280, 1024]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await expect.poll(() => page.locator(".workflow-editor-stage").evaluate(stage => {
+        const bounds = stage.getBoundingClientRect();
+        return [...stage.querySelectorAll(".workflow-editor-node")].every(node => {
+          const box = node.getBoundingClientRect();
+          return box.left >= bounds.left && box.right <= bounds.right && box.top >= bounds.top && box.bottom <= bounds.bottom;
+        });
+      })).toBe(true);
+      const canvasBox = await page.locator(".workflow-studio-canvas").boundingBox();
+      const inspectorBox = await inspector.boundingBox();
+      expect(canvasBox!.x + canvasBox!.width).toBeLessThanOrEqual(inspectorBox!.x + 1);
+      expect(await dependencies.evaluate(section => [...section.querySelectorAll(".workflow-dependency-chip")].every(chip => chip.getBoundingClientRect().bottom <= section.querySelector("p")!.getBoundingClientRect().top))).toBe(true);
+      if (process.env.AFK_UI_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.AFK_UI_EVIDENCE_DIR}/workflow-layout-${width}.png` });
+    }
+    await page.getByRole("button", { name: "收起配置栏", exact: true }).click();
+    await expect(inspector).toHaveCount(0);
+    await page.getByRole("button", { name: "展开配置栏", exact: true }).click();
+    await expect(inspector).toBeVisible();
+  });
+
   test("rejects saving an empty managed draft and reopens the last saved definition", async ({ page }) => {
     await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
     await page.getByRole("button", { name: "新建工作流" }).click();
@@ -67,6 +121,28 @@ test.describe("Workflow studio", () => {
     await expect(page.locator(".workflow-library-card").filter({ hasText: "自定义工作流" })).toHaveCount(0);
   });
 
+  test("persists custom node positions after dragging at a fractional zoom", async ({ page }) => {
+    await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
+    await page.getByRole("button", { name: "新建工作流" }).click();
+    await page.getByRole("button", { name: "添加工作流步骤" }).click();
+    await page.getByRole("menuitem", { name: "添加 Agent 步骤" }).click();
+    await page.getByRole("button", { name: "缩小", exact: true }).click();
+    const node = page.locator(".workflow-editor-node.custom-node");
+    const bounds = await node.boundingBox();
+    if (!bounds) throw new Error("custom node is not measurable");
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width / 2 + 80, bounds.y + bounds.height / 2 + 40);
+    await page.mouse.up();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(page.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+    const saved = await page.evaluate(() => window.afkDesktop.snapshot(""));
+    expect(saved.workflow.canvasNodes).toHaveLength(1);
+    expect(Number.isInteger(saved.workflow.canvasNodes[0].x)).toBe(true);
+    expect(Number.isInteger(saved.workflow.canvasNodes[0].y)).toBe(true);
+    expect(saved.workflow.canvasNodes[0].x).toBeGreaterThan(292);
+  });
+
   test("uses an icon-only create action in the workflow library", async ({ page }) => {
     await page.getByRole("button", { name: "工作流" }).click();
 
@@ -92,7 +168,7 @@ test.describe("Workflow studio", () => {
     await expect(page.locator(".workflow-editor-node").first()).toBeVisible();
   });
 
-  test("lays the track bands on separate rows so they cannot overlap", async ({ page }) => {
+  test("keeps a sequential workflow aligned without overlapping its track bands", async ({ page }) => {
     await page.getByRole("button", { name: "工作流" }).click();
     await page.locator(".workflow-library-card").first().click();
 
@@ -102,16 +178,13 @@ test.describe("Workflow studio", () => {
     const stage = page.locator(".workflow-editor-stage");
     await expectOccupiesSpace(page, ".workflow-editor-stage", 200);
 
-    const bands = page.locator(".workflow-canvas-track");
-    await expect(bands).toHaveCount(2);
-
-    const [agent, system] = await Promise.all([
-      page.locator(".workflow-canvas-track.track-agent").boundingBox(),
-      page.locator(".workflow-canvas-track.track-system").boundingBox(),
-    ]);
-    if (!agent || !system) throw new Error("track bands are not measurable");
-
-    expect(agent.y + agent.height).toBeLessThanOrEqual(system.y);
+    await expect(page.locator(".workflow-canvas-track")).toHaveCount(2);
+    expect(await page.locator(".workflow-editor-node:not(.origin-node)").evaluateAll(nodes => new Set(nodes.map(node => Math.round(node.getBoundingClientRect().top))).size)).toBe(1);
+    expect(await page.locator(".workflow-canvas-track").evaluateAll(bands => bands.every((band, index) => bands.slice(index + 1).every(other => {
+      const left = band.getBoundingClientRect();
+      const right = other.getBoundingClientRect();
+      return left.right <= right.left || right.right <= left.left || left.bottom <= right.top || right.bottom <= left.top;
+    })))).toBe(true);
   });
 
   test("keeps the zoom controls clickable beside the inspector", async ({ page }) => {
@@ -119,9 +192,6 @@ test.describe("Workflow studio", () => {
     await page.locator(".workflow-library-card").first().click();
     await page.waitForTimeout(400);
 
-    // The inspector overlays the stage rather than taking a grid column, so a
-    // full-width stage-bar parks the zoom pill underneath it: present in the DOM,
-    // impossible to click. Measure what is actually on top at the pill's centre.
     const hit = await page.evaluate(() => {
       const zoom = document.querySelector(".workflow-canvas-zoom button");
       if (!zoom) return "missing";
@@ -234,7 +304,11 @@ test.describe("Workflow studio", () => {
     const pageBox = await page.locator(".workflow-studio-page").boundingBox();
     const canvasBox = await page.locator(".workflow-studio-canvas").boundingBox();
     if (!pageBox || !canvasBox) throw new Error("workflow studio width is not measurable");
-    expect(canvasBox.width / pageBox.width).toBeGreaterThanOrEqual(0.75);
+    const inspectorBox = await page.locator(".workflow-studio-inspector").boundingBox();
+    expect(inspectorBox).not.toBeNull();
+    expect(inspectorBox!.width).toBeGreaterThanOrEqual(280);
+    expect(inspectorBox!.width).toBeLessThanOrEqual(336);
+    expect(canvasBox.width + inspectorBox!.width).toBeCloseTo(pageBox.width, 0);
   });
 
   test("uses one icon-only add trigger with clearly labeled step choices", async ({ page }) => {
@@ -245,7 +319,7 @@ test.describe("Workflow studio", () => {
     const trigger = toolbar.getByRole("button", { name: "添加工作流步骤" });
     await expect(trigger).toHaveText("");
     await expect(trigger.locator("svg")).toHaveCount(1);
-    await expect(toolbar.getByRole("button")).toHaveCount(1);
+    await expect(toolbar.getByRole("button")).toHaveCount(2);
 
     await trigger.click();
     const menu = page.getByRole("menu", { name: "添加工作流步骤" });
@@ -269,6 +343,16 @@ test.describe("Workflow studio", () => {
       const menu = page.getByRole("listbox", { name: "默认 Agent" });
       const popover = trigger.locator("..").locator(".select-menu-popover");
       await expect(menu).toBeVisible();
+      const triggerBounds = await trigger.boundingBox();
+      const popoverBounds = await popover.boundingBox();
+      expect(triggerBounds).not.toBeNull();
+      expect(popoverBounds).not.toBeNull();
+      expect(Math.abs(popoverBounds!.width - triggerBounds!.width)).toBeLessThanOrEqual(1);
+      const searchInput = popover.getByRole("combobox", { name: "搜索默认 Agent" });
+      await expect(searchInput).toBeFocused();
+      await expect(searchInput).toHaveCSS("border-top-width", "0px");
+      await expect(searchInput).toHaveCSS("outline-width", "0px");
+      await expect(searchInput).toHaveCSS("box-shadow", "none");
       const background = await popover.evaluate(element => getComputedStyle(element).backgroundColor);
       expect(background).toMatch(/^rgb\(/);
       await expect(popover).toHaveCSS("opacity", "1");
@@ -312,7 +396,7 @@ test.describe("Workflow studio", () => {
     if (await activeCard.count() === 0) {
       await page.locator(".workflow-library-card").first().click();
       await page.getByRole("button", { name: "保存", exact: true }).first().click();
-      await page.getByRole("button", { name: "工作流", exact: true }).last().click();
+      await page.locator(".workflow-back").click();
       activeCard = page.locator(".workflow-library-card.active");
     }
 
@@ -320,7 +404,7 @@ test.describe("Workflow studio", () => {
     await expect(activeCard.locator(".workflow-library-card-status")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   });
 
-  test("uses compact studio controls and inline node state labels", async ({ page }) => {
+  test("uses compact studio controls and node kind labels in definition mode", async ({ page }) => {
     await page.getByRole("button", { name: "工作流" }).click();
     await page.locator(".workflow-library-card").first().click();
 
@@ -330,12 +414,12 @@ test.describe("Workflow studio", () => {
     const addBox = await addButton.boundingBox();
     if (!saveBox || !addBox) throw new Error("workflow controls are not measurable");
     expect(saveBox.height).toBeLessThanOrEqual(28);
-    expect(addBox.width).toBeLessThanOrEqual(28);
-    expect(addBox.height).toBeLessThanOrEqual(28);
+    expect(addBox.width).toBeLessThanOrEqual(32);
+    expect(addBox.height).toBeLessThanOrEqual(32);
 
     const nodeStatus = page.locator(".workflow-editor-node .workflow-node-status").first();
     await expect(nodeStatus).toBeVisible();
-    await expect(nodeStatus).toHaveText(/就绪|运行中|已完成|待执行/);
+    await expect(nodeStatus).toHaveText("配置");
     await expect(nodeStatus).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   });
 });

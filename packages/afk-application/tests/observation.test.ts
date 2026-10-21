@@ -56,9 +56,16 @@ describe('run observation facade', () => {
   it('queries summaries with work-item filtering and a cursor', async () => {
     const deps = port();
     await expect(queryExecutionHistory({ workItemId: 'work-1', limit: 1 }, deps)).resolves.toEqual({
-      executions: [{ runId: 'run-1', workItemId: 'work-1', profileId: 'profile-1', attempt: 1, status: 'running', phase: undefined, sequence: 2, terminal: false }],
+      executions: [{ runId: 'run-1', workItemId: 'work-1', profileId: 'profile-1', attempt: 1, status: 'running', phase: undefined, sequence: 2, terminal: false, startedAt: '2026-09-30T00:00:02.000Z' }],
       nextCursor: undefined,
     });
+  });
+
+  it('only exposes a verified start event, without treating a request as a start', async () => {
+    expect((await queryExecutionHistory({}, port([event(1, 'run.requested')]))).executions[0]).not.toHaveProperty('startedAt');
+    const deps = port();
+    expect((await queryExecutionHistory({}, { ...deps, verify: async () => ({ valid: false, lastSequence: 1 }) })).executions[0]).not.toHaveProperty('startedAt');
+    expect((await queryExecutionHistory({}, { ...deps, verify: async () => ({ valid: true, lastSequence: 1 }) })).executions[0]).not.toHaveProperty('startedAt');
   });
 
   it('isolates invalid or non-replayable runs while returning healthy executions', async () => {

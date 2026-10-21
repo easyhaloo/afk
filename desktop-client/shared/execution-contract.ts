@@ -21,6 +21,7 @@ export type ExecutionSummary = {
   phase?: typeof EXECUTION_PHASES[number];
   sequence: number;
   terminal: boolean;
+  startedAt?: string;
   usage?: AgentUsage;
 };
 
@@ -75,7 +76,7 @@ export function parseExecutionQueryOptions(input: unknown): ExecutionQueryOption
 
 export function parseExecutionSummary(input: unknown): ExecutionSummary {
   const candidate = parseObject(input, "execution summary");
-  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "usage"], "execution summary");
+  assertExactKeys(candidate, ["runId", "workItemId", "profileId", "attempt", "status", "phase", "sequence", "terminal", "startedAt", "usage"], "execution summary");
   const workItemId = parseWorkItemId(candidate.workItemId);
   if (!EXECUTION_STATUSES.includes(candidate.status as ExecutionStatus)) throw new Error("execution summary status is invalid");
   if (candidate.phase !== undefined && !EXECUTION_PHASES.includes(candidate.phase as typeof EXECUTION_PHASES[number])) throw new Error("execution summary phase is invalid");
@@ -92,6 +93,11 @@ export function parseExecutionSummary(input: unknown): ExecutionSummary {
     terminal: candidate.terminal,
   };
   if (candidate.phase !== undefined) summary.phase = candidate.phase as typeof EXECUTION_PHASES[number];
+  if (candidate.startedAt !== undefined) {
+    const startedAt = parseRequiredString(candidate.startedAt, "execution summary: startedAt");
+    if (!Number.isFinite(Date.parse(startedAt))) throw new Error("execution summary startedAt is invalid");
+    summary.startedAt = startedAt;
+  }
   if (candidate.usage !== undefined) {
     const usage = parseObject(candidate.usage, "execution usage");
     assertExactKeys(usage, ["inputTokens", "outputTokens", "totalTokens"], "execution usage");

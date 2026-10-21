@@ -461,6 +461,7 @@ describe("BacklogPage execution", () => {
 
   it("labels custom qa nodes as review agents without changing their type", () => {
     expect(workflowNodeDisplayLabel("qa", "QA 1")).toBe("审查 Agent");
+    expect(workflowNodeDisplayLabel("qa", "质量审查")).toBe("质量审查");
     expect(workflowNodeDisplayLabel("agent", "Agent 1")).toBe("Agent 1");
   });
 

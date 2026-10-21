@@ -29,9 +29,9 @@ describe("run timeline view", () => {
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineSection, { load, runId: detail.runId, workItemId: detail.workItemId, running: true })); });
     expect(load).not.toHaveBeenCalled();
-    await act(async () => { renderer.root.findByType("details").props.onToggle({ currentTarget: { open: true } }); });
+    await act(async () => { const target = { open: true }; renderer.root.findByProps({ className: "work-item-run-timeline" }).props.onToggle({ target, currentTarget: target }); });
     expect(load).toHaveBeenCalledOnce();
-    await act(async () => { renderer.root.findByType("details").props.onToggle({ currentTarget: { open: false } }); });
+    await act(async () => { const target = { open: false }; renderer.root.findByProps({ className: "work-item-run-timeline" }).props.onToggle({ target, currentTarget: target }); });
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
     expect(load).toHaveBeenCalledOnce();
     act(() => renderer.unmount());
@@ -64,6 +64,32 @@ describe("run timeline view", () => {
     let renderer!: ReturnType<typeof create>;
     await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: "afk-158", workItemId: "github:easyhaloo/afk#158", expanded: false, running: false })); });
     expect(load).not.toHaveBeenCalled();
+    act(() => renderer.unmount());
+  });
+
+  it("combines failure filtering with search and keeps unknown event kinds readable", async () => {
+    const load = vi.fn(async () => ({ ...detail, entries: [...detail.entries, { sequence: 4, occurredAt: "2026-09-29T00:00:03.000Z", kind: "retro.requested", reason: "review queued" }] }));
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: detail.runId, workItemId: detail.workItemId, expanded: true, running: false })); });
+    const timeline = () => text(renderer.root.findByProps({ className: "run-timeline" }));
+    expect(timeline()).toContain("retro.requested");
+    await act(async () => { renderer.root.findAllByProps({ role: "radio" }).find(button => text(button).startsWith("异常"))!.props.onClick(); });
+    expect(timeline()).toContain("AC-2 未满足");
+    expect(timeline()).not.toContain("运行开始");
+    await act(async () => { renderer.root.findByProps({ type: "search" }).props.onChange({ target: { value: "不存在的步骤" } }); });
+    expect(text(renderer.root)).toContain("没有匹配的运行日志");
+    await act(async () => { renderer.root.findByProps({ type: "search" }).props.onChange({ target: { value: "AC-2" } }); });
+    expect(timeline()).toContain("#3");
+    expect(load).toHaveBeenCalledOnce();
+    act(() => renderer.unmount());
+  });
+
+  it("does not render entries from an invalid audit stream", async () => {
+    const load = vi.fn(async () => ({ ...detail, integrityValid: false, integrityReason: "integrity_mismatch" }));
+    let renderer!: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(RunTimelineView, { load, runId: detail.runId, workItemId: detail.workItemId, expanded: true, running: false })); });
+    expect(text(renderer.root)).toContain("integrity_mismatch");
+    expect(renderer.root.findAllByProps({ className: "run-timeline" })).toHaveLength(0);
     act(() => renderer.unmount());
   });
 

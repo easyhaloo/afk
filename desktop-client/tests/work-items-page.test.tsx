@@ -102,6 +102,43 @@ const multiResourceResult: WorkItemInventoryResult = {
 };
 
 describe("WorkItemsPage", () => {
+  it("defaults to pending and filters completed work items from the quick statuses", async () => {
+    const inventory: WorkItemInventoryResult = {
+      ...result,
+      items: [
+        result.items[0],
+        { ...result.items[1], state: "done" },
+        { ...result.items[0], id: "github:acme/api#2", title: "Running issue", state: "in_progress" },
+      ],
+    };
+    const list = vi.fn(async () => inventory);
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    const statuses = renderer!.root.findByProps({ role: "radiogroup", "aria-label": "工作项快捷状态" });
+    const pending = statuses.findAllByProps({ role: "radio" }).find(node => textContent(node) === "待处理1")!;
+    expect(pending.props["aria-checked"]).toBe(true);
+    expect(renderer!.root.findByProps({ "aria-label": "筛选状态" }).props.value).toBe("ready");
+    const pendingRows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
+    expect(pendingRows).toHaveLength(1);
+    expect(textContent(pendingRows[0])).toContain("API issue");
+
+    const completed = statuses.findAllByProps({ role: "radio" }).find(node => textContent(node) === "已完成1");
+    expect(completed).toBeDefined();
+    await act(async () => { completed!.props.onClick(); });
+    expect(completed!.props["aria-checked"]).toBe(true);
+    expect(renderer!.root.findByProps({ "aria-label": "筛选状态" }).props.value).toBe("done");
+    const completedRows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
+    expect(completedRows).toHaveLength(1);
+    expect(textContent(completedRows[0])).toContain("Web issue");
+
+    await act(async () => { findButton(renderer!, "全部").props.onClick(); });
+    expect(renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })).toHaveLength(3);
+    expect(list).toHaveBeenCalledTimes(1);
+    act(() => renderer!.unmount());
+  });
+
   it("loads globally without a workspace and keeps same-number issues distinct", async () => {
     const list = vi.fn(async () => result);
     vi.stubGlobal("window", { afkDesktop: { workItems: { list }, openExternal: vi.fn() } });
@@ -446,7 +483,7 @@ describe("WorkItemsPage", () => {
     await act(async () => { findButton(renderer!, "运行记录").props.onClick(); });
     expect(textContent(renderer!.root.findByProps({ "aria-label": `工作项 ${initial.items[0].id}` }))).toContain("执行中");
     await act(async () => { renderer!.root.findByProps({ "aria-label": "刷新工作项" }).props.onClick(); });
-    expect(textContent(renderer!.root.findByProps({ "aria-label": `工作项 ${initial.items[0].id}` }))).toContain("旧记录：QA 待确认");
+    expect(textContent(renderer!.root.findByProps({ "aria-label": `工作项 ${initial.items[0].id}` }))).toContain("QA 待确认");
     expect(list).toHaveBeenCalledTimes(2);
     act(() => renderer!.unmount());
   });
@@ -463,7 +500,11 @@ describe("WorkItemsPage", () => {
     await act(async () => { findButton(renderer!, "开始执行").props.onClick(); });
     await act(async () => { findButton(renderer!, "创建运行").props.onClick(); });
     expect(list).toHaveBeenCalledTimes(2);
-    expect(textContent(renderer!.root.findByProps({ "aria-label": "工作项 WI-2026-018" }))).toContain(run.id);
+    const card = renderer!.root.findByProps({ "data-run-id": run.id });
+    expect(card.props["data-selected"]).toBe(true);
+    const inspector = renderer!.root.findByProps({ "aria-label": "运行详情" });
+    expect(textContent(inspector)).toContain("run-2");
+    expect(inspector.findByProps({ title: run.id }).type).toBe("code");
     act(() => renderer!.unmount());
   });
 

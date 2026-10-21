@@ -110,7 +110,7 @@
 .resource-search input::placeholder { color: var(--afk-muted); }
 .resource-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
 .resource-toolbar .resource-search { flex: 1; min-width: min(100%, 220px); }
-.run-resource-toolbar { padding: 16px 24px 0; margin-bottom: 0; }
+.run-resource-toolbar { padding: 0; margin-bottom: 0; }
 .workspace-switcher { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; margin-bottom: 20px; border: 1px solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel); color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
 .workspace-switcher span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-switcher svg { flex-shrink: 0; color: var(--afk-muted); }

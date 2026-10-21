@@ -322,8 +322,8 @@
 .workflow-inspector-fields { display: grid; gap: 11px; padding: 15px; }
 .workflow-field { display: grid; gap: 6px; }
 .workflow-field > span, .workflow-readonly > span { color: var(--afk-muted); font-size: calc(9px * var(--afk-scale)); }
-.workflow-field input, .workflow-field select { width: 100%; min-height: 30px; padding: 0 8px; border: var(--border-w) solid #dedfe7; border-radius: var(--radius-sm); outline: 0; background: var(--afk-panel); color: var(--afk-text); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
-.workflow-field input:focus, .workflow-field select:focus { border-color: var(--afk-accent); box-shadow: 0 0 0 3px var(--afk-accent-soft); }
+.workflow-field > input, .workflow-field > select { width: 100%; min-height: 30px; padding: 0 8px; border: var(--border-w) solid #dedfe7; border-radius: var(--radius-sm); outline: 0; background: var(--afk-panel); color: var(--afk-text); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); }
+.workflow-field > input:focus, .workflow-field > select:focus { border-color: var(--afk-accent); box-shadow: 0 0 0 3px var(--afk-accent-soft); }
 .workflow-readonly { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; min-height: 31px; align-items: center; border-bottom: var(--border-w) solid var(--afk-border); }
 .workflow-readonly b { overflow: hidden; color: var(--afk-text); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 500; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .workflow-save-error { margin: 0 15px; padding: 9px; border: var(--border-w) solid #edcdca; border-radius: var(--radius-sm); background: #fff4f3; color: #a35350; font-size: calc(9px * var(--afk-scale)); line-height: 1.45; }
@@ -745,13 +745,13 @@
 .workflow-editor-stage.is-dragging .workflow-edge-flow { opacity: .18; }
 @keyframes workflow-node-select { 0% { transform: scale(.985); } 100% { transform: scale(1); } }
 
-.workflow-studio-inspector { border-left-color: #e5e5df; background: var(--afk-panel); animation: workflow-inspector-enter 190ms cubic-bezier(.2,.75,.2,1); }
-.workflow-studio-inspector > header { min-height: 58px; padding: 11px 15px; border-bottom-color: #e9e9e4; }
+.workflow-studio-inspector { border-left-color: var(--afk-border); background: var(--afk-panel); animation: workflow-inspector-enter 190ms cubic-bezier(.2,.75,.2,1); }
+.workflow-studio-inspector > header { min-height: 58px; padding: 11px 15px; border-bottom-color: var(--afk-border); }
 .workflow-studio-inspector > header > span { width: 24px; height: 24px; border-radius: var(--radius-sm); background: var(--afk-accent-soft); color: var(--ink-mid); }
 .workflow-studio-inspector > header b { font-size: calc(12px * var(--afk-scale)); }
-.workflow-studio-inspector > p { min-height: auto; padding: 9px 15px; border-bottom-color: #e9e9e4; font-size: calc(9px * var(--afk-scale)); }
+.workflow-studio-inspector > p { min-height: auto; padding: 9px 15px; border-bottom-color: var(--afk-border); font-size: calc(9px * var(--afk-scale)); }
 .workflow-studio-inspector .workflow-inspector-fields { padding: 10px 15px; }
-.workflow-readonly { min-height: 38px; border-bottom-color: #eeeeea; }
+.workflow-readonly { min-height: 38px; border-bottom-color: var(--afk-border); }
 .workflow-readonly > span { font-size: calc(10px * var(--afk-scale)); }
 .workflow-readonly b { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
 @keyframes workflow-inspector-enter { from { opacity: 0; transform: translateX(5px); } to { opacity: 1; transform: translateX(0); } }
@@ -786,9 +786,9 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: var(--border-w) solid rgba(38, 40, 36, .12);
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, .96);
+  background: var(--afk-panel);
   box-shadow: var(--shadow-panel);
   backdrop-filter: blur(12px);
   animation: workflow-inspector-in 180ms cubic-bezier(.2,.75,.2,1);
@@ -810,25 +810,25 @@
   background: transparent;
   color: var(--ink-mid);
 }
-.workflow-inspector-collapse:hover { border-color: #dedfd9; background: #f3f4f1; color: var(--ink-main); }
+.workflow-inspector-collapse:hover { border-color: var(--afk-border); background: var(--afk-panel-subtle); color: var(--afk-text); }
 .workflow-studio-inspector > p { padding: 8px 12px; font-size: calc(10px * var(--afk-scale)); line-height: 1.45; }
 .workflow-studio-inspector .workflow-inspector-fields { display: grid; gap: 12px; overflow: auto; padding: 12px; scrollbar-gutter: stable; }
 .workflow-studio-inspector .workflow-field { gap: 5px; }
 .workflow-studio-inspector .workflow-field > span,
-.workflow-studio-inspector .workflow-readonly > span { color: #7c7f78; font-size: calc(10px * var(--afk-scale)); font-weight: 550; }
-.workflow-studio-inspector .workflow-field input,
+.workflow-studio-inspector .workflow-readonly > span { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); font-weight: 550; }
+.workflow-studio-inspector .workflow-field > input,
 .workflow-studio-inspector .workflow-field textarea {
   width: 100%;
-  border: var(--border-w) solid #dfe0da;
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-sm);
   outline: none;
-  background: var(--afk-panel);
+  background: var(--afk-panel-subtle);
   color: var(--afk-text);
   font-family: var(--afk-font);
   font-size: calc(9px * var(--afk-scale));
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
-.workflow-studio-inspector .workflow-field input { min-height: 32px; padding: 0 9px; }
+.workflow-studio-inspector .workflow-field > input { min-height: 32px; padding: 0 9px; }
 .workflow-studio-inspector .workflow-field .select-menu { width: 100%; min-width: 0; }
 .workflow-studio-inspector .workflow-field .select-menu-trigger {
   min-height: 32px;
@@ -836,7 +836,7 @@
   padding: 0 9px;
   border-radius: var(--radius-sm);
   border-color: var(--afk-border);
-  background: var(--afk-panel);
+  background: var(--afk-panel-subtle);
   color: var(--afk-text);
   font-family: var(--afk-font);
   font-size: calc(9px * var(--afk-scale));
@@ -844,32 +844,49 @@
 .workflow-studio-inspector .workflow-field .select-menu-trigger:hover,
 .workflow-studio-inspector .workflow-field .select-menu-trigger.open,
 .workflow-studio-inspector .workflow-field .select-menu-trigger:focus-visible {
-  border-color: #7180a5;
-  box-shadow: 0 0 0 3px rgba(112, 128, 165, .14);
+  border-color: var(--afk-accent);
+  box-shadow: 0 0 0 3px var(--afk-accent-soft);
 }
 .workflow-studio-inspector .workflow-field .select-menu-popover {
   z-index: 12;
-  border-color: #dfe0da;
-  background: #fff;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-color: var(--afk-border);
+  background: var(--afk-panel);
   box-shadow: var(--shadow-panel);
 }
+.workflow-studio-inspector .workflow-field .select-menu-search {
+  height: 34px;
+  margin: 0 0 5px;
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-sm);
+  background: var(--afk-panel-subtle);
+  color: var(--afk-muted);
+}
+.workflow-studio-inspector .workflow-field .select-menu-search:focus-within {
+  border-color: var(--afk-accent);
+  box-shadow: 0 0 0 3px var(--afk-accent-soft);
+}
+.workflow-studio-inspector .workflow-field .select-menu-search input { outline: none; background: transparent; color: var(--afk-text); }
+.workflow-studio-inspector .workflow-field .select-menu-options { max-height: 220px; }
 .workflow-studio-inspector .workflow-field .select-menu-option {
-  height: 30px;
-  color: #30332f;
+  height: 32px;
+  color: var(--afk-text);
   font-size: calc(9px * var(--afk-scale));
 }
 .workflow-studio-inspector .workflow-field .select-menu-option:hover,
 .workflow-studio-inspector .workflow-field .select-menu-option:focus-visible,
 .workflow-studio-inspector .workflow-field .select-menu-option.selected {
-  background: #f0f2f7;
-  color: #4d6297;
+  background: var(--afk-accent-soft);
+  color: var(--afk-accent);
 }
 .workflow-studio-inspector .workflow-field textarea { min-height: 78px; padding: 8px 9px; line-height: 1.45; resize: vertical; }
-.workflow-studio-inspector .workflow-field input:hover,
+.workflow-studio-inspector .workflow-field > input:hover,
 .workflow-studio-inspector .workflow-field textarea:hover { border-color: var(--afk-border-strong); }
-.workflow-studio-inspector .workflow-field input:focus,
-.workflow-studio-inspector .workflow-field textarea:focus { border-color: var(--afk-accent); box-shadow: 0 0 0 3px rgba(112, 128, 165, .14); }
-.workflow-studio-inspector .workflow-field input:disabled,
+.workflow-studio-inspector .workflow-field > input:focus,
+.workflow-studio-inspector .workflow-field textarea:focus { border-color: var(--afk-accent); box-shadow: 0 0 0 3px var(--afk-accent-soft); }
+.workflow-studio-inspector .workflow-field > input:disabled,
 .workflow-studio-inspector .workflow-field textarea:disabled { cursor: not-allowed; background: var(--afk-panel-subtle); color: var(--afk-muted); }
 .workflow-studio-inspector .workflow-readonly { min-height: 34px; padding: 6px 0; }
 .workflow-studio-inspector footer { gap: 6px; padding: 10px 12px; background: var(--afk-panel-subtle); }
@@ -1331,42 +1348,45 @@
 
 .queue {
   width: 100%;
-  padding-top: 10px;
+  margin-top: 12px;
+  padding-top: 0;
+  overflow: hidden;
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-well);
+  background: var(--afk-panel);
+  box-shadow: var(--shadow-panel);
 }
 
 .queue-stream {
   position: relative;
-  border-top: var(--border-w) solid var(--line-soft);
-}
-
-.queue-stream::before {
-  position: absolute;
-  top: 28px;
-  bottom: 28px;
-  left: 11px;
-  width: 1px;
-  background: #e3e7e1;
-  content: "";
 }
 
 .queue .event-row {
   position: relative;
   z-index: 1;
-  padding: 0 12px;
-  border-bottom: var(--border-w) solid var(--afk-border);
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 96px;
+  gap: 12px;
+  min-height: 52px;
+  padding: 7px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--afk-border);
   border-radius: 0;
   background: transparent;
 }
+.queue .event-row:last-child { border-bottom: 0; }
+.queue .event-row:is(:hover, :focus-visible) { background: var(--paper-3); }
+.queue .event-copy strong { font-size: calc(12.5px * var(--afk-scale)); font-weight: 600; }
+.run-row-meta { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.run-row-meta .runtime-source { flex: 0 1 auto; }
+.run-row-meta small { min-width: 0; overflow: hidden; color: var(--afk-muted); font-family: var(--afk-mono); font-size: calc(10px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
 .queue .event-row .state-glyph { flex-shrink: 0; }
 .queue .event-row .run-main { flex: 1; min-width: 0; overflow: hidden; }
-.queue .event-row .event-time { flex-shrink: 0; width: 96px; margin-left: auto; text-align: right; }
+.queue .event-row .event-time { flex-shrink: 0; width: 96px; margin-left: 0; text-align: right; }
 .queue .event-row .event-detail-affordance { flex-shrink: 0; width: 22px; display: grid; place-items: center; }
 
 .event-row:hover { background: #fafcf9; }
 .event-row.selected { border-color: var(--line-soft); background: #f2f7f2; box-shadow: inset 2px 0 0 var(--run); }
-.event-row.active { background: linear-gradient(90deg, rgba(239,246,240,.58), transparent 70%); }
-.event-row.attention { background: linear-gradient(90deg, rgba(255,248,238,.46), transparent 70%); }
-.event-row.failed { background: linear-gradient(90deg, rgba(250,243,243,.54), transparent 70%); }
 .event-row.active.selected,
 .event-row.attention.selected,
 .event-row.failed.selected { background: #f2f7f2; }
@@ -1378,18 +1398,18 @@
   width: 22px;
   height: 22px;
   place-items: center;
-  border: var(--border-w) solid #d7ddd6;
-  border-radius: 50%;
+  border: var(--border-w) solid transparent;
+  border-radius: 50% 8% 50% 8% / 8% 50% 8% 50%;
   background: var(--surface-raised, #fff);
-  color: #8b948c;
+  color: var(--afk-muted);
 }
 
-.state-glyph.active { border-color: #afc9b5; color: var(--run); }
-.state-glyph.verify { border-color: #bfd2cb; color: var(--verify); }
-.state-glyph.attention { border-color: #e2cda8; color: var(--attention); }
-.state-glyph.failed { border-color: #d8c0c0; color: var(--fail); }
-.state-glyph.ready { border-color: #d7dbe0; color: var(--ready); }
-.state-glyph.muted { border-color: #dfe4de; background: #fbfcfa; color: #aab2aa; }
+.state-glyph.active { background: var(--afk-accent-soft); color: var(--run); }
+.state-glyph.verify { border-color: var(--afk-accent-border); border-radius: 8% 50% 8% 50% / 50% 8% 50% 8%; color: var(--verify); }
+.state-glyph.attention { border-radius: 40% 60% 40% 60% / 60% 40% 60% 40%; background: var(--warn-bg); color: var(--attention); }
+.state-glyph.failed { border-radius: 60% 40% 60% 40% / 40% 60% 40% 60%; background: var(--fail-bg); color: var(--fail); }
+.state-glyph.ready { background: var(--paper-3); color: var(--ready); }
+.state-glyph.muted { border-color: var(--afk-border); background: var(--afk-panel-subtle); color: var(--afk-muted); }
 .state-glyph.active svg { animation: run-center-state-pulse 1.9s ease-in-out infinite; }
 
 .runtime-source {
@@ -1404,21 +1424,22 @@
 .runtime-source > svg {
   flex: 0 0 14px;
 }
+:root:not([data-afk-theme="light"]) .runtime-source .provider-icon[alt="GitHub"] { filter: invert(1); }
 
 .runtime-repository {
   overflow: hidden;
-  color: #626a64;
-  font-family: "DM Mono", monospace;
-  font-size: calc(9px * var(--afk-scale));
+  color: var(--afk-muted);
+  font-family: var(--afk-mono);
+  font-size: calc(10px * var(--afk-scale));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .runtime-work-item {
   flex: 0 0 auto;
-  color: #9a9e9a;
-  font-family: "DM Mono", monospace;
-  font-size: calc(9px * var(--afk-scale));
+  color: var(--afk-muted);
+  font-family: var(--afk-mono);
+  font-size: calc(10px * var(--afk-scale));
 }
 
 .event-copy { min-width: 0; }
@@ -1431,7 +1452,7 @@
 }
 .event-copy strong { color: var(--afk-text, #343832); font-size: calc(12px * var(--afk-scale)); font-weight: 650; }
 .event-copy small { margin-top: 5px; color: #7f8981; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); }
-.event-time { color: #7f8981; font-family: "DM Mono", monospace; font-size: calc(10px * var(--afk-scale)); white-space: nowrap; }
+.event-time { color: var(--afk-muted); font-family: var(--afk-mono); font-size: calc(10px * var(--afk-scale)); white-space: nowrap; }
 .event-detail-affordance { display: grid; place-items: center; color: #99a199; }
 .event-row:hover .event-detail-affordance,
 .event-row.selected .event-detail-affordance { color: var(--afk-accent, #6d5dfc); }
@@ -1459,9 +1480,9 @@
   background: transparent;
 }
 .board-column.is-empty > header {
-  border: var(--border-w) solid #e7ebe5;
+  border: var(--border-w) solid var(--afk-border);
   border-radius: var(--radius-md);
-  background: #fbfcfa;
+  background: var(--afk-panel);
 }
 
 .board-column > header .state-glyph.active svg { animation-duration: 2.2s; }
@@ -1477,10 +1498,10 @@
   width: 18px;
   height: 18px;
   place-items: center;
-  color: #9aa19b;
+  color: var(--afk-muted);
   transform: translateY(-50%);
 }
-.board-card.failed { border-left: 2px solid #c49797; }
+.board-card.failed { border-left: 2px solid var(--fail-ln); }
 .board-card:hover .board-detail-affordance,
 .board-card.selected .board-detail-affordance { color: var(--afk-accent, #6d5dfc); }
 
@@ -1544,7 +1565,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px 24px 0;
+  padding: 0;
   width: 100%;
 }
 
@@ -1552,10 +1573,12 @@
   display: flex;
   align-items: baseline;
   gap: 0;
-  padding: 0 4px;
-  border-radius: var(--radius-md);
-  background: var(--afk-panel);
-  overflow: hidden;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border: var(--border-w) solid var(--afk-border);
+  border-radius: var(--radius-lg);
+  background: transparent;
+  box-shadow: var(--shadow-panel-sm);
 }
 .stats > div {
   display: flex;
@@ -1566,7 +1589,7 @@
 }
 .stats > div:first-child { padding-left: 0; border-left: 0; }
 .stats b {
-  font-family: "DM Mono", monospace;
+  font-family: var(--afk-mono);
   font-size: calc(19px * var(--afk-scale));
   font-weight: 700;
   letter-spacing: -.02em;
@@ -1578,10 +1601,11 @@
 .stats .ok b { color: var(--afk-accent); }
 
 .run-col-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 96px;
   align-items: center;
   gap: 12px;
-  height: 28px;
+  height: 32px;
   padding: 0 12px;
   border-bottom: 1.5px solid var(--afk-border);
   color: var(--afk-muted);

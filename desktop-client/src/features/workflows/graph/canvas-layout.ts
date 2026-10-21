@@ -1,7 +1,7 @@
 import type { CanvasTemplateNode } from "../../../../shared/ipc-contract";
 
-export const CANVAS_NODE_WIDTH = 164;
-export const CANVAS_NODE_HEIGHT = 94;
+export const CANVAS_NODE_WIDTH = 200;
+export const CANVAS_NODE_HEIGHT = 120;
 export const CANVAS_WORLD_WIDTH = 1500;
 export const CANVAS_WORLD_HEIGHT = 640;
 export const CANVAS_MARGIN = 22;
@@ -9,9 +9,9 @@ export const CANVAS_MARGIN = 22;
 export type CanvasViewport = { x: number; y: number; scale: number };
 export type CanvasPoint = { x: number; y: number };
 
-const START_X = 220;
+const START_X = 292;
 const START_Y = 74;
-const COLUMN_GAP = 190;
+const COLUMN_GAP = 244;
 const ROW_GAP = 154;
 const MAX_COLUMNS = 4;
 
@@ -20,7 +20,7 @@ export function clampCanvasPosition(value: number, min: number, max: number) {
 }
 
 export function zoomCanvasViewportAtPoint(viewport: CanvasViewport, pointer: CanvasPoint, requestedScale: number): CanvasViewport {
-  const scale = clampCanvasPosition(requestedScale, 0.7, 1.35);
+  const scale = clampCanvasPosition(requestedScale, 0.1, 1.35);
   const worldX = (pointer.x - viewport.x) / viewport.scale;
   const worldY = (pointer.y - viewport.y) / viewport.scale;
   return {
@@ -28,6 +28,16 @@ export function zoomCanvasViewportAtPoint(viewport: CanvasViewport, pointer: Can
     y: pointer.y - worldY * scale,
     scale,
   };
+}
+
+export function fitCanvasViewport(nodes: readonly CanvasPoint[], size: { width: number; height: number }): CanvasViewport {
+  if (!nodes.length) return { x: 0, y: 0, scale: 1 };
+  const minX = Math.min(...nodes.map(node => node.x)) - 16;
+  const minY = Math.min(...nodes.map(node => node.y)) - 70;
+  const width = Math.max(...nodes.map(node => node.x + CANVAS_NODE_WIDTH)) + 16 - minX;
+  const height = Math.max(...nodes.map(node => node.y + CANVAS_NODE_HEIGHT)) + 24 - minY;
+  const scale = Math.max(.1, Math.min(1, (size.width - 32) / width, (size.height - 100) / height));
+  return { scale, x: (size.width - width * scale) / 2 - minX * scale, y: (size.height - 60 - height * scale) / 2 - minY * scale };
 }
 
 export function layoutCanvasNodes(nodes: readonly CanvasTemplateNode[]): CanvasTemplateNode[] {

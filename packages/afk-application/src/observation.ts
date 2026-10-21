@@ -48,6 +48,7 @@ export interface ExecutionSummary {
   phase?: RunPhase;
   sequence: number;
   terminal: boolean;
+  startedAt?: string;
   usage?: AgentUsage;
 }
 
@@ -77,6 +78,10 @@ export async function queryExecutionHistory(
     const usage = observed.integrity.valid ? projectAgentUsage(observed.events.filter(event =>
       event.sequence <= observed.integrity.lastSequence && event.context.workItemId === observed.state.run!.workItemId
       && event.correlationId === observed.events[0]?.correlationId)) : undefined;
+    const startedAt = observed.integrity.valid ? observed.events.find(event =>
+      event.data.kind === 'run.started' && event.sequence <= observed.integrity.lastSequence
+      && event.context.runId === runId && event.context.workItemId === observed.state.run!.workItemId
+      && event.correlationId === observed.events[0]?.correlationId)?.occurredAt : undefined;
     matching.push({
       sortKey: observed.events[0]?.occurredAt ?? '',
       summary: {
@@ -88,6 +93,7 @@ export async function queryExecutionHistory(
         phase: observed.state.run.phase,
         sequence: observed.state.sequence,
         terminal: observed.state.terminal,
+        ...(startedAt ? { startedAt } : {}),
         ...(usage ? { usage } : {}),
       },
     });

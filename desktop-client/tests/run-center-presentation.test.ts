@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents } from "../src/features/run-center/runtime-presentation";
+import { findRuntimeTerminalSession, groupRuntimeEvents, parseRuntimeSource, runtimeEventTitle, runtimeStateMeta, runtimeWorkspacePath, searchRuntimeEvents } from "../src/features/run-center/runtime-presentation";
 
 describe("searchRuntimeEvents", () => {
   it("matches history without replacing the latest run status", () => {
@@ -33,6 +33,11 @@ describe("groupRuntimeEvents", () => {
 });
 
 describe("run center presentation", () => {
+  it("uses the work item title for the primary label and falls back to the event result", () => {
+    expect(runtimeEventTitle({ title: "修复登录态", result: "工作项正在执行" })).toBe("修复登录态");
+    expect(runtimeEventTitle({ title: "  ", result: "工作项执行失败" })).toBe("工作项执行失败");
+  });
+
   it("parses GitHub work item sources into provider, repository, and issue", () => {
     expect(parseRuntimeSource("github:easyhaloo/afk #144")).toEqual({
       provider: "github",

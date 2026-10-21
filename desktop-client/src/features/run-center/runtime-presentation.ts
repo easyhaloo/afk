@@ -16,13 +16,18 @@ export type RuntimeStateVisual = {
 export type RuntimeEventLike = {
   id?: string;
   source: string;
+  title?: string;
   timestamp: string;
 };
+
+export function runtimeEventTitle(event: { title?: string; result: string }): string {
+  return event.title?.trim() || event.result;
+}
 
 export function searchRuntimeEvents<T extends RuntimeEventLike & { result: string; nextStep: string }>(events: T[], query: string): T[] {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return events;
-  return groupRuntimeEvents(events).filter(group => group.events.some(event => `${event.id ?? ""} ${event.source} ${event.result} ${event.nextStep}`.toLowerCase().includes(normalized))).flatMap(group => group.events);
+  return groupRuntimeEvents(events).filter(group => group.events.some(event => `${event.id ?? ""} ${event.source} ${event.title ?? ""} ${event.result} ${event.nextStep}`.toLowerCase().includes(normalized))).flatMap(group => group.events);
 }
 
 export type RuntimeEventGroup<T extends RuntimeEventLike = RuntimeEventLike> = {

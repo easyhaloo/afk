@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, ExternalLink, FolderGit2, GitBranch, Hand, History, Link2, ListChecks, Play, Plus, RefreshCw, Search, ShieldAlert, Workflow, X } from "lucide-react";
+import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Copy, ExternalLink, FolderGit2, GitBranch, Hand, Link2, ListChecks, Play, Plus, RefreshCw, Search, ShieldAlert, Workflow, X } from "lucide-react";
 import { Overlay } from "../../overlay";
 import type { ReactNode } from "react";
 import type {
@@ -17,7 +17,7 @@ import type {
 } from "../../../shared/backlog-contract";
 import type { AgentRuntime } from "../../../shared/ipc-contract";
 import { type ExecutionSummary } from "../../../shared/execution-contract";
-import { RunTimelineSection } from "../run-center/RunTimelineView";
+import { RunTimelineView } from "../run-center/RunTimelineView";
 import { useExecutionHistory } from "../run-center/use-execution-history";
 import {
   planRepositoryCheckoutPaths,
@@ -58,7 +58,7 @@ const stateFilterOptions: Array<{ value: GlobalWorkItem["state"] | "all"; label:
 const runStatusLabels: Record<WorkItemRunRecord["status"], string> = {
   starting: "准备中",
   running: "执行中",
-  completed: "旧记录：QA 待确认",
+  completed: "QA 待确认",
   failed: "失败",
 };
 
@@ -80,6 +80,7 @@ const terminalOptions: Array<{ value: WorkItemTerminalId; label: string }> = [
 
 type DetailTab = "overview" | "plan" | "runs";
 type RepositoryRunDraft = { selected: boolean; baseBranch: string };
+type WorkItemRunView = { key: string; runId: string; startedAt?: string; status: string; statusLabel: string; summary?: string; actions?: ReactNode; metadata: ReactNode; log?: ReactNode };
 
 function diagnosticTitle(diagnostic: WorkItemInventoryDiagnostic): string {
   return diagnostic.projectKey ? `${diagnostic.platform} · ${diagnostic.projectKey}` : diagnostic.platform;
@@ -167,6 +168,59 @@ function WorkItemEmptySection({ children }: { children: string }) {
   return <div className="work-item-section-empty">{children}</div>;
 }
 
+function RunStartTime({ value }: { value: string }) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return <span title={value}>开始时间不可用</span>;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return <time dateTime={value} title={`本地时间（${timeZone}）`}>
+    <span className="work-item-run-date">{date.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" })}</span>{" "}
+    <span className="work-item-run-clock">{date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })}</span>
+  </time>;
+}
+
+function WorkItemRunCard({ runId, startedAt, status, statusLabel, summary, selected, onSelect }: {
+  runId: string; startedAt?: string; status: string; statusLabel: string; summary?: string;
+  selected: boolean; onSelect: (button: HTMLButtonElement) => void;
+}) {
+  return <article className="work-item-run-card" data-run-id={runId} data-selected={selected}>
+    <button type="button" className="work-item-run-heading" aria-pressed={selected} aria-controls="work-item-run-inspector" onClick={event => onSelect(event.currentTarget)}>
+      <b>{startedAt ? <RunStartTime value={startedAt} /> : status === "pending" ? "等待开始" : "开始时间未记录"}</b>
+      <span className="work-item-run-outcome">
+        <em className={`work-item-run-result ${status}`}>{statusLabel}</em>
+        {summary ? <span className={`work-item-run-summary ${status}`} title={summary}>{summary}</span> : null}
+      </span>
+      <ChevronRight className="work-item-run-arrow" size={14} aria-hidden="true" />
+    </button>
+  </article>;
+}
+
+function WorkItemRunInspector({ runId, startedAt, status, statusLabel, summary, metadata, actions, log, onBack }: {
+  runId: string; startedAt?: string; status: string; statusLabel: string; summary?: string;
+  metadata: ReactNode; actions?: ReactNode; log?: ReactNode; onBack: () => void;
+}) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const copyRunId = async () => {
+    try {
+      setCopyState(await window.afkDesktop.copyText(runId) ? "copied" : "failed");
+    } catch {
+      setCopyState("failed");
+    }
+  };
+  return <section id="work-item-run-inspector" className="work-item-run-inspector" role="region" aria-label="运行详情" tabIndex={-1}>
+    <button type="button" className="work-item-run-back" onClick={onBack}><ArrowLeft size={14} aria-hidden="true" />返回运行记录</button>
+    <header className="work-item-run-inspector-heading">
+      <div>
+        <em className={`work-item-run-result ${status}`}>{statusLabel}</em>
+        <h4>{startedAt ? <RunStartTime value={startedAt} /> : status === "pending" ? "等待开始" : "开始时间未记录"}</h4>
+        {summary ? <p className={`work-item-run-inspector-summary ${status}`}>{summary}</p> : null}
+      </div>
+      <div className="work-item-run-actions">{actions}</div>
+    </header>
+    <section className="work-item-run-inspector-section"><h5>运行信息</h5><div className="work-item-run-inspector-meta">{metadata}<span>运行编号</span><div className="work-item-run-identity"><code title={runId}>{runId.replace(/^desktop-/, "").slice(0, 8)}</code><button type="button" aria-label={`复制运行 ${runId} 的完整编号`} title="复制完整编号" onClick={copyRunId}>{copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}</button></div></div>{copyState !== "idle" ? <span className="work-item-run-copy-notice" role="status">{copyState === "copied" ? "已复制" : "复制失败，请重试"}</span> : null}</section>
+    {log ? <section className="work-item-run-inspector-section"><h5>执行时间线</h5>{log}</section> : null}
+  </section>;
+}
+
 export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgent = "claude-code", onAttach, onWorkflow, onCreate, onReviewMerge }: { focusWorkItemId?: string; agentRuntimes?: AgentRuntime[]; defaultAgent?: string; onAttach?: (runId: string) => void; onWorkflow?: (runId: string, workItemId: string) => void; onCreate?: () => void; onReviewMerge?: () => void } = {}) {
   const [inventory, setInventory] = useState<WorkItemInventoryResult>(emptyInventory);
   const [loading, setLoading] = useState(true);
@@ -174,9 +228,12 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [query, setQuery] = useState("");
   const [platform, setPlatform] = useState<"all" | BacklogPlatform>("all");
   const [project, setProject] = useState("all");
-  const [stateFilter, setStateFilter] = useState<GlobalWorkItem["state"] | "all">("all");
+  const [stateFilter, setStateFilter] = useState<GlobalWorkItem["state"] | "all">("ready");
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
+  const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
+  const [runDetailOpen, setRunDetailOpen] = useState(false);
+  const runSelectionButton = useRef<HTMLButtonElement | null>(null);
   const [runSetupOpen, setRunSetupOpen] = useState(false);
   const [runNotice, setRunNotice] = useState("");
   const [runError, setRunError] = useState("");
@@ -255,6 +312,8 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
     selectedWorkItemId.current = item.id;
     setSelected(item);
     setDetailTab("overview");
+    setSelectedRunKey(null);
+    setRunDetailOpen(false);
     setRunSetupOpen(false);
     setRunNotice("");
     setRunError("");
@@ -288,6 +347,26 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const availableExecutionRepositories = selected ? executionRepositories(selected) : [];
   const selectedPlan = selected?.executionPlan ?? [];
   const selectedRuns = selected?.runs ?? [];
+  const runRecords: WorkItemRunView[] = [
+    ...auditedRuns.map(run => ({
+      key: `audit:${run.runId}`, runId: run.runId, startedAt: run.startedAt, status: run.status, statusLabel: auditedRunLabels[run.status],
+      summary: run.phase ? `${auditedPhaseLabels[run.phase]}阶段` : undefined,
+      actions: <>{onWorkflow ? <button type="button" aria-label={`查看运行 ${run.runId} 的工作流实例`} title="工作流实例" onClick={() => onWorkflow(run.runId, run.workItemId)}><Workflow size={14} /></button> : null}{onAttach && !run.terminal ? <button type="button" onClick={() => onAttach(run.runId)}>接管</button> : null}</>,
+      metadata: <><span>来源</span><b>运行审计</b><span>执行尝试</span><b>{run.attempt} · 事件序号 {run.sequence}</b></>,
+      log: typeof window.afkDesktop.workItems.executionRunDetail === "function" ? <RunTimelineView runId={run.runId} workItemId={run.workItemId} expanded running={run.status === "running"} load={(id, itemId) => window.afkDesktop.workItems.executionRunDetail(id, itemId)} /> : undefined,
+    })),
+    ...selectedRuns.map(run => ({
+      key: `launch:${run.id}`, runId: run.id, startedAt: run.startedAt, status: run.status, statusLabel: runStatusLabels[run.status],
+      summary: run.status === "failed" ? run.error?.trim() : undefined,
+      metadata: <><span>来源</span><b>启动记录</b>{run.workflow?.trim() ? <><span>工作流</span><b>{run.workflow}</b></> : null}{run.status === "failed" && !run.error?.trim() ? <><span>失败原因</span><b>未记录</b></> : null}{run.workspacePath ? <><span>工作目录</span><code title={run.workspacePath}>{run.workspacePath}</code></> : null}</>,
+    })),
+  ];
+  runRecords.sort((left, right) => (Date.parse(right.startedAt ?? "") || 0) - (Date.parse(left.startedAt ?? "") || 0));
+  const activeRun = runRecords.find(run => run.key === selectedRunKey) ?? runRecords[0];
+  const returnToRunList = () => {
+    setRunDetailOpen(false);
+    requestAnimationFrame(() => runSelectionButton.current?.focus());
+  };
   const remainingItems = Math.max(0, visibleItems.length - visibleLimit);
   const selectedExecutionRepositories = availableExecutionRepositories.filter(repository => repositoryRunDrafts[repositoryDraftKey(repository)]?.selected);
   const selectedCheckoutPaths = planRepositoryCheckoutPaths(selectedExecutionRepositories);
@@ -366,7 +445,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       {error ? <div className="backlog-alert error"><ShieldAlert size={15} />{error}</div> : null}
       {inventory.diagnostics.length ? <div className="work-item-diagnostics">{inventory.diagnostics.map((diagnostic, index) => <div key={`${diagnostic.platform}-${diagnostic.projectKey ?? "provider"}-${index}`}><b>{diagnosticTitle(diagnostic)}</b><span>{diagnostic.message}</span></div>)}</div> : null}
 
-      <SegmentedControl label="工作项快捷状态" value={stateFilter} options={[{ value: "all", label: "全部", count: inventory.items.length }, { value: "ready", label: "待处理", count: inventory.items.filter(item => item.state === "ready").length }, { value: "in_progress", label: "执行中", count: inventory.items.filter(item => item.state === "in_progress").length }]} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
+      <SegmentedControl label="工作项快捷状态" value={stateFilter} options={[{ value: "all", label: "全部", count: inventory.items.length }, { value: "ready", label: "待处理", count: inventory.items.filter(item => item.state === "ready").length }, { value: "in_progress", label: "执行中", count: inventory.items.filter(item => item.state === "in_progress").length }, { value: "done", label: "已完成", count: inventory.items.filter(item => item.state === "done").length }]} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
       <div className="backlog-toolbar work-items-toolbar">
         <label className="backlog-search"><Search size={14} /><input aria-label="搜索工作项" value={query} onChange={event => { setQuery(event.target.value); setVisibleLimit(pageSize); }} placeholder="搜索标题、来源、关联仓库或标签" /></label>
         <FilterPanel label="筛选工作项" filters={[
@@ -406,8 +485,8 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       {remainingItems > 0 ? <div className="work-items-load-more"><span>还有 {remainingItems} 个</span><button type="button" aria-label="显示更多工作项" onClick={() => setVisibleLimit(limit => limit + pageSize)}>继续加载 <ChevronDown size={13} /></button></div> : null}
 
       {selected ? (<Overlay>
-        <div className="work-item-detail-layer" onMouseDown={event => { if (event.target === event.currentTarget) closeDetails(); }}>
-          <aside className="work-item-detail" role="dialog" aria-modal="true" aria-label={`工作项 ${selected.id}`}>
+        <div className="work-item-detail-layer" data-runs={detailTab === "runs"} onMouseDown={event => { if (event.target === event.currentTarget) closeDetails(); }}>
+          <aside className="work-item-detail" data-runs={detailTab === "runs"} role="dialog" aria-modal={detailTab !== "runs"} aria-label={`工作项 ${selected.id}`}>
             <header className="work-item-detail-header">
               <div><small className="work-item-detail-id"><ProviderIcon provider={selected.project.platform ?? selected.sources?.[0]?.platform} size={11} />{selected.issueNumber ? `${selected.project.projectKey} #${selected.issueNumber}` : selected.id} · {executionModeLabels[selected.executionMode]} · {selected.executionEligible ? "可执行" : "不可执行"}</small><h2>{selected.title}</h2><p>{[selected.owner ? `负责人：${selected.owner}` : "", selected.priority ? `优先级 ${selected.priority}` : "", selected.updatedAt ? `更新于 ${selected.updatedAt}` : ""].filter(Boolean).join(" · ") || "独立工作项"}</p></div>
               <button type="button" aria-label="关闭工作项详情" onClick={closeDetails}><X size={16} /></button>
@@ -443,13 +522,22 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
                 {selectedPlan.length ? selectedPlan.map((step, index) => <div className="work-item-plan-card" key={step.id}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{step.title}</b><small>{step.detail ?? "待补充执行说明"}</small></div><em className={step.status ?? "pending"}>{step.status === "completed" ? "已完成" : step.status === "running" ? "执行中" : step.status === "blocked" ? "阻塞" : "待执行"}</em></div>) : <WorkItemEmptySection>尚未生成执行计划；可在开始执行时选择工作流。</WorkItemEmptySection>}
               </section> : null}
 
-              {detailTab === "runs" ? <section className="work-item-detail-section">
-                <div className="work-item-section-heading"><h3>运行记录</h3><small>每次运行使用独立任务空间</small></div>
+              {detailTab === "runs" ? <section className="work-item-detail-section work-item-run-history" data-detail-open={runDetailOpen}>
+                <div className="work-item-section-heading"><h3>运行记录</h3></div>
                 {auditError ? <div className="work-item-run-error">运行审计查询失败：{auditError}</div> : null}
-                {auditedRuns.map(run => <div key={run.runId}><div className="work-item-run-card"><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.runId}</b><small>第 {run.attempt} 次 · {run.phase ? auditedPhaseLabels[run.phase] : "尚未开始"} · 事件 #{run.sequence}</small></div><em>{auditedRunLabels[run.status]}</em>{onWorkflow ? <button type="button" aria-label={`查看运行 ${run.runId} 的工作流实例`} title="工作流实例" onClick={() => onWorkflow(run.runId, selected.id)}><Workflow size={14} /></button> : null}{onAttach && !run.terminal ? <button type="button" onClick={() => onAttach(run.runId)}>接管</button> : null}</div>{typeof window.afkDesktop.workItems.executionRunDetail === "function" ? <RunTimelineSection runId={run.runId} workItemId={selected.id} running={run.status === "running"} load={(id, itemId) => window.afkDesktop.workItems.executionRunDetail(id, itemId)} /> : null}</div>)}
-                {auditCursor ? <button type="button" onClick={() => void loadMoreAuditedRuns()}>查看更多运行记录</button> : null}
-                {selectedRuns.map(run => <div className="work-item-run-card" key={`old:${run.id}`}><span className={`work-item-run-status ${run.status}`}><History size={14} /></span><div><b>{run.id}</b><small>旧记录 · {run.workflow ?? "默认工作流"} · {run.startedAt}</small><code>{run.workspacePath ?? workspacePath(selected)}</code></div><em>{runStatusLabels[run.status]}</em></div>)}
-                {!auditedRuns.length && !selectedRuns.length ? <WorkItemEmptySection>暂无运行记录。</WorkItemEmptySection> : null}
+                {runRecords.length ? <div className="work-item-run-split">
+                  <div className="work-item-run-list" role="group" aria-label="运行记录列表">
+                    {runRecords.map(({ key, ...run }) => <WorkItemRunCard key={key} {...run} selected={key === activeRun?.key} onSelect={button => {
+                      runSelectionButton.current = button;
+                      setSelectedRunKey(key);
+                      setRunDetailOpen(true);
+                      if (button) requestAnimationFrame(() => { if (button.offsetParent === null) document.getElementById("work-item-run-inspector")?.focus(); });
+                    }} />)}
+                    {auditCursor ? <button type="button" className="work-item-run-more" onClick={() => void loadMoreAuditedRuns()}>查看更多运行记录</button> : null}
+                  </div>
+                  {activeRun ? <WorkItemRunInspector key={activeRun.key} runId={activeRun.runId} startedAt={activeRun.startedAt} status={activeRun.status} statusLabel={activeRun.statusLabel} summary={activeRun.summary} metadata={activeRun.metadata} actions={activeRun.actions} log={activeRun.log} onBack={returnToRunList} /> : null}
+                </div> : null}
+                {!runRecords.length ? <WorkItemEmptySection>暂无运行记录。</WorkItemEmptySection> : null}
               </section> : null}
             </div>
             <footer className="work-item-detail-footer">

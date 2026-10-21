@@ -21,6 +21,11 @@ function port(events: RunEvent[] = [event]): RunEventQueryPort {
 }
 
 describe("work item execution query", () => {
+  it("passes the recorded start time through the application and desktop boundary", async () => {
+    const started: RunEvent = { ...event, id: "started", sequence: 2, type: "run.started", occurredAt: "2026-10-19T12:16:17.270Z", data: { kind: "run.started" } };
+    const page = await createWorkItemExecutionQueryService(port([event, started])).list();
+    expect(page.executions[0]).toMatchObject({ startedAt: started.occurredAt, status: "running" });
+  });
   it("passes verified session usage from the application to the desktop DTO", async () => {
     const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12 };
     const recorded: RunEvent = { ...event, id: "usage", sequence: 2, type: "agent.session_recorded", data: { kind: "agent.session_recorded", sessionId: "session-1", usage } };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasCanvasNodeCollisions, insertCanvasNodeAfter, layoutCanvasNodes, zoomCanvasViewportAtPoint } from "../src/features/workflows/graph/canvas-layout";
+import { CANVAS_NODE_HEIGHT, CANVAS_NODE_WIDTH, fitCanvasViewport, hasCanvasNodeCollisions, insertCanvasNodeAfter, layoutCanvasNodes, zoomCanvasViewportAtPoint } from "../src/features/workflows/graph/canvas-layout";
 
 const nodes = (count: number) => Array.from({ length: count }, (_, index) => ({
   id: `agent-${index + 1}`,
@@ -23,17 +23,29 @@ describe("custom workflow canvas layout", () => {
     expect(result.scale).toBe(1.25);
   });
 
+  it("fits a branching graph and its labels inside a narrow canvas", () => {
+    const positions = [{ x: 48, y: 186 }, { x: 292, y: 186 }, { x: 536, y: 94 }, { x: 536, y: 278 }, { x: 780, y: 186 }, { x: 1024, y: 186 }];
+    const viewport = fitCanvasViewport(positions, { width: 600, height: 500 });
+    for (const position of positions) {
+      expect(viewport.x + position.x * viewport.scale).toBeGreaterThanOrEqual(16);
+      expect(viewport.x + (position.x + CANVAS_NODE_WIDTH) * viewport.scale).toBeLessThanOrEqual(584);
+      expect(viewport.y + (position.y - 70) * viewport.scale).toBeGreaterThanOrEqual(0);
+      expect(viewport.y + (position.y + CANVAS_NODE_HEIGHT + 24) * viewport.scale).toBeLessThan(440);
+    }
+  });
+
   it("clamps pointer-centered zoom to the supported range", () => {
     expect(zoomCanvasViewportAtPoint({ x: 0, y: 0, scale: 1 }, { x: 0, y: 0 }, 2).scale).toBe(1.35);
-    expect(zoomCanvasViewportAtPoint({ x: 0, y: 0, scale: 1 }, { x: 0, y: 0 }, 0.2).scale).toBe(0.7);
+    expect(zoomCanvasViewportAtPoint({ x: 0, y: 0, scale: 1 }, { x: 0, y: 0 }, 0.01).scale).toBe(0.1);
   });
 
   it("places a long workflow in rows without overlapping nodes", () => {
     const result = layoutCanvasNodes(nodes(12));
 
     expect(result).toHaveLength(12);
-    expect(result.every(node => node.x >= 22 && node.y >= 22 && node.x + 164 <= 1478 && node.y + 94 <= 618)).toBe(true);
+    expect(result.every(node => node.x >= 22 && node.y >= 22 && node.x + CANVAS_NODE_WIDTH <= 1478 && node.y + CANVAS_NODE_HEIGHT <= 618)).toBe(true);
     expect(hasCanvasNodeCollisions(result)).toBe(false);
+    expect(result.every(node => node.x <= 1400 && node.y <= 440)).toBe(true);
   });
 
   it("is deterministic and preserves the input order", () => {

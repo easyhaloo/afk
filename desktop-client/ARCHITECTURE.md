@@ -90,6 +90,23 @@ subprocesses use the fixture binaries through explicit CLI configuration and PAT
 they do not require or use real provider credentials. Tests isolate HOME, workspaces,
 and Electron user data, including the JSONL audit streams.
 
+Workflow coverage lives in `workflow.spec.ts` and `workflow-crud.spec.ts`.
+The CRUD suite edits managed steps through the UI, checks the saved YAML after
+reload, and exercises project template discovery, updates and removal through
+their supported filesystem source. It also loads seven graph structures from
+`.yml` and `.yaml` files and checks node geometry and dependencies at wide and
+narrow viewport sizes. Successful screenshots and graph definitions can be kept
+outside the generated test directory:
+
+```bash
+AFK_E2E_PORT=5291 AFK_UI_EVIDENCE_DIR="$HOME/afk-workflow-evidence" \
+  pnpm --dir desktop-client exec playwright test --config=playwright.config.ts \
+  workflow.spec.ts workflow-crud.spec.ts --output="$HOME/afk-workflow-evidence/results"
+```
+
+Screenshots are also attached to the Playwright results when no evidence
+directory is specified. Keep generated evidence outside the source tree.
+
 | API | 主进程操作 | 输入约束 |
 | --- | --- | --- |
 | `snapshot(workspace)` | 读取 `.afk/runs/**/events.jsonl`，诊断 `afk --version`，列出 Docker / Podman / tmux | 工作区必须是存在的目录。 |

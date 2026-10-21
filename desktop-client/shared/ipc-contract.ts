@@ -58,6 +58,37 @@ export type RuntimeRunEvent = {
   usage?: AgentUsage;
 };
 
+/**
+ * The states a detected agent runtime can be in.
+ *
+ * The wire contract and the snapshot schema are two halves of one
+ * answer: the schema validates the payload the contract describes. Each
+ * vocabulary is named here, once, and the schema reads it from here.
+ */
+export const AGENT_RUNTIME_STATUSES = ["available", "missing", "error"] as const;
+
+export type AgentRuntimeStatus = (typeof AGENT_RUNTIME_STATUSES)[number];
+
+/** The kinds of template a canvas node can be. */
+export const CANVAS_TEMPLATE_KINDS = ["agent", "qa"] as const;
+
+export type CanvasTemplateKind = (typeof CANVAS_TEMPLATE_KINDS)[number];
+
+/** Where a workflow template came from. */
+export const WORKFLOW_TEMPLATE_SOURCES = ["builtin", "project", "managed"] as const;
+
+export type WorkflowTemplateSource = (typeof WORKFLOW_TEMPLATE_SOURCES)[number];
+
+/** Where the workflow configuration came from. */
+export const WORKFLOW_CONFIG_SOURCES = ["project", "cli-defaults"] as const;
+
+export type WorkflowConfigSource = (typeof WORKFLOW_CONFIG_SOURCES)[number];
+
+/** The states the loop can be in. */
+export const LOOP_STATES = ["running", "stopped"] as const;
+
+export type LoopState = (typeof LOOP_STATES)[number];
+
 export type AgentRuntime = {
   id: WorkItemAgentId;
   label: string;
@@ -65,7 +96,7 @@ export type AgentRuntime = {
   available: boolean;
   executable: string;
   summary: string;
-  status: "available" | "missing" | "error";
+  status: AgentRuntimeStatus;
   installation: { source: string; version: string; checkedAt: string };
 };
 
@@ -90,7 +121,7 @@ export type AgentProviderId = typeof AGENT_PROVIDER_IDS[number];
 
 export type CanvasTemplateNode = {
   id: string;
-  template: "agent" | "qa";
+  template: CanvasTemplateKind;
   label: string;
   description: string;
   prompt: string;
@@ -115,14 +146,14 @@ export type WorkflowTemplateSummary = {
   id: string;
   name: string;
   description: string;
-  source: "builtin" | "project" | "managed";
+  source: WorkflowTemplateSource;
   steps: WorkflowTemplateStepSummary[];
   canvasNodes?: CanvasTemplateNode[];
 };
 
 export type WorkflowConfigSummary = {
   configPath: string;
-  source: "project" | "cli-defaults";
+  source: WorkflowConfigSource;
   agentDefault: string;
   tmuxSession: string;
   targetBranch: string;
@@ -177,7 +208,7 @@ export type WorkflowRunSummary = {
 };
 
 export type LoopStatus = {
-  state: "running" | "stopped";
+  state: LoopState;
   pid?: number;
   execution: { active: number; ids: string[] };
   totals: { completed: number; failed: number };

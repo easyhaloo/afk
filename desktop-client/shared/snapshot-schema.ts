@@ -16,7 +16,16 @@
 import { z } from "zod";
 import { WORKFLOW_STEP_KINDS } from "@afk/core";
 import { WORK_ITEM_AGENT_IDS, WORK_ITEM_RUN_STATUSES } from "./backlog-contract.js";
-import { AGENT_PROVIDER_IDS, WORKFLOW_RUN_STATUSES, type Snapshot } from "./ipc-contract.js";
+import {
+  AGENT_PROVIDER_IDS,
+  AGENT_RUNTIME_STATUSES,
+  CANVAS_TEMPLATE_KINDS,
+  LOOP_STATES,
+  WORKFLOW_CONFIG_SOURCES,
+  WORKFLOW_RUN_STATUSES,
+  WORKFLOW_TEMPLATE_SOURCES,
+  type Snapshot,
+} from "./ipc-contract.js";
 
 const agentProviderIdSchema = z.enum(AGENT_PROVIDER_IDS);
 const workItemAgentIdSchema = z.enum(WORK_ITEM_AGENT_IDS);
@@ -31,7 +40,7 @@ const cliCapabilitySchema = z.object({
 
 const canvasTemplateNodeSchema = z.object({
   id: z.string(),
-  template: z.enum(["agent", "qa"]),
+  template: z.enum(CANVAS_TEMPLATE_KINDS),
   label: z.string(),
   description: z.string(),
   prompt: z.string(),
@@ -64,14 +73,14 @@ const workflowTemplateSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
-  source: z.enum(["builtin", "project", "managed"]),
+  source: z.enum(WORKFLOW_TEMPLATE_SOURCES),
   steps: z.array(workflowTemplateStepSummarySchema),
   canvasNodes: z.array(canvasTemplateNodeSchema).optional(),
 });
 
 const workflowConfigSummarySchema = z.object({
   configPath: z.string(),
-  source: z.enum(["project", "cli-defaults"]),
+  source: z.enum(WORKFLOW_CONFIG_SOURCES),
   agentDefault: z.string(),
   tmuxSession: z.string(),
   targetBranch: z.string(),
@@ -110,7 +119,7 @@ const workflowRunSummarySchema = z.object({
 });
 
 const loopStatusSchema = z.object({
-  state: z.enum(["running", "stopped"]),
+  state: z.enum(LOOP_STATES),
   pid: z.number().optional(),
   execution: z.object({ active: z.number(), ids: z.array(z.string()) }),
   totals: z.object({ completed: z.number(), failed: z.number() }),
@@ -126,7 +135,7 @@ const agentRuntimeSchema = z.object({
   available: z.boolean(),
   executable: z.string(),
   summary: z.string(),
-  status: z.enum(["available", "missing", "error"]),
+  status: z.enum(AGENT_RUNTIME_STATUSES),
   installation: z.object({ source: z.string(), version: z.string(), checkedAt: z.string() }),
 });
 

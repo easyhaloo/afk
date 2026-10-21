@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { Signal } from '@afk/infrastructure';
-import { readSignal, readSignalSync } from '@afk/infrastructure';
-import { ControlModeConnection } from './control-mode.js';
+import { logger, readSignal, readSignalSync } from '@afk/infrastructure';
+import { ControlModeConnection, type ControlModeOutputCallback } from './control-mode.js';
 import { normalizeTmuxSessionName } from '../../domain/tmux/session-name.js';
 import type { AgentReadiness, TmuxCaptureOptions, TmuxSession } from '../../domain/tmux/types.js';
 
@@ -12,16 +12,34 @@ export type { TmuxCaptureOptions, TmuxSession };
 type SignalReaders = { readSignal: typeof readSignal; readSignalSync: typeof readSignalSync };
 
 /**
+ * The part of a Control Mode connection this client uses.
+ *
+ * The connection itself talks to tmux over a pipe, which needs a terminal
+ * the test runner does not have. Naming what the client needs leaves the
+ * pane-watching path open to a test that can drive it.
+ */
+export interface ControlModeChannel {
+  onOutput(callback: ControlModeOutputCallback): void;
+  offOutput(callback: ControlModeOutputCallback): void;
+  sendRawCommand(command: string): void;
+  close(): void;
+}
+
+/**
  * Tmux client wrapper for session management.
  *
  * Uses Control Mode (`tmux -CC`) for interactive operations (sendKeys, waitForSignal)
  * to receive real-time events, and plain `exec()` for one-shot commands.
  */
 export class TmuxClient {
-  private controlMode: ControlModeConnection | null = null;
+  private controlMode: ControlModeChannel | null = null;
   private currentSession: string | null = null;
 
-  constructor(private readonly signalReaders: SignalReaders = { readSignal, readSignalSync }) {}
+  constructor(
+    private readonly signalReaders: SignalReaders = { readSignal, readSignalSync },
+    private readonly connectControlMode: (session: string) => ControlModeChannel = session =>
+      new ControlModeConnection({ session, pauseAfter: 1 }),
+  ) {}
 
   /**
    * Open a Control Mode connection to a session.
@@ -30,7 +48,7 @@ export class TmuxClient {
   async openSession(session: string): Promise<void> {
     this.closeSession();
     const normalized = normalizeTmuxSessionName(session);
-    this.controlMode = new ControlModeConnection({ session: normalized, pauseAfter: 1 });
+    this.controlMode = this.connectControlMode(normalized);
     this.currentSession = normalized;
   }
 
@@ -252,8 +270,15 @@ export class TmuxClient {
   }
 
   /**
-   * Wait for signal file to appear.
-   * Uses Control Mode output events when connected, falls back to polling.
+   * Wait for the signal file to carry a specific type.
+   *
+   * The file is read before the wait starts, and again whenever the pane
+   * produces output. The pane tells us that something changed, not that
+   * this file changed, so a signal that was already on disk when the wait
+   * began would otherwise wait for output that never comes.
+   *
+   * A file that is there and cannot be read ends the wait: no signal will
+   * ever come from it, and the caller has something else to fall back on.
    */
   async waitForSignal(
     session: string,
@@ -262,35 +287,78 @@ export class TmuxClient {
     worktreeDir: string,
     timeout: number = 300000
   ): Promise<Signal | null> {
+    const existing = await this.readOutcome(worktreeDir, signalType);
+    if (existing.signal) return existing.signal;
+    if (existing.broken) return null;
+
     // Try Control Mode first if connected to this session
     if (this.controlMode && this.currentSession === normalizeTmuxSessionName(session)) {
+      // The channel is held locally: the connection can be closed while
+      // the wait is still open, and a wait that outlives its channel must
+      // end quietly rather than throw on the way out.
+      const channel = this.controlMode;
       return new Promise<Signal | null>((resolve) => {
-        const outputHandler = (_pane: string, text: string) => {
-          // When we see the signal file written, resolve
-          const signal = this.signalReaders.readSignalSync(worktreeDir);
-          if (signal && signal.type === signalType) {
-            this.controlMode!.offOutput(outputHandler);
-            resolve(signal);
-          }
+        let timer: NodeJS.Timeout | undefined;
+        let settled = false;
+        const finish = (signal: Signal | null): void => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          channel.offOutput(outputHandler);
+          resolve(signal);
         };
-        this.controlMode!.onOutput(outputHandler);
+        const outputHandler = (_pane: string, _text: string): void => {
+          // When we see the signal file written, resolve
+          const outcome = this.readOutcomeSync(worktreeDir, signalType);
+          if (outcome.signal) finish(outcome.signal);
+          else if (outcome.broken) finish(null);
+        };
 
         // Timeout fallback
-        const timer = setTimeout(() => {
-          this.controlMode!.offOutput(outputHandler);
-          resolve(null);
-        }, timeout);
+        timer = setTimeout(() => finish(null), timeout);
+        channel.onOutput(outputHandler);
       });
     }
 
     // Fallback: filesystem polling
     const start = Date.now();
     while (Date.now() - start < timeout) {
-      const signal = await this.signalReaders.readSignal(worktreeDir);
-      if (signal && signal.type === signalType) return signal;
+      const outcome = await this.readOutcome(worktreeDir, signalType);
+      if (outcome.signal) return outcome.signal;
+      if (outcome.broken) return null;
       await this.sleep(2000);
     }
     return null;
+  }
+
+  /**
+   * What the signal file holds right now.
+   *
+   * The reader throws when the file is there and cannot be read. Inside a
+   * wait that is not a crash: the file is broken, no signal will ever come
+   * from it, and the wait is over. The reason is logged, because a wait
+   * that ends with nothing otherwise looks exactly like a wait that timed
+   * out.
+   */
+  private async readOutcome(worktreeDir: string, signalType: Signal['type']): Promise<{ signal: Signal | null; broken: boolean }> {
+    try {
+      const signal = await this.signalReaders.readSignal(worktreeDir);
+      return { signal: signal && signal.type === signalType ? signal : null, broken: false };
+    } catch (error) {
+      logger.warn({ worktreeDir, err: error }, 'the signal file could not be read; no signal will come from it');
+      return { signal: null, broken: true };
+    }
+  }
+
+  /** The same question, asked from a synchronous callback. */
+  private readOutcomeSync(worktreeDir: string, signalType: Signal['type']): { signal: Signal | null; broken: boolean } {
+    try {
+      const signal = this.signalReaders.readSignalSync(worktreeDir);
+      return { signal: signal && signal.type === signalType ? signal : null, broken: false };
+    } catch (error) {
+      logger.warn({ worktreeDir, err: error }, 'the signal file could not be read; no signal will come from it');
+      return { signal: null, broken: true };
+    }
   }
 
   private async exec(args: string[]): Promise<string> {

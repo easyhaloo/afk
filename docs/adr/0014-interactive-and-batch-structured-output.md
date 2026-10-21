@@ -36,6 +36,13 @@ The runner polls the file every 2s. The write is atomic (temp + rename).
 | `handoff_ready` | Agent ready for context handoff (summary in payload) |
 | `timeout` | Watchdog fired (written by watchdog process, not agent) |
 
+The file has one grammar: `SignalSchema` in `@afk/infrastructure`. The
+writer checks a signal against it before writing, so a signal no reader
+can accept is refused where the mistake is. The readers report a file
+that is present but unreadable as an error rather than as an absence: an
+unreadable signal used to leave the runner waiting for a signal that
+could never arrive, until the timeout named the wrong reason.
+
 **Why not stream?** In interactive mode, the agent runs in a tmux TUI — there is no stdout stream to parse. The session persists to `~/.claude/projects/.../sessions/<id>.jsonl`, but that file is only accessible on the machine where the agent ran.
 
 ### Batch Mode → Event Stream Parsing

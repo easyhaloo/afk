@@ -6,7 +6,7 @@ export interface ControlModeOptions {
   pauseAfter?: number;  // flow control: pause after N seconds
 }
 
-type OutputCallback = (pane: string, text: string) => void;
+export type ControlModeOutputCallback = (pane: string, text: string) => void;
 type NotificationCallback = (line: string) => void;
 type ExitCallback = () => void;
 
@@ -47,7 +47,7 @@ export class ControlModeConnection {
   private nextCmdId: number = 1;
 
   private pendingCommands = new Map<number, PendingCommand>();
-  private outputCallbacks: OutputCallback[] = [];
+  private outputCallbacks: ControlModeOutputCallback[] = [];
   private notificationCallbacks: NotificationCallback[] = [];
   private exitCallbacks: ExitCallback[] = [];
 
@@ -135,14 +135,14 @@ export class ControlModeConnection {
   /**
    * Subscribe to pane output notifications.
    */
-  onOutput(callback: OutputCallback): void {
+  onOutput(callback: ControlModeOutputCallback): void {
     this.outputCallbacks.push(callback);
   }
 
   /**
    * Unsubscribe from pane output notifications.
    */
-  offOutput(callback: OutputCallback): void {
+  offOutput(callback: ControlModeOutputCallback): void {
     this.outputCallbacks = this.outputCallbacks.filter(cb => cb !== callback);
   }
 

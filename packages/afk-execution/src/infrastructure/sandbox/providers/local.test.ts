@@ -257,4 +257,26 @@ describe('LocalSandboxProvider', () => {
       structuredOutput: signal,
     });
   });
+
+  it('fails with the reason when the signal file cannot be read', async () => {
+    const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-execution-'));
+    await writeFile(join(worktreePath, '.afk-signal.json'), '{not json');
+    const execution = new LocalAgentExecution({
+      worktreePath,
+      sessionName: 'broken-signal',
+      command: { argv: ['agent'], cwd: worktreePath },
+      generation: 1,
+      prompt: 'verify acceptance criteria',
+      signalType: 'goal_complete',
+      metadata: { provider: 'claude-code', transport: 'process' },
+      tmux: {} as never,
+    });
+
+    // The agent finished and left a file nobody can read. Waiting cannot
+    // mend it, and a timeout would name the wrong reason.
+    await expect(execution.waitForResult({ completionTimeoutMs: 30_000 })).resolves.toMatchObject({
+      status: 'failed',
+      error: { code: 'INVALID_SIGNAL_FILE' },
+    });
+  });
 });

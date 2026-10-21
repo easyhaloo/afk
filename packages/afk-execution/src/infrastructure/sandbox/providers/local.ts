@@ -18,7 +18,7 @@ import { promises as fs, realpathSync } from 'fs';
 import { join } from 'path';
 import { WorktreeManager } from '../../git/index.js';
 import type { SandboxTmux } from '../../../domain/tmux/types.js';
-import { clearSignal, clearStatus, getTokenUsage, quoteShellArgument, readSignal } from '@afk/infrastructure';
+import { clearSignal, clearStatus, getTokenUsage, quoteShellArgument, readSignal, type Signal } from '@afk/infrastructure';
 import { StreamingAgentExecution } from './streaming.js';
 import { normalizeTmuxSessionName } from '../../../domain/tmux/session-name.js';
 import { agentReadiness } from '../../tmux/agent-readiness.js';
@@ -270,22 +270,37 @@ export class LocalAgentExecution implements AgentExecution {
 
       // Check for completion signal first (agent writes .afk-signal.json on goal_complete).
       // Completion must take priority over context_high: if goal is done, return immediately.
+      let sig: Signal | null;
       try {
-        const sig = await readSignal(this.worktreePath);
-        if (sig?.type === 'goal_complete') {
-          this.done = true;
-          return {
-            version: 1,
-            runId: this.id,
-            status: 'completed',
-            provider: this.metadata.provider,
-            sessionId: this.sessionId,
-            commits: [],
-            branch: this.sessionName,
-            structuredOutput: sig,
-          };
-        }
-      } catch { /* ignore */ }
+        sig = await readSignal(this.worktreePath);
+      } catch (error) {
+        // The agent finished and left a file nobody can read. Waiting
+        // cannot mend it, and a timeout would name the wrong reason.
+        this.done = true;
+        return {
+          version: 1,
+          runId: this.id,
+          status: 'failed',
+          provider: this.metadata.provider,
+          sessionId: this.sessionId,
+          commits: [],
+          branch: this.sessionName,
+          error: { code: 'INVALID_SIGNAL_FILE', message: (error as Error).message },
+        };
+      }
+      if (sig?.type === 'goal_complete') {
+        this.done = true;
+        return {
+          version: 1,
+          runId: this.id,
+          status: 'completed',
+          provider: this.metadata.provider,
+          sessionId: this.sessionId,
+          commits: [],
+          branch: this.sessionName,
+          structuredOutput: sig,
+        };
+      }
 
       // Check token threshold (context near limit → return context_high result).
       // Only checked after confirming goal is not yet complete.

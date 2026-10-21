@@ -3,9 +3,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { readSignalSync } from '@afk/infrastructure';
+import { readSignal, readSignalSync } from '@afk/infrastructure';
 import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
 import type { AgentReadiness } from './agent-readiness.js';
+
+/** A Control Mode connection that never says anything. */
+function fakeControlMode() {
+  const handlers: ((pane: string, text: string) => void)[] = [];
+  return {
+    handlers,
+    onOutput(callback: (pane: string, text: string) => void) { handlers.push(callback); },
+    offOutput(callback: (pane: string, text: string) => void) {
+      const index = handlers.indexOf(callback);
+      if (index >= 0) handlers.splice(index, 1);
+    },
+    sendRawCommand() {},
+    close() {},
+  };
+}
 
 describe('normalizeTmuxSessionName', () => {
   it('rewrites colons the same way tmux stores session names', () => {
@@ -67,6 +82,42 @@ describe('TmuxClient signal readers', () => {
 
     await expect(client.waitForSignal('', '', 'goal_complete', '/unused', 100)).resolves.toEqual(signal);
     expect(readLegacySignal).toHaveBeenCalledWith('/unused');
+  });
+
+  it('finds a signal that was already on disk when the wait began', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'afk-tmux-signal-'));
+    const channel = fakeControlMode();
+    const client = new TmuxClient({ readSignal, readSignalSync }, () => channel);
+    const signal = { type: 'goal_complete' as const, timestamp: new Date().toISOString(), summary: 'ready' };
+    try {
+      await client.openSession('afk-test-session');
+      // The agent wrote the signal before the wait started. The pane will
+      // not say anything about it, so a wait that only listens for output
+      // sits there until it times out.
+      await writeFile(join(dir, '.afk-signal.json'), JSON.stringify(signal));
+
+      await expect(client.waitForSignal('afk-test-session', 'main', 'goal_complete', dir, 500)).resolves.toEqual(signal);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('ends the wait at once when the signal file cannot be read', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'afk-tmux-signal-'));
+    const channel = fakeControlMode();
+    const client = new TmuxClient({ readSignal, readSignalSync }, () => channel);
+    try {
+      await client.openSession('afk-test-session');
+      await writeFile(join(dir, '.afk-signal.json'), '{not json');
+
+      const started = Date.now();
+      await expect(client.waitForSignal('afk-test-session', 'main', 'goal_complete', dir, 30_000)).resolves.toBeNull();
+      // Not after the timeout: no signal will ever come from a file that
+      // nobody can read.
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

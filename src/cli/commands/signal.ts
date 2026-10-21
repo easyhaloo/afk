@@ -1,7 +1,7 @@
-import { Command, InvalidArgumentError } from 'commander';
+import { Command, InvalidArgumentError, Option } from 'commander';
 import chalk from 'chalk';
 import { simpleGit } from 'simple-git';
-import { getCurrentTimestamp, type Signal } from '@afk/infrastructure';
+import { getCurrentTimestamp, SIGNAL_TYPES, type Signal } from '@afk/infrastructure';
 import { writeSignal, readSignal, clearSignal, waitForSignal } from '@afk/infrastructure';
 import { handleCommandError, success, info, warning, detail, formatJson } from '../cli-utils.js';
 
@@ -117,14 +117,18 @@ export function registerSignalCommands(program: Command): void {
 
   signal.command('wait')
     .description('Wait for a specific signal type')
-    .requiredOption('-t, --type <type>', 'Signal type to wait for (goal_complete, handoff_ready, timeout, idle)')
+    // The type is checked against the schema's own list, so a typo is
+    // refused now rather than after the full timeout.
+    .addOption(new Option('-t, --type <type>', 'Signal type to wait for')
+      .choices([...SIGNAL_TYPES])
+      .makeOptionMandatory())
     .option('--timeout <ms>', 'Timeout in milliseconds', '300000')
     .option('--interval <ms>', 'Polling interval in milliseconds', '2000')
     .option('--dir <path>', 'Working directory', process.cwd())
     .action(async options => {
       try {
         info(`Waiting for signal: ${options.type}...`);
-        const signalData = await waitForSignal(options.type, {
+        const signalData = await waitForSignal(options.type as Signal['type'], {
           timeout: parsePositiveInt(String(options.timeout)),
           interval: parsePositiveInt(String(options.interval)),
           dir: options.dir,

@@ -53,6 +53,17 @@ export const SignalSchema = z.discriminatedUnion('type', [
 
 export type Signal = z.infer<typeof SignalSchema>;
 
+/**
+ * The signal types a signal file may carry.
+ *
+ * Read off the schema rather than written out again: a second list would
+ * be a second answer to "which signals exist", and the two would drift.
+ */
+export const SIGNAL_TYPES: readonly Signal['type'][] = Array.from(
+  SignalSchema.options.values(),
+  option => option.shape.type.value,
+);
+
 export function getCurrentTimestamp(): string {
   return new Date().toISOString();
 }

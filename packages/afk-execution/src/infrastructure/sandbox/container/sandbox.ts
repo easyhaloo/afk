@@ -22,7 +22,7 @@
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { isAbsolute, join, relative } from 'path';
-import { clearSignal, readSignal } from '@afk/infrastructure';
+import { clearSignal, readSignal, type Signal } from '@afk/infrastructure';
 import type { Sandbox, SandboxOptions } from '../../../domain/sandbox/types.js';
 import type {
   AgentStartOptions,
@@ -309,7 +309,17 @@ export class ContainerAgentExecution implements AgentExecution {
         return this.result('timed_out');
       }
 
-      const signal = await readSignal(this.worktreePath).catch(() => undefined);
+      let signal: Signal | null;
+      try {
+        signal = await readSignal(this.worktreePath);
+      } catch (error) {
+        // The agent finished and left a file nobody can read. Waiting
+        // cannot mend it, and a timeout would name the wrong reason.
+        this._done = true;
+        return this.result('failed', {
+          error: { code: 'INVALID_SIGNAL_FILE', message: (error as Error).message },
+        });
+      }
       if (signal?.type === this.signalType) {
         this._done = true;
         return this.result('completed', { structuredOutput: signal });

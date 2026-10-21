@@ -1356,7 +1356,7 @@ export class WorkflowRunner {
           // a timeout, not a failure: the agent did not choose to stop, and
           // the run has to be recorded as the timeout it was. Which of the
           // two timers noticed first no longer decides.
-          // 'failed', 'blocked', 'aborted' — treat as failure
+          // 'failed', 'aborted' — treat as failure
           const diagnostics = formatExecutionFailure(result);
           this.runtimeErrorSummary = diagnostics;
           logger.warn({ iid: p.iid, status: result.status, diagnostics }, 'execution returned non-success status');

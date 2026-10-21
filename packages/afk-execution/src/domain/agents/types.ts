@@ -169,7 +169,7 @@ export interface CaptureOptions {
 export interface ExecutionResult {
   version: 1;
   runId: string;
-  status: 'completed' | 'blocked' | 'failed' | 'aborted' | 'timed_out' | 'context_high';
+  status: 'completed' | 'failed' | 'aborted' | 'timed_out' | 'context_high';
   /**
    * The agent that ran.
    *

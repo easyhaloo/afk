@@ -1,4 +1,3 @@
-import { assertExactKeys, parseObject, parseRequiredString } from "./validation.js";
 import { normalizeTmuxSessionName } from "./tmux-session.js";
 
 /**
@@ -48,25 +47,6 @@ export type ExecutionEnvironmentUnavailable = {
 export type ExecutionEnvironmentQueryResult =
   | { available: true; environment: ExecutionEnvironment }
   | { available: false; unavailable: ExecutionEnvironmentUnavailable };
-export function parseTmuxAttachTarget(input: unknown): TmuxAttachTarget {
-  const candidate = parseObject(input, "tmux attach target");
-  assertExactKeys(candidate, ["session", "windowId", "windowName", "paneId"], "tmux attach target");
-  const target: TmuxAttachTarget = { session: parseRequiredString(candidate.session, "tmux attach target: session") };
-  if (candidate.windowId !== undefined) {
-    if (typeof candidate.windowId !== "string") throw new Error("tmux attach target: windowId must be a string");
-    target.windowId = candidate.windowId;
-  }
-  if (candidate.windowName !== undefined) {
-    if (typeof candidate.windowName !== "string") throw new Error("tmux attach target: windowName must be a string");
-    target.windowName = candidate.windowName;
-  }
-  if (candidate.paneId !== undefined) {
-    if (typeof candidate.paneId !== "string") throw new Error("tmux attach target: paneId must be a string");
-    target.paneId = candidate.paneId;
-  }
-  return target;
-}
-
 /** `session:window.pane` form consumed by `tmux attach-session -t`. */
 export function formatTmuxTarget(target: TmuxAttachTarget): string {
   const session = normalizeTmuxSessionName(target.session);

@@ -25,33 +25,18 @@ export type {
   ExecutionResult,
   InterruptReason,
 } from '../agents/types.js';
-import type { SandboxTmux } from '../tmux/types.js';
+import {
+  CONTAINER_ENGINES,
+  SANDBOX_KINDS,
+  type ContainerEngine,
+  type SandboxKind,
+  type SandboxTmux,
+} from '@afk/core';
+
+export { CONTAINER_ENGINES, SANDBOX_KINDS };
+export type { ContainerEngine, SandboxKind };
 
 export type SandboxProviderName = 'local' | 'docker' | 'podman';
-
-/**
- * The container engines a run can use.
- *
- * The engines are a sandbox question, not a registry one: a resource
- * row records the engine a container ran on, and the registry took the
- * names from a second list of its own.
- */
-export const CONTAINER_ENGINES = ['docker', 'podman'] as const;
-
-export type ContainerEngine = (typeof CONTAINER_ENGINES)[number];
-
-/**
- * The kinds a sandbox runs in.
- *
- * A provider that runs a container is a container, whatever it is
- * called. The rule lives here because two runners asked the same
- * question - where a run's transcript can be read from - and each
- * wrote the answer down. A provider added to one and not the other
- * would have its run read from the wrong place.
- */
-export const SANDBOX_KINDS = ['local', 'container'] as const;
-
-export type SandboxKind = (typeof SANDBOX_KINDS)[number];
 
 /** The sandbox providers that run a container. */
 const CONTAINER_SANDBOX_PROVIDERS: readonly SandboxProviderName[] = ['docker', 'podman'];

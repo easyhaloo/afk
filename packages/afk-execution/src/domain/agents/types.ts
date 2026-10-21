@@ -15,6 +15,7 @@ import type {
   AgentProviderName,
   AgentToolCallSummary,
   AgentTransport,
+  TokenUsage,
 } from '@afk/core';
 
 /**
@@ -25,7 +26,7 @@ import type {
  * The execution runtime names them from there rather than writing a
  * second answer down.
  */
-export type { AgentProviderName };
+export type { AgentProviderName, TokenUsage };
 
 /** Capabilities that a provider may support. */
 export type AgentCapability =
@@ -36,12 +37,6 @@ export type AgentCapability =
   | 'fork'             // Provider supports session forking
   | 'interactive';     // Provider supports HITL attach */
 
-/** Token usage snapshot for a single generation. */
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-}
 
 /** Command to execute — provider-built, runner-owned. */
 export interface AgentCommand {

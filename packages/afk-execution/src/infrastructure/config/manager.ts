@@ -4,7 +4,7 @@ import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES } from '@afk/core';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { load as loadYaml } from 'js-yaml';
-import type { GitLabConfig, SchedulerConfig, WorkflowConfig } from '../../domain/config/types.js';
+import type { ConfigurationPort, GitLabConfig, SchedulerConfig, WorkflowConfig } from '../../domain/config/types.js';
 export type { GitLabConfig, SchedulerConfig, WorkflowConfig } from '../../domain/config/types.js';
 
 import {
@@ -160,6 +160,22 @@ export function getWorkflowConfig(): WorkflowConfig {
 export function getSchedulerConfig(): SchedulerConfig {
   return _scheduler ??= loadSchedulerConfig();
 }
+
+/**
+ * The configuration, read from the file and the environment.
+ *
+ * The callers that shape a run by the configuration are not the ones
+ * that know how the file is read, so they reach it through the port and
+ * the composition root chooses this implementation.
+ */
+export const fileConfigurationPort: ConfigurationPort = {
+  workflow: (projectRoot) => loadWorkflowConfig(projectRoot),
+  // A copy: the defaults are a shared object, and a caller that adjusts
+  // what it was handed must not be adjusting everyone else's defaults.
+  defaults: () => structuredClone(DEFAULT_WORKFLOW_CONFIG),
+  scheduler: () => getSchedulerConfig(),
+  gitLab: () => getGitLabConfig(),
+};
 function readProjectConfig(projectRoot: string): ConfigObject {
   const path = join(projectRoot, AFK_CONFIG_FILE);
   if (!existsSync(path)) return {};

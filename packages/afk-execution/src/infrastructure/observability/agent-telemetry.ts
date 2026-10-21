@@ -4,28 +4,16 @@
  * Boundary: harness owns agent-layer truth. AFK only READS.
  */
 
-import type { AgentToolCallSummary } from '@afk/core';
+import {
+  isAgentTelemetryProvider,
+  type AgentTelemetryProvider,
+  type AgentToolCallSummary,
+  type SandboxKind,
+} from '@afk/core';
 import type { AgentExecution, ExecutionResult, TokenUsage } from '../../domain/agents/types.js';
-import type { SandboxKind } from '../../domain/sandbox/types.js';
 import { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
 export { extractClaudeToolEvents, extractCodexToolEvents, extractOpenCodeToolEvents } from '../../domain/agents/tool-telemetry.js';
 
-/**
- * The harnesses whose transcripts AFK can read.
- *
- * Not every provider AFK can drive has a transcript reader: a provider
- * with no reader here is a provider a retro cannot gather evidence from.
- * The list is named so a caller can refuse a provider it cannot read
- * rather than treat it as one it can.
- */
-export const AGENT_TELEMETRY_PROVIDERS = ['claude-code', 'codex', 'opencode'] as const;
-
-export type AgentTelemetryProvider = (typeof AGENT_TELEMETRY_PROVIDERS)[number];
-
-/** Whether a value names a harness whose transcripts AFK can read. */
-export function isAgentTelemetryProvider(value: unknown): value is AgentTelemetryProvider {
-  return typeof value === 'string' && (AGENT_TELEMETRY_PROVIDERS as readonly string[]).includes(value);
-}
 
 export interface ResolvedAgentTranscript {
   path: string;

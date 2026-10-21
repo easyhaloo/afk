@@ -1,12 +1,13 @@
-import type { AgentProviderName } from '../agents/types.js';
+import type { AgentProviderName } from './agent-provider-names.js';
 
 /**
  * The tmux vocabulary, and the seam a sandbox drives a session through.
  *
- * These shapes describe a session, not a process.  The client that
+ * These shapes describe a session, not a process. The client that
  * implements them lives in the infrastructure layer, where the tmux binary
- * does; the runner and the sandbox speak in these terms, so the terms live
- * here rather than being imported from the implementation beside them.
+ * does; the runner, the sandbox and the commands that drive a session from
+ * outside the runtime all speak in these terms, so the terms live in the
+ * core package - the one layer every one of them can reach.
  */
 
 /** A tmux session, as the runner names it. */
@@ -54,8 +55,8 @@ export type AgentReadiness = {
  * The tmux seam a sandbox drives a session through.
  *
  * The sandbox owns no session: it asks for one, sends a prompt, reads the
- * pane and closes it.  That is the whole of what it needs, so that is what
- * the seam says.  The client offers more than this and the sandbox asks for
+ * pane and closes it. That is the whole of what it needs, so that is what
+ * the seam says. The client offers more than this and the sandbox asks for
  * less, and naming the difference here is what keeps the sandbox from
  * depending on the client it happens to be handed.
  */

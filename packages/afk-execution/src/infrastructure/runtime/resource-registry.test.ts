@@ -3,7 +3,13 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AfkResourceRegistry, getAfkResourceRegistry, readActiveAfkResources, readRunAfkResources, workspaceRootForWorktree } from './resource-registry.js';
+import {
+  AFK_RESOURCE_ENGINES,
+  AFK_RESOURCE_KINDS,
+  AFK_RESOURCE_ORIGINS,
+  AFK_RESOURCE_STATUSES,
+} from '@afk/core';
+import { AfkResourceRegistry, getAfkResourceRegistry, readActiveAfkResources, readRunAfkResources, sqlValueList, workspaceRootForWorktree } from './resource-registry.js';
 
 async function registryFixture() {
   const root = await mkdtemp(join(tmpdir(), 'afk-resources-'));
@@ -111,6 +117,16 @@ describe('AfkResourceRegistry', () => {
     expect(readActiveAfkResources(databasePath, ['/repo'])).toEqual([]);
     expect(readRunAfkResources(databasePath, 'run-42')).toEqual([]);
     expect(existsSync(databasePath)).toBe(false);
+  });
+
+  it('writes the table its check constraints from the same lists', () => {
+    // The check constraint is the database's answer to "which values may
+    // this column hold". A kind the registry can register and the
+    // database refuses is a resource that cannot be stored at all.
+    expect(sqlValueList(AFK_RESOURCE_KINDS)).toBe("'tmux', 'container', 'isolate-service'");
+    expect(sqlValueList(AFK_RESOURCE_ORIGINS)).toBe("'local-sandbox', 'container-sandbox', 'isolate'");
+    expect(sqlValueList(AFK_RESOURCE_ENGINES)).toBe("'docker', 'podman'");
+    expect(sqlValueList(AFK_RESOURCE_STATUSES)).toBe("'active', 'closed', 'missing', 'failed'");
   });
 
   it('derives the selected AFK workspace from its standard worktree directory', () => {

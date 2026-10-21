@@ -2,7 +2,9 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { SIGNAL_TYPES } from '@afk/core';
 import { SIGNAL_FILE, SignalFileError, readSignal, readSignalSync, writeSignal } from '../src/io/signal.js';
+import { SignalSchema } from '../src/schemas.js';
 
 const roots: string[] = [];
 
@@ -79,5 +81,16 @@ describe('readSignal', () => {
     // to the next.
     await expect(readSignal(dir)).rejects.toThrow();
     expect(() => readSignalSync(dir)).toThrow();
+  });
+});
+
+describe('the signal grammar and the signal vocabulary', () => {
+  it('accepts exactly the signals the vocabulary names', () => {
+    // The vocabulary is what a caller reads to learn which signals
+    // exist, and the grammar is what a file has to satisfy. A signal the
+    // vocabulary does not name cannot be waited for, and a signal the
+    // vocabulary names but the grammar refuses can never be written.
+    const accepted = SignalSchema.options.map(option => option.shape.type.value).sort();
+    expect(accepted).toEqual([...SIGNAL_TYPES].sort());
   });
 });

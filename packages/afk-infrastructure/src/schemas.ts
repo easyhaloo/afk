@@ -1,15 +1,23 @@
 import { z } from 'zod';
+import {
+  GOAL_COMPLETE_RESULTS,
+  type GoalCompleteSignal,
+  type HandoffReadySignal,
+  type IdleSignal,
+  type Signal,
+  type TimeoutSignal,
+} from '@afk/core';
 
 /**
- * The results a QA signal can carry.
+ * The grammar of the signal file.
  *
- * The list is named so the signal schema and the command that writes a
- * QA signal read the same answer. Writing the results down in each of
- * them meant the command refused a result the signal file accepted.
+ * The shapes a signal may take live in the core package, because the
+ * runner that writes one, the reader that waits for one and the command
+ * that asks for one are three layers. This file is the grammar the file
+ * has to satisfy, and it is written against those shapes: a schema that
+ * accepted a signal the shapes do not describe would let a file in that
+ * no reader of the shapes can make sense of.
  */
-export const GOAL_COMPLETE_RESULTS = ['PASS', 'FAIL'] as const;
-
-export type GoalCompleteResult = (typeof GOAL_COMPLETE_RESULTS)[number];
 
 export const GoalCompleteSignalSchema = z.object({
   type: z.literal('goal_complete'),
@@ -29,51 +37,30 @@ export const GoalCompleteSignalSchema = z.object({
     command: z.string().min(1),
     expected: z.string().min(1),
   })).optional(),
-});
-
-export type GoalCompleteSignal = z.infer<typeof GoalCompleteSignalSchema>;
+}) satisfies z.ZodType<GoalCompleteSignal>;
 
 export const HandoffReadySignalSchema = z.object({
   type: z.literal('handoff_ready'),
   timestamp: z.string().datetime(),
   summary: z.string().min(1, 'Summary is required'),
-});
-
-export type HandoffReadySignal = z.infer<typeof HandoffReadySignalSchema>;
+}) satisfies z.ZodType<HandoffReadySignal>;
 
 export const TimeoutSignalSchema = z.object({
   type: z.literal('timeout'),
   timestamp: z.string().datetime(),
-});
-
-export type TimeoutSignal = z.infer<typeof TimeoutSignalSchema>;
+}) satisfies z.ZodType<TimeoutSignal>;
 
 export const IdleSignalSchema = z.object({
   type: z.literal('idle'),
   timestamp: z.string().datetime(),
-});
-
-export type IdleSignal = z.infer<typeof IdleSignalSchema>;
+}) satisfies z.ZodType<IdleSignal>;
 
 export const SignalSchema = z.discriminatedUnion('type', [
   GoalCompleteSignalSchema,
   HandoffReadySignalSchema,
   TimeoutSignalSchema,
   IdleSignalSchema,
-]);
-
-export type Signal = z.infer<typeof SignalSchema>;
-
-/**
- * The signal types a signal file may carry.
- *
- * Read off the schema rather than written out again: a second list would
- * be a second answer to "which signals exist", and the two would drift.
- */
-export const SIGNAL_TYPES: readonly Signal['type'][] = Array.from(
-  SignalSchema.options.values(),
-  option => option.shape.type.value,
-);
+]) satisfies z.ZodType<Signal>;
 
 export function getCurrentTimestamp(): string {
   return new Date().toISOString();

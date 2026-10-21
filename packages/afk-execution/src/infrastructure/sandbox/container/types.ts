@@ -22,7 +22,7 @@
  * the docker socket, or sibling repos; the allowlist is enforced here.
  */
 
-import { CONTAINER_ENGINES, type ContainerEngine } from '../../../domain/sandbox/types.js';
+import { CONTAINER_ENGINES, type ContainerEngine } from '@afk/core';
 
 export { CONTAINER_ENGINES, type ContainerEngine };
 

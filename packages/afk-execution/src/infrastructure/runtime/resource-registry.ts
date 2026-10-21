@@ -1,4 +1,16 @@
-import { AFK_RUNTIME_RESOURCES_FILE } from '@afk/core';
+import {
+  AFK_RESOURCE_ENGINES,
+  AFK_RESOURCE_KINDS,
+  AFK_RESOURCE_ORIGINS,
+  AFK_RESOURCE_STATUSES,
+  AFK_RUNTIME_RESOURCES_FILE,
+  type AfkResourceEngine,
+  type AfkResourceKind,
+  type AfkResourceMetadata,
+  type AfkResourceOrigin,
+  type AfkResourceRecord,
+  type AfkResourceStatus,
+} from '@afk/core';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -22,56 +34,29 @@ const requireNode = createRequire(import.meta.url);
 const { DatabaseSync } = requireNode(`node:${'sqlite'}`) as { DatabaseSync: new (path: string, options?: { readOnly?: boolean }) => SQLiteDatabase };
 
 /**
- * The resource vocabulary lives in the domain layer, so the desktop's
- * wire contract and this table's check constraints are written from the
- * same answer.
+ * The values of a column, quoted the way SQL wants them.
+ *
+ * The table's check constraints are the database's answer to "which
+ * values may this column hold", and they are written from the same lists
+ * the registry reads. The quoting is the database's own business, so it
+ * lives here rather than in the vocabulary.
  */
-import {
-  AFK_RESOURCE_ENGINES,
-  AFK_RESOURCE_KINDS,
-  AFK_RESOURCE_ORIGINS,
-  AFK_RESOURCE_STATUSES,
-  sqlValueList,
-  type AfkResourceEngine,
-  type AfkResourceKind,
-  type AfkResourceOrigin,
-  type AfkResourceStatus,
-} from '../../domain/runtime/resource.js';
+export function sqlValueList(values: readonly string[]): string {
+  return values.map(value => `'${value}'`).join(', ');
+}
 
 export {
   AFK_RESOURCE_ENGINES,
   AFK_RESOURCE_KINDS,
   AFK_RESOURCE_ORIGINS,
   AFK_RESOURCE_STATUSES,
-  sqlValueList,
   type AfkResourceEngine,
   type AfkResourceKind,
+  type AfkResourceMetadata,
   type AfkResourceOrigin,
+  type AfkResourceRecord,
   type AfkResourceStatus,
-} from '../../domain/runtime/resource.js';
-
-export interface AfkResourceMetadata {
-  [key: string]: unknown;
-}
-
-export interface AfkResourceRecord {
-  id: string;
-  resourceKey: string;
-  workspacePath: string;
-  runId?: string;
-  worktreePath: string;
-  kind: AfkResourceKind;
-  origin: AfkResourceOrigin;
-  engine?: 'docker' | 'podman';
-  name: string;
-  externalId?: string;
-  status: AfkResourceStatus;
-  detail?: string;
-  metadata: AfkResourceMetadata;
-  createdAt: string;
-  updatedAt: string;
-  closedAt?: string;
-}
+} from '@afk/core';
 
 export interface RegisterAfkResource {
   workspacePath: string;

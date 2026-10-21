@@ -4,8 +4,7 @@ import {
   AFK_RESOURCE_KINDS,
   AFK_RESOURCE_ORIGINS,
   AFK_RESOURCE_STATUSES,
-  sqlValueList,
-} from './resource.js';
+} from '../src/afk-resources.js';
 
 describe('the resource vocabulary', () => {
   it('names the kinds of environment a run can register', () => {
@@ -22,15 +21,5 @@ describe('the resource vocabulary', () => {
 
   it('names the container engines a resource can run on', () => {
     expect([...AFK_RESOURCE_ENGINES]).toEqual(['docker', 'podman']);
-  });
-
-  it('writes the table its check constraints from the same lists', () => {
-    // The check constraint is the database's answer to "which values may
-    // this column hold". A kind the registry can register and the
-    // database refuses is a resource that cannot be stored at all.
-    expect(sqlValueList(AFK_RESOURCE_KINDS)).toBe("'tmux', 'container', 'isolate-service'");
-    expect(sqlValueList(AFK_RESOURCE_ORIGINS)).toBe("'local-sandbox', 'container-sandbox', 'isolate'");
-    expect(sqlValueList(AFK_RESOURCE_ENGINES)).toBe("'docker', 'podman'");
-    expect(sqlValueList(AFK_RESOURCE_STATUSES)).toBe("'active', 'closed', 'missing', 'failed'");
   });
 });

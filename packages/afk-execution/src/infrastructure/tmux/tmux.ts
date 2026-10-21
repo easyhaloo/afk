@@ -1,9 +1,9 @@
 import { spawn } from 'child_process';
-import { Signal } from '@afk/infrastructure';
+import type { Signal } from '@afk/core';
 import { logger, readSignal, readSignalSync } from '@afk/infrastructure';
 import { ControlModeConnection, type ControlModeOutputCallback } from './control-mode.js';
 import { normalizeTmuxSessionName } from '../../domain/tmux/session-name.js';
-import type { AgentReadiness, TmuxCaptureOptions, TmuxSession } from '../../domain/tmux/types.js';
+import type { AgentReadiness, TmuxCaptureOptions, TmuxSession } from '@afk/core';
 
 export { normalizeTmuxSessionName };
 

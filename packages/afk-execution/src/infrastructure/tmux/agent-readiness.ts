@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import { statusFilePath } from '@afk/infrastructure';
 import type { AgentProviderName } from '../../domain/agents/types.js';
-import type { AgentReadiness, ReadinessContext } from '../../domain/tmux/types.js';
+import type { AgentReadiness, ReadinessContext } from '@afk/core';
 
 export type { AgentReadiness, ReadinessContext };
 

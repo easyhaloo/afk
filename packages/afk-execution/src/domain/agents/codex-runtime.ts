@@ -3,6 +3,7 @@ import { AGENT_AUTH_CHOICES, AGENT_TRANSPORT_CHOICES, isAgentAuth, type AgentAut
 import type { AgentRuntimeSelection, CodexRuntimeSelection } from './types.js';
 
 type RuntimeObject = { [key: string]: unknown };
+import type { CodexConfig } from '@afk/application';
 import { AppServerClient } from './codex-app-server/client.js';
 import { createAppServerTransport, type AppServerTransport } from './codex-app-server/transport.js';
 
@@ -14,17 +15,13 @@ import { createAppServerTransport, type AppServerTransport } from './codex-app-s
 export type CodexTransport = AgentTransportChoice;
 export type CodexAuth = AgentAuthChoice;
 
-export interface CodexConfig {
-  transport: CodexTransport;
-  auth: CodexAuth;
-  provider: string;
-  profile?: string;
-  appServer: {
-    endpoint?: string;
-    authTokenEnv?: string;
-    startupTimeoutMs: number;
-  };
-}
+/**
+ * The codex settings a run uses.
+ *
+ * The shape lives in the application package, where the configuration
+ * that holds it is defined and the port that reads it is declared.
+ */
+export type { CodexConfig } from '@afk/application';
 
 export interface CodexRuntimeOverrides {
   transport?: CodexTransport;

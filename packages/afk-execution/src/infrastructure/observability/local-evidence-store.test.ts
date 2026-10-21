@@ -44,4 +44,17 @@ describe('LocalEncryptedEvidenceStore', () => {
     expect(Buffer.from(result.bytes).toString('utf8')).toBe('ordinary diagnostic output');
     expect(result.redactionStatus).toBe('not_required');
   });
+
+  it('redacts a GitLab token that travels on its own', () => {
+    // AFK talks to GitLab as well as GitHub. A token that travels with its
+    // name is caught by the assignment pattern; one that travels on its own
+    // - in a clone URL, in a command - is only caught if the tracker is
+    // recognised.
+    const secret = 'glpat-abcdefghij0123456789';
+    const result = redactUtf8(Buffer.from(`git clone https://oauth2:${secret}@gitlab.com/acme/api.git\n`, 'utf8'));
+
+    expect(Buffer.from(result.bytes).toString('utf8')).not.toContain(secret);
+    expect(Buffer.from(result.bytes).toString('utf8')).toContain('[redacted:gitlab-token]');
+    expect(result.redactionStatus).toBe('applied');
+  });
 });

@@ -62,6 +62,15 @@ export function redactUtf8(input: Uint8Array, initial: EvidenceRef['redactionSta
   const redacted = original
     .replace(/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g, '[redacted:github-token]')
     .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '[redacted:github-token]')
+    // AFK talks to GitLab as well as GitHub, so a GitLab token has to be
+    // recognised the way a GitHub one is. The assignment patterns below
+    // only catch a token that travels with its name; one that travels on
+    // its own - in a clone URL, in a command - does not.
+    .replace(/\bgl(?:pat|cbt|rt|dt)-[A-Za-z0-9_-]{20,}\b/g, '[redacted:gitlab-token]')
+    // AFK talks to GitLab as well as GitHub, so a GitLab token has to be
+    // recognised the way a GitHub one is. The assignment patterns below
+    // only catch a token that travels with its name; one that travels on
+    // its own - in a clone URL, in a command - does not.
     .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, '[redacted:api-key]')
     .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[redacted:aws-access-key]')
     .replace(/((?:api[_-]?key|token|secret|password)\s*[=:]\s*)[^\s'"`]+/gi, '$1[redacted]')

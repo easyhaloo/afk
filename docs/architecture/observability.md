@@ -110,7 +110,7 @@ run 说法不一。
 
 ## 4. Evidence 与数据治理
 
-`LocalEncryptedEvidenceStore` 对正文按哈希寻址并以 AES-256-GCM 加密。用于创建 store 的密钥必须来自受控 secret provider，而非命令行参数、日志或 profile 文件。文本 evidence 在加密前会尝试去除常见 GitHub token、API key、AWS access key、Bearer token 和 `token=/secret=/password=` 赋值；它不是通用 DLP 引擎，生产化前仍须接入组织的 secret scanner、访问控制与保留策略。
+`LocalEncryptedEvidenceStore` 对正文按哈希寻址并以 AES-256-GCM 加密。用于创建 store 的密钥必须来自受控 secret provider，而非命令行参数、日志或 profile 文件。文本 evidence 在加密前会尝试去除常见 GitHub token、GitLab token、API key、AWS access key、Bearer token 和 `token=/secret=/password=` 赋值；它不是通用 DLP 引擎，生产化前仍须接入组织的 secret scanner、访问控制与保留策略。
 
 > 事件只记录 metadata、hash 和 `EvidenceRef`。prompt、命令全文、环境变量、cookie、token、私有代码和高基数路径不应进入 metric label、OTLP attribute 或普通日志。
 

@@ -14,6 +14,7 @@ import type {
   WorkItemRunRecord,
   WorkItemAgentId,
 } from "../../shared/backlog-contract.js";
+import { isWorkItemRunInFlight } from "../../shared/backlog-contract.js";
 import type { SshExternalTerminalId } from "../../shared/ssh-contract.js";
 import {
   validateBaseBranch,
@@ -206,7 +207,7 @@ export function createWorkItemExecutionService(deps: WorkItemExecutionServiceDep
     const workingBranch = validateBaseBranch(item.branchName, "branchName");
 
     const workspace = await deps.workspace.allocate(input.workItemId, authoritative.map(selection => selection.repository));
-    if ((await deps.runStore.load(workspace.root)).some(run => run.status === "starting" || run.status === "running")) {
+    if ((await deps.runStore.load(workspace.root)).some(run => isWorkItemRunInFlight(run.status))) {
       throw new Error(`工作项 ${input.workItemId} 已有运行中的任务，请等待运行结束`);
     }
     const repositories = canonicalRepositories(workspace, authoritative);

@@ -156,6 +156,25 @@ export const WORK_ITEM_RUN_STATUSES = ["starting", "running", "completed", "fail
 
 export type WorkItemRunStatus = (typeof WORK_ITEM_RUN_STATUSES)[number];
 
+/**
+ * The states a run is still in flight in.
+ *
+ * A run that is starting or running has not finished. Three places ask
+ * that question - whether a second run may start, what the board offers
+ * to do, and whether the page keeps polling - and each of them used to
+ * write the two names down. A state the vocabulary gained was a state
+ * none of them knew about, and a work item with such a run could be
+ * started a second time.
+ */
+export const WORK_ITEM_RUN_STATUSES_IN_FLIGHT = ["starting", "running"] as const;
+
+export type WorkItemRunStatusInFlight = (typeof WORK_ITEM_RUN_STATUSES_IN_FLIGHT)[number];
+
+/** Whether a run is still going. */
+export function isWorkItemRunInFlight(status: WorkItemRunStatus): boolean {
+  return (WORK_ITEM_RUN_STATUSES_IN_FLIGHT as readonly string[]).includes(status);
+}
+
 export type WorkItemRunRecord = {
   id: string;
   status: WorkItemRunStatus;

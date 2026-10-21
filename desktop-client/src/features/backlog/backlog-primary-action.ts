@@ -1,4 +1,4 @@
-import type { BacklogItem, BacklogRuntimeSummary } from "../../../shared/backlog-contract";
+import { isWorkItemRunInFlight, type BacklogItem, type BacklogRuntimeSummary } from "../../../shared/backlog-contract";
 
 /**
  * The action the backlog list offers on an item.
@@ -15,7 +15,7 @@ export type BacklogPrimaryAction = "start" | "view-run" | "stop" | "recover" | "
  */
 export function getBacklogPrimaryAction(item: BacklogItem, summary?: BacklogRuntimeSummary): BacklogPrimaryAction {
   if (summary?.runtime?.status === "stale") return "recover";
-  const localRunning = summary?.activeRun?.status === "starting" || summary?.activeRun?.status === "running";
+  const localRunning = summary?.activeRun !== undefined && isWorkItemRunInFlight(summary.activeRun.status);
   const localAlive = localRunning && summary?.activeRun?.pid !== undefined;
   if ((item.state === "in_progress" || item.state === "verification") && localAlive) return "stop";
   if (localRunning || summary?.runtime?.status === "running") return "view-run";

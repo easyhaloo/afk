@@ -15,6 +15,7 @@ import type {
   WorkItemAgentId,
   WorkItemTerminalId,
 } from "../../../shared/backlog-contract";
+import { isWorkItemRunInFlight } from "../../../shared/backlog-contract";
 import type { AgentRuntime } from "../../../shared/ipc-contract";
 import { type ExecutionSummary } from "../../../shared/execution-contract";
 import { RunTimelineSection } from "../run-center/RunTimelineView";
@@ -214,7 +215,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   }, [platform]);
 
   useEffect(() => {
-    if (detailTab !== "runs" || !selected?.runs?.some(run => run.status === "starting" || run.status === "running")) return;
+    if (detailTab !== "runs" || !selected?.runs?.some(run => isWorkItemRunInFlight(run.status))) return;
     const timer = setInterval(() => { void load(false, true); }, 3000);
     return () => clearInterval(timer);
   }, [detailTab, selected?.id, selected?.runs]);

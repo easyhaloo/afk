@@ -3,6 +3,7 @@
 - **PRD ID**: PRD-2026-10-15-001
 - **Version**: 1.0.0
 - **Status**: Approved
+- **实现状态**：**部分实现**（2026-10-22 核对）—— 排序词汇与比较器已实现并有测试（`apps/desktop/src/features/backlog/backlog-sort.ts`），但全局工作项页仍硬编码 `updatedAt` 倒序（`apps/desktop/src/features/work-items/WorkItemsPage.tsx:303-305`），也没有选择器消费该模块；FR-001、AC-001…AC-005（可见、可切换、可持久、可访问）尚未落地
 - **Owner**: AFK Control
 - **Created**: 2026-10-15
 - **Updated**: 2026-10-15

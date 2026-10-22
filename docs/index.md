@@ -13,6 +13,7 @@
 | 文档 | 说明 |
 |---|---|
 | [system-architecture-design.md](architecture/system-architecture-design.md) | **系统架构设计说明书**：边界、约束、分层、闭环、不变量、失败模型与演进 |
+| [architecture-handbook.md](architecture/architecture-handbook.md) | **系统架构手册**：概念六层栈、十条架构决策（背景 → 决策 → 否决的备选 → 后果）、失败模型 |
 | [overview.md](architecture/overview.md) | AFK 跨平台抽象与 CLI 命令映射 |
 | [execution.md](architecture/execution.md) | 8 阶段执行设计（执行环境、sandbox、session、branches、templates） |
 | [observability.md](architecture/observability.md) | 可观测性 harness |
@@ -61,6 +62,8 @@ infrastructure / execution 四包布局，而 `main` 已把 infrastructure 与 e
 | [product/PRD.md](product/PRD.md) | 产品需求文档 |
 | [product/PRD-retro-feedback-loop.md](product/PRD-retro-feedback-loop.md) | AFK 执行复盘反馈闭环 PRD |
 | [product/PRD-work-items-reverse-sort-2026-10-15.md](product/PRD-work-items-reverse-sort-2026-10-15.md) | 工作项倒序排序 PRD（**部分实现**） |
+| [product/PRD-manual-work-item-create-and-execution-2026-10-19.md](product/PRD-manual-work-item-create-and-execution-2026-10-19.md) | 手动创建工作项并通过 Desktop 执行 PRD（**未按本文实现**） |
+| [research/agent-cli-comparison.md](research/agent-cli-comparison.md) | Agent CLI 横向对比（[中文](research/agent-cli-comparison.zh.md)） |
 | [research/](research/) | 研究材料与方法论文档 |
 
 ## 文档治理
@@ -77,7 +80,8 @@ infrastructure / execution 四包布局，而 `main` 已把 infrastructure 与 e
 
 ## 归档
 
-`_archive/` 下保留历史材料。**归档件描述的是当时的仓库，不是当前指引**：
+`_archive/` 下保留历史材料。**归档件描述的是当时的仓库，不是当前指引**。索引见
+[`_archive/README.md`](_archive/README.md)，那里按主题把历史材料分组并注明每个的结论：
 
 | 路径 | 内容 |
 |---|---|

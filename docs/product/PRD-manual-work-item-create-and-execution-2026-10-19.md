@@ -3,6 +3,7 @@
 - **PRD ID**: PRD-2026-10-19-001
 - **Version**: 1.0.0
 - **Status**: Approved
+- **实现状态**：**未按本文实现**（2026-10-22 核对）—— 全局工作项页的新建按钮仍跳转到旧的项目 backlog 页（`apps/desktop/src/main.tsx:432` 的 `onCreate` → `setView("projectBacklog")`）；本文要求的"在全局页内做 Provider 项目发现 → 创建 → 详情 → 执行配置"序列尚未落地
 - **Owner**: AFK Control
 - **Created**: 2026-10-19
 - **Updated**: 2026-10-19

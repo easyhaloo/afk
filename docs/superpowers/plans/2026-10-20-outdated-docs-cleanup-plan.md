@@ -1,8 +1,9 @@
 # AFK 过时文档清理计划
 
-> 编制日期：2026-10-20
-> 范围：`docs/`（40 篇在用 + 92 篇归档）、仓库根入口文档、`apps/desktop/ARCHITECTURE.md`、`skills/`
-> 基线提交：`main` @ `2b4a72b`
+> 编制日期：2026-10-20（2026-10-22 按 main 的新布局重做一次）
+> 范围：`docs/`（盘点时 40 篇在用 + 92 篇归档）、仓库根入口文档、`apps/desktop/ARCHITECTURE.md`、`skills/`
+> 判定基线：`main` @ `2b4a72b`（盘点当时的代码状态）
+> **执行基线：`main` @ `8a30a1b`** —— 清理在 `docs/overdue-cleanup` 上完成，基于该提交
 > 判定依据：源码实测 + CLI 注册表 + 架构守卫 + git 历史
 
 ---
@@ -172,6 +173,10 @@
 ---
 
 ## 4. 时序：与在途重构的关系
+
+> 本节写于 2026-10-20，当时包拆分尚未合入 `main`。实际结果是：包拆分已合入 `main`
+>（`b56d3bc`），`main` 上现在的包布局是 core / application / runtime / workflow-graph，
+> 而非本节设想的五包。清理因此在 `main` 上重做一次，见 §8 与 §9。
 
 `refactor/afk-package-boundaries`（`e167fc9`，worktree 在 `.worktrees/afk-package-boundaries`）**已经改写了 17 个文档的路径**，并新增 `scripts/doc-source-paths-baseline.json` 与源路径检查。
 
@@ -345,6 +350,57 @@
 - `docs/guides/workflows.md` 与 `.zh.md` 的标题数差 2 —— 差异来自代码块内注释行数，不是结构漂移。
 - SSH / xterm / PTY / kanban 功能均真实存在（`apps/desktop/src/features/ssh/`、`apps/desktop/src/features/terminal/`、`apps/cli/src/commands/kanban.ts`）。
 - `docs/index.md` 中 `blueprints/`、`research/`、`decisions/` 的目录行已覆盖其下文件，不算漏挂。
+
+---
+
+## 8. 执行结果
+
+**执行分支**：`docs/overdue-cleanup`，基于 `main` @ `8a30a1b`，6 个提交，48 个文件，
++1362 / −693。
+
+**已完成**
+
+| 批次 | 内容 | 结果 |
+|---|---|---|
+| B0 | P0：重写 ADR-0018、归档 4 份文档 | 完成 |
+| B1 | P1-A：架构文档事实修正（中英双份） | 完成 |
+| B2 | P1-B：getting-started / workflows / skills / testing（中英双份） | 完成 |
+| B3 | P1-C：索引重写、ADR 引用、研究与 PRD 状态标注 | 完成 |
+| B4 | P2：源路径检查接回 main 的检查器、基线归零 | 完成 |
+| B5 | P2：根级孤儿、README_zh 的 npm、CLAUDE/AGENTS 规则收敛、SKILL-GUIDE | 完成 |
+| B6 | §7 运行时布局重写、计划 §9 记录本轮发现 | 完成 |
+
+**验收指标实测**
+
+| # | 指标 | 起点 | 现状 |
+|---|---|---|---|
+| A1 | 源路径基线条目数 | 50 | **0** |
+| A2 | 在用文档中无法解析的路径引用 | 116 个 / 135 处 | **0** |
+| A3 | `pnpm docs:check` | 0 断裂（但看不见内容陈旧） | 238 文件 0 断裂，**且现在能看见内容陈旧** |
+| A4 | `docs/index.md` 覆盖 | 漏 5 个 | **100%** |
+| A5 | 干净克隆 `pnpm typecheck` | 失败 | 通过 |
+| A6 | 损坏文档 | ADR-0018 | **0** |
+| A7 | 双语镜像结构对齐 | 1 对有差异 | **7/7 一致** |
+
+**校验**：`pnpm docs:check`（238 文件 0 断裂）、`pnpm architecture:check`
+（239 源文件 + 223 桌面端文件，0 隔离项）、`pnpm typecheck`（4 个包 + CLI + 测试树）、
+`pnpm test`（根 97 项 + 各包 1203 项）、桌面端 832 项，全部通过。
+
+**留在计划里、需要 owner 或代码侧决定的事**
+
+- **ADR-0020** 自 2026-09-29 挂在 `proposed`，需要一次接受／拒绝裁决。
+- **包边界没有 ADR**：分支上的 ADR-0021 描述的是四包布局，`main` 已把 infrastructure 与
+  execution 合并为 `runtime`，照搬会立刻成为又一份过时文档。需要按 `main` 的实际布局新写。
+- **ADR 编号 0002–0013 从未分配**（不是删除，也不是预留）。本计划**建议不重排**——重排需
+  同步 7 个源码文件里的引用——改为在 `docs/adr/README.md` 写明。
+- **两处读端仍在扫 `.afk/runs/`**，因此实际读到空：`apps/desktop/electron/services/
+  workspace-service.ts` 的 `readEvents()`、`apps/desktop/electron/services/desktop-service.ts`
+  的 `readWorkflowRuns()`。删除还是改指运行时任务存储，是代码决策。
+- **`RunStateWriter` / `AgentExecutionService` 在 `main` 上仍在**（删除在未合入的分支上）。
+  它们是死代码，但删除是同事的进行中工作。
+- **`docs/research/RESEARCH.md`** 是针对某个内部 JumpServer 实例的一次性调研；
+  **`docs/research/dt-mdp-llm-research.md`** 的 "DT-MDP" 在代码中零命中。两者的去留由
+  owner 判断。
 
 ---
 

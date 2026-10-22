@@ -1,10 +1,11 @@
 import { test, expect } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 
 const OUT = process.env.AFK_UI_EVIDENCE_DIR ?? "/tmp/afk-shots";
 const VIEWS = ["工作项", "运行中心", "工作流", "Agents", "设置"] as const;
 
 async function setTheme(page: import("playwright").Page, label: string) {
-  await page.locator(".primary-nav button", { hasText: "设置" }).click();
+  await navButton(page, "设置").click();
   await page.getByRole("radiogroup", { name: "界面主题" }).getByText(label).click();
   await page.waitForTimeout(300);
 }
@@ -28,7 +29,7 @@ test.describe("reskin evidence", () => {
       // The default theme is now dark, so light must be selected explicitly —
       // otherwise every "light" shot is silently dark.
       await setTheme(page, "浅色");
-      await page.locator(".primary-nav button", { hasText: view }).click();
+      await navButton(page, view).click();
       await page.waitForTimeout(500);
       await page.screenshot({ path: `${OUT}/${view}-light.png` });
     });
@@ -37,7 +38,7 @@ test.describe("reskin evidence", () => {
   for (const view of ["运行中心", "工作流"] as const) {
     test(`${view} (dark)`, async ({ page }) => {
       await setTheme(page, "深色");
-      await page.locator(".primary-nav button", { hasText: view }).click();
+      await navButton(page, view).click();
       await page.waitForTimeout(500);
       await page.screenshot({ path: `${OUT}/${view}-dark.png` });
     });
@@ -58,10 +59,10 @@ test.describe("reskin evidence", () => {
   for (const view of ["工作流", "工作项"] as const) {
     test(`${view} (舒展)`, async ({ page }) => {
       await setTheme(page, "浅色");
-      await page.locator(".primary-nav button", { hasText: "设置" }).click();
+      await navButton(page, "设置").click();
       await page.getByRole("radiogroup", { name: "字号密度" }).getByText("舒展").click();
       await page.waitForTimeout(250);
-      await page.locator(".primary-nav button", { hasText: view }).click();
+      await navButton(page, view).click();
       await page.waitForTimeout(500);
       await page.screenshot({ path: `${OUT}/${view}-large.png` });
     });

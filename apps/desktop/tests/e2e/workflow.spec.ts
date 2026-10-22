@@ -1,4 +1,5 @@
 import { test, expect } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 import { expectOccupiesSpace } from "./_helpers/geometry.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -19,7 +20,7 @@ test.describe("Workflow studio", () => {
       ],
     }));
     await page.reload();
-    await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+    await navButton(page, "设置").click();
     await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: "浅色" }).click();
     await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
     await page.locator(".workflow-library-card").filter({ hasText: "parallel-layout" }).click();
@@ -331,7 +332,7 @@ test.describe("Workflow studio", () => {
     // 石墨 was removed when the themes collapsed to 浅色 / 深色; asking for it
     // here could only ever time out.
     for (const theme of ["浅色", "深色"]) {
-      await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+      await navButton(page, "设置").click();
       await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: theme }).click();
       await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
       await page.locator(".workflow-library-card").first().click();

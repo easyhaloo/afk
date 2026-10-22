@@ -185,11 +185,14 @@
   .capability-grid article:nth-child(3n) { border-right: 0; }
 }
 
-/* Workflow canvas: the graph is the primary surface; configuration is revealed only for the selected node. */
-.sidebar-bottom { display: grid; gap: 5px; }
+/* Sidebar bottom constant area: 快速查找 on top, the global 设置 entry last.
+   It hugs the bottom edge, so the global entry never competes with the
+   navigation groups for space (PRD-2026-10-22-001). */
+.sidebar-bottom { display: grid; gap: 5px; margin-top: auto; }
 .sidebar-bottom .settings-entry { margin-top: 1px; }
 .sidebar-bottom .settings-entry.active { color: var(--afk-accent); background: var(--afk-accent-soft); }
 
+/* Workflow canvas: the graph is the primary surface; configuration is revealed only for the selected node. */
 .workflow-canvas-page { width: min(100%, 1280px); margin: 8px auto 36px; color: var(--afk-text); font-size: calc(13px * var(--afk-scale)); }
 .workflow-canvas-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 10px 2px 20px; }
 .workflow-canvas-heading p { margin: 0 0 6px; color: var(--afk-accent); font-family: "DM Mono", monospace; font-size: calc(9px * var(--afk-scale)); font-weight: 650; letter-spacing: .09em; }
@@ -394,6 +397,8 @@
   .nav-item em, .sidebar-projects, .primary-nav .nav-label { display: none; }
   .primary-nav { width: 42px; gap: 8px; }
   .sidebar-bottom { width: 42px; margin-top: auto; padding-top: 9px; }
+  /* The icon rail has no room for the text quick-find; the global entry stays. */
+  .sidebar-bottom .sidebar-quick-find { display: none; }
   .topbar { padding-right: 12px; padding-left: 12px; }
   .command { gap: 0; width: 31px; justify-content: center; padding: 0; font-size: 0; }
   .command kbd { display: none; }

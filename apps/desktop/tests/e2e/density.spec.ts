@@ -1,4 +1,5 @@
 import { expect, test } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 
 /**
  * The ratchet in control-theme.test.ts proves every font size *reads*
@@ -16,7 +17,7 @@ import { expect, test } from "./_helpers/launch.js";
 const SAMPLED = [".nav-item", ".backlog-search input"] as const;
 
 async function setDensity(page: import("playwright").Page, label: string) {
-  await page.locator(".primary-nav button", { hasText: "设置" }).click();
+  await navButton(page, "设置").click();
   await page.getByRole("radiogroup", { name: "字号密度" }).getByText(label).click();
   await page.waitForTimeout(250);
   await page.locator(".primary-nav button", { hasText: "工作项" }).click();

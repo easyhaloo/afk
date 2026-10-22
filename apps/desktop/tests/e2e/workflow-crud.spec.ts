@@ -1,4 +1,5 @@
 import { test, expect } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 import type { Page, TestInfo } from "@playwright/test";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -43,7 +44,7 @@ const scenarios: Array<{ name: string; extension: string; steps: WorkflowTemplat
 ];
 
 async function openLibrary(page: Page) {
-  await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+  await navButton(page, "设置").click();
   await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: "浅色" }).click();
   await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
 }
@@ -276,7 +277,7 @@ test.describe("Workflow CRUD and graph evidence", () => {
         await capture(page, testInfo, `graph-${scenario.name}-${width}`);
       }
       if (scenario.name === "conditional") {
-        await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+        await navButton(page, "设置").click();
         await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: "深色" }).click();
         await page.locator(".primary-nav").getByRole("button", { name: "工作流", exact: true }).click();
         if (await page.locator(".workflow-library-card").count()) await page.locator(".workflow-library-card").filter({ hasText: "e2e-conditional" }).click();

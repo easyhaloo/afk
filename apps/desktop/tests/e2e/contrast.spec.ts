@@ -1,4 +1,5 @@
 import { test, expect } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 
 /**
  * WCAG AA contrast ratchet.
@@ -45,7 +46,7 @@ test.describe("WCAG AA contrast", () => {
       await page.locator("html").evaluate((el, t) => { el.dataset.afkTheme = t; }, theme);
 
       for (const label of VIEWS) {
-        await page.locator(".primary-nav button").filter({ hasText: label }).first().click();
+        await navButton(page, label).first().click();
         await page.waitForTimeout(350);
 
         const result = await page.evaluate(() => {

@@ -35,7 +35,7 @@ function stateMappingFixture({ files, legacyFiles = [], legacyStateMappings = {}
   const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-state-mapping-'));
   directories.push(directory);
   const root = join(directory, 'src');
-  const desktopRoot = join(directory, 'desktop-client');
+  const desktopRoot = join(directory, 'apps', 'desktop');
   mkdirSync(root, { recursive: true });
   for (const [filename, contents] of Object.entries(files)) {
     write(root, filename, contents);
@@ -47,7 +47,7 @@ function stateMappingFixture({ files, legacyFiles = [], legacyStateMappings = {}
     try {
       return execFileSync(
         process.execPath,
-        [guard, '--root', root, '--baseline', baseline, '--desktop-client-root', desktopRoot],
+        [guard, '--root', root, '--baseline', baseline, '--desktop-root', desktopRoot],
         { encoding: 'utf8' },
       );
     } catch (error) {
@@ -155,7 +155,7 @@ describe('architecture guard duplicate state mapping', () => {
     const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-state-mapping-dist-'));
     directories.push(directory);
     const root = join(directory, 'src');
-    const desktopRoot = join(directory, 'desktop-client');
+    const desktopRoot = join(directory, 'apps', 'desktop');
     write(root, 'application/backlog-work-item.ts', stateMapping);
     write(desktopRoot, 'dist-electron/types/backlog-work-item.d.ts', stateMapping);
     const baseline = join(directory, 'baseline.json');
@@ -163,7 +163,7 @@ describe('architecture guard duplicate state mapping', () => {
 
     const output = execFileSync(
       process.execPath,
-      [guard, '--root', root, '--baseline', baseline, '--desktop-client-root', desktopRoot],
+      [guard, '--root', root, '--baseline', baseline, '--desktop-root', desktopRoot],
       { encoding: 'utf8' },
     );
     expect(output).toContain('Architecture guard passed');

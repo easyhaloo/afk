@@ -150,17 +150,38 @@ describe('GitBranchProvider', () => {
     await writeFile(join(repoPath, '.git/info/exclude'), 'node_modules/\nkeep-local\n');
     await mkdir(join(repoPath, 'node_modules'), { recursive: true });
     await writeFile(join(repoPath, 'node_modules', 'marker.txt'), 'shared\n');
+    await mkdir(join(repoPath, 'node_modules', '.pnpm'), { recursive: true });
 
     const provider = new GitBranchProvider(repoPath);
     const handle = await provider.createVerificationWorktree(item(), 'main');
 
-    await expect(lstat(join(handle.worktreePath, 'node_modules'))).resolves.toSatisfy(stat => stat.isSymbolicLink());
+    // pnpm refuses a task run state directory that is a symlink, so the
+    // worktree keeps a real node_modules whose entries point at the checkout.
+    await expect(lstat(join(handle.worktreePath, 'node_modules'))).resolves.toSatisfy(stat => stat.isDirectory());
+    await expect(lstat(join(handle.worktreePath, 'node_modules', 'marker.txt'))).resolves.toSatisfy(stat => stat.isSymbolicLink());
+    await expect(lstat(join(handle.worktreePath, 'node_modules', '.pnpm'))).resolves.toSatisfy(stat => stat.isSymbolicLink());
     await expect(readFile(join(handle.worktreePath, 'node_modules', 'marker.txt'), 'utf8')).resolves.toBe('shared\n');
     await writeFile(join(handle.worktreePath, 'fixture.txt'), 'fixture\n');
     await provider.commit(handle.worktreePath, 'verify fixture');
     await expect(simpleGit(handle.worktreePath).raw(['ls-tree', '--name-only', 'HEAD']))
       .resolves.toBe('README.md\nfixture.txt\n');
     await expect(readFile(join(repoPath, '.git/info/exclude'), 'utf8')).resolves.toContain('keep-local\n');
+  });
+
+  it('keeps pnpm task run state out of the shared dependency directory', async () => {
+    const { repoPath } = await repository();
+    await mkdir(join(repoPath, 'node_modules', '.pnpm-task-run-state-v1'), { recursive: true });
+    await writeFile(join(repoPath, 'node_modules', '.pnpm-workspace-state-v1.json'), '{"main":true}\n');
+    await writeFile(join(repoPath, 'node_modules', 'marker.txt'), 'shared\n');
+
+    const provider = new GitBranchProvider(repoPath);
+    const handle = await provider.createVerificationWorktree(item(), 'main');
+    const target = join(handle.worktreePath, 'node_modules');
+
+    await expect(lstat(target)).resolves.toSatisfy(stat => stat.isDirectory());
+    await expect(lstat(join(target, '.pnpm-task-run-state-v1'))).rejects.toThrow();
+    await expect(lstat(join(target, '.pnpm-workspace-state-v1.json'))).rejects.toThrow();
+    await expect(readFile(join(target, 'marker.txt'), 'utf8')).resolves.toBe('shared\n');
   });
 
   it('returns the full local commit SHA and leaves an unchanged repository without a new commit', async () => {

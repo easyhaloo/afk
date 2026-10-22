@@ -130,7 +130,7 @@ describe('explicit backlog adoption', () => {
       await commandTree(registerBacklogCommands).parseAsync([
         'node', 'afk', 'backlog', 'adopt', '--id', '42', '--project', 'org/repo', '--platform', platform, '--json',
       ]);
-      expect(factory).toHaveBeenCalledWith('org/repo', undefined, platform);
+      expect(factory).toHaveBeenCalledWith('org/repo', process.cwd(), platform, undefined);
       expect(adopt).toHaveBeenCalledWith('42');
       expect(stdout).toHaveBeenCalledTimes(1);
       expect(JSON.parse(String(stdout.mock.calls[0][0]))).toEqual({ ok: true, kind: 'backlog.adopt', data: item });

@@ -27,42 +27,41 @@ afk --help
 
 ## Configuration
 
-### GitLab Project
+### Provider credentials
 
-Create a config file at `~/.config/afk/.env`:
-
-```bash
-# GitLab configuration
-GITLAB_TOKEN=glpat-xxxxxxxxxxxxx
-GITLAB_BASE_URL=https://gitlab.company.com/api/v4  # Optional, defaults to gitlab.com
-
-# Or use git config (recommended)
-cd /path/to/your/project
-git config afk.platform gitlab
-git config afk.project "mygroup/myproject"
-```
-
-### GitHub Project
+AFK reads provider credentials from the environment or from the provider CLI:
 
 ```bash
-# GitHub configuration
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
-GITHUB_OWNER=your-org
-GITHUB_REPO=your-repo
+# GitHub: GITHUB_TOKEN / GH_TOKEN, or `gh auth login`
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
 
-# Or use git config
-cd /path/to/your/project
-git config afk.platform github
-git config afk.owner "your-org"
-git config afk.repo "your-repo"
+# GitLab: GITLAB_TOKEN plus the optional GITLAB_URL, or `glab auth login`
+export GITLAB_TOKEN=glpat_xxxxxxxxxxxxx
+export GITLAB_URL=https://gitlab.company.com   # Optional, defaults to gitlab.com
 ```
 
-### Platform Auto-Detection
+### Tracker target
 
-AFK automatically detects the platform:
-1. Checks the `TRACKER_PLATFORM` environment variable
-2. Analyzes the git remote URL
-3. Checks project config files (.gitlab-ci.yml or .github/workflows/)
+Every provider-backed command needs to know which provider project to talk
+to. AFK resolves that target in this order:
+
+1. the `--project` / `--platform` command-line flags
+2. the `AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM` environment variables
+3. the `origin` remote of the current git repository
+
+The git remote is optional, so read-only commands such as `afk backlog show`
+work from any directory once the target is configured:
+
+```bash
+export AFK_TRACKER_PROJECT=my-org/my-repo
+export AFK_TRACKER_PLATFORM=github   # Optional; inferred from the project key
+afk backlog show --id 123
+```
+
+When the platform is still unknown, a numeric project key (`202`) or a key
+with three or more path segments (`group/sub/project`) resolves to GitLab,
+and an `owner/repo` key resolves to GitHub unless only GitLab credentials
+are configured.
 
 ## Basic Usage
 
@@ -91,6 +90,12 @@ management commands can explicitly select a supported provider when needed:
 ```bash
 afk backlog list --platform github
 afk backlog show --id 42 --platform gitlab
+```
+
+Outside a git repository, name the project explicitly instead:
+
+```bash
+afk backlog show --id 42 --project my-org/my-repo --platform github
 ```
 
 The provider owns the canonical Backlog ID. AFK creates and merges change

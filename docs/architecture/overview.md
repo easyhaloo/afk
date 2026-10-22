@@ -141,6 +141,21 @@ tag updates, and the state/mode updates needed by QA. It has no `claim()` at
 the type or runtime boundary. The execution bundle is the only path that
 exposes claiming and runnable checks.
 
+### Tracker target resolution
+
+The provider project a command talks to is a tracker target: one platform and
+one project, resolved together and never mixed. Both halves resolve in the
+same order: the explicit `--project` / `--platform` flags, then the
+`AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM` environment variables, then the
+`origin` remote of the working directory.
+
+The git remote is therefore optional. Read-only commands such as
+`afk backlog show` run from any directory once the target is configured, and
+an unresolvable target fails with an actionable error instead of a platform
+detection failure. When the platform is still unknown, a numeric project key
+or a key with three or more path segments resolves to GitLab; an `owner/repo`
+key resolves to GitHub unless only GitLab credentials are configured.
+
 `adopt` is an optional management/provider capability; unsupported providers
 return an explicit error. The tracker adapter checks the issue's raw state and
 metadata rather than inferring readiness from domain defaults. It accepts only

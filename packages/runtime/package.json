@@ -159,6 +159,14 @@
       "types": "./dist/infrastructure/tracker/resolver.d.ts",
       "import": "./dist/infrastructure/tracker/resolver.js"
     },
+    "./infrastructure/tracker/store": {
+      "types": "./dist/infrastructure/tracker/store.d.ts",
+      "import": "./dist/infrastructure/tracker/store.js"
+    },
+    "./infrastructure/tracker/target": {
+      "types": "./dist/infrastructure/tracker/target.d.ts",
+      "import": "./dist/infrastructure/tracker/target.js"
+    },
     "./shared/agent-transcript-path": {
       "types": "./dist/shared/agent-transcript-path.d.ts",
       "import": "./dist/shared/agent-transcript-path.js"

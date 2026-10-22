@@ -40,7 +40,10 @@ export function DashboardEntry() {
   useEffect(() => {
     if (!isReady) return;
     let cancelled = false;
-    void createManagementProviders(process.env.AFK_PROJECT, process.cwd())
+    // The tracker target is resolved centrally (AFK_TRACKER_PROJECT /
+    // AFK_TRACKER_PLATFORM, then the git remote). AFK_PROJECT keeps its
+    // single meaning here: the local workspace filter below.
+    void createManagementProviders(undefined, process.cwd())
       .then(bundle => {
         if (!cancelled) {
           setManagement({ backlog: { list: options => bundle.backlog.list(options) } });

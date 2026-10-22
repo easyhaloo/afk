@@ -43,7 +43,7 @@ describe('canonical command provider wiring', () => {
 
     await runCommand(registerBacklogCommands, 'backlog', 'init', '--project', 'group/repo');
 
-    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', undefined, undefined);
+    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', process.cwd(), 'github', undefined);
     expect(initialize).toHaveBeenCalledOnce();
   });
 
@@ -56,7 +56,7 @@ describe('canonical command provider wiring', () => {
 
     await runCommand(registerQACommands, 'qa', '--backlog-id', 'item-1', '--project', 'group/repo', '--mode', 'interactive');
 
-    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', process.cwd());
+    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', process.cwd(), 'github', undefined);
     expect(backlog.get).toHaveBeenCalledWith('item-1');
     expect(QARunner).toHaveBeenCalledWith(providers, expect.anything(), {
       executionMode: 'interactive',

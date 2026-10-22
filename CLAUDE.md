@@ -103,6 +103,8 @@ and its shared dependencies.
 GITLAB_TOKEN=          # GitLab API token
 GITLAB_URL=            # GitLab instance URL
 GITHUB_TOKEN=          # GitHub API token
+AFK_TRACKER_PROJECT=   # Provider project fallback when cwd has no git remote
+AFK_TRACKER_PLATFORM=  # Provider platform fallback (github|gitlab)
 AFK_TMUX_SESSION=      # tmux session name (default: afk)
 ```
 

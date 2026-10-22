@@ -8,6 +8,7 @@ import type { BranchProvider } from '../git/branches/provider.js';
 import { GitBranchProvider } from '../git/branches/git-provider.js';
 import type { ChangeProvider } from '../tracker/changes/provider.js';
 import { TrackerChangeProvider } from '../tracker/changes/tracker-adapter.js';
+import { RecordingBacklogProvider } from '../tracker/recording-provider.js';
 
 export interface ProviderBundle {
   backlog: BacklogProvider;
@@ -26,6 +27,8 @@ export interface ProviderBundleOptions {
   claimLock?: ClaimLock;
   claimLockFactory?: ClaimLockFactory;
   claimTtlMs?: number;
+  /** State root of the local tracker index. Defaults to `AFK_STATE_DIR`. */
+  trackerStateRoot?: string;
 }
 
 export function createProviderBundle(
@@ -33,10 +36,18 @@ export function createProviderBundle(
   repoRoot: string,
   options: ProviderBundleOptions = {},
 ): ProviderBundle {
+  const backlog = tracker.platform === 'github'
+    ? new GitHubBacklogProvider(tracker, options)
+    : new GitLabBacklogProvider(tracker, options);
   return {
-    backlog: tracker.platform === 'github'
-      ? new GitHubBacklogProvider(tracker, options)
-      : new GitLabBacklogProvider(tracker, options),
+    // The recorder keeps the local tracker index in step with everything AFK
+    // reads and writes, so later commands can resolve an issue id or a
+    // directory to its provider project on their own.
+    backlog: new RecordingBacklogProvider(backlog, {
+      platform: tracker.platform,
+      project: String(tracker.projectId),
+      host: tracker.providerHost,
+    }, repoRoot, options.trackerStateRoot),
     branches: new GitBranchProvider(repoRoot),
     changes: new TrackerChangeProvider(tracker),
   };

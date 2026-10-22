@@ -4,13 +4,17 @@ import {
   createGlobalWorkItemCatalogs,
   createManagementProviders,
   type GlobalTrackerPlatform,
+  type ManagementProviderBundle,
   type TrackerPlatform,
 } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 import {
   collectGlobalWorkItemInventory,
   filterGlobalWorkItemInventory,
 } from '@afk/runtime/infrastructure/provider/inventory';
+import { resolveTrackerTarget } from '@afk/runtime/infrastructure/tracker/target';
+import { recordTrackerActivity, trackerIdentityOf } from '@afk/runtime/infrastructure/tracker/store';
 import type {
+  GlobalWorkItem,
   GlobalWorkItemInventoryResult,
   ProviderCatalog,
 } from '@afk/runtime/domain/work-item/provider-types';
@@ -47,8 +51,47 @@ function asPlatform(value: unknown): TrackerPlatform | undefined {
   return value === 'github' || value === 'gitlab' ? value : undefined;
 }
 
-function providerFor(project?: string, platform?: unknown): Promise<BacklogManagementProvider> {
-  return createManagementProviders(project, undefined, asPlatform(platform)).then(bundle => bundle.backlog);
+/** The provider project a backlog command addresses. */
+interface BacklogTarget {
+  platform: TrackerPlatform;
+  projectId: string;
+  host?: string;
+}
+
+/**
+ * Resolve the provider target of one backlog command.
+ *
+ * The issue id takes part in the lookup: the local tracker index maps every
+ * issue AFK has worked with to its provider project, so a bare id is enough
+ * to find that project from any directory.
+ */
+async function resolveBacklogTarget(
+  project?: string,
+  platform?: unknown,
+  issueId?: string,
+): Promise<BacklogTarget> {
+  const target = await resolveTrackerTarget({
+    project,
+    platform: asPlatform(platform),
+    issueId,
+    cwd: process.cwd(),
+  });
+  return { platform: target.platform, projectId: target.projectId, host: target.host };
+}
+
+/** Create the management bundle for a resolved target. */
+function providersFor(target: BacklogTarget): Promise<ManagementProviderBundle> {
+  return createManagementProviders(target.projectId, process.cwd(), target.platform, target.host);
+}
+
+/** Create the backlog provider for a command target. */
+async function backlogProviderFor(
+  project?: string,
+  platform?: unknown,
+  issueId?: string,
+): Promise<BacklogManagementProvider> {
+  const target = await resolveBacklogTarget(project, platform, issueId);
+  return (await providersFor(target)).backlog;
 }
 
 function isHelpError(error: { code?: string; exitCode?: number }): boolean {
@@ -79,6 +122,37 @@ function printItem(item: Awaited<ReturnType<typeof showBacklog>>): void {
 }
 
 export type JsonMode = { json?: boolean };
+
+/**
+ * Teach the local tracker index what an inventory found.
+ *
+ * An inventory touches every project the credentials reach, so it is the
+ * cheapest way to learn which issues live where. Later commands resolve a
+ * bare issue id through that index.
+ */
+function recordInventory(items: readonly GlobalWorkItem[]): void {
+  const groups = new Map<string, {
+    platform: TrackerPlatform;
+    project: string;
+    host?: string;
+    issues: Array<{ id: string; title?: string }>;
+  }>();
+  for (const item of items) {
+    const identity = trackerIdentityOf(item.project);
+    const key = `${item.project.platform}:${identity.host ?? ''}:${identity.project}`;
+    const group = groups.get(key) ?? {
+      platform: item.project.platform,
+      project: identity.project,
+      host: identity.host,
+      issues: [] as Array<{ id: string; title?: string }>,
+    };
+    group.issues.push({ id: String(item.issueNumber), title: item.title });
+    groups.set(key, group);
+  }
+  for (const group of groups.values()) {
+    recordTrackerActivity({ ...group, cwd: process.cwd() });
+  }
+}
 
 export interface BacklogInventoryOptions extends JsonMode {
   platform?: string;
@@ -113,6 +187,7 @@ export async function runBacklogInventory(
         project: options.project,
       },
     );
+    recordInventory(result.items);
     if (options.json) {
       emitSuccess<GlobalWorkItemInventoryResult>(kind, result);
       return;
@@ -370,7 +445,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       try {
         if (!options.id.trim()) throw new Error('backlog id must not be empty');
         if (!options.project.trim()) throw new Error('provider project must not be empty');
-        await runBacklogAdopt(await providerFor(options.project, options.platform), options.id, options);
+        await runBacklogAdopt(await backlogProviderFor(options.project, options.platform), options.id, options);
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.adopt', classifyError(error), (error as Error).message);
@@ -387,7 +462,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        const provider = await providerFor(options.project, options.platform);
+        const provider = await backlogProviderFor(options.project, options.platform);
         if (options.json) {
           try {
             await initializeBacklog(provider);
@@ -439,7 +514,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        await runBacklogList(await providerFor(options.project, options.platform), options);
+        await runBacklogList(await backlogProviderFor(options.project, options.platform), options);
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.list', classifyError(error), (error as Error).message);
@@ -457,7 +532,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        await runBacklogShow(await providerFor(options.project, options.platform), options.id, options);
+        await runBacklogShow(await backlogProviderFor(options.project, options.platform, options.id), options.id, options);
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.show', classifyError(error), (error as Error).message);
@@ -482,7 +557,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async (title: string, options) => {
       try {
-        await runBacklogCreate(await providerFor(options.project, options.platform), { title, ...options });
+        await runBacklogCreate(await backlogProviderFor(options.project, options.platform), { title, ...options });
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.create', classifyError(error), (error as Error).message);
@@ -501,7 +576,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
+        const providers = await providersFor(await resolveBacklogTarget(options.project, options.platform, options.id));
         await runBacklogInterrupt(providers.backlog, options.id, options.reason, options);
       } catch (error) {
         if (options.json) {
@@ -521,7 +596,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
+        const providers = await providersFor(await resolveBacklogTarget(options.project, options.platform, options.id));
         await runBacklogRetry(providers.backlog, options.id, options.reason, options);
       } catch (error) {
         if (options.json) {
@@ -540,7 +615,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        const providers = await createManagementProviders(options.project, undefined, asPlatform(options.platform));
+        const providers = await providersFor(await resolveBacklogTarget(options.project, options.platform, options.id));
         await runBacklogConfirmMerge(providers.backlog, providers.changes, options.id, getWorkflowConfig().targetBranch, options);
       } catch (error) {
         if (options.json) {
@@ -561,7 +636,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        await runBacklogTagAdd(await providerFor(options.project, options.platform), options.id, options.tag, options);
+        await runBacklogTagAdd(await backlogProviderFor(options.project, options.platform, options.id), options.id, options.tag, options);
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.tag.add', classifyError(error), (error as Error).message);
@@ -580,7 +655,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        await runBacklogTagRemove(await providerFor(options.project, options.platform), options.id, options.tag, options);
+        await runBacklogTagRemove(await backlogProviderFor(options.project, options.platform, options.id), options.id, options.tag, options);
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.tag.remove', classifyError(error), (error as Error).message);

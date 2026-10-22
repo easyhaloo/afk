@@ -119,6 +119,18 @@ tracker 类型。
 执行模式更新；类型和运行时都没有 `claim()`。只有执行 bundle 暴露认领和
 可运行性检查。
 
+### Tracker 目标解析
+
+命令访问的 provider 项目是一个 tracker 目标：一个平台加一个项目，二者
+一起解析、绝不混用。两半的解析顺序相同：显式的 `--project` / `--platform`
+参数，然后是 `AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM` 环境变量，最后
+是工作目录的 `origin` remote。
+
+因此 git remote 是可选的。`afk backlog show` 这类只读命令在配置好目标后
+可以在任意目录下执行；无法解析目标时给出可操作的错误，而不是平台探测
+失败。平台仍未知时，数字项目名或三段及以上路径判定为 GitLab；`owner/repo`
+形态判定为 GitHub，除非只配置了 GitLab 凭据。
+
 `adopt` 是管理/provider 的可选能力，不支持时明确报错。tracker adapter
 检查 issue 原始状态和元数据，不从 domain 默认状态推断 ready。只接受开放且
 生命周期标签缺失或为 canonical ready/afk 的 issue；拒绝未知、重复或冲突的

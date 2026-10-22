@@ -5,8 +5,12 @@ import { GitLabClient } from '../gitlab/index.js';
 import {
   resolveGitHubRepository,
   resolveGitLabProject,
-  resolveTrackerProject,
 } from '../tracker/resolver.js';
+import {
+  resolveTrackerTarget,
+  type TrackerPlatform,
+  type TrackerTargetCredentials,
+} from '../tracker/target.js';
 import { getGlabToken, listGlabTokens, type GlabTokenConfig } from '../gitlab/glab-config.js';
 import type { TrackerProvider } from '../../domain/tracker/types.js';
 import { createManagementProviderBundle, createProviderBundle } from './providers.js';
@@ -80,7 +84,8 @@ export async function createGitLabTracker(projectId?: string, cwd?: string, pref
   return new GitLabClient({ url: auth.url, token: auth.token, projectId: project });
 }
 
-export type TrackerPlatform = 'github' | 'gitlab';
+export type { TrackerPlatform } from '../tracker/target.js';
+export type { ManagementProviderBundle } from './providers.js';
 export type GlobalTrackerPlatform = TrackerPlatform | 'all';
 
 export interface GlobalWorkItemCatalogDependencies {
@@ -114,23 +119,41 @@ export function createGlobalWorkItemCatalogs(
   return catalogs;
 }
 
-function asTrackerPlatform(value: unknown): TrackerPlatform | undefined {
-  return value === 'github' || value === 'gitlab' ? value : undefined;
+/**
+ * Report which providers are configured. Only consulted when the platform has
+ * to be inferred from a project key, so the `gh` lookup stays off the hot
+ * path of git-backed commands.
+ */
+function detectTrackerCredentials(env: NodeJS.ProcessEnv = process.env): TrackerTargetCredentials {
+  return {
+    github: Boolean(env.GITHUB_TOKEN ?? env.GH_TOKEN ?? readGhToken()),
+    gitlab: Boolean(env.GITLAB_TOKEN) || listGlabTokens().length > 0,
+  };
 }
 
+/**
+ * Create the tracker client for one command invocation.
+ *
+ * The target platform and project are resolved from the explicit arguments,
+ * the `AFK_TRACKER_*` environment variables, or the `origin` remote of the
+ * working directory — in that order. A directory that is not a git
+ * repository is therefore usable as soon as the target is configured.
+ */
 export async function createTracker(
   projectId?: string,
   cwd?: string,
   platform?: TrackerPlatform,
   preferredHost?: string,
 ): Promise<TrackerProvider> {
-  const override = asTrackerPlatform(platform);
-  if (override === 'github') return createGitHubTracker(projectId, cwd);
-  if (override === 'gitlab') return createGitLabTracker(projectId, cwd, preferredHost);
-  const detected = await resolveTrackerProject(cwd);
-  return detected.platform === 'github'
-    ? createGitHubTracker(projectId, cwd)
-    : createGitLabTracker(projectId, cwd, preferredHost);
+  const target = await resolveTrackerTarget({
+    project: projectId,
+    platform,
+    cwd,
+    credentials: () => detectTrackerCredentials(),
+  });
+  return target.platform === 'github'
+    ? createGitHubTracker(target.projectId, cwd)
+    : createGitLabTracker(target.projectId, cwd, preferredHost);
 }
 
 export async function createWorkflowProviders(
@@ -138,8 +161,9 @@ export async function createWorkflowProviders(
   cwd = process.cwd(),
   options?: ProviderBundleOptions,
   platform?: TrackerPlatform,
+  preferredHost?: string,
 ): Promise<ProviderBundle> {
-  const tracker = await createTracker(projectId, cwd, platform);
+  const tracker = await createTracker(projectId, cwd, platform, preferredHost);
   return createProviderBundle(tracker, cwd, options);
 }
 
@@ -147,8 +171,9 @@ export async function createManagementProviders(
   projectId?: string,
   cwd = process.cwd(),
   platform?: TrackerPlatform,
+  preferredHost?: string,
 ): Promise<ManagementProviderBundle> {
-  const tracker = await createTracker(projectId, cwd, platform);
+  const tracker = await createTracker(projectId, cwd, platform, preferredHost);
   return createManagementProviderBundle(tracker, cwd);
 }
 

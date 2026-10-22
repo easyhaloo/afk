@@ -1,5 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createGlobalWorkItemCatalogs } from './tracker-provider-factory.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const mocks = vi.hoisted(() => ({
+  resolveRemoteTarget: vi.fn(async (): Promise<{ platform: 'github' | 'gitlab'; projectId: string } | null> => null),
+}));
+
+vi.mock('../tracker/resolver.js', () => ({
+  resolveGitHubRepository: vi.fn(async () => null),
+  resolveGitLabProject: vi.fn(async () => null),
+  resolveRemoteTarget: mocks.resolveRemoteTarget,
+}));
+
+import { createGlobalWorkItemCatalogs, createTracker } from './tracker-provider-factory.js';
 import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
 
 describe('global provider catalog factory', () => {
@@ -59,5 +73,53 @@ describe('global provider catalog factory', () => {
       createGitHubCatalog: vi.fn(),
       createGitLabCatalog: vi.fn(),
     })).toThrow('GitHub authentication is required');
+  });
+});
+
+describe('tracker target resolution outside a git repository', () => {
+  let stateRoot: string;
+  let previousStateRoot: string | undefined;
+
+  beforeEach(() => {
+    // The local tracker index is machine state; the tests must not read it.
+    stateRoot = mkdtempSync(join(tmpdir(), 'afk-tracker-factory-'));
+    previousStateRoot = process.env.AFK_STATE_DIR;
+    process.env.AFK_STATE_DIR = stateRoot;
+  });
+
+  afterEach(() => {
+    rmSync(stateRoot, { recursive: true, force: true });
+    if (previousStateRoot === undefined) delete process.env.AFK_STATE_DIR;
+    else process.env.AFK_STATE_DIR = previousStateRoot;
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.AFK_TRACKER_PROJECT;
+    mocks.resolveRemoteTarget.mockReset();
+    mocks.resolveRemoteTarget.mockResolvedValue(null);
+  });
+
+  it('creates a tracker from an explicit project when the directory has no remote', async () => {
+    process.env.GITHUB_TOKEN = 'token';
+
+    const tracker = await createTracker('owner/repo', '/nowhere');
+
+    expect(tracker).toMatchObject({ platform: 'github', projectId: 'owner/repo' });
+  });
+
+  it('creates a tracker from AFK_TRACKER_PROJECT when the directory has no remote', async () => {
+    process.env.GITHUB_TOKEN = 'token';
+    process.env.AFK_TRACKER_PROJECT = 'owner/repo';
+
+    const tracker = await createTracker(undefined, '/nowhere');
+
+    expect(tracker).toMatchObject({ platform: 'github', projectId: 'owner/repo' });
+  });
+
+  it('reports the remote target when the directory is a git repository', async () => {
+    process.env.GITHUB_TOKEN = 'token';
+    mocks.resolveRemoteTarget.mockResolvedValue({ platform: 'github', projectId: 'team/repo' });
+
+    const tracker = await createTracker(undefined, '/repo');
+
+    expect(tracker).toMatchObject({ platform: 'github', projectId: 'team/repo' });
   });
 });

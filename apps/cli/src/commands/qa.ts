@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { createManagementProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
+import { resolveTrackerTarget } from '@afk/runtime/infrastructure/tracker/target';
 import { QARunner } from '@afk/runtime/application/modules/qa-runner';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
@@ -30,8 +31,15 @@ export function registerQACommands(program: Command): void {
         const agentRuntime = await prepareAgentRuntime(resolveAgentRuntimeOptions(agentProviderName, config, options));
         const agentProvider = createAgentProvider(agentProviderName);
         // QA never claims work; use the management bundle so verification does
-        // not require an implementation-only atomic claim capability.
-        const providers = await createManagementProviders(options.project, process.cwd());
+        // not require an implementation-only atomic claim capability. The
+        // backlog id takes part in the target lookup, so QA also works from a
+        // directory that is not a git repository.
+        const target = await resolveTrackerTarget({
+          project: options.project,
+          issueId: options.backlogId,
+          cwd: process.cwd(),
+        });
+        const providers = await createManagementProviders(target.projectId, process.cwd(), target.platform, target.host);
         const item = await providers.backlog.get(options.backlogId);
         if (item.state !== 'verification') {
           throw new Error(`backlog ${item.id} is in ${item.state}; QA requires verification state`);

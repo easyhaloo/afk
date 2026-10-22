@@ -22,7 +22,7 @@ vi.mock('../gitlab/index.js', () => ({
 vi.mock('../tracker/resolver.js', () => ({
   resolveGitHubRepository: vi.fn(),
   resolveGitLabProject: vi.fn(async () => { throw new Error('git remote must not be consulted'); }),
-  resolveTrackerProject: vi.fn(async () => { throw new Error('platform detection must not run'); }),
+  resolveRemoteTarget: vi.fn(async () => { throw new Error('git remote must not be consulted'); }),
 }));
 
 import { createTracker } from './tracker-provider-factory.js';

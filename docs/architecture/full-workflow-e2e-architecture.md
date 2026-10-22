@@ -301,6 +301,18 @@ GitHub 侧的附件 release 不能是 draft：draft 的 `browser_download_url` �
 
 这条链路此前从未接通：`TrackerProvider.uploadArtifacts` 有 GitLab 实现却没有调用方，GitHub 实现是返回空串的 TODO 空壳。Backlog 229 的 QA 因此只发出两行正文，逐条 AC 证据只落在 `~/.afk/runtime/tasks/diagnostics/<runId>/result.json`，二进制产物无处可寻（QA 提交里 `.afk/` 文件数为 0）。回归测试覆盖证据渲染、change provider 的上传接线与上传失败降级、GitHub pre-release 的创建与复用、同名附件先删后传、单个附件失败不影响其余附件，以及 runner 在缺清单时的留痕。
 
+### 7.4 各阶段证据的出口（2026-10-22）
+
+一次工作项的证据分两个阶段落在两个地方，skill 必须与之一致，否则 agent 会执行不存在的步骤。
+
+| 阶段 | 证据 | 出口 | 持久性 |
+| --- | --- | --- | --- |
+| 实现 | 命令输出等文本 | commit message 的 Progress 清单 | 随分支到达评审者 |
+| 实现 | 截图、trace、二进制 | 工作树内的 `.afk/artifacts.txt` 记录绝对路径 | 不持久：`.afk/` 被 Git 忽略，且工作树在运行结束后被清理 |
+| QA | 逐条 AC 的预期与实际、行为断言、附件 | Change Request 正文的 `## Verification Evidence` 段，附件上传到 provider 的 release | 持久，且评审者无需访问本机 |
+
+实现阶段不上传任何文件：那个阶段还没有 Change Request 可挂载，工作树也会在运行结束后被删除，因此只有文本证据能随分支存活。skill 曾要求 agent `git add .afk/artifacts.txt`——该路径被 Git 忽略，命令必然被拒绝；skill 还承诺一个并不存在的 "wrapup step" 会上传并嵌入 URL。两处都已改正，并由 `tests/contract/skill-evidence-contract.test.ts` 守卫：任何 skill 不得再要求暂存 `.afk/`，且必须写明附件由 QA 阶段上传。
+
 ## 8. 验证边界与建议用例
 
 | 层级 | 应验证什么 | 可接受证据 | 不能证明什么 |

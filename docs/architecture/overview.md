@@ -1,9 +1,42 @@
 # AFK architecture
 
+## Workspace organization
+
+The root is a private pnpm workspace. `apps/cli` owns the `afk` executable,
+Commander commands, shell completion, and the Ink TUI. `apps/desktop` owns
+Electron main/preload, IPC validation and the React renderer. Both consume
+the same shared packages through declared exports:
+
+| Package | Responsibility |
+| --- | --- |
+| `packages/core` (`@afk/core`) | Pure models, events, reducer, policy and ports |
+| `packages/application` (`@afk/application`) | Shared use cases, inventory and execution queries; depends on Core |
+| `packages/runtime` (`@afk/runtime`) | Workflow execution, backlog operations and Node adapters for providers, Git, tmux, sandbox and storage |
+| `packages/workflow-graph` (`@afk/workflow-graph`) | Pure workflow graph projection, layout and validation |
+
+Applications must not import another workspace's source by relative path.
+Shared packages must not depend on applications; the workspace graph must be
+acyclic. Desktop renderer code must not import `@afk/runtime`; Node access
+stays behind main-process IPC. Runtime retains its existing internal layer
+rules. The architecture check enforces these rules and package exports.
+
+Desktop backlog operations and graph generation call Runtime directly.
+Managed work-item execution runs the same `executeWorkItem` used by CLI in a
+bundled, detached Node worker. This preserves task process isolation and
+allows execution to outlive the desktop window. Desktop never looks up or calls
+the AFK CLI. Stop, recovery and merge confirmation call shared Runtime directly;
+execution has a single Worker path with no command override or fallback.
+
+Each workspace owns its build, typecheck and tests. Root commands run shared
+packages and CLI in dependency order, then repository contract tests. Desktop
+validation runs separately with `pnpm --filter afk-control-electron typecheck`,
+`build` and `test`. The CLI binary is `apps/cli/dist/index.js`; root no longer
+publishes an executable or contains application source.
+
 ## Architecture guard
 
 `pnpm architecture:check --check-packages` enforces layer direction and checks
-the `packages/afk-core` and `packages/afk-application` roots for pure
+the `packages/core` and `packages/application` roots for pure
 source imports and dependency direction. The guard also
 disallows generic records and legacy client-factory imports. The legacy migration is complete:
 `scripts/architecture-legacy-baseline.json` records zero legacy files, imports,
@@ -11,9 +44,11 @@ and patterns. New legacy files or imports fail the check. Delete the stale
 baseline record when removing an entry.
 
 Layer direction applies to relative imports between non-test files in
-`src/cli`, `src/domain`, `src/application`, `src/infrastructure`,
-`src/shared`, and `src/views`. Passing `--require-packages` makes a missing
-package root a failure instead of a skipped check.
+`packages/runtime/src/domain`, `packages/runtime/src/application`,
+`packages/runtime/src/infrastructure`, and `packages/runtime/src/shared`.
+Application boundaries in `apps/cli` and `apps/desktop` are checked by the
+workspace import guard. Passing `--require-packages` makes a missing package
+root a failure instead of a skipped check.
 
 ## Scope and command surface
 
@@ -137,11 +172,12 @@ status, phase, heartbeat, progress, and diagnostics. A heartbeat older than the
 freshness threshold is displayed as runtime `stale`; it does not mutate the
 Provider Backlog lifecycle state.
 
-Desktop's workspace-local `.afk/backlog-runs.json` contains process launch
-metadata only. It may report a PID or launch error, but it cannot infer
-`verification`, `blocked`, or `done`. Desktop joins Backlog, launch metadata,
-and canonical runtime records by exact `backlogId`; missing or malformed runtime
-data leaves the Backlog visible with an explicit no-runtime state.
+Desktop reads `.afk/work-item-runs.json` from the execution workspace located
+by canonical `workItemId`. These records contain Worker launch receipts, not
+Provider lifecycle state. Runtime records must explicitly name their workspace;
+Desktop joins them by exact `backlogId`, execution workspace and provider.
+Missing or malformed runtime data leaves the Backlog visible with an explicit
+no-runtime state. There is no reader for the removed backlog run store.
 
 ## Claim boundary and local fallback
 

@@ -1,8 +1,8 @@
 # AFK 目标目录布局
 
 **作者：** Mavis
-**状态：** 提案，尚未采纳。本文档描述**目标态**，不描述当前代码库。
-**范围：** 仓库根、`src/`、`packages/`、`docs/` 的组织规则；不含 `desktop-client/` 内部（其结构已符合目标）。
+**状态：** 旧提案，尚未采纳。本文的根目录 `src/` 方案已由 `apps/cli`、`apps/desktop` 与共享 `packages` 的组织方式取代；当前结构以[架构总览](../overview.zh.md#工作区组织)为准。下文保留原提案供追溯。
+**范围：** 仓库根、`src/`、`packages/`、`docs/` 的组织规则；不含 `apps/desktop/` 内部（其结构已符合目标）。
 **决策依据：** 社区目录组织共识（单一源码根 / 功能内聚 / 命名说产品语言 / 单一命名约定 / 工具兜底），见文末「参考」。
 
 ---
@@ -14,7 +14,7 @@
 
 > **轴 1 运行边界** → **轴 2 依赖方向** → **轴 3 功能内聚** → **轴 4 读者类型**
 
-- **轴 1 运行边界**：加载它的进程有几个？1 个 → `src/`；多个 → `packages/`；完全独立 → `desktop-client/`。
+- **轴 1 运行边界**：加载它的进程有几个？1 个 → `src/`；多个 → `packages/`；完全独立 → `apps/desktop/`。
 - **轴 2 依赖方向**：只在**同一个仓**内分层，依赖单向向下，永不反向。分层由 `pnpm architecture:check` 强制。
 - **轴 3 功能内聚**：层**内部**按业务能力分组（`task-cockpit/`），**不按**文件类型（`components/`、`utils/`、`types/`）。
 - **轴 4 读者类型**：只影响 `docs/`。代码与 agent 制品不受影响。
@@ -77,7 +77,7 @@ afk/
 │   ├── plugin-sdk/                  ← 边界：对外插件契约（稳定的对外 API）
 │   └── types/                       ← 仅 ambient .d.ts，不放业务类型
 │
-├── desktop-client/                  ← 轴 1：Electron 独立包（结构已达标，不动）
+├── apps/desktop/                  ← 轴 1：Electron 独立包（结构已达标，不动）
 ├── skills/                          ← 轴 4：agent 行为制品（142 文件，不可 import）
 ├── docs/                            ← 轴 4：人读文档
 │   ├── architecture/                ← 现状：现在已经是什么
@@ -93,12 +93,12 @@ afk/
 
 ## 2.1 已核验：运行边界是干净的
 
-实测 `desktop-client/` 对 `src/` 的 import 数为 **0**。它只通过 `packages/*` 复用领域
-语义（`package.json` 里 `build:application` 显式编译 `../packages/afk-core` 与
-`../packages/afk-application`）。
+实测 `apps/desktop/` 对 `src/` 的 import 数为 **0**。它只通过 `packages/*` 复用领域
+语义（`package.json` 里 `build:application` 显式编译 `../packages/core` 与
+`../packages/application`）。
 
 这条边界值得保持：**`src/` 可以任意重构而不影响 Electron**，反之亦然。
-任何未来让 `desktop-client` 直接引用 `src/` 的改动都应视为破坏轴 1。
+任何未来让 `apps/desktop` 直接引用 `src/` 的改动都应视为破坏轴 1。
 
 ---
 
@@ -106,23 +106,23 @@ afk/
 
 | 目录 | 职责 | 可依赖 | 禁止事项 |
 | --- | --- | --- | --- |
-| `packages/afk-core/` | 领域内核：状态机、事件、端口契约。CLI 与 Electron 共享同一份语义 | 无（零依赖） | 任何 `node:*`、任何 I/O、任何框架 |
-| `packages/afk-contracts/` | 跨进程只读投影与端口：让 Electron 不必复制业务模型 | `afk-core` | 编排逻辑、副作用 |
-| `packages/afk-workflow-graph/` | 工作流图结构与校验 | `afk-core` | I/O |
-| `src/domain/` | CLI 侧领域类型、reducer、端口**定义** | `afk-core`、`shared` | **一切 I/O**；依赖 application 及以下 |
-| `src/application/` | 用例编排：workflow / run / session 生命周期 | `domain`、`core`、`infrastructure`、`shared` | 依赖 `cli`、`views`；直接 spawn 进程 |
-| `src/infrastructure/` | 全部 I/O：git、tmux、sandbox、tracker、文件、进程 | `domain`、`core`、`shared` | 业务决策；依赖 `application` 及以上 |
-| `src/cli/` | 命令表面、参数解析、输出格式。**唯一真源** | `application`、`domain`、`infrastructure`、`shared`、`views` | 业务逻辑下沉；命令重复注册 |
-| `src/views/` | Ink 渲染。按功能分组 | `application`、`domain`、`infrastructure`、`shared` | 业务逻辑；`components/utils/types` 式类型分组 |
-| `src/observability/` | 审计主干的查询与投影 | `application`、`domain`、`infrastructure`、`core` | 写审计事件（属 infrastructure） |
-| `src/coordinator/` | 跨切面协调：把用例与执行环境接起来 | `application`、`infrastructure` | 沉淀通用工具 |
-| `src/plugin-sdk/` | 对外插件契约。**兼容性承诺面** | `domain` | 反向依赖仓库内部实现 |
-| `src/types/` | 仅 ambient 声明（如 `node-sqlite.d.ts`） | — | 业务类型、任何运行时值 |
-| `src/shared/` | 跨层纯工具与常量 | 无（最低层） | 业务规则、I/O |
+| `packages/core/` | 领域内核：状态机、事件、端口契约。CLI 与 Electron 共享同一份语义 | 无（零依赖） | 任何 `node:*`、任何 I/O、任何框架 |
+| `packages/contracts/` | 跨进程只读投影与端口：让 Electron 不必复制业务模型 | `afk-core` | 编排逻辑、副作用 |
+| `packages/workflow-graph/` | 工作流图结构与校验 | `afk-core` | I/O |
+| `packages/runtime/src/domain/` | CLI 侧领域类型、reducer、端口**定义** | `afk-core`、`shared` | **一切 I/O**；依赖 application 及以下 |
+| `packages/runtime/src/application/` | 用例编排：workflow / run / session 生命周期 | `domain`、`core`、`infrastructure`、`shared` | 依赖 `cli`、`views`；直接 spawn 进程 |
+| `packages/runtime/src/infrastructure/` | 全部 I/O：git、tmux、sandbox、tracker、文件、进程 | `domain`、`core`、`shared` | 业务决策；依赖 `application` 及以上 |
+| `apps/cli/src/` | 命令表面、参数解析、输出格式。**唯一真源** | `application`、`domain`、`infrastructure`、`shared`、`views` | 业务逻辑下沉；命令重复注册 |
+| `apps/cli/src/tui/` | Ink 渲染。按功能分组 | `application`、`domain`、`infrastructure`、`shared` | 业务逻辑；`components/utils/types` 式类型分组 |
+| `packages/runtime/src/observability/` | 审计主干的查询与投影 | `application`、`domain`、`infrastructure`、`core` | 写审计事件（属 infrastructure） |
+| `packages/runtime/src/coordinator/` | 跨切面协调：把用例与执行环境接起来 | `application`、`infrastructure` | 沉淀通用工具 |
+| `packages/runtime/src/plugin-sdk/` | 对外插件契约。**兼容性承诺面** | `domain` | 反向依赖仓库内部实现 |
+| `packages/runtime/src/types/` | 仅 ambient 声明（如 `node-sqlite.d.ts`） | — | 业务类型、任何运行时值 |
+| `packages/runtime/src/shared/` | 跨层纯工具与常量 | 无（最低层） | 业务规则、I/O |
 | `skills/` | agent 行为定义 | — | 被 TS import；被 CLI 运行时加载 |
 | `docs/` | 人读文档，按「状态」分目录（见 §3.1） | — | 承载构建逻辑 |
 | `tests/` | 仓库级不变量：架构规则、跨层契约、端到端 | 全部 | 重复单元测试（那些应 colocate） |
-| `desktop-client/` | Electron 独立进程 | 仅 `packages/*` | 内联复制 `src/` 业务逻辑；import `src/` |
+| `apps/desktop/` | Electron 独立进程 | 仅 `packages/*` | 内联复制 `src/` 业务逻辑；import `src/` |
 
 ### 3.1 `docs/` 的状态语义（一目录一状态）
 
@@ -145,10 +145,10 @@ afk/
 | 位置 | 装什么 | 现状 |
 | --- | --- | --- |
 | `src/**/*.test.ts` | 单元 / 组件测试，与源码同目录 | ✅ 115 个，保持不变 |
-| `src/domain`、`src/application` 内部 | 纯函数与 reducer 测试 | ✅ 保持 |
+| `packages/runtime/src/domain`、`packages/runtime/src/application` 内部 | 纯函数与 reducer 测试 | ✅ 保持 |
 | `packages/*/tests/` | **收归**为 colocated，上移到 `packages/*/src/` | ❌ 15 个待迁移 |
 | `tests/` | 仓库级不变量：架构守卫、跨层契约、E2E、fixtures | ⚠️ 9 个，需收窄职责并命名区分 |
-| `desktop-client/tests/` | Electron 进程边界测试 | 独立包，维持现状 |
+| `apps/desktop/tests/` | Electron 进程边界测试 | 独立包，维持现状 |
 
 例外理由：只有**不属于任一源文件**的测试（架构规则、契约、E2E）才放 `tests/`。
 
@@ -160,14 +160,14 @@ afk/
 
 ### 5.1 统一 `work-item` 拼写 — 纯重命名
 
-`src/domain/work-item/`（保留，单数，规范名）与 `src/application/work-items/` → `work-item/`。
+`packages/runtime/src/domain/work-item/`（保留，单数，规范名）与 `packages/runtime/src/application/work-items/` → `work-item/`。
 
 同一领域概念在两层用了两种拼写，grep 无法定位全貌，跨层 import 易错。
 依据：`AGENTS.md` 已声明「Work identity is a contract」。
 
 ### 5.2 塌陷同名嵌套
 
-`src/views/board/board/` → 内容上提到 `src/views/board/`。调用方从
+`apps/cli/src/tui/board/board/` → 内容上提到 `apps/cli/src/tui/board/`。调用方从
 `views/board/board/BoardView` 变为 `views/board/BoardView`。无命名冲突。
 
 ### 5.3 测试布局归一
@@ -175,11 +175,11 @@ afk/
 `packages/*/tests/` 15 个文件上移为 colocated；根 `tests/` 收窄为不变量测试，
 文件名加前缀区分（`contract-*` / `e2e-*` / `architecture-*`）。
 
-### 5.4 拆解 `src/types/`
+### 5.4 拆解 `packages/runtime/src/types/`
 
-`src/types/board.ts`（含业务函数 `getTaskBacklogId()` 与 deprecated 字段 `iid`）
-→ 并入 `src/views/board/`（它本就是给看板用的 runtime 投影，该目录已有 `types.ts`）。
-`src/types/` 仅保留 `node-sqlite.d.ts`。需同步 `AGENTS.md` 布局表。
+`apps/cli/src/tui/board-types.ts`（含业务函数 `getTaskBacklogId()` 与 deprecated 字段 `iid`）
+→ 并入 `apps/cli/src/tui/board/`（它本就是给看板用的 runtime 投影，该目录已有 `types.ts`）。
+`packages/runtime/src/types/` 仅保留 `node-sqlite.d.ts`。需同步 `AGENTS.md` 布局表。
 
 ### 5.5 `docs/` 归并
 
@@ -189,45 +189,45 @@ afk/
 
 ### 5.6 `modules/` → `runners/`
 
-`src/application/modules/` 内是 `loop-runner` / `qa-runner` / `_registry` / `isolate` /
+`packages/runtime/src/application/modules/` 内是 `loop-runner` / `qa-runner` / `_registry` / `isolate` /
 `project-resolver`——是执行器，不是「模块」。改用业务语言命名。
 
-### 5.7 `packages/afk-application` 更名（可选，中等成本）
+### 5.7 `packages/application` 更名（可选，中等成本）
 
-它装的是端口契约与只读投影，不是用例。`src/application/`（76 文件用例编排）与它
+它装的是端口契约与只读投影，不是用例。`packages/runtime/src/application/`（76 文件用例编排）与它
 同名却无共同职责——架构守卫把两者都判为 `application` 层，等于两层并一层。
-更名为 `packages/afk-contracts/` 可消除歧义。需同步：`package.json`、两处
-`tsconfig`、`desktop-client/scripts/*`、`architecture-guard.mjs` 的 layers 定义。
+更名为 `packages/contracts/` 可消除歧义。需同步：`package.json`、两处
+`tsconfig`、`apps/desktop/scripts/*`、`architecture-guard.mjs` 的 layers 定义。
 **建议单独 commit。**
 
 ---
 
 ## 6. 执法缺口：声明与现实相反
 
-`AGENTS.md` 写「`src/domain/` — Pure types, reducers, provider seams — **no I/O**」。
-实测 `src/domain/` 有 **12 个文件** import node 内置模块，其中 **4 个**真的起进程：
+`AGENTS.md` 写「`packages/runtime/src/domain/` — Pure types, reducers, provider seams — **no I/O**」。
+实测 `packages/runtime/src/domain/` 有 **12 个文件** import node 内置模块，其中 **4 个**真的起进程：
 
 | 文件 | I/O |
 | --- | --- |
-| `src/domain/agents/codex-app-server/transport.ts` | `spawn`、`net.createConnection` |
-| `src/domain/agents/codex-runtime.ts` | `execFile` |
-| `src/domain/backlog/claim.ts` | `fs/promises`、`os` |
-| `src/domain/templates/loader.ts` | `fs`、`os`、`path` |
+| `packages/runtime/src/domain/agents/codex-app-server/transport.ts` | `spawn`、`net.createConnection` |
+| `packages/runtime/src/domain/agents/codex-runtime.ts` | `execFile` |
+| `packages/runtime/src/domain/backlog/claim.ts` | `fs/promises`、`os` |
+| `packages/runtime/src/domain/templates/loader.ts` | `fs`、`os`、`path` |
 
 **为什么没被拦住**：`architecture-guard.mjs` 的 `nodeBuiltins` 黑名单只作用于
 `packages/*/`（第 262 行）；`src/**` 只检查**相对导入**的层方向，而这 12 个文件
 import 的是 `node:*`，直接绕过检查。
 
 **这是本提案最重要的发现**：原则写在了文档里，却既没被代码遵守，也没被工具兜住。
-目标布局要求全部 I/O 收敛到 `src/infrastructure/`。修复分两步：
+目标布局要求全部 I/O 收敛到 `packages/runtime/src/infrastructure/`。修复分两步：
 
-1. **立即**：给 `architecture-guard.mjs` 增加规则——`src/domain/` 与 `src/application/`
+1. **立即**：给 `architecture-guard.mjs` 增加规则——`packages/runtime/src/domain/` 与 `packages/runtime/src/application/`
    禁止 `nodeBuiltins`。让它先变红。
 2. **随后**：按报错把 `claim.ts`、`loader.ts`、`transport.ts` 等迁到 `infrastructure/`，
    在 `domain/` 只留端口定义。
 
 这一步会触及较深的 import 链，且当前工作区正处于同方向的重构中
-（`src/application/providers.ts` 已删除），建议独立分支推进。
+（`packages/runtime/src/application/providers.ts` 已删除），建议独立分支推进。
 
 ---
 

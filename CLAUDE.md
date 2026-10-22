@@ -14,30 +14,27 @@ React + `ink`; validation with `zod`; Git via `simple-git` and `node-tmux`;
 GitLab via `@gitbeaker/node`, GitHub via `@octokit/rest`; structured logging
 with `pino`. Tests run under `vitest`. The Electron desktop client is a
 separate package with its own toolchain — see
-[`desktop-client/ARCHITECTURE.md`](desktop-client/ARCHITECTURE.md).
+[`apps/desktop/ARCHITECTURE.md`](apps/desktop/ARCHITECTURE.md).
 
 ## Repository layout
 
 ```
-src/
-├── domain/          # Pure types, reducers, provider seams — no I/O
-├── application/     # Use cases over domain; owns workflow/run state
-├── infrastructure/  # Git, tmux, sandboxes, trackers, observability
-├── cli/             # Commander wiring, command registry
-├── views/           # Ink TUI (core primitives in views/shared/)
-├── coordinator/     # Cross-cutting coordination
-├── observability/   # Query/projection layer over the audit spine
-├── plugin-sdk/      # External plugin contract
-├── types/           # Shared board/runtime type projections
-└── shared/          # Cross-layer utilities
-packages/            # afk-core, afk-application, afk-workflow-graph
+apps/
+├── cli/             # afk executable, Commander commands, completion, Ink TUI
+└── desktop/         # Electron main/preload and React renderer
+packages/
+├── core/            # @afk/core: pure models, events, reducer, ports
+├── application/     # @afk/application: shared use cases and queries
+├── runtime/         # @afk/runtime: execution engine and Node adapters
+└── workflow-graph/  # @afk/workflow-graph: pure graph computation
 skills/              # Source of truth for all Claude Code skills
 docs/                # All documentation (see below)
 ```
 
-Layer direction is enforced, not merely documented: `pnpm architecture:check`
-rejects illegal relative imports and quarantines legacy files. Do not add a
-dependency that inverts a layer.
+The root package is a private workspace coordinator. Package responsibilities
+and dependency rules are owned by [the architecture overview](docs/architecture/overview.md#workspace-organization).
+`pnpm architecture:check` checks runtime layers, public workspace imports and
+dependency direction. Do not import another workspace's source by relative path.
 
 ## Documentation
 
@@ -87,15 +84,18 @@ documents ship as `name.md` + `name.zh.md`; update both.
 ```bash
 pnpm build              # compile to dist/ (runs workspace package builds first)
 pnpm typecheck          # root + workspace typecheck
-pnpm test               # vitest + @afk/core + @afk/application
+pnpm test               # shared packages + CLI + repository contract tests
 pnpm architecture:check # layer direction + legacy quarantine
 pnpm docs:check         # broken/case-mismatched doc links
 ```
 
 `pretest` runs a build, so `pnpm test` is self-contained. `.husky/pre-push` runs
 architecture:check → typecheck → build → test on `main` and `release/*` before
-letting a push through. Desktop work is scoped to `desktop-client/`, whose
+letting a push through. Desktop work is scoped to `apps/desktop/`, whose
 packages are built and tested separately — run its own scripts there.
+The built executable is `apps/cli/dist/index.js`; `pnpm --filter afk dev --help`
+runs the source CLI. `pnpm --filter afk-control-electron build` builds Desktop
+and its shared dependencies.
 
 ## Environment
 

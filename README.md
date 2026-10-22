@@ -23,8 +23,8 @@ Cross-platform issue tracking automation (GitLab/GitHub) powered by Claude AI ag
 ```bash
 git clone https://github.com/easyhaloo/afk.git
 cd afk
-npm install && npm run build
-npm link
+pnpm install && pnpm build
+pnpm --dir apps/cli link --global
 afk --version
 ```
 
@@ -176,10 +176,11 @@ See [Workflow Documentation](docs/guides/workflows.md).
 ## Development
 
 ```bash
-npm install
-npm run build    # Build TypeScript
-npm test         # Run tests
-npm link         # Install globally
+pnpm install
+pnpm build                         # Build shared packages and CLI
+pnpm test                          # Test shared packages and CLI
+pnpm --dir apps/desktop test        # Test Desktop
+pnpm --dir apps/cli link --global   # Install CLI globally
 ```
 
 ## Documentation

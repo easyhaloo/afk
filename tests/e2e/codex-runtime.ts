@@ -8,19 +8,19 @@ import {
   resolveCodexRuntime,
   type CodexRuntimeSelection,
   type CodexTransport,
-} from '../../src/domain/agents/index';
-import { BACKLOG_METADATA } from '../../src/domain/backlog/index';
-import { getWorkflowConfig } from '../../src/infrastructure/config/manager';
-import { createProviderBundle as assembleProviderBundle } from '../../src/infrastructure/provider/providers';
-import { createTracker } from '../../src/infrastructure/provider/tracker-provider-factory';
-import type { TrackerProvider } from '../../src/domain/tracker/types';
-import { LoopRunner } from '../../src/application/modules/loop-runner';
-import { TaskRuntimeManager } from '../../src/application/runtime/task-runtime';
-import { deriveBacklogBranchName } from '../../src/domain/backlog/index';
-import { formatWorkItemId } from '../../src/domain/work-item/identity';
-import { toGlobalWorkItem } from '../../src/domain/work-item/metadata';
-import { executeWorkItem } from '../../src/application/workflows/execute-work-item';
-import { waitForTerminal } from './codex-runtime-wait';
+} from '@afk/runtime/domain/agents/index';
+import { BACKLOG_METADATA } from '@afk/runtime/domain/backlog/index';
+import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
+import { createProviderBundle as assembleProviderBundle } from '@afk/runtime/infrastructure/provider/providers';
+import { createTracker } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
+import type { TrackerProvider } from '@afk/runtime/domain/tracker/types';
+import { LoopRunner } from '@afk/runtime/application/modules/loop-runner';
+import { TaskRuntimeManager } from '@afk/runtime/application/runtime/task-runtime';
+import { deriveBacklogBranchName } from '@afk/runtime/domain/backlog/index';
+import { formatWorkItemId } from '@afk/runtime/domain/work-item/identity';
+import { toGlobalWorkItem } from '@afk/runtime/domain/work-item/metadata';
+import { executeWorkItem } from '@afk/runtime/execution';
+import { waitForTerminal } from './codex-runtime-wait.js';
 
 const E2E_PHASE_TIMEOUT_MS = positiveInteger(process.env.AFK_CODEX_E2E_TIMEOUT_MS) ?? 30 * 60_000;
 

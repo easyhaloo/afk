@@ -10,13 +10,13 @@ git clone https://github.com/easyhaloo/afk.git
 cd afk
 
 # Install dependencies
-npm install
+pnpm install
 
 # Build
-npm run build
+pnpm build
 
 # Install globally
-npm link
+pnpm --dir apps/cli link --global
 ```
 
 Verify the installation:
@@ -145,7 +145,7 @@ cd /path/to/afk
 npm link
 
 # Or run directly
-node /path/to/afk/dist/index.js --help
+node /path/to/afk/apps/cli/dist/index.js --help
 ```
 
 ### Platform Detection Error

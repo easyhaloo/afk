@@ -6,7 +6,7 @@
 
 | 能力 | 当前状态 | 说明 |
 | --- | --- | --- |
-| 纯领域 `WorkItem` / `Run` / `RunEvent` / reducer | 已实现 | `packages/afk-core/` 无 Node.js、网络、GitHub、Pino 或 Commander 依赖。 |
+| 纯领域 `WorkItem` / `Run` / `RunEvent` / reducer | 已实现 | `packages/core/` 无 Node.js、网络、GitHub、Pino 或 Commander 依赖。 |
 | 显式执行基线策略 | 已实现 | `parentId`、`dependsOn` 与 `baseBacklogId/baseWorkItemId` 在 Backlog 与 core 投影中职责分离。 |
 | JSONL 事件存储 | 已实现 | 单 run 顺序、hash chain、fsync 追加、重启校验与读取。初期只保证单 workspace 进程内序列化。 |
 | 本地加密 EvidenceStore | 已实现 | AES-256-GCM、内容哈希、文本 secret redaction；尚未自动捕获正文。 |
@@ -21,10 +21,10 @@
 运行入口负责组装 `RunObserver` 与 JSONL `EventStore`。可以指定审计目录和 profile；无需启用模式开关。
 
 ```bash
-node scripts/build.mjs
+pnpm build
 export AFK_EVENT_STORE_DIR="$HOME/.afk/events"
 export AFK_PROFILE=local
-node dist/index.js run --backlog-id 123 --execution-mode batch
+node apps/cli/dist/index.js run --backlog-id 123 --execution-mode batch
 ```
 
 `WorkflowRunner` 在 `AFK_EVENT_STORE_DIR` 追加 JSONL 审计事件；不能持久化事件时抛出 `AuditPersistenceError`，不会静默跳过审计。
@@ -33,7 +33,8 @@ Provider Backlog owns business identity and lifecycle. `BacklogItem.id` is
 recorded as `Run.workItemId` and runtime/event `backlogId`; `runId` identifies
 only one attempt. Runtime heartbeat freshness is diagnostic: `stale` never
 changes the Provider Backlog state. Desktop launch records in
-`.afk/backlog-runs.json` are not execution or business-state evidence.
+the execution workspace's `.afk/work-item-runs.json` are Worker launch receipts,
+not execution or business-state evidence.
 
 | 环境变量 | 默认值 | 用途 |
 | --- | --- | --- |
@@ -46,25 +47,25 @@ changes the Provider Backlog state. Desktop launch records in
 
 ```bash
 # 检查本地事件目录
-node dist/index.js observe doctor --json
+node apps/cli/dist/index.js observe doctor --json
 
 # 发现本地事件目录中的 run ID
-node dist/index.js observe runs --json
+node apps/cli/dist/index.js observe runs --json
 
 # 查看事件时序与 hash-chain 校验结论
-node dist/index.js observe timeline <run-id> --json
-node dist/index.js observe verify <run-id> --json
+node apps/cli/dist/index.js observe timeline <run-id> --json
+node apps/cli/dist/index.js observe verify <run-id> --json
 
 # 从事件流重放 aggregate state；不会执行 effect
-node dist/index.js observe replay <run-id> --json
+node apps/cli/dist/index.js observe replay <run-id> --json
 
 # 直接回答“为何运行、失败、终止或等待人工”
-node dist/index.js observe explain <run-id>
+node apps/cli/dist/index.js observe explain <run-id>
 ```
 
 一次可解释的 run 至少拥有 `run.requested`、`run.started`、执行/QA step 边界、失败分类或变更单事实，以及 `run.finished` 或 `human_gate.opened`。事件名称低基数，动态值写入 data。
 
-`src/infrastructure/io/logger.ts` 导出
+`packages/runtime/src/infrastructure/io/logger.ts` 导出
 `withLogContext({ runId, workItemId }, asyncFn)` 与 `getLogContext()`。
 前者用 AsyncLocalStorage 隔离异步作用域，Pino mixin 为作用域内的
 `logger` / `fileLogger` JSON 行添加 `runId`、`workItemId`；后者返回当前上下文，
@@ -130,7 +131,7 @@ arguments, output bodies, error messages, file paths and search queries are
 excluded. Timestamps and durations come from native fields; missing values
 are not filled using AFK's clock or text parsing.
 
-The pure domain API in `src/domain/agents/tool-telemetry.ts` exports
+The pure domain API in `packages/runtime/src/domain/agents/tool-telemetry.ts` exports
 `extractClaudeToolEvents(lines)`, `extractCodexToolEvents(lines)` and
 `collectAgentToolEvent(provider, event, tools)`; the collector merges parsed
 native events into a caller-owned map keyed by tool call/item ID. The two
@@ -157,7 +158,7 @@ returns collected `tools`, including failure, abort and timeout. This does not
 add a raw-output buffer and does not depend on the bounded `captureOutput`
 tail. With no recognized calls, `tools` remains absent.
 
-`src/infrastructure/observability/agent-telemetry.ts` re-exports the provider extractors
+`packages/runtime/src/infrastructure/observability/agent-telemetry.ts` re-exports the provider extractors
 and provides `readAgentTools(options: ReadTelemetryOptions):
 Promise<AgentToolCallSummary[] | undefined>`, independently of the existing
 `readAgentTelemetry` token API. Its `collectAgentTelemetry(execution, result,

@@ -1,0 +1,44 @@
+import React from 'react';
+import { Box, Text } from 'ink';
+import { getTaskBacklogId, Task } from '../../board-types.js';
+import { ListView } from './ListView.js';
+import { formatRelativeTime } from '../utils.js';
+
+interface Props {
+  tasks: Task[];
+  selected: number;
+  scrollOffset: number;
+  viewportHeight: number;
+}
+
+export function CompletedListView({ tasks, selected, scrollOffset, viewportHeight }: Props) {
+  return (
+    <ListView
+      items={tasks}
+      selected={selected}
+      scrollOffset={scrollOffset}
+      viewportHeight={viewportHeight}
+      emptyMessage="ℹ  no completed tasks"
+      getKey={getTaskBacklogId}
+      render={(task, index, isSelected) => {
+        const color = isSelected ? 'white' : 'gray';
+        return (
+          <Box
+            key={getTaskBacklogId(task)}
+            width="100%"
+            overflow="hidden"
+            flexDirection="row"
+            borderStyle={isSelected ? 'round' : undefined}
+            borderColor={isSelected ? 'white' : undefined}
+            paddingX={1}
+          >
+            <Text color="white">✔ </Text>
+            <Text color={color} bold> #{getTaskBacklogId(task)} </Text>
+            <Text color={color}>{task.title || task.branch}</Text>
+            <Text dimColor>  ─ {task.runStatus ?? 'completed'} · {task.phase} · {task.progress || '100%'} · {task.startedAt ? formatRelativeTime(task.startedAt) : '–'}</Text>
+          </Box>
+        );
+      }}
+    />
+  );
+}

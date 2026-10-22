@@ -1,0 +1,700 @@
+import { describe, expect, it, vi } from 'vitest';
+import { Command } from 'commander';
+import {
+  registerBacklogCommands,
+  runBacklogAdopt,
+  runBacklogConfirmMerge,
+  runBacklogCreate,
+  runBacklogInterrupt,
+  runBacklogInventory,
+  runBacklogList,
+  runBacklogRetry,
+  runBacklogShow,
+  runBacklogTagAdd,
+  runBacklogTagRemove,
+} from './backlog.js';
+import { registerRunCommands } from './run.js';
+import { registerQACommands } from './qa.js';
+import { registerLoopCommands } from './loop.js';
+import type { BacklogItem, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
+import type { ProviderCatalog } from '@afk/runtime/domain/work-item/provider-types';
+import { emitSuccess, emitFailure } from '../json-output.js';
+import * as providerFactory from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
+
+function commandTree(register: (program: Command) => void): Command {
+  const program = new Command();
+  program.name('afk').exitOverride();
+  register(program);
+  return program;
+}
+
+describe('hard-cutover command surface', () => {
+  it('exposes backlog management subcommands only', () => {
+    const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog');
+    const commandNames = backlog?.commands.map(command => command.name()) ?? [];
+    expect(commandNames).toEqual(expect.arrayContaining([
+      'init', 'adopt', 'inventory', 'list', 'show', 'create', 'interrupt', 'retry', 'confirm-merge', 'tag',
+    ]));
+    expect(new Set(commandNames).size).toBe(commandNames.length);
+    const tagNames = backlog?.commands.find(command => command.name() === 'tag')?.commands.map(command => command.name()) ?? [];
+    expect(tagNames).toEqual(expect.arrayContaining(['add', 'remove']));
+    expect(new Set(tagNames).size).toBe(tagNames.length);
+  });
+
+  it('exposes global inventory filters without changing backlog list options', () => {
+    const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog')!;
+    const inventory = backlog.commands.find(command => command.name() === 'inventory')!;
+    const list = backlog.commands.find(command => command.name() === 'list')!;
+
+    expect(inventory.options.map(option => option.long)).toEqual(expect.arrayContaining([
+      '--platform', '--state', '--mode', '--tag', '--project', '--json',
+    ]));
+    expect(list.options.some(option => option.long === '--parent')).toBe(true);
+    expect(list.options.map(option => option.long)).not.toContain('--all-projects');
+  });
+
+  it('requires a string backlog id for run and qa', () => {
+    const run = commandTree(registerRunCommands).commands.find(command => command.name() === 'run');
+    const qa = commandTree(registerQACommands).commands.find(command => command.name() === 'qa');
+    expect(run?.options.some(option => option.long === '--backlog-id' && option.required)).toBe(true);
+    expect(qa?.options.some(option => option.long === '--backlog-id' && option.required)).toBe(true);
+    expect(run?.options.some(option => option.long === '--iid')).toBe(false);
+    expect(qa?.options.some(option => option.long === '--iid')).toBe(false);
+  });
+
+  it('keeps agent selection on lower-level commands and binds loop to a manifest', () => {
+    const run = commandTree(registerRunCommands).commands.find(command => command.name() === 'run');
+    const loop = commandTree(registerLoopCommands).commands.find(command => command.name() === 'loop');
+    const qa = commandTree(registerQACommands).commands.find(command => command.name() === 'qa');
+
+    expect(run?.options.some(option => option.long === '--agent')).toBe(true);
+    expect(loop?.options.map(option => option.long)).toEqual(expect.arrayContaining([
+      '--backlog-id', '--work-item-id', '--execution-manifest',
+    ]));
+    expect(loop?.options.some(option => option.long === '--agent')).toBe(false);
+    expect(qa?.options.some(option => option.long === '--agent')).toBe(true);
+  });
+
+  it('exposes backlog creation relationship options', () => {
+    const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog');
+    const create = backlog?.commands.find(command => command.name() === 'create');
+
+    expect(create?.registeredArguments.map(argument => argument.name())).toEqual(['title']);
+    expect(create?.options.map(option => option.long)).toEqual(expect.arrayContaining([
+      '--description-file', '--parent', '--base-backlog', '--depends-on', '--mode', '--tag', '--project', '--platform', '--json',
+    ]));
+    expect(create?.options.find(option => option.long === '--base-backlog')?.description).toContain('explicit execution base');
+    expect(create?.options.find(option => option.long === '--depends-on')?.short).toBe('-d');
+  });
+
+  it('exposes --json and --platform on every backlog read/write subcommand', () => {
+    const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog');
+    expect(backlog).toBeDefined();
+    for (const name of ['list', 'show', 'init', 'interrupt', 'retry', 'confirm-merge']) {
+      const command = backlog!.commands.find(cmd => cmd.name() === name);
+      expect(command?.options.some(option => option.long === '--json'), `${name} --json`).toBe(true);
+      expect(command?.options.some(option => option.long === '--platform'), `${name} --platform`).toBe(true);
+    }
+    for (const name of ['interrupt', 'retry']) {
+      const command = backlog!.commands.find(cmd => cmd.name() === name);
+      expect(command?.options.some(option => option.long === '--id' && option.required), `${name} --id`).toBe(true);
+      expect(command?.options.some(option => option.long === '--reason' && option.required), `${name} --reason`).toBe(true);
+    }
+    const confirmMerge = backlog!.commands.find(cmd => cmd.name() === 'confirm-merge');
+    expect(confirmMerge?.options.some(option => option.long === '--id' && option.required)).toBe(true);
+    const tagAdd = backlog!.commands.find(cmd => cmd.name() === 'tag')!.commands.find(cmd => cmd.name() === 'add');
+    const tagRemove = backlog!.commands.find(cmd => cmd.name() === 'tag')!.commands.find(cmd => cmd.name() === 'remove');
+    expect(tagAdd?.options.some(option => option.long === '--json')).toBe(true);
+    expect(tagAdd?.options.some(option => option.long === '--platform')).toBe(true);
+    expect(tagRemove?.options.some(option => option.long === '--json')).toBe(true);
+    expect(tagRemove?.options.some(option => option.long === '--platform')).toBe(true);
+  });
+});
+
+describe('explicit backlog adoption', () => {
+  it.each(['github', 'gitlab'])('uses the explicit %s project and emits one adoption envelope', async platform => {
+    const item: BacklogItem = {
+      id: '42', title: 'Manual issue', state: 'ready', executionMode: 'afk',
+      tags: ['feature'], dependsOn: [], branchName: 'afk/backlog-42', providerRef: `${platform}:org/repo#42`,
+    };
+    const adopt = vi.fn().mockResolvedValue(item);
+    const factory = vi.spyOn(providerFactory, 'createManagementProviders').mockResolvedValue({
+      backlog: stubProvider([], { adopt }),
+    } as Awaited<ReturnType<typeof providerFactory.createManagementProviders>>);
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      await commandTree(registerBacklogCommands).parseAsync([
+        'node', 'afk', 'backlog', 'adopt', '--id', '42', '--project', 'org/repo', '--platform', platform, '--json',
+      ]);
+      expect(factory).toHaveBeenCalledWith('org/repo', undefined, platform);
+      expect(adopt).toHaveBeenCalledWith('42');
+      expect(stdout).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(stdout.mock.calls[0][0]))).toEqual({ ok: true, kind: 'backlog.adopt', data: item });
+    } finally {
+      factory.mockRestore();
+      stdout.mockRestore();
+    }
+  });
+
+  it.each([
+    ['--project', 'org/repo', '--platform', 'github'],
+    ['--id', '42', '--platform', 'github'],
+    ['--id', '42', '--project', 'org/repo'],
+    ['--id', '42', '--project', 'org/repo', '--platform', 'all'],
+  ])('rejects invalid or missing adoption scope before provider creation: %j', async flags => {
+    const argv = ['node', 'afk', 'backlog', 'adopt', ...flags, '--json'];
+    const program = new Command().name('afk').exitOverride();
+    registerBacklogCommands(program, { argv });
+    const factory = vi.spyOn(providerFactory, 'createManagementProviders');
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const previousExitCode = process.exitCode;
+    try {
+      await expect(program.parseAsync(argv)).rejects.toThrow();
+      expect(factory).not.toHaveBeenCalled();
+      expect(stdout).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(stdout.mock.calls[0][0]))).toMatchObject({
+        ok: false, kind: 'backlog.adopt', error: { code: 'validation' },
+      });
+    } finally {
+      process.exitCode = previousExitCode;
+      stdout.mockRestore();
+      factory.mockRestore();
+    }
+  });
+
+  it('emits one JSON failure when adoption is unsupported', async () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const previousExitCode = process.exitCode;
+    try {
+      await runBacklogAdopt(stubProvider([]), '42', { json: true });
+      expect(stdout).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(stdout.mock.calls[0][0]))).toMatchObject({
+        ok: false, kind: 'backlog.adopt', error: { message: expect.stringContaining('does not support explicit issue adoption') },
+      });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = previousExitCode;
+      stdout.mockRestore();
+    }
+  });
+});
+
+describe('backlog inventory command', () => {
+  const managedLabels = ['stage::ready-for-issues', 'mode::afk', 'team::api'];
+
+  function inventoryCatalog(): ProviderCatalog {
+    return {
+      platform: 'github',
+      scopeKey: 'github.com',
+      async listProjects() {
+        return [
+          { platform: 'github', projectKey: 'acme/api', name: 'api' },
+          { platform: 'github', projectKey: 'acme/web', name: 'web' },
+        ];
+      },
+      async listIssues(project) {
+        if (project.projectKey === 'acme/api') {
+          return [
+            { issueNumber: 1, title: 'matching', labels: managedLabels, state: 'opened' },
+            { issueNumber: 2, title: 'wrong mode', labels: ['stage::ready-for-issues', 'mode::hitl', 'team::api'], state: 'opened' },
+          ];
+        }
+        return [{ issueNumber: 1, title: 'wrong project', labels: managedLabels, state: 'opened' }];
+      },
+    };
+  }
+
+  it('emits the backlog.inventory envelope with combined filters', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogInventory(
+        platform => {
+          expect(platform).toBe('github');
+          return [inventoryCatalog()];
+        },
+        { platform: 'github', state: 'ready', mode: 'afk', tag: 'team::api', project: 'acme/api', json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.inventory',
+      data: {
+        complete: true,
+        projects: [{ projectKey: 'acme/api' }],
+        diagnostics: [],
+        items: [{ id: 'github:acme/api#1', title: 'matching' }],
+      },
+    });
+  });
+
+  it('emits a successful empty inventory', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogInventory(() => [{
+        platform: 'github',
+        scopeKey: 'github.com',
+        async listProjects() { return []; },
+        async listIssues() { return []; },
+      }], { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+
+    expect(JSON.parse(captured.join(''))).toEqual({
+      ok: true,
+      kind: 'backlog.inventory',
+      data: { items: [], projects: [], diagnostics: [], complete: true },
+    });
+  });
+
+  it('emits an auth failure when catalog credentials are missing', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    const previousExitCode = process.exitCode;
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    process.exitCode = undefined;
+    try {
+      await runBacklogInventory(() => {
+        throw new Error('GitHub authentication is required. Set GITHUB_TOKEN.');
+      }, { platform: 'github', json: true });
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.stdout.write = original;
+      process.exitCode = previousExitCode;
+    }
+
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: false,
+      kind: 'backlog.inventory',
+      error: { code: 'auth' },
+    });
+  });
+});
+
+describe('json-output helpers', () => {
+  it('emitSuccess writes the structured success envelope to stdout', () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      emitSuccess('backlog.list', [{ id: '1' }]);
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toEqual({ ok: true, kind: 'backlog.list', data: [{ id: '1' }] });
+  });
+
+  it('emitFailure writes the complete envelope and sets exitCode without immediate process exit', () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const exitSpy = vi.spyOn(process, 'exit');
+    const previousExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+      expect(() => emitFailure('backlog.list', 'auth', 'missing token', { hint: 'set GITHUB_TOKEN' })).not.toThrow();
+    } finally {
+      process.stdout.write = original;
+      exitSpy.mockRestore();
+      process.exitCode = previousExitCode;
+    }
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(previousExitCode);
+    expect(JSON.parse(captured.join(''))).toEqual({
+      ok: false,
+      kind: 'backlog.list',
+      error: { code: 'auth', message: 'missing token', details: { hint: 'set GITHUB_TOKEN' } },
+    });
+  });
+
+  it('emits one JSON envelope when Commander rejects a missing required backlog option', () => {
+    const program = new Command().name('afk').exitOverride();
+    const captured: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    const originalError = process.stderr.write.bind(process.stderr);
+    const previousExitCode = process.exitCode;
+    registerBacklogCommands(program, { argv: ['node', 'afk', 'backlog', 'show', '--json'] });
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    process.exitCode = undefined;
+    try {
+      expect(() => program.parse(['node', 'afk', 'backlog', 'show', '--json'])).toThrow(/required option/i);
+    } finally {
+      process.stdout.write = originalWrite;
+      process.stderr.write = originalError;
+      process.exitCode = previousExitCode;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: false,
+      kind: 'backlog.show',
+      error: { code: 'validation', message: expect.stringMatching(/required option/i) },
+    });
+  });
+});
+
+function stubProvider(items: BacklogItem[], overrides: Partial<QABacklogProvider> = {}): QABacklogProvider {
+  return {
+    async list() { return items; },
+    async get(id: string) {
+      const found = items.find(item => item.id === id);
+      if (!found) throw new Error(`backlog ${id} not found`);
+      return found;
+    },
+    async create(input) {
+      const created: BacklogItem = {
+        id: 'new-1', title: input.title, description: input.description,
+        parentId: input.parentId, baseBacklogId: input.baseBacklogId,
+        dependsOn: [...(input.dependsOn ?? [])],
+        state: 'ready',
+        executionMode: input.executionMode ?? 'afk',
+        tags: [...(input.tags ?? [])],
+        branchName: 'afk/backlog-new-1', providerRef: 'stub:new-1',
+      };
+      return created;
+    },
+    async addTag(id: string, tag: string) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      if (!item.tags.includes(tag)) item.tags.push(tag);
+    },
+    async removeTag(id: string, tag: string) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.tags = item.tags.filter(existing => existing !== tag);
+    },
+    async initialize() { /* noop */ },
+    async transition(id, state) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.state = state;
+      if (state === 'blocked') item.executionMode = 'hitl';
+    },
+    async setExecutionMode(id, mode) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.executionMode = mode;
+    },
+    async createRework(id, input) {
+      const item = items.find(candidate => candidate.id === id);
+      if (!item) throw new Error(`backlog ${id} not found`);
+      item.state = 'rework';
+      item.executionMode = 'afk';
+      return {
+        ...input,
+        version: 1,
+        id: 'r1',
+        attempt: 1,
+        status: 'open',
+        createdAt: '2026-09-17T00:00:00.000Z',
+      };
+    },
+    async getActiveRework() { return undefined; },
+    async resolveRework() { /* noop */ },
+    ...overrides,
+  };
+}
+
+const stubItem: BacklogItem = {
+  id: '42', title: 'demo task', description: 'demo body',
+  parentId: undefined, baseBacklogId: undefined, dependsOn: [],
+  state: 'ready', executionMode: 'afk', tags: ['billing'],
+  branchName: 'afk/backlog-42', providerRef: 'stub:42', webUrl: 'https://example/42',
+};
+
+describe('backlog action handlers (JSON envelope mode)', () => {
+  it('runBacklogList returns the structured success envelope when --json is set', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogList(stubProvider([stubItem]), { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toEqual({
+      ok: true, kind: 'backlog.list', data: [stubItem],
+    });
+  });
+
+  it('runBacklogList returns the structured failure envelope when the provider throws', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__:${code ?? 0}`);
+    }) as never);
+    try {
+      await expect(runBacklogList(
+        stubProvider([], { async list() { throw new Error('authentication required: GITHUB_TOKEN not set'); } }),
+        { json: true },
+      )).resolves.toBeUndefined();
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.stdout.write = original;
+      exitSpy.mockRestore();
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(false);
+    expect(envelope.kind).toBe('backlog.list');
+    expect(envelope.error.code).toBe('auth');
+    expect(envelope.error.message).toContain('authentication');
+  });
+
+  it('runBacklogShow emits the success envelope', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogShow(stubProvider([stubItem]), '42', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toEqual({
+      ok: true, kind: 'backlog.show', data: stubItem,
+    });
+  });
+
+  it('runBacklogCreate emits the success envelope with the new item', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogCreate(stubProvider([]), { title: 'fresh', description: 'desc', json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.create');
+    expect(envelope.data.id).toBe('new-1');
+    expect(envelope.data.title).toBe('fresh');
+  });
+
+  it('runBacklogTagAdd emits the success envelope with the updated item', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogTagAdd(stubProvider([{ ...stubItem, tags: ['billing'] }]), '42', 'urgent', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.tag.add');
+    expect(envelope.data.tags).toContain('urgent');
+  });
+
+  it('runBacklogTagRemove emits the success envelope with the updated item', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogTagRemove(stubProvider([{ ...stubItem, tags: ['billing', 'urgent'] }]), '42', 'urgent', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.kind).toBe('backlog.tag.remove');
+    expect(envelope.data.tags).not.toContain('urgent');
+  });
+
+  it('runBacklogInterrupt emits the blocked hitl backlog', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogInterrupt(
+        stubProvider([{ ...stubItem, state: 'in_progress', executionMode: 'afk' }]),
+        '42',
+        'operator stop',
+        { json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.interrupt',
+      data: { id: '42', state: 'blocked', executionMode: 'hitl' },
+    });
+  });
+
+  it('runBacklogRetry emits the rework afk backlog', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogRetry(
+        stubProvider([{ ...stubItem, state: 'blocked', executionMode: 'hitl' }]),
+        '42',
+        'operator retry',
+        { json: true },
+      );
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.retry',
+      data: { id: '42', state: 'rework', executionMode: 'afk' },
+    });
+  });
+
+  it('runBacklogConfirmMerge emits the completed root backlog', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    const item = { ...stubItem, state: 'merge_ready' as const, executionMode: 'hitl' as const };
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'open', sourceBranch: item.branchName, targetBranch: 'main' }),
+      merge: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: item.branchName, targetBranch: 'main' }),
+    };
+    try {
+      await runBacklogConfirmMerge(stubProvider([item]), changes, '42', 'main', { json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      kind: 'backlog.confirm-merge',
+      data: { id: '42', state: 'done' },
+    });
+  });
+
+  it('classifies lifecycle domain failures as validation JSON errors', async () => {
+    const cases = [
+      {
+        kind: 'backlog.interrupt',
+        run: () => runBacklogInterrupt(stubProvider([{ ...stubItem, state: 'ready' }]), '42', 'stop', { json: true }),
+      },
+      {
+        kind: 'backlog.retry',
+        run: () => runBacklogRetry(stubProvider([{ ...stubItem, state: 'blocked', executionMode: 'afk' }]), '42', 'retry', { json: true }),
+      },
+      {
+        kind: 'backlog.confirm-merge',
+        run: () => runBacklogConfirmMerge(
+          stubProvider([{ ...stubItem, state: 'merge_ready', executionMode: 'hitl', parentId: '7' }]),
+          { findForBacklog: vi.fn(), merge: vi.fn(), get: vi.fn() },
+          '42',
+          'main',
+          { json: true },
+        ),
+      },
+      {
+        kind: 'backlog.confirm-merge',
+        run: () => runBacklogConfirmMerge(
+          stubProvider([{ ...stubItem, state: 'merge_ready', executionMode: 'hitl' }]),
+          { findForBacklog: vi.fn().mockResolvedValue(null), merge: vi.fn(), get: vi.fn() },
+          '42',
+          'main',
+          { json: true },
+        ),
+      },
+      {
+        kind: 'backlog.confirm-merge',
+        run: () => runBacklogConfirmMerge(
+          stubProvider([{ ...stubItem, state: 'merge_ready', executionMode: 'hitl' }]),
+          { findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'closed', sourceBranch: stubItem.branchName, targetBranch: 'main' }), merge: vi.fn(), get: vi.fn() },
+          '42',
+          'main',
+          { json: true },
+        ),
+      },
+      {
+        kind: 'backlog.confirm-merge',
+        run: () => runBacklogConfirmMerge(
+          stubProvider([{ ...stubItem, state: 'merge_ready', executionMode: 'hitl' }]),
+          {
+            findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'open', sourceBranch: stubItem.branchName, targetBranch: 'main' }),
+            merge: vi.fn(),
+            get: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'open', sourceBranch: stubItem.branchName, targetBranch: 'main' }),
+          },
+          '42',
+          'main',
+          { json: true },
+        ),
+      },
+    ];
+    const original = process.stdout.write.bind(process.stdout);
+    const previousExitCode = process.exitCode;
+    try {
+      for (const testCase of cases) {
+        const captured: string[] = [];
+        process.stdout.write = (chunk: string | Uint8Array): boolean => {
+          captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+          return true;
+        };
+        process.exitCode = undefined;
+        await testCase.run();
+        expect(JSON.parse(captured.join(''))).toMatchObject({
+          ok: false,
+          kind: testCase.kind,
+          error: { code: 'validation' },
+        });
+      }
+    } finally {
+      process.stdout.write = original;
+      process.exitCode = previousExitCode;
+    }
+  });
+});

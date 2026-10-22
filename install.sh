@@ -82,7 +82,7 @@ Examples:
 
 Requirements:
   - Node.js v18+
-  - npm v9+
+  - pnpm
   - Git
 EOF
             exit 0
@@ -127,12 +127,12 @@ if [[ "$SKIP_DEPS" == false ]]; then
     fi
     print_success "Node.js v$(node --version)"
 
-    # Check npm
-    if ! command -v npm &> /dev/null; then
-        print_error "npm is not installed"
+    # Check pnpm
+    if ! command -v pnpm &> /dev/null; then
+        print_error "pnpm is not installed"
         exit 1
     fi
-    print_success "npm v$(npm --version)"
+    print_success "pnpm v$(pnpm --version)"
 
     # Check git
     if ! command -v git &> /dev/null; then
@@ -153,8 +153,8 @@ if [[ ! -f "$SCRIPT_DIR/package.json" ]]; then
     exit 1
 fi
 
-if [[ ! -d "$SCRIPT_DIR/src" ]]; then
-    print_error "src/ directory not found in $SCRIPT_DIR"
+if [[ ! -d "$SCRIPT_DIR/apps/cli/src" ]]; then
+    print_error "apps/cli/src/ directory not found in $SCRIPT_DIR"
     exit 1
 fi
 
@@ -177,17 +177,17 @@ if command -v afk &> /dev/null && [[ "$FORCE" == false ]]; then
     fi
 fi
 
-# Install npm dependencies (full, including devDependencies for build)
-print_info "Installing npm dependencies..."
+# Install workspace dependencies, including build tools.
+print_info "Installing workspace dependencies..."
 cd "$SCRIPT_DIR"
-npm install --silent
+pnpm install --frozen-lockfile
 print_success "Dependencies installed"
 
 # Build TypeScript
 print_info "Building TypeScript..."
-npm run build > /dev/null
-if [[ ! -f "$SCRIPT_DIR/dist/index.js" ]]; then
-    print_error "Build failed: dist/index.js not found"
+pnpm run build > /dev/null
+if [[ ! -f "$SCRIPT_DIR/apps/cli/dist/index.js" ]]; then
+    print_error "Build failed: apps/cli/dist/index.js not found"
     exit 1
 fi
 print_success "Build completed"
@@ -208,7 +208,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 // Run the actual CLI
-const cliPath = path.join('$SCRIPT_DIR', 'dist', 'index.js');
+const cliPath = path.join('$SCRIPT_DIR', 'apps', 'cli', 'dist', 'index.js');
 const child = spawn(process.execPath, [cliPath, ...process.argv.slice(2)], {
   stdio: 'inherit',
   env: process.env

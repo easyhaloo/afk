@@ -10,8 +10,8 @@ dist/
 *.tsbuildinfo
 
 # Electron release artifacts
-desktop-client/release/
-desktop-client/dist-electron/
+apps/desktop/release/
+apps/desktop/dist-electron/
 
 # Environment files
 .env
@@ -32,7 +32,7 @@ Thumbs.db
 # Testing
 coverage/
 .nyc_output/
-desktop-client/test-results/
+apps/desktop/test-results/
 # Outputs of past tests/e2e/codex-runtime.ts runs. That test instructs a real
 # Codex agent to create the file and verifies it via the fetched remote ref, so
 # nothing reads the local copy — but a tracked leftover turns the agent's
@@ -49,7 +49,7 @@ tests/fixtures/afk-codex-e2e-*.txt
 .afk/
 
 # Desktop client dev artifacts
-desktop-client/.dev/
+apps/desktop/.dev/
 
 # Redis dump
 dump.rdb
@@ -73,5 +73,5 @@ dump.rdb
 .omo/
 
 # Playwright run output — regenerated on every e2e run.
-desktop-client/test-results/
-desktop-client/playwright-report/
+apps/desktop/test-results/
+apps/desktop/playwright-report/

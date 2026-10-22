@@ -1,13 +1,14 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": ".",
-    "outDir": null,
     "declaration": false,
     "declarationMap": false,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["tests/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "tests/**/*.ts"
+  ]
 }

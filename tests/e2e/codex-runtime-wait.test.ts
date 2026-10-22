@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BacklogItem } from '../../src/domain/backlog/index';
-import { waitForTerminal } from './codex-runtime-wait';
+import type { BacklogItem } from '@afk/runtime/domain/backlog/index';
+import { waitForTerminal } from './codex-runtime-wait.js';
 
 describe('Codex E2E phase deadlines', () => {
   beforeEach(() => { vi.useFakeTimers(); });

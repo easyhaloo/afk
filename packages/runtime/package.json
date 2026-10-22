@@ -1,0 +1,211 @@
+{
+  "name": "@afk/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./errors": { "types": "./dist/errors.d.ts", "import": "./dist/errors.js" },
+    "./backlog": { "types": "./dist/backlog.d.ts", "import": "./dist/backlog.js" },
+    "./execution": { "types": "./dist/execution.d.ts", "import": "./dist/execution.js" },
+    "./application/isolate": {
+      "types": "./dist/application/isolate.d.ts",
+      "import": "./dist/application/isolate.js"
+    },
+    "./application/loop/loop-config": {
+      "types": "./dist/application/loop/loop-config.d.ts",
+      "import": "./dist/application/loop/loop-config.js"
+    },
+    "./application/modules/loop-runner": {
+      "types": "./dist/application/modules/loop-runner.d.ts",
+      "import": "./dist/application/modules/loop-runner.js"
+    },
+    "./application/modules/qa-runner": {
+      "types": "./dist/application/modules/qa-runner.d.ts",
+      "import": "./dist/application/modules/qa-runner.js"
+    },
+    "./application/runtime/task-runtime": {
+      "types": "./dist/application/runtime/task-runtime.d.ts",
+      "import": "./dist/application/runtime/task-runtime.js"
+    },
+    "./application/sessions/chain": {
+      "types": "./dist/application/sessions/chain.d.ts",
+      "import": "./dist/application/sessions/chain.js"
+    },
+    "./application/visualizations/graph-cache": {
+      "types": "./dist/application/visualizations/graph-cache.d.ts",
+      "import": "./dist/application/visualizations/graph-cache.js"
+    },
+    "./application/visualizations/workflow-graph": {
+      "types": "./dist/application/visualizations/workflow-graph.d.ts",
+      "import": "./dist/application/visualizations/workflow-graph.js"
+    },
+    "./application/workflows/execution-protocol": {
+      "types": "./dist/application/workflows/execution-protocol.d.ts",
+      "import": "./dist/application/workflows/execution-protocol.js"
+    },
+    "./application/workflows/run-cmd": {
+      "types": "./dist/application/workflows/run-cmd.d.ts",
+      "import": "./dist/application/workflows/run-cmd.js"
+    },
+    "./domain/agents/claude-code": {
+      "types": "./dist/domain/agents/claude-code.d.ts",
+      "import": "./dist/domain/agents/claude-code.js"
+    },
+    "./domain/agents/codex-app-server/execution": {
+      "types": "./dist/domain/agents/codex-app-server/execution.d.ts",
+      "import": "./dist/domain/agents/codex-app-server/execution.js"
+    },
+    "./domain/agents/codex-app-server/transport": {
+      "types": "./dist/domain/agents/codex-app-server/transport.d.ts",
+      "import": "./dist/domain/agents/codex-app-server/transport.js"
+    },
+    "./domain/agents/codex-runtime": {
+      "types": "./dist/domain/agents/codex-runtime.d.ts",
+      "import": "./dist/domain/agents/codex-runtime.js"
+    },
+    "./domain/agents/index": {
+      "types": "./dist/domain/agents/index.d.ts",
+      "import": "./dist/domain/agents/index.js"
+    },
+    "./domain/agents/types": {
+      "types": "./dist/domain/agents/types.d.ts",
+      "import": "./dist/domain/agents/types.js"
+    },
+    "./domain/backlog/commands": {
+      "types": "./dist/domain/backlog/commands.d.ts",
+      "import": "./dist/domain/backlog/commands.js"
+    },
+    "./domain/backlog/index": {
+      "types": "./dist/domain/backlog/index.d.ts",
+      "import": "./dist/domain/backlog/index.js"
+    },
+    "./domain/schemas": {
+      "types": "./dist/domain/schemas.d.ts",
+      "import": "./dist/domain/schemas.js"
+    },
+    "./domain/tracker/types": {
+      "types": "./dist/domain/tracker/types.d.ts",
+      "import": "./dist/domain/tracker/types.js"
+    },
+    "./domain/work-item/identity": {
+      "types": "./dist/domain/work-item/identity.d.ts",
+      "import": "./dist/domain/work-item/identity.js"
+    },
+    "./domain/work-item/metadata": {
+      "types": "./dist/domain/work-item/metadata.d.ts",
+      "import": "./dist/domain/work-item/metadata.js"
+    },
+    "./domain/work-item/provider-types": {
+      "types": "./dist/domain/work-item/provider-types.d.ts",
+      "import": "./dist/domain/work-item/provider-types.js"
+    },
+    "./infrastructure/config/manager": {
+      "types": "./dist/infrastructure/config/manager.d.ts",
+      "import": "./dist/infrastructure/config/manager.js"
+    },
+    "./infrastructure/gitlab/glab-config": {
+      "types": "./dist/infrastructure/gitlab/glab-config.d.ts",
+      "import": "./dist/infrastructure/gitlab/glab-config.js"
+    },
+    "./infrastructure/gitlab/index": {
+      "types": "./dist/infrastructure/gitlab/index.d.ts",
+      "import": "./dist/infrastructure/gitlab/index.js"
+    },
+    "./infrastructure/io/index": {
+      "types": "./dist/infrastructure/io/index.d.ts",
+      "import": "./dist/infrastructure/io/index.js"
+    },
+    "./infrastructure/io/logger": {
+      "types": "./dist/infrastructure/io/logger.d.ts",
+      "import": "./dist/infrastructure/io/logger.js"
+    },
+    "./infrastructure/observability/agent-telemetry": {
+      "types": "./dist/infrastructure/observability/agent-telemetry.d.ts",
+      "import": "./dist/infrastructure/observability/agent-telemetry.js"
+    },
+    "./infrastructure/observability/jsonl-event-store": {
+      "types": "./dist/infrastructure/observability/jsonl-event-store.d.ts",
+      "import": "./dist/infrastructure/observability/jsonl-event-store.js"
+    },
+    "./infrastructure/process/daemon": {
+      "types": "./dist/infrastructure/process/daemon.d.ts",
+      "import": "./dist/infrastructure/process/daemon.js"
+    },
+    "./infrastructure/process/pid-file": {
+      "types": "./dist/infrastructure/process/pid-file.d.ts",
+      "import": "./dist/infrastructure/process/pid-file.js"
+    },
+    "./infrastructure/provider/inventory": {
+      "types": "./dist/infrastructure/provider/inventory.d.ts",
+      "import": "./dist/infrastructure/provider/inventory.js"
+    },
+    "./infrastructure/provider/providers": {
+      "types": "./dist/infrastructure/provider/providers.d.ts",
+      "import": "./dist/infrastructure/provider/providers.js"
+    },
+    "./infrastructure/provider/tracker-provider-factory": {
+      "types": "./dist/infrastructure/provider/tracker-provider-factory.d.ts",
+      "import": "./dist/infrastructure/provider/tracker-provider-factory.js"
+    },
+    "./infrastructure/sandbox/providers/local": {
+      "types": "./dist/infrastructure/sandbox/providers/local.d.ts",
+      "import": "./dist/infrastructure/sandbox/providers/local.js"
+    },
+    "./infrastructure/tmux/tmux": {
+      "types": "./dist/infrastructure/tmux/tmux.d.ts",
+      "import": "./dist/infrastructure/tmux/tmux.js"
+    },
+    "./infrastructure/tracker/resolver": {
+      "types": "./dist/infrastructure/tracker/resolver.d.ts",
+      "import": "./dist/infrastructure/tracker/resolver.js"
+    },
+    "./shared/agent-transcript-path": {
+      "types": "./dist/shared/agent-transcript-path.d.ts",
+      "import": "./dist/shared/agent-transcript-path.js"
+    },
+    "./shared/browser": {
+      "types": "./dist/shared/browser.d.ts",
+      "import": "./dist/shared/browser.js"
+    },
+    "./shared/stats/types": {
+      "types": "./dist/shared/stats/types.d.ts",
+      "import": "./dist/shared/stats/types.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs && tsc --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@afk/application": "workspace:*",
+    "@afk/core": "workspace:*",
+    "@afk/workflow-graph": "workspace:*",
+    "@anthropic-ai/claude-code": "^2.1.299",
+    "@gitbeaker/node": "^35.8.0",
+    "@m234/nerd-fonts": "^0.5.1",
+    "@octokit/rest": "^22.0.1",
+    "conf": "^12.0.0",
+    "express": "^4.18.2",
+    "js-yaml": "^5.2.2",
+    "node-tmux": "^1.0.2",
+    "open": "^11.0.0",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3",
+    "simple-git": "^3.22.0",
+    "ws": "^8.21.3",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/open": "^6.1.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.21.5",
+    "glob": "^13.0.6",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  }
+}

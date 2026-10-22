@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, render } from 'ink';
-import { AppContent } from '../../src/views/app/AppContent';
-import { StateProvider } from '../../src/views/app/state/StateContext';
+import { AppContent } from '../../apps/cli/src/tui/app/AppContent.js';
+import { StateProvider } from '../../apps/cli/src/tui/app/state/StateContext.js';
 
 const tasks = [{
   iid: 17,

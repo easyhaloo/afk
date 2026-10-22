@@ -71,4 +71,20 @@ describe('batch execution prompt protocol', () => {
     expect(prompt).toContain('"kind":"qa"');
     expect(prompt).toContain('"result":"PASS|FAIL"');
   });
+
+  it('tells the QA agent to register the binary evidence it produced', () => {
+    const batch = buildBatchPrompt('/goal verify issue #60', 'qa');
+    const interactive = buildExecutionPrompt('/goal verify issue #60', 'interactive', 'qa');
+
+    for (const prompt of [batch, interactive]) {
+      expect(prompt).toContain('.afk/artifacts.txt');
+      expect(prompt).toContain('one absolute path per line');
+    }
+  });
+
+  it('keeps the artifact instruction out of prompts that are not QA verification', () => {
+    expect(buildBatchPrompt('/goal implement issue #60')).not.toContain('.afk/artifacts.txt');
+    expect(buildBatchPrompt('/goal verify issue #60', 'ac')).not.toContain('.afk/artifacts.txt');
+    expect(buildExecutionPrompt('/goal implement issue #60', 'interactive')).not.toContain('.afk/artifacts.txt');
+  });
 });

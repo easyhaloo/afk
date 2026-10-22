@@ -70,6 +70,7 @@ Exactly one of:
 | `curl` | HTTP request assertion | API endpoints |
 | `log` | Process log line check | Background workers |
 | `manual` | Human inspection required | UI / copy / a11y |
+| `bash` | Raw shell command | Script / build / lint checks |
 | `none` | Declarative; no runtime check | Removal / refactor |
 
 ### Field 3: `check_command`
@@ -82,6 +83,20 @@ Examples:
 - `grep -q "ERROR" /var/log/worker.log` (log)
 - `echo "manual review needed"` (manual — always exits 0; gate is human signoff)
 - `! grep -rn "TODO" src/` (none — declarative; command verifies a property)
+
+### Equivalent block form
+
+A check command that does not fit on one line may be written as an indented
+`_verify:` line under the AC item. The tracker parser reads both forms:
+
+```
+- [ ] <ac_text>
+  _verify: <check_command>
+```
+
+The block form always carries `evidence_type: bash`, because the evidence type
+is implied by the command being a shell invocation. Prefer the three-field
+form when the evidence type matters.
 
 ## Examples
 

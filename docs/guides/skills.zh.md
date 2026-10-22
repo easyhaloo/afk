@@ -519,8 +519,8 @@ tests/api-workflow/
 **设计决策：**
 
 **为什么用模板？**
-- 保证 PRD 输出格式一致，每个 AC 使用 3 字段格式：`<text> -- <evidence_type> -- <check_command>`
-- `evidence_type` 受控词汇：test | curl | log | manual | none
+- 保证 PRD 输出格式统一，章节集合固定不变
+- 验收标准不写进 PRD：由 `afk-to-issues` 在把 PRD 拆解为可执行 item 时补齐证据类型与检查命令
 
 **为什么限制合成范围？**
 - 只合成已有信息，不发明用户故事
@@ -558,6 +558,10 @@ tests/api-workflow/
 
 **为什么需要隔离分析？**
 - 需要中间件（MySQL、Redis 等）的 issue 需要特殊标记，scheduler 才能启动隔离容器
+
+**为什么用三字段验收标准契约？**
+- 每条 AC 携带 `<text> -- <evidence_type> -- <check_command>`，保证每条标准都可被机器验证
+- `evidence_type` 受控词汇：test | curl | log | manual | bash | none
 
 **与其他 skills 协作：**
 - **前置** ← **afk-to-prd** 的输出（PRD Mode）

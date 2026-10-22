@@ -1,5 +1,5 @@
 import type { TrackedIssue } from './types.js';
-import type { ACItem } from './ac-types.js';
+import { EVIDENCE_TYPES, type ACItem, type EvidenceType } from './ac-types.js';
 
 /**
  * AC is represented as issue labels with prefix `ac::`.
@@ -59,10 +59,43 @@ export function extractACFromLabels(labels: readonly string[]): ACItem[] {
 }
 
 /**
+ * The canonical three-field contract: `<text> -- <evidence_type> -- <command>`.
+ *
+ * The first two groups are non-greedy/anchored so a check command may itself
+ * contain ` -- ` (for example `npm test -- --testPathPattern=auth`): only the
+ * first two separators are field boundaries and the remainder stays the
+ * command. The trailing separator may be empty (`-- none --`).
+ */
+const THREE_FIELD_CONTRACT = /^(.*?)\s+--\s+(\w+)\s+--\s*(.*)$/;
+
+function isEvidenceType(value: string): value is EvidenceType {
+  return (EVIDENCE_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Parse the canonical three-field contract:
+ *   `- [ ] <text> -- <evidence_type> -- <check_command>`
+ *
+ * The evidence type is validated against the controlled vocabulary: a line
+ * that merely contains ` -- ` is not a contract and stays plain text.
+ */
+function parseThreeFieldContract(line: string): { text: string; evidenceType: EvidenceType; checkCommand: string } | null {
+  const match = line.match(THREE_FIELD_CONTRACT);
+  if (!match) return null;
+  const [, rawText, rawEvidenceType, rawCheckCommand] = match;
+  const evidenceType = rawEvidenceType.trim();
+  if (!isEvidenceType(evidenceType)) return null;
+  const text = rawText.trim();
+  if (!text) return null;
+  return { text, evidenceType, checkCommand: rawCheckCommand.trim() };
+}
+
+/**
  * Extract AC items from issue description markdown.
  *
- * Supports both:
+ * Supports:
  *   - Authoritative 3-field format: `- [ ] <text> -- <type> -- <command>`
+ *   - Block format: `- [ ] <text>` plus an indented `_verify: <command>` line
  *   - Legacy simple format: `- [ ] <text>` (best-effort; evidenceType=none,
  *     checkCommand=empty)
  *
@@ -80,14 +113,24 @@ export function parseACLegacy(description: string): ACItem[] | null {
   const items: ACItem[] = [];
   let idx = 1;
   for (const block of itemTexts) {
-    const firstLine = block.split('\n')[0];
+    const lines = block.split('\n');
+    const firstLine = lines[0];
     const checkboxMatch = firstLine.match(/^[-*]\s+\[\s\]\s+(.+)$/);
     if (!checkboxMatch) continue;
+    const verifyLines = lines.slice(1).map(l => l.trim()).filter(l => l.startsWith('_verify:'));
+    const verifyCommand = verifyLines.map(l => l.replace(/^_verify:\s*/, '')).join('; ');
+    const contract = parseThreeFieldContract(checkboxMatch[1].trim());
+    if (contract) {
+      // A three-field item keeps its own evidence type; a `_verify:` block only
+      // supplies the command when the contract left it empty.
+      const checkCommand = contract.checkCommand || verifyCommand;
+      const evidenceType = contract.checkCommand ? contract.evidenceType : (verifyCommand ? 'bash' : contract.evidenceType);
+      items.push({ index: idx++, text: contract.text, evidenceType, checkCommand });
+      continue;
+    }
     const text = checkboxMatch[1].trim();
-    const verifyLines = block.split('\n').slice(1).map(l => l.trim()).filter(l => l.startsWith('_verify:'));
-    const checkCommand = verifyLines.map(l => l.replace(/^_verify:\s*/, '')).join('; ');
-    if (checkCommand) {
-      items.push({ index: idx++, text, evidenceType: 'bash', checkCommand });
+    if (verifyCommand) {
+      items.push({ index: idx++, text, evidenceType: 'bash', checkCommand: verifyCommand });
     } else {
       items.push({ index: idx++, text, evidenceType: 'none', checkCommand: '' });
     }

@@ -519,8 +519,8 @@ tests/api-workflow/
 **Design Decisions:**
 
 **Why use a template?**
-- Ensure consistent PRD output format, each AC uses 3-field format: `<text> -- <evidence_type> -- <check_command>`
-- `evidence_type` controlled vocabulary: test | curl | log | manual | none
+- Ensure a consistent PRD output format across the fixed section set
+- Acceptance criteria stay out of the PRD: `afk-to-issues` adds evidence types and check commands when it decomposes the PRD into executable items
 
 **Why limit synthesis scope?**
 - Only synthesize existing information, don't invent user stories
@@ -558,6 +558,10 @@ tests/api-workflow/
 
 **Why isolation analysis?**
 - Issues needing middleware (MySQL, Redis, etc.) require special tagging for scheduler to start isolated containers
+
+**Why the three-field acceptance criteria contract?**
+- Every AC carries `<text> -- <evidence_type> -- <check_command>`, so each criterion is machine-verifiable
+- `evidence_type` controlled vocabulary: test | curl | log | manual | bash | none
 
 **Collaboration with Other Skills:**
 - **Prerequisite** ← **afk-to-prd** output (PRD Mode)

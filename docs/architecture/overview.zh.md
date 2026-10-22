@@ -60,7 +60,9 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
 | `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
 | `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看与优雅停止 |
-| `afk observe` | 读取 append-only 的 AFK 运行审计事件（`runs`、`executions`、`execution`、`timeline`、`verify`、`replay`、`explain`、`doctor`） |
+| `afk observe` | 默认以友好文本读取 append-only 的 AFK 运行审计事件，支持 `--json`（`runs`、`executions`、`execution`、`timeline`、`verify`、`replay`、`explain`、`doctor`） |
+| `afk observe <runId>` / `afk log <runId>` | `afk observe execution <runId>` 的简写，支持相同的 `--watch`、`--tail`、`--root` 和 `--json` 参数 |
+| `afk observe execution\|timeline <runId> [--watch] [--tail <count>]` | 查看带详情的运行时间线，可持续追踪新事件或限制首次展示的历史数量 |
 | `afk retro run --run-id <id> --workspace <path>` | 用现有 `/retro` 技能分析已记录证据并写出 `report.json` 与 `report.html` |
 | `afk retro show <report>` | 读取已生成的复盘报告 |
 | `afk graph workflow <template>` | 生成确定性的工作流图 |
@@ -68,6 +70,37 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 
 已移除的命令组没有别名。provider 的元数据标签属于 adapter 内部实现，
 不是 CLI 契约。
+
+### 查看和追踪运行
+
+```bash
+afk observe runs
+afk observe <runId>
+afk log <runId> --watch --tail 20
+afk observe execution <runId>
+afk observe timeline <runId> --tail 20 --watch
+afk observe execution <runId> --watch --tail 0
+afk observe execution <runId> --json
+```
+
+`observe <runId>` 使用默认的 `execution` 子命令；原有具名子命令仍优先匹配。
+`log <runId>` 直接复用同一运行查看器，参数校验和 JSON 契约也保持一致。
+
+文本摘要包含审计记录中的运行状态、阶段、活动步骤或人工审核关卡、完整性、
+本地时区、耗时和最后一个事件。即使 `--tail` 隐藏了工作区原始事件，摘要中
+仍显示已记录的工作区路径和分支。时间线展开事件字段，包括步骤、提交、变更
+链接、会话和 transcript 路径、完整多行错误摘要，以及 QA 条件的预期和实际结果。
+失败事件没有记录原因时会明确说明。这里展示的是审计事件，不是 agent 的实时
+stdout/stderr；无法还原没有记录的详情。运行中没有活动步骤本身不代表失败。
+
+`--watch` 每秒查询一次，只追加新事件；无变化时保持安静，等待人工审核时展示
+关卡信息，进入终态后自动退出。Ctrl-C 或 SIGTERM 只停止观察。完整性无效时
+停止追踪、标记状态不可信，并排除未通过校验的详情。历史被替换或缩短时需要
+重新启动观察。`--tail` 接受非负整数，按完整事件计数；零表示不展示初始时间线，
+但仍保留摘要。
+
+`--json` 保持原有单个 JSON 文档契约，与 `--watch`、`--tail` 互斥。重定向到文件
+或管道时不输出颜色转义；终端中也可通过 `NO_COLOR` 关闭颜色。
 
 ## Provider 边界
 

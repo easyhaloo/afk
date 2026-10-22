@@ -33,6 +33,7 @@ describe('buildLazyArgv', () => {
     ['backlog', ['tag', 'add', '--help'], 'Add a business tag'],
     ['backlog', ['tag', 'remove', '--help'], 'Remove a business tag'],
     ['observe', ['timeline', '--help'], 'Show ordered audit events for a run'],
+    ['log', ['--help'], 'Show one observed run and its verified timeline'],
   ] as const)('executes the real lazy nested parser for %s %j', async (command, args, expectedHelp) => {
     const captured: string[] = [];
     const originalWrite = process.stdout.write.bind(process.stdout);

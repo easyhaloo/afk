@@ -72,7 +72,9 @@ single source of truth for the supported surface:
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
 | `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
 | `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status, and graceful stop |
-| `afk observe` | Read append-only AFK run audit events (`runs`, `executions`, `execution`, `timeline`, `verify`, `replay`, `explain`, `doctor`) |
+| `afk observe` | Read append-only AFK run audit events as text by default, or with `--json` (`runs`, `executions`, `execution`, `timeline`, `verify`, `replay`, `explain`, `doctor`) |
+| `afk observe <runId>` / `afk log <runId>` | Short forms of `afk observe execution <runId>` with the same `--watch`, `--tail`, `--root`, and `--json` options |
+| `afk observe execution\|timeline <runId> [--watch] [--tail <count>]` | Show a detailed run timeline; optionally follow new events or limit the initial history |
 | `afk retro run --run-id <id> --workspace <path>` | Analyze recorded evidence with the existing `/retro` skill and write `report.json` plus `report.html` |
 | `afk retro show <report>` | Read a generated retro report |
 | `afk graph workflow <template>` | Generate a deterministic workflow graph |
@@ -80,6 +82,44 @@ single source of truth for the supported surface:
 
 There are no aliases for removed command groups. Provider metadata labels are
 an adapter detail and never part of this CLI contract.
+
+### Reading and following runs
+
+```bash
+afk observe runs
+afk observe <runId>
+afk log <runId> --watch --tail 20
+afk observe execution <runId>
+afk observe timeline <runId> --tail 20 --watch
+afk observe execution <runId> --watch --tail 0
+afk observe execution <runId> --json
+```
+
+`observe <runId>` uses `execution` as the default subcommand; existing named
+subcommands still take precedence. `log <runId>` is a direct shortcut to the
+same run viewer, including the same option validation and JSON contract.
+
+Text output includes the recorded run state, phase, active step or human gate,
+integrity, local time zone, elapsed time, and latest event. Workspace paths and
+branches remain in the summary even when `--tail` hides their original event.
+Timeline entries expand event fields, including steps, commits, change URLs,
+session/transcript references, complete multiline error summaries, and QA
+expected/actual criteria. Failed events without a recorded reason say so.
+These are audit events, not a live agent stdout/stderr stream; unrecorded
+details cannot be reconstructed. A running state without an active step is
+not by itself a failure.
+
+`--watch` polls once per second and appends new events without repeating the
+history. It stays quiet without changes, displays human-review gates while
+waiting, and exits after a terminal event. Ctrl-C or SIGTERM stops only the
+observer. Invalid integrity stops following, marks the state untrusted, and
+excludes unverified details. A replaced or shortened history requires restarting
+the observer. `--tail` accepts a non-negative integer and counts complete events;
+zero suppresses the initial timeline while retaining the summary.
+
+`--json` preserves the existing single-document JSON contracts and cannot be
+combined with `--watch` or `--tail`. Text redirected to a file or pipe has no
+color escapes; `NO_COLOR` also disables colors in a terminal.
 
 ## Provider boundaries
 

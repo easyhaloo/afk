@@ -1,4 +1,4 @@
-import { appendFile, lstat, mkdir, readFile, symlink } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, readdir, readFile, symlink } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { simpleGit } from 'simple-git';
 import type { BacklogItem } from '../../../domain/backlog/index.js';
@@ -105,6 +105,18 @@ async function isAncestor(git: ReturnType<typeof simpleGit>, ancestor: string, d
   return (await git.raw(['merge-base', ancestor, descendant])).trim() === ancestor;
 }
 
+/**
+ * pnpm keeps its per-workspace task run state inside `node_modules` and
+ * refuses to use that directory when it is a symbolic link
+ * (ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH). A worktree therefore receives a real
+ * `node_modules` directory whose entries point at the main checkout, instead of
+ * one symlink to the main checkout's `node_modules`.
+ */
+const PNPM_WORKSPACE_STATE_ENTRIES = new Set([
+  '.pnpm-task-run-state-v1',
+  '.pnpm-workspace-state-v1.json',
+]);
+
 async function shareNodeModules(repoRoot: string, worktreePath: string): Promise<void> {
   const source = join(repoRoot, 'node_modules');
   const target = join(worktreePath, 'node_modules');
@@ -129,5 +141,14 @@ async function shareNodeModules(repoRoot: string, worktreePath: string): Promise
     await mkdir(dirname(excludePath), { recursive: true });
     await appendFile(excludePath, '\n/node_modules\n');
   }
-  await symlink(source, target, 'dir');
+  await mkdir(target, { recursive: true });
+  for (const entry of await readdir(source)) {
+    // pnpm's mutable per-workspace state stays local so parallel worktrees
+    // never write through the shared directory into each other.
+    if (PNPM_WORKSPACE_STATE_ENTRIES.has(entry)) continue;
+    const entryPath = join(source, entry);
+    const entryTarget = join(target, entry);
+    const isDirectory = (await lstat(entryPath)).isDirectory();
+    await symlink(entryPath, entryTarget, isDirectory ? 'dir' : 'file');
+  }
 }

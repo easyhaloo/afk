@@ -245,6 +245,8 @@ stateDiagram-v2
 
 FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 和 `actual`。PASS 会 commit、push、发布 Change Request；`executeWorkItem` 注入的回调负责复用检查和 issue association 验证，独立 QA CLI 没有注入这些闭环审计回调。root 项切到 `merge_ready` 和 `hitl`；child 项也先进入 `merge_ready`，再执行 merge 并切到 `done`。QA 的终端路由失败会切到 `blocked` 和 `hitl`。
 
+QA 工作树的依赖目录不是指向主检出的单个符号链接。pnpm 12 会拒绝把符号链接当作任务运行状态目录（`ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH`），带 `--filter` 的 workspace 运行在软链布局下直接失败。`GitBranchProvider` 为 QA 工作树物化一个真实的 `node_modules` 目录，其条目（包含 `.pnpm` 存储和 `.bin`）逐项链接到主检出；pnpm 自身的可变状态 `.pnpm-task-run-state-v1` 与 `.pnpm-workspace-state-v1.json` 不共享，留在工作树本地，避免并行工作树互相写入。
+
 ## 7. 日志、事件和截图归档
 
 ### 7.1 运行时产生的证据
@@ -361,6 +363,12 @@ env -u AFK_CODEX_E2E_TIMEOUT_MS pnpm exec tsx tests/e2e/codex-runtime.ts --trans
 Issue #178 的实现、验收检查、QA 和 PR #179 发布已完成，驱动命令于 **2026-10-12 12:33:15 CST** 退出 `0`；命令耗时 23 分 56 秒，Loop 执行耗时 23 分 1 秒。实现与 QA runtime 均为 `completed` / `codex` / `app-server`，13 条事件的 hash chain 校验通过，Provider 为 `merge_ready` / `hitl`。本次 QA 的类型检查在相同源码的临时镜像、真实依赖目录中完成；不能声称 pnpm 已兼容原工作树的依赖符号链接。
 
 独立范围核验另外发现 QA 自动提交带入了生成的 `node_modules` 符号链接：仅匹配目录的 `node_modules/` 规则不会忽略该链接。`GitBranchProvider` 现为自己创建的共享链接补充 Git 本地 `/node_modules` 排除规则，保留既有规则；native Git 回归测试覆盖共享链接与自动提交的真实路径。E2E 驱动同时校验远端分支只能改动指定 fixture。PR #179 中的多余链接已通过提交 `332c73a` 清理，最终 Git diff、PR 文件范围及 fixture 精确字节核验通过；该清理发生在真实运行之后，不属于最初自动发布的结果。完整记录见归档中的 `driver-result.json`、`issue-178/verification.json`、`verification.log` 及依赖链接的 red/green 日志。
+
+### 8.3 QA 工作树依赖共享修复（2026-10-22）
+
+Backlog 229 的 QA 在工作树内执行 `pnpm --filter @afk/runtime... build` 时命中 pnpm 12.5.1 的 `ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH`：拒绝把符号链接 `node_modules` 用作任务运行状态目录。Agent 自行把软链物化为真实目录后验证通过，那只是本次执行的临时恢复，不是可依赖的布局；8.1 记录的同源现象在此得到解释。
+
+`GitBranchProvider.shareNodeModules` 改为物化真实 `node_modules` 目录，并逐项链接主检出的条目；pnpm 可变状态留在工作树本地。修复后在一个由修复代码创建的 QA 工作树中，原失败命令 `pnpm --filter @afk/runtime... build` 通过，`pnpm exec playwright test --config=playwright.config.ts boot` 3 passed。native Git 回归测试覆盖真实目录、逐项链接、状态条目排除，以及自动提交不混入 `node_modules`。
 
 ## 9. 已知限制
 

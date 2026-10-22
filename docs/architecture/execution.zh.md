@@ -355,19 +355,70 @@ Docker socket
 9. 继续当前 workflow step
 ```
 
-运行状态目录：
-
-```text
-<worktree>/.afk/runs/<run-id>/
-├── request.json
-├── events.jsonl
-├── result.json
-└── output.log
-```
-
-交接恢复文档不属于 run 目录，它写入
+交接恢复文档写入
 `<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
 （`packages/runtime/src/application/workflows/handoff.ts`）。
+
+### 东西分别写在哪里
+
+一次执行会留下三类痕迹，落在三个不同的地方，由三个不同的主人写入。三者不可互换：
+一个是权威记录，一个是投影，一个是桌面端自己的暂存空间。
+
+**审计脊柱** —— 一次执行的权威、只追加记录。每个 run 一个 JSONL 文件，带 hash 链，
+回放前先校验。
+
+```text
+~/.afk/events/<base64url(runId)>.jsonl
+```
+
+根目录可由 `AFK_EVENT_STORE_DIR` 改写
+（`packages/runtime/src/infrastructure/observability/jsonl-event-store.ts`）。
+
+**运行时记录** —— TUI 与桌面端读它来展示进度、心跳与阶段。每个 run 一个文件，
+到达终态时从 `active/` 移到 `archive/`。
+
+```text
+~/.afk/runtime/tasks/
+├── active/<base64url(runId)>.json
+├── archive/<base64url(runId)>.json
+└── diagnostics/<base64url(runId)>/
+    ├── runtime.json
+    ├── result.json
+    └── output.log
+```
+
+`result.json` 与 `output.log` 由 `TaskRuntimeStore.writeDiagnostics` 写入，并由运行中心
+读取。调用方是工作流引擎（`packages/runtime/src/application/workflow-engine.ts`）与
+QA runner（`packages/runtime/src/application/modules/qa-runner.ts`），各调一次；写入发生在
+run 归档之前，所以归档记录带 `diagnosticPath` 指向它们。
+
+**桌面执行工作区** —— 一个桌面工作项的检出目录、产物与日志。
+
+```text
+~/.loop-workspace/<taskId>/
+├── repositories/<project>/...
+├── artifacts/
+├── runtime/
+├── logs/
+└── diagnostics/
+```
+
+（`apps/desktop/electron/services/execution-workspace-service.ts`。）
+
+本节此前描述的那棵按 run 的目录树没有了，但它的四个条目并非一起消失——活下来的两个
+只是换了位置：
+
+| 原先 | 现在 |
+|---|---|
+| `<worktree>/.afk/runs/<run-id>/request.json` | 无人写入——产生它的模块只能从它自己的测试到达 |
+| `<worktree>/.afk/runs/<run-id>/events.jsonl` | 审计脊柱 `~/.afk/events/<base64url(runId)>.jsonl` |
+| `<worktree>/.afk/runs/<run-id>/result.json` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/result.json` |
+| `<worktree>/.afk/runs/<run-id>/output.log` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/output.log` |
+
+写那棵树的模块——`packages/runtime/src/application/sessions/run-state.ts` 里的
+`RunStateWriter`——只能经由 `AgentExecutionService` 到达，而后者只能从它自己的测试到达。
+生产路径上从未有人创建过那个目录，所以这棵树只存在于本文。该模块目前仍在仓库里，
+已列入待删除。
 
 Session 文件必须使用临时文件、校验和原子 rename，避免新 generation 读取半截 JSONL。
 

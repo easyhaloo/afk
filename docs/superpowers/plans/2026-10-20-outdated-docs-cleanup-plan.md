@@ -197,9 +197,20 @@
 
 ## 5. 防复发机制
 
-### 5.1 引用检查覆盖到"裸文件名"与非代码扩展名
+### 5.1 引用检查覆盖到"裸文件名"与非代码扩展名（实测后收窄）
 
-当前 `scripts/check-doc-links.mjs:152` 的 `if (!raw.includes('/')) continue;` 是最大的盲区。`execution.md` 里的 `workflows.ts`、ADR-0019 里的 `main.tsx`、`PRD.md` 里的 `run-log-service.ts` 全部跳过。建议改为三向解析后判定存在性，解析失败再按基线豁免。
+原设想是取消 `if (!raw.includes('/')) continue;` 的跳过，并把正则扩展到 `.json .yml .css .html .md .sh`。**实施时实测了这两项，结论是它们都会把一个可用的检查变成噪声**：
+
+- **裸文件名**：全仓 54 处裸文件名引用，按"全仓是否存在该 basename"判定后剩 19 处，逐条看有 5 类误报——`browser-session.ts` 与 `postToolHook.ts` 是 skill 要求**用户项目**生成的文件，`.spec.ts` 是后缀示例，`paths.ts` 与 `run-log-service.ts` 是文档声明的**待创建**文件，ADR-0001 与 PRD.md 里的前瞻引用并非错误。
+- **非代码扩展名**：不可解析 294 处，其中 `.md` 164 处、`.json` 56 处、`.yml` 13 处，几乎全部是运行时产物（`.afk-signal.json`、`report.json`）、占位符（`NNNN-title-slug.md`）或用户项目输出（`CONTEXT.md`、`PRD.md`）。
+
+**实际采取的改动**：
+
+1. 正则补上 `.cts` 与 `.mts`——桌面端曾用 `preload.cts`，这两个扩展名无歧义。
+2. 把上述测量结论写进 `scripts/check-doc-links.mjs` 的注释，说明"检查什么、不检查什么、为什么"——扩检测面不是改一次正则，而是要证明新报出的每一条都是真漂移。
+3. 裸文件名盲区里**确属陈旧**的文档引用由人工核对修正，不依赖自动检查。
+
+这样检查保持在"零误报、零基线"的状态：每一条报出都是真的。
 
 ### 5.2 引用检查覆盖到 `https://` 人工白名单
 
@@ -224,15 +235,15 @@
 
 ## 6. 验收标准
 
-| # | 指标 | 当前 | 目标 |
-|---|---|---|---|
-| A1 | `scripts/doc-source-paths-baseline.json` 条目数 | 50 | **0** |
-| A2 | 在用文档中无法解析的路径引用 | 116 个不同路径 / 135 处（其中 48 个为明确事实性漂移） | **0** |
-| A3 | `pnpm docs:check` | 通过（0 断裂） | 通过，**且无基线豁免** |
-| A4 | `docs/index.md` 覆盖在用文档 | 漏 5 个 | 100% |
-| A5 | 干净克隆 `pnpm typecheck` | 失败（`tsconfig.tests.json` 未跟踪） | 通过 |
-| A6 | 损坏文档 | ADR-0018 | 0 |
-| A7 | 双语镜像结构对齐 | 7 对中 1 对有差异（代码注释行数，非缺陷） | 保持 |
+| # | 指标 | 起点 | 目标 | 状态 |
+|---|---|---|---|---|
+| A1 | `scripts/doc-source-paths-baseline.json` 条目数 | 50 | **0** | ✅ 0（机制已接回 main 的检查器） |
+| A2 | 在用文档中无法解析的路径引用 | 116 个不同路径 / 135 处（其中 48 个为明确事实性漂移） | **0** | ✅ 0（检查器报 0） |
+| A3 | `pnpm docs:check` | 通过（0 断裂） | 通过，**且无基线豁免** | ✅ 238 文件 0 断裂，基线为空 |
+| A4 | `docs/index.md` 覆盖在用文档 | 漏 5 个 | 100% | ✅ 100% |
+| A5 | 干净克隆 `pnpm typecheck` | 失败（`tsconfig.tests.json` 未跟踪） | 通过 | ✅ main 已入库 |
+| A6 | 损坏文档 | ADR-0018 | 0 | ✅ 已按实现重写 |
+| A7 | 双语镜像结构对齐 | 7 对中 1 对有差异（代码注释行数，非缺陷） | 保持 | ✅ 7/7 标题数一致 |
 
 ---
 
@@ -330,7 +341,60 @@
 - `docs/guides/workflows.md` 的阈值 100000、`--max-total-tokens` 默认 500000、QA 合并条件、`afk/backlog-123` 分支名 —— 全部准确。
 - `README.md` 的 15 条 CLI 示例、`22 Claude Code skills` —— 全部准确。
 - `AFK-ARCHITECTURE.md §6.1` 的 7 状态机与 `BacklogState` 完全一致（`packages/core/src/model.ts` 的 9 值 `WorkState` 是另一个类型，不构成矛盾）。
-- `docs/architecture/execution.md:381` 的 `.afk/runs` 目录是真实实现（`packages/runtime/src/application/sessions/run-state.ts:22`）——**不要删 §7**。
+- ~~`docs/architecture/execution.md:381` 的 `.afk/runs` 目录是真实实现——**不要删 §7**~~ → **这条判定是错的，已撤回。** 写那个目录的 `RunStateWriter` 只能经由 `AgentExecutionService` 到达，而后者只能从它自己的测试到达：生产路径上从未有人创建过 `.afk/runs/`。§7 已按真实落盘布局重写，见 §9。
 - `docs/guides/workflows.md` 与 `.zh.md` 的标题数差 2 —— 差异来自代码块内注释行数，不是结构漂移。
 - SSH / xterm / PTY / kanban 功能均真实存在（`apps/desktop/src/features/ssh/`、`apps/desktop/src/features/terminal/`、`apps/cli/src/commands/kanban.ts`）。
 - `docs/index.md` 中 `blueprints/`、`research/`、`decisions/` 的目录行已覆盖其下文件，不算漏挂。
+
+---
+
+## 9. 更正与新发现
+
+### 9.1 旧树四个条目的下场
+
+`.afk/runs/` 这棵树的四个条目并没有一起消失，两个只是换了位置：
+
+| 旧位置 | 现在的下场 |
+|---|---|
+| `<worktree>/.afk/runs/<run-id>/request.json` | 无人写入——产生它的模块只能经由 `AgentExecutionService` 到达，而后者只能从它自己的测试到达 |
+| `<worktree>/.afk/runs/<run-id>/events.jsonl` | 由审计脊柱取代：`~/.afk/events/<base64url(runId)>.jsonl` |
+| `<worktree>/.afk/runs/<run-id>/result.json` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/result.json` |
+| `<worktree>/.afk/runs/<run-id>/output.log` | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/output.log` |
+
+后两个由 `TaskRuntimeStore.writeDiagnostics` 写入（`task-runtime.ts`），调用方是工作流引擎
+与 QA runner 各一次；写入发生在归档之前，所以归档记录带 `diagnosticPath` 指向它们。
+
+**一处曾经的误判**：最初判定"`result.json` 没人写、断言无法满足"是错的——没有查
+`writeDiagnostics` 就下了结论。**文件存在只证明它没被删，不证明有人在用它；反过来，
+文件存在也不证明它有人在用——要看调用链。** 这条已由 §7 的迁移对照表落进正文。
+
+### 9.2 同步到新布局时发现的另一处误判
+
+把文档重指到 main 的新包布局时，路径映射本身写错了一版：把根 `src/domain/` 映射成
+`packages/runtime/src/domain/` 的规则，也匹配上了**已经改写过**的
+`packages/runtime/src/domain/`，产出 `packages/runtime/packages/runtime/src/...`。
+源路径检查器立刻抓到了这批重复路径。
+
+**教训**：路径改写不是字符串替换，是要幂等的。重写一遍之后必须再重写一遍并 diff，
+第二遍不应产生任何变化。
+
+### 9.3 重新同步到 main 时发现的新问题
+
+| 发现 | 状态 |
+|---|---|
+| main 上**没有** `docs/adr/0021-package-boundaries-and-in-process-desktop.md` | 包拆分已进 main，但它记录的是 core／application／infrastructure／execution 四包布局，而 main 已把后两者合并为 `runtime`。照搬会立刻成为又一份过时文档，因此**不搬**，改为在 `docs/index.md` 写明缺口：main 的包布局目前没有决策记录。 |
+| main 的检查器**只查 markdown 链接**，没有源路径检查 | 已把源路径检查接回 main 的检查器（`scripts/doc-source-paths.mjs` + 空基线），这是当初抓到 `.afk/runs` 漂移的机制。 |
+| main 的 `terminalHandoff` **不写 issue 评论**，只把 backlog 转为 `blocked` + `hitl` | 文档、代码注释与测试标题三处都还写着"写评论 + `handoff::active` 标签"。文档已按实现改正；代码注释与测试标题是同事的文件，未动。 |
+| `RunStateWriter` / `AgentExecutionService` **在 main 上仍在** | 调用链仍是死路，删除在 `refactor/afk-package-boundaries` 上尚未合入。§7 按"模块还在但没人调用"措辞，不写成"已删除"。 |
+
+### 9.4 仍然存在、需要代码侧决定的两处
+
+删除写端之后，两处**读端**仍在扫 `.afk/runs/`，因此实际读到空：
+
+- `apps/desktop/electron/services/workspace-service.ts` —— `readEvents()` 递归找
+  `<root>/.afk/runs/**/events.jsonl`（快照里的 `events` 通道）。
+- `apps/desktop/electron/services/desktop-service.ts` —— `readWorkflowRuns()` 读
+  `<root>/.afk/runs/<runId>/{request.json,result.json}`，结果进快照的 `workflowRuns`。
+
+这两条读端是否删除、还是改指运行时任务存储，属于运行时重构的代码决策，不在文档清理
+的范围内，故只登记不动。

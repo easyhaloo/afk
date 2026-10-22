@@ -167,14 +167,23 @@ code was written.
 - `interface SnapshotRepo { FindByBindingAndDocID(...) }` — only when the
   AC is "define interface X" (code itself is the artifact)
 
-**Evidence that requires file upload:**
-If the evidence is a screenshot, log excerpt, or binary artifact, the file
-must be uploaded through the configured change provider to appear on the
-associated change. To do this:
-1. Write the file path(s) to `.afk/artifacts.txt` (one absolute path per line)
-2. The wrapup step will upload them and embed URLs in the change description
-3. Reference the uploaded URL in your Progress evidence, e.g.
-   `![screenshot](uploads/xxx.png)` or `log: uploads/test.log`
+**Evidence that requires a file:**
+A screenshot, log excerpt, or binary artifact is not part of the change.
+`.afk/` is ignored by Git, so a manifest is a local record and is never
+committed, and the worktree is removed when the run ends — a file left
+behind does not outlive the run.
+
+- Use text evidence. Command output and other text belong in the Progress
+  checklist of the commit message: it travels with the branch and reaches
+  the reviewer.
+- Keep a binary file only when the AC cannot be shown any other way. Record
+  its absolute path, one per line, in `.afk/artifacts.txt` inside the
+  worktree, and state in the Progress evidence which claim that file
+  supports. Do not commit the manifest.
+
+The durable attachments on the change request are produced by the QA stage,
+which re-runs the checks independently and uploads the evidence of that run.
+The implementation stage uploads nothing.
 
 **Non-compliant evidence (code as artifact):**
 - "implemented the handler"
@@ -221,14 +230,12 @@ execution record mentioning "HC-3 violated".
    # Example: curl returned 200 + {"id": 123, "status": "created"}
    ```
 
-5. **If evidence requires screenshots/logs, upload them**
-   ```bash
-   # Add file paths to artifacts list
-   echo "/absolute/path/to/screenshot.png" >> .afk/artifacts.txt
-   echo "/absolute/path/to/test-output.log" >> .afk/artifacts.txt
-   git add .afk/artifacts.txt
-   git commit --amend --no-edit
-   ```
+5. **If the AC still needs a file, record it locally**
+   Record the absolute path of each file, one per line, in
+   `.afk/artifacts.txt` inside the worktree, and name in the Progress
+   checklist which claim each file supports. Do not commit the manifest:
+   `.afk/` is ignored by Git, so staging it is rejected. Prefer the command
+   output itself as the evidence, so it travels with the commit.
 
 6. **Resume AFK**
    ```bash

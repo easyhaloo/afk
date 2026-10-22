@@ -1,4 +1,5 @@
 import { test, expect } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 import { seedSelectionInventory } from "./_helpers/inventory.js";
 
 test.describe("contextual selection", () => {
@@ -20,7 +21,7 @@ test.describe("contextual selection", () => {
   });
 
   test("insets appearance choices inside their section", async ({ page }) => {
-    await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+    await navButton(page, "设置").click();
     const spacing = await page.getByRole("radiogroup", { name: "字号密度" }).evaluate(element => {
       const bounds = element.getBoundingClientRect();
       const section = element.closest(".settings-section")!;
@@ -90,12 +91,14 @@ test.describe("contextual selection", () => {
     await search.fill("设置");
     await search.press("Enter");
     await expect(page.getByRole("region", { name: "外观设置" })).toBeVisible();
+    await expect(page.locator(".breadcrumb strong")).toHaveText("设置");
+    await expect(page.locator(".sidebar-bottom .settings-entry")).toHaveClass(/active/);
     await page.locator(".primary-nav").getByRole("button", { name: "工作项", exact: true }).click();
     await expect(page.getByRole("button", { name: "筛选工作项" })).toBeVisible();
   });
 
   test("keeps shared controls readable in the light theme and within a narrow desktop viewport", async ({ electronApp, page }) => {
-    await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+    await navButton(page, "设置").click();
     await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: "浅色" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-afk-theme", "light");
     await page.getByRole("radiogroup", { name: "字号密度" }).getByRole("radio", { name: "舒展" }).click();

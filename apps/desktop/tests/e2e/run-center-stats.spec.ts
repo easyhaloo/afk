@@ -2,6 +2,7 @@ import path from "node:path";
 import type { RunEventDraft } from "@afk/core";
 import { JsonlEventStore } from "@afk/runtime/infrastructure/observability/jsonl-event-store";
 import { test, expect, E2E_HOME_PATH } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 import { expectColumnsAligned } from "./_helpers/geometry.js";
 
 function pastTimestamp(hoursAgo: number): string {
@@ -133,7 +134,7 @@ test("matches the sketch panel and two-line run rows in both themes", async ({ p
   await seedEvents(store);
 
   for (const theme of ["浅色", "深色"]) {
-    await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+    await navButton(page, "设置").click();
     await page.getByRole("radiogroup", { name: "界面主题" }).getByRole("radio", { name: theme }).click();
     await page.locator(".primary-nav").getByRole("button", { name: "运行中心", exact: true }).click();
     const row = page.locator(".queue .event-row").first();

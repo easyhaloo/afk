@@ -5,11 +5,17 @@ import { JsonlEventStore } from "@afk/runtime/infrastructure/observability/jsonl
 import { IPC_CHANNELS } from "../../shared/ipc-contract.js";
 import { test, expect, E2E_HOME_PATH } from "./_helpers/launch.js";
 
-test("shows launch records with local timestamps and recorded workflow metadata", async ({ page, electronApp }) => {
+for (const [timeZone, launchTime, auditTime] of [
+  ["UTC", "2026/10/19 12:16:17", "2026/10/19 12:16:54"],
+  ["Asia/Shanghai", "2026/10/19 20:16:17", "2026/10/19 20:16:54"],
+] as const) test(`shows launch records with local timestamps and recorded workflow metadata (${timeZone})`, async ({ page, electronApp }) => {
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setTimezoneOverride", { timezoneId: timeZone });
+  expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(timeZone);
   const inventory = await page.evaluate(() => window.afkDesktop.workItems.list());
   const workItemId = "github:acme/api#1";
   const runId = "desktop-2954a4d0-d193-4a39-95dc-e2b61cb69305";
-  const startedAt = new Date(2026, 9, 19, 20, 16, 17, 270).toISOString();
+  const startedAt = "2026-10-19T12:16:17.270Z";
   const auditedRunId = "desktop-7d41a886-2be8-48cf-81ba-0b8e6a5c9320";
   const auditContext = { traceId: auditedRunId, runId: auditedRunId, workItemId, profileId: "default", attempt: 1, actor: { kind: "cli" as const, id: "e2e" } };
   const store = new JsonlEventStore({ root: path.join(E2E_HOME_PATH, ".afk", "events") });
@@ -57,19 +63,19 @@ test("shows launch records with local timestamps and recorded workflow metadata"
   expect(shell.detailLeft - shell.sidebarRight).toBeGreaterThanOrEqual(240);
   await expect(history.locator(".work-item-run-card")).toHaveCount(3);
   await expect(history.locator(`.work-item-run-card[data-run-id="${auditedRunId}"]`)).toHaveAttribute("data-selected", "true");
-  await expect(inspector).toContainText("20:16:54");
+  await expect(inspector.locator("h4 time")).toHaveText(auditTime);
   await expect(inspector).toContainText("运行审计");
   const card = drawer.locator(`.work-item-run-card[data-run-id="${runId}"]`);
-  await expect(card.locator("time")).toHaveText("2026/10/19 20:16:17");
+  await expect(card.locator("time")).toHaveText(launchTime);
   await expect(card.locator("time")).toHaveAttribute("datetime", startedAt);
-  await expect(card.locator("time")).toHaveAttribute("title", /本地时间（.+）/);
+  await expect(card.locator("time")).toHaveAttribute("title", `本地时间（${timeZone}）`);
   const timestampFits = await card.locator("time").evaluate(element => {
     const parent = element.parentElement!;
     return element.getBoundingClientRect().width <= parent.getBoundingClientRect().width;
   });
   expect(timestampFits).toBe(true);
   const auditedCard = drawer.locator(`.work-item-run-card[data-run-id="${auditedRunId}"]`);
-  await expect(auditedCard.locator("b")).toHaveText("2026/10/19 20:16:54");
+  await expect(auditedCard.locator("b")).toHaveText(auditTime);
   await expect(inspector.getByRole("button", { name: `查看运行 ${auditedRunId} 的工作流实例` })).toBeVisible();
   const previousCard = drawer.locator('.work-item-run-card[data-run-id="desktop-a5a486e4-68ed-4f8a-8806-a1ddca12c27d"]');
   await expect(previousCard.locator(".work-item-run-summary")).toHaveText("启动超时：等待 Agent 就绪");
@@ -85,7 +91,7 @@ test("shows launch records with local timestamps and recorded workflow metadata"
   const listBounds = await history.locator(".work-item-run-list").boundingBox();
   await card.getByRole("button").focus();
   await card.getByRole("button").press("Enter");
-  await expect(inspector).toContainText("20:16:17");
+  await expect(inspector.locator("h4 time")).toHaveText(launchTime);
   await expect(inspector.locator(".work-item-run-inspector-meta")).toContainText("失败原因未记录");
   await expect(inspector).toContainText("/isolated/task");
   expect(await history.locator(".work-item-run-list").boundingBox()).toEqual(listBounds);

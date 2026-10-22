@@ -301,14 +301,18 @@ test.describe("Workflow studio", () => {
     await page.getByRole("button", { name: "工作流" }).click();
     await page.locator(".workflow-library-card").first().click();
 
-    const pageBox = await page.locator(".workflow-studio-page").boundingBox();
-    const canvasBox = await page.locator(".workflow-studio-canvas").boundingBox();
-    if (!pageBox || !canvasBox) throw new Error("workflow studio width is not measurable");
-    const inspectorBox = await page.locator(".workflow-studio-inspector").boundingBox();
-    expect(inspectorBox).not.toBeNull();
-    expect(inspectorBox!.width).toBeGreaterThanOrEqual(280);
-    expect(inspectorBox!.width).toBeLessThanOrEqual(336);
-    expect(canvasBox.width + inspectorBox!.width).toBeCloseTo(pageBox.width, 0);
+    // Read one layout snapshot: a scrollbar can disappear between separate
+    // boundingBox calls while the editor replaces the workflow library.
+    await expect(async () => {
+      const widths = await page.evaluate(() => ({
+        page: document.querySelector(".workflow-studio-page")?.getBoundingClientRect().width,
+        canvas: document.querySelector(".workflow-studio-canvas")?.getBoundingClientRect().width,
+        inspector: document.querySelector(".workflow-studio-inspector")?.getBoundingClientRect().width,
+      }));
+      expect(widths.inspector).toBeGreaterThanOrEqual(280);
+      expect(widths.inspector).toBeLessThanOrEqual(336);
+      expect(widths.canvas! + widths.inspector!).toBeCloseTo(widths.page!, 0);
+    }).toPass({ timeout: 10_000 });
   });
 
   test("uses one icon-only add trigger with clearly labeled step choices", async ({ page }) => {

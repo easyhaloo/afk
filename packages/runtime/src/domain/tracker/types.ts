@@ -59,6 +59,26 @@ export interface CreateMROptions {
 }
 
 /**
+ * One verification artifact uploaded to the provider and where it can be read.
+ */
+export interface UploadedArtifact {
+  name: string;
+  url: string;
+}
+
+/**
+ * Context for uploading the artifacts a QA run registered.
+ */
+export interface UploadArtifactsOptions {
+  /** Backlog item the artifacts belong to; names the artifact release. */
+  backlogId?: string;
+  /** Branch the artifacts were produced from. */
+  sourceBranch?: string;
+  /** Commit the artifact release points at. */
+  targetCommitish?: string;
+}
+
+/**
  * Merge MR/PR options
  */
 export interface MergeMROptions {
@@ -183,7 +203,7 @@ export interface TrackerProvider {
   parseAC(issue: Pick<TrackedIssue, 'labels' | 'description'>): AcceptanceCriteria;
   getRetryCount(issue: TrackedIssue): number;
   detectTargetBranch(issueId: number, explicit?: string): Promise<string>;
-  uploadArtifacts(worktreePath: string): Promise<string>;
+  uploadArtifacts(worktreePath: string, options?: UploadArtifactsOptions): Promise<UploadedArtifact[]>;
 }
 
 /**

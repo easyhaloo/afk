@@ -310,8 +310,17 @@ export class QARunner {
       if (existing && (existing.state !== 'open' || existing.sourceBranch !== verificationBranch || existing.targetBranch !== targetBranch)) {
         throw new Error(`existing change request ${existing.id} does not match QA branch and target`);
       }
+      await this.recordArtifactManifest(backlogId, worktreePath);
       const mr = existing ?? await this.providers.changes.create({
         backlog, sourceBranch: verificationBranch, targetBranch, draft: false,
+        evidence: {
+          summary: signal.summary,
+          checks: signal.requiredChecks,
+          observations: signal.observations,
+          notes: signal.notes,
+        },
+        worktreePath,
+        commitSha: commitSha || undefined,
       });
       await this.afterPublication?.(mr);
       if (activeRework) {
@@ -335,6 +344,38 @@ export class QARunner {
       await this.markBlocked(backlogId, summary);
       logger.error({ backlogId, error }, 'QA failed: terminal routing error');
       return { success: false, summary, failureCode: 'provider_change_unconfirmed' };
+    }
+  }
+
+  /**
+   * Leave a trace when a QA run published no binary evidence. A missing
+   * `.afk/artifacts.txt` is not a failure — a run may produce no artifacts —
+   * but it must not look like a verified run with attachments.
+   */
+  private async recordArtifactManifest(backlogId: string, worktreePath: string): Promise<void> {
+    const marker = join(worktreePath, '.afk', 'artifacts.txt');
+    try {
+      const content = await fs.readFile(marker, 'utf-8');
+      const paths = content.split('\n').map(line => line.trim()).filter(Boolean);
+      logger.info({ backlogId, worktreePath, artifacts: paths.length }, 'QA artifact manifest found');
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn({ backlogId, worktreePath, error }, 'failed to read the QA artifact manifest');
+        return;
+      }
+    }
+    logger.warn({ backlogId, worktreePath }, 'QA published no artifact manifest; no binary evidence was registered');
+    const runId = getLogContext()?.runId;
+    if (!runId) return;
+    try {
+      await this.runtimeManager.appendActivity(runId, {
+        kind: 'qa',
+        message: 'no artifact manifest was registered for this QA run',
+        detail: `Expected ${marker} to list the binary evidence of the run.`,
+      });
+    } catch (error) {
+      logger.warn({ runId, error }, 'failed to record the missing QA artifact manifest');
     }
   }
 
@@ -449,7 +490,9 @@ interface QAResult {
   result: 'PASS' | 'FAIL';
   summary: string;
   failedCriteria?: QAFailureCriterion[];
-  requiredChecks?: Array<{ command: string; expected: string }>;
+  requiredChecks?: Array<{ command: string; expected: string; actual?: string }>;
+  observations?: Array<{ claim: string; evidence?: string }>;
+  notes?: string;
 }
 
 interface QAFailure extends QAResult {
@@ -473,17 +516,39 @@ function parseCriteria(value: unknown): QAFailureCriterion[] | undefined {
   return criteria.some(item => item === undefined) ? undefined : criteria as QAFailureCriterion[];
 }
 
-function parseRequiredChecks(value: unknown): Array<{ command: string; expected: string }> | undefined {
+function parseRequiredChecks(value: unknown): Array<{ command: string; expected: string; actual?: string }> | undefined {
   if (value === undefined) return [];
   if (!Array.isArray(value)) return undefined;
   const checks = value.map(entry => {
     if (!entry || typeof entry !== 'object') return undefined;
     const item = entry as QAResultObject;
-    return nonEmptyString(item.command) && nonEmptyString(item.expected)
-      ? { command: item.command, expected: item.expected }
-      : undefined;
+    if (!nonEmptyString(item.command) || !nonEmptyString(item.expected)) return undefined;
+    const actual = nonEmptyString(item.actual) ? item.actual : undefined;
+    return { command: item.command, expected: item.expected, ...(actual ? { actual } : {}) };
   });
-  return checks.some(item => item === undefined) ? undefined : checks as Array<{ command: string; expected: string }>;
+  return checks.some(item => item === undefined) ? undefined : checks as Array<{ command: string; expected: string; actual?: string }>;
+}
+
+/**
+ * Observations and notes are extra reporting detail, not the QA verdict. A
+ * malformed entry is dropped so it can never invalidate a result the agent
+ * already proved.
+ */
+function parseObservations(value: unknown): Array<{ claim: string; evidence?: string }> | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const observations = value.flatMap(entry => {
+    if (!entry || typeof entry !== 'object') return [];
+    const item = entry as QAResultObject;
+    if (!nonEmptyString(item.claim)) return [];
+    const evidence = nonEmptyString(item.evidence) ? item.evidence : undefined;
+    return [{ claim: item.claim, ...(evidence ? { evidence } : {}) }];
+  });
+  return observations.length ? observations : undefined;
+}
+
+function parseNotes(value: unknown): string | undefined {
+  return nonEmptyString(value) ? value : undefined;
 }
 
 function asQAResult(value: unknown): QAResult | undefined {
@@ -495,10 +560,13 @@ function asQAResult(value: unknown): QAResult | undefined {
   ) return undefined;
   const requiredChecks = parseRequiredChecks(candidate.requiredChecks);
   if (!requiredChecks) return undefined;
+  const observations = parseObservations(candidate.observations);
+  const notes = parseNotes(candidate.notes);
+  const detail = { ...(observations ? { observations } : {}), ...(notes ? { notes } : {}) };
   if (candidate.result === 'FAIL') {
     const failedCriteria = parseCriteria(candidate.failedCriteria);
     if (!failedCriteria) return undefined;
-    return { type: 'goal_complete', kind: 'qa', result: 'FAIL', summary: candidate.summary, failedCriteria, requiredChecks };
+    return { type: 'goal_complete', kind: 'qa', result: 'FAIL', summary: candidate.summary, failedCriteria, requiredChecks, ...detail };
   }
-  return { type: 'goal_complete', kind: 'qa', result: 'PASS', summary: candidate.summary, requiredChecks };
+  return { type: 'goal_complete', kind: 'qa', result: 'PASS', summary: candidate.summary, requiredChecks, ...detail };
 }

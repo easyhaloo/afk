@@ -4,7 +4,7 @@ import { createAgentProvider, registerAgentProvider } from '../../domain/agents/
 import { TrackerBacklogProvider } from '../../domain/backlog/tracker-adapter.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
@@ -478,6 +478,90 @@ describe('QARunner execution boundary', () => {
     await runner.process('60');
 
     expect(onCommit).toHaveBeenCalledWith('commit-60', 'qa-60');
+  });
+
+  it('publishes the per-criterion evidence and the artifact worktree with the change request', async () => {
+    const f = fixture();
+    f.execution.waitForResult.mockResolvedValue({
+      version: 1, runId: 'execution-60', status: 'completed', provider: 'batch', commits: [],
+      structuredOutput: {
+        type: 'goal_complete', kind: 'qa', result: 'PASS', summary: 'every criterion was re-run',
+        requiredChecks: [{ command: 'pnpm exec playwright test boot', expected: '5 passed' }],
+        observations: [{ claim: 'the entry hugs the bottom edge', evidence: 'boot spec' }],
+        notes: 'the worktree node_modules was materialized as a real directory',
+      },
+    });
+    const root = await mkdtemp(join(tmpdir(), 'afk-qa-artifacts-'));
+    await mkdir(join(root, '.afk'), { recursive: true });
+    await writeFile(join(root, '.afk', 'artifacts.txt'), '/tmp/boot.png\n', 'utf-8');
+    f.branches.createVerificationWorktree.mockResolvedValue({ branchName: 'qa-60', worktreePath: root });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+    });
+
+    await runner.process('60');
+
+    expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({
+      worktreePath: root,
+      commitSha: 'commit-60',
+      evidence: {
+        summary: 'every criterion was re-run',
+        checks: [{ command: 'pnpm exec playwright test boot', expected: '5 passed' }],
+        observations: [{ claim: 'the entry hugs the bottom edge', evidence: 'boot spec' }],
+        notes: 'the worktree node_modules was materialized as a real directory',
+      },
+    }));
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('keeps a PASS result when the reported observations are malformed', async () => {
+    const f = fixture();
+    f.execution.waitForResult.mockResolvedValue({
+      version: 1, runId: 'execution-60', status: 'completed', provider: 'batch', commits: [],
+      structuredOutput: {
+        type: 'goal_complete', kind: 'qa', result: 'PASS', summary: 'every criterion was re-run',
+        requiredChecks: [{ command: 'pnpm exec playwright test boot', expected: '5 passed' }],
+        observations: [{ evidence: 'no claim here' }, 'not an object'],
+      },
+    });
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+    });
+
+    await expect(runner.process('60')).resolves.toMatchObject({ success: true });
+    expect(f.providers.changes.create).toHaveBeenCalledWith(expect.objectContaining({
+      evidence: expect.objectContaining({ observations: undefined }),
+    }));
+  });
+
+  it('records that a QA run published no artifact manifest', async () => {
+    const f = fixture();
+    const root = await mkdtemp(join(tmpdir(), 'afk-qa-no-artifacts-'));
+    f.branches.createVerificationWorktree.mockResolvedValue({ branchName: 'qa-60', worktreePath: root });
+    const appendActivity = vi.fn(async () => ({}));
+    const runner = new QARunner(f.providers, config, {
+      sandboxProvider: f.sandboxProvider,
+      agentProvider: f.agentProvider,
+      executionMode: 'batch',
+      mergeBranch: vi.fn(async () => {}),
+      runtimeManager: {
+        start: vi.fn(), heartbeat: vi.fn(), finish: vi.fn(), writeDiagnostics: vi.fn(), appendActivity,
+      } as any,
+    });
+
+    await runner.process('60');
+
+    expect(appendActivity).toHaveBeenCalledWith(
+      expect.stringContaining('qa-60'),
+      expect.objectContaining({ kind: 'qa', message: expect.stringContaining('no artifact manifest') }),
+    );
+    await rm(root, { recursive: true, force: true });
   });
 
   it('keeps the managed execution log context throughout QA', async () => {

@@ -1,4 +1,6 @@
 import { Octokit } from '@octokit/rest';
+import { readFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import type {
   TrackerProvider,
   TrackedIssue,
@@ -19,6 +21,8 @@ import type {
   Commit,
   TrackerIssueComment,
   LabelDelta,
+  UploadedArtifact,
+  UploadArtifactsOptions,
 } from '../../domain/tracker/types.js';
 import { extractAC } from '../../domain/tracker/ac.js';
 import type { BacklogMetadataLabel } from '../../domain/backlog/initialization.js';
@@ -499,9 +503,73 @@ export class GitHubClient implements TrackerProvider {
     return process.env.AFK_TARGET_BRANCH || 'main';
   }
 
-  async uploadArtifacts(worktreePath: string): Promise<string> {
-    // TODO: implement GitHub release asset upload
-    return '';
+  async uploadArtifacts(worktreePath: string, options: UploadArtifactsOptions = {}): Promise<UploadedArtifact[]> {
+    const paths = await readArtifactPaths(join(worktreePath, '.afk', 'artifacts.txt'));
+    if (paths.length === 0) return [];
+    const { owner, repo } = this.getOwnerRepo();
+    const release = await this.ensureArtifactRelease(owner, repo, options);
+    const artifacts: UploadedArtifact[] = [];
+    for (const path of paths) {
+      const name = basename(path);
+      try {
+        const data = await readFile(path);
+        await this.removeExistingAsset(owner, repo, release.id, name);
+        const asset = await this.client.repos.uploadReleaseAsset({
+          owner,
+          repo,
+          release_id: release.id,
+          name,
+          // Octokit types the request body as a string, but the asset endpoint
+          // takes the raw bytes: the endpoint parser passes a Buffer through
+          // to fetch unchanged.
+          data: data as unknown as string,
+          headers: { 'content-type': 'application/octet-stream' },
+        });
+        artifacts.push({ name, url: asset.data.browser_download_url });
+      } catch (error) {
+        // Best-effort: one unreadable artifact must not fail the whole run.
+        logger.warn({ owner, repo, releaseId: release.id, path, error }, 'failed to upload QA artifact');
+      }
+    }
+    return artifacts;
+  }
+
+  /**
+   * GitHub rejects a second asset with the same name, so a re-run has to drop
+   * the previous file before it can upload its own.
+   */
+  private async removeExistingAsset(owner: string, repo: string, releaseId: number, name: string): Promise<void> {
+    const existing = await this.client.repos.listReleaseAssets({ owner, repo, release_id: releaseId, per_page: 100 });
+    const clash = existing.data.find(asset => asset.name === name);
+    if (clash) await this.client.repos.deleteReleaseAsset({ owner, repo, asset_id: clash.id });
+  }
+
+  /**
+   * QA artifacts live in a pre-release so the link in the change request
+   * opens for the reviewer without a token. A draft release would 404 on its
+   * browser download URL: GitHub only serves those through the
+   * authenticated API endpoint, which is not clickable in a browser.
+   */
+  private async ensureArtifactRelease(
+    owner: string,
+    repo: string,
+    options: UploadArtifactsOptions,
+  ): Promise<{ id: number }> {
+    const tag = artifactReleaseTag(options);
+    const existing = await this.client.repos.listReleases({ owner, repo, per_page: 100 });
+    const found = existing.data.find(release => release.tag_name === tag);
+    if (found) return { id: found.id };
+    const created = await this.client.repos.createRelease({
+      owner,
+      repo,
+      tag_name: tag,
+      name: `AFK QA artifacts${options.backlogId ? ` for backlog ${options.backlogId}` : ''}`,
+      body: 'Verification artifacts uploaded by the AFK QA runner.',
+      draft: false,
+      prerelease: true,
+      target_commitish: options.targetCommitish ?? options.sourceBranch,
+    });
+    return { id: created.data.id };
   }
 }
 
@@ -510,4 +578,27 @@ function statusCode(error: unknown): number | undefined {
     && typeof (error as { status?: unknown }).status === 'number'
     ? (error as { status: number }).status
     : undefined;
+}
+
+/**
+ * Read the artifact manifest a QA run leaves in its worktree. One absolute
+ * path per line; a missing manifest means the run registered no artifacts.
+ */
+export async function readArtifactPaths(markerPath: string): Promise<string[]> {
+  try {
+    const content = await readFile(markerPath, 'utf-8');
+    return content.split('\n').map(line => line.trim()).filter(Boolean);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+/**
+ * One artifact release per backlog item, so a re-run reuses the release it
+ * created instead of piling up drafts.
+ */
+export function artifactReleaseTag(options: UploadArtifactsOptions): string {
+  const id = options.backlogId?.replace(/[^A-Za-z0-9._-]/g, '-');
+  return id ? `afk-qa-artifacts-${id}` : 'afk-qa-artifacts';
 }

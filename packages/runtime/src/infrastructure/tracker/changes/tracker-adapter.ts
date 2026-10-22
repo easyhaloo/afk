@@ -1,14 +1,20 @@
 import type { BacklogItem } from '../../../domain/backlog/index.js';
-import type { ChangeProvider, ChangeRequest } from './provider.js';
+import type { ChangeProvider, ChangeRequest, CreateChangeInput } from './provider.js';
 import type { TrackerProvider } from '../../../domain/tracker/types.js';
 import { parseWorkItemId } from '../../../domain/work-item/identity.js';
 import { resolveGitLabProjectKey } from '../../../shared/gitlab-project.js';
+import { renderVerificationEvidence, type VerificationEvidence } from './verification-evidence.js';
+import { logger } from '../../io/index.js';
 
-export function renderChangeDescription(backlog: BacklogItem, tracker?: Pick<TrackerProvider, 'platform' | 'projectId' | 'providerHost'>): string {
+export function renderChangeDescription(
+  backlog: BacklogItem,
+  tracker?: Pick<TrackerProvider, 'platform' | 'projectId' | 'providerHost'>,
+  evidence?: VerificationEvidence,
+): string {
   const issue = backlog.workItemId ?? (/^(github|gitlab):/.test(backlog.providerRef ?? '') ? backlog.providerRef : undefined);
   const issueNumber = Number(backlog.id);
   if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) throw new Error('backlog issue number is invalid');
-  if (!issue || !tracker) return `QA: PASS\nCloses #${issueNumber}`;
+  if (!issue || !tracker) return appendEvidence(`QA: PASS\nCloses #${issueNumber}`, evidence);
   const identity = parseWorkItemId(issue);
   if (identity.platform !== tracker.platform) throw new Error('issue and change request platform mismatch');
   if (identity.issueNumber !== issueNumber) throw new Error('issue number does not match backlog identity');
@@ -22,21 +28,45 @@ export function renderChangeDescription(backlog: BacklogItem, tracker?: Pick<Tra
   const sameProject = String(tracker.projectId).toLowerCase() === issueProject.toLowerCase()
     || (backlog.project?.providerProjectId !== undefined && String(tracker.projectId) === backlog.project.providerProjectId);
   const reference = sameProject ? `#${issueNumber}` : `${issueProject}#${issueNumber}`;
-  return `QA: PASS\nCloses ${reference}`;
+  return appendEvidence(`QA: PASS\nCloses ${reference}`, evidence);
+}
+
+function appendEvidence(body: string, evidence?: VerificationEvidence): string {
+  const section = renderVerificationEvidence(evidence);
+  return section ? `${body}\n\n${section}` : body;
 }
 
 export class TrackerChangeProvider implements ChangeProvider {
   constructor(private readonly tracker: TrackerProvider) {}
 
-  async create(input: { backlog: BacklogItem; sourceBranch: string; targetBranch: string; draft?: boolean }): Promise<ChangeRequest> {
+  async create(input: CreateChangeInput): Promise<ChangeRequest> {
+    const artifacts = await this.uploadArtifacts(input);
     const id = await this.tracker.createMR({
       title: `Backlog ${input.backlog.id}: ${input.backlog.title}`,
-      description: renderChangeDescription(input.backlog, this.tracker),
+      description: renderChangeDescription(input.backlog, this.tracker, { ...input.evidence, artifacts }),
       sourceBranch: input.sourceBranch,
       targetBranch: input.targetBranch,
       draft: input.draft,
     });
     return this.get(String(id));
+  }
+
+  /**
+   * Upload the artifacts a QA run registered. A failed upload must not stop
+   * the publication: the text evidence still belongs in the description.
+   */
+  private async uploadArtifacts(input: CreateChangeInput) {
+    if (!input.worktreePath) return [];
+    try {
+      return await this.tracker.uploadArtifacts(input.worktreePath, {
+        backlogId: input.backlog.id,
+        sourceBranch: input.sourceBranch,
+        targetCommitish: input.commitSha ?? input.sourceBranch,
+      });
+    } catch (error) {
+      logger.warn({ backlogId: input.backlog.id, worktreePath: input.worktreePath, error }, 'failed to upload QA verification artifacts');
+      return [];
+    }
   }
 
   async get(id: string): Promise<ChangeRequest> {

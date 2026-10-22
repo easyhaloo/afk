@@ -20,6 +20,7 @@ import type {
   Commit,
   TrackerIssueComment,
   LabelDelta,
+  UploadedArtifact,
 } from '../../domain/tracker/types.js';
 import { extractAC } from '../../domain/tracker/ac.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
@@ -272,40 +273,36 @@ export class GitLabClient implements TrackerProvider {
     return process.env.AFK_TARGET_BRANCH || 'main';
   }
 
-  async uploadArtifacts(worktreePath: string): Promise<string> {
+  async uploadArtifacts(worktreePath: string): Promise<UploadedArtifact[]> {
     const marker = `${worktreePath}/.afk/artifacts.txt`;
     const { promises: fs } = await import('fs');
+    const artifacts: UploadedArtifact[] = [];
 
-    let artifactUrls = '';
+    let paths: string[] = [];
     try {
       const content = await fs.readFile(marker, 'utf-8');
-      const paths = content.split('\n').map(p => p.trim()).filter(Boolean);
-
-      for (const filepath of paths) {
-        try {
-          const filename = filepath.split('/').pop()!;
-          const fileContent = await fs.readFile(filepath);
-          const upload = await (this.client as any).Projects.upload(
-            this.projectId,
-            fileContent,
-            { metadata: { filename } }
-          ) as any;
-          const url = upload.full_path ?? upload.url ?? '';
-          if (url) {
-            artifactUrls += `\n- ![${filename}](${url})`;
-          }
-        } catch {
-          // best-effort: skip failed uploads
-        }
-      }
+      paths = content.split('\n').map(p => p.trim()).filter(Boolean);
     } catch {
       // no artifacts file — no-op
+      return artifacts;
     }
 
-    if (artifactUrls) {
-      return `## Verification Evidence${artifactUrls}\n`;
+    for (const filepath of paths) {
+      try {
+        const filename = filepath.split('/').pop()!;
+        const fileContent = await fs.readFile(filepath);
+        const upload = await (this.client as any).Projects.upload(
+          this.projectId,
+          fileContent,
+          { metadata: { filename } }
+        ) as any;
+        const url = upload.full_path ?? upload.url ?? '';
+        if (url) artifacts.push({ name: filename, url });
+      } catch {
+        // best-effort: skip failed uploads
+      }
     }
-    return '';
+    return artifacts;
   }
 
   async updateLabels(iid: number, delta: LabelDelta): Promise<void> {

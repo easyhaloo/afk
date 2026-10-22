@@ -66,20 +66,39 @@ the AC independently in the QA worktree.
 
 ### Step 3 — Record per-line results
 
-Per AC line: pass/fail + evidence (command output or response snippet).
-If binary evidence was generated, write paths to `.afk/artifacts.txt`
-(one absolute path per line).
+Report the evidence in separated fields; the runner renders each one into its
+own section of the change request.
 
+- `summary` — one sentence stating the verdict. Do not repeat the individual
+  test results there; they belong in `requiredChecks`.
+- `observations` — one entry per behavioural acceptance criterion, each with
+  the claim and how it was observed.
+- `requiredChecks` — one entry per acceptance criterion you re-ran, with the
+  command, what it was expected to show, and what it actually showed. The
+  actual outcome belongs next to the expectation, not in the summary.
+- `notes` — environment facts, tooling caveats, and anything that is not
+  acceptance evidence. A reviewer must be able to tell a caveat from a
+  result without reading around it.
+
+If binary evidence was generated, write paths to `.afk/artifacts.txt`
+(one absolute path per line). The runner uploads every listed file to the
+provider and links it from the change request; a run without that manifest
+publishes no attachments and says so in the runtime record.
 ### Step 4 — Publish on PASS
 
 1. Return an explicit `goal_complete` payload with `kind: qa, result: PASS`.
 2. The QA runner commits and pushes the QA branch, then creates the PR/MR.
-   Its body is exactly two lines; do not copy the PRD or write a long summary:
+   Its body starts with exactly two lines; do not copy the PRD or write a
+   long summary:
 
    ```text
    QA: PASS
    Closes #<backlog-id>
    ```
+
+   The runner appends a `## Verification Evidence` section below those two
+   lines with the per-AC results and the uploaded artifacts. The agent does
+   not write that section, and does not put evidence into the two lines.
 
 3. The runner transitions the backlog to `merge_ready`. A root backlog moves
    to `executionMode: hitl` for human merge; a child change is merged by the

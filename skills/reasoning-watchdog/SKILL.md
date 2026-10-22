@@ -115,11 +115,11 @@ cd ~/.claude/reasoning-watchdog && grep -c "reasoning-watchdog" ~/.claude/settin
 
 - **Not installed** → offer `npm run install`
 - **Installed but not working** → check if Claude Code was restarted
-- **False triggers** → tune thresholds in `src/postToolHook.ts`
+- **False triggers** → tune thresholds in the project's `postToolHook.ts` (under `src/`)
 
 ### Step 3 — Tune thresholds
 
-Edit `src/postToolHook.ts`:
+Edit the project's `postToolHook.ts` (under `src/`):
 
 ```typescript
 const REPEAT_THRESHOLD = 3;        // N consecutive edits

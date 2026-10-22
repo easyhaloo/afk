@@ -62,7 +62,7 @@ terminal.
   selectable) to clipboard as a Markdown table suitable for pasting
   into a ticket.
 - **US4.** As an operator, when the run-log section is empty, it shows
-  a hint pointing at `afk observe timeline --runId <id>` for manual
+  a hint pointing at `afk observe timeline <runId>` for manual
   diagnosis (so the feature degrades to "give me the terminal command"
   instead of "blank").
 
@@ -114,7 +114,7 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
 
 | Context | Module | Touch |
 |---------|--------|-------|
-| Run audit spine | `packages/runtime/src/core/events.ts`, `packages/runtime/src/infrastructure/observability/jsonl-event-store.ts` | none (read-only consumer) |
+| Run audit spine | `packages/runtime/src/core/events.ts`, `packages/runtime/packages/runtime/src/infrastructure/observability/jsonl-event-store.ts` | none (read-only consumer) |
 | CLI projection | `apps/cli/src/commands/observe.ts` (`runs`, `timeline`) | none (already exposes needed subcommands) |
 | Electron IPC | `apps/desktop/shared/ipc-contract.ts`, `apps/desktop/electron/ipc/register-handlers.ts` | add 2 handlers |
 | Electron service | `apps/desktop/electron/services/` | add `run-log-service.ts` |
@@ -144,7 +144,7 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
   Spot-check confirms the field is present on `RunEvent.context`
   (`packages/runtime/src/core/events.ts:9`). If any future emitter skips it, the
   viewer's "latest run for this item" lookup silently returns nothing.
-  Owner action: add a regression test in `packages/runtime/src/observability/` that
+  Owner action: add a regression test in `packages/runtime/packages/runtime/src/observability/` that
   asserts every append sets `workItemId`.
 - **R4 — Pull-poll may miss late events that emit between polls.**
   Acceptable for the user-stated value (occasional inspection), but

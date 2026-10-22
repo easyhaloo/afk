@@ -23,7 +23,9 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 - `packages/application` 提供 inventory、run decision/start 和 observation/query
   的最小用例 facade。
 - CLI `observe executions` 直接调用 `@afk/application` 的
-  `queryExecutionHistory`，CLI 只负责参数解析和输出。
+  `queryExecutionHistory`。但 observe 的五个子命令仍在命令层内联构造
+  `JsonlEventStore`（`apps/cli/src/commands/observe.ts:12-13,95`），所以事件存储的
+  根目录解析与构造还没有收进 `@afk/application` 的用例里。
 - Workflow 运行入口显式组装 `RunObserver` 并注入 `WorkflowRunner`；审计事件写入
   失败即停止执行，已删除 `legacy-observer` 与 `AFK_HARNESS_MODE` 分支。
 - Desktop inventory 通过 `@afk/application/provider-inventory` Port 调用进程内
@@ -35,7 +37,7 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 - backlog 到 core 的状态与执行模式映射收敛为单一实现
   `packages/application/src/backlog-mapping.ts`，CLI 与 Desktop 共用，
   不再各维护一份映射表。
-- Electron main 与 `@afk/*` 统一为 ESM。`apps/desktop` 的 `type` 改为 `module`，
+- Electron main 与 `@afk/*` 统一为 ESM。`desktop-client` 的 `type` 改为 `module`，
   main 源码直接 `import` Application 用例，不再经过运行期 CommonJS 桥接产物
   `application.cjs`；`loadApplication()` shim 已删除。沙箱 preload 按 Electron
   要求保持 CJS，源码以 `preload.cts` 表达（`.cts` 恒定产出 `.cjs`），
@@ -49,12 +51,27 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
   同样保留 `dist-electron/provider-inventory.cjs`，因为它是真正内联了
   GitHub/GitLab SDK 的 bundle。`@afk/*` 因此是 devDependency 而非 dependency。
 
-仍需继续收敛根包 `packages/runtime/src/application` 中的 Provider SDK 实现、其他 Desktop CLI
-入口和工作项状态转换；不能将已迁移入口的单路径误写成全仓所有能力迁移完成。
-Desktop 目前对 `@afk/core` 的引用仍限于 `import type`，`decide` / `evolve` /
-`replay` / `resolveExecutionBase` 尚未在 Desktop 侧被调用——本节完成的是状态
-映射的去重，Core 行为函数的多端共享尚未达成。模块制式已统一，但这不等于
-Desktop 已经在复用 Core 的行为函数。
+- 共享能力已从根包 `src/` 上移为四个 workspace package：
+  `packages/application`（用例与 Port，纯、无运行时依赖）、
+  `packages/runtime`（Provider SDK、git、tracker、claim lock、事件存储）、
+  `packages/runtime`（工作项执行运行时：workflow、QA、agent、sandbox）、
+  `packages/workflow-graph`（图算法）。根包 `src/` 现在只保留 CLI 与 TUI
+  表现层。
+- 架构守卫按包表驱动检查依赖方向，并新增一条：桌面客户端不得导入根包 `src/` 树。
+  桌面只依赖 `@afk/application`、`@afk/core`、`@afk/infrastructure`、
+  `@afk/execution`。
+- Desktop 已不再 spawn 任何 AFK CLI 进程：backlog 读写与控制命令、工作项执行、
+  工作流图生成、版本探测全部在进程内调用同一批用例。原先 `afk loop` 的参数
+  本来就不被当前 CLI 接受，改为委派给工作项执行后该路径才真正可用。
+- 工作项清单改为 scope 级列举：平台能服务端过滤时按 owner/全局 feed 一次取回，
+  否则回退到逐项目请求。并发上限从 4 提到 12。
+
+仍需继续收敛的部分：把执行运行时里的用例按 Port 拆开，让 `executeWorkItem`
+本身可以进入 `@afk/application`；`@afk/execution` 目前仍是"用例 + 实现"合一的
+过渡形态。Core 行为函数（`decide` / `evolve` / `replay` /
+`resolveExecutionBase`）在 Desktop 侧大部分仍只被用作类型引用，但 `replay`
+已经通过 `@afk/application` 的 `replayRun` 进入 Desktop 的真实调用链
+（`apps/desktop/electron/services/work-item-execution-query-service.ts:63`）。
 
 ## 当前结构分析
 
@@ -62,11 +79,11 @@ Desktop 已经在复用 Core 的行为函数。
 
 核心模型现在位于独立的 `packages/core`：
 
-- `packages/runtime/src/model.ts` 定义 `WorkItem`、`Run`、状态和运行决策。
-- `packages/runtime/src/reducer.ts` 负责运行事件回放和状态演进。
-- `packages/runtime/src/events.ts` 定义运行事件、观察上下文和证据引用。
-- `packages/runtime/src/ports.ts` 定义事件存储、证据存储、时钟、ID、指标和追踪 Port。
-- `packages/runtime/src/execution-base-policy.ts` 负责执行基线策略。
+- `packages/core/src/model.ts` 定义 `WorkItem`、`Run`、状态和运行决策。
+- `packages/core/src/reducer.ts` 负责运行事件回放和状态演进。
+- `packages/core/src/events.ts` 定义运行事件、观察上下文和证据引用。
+- `packages/core/src/ports.ts` 定义事件存储、证据存储、时钟、ID、指标和追踪 Port。
+- `packages/core/src/execution-base-policy.ts` 负责执行基线策略。
 
 这些模块大体是纯 TypeScript，已经具备核心层的基本形态。
 
@@ -77,24 +94,21 @@ Desktop 已经在复用 Core 的行为函数。
 `packages/core` 已成为正式 workspace package；根包不再维护第二份模型、
 事件、Reducer 或 Policy 实现。
 
-#### Domain 层职责过重
+#### Domain 层与 Application 层已迁空
 
-`packages/runtime/src/domain/backlog` 同时包含：
+`src/domain` 和 `src/application` 在迁移后只剩空目录。此前混在一层的 backlog
+领域类型、Provider 接口、Provider 管理能力、Claim 与文件系统锁、内存 Provider
+和标签映射规则，已经按职责拆开：
 
-- backlog 领域类型；
-- Provider 接口；
-- Provider 管理能力；
-- Claim 和文件系统锁；
-- 内存 Provider；
-- 标签与分支映射规则。
+- 纯类型与 Port 在 `packages/application`（`packages/application/src/backlog/claim.ts` 等）；
+- Provider SDK、内存 Provider、文件系统 claim lock 在
+  `packages/runtime`（`packages/runtime/packages/runtime/src/infrastructure/backlog/in-memory-provider.ts`、
+  `packages/runtime/packages/runtime/src/infrastructure/backlog/filesystem-claim-lock.ts`）；
+- 工作项执行运行时在 `packages/runtime`。
 
-这些内容分别属于核心规则、应用接口和基础设施实现，不应长期放在同一层。
-
-#### Application 层包含基础设施组装
-
-部分 `packages/runtime/src/application` 模块直接创建或引用 Git、tmux、配置、日志和 Provider
-实现。这样 application 层既负责业务编排，又负责运行环境组装，CLI 和 Desktop
-难以共享同一套用例。
+"application 层既负责业务编排又负责运行环境组装"的问题随这次分离一起消失。
+仍然存在的边界问题在别处：`@afk/execution` 内部还是"用例 + 实现"合一，
+`executeWorkItem` 尚未按 Port 拆开。
 
 #### Desktop 的跨进程 DTO 仍是独立边界
 
@@ -114,57 +128,75 @@ Desktop 的 Main 通过 Application adapter 获取工作项数据，并在
 架构检查同时扫描 `@afk/core`、`@afk/application` package 和根包层之间的
 依赖，阻止 Core 依赖 application、infrastructure、Electron 或其他运行时实现。
 
-## 目标结构
+## 目标结构（实现后已收敛为扁平布局）
 
-第一阶段保留现有根目录布局，只新增可复用 package：
+本节最初设想用 `work-item/` `run/` `lifecycle/` `policy/` 这样的子目录切分
+`@afk/core`，用 `backlog/` `execution/` `observation/` `workflow/` 切分
+`@afk/application`。**实现时没有采用这套嵌套**：`@afk/core` 最终保持扁平，
+因为它的领域类型之间高度耦合，拆目录只会制造跨目录 import 而不产生边界。
+
+落地后的实际布局：
 
 ```text
 packages/
-  afk-core/
+  afk-core/                 # 零依赖领域内核
     src/
-      work-item/
-      run/
-      lifecycle/
-      policy/
-      events/
-      ports/
+      model.ts
+      reducer.ts
+      events.ts
+      ports.ts
+      execution-base-policy.ts
       index.ts
 
-  afk-application/
+  afk-application/          # 用例层，只依赖 @afk/core
     src/
-      backlog/
-      execution/
-      observation/
-      workflow/
+      backlog/              # backlog 领域模型与 provider 契约
+      tracker/
+      work-items/
+      backlog-mapping.ts
+      errors.ts
+      version.ts
+      execution.ts
+      execution-query.ts
+      inventory.ts
+      observation.ts
+      provider-inventory.ts
+      ports.ts
+      runtime-health.ts
+      workflow-instance.ts
       index.ts
 
-src/
-  infrastructure/
-    github/
-    gitlab/
-    git/
-    sandbox/
-    observability/
-    process/
+  afk-infrastructure/       # 基础设施适配层
+    src/
+      backlog/  branches/  git/  io/  observability/  provider/  shared/  tracker/
 
-  cli/
-    commands/
-    presentation/
-    composition-root.ts
+  afk-execution/            # 执行运行时
+    src/
+      application/          # agents、loop、modules、plugins、runtime、sessions、visualizations、workflows
+      domain/               # agents、templates
+      infrastructure/       # config、git、observability、process、runtime、sandbox、tmux
+      observability/  shared/
+
+  afk-workflow-graph/       # 图引擎
+    src/
+
+src/                        # 根层：CLI 与 TUI
+  cli/                      # commands/、composition-root.ts、command-registry.ts
+  views/                    # Ink TUI
+  coordinator/
+  plugin-sdk/
+  shared/
+  types/
 
 apps/desktop/
   electron/
-    adapters/
-    services/
-    ipc/
-    composition-root.ts
+    adapters/  services/  ipc/  lib/  security/  window/  workflow/
   shared/
-    ipc-contracts/
   src/
     features/
 ```
 
-`packages/core` 和 `packages/application` 都应是 workspace package，
+`packages/core` 和 `packages/application` 都是 workspace package，
 采用仓库中 `packages/workflow-graph` 已使用的 package 构建方式。
 
 ## 分层职责
@@ -189,9 +221,9 @@ Core 禁止依赖：
 - Commander、Ink、IPC channel 和 CLI 参数；
 - Provider 标签字符串或平台客户端。
 
-`packages/runtime/src/application/backlog-work-item.ts` 中把外部 backlog 模型映射为 Core 模型的逻辑
-属于 adapter/application 边界，不应让 Core 依赖 `BacklogWorkItemInput`、`afk`
-或 `hitl` 这样的外部命名。
+`packages/application/src/backlog-mapping.ts` 中把外部 backlog 词汇映射为
+Core 词汇的逻辑属于 adapter/application 边界，不应让 Core 依赖
+`BacklogWorkItemInput`、`afk` 或 `hitl` 这样的外部命名。
 
 ### `@afk/application`
 

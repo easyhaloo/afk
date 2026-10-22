@@ -71,7 +71,7 @@ Real-world scenarios combining multiple patterns.
 
 **Scenario:** API login, save auth state, open browser and verify protected pages.
 
-**Generated artifacts:** `fixtures/browser-session.ts` (storage-state), `setup/auth-api.setup.ts`, `playwright/.auth/` (gitignored), `.env.example`
+**Generated artifacts:** `browser-session.ts` under `fixtures/` (storage-state), `auth-api.setup.ts` under `setup/`, `playwright/.auth/` (gitignored), `.env.example`
 
 **Steps:**
 1. Setup: API login → save state to `playwright/.auth/user.json`
@@ -90,7 +90,7 @@ Real-world scenarios combining multiple patterns.
 with `--remote-debugging-port=9222`, completes SSO + MFA manually once,
 and leaves it running. Tests attach over CDP and reuse the live session.
 
-**Generated artifacts:** `fixtures/browser-session.ts` (localhost-cdp), `browser-auth-runbook.md`, `.env.example`
+**Generated artifacts:** `browser-session.ts` under `fixtures/` (localhost-cdp), `browser-auth-runbook.md`, `.env.example`
 
 **Steps:**
 1. One-time: launch Chrome with `--user-data-dir=~/.afk-browser-profile --remote-debugging-port=9222`
@@ -109,7 +109,7 @@ and leaves it running. Tests attach over CDP and reuse the live session.
 
 **Scenario:** Developer has already logged in manually in a Chromium window started with `--remote-debugging-port`. Tests attach to the existing session.
 
-**Generated artifacts:** `fixtures/browser-session.ts` (localhost-cdp), `browser-auth-runbook.md`, `.env.example`
+**Generated artifacts:** `browser-session.ts` under `fixtures/` (localhost-cdp), `browser-auth-runbook.md`, `.env.example`
 
 **Steps:**
 1. Start Chromium: `google-chrome --user-data-dir=/tmp/profile --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1`

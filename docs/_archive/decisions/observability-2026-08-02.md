@@ -1,3 +1,7 @@
+> **归档说明（2026-10-20）**：本文是一次针对**另一套代码库**的可观测性普查——它描述的布局是 `src/lib/core/io/logger.ts`、`src/lib/scheduler.ts`、`src/commands/*`，命令是 `afk issue` / `afk worktree` / `afk scheduler status`，这些在本仓库中从未存在或已被移除。
+> 本文的核心结论"没有 append-only 审计日志、没有结构化事件存储"已被 **ADR-0016 Run Event Audit Spine** 推翻：现在有 hash 链 JSONL 事件存储（`packages/afk-core/src/events.ts` + `packages/afk-infrastructure/src/observability/jsonl-event-store.ts`）与 `afk observe` 命令。
+> **当前可观测性指南见 [`docs/architecture/observability.md`](../../architecture/observability.md)。** 本文仅作为历史调研记录保留，不构成当前指引。
+
 # AFK Observability Survey
 
 **Date:** 2026-08-02

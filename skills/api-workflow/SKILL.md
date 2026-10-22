@@ -97,14 +97,14 @@ tests/api-workflow/
 
 When a browser auth mode is selected, the generated project also receives:
 
-| Artifact | Source template |
+| Generated artifact (in the target project) | Source template (in this skill) |
 |----------|----------------|
-| `fixtures/browser-session.ts` | Selected mode fixture (`localhost-cdp` or `storage-state`) |
-| `setup/auth-api.setup.ts` (storage-state only) | API setup to generate state file |
-| `playwright/.auth/` (gitignored) | Auth state file location |
-| `.gitignore` entries | `templates/auth-artifacts.gitignore` |
-| `.env.example` | `templates/auth.env.example` |
-| `browser-auth-runbook.md` | Setup and re-auth instructions |
+| fixtures/browser-session.ts | `templates/fixtures/browser-session.localhost-cdp.ts` or `templates/fixtures/browser-session.storage-state.ts` |
+| setup/auth-api.setup.ts (storage-state only) | `templates/setup/auth-api.setup.ts` |
+| playwright/.auth/ (gitignored) | Auth state file location |
+| .gitignore entries | `templates/auth-artifacts.gitignore` |
+| .env.example | `templates/auth.env.example` |
+| browser-auth-runbook.md | `templates/browser-auth-runbook.md` |
 
 ## Config
 

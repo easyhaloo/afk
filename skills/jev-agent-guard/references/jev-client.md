@@ -14,7 +14,7 @@ in this Skill directory; it remains independent from the AFK application.
 
 ## Direct use from an internal script
 
-Import `scripts/jev-client.mjs` and call `askJev`, `decideChoice`,
+Import `../scripts/jev-client.mjs` and call `askJev`, `decideChoice`,
 `decideNoul`, or `decideScore`. The facade only creates typed questions and
 calls `TypeSafeClient.systemOne`; it does not implement HTTP, retries, response
 parsing, or authentication.
@@ -24,7 +24,7 @@ write the key to a repository file, command argument, audit record, or log.
 
 ## CLI bridge input
 
-`scripts/jev.mjs` reads JSON from stdin or `--input`. The bridge converts the
+`../scripts/jev.mjs` reads JSON from stdin or `--input`. The bridge converts the
 JSON question specification into native SDK question objects:
 
 ```json

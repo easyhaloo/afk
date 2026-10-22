@@ -1,7 +1,7 @@
 # AFK Architecture Decision Records
 
 This directory holds the project's Architecture Decision Records (ADRs).
-See [the ADR process guide](https://github.com/anthropics/.../afk-to-prd/references/adr-process.md)
+See [the ADR process guide](../../skills/afk-to-prd/references/adr-process.md)
 for the workflow.
 
 ## Index

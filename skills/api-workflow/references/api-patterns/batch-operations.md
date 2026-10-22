@@ -8,7 +8,7 @@ Create several related resources in a loop, track their IDs, then clean them up 
 
 ## Usage
 
-Use `fixtures/test-data.ts` from templates:
+Use `../../templates/fixtures/test-data.ts` from templates:
 
 ```typescript
 import { TestDataManager } from '../fixtures/test-data';

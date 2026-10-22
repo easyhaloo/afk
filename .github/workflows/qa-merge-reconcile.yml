@@ -1,0 +1,92 @@
+name: QA Merge Reconciliation
+
+# The merge happens on the platform, but the backlog state lives in the
+# provider labels. A merged change request closes its issue, and a closed
+# issue reads as done whatever its label says — so the label can stay on
+# "merge pending" forever. This workflow calls the AFK reconciliation, which
+# repairs that label against the same audit the human confirmation uses.
+#
+# `closed` is not one of the default pull_request event types, so it is
+# declared explicitly. Without it the workflow never runs.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  # Label updates on the issue need write access.
+  issues: write
+
+jobs:
+  reconcile:
+    name: Reconcile the merged backlog to done
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+
+      - name: Build the CLI
+        run: pnpm build
+
+      - name: Reconcile the merged backlog
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # The change provider titles its change requests `Backlog <id>: ...`
+          # and closes them with `Closes #<id>`. A hand-made change request
+          # carries neither and is not an AFK backlog at all.
+          BACKLOG_ID=$(printf '%s' "$PR_TITLE" | grep -oE '^Backlog [0-9]+' | grep -oE '[0-9]+' || true)
+          if [ -z "$BACKLOG_ID" ]; then
+            BACKLOG_ID=$(printf '%s' "$PR_BODY" | grep -oE 'Closes #[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+          fi
+          if [ -z "$BACKLOG_ID" ]; then
+            echo "not an AFK change request, nothing to reconcile"
+            exit 0
+          fi
+
+          ENVELOPE=$(node apps/cli/dist/index.js backlog reconcile-merge \
+            --id "$BACKLOG_ID" --project "$REPOSITORY" --platform github --json)
+          echo "$ENVELOPE"
+
+          # The backlog is consistent when its label says done — whether this
+          # run repaired it or a human had already confirmed the merge.
+          LABELLED=$(printf '%s' "$ENVELOPE" | node -e '
+            let raw = "";
+            process.stdin.on("data", chunk => { raw += chunk; })
+              .on("end", () => {
+                try {
+                  const envelope = JSON.parse(raw);
+                  const item = envelope?.data?.item ?? {};
+                  console.log(item.labeledState ?? item.state ?? "unknown");
+                } catch { console.log("unknown"); }
+              });
+          ')
+          if [ "$LABELLED" != "done" ]; then
+            echo "::error::backlog $BACKLOG_ID did not reach done (label: $LABELLED)"
+            exit 1
+          fi
+          echo "backlog $BACKLOG_ID is done"

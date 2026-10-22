@@ -4,6 +4,7 @@ import {
   confirmBacklogMerge,
   createBacklog,
   interruptBacklog,
+  reconcileMergedBacklog,
   retryBacklog,
 } from './commands.js';
 import type { BacklogItem, BacklogManagementProvider, QABacklogProvider } from './index.js';
@@ -183,6 +184,101 @@ describe('backlog commands', () => {
     await expect(confirmBacklogMerge(lifecycleProvider(backlogItem({ state: 'done', executionMode: 'hitl' })), { findForBacklog: vi.fn(), merge: vi.fn(), get: vi.fn() }, '42', 'main')).resolves.toMatchObject({ state: 'done' });
   });
 });
+
+  it('completes a root backlog whose change is already merged without merging anything', async () => {
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: `${item.branchName}-qa`, targetBranch: 'main' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    await expect(reconcileMergedBacklog(provider, changes, item.id, 'main')).resolves.toMatchObject({
+      reconciled: true,
+      item: { state: 'done' },
+    });
+    expect(changes.merge).not.toHaveBeenCalled();
+    expect(provider.transition).toHaveBeenCalledWith(item.id, 'done', { changeId: 'mr-9' });
+  });
+
+  it('leaves the merge gate alone while the change is still open', async () => {
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'open', sourceBranch: `${item.branchName}-qa`, targetBranch: 'main' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, item.id, 'main');
+    expect(outcome.reconciled).toBe(false);
+    expect(outcome.reason).toMatch(/merge gate is still open/);
+    expect(changes.merge).not.toHaveBeenCalled();
+    expect(provider.transition).not.toHaveBeenCalled();
+  });
+
+  it('refuses to reconcile a change that targets another branch or belongs to a child', async () => {
+    const item = backlogItem({ state: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: item.branchName, targetBranch: 'release' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, item.id, 'main');
+    expect(outcome.reconciled).toBe(false);
+    expect(outcome.reason).toMatch(/targets release/);
+    expect(provider.transition).not.toHaveBeenCalled();
+
+    const child = backlogItem({ id: '43', parentId: '42', state: 'merge_ready', executionMode: 'hitl' });
+    const childProvider = lifecycleProvider(child);
+    const childOutcome = await reconcileMergedBacklog(childProvider, changes, child.id, 'main');
+    expect(childOutcome.reconciled).toBe(false);
+    expect(childOutcome.reason).toMatch(/not a root backlog/);
+    expect(childProvider.transition).not.toHaveBeenCalled();
+  });
+
+  it('reports an already completed backlog instead of reconciling it again', async () => {
+    const item = backlogItem({ state: 'done', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = { findForBacklog: vi.fn(), merge: vi.fn(), get: vi.fn() };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, item.id, 'main');
+    expect(outcome.reconciled).toBe(false);
+    expect(outcome.reason).toMatch(/already done/);
+    expect(provider.transition).not.toHaveBeenCalled();
+  });
+
+  it('repairs a stale merge-ready label on an issue the provider already closed', async () => {
+    // The provider closed the issue when the change merged, so the derived
+    // state reads done while the label still says "merge pending".
+    const item = backlogItem({ state: 'done', labeledState: 'merge_ready', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = {
+      findForBacklog: vi.fn().mockResolvedValue({ id: 'mr-9', state: 'merged', sourceBranch: `${item.branchName}-qa`, targetBranch: 'main' }),
+      merge: vi.fn(),
+      get: vi.fn(),
+    };
+
+    await expect(reconcileMergedBacklog(provider, changes, item.id, 'main')).resolves.toMatchObject({
+      reconciled: true,
+    });
+    expect(provider.transition).toHaveBeenCalledWith(item.id, 'done', { changeId: 'mr-9' });
+    expect(changes.merge).not.toHaveBeenCalled();
+  });
+
+  it('leaves a completed backlog whose label already says done alone', async () => {
+    const item = backlogItem({ state: 'done', labeledState: 'done', executionMode: 'hitl' });
+    const provider = lifecycleProvider(item);
+    const changes = { findForBacklog: vi.fn(), merge: vi.fn(), get: vi.fn() };
+
+    const outcome = await reconcileMergedBacklog(provider, changes, item.id, 'main');
+    expect(outcome.reconciled).toBe(false);
+    expect(outcome.reason).toMatch(/already done/);
+    expect(provider.transition).not.toHaveBeenCalled();
+  });
 
 function backlogItem(overrides: Partial<BacklogItem> = {}): BacklogItem {
   return {

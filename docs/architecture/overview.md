@@ -66,6 +66,7 @@ single source of truth for the supported surface:
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
 | `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
 | `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
+| `afk backlog reconcile-merge` | Complete a root backlog whose change is already merged on the provider |
 | `afk run --backlog-id <id>` | Execute one claimed item |
 | `afk execute --work-item-id <id> --execution-manifest <path>` | Implement, independently verify, and publish one managed work item |
 | `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |

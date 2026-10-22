@@ -4,6 +4,7 @@ import * as path from 'path';
 import { logger } from '../../infrastructure/io/index.js';
 import type { ProviderBundle } from '../../infrastructure/provider/providers.js';
 import { parseWorkItemId } from '../../domain/backlog/index.js';
+import { reconcileMergedBacklog } from '../../domain/backlog/commands.js';
 import { readExecutionManifest } from '../workflows/execution-manifest.js';
 import { executeWorkItem } from '../workflows/execute-work-item.js';
 
@@ -27,6 +28,8 @@ export interface LoopRunnerOptions {
   pidFilePath?: string;
   /** Where to write status JSON periodically (so `afk loop status` can read it). */
   statusFilePath?: string;
+  /** Target branch the merged change must have targeted. */
+  targetBranch?: string;
 }
 
 export interface ChainContext {
@@ -55,6 +58,7 @@ interface InternalOptions {
   executeManagedWorkItem: typeof executeWorkItem;
   pidFilePath: string;
   statusFilePath: string;
+  targetBranch: string;
 }
 
 const DEFAULTS = {
@@ -63,6 +67,7 @@ const DEFAULTS = {
   shutdownTimeoutMs: 300_000,
   pidFilePath: path.join(os.homedir(), '.afk', 'loop.pid'),
   statusFilePath: path.join(os.homedir(), '.afk', 'loop-status.json'),
+  targetBranch: 'main',
 };
 
 const POLL_RETRY_DELAY_MS = 5_000;
@@ -120,6 +125,7 @@ export class LoopRunner {
       executeManagedWorkItem: options.executeManagedWorkItem ?? executeWorkItem,
       pidFilePath: options.pidFilePath ?? DEFAULTS.pidFilePath,
       statusFilePath: options.statusFilePath ?? DEFAULTS.statusFilePath,
+      targetBranch: options.targetBranch ?? DEFAULTS.targetBranch,
     };
   }
 
@@ -327,6 +333,7 @@ export class LoopRunner {
       }
 
       logger.info({ found: issues.length, enqueued, skipped }, 'poll complete');
+      await this.reconcileMergedChanges();
     } catch (error) {
       logger.error({ err: error }, 'poll error');
       this.emitEvent(`poll error: ${(error as Error).message}`);
@@ -334,6 +341,32 @@ export class LoopRunner {
       await new Promise(r => setTimeout(r, POLL_RETRY_DELAY_MS));
     } finally {
       this.polling = false;
+    }
+  }
+
+  /**
+   * A human merges the change on the provider. The backlog state is then
+   * bookkeeping, and this loop brings it in line — it never merges anything.
+   */
+  private async reconcileMergedChanges(): Promise<void> {
+    const candidates = await this.providers.backlog.list({ state: 'merge_ready', executionMode: 'hitl' });
+    for (const candidate of candidates) {
+      const id = String(candidate.id);
+      if (!this.opts.backlogIds.has(id)) continue;
+      try {
+        const outcome = await reconcileMergedBacklog(
+          this.providers.backlog,
+          this.providers.changes,
+          id,
+          this.opts.targetBranch,
+        );
+        if (outcome.reconciled) {
+          this.emitEvent(`${id} reconciled to done: ${outcome.reason}`);
+          logger.info({ iid: id, reason: outcome.reason }, 'merged backlog reconciled to done');
+        }
+      } catch (error) {
+        logger.warn({ iid: id, error }, 'failed to reconcile a merged backlog');
+      }
     }
   }
 

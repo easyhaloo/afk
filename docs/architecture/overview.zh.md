@@ -54,6 +54,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
 | `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
 | `afk backlog confirm-merge` | 合并已批准的根 backlog 变更并置为 done |
+| `afk backlog reconcile-merge` | 当变更已在平台合并时，将根 backlog 收敛为 done |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
 | `afk execute --work-item-id <id> --execution-manifest <path>` | 实现、独立验证并发布一个托管工作项 |
 | `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |

@@ -46,9 +46,13 @@
 | [0018](adr/0018-evidence-classification-and-redaction.md) | Evidence classification and redaction | accepted |
 | [0019](adr/0019-desktop-run-log-viewer-projection.md) | Shared execution views and interactive tmux access | in progress |
 | [0020](adr/0020-backlog-item-drop-singular-change-request.md) | Backlog item drop = singular change request | proposed |
-| [0021](adr/0021-package-boundaries-and-in-process-desktop.md) | Package boundaries and the in-process desktop client | accepted |
 
 编号自 0014 起；0002–0013 从未被分配（见 `adr/README.md`）。
+
+**尚缺一份**：包边界与进程内桌面端这个决策在 `main` 上没有对应的 ADR。分支
+`refactor/afk-package-boundaries` 上的 ADR-0021 描述的是 core / application /
+infrastructure / execution 四包布局，而 `main` 已把 infrastructure 与 execution 合并为
+`runtime`，原样搬运会立刻成为又一份过时文档——需要按 `main` 的实际布局新写一份。
 
 ## 产品与研究
 

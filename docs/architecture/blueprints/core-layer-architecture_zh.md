@@ -100,10 +100,11 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 领域类型、Provider 接口、Provider 管理能力、Claim 与文件系统锁、内存 Provider
 和标签映射规则，已经按职责拆开：
 
-- 纯类型与 Port 在 `packages/application`（`packages/application/src/backlog/claim.ts` 等）；
-- Provider SDK、内存 Provider、文件系统 claim lock 在
-  `packages/runtime`（`packages/runtime/packages/runtime/src/infrastructure/backlog/in-memory-provider.ts`、
-  `packages/runtime/packages/runtime/src/infrastructure/backlog/filesystem-claim-lock.ts`）；
+- 纯类型与 Port 在 `packages/application`（`packages/application/src/ports.ts` 等）；
+- 领域模型、Provider 接口、Claim 策略与文件系统锁在 `packages/runtime`
+  （`packages/runtime/src/domain/backlog/claim.ts`、
+  `packages/runtime/src/domain/backlog/claim-strategy.ts`、
+  `packages/runtime/src/domain/tracker/types.ts`）；
 - 工作项执行运行时在 `packages/runtime`。
 
 "application 层既负责业务编排又负责运行环境组装"的问题随这次分离一起消失。

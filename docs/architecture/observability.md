@@ -66,7 +66,7 @@ node apps/cli/dist/index.js observe explain <run-id>
 
 一次可解释的 run 至少拥有 `run.requested`、`run.started`、执行/QA step 边界、失败分类或变更单事实，以及 `run.finished` 或 `human_gate.opened`。事件名称低基数，动态值写入 data。
 
-`packages/runtime/packages/runtime/src/infrastructure/io/logger.ts` 导出
+`packages/runtime/src/infrastructure/io/logger.ts` 导出
 `withLogContext({ runId, workItemId }, asyncFn)` 与 `getLogContext()`。
 前者用 AsyncLocalStorage 隔离异步作用域，Pino mixin 为作用域内的
 `logger` / `fileLogger` JSON 行添加 `runId`、`workItemId`；后者返回当前上下文，
@@ -132,7 +132,7 @@ arguments, output bodies, error messages, file paths and search queries are
 excluded. Timestamps and durations come from native fields; missing values
 are not filled using AFK's clock or text parsing.
 
-The pure domain API in `packages/runtime/packages/runtime/src/domain/agents/tool-telemetry.ts` exports
+The pure domain API in `packages/runtime/src/domain/agents/tool-telemetry.ts` exports
 `extractClaudeToolEvents(lines)`, `extractCodexToolEvents(lines)` and
 `collectAgentToolEvent(provider, event, tools)`; the collector merges parsed
 native events into a caller-owned map keyed by tool call/item ID. The two
@@ -159,7 +159,7 @@ returns collected `tools`, including failure, abort and timeout. This does not
 add a raw-output buffer and does not depend on the bounded `captureOutput`
 tail. With no recognized calls, `tools` remains absent.
 
-`packages/runtime/packages/runtime/src/infrastructure/observability/agent-telemetry.ts` re-exports the provider extractors
+`packages/runtime/src/infrastructure/observability/agent-telemetry.ts` re-exports the provider extractors
 and provides `readAgentTools(options: ReadTelemetryOptions):
 Promise<AgentToolCallSummary[] | undefined>`, independently of the existing
 `readAgentTelemetry` token API. Its `collectAgentTelemetry(execution, result,

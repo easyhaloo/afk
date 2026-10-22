@@ -367,7 +367,7 @@ Docker socket
 
 交接恢复文档不属于 run 目录，它写入
 `<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
-（`packages/runtime/packages/runtime/src/application/workflows/handoff.ts`）。
+（`packages/runtime/src/application/workflows/handoff.ts`）。
 
 Session 文件必须使用临时文件、校验和原子 rename，避免新 generation 读取半截 JSONL。
 
@@ -483,7 +483,7 @@ afk run --backlog-id <id>
 ```
 
 `afk run` 认领一个 ready 状态的 backlog 项，并按该项选定的模板推进执行。模板由
-`packages/runtime/packages/runtime/src/domain/templates/builtin.ts` 解析；CLI 上没有
+`packages/runtime/src/domain/templates/builtin.ts` 解析；CLI 上没有
 `--template` 选项，也不存在 `afk workflow` 命令组。
 
 配置示例：
@@ -596,16 +596,16 @@ workflow:
 
 前提：所有新 workflow 和默认 Provider 已使用 ExecutionResult。
 
-- ✅ 删除新 prompt 中的 signal 写入要求 (`packages/runtime/packages/runtime/src/domain/templates/builtin.ts` 与工作流阶段)
-- ✅ Runner 仍读取 signal 作为向后兼容 fallback (`packages/runtime/packages/runtime/src/infrastructure/tmux/tmux.ts`)
+- ✅ 删除新 prompt 中的 signal 写入要求 (`packages/runtime/src/domain/templates/builtin.ts` 与工作流阶段)
+- ✅ Runner 仍读取 signal 作为向后兼容 fallback (`packages/runtime/src/infrastructure/tmux/tmux.ts`)
 - ⏳ 清理 legacy signal CLI/schema/tests（保留 readSignal/writeSignal/clearSignal + 单元测试；CLI/技能暂无独立 signal 子命令）
 - ✅ 更新 skills、README 和架构文档（`CLAUDE.md` 含 Phase 状态表）
 
 验收：全量测试通过，旧 worktree 可以被兼容读取或明确迁移。
 
 实现细节：
-- 批量 agent 通过 `ExecutionResult` 上报；交互式 agent 按 `packages/runtime/packages/runtime/src/application/workflows/execution-protocol.ts` 写 `.afk-signal.json`，由 `packages/runtime/packages/runtime/src/infrastructure/tmux/tmux.ts` 的 `readSignal`/`readSignalSync` 读取。
-- `packages/runtime/packages/runtime/src/infrastructure/io/signal.ts` 持有 signal 文件原语。
+- 批量 agent 通过 `ExecutionResult` 上报；交互式 agent 按 `packages/runtime/src/application/workflows/execution-protocol.ts` 写 `.afk-signal.json`，由 `packages/runtime/src/infrastructure/tmux/tmux.ts` 的 `readSignal`/`readSignalSync` 读取。
+- `packages/runtime/src/infrastructure/io/signal.ts` 持有 signal 文件原语。
 
 ## 13. 测试计划
 

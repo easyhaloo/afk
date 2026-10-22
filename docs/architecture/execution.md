@@ -371,7 +371,7 @@ Run state directory:
 
 Handoff recovery documents are not part of the run directory. They are written
 to `<worktree>/.afk/handoff/handoff-<backlogId>-<generation>.md`
-(`packages/runtime/packages/runtime/src/application/workflows/handoff.ts`).
+(`packages/runtime/src/application/workflows/handoff.ts`).
 
 Session files must use temp files, checksums, and atomic rename to avoid new generation reading half-written JSONL.
 
@@ -488,7 +488,7 @@ afk run --backlog-id <id>
 
 `afk run` claims one ready backlog item and drives it through the template the
 item selects. The template is resolved by
-`packages/runtime/packages/runtime/src/domain/templates/builtin.ts`; there is no
+`packages/runtime/src/domain/templates/builtin.ts`; there is no
 `--template` flag on the CLI, and no `afk workflow` command group.
 
 Configuration example:
@@ -601,16 +601,16 @@ Acceptance: templates can express dependencies, conditions, execution modes, Age
 
 Prerequisite: all new workflows and default Provider use ExecutionResult.
 
-- Delete signal writing requirements from new prompts (`packages/runtime/packages/runtime/src/domain/templates/builtin.ts`, the workflow phases)
-- Runner still reads signal as backward-compatible fallback (`packages/runtime/packages/runtime/src/infrastructure/tmux/tmux.ts`)
+- Delete signal writing requirements from new prompts (`packages/runtime/src/domain/templates/builtin.ts`, the workflow phases)
+- Runner still reads signal as backward-compatible fallback (`packages/runtime/src/infrastructure/tmux/tmux.ts`)
 - Clean up legacy signal CLI/schema/tests (preserve readSignal/writeSignal/clearSignal + unit tests; CLI/skills have no independent signal subcommand yet)
 - Update skills, README, and architecture docs (`CLAUDE.md` contains Phase status table)
 
 Acceptance: full test suite passes, old worktrees can be compatibly read or explicitly migrated.
 
 Implementation details:
-- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `packages/runtime/packages/runtime/src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `packages/runtime/packages/runtime/src/infrastructure/tmux/tmux.ts`.
-- `packages/runtime/packages/runtime/src/infrastructure/io/signal.ts` owns the signal file primitives.
+- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `packages/runtime/src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `packages/runtime/src/infrastructure/tmux/tmux.ts`.
+- `packages/runtime/src/infrastructure/io/signal.ts` owns the signal file primitives.
 
 ## 13. Testing Plan
 

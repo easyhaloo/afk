@@ -114,7 +114,7 @@ afk/
 | `packages/runtime/src/infrastructure/` | 全部 I/O：git、tmux、sandbox、tracker、文件、进程 | `domain`、`core`、`shared` | 业务决策；依赖 `application` 及以上 |
 | `apps/cli/src/` | 命令表面、参数解析、输出格式。**唯一真源** | `application`、`domain`、`infrastructure`、`shared`、`views` | 业务逻辑下沉；命令重复注册 |
 | `apps/cli/src/tui/` | Ink 渲染。按功能分组 | `application`、`domain`、`infrastructure`、`shared` | 业务逻辑；`components/utils/types` 式类型分组 |
-| `packages/runtime/packages/runtime/src/observability/` | 审计主干的查询与投影 | `application`、`domain`、`infrastructure`、`core` | 写审计事件（属 infrastructure） |
+| `packages/runtime/src/observability/` | 审计主干的查询与投影 | `application`、`domain`、`infrastructure`、`core` | 写审计事件（属 infrastructure） |
 | `packages/runtime/src/coordinator/` | 跨切面协调：把用例与执行环境接起来 | `application`、`infrastructure` | 沉淀通用工具 |
 | `packages/runtime/src/plugin-sdk/` | 对外插件契约。**兼容性承诺面** | `domain` | 反向依赖仓库内部实现 |
 | `packages/runtime/src/types/` | 仅 ambient 声明（如 `node-sqlite.d.ts`） | — | 业务类型、任何运行时值 |
@@ -177,7 +177,7 @@ afk/
 
 ### 5.4 拆解 `packages/runtime/src/types/`
 
-`packages/runtime/src/types/board.ts`（含业务函数 `getTaskBacklogId()` 与 deprecated 字段 `iid`）
+`apps/cli/src/tui/board-types.ts`（含业务函数 `getTaskBacklogId()` 与 deprecated 字段 `iid`）
 → 并入 `apps/cli/src/tui/board/`（它本就是给看板用的 runtime 投影，该目录已有 `types.ts`）。
 `packages/runtime/src/types/` 仅保留 `node-sqlite.d.ts`。需同步 `AGENTS.md` 布局表。
 
@@ -191,7 +191,7 @@ ADR-0016 推翻，因此不迁往 `docs/research/`，而是归档到
 
 ### 5.6 `modules/` → `runners/`
 
-`packages/runtime/packages/runtime/src/application/modules/` 内是 `loop-runner` / `qa-runner` / `_registry` / `isolate` /
+`packages/runtime/src/application/modules/` 内是 `loop-runner` / `qa-runner` / `_registry` / `isolate` /
 `project-resolver`——是执行器，不是「模块」。改用业务语言命名。
 
 ### 5.7 `packages/application` 更名（可选，中等成本）
@@ -207,14 +207,14 @@ ADR-0016 推翻，因此不迁往 `docs/research/`，而是归档到
 ## 6. 执法缺口：声明与现实相反
 
 `AGENTS.md` 写「`packages/runtime/src/domain/` — Pure types, reducers, provider seams — **no I/O**」。
-实测 `packages/*/packages/runtime/src/domain/` 有 **8 个文件** import node 内置模块，其中 **3 个**真的起进程：
+实测 `packages/*/src/domain/` 有 **8 个文件** import node 内置模块，其中 **3 个**真的起进程：
 
 | 文件 | I/O |
 | --- | --- |
-| `packages/runtime/packages/runtime/src/domain/agents/codex-app-server/transport.ts` | `spawn`、`net.createConnection` |
-| `packages/runtime/packages/runtime/src/domain/agents/codex-runtime.ts` | `execFile` |
-| `packages/runtime/packages/runtime/src/infrastructure/backlog/filesystem-claim-lock.ts` | `fs/promises`、`os` |
-| `packages/runtime/packages/runtime/src/domain/templates/loader.ts` | `fs`、`os`、`path` |
+| `packages/runtime/src/domain/agents/codex-app-server/transport.ts` | `spawn`、`net.createConnection` |
+| `packages/runtime/src/domain/agents/codex-runtime.ts` | `execFile` |
+| `packages/runtime/src/domain/backlog/claim.ts` | `fs/promises`、`os` |
+| `packages/runtime/src/domain/templates/loader.ts` | `fs`、`os`、`path` |
 
 **为什么没被拦住**：`architecture-guard.mjs` 的 `nodeBuiltins` 黑名单只作用于
 `packages/*/`（定义在第 85 行，判定在第 440 行）；`src/**` 只检查**相对导入**的层方向，
@@ -223,10 +223,10 @@ ADR-0016 推翻，因此不迁往 `docs/research/`，而是归档到
 **这是本提案最重要的发现**：原则写在了文档里，却既没被代码遵守，也没被工具兜住。
 目标布局要求全部 I/O 收敛到基础设施层。修复分两步：
 
-1. **立即**：给 `architecture-guard.mjs` 增加规则——`packages/*/packages/runtime/src/domain/`
+1. **立即**：给 `architecture-guard.mjs` 增加规则——`packages/*/src/domain/`
    禁止 `nodeBuiltins`。让它先变红。
 2. **随后**：按报错把 `loader.ts`、`transport.ts`、`codex-runtime.ts` 等迁到
-   `packages/runtime/packages/runtime/src/infrastructure/`，在 `domain/` 只留端口定义。
+   `packages/runtime/src/infrastructure/`，在 `domain/` 只留端口定义。
 
 这一步会触及较深的 import 链，且当前工作区正处于同方向的重构中
 （provider 契约已抽到 `packages/application/src/ports.ts`），建议独立分支推进。

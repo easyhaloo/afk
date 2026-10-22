@@ -43,9 +43,9 @@ must now name the evidence and let the store own the bytes.
 > preserved verbatim; the missing sections were reconstructed from the
 > implemented semantics in `packages/core/src/events.ts`,
 > `packages/core/src/ports.ts`, and
-> `packages/runtime/packages/runtime/src/infrastructure/observability/local-evidence-store.ts`.
+> `packages/runtime/src/infrastructure/observability/local-evidence-store.ts`.
 ## References
 
 - `packages/core/src/events.ts` — `EvidenceClassification`, `RedactionStatus`, `EvidenceRef`
 - `packages/core/src/ports.ts` — `EvidenceStorePort` and the core port set
-- `packages/runtime/packages/runtime/src/infrastructure/observability/local-evidence-store.ts` — encrypted local store and `redactUtf8`
+- `packages/runtime/src/infrastructure/observability/local-evidence-store.ts` — encrypted local store and `redactUtf8`

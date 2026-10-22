@@ -36,7 +36,7 @@
 
 - CLI 命令面唯一真源是 `apps/cli/src/command-registry.ts`（14 个命令组）。实测 `node dist/index.js --help` 与 `docs/architecture/overview.md` 的命令表**逐条吻合**。
 - `afk board` 已被显式移除（`apps/cli/src/index.ts:26-30` 直接报错退出），`afk`（无参数）= TUI。
-- 领域状态机、信号类型、模板清单、Provider 契约以 `packages/runtime/packages/runtime/src/domain/`、`packages/runtime/packages/runtime/src/domain/schemas.ts`、`packages/runtime/packages/runtime/src/domain/templates/builtin.ts`、`packages/runtime/packages/runtime/src/domain/backlog/index.ts` 为准。
+- 领域状态机、信号类型、模板清单、Provider 契约以 `packages/runtime/src/domain/`、`packages/runtime/src/domain/schemas.ts`、`packages/runtime/src/domain/templates/builtin.ts`、`packages/runtime/src/domain/backlog/index.ts` 为准。
 - 包边界正在迁移：main 3 个包，in-flight 分支 5 个包。
 
 ---
@@ -58,7 +58,7 @@
 ### 2.2 两份文档描述的是"另一套代码库"
 
 - `docs/decisions/observability-2026-08-02.md` —— 整篇基于 packages/runtime/src/lib/core/io/logger.ts、packages/runtime/src/lib/scheduler.ts、packages/runtime/src/commands/*，讨论 `afk issue` / `afk worktree` / `afk scheduler status` 等**注册表里根本不存在的命令**。其核心结论"没有 append-only 审计日志"已被 ADR-0016 的 hash 链 JSONL 与 `afk observe` 推翻。
-- `docs/superpowers/plans/2026-10-16-retro-feedback-loop.md` —— 规划了 packages/runtime/packages/runtime/src/domain/observability/retro-types.ts + packages/runtime/packages/runtime/src/application/retrospectives/* + packages/runtime/packages/runtime/src/infrastructure/observability/retro-*.ts 共 17 个文件，**一个都不存在**；实际实现全部内联在 `apps/cli/src/commands/retro.ts` 单文件内。
+- `docs/superpowers/plans/2026-10-16-retro-feedback-loop.md` —— 规划了 packages/runtime/src/domain/observability/retro-types.ts + packages/runtime/src/application/retrospectives/* + packages/runtime/src/infrastructure/observability/retro-*.ts 共 17 个文件，**一个都不存在**；实际实现全部内联在 `apps/cli/src/commands/retro.ts` 单文件内。
 
 ### 2.3 蓝图状态标记失真
 
@@ -67,7 +67,7 @@
 | 蓝图 | 标记 | 实际 |
 |---|---|---|
 | `afk-native-graph-engine-blueprint.md` | 建议进入 RFC | **已采纳并实现**为 `packages/workflow-graph`（`ir/project/normalize/layout/routing/validate/receipt` 全部就位） |
-| `archify-afk-integration-proposal.md` | 建议采纳，尚未实现 | **方向已被否决**，仅 IR 投影以 `packages/runtime/packages/runtime/src/application/visualizations/archify-adapter.ts` 存活 |
+| `archify-afk-integration-proposal.md` | 建议采纳，尚未实现 | **方向已被否决**，仅 IR 投影以 `packages/runtime/src/application/visualizations/archify-adapter.ts` 存活 |
 | `core-layer-architecture_zh.md` | 目标结构 | "当前落地状态"准确，"目标结构"子树未实现（实际是扁平布局） |
 | `target-directory-layout.md` | 提案，尚未采纳 | 有效提案，统计数字需刷新 |
 
@@ -107,13 +107,13 @@
 
 | # | 文件:行 | 现状断言 | 实际 |
 |---|---|---|---|
-| P1-1 | `architecture/execution.md:110` | 目录树为 `packages/runtime/src/lib/{agents,sandbox,execution,sessions,branches,templates}/` | `packages/runtime/src/lib/` 不存在；真实位置 `packages/runtime/packages/runtime/src/domain/agents/`、`packages/runtime/packages/runtime/src/infrastructure/sandbox/`、`packages/runtime/packages/runtime/src/domain/templates/` 等 |
+| P1-1 | `architecture/execution.md:110` | 目录树为 `packages/runtime/src/lib/{agents,sandbox,execution,sessions,branches,templates}/` | `packages/runtime/src/lib/` 不存在；真实位置 `packages/runtime/src/domain/agents/`、`packages/runtime/src/infrastructure/sandbox/`、`packages/runtime/src/domain/templates/` 等 |
 | P1-2 | `architecture/execution.md:494,707` | `afk workflow run --iid 42 --agent claude-code ...` | 无 `workflow` 命令；真实入口 `afk run`（`apps/cli/src/commands/run.ts:17-35`） |
 | P1-3 | `architecture/execution.md:702` | "默认超时遵循 packages/runtime/src/lib/constants.ts" | 文件不存在；超时是 `afk run --hard-timeout`（`run.ts:26`） |
-| P1-4 | `architecture/execution.md:612` | 引用 `workflows.ts` 的阶段 | 该文件不存在；模板在 `packages/runtime/packages/runtime/src/domain/templates/builtin.ts` |
+| P1-4 | `architecture/execution.md:612` | 引用 `workflows.ts` 的阶段 | 该文件不存在；模板在 `packages/runtime/src/domain/templates/builtin.ts` |
 | P1-5 | `architecture/execution.md:468-475` | 5 个内置模板 | `builtinTemplates()` 返回 **6** 个（多 `parallel-planner`、`planner-with-review`） |
-| P1-6 | `architecture/execution.md:381` | handoff 文档写入 `<worktree>/.afk/runs/<run-id>/handoff/handoff-1.md` | 实际写入 `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md`（`packages/runtime/packages/runtime/src/application/workflows/handoff.ts:15-16`） |
-| P1-7 | `architecture/glossary.md:27` | 信号种类含 `ac_result` | 实际 union 为 `goal_complete \| handoff_ready \| timeout \| idle`（`packages/runtime/packages/runtime/src/domain/schemas.ts:49-54`） |
+| P1-6 | `architecture/execution.md:381` | handoff 文档写入 `<worktree>/.afk/runs/<run-id>/handoff/handoff-1.md` | 实际写入 `<worktree>/.afk/handoff/handoff-<backlogId>-<gen>.md`（`packages/runtime/src/application/workflows/handoff.ts:15-16`） |
+| P1-7 | `architecture/glossary.md:27` | 信号种类含 `ac_result` | 实际 union 为 `goal_complete \| handoff_ready \| timeout \| idle`（`packages/runtime/src/domain/schemas.ts:49-54`） |
 | P1-8 | `architecture/glossary.md:40-46` | Packages 只列 `@afk/core`、`@afk/application` | 漏 `@afk/workflow-graph`（承载 `afk graph workflow`） |
 | P1-9 | `architecture/observability.md:17,207` | `confirm-merge` 标为"未切换 / 下一阶段工作" | `afk reconcile`（`command-registry.ts:32`）与 `afk backlog confirm-merge` 均已上线并产出 `change.merge_verified` 事件 |
 | P1-10 | `architecture/overview.md:20-21,28` + `.zh.md` | 自相矛盾："不负责创建或拆分任务"，但命令表列有 `afk backlog create <title>` | 收紧范围表述 |
@@ -126,11 +126,11 @@
 
 | # | 文件:行 | 现状断言 | 实际 |
 |---|---|---|---|
-| P1-15 | `getting-started.md:32` | 配置文件在 `~/.config/afk/.env` | 无此路径；配置来自 `<projectRoot>/.afk/config.yml`（`packages/runtime/packages/runtime/src/infrastructure/config/manager.ts:220`）+ 环境变量 |
+| P1-15 | `getting-started.md:32` | 配置文件在 `~/.config/afk/.env` | 无此路径；配置来自 `<projectRoot>/.afk/config.yml`（`packages/runtime/src/infrastructure/config/manager.ts:220`）+ 环境变量 |
 | P1-16 | `getting-started.md:37` | `GITLAB_BASE_URL` | 代码读 `GITLAB_URL`（`manager.ts:110`） |
 | P1-17 | `getting-started.md:41,50-57` | `GITLAB_BASE_URL` 之外的 `GITHUB_OWNER` / `GITHUB_REPO` / `git config afk.platform\|project\|owner\|repo` | **全部零命中**；实际只有 `GITHUB_TOKEN`、`GITHUB_REPOSITORY` |
 | P1-18 | `getting-started.md:63,155` | `TRACKER_PLATFORM` | 仅出现在这两份文档里，代码中不存在 |
-| P1-19 | `getting-started.md` | 未提 `AFK_STATE_DIR`、`AFK_TMUX_SESSION` | 二者都是真实读取的环境变量（`packages/runtime/packages/runtime/src/domain/backlog/claim.ts:334`、`manager.ts:139`） |
+| P1-19 | `getting-started.md` | 未提 `AFK_STATE_DIR`、`AFK_TMUX_SESSION` | 二者都是真实读取的环境变量（`packages/runtime/src/domain/backlog/claim.ts:334`、`manager.ts:139`） |
 | P1-20 | `guides/testing.md:11,51,55,60,96,205` | TUI 测试用 `ink-testing-library` | **不是依赖，仓库零使用**；10 个 `*.test.tsx` 用 `ink` 的 `renderToString` |
 | P1-21 | `guides/testing.md:237` | "跑全部测试：`pnpm dlx vitest --run`" | 真实全量命令是 `pnpm test`（含 3 个包自己的 test） |
 | P1-22 | `guides/testing.md:173,310` | PTY 示例 spawn `[distPath, 'board']` | `afk board` 已被显式拒绝（`apps/cli/src/index.ts:26-30`）；真实测试 spawn `[distPath]`（`tests/pty/notification.test.ts:112`） |
@@ -138,7 +138,7 @@
 | P1-24 | `guides/workflows.md:370-374` | 信号 union 含 `ac_result` | 同 P1-7，且缺 `idle` |
 | P1-25 | `guides/workflows.md:57` vs `:93-190` | 一处说调度器"已移除"，另一处完整描述 Scheduler Service / worker pool / DAG / 状态机 | 无 `afk scheduler` 命令、无调度器模块；**删除该章节** |
 | P1-26 | `guides/workflows.md:407` | `--max-handoffs` 默认 3 | 实际 `Math.min(Math.ceil(goalBudget/1e6),20) \|\| 3`，`goalBudget` 默认 500000 → **1** |
-| P1-27 | `guides/skills.md:274` | 分支名 `afk/issue-<iid>` | 只派生 `afk/backlog-<id>`（`packages/runtime/packages/runtime/src/domain/backlog/index.ts:109-112`） |
+| P1-27 | `guides/skills.md:274` | 分支名 `afk/issue-<iid>` | 只派生 `afk/backlog-<id>`（`packages/runtime/src/domain/backlog/index.ts:109-112`） |
 | P1-28 | `guides/skills.md:799-813` | 共享 `references/` 树含 `task-type/{feature,refactor,bugfix}.md` | 无 `skills/references/`；每个 skill 自带 `references/`，无 `task-type/` 子目录 |
 | P1-29 | `guides/skills.md` | 记录 18 个 skill | 实际 22 个；**漏记** `afk-ai-prd`、`afk-llm-dev-guide`、`jev-agent-guard`、`software-complexity-governance`（其中 `afk-ai-prd` 被两份新 PRD 引为校验器） |
 
@@ -212,7 +212,7 @@
 - `docs/index.md:28` 说"Desktop 端 ADR 带 `desktop-` 前缀"指的是 0001 的**文件名前缀**，不是编号预留。
 - ADR-0021 在未合并分支上，不是删除。
 
-选项：**(a)** 保持现状，在 `docs/adr/README.md` 写明"编号自 0014 起，0002–0013 未分配"；**(b)** 重排 0014–0020 → 0002–0008（分支上的 0021 顺延为 0009），需同步 7 个源码文件里的 ADR 引用（`packages/runtime/packages/runtime/src/infrastructure/sandbox/providers/streaming.ts:4`、`packages/runtime/packages/runtime/src/infrastructure/tmux/tmux.ts:16,94`、`packages/runtime/packages/runtime/src/application/workflows/execute-work-item.ts:218`、`apps/desktop/electron/adapters/resource-adapter.ts:109`、`apps/desktop/electron/adapters/tmux-pty-adapter.ts:31`、`apps/desktop/electron/services/execution-attach-service.ts:27`、`apps/desktop/shared/execution-environment-contract.ts:5`）+ 3 份文档。
+选项：**(a)** 保持现状，在 `docs/adr/README.md` 写明"编号自 0014 起，0002–0013 未分配"；**(b)** 重排 0014–0020 → 0002–0008（分支上的 0021 顺延为 0009），需同步 7 个源码文件里的 ADR 引用（`packages/runtime/src/infrastructure/sandbox/providers/streaming.ts:4`、`packages/runtime/src/infrastructure/tmux/tmux.ts:16,94`、`packages/runtime/src/application/workflows/execute-work-item.ts:218`、`apps/desktop/electron/adapters/resource-adapter.ts:109`、`apps/desktop/electron/adapters/tmux-pty-adapter.ts:31`、`apps/desktop/electron/services/execution-attach-service.ts:27`、`apps/desktop/shared/execution-environment-contract.ts:5`）+ 3 份文档。
 
 **建议 (a)**：成本低、不产生交叉引用风险；若选 (b) 必须与 `refactor/afk-package-boundaries` 同批进行。
 
@@ -278,7 +278,7 @@
 | `0014-interactive-and-batch-structured-output.md` | 准确 | 保留 |
 | `0015-typed-workflow-runtime.md` | 准确 | 保留 |
 | `0016-run-event-audit-spine.md` | 准确 | 保留 |
-| `0017-capability-profiles-and-ports.md` | 准确 | 保留（可补一句 manifest 实际在 `packages/runtime/packages/runtime/src/plugin-sdk/profile.ts`，避免读者误定位） |
+| `0017-capability-profiles-and-ports.md` | 准确 | 保留（可补一句 manifest 实际在 `packages/runtime/src/plugin-sdk/profile.ts`，避免读者误定位） |
 | `0018-evidence-classification-and-redaction.md` | **文件损坏** | P0-1 重写 |
 | `0019-desktop-run-log-viewer-projection.md` | 准确（"in progress" 正确） | 保留；待 Desktop 接管验收后改状态 |
 | `0020-backlog-item-drop-singular-change-request.md` | 状态正确，引用漂移 | P1-34 |
@@ -330,7 +330,7 @@
 - `docs/guides/workflows.md` 的阈值 100000、`--max-total-tokens` 默认 500000、QA 合并条件、`afk/backlog-123` 分支名 —— 全部准确。
 - `README.md` 的 15 条 CLI 示例、`22 Claude Code skills` —— 全部准确。
 - `AFK-ARCHITECTURE.md §6.1` 的 7 状态机与 `BacklogState` 完全一致（`packages/core/src/model.ts` 的 9 值 `WorkState` 是另一个类型，不构成矛盾）。
-- `docs/architecture/execution.md:381` 的 `.afk/runs` 目录是真实实现（`packages/runtime/packages/runtime/src/application/sessions/run-state.ts:22`）——**不要删 §7**。
+- `docs/architecture/execution.md:381` 的 `.afk/runs` 目录是真实实现（`packages/runtime/src/application/sessions/run-state.ts:22`）——**不要删 §7**。
 - `docs/guides/workflows.md` 与 `.zh.md` 的标题数差 2 —— 差异来自代码块内注释行数，不是结构漂移。
 - SSH / xterm / PTY / kanban 功能均真实存在（`apps/desktop/src/features/ssh/`、`apps/desktop/src/features/terminal/`、`apps/cli/src/commands/kanban.ts`）。
 - `docs/index.md` 中 `blueprints/`、`research/`、`decisions/` 的目录行已覆盖其下文件，不算漏挂。

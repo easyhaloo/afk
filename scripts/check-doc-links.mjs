@@ -2,6 +2,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve, dirname, basename, sep } from 'node:path';
+import { isExistingSourcePath } from './doc-source-paths.mjs';
 
 // Resolve repo root as the parent of the directory containing this script.
 // Use fileURLToPath to avoid percent-encoding issues with .pathname on paths
@@ -112,6 +113,87 @@ for (const mdFile of mdFiles) {
 if (broken.length > 0) {
   for (const b of broken) console.error(b);
   console.error(`\nchecked ${mdFiles.length} files, ${broken.length} broken`);
+  process.exit(1);
+}
+
+// --- Source path references -------------------------------------------------
+//
+// A backticked path is not a link, so the check above cannot see the claim it
+// makes. A document that names a source file asserts that the file exists;
+// moving a module without correcting the documents that name it leaves a
+// claim nobody is checking.
+//
+// Known-stale references are recorded in scripts/doc-source-paths-baseline.json
+// with the number of times each one appears. A reference that is new, or
+// that appears more often than the baseline records, fails the check; a
+// baseline entry that no longer appears at all is reported so the baseline
+// can be tightened.
+//
+// Scope, and why it stops here:
+//
+//   checked    a backticked path with a directory component and a source-code
+//              extension (.ts .tsx .cts .mts .mjs .js). A source file either
+//              exists in the repository or the document is wrong; there is no
+//              third case, because the repository is the only thing a
+//              document of this repository can be talking about.
+//
+//   excluded   bare file names, other extensions, and paths under a runtime
+//              or user-output directory. Each of those was measured, and
+//              each produces false positives rather than findings: a bare
+//              name that exists nowhere is usually a file the skill asks the
+//              *user's* project to have, and .md/.json/.yml references are
+//              mostly runtime artefacts, placeholders, or files a skill
+//              writes into the user's project.
+//
+//              Widening the pattern is therefore not a regex change: it needs
+//              a calibration pass that shows every newly reported reference
+//              is a real drift. The baseline is the instrument for that.
+
+const sourcePathPattern = /`([^`\s]+\.(?:ts|tsx|cts|mts|mjs|js))(?::\d+(?:-\d+)?)?`/g;
+const sourcePathBaselineFile = join(repoRoot, 'scripts', 'doc-source-paths-baseline.json');
+const sourcePathBaseline = existsSync(sourcePathBaselineFile)
+  ? JSON.parse(readFileSync(sourcePathBaselineFile, 'utf8'))
+  : {};
+const observedSourcePaths = new Map();
+
+for (const mdFile of mdFiles) {
+  // docs/_archive is a historical holding area: its documents describe the
+  // repository as it was, not as it is.
+  if (mdFile.startsWith('docs/_archive/')) continue;
+
+  const fullPath = join(repoRoot, mdFile);
+  if (!existsSync(fullPath)) continue;
+
+  const content = readFileSync(fullPath, 'utf8');
+  const fileDir = join(repoRoot, dirname(mdFile));
+
+  for (const match of content.matchAll(sourcePathPattern)) {
+    const raw = match[1];
+    if (isExistingSourcePath(repoRoot, fileDir, raw) !== false) continue;
+    observedSourcePaths.set(raw, (observedSourcePaths.get(raw) ?? 0) + 1);
+  }
+}
+
+const sourcePathViolations = [];
+for (const [raw, count] of observedSourcePaths) {
+  const known = sourcePathBaseline[raw];
+  if (known === undefined) {
+    sourcePathViolations.push(`new stale source path: ${raw} (${count}x)`);
+  } else if (count > known) {
+    sourcePathViolations.push(`stale source path spread: ${raw} (${count}x, baseline ${known}x)`);
+  }
+}
+const staleBaselineViolations = [];
+for (const raw of Object.keys(sourcePathBaseline)) {
+  if (!observedSourcePaths.has(raw)) {
+    staleBaselineViolations.push(`stale baseline entry no longer referenced: ${raw}`);
+  }
+}
+
+if (sourcePathViolations.length > 0 || staleBaselineViolations.length > 0) {
+  for (const v of sourcePathViolations) console.error(v);
+  for (const v of staleBaselineViolations) console.error(v);
+  console.error(`\nchecked ${mdFiles.length} files, ${sourcePathViolations.length} broken source paths`);
   process.exit(1);
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isEven, parityLabel } from '../fixtures/afk-e2e-parity';
+import { isEven, parityLabel } from '../fixtures/afk-e2e-parity.js';
 
 describe('AFK E2E parity fixture', () => {
   it('isEven(-3) === false', () => {

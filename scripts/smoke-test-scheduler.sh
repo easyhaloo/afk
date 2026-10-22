@@ -2,4 +2,4 @@
 # Smoke test: verify the built scheduler CLI responds to --version.
 set -euo pipefail
 
-node dist/index.js --version
+node apps/cli/dist/index.js --version

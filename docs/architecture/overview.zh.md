@@ -1,15 +1,42 @@
 # AFK 架构
 
+## 工作区组织
+
+根目录是私有 pnpm 工作区。`apps/cli` 管理 `afk` 可执行入口、Commander 命令、
+补全和 Ink TUI；`apps/desktop` 管理 Electron 主进程、preload、IPC 与 React 界面。
+两端通过包的正式导出复用以下模块：
+
+| 包 | 职责 |
+| --- | --- |
+| `packages/core`（`@afk/core`） | 纯模型、事件、Reducer、策略与 Port |
+| `packages/application`（`@afk/application`） | 共享用例、清单与执行查询，依赖 Core |
+| `packages/runtime`（`@afk/runtime`） | Workflow 执行、backlog 操作，以及 Provider、Git、tmux、sandbox、存储等 Node 适配器 |
+| `packages/workflow-graph`（`@afk/workflow-graph`） | 纯工作流图投影、布局与校验 |
+
+应用禁止通过相对路径引用其他工作区的源码，共享包禁止反向依赖应用，包依赖图必须无环。
+桌面渲染器禁止引用 `@afk/runtime`，Node 能力通过主进程 IPC 提供。
+runtime 内部保留既有分层约束，架构检查同时检查包导出和工作区依赖。
+
+桌面 backlog 管理和图生成直接调用 Runtime；托管工作项通过打包后的独立 Node Worker
+调用与 CLI 相同的 `executeWorkItem`，保留进程隔离和关闭窗口后继续执行的能力。
+桌面端不查找或调用 AFK CLI；停止、恢复和合并确认直接复用共享 Runtime。
+执行只有 Worker 一条路径，不提供命令覆盖或回退入口。
+
+各包分别拥有构建、类型检查和测试命令；根命令按依赖顺序检查共享包、CLI 和仓库契约测试。
+桌面端通过 `pnpm --filter afk-control-electron` 分别运行 `typecheck`、`build`、`test`。
+CLI 产物位于 `apps/cli/dist/index.js`，根包不再发布可执行文件或包含应用源码。
+
 ## 架构守卫
 
 `pnpm architecture:check --check-packages` 强制层间依赖方向，并检查
-`packages/afk-core` 与 `packages/afk-application` 根目录的纯源码导入和依赖方向。
+`packages/core` 与 `packages/application` 根目录的纯源码导入和依赖方向。
 该守卫同时禁止泛型 record 和遗留 client-factory 导入。遗留迁移已完成：
 `scripts/architecture-legacy-baseline.json` 记录零个遗留文件、导入和模式。
 新增的遗留文件或导入会导致检查失败。删除基线条目时请一并删除这条过期记录。
 
-层间方向约束适用于 `src/cli`、`src/domain`、`src/application`、
-`src/infrastructure`、`src/shared` 和 `src/views` 中非测试文件的相对导入。
+层间方向约束适用于 `packages/runtime/src/domain`、`packages/runtime/src/application`、
+`packages/runtime/src/infrastructure` 和 `packages/runtime/src/shared` 中非测试文件的相对导入。
+`apps/cli` 和 `apps/desktop` 的应用边界由工作区导入检查约束。
 传入 `--require-packages` 会让缺失的 package 根目录导致失败，而不是跳过检查。
 
 ## 范围与命令
@@ -21,10 +48,22 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
+| `afk backlog create <title>` | 创建一个 provider 背书的 backlog 工作项 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
+| `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
+| `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
+| `afk backlog retry` | 把 blocked 的操作者持有工作项退回 autonomous rework |
+| `afk backlog confirm-merge` | 合并已批准的根 backlog 变更并置为 done |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
-| `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
+| `afk execute --work-item-id <id> --execution-manifest <path>` | 实现、独立验证并发布一个托管工作项 |
+| `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
+| `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
+| `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看与优雅停止 |
+| `afk observe` | 读取 append-only 的 AFK 运行审计事件（`runs`、`executions`、`execution`、`timeline`、`verify`、`replay`、`explain`、`doctor`） |
+| `afk retro run --run-id <id> --workspace <path>` | 用现有 `/retro` 技能分析已记录证据并写出 `report.json` 与 `report.html` |
+| `afk retro show <report>` | 读取已生成的复盘报告 |
+| `afk graph workflow <template>` | 生成确定性的工作流图 |
 | `afk`（TUI）、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
 
 已移除的命令组没有别名。provider 的元数据标签属于 adapter 内部实现，
@@ -108,10 +147,11 @@ handoff/token `BudgetManager` 会按 canonical work item 从
 进度和诊断的最终解释权。超过新鲜度阈值的心跳会显示为运行时 `stale`；
 它不会改变 Provider Backlog 的生命周期状态。
 
-Desktop 的工作区本地文件 `.afk/backlog-runs.json` 仅包含进程启动元数据。
-它可以报告 PID 或启动错误，但无法推断 `verification`、`blocked` 或 `done`。
-Desktop 按精确的 `backlogId` 关联 Backlog、启动元数据和规范运行时记录；
-运行时数据缺失或格式错误时，Backlog 仍然可见，并显式呈现为无运行时状态。
+Desktop 通过规范 `workItemId` 定位执行工作区，读取其中的
+`.afk/work-item-runs.json`。该文件记录 Worker 启动回执，不拥有 Provider 生命周期状态。
+规范运行时记录必须显式包含工作区，Desktop 按精确的 `backlogId`、执行工作区和
+Provider 关联。运行时数据缺失或格式错误时，Backlog 仍然可见，并显式呈现为无运行时状态。
+已删除的 backlog 运行存储不再提供读取兼容。
 
 ## 认领与本地文件系统 fallback
 

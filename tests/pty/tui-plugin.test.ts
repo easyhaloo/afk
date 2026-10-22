@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { stripVTControlCharacters } from 'util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const distPath = join(__dirname, '../../dist/index.js');
+const distPath = join(__dirname, '../../apps/cli/dist/index.js');
 const require = createRequire(import.meta.url);
 
 let nodePtyWorks = false;
@@ -22,8 +22,7 @@ try {
   nodePtyWorks = false;
 }
 
-// ponytail: E2E TUI tests require a full afk binary with a working TTY; skipped in CI/local envs
-const describeE2E = describe.skip;
+const describeE2E = nodePtyWorks ? describe : describe.skip;
 
 describeE2E('external TUI plugins', () => {
   let processHandle: ReturnType<typeof spawn> | null = null;
@@ -37,7 +36,7 @@ describeE2E('external TUI plugins', () => {
   });
 
   it('loads an enabled plugin and switches to its page by shortcut', async () => {
-    if (!existsSync(distPath)) return;
+    expect(existsSync(distPath)).toBe(true);
 
     const reactUrl = pathToFileURL(require.resolve('react')).href;
     const inkUrl = pathToFileURL(require.resolve('ink')).href;

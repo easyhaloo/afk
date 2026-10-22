@@ -8,18 +8,19 @@ import {
   resolveCodexRuntime,
   type CodexRuntimeSelection,
   type CodexTransport,
-} from '../../src/domain/agents/index';
-import { BACKLOG_METADATA } from '../../src/domain/backlog/index';
-import { getWorkflowConfig } from '../../src/infrastructure/config/manager';
-import { createProviderBundle as assembleProviderBundle } from '../../src/infrastructure/provider/providers';
-import { createTracker } from '../../src/infrastructure/provider/tracker-provider-factory';
-import { LoopRunner } from '../../src/application/modules/loop-runner';
-import { TaskRuntimeManager } from '../../src/application/runtime/task-runtime';
-import { deriveBacklogBranchName } from '../../src/domain/backlog/index';
-import { formatWorkItemId } from '../../src/domain/work-item/identity';
-import { toGlobalWorkItem } from '../../src/domain/work-item/metadata';
-import { executeWorkItem } from '../../src/application/workflows/execute-work-item';
-import { waitForTerminal } from './codex-runtime-wait';
+} from '@afk/runtime/domain/agents/index';
+import { BACKLOG_METADATA } from '@afk/runtime/domain/backlog/index';
+import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
+import { createProviderBundle as assembleProviderBundle } from '@afk/runtime/infrastructure/provider/providers';
+import { createTracker } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
+import type { TrackerProvider } from '@afk/runtime/domain/tracker/types';
+import { LoopRunner } from '@afk/runtime/application/modules/loop-runner';
+import { TaskRuntimeManager } from '@afk/runtime/application/runtime/task-runtime';
+import { deriveBacklogBranchName } from '@afk/runtime/domain/backlog/index';
+import { formatWorkItemId } from '@afk/runtime/domain/work-item/identity';
+import { toGlobalWorkItem } from '@afk/runtime/domain/work-item/metadata';
+import { executeWorkItem } from '@afk/runtime/execution';
+import { waitForTerminal } from './codex-runtime-wait.js';
 
 const E2E_PHASE_TIMEOUT_MS = positiveInteger(process.env.AFK_CODEX_E2E_TIMEOUT_MS) ?? 30 * 60_000;
 
@@ -40,6 +41,9 @@ async function main(): Promise<void> {
 
   // Readiness must happen before a tracker client or backlog is created.
   const runtime = await prepareAgentRuntime(unresolvedRuntime);
+  if (runtime.kind !== 'codex') {
+    throw new Error(`codex E2E requires a codex runtime, resolved ${runtime.kind}`);
+  }
   const tracker = await createTracker(undefined, process.cwd());
   const providers = assembleProviderBundle(tracker, process.cwd());
   await providers.backlog.initialize();
@@ -80,6 +84,7 @@ async function main(): Promise<void> {
     webUrl: issue.url,
   });
   const workspaceRoot = dirname(process.cwd());
+  const workingBranch = deriveBacklogBranchName(backlogId);
   const manifestPath = join(workspaceRoot, '.afk', 'e2e-runtime', `manifest-${marker}.json`);
   await mkdir(dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, JSON.stringify({
@@ -92,7 +97,7 @@ async function main(): Promise<void> {
       ...(tracker.providerHost ? { providerHost: tracker.providerHost } : {}),
       ...(tracker.platform === 'gitlab' ? { providerProjectId: String(tracker.projectId) } : {}),
     },
-    workingBranch: deriveBacklogBranchName(backlogId),
+    workingBranch,
     repositories: [{
       platform: tracker.platform,
       projectKey,
@@ -101,14 +106,15 @@ async function main(): Promise<void> {
       name: basename(process.cwd()),
       checkoutPath: basename(process.cwd()),
       baseBranch: workflow.targetBranch,
-      workingBranch: deriveBacklogBranchName(backlogId),
+      workingBranch,
       primary: true,
     }],
   }, null, 2));
+  // The runner takes no agent provider or runtime: the agent and its runtime
+  // are derived from the workflow config (agentDefault + agents.codex) inside
+  // `executeWorkItem`, exactly like `afk loop` does in production. Passing
+  // them here was silently ignored.
   const runner = new LoopRunner(providers, {
-    providers,
-    agentProvider: 'codex',
-    agentRuntime: runtime,
     backlogIds: [backlogId],
     managedExecution: { workItemId, manifestPath },
     template: 'issue-implementation',
@@ -118,12 +124,6 @@ async function main(): Promise<void> {
         return inventoryItem;
       },
     }),
-    readinessProbe: async selected => ({
-      ready: true,
-      auth: selected.auth,
-      provider: selected.provider,
-    }),
-    maxConcurrent: 1,
     maxIterations: 1,
     pollIntervalMs: 10_000,
     statusIntervalMs: 10_000,
@@ -161,7 +161,76 @@ async function main(): Promise<void> {
   } finally {
     await rm(manifestPath, { force: true });
     await rm(runtimeDir, { recursive: true, force: true });
+    await cleanupRemoteArtifacts({
+      tracker,
+      backlogId,
+      title,
+      branches: [workingBranch, `${workingBranch}-qa`],
+    });
   }
+}
+
+/**
+ * Remove the remote artifacts a Codex E2E run creates on the real tracker:
+ * the merge request, the issue, and the pushed branches. The local checkout
+ * is restored by the multi-repository preparer, but nothing cleaned the
+ * provider side, so every run used to leave an open issue, an open PR and
+ * two remote branches behind on the user's repository.
+ *
+ * Set `AFK_CODEX_E2E_KEEP=1` to retain the artifacts for inspection.
+ */
+async function cleanupRemoteArtifacts(input: {
+  tracker: TrackerProvider;
+  backlogId: string;
+  title: string;
+  branches: readonly string[];
+}): Promise<void> {
+  if (process.env.AFK_CODEX_E2E_KEEP === '1') {
+    console.log('Codex E2E cleanup skipped: AFK_CODEX_E2E_KEEP=1 retains the remote artifacts');
+    return;
+  }
+
+  const { tracker, backlogId, title, branches } = input;
+  const failures: string[] = [];
+
+  try {
+    const change = (await tracker.listMRs({ state: 'opened', perPage: 100 }))
+      .find(candidate => candidate.title === `Backlog ${backlogId}: ${title}`);
+    if (change) {
+      await tracker.closeMR(change.id, { comment: 'Closed by the AFK Codex E2E cleanup.' });
+    }
+  } catch (error) {
+    failures.push(`close merge request: ${errorMessage(error)}`);
+  }
+
+  try {
+    await tracker.updateIssue(Number(backlogId), { state: 'closed' });
+  } catch (error) {
+    failures.push(`close issue: ${errorMessage(error)}`);
+  }
+
+  const git = simpleGit(process.cwd());
+  for (const branch of branches) {
+    try {
+      await git.raw(['push', 'origin', '--delete', branch]);
+    } catch (error) {
+      const message = errorMessage(error);
+      if (!/remote ref does not exist|couldn't find remote ref|does not exist/i.test(message)) {
+        failures.push(`delete branch ${branch}: ${message}`);
+      }
+    }
+  }
+
+  if (failures.length > 0) {
+    console.error(`Codex E2E cleanup incomplete:\n  ${failures.join('\n  ')}`);
+    console.error('Remove the leftover artifacts on the tracker manually.');
+  } else {
+    console.log('Codex E2E cleanup: closed the merge request and issue, deleted the remote branches');
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function parseTransport(args: string[]): Exclude<CodexTransport, 'auto'> {

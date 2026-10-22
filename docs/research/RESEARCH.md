@@ -155,8 +155,8 @@ HTTP/2 404
 ## AFK 集成角度（仅事实，未做产品决策）
 
 - AFK 当前对 JumpServer 的支持停留在「把堡垒机作为 ProxyJump 跳板的 SSH 别名」层面（`jumpHostType: "jumpserver"`），整个仓库无 REST 客户端代码。
-- `desktop-client` 用 Electron IPC + node-pty，没有 fetch/axios 骨架；新增 JumpServer adapter 需要从零写。
-- 若要做"AFK 推送公钥到堡垒机"按钮，最小侵入路径是新建 `desktop-client/electron/services/jumpserver-key-service.ts`，对外暴露 `pushPublicKey(hostId)`；凭据（AccessKey）也走 `safeStorage` 保存，与现有 `ssh-credential-service.ts` 风格一致。
+- `apps/desktop` 用 Electron IPC + node-pty，没有 fetch/axios 骨架；新增 JumpServer adapter 需要从零写。
+- 若要做"AFK 推送公钥到堡垒机"按钮，最小侵入路径是新建 `apps/desktop/electron/services/jumpserver-key-service.ts`，对外暴露 `pushPublicKey(hostId)`；凭据（AccessKey）也走 `safeStorage` 保存，与现有 `ssh-credential-service.ts` 风格一致。
 - 这条产品决策不在本次研究范围。
 
 ## Next-step 选项（等你拍板）

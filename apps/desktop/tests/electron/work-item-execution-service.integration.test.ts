@@ -1,0 +1,131 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createExecutionWorker } from "../../electron/adapters/execution-worker-adapter.js";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { createExecutionWorkspaceService } from "../../electron/services/execution-workspace-service.js";
+import { createWorkItemExecutionManifestStore } from "../../electron/services/work-item-execution-manifest-store.js";
+import { createWorkItemExecutionService } from "../../electron/services/work-item-execution-service.js";
+import { createWorkItemRunStore } from "../../electron/services/work-item-run-store.js";
+import type { GlobalWorkItem, WorkItemRunRecord } from "../../shared/backlog-contract.js";
+
+async function waitFor<T>(read: () => Promise<T | undefined>, timeoutMs = 5_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await read();
+    if (value !== undefined) return value;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw new Error("timed out waiting for child process state");
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+describe("work item execution service process integration", () => {
+  it("forks a detached executable and persists the manifest and full run lifecycle", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "afk-desktop-process-integration-"));
+    let childPid: number | undefined;
+    try {
+      const shim = path.join(root, "execution-worker.cjs");
+      await writeFile(shim, `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.cwd(), ".afk", "shim-invocation.json"), JSON.stringify({ pid: process.pid, args: process.argv.slice(2) }));
+setTimeout(() => process.exit(0), 400);
+`, "utf8");
+
+      const project = { platform: "github" as const, projectKey: "acme/api", name: "api" };
+      const item: GlobalWorkItem = {
+        id: "WI-2026-018",
+        issueNumber: 42,
+        project,
+        repositories: [project],
+        title: "Coordinate checkout changes",
+        managed: true,
+        executionEligible: true,
+        state: "ready",
+        executionMode: "afk",
+        dependsOn: [],
+        tags: [],
+        branchName: "afk/work-item-18",
+        providerRef: "github:acme/api#42",
+      };
+      const workspace = createExecutionWorkspaceService({ baseDirectory: path.join(root, "workspaces") });
+      const manifestStore = createWorkItemExecutionManifestStore();
+      const persistedRunStore = createWorkItemRunStore({ resolveWorkspace: value => value });
+      const observedStatuses: WorkItemRunRecord["status"][] = [];
+      const runStore = {
+        load: persistedRunStore.load,
+        save: async (workspaceRoot: string, runs: WorkItemRunRecord[]) => {
+          observedStatuses.push(...runs.map(run => run.status));
+          await persistedRunStore.save(workspaceRoot, runs);
+        },
+      };
+      const service = createWorkItemExecutionService({
+        getWorkItem: async () => item,
+        launchExecution: createExecutionWorker(shim),
+        workspace,
+        manifestStore,
+        runStore,
+      });
+
+      const result = await service.start({
+        workItemId: item.id,
+        repositories: [{ ...project, checkoutPath: "repositories/api", baseBranch: "main" }],
+      });
+      expect(result.runId).toBeTruthy();
+
+      const running = (await persistedRunStore.load(result.workspace.root))[0];
+      expect(running).toMatchObject({ id: result.runId, status: "running", pid: expect.any(Number) });
+      childPid = running.pid;
+      expect(childPid).toBeTypeOf("number");
+      expect(observedStatuses).toContain("starting");
+      expect(observedStatuses).toContain("running");
+      expect(await manifestStore.load(result.workspace.root)).toMatchObject({
+        workItemId: item.id,
+        providerBacklogId: "42",
+        tracker: { platform: "github", projectKey: "acme/api" },
+        workingBranch: "afk/work-item-18",
+        repositories: [expect.objectContaining({ baseBranch: "main", primary: true })],
+      });
+
+      const invocation = await waitFor(async () => {
+        try {
+          return JSON.parse(await readFile(path.join(result.workspace.root, ".afk", "shim-invocation.json"), "utf8")) as { pid: number; args: string[] };
+        } catch {
+          return undefined;
+        }
+      });
+      expect(invocation.pid).toBe(childPid);
+      expect(JSON.parse(invocation.args[0])).toEqual({
+        workItemId: item.id, manifestPath: path.join(result.workspace.root, ".afk", "execution-manifest.json"),
+        executionId: result.runId,
+      });
+
+      const terminal = await waitFor(async () => {
+        const run = (await persistedRunStore.load(result.workspace.root))[0];
+        return run?.status === "completed" || run?.status === "failed" ? run : undefined;
+      });
+      expect(terminal).toMatchObject({ id: result.runId, status: "completed", pid: childPid });
+      expect(observedStatuses).toContain("completed");
+      // Clearing the workspace pointer is a separate write from flipping the run
+      // status to terminal, so it lands asynchronously — read it under waitFor
+      // like the surrounding assertions, otherwise this races under load.
+      await waitFor(async () => ((await workspace.read(item.id))?.currentRunId === undefined ? true : undefined));
+      await waitFor(async () => childPid !== undefined && !processIsAlive(childPid) ? true : undefined);
+    } finally {
+      if (childPid !== undefined && processIsAlive(childPid)) {
+        try { process.kill(-childPid, "SIGTERM"); } catch { /* already stopped */ }
+        try { process.kill(childPid, "SIGTERM"); } catch { /* already stopped */ }
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

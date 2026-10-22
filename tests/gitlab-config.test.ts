@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const getGlabToken = vi.hoisted(() => vi.fn());
-vi.mock('../src/infrastructure/gitlab/glab-config', () => ({ getGlabToken }));
+vi.mock('@afk/runtime/infrastructure/gitlab/glab-config', () => ({ getGlabToken }));
 
-import { getGitLabConfig } from '../src/infrastructure/config/manager';
+import { getGitLabConfig } from '@afk/runtime/infrastructure/config/manager';
 
 describe('gitlab config', () => {
   it('resolves glab authentication from the infrastructure implementation', () => {

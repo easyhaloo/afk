@@ -10,7 +10,7 @@
 
 ## Problem Statement
 
-The AFK desktop client (`desktop-client/`) launches work-item runs via
+The AFK desktop client (`apps/desktop/`) launches work-item runs via
 `afk run --backlog-id <id>` and tracks per-run state in its own run store
 (`backlog-run-store.ts`, keyed by `desktop-<workItemId>-<uuid>`). It has
 **no surface for the execution log itself** — neither in `BacklogDetailDrawer`
@@ -98,7 +98,7 @@ terminal.
 | **D2** | The renderer reaches RunEvent **via `afk observe`**, not by reading JSONL files itself. | Reuses the existing CLI projection (`afk observe timeline`, `afk observe runs`) instead of duplicating event-store wiring in Electron. Same code path as terminal users, same format. |
 | **D3** | Work-item ↔ run correlation is via the **`workItemId` field on every RunEvent** (not runId). | The desktop's runId (`desktop-<workItemId>-<uuid>`) and the CLI's runId are not the same. The event store is keyed by CLI runId. `workItemId` is the only stable cross-system identifier. |
 | **D4** | Live tail = **pull-poll every 2 s**, not a push channel. | Electron IPC + 2 s poll is sufficient (events are append-only; the renderer is not on a hot path). Avoids WebSocket / IPC push plumbing for a feature whose value is "occasional inspection", not real-time monitoring. |
-| **D5** | Renderer never sees the run store root path directly; all access goes through a **typed IPC service** (`run-log-service`) that runs `afk observe` and validates JSON envelopes. | Matches the existing pattern in `desktop-client/electron/services/` (`backlog-service`, `jumpserver-service`); keeps file-system and CLI access in the main process. |
+| **D5** | Renderer never sees the run store root path directly; all access goes through a **typed IPC service** (`run-log-service`) that runs `afk observe` and validates JSON envelopes. | Matches the existing pattern in `apps/desktop/electron/services/` (`backlog-service`, `jumpserver-service`); keeps file-system and CLI access in the main process. |
 | **D6** | ADR-0019 records the projection choice; this PRD is the only artifact that mentions product framing. | Avoid two documents arguing the same point; ADR for the irreversible observability decision, PRD for the user-visible surface.
 
 Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-desktop-run-log-viewer-projection.md).
@@ -114,11 +114,11 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
 
 | Context | Module | Touch |
 |---------|--------|-------|
-| Run audit spine | `src/core/events.ts`, `src/infrastructure/observability/jsonl-event-store.ts` | none (read-only consumer) |
-| CLI projection | `src/cli/commands/observe.ts` (`runs`, `timeline`) | none (already exposes needed subcommands) |
-| Electron IPC | `desktop-client/shared/ipc-contract.ts`, `desktop-client/electron/ipc/register-handlers.ts` | add 2 handlers |
-| Electron service | `desktop-client/electron/services/` | add `run-log-service.ts` |
-| Renderer feature | `desktop-client/src/features/run-center/`, `desktop-client/src/features/backlog/BacklogDetailDrawer.tsx` | embed `RunLogPanel` |
+| Run audit spine | `packages/runtime/src/core/events.ts`, `packages/runtime/src/infrastructure/observability/jsonl-event-store.ts` | none (read-only consumer) |
+| CLI projection | `apps/cli/src/commands/observe.ts` (`runs`, `timeline`) | none (already exposes needed subcommands) |
+| Electron IPC | `apps/desktop/shared/ipc-contract.ts`, `apps/desktop/electron/ipc/register-handlers.ts` | add 2 handlers |
+| Electron service | `apps/desktop/electron/services/` | add `run-log-service.ts` |
+| Renderer feature | `apps/desktop/src/features/run-center/`, `apps/desktop/src/features/backlog/BacklogDetailDrawer.tsx` | embed `RunLogPanel` |
 
 ## Open Risks
 
@@ -142,9 +142,9 @@ Full ADR: [docs/adr/0019-desktop-run-log-viewer-projection.md](docs/adr/0019-des
   management.
 - **R3 — Correlation depends on every RunEvent carrying `workItemId`.**
   Spot-check confirms the field is present on `RunEvent.context`
-  (`src/core/events.ts:9`). If any future emitter skips it, the
+  (`packages/runtime/src/core/events.ts:9`). If any future emitter skips it, the
   viewer's "latest run for this item" lookup silently returns nothing.
-  Owner action: add a regression test in `src/observability/` that
+  Owner action: add a regression test in `packages/runtime/src/observability/` that
   asserts every append sets `workItemId`.
 - **R4 — Pull-poll may miss late events that emit between polls.**
   Acceptable for the user-stated value (occasional inspection), but

@@ -30,7 +30,7 @@ self-healing recovery from terminal handoff, and a fully-stubbed
 ## 1. Logging
 
 **Library:** pino + pino-pretty, day-rotated JSONL file
-**Module:** `src/lib/core/io/logger.ts`
+**Module:** `packages/runtime/src/lib/core/io/logger.ts`
 
 ### What works
 
@@ -56,7 +56,7 @@ self-healing recovery from terminal handoff, and a fully-stubbed
 | commands: tracker, worktree, kanban, signal, debug, tmux, completion | NONE | YES — all output |
 | views/app TUI components | NONE | `console.warn` × 3 for fetch errors |
 
-`redirectStdioToLog` has **one caller**: `src/commands/loop.ts:200` when
+`redirectStdioToLog` has **one caller**: `packages/runtime/src/commands/loop.ts:200` when
 `AFK_LOOP_CHILD === '1'`. No other daemon/background path benefits from
 the unified log capture.
 
@@ -71,7 +71,7 @@ the unified log capture.
   in pino but are silently suppressed under default `LOG_LEVEL=info`.
 - **`LOG_DIR` is hardcoded** (`~/.afk/logs`); only `LOG_LEVEL` is
   overridable via env.
-- **`src/views/app/DashboardEntry.tsx` `console.warn` × 3** — TUI fetch
+- **`apps/cli/src/tui/app/DashboardEntry.tsx` `console.warn` × 3** — TUI fetch
   warnings never reach the file log.
 
 ---
@@ -90,7 +90,7 @@ the unified log capture.
 
 ### Retry / backoff
 
-- **Single site** — `src/lib/scheduler.ts:287–293`: `60000ms × 2^(retry-1)`
+- **Single site** — `packages/runtime/src/lib/scheduler.ts:287–293`: `60000ms × 2^(retry-1)`
   → 60s, 120s. After maxRetries (3), task moves to `failed[]` DLQ.
   **No jitter.**
 - **Poll-error pause** — `loop-runner.ts:337`: `POLL_RETRY_DELAY_MS = 5_000`
@@ -165,7 +165,7 @@ inconsistent state.
 | `onAfterAgent` | Logged + swallowed | Result collection |
 | `onCleanup` | Logged + swallowed | Teardown |
 
-Modules discovered from `src/lib/modules/*.ts`, activated via `--ext`,
+Modules discovered from `packages/runtime/src/lib/modules/*.ts`, activated via `--ext`,
 `.afk/config.yml → workflow.modules`, or `AFK_MODULES`.
 
 ### Watchdog
@@ -252,8 +252,8 @@ integration anywhere in `src/`.
 
 ### StatsAggregator (inert)
 
-- Class defined at `src/lib/stats/aggregator.ts:7–51` with `StatsProvider`
-  type in `src/lib/ui/core/types.ts:15–23`. Default 60s tick.
+- Class defined at `packages/runtime/src/lib/stats/aggregator.ts:7–51` with `StatsProvider`
+  type in `packages/runtime/src/lib/ui/core/types.ts:15–23`. Default 60s tick.
 - `View.stats?: StatsProvider` declared in interface but **never
   instantiated**. No provider registered anywhere. Infrastructure is
   stubbed out and completely unused.
@@ -333,25 +333,25 @@ These gaps recur across multiple dimensions:
 
 Primary files surveyed (read directly):
 
-- `src/lib/core/io/logger.ts` (204 lines)
-- `src/lib/cli-utils.ts` (116 lines)
-- `src/lib/core/io/signal.ts` (108 lines)
-- `src/lib/schemas.ts`
-- `src/lib/workflows/lifecycle.ts` (84 lines)
-- `src/lib/workflows/watchdog.ts` (62 lines)
-- `src/lib/workflows/handoff.ts`
-- `src/lib/scheduler.ts` (excerpts)
-- `src/lib/loop-runner.ts` (excerpts)
-- `src/lib/stats/aggregator.ts` (52 lines)
-- `src/lib/ui/core/types.ts` (excerpts)
-- `src/commands/signal.ts` (196 lines)
-- `src/commands/loop.ts`, `scheduler.ts`, `qa.ts`, `kanban.ts`, `debug.ts`
-- `src/index.ts`
-- `src/views/board/data/fetcher.ts`, `useData.ts`
-- `src/views/board/board/BoardView.tsx`
-- `src/views/board/views/TaskListView.tsx`, `IssueListView.tsx`,
+- `packages/runtime/src/lib/core/io/logger.ts` (204 lines)
+- `packages/runtime/src/lib/cli-utils.ts` (116 lines)
+- `packages/runtime/src/lib/core/io/signal.ts` (108 lines)
+- `packages/runtime/src/lib/schemas.ts`
+- `packages/runtime/src/lib/workflows/lifecycle.ts` (84 lines)
+- `packages/runtime/src/lib/workflows/watchdog.ts` (62 lines)
+- `packages/runtime/src/lib/workflows/handoff.ts`
+- `packages/runtime/src/lib/scheduler.ts` (excerpts)
+- `packages/runtime/src/lib/loop-runner.ts` (excerpts)
+- `packages/runtime/src/lib/stats/aggregator.ts` (52 lines)
+- `packages/runtime/src/lib/ui/core/types.ts` (excerpts)
+- `packages/runtime/src/commands/signal.ts` (196 lines)
+- `packages/runtime/src/commands/loop.ts`, `scheduler.ts`, `qa.ts`, `kanban.ts`, `debug.ts`
+- `apps/cli/src/index.ts`
+- `apps/cli/src/tui/board/data/fetcher.ts`, `useData.ts`
+- `apps/cli/src/tui/board/board/BoardView.tsx`
+- `apps/cli/src/tui/board/views/TaskListView.tsx`, `IssueListView.tsx`,
   `ProjectListView.tsx`
-- `src/views/app/DashboardEntry.tsx`
+- `apps/cli/src/tui/app/DashboardEntry.tsx`
 
 Survey methodology: four parallel Explore agents dispatched against
 non-overlapping file scopes; findings cross-checked against primary

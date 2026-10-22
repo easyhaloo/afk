@@ -103,7 +103,7 @@ TUI 前移除开头的 `/goal` 命令前缀，将完整工作项正文和完成�
 ## 3. 目标目录结构
 
 ```text
-src/lib/
+packages/runtime/src/lib/
 ├── agents/
 │   ├── types.ts
 │   ├── provider.ts
@@ -606,15 +606,15 @@ workflow:
 前提：所有新 workflow 和默认 Provider 已使用 ExecutionResult。
 
 - ✅ 删除新 prompt 中的 signal 写入要求 (`templates/builtin.ts`, `workflows.ts` phases)
-- ✅ Runner 仍读取 signal 作为向后兼容 fallback (`src/infrastructure/tmux/tmux.ts`)
+- ✅ Runner 仍读取 signal 作为向后兼容 fallback (`packages/runtime/src/infrastructure/tmux/tmux.ts`)
 - ⏳ 清理 legacy signal CLI/schema/tests（保留 readSignal/writeSignal/clearSignal + 单元测试；CLI/技能暂无独立 signal 子命令）
 - ✅ 更新 skills、README 和架构文档（`CLAUDE.md` 含 Phase 状态表）
 
 验收：全量测试通过，旧 worktree 可以被兼容读取或明确迁移。
 
 实现细节：
-- 批量 agent 通过 `ExecutionResult` 上报；交互式 agent 按 `src/application/workflows/execution-protocol.ts` 写 `.afk-signal.json`，由 `src/infrastructure/tmux/tmux.ts` 的 `readSignal`/`readSignalSync` 读取。
-- `src/infrastructure/io/signal.ts` 持有 signal 文件原语。
+- 批量 agent 通过 `ExecutionResult` 上报；交互式 agent 按 `packages/runtime/src/application/workflows/execution-protocol.ts` 写 `.afk-signal.json`，由 `packages/runtime/src/infrastructure/tmux/tmux.ts` 的 `readSignal`/`readSignalSync` 读取。
+- `packages/runtime/src/infrastructure/io/signal.ts` 持有 signal 文件原语。
 
 ## 13. 测试计划
 
@@ -695,7 +695,7 @@ Issue
 
 - Scheduler 实际是内存队列，不是 BullMQ/Redis
 - AC 验证文档需要与当前 WorkflowRunner 实际流程一致
-- 默认 timeout 以 `src/lib/constants.ts` 为准
+- 默认 timeout 以 `packages/runtime/src/lib/constants.ts` 为准
 
 ## 15. 最终架构
 

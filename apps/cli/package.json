@@ -1,0 +1,43 @@
+{
+  "name": "afk",
+  "version": "0.1.0",
+  "description": "Away From Keyboard — autonomous development workflow CLI + Skills system",
+  "type": "module",
+  "bin": {
+    "afk": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/build-package.mjs && tsc --emitDeclarationOnly",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "pnpm build"
+  },
+  "dependencies": {
+    "@afk/runtime": "workspace:*",
+    "@afk/application": "workspace:*",
+    "@afk/core": "workspace:*",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "ink": "^7.1.1",
+    "react": "^19.2.8",
+    "js-yaml": "^5.2.2",
+    "simple-git": "^3.22.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^19.2.17",
+    "esbuild": "^0.21.5",
+    "glob": "^13.0.6",
+    "tsx": "^4.23.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

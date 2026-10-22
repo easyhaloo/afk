@@ -468,7 +468,7 @@ Retro Agent、skill、解析器或证据归档失败不得改变原工作项、Q
 
 ### ASM-001: Desktop workspace 已可运行
 
-- **Assumption**: 当前环境可以构建并启动 `desktop-client`，且测试 fixture 或本地 provider 可以创建一个可执行工作项。
+- **Assumption**: 当前环境可以构建并启动 `apps/desktop`，且测试 fixture 或本地 provider 可以创建一个可执行工作项。
 - **Confidence**: High
 - **Validation Needed**: Yes
 - **Affected Requirements**: FR-001, FLOW-001

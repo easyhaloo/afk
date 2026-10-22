@@ -6,15 +6,15 @@
 
 | 领域 | 实现入口 |
 | --- | --- |
-| CLI 命令注册 | [`src/cli/command-registry.ts`](../../src/cli/command-registry.ts) |
-| `afk run` | [`src/cli/commands/run.ts`](../../src/cli/commands/run.ts)、[`src/application/workflows/run-cmd.ts`](../../src/application/workflows/run-cmd.ts) |
-| `afk loop` | [`src/cli/commands/loop.ts`](../../src/cli/commands/loop.ts)、[`src/application/modules/loop-runner.ts`](../../src/application/modules/loop-runner.ts) |
-| 单项闭环 | [`src/application/workflows/execute-work-item.ts`](../../src/application/workflows/execute-work-item.ts) |
-| 工作流执行 | [`src/application/workflow-engine.ts`](../../src/application/workflow-engine.ts) |
-| 模板加载与编译 | [`src/domain/templates/loader.ts`](../../src/domain/templates/loader.ts)、[`src/domain/templates/builtin.ts`](../../src/domain/templates/builtin.ts)、[`src/application/workflows/plan-executor.ts`](../../src/application/workflows/plan-executor.ts) |
-| QA | [`src/cli/commands/qa.ts`](../../src/cli/commands/qa.ts)、[`src/application/modules/qa-runner.ts`](../../src/application/modules/qa-runner.ts) |
-| 审计事件 | [`packages/afk-core/src/events.ts`](../../packages/afk-core/src/events.ts)、[`src/infrastructure/observability/jsonl-event-store.ts`](../../src/infrastructure/observability/jsonl-event-store.ts) |
-| 桌面端与 E2E | [`desktop-client/ARCHITECTURE.md`](../../desktop-client/ARCHITECTURE.md)、[`desktop-client/playwright.config.ts`](../../desktop-client/playwright.config.ts)、[`desktop-client/tests/e2e/_helpers/launch.ts`](../../desktop-client/tests/e2e/_helpers/launch.ts) |
+| CLI 命令注册 | [`apps/cli/src/command-registry.ts`](../../apps/cli/src/command-registry.ts) |
+| `afk run` | [`apps/cli/src/commands/run.ts`](../../apps/cli/src/commands/run.ts)、[`packages/runtime/src/application/workflows/run-cmd.ts`](../../packages/runtime/src/application/workflows/run-cmd.ts) |
+| `afk loop` | [`apps/cli/src/commands/loop.ts`](../../apps/cli/src/commands/loop.ts)、[`packages/runtime/src/application/modules/loop-runner.ts`](../../packages/runtime/src/application/modules/loop-runner.ts) |
+| 单项闭环 | [`packages/runtime/src/application/workflows/execute-work-item.ts`](../../packages/runtime/src/application/workflows/execute-work-item.ts) |
+| 工作流执行 | [`packages/runtime/src/application/workflow-engine.ts`](../../packages/runtime/src/application/workflow-engine.ts) |
+| 模板加载与编译 | [`packages/runtime/src/domain/templates/loader.ts`](../../packages/runtime/src/domain/templates/loader.ts)、[`packages/runtime/src/domain/templates/builtin.ts`](../../packages/runtime/src/domain/templates/builtin.ts)、[`packages/runtime/src/application/workflows/plan-executor.ts`](../../packages/runtime/src/application/workflows/plan-executor.ts) |
+| QA | [`apps/cli/src/commands/qa.ts`](../../apps/cli/src/commands/qa.ts)、[`packages/runtime/src/application/modules/qa-runner.ts`](../../packages/runtime/src/application/modules/qa-runner.ts) |
+| 审计事件 | [`packages/core/src/events.ts`](../../packages/core/src/events.ts)、[`packages/runtime/src/infrastructure/observability/jsonl-event-store.ts`](../../packages/runtime/src/infrastructure/observability/jsonl-event-store.ts) |
+| 桌面端与 E2E | [`apps/desktop/ARCHITECTURE.md`](../../apps/desktop/ARCHITECTURE.md)、[`apps/desktop/playwright.config.ts`](../../apps/desktop/playwright.config.ts)、[`apps/desktop/tests/e2e/_helpers/launch.ts`](../../apps/desktop/tests/e2e/_helpers/launch.ts) |
 
 ## 1. 范围与判定口径
 
@@ -195,7 +195,7 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 
 ## 5. 内置模板覆盖矩阵
 
-当前 `builtinTemplates()` 注册以下 6 个模板；名称由 `src/domain/templates/templates.test.ts` 固定断言。
+当前 `builtinTemplates()` 注册以下 6 个模板；名称由 `packages/runtime/src/domain/templates/templates.test.ts` 固定断言。
 
 | 模板 | 图结构 | 主要能力 | 全流程验证重点 | 终态边界 |
 | --- | --- | --- | --- | --- |
@@ -294,12 +294,12 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 
 | 层级 | 应验证什么 | 可接受证据 | 不能证明什么 |
 | --- | --- | --- | --- |
-| 模板纯测试 | 注册、schema、依赖层级、`when` 条件、cycle 拒绝 | `src/domain/templates/templates.test.ts`、compiler/resolver 测试 | Agent、Git、Provider、桌面端真实行为 |
-| workflow 集成测试 | claim、lease、worktree、system action、失败清理、runtime | `src/application/workflow-engine*.test.ts`、workflow tests | 外部 Provider 真实网络结果 |
+| 模板纯测试 | 注册、schema、依赖层级、`when` 条件、cycle 拒绝 | `packages/runtime/src/domain/templates/templates.test.ts`、compiler/resolver 测试 | Agent、Git、Provider、桌面端真实行为 |
+| workflow 集成测试 | claim、lease、worktree、system action、失败清理、runtime | `packages/runtime/src/application/workflow-engine*.test.ts`、workflow tests | 外部 Provider 真实网络结果 |
 | `executeWorkItem` 测试 | manifest 身份、锁、journal、QA 路由、root/child 分支 | `execute-work-item.test.ts`、审计事件投影 | 桌面 UI 和真实 Electron 进程 |
 | loop 测试 | poll、单实例、状态文件、SIGTERM、重试、max iterations | `loop-runner.test.ts`、loop CLI tests | 跨重启恢复内存 `inFlight` |
 | CLI/provider E2E | 真实 claim、push、change request、QA、merge | 隔离 Provider 项目和脱敏命令日志 | 不应使用生产任务做回归 |
-| Desktop Electron E2E | Main/preload/IPC/renderer、导航、筛选、workflow 画布、任务入口 | `desktop-client/tests/e2e/*.spec.ts`、截图/trace | 真实 GitHub/GitLab、真实 Agent、真实 MR merge |
+| Desktop Electron E2E | Main/preload/IPC/renderer、导航、筛选、workflow 画布、任务入口 | `apps/desktop/tests/e2e/*.spec.ts`、截图/trace | 真实 GitHub/GitLab、真实 Agent、真实 MR merge |
 | 全流程验收 | 从 ready 到 merge_ready/done 的身份和状态闭环 | Provider final snapshot + event/runtime/journal + Playwright evidence | 单一截图或单一进程退出码 |
 
 最低全流程用例应至少覆盖：

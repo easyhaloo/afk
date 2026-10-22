@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -39,6 +39,17 @@ function fixture(source: string, extraFiles: Record<string, string> = {}) {
   return { run, root, baseline };
 }
 
+interface PackageFixtureOptions {
+  coreSource?: string;
+  applicationSource?: string;
+  /** Package manifests accept arbitrary dependency names — the guard is the
+   *  thing under test, so the fixture must be able to declare any of them. */
+  corePackage?: { dependencies?: Record<string, string> };
+  applicationPackage?: { dependencies?: Record<string, string> };
+  includeCore?: boolean;
+  includeApplication?: boolean;
+}
+
 function packageFixture({
   coreSource = 'export type CoreValue = string;\n',
   applicationSource = "import type { CoreValue } from '@afk/core';\nexport type ApplicationValue = CoreValue;\n",
@@ -46,7 +57,7 @@ function packageFixture({
   applicationPackage = { dependencies: { '@afk/core': 'workspace:*' } },
   includeCore = true,
   includeApplication = true,
-} = {}) {
+}: PackageFixtureOptions = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'afk-architecture-packages-'));
   directories.push(directory);
   const root = join(directory, 'src');
@@ -94,6 +105,13 @@ function packageFixture({
 }
 
 describe('architecture guard migration baseline', () => {
+  it('ignores development state containing Electron singleton symlinks', () => {
+    const { root, run } = fixture("import { legacy } from '../lib/legacy';\nconsole.log(legacy);\n");
+    mkdirSync(join(root, '.dev', 'user-data'), { recursive: true });
+    symlinkSync('/missing-electron-cookie', join(root, '.dev', 'user-data', 'SingletonCookie'));
+    expect(run()).toContain('Architecture guard passed');
+  });
+
   it('accepts reviewed legacy files and imports', () => {
     expect(fixture("import { legacy } from '../lib/legacy';\nconsole.log(legacy);\n").run()).toContain('Architecture guard passed');
   });

@@ -10,13 +10,13 @@ git clone https://github.com/easyhaloo/afk.git
 cd afk
 
 # 安装依赖
-npm install
+pnpm install
 
 # 构建
-npm run build
+pnpm build
 
 # 全局安装
-npm link
+pnpm --dir apps/cli link --global
 ```
 
 验证安装：
@@ -142,7 +142,7 @@ cd /path/to/afk
 npm link
 
 # 或直接运行
-node /path/to/afk/dist/index.js --help
+node /path/to/afk/apps/cli/dist/index.js --help
 ```
 
 ### 平台检测错误

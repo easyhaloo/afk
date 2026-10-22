@@ -6,7 +6,7 @@
 
 ## 结论
 
-建议新建零运行时依赖的共享包 **`@afk/workflow-graph`**，将当前 `desktop-client/src/main.tsx` 中的临时布局、SVG path 和几何判断迁移为可测试的 TypeScript 内核。它应当借鉴 Archify 的产品原则——typed IR、确定性布局、关系可验证、有限 trace、最终收据——但使用 AFK 的领域模型、配置和界面语言，而不是复制 Archify viewer 或把外部 HTML 嵌入 Electron。[1] [2]
+建议新建零运行时依赖的共享包 **`@afk/workflow-graph`**，将当前 `apps/desktop/src/main.tsx` 中的临时布局、SVG path 和几何判断迁移为可测试的 TypeScript 内核。它应当借鉴 Archify 的产品原则——typed IR、确定性布局、关系可验证、有限 trace、最终收据——但使用 AFK 的领域模型、配置和界面语言，而不是复制 Archify viewer 或把外部 HTML 嵌入 Electron。[1] [2]
 
 这条路线比“把 Archify HTML 内嵌进当前桌面端”更适合 AFK。它既能维持 AFK 对执行事实的权威，也能使配置画布、CLI 校验、桌面端渲染和未来导出使用同一套图计算结果。Archify 可继续作为设计对照、fixture 互操作工具和视觉质量基准，但不进入最终用户的运行时依赖链。
 
@@ -36,10 +36,10 @@
 
 ## 2. 推荐的代码边界
 
-当前桌面端已有 React、TypeScript、SVG 和受控 Electron IPC，但工作流图逻辑集中在 `desktop-client/src/main.tsx`。这使布局、路径、节点尺寸、主题样式和交互状态容易漂移；近期出现的 SVG 高度与节点常量错位就是一个具象风险。应将纯计算从 UI 中剥离为共享包，保证 CLI 检查、主进程产物生成与 renderer 都依赖同一实现。
+当前桌面端已有 React、TypeScript、SVG 和受控 Electron IPC，但工作流图逻辑集中在 `apps/desktop/src/main.tsx`。这使布局、路径、节点尺寸、主题样式和交互状态容易漂移；近期出现的 SVG 高度与节点常量错位就是一个具象风险。应将纯计算从 UI 中剥离为共享包，保证 CLI 检查、主进程产物生成与 renderer 都依赖同一实现。
 
 ```text
-packages/afk-workflow-graph/
+packages/workflow-graph/
   src/
     ir.ts                 # 版本化图 IR、配置和收据类型
     project.ts            # WorkflowTemplate -> GraphDefinition
@@ -57,12 +57,12 @@ packages/afk-workflow-graph/
     validate.test.ts
     determinism.test.ts
 
-src/application/workflows/
+packages/runtime/src/application/workflows/
   graph-snapshot.ts       # AFK CLI 调用共享包的适配器
 
-desktop-client/
+apps/desktop/
   electron/graph-ipc.ts   # 受控快照/导出 IPC
-  src/workflow-graph/
+  packages/runtime/src/workflow-graph/
     GraphSurface.tsx      # 只消费 GraphSnapshot
     GraphInspector.tsx
     graph.css

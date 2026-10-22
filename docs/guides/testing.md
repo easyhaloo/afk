@@ -23,7 +23,7 @@ AFK TUI is built with React + Ink and uses a layered testing strategy.
 **Pattern**: Instantiate classes directly, call methods, assert results
 
 ```typescript
-// src/views/shared/Keyboard.test.ts
+// apps/cli/src/tui/shared/Keyboard.test.ts
 import { KeyboardDispatcher } from './Keyboard';
 
 it('dispatches escape to global handler', () => {
@@ -43,7 +43,7 @@ it('dispatches escape to global handler', () => {
 
 **Run**:
 ```bash
-pnpm exec vitest run src/views/shared/
+pnpm --filter afk exec vitest run src/tui/shared/
 ```
 
 ---
@@ -127,7 +127,7 @@ describe('Notification rendering', () => {
 
 **Run**:
 ```bash
-pnpm dlx vitest --run src/views/
+pnpm --filter afk exec vitest run src/tui/
 ```
 
 ---
@@ -148,7 +148,7 @@ import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const distPath = join(__dirname, '../../dist/index.js');
+const distPath = join(__dirname, '../../apps/cli/dist/index.js');
 
 // Detect node-pty at module load time
 let nodePtyWorks = false;
@@ -209,12 +209,14 @@ pnpm test:e2e:pty
 
 ```
 afk/
-├── src/
-│   ├── views/shared/
-│   │   ├── Keyboard.test.ts      ← Unit tests (5 tests)
-│   │   └── Registry.test.ts      ← Unit tests (8 tests)
-│   └── views/board/views/
-│       └── Notification.tsx      ← Component (no dedicated test file)
+├── apps/
+│   ├── cli/src/tui/             ← CLI unit and component tests beside source
+│   └── desktop/tests/           ← Desktop tests, run with its own config
+├── packages/
+│   ├── runtime/src/             ← Runtime tests beside source
+│   ├── core/src/
+│   ├── application/src/
+│   └── workflow-graph/src/
 ├── tests/
 │   ├── e2e/
 │   │   └── codex-runtime.test.ts     ← unit test, runs by default
@@ -234,30 +236,73 @@ afk/
 ## Running Tests
 
 ```bash
-# Run all tests
-source ~/.nvm/nvm.sh && nvm use lts/iron && pnpm dlx vitest --run
+# Run shared packages, CLI and repository tests
+pnpm test
+
+# Desktop tests
+pnpm --dir apps/desktop test
+
+# Full CLI subprocess, PTY and Electron E2E suites
+pnpm test:e2e
+
+# CLI workflows only (builds the executable first)
+pnpm test:e2e:cli
 
 # Watch mode (development)
-pnpm dlx vitest
+pnpm --filter afk exec vitest
 
 # Unit tests only
-pnpm dlx vitest --run src/domain/ src/application/ src/infrastructure/ src/shared/ src/cli/
+pnpm --filter @afk/runtime test
+pnpm --filter afk test
 
 # Component tests only
-pnpm dlx vitest --run src/views/
+pnpm --filter afk exec vitest run src/tui/
 
 # PTY E2E only (opt-in, needs a real terminal)
 pnpm test:e2e:pty
 
 # Coverage
-pnpm dlx vitest --run --coverage
+pnpm --filter afk exec vitest run --coverage
 ```
+
+CLI workflow tests launch the production executable against an isolated local
+GitLab HTTP fixture. They cover command loading, completion, backlog creation,
+adoption, tags, interruption, retry, merge confirmation, inventory, graph output,
+audit replay and corruption, plus execution-manifest errors. Provider responses
+are simulated; command parsing, SDK calls and domain transitions remain real.
+Electron uses the typed Runtime fixtures described in
+[Desktop architecture](../../apps/desktop/ARCHITECTURE.md#end-to-end-testing).
+These suites do not run a live coding agent or mutate a remote repository.
+
+## Live Agent Tests
+
+```bash
+# Real Claude protocol, code generation, test execution and task projection
+CLAUDE_CODE_SAFE_MODE=1 pnpm test:e2e:claude
+
+# Real Codex implementation, independent QA and remote pull request
+pnpm test:e2e:codex
+```
+
+Claude runs in temporary workspaces; the host independently checks its generated
+function and reruns its tests. Safe mode disables user customizations while
+preserving authentication and built-in tools. Omit it to include local plugins
+and hooks. Codex uses the current repository's real tracker and credentials,
+creates a dedicated issue and branches, and verifies the remote fixture diff.
+It closes the test issue and pull request and deletes its remote branches on
+completion. It does not merge into the target branch. Set `AFK_CODEX_E2E_KEEP=1`
+only when the remote artifacts should be retained for inspection.
 
 ---
 
 ## node-pty macOS Installation Issues
 
 macOS may block `spawn-helper` execution (`posix_spawnp failed` or `permission denied`).
+
+Check its executable bit first; a missing bit does not require re-signing:
+```bash
+chmod u+x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper
+```
 
 **Fix script**:
 ```bash

@@ -1,0 +1,393 @@
+import type { AgentUsage, ExecutionQueryOptions, ExecutionRunDetail, ExecutionSummary } from "./execution-contract.js";
+import type { WorkItemAgentId } from "./backlog-contract.js";
+import type { ExecutionEnvironmentQueryResult } from "./execution-environment-contract.js";
+
+export type RuntimeEvent = {
+  id: string;
+  timestamp: string;
+  source: string;
+  title?: string;
+  status?: string;
+  result: string;
+  nextStep: string;
+  raw: string;
+  usage?: AgentUsage;
+};
+
+export type AgentRuntime = {
+  id: WorkItemAgentId;
+  label: string;
+  command: string;
+  available: boolean;
+  executable: string;
+  summary: string;
+  status: "available" | "missing" | "error";
+  installation: { source: string; version: string; checkedAt: string };
+};
+
+export type CliCapability = {
+  id: string;
+  label: string;
+  command: string;
+  description: string;
+  available: boolean;
+};
+
+export type CanvasTemplateNode = {
+  id: string;
+  template: "agent" | "qa";
+  label: string;
+  description: string;
+  prompt: string;
+  provider?: "claude-code" | "codex" | "cursor" | "pi" | "opencode" | "copilot";
+  x: number;
+  y: number;
+};
+
+export type WorkflowTemplateStepSummary = {
+  id: string;
+  role: string;
+  kind: "agent" | "system";
+  provider?: string;
+  action?: string;
+  when?: { step: string; equals: string };
+  dependsOn: string[];
+};
+
+export type WorkflowTemplateSummary = {
+  id: string;
+  name: string;
+  description: string;
+  source: "builtin" | "project" | "managed";
+  steps: WorkflowTemplateStepSummary[];
+  canvasNodes?: CanvasTemplateNode[];
+};
+
+export type WorkflowConfigSummary = {
+  configPath: string;
+  source: "project" | "cli-defaults";
+  agentDefault: string;
+  tmuxSession: string;
+  targetBranch: string;
+  baseBranch: string;
+  maxRetries: number;
+  hardTimeoutMs: number;
+  completionTimeoutMs: number;
+  contextThreshold: number;
+  goalBudget: number;
+  codex: { transport: string; auth: string; provider: string; profile?: string; endpoint?: string; authTokenEnv?: string; startupTimeoutMs: number };
+  canvasNodes: CanvasTemplateNode[];
+  templateName?: string;
+};
+
+export type WorkflowRunSummary = {
+  id: string;
+  status: "running" | "completed" | "blocked" | "failed" | "aborted" | "timed_out" | "context_high";
+  startedAt: string;
+  goal: string;
+  provider: string;
+  transport?: string;
+  auth?: string;
+  modelProvider?: string;
+  worktreePath: string;
+  sessionId?: string;
+  branch?: string;
+  error?: string;
+};
+
+export type LoopStatus = {
+  state: "running" | "stopped";
+  pid?: number;
+  execution: { active: number; ids: string[] };
+  totals: { completed: number; failed: number };
+  startedAt?: number;
+  lastUpdateAt?: number;
+  lastError: Record<string, string>;
+};
+
+export type AppearancePreferences = {
+  locale: "system" | "zh-CN" | "en-US";
+  fontFamily: "system" | "serif" | "mono";
+  fontScale: "small" | "medium" | "large";
+  handDrawnHeaders: boolean;
+  theme: "light" | "dark";
+};
+
+export type WorkflowGraphFormat = "json" | "archify-json";
+
+export type WorkflowGraphDiagnostic = {
+  severity: "info" | "warning" | "error";
+  code: string;
+  message: string;
+};
+
+export type WorkflowGraphStatus = {
+  state: "missing" | "generating" | "trusted" | "stale" | "rejected";
+  templateId: string;
+  inputHash?: string;
+  trustedInputHash?: string;
+  graph?: unknown;
+  diagnostics: WorkflowGraphDiagnostic[];
+};
+
+export type WorkflowGraphGenerateRequest = {
+  workspace: string;
+  templateId: string;
+  format?: WorkflowGraphFormat;
+};
+
+export type WorkflowGraphGenerateResult = {
+  status: WorkflowGraphStatus;
+  outputPath?: string;
+};
+
+export type ProjectRun = {
+  id: string;
+  workItemId: string;
+  status: "starting" | "running" | "completed" | "failed";
+  startedAt: string;
+  completedAt?: string;
+  workspacePath: string;
+};
+
+export type Snapshot = {
+  workspace: { root: string; afkDirectoryPresent: boolean; eventCount: number };
+  afk: { available: boolean; executable: string; summary: string };
+  capabilities: CliCapability[];
+  workflow: WorkflowConfigSummary;
+  workflowTemplates: WorkflowTemplateSummary[];
+  workflowRuns: WorkflowRunSummary[];
+  loop: LoopStatus;
+  agentRuntimes: AgentRuntime[];
+  events: RuntimeEvent[];
+  workItemRuns: ProjectRun[];
+  containers: Array<{ engine: string; name: string; image: string; status: string }>;
+  sessions: Array<{ name: string; workspace: string; windows: string; attached: boolean; runId?: string; resourceId?: string }>;
+};
+
+export type ExecutionAttachRequest = {
+  runId: string;
+  workItemId?: string;
+  resourceId?: string;
+};
+
+export type ExecutionAttachResult = {
+  attachId: string;
+  attachTarget: string;
+  resourceId: string;
+};
+
+export type ExecutionAttachInput = {
+  runId: string;
+  resourceId?: string;
+  cols?: number;
+  rows?: number;
+};
+
+export type DesktopApi = {
+  copyText: (text: string) => Promise<boolean>;
+  openExternal: (url: string) => Promise<boolean>;
+  chooseWorkspace: () => Promise<string | null>;
+  snapshot: (workspace: string) => Promise<Snapshot>;
+  appearance: () => Promise<AppearancePreferences>;
+  saveAppearance: (appearance: AppearancePreferences) => Promise<AppearancePreferences>;
+  saveWorkflow: (workspace: string, workflow: WorkflowConfigSummary) => Promise<WorkflowConfigSummary>;
+  graphStatus: (workspace: string, templateId: string) => Promise<WorkflowGraphStatus>;
+  graphGenerate: (request: WorkflowGraphGenerateRequest) => Promise<WorkflowGraphGenerateResult>;
+  tmuxPane: (workspace: string, session: string) => Promise<string>;
+  tmuxSend: (workspace: string, session: string, line: string) => Promise<boolean>;
+  ssh: {
+    list: (options?: SshListOptions) => Promise<SshListResult>;
+    add: (input: ManagedSshHostInput) => Promise<SshHost>;
+    update: (hostId: string, input: ManagedSshHostInput) => Promise<SshHost>;
+    remove: (hostId: string) => Promise<boolean>;
+    trust: (request: SshTrustRequest) => Promise<SshFingerprint>;
+    generateKey: () => Promise<{ publicKeyPath: string; session: SshSession }>;
+    deployKey: (hostId: string) => Promise<SshSession>;
+    test: (hostId: string) => Promise<SshTestResult>;
+    upload: (hostId: string) => Promise<SshUploadResult | null>;
+    connect: (hostId: string) => Promise<SshSession>;
+    openExternal: (hostId: string, terminal?: SshExternalTerminalId) => Promise<SshExternalTerminalResult>;
+    credentialHas: (hostId: string) => Promise<boolean>;
+    credentialSet: (input: SshCredentialSetInput) => Promise<boolean>;
+    credentialRemove: (hostId: string) => Promise<boolean>;
+    input: (request: SshInputRequest) => Promise<boolean>;
+    resize: (request: SshResizeRequest) => Promise<boolean>;
+    close: (sessionId: string) => Promise<boolean>;
+    onData: (listener: (sessionId: string, data: string) => void) => () => void;
+    onExit: (listener: (sessionId: string, code: number) => void) => () => void;
+  };
+  backlog: {
+    list: (workspace: string, options?: BacklogListOptions) => Promise<BacklogItem[]>;
+    show: (workspace: string, id: string) => Promise<BacklogItem>;
+    create: (workspace: string, input: BacklogCreateInput) => Promise<BacklogItem>;
+    stop: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
+    recover: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
+    confirmMerge: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
+    summary: (workspace: string, backlogId: string) => Promise<BacklogRuntimeSummary>;
+    addTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
+    removeTag: (workspace: string, id: string, tag: string) => Promise<BacklogItem>;
+  };
+  workItems: {
+    list: (options?: WorkItemInventoryOptions, forceRefresh?: boolean) => Promise<WorkItemInventoryResult>;
+    start: (input: WorkItemRunStartInput) => Promise<WorkItemRunStartResult>;
+    executions: (options?: ExecutionQueryOptions) => Promise<{ executions: ExecutionSummary[]; nextCursor?: string }>;
+    executionRunDetail: (runId: string, workItemId: string) => Promise<ExecutionRunDetail>;
+    resolveAttachTarget: (request: ExecutionAttachRequest) => Promise<ExecutionEnvironmentQueryResult>;
+    attach: (input: ExecutionAttachInput) => Promise<ExecutionAttachResult>;
+    attachInput: (attachId: string, data: string) => Promise<boolean>;
+    attachResize: (attachId: string, cols: number, rows: number) => Promise<boolean>;
+    detach: (attachId: string) => Promise<boolean>;
+    onAttachData: (listener: (attachId: string, data: string) => void) => () => void;
+    onAttachExit: (listener: (attachId: string, code: number) => void) => () => void;
+  };
+  jumpserver: {
+    testConnection: (input: JumpserverTestConnectionInput) => Promise<JumpserverTestConnectionResult>;
+    addBastion: (input: JumpserverAddBastionInput) => Promise<JumpserverAddBastionResult>;
+    listAssets: (bastionId: string) => Promise<SshBastionAssetPreview[]>;
+    previewAssets: (input: { hostname: string; port: number; user: string; password: string; otpSecret?: string }) => Promise<SshBastionAssetPreview[]>;
+    syncAssets: (input: JumpserverSyncAssetsInput) => Promise<SshBastionSyncResult>;
+    removeBastion: (bastionId: string) => Promise<JumpserverRemoveBastionResult>;
+    listBastions: () => Promise<SshBastion[]>;
+    getSyncLog: (bastionId: string) => Promise<SshBastionSyncLogEntry[]>;
+  };
+};
+
+export const IPC_CHANNELS = {
+  copyText: "afk:copy-text",
+  openExternal: "afk:open-external",
+  chooseWorkspace: "afk:choose-workspace",
+  snapshot: "afk:snapshot",
+  appearance: "afk:appearance",
+  appearanceSave: "afk:appearance-save",
+  workflowSave: "afk:workflow-save",
+  graphStatus: "afk:graph-status",
+  graphGenerate: "afk:graph-generate",
+  tmuxPane: "afk:tmux-pane",
+  tmuxSend: "afk:tmux-send",
+  sshList: "afk:ssh-list",
+  sshAdd: "afk:ssh-add",
+  sshUpdate: "afk:ssh-update",
+  sshRemove: "afk:ssh-remove",
+  sshTrust: "afk:ssh-trust",
+  sshGenerateKey: "afk:ssh-generate-key",
+  sshDeployKey: "afk:ssh-deploy-key",
+  sshTest: "afk:ssh-test",
+  sshUpload: "afk:ssh-upload",
+  sshConnect: "afk:ssh-connect",
+  sshOpenExternal: "afk:ssh-open-external",
+  sshCredentialHas: "afk:ssh-credential-has",
+  sshCredentialSet: "afk:ssh-credential-set",
+  sshCredentialRemove: "afk:ssh-credential-remove",
+  sshInput: "afk:ssh-input",
+  sshResize: "afk:ssh-resize",
+  sshClose: "afk:ssh-close",
+  sshData: "afk:ssh-data",
+  sshExit: "afk:ssh-exit",
+  backlogList: "afk:backlog-list",
+  backlogShow: "afk:backlog-show",
+  backlogCreate: "afk:backlog-create",
+  backlogStop: "afk:backlog-stop",
+  backlogRecover: "afk:backlog-recover",
+  backlogConfirmMerge: "afk:backlog-confirm-merge",
+  backlogTagAdd: "afk:backlog-tag-add",
+  backlogTagRemove: "afk:backlog-tag-remove",
+  backlogSummary: "afk:backlog-summary",
+  workItemsList: "afk:work-items-list",
+  workItemsStart: "afk:work-items-start",
+  workItemsExecutions: "afk:work-items-executions",
+  workItemsExecutionRunDetail: "afk:work-items-execution-run-detail",
+  workItemsResolveAttachTarget: "afk:work-items-resolve-attach-target",
+  workItemsAttach: "afk:work-items-attach",
+  workItemsAttachInput: "afk:work-items-attach-input",
+  workItemsAttachResize: "afk:work-items-attach-resize",
+  workItemsDetach: "afk:work-items-detach",
+  workItemsAttachData: "afk:work-items-attach-data",
+  workItemsAttachExit: "afk:work-items-attach-exit",
+  jumpserverTestConnection: "afk:jumpserver-test-connection",
+  jumpserverAddBastion: "afk:jumpserver-add-bastion",
+  jumpserverListAssets: "afk:jumpserver-list-assets",
+  jumpserverPreviewAssets: "afk:jumpserver-preview-assets",
+  jumpserverSyncAssets: "afk:jumpserver-sync-assets",
+  jumpserverRemoveBastion: "afk:jumpserver-remove-bastion",
+  jumpserverListBastions: "afk:jumpserver-list-bastions",
+  jumpserverGetSyncLog: "afk:jumpserver-get-sync-log",
+} as const;
+import type {
+  ManagedSshHostInput,
+  SshBastion,
+  SshBastionAssetPreview,
+  SshBastionSyncLogEntry,
+  SshBastionSyncResult,
+  SshFingerprint,
+  SshExternalTerminalId,
+  SshHost,
+  SshInputRequest,
+  SshListResult,
+  SshResizeRequest,
+  SshSession,
+  SshTestResult,
+  SshTrustRequest,
+  SshUploadResult,
+} from "./ssh-contract.js";
+import type {
+  BacklogCreateInput,
+  BacklogItem,
+  BacklogListOptions,
+  BacklogRuntimeSummary,
+  WorkItemInventoryOptions,
+  WorkItemInventoryResult,
+  WorkItemRunStartInput,
+  WorkItemRunStartResult,
+} from "./backlog-contract.js";
+
+export type SshExternalTerminalResult = {
+  terminal: SshExternalTerminalId;
+};
+
+export type SshListOptions = {
+  forceRefresh?: boolean;
+};
+
+export type SshCredentialSetInput = {
+  hostId: string;
+  password: string;
+};
+
+export type JumpserverTestConnectionInput = {
+  hostname: string;
+  port: number;
+  user: string;
+  password: string;
+  otpSecret?: string;
+};
+
+export type JumpserverTestConnectionResult =
+  | { ok: true; assets: SshBastionAssetPreview[] }
+  | { ok: false; error: string };
+
+export type JumpserverAddBastionInput = {
+  alias: string;
+  hostname: string;
+  port: number;
+  user: string;
+  password: string;
+  otpSecret?: string;
+  linuxOnly?: boolean;
+};
+
+export type JumpserverAddBastionResult = {
+  bastion: SshBastion;
+  assetPreview: SshBastionAssetPreview[];
+};
+
+export type JumpserverSyncAssetsInput = {
+  bastionId: string;
+  selectedNames?: string[];
+  linuxOnly?: boolean;
+};
+
+export type JumpserverRemoveBastionResult = {
+  ok: true;
+  removedAssetCount: number;
+};

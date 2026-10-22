@@ -49,7 +49,7 @@ const nodeBuiltins = new Set([
   'url', 'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib',
 ]);
 const domGlobals = ['document', 'window', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'Element'];
-const desktopRoot = option('--desktop-client-root', resolve(new URL('../apps/desktop/', import.meta.url).pathname));
+const desktopRoot = option('--desktop-root', resolve(new URL('../apps/desktop/', import.meta.url).pathname));
 const buildOutputDirectories = new Set(['.dev', 'dist', 'dist-electron', 'node_modules', 'coverage', 'release', 'test-results', 'screenshots']);
 const backlogStateKeys = new Set(['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked']);
 const requiredStateMappingKeys = ['in_progress', 'verification', 'merge_ready'];

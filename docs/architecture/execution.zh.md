@@ -434,22 +434,39 @@ steps:
   - id: implement
     role: implementer
     prompt: prompts/implement.md
+    phase: implementation
+    completionKind: task
     branch:
       type: issue
 
   - id: review
     role: reviewer
     prompt: prompts/review.md
+    phase: verification
+    completionKind: task
     dependsOn:
       - implement
 
   - id: fix
     role: implementer
     prompt: prompts/fix.md
+    phase: implementation
+    completionKind: task
     dependsOn:
       - review
-    when: review.status == "failed"
+    when:
+      step: review
+      equals: failed
 ```
+
+`phase` 与 `completionKind` 都是可选的。`phase` 取 `implementation` 或
+`verification`，说明这个 step 在工作流行为里处于哪一段：AC 反馈注入到实现阶段的
+step，AC 自纠正循环重跑验证阶段的 step。`completionKind` 取 `task`、`qa` 或 `ac`，
+说明这个 step 说哪种完成协议。
+
+两者由编译器解析到编译后的 step 上，因此 runner 不再比较 step id。没有声明这两项
+的模板仍然可用：阶段与协议由 step 的 `role` 推导。这正是「叫 `verify-ac` 的 step
+不再因为名字决定任何事」的原因——名字是数据，声明才是行为。
 
 内置模板：
 
@@ -483,8 +500,12 @@ afk run --backlog-id <id>
 ```
 
 `afk run` 认领一个 ready 状态的 backlog 项，并按该项选定的模板推进执行。模板由
-`packages/runtime/src/domain/templates/builtin.ts` 解析；CLI 上没有
-`--template` 选项，也不存在 `afk workflow` 命令组。
+`packages/runtime/src/domain/templates/builtin.ts` 解析，可用
+`--template <name>` 覆盖；相关选项还有 `--agent`、`--sandbox`、
+`--execution-mode`、`--base-branch`、`--target-branch`、`--max-handoffs`、
+`--context-high`、`--max-total-tokens` 与 `--hard-timeout`。不存在 `afk workflow`
+命令组，也没有 `--iid` 或 `--branch-strategy` 选项——工作项用 `--backlog-id` 选择，
+分支用 `--base-branch` 选择。
 
 配置示例：
 

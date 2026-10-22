@@ -40,6 +40,10 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
 
 /afk-scheduler ──────→ 多 issues 依赖感知调度
 /afk-branch-migrate ─→ 跨分支代码迁移
+/afk-ai-prd ──────────→ AI 友好 PRD 起草 / 评审 / 修订
+/afk-llm-dev-guide ──→ LLM 应用设计与架构
+/jev-agent-guard ────→ 全局安装的 agent 检查点
+/software-complexity-governance → 复杂度度量与治理
 /md-to-pdf ──────────→ Markdown 转 PDF
 /reasoning-guard ────→ 会话内推理路径看护
 /reasoning-watchdog ──→ hooks 自动推理监控
@@ -271,7 +275,7 @@ feat(auth): add user model      — 最终提交
 
 **为什么有两个合并 gate？**
 ```
-afk/issue-<iid> ──→ prd/<N> ──→ main
+afk/backlog-<id> ──→ prd/<N> ──→ main
                   ↑          ↑
                 AFK gate   Human gate
 ```
@@ -748,6 +752,80 @@ Claude Code session
 
 ---
 
+### 19. afk-ai-prd
+
+**Purpose:** 以 Markdown 创建、评审或修订 AI 友好型 PRD —— 让人工智能可以解析、追问、拆解、实现并验证的需求文档
+
+**触发场景：**
+- 需要一份能被人智能体直接执行的 PRD
+- 评审既有 PRD 的可机器检查性
+- `docs/product/` 下的产品与开发类 PRD 都把该 skill 列为校验器
+
+**流程：**
+1. **起草** —— 固定 Markdown 章节、原子化需求、Mermaid 图、稳定 ID、可追溯性
+2. **自检门禁** —— 未通过自身检查的 PRD 不会被交付
+
+**设计决策：**
+
+**为什么单列一个 PRD skill？**
+- 给人读的需求和能被机器拆解的需求不是同一份产物
+- 稳定 ID 与可追溯性，才让一个 issue 能把需求带回 PRD 的具体某一行
+
+**与其他 skills 协作：**
+- **互补** → **afk-to-prd**（产出 PRD）、**afk-to-issues**（消费 PRD）
+
+---
+
+### 20. afk-llm-dev-guide
+
+**Purpose:** LLM 应用设计指南 —— 架构、以 skill 驱动的体系、上下文工程、HITL、可观测性与可演进性
+
+**触发场景：**
+- 用户问的是如何设计一个 LLM 应用，而不是如何实现它
+- 关于上下文预算、人工介入位置、或如何让 LLM 系统保持可改造的讨论
+
+**与其他 skills 协作：**
+- **独立** —— 参考型 skill，直接调用
+
+---
+
+### 21. jev-agent-guard
+
+**Purpose:** 为 Claude Code、Codex 与 OpenCode 全局安装 Jev 检查点 —— 推荐相关 Skill、监控可观测的执行证据，并在不替代宿主权限的前提下减少安全的工具输出噪声
+
+**触发场景：**
+- 在一台机器上为所有 agent 宿主配置 Jev 检查点
+- 需要可观测检查点的长时间 agent 会话
+
+**流程：**
+1. **安装** —— `skills/jev-agent-guard/scripts/install.mjs` 为选定宿主注册检查点 hook（先 `--dry-run`）
+2. **运行** —— `skills/jev-agent-guard/scripts/jev.mjs` 从 stdin 或 `--input` 读取问题规格，并转成宿主原生提问
+3. **决策** —— `skills/jev-agent-guard/scripts/jev-client.mjs` 暴露 `askJev`、`decideChoice`、`decideNoul`、`decideScore`
+
+**设计决策：**
+
+**为什么不替代宿主权限？**
+- 该守卫负责观察与提问，不扩大 agent 的权限边界
+
+**与其他 skills 协作：**
+- **独立** —— 安装在宿主层，而非某个 skill 内
+
+---
+
+### 22. software-complexity-governance
+
+**Purpose:** 从方法论到仓库范围评估并治理软件复杂度 —— 圈复杂度与认知复杂度、代码异味、耦合、模块与服务边界、重复、变更热点与技术债优先级
+
+**触发场景：**
+- 度量某个模块、某个服务或整个仓库的复杂度
+- 对技术债排优先级
+- 评审一次重构提案是否真的降低了耦合
+
+**与其他 skills 协作：**
+- **独立** —— 度量型 skill，直接调用
+
+---
+
 ## Skills 设计原则总结
 
 ### 1. 单一职责
@@ -802,15 +880,20 @@ Skills 引用的方法论文档位于 `references/` 目录：
 references/
 ├── README.md              # 任务类型检测指南
 ├── tdd-feature.md         # TDD 开发流程
+├── tdd-refactor.md        # TDD 重构流程
 ├── hard-checks.md         # 强制检查清单
+├── hard-checks-recovery.md # 检查失败后的恢复流程
 ├── ddd.md                 # DDD 设计指南
 ├── architecture.md        # 架构决策模板
 ├── adr.md                 # ADR 写作指南
-└── task-type/
-    ├── feature.md         # 功能开发任务
-    ├── refactor.md        # 重构任务
-    └── bugfix.md          # Bug 修复任务
+├── research.md            # 调研任务指南
+├── spike.md               # 探针任务指南
+└── hotfix.md              # 紧急修复任务指南
 ```
+
+每个 skill 自带自己的 `references/` 目录；不存在共享的 `skills/references/` 树，
+也没有 `task-type/` 子目录。任务类型的区分体现为 skill 读取哪个参考文件
+（`tdd-feature.md`、`tdd-refactor.md`、`hotfix.md`、`spike.md`）。
 
 **为什么使用 references/ 而非硬编码流程？**
 1. **可演进** — 方法论改进时，更新文档即可，无需修改 skill 代码

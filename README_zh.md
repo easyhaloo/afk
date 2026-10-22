@@ -129,6 +129,7 @@ afk signal goal-complete --summary "<summary>"
 | `/afk-to-issues` | 分解为 Issues | PRD 批准后 |
 | `/afk-do` | 任务编排 | 清晰的功能或任务描述 |
 | `/afk-research` | 技术调研 | 编码前需要理解现有实现 |
+| `/afk-urltrace` | URL 访问链路追踪 | 交互式访问页面，记录页面路径及请求/返回，并映射到仓库代码 |
 | `/afk-prototype` | 方案验证 | 承诺投入前验证技术方案 |
 | `/afk-implement` | TDD 实现 | 清晰实现目标 |
 | `/afk-qa` | 独立验证 | MR/PR 准备合并 |

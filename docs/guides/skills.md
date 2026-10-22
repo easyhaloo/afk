@@ -44,6 +44,7 @@ User Request
 /reasoning-guard ────→ In-session Reasoning Path Guardian
 /reasoning-watchdog ──→ Hooks-based Automatic Reasoning Monitor
 /afk-skill-craft ────→ Skill Create / Diagnose / Refactor
+/afk-urltrace ───────→ Guided URL Path → Page/Network Evidence → Repository Code Map
 ```
 
 ## Core Skills Details
@@ -745,6 +746,35 @@ Claude Code session
 
 **Collaboration with Other Skills:**
 - **Opposite** → **reasoning-guard** — In-session version, for temporary monitoring
+
+---
+
+### 19. afk-urltrace
+
+**Purpose:** Turn a URL into a user-guided access trace and map the observed
+pages and business requests to repository code.
+
+**Workflow:** Start browser network capture before navigation → show each
+page's outcome → persist page transitions and request/response evidence →
+ask whether to finish or accept the next instruction. Single-step debugging
+is the default: Playwright CLI drives a named, headed browser session that
+stays open across turns with login state and capture retained. Inspecting
+earlier evidence does not replay actions. Batch execution requires an explicit
+request. On completion, trace frontend routes and API calls into backend
+handlers/services and deliver per-page analysis with file/line references.
+When the next route or business meaning is unclear, search the local coding
+wiki first and record the page/headings used. Wiki context guides the question
+and candidate actions; current runtime evidence decides the trace when they
+conflict.
+
+**Artifacts:** Each session under `.afk/urltrace/` contains `steps.jsonl`,
+`network.jsonl`, `wiki.jsonl`, sanitized `evidence/`, and `report.md`. Capture gaps and
+candidate/unmapped code relationships remain explicit. The trace covers the
+observed path, including branches and revisits; it does not crawl the site.
+
+**Requirements:** A browser session with network capture and the relevant
+repository checkouts. Missing capture capabilities or repositories must be
+resolved or reported; endpoint-name guesses are not verified mappings.
 
 ---
 

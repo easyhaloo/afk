@@ -129,6 +129,7 @@ Full command reference: `afk --help`
 | `/afk-to-issues` | Decompose to issues | After PRD approved |
 | `/afk-do` | Task orchestration | Clear feature or task description |
 | `/afk-research` | Technical research | Need to understand existing implementation before coding |
+| `/afk-urltrace` | URL access tracing | Walk a URL interactively, capture page/request/response paths, and map them to repository code |
 | `/afk-prototype` | Validate approach | Need to validate tech approach before committing |
 | `/afk-implement` | TDD implementation | Clear implementation target |
 | `/afk-qa` | Independent verification | MR/PR ready to merge |

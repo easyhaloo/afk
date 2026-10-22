@@ -8,6 +8,7 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 |-------|---------|-------------|
 | [afk-do](./afk-do/) | `/afk-do` | Direct task execution — TDD, spike, research, or hotfix modes |
 | [afk-research](./afk-research/) | `/afk-research` | Technical investigation with structured findings report |
+| [afk-urltrace](./afk-urltrace/) | `/afk-urltrace` | Interactive URL walkthrough with page/network evidence and repository code mapping |
 | [afk-grill-me](./afk-grill-me/) | `/afk-grill-me` | Requirements interview — ambiguous → falsifiable shared understanding |
 | [afk-grill-me-context](./afk-grill-me-context/) | `/afk-grill-me-context` | Gap-fill interview — verify/correct existing context |
 | [afk-hand-off](./afk-hand-off/) | `/afk-hand-off` | Session handoff — zero context loss between sessions |

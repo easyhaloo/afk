@@ -21,6 +21,7 @@
 .work-items-toolbar .backlog-search { min-width: 220px; }
 .work-items-toolbar > .select-menu { flex: 0 0 auto; width: 144px; min-width: 144px; max-width: 144px; }
 .work-items-toolbar > .select-menu:last-child { min-width: 150px; max-width: 260px; }
+.work-items-toolbar > .select-menu:nth-last-child(2) { min-width: 150px; max-width: 180px; }
 .work-items-load-more { display: flex; align-items: center; gap: 10px; margin: 15px 2px 4px; color: var(--backlog-muted); font-size: calc(11px * var(--afk-scale)); }
 .work-items-load-more::before,
 .work-items-load-more::after { height: 1px; flex: 1; background: var(--backlog-border); content: ""; }

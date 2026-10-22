@@ -50,9 +50,9 @@ describe("sortBacklogItems", () => {
     expect(sortBacklogItems(items, { field: "state", direction: "desc" }).map(entry => entry.id)).toEqual(["b", "c", "a"]);
   });
 
-  it("orders updatedAt ascending with missing dates first and descending with them last", () => {
+  it("orders updatedAt ascending with missing dates last and descending with them last too", () => {
     const withMissing = [item({ id: "x", updatedAt: undefined }), item({ id: "d", updatedAt: "2026-01-01" })];
-    expect(sortBacklogItems(withMissing, { field: "updatedAt", direction: "asc" }).map(entry => entry.id)).toEqual(["x", "d"]);
+    expect(sortBacklogItems(withMissing, { field: "updatedAt", direction: "asc" }).map(entry => entry.id)).toEqual(["d", "x"]);
     expect(sortBacklogItems(withMissing, { field: "updatedAt", direction: "desc" }).map(entry => entry.id)).toEqual(["d", "x"]);
   });
 

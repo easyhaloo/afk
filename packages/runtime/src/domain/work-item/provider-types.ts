@@ -10,6 +10,7 @@ export interface ProviderIssue {
   labels: string[];
   state: 'opened' | 'closed';
   webUrl?: string;
+  updatedAt?: string;
 }
 
 export interface ProviderCatalog {

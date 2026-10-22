@@ -46,7 +46,7 @@ dependency direction. Do not import another workspace's source by relative path.
 | Task guides (workflows, skills, testing) | [`docs/guides/`](docs/guides/workflows.md) |
 | Architecture decision records | [`docs/adr/`](docs/adr/README.md) |
 | Desktop execution and interactive tmux access | [`ADR-0019`](docs/adr/0019-desktop-run-log-viewer-projection.md) |
-| Product requirements, research | [`docs/product/`](docs/product/PRD.md), [`docs/research/`](docs/research/) |
+| Product requirements, research | [`docs/product/`](docs/product/PRD.md), [`docs/product/PRD-work-items-reverse-sort-2026-10-15.md`](docs/product/PRD-work-items-reverse-sort-2026-10-15.md), [`docs/research/`](docs/research/) |
 | Onboarding | [`docs/getting-started.md`](docs/getting-started.md) |
 
 `docs/_archive/` is a historical holding area, not current guidance. Bilingual

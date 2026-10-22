@@ -583,7 +583,7 @@ describe("WorkItemsPage", () => {
     await act(async () => { renderer = create(createElement(WorkItemsPage)); });
 
     expect(renderer!.root.findByProps({ className: "backlog-toolbar work-items-toolbar" })).toBeTruthy();
-    expect(renderer!.root.findAllByProps({ className: "select-menu filter-trigger" })).toHaveLength(3);
+    expect(renderer!.root.findAllByProps({ className: "select-menu filter-trigger" })).toHaveLength(4);
 
     expect(renderer!.root.findByProps({ "aria-label": "筛选条件" }).props.hidden).toBe(true);
     await act(async () => { renderer!.root.findByProps({ "aria-label": "筛选工作项" }).props.onClick(); });
@@ -668,6 +668,88 @@ describe("WorkItemsPage", () => {
 
     const row = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" })[0];
     expect(textContent(row)).not.toContain("github:acme/api#1");
+    act(() => renderer!.unmount());
+  });
+
+  it("defaults to updatedAt descending and sorts rows accordingly", async () => {
+    const sortResult: WorkItemInventoryResult = {
+      ...result,
+      items: [
+        { ...result.items[0], id: "github:acme/old#1", title: "Old item", updatedAt: "2026-01-01T00:00:00.000Z" },
+        { ...result.items[0], id: "github:acme/new#2", title: "New item", updatedAt: "2026-10-01T00:00:00.000Z" },
+        { ...result.items[0], id: "github:acme/mid#3", title: "Mid item", updatedAt: "2026-05-01T00:00:00.000Z" },
+      ],
+    };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => sortResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    const rows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
+    expect(textContent(rows[0])).toContain("New item");
+    expect(textContent(rows[1])).toContain("Mid item");
+    expect(textContent(rows[2])).toContain("Old item");
+    act(() => renderer!.unmount());
+  });
+
+  it("reverses sort order when user selects earliest-first", async () => {
+    const sortResult: WorkItemInventoryResult = {
+      ...result,
+      items: [
+        { ...result.items[0], id: "github:acme/old#1", title: "Old item", updatedAt: "2026-01-01T00:00:00.000Z" },
+        { ...result.items[0], id: "github:acme/new#2", title: "New item", updatedAt: "2026-10-01T00:00:00.000Z" },
+        { ...result.items[0], id: "github:acme/mid#3", title: "Mid item", updatedAt: "2026-05-01T00:00:00.000Z" },
+      ],
+    };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => sortResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    const sortButton = renderer!.root.findAllByType("button").find(node => node.props["aria-label"] === "排序");
+    if (!sortButton) throw new Error("sort button not found");
+    await act(async () => { sortButton.props.onChange({ currentTarget: { value: "updatedAt:asc" } }); });
+
+    const rows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
+    expect(textContent(rows[0])).toContain("Old item");
+    expect(textContent(rows[1])).toContain("Mid item");
+    expect(textContent(rows[2])).toContain("New item");
+    act(() => renderer!.unmount());
+  });
+
+  it("keeps sort selection after search filter is applied", async () => {
+    const sortResult: WorkItemInventoryResult = {
+      ...result,
+      items: [
+        { ...result.items[0], id: "github:acme/old#1", title: "Old item", updatedAt: "2026-01-01T00:00:00.000Z" },
+        { ...result.items[0], id: "github:acme/new#2", title: "New item", updatedAt: "2026-10-01T00:00:00.000Z" },
+      ],
+    };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => sortResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    // Default sort is updatedAt:desc, search filters to Old item which remains sorted correctly
+    await act(async () => { renderer!.root.findByProps({ "aria-label": "搜索工作项" }).props.onChange({ target: { value: "Old" } }); });
+
+    const rows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
+    expect(textContent(rows[0])).toContain("Old item");
+    act(() => renderer!.unmount());
+  });
+
+  it("places items with missing updatedAt last in descending order", async () => {
+    const sortResult: WorkItemInventoryResult = {
+      ...result,
+      items: [
+        { ...result.items[0], id: "github:acme/missing#1", title: "Missing date", updatedAt: undefined },
+        { ...result.items[0], id: "github:acme/new#2", title: "Has date", updatedAt: "2026-10-01T00:00:00.000Z" },
+      ],
+    };
+    vi.stubGlobal("window", { afkDesktop: { workItems: { list: vi.fn(async () => sortResult) }, openExternal: vi.fn() } });
+    let renderer: ReturnType<typeof create>;
+    await act(async () => { renderer = create(createElement(WorkItemsPage)); });
+
+    const rows = renderer!.root.findAllByProps({ className: "backlog-row work-item-row" });
+    expect(textContent(rows[0])).toContain("Has date");
+    expect(textContent(rows[1])).toContain("Missing date");
     act(() => renderer!.unmount());
   });
 });

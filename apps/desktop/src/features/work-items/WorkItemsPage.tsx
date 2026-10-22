@@ -29,6 +29,7 @@ import { FilterPanel } from "../../components/FilterPanel.js";
 import { SegmentedControl } from "../../components/SegmentedControl.js";
 import { ProviderIcon } from "../../components/ProviderIcon.js";
 import { MarkdownContent } from "../backlog/MarkdownContent.js";
+import { sortBacklogItems, parseBacklogSort, WORK_ITEM_SORT_OPTIONS, type BacklogSortSelection } from "../backlog/backlog-sort.js";
 import "../backlog/backlog.css";
 import "./work-items.css";
 
@@ -229,6 +230,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
   const [platform, setPlatform] = useState<"all" | BacklogPlatform>("all");
   const [project, setProject] = useState("all");
   const [stateFilter, setStateFilter] = useState<GlobalWorkItem["state"] | "all">("ready");
+  const [sortSelection, setSortSelection] = useState<BacklogSortSelection>(() => parseBacklogSort("updatedAt:desc"));
   const [selectedItem, setSelected] = useState<GlobalWorkItem | null>(null);
   const [detailTab, setDetailTab] = useState<DetailTab>("overview");
   const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
@@ -300,12 +302,8 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
       ].join(" ").toLowerCase();
       return !normalized || searchable.includes(normalized);
     });
-    return filtered.sort((a, b) => {
-      const aTime = a.updatedAt ?? "";
-      const bTime = b.updatedAt ?? "";
-      return bTime.localeCompare(aTime);
-    });
-  }, [inventory.items, platform, project, stateFilter, query]);
+    return sortBacklogItems(filtered, sortSelection);
+  }, [inventory.items, platform, project, stateFilter, query, sortSelection]);
 
   const openDetails = (item: GlobalWorkItem) => {
     runRequestVersion.current += 1;
@@ -457,6 +455,7 @@ export function WorkItemsPage({ focusWorkItemId, agentRuntimes = [], defaultAgen
         <SelectMenu label="选择仓库" value={project} variant="filter" triggerPrefix="Issue" search={{ label: "搜索 Issue 来源", pinnedValue: "all", emptyMessage: "没有匹配的 Issue 来源" }} options={projectOptions} onChange={value => { setProject(value); setVisibleLimit(pageSize); }} />
         <SelectMenu label="筛选状态" value={stateFilter} variant="filter" triggerPrefix="状态" options={stateFilterOptions} onChange={value => { setStateFilter(value as GlobalWorkItem["state"] | "all"); setVisibleLimit(pageSize); }} />
         </FilterPanel>
+        <SelectMenu label="排序" value={`${sortSelection.field}:${sortSelection.direction}`} variant="filter" triggerPrefix="排序" options={WORK_ITEM_SORT_OPTIONS} onChange={value => { setSortSelection(parseBacklogSort(value)); setVisibleLimit(pageSize); }} />
       </div>
 
       <div className="backlog-list">

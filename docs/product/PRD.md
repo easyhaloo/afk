@@ -21,7 +21,7 @@ The data needed to render that surface already exists:
 
 | Source | Location | Authority | Notes |
 |---------|----------|-----------|-------|
-| Unified pino day-rotated log | `~/.afk/logs/afk-YYYY-MM-DD.log` | Projection only | Mixed across all work items + commands; written via `fs.writeSync`; the `redirectStdioToLog()` daemon redirect also lands here. Per [[afk-logging-convention]]. |
+| Unified pino day-rotated log | `~/.afk/logs/afk-YYYY-MM-DD.log` | Projection only | Mixed across all work items + commands; written via `fs.writeSync`; the `redirectStdioToLog()` daemon redirect also lands here. Watchdog/QA timeout snapshots share the same root (`~/.afk/logs/timeout/`, `~/.afk/logs/qa/`). Per [[afk-logging-convention]]. |
 | RunEvent JSONL audit spine | `~/.afk/events/<base64url(runId)>.jsonl` | **Authoritative** per ADR-0016 | Per-run, hash-chained, append-only, integrity-verifiable. CLI runId; desktop runId (`desktop-X-Y`) is not the same. Exposed via `afk observe`. |
 
 For work item **#158** the audit spine contains the events needed to

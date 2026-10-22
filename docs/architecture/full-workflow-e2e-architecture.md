@@ -256,8 +256,9 @@ FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 
 | 运行时归档 | `~/.afk/runtime/tasks/archive/` | terminal runtime 记录；`completed` 或 `blocked` 后从 active 移入 archive |
 | 运行时诊断 | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/` | `runtime.json`、`result.json`、`output.log`；active/archive 的 JSON 文件也以相同编码命名 |
 | 闭环 journal | `<manifest.workspaceRoot>/.afk/executions/<executionId>.jsonl` | `requested`、`implementing`、`verifying`、发布/合并及最终状态；每行包含 `executionId` 和 `workItemId` |
-| 实现超时日志 | `$HOME/.claude/logs/afk/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
-| QA 超时日志 | `$HOME/.claude/logs/afk/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
+| 统一日志 | `~/.afk/logs/afk-YYYY-MM-DD.log` | 按天轮转的 pino JSONL 日志；watchdog、QA 超时快照同在此根目录下，可用 `AFK_LOG_DIR` 整体覆盖 |
+| 实现超时日志 | `~/.afk/logs/timeout/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
+| QA 超时日志 | `~/.afk/logs/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
 | loop 状态 | `~/.afk/loop-status.json` | active execution、完成/失败计数、uptime、启动时间和最近状态 |
 | loop PID | `~/.afk/loop.pid` | daemon 控制和单实例检查 |
 

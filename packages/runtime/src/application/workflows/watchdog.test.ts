@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 vi.mock('child_process', () => ({
   spawn: vi.fn(() => ({ pid: 12345, unref: vi.fn() })),
@@ -29,6 +32,19 @@ describe('Watchdog', () => {
     expect(cmd).toContain('tmux kill-session -t "afk-gh-42"');
     expect(cmd).toContain('WATCHDOG:42:afk-gh-42:60000');
     expect(cmd).toContain('/tmp/afk-logs-test/watchdog.log');
+  });
+
+  it('creates the log directory before the detached shell can append to it', () => {
+    const dir = join(tmpdir(), `afk-watchdog-${process.pid}-${Date.now()}`);
+    const wd = new Watchdog(dir);
+    try {
+      wd.arm('afk-gh-42', 60_000, 42, '/tmp/wt-42');
+      // The detached shell appends to <logDir>/watchdog.log; a missing
+      // directory would make that redirect fail silently.
+      expect(existsSync(dir)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('disarm sends SIGTERM to the process group (negative pid)', () => {

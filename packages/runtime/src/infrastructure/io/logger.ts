@@ -3,11 +3,8 @@ import pretty from 'pino-pretty';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Console } from 'node:console';
 import { Writable } from 'node:stream';
-import { join } from 'path';
-import { homedir } from 'os';
-import { closeSync, mkdirSync, openSync, readdirSync, statSync, unlinkSync, writeSync } from 'fs';
-
-const LOG_DIR = join(homedir(), '.afk', 'logs');
+import { closeSync, openSync, writeSync } from 'fs';
+import { ensureLogDir, pruneStaleLogs, resolveLogDir, resolveLogPath } from './log-paths.js';
 
 export interface LogContext {
   runId: string;
@@ -26,36 +23,10 @@ export function withLogContext<T>(context: LogContext, asyncFn: () => Promise<T>
 
 // ── Unified day-rotated log file ────────────────────────────────────────────
 
-/**
- * The single log file all of afk writes to: `~/.afk/logs/afk-YYYY-MM-DD.log`.
- * One file per day — the date in the name IS the rotation: when the date
- * changes, writes switch to a new file (no renaming, nothing to clean up).
- * Files older than 7 days are pruned when a new file is opened.
- */
-export function resolveLogPath(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return join(LOG_DIR, `afk-${d.getFullYear()}-${m}-${day}.log`);
-}
-
-function pruneOldLogs(): void {
-  const cutoff = Date.now() - 7 * 24 * 3600 * 1000;
-  let names: string[];
-  try {
-    names = readdirSync(LOG_DIR);
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    if (!/^afk-\d{4}-\d{2}-\d{2}\.log$/.test(name)) continue;
-    try {
-      if (statSync(join(LOG_DIR, name)).mtimeMs < cutoff) unlinkSync(join(LOG_DIR, name));
-    } catch {
-      /* ignore */
-    }
-  }
-}
+// The destination and its day rotation live in ./log-paths.ts — the single
+// source of truth for every AFK log path. Re-exported here because
+// `resolveLogPath()` is part of this module's published surface.
+export { resolveLogPath };
 
 /**
  * Day log as a real Writable stream with a SYNCHRONOUS `_write`.
@@ -102,13 +73,13 @@ export class DayRotator extends Writable {
       }
     }
     try {
-      mkdirSync(LOG_DIR, { recursive: true });
+      ensureLogDir(resolveLogDir());
     } catch {
       /* ignore */
     }
     this.fd = openSync(file, 'a');
     this.current = file;
-    pruneOldLogs();
+    pruneStaleLogs();
   }
 }
 

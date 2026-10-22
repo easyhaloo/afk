@@ -210,3 +210,21 @@ and rebuilt from event streams when its schema or cached usage is invalid.
 6. 执行隔离 GitHub/GitLab 真实 E2E：Issue → claim → agent → QA → PR/MR → human merge → dependency unlock → timeline → dry-run replay。
 
 在以上门禁完成前，事件流可用于诊断、对账和 golden trace 比较，但不能成为自动合并、状态恢复或外部副作用授权的唯一依据。
+
+## 8. 日志落盘约定
+
+所有 AFK 日志都写在同一个根目录下，默认 `~/.afk/logs`。路径由 `packages/runtime/src/infrastructure/io/log-paths.ts` 统一给出，其它模块不得自行拼接日志目录。
+
+| 位置 | 内容 | 保留策略 |
+| --- | --- | --- |
+| `~/.afk/logs/afk-YYYY-MM-DD.log` | 按天轮转的 pino JSONL 日志；TTY 下 stderr 另有彩色版本 | 7 天，打开新文件时清理 |
+| `~/.afk/logs/watchdog.log` | watchdog 触发记录 | 7 天 |
+| `~/.afk/logs/timeout/timeout-<iid>-<timestamp>.log` | workflow 超时时捕获的 tmux pane | 7 天 |
+| `~/.afk/logs/qa/timeout-<backlogId>-<timestamp>.log` | QA 超时时捕获的 Agent 输出 | 7 天 |
+
+| 环境变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `AFK_LOG_DIR` | `~/.afk/logs` | 日志根目录；上表所有子路径随之整体迁移。 |
+| `LOG_LEVEL` | `info` | pino 日志级别，启动时读取。 |
+
+历史遗留：watchdog 与 QA 的超时快照曾经写在 `~/.claude/logs/afk/`（Claude Code 的家目录），是统一日志改造时的遗漏，现已并入上述根目录。`tests/contract/log-paths.test.ts` 守卫该约定，禁止再出现第二个日志根目录。

@@ -4,7 +4,7 @@ import { createAgentProvider, registerAgentProvider } from '../../domain/agents/
 import { TrackerBacklogProvider } from '../../domain/backlog/tracker-adapter.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';
@@ -205,18 +205,31 @@ describe('QARunner execution boundary', () => {
       sessionId: 'agent-session-60',
       commits: [],
     });
-    const runner = new QARunner(f.providers, { ...config, qaTimeout: 25 }, {
-      sandboxProvider: f.sandboxProvider,
-      agentProvider: f.agentProvider,
-      executionMode: 'batch',
-      mergeBranch: vi.fn(async () => {}),
-    });
+    f.execution.captureOutput.mockResolvedValue('pane snapshot');
+    const logRoot = await mkdtemp(join(tmpdir(), 'afk-qa-logs-'));
+    const previousLogDir = process.env.AFK_LOG_DIR;
+    process.env.AFK_LOG_DIR = logRoot;
+    try {
+      const runner = new QARunner(f.providers, { ...config, qaTimeout: 25 }, {
+        sandboxProvider: f.sandboxProvider,
+        agentProvider: f.agentProvider,
+        executionMode: 'batch',
+        mergeBranch: vi.fn(async () => {}),
+      });
 
-    await expect(runner.process('60')).resolves.toMatchObject({
-      success: false,
-      failureCode: 'qa_timeout',
-    });
-    expect(f.execution.waitForResult).toHaveBeenCalledWith({ completionTimeoutMs: 25 });
+      await expect(runner.process('60')).resolves.toMatchObject({
+        success: false,
+        failureCode: 'qa_timeout',
+      });
+      expect(f.execution.waitForResult).toHaveBeenCalledWith({ completionTimeoutMs: 25 });
+      // The snapshot belongs under the AFK log root — not a second root.
+      const snapshots = await readdir(join(logRoot, 'qa'));
+      expect(snapshots).toEqual([expect.stringMatching(/^timeout-60-\d+\.log$/)]);
+    } finally {
+      if (previousLogDir === undefined) delete process.env.AFK_LOG_DIR;
+      else process.env.AFK_LOG_DIR = previousLogDir;
+      await rm(logRoot, { recursive: true, force: true });
+    }
   });
 
   it('passes tmux only to the sandbox for interactive QA', async () => {

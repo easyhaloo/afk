@@ -1,8 +1,9 @@
 import { promises as fs } from 'fs';
+import { join } from 'path';
 import { WorktreeManager } from '../../infrastructure/git/index.js';
 import { captureWorktreeDiagnostics } from '../../infrastructure/git/worktree-diagnostics.js';
 import { createTmuxClient, type TmuxClient } from '../../infrastructure/tmux/index.js';
-import { configureStatusline, logger, getLogContext, withLogContext } from '../../infrastructure/io/index.js';
+import { configureStatusline, logger, getLogContext, resolveQaTimeoutSnapshotDir, withLogContext } from '../../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../../infrastructure/config/manager.js';
 import { TemplateLoader } from '../../domain/templates/loader.js';
 import { compileTemplate } from '../../domain/templates/compiler.js';
@@ -74,7 +75,7 @@ export class QARunner {
   private readonly onSession?: QARunnerDependencies['onSession'];
 
   constructor(providers: ManagementProviderBundle, config?: WorkflowConfig, deps: QARunnerDependencies = {}) {
-    this.logDir = `${process.env.HOME}/.claude/logs/afk/qa`;
+    this.logDir = resolveQaTimeoutSnapshotDir();
     this.config = config ?? getWorkflowConfig();
     this.providers = providers;
     this.executionMode = deps.executionMode ?? 'batch';
@@ -283,7 +284,7 @@ export class QARunner {
     if (result.status === 'timed_out') {
       const snapshot = await execution.captureOutput({ lines: 100, history: 200 });
       await fs.mkdir(this.logDir, { recursive: true });
-      await fs.writeFile(`${this.logDir}/timeout-${backlogId}-${Date.now()}.log`, snapshot, 'utf-8');
+      await fs.writeFile(join(this.logDir, `timeout-${backlogId}-${Date.now()}.log`), snapshot, 'utf-8');
     }
     await this.markBlocked(backlogId, `QA ${result.status}: ${formatExecutionFailure(result)}`);
     logger.warn({ backlogId, session, worktreePath, diagnostics: formatExecutionFailure(result) }, 'QA execution did not complete');

@@ -14,7 +14,7 @@ import type {
   ExecutionResult,
 } from '../infrastructure/sandbox/types.js';
 import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
-import { getTokenUsage, configureStatusline, logger, withLogContext } from '../infrastructure/io/index.js';
+import { getTokenUsage, configureStatusline, logger, resolveLogDir, resolveTimeoutSnapshotDir, withLogContext } from '../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
 import { loadModules, parseModuleParams } from './modules/_registry.js';
 import type { ModuleParams } from './modules/_registry.js';
@@ -257,7 +257,8 @@ export class WorkflowRunner {
   /** Execution mode (set in run()). */
   private executionMode: ExecutionMode = 'interactive';
   private sandbox: Sandbox | undefined;
-  private logDir: string;
+  /** Where workflow timeout snapshots are written (`<log root>/timeout`). */
+  private timeoutSnapshotDir: string;
   private modules: LifecycleModule[] = [];
   private lifecycleDispatcher?: LifecycleDispatcher;
   private extParams: ModuleParams = {};
@@ -320,8 +321,8 @@ export class WorkflowRunner {
   constructor(providers: ProviderBundle, deps: RunnerDependencies) {
     if (!deps?.observer) throw new Error('WorkflowRunner requires an observer');
     this.tmux = deps?.tmux ?? createTmuxClient();
-    this.logDir = `${process.env.HOME}/.claude/logs/afk`;
-    this.watchdog = deps?.watchdog ?? createWatchdog(this.logDir);
+    this.timeoutSnapshotDir = resolveTimeoutSnapshotDir();
+    this.watchdog = deps?.watchdog ?? createWatchdog(resolveLogDir());
     this.config = deps?.config ?? getWorkflowConfig();
     this.plugins = deps?.plugins;
     this.providers = providers;
@@ -1054,9 +1055,9 @@ export class WorkflowRunner {
     timeoutMs: number
   ): Promise<void> {
     const snapshot = await this.tmux.capturePane(session, 'main', { lines: 100, history: 1000 });
-    const logPath = `${this.logDir}/timeout-${iid}-${Date.now()}.log`;
+    const logPath = join(this.timeoutSnapshotDir, `timeout-${iid}-${Date.now()}.log`);
 
-    await fs.mkdir(this.logDir, { recursive: true });
+    await fs.mkdir(this.timeoutSnapshotDir, { recursive: true });
     await fs.writeFile(logPath, snapshot, 'utf-8');
 
     try {

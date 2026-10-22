@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import type { ChildProcess, SpawnOptions } from 'child_process';
 import { normalizeTmuxSessionName } from '../../infrastructure/tmux/session-name.js';
+import { ensureLogDir } from '../../infrastructure/io/log-paths.js';
 
 /**
  * Detached spawn that works on both Linux and macOS.
@@ -28,6 +29,10 @@ function spawnDetached(file: string, args: string[], opts: SpawnOptions): ChildP
 export class Watchdog {
   private child: ChildProcess | null = null;
 
+  /**
+   * @param logDir Root of the AFK log tree — the watchdog appends its
+   *   trigger line to `<logDir>/watchdog.log`.
+   */
   constructor(private readonly logDir: string) {}
 
   /**
@@ -36,6 +41,10 @@ export class Watchdog {
    */
   arm(session: string, hardTimeoutMs: number, iid: number, worktreePath: string): void {
     this.disarm();
+    // The detached shell appends to <logDir>/watchdog.log on fire. If the
+    // directory is missing the redirect fails silently (stdio is ignored),
+    // so the trigger is lost — create it up front.
+    ensureLogDir(this.logDir);
     const shellCmd =
       `sleep ${hardTimeoutMs / 1000} && ` +
       `tmux kill-session -t "${normalizeTmuxSessionName(session)}" 2>/dev/null || true; ` +

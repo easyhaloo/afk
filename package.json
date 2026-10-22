@@ -46,6 +46,7 @@
     "@afk/core": "workspace:*",
     "commander": "^12.0.0",
     "react": "^19.2.8",
+    "simple-git": "^3.22.0",
     "ink": "^7.1.1"
   }
 }

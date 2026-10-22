@@ -27,8 +27,8 @@ export interface ProviderBundleOptions {
   claimLock?: ClaimLock;
   claimLockFactory?: ClaimLockFactory;
   claimTtlMs?: number;
-  /** State root of the local tracker index. Defaults to `AFK_STATE_DIR`. */
-  trackerStateRoot?: string;
+  /** Directory that holds the local tracker index. Defaults to the workspace. */
+  trackerDirectory?: string;
 }
 
 export function createProviderBundle(
@@ -47,7 +47,7 @@ export function createProviderBundle(
       platform: tracker.platform,
       project: String(tracker.projectId),
       host: tracker.providerHost,
-    }, repoRoot, options.trackerStateRoot),
+    }, repoRoot, options.trackerDirectory),
     branches: new GitBranchProvider(repoRoot),
     changes: new TrackerChangeProvider(tracker),
   };

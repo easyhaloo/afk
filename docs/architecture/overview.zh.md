@@ -122,14 +122,35 @@ tracker 类型。
 ### Tracker 目标解析
 
 命令访问的 provider 项目是一个 tracker 目标：一个平台加一个项目，二者
-一起解析、绝不混用。两半的解析顺序相同：显式的 `--project` / `--platform`
-参数，然后是 `AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM` 环境变量，最后
-是工作目录的 `origin` remote。
+一起解析、绝不混用。项目由第一个能指明它的来源决定：
 
-因此 git remote 是可选的。`afk backlog show` 这类只读命令在配置好目标后
-可以在任意目录下执行；无法解析目标时给出可操作的错误，而不是平台探测
-失败。平台仍未知时，数字项目名或三段及以上路径判定为 GitLab；`owner/repo`
-形态判定为 GitHub，除非只配置了 GitLab 凭据。
+1. 显式的 `--project` 参数
+2. 本地 tracker 索引，按 issue id 命中
+3. 本地 tracker 索引，按工作目录命中
+4. `AFK_TRACKER_PROJECT` 环境变量
+5. 工作目录的 `origin` remote
+
+平台随项目而定：`--platform` 参数优先，然后是记录在该项目旁的平台，然后是
+`AFK_TRACKER_PLATFORM`，然后由项目名形态判定，然后是 git remote，最后是
+已配置的凭据。
+
+因此 git remote 是可选的。`afk backlog show` 这类只读命令在知道目标后可以在
+任意目录下执行；无法解析目标时给出可操作的错误，而不是平台探测失败。平台仍
+未知时，数字项目名或三段及以上路径判定为 GitLab；`owner/repo` 形态判定为
+GitHub，除非只配置了 GitLab 凭据。
+
+### 本地 tracker 索引
+
+`<workspace>/.afk/tracker-projects.json`（未配置工作区时为
+`~/.afk/tracker-projects.json`）记录 AFK 接触过的 provider 项目：项目本身、
+访问时所在的本地仓库，以及涉及的 issue。每次读取
+provider、inventory 和执行都会写入它看到的内容，因此后续命令无需任何配置
+就能把裸 issue id 或工作目录解析到对应项目。多仓库用户由此无需记住项目名、
+也无需逐个仓库配置。
+
+索引只是本地缓存，不是事实来源：provider 状态始终以 provider 为准；索引缺失
+或损坏只意味着"暂未建立关联"。当多个已记录项目都有同一个 issue id 时，工作
+目录所属的项目优先；否则取最近更新的项目，`--project` 始终可以覆盖该选择。
 
 `adopt` 是管理/provider 的可选能力，不支持时明确报错。tracker adapter
 检查 issue 原始状态和元数据，不从 domain 默认状态推断 ready。只接受开放且

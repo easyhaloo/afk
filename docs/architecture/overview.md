@@ -144,17 +144,43 @@ exposes claiming and runnable checks.
 ### Tracker target resolution
 
 The provider project a command talks to is a tracker target: one platform and
-one project, resolved together and never mixed. Both halves resolve in the
-same order: the explicit `--project` / `--platform` flags, then the
-`AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM` environment variables, then the
-`origin` remote of the working directory.
+one project, resolved together and never mixed. The project is chosen by the
+first source that names one:
+
+1. the explicit `--project` flag
+2. the local tracker index, by issue id
+3. the local tracker index, by working directory
+4. the `AFK_TRACKER_PROJECT` environment variable
+5. the `origin` remote of the working directory
+
+The platform follows the project: the `--platform` flag wins, then the
+platform recorded next to the project, then `AFK_TRACKER_PLATFORM`, then the
+shape of the project key, then the git remote, then the configured
+credentials.
 
 The git remote is therefore optional. Read-only commands such as
-`afk backlog show` run from any directory once the target is configured, and
-an unresolvable target fails with an actionable error instead of a platform
+`afk backlog show` run from any directory once the target is known, and an
+unresolvable target fails with an actionable error instead of a platform
 detection failure. When the platform is still unknown, a numeric project key
 or a key with three or more path segments resolves to GitLab; an `owner/repo`
 key resolves to GitHub unless only GitLab credentials are configured.
+
+### Local tracker index
+
+`<workspace>/.afk/tracker-projects.json` — `~/.afk/tracker-projects.json`
+when no workspace is configured — records the provider projects AFK has
+worked with: the project, the local repositories it was
+reached from, and the issues it contains. Every provider read, inventory and
+execution writes what it saw, so a later command resolves a bare issue id or
+a working directory to its provider project without any configuration. This
+is how a user who works across several repositories addresses a project
+without remembering its key or configuring each repository.
+
+The index is a local cache, not a source of truth: provider state always
+comes from the provider, and a missing or damaged index only means "no
+association known". When several recorded projects carry the same issue id,
+the project that owns the working directory wins; otherwise the most recently
+updated project wins, and `--project` always overrides that choice.
 
 `adopt` is an optional management/provider capability; unsupported providers
 return an explicit error. The tracker adapter checks the issue's raw state and

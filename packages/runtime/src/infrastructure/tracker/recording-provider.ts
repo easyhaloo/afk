@@ -39,7 +39,7 @@ export class RecordingBacklogProvider implements BacklogProvider {
     private readonly provider: BacklogProvider,
     private readonly identity: TrackerIdentity,
     private readonly cwd: string,
-    private readonly stateRoot?: string,
+    private readonly trackerDirectory?: string,
   ) {
     this.capabilities = provider.capabilities;
   }
@@ -120,6 +120,6 @@ export class RecordingBacklogProvider implements BacklogProvider {
       host: this.identity.host,
       cwd: this.cwd,
       issues,
-    }, this.stateRoot);
+    }, this.trackerDirectory);
   }
 }

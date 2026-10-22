@@ -77,20 +77,20 @@ describe('global provider catalog factory', () => {
 });
 
 describe('tracker target resolution outside a git repository', () => {
-  let stateRoot: string;
-  let previousStateRoot: string | undefined;
+  let workspace: string;
+  let previousWorkspace: string | undefined;
 
   beforeEach(() => {
-    // The local tracker index is machine state; the tests must not read it.
-    stateRoot = mkdtempSync(join(tmpdir(), 'afk-tracker-factory-'));
-    previousStateRoot = process.env.AFK_STATE_DIR;
-    process.env.AFK_STATE_DIR = stateRoot;
+    // The local tracker index is workspace state; the tests must not read it.
+    workspace = mkdtempSync(join(tmpdir(), 'afk-tracker-factory-'));
+    previousWorkspace = process.env.AFK_WORKSPACE;
+    process.env.AFK_WORKSPACE = workspace;
   });
 
   afterEach(() => {
-    rmSync(stateRoot, { recursive: true, force: true });
-    if (previousStateRoot === undefined) delete process.env.AFK_STATE_DIR;
-    else process.env.AFK_STATE_DIR = previousStateRoot;
+    rmSync(workspace, { recursive: true, force: true });
+    if (previousWorkspace === undefined) delete process.env.AFK_WORKSPACE;
+    else process.env.AFK_WORKSPACE = previousWorkspace;
     delete process.env.GITHUB_TOKEN;
     delete process.env.AFK_TRACKER_PROJECT;
     mocks.resolveRemoteTarget.mockReset();

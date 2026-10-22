@@ -46,11 +46,14 @@ Every provider-backed command needs to know which provider project to talk
 to. AFK resolves that target in this order:
 
 1. the `--project` / `--platform` command-line flags
-2. the `AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM` environment variables
-3. the `origin` remote of the current git repository
+2. the local tracker index, by issue id — AFK wrote that association when it
+   last worked with the issue
+3. the local tracker index, by working directory
+4. the `AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM` environment variables
+5. the `origin` remote of the current git repository
 
 The git remote is optional, so read-only commands such as `afk backlog show`
-work from any directory once the target is configured:
+work from any directory once the target is known:
 
 ```bash
 export AFK_TRACKER_PROJECT=my-org/my-repo
@@ -62,6 +65,26 @@ When the platform is still unknown, a numeric project key (`202`) or a key
 with three or more path segments (`group/sub/project`) resolves to GitLab,
 and an `owner/repo` key resolves to GitHub unless only GitLab credentials
 are configured.
+
+### Local tracker index
+
+AFK keeps a local index of the provider projects it has worked with, in
+the workspace: `<workspace>/.afk/tracker-projects.json`, or
+`~/.afk/tracker-projects.json` when no workspace is configured. Every backlog
+listing, issue lookup, inventory and execution writes what it saw: the
+provider project, the repository it was reached from, and the issues it
+touched.
+
+That index is what makes a bare issue id enough, in any directory:
+
+```bash
+afk backlog show --id 229
+```
+
+With several repositories AFK learns the association on its own: standing in
+a repository selects its project, and an issue id selects the project the
+issue belongs to. No per-repository configuration is required. The index is a
+local cache — provider state always comes from the provider.
 
 ## Basic Usage
 

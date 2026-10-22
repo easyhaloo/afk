@@ -103,10 +103,17 @@ and its shared dependencies.
 GITLAB_TOKEN=          # GitLab API token
 GITLAB_URL=            # GitLab instance URL
 GITHUB_TOKEN=          # GitHub API token
+AFK_WORKSPACE=         # Workspace root; holds <workspace>/.afk local state
 AFK_TRACKER_PROJECT=   # Provider project fallback when cwd has no git remote
 AFK_TRACKER_PLATFORM=  # Provider platform fallback (github|gitlab)
 AFK_TMUX_SESSION=      # tmux session name (default: afk)
 ```
+
+`AFK_WORKSPACE` is the only knob for workspace-local state: the local tracker
+index lives in `<workspace>/.afk/tracker-projects.json`, or
+`~/.afk/tracker-projects.json` when no workspace is configured. Claim leases
+stay machine-wide under `AFK_STATE_DIR` (`~/.afk/state`) so two worktrees
+cannot claim the same issue.
 
 ## Related projects
 

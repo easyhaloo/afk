@@ -68,8 +68,8 @@ export interface TrackerTargetOptions {
   credentials?: () => TrackerTargetCredentials;
   /** Local tracker index override. Defaults to the index read from disk. */
   store?: TrackerStore;
-  /** State root of the local tracker index. Defaults to `AFK_STATE_DIR`. */
-  stateRoot?: string;
+  /** Directory that holds the local tracker index. Defaults to the workspace. */
+  trackerDirectory?: string;
 }
 
 export interface TrackerTarget {
@@ -110,7 +110,7 @@ export async function resolveTrackerTarget(options: TrackerTargetOptions = {}): 
     };
   }
 
-  const store = options.store ?? readTrackerStore(options.stateRoot);
+  const store = options.store ?? readTrackerStore(options.trackerDirectory);
   let selection = selectProject({ store, cwd, flagProject, envProject, issueId: trimmed(options.issueId) });
   if (!selection) {
     const remote = await resolveRemoteTarget(cwd);

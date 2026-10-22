@@ -31,12 +31,11 @@ export function registerQACommands(program: Command): void {
         const agentRuntime = await prepareAgentRuntime(resolveAgentRuntimeOptions(agentProviderName, config, options));
         const agentProvider = createAgentProvider(agentProviderName);
         // QA never claims work; use the management bundle so verification does
-        // not require an implementation-only atomic claim capability. The
-        // backlog id takes part in the target lookup, so QA also works from a
-        // directory that is not a git repository.
+        // not require an implementation-only atomic claim capability. QA runs
+        // inside the workspace, so the target follows the working directory
+        // rather than the backlog id.
         const target = await resolveTrackerTarget({
           project: options.project,
-          issueId: options.backlogId,
           cwd: process.cwd(),
         });
         const providers = await createManagementProviders(target.projectId, process.cwd(), target.platform, target.host);

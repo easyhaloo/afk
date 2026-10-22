@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
+import { workspaceStateDirectory } from '../workspace.js';
 
 /**
  * Tracker store — the local record of the provider projects AFK has worked
@@ -65,14 +65,19 @@ const MAX_PATHS_PER_PROJECT = 20;
 /** An untyped JSON object, narrowed from `unknown`. */
 type UnknownObject = { [key: string]: unknown };
 
-/** The file that holds the local tracker index. */
-export function trackerStorePath(stateRoot?: string): string {
-  return join(stateRoot ?? defaultStateRoot(), 'tracker-projects.json');
+/**
+ * The file that holds the local tracker index.
+ *
+ * The index belongs to the AFK workspace: `<workspace>/.afk/tracker-projects.json`,
+ * or AFK's home directory when no workspace is configured.
+ */
+export function trackerStorePath(directory?: string): string {
+  return join(directory ?? workspaceStateDirectory(), 'tracker-projects.json');
 }
 
 /** Read the local tracker index. A missing or damaged file reads as empty. */
-export function readTrackerStore(stateRoot?: string): TrackerStore {
-  const path = trackerStorePath(stateRoot);
+export function readTrackerStore(directory?: string): TrackerStore {
+  const path = trackerStorePath(directory);
   if (!existsSync(path)) return { version: STORE_VERSION, projects: {} };
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
@@ -105,9 +110,9 @@ export function readTrackerStore(stateRoot?: string): TrackerStore {
  * The write is best effort: a failure here must never break the command that
  * produced the knowledge.
  */
-export function recordTrackerActivity(activity: TrackerActivity, stateRoot?: string): void {
+export function recordTrackerActivity(activity: TrackerActivity, directory?: string): void {
   try {
-    const store = readTrackerStore(stateRoot);
+    const store = readTrackerStore(directory);
     const key = projectKey(activity.platform, activity.project, activity.host);
     const existing = store.projects[key];
     const seenAt = new Date().toISOString();
@@ -131,7 +136,7 @@ export function recordTrackerActivity(activity: TrackerActivity, stateRoot?: str
     }
     record.issues = capIssues(record.issues);
     store.projects[key] = record;
-    writeTrackerStore(store, stateRoot);
+    writeTrackerStore(store, directory);
   } catch {
     // The index is an optimisation; losing a write is not worth failing over.
   }
@@ -206,8 +211,8 @@ export function trackerIdentityOf(reference: {
   return { project, host };
 }
 
-function writeTrackerStore(store: TrackerStore, stateRoot?: string): void {
-  const path = trackerStorePath(stateRoot);
+function writeTrackerStore(store: TrackerStore, directory?: string): void {
+  const path = trackerStorePath(directory);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temporaryPath = join(dirname(path), `.tracker-projects-${randomUUID()}.tmp`);
   try {
@@ -246,10 +251,6 @@ function repositoryRoot(cwd?: string): string | undefined {
     if (parent === directory) return undefined;
     directory = parent;
   }
-}
-
-function defaultStateRoot(): string {
-  return process.env.AFK_STATE_DIR ?? join(homedir(), '.afk', 'state');
 }
 
 function isInside(parent: string, child: string): boolean {

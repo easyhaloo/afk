@@ -46,10 +46,12 @@ export GITLAB_URL=https://gitlab.company.com   # 可选，默认 gitlab.com
 顺序解析该目标：
 
 1. 命令行参数 `--project` / `--platform`
-2. 环境变量 `AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM`
-3. 当前 git 仓库的 `origin` remote
+2. 本地 tracker 索引，按 issue id 命中——AFK 上次处理该 issue 时写下的关联
+3. 本地 tracker 索引，按当前目录命中
+4. 环境变量 `AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM`
+5. 当前 git 仓库的 `origin` remote
 
-git remote 是可选的，因此 `afk backlog show` 这类只读命令在配置好目标后
+git remote 是可选的，因此 `afk backlog show` 这类只读命令在知道目标后
 可以在任意目录下执行：
 
 ```bash
@@ -60,6 +62,24 @@ afk backlog show --id 123
 
 平台仍无法确定时，数字项目名（`202`）或三段及以上路径（`group/sub/project`）
 判定为 GitLab；`owner/repo` 形态判定为 GitHub，除非只配置了 GitLab 凭据。
+
+### 本地 tracker 索引
+
+AFK 把接触过的 provider 项目记在本地索引里，位置随工作区而定：
+`<workspace>/.afk/tracker-projects.json`；未配置工作区时为
+`~/.afk/tracker-projects.json`。每次 backlog 列表、
+issue 查询、inventory 和执行都会写入它看到的内容：provider 项目、访问时
+所在的仓库、以及涉及的 issue。
+
+正是这个索引让"裸 issue id"在任何目录下都够用：
+
+```bash
+afk backlog show --id 229
+```
+
+多仓库场景下关联关系由 AFK 自己建立：站在某个仓库里就选中它的项目，
+给出 issue id 就选中它所属的项目，不需要给每个仓库单独配置。索引只是本地
+缓存——provider 状态始终以 provider 为准。
 
 ## 基本使用
 

@@ -39,17 +39,17 @@ function stubProvider(): BacklogProvider {
 }
 
 describe('recording backlog provider', () => {
-  let stateRoot: string;
+  let directory: string;
   let repository: string;
 
   beforeEach(() => {
-    stateRoot = mkdtempSync(join(tmpdir(), 'afk-recording-provider-'));
+    directory = mkdtempSync(join(tmpdir(), 'afk-recording-provider-'));
     repository = mkdtempSync(join(tmpdir(), 'afk-recording-repo-'));
     mkdirSync(join(repository, '.git'), { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(stateRoot, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true });
     rmSync(repository, { recursive: true, force: true });
   });
 
@@ -58,12 +58,12 @@ describe('recording backlog provider', () => {
       stubProvider(),
       { platform: 'github', project: 'owner/repo' },
       repository,
-      stateRoot,
+      directory,
     );
 
     await provider.get('229');
 
-    const store = readTrackerStore(stateRoot);
+    const store = readTrackerStore(directory);
     expect(store.projects['github::owner/repo']).toMatchObject({
       platform: 'github',
       project: 'owner/repo',
@@ -77,12 +77,12 @@ describe('recording backlog provider', () => {
       stubProvider(),
       { platform: 'github', project: 'owner/repo' },
       repository,
-      stateRoot,
+      directory,
     );
 
     await provider.list();
 
-    expect(Object.keys(readTrackerStore(stateRoot).projects['github::owner/repo'].issues)).toEqual(['229']);
+    expect(Object.keys(readTrackerStore(directory).projects['github::owner/repo'].issues)).toEqual(['229']);
   });
 
   it('keeps a GitLab instance host with the project', async () => {
@@ -90,12 +90,12 @@ describe('recording backlog provider', () => {
       stubProvider(),
       { platform: 'gitlab', project: 'team/api', host: 'git.corp' },
       repository,
-      stateRoot,
+      directory,
     );
 
     await provider.get('229');
 
-    expect(readTrackerStore(stateRoot).projects['gitlab:git.corp:team/api']).toMatchObject({
+    expect(readTrackerStore(directory).projects['gitlab:git.corp:team/api']).toMatchObject({
       platform: 'gitlab',
       project: 'team/api',
       host: 'git.corp',

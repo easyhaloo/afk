@@ -291,6 +291,14 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 
 归档命名必须包含可回查的 `workItemId` 和时间；截图至少覆盖任务列表/详情、运行中或 runtime 视图、QA/状态终态和关键 workflow/template 页面。截图只能证明可见 UI 状态，不能替代 Provider 状态、事件完整性或 runtime 文件。
 
+### 7.3 QA 证据的对外出口（2026-10-22）
+
+QA 的验证证据不再只留在本机运行时归档里。Change Request 正文仍以两行开头（`QA: PASS` 与 `Closes #<id>`），runner 在其后追加 `## Verification Evidence` 段：先是 agent 返回的 `summary`，再是 `requiredChecks` 逐条 AC 的命令与预期，最后是 `### Artifacts` 附件链接。二进制产物由 Agent 写进工作树的 `.afk/artifacts.txt`（一行一个绝对路径），runner 在发布时经 `TrackerProvider.uploadArtifacts` 上传到 provider 并回填链接；GitHub 侧落到该工作项专属的 pre-release，GitLab 侧落到项目 upload。附件缺失不是失败，但 runner 会在运行时活动里留痕，避免"已验证且带附件"与"已验证但无附件"看起来一样。
+
+GitHub 侧的附件 release 不能是 draft：draft 的 `browser_download_url` 在浏览器里是 404，GitHub 只允许用带 token 的 `GET /repos/{owner}/{repo}/releases/assets/{asset_id}` 取内容，PR 正文里的链接点不开。实测 draft 附件经该 API 端点返回 200，published 后的 `browser_download_url` 无需认证即返回 200 且字节一致，所以附件 release 以 `prerelease: true` 发布：不占用 "Latest release"，链接却是评审者能直接打开的。重跑同一工作项时复用同一个 release，GitHub 拒绝同名附件，所以上传前先删除旧附件。
+
+这条链路此前从未接通：`TrackerProvider.uploadArtifacts` 有 GitLab 实现却没有调用方，GitHub 实现是返回空串的 TODO 空壳。Backlog 229 的 QA 因此只发出两行正文，逐条 AC 证据只落在 `~/.afk/runtime/tasks/diagnostics/<runId>/result.json`，二进制产物无处可寻（QA 提交里 `.afk/` 文件数为 0）。回归测试覆盖证据渲染、change provider 的上传接线与上传失败降级、GitHub pre-release 的创建与复用、同名附件先删后传、单个附件失败不影响其余附件，以及 runner 在缺清单时的留痕。
+
 ## 8. 验证边界与建议用例
 
 | 层级 | 应验证什么 | 可接受证据 | 不能证明什么 |

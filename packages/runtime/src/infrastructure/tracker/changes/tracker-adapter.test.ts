@@ -30,6 +30,72 @@ describe('TrackerChangeProvider', () => {
     expect(tracker.createMR).toHaveBeenCalledWith(expect.objectContaining({ description: 'QA: PASS\nCloses owner/issues#158' }));
   });
 
+  it('appends the verification evidence below the two-line reference', async () => {
+    const tracker = {
+      platform: 'github', projectId: 'owner/code',
+      createMR: vi.fn().mockResolvedValue(9),
+      getMR: vi.fn().mockResolvedValue({ id: 9, state: 'opened', sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' }),
+    } as unknown as TrackerProvider;
+
+    await new TrackerChangeProvider(tracker).create({
+      backlog: { id: '158', title: 'Item', workItemId: 'github:owner/issues#158' } as BacklogItem,
+      sourceBranch: 'qa', targetBranch: 'main',
+      evidence: {
+        summary: 'The acceptance criteria were re-run independently.',
+        checks: [{ command: 'pnpm exec playwright test boot', expected: '5 passed' }],
+      },
+    });
+
+    const description = vi.mocked(tracker.createMR).mock.calls[0][0].description!;
+    expect(description.startsWith('QA: PASS\nCloses owner/issues#158\n\n')).toBe(true);
+    expect(description).toContain('## Verification Evidence');
+    expect(description).toContain('The acceptance criteria were re-run independently.');
+    expect(description).toContain('| `pnpm exec playwright test boot` | 5 passed |');
+  });
+
+  it('uploads the registered artifacts and links them from the description', async () => {
+    const tracker = {
+      platform: 'github', projectId: 'owner/code',
+      createMR: vi.fn().mockResolvedValue(9),
+      getMR: vi.fn().mockResolvedValue({ id: 9, state: 'opened', sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' }),
+      uploadArtifacts: vi.fn().mockResolvedValue([{ name: 'boot.png', url: 'https://github.test/releases/boot.png' }]),
+    } as unknown as TrackerProvider;
+
+    await new TrackerChangeProvider(tracker).create({
+      backlog: { id: '158', title: 'Item', workItemId: 'github:owner/issues#158' } as BacklogItem,
+      sourceBranch: 'afk/backlog-158-qa', targetBranch: 'main',
+      worktreePath: '/tmp/qa-158',
+      commitSha: 'abc123',
+    });
+
+    expect(tracker.uploadArtifacts).toHaveBeenCalledWith('/tmp/qa-158', {
+      backlogId: '158', sourceBranch: 'afk/backlog-158-qa', targetCommitish: 'abc123',
+    });
+    const description = vi.mocked(tracker.createMR).mock.calls[0][0].description!;
+    expect(description).toContain('### Artifacts');
+    expect(description).toContain('- [boot.png](https://github.test/releases/boot.png)');
+  });
+
+  it('publishes the text evidence when the artifact upload fails', async () => {
+    const tracker = {
+      platform: 'github', projectId: 'owner/code',
+      createMR: vi.fn().mockResolvedValue(9),
+      getMR: vi.fn().mockResolvedValue({ id: 9, state: 'opened', sourceBranch: 'qa', targetBranch: 'main', url: 'https://github.com/owner/code/pull/9' }),
+      uploadArtifacts: vi.fn().mockRejectedValue(new Error('release upload failed')),
+    } as unknown as TrackerProvider;
+
+    await new TrackerChangeProvider(tracker).create({
+      backlog: { id: '158', title: 'Item', workItemId: 'github:owner/issues#158' } as BacklogItem,
+      sourceBranch: 'qa', targetBranch: 'main',
+      worktreePath: '/tmp/qa-158',
+      evidence: { summary: 'The acceptance criteria were re-run independently.' },
+    });
+
+    const description = vi.mocked(tracker.createMR).mock.calls[0][0].description!;
+    expect(description).toContain('The acceptance criteria were re-run independently.');
+    expect(description).not.toContain('### Artifacts');
+  });
+
   it('verifies the exact canonical issue through provider-native readback', async () => {
     const tracker = {
       platform: 'github', projectId: 'owner/code',

@@ -310,8 +310,12 @@ export class QARunner {
       if (existing && (existing.state !== 'open' || existing.sourceBranch !== verificationBranch || existing.targetBranch !== targetBranch)) {
         throw new Error(`existing change request ${existing.id} does not match QA branch and target`);
       }
+      await this.recordArtifactManifest(backlogId, worktreePath);
       const mr = existing ?? await this.providers.changes.create({
         backlog, sourceBranch: verificationBranch, targetBranch, draft: false,
+        evidence: { summary: signal.summary, checks: signal.requiredChecks },
+        worktreePath,
+        commitSha: commitSha || undefined,
       });
       await this.afterPublication?.(mr);
       if (activeRework) {
@@ -335,6 +339,38 @@ export class QARunner {
       await this.markBlocked(backlogId, summary);
       logger.error({ backlogId, error }, 'QA failed: terminal routing error');
       return { success: false, summary, failureCode: 'provider_change_unconfirmed' };
+    }
+  }
+
+  /**
+   * Leave a trace when a QA run published no binary evidence. A missing
+   * `.afk/artifacts.txt` is not a failure — a run may produce no artifacts —
+   * but it must not look like a verified run with attachments.
+   */
+  private async recordArtifactManifest(backlogId: string, worktreePath: string): Promise<void> {
+    const marker = join(worktreePath, '.afk', 'artifacts.txt');
+    try {
+      const content = await fs.readFile(marker, 'utf-8');
+      const paths = content.split('\n').map(line => line.trim()).filter(Boolean);
+      logger.info({ backlogId, worktreePath, artifacts: paths.length }, 'QA artifact manifest found');
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn({ backlogId, worktreePath, error }, 'failed to read the QA artifact manifest');
+        return;
+      }
+    }
+    logger.warn({ backlogId, worktreePath }, 'QA published no artifact manifest; no binary evidence was registered');
+    const runId = getLogContext()?.runId;
+    if (!runId) return;
+    try {
+      await this.runtimeManager.appendActivity(runId, {
+        kind: 'qa',
+        message: 'no artifact manifest was registered for this QA run',
+        detail: `Expected ${marker} to list the binary evidence of the run.`,
+      });
+    } catch (error) {
+      logger.warn({ runId, error }, 'failed to record the missing QA artifact manifest');
     }
   }
 

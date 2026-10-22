@@ -4,7 +4,7 @@ import { createAgentProvider, registerAgentProvider } from '../../domain/agents/
 import { TrackerBacklogProvider } from '../../domain/backlog/tracker-adapter.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BudgetStore } from '../workflows/budget-store.js';

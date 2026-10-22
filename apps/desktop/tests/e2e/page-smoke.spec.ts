@@ -1,4 +1,5 @@
 import { test, expect } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 
 /**
  * Per-page smoke sweep: visit every renderer view and assert the page loads
@@ -49,7 +50,7 @@ test.describe("every page loads cleanly", () => {
     for (const [label, key] of NAV_PAGES) {
       problems.length = 0;
 
-      const button = page.locator(".primary-nav button", { hasText: label });
+      const button = navButton(page, label);
       await expect(button, `nav item ${label}`).toBeVisible();
       await button.click();
 
@@ -58,7 +59,7 @@ test.describe("every page loads cleanly", () => {
 
       // The active nav item is the signal the view actually rendered.
       await expect(
-        page.locator(`.primary-nav button.active`, { hasText: label }),
+        page.locator(".nav-item.active").filter({ hasText: label }),
         `${key} became active`,
       ).toBeVisible();
 

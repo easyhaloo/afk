@@ -115,7 +115,8 @@
 .workspace-switcher span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-switcher svg { flex-shrink: 0; color: var(--afk-muted); }
 .workspace-switcher:hover:not(:disabled) { border-color: var(--afk-accent-border); background: var(--afk-panel-subtle); }
-.sidebar-quick-find { margin-top: auto; padding-top: 16px; }
+/* The bottom constant area (.sidebar-bottom) owns the bottom anchoring. */
+.sidebar-quick-find { padding-top: 16px; }
 .sidebar-quick-find .select-menu-trigger { width: 100%; }
 .sidebar-quick-find .select-menu-popover { top: auto; bottom: calc(100% + 8px); }
 .environment-page .environment-grid { display: grid; }
@@ -131,7 +132,6 @@
   .selection-filter-panel { right: auto; left: 0; }
   .selection-filter-chips { max-width: 100%; }
   .resource-toolbar .selection-segments { max-width: 100%; }
-  .sidebar-quick-find { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .selection-segments button, .selection-filter-trigger, .resource-search { transition: none; }

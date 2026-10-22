@@ -1,4 +1,5 @@
 import { test, expect } from "./_helpers/launch.js";
+import { navButton } from "./_helpers/nav.js";
 import { seedSelectionInventory } from "./_helpers/inventory.js";
 import { IPC_CHANNELS } from "../../shared/ipc-contract.js";
 import { INVENTORY } from "./fixtures/provider-inventory.mjs";
@@ -49,7 +50,7 @@ test.describe("global work items", () => {
       ipcMain.handle(channel, () => inventory);
     }, { channel: IPC_CHANNELS.workItemsList, inventory });
     for (const theme of ["浅色", "深色"]) {
-      await page.locator(".primary-nav").getByRole("button", { name: "设置", exact: true }).click();
+      await navButton(page, "设置").click();
       await page.getByRole("radiogroup", { name: "界面主题" }).getByText(theme).click();
       await page.locator(".primary-nav").getByRole("button", { name: "工作项", exact: true }).click();
       await page.getByRole("button", { name: "刷新工作项" }).click();

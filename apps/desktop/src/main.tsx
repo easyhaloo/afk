@@ -344,9 +344,15 @@ function App() {
     { label: "Work", title: "工作", items: [["backlog", "工作项", ClipboardList], ["queue", "运行中心", Workflow]] },
     { label: "Automation", title: "自动化", items: [["workflows", "工作流", Boxes], ["agents", "Agents", Activity]] },
     { label: "Resources", title: "资源", items: [["repositories", "代码仓库", FolderOpen], ["containers", "执行环境", Container], ["ssh", "SSH 主机", Terminal]] },
-    { label: "System", title: "系统", items: [["events", "活动记录", Archive], ["settings", "设置", Settings2]] },
+    { label: "System", title: "系统", items: [["events", "活动记录", Archive]] },
   ];
-  const nav = navGroups.flatMap((group) => group.items);
+  /* 设置 is a global entry, not a business page: it renders in the sidebar's
+     bottom constant area (PRD-2026-10-22-001) but stays in the nav list so
+     快速查找 can still reach it. */
+  const globalNav: NavigationItem = ["settings", "设置", Settings2];
+  const nav = [...navGroups.flatMap((group) => group.items), globalNav];
+  const navGroupTitles = new Map(navGroups.flatMap((group) => group.items.map(([key]) => [key, group.title] as const)));
+  navGroupTitles.set("settings", "系统");
   const activeNav = view === "board" ? "queue" : view === "workflowInstances" ? "workflows" : view;
   const title = nav.find(([key]) => key === activeNav)?.[1] ?? "运行";
   const subtitle = view === "workflowInstances" ? "每次运行的工作流快照与执行记录" : activeNav === "queue" ? "本机正在跑的任务，按最近更新排序" : activeNav === "workflows" ? "模板库与项目级可执行模板" : activeNav === "repositories" ? "已授权 Provider 中可访问的仓库" : "";
@@ -407,7 +413,12 @@ function App() {
         <div className="brand"><span className="brand-mark">A</span><strong>AFK <b>/</b> CONTROL</strong><small>LOCAL OPERATIONS</small></div>
         <button type="button" className="workspace-switcher" aria-label="选择本地工作区" title={workspace || "选择本地工作区"} disabled={loading} onClick={() => { void (async () => { try { const target = await window.afkDesktop.chooseWorkspace(); if (target) await refresh(target); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } })(); }}><FolderOpen size={16} /><span>{workspace.split(/[\\/]/).filter(Boolean).at(-1) || "选择工作区"}</span></button>
         <nav className="primary-nav" aria-label="主导航">{navGroups.map((group) => <section className="nav-group" aria-label={group.label} key={group.label}><span className="nav-label">{group.title}</span><span className="nav-group-label">{group.label}</span>{group.items.map(([key, text, Icon]) => <button key={key} className={activeNav === key ? "nav-item active" : "nav-item"} aria-current={activeNav === key ? "page" : undefined} title={text} onClick={() => { if (key === "queue") setRunMode("queue"); activateView(key); }}><Icon size={16} aria-hidden="true" />{text}{key === "agents" && runtimes.length ? <em className="healthy-badge">{availableRuntimeCount}/{runtimeTotal}</em> : null}</button>)}</section>)}</nav>
-        <div className="sidebar-quick-find"><SelectMenu label="快速查找" value={activeNav} options={nav.map(([key, text]) => ({ value: key, label: text, description: navGroups.find(group => group.items.some(([item]) => item === key))?.title }))} search={{ label: "搜索页面" }} onChange={activateView} /></div>
+        <div className="sidebar-bottom">
+          <div className="sidebar-quick-find"><SelectMenu label="快速查找" value={activeNav} options={nav.map(([key, text]) => ({ value: key, label: text, description: navGroupTitles.get(key) }))} search={{ label: "搜索页面" }} onChange={activateView} /></div>
+          <nav className="sidebar-global-nav" aria-label="全局入口">
+            <button type="button" className={activeNav === "settings" ? "nav-item settings-entry active" : "nav-item settings-entry"} aria-current={activeNav === "settings" ? "page" : undefined} title="设置" onClick={() => activateView("settings")}><Settings2 size={16} aria-hidden="true" />设置</button>
+          </nav>
+        </div>
       </aside>
 
       <section className="content-shell">

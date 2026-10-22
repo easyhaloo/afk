@@ -200,10 +200,10 @@ jobs:
           CI: "true"
         run: xvfb-run --auto-servernum --server-args="-screen 0 1600x1200x24" pnpm e2e
 
-      - name: Upload Playwright report on failure
+      - name: Upload Playwright results on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: desktop-e2e-report
-          path: apps/desktop/playwright-report/
+          path: apps/desktop/test-results/
           retention-days: 7

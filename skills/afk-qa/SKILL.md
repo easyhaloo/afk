@@ -66,11 +66,20 @@ the AC independently in the QA worktree.
 
 ### Step 3 — Record per-line results
 
-Per AC line: pass/fail + evidence (command output or response snippet).
-Return the per-line results in the completion payload — the `summary` field
-carries what the run proved, and `requiredChecks` carries one entry per AC
-with the command that was re-run and what it was expected to show. The QA
-runner renders both into the change request description.
+Report the evidence in separated fields; the runner renders each one into its
+own section of the change request.
+
+- `summary` — one sentence stating the verdict. Do not repeat the individual
+  test results there; they belong in `requiredChecks`.
+- `observations` — one entry per behavioural acceptance criterion, each with
+  the claim and how it was observed.
+- `requiredChecks` — one entry per acceptance criterion you re-ran, with the
+  command, what it was expected to show, and what it actually showed. The
+  actual outcome belongs next to the expectation, not in the summary.
+- `notes` — environment facts, tooling caveats, and anything that is not
+  acceptance evidence. A reviewer must be able to tell a caveat from a
+  result without reading around it.
+
 If binary evidence was generated, write paths to `.afk/artifacts.txt`
 (one absolute path per line). The runner uploads every listed file to the
 provider and links it from the change request; a run without that manifest

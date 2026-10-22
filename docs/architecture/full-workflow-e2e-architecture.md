@@ -293,7 +293,7 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 
 ### 7.3 QA 证据的对外出口（2026-10-22）
 
-QA 的验证证据不再只留在本机运行时归档里。Change Request 正文仍以两行开头（`QA: PASS` 与 `Closes #<id>`），runner 在其后追加 `## Verification Evidence` 段：先是 agent 返回的 `summary`，再是 `requiredChecks` 逐条 AC 的命令与预期，最后是 `### Artifacts` 附件链接。二进制产物由 Agent 写进工作树的 `.afk/artifacts.txt`（一行一个绝对路径），runner 在发布时经 `TrackerProvider.uploadArtifacts` 上传到 provider 并回填链接；GitHub 侧落到该工作项专属的 pre-release，GitLab 侧落到项目 upload。附件缺失不是失败，但 runner 会在运行时活动里留痕，避免"已验证且带附件"与"已验证但无附件"看起来一样。
+QA 的验证证据不再只留在本机运行时归档里。Change Request 正文仍以两行开头（`QA: PASS` 与 `Closes #<id>`），runner 在其后追加 `## Verification Evidence` 段，并按性质分层：`summary` 是 agent 的一句话结论，`### Acceptance criteria` 是 `requiredChecks` 逐条 AC 的命令与预期，`### Observations` 是逐条行为断言及其观察方式，`### Artifacts` 是附件链接，`> **Run notes**` 单独承载环境说明与工具注意事项。分层不是排版偏好：一次 QA 产出的三类信息不可互换，混在一段散文里会让评审者无法分辨哪句是验收证据、哪句是环境噪声。二进制产物由 Agent 写进工作树的 `.afk/artifacts.txt`（一行一个绝对路径），runner 在发布时经 `TrackerProvider.uploadArtifacts` 上传到 provider 并回填链接；GitHub 侧落到该工作项专属的 pre-release，GitLab 侧落到项目 upload。附件缺失不是失败，但 runner 会在运行时活动里留痕，避免"已验证且带附件"与"已验证但无附件"看起来一样。
 
 GitHub 侧的附件 release 不能是 draft：draft 的 `browser_download_url` 在浏览器里是 404，GitHub 只允许用带 token 的 `GET /repos/{owner}/{repo}/releases/assets/{asset_id}` 取内容，PR 正文里的链接点不开。实测 draft 附件经该 API 端点返回 200，published 后的 `browser_download_url` 无需认证即返回 200 且字节一致，所以附件 release 以 `prerelease: true` 发布：不占用 "Latest release"，链接却是评审者能直接打开的。重跑同一工作项时复用同一个 release，GitHub 拒绝同名附件，所以上传前先删除旧附件。
 

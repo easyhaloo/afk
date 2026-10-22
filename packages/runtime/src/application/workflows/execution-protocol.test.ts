@@ -82,6 +82,18 @@ describe('batch execution prompt protocol', () => {
     }
   });
 
+  it('asks the QA agent to separate the verdict, the observations and the caveats', () => {
+    const batch = buildBatchPrompt('/goal verify issue #60', 'qa');
+    const interactive = buildExecutionPrompt('/goal verify issue #60', 'interactive', 'qa');
+
+    for (const prompt of [batch, interactive]) {
+      expect(prompt).toContain('"observations"');
+      expect(prompt).toContain('"notes"');
+      expect(prompt).toContain('"requiredChecks"');
+      expect(prompt).toContain('not acceptance evidence');
+    }
+  });
+
   it('keeps the artifact instruction out of prompts that are not QA verification', () => {
     expect(buildBatchPrompt('/goal implement issue #60')).not.toContain('.afk/artifacts.txt');
     expect(buildBatchPrompt('/goal verify issue #60', 'ac')).not.toContain('.afk/artifacts.txt');

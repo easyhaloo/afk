@@ -22,7 +22,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-AFK="$SCRIPT_DIR/../dist/index.js"
+AFK="$SCRIPT_DIR/../apps/cli/dist/index.js"
 
 REPO_A=/tmp/afk-e2e-repo-a
 REPO_B=/tmp/afk-e2e-repo-b

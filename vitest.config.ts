@@ -11,7 +11,7 @@ export default defineConfig({
     environment: 'node',
     testTimeout: 30000,
     pool: 'forks',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.spec.ts', 'tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts'],
     exclude: [...configDefaults.exclude, 'tests/pty/**'],
     coverage: {
       reporter: ['text', 'html'],

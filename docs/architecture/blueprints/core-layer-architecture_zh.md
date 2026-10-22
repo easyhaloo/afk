@@ -19,8 +19,8 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
 
 当前已落地：
 
-- `packages/afk-core` 提供独立的 `@afk/core` workspace package。
-- `packages/afk-application` 提供 inventory、run decision/start 和 observation/query
+- `packages/core` 提供独立的 `@afk/core` workspace package。
+- `packages/application` 提供 inventory、run decision/start 和 observation/query
   的最小用例 facade。
 - CLI `observe executions` 直接调用 `@afk/application` 的
   `queryExecutionHistory`，CLI 只负责参数解析和输出。
@@ -33,9 +33,9 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
   双执行链与 QA 队列已删除；缺失 manifest 时明确拒绝启动。
 - 架构守卫现在检查 Core/Application package 的依赖纯度和 package 边界。
 - backlog 到 core 的状态与执行模式映射收敛为单一实现
-  `packages/afk-application/src/backlog-mapping.ts`，CLI 与 Desktop 共用，
+  `packages/application/src/backlog-mapping.ts`，CLI 与 Desktop 共用，
   不再各维护一份映射表。
-- Electron main 与 `@afk/*` 统一为 ESM。`desktop-client` 的 `type` 改为 `module`，
+- Electron main 与 `@afk/*` 统一为 ESM。`apps/desktop` 的 `type` 改为 `module`，
   main 源码直接 `import` Application 用例，不再经过运行期 CommonJS 桥接产物
   `application.cjs`；`loadApplication()` shim 已删除。沙箱 preload 按 Electron
   要求保持 CJS，源码以 `preload.cts` 表达（`.cts` 恒定产出 `.cjs`），
@@ -49,7 +49,7 @@ AFK 同时提供 CLI、TUI、Electron Desktop 和插件能力。它们应复用�
   同样保留 `dist-electron/provider-inventory.cjs`，因为它是真正内联了
   GitHub/GitLab SDK 的 bundle。`@afk/*` 因此是 devDependency 而非 dependency。
 
-仍需继续收敛根包 `src/application` 中的 Provider SDK 实现、其他 Desktop CLI
+仍需继续收敛根包 `packages/runtime/src/application` 中的 Provider SDK 实现、其他 Desktop CLI
 入口和工作项状态转换；不能将已迁移入口的单路径误写成全仓所有能力迁移完成。
 Desktop 目前对 `@afk/core` 的引用仍限于 `import type`，`decide` / `evolve` /
 `replay` / `resolveExecutionBase` 尚未在 Desktop 侧被调用——本节完成的是状态
@@ -60,13 +60,13 @@ Desktop 已经在复用 Core 的行为函数。
 
 ### 已有基础
 
-核心模型现在位于独立的 `packages/afk-core`：
+核心模型现在位于独立的 `packages/core`：
 
-- `src/model.ts` 定义 `WorkItem`、`Run`、状态和运行决策。
-- `src/reducer.ts` 负责运行事件回放和状态演进。
-- `src/events.ts` 定义运行事件、观察上下文和证据引用。
-- `src/ports.ts` 定义事件存储、证据存储、时钟、ID、指标和追踪 Port。
-- `src/execution-base-policy.ts` 负责执行基线策略。
+- `packages/runtime/src/model.ts` 定义 `WorkItem`、`Run`、状态和运行决策。
+- `packages/runtime/src/reducer.ts` 负责运行事件回放和状态演进。
+- `packages/runtime/src/events.ts` 定义运行事件、观察上下文和证据引用。
+- `packages/runtime/src/ports.ts` 定义事件存储、证据存储、时钟、ID、指标和追踪 Port。
+- `packages/runtime/src/execution-base-policy.ts` 负责执行基线策略。
 
 这些模块大体是纯 TypeScript，已经具备核心层的基本形态。
 
@@ -74,12 +74,12 @@ Desktop 已经在复用 Core 的行为函数。
 
 #### Core 的迁移边界
 
-`packages/afk-core` 已成为正式 workspace package；根包不再维护第二份模型、
+`packages/core` 已成为正式 workspace package；根包不再维护第二份模型、
 事件、Reducer 或 Policy 实现。
 
 #### Domain 层职责过重
 
-`src/domain/backlog` 同时包含：
+`packages/runtime/src/domain/backlog` 同时包含：
 
 - backlog 领域类型；
 - Provider 接口；
@@ -92,14 +92,14 @@ Desktop 已经在复用 Core 的行为函数。
 
 #### Application 层包含基础设施组装
 
-部分 `src/application` 模块直接创建或引用 Git、tmux、配置、日志和 Provider
+部分 `packages/runtime/src/application` 模块直接创建或引用 Git、tmux、配置、日志和 Provider
 实现。这样 application 层既负责业务编排，又负责运行环境组装，CLI 和 Desktop
 难以共享同一套用例。
 
 #### Desktop 的跨进程 DTO 仍是独立边界
 
 Desktop 的 Main 通过 Application adapter 获取工作项数据，并在
-`desktop-client/shared` 中维护跨进程 DTO。DTO 是必要的传输边界，不是第二套
+`apps/desktop/shared` 中维护跨进程 DTO。DTO 是必要的传输边界，不是第二套
 业务规则。当前 Desktop inventory 的 Provider SDK 在 Main 进程内运行，
 通过 Application Port 注入；查询也直接读取经校验的事件流。Provider 细节
 不能泄漏到 service、IPC 或 renderer，否则会产生：
@@ -152,7 +152,7 @@ src/
     presentation/
     composition-root.ts
 
-desktop-client/
+apps/desktop/
   electron/
     adapters/
     services/
@@ -164,8 +164,8 @@ desktop-client/
     features/
 ```
 
-`packages/afk-core` 和 `packages/afk-application` 都应是 workspace package，
-采用仓库中 `packages/afk-workflow-graph` 已使用的 package 构建方式。
+`packages/core` 和 `packages/application` 都应是 workspace package，
+采用仓库中 `packages/workflow-graph` 已使用的 package 构建方式。
 
 ## 分层职责
 
@@ -189,7 +189,7 @@ Core 禁止依赖：
 - Commander、Ink、IPC channel 和 CLI 参数；
 - Provider 标签字符串或平台客户端。
 
-`src/application/backlog-work-item.ts` 中把外部 backlog 模型映射为 Core 模型的逻辑
+`packages/runtime/src/application/backlog-work-item.ts` 中把外部 backlog 模型映射为 Core 模型的逻辑
 属于 adapter/application 边界，不应让 Core 依赖 `BacklogWorkItemInput`、`afk`
 或 `hitl` 这样的外部命名。
 
@@ -332,8 +332,8 @@ Desktop inventory 或执行历史查询调用 CLI，也没有 service 回退路�
 
 ### 阶段一：提取 Core package
 
-- 新建 `packages/afk-core`。
-- 将纯模型、事件、Reducer、Policy 和 Port 放入 `packages/afk-core`。
+- 新建 `packages/core`。
+- 将纯模型、事件、Reducer、Policy 和 Port 放入 `packages/core`。
 - 根包调用方直接依赖 `@afk/core`，不再维护根包 Core 门面。
 - 为 package 增加独立 typecheck、build 和 test。
 - 将架构守卫加入 `core` layer。

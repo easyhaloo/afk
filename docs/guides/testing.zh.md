@@ -23,7 +23,7 @@ AFK TUI 基于 React + Ink 构建，采用分层测试策略。
 **模式**：直接实例化类，调用方法，断言结果
 
 ```typescript
-// src/views/shared/Keyboard.test.ts
+// apps/cli/src/tui/shared/Keyboard.test.ts
 import { KeyboardDispatcher } from './Keyboard';
 
 it('dispatches escape to global handler', () => {
@@ -43,7 +43,7 @@ it('dispatches escape to global handler', () => {
 
 **运行**：
 ```bash
-pnpm exec vitest run src/views/shared/
+pnpm --filter afk exec vitest run src/tui/shared/
 ```
 
 ---
@@ -127,7 +127,7 @@ describe('Notification rendering', () => {
 
 **运行**：
 ```bash
-pnpm dlx vitest --run src/views/
+pnpm --filter afk exec vitest run src/tui/
 ```
 
 ---
@@ -148,7 +148,7 @@ import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const distPath = join(__dirname, '../../dist/index.js');
+const distPath = join(__dirname, '../../apps/cli/dist/index.js');
 
 // Detect node-pty at module load time
 let nodePtyWorks = false;
@@ -208,12 +208,14 @@ pnpm test:e2e:pty
 
 ```
 afk/
-├── src/
-│   ├── views/shared/
-│   │   ├── Keyboard.test.ts      ← 单元测试 (5 tests)
-│   │   └── Registry.test.ts      ← 单元测试 (8 tests)
-│   └── views/board/views/
-│       └── Notification.tsx      ← 组件（无独立测试文件）
+├── apps/
+│   ├── cli/src/tui/             ← CLI 单元及组件测试与源码同目录
+│   └── desktop/tests/           ← 桌面端测试，使用独立配置
+├── packages/
+│   ├── runtime/src/             ← Runtime 测试与源码同目录
+│   ├── core/src/
+│   ├── application/src/
+│   └── workflow-graph/src/
 ├── tests/
 │   ├── e2e/
 │   │   └── codex-runtime.test.ts     ← 单元测试，默认运行
@@ -233,30 +235,67 @@ afk/
 ## 运行测试
 
 ```bash
-# 运行所有测试
-source ~/.nvm/nvm.sh && nvm use lts/iron && pnpm dlx vitest --run
+# 运行共享包、CLI 和仓库测试
+pnpm test
+
+# 桌面端测试
+pnpm --dir apps/desktop test
+
+# 完整运行 CLI 子进程、PTY 和 Electron E2E
+pnpm test:e2e
+
+# 只跑 CLI 流程（先构建可执行文件）
+pnpm test:e2e:cli
 
 # 监听模式（开发时）
-pnpm dlx vitest
+pnpm --filter afk exec vitest
 
 # 只跑单元测试
-pnpm dlx vitest --run src/domain/ src/application/ src/infrastructure/ src/shared/ src/cli/
+pnpm --filter @afk/runtime test
+pnpm --filter afk test
 
 # 只跑组件测试
-pnpm dlx vitest --run src/views/
+pnpm --filter afk exec vitest run src/tui/
 
 # 只跑 PTY E2E（需显式运行，要求真实终端）
 pnpm test:e2e:pty
 
 # 覆盖率
-pnpm dlx vitest --run --coverage
+pnpm --filter afk exec vitest run --coverage
 ```
+
+CLI 流程测试启动生产可执行文件，连接隔离的本地 GitLab HTTP fixture，覆盖命令加载、
+补全、Backlog 创建与接管、标签、中断、重试、合并确认、库存、图生成、审计重放与篡改检测，
+以及执行清单错误。只模拟 Provider 响应，命令解析、SDK 调用和领域状态转换使用真实实现。
+Electron 使用[桌面架构文档](../../apps/desktop/ARCHITECTURE.md#end-to-end-testing)
+中描述的类型化 Runtime fixture。这些测试不运行真实编码 Agent，也不修改远程仓库。
+
+## 真实 Agent 测试
+
+```bash
+# 真实 Claude 协议、代码生成、测试执行与任务投影
+CLAUDE_CODE_SAFE_MODE=1 pnpm test:e2e:claude
+
+# 真实 Codex 实现、独立 QA 与远程 PR
+pnpm test:e2e:codex
+```
+
+Claude 在临时工作区执行；测试宿主会独立检查生成的函数并重新运行其测试。
+安全模式关闭用户自定义配置，保留认证和内置工具；去掉该变量即可包含本地插件和钩子。
+Codex 使用当前仓库的真实 Tracker 与认证，创建专用 Issue 和分支，并校验远程文件差异。
+结束后关闭测试 Issue、PR 并删除本次远程分支，不合并到目标分支。
+仅在需要保留远程产物供检查时设置 `AFK_CODEX_E2E_KEEP=1`。
 
 ---
 
 ## node-pty macOS 安装问题
 
 macOS 可能阻止 `spawn-helper` 执行（`posix_spawnp failed` 或 `permission denied`）。
+
+先检查执行权限；缺失执行位时不需要重新签名：
+```bash
+chmod u+x node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper
+```
 
 **修复脚本**：
 ```bash

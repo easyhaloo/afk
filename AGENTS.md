@@ -3,8 +3,8 @@
 Rules for coding agents working in this repository. For project orientation —
 tech stack, layout, documentation map, and the build/test commands — read
 [`CLAUDE.md`](CLAUDE.md). Desktop rules are owned separately by
-[`desktop-client/ARCHITECTURE.md`](desktop-client/ARCHITECTURE.md); read that
-before touching `desktop-client/`.
+[`apps/desktop/ARCHITECTURE.md`](apps/desktop/ARCHITECTURE.md); read that
+before touching `apps/desktop/`.
 
 ## Hard rules
 
@@ -24,7 +24,7 @@ before touching `desktop-client/`.
   `runId`, `parentId`, `dependsOn`, and `baseBacklogId` have distinct,
   non-interchangeable meanings — see
   [docs/architecture/overview.md](docs/architecture/overview.md#work-item-and-execution-identity).
-- **UI work under `desktop-client/`** must follow
+- **UI work under `apps/desktop/`** must follow
   [docs/architecture/design-system.md](docs/architecture/design-system.md).
 
 ## Documentation

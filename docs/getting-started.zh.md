@@ -10,13 +10,13 @@ git clone https://github.com/easyhaloo/afk.git
 cd afk
 
 # 安装依赖
-npm install
+pnpm install
 
 # 构建
-npm run build
+pnpm build
 
 # 全局安装
-npm link
+pnpm --dir apps/cli link --global
 ```
 
 验证安装：
@@ -27,42 +27,39 @@ afk --help
 
 ## 配置
 
-### GitLab 项目
+### Provider 凭据
 
-创建配置文件 `~/.config/afk/.env`：
-
-```bash
-# GitLab 配置
-GITLAB_TOKEN=glpat-xxxxxxxxxxxxx
-GITLAB_BASE_URL=https://gitlab.company.com/api/v4  # 可选，默认 gitlab.com
-
-# 或使用 git config（推荐）
-cd /path/to/your/project
-git config afk.platform gitlab
-git config afk.project "mygroup/myproject"
-```
-
-### GitHub 项目
+AFK 从环境变量或 provider 自己的 CLI 读取凭据：
 
 ```bash
-# GitHub 配置
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
-GITHUB_OWNER=your-org
-GITHUB_REPO=your-repo
+# GitHub：GITHUB_TOKEN / GH_TOKEN，或 `gh auth login`
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
 
-# 或使用 git config
-cd /path/to/your/project
-git config afk.platform github
-git config afk.owner "your-org"
-git config afk.repo "your-repo"
+# GitLab：GITLAB_TOKEN 加可选的 GITLAB_URL，或 `glab auth login`
+export GITLAB_TOKEN=glpat_xxxxxxxxxxxxx
+export GITLAB_URL=https://gitlab.company.com   # 可选，默认 gitlab.com
 ```
 
-### 平台自动检测
+### Tracker 目标
 
-AFK 会自动检测平台：
-1. 检查 `TRACKER_PLATFORM` 环境变量
-2. 分析 git remote URL
-3. 检查项目配置文件（.gitlab-ci.yml 或 .github/workflows/）
+所有面向 provider 的命令都需要知道要访问哪个 provider 项目。AFK 按以下
+顺序解析该目标：
+
+1. 命令行参数 `--project` / `--platform`
+2. 环境变量 `AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM`
+3. 当前 git 仓库的 `origin` remote
+
+git remote 是可选的，因此 `afk backlog show` 这类只读命令在配置好目标后
+可以在任意目录下执行：
+
+```bash
+export AFK_TRACKER_PROJECT=my-org/my-repo
+export AFK_TRACKER_PLATFORM=github   # 可选，由项目名推断
+afk backlog show --id 123
+```
+
+平台仍无法确定时，数字项目名（`202`）或三段及以上路径（`group/sub/project`）
+判定为 GitLab；`owner/repo` 形态判定为 GitHub，除非只配置了 GitLab 凭据。
 
 ## 基本使用
 
@@ -90,6 +87,12 @@ AFK 默认从当前仓库探测 Provider；需要时可显式选择：
 ```bash
 afk backlog list --platform github
 afk backlog show --id 42 --platform gitlab
+```
+
+在 git 仓库之外执行时，显式给出项目名：
+
+```bash
+afk backlog show --id 42 --project my-org/my-repo --platform github
 ```
 
 Provider 分配规范 Backlog ID；变更单创建与合并由类型化工作流步骤完成，不再提供独立 MR 公共命令。
@@ -142,7 +145,7 @@ cd /path/to/afk
 npm link
 
 # 或直接运行
-node /path/to/afk/dist/index.js --help
+node /path/to/afk/apps/cli/dist/index.js --help
 ```
 
 ### 平台检测错误

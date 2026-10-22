@@ -1,0 +1,87 @@
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { afterEach, describe, expect, it } from 'vitest';
+import { ClaudeCodeProvider } from '@afk/runtime/domain/agents/claude-code';
+import { LocalSandboxProvider } from '@afk/runtime/infrastructure/sandbox/providers/local';
+import { buildExecutionPrompt } from '@afk/runtime/application/workflows/execution-protocol';
+import { fetchTasks } from './board/data/fetcher.js';
+import { TaskRuntimeManager, TaskRuntimeStore } from '@afk/runtime/application/runtime/task-runtime';
+
+const temporaryRoots: string[] = [];
+const exec = promisify(execFile);
+
+afterEach(async () => {
+  await Promise.all(temporaryRoots.splice(0).map(path => rm(path, { recursive: true, force: true })));
+});
+
+describe.runIf(process.env.AFK_REAL_CLAUDE_E2E === '1')('task runtime sandbox integration', () => {
+  it('tracks a full-tool sandbox batch run through the Tasks read model', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-runtime-integration-'));
+    temporaryRoots.push(root);
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace);
+
+    const runId = 'integration-run';
+    const manager = new TaskRuntimeManager(new TaskRuntimeStore(join(root, 'runtime')));
+    const now = new Date().toISOString();
+    await manager.start({
+      runId,
+      backlogId: 'INT-42',
+      title: 'Exercise runtime monitor',
+      phase: 'implementing',
+      status: 'running',
+      sandboxProvider: 'local',
+      executionMode: 'batch',
+      agentProvider: 'claude-code',
+      workspace: process.cwd(),
+      worktree: workspace,
+      branch: 'afk/backlog-INT-42',
+      startedAt: now,
+      heartbeatAt: now,
+    });
+
+    const agent = new ClaudeCodeProvider();
+    const sandbox = await new LocalSandboxProvider().create({
+      worktreePath: workspace,
+      session: 'integration-session',
+      executionMode: 'batch',
+    });
+
+    try {
+      const execution = await sandbox.startAgent({
+        command: agent.buildCommand({ worktreePath: workspace, sessionId: 'integration-session', executionMode: 'batch' }),
+        generation: 1,
+        prompt: buildExecutionPrompt('/goal In this workspace create sum.mjs exporting function sum(a, b) that returns a + b. Create sum.test.mjs using node:test and node:assert/strict to test positive, negative and decimal inputs. Run node --test sum.test.mjs and fix any failures. Do not install dependencies or modify files outside this workspace. Complete only after the tests pass.', 'batch', 'task'),
+        signalType: 'goal_complete',
+        executionMode: 'batch',
+        metadata: { provider: 'claude-code', transport: 'process' },
+        parseLine: line => agent.parseLine(line),
+      });
+      const result = await execution.waitForResult({ completionTimeoutMs: 180_000 });
+      const output = await execution.captureOutput();
+      await manager.writeDiagnostics(runId, { result, output });
+      await manager.heartbeat(runId, { progress: 'agent completed' });
+
+      expect(result).toMatchObject({ status: 'completed', structuredOutput: { type: 'goal_complete' } });
+      await exec(process.execPath, ['--test', 'sum.test.mjs'], { cwd: workspace, timeout: 10_000 });
+      await exec(process.execPath, ['--input-type=module', '-e', 'import assert from "node:assert/strict"; import { sum } from "./sum.mjs"; assert.equal(sum(2, 3), 5); assert.equal(sum(-2, -3), -5); assert.equal(sum(1.25, 2.5), 3.75);'], { cwd: workspace, timeout: 10_000 });
+      await expect(fetchTasks(manager)).resolves.toEqual({
+        active: [expect.objectContaining({
+          iid: 'INT-42', runId, status: 'active', executionMode: 'batch', progress: 'agent completed',
+        })],
+        completed: [],
+      });
+      const active = await manager.listActive();
+      await expect(readFile(join(active[0]!.diagnosticPath!, 'result.json'), 'utf8')).resolves.toContain('"status": "completed"');
+      await expect(readFile(join(active[0]!.diagnosticPath!, 'output.log'), 'utf8')).resolves.toContain('goal_complete');
+
+      await manager.finish(runId, { status: 'completed', progress: 'finished' });
+      await expect(fetchTasks(manager)).resolves.toMatchObject({ active: [], completed: [{ runId, runStatus: 'completed' }] });
+    } finally {
+      await sandbox.close();
+    }
+  }, 210_000);
+});

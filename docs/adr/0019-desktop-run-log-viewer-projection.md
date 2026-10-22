@@ -302,7 +302,7 @@ remain readable and cannot be retroactively turned into live interactive session
 
 - [Execution identity and lifecycle](../architecture/overview.md#work-item-and-execution-identity)
 - [Execution environment design](../architecture/execution.md)
-- [Desktop architecture](../../desktop-client/ARCHITECTURE.md)
+- [Desktop architecture](../../apps/desktop/ARCHITECTURE.md)
 - [Desktop design system](../architecture/design-system.md)
 - [ADR-0016: Run Event Audit Spine](0016-run-event-audit-spine.md)
 - [ADR-0018: Evidence Classification and Redaction](0018-evidence-classification-and-redaction.md)

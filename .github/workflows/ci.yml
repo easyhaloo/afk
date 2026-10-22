@@ -29,7 +29,7 @@ jobs:
         run: node scripts/check-doc-links.mjs
 
   cli:
-    name: CLI (root package)
+    name: Shared Packages And CLI
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -51,10 +51,8 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # The root workspace declares packages/* AND desktop-client, so this
-      # install also materialises the desktop-client dependency set. That set
-      # is built and tested by the `verify` job against desktop-client's own
-      # lockfile; this job only runs the root CLI's own checks.
+      # All applications share the root workspace lockfile. Desktop checks
+      # run separately in `verify`.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
 
@@ -118,9 +116,6 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Architecture check
-        run: pnpm architecture:check --check-packages
-
       - name: Cache node-gyp headers
         uses: actions/cache@v4
         with:
@@ -130,23 +125,26 @@ jobs:
             node-gyp-${{ runner.os }}-node22-
 
       - name: Install dependencies
-        working-directory: desktop-client
+        working-directory: apps/desktop
         run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
+
+      - name: Architecture check
+        run: pnpm architecture:check
 
       - name: Build native dependencies
         run: |
-          pnpm --dir desktop-client rebuild electron node-pty esbuild --pending --reporter=append-only
+          pnpm --dir apps/desktop rebuild electron node-pty esbuild --pending --reporter=append-only
 
       - name: Typecheck
-        working-directory: desktop-client
+        working-directory: apps/desktop
         run: pnpm typecheck
 
       - name: Build
-        working-directory: desktop-client
+        working-directory: apps/desktop
         run: pnpm build
 
       - name: Test
-        working-directory: desktop-client
+        working-directory: apps/desktop
         run: pnpm test
 
   desktop-e2e:
@@ -181,31 +179,31 @@ jobs:
             xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
             libxcomposite1 libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2t64
 
-      - name: Install desktop-client dependencies
-        working-directory: desktop-client
+      - name: Install apps/desktop dependencies
+        working-directory: apps/desktop
         run: pnpm install --frozen-lockfile --ignore-scripts --reporter=append-only
 
       - name: Build native dependencies
         run: |
-          pnpm --dir desktop-client rebuild electron node-pty esbuild --pending --reporter=append-only
+          pnpm --dir apps/desktop rebuild electron node-pty esbuild --pending --reporter=append-only
 
       - name: Typecheck + build main
-        working-directory: desktop-client
+        working-directory: apps/desktop
         run: |
           pnpm typecheck
           pnpm build:main
 
       # xvfb-run provides the display server Electron needs on Linux.
       - name: Run Playwright + Electron E2E
-        working-directory: desktop-client
+        working-directory: apps/desktop
         env:
           CI: "true"
         run: xvfb-run --auto-servernum --server-args="-screen 0 1600x1200x24" pnpm e2e
 
-      - name: Upload Playwright report on failure
+      - name: Upload Playwright results on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: desktop-e2e-report
-          path: desktop-client/playwright-report/
+          path: apps/desktop/test-results/
           retention-days: 7

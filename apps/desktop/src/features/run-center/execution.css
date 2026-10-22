@@ -1,0 +1,142 @@
+.workflow-instances { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 100%; color: var(--afk-text); }
+.workflow-instances-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.workflow-instances-heading h1 { margin: 0; font-size: calc(18px * var(--afk-scale)); font-weight: 650; }
+.workflow-instances-heading p { margin: 5px 0 0; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); }
+.workflow-instances-heading > span { color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(10px * var(--afk-scale)); }
+.workflow-instance-layout { display: grid; flex: 1; grid-template-columns: 270px minmax(0, 1fr); align-items: start; gap: 16px; min-width: 0; }
+.workflow-instance-list, .workflow-instance-detail { min-width: 0; overflow: hidden; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); box-shadow: var(--shadow-panel-sm); }
+.workflow-instance-list { position: sticky; top: 0; }
+.workflow-instance-search { display: grid; gap: 10px; padding: 12px; border-bottom: var(--border-w) solid var(--afk-border); }
+.workflow-instance-search .resource-search { width: 100%; min-width: 0; }
+.workflow-instance-search .selection-segments { display: flex; flex-wrap: nowrap; width: 100%; }
+.workflow-instance-search .selection-segments button { flex: 1; padding-inline: 8px; white-space: nowrap; }
+.workflow-instance-list nav { max-height: calc(100dvh - 330px); overflow-y: auto; }
+.workflow-instance-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; padding: 16px 12px; border: 0; border-bottom: var(--border-w) solid var(--afk-border); background: transparent; color: var(--afk-text); text-align: left; cursor: pointer; }
+.workflow-instance-row:last-child { border-bottom: 0; }
+.workflow-instance-row:hover { background: var(--afk-panel-subtle); }
+.workflow-instance-row[aria-pressed="true"] { background: var(--afk-accent-soft); box-shadow: inset 3px 0 var(--afk-accent); }
+.workflow-instance-row > svg { flex: 0 0 auto; margin-top: 2px; }
+.workflow-instance-row > span { display: grid; min-width: 0; gap: 6px; }
+.workflow-instance-row b { overflow: hidden; font-size: calc(11px * var(--afk-scale)); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-instance-row code { overflow: hidden; color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(10px * var(--afk-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.workflow-instance-row small { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.workflow-instance-list footer { padding: 11px 12px; border-top: var(--border-w) solid var(--afk-border); background: var(--afk-panel-subtle); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.workflow-instance-list footer button { width: 100%; padding: 6px; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel); cursor: pointer; }
+.workflow-instance-list-empty { margin: 0; padding: 30px 14px; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); text-align: center; }
+.workflow-instance-detail { min-height: 460px; padding: 20px; }
+.workflow-instance-detail-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.workflow-instance-detail-heading > div:first-child { min-width: 0; }
+.workflow-instance-detail-heading h2 { margin: 11px 0 6px; overflow-wrap: anywhere; font-size: calc(19px * var(--afk-scale)); font-weight: 600; }
+.workflow-instance-detail-heading code { color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(10px * var(--afk-scale)); overflow-wrap: anywhere; }
+.workflow-instance-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 5px; }
+.workflow-instance-actions button { display: grid; place-items: center; width: 30px; height: 30px; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel); color: var(--afk-muted); cursor: pointer; }
+.workflow-instance-actions button:hover:not(:disabled) { border-color: var(--afk-accent); background: var(--afk-accent-soft); color: var(--afk-accent); }
+.workflow-instance-actions button:disabled { opacity: .45; cursor: default; }
+.workflow-instance-context { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; margin: 22px 0 16px; }
+.workflow-instance-context > div { min-width: 0; }
+.workflow-instance-context dt { margin-bottom: 5px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.workflow-instance-context dd { margin: 0; color: var(--afk-text); font-family: var(--font-mono); font-size: calc(10px * var(--afk-scale)); overflow-wrap: anywhere; }
+.workflow-instance-workspace { grid-column: 1 / -1; }
+.workflow-instance-context code { font: inherit; }
+.execution-status-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-pill); color: var(--afk-muted); background: var(--afk-panel-subtle); font-size: calc(10px * var(--afk-scale)); line-height: 1.4; white-space: nowrap; }
+.execution-status-badge.running, .execution-status-badge.succeeded { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); color: var(--afk-accent); }
+.execution-status-badge.failed, .execution-status-badge.cancelled { border-color: var(--fail-ln); background: var(--fail-bg); color: var(--fail); }
+.execution-status-badge.awaiting_human { border-color: var(--warn-ln); background: var(--warn-bg); color: var(--warn); }
+.execution-status-icon { color: var(--afk-muted); }
+.execution-status-icon.running, .execution-status-icon.succeeded { color: var(--afk-accent); }
+.execution-status-icon.failed, .execution-status-icon.cancelled { color: var(--fail); }
+.execution-status-icon.awaiting_human { color: var(--warn); }
+.workflow-instance-tabs { padding: 4px 0 16px; border-bottom: var(--border-w) solid var(--afk-border); }
+.workflow-instance-snapshot > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 0 12px; }
+.workflow-instance-snapshot h3 { margin: 0; font-size: calc(12px * var(--afk-scale)); font-weight: 600; }
+.workflow-instance-snapshot > header span, .workflow-instance-snapshot > footer { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.workflow-instance-steps { display: grid; margin: 0; padding: 0; list-style: none; }
+.workflow-instance-steps > li { display: grid; position: relative; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; padding: 12px 0 18px; }
+.workflow-instance-steps > li:not(:last-child)::before { content: ""; position: absolute; top: 40px; bottom: -12px; left: 14px; border-left: var(--border-w) solid var(--afk-border); }
+.workflow-instance-step-glyph { display: grid; position: relative; width: 30px; height: 30px; place-items: center; border: var(--border-w) solid var(--afk-border); border-radius: 50%; background: var(--afk-panel-subtle); }
+.workflow-instance-step-glyph.running, .workflow-instance-step-glyph.succeeded { border-color: var(--afk-accent-border); background: var(--afk-accent-soft); }
+.workflow-instance-step-glyph.failed { border-color: var(--fail-ln); background: var(--fail-bg); }
+.workflow-instance-step-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; }
+.workflow-instance-step-heading b { font-family: var(--font-mono); font-size: calc(12px * var(--afk-scale)); overflow-wrap: anywhere; }
+.workflow-instance-steps small, .workflow-instance-steps p { display: flex; align-items: center; gap: 6px; margin: 6px 0 0; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); overflow-wrap: anywhere; }
+.workflow-instance-steps small svg, .workflow-instance-steps p svg { flex: 0 0 auto; }
+.workflow-instance-snapshot > footer { padding-top: 12px; border-top: var(--border-w) solid var(--afk-border); line-height: 1.6; }
+.workflow-instance-empty { display: grid; justify-items: center; align-content: center; min-height: 400px; color: var(--afk-muted); text-align: center; }
+.workflow-instance-empty h2 { margin: 16px 0 0; color: var(--afk-text); font-size: calc(14px * var(--afk-scale)); }
+.workflow-instance-empty p { font-size: calc(11px * var(--afk-scale)); }
+
+.execution-health { margin: 12px 0 16px; padding: 0; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel-subtle); }
+.execution-health summary { display: flex; align-items: center; gap: 8px; padding: 10px 12px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); cursor: pointer; list-style: none; }
+.execution-health summary b { margin-left: auto; font: inherit; color: var(--afk-text); }
+.execution-health.live summary b { color: var(--afk-accent); }
+.execution-health.stale summary b { color: var(--warn); }
+.execution-health summary::-webkit-details-marker { display: none; }
+.execution-health details[open] summary > svg:last-child { transform: rotate(180deg); }
+.execution-health details > p, .execution-health details > small { display: block; margin: 0; padding: 0 12px 12px; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.6; }
+.execution-health details > dl { display: grid; grid-template-columns: 1fr; gap: 8px; margin: 0; padding: 0 12px 12px; border: 0; font-size: calc(10px * var(--afk-scale)); }
+.execution-health dl > div { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 10px; }
+.execution-health dl dt, .execution-health dl dd { margin: 0; font: inherit; overflow-wrap: anywhere; }
+.execution-health dl dt { color: var(--afk-muted); }
+.execution-health dl dd { color: var(--afk-text); }
+
+.work-item-run-timeline { margin-top: 14px; border-top: var(--border-w) solid var(--afk-border); }
+.work-item-run-timeline > summary { display: flex; align-items: center; gap: 8px; padding: 12px 0; color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); cursor: pointer; list-style: none; }
+.work-item-run-timeline > summary::-webkit-details-marker { display: none; }
+.work-item-run-timeline > summary > svg:last-child { margin-left: auto; color: var(--afk-muted); }
+.work-item-run-timeline[open] > summary > svg:last-child { transform: rotate(90deg); }
+.run-timeline-missing, .run-timeline-loading { margin: 16px 0; color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); line-height: 1.7; }
+.run-event-log { min-width: 0; color: var(--afk-text); }
+.run-log-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 0; }
+.run-log-toolbar .resource-search { flex: 1 1 160px; min-width: 0; max-width: none; }
+.run-log-toolbar .selection-segments { flex: 0 0 auto; }
+.run-log-caption { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 0; border-top: var(--border-w) solid var(--afk-border); border-bottom: var(--border-w) solid var(--afk-border); }
+.run-log-caption > span { display: flex; align-items: center; gap: 7px; font-size: calc(11px * var(--afk-scale)); }
+.run-log-caption small { color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); }
+.run-log-notice { margin: 0; padding: 12px 0; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.6; }
+.run-event-log .run-timeline { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.run-event-log .run-timeline-entry { display: block; min-width: 0; border-bottom: var(--border-w) solid var(--afk-border); }
+.run-log-event > summary { display: grid; grid-template-columns: 58px 18px minmax(0, 1fr) 14px; gap: 10px; align-items: start; padding: 14px 0; list-style: none; cursor: pointer; }
+.run-log-event > summary::-webkit-details-marker { display: none; }
+.run-log-event > summary:hover { background: var(--afk-panel-subtle); }
+.run-log-event time { padding-top: 3px; color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(9px * var(--afk-scale)); white-space: nowrap; }
+.run-log-glyph { display: grid; place-items: center; width: 18px; height: 20px; color: var(--afk-muted); }
+.run-timeline-entry.completed .run-log-glyph { color: var(--afk-accent); }
+.run-timeline-entry.failed .run-log-glyph, .run-event-log .run-timeline-entry.failed .run-log-copy b { color: var(--fail); }
+.run-log-copy { display: grid; min-width: 0; gap: 5px; }
+.run-log-copy > span:first-child { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 10px; }
+.run-event-log .run-log-copy b { color: var(--afk-text); font-family: var(--afk-font); font-size: calc(11px * var(--afk-scale)); font-weight: 550; overflow-wrap: anywhere; }
+.run-log-copy small { color: var(--afk-muted); font-family: var(--font-mono); font-size: calc(9px * var(--afk-scale)); }
+.run-log-description { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); line-height: 1.6; overflow-wrap: anywhere; }
+.run-log-chevron { margin-top: 3px; color: var(--afk-muted); }
+.run-log-event[open] .run-log-chevron { transform: rotate(90deg); }
+.run-log-event .run-log-fields { display: grid; grid-template-columns: 1fr; gap: 10px; margin: 0 0 14px 86px; padding: 12px; border: var(--border-w) solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel-subtle); }
+.run-log-fields > div { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 8px; }
+.run-log-fields dt, .run-log-fields dd { margin: 0; font-family: var(--afk-font); font-size: calc(10px * var(--afk-scale)); line-height: 1.6; }
+.run-log-fields dt { color: var(--afk-muted); }
+.run-log-fields dd { color: var(--afk-text); overflow-wrap: anywhere; }
+.run-log-fields code { font-family: var(--font-mono); font-size: inherit; }
+.run-log-empty { display: grid; justify-items: center; gap: 12px; padding: 42px 12px; color: var(--afk-muted); text-align: center; font-size: calc(11px * var(--afk-scale)); }
+.run-log-empty b { color: var(--afk-text); font-weight: 500; }
+.workflow-instances button:focus-visible, .run-log-event > summary:focus-visible, .execution-health summary:focus-visible, .work-item-run-timeline > summary:focus-visible { outline: 2px solid var(--afk-accent); outline-offset: -2px; }
+
+.run-center-layout .inspector > header { border-color: var(--afk-border); color: var(--afk-muted); }
+.run-center-layout .inspector-toggle { border-color: var(--afk-border); background: var(--afk-panel); color: var(--afk-muted); }
+.run-center-layout .inspector-toggle:hover { background: var(--afk-accent-soft); color: var(--afk-accent); }
+.run-center-layout .inspector-title h2 { color: var(--afk-text); }
+.run-center-layout .inspector-title small { color: var(--afk-muted); }
+.run-center-layout .inspector-actions { display: flex; gap: 6px; }
+.run-center-layout .inspector-body > dl { border-color: var(--afk-border); }
+.inspector .run-log-event .run-log-fields { grid-template-columns: minmax(0, 1fr); margin-left: 0; }
+.inspector .execution-health details > dl { grid-template-columns: minmax(0, 1fr); }
+.inspector .run-log-fields dd, .inspector .execution-health dd { overflow: visible; text-overflow: clip; }
+
+@media (max-width: 1260px) {
+  .workflow-instance-layout { grid-template-columns: 230px minmax(0, 1fr); gap: 12px; }
+  .workflow-instance-detail { padding: 16px; }
+  .workflow-instance-detail-heading { flex-wrap: wrap; }
+}
+@media (max-width: 900px) {
+  .workflow-instance-layout { grid-template-columns: 1fr; }
+  .workflow-instance-list { position: static; }
+  .workflow-instance-list nav { max-height: 250px; }
+}

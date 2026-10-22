@@ -107,7 +107,7 @@ Old signal compatible reading is preserved during migration.
 ## 3. Target Directory Structure
 
 ```text
-src/lib/
+packages/runtime/src/lib/
 ├── agents/
 │   ├── types.ts
 │   ├── provider.ts
@@ -610,15 +610,15 @@ Acceptance: templates can express dependencies, conditions, execution modes, Age
 Prerequisite: all new workflows and default Provider use ExecutionResult.
 
 - Delete signal writing requirements from new prompts (`templates/builtin.ts`, `workflows.ts` phases)
-- Runner still reads signal as backward-compatible fallback (`src/infrastructure/tmux/tmux.ts`)
+- Runner still reads signal as backward-compatible fallback (`packages/runtime/src/infrastructure/tmux/tmux.ts`)
 - Clean up legacy signal CLI/schema/tests (preserve readSignal/writeSignal/clearSignal + unit tests; CLI/skills have no independent signal subcommand yet)
 - Update skills, README, and architecture docs (`CLAUDE.md` contains Phase status table)
 
 Acceptance: full test suite passes, old worktrees can be compatibly read or explicitly migrated.
 
 Implementation details:
-- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `src/infrastructure/tmux/tmux.ts`.
-- `src/infrastructure/io/signal.ts` owns the signal file primitives.
+- Batch agents report via `ExecutionResult`; interactive agents write `.afk-signal.json` per `packages/runtime/src/application/workflows/execution-protocol.ts`, read via `readSignal`/`readSignalSync` in `packages/runtime/src/infrastructure/tmux/tmux.ts`.
+- `packages/runtime/src/infrastructure/io/signal.ts` owns the signal file primitives.
 
 ## 13. Testing Plan
 
@@ -699,7 +699,7 @@ Also fix implementation drift in existing architecture docs:
 
 - Scheduler is actually an in-memory queue, not BullMQ/Redis
 - AC verification docs need to match current WorkflowRunner actual flow
-- Default timeout follows `src/lib/constants.ts`
+- Default timeout follows `packages/runtime/src/lib/constants.ts`
 
 ## 15. Final Architecture
 

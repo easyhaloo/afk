@@ -15,7 +15,7 @@ describe('package test scripts', () => {
   });
 
   it('starts desktop development through the background launcher', () => {
-    const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'desktop-client/package.json'), 'utf8')) as {
+    const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'apps/desktop/package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
     const makefile = readFileSync(join(repositoryRoot, 'Makefile'), 'utf8');
@@ -25,7 +25,7 @@ describe('package test scripts', () => {
   });
 
   it('cleans up the previous desktop development stack before starting a new one', () => {
-    const startScript = readFileSync(join(repositoryRoot, 'desktop-client/scripts/start.sh'), 'utf8');
+    const startScript = readFileSync(join(repositoryRoot, 'apps/desktop/scripts/start.sh'), 'utf8');
 
     expect(startScript).toContain('dev:raw');
     // The dev stack's process matcher must recognise whatever actually runs the
@@ -38,13 +38,13 @@ describe('package test scripts', () => {
   });
 
   it('builds the in-process inventory provider instead of packaging the CLI runner', () => {
-    const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'desktop-client/package.json'), 'utf8')) as {
+    const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'apps/desktop/package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
       build?: { files?: string[] };
     };
 
     expect(packageJson.scripts?.['build:main']).toContain('node scripts/build-provider-inventory.mjs');
-    const inventoryBuild = readFileSync(join(repositoryRoot, 'desktop-client/scripts/build-provider-inventory.mjs'), 'utf8');
+    const inventoryBuild = readFileSync(join(repositoryRoot, 'apps/desktop/scripts/build-provider-inventory.mjs'), 'utf8');
     expect(inventoryBuild).toContain('dist-electron/provider-inventory.cjs');
     // Electron main and the @afk/* packages are both ESM now, so the use cases
     // are imported directly. Guard against re-introducing a CommonJS bridge.
@@ -55,12 +55,12 @@ describe('package test scripts', () => {
   });
 
   it('bundles the workspace packages into the packaged Electron main', () => {
-    const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'desktop-client/package.json'), 'utf8')) as {
+    const packageJson = JSON.parse(readFileSync(join(repositoryRoot, 'apps/desktop/package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     };
-    const mainBuild = readFileSync(join(repositoryRoot, 'desktop-client/scripts/build-main.mjs'), 'utf8');
+    const mainBuild = readFileSync(join(repositoryRoot, 'apps/desktop/scripts/build-main.mjs'), 'utf8');
 
     expect(packageJson.scripts?.['build:main']).toContain('node scripts/build-main.mjs');
     expect(mainBuild).toContain('bundle: true');

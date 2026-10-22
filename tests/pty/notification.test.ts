@@ -17,7 +17,7 @@ import { stripVTControlCharacters } from 'util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const distPath = join(__dirname, '../../dist/index.js');
+const distPath = join(__dirname, '../../apps/cli/dist/index.js');
 
 // Ensure screenshot output directory exists
 const screenshotDir = '/tmp/afk-e2e-screenshots';

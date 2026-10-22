@@ -1,0 +1,138 @@
+.selection-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px;
+  border: 1px solid var(--afk-border);
+  border-radius: var(--radius-md);
+  background: var(--afk-panel-subtle);
+}
+.selection-segments button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--afk-muted);
+  font: inherit;
+  font-size: calc(12px * var(--afk-scale));
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.selection-segments button.selected {
+  border-color: var(--afk-border);
+  background: var(--afk-panel);
+  color: var(--afk-text);
+  font-weight: 600;
+  box-shadow: var(--shadow-panel-sm);
+}
+.selection-segments button span { min-width: 18px; padding: 1px 4px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--afk-muted) 8%, transparent); color: var(--afk-muted); font-size: calc(10px * var(--afk-scale)); font-variant-numeric: tabular-nums; }
+.selection-segments button.selected span { background: color-mix(in srgb, var(--afk-accent) 10%, transparent); color: var(--afk-accent); }
+.selection-segments button:disabled { cursor: not-allowed; opacity: .5; }
+.selection-segments button:hover:not(:disabled):not(.selected) { background: color-mix(in srgb, var(--afk-muted) 6%, transparent); color: var(--afk-text); }
+.settings-section > .selection-segments { margin: 16px 17px 18px; max-width: calc(100% - 34px); }
+.backlog-page > .selection-segments { margin-bottom: 16px; }
+.backlog-toolbar, .work-items-toolbar { display: flex; flex-wrap: wrap; gap: 10px; }
+.backlog-toolbar .backlog-search { flex: 1; min-width: min(100%, 240px); }
+.selection-filters { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.selection-filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 36px;
+  min-width: 36px;
+  padding: 6px;
+  border: 1px solid var(--afk-border);
+  border-radius: var(--radius-sm);
+  background: var(--afk-panel);
+  color: var(--afk-muted);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.selection-filter-trigger:hover { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.selection-filter-trigger:is(.active, [aria-expanded="true"]) { color: var(--afk-accent); border-color: var(--afk-accent-border); background: color-mix(in srgb, var(--afk-accent) 8%, var(--afk-panel)); }
+.selection-filter-trigger span { min-width: 16px; font-size: calc(11px * var(--afk-scale)); font-weight: 600; font-variant-numeric: tabular-nums; }
+.selection-filter-panel {
+  position: absolute;
+  right: 0;
+  top: 42px;
+  z-index: 30;
+  display: grid;
+  gap: 10px;
+  width: min(310px, calc(100vw - 48px));
+  padding: 16px;
+  border: 1px solid var(--afk-border);
+  border-radius: var(--radius-md);
+  background: var(--afk-panel);
+  box-shadow: var(--shadow-panel);
+}
+.selection-filter-panel::before { content: "筛选条件"; margin-bottom: 2px; padding-bottom: 10px; border-bottom: 1px solid var(--afk-border); color: var(--afk-muted); font-size: calc(11px * var(--afk-scale)); font-weight: 600; }
+.selection-filter-panel[hidden] { display: none; }
+.app-shell .selection-filter-panel .select-menu, .app-shell .selection-filter-panel .select-menu-trigger { width: 100%; min-width: 0; max-width: none; }
+.app-shell .selection-filter-panel .select-menu .select-menu-trigger { border-radius: var(--radius-sm); background: var(--afk-panel); }
+.app-shell .selection-filter-panel .select-menu-trigger-copy { gap: 5px; }
+.app-shell .selection-filter-panel .select-menu-trigger-prefix { min-width: 42px; }
+.app-shell .selection-filter-panel .select-menu.filter-trigger .select-menu-popover.searchable { width: 100%; min-width: 0; max-width: none; }
+.selection-filter-panel .select-menu-popover { right: 0; left: auto; min-width: 100%; }
+.selection-filter-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.selection-filter-chips button { display: flex; gap: 6px; align-items: center; min-height: 28px; max-width: 100%; padding: 4px 8px; border: 1px solid var(--afk-accent-border); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--afk-accent) 6%, var(--afk-panel)); color: var(--afk-text); font-size: calc(11px * var(--afk-scale)); overflow-wrap: anywhere; text-align: left; cursor: pointer; }
+.selection-filter-chips button svg { flex-shrink: 0; color: var(--afk-muted); }
+.selection-filter-chips button:hover { border-color: var(--afk-accent); }
+.selection-filter-chips button:last-child { border-color: transparent; background: transparent; color: var(--afk-muted); }
+.select-menu-popover.searchable { min-width: min(300px, calc(100vw - 48px)); }
+.app-shell .select-menu .select-menu-trigger { height: var(--backlog-control-height, 36px); background: var(--afk-panel); border-color: var(--afk-border); color: var(--afk-text); }
+.app-shell .select-menu .select-menu-trigger:is(.open, :hover, :focus-visible) { border-color: var(--backlog-accent, var(--afk-accent)); }
+.app-shell .select-menu .select-menu-popover { padding: 5px; border-radius: var(--radius-md); background: var(--afk-panel); border-color: var(--afk-border); }
+.app-shell .select-menu .select-menu-option { color: var(--afk-text); }
+.app-shell .select-menu .select-menu-option:is(:hover, .keyboard-active) { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.app-shell .select-menu .select-menu-option.selected { background: color-mix(in srgb, var(--afk-accent) 8%, var(--afk-panel)); color: var(--afk-accent); }
+.app-shell .select-menu .select-menu-options { border: 0; border-radius: var(--radius-sm); background: var(--afk-panel); }
+.app-shell .select-menu .select-menu-search { height: 36px; margin-bottom: 5px; border: 1px solid var(--afk-border); background: var(--afk-panel-subtle); color: var(--afk-muted); }
+.app-shell .select-menu .select-menu-search:focus-within { border-color: var(--afk-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--afk-accent) 12%, transparent); }
+.app-shell .select-menu .select-menu-search input { background: transparent; color: var(--afk-text); }
+.select-menu-option.keyboard-active { background: var(--afk-panel-subtle); color: var(--afk-text); }
+.select-menu-option-label small { display: block; padding-top: 3px; font-size: calc(11px * var(--afk-scale)); font-weight: 400; color: var(--afk-muted); white-space: normal; }
+.app-shell .select-menu-option.has-description { height: auto; min-height: 42px; align-items: flex-start; padding-top: 7px; padding-bottom: 7px; line-height: 1.25; }
+.app-shell .select-menu-option.has-description .select-menu-option-label { overflow: visible; text-overflow: clip; white-space: normal; }
+.select-menu-options { max-height: 280px; overflow-y: auto; }
+.resource-search { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 6px 11px; border: 1px solid var(--afk-border); border-radius: var(--radius-md); background: var(--afk-panel); color: var(--afk-muted); transition: border-color 140ms ease, box-shadow 140ms ease; }
+.resource-search input { min-width: 0; width: 100%; padding: 0; border: 0; background: transparent; color: var(--afk-text); font: inherit; font-size: calc(12px * var(--afk-scale)); }
+.resource-search:focus-within { border-color: var(--afk-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 12%, transparent); }
+.resource-search svg { flex-shrink: 0; }
+.resource-search input::placeholder { color: var(--afk-muted); }
+.resource-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }
+.resource-toolbar .resource-search { flex: 1; min-width: min(100%, 220px); }
+.run-resource-toolbar { padding: 0; margin-bottom: 0; }
+.workspace-switcher { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 12px; margin-bottom: 20px; border: 1px solid var(--afk-border); border-radius: var(--radius-sm); background: var(--afk-panel); color: var(--afk-text); font-size: calc(12px * var(--afk-scale)); }
+.workspace-switcher span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-switcher svg { flex-shrink: 0; color: var(--afk-muted); }
+.workspace-switcher:hover:not(:disabled) { border-color: var(--afk-accent-border); background: var(--afk-panel-subtle); }
+/* The bottom constant area (.sidebar-bottom) owns the bottom anchoring. */
+.sidebar-quick-find { padding-top: 16px; }
+.sidebar-quick-find .select-menu-trigger { width: 100%; }
+.sidebar-quick-find .select-menu-popover { top: auto; bottom: calc(100% + 8px); }
+.environment-page .environment-grid { display: grid; }
+.app-shell :is(button, input, textarea):focus-visible { outline: 2px solid var(--afk-accent); outline-offset: 3px; }
+.app-shell :is(.resource-search, .select-menu-search, .backlog-search, .ssh-search) input:focus-visible { outline: none; box-shadow: none; }
+.app-shell .selection-segments button:focus-visible { outline-offset: -2px; }
+.app-shell .selection-filter-panel .select-menu-trigger { min-height: 36px; font-size: calc(12px * var(--afk-scale)); }
+.ssh-search:focus-within { border-color: var(--afk-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--afk-accent) 12%, transparent); }
+.ssh-toolbar .ssh-search { min-height: 36px; }
+.app-shell .ssh-toolbar > .icon-button { width: 36px; height: 36px; }
+@media (max-width: 760px) {
+  .selection-filters { width: 100%; }
+  .selection-filter-panel { right: auto; left: 0; }
+  .selection-filter-chips { max-width: 100%; }
+  .resource-toolbar .selection-segments { max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .selection-segments button, .selection-filter-trigger, .resource-search { transition: none; }
+}

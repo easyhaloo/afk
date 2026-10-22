@@ -52,6 +52,12 @@
 |---|---|
 | [decisions/](decisions/) | 阶段性决策记录（observability harness 历史基线等） |
 
+## 文档治理
+
+| 路径 | 内容 |
+|---|---|
+| [superpowers/plans/2026-10-20-outdated-docs-cleanup-plan.md](superpowers/plans/2026-10-20-outdated-docs-cleanup-plan.md) | 过时文档盘点与清理计划（分级处置清单、时序与验收标准） |
+
 ## 归档
 
 `_archive/` 下保留历史材料，不在主文档流中：

@@ -1,9 +1,42 @@
 # AFK architecture
 
+## Workspace organization
+
+The root is a private pnpm workspace. `apps/cli` owns the `afk` executable,
+Commander commands, shell completion, and the Ink TUI. `apps/desktop` owns
+Electron main/preload, IPC validation and the React renderer. Both consume
+the same shared packages through declared exports:
+
+| Package | Responsibility |
+| --- | --- |
+| `packages/core` (`@afk/core`) | Pure models, events, reducer, policy and ports |
+| `packages/application` (`@afk/application`) | Shared use cases, inventory and execution queries; depends on Core |
+| `packages/runtime` (`@afk/runtime`) | Workflow execution, backlog operations and Node adapters for providers, Git, tmux, sandbox and storage |
+| `packages/workflow-graph` (`@afk/workflow-graph`) | Pure workflow graph projection, layout and validation |
+
+Applications must not import another workspace's source by relative path.
+Shared packages must not depend on applications; the workspace graph must be
+acyclic. Desktop renderer code must not import `@afk/runtime`; Node access
+stays behind main-process IPC. Runtime retains its existing internal layer
+rules. The architecture check enforces these rules and package exports.
+
+Desktop backlog operations and graph generation call Runtime directly.
+Managed work-item execution runs the same `executeWorkItem` used by CLI in a
+bundled, detached Node worker. This preserves task process isolation and
+allows execution to outlive the desktop window. Desktop never looks up or calls
+the AFK CLI. Stop, recovery and merge confirmation call shared Runtime directly;
+execution has a single Worker path with no command override or fallback.
+
+Each workspace owns its build, typecheck and tests. Root commands run shared
+packages and CLI in dependency order, then repository contract tests. Desktop
+validation runs separately with `pnpm --filter afk-control-electron typecheck`,
+`build` and `test`. The CLI binary is `apps/cli/dist/index.js`; root no longer
+publishes an executable or contains application source.
+
 ## Architecture guard
 
 `pnpm architecture:check --check-packages` enforces layer direction and checks
-the `packages/afk-core` and `packages/afk-application` roots for pure
+the `packages/core` and `packages/application` roots for pure
 source imports and dependency direction. The guard also
 disallows generic records and legacy client-factory imports. The legacy migration is complete:
 `scripts/architecture-legacy-baseline.json` records zero legacy files, imports,
@@ -11,9 +44,11 @@ and patterns. New legacy files or imports fail the check. Delete the stale
 baseline record when removing an entry.
 
 Layer direction applies to relative imports between non-test files in
-`src/cli`, `src/domain`, `src/application`, `src/infrastructure`,
-`src/shared`, and `src/views`. Passing `--require-packages` makes a missing
-package root a failure instead of a skipped check.
+`packages/runtime/src/domain`, `packages/runtime/src/application`,
+`packages/runtime/src/infrastructure`, and `packages/runtime/src/shared`.
+Application boundaries in `apps/cli` and `apps/desktop` are checked by the
+workspace import guard. Passing `--require-packages` makes a missing package
+root a failure instead of a skipped check.
 
 ## Scope and command surface
 
@@ -25,16 +60,66 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
+| `afk backlog create <title>` | Create one provider-backed backlog item |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
+| `afk backlog inventory` | Inventory issues across all credential-accessible projects |
+| `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
+| `afk backlog retry` | Return blocked operator-owned work to autonomous rework |
+| `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
 | `afk run --backlog-id <id>` | Execute one claimed item |
-| `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
+| `afk execute --work-item-id <id> --execution-manifest <path>` | Implement, independently verify, and publish one managed work item |
+| `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
+| `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
+| `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status, and graceful stop |
+| `afk observe` | Read append-only AFK run audit events as text by default, or with `--json` (`runs`, `executions`, `execution`, `timeline`, `verify`, `replay`, `explain`, `doctor`) |
+| `afk observe <runId>` / `afk log <runId>` | Short forms of `afk observe execution <runId>` with the same `--watch`, `--tail`, `--root`, and `--json` options |
+| `afk observe execution\|timeline <runId> [--watch] [--tail <count>]` | Show a detailed run timeline; optionally follow new events or limit the initial history |
 | `afk retro run --run-id <id> --workspace <path>` | Analyze recorded evidence with the existing `/retro` skill and write `report.json` plus `report.html` |
 | `afk retro show <report>` | Read a generated retro report |
+| `afk graph workflow <template>` | Generate a deterministic workflow graph |
 | `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
 There are no aliases for removed command groups. Provider metadata labels are
 an adapter detail and never part of this CLI contract.
+
+### Reading and following runs
+
+```bash
+afk observe runs
+afk observe <runId>
+afk log <runId> --watch --tail 20
+afk observe execution <runId>
+afk observe timeline <runId> --tail 20 --watch
+afk observe execution <runId> --watch --tail 0
+afk observe execution <runId> --json
+```
+
+`observe <runId>` uses `execution` as the default subcommand; existing named
+subcommands still take precedence. `log <runId>` is a direct shortcut to the
+same run viewer, including the same option validation and JSON contract.
+
+Text output includes the recorded run state, phase, active step or human gate,
+integrity, local time zone, elapsed time, and latest event. Workspace paths and
+branches remain in the summary even when `--tail` hides their original event.
+Timeline entries expand event fields, including steps, commits, change URLs,
+session/transcript references, complete multiline error summaries, and QA
+expected/actual criteria. Failed events without a recorded reason say so.
+These are audit events, not a live agent stdout/stderr stream; unrecorded
+details cannot be reconstructed. A running state without an active step is
+not by itself a failure.
+
+`--watch` polls once per second and appends new events without repeating the
+history. It stays quiet without changes, displays human-review gates while
+waiting, and exits after a terminal event. Ctrl-C or SIGTERM stops only the
+observer. Invalid integrity stops following, marks the state untrusted, and
+excludes unverified details. A replaced or shortened history requires restarting
+the observer. `--tail` accepts a non-negative integer and counts complete events;
+zero suppresses the initial timeline while retaining the summary.
+
+`--json` preserves the existing single-document JSON contracts and cannot be
+combined with `--watch` or `--tail`. Text redirected to a file or pipe has no
+color escapes; `NO_COLOR` also disables colors in a terminal.
 
 ## Provider boundaries
 
@@ -55,6 +140,21 @@ backlog surface includes lookup, listing, metadata initialization, business
 tag updates, and the state/mode updates needed by QA. It has no `claim()` at
 the type or runtime boundary. The execution bundle is the only path that
 exposes claiming and runnable checks.
+
+### Tracker target resolution
+
+The provider project a command talks to is a tracker target: one platform and
+one project, resolved together and never mixed. Both halves resolve in the
+same order: the explicit `--project` / `--platform` flags, then the
+`AFK_TRACKER_PROJECT` / `AFK_TRACKER_PLATFORM` environment variables, then the
+`origin` remote of the working directory.
+
+The git remote is therefore optional. Read-only commands such as
+`afk backlog show` run from any directory once the target is configured, and
+an unresolvable target fails with an actionable error instead of a platform
+detection failure. When the platform is still unknown, a numeric project key
+or a key with three or more path segments resolves to GitLab; an `owner/repo`
+key resolves to GitHub unless only GitLab credentials are configured.
 
 `adopt` is an optional management/provider capability; unsupported providers
 return an explicit error. The tracker adapter checks the issue's raw state and
@@ -127,11 +227,12 @@ status, phase, heartbeat, progress, and diagnostics. A heartbeat older than the
 freshness threshold is displayed as runtime `stale`; it does not mutate the
 Provider Backlog lifecycle state.
 
-Desktop's workspace-local `.afk/backlog-runs.json` contains process launch
-metadata only. It may report a PID or launch error, but it cannot infer
-`verification`, `blocked`, or `done`. Desktop joins Backlog, launch metadata,
-and canonical runtime records by exact `backlogId`; missing or malformed runtime
-data leaves the Backlog visible with an explicit no-runtime state.
+Desktop reads `.afk/work-item-runs.json` from the execution workspace located
+by canonical `workItemId`. These records contain Worker launch receipts, not
+Provider lifecycle state. Runtime records must explicitly name their workspace;
+Desktop joins them by exact `backlogId`, execution workspace and provider.
+Missing or malformed runtime data leaves the Backlog visible with an explicit
+no-runtime state. There is no reader for the removed backlog run store.
 
 ## Claim boundary and local fallback
 

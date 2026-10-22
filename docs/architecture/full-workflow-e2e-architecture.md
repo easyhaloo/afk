@@ -6,15 +6,15 @@
 
 | 领域 | 实现入口 |
 | --- | --- |
-| CLI 命令注册 | [`src/cli/command-registry.ts`](../../src/cli/command-registry.ts) |
-| `afk run` | [`src/cli/commands/run.ts`](../../src/cli/commands/run.ts)、[`src/application/workflows/run-cmd.ts`](../../src/application/workflows/run-cmd.ts) |
-| `afk loop` | [`src/cli/commands/loop.ts`](../../src/cli/commands/loop.ts)、[`src/application/modules/loop-runner.ts`](../../src/application/modules/loop-runner.ts) |
-| 单项闭环 | [`src/application/workflows/execute-work-item.ts`](../../src/application/workflows/execute-work-item.ts) |
-| 工作流执行 | [`src/application/workflow-engine.ts`](../../src/application/workflow-engine.ts) |
-| 模板加载与编译 | [`src/domain/templates/loader.ts`](../../src/domain/templates/loader.ts)、[`src/domain/templates/builtin.ts`](../../src/domain/templates/builtin.ts)、[`src/application/workflows/plan-executor.ts`](../../src/application/workflows/plan-executor.ts) |
-| QA | [`src/cli/commands/qa.ts`](../../src/cli/commands/qa.ts)、[`src/application/modules/qa-runner.ts`](../../src/application/modules/qa-runner.ts) |
-| 审计事件 | [`packages/afk-core/src/events.ts`](../../packages/afk-core/src/events.ts)、[`src/infrastructure/observability/jsonl-event-store.ts`](../../src/infrastructure/observability/jsonl-event-store.ts) |
-| 桌面端与 E2E | [`desktop-client/ARCHITECTURE.md`](../../desktop-client/ARCHITECTURE.md)、[`desktop-client/playwright.config.ts`](../../desktop-client/playwright.config.ts)、[`desktop-client/tests/e2e/_helpers/launch.ts`](../../desktop-client/tests/e2e/_helpers/launch.ts) |
+| CLI 命令注册 | [`apps/cli/src/command-registry.ts`](../../apps/cli/src/command-registry.ts) |
+| `afk run` | [`apps/cli/src/commands/run.ts`](../../apps/cli/src/commands/run.ts)、[`packages/runtime/src/application/workflows/run-cmd.ts`](../../packages/runtime/src/application/workflows/run-cmd.ts) |
+| `afk loop` | [`apps/cli/src/commands/loop.ts`](../../apps/cli/src/commands/loop.ts)、[`packages/runtime/src/application/modules/loop-runner.ts`](../../packages/runtime/src/application/modules/loop-runner.ts) |
+| 单项闭环 | [`packages/runtime/src/application/workflows/execute-work-item.ts`](../../packages/runtime/src/application/workflows/execute-work-item.ts) |
+| 工作流执行 | [`packages/runtime/src/application/workflow-engine.ts`](../../packages/runtime/src/application/workflow-engine.ts) |
+| 模板加载与编译 | [`packages/runtime/src/domain/templates/loader.ts`](../../packages/runtime/src/domain/templates/loader.ts)、[`packages/runtime/src/domain/templates/builtin.ts`](../../packages/runtime/src/domain/templates/builtin.ts)、[`packages/runtime/src/application/workflows/plan-executor.ts`](../../packages/runtime/src/application/workflows/plan-executor.ts) |
+| QA | [`apps/cli/src/commands/qa.ts`](../../apps/cli/src/commands/qa.ts)、[`packages/runtime/src/application/modules/qa-runner.ts`](../../packages/runtime/src/application/modules/qa-runner.ts) |
+| 审计事件 | [`packages/core/src/events.ts`](../../packages/core/src/events.ts)、[`packages/runtime/src/infrastructure/observability/jsonl-event-store.ts`](../../packages/runtime/src/infrastructure/observability/jsonl-event-store.ts) |
+| 桌面端与 E2E | [`apps/desktop/ARCHITECTURE.md`](../../apps/desktop/ARCHITECTURE.md)、[`apps/desktop/playwright.config.ts`](../../apps/desktop/playwright.config.ts)、[`apps/desktop/tests/e2e/_helpers/launch.ts`](../../apps/desktop/tests/e2e/_helpers/launch.ts) |
 
 ## 1. 范围与判定口径
 
@@ -195,7 +195,7 @@ manifest-bound 执行通过工作区 `.afk/executions/` 创建以 `executionId` 
 
 ## 5. 内置模板覆盖矩阵
 
-当前 `builtinTemplates()` 注册以下 6 个模板；名称由 `src/domain/templates/templates.test.ts` 固定断言。
+当前 `builtinTemplates()` 注册以下 6 个模板；名称由 `packages/runtime/src/domain/templates/templates.test.ts` 固定断言。
 
 | 模板 | 图结构 | 主要能力 | 全流程验证重点 | 终态边界 |
 | --- | --- | --- | --- | --- |
@@ -245,6 +245,8 @@ stateDiagram-v2
 
 FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 和 `actual`。PASS 会 commit、push、发布 Change Request；`executeWorkItem` 注入的回调负责复用检查和 issue association 验证，独立 QA CLI 没有注入这些闭环审计回调。root 项切到 `merge_ready` 和 `hitl`；child 项也先进入 `merge_ready`，再执行 merge 并切到 `done`。QA 的终端路由失败会切到 `blocked` 和 `hitl`。
 
+QA 工作树的依赖目录不是指向主检出的单个符号链接。pnpm 12 会拒绝把符号链接当作任务运行状态目录（`ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH`），带 `--filter` 的 workspace 运行在软链布局下直接失败。`GitBranchProvider` 为 QA 工作树物化一个真实的 `node_modules` 目录，其条目（包含 `.pnpm` 存储和 `.bin`）逐项链接到主检出；pnpm 自身的可变状态 `.pnpm-task-run-state-v1` 与 `.pnpm-workspace-state-v1.json` 不共享，留在工作树本地，避免并行工作树互相写入。
+
 ## 7. 日志、事件和截图归档
 
 ### 7.1 运行时产生的证据
@@ -256,8 +258,9 @@ FAIL 还必须提供非空的 `failedCriteria`，每项包含 `id`、`expected` 
 | 运行时归档 | `~/.afk/runtime/tasks/archive/` | terminal runtime 记录；`completed` 或 `blocked` 后从 active 移入 archive |
 | 运行时诊断 | `~/.afk/runtime/tasks/diagnostics/<base64url(runId)>/` | `runtime.json`、`result.json`、`output.log`；active/archive 的 JSON 文件也以相同编码命名 |
 | 闭环 journal | `<manifest.workspaceRoot>/.afk/executions/<executionId>.jsonl` | `requested`、`implementing`、`verifying`、发布/合并及最终状态；每行包含 `executionId` 和 `workItemId` |
-| 实现超时日志 | `$HOME/.claude/logs/afk/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
-| QA 超时日志 | `$HOME/.claude/logs/afk/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
+| 统一日志 | `~/.afk/logs/afk-YYYY-MM-DD.log` | 按天轮转的 pino JSONL 日志；watchdog、QA 超时快照同在此根目录下，可用 `AFK_LOG_DIR` 整体覆盖 |
+| 实现超时日志 | `~/.afk/logs/timeout/timeout-<iid>-<timestamp>.log` | workflow watchdog 捕获的 tmux pane 内容 |
+| QA 超时日志 | `~/.afk/logs/qa/timeout-<backlogId>-<timestamp>.log` | QA Agent 最近输出和执行诊断 |
 | loop 状态 | `~/.afk/loop-status.json` | active execution、完成/失败计数、uptime、启动时间和最近状态 |
 | loop PID | `~/.afk/loop.pid` | daemon 控制和单实例检查 |
 
@@ -290,16 +293,24 @@ artifacts/full-workflow-e2e/<UTC-timestamp>/<workItemId>/
 
 归档命名必须包含可回查的 `workItemId` 和时间；截图至少覆盖任务列表/详情、运行中或 runtime 视图、QA/状态终态和关键 workflow/template 页面。截图只能证明可见 UI 状态，不能替代 Provider 状态、事件完整性或 runtime 文件。
 
+### 7.3 QA 证据的对外出口（2026-10-22）
+
+QA 的验证证据不再只留在本机运行时归档里。Change Request 正文仍以两行开头（`QA: PASS` 与 `Closes #<id>`），runner 在其后追加 `## Verification Evidence` 段，并按性质分层：`summary` 是 agent 的一句话结论，`### Acceptance criteria` 是 `requiredChecks` 逐条 AC 的命令与预期，`### Observations` 是逐条行为断言及其观察方式，`### Artifacts` 是附件链接，`> **Run notes**` 单独承载环境说明与工具注意事项。分层不是排版偏好：一次 QA 产出的三类信息不可互换，混在一段散文里会让评审者无法分辨哪句是验收证据、哪句是环境噪声。二进制产物由 Agent 写进工作树的 `.afk/artifacts.txt`（一行一个绝对路径），runner 在发布时经 `TrackerProvider.uploadArtifacts` 上传到 provider 并回填链接；GitHub 侧落到该工作项专属的 pre-release，GitLab 侧落到项目 upload。附件缺失不是失败，但 runner 会在运行时活动里留痕，避免"已验证且带附件"与"已验证但无附件"看起来一样。
+
+GitHub 侧的附件 release 不能是 draft：draft 的 `browser_download_url` 在浏览器里是 404，GitHub 只允许用带 token 的 `GET /repos/{owner}/{repo}/releases/assets/{asset_id}` 取内容，PR 正文里的链接点不开。实测 draft 附件经该 API 端点返回 200，published 后的 `browser_download_url` 无需认证即返回 200 且字节一致，所以附件 release 以 `prerelease: true` 发布：不占用 "Latest release"，链接却是评审者能直接打开的。重跑同一工作项时复用同一个 release，GitHub 拒绝同名附件，所以上传前先删除旧附件。
+
+这条链路此前从未接通：`TrackerProvider.uploadArtifacts` 有 GitLab 实现却没有调用方，GitHub 实现是返回空串的 TODO 空壳。Backlog 229 的 QA 因此只发出两行正文，逐条 AC 证据只落在 `~/.afk/runtime/tasks/diagnostics/<runId>/result.json`，二进制产物无处可寻（QA 提交里 `.afk/` 文件数为 0）。回归测试覆盖证据渲染、change provider 的上传接线与上传失败降级、GitHub pre-release 的创建与复用、同名附件先删后传、单个附件失败不影响其余附件，以及 runner 在缺清单时的留痕。
+
 ## 8. 验证边界与建议用例
 
 | 层级 | 应验证什么 | 可接受证据 | 不能证明什么 |
 | --- | --- | --- | --- |
-| 模板纯测试 | 注册、schema、依赖层级、`when` 条件、cycle 拒绝 | `src/domain/templates/templates.test.ts`、compiler/resolver 测试 | Agent、Git、Provider、桌面端真实行为 |
-| workflow 集成测试 | claim、lease、worktree、system action、失败清理、runtime | `src/application/workflow-engine*.test.ts`、workflow tests | 外部 Provider 真实网络结果 |
+| 模板纯测试 | 注册、schema、依赖层级、`when` 条件、cycle 拒绝 | `packages/runtime/src/domain/templates/templates.test.ts`、compiler/resolver 测试 | Agent、Git、Provider、桌面端真实行为 |
+| workflow 集成测试 | claim、lease、worktree、system action、失败清理、runtime | `packages/runtime/src/application/workflow-engine*.test.ts`、workflow tests | 外部 Provider 真实网络结果 |
 | `executeWorkItem` 测试 | manifest 身份、锁、journal、QA 路由、root/child 分支 | `execute-work-item.test.ts`、审计事件投影 | 桌面 UI 和真实 Electron 进程 |
 | loop 测试 | poll、单实例、状态文件、SIGTERM、重试、max iterations | `loop-runner.test.ts`、loop CLI tests | 跨重启恢复内存 `inFlight` |
 | CLI/provider E2E | 真实 claim、push、change request、QA、merge | 隔离 Provider 项目和脱敏命令日志 | 不应使用生产任务做回归 |
-| Desktop Electron E2E | Main/preload/IPC/renderer、导航、筛选、workflow 画布、任务入口 | `desktop-client/tests/e2e/*.spec.ts`、截图/trace | 真实 GitHub/GitLab、真实 Agent、真实 MR merge |
+| Desktop Electron E2E | Main/preload/IPC/renderer、导航、筛选、workflow 画布、任务入口 | `apps/desktop/tests/e2e/*.spec.ts`、截图/trace | 真实 GitHub/GitLab、真实 Agent、真实 MR merge |
 | 全流程验收 | 从 ready 到 merge_ready/done 的身份和状态闭环 | Provider final snapshot + event/runtime/journal + Playwright evidence | 单一截图或单一进程退出码 |
 
 最低全流程用例应至少覆盖：
@@ -352,6 +363,12 @@ env -u AFK_CODEX_E2E_TIMEOUT_MS pnpm exec tsx tests/e2e/codex-runtime.ts --trans
 Issue #178 的实现、验收检查、QA 和 PR #179 发布已完成，驱动命令于 **2026-10-12 12:33:15 CST** 退出 `0`；命令耗时 23 分 56 秒，Loop 执行耗时 23 分 1 秒。实现与 QA runtime 均为 `completed` / `codex` / `app-server`，13 条事件的 hash chain 校验通过，Provider 为 `merge_ready` / `hitl`。本次 QA 的类型检查在相同源码的临时镜像、真实依赖目录中完成；不能声称 pnpm 已兼容原工作树的依赖符号链接。
 
 独立范围核验另外发现 QA 自动提交带入了生成的 `node_modules` 符号链接：仅匹配目录的 `node_modules/` 规则不会忽略该链接。`GitBranchProvider` 现为自己创建的共享链接补充 Git 本地 `/node_modules` 排除规则，保留既有规则；native Git 回归测试覆盖共享链接与自动提交的真实路径。E2E 驱动同时校验远端分支只能改动指定 fixture。PR #179 中的多余链接已通过提交 `332c73a` 清理，最终 Git diff、PR 文件范围及 fixture 精确字节核验通过；该清理发生在真实运行之后，不属于最初自动发布的结果。完整记录见归档中的 `driver-result.json`、`issue-178/verification.json`、`verification.log` 及依赖链接的 red/green 日志。
+
+### 8.3 QA 工作树依赖共享修复（2026-10-22）
+
+Backlog 229 的 QA 在工作树内执行 `pnpm --filter @afk/runtime... build` 时命中 pnpm 12.5.1 的 `ERR_PNPM_UNSAFE_TASK_RUN_STATE_PATH`：拒绝把符号链接 `node_modules` 用作任务运行状态目录。Agent 自行把软链物化为真实目录后验证通过，那只是本次执行的临时恢复，不是可依赖的布局；8.1 记录的同源现象在此得到解释。
+
+`GitBranchProvider.shareNodeModules` 改为物化真实 `node_modules` 目录，并逐项链接主检出的条目；pnpm 可变状态留在工作树本地。修复后在一个由修复代码创建的 QA 工作树中，原失败命令 `pnpm --filter @afk/runtime... build` 通过，`pnpm exec playwright test --config=playwright.config.ts boot` 3 passed。native Git 回归测试覆盖真实目录、逐项链接、状态条目排除，以及自动提交不混入 `node_modules`。
 
 ## 9. 已知限制
 

@@ -14,14 +14,14 @@
 
 仓库已有以下能力，实施时必须复用：
 
-- `src/infrastructure/observability/jsonl-event-store.ts`：追加写入、顺序号、前向 hash 链、`fsync`、校验和按运行查询。
-- `src/infrastructure/observability/local-evidence-store.ts`：AES-256-GCM 加密、SHA-256 去重、文本脱敏、`EvidenceRef` 引用。
-- `packages/afk-core/src/events.ts`：`RunEvent`、`RunEventData`、`EvidenceRef`、`AgentToolCallSummary`。
-- `src/observability/run-observer.ts`：将事件追加到审计流并记录可观测字段。
-- `src/infrastructure/observability/agent-telemetry.ts` 与 `src/domain/agents/tool-telemetry.ts`：从 Claude/Codex transcript/rollout 读取 token 和工具调用元数据；transcript 是 agent 行为的唯一事实源。
-- `src/application/sessions/types.ts`、`src/application/sessions/chain.ts`、`src/application/sessions/file-store.ts`、`src/application/sessions/handoff-store.ts`：provider-native session snapshot、checksum、优先级 fallback 和 handoff fallback。
-- `src/application/workflow-engine.ts:1146-1415`：定位 transcript、读取 transcript 派生 telemetry 并写入 `agent.session_recorded`。
-- `src/application/workflows/execute-work-item.ts`：实现、QA、发布和人工合并关联的执行闭环。
+- `packages/runtime/src/infrastructure/observability/jsonl-event-store.ts`：追加写入、顺序号、前向 hash 链、`fsync`、校验和按运行查询。
+- `packages/runtime/src/infrastructure/observability/local-evidence-store.ts`：AES-256-GCM 加密、SHA-256 去重、文本脱敏、`EvidenceRef` 引用。
+- `packages/core/src/events.ts`：`RunEvent`、`RunEventData`、`EvidenceRef`、`AgentToolCallSummary`。
+- `packages/runtime/src/observability/run-observer.ts`：将事件追加到审计流并记录可观测字段。
+- `packages/runtime/src/infrastructure/observability/agent-telemetry.ts` 与 `packages/runtime/src/domain/agents/tool-telemetry.ts`：从 Claude/Codex transcript/rollout 读取 token 和工具调用元数据；transcript 是 agent 行为的唯一事实源。
+- `packages/runtime/src/application/sessions/types.ts`、`packages/runtime/src/application/sessions/chain.ts`、`packages/runtime/src/application/sessions/file-store.ts`、`packages/runtime/src/application/sessions/handoff-store.ts`：provider-native session snapshot、checksum、优先级 fallback 和 handoff fallback。
+- `packages/runtime/src/application/workflow-engine.ts:1146-1415`：定位 transcript、读取 transcript 派生 telemetry 并写入 `agent.session_recorded`。
+- `packages/runtime/src/application/workflows/execute-work-item.ts`：实现、QA、发布和人工合并关联的执行闭环。
 - `docs/architecture/observability.md` 与 `docs/adr/0018-evidence-classification-and-redaction.md`：审计和证据分类规则。
 
 现有 `/Users/shenggangshu/.claude/skills/retro` 是复盘规则的唯一来源。AFK 不复制其正文、不新增同名 skill、不修改 `~/.claude/skills` 或其软链接目标。AFK 只负责准备输入、启动已有 skill、校验输出和保存结果。
@@ -81,7 +81,7 @@
 
 如果 transcript 与 `agent.session_recorded`、session snapshot 或 handoff summary 的同名字段不一致，记录 `sourceConflict`，以 transcript 为准；不做“多数值胜出”、不合并 token、不合并 tool call。若 transcript 缺失，报告标记 `incomplete`，而不是用其他来源伪造完整 session。
 
-`WorkflowRunner` 已在 `context_high` 路径调用 `execution.captureSession()` 后通过 `SessionStoreChain.saveFirst()` 保存 snapshot；恢复路径由 `src/application/workflows/resume.ts` 调用同一条 chain。Retro 只读这些既有产物，不重新捕获、不重新持久化，也不创建第二个 session id 体系。
+`WorkflowRunner` 已在 `context_high` 路径调用 `execution.captureSession()` 后通过 `SessionStoreChain.saveFirst()` 保存 snapshot；恢复路径由 `packages/runtime/src/application/workflows/resume.ts` 调用同一条 chain。Retro 只读这些既有产物，不重新捕获、不重新持久化，也不创建第二个 session id 体系。
 
 ### 2.2 复盘任务
 
@@ -140,7 +140,7 @@ Return a JSON report matching the supplied schema.
 
 ### 3.1 `ExecutionEvidenceManifest`
 
-新增 `src/domain/observability/retro-types.ts`，定义版本化数据契约：
+新增 `packages/runtime/src/domain/observability/retro-types.ts`，定义版本化数据契约：
 
 ```ts
 export type RetroSource = 'provisional' | 'final' | 'failure';
@@ -258,7 +258,7 @@ export interface RetroReport {
 
 ### 3.3 审计事件
 
-在 `packages/afk-core/src/events.ts` 增加四类事件：
+在 `packages/core/src/events.ts` 增加四类事件：
 
 ```ts
 | { kind: 'retro.requested'; retroId: string; source: RetroSource; inputHash: string; retroVersion: string }
@@ -276,7 +276,7 @@ retro.completed:<retroId>:<reportHash>
 retro.failed:<retroId>:<attempt>
 ```
 
-`packages/afk-core/src/reducer.ts`、`src/observability/work-item-execution-projection.ts` 和 Desktop execution contract 必须将上述事件视为观测信息，不能改变工作项生命周期状态。
+`packages/core/src/reducer.ts`、`packages/runtime/src/observability/work-item-execution-projection.ts` 和 Desktop execution contract 必须将上述事件视为观测信息，不能改变工作项生命周期状态。
 
 ## 4. 文件职责
 
@@ -284,32 +284,32 @@ retro.failed:<retroId>:<attempt>
 
 | 文件 | 职责 |
 | --- | --- |
-| `src/domain/observability/retro-types.ts` | manifest、task、report、finding 的纯类型和 schema 常量 |
-| `src/application/retrospectives/evidence-manifest.ts` | 从已验证事件、现有 session store 和现有 telemetry 结果生成规范化 manifest；不执行 agent |
-| `src/application/retrospectives/retro-evidence-reader.ts` | 校验 manifest、读取 `EvidenceRef`、生成脱敏临时输入目录 |
-| `src/application/retrospectives/retro-prompt.ts` | 生成固定 prompt 和输出 schema 指针；不复制 skill 正文 |
-| `src/application/retrospectives/retro-runner.ts` | 创建 task、启动现有 Agent Provider、解析报告、记录状态 |
-| `src/application/retrospectives/retro-reconciler.ts` | 根据事件流发现缺失、重复、卡住和可升级的复盘任务 |
-| `src/infrastructure/observability/retro-task-store.ts` | `~/.afk/retro/tasks/<retroId>.json` 的原子写入和幂等查询 |
-| `src/infrastructure/observability/retro-report-store.ts` | `~/.afk/retro/reports/<retroId>.json` 的 hash 校验、读取和列表 |
-| `src/cli/commands/retro.ts` | `run/pending/scan/show/rerun/propose` CLI |
-| `src/application/retrospectives/*.test.ts` | 纯函数、任务状态、manifest、prompt、report parser 测试 |
-| `src/infrastructure/observability/retro-*.test.ts` | 原子写入、幂等、损坏文件、报告 hash 测试 |
-| `src/cli/commands/retro.test.ts` | Commander 参数和 JSON 输出测试 |
+| `packages/runtime/src/domain/observability/retro-types.ts` | manifest、task、report、finding 的纯类型和 schema 常量 |
+| `packages/runtime/src/application/retrospectives/evidence-manifest.ts` | 从已验证事件、现有 session store 和现有 telemetry 结果生成规范化 manifest；不执行 agent |
+| `packages/runtime/src/application/retrospectives/retro-evidence-reader.ts` | 校验 manifest、读取 `EvidenceRef`、生成脱敏临时输入目录 |
+| `packages/runtime/src/application/retrospectives/retro-prompt.ts` | 生成固定 prompt 和输出 schema 指针；不复制 skill 正文 |
+| `packages/runtime/src/application/retrospectives/retro-runner.ts` | 创建 task、启动现有 Agent Provider、解析报告、记录状态 |
+| `packages/runtime/src/application/retrospectives/retro-reconciler.ts` | 根据事件流发现缺失、重复、卡住和可升级的复盘任务 |
+| `packages/runtime/src/infrastructure/observability/retro-task-store.ts` | `~/.afk/retro/tasks/<retroId>.json` 的原子写入和幂等查询 |
+| `packages/runtime/src/infrastructure/observability/retro-report-store.ts` | `~/.afk/retro/reports/<retroId>.json` 的 hash 校验、读取和列表 |
+| `apps/cli/src/commands/retro.ts` | `run/pending/scan/show/rerun/propose` CLI |
+| `packages/runtime/src/application/retrospectives/*.test.ts` | 纯函数、任务状态、manifest、prompt、report parser 测试 |
+| `packages/runtime/src/infrastructure/observability/retro-*.test.ts` | 原子写入、幂等、损坏文件、报告 hash 测试 |
+| `apps/cli/src/commands/retro.test.ts` | Commander 参数和 JSON 输出测试 |
 
 ### 修改文件
 
 | 文件 | 修改 |
 | --- | --- |
-| `packages/afk-core/src/events.ts` | 增加 retro 事件和共享类型引用 |
-| `packages/afk-core/src/reducer.ts` | 处理 retro 事件的只读 projection 语义 |
-| `src/cli/command-registry.ts` | 注册 `retro` loader；根 `src/command-registry.ts` 继续复用同一数组 |
+| `packages/core/src/events.ts` | 增加 retro 事件和共享类型引用 |
+| `packages/core/src/reducer.ts` | 处理 retro 事件的只读 projection 语义 |
+| `apps/cli/src/command-registry.ts` | 注册 `retro` loader；根 `packages/runtime/src/command-registry.ts` 继续复用同一数组 |
 | `docs/architecture/overview.md` | 更新 command surface，记录 `afk retro` 不改变工作项生命周期 |
 | `docs/architecture/observability.md` | 记录 manifest、task、report 的位置和审计边界 |
 | `docs/adr/0018-evidence-classification-and-redaction.md` | 增加 Retro 输入、原始证据和报告的分类规则 |
-| `src/application/workflows/execute-work-item.ts` | 只追加可选 `retro.requested`，不等待 Retro Agent，不改变执行结果 |
-| `src/application/workflow-engine.ts:1146-1415` | 调整 `recordAgentTelemetry()`：transcript 可读时以 transcript 为唯一 authoritative source；`ExecutionResult.usage/tools` 只能做运行时一致性检查，不能覆盖或替代 transcript |
-| `desktop-client/shared/execution-contract.ts` | 展示新增事件名称，保持 Desktop 兼容未知 retro 事件 |
+| `packages/runtime/src/application/workflows/execute-work-item.ts` | 只追加可选 `retro.requested`，不等待 Retro Agent，不改变执行结果 |
+| `packages/runtime/src/application/workflow-engine.ts:1146-1415` | 调整 `recordAgentTelemetry()`：transcript 可读时以 transcript 为唯一 authoritative source；`ExecutionResult.usage/tools` 只能做运行时一致性检查，不能覆盖或替代 transcript |
+| `apps/desktop/shared/execution-contract.ts` | 展示新增事件名称，保持 Desktop 兼容未知 retro 事件 |
 
 ## 5. 分阶段实施任务
 
@@ -318,7 +318,7 @@ retro.failed:<retroId>:<attempt>
 **Files:**
 
 - Modify: `docs/architecture/observability.md`
-- Test: existing `src/infrastructure/observability/*.test.ts`
+- Test: existing `packages/runtime/src/infrastructure/observability/*.test.ts`
 
 - [ ] **Step 1: 记录当前基线命令和结果**
 
@@ -352,10 +352,10 @@ pnpm docs:check
 
 **Files:**
 
-- Create: `src/domain/observability/retro-types.ts`
-- Modify: `packages/afk-core/src/events.ts`
-- Modify: `packages/afk-core/src/reducer.ts`
-- Test: `src/domain/observability/retro-types.test.ts`
+- Create: `packages/runtime/src/domain/observability/retro-types.ts`
+- Modify: `packages/core/src/events.ts`
+- Modify: `packages/core/src/reducer.ts`
+- Test: `packages/runtime/src/domain/observability/retro-types.test.ts`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -372,18 +372,18 @@ schema 的顶层对象设置 `.strict()`；数组长度、字符串大小和 fin
 - [ ] **Step 4: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/domain/observability/retro-types.test.ts packages/afk-core/src/reducer.test.ts
+pnpm vitest run packages/runtime/src/domain/observability/retro-types.test.ts packages/core/src/reducer.test.ts
 ```
 
 ### Task 2: 生成和保存 Execution Evidence Manifest
 
 **Files:**
 
-- Create: `src/application/retrospectives/evidence-manifest.ts`
-- Create: `src/infrastructure/observability/retro-manifest-store.ts`
-- Modify: `src/application/workflows/execute-work-item.ts`
-- Test: `src/application/retrospectives/evidence-manifest.test.ts`
-- Test: `src/infrastructure/observability/retro-manifest-store.test.ts`
+- Create: `packages/runtime/src/application/retrospectives/evidence-manifest.ts`
+- Create: `packages/runtime/src/infrastructure/observability/retro-manifest-store.ts`
+- Modify: `packages/runtime/src/application/workflows/execute-work-item.ts`
+- Test: `packages/runtime/src/application/retrospectives/evidence-manifest.test.ts`
+- Test: `packages/runtime/src/infrastructure/observability/retro-manifest-store.test.ts`
 
 - [ ] **Step 1: 写事件到 manifest 的测试**
 
@@ -413,17 +413,17 @@ expect(manifest.inputHash).toMatch(/^[a-f0-9]{64}$/);
 - [ ] **Step 5: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/application/retrospectives/evidence-manifest.test.ts src/infrastructure/observability/retro-manifest-store.test.ts src/application/workflows/execute-work-item.test.ts
+pnpm vitest run packages/runtime/src/application/retrospectives/evidence-manifest.test.ts packages/runtime/src/infrastructure/observability/retro-manifest-store.test.ts packages/runtime/src/application/workflows/execute-work-item.test.ts
 ```
 
 ### Task 3: 复用 session/telemetry 并归档 Git/CI 证据
 
 **Files:**
 
-- Modify: `src/application/workflow-engine.ts:1146-1415`
-- Read: `src/application/sessions/types.ts`, `src/application/sessions/chain.ts`, `src/application/sessions/file-store.ts`, `src/application/sessions/handoff-store.ts`
-- Create: `src/application/retrospectives/evidence-collector.ts`
-- Test: `src/application/retrospectives/evidence-collector.test.ts`
+- Modify: `packages/runtime/src/application/workflow-engine.ts:1146-1415`
+- Read: `packages/runtime/src/application/sessions/types.ts`, `packages/runtime/src/application/sessions/chain.ts`, `packages/runtime/src/application/sessions/file-store.ts`, `packages/runtime/src/application/sessions/handoff-store.ts`
+- Create: `packages/runtime/src/application/retrospectives/evidence-collector.ts`
+- Test: `packages/runtime/src/application/retrospectives/evidence-collector.test.ts`
 
 - [ ] **Step 1: 为失败和超时路径写测试**
 
@@ -437,7 +437,7 @@ session 归档只调用现有 `SessionStoreChain.loadFirst()`/`list()`，保留�
 
 - [ ] **Step 3: 修正现有 telemetry 写入优先级**
 
-将 `src/application/workflow-engine.ts:recordAgentTelemetry()` 从“优先使用 `ExecutionResult.usage/tools`、缺失时读取 transcript”改为：先定位并读取 transcript；transcript 可读时只使用 transcript 派生的 usage/tools 写入 `agent.session_recorded`；`ExecutionResult.usage/tools` 仅在内存中用于一致性检查。transcript 不可读时只保留 session id，manifest 记录 `transcript_missing`，不把 runtime result 当作 authoritative telemetry。
+将 `packages/runtime/src/application/workflow-engine.ts:recordAgentTelemetry()` 从“优先使用 `ExecutionResult.usage/tools`、缺失时读取 transcript”改为：先定位并读取 transcript；transcript 可读时只使用 transcript 派生的 usage/tools 写入 `agent.session_recorded`；`ExecutionResult.usage/tools` 仅在内存中用于一致性检查。transcript 不可读时只保留 session id，manifest 记录 `transcript_missing`，不把 runtime result 当作 authoritative telemetry。
 
 - [ ] **Step 4: 接入 `EvidenceStorePort`**
 
@@ -450,17 +450,17 @@ Git 只读取 `HEAD`、当前 branch、base branch、`diff --stat` 和 commit SH
 - [ ] **Step 6: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/application/retrospectives/evidence-collector.test.ts src/infrastructure/observability/agent-telemetry.test.ts src/application/workflows/record-agent-telemetry.test.ts
+pnpm vitest run packages/runtime/src/application/retrospectives/evidence-collector.test.ts packages/runtime/src/infrastructure/observability/agent-telemetry.test.ts packages/runtime/src/application/workflows/record-agent-telemetry.test.ts
 ```
 
 ### Task 4: 实现 Retro task store 和 report store
 
 **Files:**
 
-- Create: `src/infrastructure/observability/retro-task-store.ts`
-- Create: `src/infrastructure/observability/retro-report-store.ts`
-- Test: `src/infrastructure/observability/retro-task-store.test.ts`
-- Test: `src/infrastructure/observability/retro-report-store.test.ts`
+- Create: `packages/runtime/src/infrastructure/observability/retro-task-store.ts`
+- Create: `packages/runtime/src/infrastructure/observability/retro-report-store.ts`
+- Test: `packages/runtime/src/infrastructure/observability/retro-task-store.test.ts`
+- Test: `packages/runtime/src/infrastructure/observability/retro-report-store.test.ts`
 
 - [ ] **Step 1: 定义 task 文件**
 
@@ -501,18 +501,18 @@ task 至少包含：
 - [ ] **Step 5: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/infrastructure/observability/retro-task-store.test.ts src/infrastructure/observability/retro-report-store.test.ts
+pnpm vitest run packages/runtime/src/infrastructure/observability/retro-task-store.test.ts packages/runtime/src/infrastructure/observability/retro-report-store.test.ts
 ```
 
 ### Task 5: 实现独立 Retro Runner
 
 **Files:**
 
-- Create: `src/application/retrospectives/retro-evidence-reader.ts`
-- Create: `src/application/retrospectives/retro-prompt.ts`
-- Create: `src/application/retrospectives/retro-runner.ts`
-- Test: `src/application/retrospectives/retro-evidence-reader.test.ts`
-- Test: `src/application/retrospectives/retro-runner.test.ts`
+- Create: `packages/runtime/src/application/retrospectives/retro-evidence-reader.ts`
+- Create: `packages/runtime/src/application/retrospectives/retro-prompt.ts`
+- Create: `packages/runtime/src/application/retrospectives/retro-runner.ts`
+- Test: `packages/runtime/src/application/retrospectives/retro-evidence-reader.test.ts`
+- Test: `packages/runtime/src/application/retrospectives/retro-runner.test.ts`
 
 - [ ] **Step 1: 写 skill 路径和隔离测试**
 
@@ -541,16 +541,16 @@ prompt 使用固定文字和 manifest/report schema 版本，包含 skill 路径
 - [ ] **Step 7: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/application/retrospectives/retro-evidence-reader.test.ts src/application/retrospectives/retro-runner.test.ts
+pnpm vitest run packages/runtime/src/application/retrospectives/retro-evidence-reader.test.ts packages/runtime/src/application/retrospectives/retro-runner.test.ts
 ```
 
 ### Task 6: 增加 `afk retro` CLI
 
 **Files:**
 
-- Create: `src/cli/commands/retro.ts`
-- Create: `src/cli/commands/retro.test.ts`
-- Modify: `src/cli/command-registry.ts`
+- Create: `apps/cli/src/commands/retro.ts`
+- Create: `apps/cli/src/commands/retro.test.ts`
+- Modify: `apps/cli/src/command-registry.ts`
 - Modify: `docs/architecture/overview.md`
 
 - [ ] **Step 1: 注册命令**
@@ -561,7 +561,7 @@ pnpm vitest run src/application/retrospectives/retro-evidence-reader.test.ts src
 { names: ['retro'], loader: () => import('./commands/retro.js').then(m => m.registerRetroCommands) }
 ```
 
-根 `src/command-registry.ts` 不维护第二份列表。同步更新两个 registry test 的期望命令集合和 `docs/architecture/overview.md` command surface。
+根 `packages/runtime/src/command-registry.ts` 不维护第二份列表。同步更新两个 registry test 的期望命令集合和 `docs/architecture/overview.md` command surface。
 
 - [ ] **Step 2: 实现 `retro run`**
 
@@ -614,19 +614,19 @@ afk retro propose --retro-id <retroId> --json
 - [ ] **Step 6: 运行 CLI 测试**
 
 ```bash
-pnpm vitest run src/cli/commands/retro.test.ts src/cli/command-registry.test.ts src/command-registry.test.ts
+pnpm --filter afk exec vitest run src/commands/retro.test.ts src/command-registry.test.ts
 ```
 
 ### Task 7: 接入主流程旁路触发和补偿扫描
 
 **Files:**
 
-- Create: `src/application/retrospectives/retro-trigger.ts`
-- Create: `src/application/retrospectives/retro-reconciler.ts`
-- Modify: `src/application/workflows/execute-work-item.ts`
-- Modify: `src/application/workflows/execute-work-item.ts`
-- Test: `src/application/retrospectives/retro-trigger.test.ts`
-- Test: `src/application/retrospectives/retro-reconciler.test.ts`
+- Create: `packages/runtime/src/application/retrospectives/retro-trigger.ts`
+- Create: `packages/runtime/src/application/retrospectives/retro-reconciler.ts`
+- Modify: `packages/runtime/src/application/workflows/execute-work-item.ts`
+- Modify: `packages/runtime/src/application/workflows/execute-work-item.ts`
+- Test: `packages/runtime/src/application/retrospectives/retro-trigger.test.ts`
+- Test: `packages/runtime/src/application/retrospectives/retro-reconciler.test.ts`
 
 - [ ] **Step 1: 让主流程只持久化 request event**
 
@@ -647,18 +647,18 @@ pnpm vitest run src/cli/commands/retro.test.ts src/cli/command-registry.test.ts 
 - [ ] **Step 5: 运行聚焦测试**
 
 ```bash
-pnpm vitest run src/application/retrospectives/retro-trigger.test.ts src/application/retrospectives/retro-reconciler.test.ts src/application/workflows/execute-work-item.test.ts
+pnpm vitest run packages/runtime/src/application/retrospectives/retro-trigger.test.ts packages/runtime/src/application/retrospectives/retro-reconciler.test.ts packages/runtime/src/application/workflows/execute-work-item.test.ts
 ```
 
 ### Task 8: 提案输出和反馈闭环
 
 **Files:**
 
-- Modify: `src/application/retrospectives/retro-runner.ts`
-- Modify: `src/cli/commands/retro.ts`
+- Modify: `packages/runtime/src/application/retrospectives/retro-runner.ts`
+- Modify: `apps/cli/src/commands/retro.ts`
 - Create: `docs/architecture/retro-feedback-loop.md`
 - Modify: `docs/index.md`
-- Test: `src/application/retrospectives/retro-proposal.test.ts`
+- Test: `packages/runtime/src/application/retrospectives/retro-proposal.test.ts`
 
 - [ ] **Step 1: 固定 finding 到 action 的映射**
 

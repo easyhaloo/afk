@@ -16,7 +16,7 @@ function flag(name) {
   return process.argv.includes(name);
 }
 
-const root = option('--root', resolve(new URL('../src/', import.meta.url).pathname));
+const root = option('--root', resolve(new URL('../packages/runtime/src/', import.meta.url).pathname));
 const baselinePath = option('--baseline', resolve(new URL('./architecture-legacy-baseline.json', import.meta.url).pathname));
 const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
 const legacyFiles = new Set(baseline.legacyFiles);
@@ -28,12 +28,12 @@ const requirePackages = flag('--require-packages');
 const packageRoots = [
   {
     name: 'core',
-    path: option('--core-root', resolve(new URL('../packages/afk-core/', import.meta.url).pathname)),
+    path: option('--core-root', resolve(new URL('../packages/core/', import.meta.url).pathname)),
     required: requirePackages,
   },
   {
     name: 'application',
-    path: option('--application-root', resolve(new URL('../packages/afk-application/', import.meta.url).pathname)),
+    path: option('--application-root', resolve(new URL('../packages/application/', import.meta.url).pathname)),
     required: requirePackages,
   },
 ];
@@ -49,8 +49,8 @@ const nodeBuiltins = new Set([
   'url', 'util', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib',
 ]);
 const domGlobals = ['document', 'window', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'Element'];
-const desktopRoot = option('--desktop-client-root', resolve(new URL('../desktop-client/', import.meta.url).pathname));
-const buildOutputDirectories = new Set(['dist', 'dist-electron', 'node_modules', 'coverage', 'release', 'test-results', 'screenshots']);
+const desktopRoot = option('--desktop-root', resolve(new URL('../apps/desktop/', import.meta.url).pathname));
+const buildOutputDirectories = new Set(['.dev', 'dist', 'dist-electron', 'node_modules', 'coverage', 'release', 'test-results', 'screenshots']);
 const backlogStateKeys = new Set(['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked']);
 const requiredStateMappingKeys = ['in_progress', 'verification', 'merge_ready'];
 const stateMappingLiteralPattern = /\{([^{}]*)\}/g;

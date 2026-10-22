@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { readSignalSync } from '../io/signal.js';
 import { TmuxClient, normalizeTmuxSessionName } from './tmux.js';
+import { ControlModeConnection } from './control-mode.js';
 
 describe('normalizeTmuxSessionName', () => {
   it('rewrites colons the same way tmux stores session names', () => {
@@ -73,5 +74,45 @@ describe('TmuxClient provider readiness', () => {
     vi.spyOn(client as any, 'sleep').mockResolvedValue(undefined);
 
     await expect(client.waitForPrompt('/missing-status', 10, 'codex', 'codex-session')).resolves.toBe(true);
+  });
+});
+
+describe('ControlModeConnection pipe failures', () => {
+  const hasTmux = (() => {
+    try { execFileSync('tmux', ['-V'], { stdio: 'pipe' }); return true; } catch { return false; }
+  })();
+
+  it.skipIf(!hasTmux)('does not write to a control pipe that closed with the session', async () => {
+    const session = `afk-test-epipe-${Date.now()}`;
+    const client = new TmuxClient();
+    await client.createSession(session, tmpdir(), 'sleep 30');
+    const connection = new ControlModeConnection({ session });
+    const exited = new Promise<void>(resolve => connection.onExit(() => resolve()));
+    try {
+      // Killing the session makes tmux exit, which closes the control pipe.
+      await client.killSession(session);
+      await exited;
+      const writes: string[] = [];
+      (connection as any).stdin.write = (chunk: string) => { writes.push(String(chunk)); return true; };
+      connection.sendRawCommand('noop');
+      // A write to a dead pipe is what produced the unhandled EPIPE that
+      // failed the whole test run.
+      expect(writes).toEqual([]);
+    } finally {
+      connection.close();
+      await client.killSession(session).catch(() => undefined);
+    }
+  }, 30000);
+
+  it('absorbs a control pipe error instead of crashing the process', () => {
+    const connection = new ControlModeConnection({ session: 'afk-test-no-such-session' });
+    try {
+      // Without an error listener the socket turns this into an uncaught
+      // exception, which fails the run over a write nobody waits for.
+      expect(() => (connection as any).stdin.emit('error', new Error('write EPIPE'))).not.toThrow();
+      expect((connection as any).exited).toBe(true);
+    } finally {
+      connection.close();
+    }
   });
 });

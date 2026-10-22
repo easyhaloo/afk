@@ -52,6 +52,22 @@ creation, agent execution, QA, or provider metadata updates are authorized.
 The caller explicitly invokes the external decomposition/provider workflow or
 the AFK execution commands separately.
 
+### Publication channel
+
+The skill does not create the backlog record. When the owner publishes the
+approved PRD as AFK work, the item carries the fixed `prd` label so a tracker
+can tell PRD-derived work apart at a glance:
+
+```bash
+afk backlog create "<title>" \
+  --description-file <prd-path> \
+  --project <group/repo> --platform github|gitlab \
+  --prd
+```
+
+`--prd` applies the `prd` label, which AFK provisions with its own colour and
+description. `--tag` carries business tags and is never a substitute for it.
+
 ## Steps
 
 ### Step 1 — Verify alignment against code (when applicable)

@@ -60,7 +60,7 @@ single source of truth for the supported surface:
 | --- | --- |
 | `afk backlog init` | Provision provider metadata |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | Explicitly adopt one open manual issue as ready AFK work |
-| `afk backlog create <title>` | Create one provider-backed backlog item |
+| `afk backlog create <title> [--prd]` | Create one provider-backed backlog item; `--prd` applies the fixed `prd` label |
 | `afk backlog list/show/tag` | Inspect and manage backlog records |
 | `afk backlog inventory` | Inventory issues across all credential-accessible projects |
 | `afk backlog interrupt` | Stop active execution and hand the backlog to an operator |
@@ -94,6 +94,14 @@ the provider bundle. They delegate common tracker mechanics internally while
 keeping platform validation and construction at the platform boundary. A
 future integration such as Linear implements `BacklogProvider` directly; no
 tracker-specific type is required by the runner.
+
+Provider labels come in two kinds. The `stage::` and `mode::` labels project
+the canonical execution state and are rewritten on every transition, so they
+belong to the adapter and cannot be set by a caller. The fixed labels classify
+an item instead: they are provisioned with a colour and a description like the
+lifecycle labels, but they survive transitions and stay settable as ordinary
+business tags. `prd` marks an item that came from an approved PRD, and
+`afk backlog create --prd` applies it.
 
 The management bundle wraps a concrete provider in a claim-free facade. Its
 backlog surface includes lookup, listing, metadata initialization, business

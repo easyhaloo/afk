@@ -36,6 +36,9 @@ after implementation and are generated separately.
 | Approved `PRD.md` with `User Stories` and Observable Behaviors | PRD Mode |
 | Any aligned requirement context without a PRD | Direct Mode |
 
+Items produced in PRD Mode carry the `prd` business tag, so the importer
+applies the fixed `prd` label that AFK provisions with its own colour.
+
 Choose `executionMode` per item: `afk` for deterministic, automatable work;
 `hitl` when a human decision, manual check, or non-automatable action is
 required. This is a backlog field, not a provider label. Use business tags

@@ -511,6 +511,48 @@ describe('backlog action handlers (JSON envelope mode)', () => {
     expect(envelope.data.title).toBe('fresh');
   });
 
+  it('runBacklogCreate applies the fixed prd label when the item comes from a PRD', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogCreate(stubProvider([]), { title: 'from prd', description: 'desc', prd: true, json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.tags).toEqual(['prd']);
+  });
+
+  it('runBacklogCreate keeps the prd label off items that did not come from a PRD', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogCreate(stubProvider([]), { title: 'plain', description: 'desc', tag: ['desktop'], json: true });
+    } finally {
+      process.stdout.write = original;
+    }
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope.data.tags).toEqual(['desktop']);
+    expect(envelope.data.tags).not.toContain('prd');
+  });
+
+  it('exposes the --prd marker on backlog create', () => {
+    const program = commandTree(registerBacklogCommands);
+    const backlog = program.commands.find(command => command.name() === 'backlog')!;
+    const create = backlog.commands.find(command => command.name() === 'create')!;
+
+    expect(create.options.map(option => option.long)).toContain('--prd');
+  });
+
   it('runBacklogTagAdd emits the success envelope with the updated item', async () => {
     const captured: string[] = [];
     const original = process.stdout.write.bind(process.stdout);

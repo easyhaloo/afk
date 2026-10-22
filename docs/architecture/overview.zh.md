@@ -48,7 +48,7 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | --- | --- |
 | `afk backlog init` | 初始化 provider 元数据 |
 | `afk backlog adopt --id <id> --project <project> --platform github\|gitlab [--json]` | 显式将一个开放手工 issue 接管为 ready AFK 工作项 |
-| `afk backlog create <title>` | 创建一个 provider 背书的 backlog 工作项 |
+| `afk backlog create <title> [--prd]` | 创建一个 provider 背书的 backlog 工作项；`--prd` 打上固定的 `prd` 标签 |
 | `afk backlog list/show/tag` | 查看和管理 backlog |
 | `afk backlog inventory` | 盘点所有凭据可达项目下的 issue |
 | `afk backlog interrupt` | 中止活跃执行，把 backlog 交还操作者 |
@@ -80,6 +80,12 @@ GitHub 和 GitLab 分别由具体的 `BacklogProvider` 实现，并由 provider 
 按平台选择。它们可以在内部复用 tracker 机制，但平台校验和生产构造位于
 各自边界。未来的 Linear 等平台直接实现 `BacklogProvider`，Runner 不依赖
 tracker 类型。
+
+平台标签分两类。`stage::` 和 `mode::` 标签投影 canonical 执行状态，每次
+状态迁移都会被重写，因此属于 adapter，调用方不能设置。固定标签用于给工作项
+分类：它们和生命周期标签一样会被 provision 出颜色与描述，但能跨状态迁移
+保留，并且仍然可以作为普通业务标签设置。`prd` 表示该工作项来自一份已批准的
+PRD，由 `afk backlog create --prd` 打上。
 
 管理 bundle 会将具体 provider 包装为不含认领能力的 facade。其 backlog
 接口提供读取、列表、元数据初始化、业务标签更新，以及 QA 所需的状态和

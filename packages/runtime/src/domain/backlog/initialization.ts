@@ -17,6 +17,23 @@ export const BACKLOG_METADATA = {
   } satisfies Record<BacklogExecutionMode, string>,
 } as const;
 
+/**
+ * Fixed business labels.  Unlike the stage and mode labels, these are not
+ * replaced on every canonical transition: they classify an item until an
+ * operator removes them.  They are provisioned with a colour so a tracker
+ * renders them the same way in every project.
+ *
+ * `prd` marks an item that came from an approved PRD.  It deliberately lives
+ * outside the `stage::` namespace: that namespace projects the canonical
+ * execution state and is rewritten on every transition, so a document-stage
+ * marker placed there would be erased the first time the item moved.
+ */
+export const FIXED_BACKLOG_TAGS = {
+  prd: { name: 'prd', color: '0F766E', description: 'Derived from an approved PRD' },
+} as const;
+
+export type FixedBacklogTag = keyof typeof FIXED_BACKLOG_TAGS;
+
 export interface BacklogMetadataLabel {
   name: string;
   color: string;
@@ -37,6 +54,7 @@ export function backlogMetadataLabelSpecs(
     { name: metadata.stateLabels.blocked, color: 'B60205', description: 'Human intervention is required' },
     { name: metadata.executionModeLabels.afk, color: '0052CC', description: 'Automated execution mode' },
     { name: metadata.executionModeLabels.hitl, color: 'D73A4A', description: 'Human-in-the-loop execution mode' },
+    ...Object.values(FIXED_BACKLOG_TAGS).map(tag => ({ ...tag })),
   ];
 }
 

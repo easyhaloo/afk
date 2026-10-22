@@ -30,6 +30,7 @@ import {
 } from '@afk/runtime/domain/backlog/commands';
 import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
+import { FIXED_BACKLOG_TAGS } from '@afk/runtime/domain/backlog/index';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import type { CommandRegistrationContext } from '../command-registry.js';
@@ -197,7 +198,7 @@ export async function runBacklogShow(
 
 export async function runBacklogCreate(
   provider: BacklogManagementProvider,
-  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; tag?: string[]; project?: string; json?: boolean } & { description?: string },
+  options: { title: string; descriptionFile?: string; parent?: string; baseBacklog?: string; dependsOn?: string[]; mode?: string; tag?: string[]; prd?: boolean; project?: string; json?: boolean } & { description?: string },
 ): Promise<void> {
   const kind = 'backlog.create';
   try {
@@ -214,7 +215,7 @@ export async function runBacklogCreate(
       baseBacklogId: options.baseBacklog,
       dependsOn: options.dependsOn,
       executionMode: options.mode as BacklogExecutionMode | undefined,
-      tags: options.tag,
+      tags: [...(options.tag ?? []), ...(options.prd ? [FIXED_BACKLOG_TAGS.prd.name] : [])],
     };
     const item = await createBacklog(provider, input);
     if (options.json) {
@@ -477,6 +478,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('-d, --depends-on <id>', 'Backlog ID that must complete first', (value: string, previous: string[]) => [...previous, value], [])
     .option('--mode <mode>', `Execution mode (${modes.join('|')})`, 'afk')
     .option('--tag <tag>', 'Business tag', (value: string, previous: string[]) => [...previous, value], [])
+    .option('--prd', 'Mark the item as derived from an approved PRD (applies the fixed prd label)')
     .option('--project <project>', 'Provider project/repository')
     .option('--platform <platform>', 'Override provider detection (github|gitlab)')
     .option('--json', 'Emit structured JSON envelope to stdout')

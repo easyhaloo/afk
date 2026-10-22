@@ -313,6 +313,25 @@ GitHub 侧的附件 release 不能是 draft：draft 的 `browser_download_url` �
 
 实现阶段不上传任何文件：那个阶段还没有 Change Request 可挂载，工作树也会在运行结束后被删除，因此只有文本证据能随分支存活。skill 曾要求 agent `git add .afk/artifacts.txt`——该路径被 Git 忽略，命令必然被拒绝；skill 还承诺一个并不存在的 "wrapup step" 会上传并嵌入 URL。两处都已改正，并由 `tests/contract/skill-evidence-contract.test.ts` 守卫：任何 skill 不得再要求暂存 `.afk/`，且必须写明附件由 QA 阶段上传。
 
+### 7.5 合并后的状态收敛（2026-10-22）
+
+人工在 GitLab 或 GitHub 上合并 Change Request 之后，backlog 仍停在 `merge_ready` + `hitl`：平台只负责关 issue，不改 AFK 的标签，而从 `merge_ready` 到 `done` 需要一次带审计的确认。
+
+`confirm-merge` 同时承担"合并"与"置为 done"，因此它始终是人工动作——它会在变更仍 open 时把 PR 合掉。自动收敛必须另走一条只读的路径：`reconcileMergedBacklog` 只在关联变更**已经 merged** 时把 backlog 收敛为 `done`，变更仍 open 时原样返回并说明原因，合并门禁的语义不变。`afk backlog reconcile-merge --id <id>` 是它的命令入口，`afk loop` 的每次轮询也会顺带收敛它自己绑定的那一项。
+
+收敛前逐项复核，与人工确认同标准：必须是根 backlog、状态为 `merge_ready` + `hitl`、变更的源分支是 QA 验证分支或实施分支、目标分支与配置一致、变更确实已 merged。任一条不满足即不动作。
+
+判定必须看**标签**而不是推导出来的状态。Provider 侧的推导是"issue 关闭即为 done"，与标签无关：变更合并后平台自动关掉 issue，backlog 读出来已经是 `done`，但标签仍停在 `stage::merge-ready`——评审者在平台上看到的仍是"待合并"。因此 `BacklogItem.labeledState` 单独暴露标签状态，收敛与人工确认都按它判定；`confirm-merge` 同样按标签判定，否则它会在"已 done"上直接返回，永远不修标签。
+
+触发方式有两种，调用的是同一条命令：
+
+| 触发 | 位置 | 适用 |
+| --- | --- | --- |
+| 轮询 | `afk loop` 每次 poll 顺带收敛自己绑定的那一项 | 本机常驻 daemon |
+| 事件 | GitHub Actions `qa-merge-reconcile.yml`（`pull_request: closed` + `merged == true`） | 平台侧即时，daemon 不在时也生效 |
+
+平台侧的 workflow 只做两件事：从标题 `Backlog <id>` 或正文 `Closes #<id>` 取出 backlog id，然后调用 `afk backlog reconcile-merge`；判定完成的依据是**标签变成 `done`**，而不是这次调用是否发生了转移（人工已确认过时同样算成功）。它需要 `issues: write` 权限，AFK CLI 由仓库源码构建。GitLab 的等价物是 `merge_request` 事件上的 CI job 调用同一条命令。
+
 ## 8. 验证边界与建议用例
 
 | 层级 | 应验证什么 | 可接受证据 | 不能证明什么 |

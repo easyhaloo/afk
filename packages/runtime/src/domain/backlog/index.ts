@@ -38,6 +38,15 @@ export interface BacklogItem {
   baseBacklogId?: string;
   dependsOn: string[];
   state: BacklogState;
+  /**
+   * The state the provider's workflow label records, when it has one.
+   *
+   * `state` is derived: a closed issue reads as `done` whatever its label
+   * says, so it cannot tell a completed backlog from a closed issue whose
+   * label still says "merge pending". The label is what a reviewer reads on
+   * the platform, so reconciling it needs this raw value.
+   */
+  labeledState?: BacklogState;
   executionMode: BacklogExecutionMode;
   /** Provider-neutral business tags (never stage/mode metadata). */
   tags: string[];

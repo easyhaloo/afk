@@ -390,6 +390,7 @@ function toBacklogItem(issue: TrackedIssue): BacklogItem {
   return {
     id: String(issue.id), title: issue.title, description: issue.description,
     parentId, baseBacklogId, dependsOn, state: state ?? 'ready', executionMode, tags: extractBacklogTags(issue.labels),
+    ...(labeledState ? { labeledState } : {}),
     branchName: deriveBacklogBranchName(String(issue.id)), providerRef: `${issue.platform}:${issue.projectId}#${issue.id}`,
     webUrl: issue.url,
   };

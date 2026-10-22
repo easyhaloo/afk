@@ -6,7 +6,7 @@ import * as path from 'path';
 import { createWorkflowProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 import { LoopRunner } from '@afk/runtime/application/modules/loop-runner';
 import { installLoopSignalHandlers } from './loop-signals.js';
-import { getSchedulerConfig } from '@afk/runtime/infrastructure/config/manager';
+import { getSchedulerConfig, getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { parseWorkItemId } from '@afk/runtime/domain/backlog/index';
 import { loadLoopConfig } from '@afk/runtime/application/loop/loop-config';
 import { logger, redirectStdioToLog, resolveLogPath } from '@afk/runtime/infrastructure/io/index';
@@ -88,6 +88,7 @@ async function runLoop(options: LoopStartOptions): Promise<void> {
     maxIterations: options.maxIterations,
     backlogIds: options.backlogId,
     managedExecution,
+    targetBranch: getWorkflowConfig().targetBranch,
     template: options.template,
   });
 

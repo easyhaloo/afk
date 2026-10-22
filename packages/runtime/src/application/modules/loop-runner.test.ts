@@ -73,6 +73,51 @@ describe('LoopRunner manifest-bound execution', () => {
     expect(internals.inFlight.has('42')).toBe(false);
   });
 
+  it('completes a merged backlog during the poll without merging the change itself', async () => {
+    const merged = { ...item, state: 'merge_ready' as const, executionMode: 'hitl' as const };
+    const transition = vi.fn(async () => {});
+    const findForBacklog = vi.fn(async () => ({
+      id: 'pr-42', state: 'merged' as const, sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main',
+    }));
+    const merge = vi.fn();
+    const { providers, backlog } = providersFor([merged]);
+    (providers as any).backlog.transition = transition;
+    (providers as any).changes = { findForBacklog, merge, get: vi.fn() };
+    const subject = new LoopRunner(providers, { ...selection, readManifest, targetBranch: 'main' });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.reconcileMergedChanges();
+
+    expect(transition).toHaveBeenCalledWith('42', 'done', { changeId: 'pr-42' });
+    expect(merge).not.toHaveBeenCalled();
+  });
+
+  it('leaves an unmerged backlog in the merge gate during the poll', async () => {
+    const pending = { ...item, state: 'merge_ready' as const, executionMode: 'hitl' as const };
+    const transition = vi.fn(async () => {});
+    const merge = vi.fn();
+    const { providers } = providersFor([pending]);
+    (providers as any).backlog.transition = transition;
+    (providers as any).changes = {
+      findForBacklog: vi.fn(async () => ({ id: 'pr-42', state: 'open' as const, sourceBranch: 'afk/backlog-42-qa', targetBranch: 'main' })),
+      merge,
+      get: vi.fn(),
+    };
+    const subject = new LoopRunner(providers, { ...selection, readManifest, targetBranch: 'main' });
+    const internals = subject as any;
+    await internals.validateManagedExecution();
+    internals.running = true;
+    internals.emitEvent = vi.fn();
+
+    await internals.reconcileMergedChanges();
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(merge).not.toHaveBeenCalled();
+  });
+
   it('refuses another provider project even with the same issue number', async () => {
     const { providers } = providersFor([{ ...item, providerRef: 'github:other/repo#42' }]);
     const executeManagedWorkItem = vi.fn();

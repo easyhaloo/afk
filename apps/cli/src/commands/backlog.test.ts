@@ -106,6 +106,9 @@ describe('hard-cutover command surface', () => {
     }
     const confirmMerge = backlog!.commands.find(cmd => cmd.name() === 'confirm-merge');
     expect(confirmMerge?.options.some(option => option.long === '--id' && option.required)).toBe(true);
+    const reconcileMerge = backlog!.commands.find(cmd => cmd.name() === 'reconcile-merge');
+    expect(reconcileMerge?.options.some(option => option.long === '--id' && option.required)).toBe(true);
+    expect(reconcileMerge?.options.some(option => option.long === '--json')).toBe(true);
     const tagAdd = backlog!.commands.find(cmd => cmd.name() === 'tag')!.commands.find(cmd => cmd.name() === 'add');
     const tagRemove = backlog!.commands.find(cmd => cmd.name() === 'tag')!.commands.find(cmd => cmd.name() === 'remove');
     expect(tagAdd?.options.some(option => option.long === '--json')).toBe(true);

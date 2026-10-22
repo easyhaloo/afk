@@ -26,11 +26,13 @@ import {
   initializeBacklog,
   interruptBacklog,
   listBacklogs,
+  reconcileMergedBacklog,
   removeBacklogTag,
   retryBacklog,
   showBacklog,
   type BacklogChangeProvider,
   type BacklogManagementProvider,
+  type BacklogMergeReconciliation,
 } from '@afk/runtime/domain/backlog/commands';
 import type { BacklogCreateInput, BacklogItem, BacklogState, QABacklogProvider } from '@afk/runtime/domain/backlog/index';
 import type { BacklogExecutionMode } from '@afk/runtime/domain/backlog/index';
@@ -421,6 +423,30 @@ async function runLifecycleAction(
   }
 }
 
+export async function runBacklogReconcileMerge(
+  provider: QABacklogProvider,
+  changes: BacklogChangeProvider,
+  id: string,
+  expectedTargetBranch: string,
+  options: JsonMode = {},
+): Promise<void> {
+  try {
+    const outcome = await reconcileMergedBacklog(provider, changes, id, expectedTargetBranch);
+    if (options.json) {
+      emitSuccess<BacklogMergeReconciliation>('backlog.reconcile-merge', outcome);
+      return;
+    }
+    if (outcome.reconciled) success(`Backlog ${id} completed: ${outcome.reason}`);
+    else warning(`Backlog ${id} unchanged: ${outcome.reason}`);
+  } catch (error) {
+    if (options.json) {
+      emitFailure('backlog.reconcile-merge', classifyError(error), (error as Error).message);
+      return;
+    }
+    throw error;
+  }
+}
+
 export function registerBacklogCommands(program: Command, context: CommandRegistrationContext = {}): void {
   const argv = context.argv ?? process.argv;
   const inheritedOutput = program.configureOutput();
@@ -620,6 +646,25 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.confirm-merge', classifyError(error), (error as Error).message);
+          return;
+        }
+        handleCommandError(error);
+      }
+    });
+
+  backlog.command('reconcile-merge')
+    .description('Complete a root backlog whose change is already merged on the provider')
+    .requiredOption('--id <id>', 'Backlog ID')
+    .option('--project <project>', 'Provider project/repository')
+    .option('--platform <platform>', 'Override provider detection (github|gitlab)')
+    .option('--json', 'Emit structured JSON envelope to stdout')
+    .action(async options => {
+      try {
+        const providers = await providersFor(await resolveBacklogTarget(options.project, options.platform, options.id));
+        await runBacklogReconcileMerge(providers.backlog, providers.changes, options.id, getWorkflowConfig().targetBranch, options);
+      } catch (error) {
+        if (options.json) {
+          emitFailure('backlog.reconcile-merge', classifyError(error), (error as Error).message);
           return;
         }
         handleCommandError(error);

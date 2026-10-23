@@ -16,8 +16,15 @@ export interface ProviderIssue {
 export interface ProviderCatalog {
   platform: WorkItemPlatform;
   scopeKey: string;
+  getAccountIdentity?: () => Promise<ProviderAccountIdentity>;
   listProjects(): Promise<CatalogPageResult<ProviderProjectRef>>;
   listIssues(project: ProviderProjectRef): Promise<CatalogPageResult<ProviderIssue>>;
+}
+
+export interface ProviderAccountIdentity {
+  platform: WorkItemPlatform;
+  host: string;
+  accountId: string;
 }
 
 export type CatalogPageResult<T> = T[] | { items: T[]; error: unknown };

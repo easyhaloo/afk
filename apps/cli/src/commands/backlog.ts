@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import {
   createGlobalWorkItemCatalogs,
   createManagementProviders,
+  resolveProviderAccountIdentities,
   type GlobalTrackerPlatform,
   type ManagementProviderBundle,
   type TrackerPlatform,
@@ -18,6 +19,8 @@ import type {
   GlobalWorkItemInventoryResult,
   ProviderCatalog,
 } from '@afk/runtime/domain/work-item/provider-types';
+import { inventoryNamespace, SqliteInventoryStore } from '@afk/runtime/storage';
+import type { InventoryDiagnostic, InventoryItem, InventoryProject, InventorySnapshot } from '@afk/application';
 import {
   addBacklogTag,
   adoptBacklog,
@@ -167,6 +170,7 @@ export interface BacklogInventoryOptions extends JsonMode {
 export async function runBacklogInventory(
   catalogFactory: (platform: GlobalTrackerPlatform) => ProviderCatalog[],
   options: BacklogInventoryOptions = {},
+  storage?: { root?: string },
 ): Promise<void> {
   const kind = 'backlog.inventory';
   try {
@@ -180,8 +184,11 @@ export async function runBacklogInventory(
     if (options.mode && !modes.includes(options.mode as BacklogExecutionMode)) {
       throw new Error(`invalid execution mode: ${options.mode}`);
     }
+    const catalogs = catalogFactory(platform as GlobalTrackerPlatform);
+    const completeResult = await collectGlobalWorkItemInventory(catalogs);
+    if (storage) await persistInventory(catalogs, completeResult, storage.root);
     const result = filterGlobalWorkItemInventory(
-      await collectGlobalWorkItemInventory(catalogFactory(platform as GlobalTrackerPlatform)),
+      completeResult,
       {
         state: options.state as BacklogState | undefined,
         mode: options.mode as BacklogExecutionMode | undefined,
@@ -207,6 +214,37 @@ export async function runBacklogInventory(
       return;
     }
     throw error;
+  }
+}
+
+async function persistInventory(
+  catalogs: readonly ProviderCatalog[],
+  result: GlobalWorkItemInventoryResult,
+  root?: string,
+): Promise<void> {
+  const identities = await resolveProviderAccountIdentities(catalogs);
+  const store = new SqliteInventoryStore({ root, namespaceKey: inventoryNamespace(identities) });
+  try {
+    for (const [index, catalog] of catalogs.entries()) {
+      const identity = identities[index];
+      const host = identity.host;
+      const projects = result.projects.filter(project => project.platform === catalog.platform && (project.providerHost ?? catalog.scopeKey) === catalog.scopeKey);
+      const projectKeys = new Set(projects.map(project => project.projectKey));
+      const items = result.items.filter(item => item.project.platform === catalog.platform && (item.project.providerHost ?? catalog.scopeKey) === catalog.scopeKey);
+      const diagnostics = result.diagnostics.filter(diagnostic =>
+        diagnostic.platform === catalog.platform
+        && (!diagnostic.projectKey || diagnostic.projectKey === catalog.scopeKey || projectKeys.has(diagnostic.projectKey)));
+      const snapshot: InventorySnapshot = {
+        items: items as unknown as InventoryItem[],
+        projects: projects as unknown as InventoryProject[],
+        diagnostics: diagnostics as unknown as InventoryDiagnostic[],
+        complete: result.complete && diagnostics.length === 0,
+      };
+      const attempt = await store.begin({ platform: catalog.platform, host, kind: 'catalog' });
+      await store.publish(attempt, snapshot);
+    }
+  } finally {
+    store.close();
   }
 }
 
@@ -519,7 +557,7 @@ export function registerBacklogCommands(program: Command, context: CommandRegist
     .option('--json', 'Emit structured JSON envelope to stdout')
     .action(async options => {
       try {
-        await runBacklogInventory(createGlobalWorkItemCatalogs, options);
+        await runBacklogInventory(createGlobalWorkItemCatalogs, options, {});
       } catch (error) {
         if (options.json) {
           emitFailure('backlog.inventory', classifyError(error), (error as Error).message);

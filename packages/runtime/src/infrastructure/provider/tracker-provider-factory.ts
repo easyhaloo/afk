@@ -21,7 +21,7 @@ import {
   type GitHubCatalogIssue,
   type GitHubCatalogProject,
 } from './catalogs.js';
-import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
+import type { ProviderAccountIdentity, ProviderCatalog } from '../../domain/work-item/provider-types.js';
 import { normalizeGitLabHost } from '../../shared/gitlab-project.js';
 
 function readGhToken(): string | null {
@@ -119,6 +119,14 @@ export function createGlobalWorkItemCatalogs(
   return catalogs;
 }
 
+export async function resolveProviderAccountIdentities(catalogs: readonly ProviderCatalog[]): Promise<ProviderAccountIdentity[]> {
+  const identities = await Promise.all(catalogs.map(async catalog => {
+    if (!catalog.getAccountIdentity) throw new Error(`Verified ${catalog.platform} account identity is unavailable for ${catalog.scopeKey}`);
+    return catalog.getAccountIdentity();
+  }));
+  return identities;
+}
+
 /**
  * Report which providers are configured. Only consulted when the platform has
  * to be inferred from a project key, so the `gh` lookup stays off the hot
@@ -210,7 +218,7 @@ function configuredGitLabTokens(
 
 function createGitHubProviderCatalog(token: string): ProviderCatalog {
   const client = new Octokit({ auth: token, userAgent: 'afk v1' });
-  return new GitHubProviderCatalog({
+  const catalog = new GitHubProviderCatalog({
     async listProjectsPage(page, perPage): Promise<GitHubCatalogProject[]> {
       const response = await client.repos.listForAuthenticatedUser({
         affiliation: 'owner,collaborator,organization_member',
@@ -244,11 +252,17 @@ function createGitHubProviderCatalog(token: string): ProviderCatalog {
       }));
     },
   });
+  return Object.assign(catalog, {
+    getAccountIdentity: async (): Promise<ProviderAccountIdentity> => {
+      const response = await client.users.getAuthenticated();
+      return { platform: 'github', host: 'github.com', accountId: String(response.data.id) };
+    },
+  });
 }
 
 function createGitLabProviderCatalog(host: string, url: string, token: string): ProviderCatalog {
   const baseUrl = normalizeProviderUrl(url);
-  return new GitLabProviderCatalog(host, {
+  const catalog = new GitLabProviderCatalog(host, {
     listProjectsPage: (page, perPage) => fetchGitLabPage<GitLabProjectResponse>(
       baseUrl,
       token,
@@ -276,6 +290,13 @@ function createGitLabProviderCatalog(host: string, url: string, token: string): 
       updatedAt: issue.updated_at,
     }))),
   });
+  return Object.assign(catalog, {
+    getAccountIdentity: async (): Promise<ProviderAccountIdentity> => {
+      const user = await fetchGitLabObject<GitLabUserResponse>(baseUrl, token, '/api/v4/user', {});
+      if (!user || user.id === undefined) throw new Error(`GitLab account identity is unavailable for ${host}`);
+      return { platform: 'gitlab', host, accountId: String(user.id) };
+    },
+  });
 }
 
 interface GitLabProjectResponse {
@@ -296,6 +317,10 @@ interface GitLabIssueResponse {
   updated_at?: string;
 }
 
+interface GitLabUserResponse {
+  id: number;
+}
+
 async function fetchGitLabPage<T>(
   baseUrl: string,
   token: string,
@@ -307,6 +332,19 @@ async function fetchGitLabPage<T>(
   const response = await fetch(target, { headers: { 'PRIVATE-TOKEN': token } });
   if (!response.ok) throw new Error(`GitLab API HTTP ${response.status}: ${response.statusText}`);
   return response.json() as Promise<T[]>;
+}
+
+async function fetchGitLabObject<T>(
+  baseUrl: string,
+  token: string,
+  pathname: string,
+  query: Record<string, string>,
+): Promise<T> {
+  const target = new URL(pathname, `${baseUrl}/`);
+  for (const [key, value] of Object.entries(query)) target.searchParams.set(key, value);
+  const response = await fetch(target, { headers: { 'PRIVATE-TOKEN': token } });
+  if (!response.ok) throw new Error(`GitLab API HTTP ${response.status}: ${response.statusText}`);
+  return response.json() as Promise<T>;
 }
 
 function normalizeProviderUrl(value: string): string {

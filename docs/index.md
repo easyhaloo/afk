@@ -11,6 +11,7 @@
 | [execution.md](architecture/execution.md) | 8 阶段执行设计（执行环境、sandbox、session、branches、templates） |
 | [observability.md](architecture/observability.md) | 可观测性 harness |
 | [design-system.md](architecture/design-system.md) | Desktop 设计标准 |
+| [CLI / Desktop 共享 SQLite 分表设计](superpowers/specs/2026-10-22-desktop-sqlite-design.md) | 设计方案：共享包分层、仓库/任务投影、独立 SSH 配置库、表关系、并发、同步与迁移 |
 | [glossary.md](architecture/glossary.md) | 领域词汇表（原仓库根 `CONTEXT.md`） |
 | [full-workflow-e2e-architecture.md](architecture/full-workflow-e2e-architecture.md) | 任务派发、Loop、模板与 QA 闭环的 E2E 架构和证据规范 |
 | [blueprints/](architecture/blueprints/) | 蓝图与未采纳方案（草稿） |

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { RunEventQueryPort } from "@afk/application";
 import type { RunEvent, RunEventDraft } from "@afk/core";
-import { createWorkItemExecutionQueryService } from "../../electron/services/work-item-execution-query-service.js";
+import { createWorkItemExecutionQueryService } from "../../electron/work-items/execution-query-service.js";
 
 const workItemId = "github:easyhaloo/afk#158";
 

@@ -3,7 +3,7 @@ import { decide, initialRunAggregate } from '@afk/core';
 import {
   toCoreWorkItemFromBacklog,
   toCoreWorkStateFromBacklog,
-} from '../../electron/adapters/core-work-item-adapter.js';
+} from '../../electron/work-items/core-adapter.js';
 import type { WorkItem, WorkState } from '@afk/core';
 
 describe('backlog -> core adapter', () => {

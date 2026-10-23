@@ -177,7 +177,7 @@ afk/
 
 ### 5.4 拆解 `packages/runtime/src/types/`
 
-`apps/cli/src/tui/board-types.ts`（含业务函数 `getTaskBacklogId()` 与 deprecated 字段 `iid`）
+`apps/cli/src/tui/board/task-types.ts`（含业务函数 `getTaskBacklogId()` 与 deprecated 字段 `iid`）
 → 并入 `apps/cli/src/tui/board/`（它本就是给看板用的 runtime 投影，该目录已有 `types.ts`）。
 `packages/runtime/src/types/` 仅保留 `node-sqlite.d.ts`。需同步 `AGENTS.md` 布局表。
 

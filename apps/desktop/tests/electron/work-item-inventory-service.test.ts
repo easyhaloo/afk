@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWorkItemApplicationAdapter } from "../../electron/adapters/work-item-application-adapter.js";
-import { createWorkItemInventoryService } from "../../electron/services/work-item-inventory-service.js";
+import { createWorkItemApplicationAdapter } from "../../electron/work-items/application-adapter.js";
+import { createWorkItemInventoryService } from "../../electron/work-items/inventory-service.js";
 
 const inventory = {
   items: [{

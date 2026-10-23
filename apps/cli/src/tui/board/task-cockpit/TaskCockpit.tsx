@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { getTaskBacklogId, type Task, type TaskActivity } from '../../board-types.js';
+import { getTaskBacklogId, type Task, type TaskActivity } from '../task-types.js';
 import { formatRelativeTime, truncateByVisualWidth } from '../utils.js';
 import { getExecutionModeColor, getExecutionModeIcon, getStatusColor, getStatusIcon } from '../views/display.js';
 import { getActivityLimit, getTaskPhaseLabel, getTaskProgress, getTaskQueue, truncateTaskText } from './model.js';

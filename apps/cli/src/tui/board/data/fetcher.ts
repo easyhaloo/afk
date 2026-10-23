@@ -1,4 +1,4 @@
-import { Task } from '../../board-types.js';
+import { Task } from '../task-types.js';
 import { TaskRuntimeManager, type ActiveTaskRuntimeRecord, type TaskRuntimeRecord } from '@afk/runtime/application/runtime/task-runtime';
 import type { BacklogItem } from '@afk/runtime/domain/backlog/index';
 import { createGitLabTracker } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';

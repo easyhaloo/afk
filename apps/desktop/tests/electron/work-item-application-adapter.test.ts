@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProviderWorkItemApplicationFacade, createWorkItemApplicationAdapter } from "../../electron/adapters/work-item-application-adapter.js";
+import { createProviderWorkItemApplicationFacade, createWorkItemApplicationAdapter } from "../../electron/work-items/application-adapter.js";
 
 const project = { platform: "github" as const, projectKey: "acme/api", name: "api" };
 const item = {

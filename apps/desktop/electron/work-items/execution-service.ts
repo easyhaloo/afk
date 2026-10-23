@@ -21,8 +21,8 @@ import {
 import {
   workItemExecutionManifestPath,
   type createWorkItemExecutionManifestStore,
-} from "./work-item-execution-manifest-store.js";
-import type { createWorkItemRunStore } from "./work-item-run-store.js";
+} from "./execution-manifest-store.js";
+import type { createWorkItemRunStore } from "./run-store.js";
 
 type SpawnedProcess = Pick<ChildProcess, "pid" | "once" | "unref"> & Partial<Pick<ChildProcess, "kill">>;
 type AllocatedWorkspace = {

@@ -73,7 +73,7 @@
 
 | 路径 | 内容 |
 |---|---|
-| `architecture/observability/profiles/local-observe.yml` | `afk observe` 的本地 profile 示例 |
+| `docs/architecture/observability-profiles/local-observe.yml` | `afk observe` 的本地 profile 示例 |
 
 ## 双语版本
 

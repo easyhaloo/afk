@@ -2,8 +2,8 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/backlog-contract.js";
-import type { createExecutionWorkspaceService } from "./execution-workspace-service.js";
-import type { createWorkItemRunStore } from "./work-item-run-store.js";
+import type { createExecutionWorkspaceService } from "../services/execution-workspace-service.js";
+import type { createWorkItemRunStore } from "./run-store.js";
 
 type HistoryDeps = {
   workspace: Pick<ReturnType<typeof createExecutionWorkspaceService>, "read" | "updateRun">;

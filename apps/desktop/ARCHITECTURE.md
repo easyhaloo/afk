@@ -38,7 +38,7 @@ shared Runtime. Launch receipts come from `.afk/work-item-runs.json` in the
 execution workspace located by canonical work-item identity.
 
 The work-item inventory service has one required application dependency in
-`electron/adapters/work-item-application-adapter.ts`:
+`apps/desktop/electron/work-items/application-adapter.ts`:
 
 - `createWorkItemInventoryService` cannot be constructed without an
   application adapter;
@@ -54,7 +54,7 @@ Execution history uses a separate direct Application path:
 
 - Electron Main injects `electron/adapters/run-event-query-adapter.ts`, a read-only
   verified JSONL `RunEventQueryPort` over `~/.afk/events`.
-- `electron/services/work-item-execution-query-service.ts` invokes
+- `apps/desktop/electron/work-items/execution-query-service.ts` invokes
   `@afk/application.queryExecutionHistory`; no CLI subprocess or legacy projection
   is used for the history view. Main source is plain ESM and imports the use cases
   directly — there is no runtime CommonJS interop shim.

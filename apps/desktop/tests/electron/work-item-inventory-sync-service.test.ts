@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWorkItemInventorySyncService } from "../../electron/services/work-item-inventory-sync-service.js";
+import { createWorkItemInventorySyncService } from "../../electron/work-items/inventory-sync-service.js";
 
 describe("work item inventory sync service", () => {
   it("runs an initial sync and prevents overlapping scheduled syncs", async () => {

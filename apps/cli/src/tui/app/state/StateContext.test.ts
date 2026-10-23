@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { appReducer } from './StateContext.js';
-import { initialState } from './initialState.js';
+import { initialState } from './initial-state.js';
 
 describe('appReducer navigation', () => {
   it('keeps built-in views reachable when plugin views are registered', () => {

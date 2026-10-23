@@ -28,7 +28,7 @@
 |---|---|---|---|
 | `docs/`（在用） | 40 篇 md + 3 个非 md，644 KB | 2026-10-19 | 主要处置面 |
 | `docs/_archive/` | 92 篇 md + 21 个产物，2.6 MB | — | 保留，需补索引 |
-| 仓库根 | `README.md` `README_zh.md` `CLAUDE.md` `AGENTS.md` `AFK-ARCHITECTURE.md` `AFK-ARCHITECTURE.pdf` | 2026-10-17 | 2 个入口 + 1 孤儿 + 1 二进制产物 |
+| 仓库根 | `README.md` `README.zh.md` `CLAUDE.md` `AGENTS.md` `AFK-ARCHITECTURE.md` `AFK-ARCHITECTURE.pdf` | 2026-10-17 | 2 个入口 + 1 孤儿 + 1 二进制产物 |
 | `apps/desktop/ARCHITECTURE.md` | 1 篇 | 2026-10-19（未提交） | 准确，在途更新中 |
 | `skills/` | 22 个 skill + `README.md` + `SKILL-GUIDE.md` | — | 1 处 frontmatter 字段漂移 |
 
@@ -151,7 +151,7 @@
 | P1-32 | `docs/adr/0001-*.md:26-27` | S2 标 Deferred，但 `electron/lib/async-mutex.ts` **已由紧接其后的 PR（`0e0c8de`）创建** → 标 Done |
 | P1-33 | `docs/adr/0001-*.md:11` | S4 列 `json-snapshot-store`，该文件不存在（现为 `apps/desktop/electron/adapters/json-kv-store.ts`），且重复点已从 4 处增至 10+ 处 → 重新枚举或关闭 S4 |
 | P1-34 | `docs/adr/0020-*.md` | 状态 `proposed` **正确**（单数 `changeRequest?` 仍活，`changeRequests` 全仓 0 次），但行号引用漂移（`execute-work-item.ts:432`→`:474`；`BacklogDetailDrawer.tsx` 已不存在）→ 只修引用；同时该提案已挂起 3 周，需给出裁决 |
-| P1-35 | `docs/research/RESEARCH.md` | apps/desktop/electron/services/jumpserver-key-service.ts → 现为 `jumpserver-credential-service.ts`；另一处 `ssh-credential-service.ts` 缺前缀 |
+| P1-35 | `docs/research/jumpserver-public-key-upload-2026-09-21.md` | apps/desktop/electron/services/jumpserver-key-service.ts → 现为 `jumpserver-credential-service.ts`；另一处 `ssh-credential-service.ts` 缺前缀 |
 | P1-36 | `docs/research/llm-app-design-methodology.json` | 与 `.md` 并存的产物，索引未收录 → 确认去留 |
 | P1-37 | `docs/product/PRD.md:117,145` | packages/runtime/src/core/events.ts → `packages/core/src/events.ts`；`:66` `afk observe timeline --runId <id>` → 实际为位置参数 `afk observe timeline <runId>` |
 | P1-38 | `docs/product/PRD-work-items-reverse-sort-2026-10-15.md` | 排序词汇与比较器已实现并有测试（`apps/desktop/src/features/backlog/backlog-sort.ts:27-30`），但全局工作项页硬编码 `updatedAt` 倒序、无选择器（`WorkItemsPage.tsx:303-307`）→ 状态标 **PARTIAL** |
@@ -310,7 +310,7 @@
 
 | 文件 | 判定 | 处置 |
 |---|---|---|
-| `README.md` / `README_zh.md` | 命令示例全部准确；**安装步骤用 npm**，但仓库是 pnpm workspace 且依赖 `workspace:*` —— `npm install` 无法解析 | 改 `pnpm install && pnpm build && pnpm link`；`install.sh:183,188` 同问题 |
+| `README.md` / `README.zh.md` | 命令示例全部准确；**安装步骤用 npm**，但仓库是 pnpm workspace 且依赖 `workspace:*` —— `npm install` 无法解析 | 改 `pnpm install && pnpm build && pnpm link`；`install.sh:183,188` 同问题 |
 | `CLAUDE.md` | 准确 | 对齐 ADR-0019 行标题（现为 "Desktop execution and interactive tmux access"，ADR H1 为 "Shared Execution Views and Interactive Tmux Access"） |
 | `AGENTS.md` | 准确但与 CLAUDE.md 重复 5/6 条硬规则 | 角色倒置：AGENTS.md 是规则文件，CLAUDE.md 自称入口点。二选一收敛 |
 | `AFK-ARCHITECTURE.md` | 孤儿 + 与 `docs/architecture/system-architecture-design.md` 重复 | P2-1 |

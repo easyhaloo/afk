@@ -46,6 +46,103 @@ User Request
 /afk-skill-craft ────→ Skill Create / Diagnose / Refactor
 ```
 
+## Local Obsidian Wiki
+
+The [wiki skill](../../skills/wiki/SKILL.md) distills reusable knowledge from
+the current task context, searches and reads local Markdown, and checks wiki
+quality. Its Python 3.10+ CLI lives inside `skills/wiki/scripts/`; search
+requires ripgrep. It needs no running Obsidian, API key, or global install.
+
+Invoke `python3 skills/wiki/scripts/wiki.py --help` from the repository root.
+Vault discovery uses `--vault`, then `WIKI_VAULT`, the nearest ancestor
+`.wiki.json`, and finally `~/.config/wiki/config.json` (or
+`$XDG_CONFIG_HOME/wiki/config.json`). Each configuration contains a `vault`
+string; relative paths resolve from the configuration directory. Configure a
+user default once, or a project binding for repositories with a different wiki.
+An invalid selected configuration fails instead of silently choosing another
+vault. `locate` shows the selected vault and source, and every successful JSON
+result includes `vault` and `vault_source`.
+
+After configuration, ordinary requests need no path. For example:
+
+```text
+/wiki ingest Distill the verified knowledge from this conversation
+/wiki search retry policy
+/wiki lint
+```
+
+Add `--json` for structured output; `--vault` remains available as an explicit
+override. These options work before or after the subcommand. CLI examples:
+
+```bash
+python3 skills/wiki/scripts/wiki.py search "retry policy" --vault /path/to/vault --json
+python3 skills/wiki/scripts/wiki.py locate --json
+python3 skills/wiki/scripts/wiki.py read "Knowledge/Retry.md" --vault /path/to/vault --json
+python3 skills/wiki/scripts/wiki.py lint --vault /path/to/vault --json
+python3 skills/wiki/scripts/wiki.py ingest --plan /tmp/wiki-plan.json --vault /path/to/vault --json
+python3 skills/wiki/scripts/wiki.py ingest --plan /tmp/wiki-plan.json --apply --vault /path/to/vault --json
+```
+
+The agent creates the evidence-backed plan described in the skill's
+[ingest contract](../../skills/wiki/references/ingest.md). Preview validates
+the candidate vault without changing the original. Apply checks file hashes,
+preserves permissions, and refuses newly introduced lint errors. Identical
+content is unchanged. A failed batch keeps a private recovery receipt and
+original copies; rollback does not overwrite intervening edits.
+
+Exit codes: 0 success (including no matches), 1 lint rejection, 2 invalid
+input/configuration, 3 version conflict, 4 execution/write failure. With
+`--json`, stdout contains a JSON object for success or failure. Normal
+diagnostics are withheld from backend failures to avoid disclosing secrets.
+Help remains ordinary text.
+
+Run the disposable-vault CLI E2E suite and rollback check with:
+
+```bash
+python3 -B -m unittest discover -s skills/wiki/scripts -p 'test_wiki.py' -v
+```
+
+### Claude Code Integration
+
+For development, link the source skill into Claude Code's user skill
+directory. From the repository root, when the destination does not already
+exist:
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$PWD/skills/wiki" ~/.claude/skills/wiki
+```
+
+Preserve an existing destination and inspect it before replacing it. Start a
+new Claude Code session and invoke `/wiki` with the target vault and operation.
+The link loads the source directly and keeps script/reference paths together;
+it does not modify installed plugin caches. Normal AFK plugin distribution
+also includes this skill under `/afk:wiki`.
+
+The optional live integration runner requires an installed, authenticated
+`claude` and uses its configured model. It makes real model calls:
+
+```bash
+python3 -B skills/wiki/scripts/e2e_claude.py
+```
+
+The runner creates a private disposable workspace, asks Claude to invoke the
+Skill tool, distill confirmed and uncertain fixture context, preview and apply
+a plan, then search/read/lint and replay unchanged. It asserts the actual tool
+trace and resulting files, including preservation of rules/templates and
+exclusion of transient conversation details. The fixture uses a relative
+project binding; the runner removes `WIKI_VAULT` and verifies that Claude uses
+automatic discovery without a `--vault` argument. Hooks and MCP are disabled for
+this process; ordinary authentication settings remain active. Claude uses
+noninteractive permissions without a global permission bypass.
+
+The printed workspace contains `result.json`, `claude.ndjson`, and the fixture
+vault for inspection. `--output` accepts a new destination directory;
+`--timeout` controls the default 600-second process limit. Keep private traces
+outside version control and remove them when no longer needed. This runner is
+separate from the deterministic suite because it requires authentication,
+model usage, and nondeterministic agent execution.
+
 ## Core Skills Details
 
 ### 1. afk-grill-me

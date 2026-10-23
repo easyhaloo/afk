@@ -81,6 +81,22 @@ single source of truth for the supported surface:
 | `afk graph workflow <template>` | Generate a deterministic workflow graph |
 | `afk` (TUI), `afk signal`, `afk tmux`, `afk kanban`, `afk debug`, `afk isolate`, `afk completion` | Operational and local tooling |
 
+The [wiki skill](../../skills/wiki/SKILL.md) bundles a separate Python CLI;
+its argparse registry in `skills/wiki/scripts/wiki.py` owns this surface.
+It does not add an `afk` command. All operations accept `--vault` and `--json`,
+before or after the subcommand. Vault resolution is `--vault` → `WIKI_VAULT`
+→ nearest ancestor `.wiki.json` → user `wiki/config.json` under
+`XDG_CONFIG_HOME` (default `~/.config`). Configurations contain a `vault`
+string; relative paths are based on the configuration's directory.
+
+| Skill-local command | Responsibility |
+| --- | --- |
+| `wiki.py locate` | Show the resolved vault and configuration source |
+| `wiki.py search <query> [--regex] [--limit <count>]` | Search titles, aliases, and content |
+| `wiki.py read <path> [--heading <heading>]` | Read a page or section and its whole-file hash |
+| `wiki.py lint [path] [--max-age-days <days>]` | Report vault-local or portable quality checks |
+| `wiki.py ingest --plan <file-or-dash> [--apply] [--max-age-days <days>]` | Preview or apply an evidence-backed change plan |
+
 There are no aliases for removed command groups. Provider metadata labels are
 an adapter detail and never part of this CLI contract.
 

@@ -183,10 +183,12 @@ The model knows the syntax; show it what to do, not how to do it.
 
 ### Self-contained
 
-A skill must be self-contained. It must not read files outside its own
-directory tree. External knowledge must be inlined or copied into
-`references/` within the skill's own directory. Directory boundary is
-absolute — no out-of-bounds reads under any circumstance.
+A skill's implementation and reference documentation must be self-contained.
+Keep these inside its directory tree rather than depending on another skill's
+private files. User-designated runtime inputs, such as a target repository or
+vault's `AGENTS.md`, templates, and content, are allowed outside that tree.
+Read those inputs in place; do not duplicate workspace-specific rules inside
+the skill.
 
 ---
 

@@ -122,4 +122,5 @@ cannot claim the same issue.
 | afk-plugin | `~/.claude/plugins/cache/afk/` | Installed copy of this repo's skills |
 
 The repo's `skills/` directory is the editable original; the cache above is
-only what Claude Code loads at runtime.
+the installed plugin copy. For direct source loading of `/wiki` and its live
+Claude Code integration test, see the [wiki integration guide](docs/guides/skills.md#claude-code-integration).

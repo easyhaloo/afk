@@ -46,6 +46,89 @@ Skills 是 Claude Code 的可复用工作流模板，每个 skill 封装了特�
 /afk-skill-craft ───→ Skill 创建 / 诊断 / 重构
 ```
 
+## 本地 Obsidian Wiki
+
+[wiki skill](../../skills/wiki/SKILL.md) 从当前任务上下文提取可复用知识，
+检索、读取本地 Markdown，并检查 Wiki 质量。配套 Python 3.10+ CLI 位于
+`skills/wiki/scripts/`；检索需要 ripgrep。无需启动 Obsidian、配置 API Key
+或全局安装命令。
+
+在仓库根目录执行 `python3 skills/wiki/scripts/wiki.py --help` 查看命令。
+Vault 按顺序自动定位：`--vault`、`WIKI_VAULT`、当前目录向上最近的
+`.wiki.json`、用户的 `~/.config/wiki/config.json`（设置了 `XDG_CONFIG_HOME`
+时使用其下的 `wiki/config.json`）。配置中填写 `vault` 字符串，相对路径以
+配置文件所在目录为基准。用户默认只需配置一次；不同项目可用项目绑定覆盖。
+选中的配置无效时直接报错，不静默换库。`locate` 显示目标与来源，所有成功
+JSON 结果均包含 `vault` 和 `vault_source`。
+
+配置后直接使用，无需重复填写路径：
+
+```text
+/wiki ingest 沉淀当前上下文中的有效知识
+/wiki search 重试策略
+/wiki lint
+```
+
+添加 `--json` 获取结构化结果，仍可用 `--vault` 临时覆盖默认。
+这两个选项均可放在子命令前后。CLI 示例：
+
+```bash
+python3 skills/wiki/scripts/wiki.py search "重试策略" --vault /path/to/vault --json
+python3 skills/wiki/scripts/wiki.py locate --json
+python3 skills/wiki/scripts/wiki.py read "知识/重试.md" --vault /path/to/vault --json
+python3 skills/wiki/scripts/wiki.py lint --vault /path/to/vault --json
+python3 skills/wiki/scripts/wiki.py ingest --plan /tmp/wiki-plan.json --vault /path/to/vault --json
+python3 skills/wiki/scripts/wiki.py ingest --plan /tmp/wiki-plan.json --apply --vault /path/to/vault --json
+```
+
+Agent 按 [ingest 契约](../../skills/wiki/references/ingest.md) 生成有证据的更新计划。
+预览仅校验候选快照，不修改原 Vault。执行时核对文件哈希、保留权限，并拒绝
+本次引入的 lint 错误。内容相同时不重写。批量写入失败会保留私有恢复清单和原文
+副本；回滚不会覆盖期间出现的其他编辑。
+
+退出码：0 成功（包括无命中），1 lint 拒绝，2 输入或配置错误，3 版本冲突，
+4 执行或写入失败。使用 `--json` 时，成功和失败均向 stdout 输出 JSON 对象。
+后端执行失败不直接打印原始诊断，避免泄露敏感值。帮助信息仍为普通文本。
+
+临时 Vault 的 CLI 端到端测试及回滚检查：
+
+```bash
+python3 -B -m unittest discover -s skills/wiki/scripts -p 'test_wiki.py' -v
+```
+
+### Claude Code 集成
+
+开发时将源码 skill 链接到 Claude Code 的用户 skill 目录。在仓库根目录执行，
+前提是目标位置尚不存在：
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$PWD/skills/wiki" ~/.claude/skills/wiki
+```
+
+目标已存在时先检查并保留，不直接覆盖。新建 Claude Code 会话后，用 `/wiki`
+指定目标 Vault 和操作。链接直接加载源码，脚本与 reference 路径随 skill 一起
+解析，不修改已安装插件缓存。正常的 AFK 插件分发也会提供 `/afk:wiki`。
+
+可选的真实集成测试需要已安装、已登录的 `claude`，使用当前配置的模型，
+会产生真实模型调用：
+
+```bash
+python3 -B skills/wiki/scripts/e2e_claude.py
+```
+
+测试创建私有临时工作目录，让 Claude 调用 Skill 工具，从已确认和未确认的
+样例上下文提炼知识，预览并执行计划，随后检索、读取、lint 和重复执行。
+检查同时核对真实工具轨迹与最终文件，验证规则/模板保持不变、临时闲聊未入库。
+样例通过相对路径的项目配置绑定 Vault，移除 `WIKI_VAULT`，并验证 Claude
+自动定位，全程不使用 `--vault` 参数。
+仅本进程禁用 hooks 和 MCP，保留正常认证配置；使用非交互权限，不全局跳过权限。
+
+输出目录包含 `result.json`、`claude.ndjson` 和样例 Vault，供复核。
+`--output` 可指定一个尚不存在的目录；`--timeout` 可调整默认 600 秒超时。
+执行轨迹应保留在版本控制之外，不再需要时删除。该测试需要认证及模型调用，
+且 Agent 行为具有不确定性，因此独立于确定性测试集运行。
+
 ## 核心 Skills 详解
 
 ### 1. afk-grill-me

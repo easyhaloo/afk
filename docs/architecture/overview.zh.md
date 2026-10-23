@@ -69,6 +69,21 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk graph workflow <template>` | 生成确定性的工作流图 |
 | `afk`（TUI）、`afk signal`、`afk tmux`、`afk kanban`、`afk debug`、`afk isolate`、`afk completion` | 运维和本地工具 |
 
+[wiki skill](../../skills/wiki/SKILL.md) 自带独立 Python CLI，命令以
+`skills/wiki/scripts/wiki.py` 的 argparse 注册为准，不增加 `afk` 命令。
+所有操作支持 `--vault` 与 `--json`，可放在子命令前后。Vault 定位顺序为
+`--vault` → `WIKI_VAULT` → 最近的祖先 `.wiki.json` → `XDG_CONFIG_HOME`
+（默认 `~/.config`）下的 `wiki/config.json`。配置填写 `vault` 字符串，
+相对路径以配置文件所在目录为基准。
+
+| Skill 内命令 | 职责 |
+| --- | --- |
+| `wiki.py locate` | 显示自动定位的 Vault 和配置来源 |
+| `wiki.py search <query> [--regex] [--limit <count>]` | 检索页名、别名和正文 |
+| `wiki.py read <path> [--heading <heading>]` | 读取页面或章节并返回完整文件哈希 |
+| `wiki.py lint [path] [--max-age-days <days>]` | 报告 Vault 专有或通用质量检查 |
+| `wiki.py ingest --plan <file-or-dash> [--apply] [--max-age-days <days>]` | 预览或执行有证据的更新计划 |
+
 已移除的命令组没有别名。provider 的元数据标签属于 adapter 内部实现，
 不是 CLI 契约。
 

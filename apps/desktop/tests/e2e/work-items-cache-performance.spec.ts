@@ -1,5 +1,5 @@
 import { test, expect, _electron as electron, type ElectronApplication } from "@playwright/test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,7 +67,10 @@ test("loads the persisted work item model before a delayed remote synchronizatio
     cold = await launchAndMeasure(environment);
     coldLaunchMs = cold.launchMs;
     coldRowsVisibleMs = cold.rowsVisibleMs;
-    await expect.poll(() => existsSync(path.join(userData, "work-item-inventory.json"))).toBe(true);
+    await expect.poll(() => {
+      const inventoryDirectory = path.join(home, ".afk", "storage", "inventory");
+      return existsSync(inventoryDirectory) && readdirSync(inventoryDirectory).some(file => file.endsWith(".sqlite"));
+    }).toBe(true);
     await cold.app.close();
     cold = undefined;
 

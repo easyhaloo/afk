@@ -7,7 +7,7 @@ import { exec } from "../adapters/process-executor.js";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter.js";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter.js";
 import { createSshConfigAdapter } from "../adapters/ssh-config-adapter.js";
-import { createSshManagedHostStore } from "../adapters/ssh-managed-host-store.js";
+import { createLegacyLocalConfigReady, createSqliteJumpserverStore, createSqliteSshManagedHostStore } from "../adapters/sqlite-local-config.js";
 import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter.js";
 import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter.js";
 import { isAfkTmuxSession, listAfkTmux, listRunResources } from "../adapters/resource-adapter.js";
@@ -31,7 +31,7 @@ import { createSshService } from "../services/ssh-service.js";
 import { createExternalUrlService } from "../services/external-url-service.js";
 import { createProviderWorkItemApplicationFacade, createWorkItemApplicationAdapter } from "../work-items/application-adapter.js";
 import { createWorkItemInventoryService } from "../work-items/inventory-service.js";
-import { createWorkItemInventoryStore } from "../work-items/inventory-store.js";
+import { createSqliteWorkItemInventoryStore } from "../work-items/sqlite-inventory-store.js";
 import { createWorkItemInventorySyncService } from "../work-items/inventory-sync-service.js";
 import { createWorkItemExecutionService } from "../work-items/execution-service.js";
 import { createWorkItemExecutionQueryService } from "../work-items/execution-query-service.js";
@@ -49,6 +49,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseWorkflowGraphGenerateRequest, validateWorkflowGraphTemplateId, validateWorkflowGraphWorkspace } from "../security/graph-validation.js";
+import { SqliteLocalConfigStore } from "@afk/runtime/storage";
 
 type HandlerSchema = (value: unknown) => unknown;
 
@@ -103,12 +104,18 @@ function broadcast(channel: string, ...args: unknown[]) {
 }
 
 const home = homedir();
-const sshManagedHostStore = createSshManagedHostStore({ file: path.join(app.getPath("userData"), "ssh-hosts.yml") });
+const localConfigStore = new SqliteLocalConfigStore();
+const localConfigReady = createLegacyLocalConfigReady(localConfigStore, {
+  hostFile: path.join(app.getPath("userData"), "ssh-hosts.yml"),
+  bastionFile: path.join(home, ".config", "afk", "jumpserver-bastions.yml"),
+});
+const sshManagedHostStore = createSqliteSshManagedHostStore(localConfigStore, localConfigReady);
 const clipboardService = createClipboardService({ writeText: (text) => clipboard.writeText(text) });
 const externalUrlService = createExternalUrlService({ openExternal: (url) => shell.openExternal(url) });
 const sshCredentialService = createSshCredentialService({ home, safeStorage });
 const defaultJumpserverService = createJumpserverService({
   home,
+  bastionStore: createSqliteJumpserverStore(localConfigStore, localConfigReady),
   credentialService: createJumpserverCredentialService({ home, safeStorage }),
   managedHostStore: sshManagedHostStore,
   listManagedHosts: async () => ({ hosts: await sshManagedHostStore.list() }),
@@ -134,9 +141,14 @@ const sshService = createSshService({
   pty: createSshPtyAdapter({ onData: (sessionId, data) => broadcast(IPC_CHANNELS.sshData, sessionId, data), onExit: (sessionId, code) => broadcast(IPC_CHANNELS.sshExit, sessionId, code) }),
 });
 const backlogService = createRuntimeBacklogService(resolveWorkspace);
+const workItemApplication = createWorkItemApplicationAdapter(createProviderWorkItemApplicationFacade());
+const workItemInventoryStore = createSqliteWorkItemInventoryStore({
+  getAccountIdentities: workItemApplication.getAccountIdentities,
+  legacyFile: path.join(app.getPath("userData"), "work-item-inventory.json"),
+});
 const workItemInventoryService = createWorkItemInventoryService({
-  application: createWorkItemApplicationAdapter(createProviderWorkItemApplicationFacade()),
-  store: createWorkItemInventoryStore(path.join(app.getPath("userData"), "work-item-inventory.json")),
+  application: workItemApplication,
+  store: workItemInventoryStore,
 });
 const tmuxAttachPty = createTmuxAttachPtyAdapter({
   onData: (attachId, data) => broadcast(IPC_CHANNELS.workItemsAttachData, attachId, data),
@@ -229,7 +241,11 @@ function sshCredentialSetInput(value: unknown): SshCredentialSetInput {
 export function registerIpcHandlers(deps: { jumpserverService?: unknown } = {}) {
   const jumpserverService = deps.jumpserverService ?? defaultJumpserverService;
   workItemInventorySyncService.start();
-  if (typeof app.once === "function") app.once("before-quit", () => workItemInventorySyncService.stop());
+  if (typeof app.once === "function") app.once("before-quit", () => {
+    workItemInventorySyncService.stop();
+    workItemInventoryStore.close();
+    localConfigStore.close();
+  });
   registerHandler(IPC_CHANNELS.copyText, (v: unknown) => v, (text) => clipboardService.copyText(text as string));
   registerHandler(IPC_CHANNELS.openExternal, (url: unknown) => {
     if (typeof url !== "string" || !url.trim()) throw new Error("外部地址无效");

@@ -4,7 +4,7 @@ import path from "node:path";
 import { inventoryNamespace, SqliteInventoryStore } from "@afk/runtime/storage";
 import type { ProviderAccountIdentity } from "@afk/runtime/domain/work-item/provider-types";
 import { parseWorkItemInventoryOptions, parseWorkItemInventoryResult, type WorkItemInventoryOptions, type WorkItemInventoryResult } from "../../shared/backlog-contract.js";
-import type { StoredWorkItemInventory, WorkItemInventoryStore } from "./work-item-inventory-store.js";
+import type { StoredWorkItemInventory, WorkItemInventoryStore } from "./inventory-store.js";
 import type { InventoryDiagnostic, InventoryItem, InventoryProject, InventorySnapshot } from "@afk/application";
 
 type SqliteWorkItemInventoryStoreOptions = {

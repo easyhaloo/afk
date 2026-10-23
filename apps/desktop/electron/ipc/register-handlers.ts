@@ -7,7 +7,7 @@ import { exec } from "../adapters/process-executor.js";
 import { createKnownHostsAdapter } from "../adapters/known-hosts-adapter.js";
 import { createSshCommandAdapter } from "../adapters/ssh-command-adapter.js";
 import { createSshConfigAdapter } from "../adapters/ssh-config-adapter.js";
-import { createLegacyLocalConfigReady, createSqliteJumpserverStore, createSqliteSshManagedHostStore } from "../adapters/sqlite-local-config-adapters.js";
+import { createLegacyLocalConfigReady, createSqliteJumpserverStore, createSqliteSshManagedHostStore } from "../adapters/sqlite-local-config.js";
 import { createSshPtyAdapter } from "../adapters/ssh-pty-adapter.js";
 import { createExternalTerminalAdapter } from "../adapters/external-terminal-adapter.js";
 import { isAfkTmuxSession, listAfkTmux, listRunResources } from "../adapters/resource-adapter.js";

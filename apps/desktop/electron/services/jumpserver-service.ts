@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { ManagedSshHostRecord } from "../../shared/ssh-contract.js";
 import type { BastionInput, BastionRecord } from "../adapters/jumpserver-store.js";
-import type { JumpserverStore, SshManagedHostStore } from "../adapters/sqlite-local-config-adapters.js";
+import type { JumpserverStore, SshManagedHostStore } from "../adapters/sqlite-local-config.js";
 import { createJumpserverStore } from "../adapters/jumpserver-store.js";
 import { JUMPSERVER_BINARY_ERROR, createJumpserverCli } from "../adapters/jumpserver-cli.js";
 import { createJumpserverCredentialStore } from "./jumpserver-credential-service.js";

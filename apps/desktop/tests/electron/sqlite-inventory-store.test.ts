@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { createSqliteWorkItemInventoryStore } from "../../electron/services/sqlite-work-item-inventory-store.js";
+import { createSqliteWorkItemInventoryStore } from "../../electron/work-items/sqlite-inventory-store.js";
 
 describe("SQLite work item inventory adapter", () => {
   it("uses the verified account namespace and round-trips inventory", async () => {

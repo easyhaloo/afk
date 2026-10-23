@@ -3,7 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { SqliteLocalConfigStore } from "@afk/runtime/storage";
-import { createLegacyLocalConfigReady, createSqliteJumpserverStore, createSqliteSshManagedHostStore } from "../../electron/adapters/sqlite-local-config-adapters.js";
+import { createLegacyLocalConfigReady, createSqliteJumpserverStore, createSqliteSshManagedHostStore } from "../../electron/adapters/sqlite-local-config.js";
 import { createJumpserverStore } from "../../electron/adapters/jumpserver-store.js";
 import { createSshManagedHostStore } from "../../electron/adapters/ssh-managed-host-store.js";
 

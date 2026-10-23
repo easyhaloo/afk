@@ -70,6 +70,11 @@ documents ship as `name.md` + `name.zh.md`; update both.
   `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/` — those are
   installed copies and edits are lost on reinstall. See
   [`skills/SKILL-GUIDE.md`](skills/SKILL-GUIDE.md) for authoring standards.
+- **Skill changes require a plugin version bump.** When adding or changing a
+  skill (including its scripts and references), update `version` in
+  [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) in the same commit.
+  Increment at least the patch version; use a minor or major bump when the
+  release requires it.
 - **Build output is not source.** `dist/`, `dist-electron/`, `release/`, and
   test screenshots are generated. Do not review, edit, or commit them.
 - **Add focused tests** for every extracted service or pure function. Each

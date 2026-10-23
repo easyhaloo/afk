@@ -11,6 +11,10 @@ before touching `apps/desktop/`.
 - **`skills/` is the source of truth.** Never edit
   `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/`; those are
   installed copies and changes there are lost on reinstall.
+- **Skill changes require a plugin version bump.** When adding or changing a
+  skill (including its scripts and references), update `version` in
+  `.claude-plugin/plugin.json` in the same commit. Increment at least the patch
+  version; use a minor or major bump when the release requires it.
 - **Build output is not source.** `dist/`, `dist-electron/`, `release/`, and
   test screenshots are generated — do not review, edit, or commit them.
 - **Add focused tests** for every extracted service or pure function. Each

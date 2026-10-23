@@ -3,7 +3,7 @@
 Rules for coding agents working in this repository. For project orientation —
 tech stack, layout, documentation map, and the build/test commands — read
 [`CLAUDE.md`](CLAUDE.md). Desktop rules are owned separately by
-[`apps/desktop/ARCHITECTURE.md`](apps/desktop/ARCHITECTURE.md); read that
+[`apps/desktop/architecture.md`](apps/desktop/architecture.md); read that
 before touching `apps/desktop/`.
 
 ## Hard rules

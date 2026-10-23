@@ -1,7 +1,7 @@
 # AFK 过时文档清理计划
 
 > 编制日期：2026-10-20
-> 范围：`docs/`（40 篇在用 + 92 篇归档）、仓库根入口文档、`apps/desktop/ARCHITECTURE.md`、`skills/`
+> 范围：`docs/`（40 篇在用 + 92 篇归档）、仓库根入口文档、`apps/desktop/architecture.md`、`skills/`
 > 基线提交：`main` @ `2b4a72b`
 > 判定依据：源码实测 + CLI 注册表 + 架构守卫 + git 历史
 
@@ -28,8 +28,8 @@
 |---|---|---|---|
 | `docs/`（在用） | 40 篇 md + 3 个非 md，644 KB | 2026-10-19 | 主要处置面 |
 | `docs/_archive/` | 92 篇 md + 21 个产物，2.6 MB | — | 保留，需补索引 |
-| 仓库根 | `README.md` `README.zh.md` `CLAUDE.md` `AGENTS.md` `AFK-ARCHITECTURE.md` `AFK-ARCHITECTURE.pdf` | 2026-10-17 | 2 个入口 + 1 孤儿 + 1 二进制产物 |
-| `apps/desktop/ARCHITECTURE.md` | 1 篇 | 2026-10-19（未提交） | 准确，在途更新中 |
+| 仓库根 | `README.md` `README.zh.md` `CLAUDE.md` `AGENTS.md` `docs/architecture/afk-architecture-handbook.md` `docs/architecture/afk-architecture-handbook.pdf` | 2026-10-17 | 2 个入口 + 1 孤儿 + 1 二进制产物 |
+| `apps/desktop/architecture.md` | 1 篇 | 2026-10-19（未提交） | 准确，在途更新中 |
 | `skills/` | 22 个 skill + `README.md` + `SKILL-GUIDE.md` | — | 1 处 frontmatter 字段漂移 |
 
 **关键结构事实（判定的地基）**
@@ -57,7 +57,7 @@
 
 ### 2.2 两份文档描述的是"另一套代码库"
 
-- `docs/decisions/observability-2026-08-02.md` —— 整篇基于 packages/runtime/src/lib/core/io/logger.ts、packages/runtime/src/lib/scheduler.ts、packages/runtime/src/commands/*，讨论 `afk issue` / `afk worktree` / `afk scheduler status` 等**注册表里根本不存在的命令**。其核心结论"没有 append-only 审计日志"已被 ADR-0016 的 hash 链 JSONL 与 `afk observe` 推翻。
+- `docs/research/observability-survey-2026-08-02.md` —— 整篇基于 packages/runtime/src/lib/core/io/logger.ts、packages/runtime/src/lib/scheduler.ts、packages/runtime/src/commands/*，讨论 `afk issue` / `afk worktree` / `afk scheduler status` 等**注册表里根本不存在的命令**。其核心结论"没有 append-only 审计日志"已被 ADR-0016 的 hash 链 JSONL 与 `afk observe` 推翻。
 - `docs/superpowers/plans/2026-10-16-retro-feedback-loop.md` —— 规划了 packages/runtime/src/domain/observability/retro-types.ts + packages/runtime/src/application/retrospectives/* + packages/runtime/src/infrastructure/observability/retro-*.ts 共 17 个文件，**一个都不存在**；实际实现全部内联在 `apps/cli/src/commands/retro.ts` 单文件内。
 
 ### 2.3 蓝图状态标记失真
@@ -75,7 +75,7 @@
 
 `docs/index.md` 漏挂 5 个在用文件：`docs/adr/0020-*`、`docs/getting-started.md`（+.zh）、`docs/product/PRD-work-items-reverse-sort-2026-10-15.md`、`docs/product/PRD-manual-work-item-create-and-execution-2026-10-19.md`、`docs/superpowers/plans/2026-10-16-retro-feedback-loop.md`。ADR 表停在 0019。
 
-`AFK-ARCHITECTURE.md`（38 KB）与 `AFK-ARCHITECTURE.pdf`（601 KB）被 git 跟踪，但**全仓零入链**，且 PDF 无生成脚本、`.gitignore` 无 `*.pdf` 规则。`AFK-ARCHITECTURE.md` 是 `docs/architecture/system-architecture-design.md`（48 KB）的中文精简重复。
+`docs/architecture/afk-architecture-handbook.md`（38 KB）与 `docs/architecture/afk-architecture-handbook.pdf`（601 KB）被 git 跟踪，但**全仓零入链**，且 PDF 无生成脚本、`.gitignore` 无 `*.pdf` 规则。`docs/architecture/afk-architecture-handbook.md` 是 `docs/architecture/system-architecture-design.md`（48 KB）的中文精简重复。
 
 ### 2.5 一份 ADR 文件在出生时就是损坏的
 
@@ -96,7 +96,7 @@
 | # | 对象 | 动作 | 依据 |
 |---|---|---|---|
 | P0-1 | `docs/adr/0018-evidence-classification-and-redaction.md` | **按已实现语义重写**（不归档——决策仍然有效） | 出生即损坏；`packages/core/src/events.ts:16-41` 是语义真源 |
-| P0-2 | `docs/decisions/observability-2026-08-02.md` | **归档**到 `docs/_archive/decisions/`（保留全文，标注"针对已不存在的 `packages/runtime/src/lib/**` 代码库"） | 整篇基于外来布局；核心结论已被 ADR-0016 推翻 |
+| P0-2 | `docs/research/observability-survey-2026-08-02.md` | **归档**到 `docs/_archive/decisions/`（保留全文，标注"针对已不存在的 `packages/runtime/src/lib/**` 代码库"） | 整篇基于外来布局；核心结论已被 ADR-0016 推翻 |
 | P0-3 | `docs/superpowers/plans/2026-10-16-retro-feedback-loop.md` | **归档**到 `docs/_archive/superpowers/plans/2026-10-16-retro-feedback-loop.md`，与其余 60 份历史计划同址 | 功能已实现但形态与计划不同（单文件内联） |
 | P0-4 | `docs/architecture/blueprints/archify-afk-integration-proposal.md` | **归档**到 `docs/_archive/blueprints/`，加一行"方向已被 native blueprint 否决" | 其提议的 `afk-archify://` 协议、IPC 名称、Archify 运行时依赖均不存在 |
 | P0-5 | `docs/architecture/blueprints/afk-native-graph-engine-blueprint.md` | **归档**为"已采纳蓝图"，在 `docs/architecture/glossary.md` 留指针 | 已被 `packages/workflow-graph` 完整实现 |
@@ -118,7 +118,7 @@
 | P1-9 | `architecture/observability.md:17,207` | `confirm-merge` 标为"未切换 / 下一阶段工作" | `afk reconcile`（`command-registry.ts:32`）与 `afk backlog confirm-merge` 均已上线并产出 `change.merge_verified` 事件 |
 | P1-10 | `architecture/overview.md:20-21,28` + `.zh.md` | 自相矛盾："不负责创建或拆分任务"，但命令表列有 `afk backlog create <title>` | 收紧范围表述 |
 | P1-11 | `architecture/blueprints/target-directory-layout.md:147-150,208` | 统计数字 115/15/9/12 | 现为 125/18/12/13；`§6` 指向守卫第 262 行，实为 45/327 行 |
-| P1-12 | `architecture/blueprints/target-directory-layout.md:187` | 指向 `docs/research/observability-survey-2026-08-02.md` | 该路径不存在；实际在 `docs/decisions/observability-2026-08-02.md` |
+| P1-12 | `architecture/blueprints/target-directory-layout.md:187` | 指向 `docs/research/observability-survey-2026-08-02.md` | 该路径不存在；实际在 `docs/research/observability-survey-2026-08-02.md` |
 | P1-13 | `architecture/blueprints/core-layer-architecture_zh.md:121-165` | 目标结构为多层子树 | 两个包实际都是扁平布局；apps/desktop/electron/composition-root.ts、`apps/cli/src/presentation/` 不存在 |
 | P1-14 | `architecture/full-workflow-e2e-architecture.md` | 示例 fixture 路径 `execute-work-item.test.ts`、`loop-runner.test.ts`、`playwright.config.ts` 等 | 路径不解析，需改为真实位置或明确标注为示意 |
 
@@ -161,7 +161,7 @@
 
 | # | 对象 | 动作 |
 |---|---|---|
-| P2-1 | `AFK-ARCHITECTURE.md` + `AFK-ARCHITECTURE.pdf` | 二选一：① 删除根副本，内容归 `docs/architecture/system-architecture-design.md`，在 `docs/index.md` 留唯一入口；② 建立 PDF 生成脚本（写进 `package.json` scripts）、加 `.gitignore` 规则、声明为发布产物。**当前状态是"重复 + 不可达 + 不可再生"** |
+| P2-1 | `docs/architecture/afk-architecture-handbook.md` + `docs/architecture/afk-architecture-handbook.pdf` | 二选一：① 删除根副本，内容归 `docs/architecture/system-architecture-design.md`，在 `docs/index.md` 留唯一入口；② 建立 PDF 生成脚本（写进 `package.json` scripts）、加 `.gitignore` 规则、声明为发布产物。**当前状态是"重复 + 不可达 + 不可再生"** |
 | P2-2 | `tsconfig.tests.json` | **未跟踪但被 `package.json:11` 的 typecheck 引用** —— 干净克隆上 `pnpm typecheck` 直接失败。分支 `acd68f5` 已把它入库 → 合入分支即可 |
 | P2-3 | apps/cli/src/commands/board.ts | 工作区已删除未提交。`afk board` 的移除是有意的（`apps/cli/src/index.ts:26-30`）→ 提交该删除，避免"文档说 board 被删、代码里还在"的分裂 |
 | P2-4 | `scripts/check-doc-links.mjs` | 扩检测面：① 去掉 `!raw.includes('/')` 的裸文件名跳过（改为按文档目录/仓库根/apps/desktop 三向解析后再判）；② 扩展正则覆盖 `.cts .json .yml .css .html .md .sh`；③ `https://` 链接做一次人工白名单检查（已发现 `docs/adr/README.md:4`） |
@@ -180,7 +180,7 @@
 | 分支已修 | 路径类漂移 | `overview.md` / `execution.md` / `glossary.md` / `observability.md` / 4 份蓝图 / `PRD.md` / retro 计划的路径已指向 `packages/afk-*` |
 | 分支**未**修 | 语义类漂移 | P1-2/P1-5/P1-7/P1-8/P1-9/P1-10/P1-11/P1-12/P1-13 全部存活 |
 | 分支新增 | ADR-0021 + 基线检查 | 编号方案需与本计划协调（见 §5.3） |
-| 主工作区 | 未提交改动 | Desktop 工作流工作室、共享日志组件、手工建工作项 PRD、新 CSS 与测试，与 P1 的 `design-system.md` / `overview.md` / `apps/desktop/ARCHITECTURE.md` **改动面重叠** |
+| 主工作区 | 未提交改动 | Desktop 工作流工作室、共享日志组件、手工建工作项 PRD、新 CSS 与测试，与 P1 的 `design-system.md` / `overview.md` / `apps/desktop/architecture.md` **改动面重叠** |
 
 **执行顺序**
 
@@ -313,9 +313,9 @@
 | `README.md` / `README.zh.md` | 命令示例全部准确；**安装步骤用 npm**，但仓库是 pnpm workspace 且依赖 `workspace:*` —— `npm install` 无法解析 | 改 `pnpm install && pnpm build && pnpm link`；`install.sh:183,188` 同问题 |
 | `CLAUDE.md` | 准确 | 对齐 ADR-0019 行标题（现为 "Desktop execution and interactive tmux access"，ADR H1 为 "Shared Execution Views and Interactive Tmux Access"） |
 | `AGENTS.md` | 准确但与 CLAUDE.md 重复 5/6 条硬规则 | 角色倒置：AGENTS.md 是规则文件，CLAUDE.md 自称入口点。二选一收敛 |
-| `AFK-ARCHITECTURE.md` | 孤儿 + 与 `docs/architecture/system-architecture-design.md` 重复 | P2-1 |
-| `AFK-ARCHITECTURE.pdf` | 601 KB 二进制产物，无生成脚本、未 gitignore、零入链 | P2-1 |
-| `apps/desktop/ARCHITECTURE.md` | 准确（未提交改动为纯新增） | 随主工作区改动一并提交后复核 |
+| `docs/architecture/afk-architecture-handbook.md` | 孤儿 + 与 `docs/architecture/system-architecture-design.md` 重复 | P2-1 |
+| `docs/architecture/afk-architecture-handbook.pdf` | 601 KB 二进制产物，无生成脚本、未 gitignore、零入链 | P2-1 |
+| `apps/desktop/architecture.md` | 准确（未提交改动为纯新增） | 随主工作区改动一并提交后复核 |
 
 ---
 

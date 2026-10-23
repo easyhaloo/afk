@@ -267,7 +267,7 @@ pnpm --filter afk exec vitest run --coverage
 CLI 流程测试启动生产可执行文件，连接隔离的本地 GitLab HTTP fixture，覆盖命令加载、
 补全、Backlog 创建与接管、标签、中断、重试、合并确认、库存、图生成、审计重放与篡改检测，
 以及执行清单错误。只模拟 Provider 响应，命令解析、SDK 调用和领域状态转换使用真实实现。
-Electron 使用[桌面架构文档](../../apps/desktop/ARCHITECTURE.md#end-to-end-testing)
+Electron 使用[桌面架构文档](apps/desktop/architecture.md#end-to-end-testing)
 中描述的类型化 Runtime fixture。这些测试不运行真实编码 Agent，也不修改远程仓库。
 
 ## 真实 Agent 测试

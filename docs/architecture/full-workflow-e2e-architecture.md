@@ -14,7 +14,7 @@
 | 模板加载与编译 | [`packages/runtime/src/domain/templates/loader.ts`](../../packages/runtime/src/domain/templates/loader.ts)、[`packages/runtime/src/domain/templates/builtin.ts`](../../packages/runtime/src/domain/templates/builtin.ts)、[`packages/runtime/src/application/workflows/plan-executor.ts`](../../packages/runtime/src/application/workflows/plan-executor.ts) |
 | QA | [`apps/cli/src/commands/qa.ts`](../../apps/cli/src/commands/qa.ts)、[`packages/runtime/src/application/runners/qa-runner.ts`](packages/runtime/src/application/runners/qa-runner.ts) |
 | 审计事件 | [`packages/core/src/events.ts`](../../packages/core/src/events.ts)、[`packages/runtime/src/infrastructure/observability/jsonl-event-store.ts`](../../packages/runtime/src/infrastructure/observability/jsonl-event-store.ts) |
-| 桌面端与 E2E | [`apps/desktop/ARCHITECTURE.md`](../../apps/desktop/ARCHITECTURE.md)、[`apps/desktop/playwright.config.ts`](../../apps/desktop/playwright.config.ts)、[`apps/desktop/tests/e2e/_helpers/launch.ts`](../../apps/desktop/tests/e2e/_helpers/launch.ts) |
+| 桌面端与 E2E | [`apps/desktop/architecture.md`](apps/desktop/architecture.md)、[`apps/desktop/playwright.config.ts`](../../apps/desktop/playwright.config.ts)、[`apps/desktop/tests/e2e/_helpers/launch.ts`](../../apps/desktop/tests/e2e/_helpers/launch.ts) |
 
 ## 1. 范围与判定口径
 

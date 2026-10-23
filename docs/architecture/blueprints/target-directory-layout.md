@@ -183,7 +183,7 @@ afk/
 
 ### 5.5 `docs/` 归并
 
-`docs/decisions/observability-2026-08-02.md`（标题实为 "AFK Observability Survey"）
+`docs/research/observability-survey-2026-08-02.md`（标题实为 "AFK Observability Survey"）
 → `docs/research/observability-survey-2026-08-02.md`。删除 `docs/decisions/`。
 决策类内容一律进 `docs/adr/`（编号）或 `docs/architecture/blueprints/`（提案）。
 

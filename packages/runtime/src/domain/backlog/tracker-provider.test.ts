@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TrackerBacklogProvider } from './tracker-adapter.js';
+import { TrackerBacklogProvider } from './tracker-provider.js';
 import { GitHubBacklogProvider } from './github-provider.js';
 import { GitLabBacklogProvider } from './gitlab-provider.js';
 import { ManagementBacklogProvider } from './management-provider.js';

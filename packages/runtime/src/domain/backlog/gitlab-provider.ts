@@ -1,5 +1,5 @@
 import type { BacklogClaim, BacklogCreateInput, BacklogExecutionMode, BacklogItem, BacklogListOptions, BacklogProvider, BacklogState, NewReworkRecord, ReworkRecord, ReworkResolution } from './index.js';
-import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-adapter.js';
+import { TrackerBacklogProvider, type TrackerBacklogAdapterOptions } from './tracker-provider.js';
 import type { TrackerProvider } from '../tracker/types.js';
 
 /** GitLab's production backlog boundary. Platform label mapping stays private. */

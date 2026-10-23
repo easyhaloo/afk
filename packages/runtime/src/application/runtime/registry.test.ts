@@ -2,7 +2,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AfkResourceRegistry, getAfkResourceRegistry, workspaceRootForWorktree } from './resource-registry.js';
+import { AfkResourceRegistry, getAfkResourceRegistry, workspaceRootForWorktree } from './registry.js';
 import { AfkResourceRegistry as InfrastructureRegistry, getAfkResourceRegistry as getInfrastructureRegistry } from '../../infrastructure/runtime/resource-registry.js';
 
 async function registryFixture() {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
-import { TrackerBacklogProvider } from '../../domain/backlog/tracker-adapter.js';
+import { TrackerBacklogProvider } from '../../domain/backlog/tracker-provider.js';
 import { parseReworkRecord } from '../../domain/backlog/rework-record.js';
 import type { TrackedIssue, TrackerProvider } from '../../domain/tracker/types.js';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';

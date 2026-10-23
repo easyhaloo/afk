@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import type { BacklogViewModel } from './data/backlog-adapter.js';
 import { BoardCard } from './BoardCard.js';
 import { BoardLane } from './BoardLane.js';
 

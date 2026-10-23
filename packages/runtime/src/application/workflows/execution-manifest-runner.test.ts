@@ -16,7 +16,7 @@ let workspaceRoot: string;
 beforeEach(async () => { workspaceRoot = await mkdtemp(join(tmpdir(), 'afk-manifest-runner-')); });
 afterEach(async () => { await rm(workspaceRoot, { recursive: true, force: true }); });
 
-vi.mock('../modules/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
+vi.mock('../runners/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
 vi.mock('simple-git', async importOriginal => ({
   ...await importOriginal<typeof import('simple-git')>(),
   simpleGit: vi.fn(() => ({ revparse: vi.fn(async () => 'baseline') })),

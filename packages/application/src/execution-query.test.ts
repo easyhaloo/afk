@@ -3,7 +3,7 @@ import type { RunEvent } from '@afk/core';
 import {
   loadWorkItemExecution, queryWorkItemExecutions, replayRun, explainExecutionRun, loadRunTimeline, listExecutionRuns, projectAgentUsage,
   type WorkItemExecutionSummary, type RunEventQueryPort,
-} from '../src/index.js';
+} from './index.js';
 
 const context = { traceId: 'trace', runId: 'run-1', workItemId: 'work-1', profileId: 'profile', attempt: 1, actor: { kind: 'system' as const, id: 'test' } };
 const event = {

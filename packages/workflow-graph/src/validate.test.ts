@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateSnapshot } from '../src/index.js';
+import { validateSnapshot } from './index.js';
 
 describe('validateSnapshot', () => {
   it('reports missing routes and endpoints', () => {

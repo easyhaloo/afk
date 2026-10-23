@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { resolveExecutionBase, type ExecutionBaseCandidate, type WorkItem } from '../src/index.js';
+import { resolveExecutionBase, type ExecutionBaseCandidate, type WorkItem } from './index.js';
 
 const item = (lineage: Partial<WorkItem['lineage']>): Pick<WorkItem, 'lineage'> => ({
   lineage: { dependsOn: [], ...lineage },

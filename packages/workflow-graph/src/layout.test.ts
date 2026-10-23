@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutWorkflow } from '../src/index.js';
+import { layoutWorkflow } from './index.js';
 
 describe('layoutWorkflow', () => {
   it('maps dependency depth to columns and emits one edge per dependency', () => {

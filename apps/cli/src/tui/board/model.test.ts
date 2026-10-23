@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BacklogViewModel } from '../data/backlog-adapter.js';
+import type { BacklogViewModel } from './data/backlog-adapter.js';
 import {
   BOARD_LANES,
   getBoardColumns,

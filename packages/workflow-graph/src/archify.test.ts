@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutWorkflow, toArchifyWorkflow } from '../src/index.js';
+import { layoutWorkflow, toArchifyWorkflow } from './index.js';
 
 describe('toArchifyWorkflow', () => {
   it('exports authored nodes and dependencies with the showcase profile', () => {

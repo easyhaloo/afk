@@ -6,7 +6,7 @@ import {
   coreWorkStateByBacklogState,
   toCoreWorkMode,
   toCoreWorkState,
-} from '../src/index.js';
+} from './index.js';
 
 describe('backlog -> core vocabulary', () => {
   it('maps every backlog state to its core work state', () => {

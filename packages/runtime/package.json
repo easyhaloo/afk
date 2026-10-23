@@ -11,17 +11,17 @@
       "types": "./dist/application/isolate.d.ts",
       "import": "./dist/application/isolate.js"
     },
-    "./application/loop/loop-config": {
-      "types": "./dist/application/loop/loop-config.d.ts",
-      "import": "./dist/application/loop/loop-config.js"
+    "./application/runners/loop-config": {
+      "types": "./dist/application/runners/loop-config.d.ts",
+      "import": "./dist/application/runners/loop-config.js"
     },
-    "./application/modules/loop-runner": {
-      "types": "./dist/application/modules/loop-runner.d.ts",
-      "import": "./dist/application/modules/loop-runner.js"
+    "./application/runners/loop-runner": {
+      "types": "./dist/application/runners/loop-runner.d.ts",
+      "import": "./dist/application/runners/loop-runner.js"
     },
-    "./application/modules/qa-runner": {
-      "types": "./dist/application/modules/qa-runner.d.ts",
-      "import": "./dist/application/modules/qa-runner.js"
+    "./application/runners/qa-runner": {
+      "types": "./dist/application/runners/qa-runner.d.ts",
+      "import": "./dist/application/runners/qa-runner.js"
     },
     "./application/runtime/task-runtime": {
       "types": "./dist/application/runtime/task-runtime.d.ts",

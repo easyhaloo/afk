@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { BacklogViewModel } from '../data/backlog-adapter.js';
-import { backlogStateColor } from '../views/BacklogRow.js';
+import type { BacklogViewModel } from './data/backlog-adapter.js';
+import { backlogStateColor } from './views/BacklogRow.js';
 import { BoardCard } from './BoardCard.js';
 import { getBoardColumnIcon } from './model.js';
 import type { BoardColumnKind } from './model.js';

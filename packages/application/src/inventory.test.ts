@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listWorkItems, type WorkItemInventoryPort } from '../src/index.js';
+import { listWorkItems, type WorkItemInventoryPort } from './index.js';
 
 const item = (id: string, title: string, state: 'ready' | 'done' = 'ready') => ({
   id,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { routeBetween } from '../src/index.js';
+import { routeBetween } from './index.js';
 
 describe('routeBetween', () => {
   it('returns orthogonal points with distinct horizontal and vertical segments', () => {

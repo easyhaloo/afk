@@ -35,7 +35,7 @@ and design discussions use these terms; keep them in lockstep with the code.
 - **LoopRunner** - Drives the full pipeline (implement -> QA -> done) for every
   `stage::ready-for-issues` issue, continuously. Two pools (N parallel
   WorkflowRunners, one serial QARunner) with tracker labels as source of truth.
-  `packages/runtime/src/application/modules/loop-runner.ts`.
+  `packages/runtime/src/application/runners/loop-runner.ts`.
 
 ## Packages
 

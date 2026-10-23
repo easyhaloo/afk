@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decide, evolve, initialRunAggregate, replay, RunEventSequenceError, RunEventTransitionError, type RunEvent, type RunEventData } from '../src/index.js';
+import { decide, evolve, initialRunAggregate, replay, RunEventSequenceError, RunEventTransitionError, type RunEvent, type RunEventData } from './index.js';
 
 const context = {
   traceId: 'trace-1',

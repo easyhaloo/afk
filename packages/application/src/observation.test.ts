@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@afk/core';
-import { observeRun, queryExecutionHistory, type RunEventQueryPort } from '../src/index.js';
+import { observeRun, queryExecutionHistory, type RunEventQueryPort } from './index.js';
 
 const context = {
   traceId: 'trace-1', runId: 'run-1', workItemId: 'work-1', profileId: 'profile-1', attempt: 1,

@@ -348,7 +348,7 @@ Primary files surveyed (read directly):
 - `packages/runtime/src/commands/loop.ts`, `scheduler.ts`, `qa.ts`, `kanban.ts`, `debug.ts`
 - `apps/cli/src/index.ts`
 - `apps/cli/src/tui/board/data/fetcher.ts`, `useData.ts`
-- `apps/cli/src/tui/board/board/BoardView.tsx`
+- `apps/cli/src/tui/board/BoardView.tsx`
 - `apps/cli/src/tui/board/views/TaskListView.tsx`, `IssueListView.tsx`,
   `ProjectListView.tsx`
 - `apps/cli/src/tui/app/DashboardEntry.tsx`

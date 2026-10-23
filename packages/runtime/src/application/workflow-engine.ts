@@ -16,8 +16,8 @@ import type {
 import type { AgentProvider, AgentProviderName, AgentRuntimeSelection, SessionSnapshot, ExecutionMode } from '../domain/agents/types.js';
 import { getTokenUsage, configureStatusline, logger, resolveLogDir, resolveTimeoutSnapshotDir, withLogContext } from '../infrastructure/io/index.js';
 import { getWorkflowConfig } from '../infrastructure/config/manager.js';
-import { loadModules, parseModuleParams } from './modules/_registry.js';
-import type { ModuleParams } from './modules/_registry.js';
+import { loadModules, parseModuleParams } from './runners/registry.js';
+import type { ModuleParams } from './runners/registry.js';
 import { LifecycleDispatcher, type LifecycleModule, type LifecycleContext } from './workflows/lifecycle.js';
 import { Watchdog, createWatchdog } from './workflows/watchdog.js';
 import type { WorkflowConfig } from '../infrastructure/config/manager.js';

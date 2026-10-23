@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectWorkflow } from '../src/index.js';
+import { projectWorkflow } from './index.js';
 
 describe('projectWorkflow', () => {
   it('projects authored workflow fields without inference', () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RunEvent, RunEventDraft } from '@afk/core';
-import { decideRunCommand, startRun, type RunCommandPorts } from '../src/index.js';
+import { decideRunCommand, startRun, type RunCommandPorts } from './index.js';
 
 const context = {
   traceId: 'trace-1',

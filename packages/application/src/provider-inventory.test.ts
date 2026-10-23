@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { queryProviderInventory } from '../src/provider-inventory.js';
+import { queryProviderInventory } from './provider-inventory.js';
 
 describe('provider inventory query', () => {
   it('filters rich provider records without losing project diagnostics', async () => {

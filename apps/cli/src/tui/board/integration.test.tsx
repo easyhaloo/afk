@@ -2,7 +2,7 @@ import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it, vi } from 'vitest';
 import type { BacklogItem } from '@afk/runtime/domain/backlog/index';
-import { BoardView } from './board/BoardView.js';
+import { BoardView } from './BoardView.js';
 import { loadBacklogViewModels } from './data/backlog-adapter.js';
 
 describe('backlog board integration', () => {

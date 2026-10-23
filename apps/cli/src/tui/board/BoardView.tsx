@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { BacklogViewModel } from '../data/backlog-adapter.js';
-import { BacklogRow } from '../views/BacklogRow.js';
+import type { BacklogViewModel } from './data/backlog-adapter.js';
+import { BacklogRow } from './views/BacklogRow.js';
 
 interface BoardViewProps {
   backlogs: BacklogViewModel[];

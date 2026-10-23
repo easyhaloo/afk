@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent, RunEventData } from '@afk/core';
-import { projectWorkflowInstance } from '../src/workflow-instance.js';
+import { projectWorkflowInstance } from './workflow-instance.js';
 
 const event = (sequence: number, data: RunEventData): RunEvent => ({
   sequence, data, context: { runId: 'run-1', workItemId: 'work-1' }, occurredAt: '2026-10-15T00:00:00.000Z',

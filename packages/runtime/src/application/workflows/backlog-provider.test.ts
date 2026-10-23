@@ -8,7 +8,7 @@ import type { RunObserver } from '../../observability/run-observer.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 
-vi.mock('../modules/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
+vi.mock('../runners/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
 
 const item: BacklogItem = {
   id: '42', title: 'Item', dependsOn: [], state: 'in_progress', executionMode: 'afk',

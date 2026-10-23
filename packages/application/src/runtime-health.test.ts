@@ -4,7 +4,7 @@ import {
   RUNTIME_STALE_AFTER_MS,
   projectRuntimeHealth,
   type RuntimeHealthObservation,
-} from '../src/runtime-health.js';
+} from './runtime-health.js';
 
 const NOW = Date.parse('2026-10-15T12:00:00.000Z');
 const FRESH_HEARTBEAT = '2026-10-15T11:58:00.000Z';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createReceipt, layoutWorkflow } from '../src/index.js';
+import { createReceipt, layoutWorkflow } from './index.js';
 
 describe('determinism', () => {
   it('produces equal snapshots and receipts for equal definitions', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { graphSchemaVersion, type GraphSnapshot } from '../src/index.js';
+import { graphSchemaVersion, type GraphSnapshot } from './index.js';
 
 describe('workflow graph IR', () => {
   it('exposes a versioned snapshot contract without runtime dependencies', () => {

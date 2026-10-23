@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeDefinition, type WorkflowGraphDefinition } from '../src/index.js';
+import { normalizeDefinition, type WorkflowGraphDefinition } from './index.js';
 
 const definitionWithSteps = (steps: WorkflowGraphDefinition['steps']): WorkflowGraphDefinition => ({
   templateId: 'test', templateVersion: 1, name: 'Test', steps,

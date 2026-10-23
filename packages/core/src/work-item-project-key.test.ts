@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isWorkItemProjectKey } from '../src/work-item-project-key.js';
+import { isWorkItemProjectKey } from './work-item-project-key.js';
 
 describe('work item project keys', () => {
   it.each(['acme/api', 'gitlab.example/acme/api', '127.0.0.1:8080/acme/api', 'gitlab.example:65535/acme/api'])('accepts %s', key => {

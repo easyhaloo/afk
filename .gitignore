@@ -59,6 +59,9 @@ dump.rdb
 .playwright-mcp/
 .playwright-cli/
 
+# Local design specs — private to this machine, not part of the published docs.
+docs/superpowers/specs/
+
 # Agent working state is local; settings.json is shared so the team gets
 # the same hooks. settings.local.json stays ignored.
 .claude/*

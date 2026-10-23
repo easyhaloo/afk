@@ -80,6 +80,19 @@ export class ControlModeConnection {
       this.flushLines();
     });
 
+    // A closed control pipe is the normal end of life for a session: tmux
+    // exits when the session is killed, and the pending write then fails
+    // with EPIPE. Without an error listener the socket turns that into an
+    // uncaught exception, which fails the whole test run over a write that
+    // nobody was waiting for.
+    this.stdin.on('error', (err: Error) => {
+      this.exited = true;
+      this.flushPending(new Error(`Control mode pipe closed: ${err.message}`));
+    });
+    (this.stdout as any).on('error', (err: Error) => {
+      this.flushPending(new Error(`Control mode stdout error: ${err.message}`));
+    });
+
     this.proc.on('close', (code) => {
       this.exited = true;
       this.flushPending(new Error(`Control mode process exited with code ${code}`));
@@ -120,6 +133,7 @@ export class ControlModeConnection {
    * Send a command without waiting for response (fire-and-forget).
    */
   sendRawCommand(cmd: string): void {
+    if (this.exited) return;
     this.stdin.write(cmd + '\n');
   }
 
@@ -156,8 +170,10 @@ export class ControlModeConnection {
    */
   close(): void {
     if (this.exited) return;
-    this.exited = true;
+    // The detach has to go out before the connection is marked closed, or the
+    // guard in sendRawCommand would swallow it.
     this.sendRawCommand('detach');
+    this.exited = true;
     setTimeout(() => {
       this.proc.kill();
       this.flushPending(new Error('Connection closed'));

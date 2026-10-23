@@ -1,4 +1,4 @@
-import type { Task } from '../../board-types.js';
+import type { Task } from '../task-types.js';
 import { truncateByVisualWidth } from '../utils.js';
 
 export function getTaskQueue(tasks: Task[]): Task[] {

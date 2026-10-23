@@ -7,8 +7,8 @@ import type {
   WorkItemRunRecord,
   WorkItemRunRepositorySelection,
 } from "../../shared/backlog-contract.js";
-import { createWorkItemExecutionService } from "../../electron/services/work-item-execution-service.js";
-import { buildForegroundAgentCommand } from "../../electron/services/work-item-execution-service.js";
+import { createWorkItemExecutionService } from "../../electron/work-items/execution-service.js";
+import { buildForegroundAgentCommand } from "../../electron/work-items/execution-service.js";
 
 const apiProject: WorkItemRepositoryRef = { platform: "github", projectKey: "acme/api", providerProjectId: "101", name: "api-service", role: "backend" };
 const webProject: WorkItemRepositoryRef = { platform: "gitlab", projectKey: "git.corp/platform/web", providerHost: "git.corp", providerProjectId: "202", name: "web-client", role: "frontend" };

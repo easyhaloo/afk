@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Task } from '../../board-types.js';
+import { Task } from '../task-types.js';
 import type { View } from '../types.js';
 import type { Project, Branch, Tag, Commit } from '@afk/runtime/domain/tracker/types';
 import { fileLogger } from '@afk/runtime/infrastructure/io/logger';

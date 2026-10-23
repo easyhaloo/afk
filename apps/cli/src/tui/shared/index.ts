@@ -1,5 +1,5 @@
-export { KeyboardDispatcher } from './Keyboard.js';
-export { ViewRegistry } from './Registry.js';
+export { KeyboardDispatcher } from './keyboard.js';
+export { ViewRegistry } from './registry.js';
 export type {
   View,
   ViewContext,

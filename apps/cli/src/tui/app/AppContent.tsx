@@ -15,7 +15,7 @@ import {
   Notification,
 } from '../board/views/index.js';
 import { getListViewportHeight } from '../board/layout.js';
-import type { Task, Project } from '../board-types.js';
+import type { Task, Project } from '../board/task-types.js';
 import type { Branch, Commit, Tag } from '@afk/runtime/domain/tracker/types';
 import type { BacklogViewModel } from '../board/data/backlog-adapter.js';
 import type { View } from '../board/types.js';

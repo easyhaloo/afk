@@ -8,7 +8,7 @@ import { encodeWorkItemIdForPath, type BacklogItem } from '../../domain/backlog/
 import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-store.js';
 import { RunObserver } from '../../observability/run-observer.js';
 import { createExecutionQueryPorts } from '../../observability/query-service.js';
-import { QARunner } from '../modules/qa-runner.js';
+import { QARunner } from '../runners/qa-runner.js';
 import { getLogContext } from '../../infrastructure/io/index.js';
 
 const workItemId = 'github:acme/api#42';

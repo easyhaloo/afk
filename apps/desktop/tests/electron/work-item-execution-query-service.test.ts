@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RunEventQueryPort } from "@afk/application";
 import type { RunEvent } from "@afk/core";
-import { createWorkItemExecutionQueryService } from "../../electron/services/work-item-execution-query-service.js";
+import { createWorkItemExecutionQueryService } from "../../electron/work-items/execution-query-service.js";
 
 const event: RunEvent = {
   id: "event-1", schemaVersion: 1, type: "run.requested", sequence: 1,

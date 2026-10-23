@@ -101,20 +101,20 @@ console.log('\n=== Required Files ===');
 const REQUIRED = [
   'SKILL.md',
   'references/hybrid-patterns/browser-auth-modes.md',
-  'templates/fixtures/browser-session.storage-state.ts',
-  'templates/fixtures/browser-session.localhost-cdp.ts',
-  'templates/fixtures/api-context.ts',
-  'templates/utils/require-env.ts',
-  'templates/utils/cdp-endpoint.ts',
-  'templates/setup/auth-api.setup.ts',
-  'templates/setup/auth-ui.setup.ts',
-  'templates/browser-auth-runbook.md',
-  'templates/auth-artifacts.gitignore',
-  'templates/auth.env.example',
-  'templates/package.json',
-  'templates/playwright.config.ts',
-  'templates/scenarios/index.ts',
-  'templates/scenarios/order-flow.spec.ts',
+  'scaffold/fixtures/browser-session.storage-state.ts',
+  'scaffold/fixtures/browser-session.localhost-cdp.ts',
+  'scaffold/fixtures/api-context.ts',
+  'scaffold/utils/require-env.ts',
+  'scaffold/utils/cdp-endpoint.ts',
+  'scaffold/setup/auth-api.setup.ts',
+  'scaffold/setup/auth-ui.setup.ts',
+  'scaffold/browser-auth-runbook.md',
+  'scaffold/auth-artifacts.gitignore',
+  'scaffold/auth.env.example',
+  'scaffold/package.json',
+  'scaffold/playwright.config.ts',
+  'scaffold/scenarios/index.ts',
+  'scaffold/scenarios/order-flow.spec.ts',
   'examples/combined-flows.md',
 ];
 
@@ -165,7 +165,7 @@ if (skillMd.includes('Copy only the selected mode') || skillMd.includes('only th
 console.log('\n=== Fixture Naming ===');
 
 for (const mode of MODES) {
-  const fixturePath = `templates/fixtures/browser-session.${mode}.ts`;
+  const fixturePath = `scaffold/fixtures/browser-session.${mode}.ts`;
   const content = readText(fixturePath);
   if (!content) continue;
   if (content.includes('sessionContext')) ok(`${mode}: exports sessionContext`);
@@ -179,7 +179,7 @@ for (const mode of MODES) {
 console.log('\n=== CDP Endpoint Validator ===');
 
 // Dynamically import ESM. We use a small inline test.
-const cdpSrc = readText('templates/utils/cdp-endpoint.ts');
+const cdpSrc = readText('scaffold/utils/cdp-endpoint.ts');
 if (cdpSrc) {
   ok('cdp-endpoint.ts exists');
   // Check for key safety patterns
@@ -195,7 +195,7 @@ if (cdpSrc) {
 
 console.log('\n=== Target Project Guidance ===');
 
-const gi = readText('templates/auth-artifacts.gitignore');
+const gi = readText('scaffold/auth-artifacts.gitignore');
 if (gi) {
   if (gi.includes('playwright/.auth')) ok('gitignore includes playwright/.auth');
   else fail('gitignore missing playwright/.auth');
@@ -203,7 +203,7 @@ if (gi) {
   else fail('gitignore missing playwright/.profiles');
 }
 
-const envEx = readText('templates/auth.env.example');
+const envEx = readText('scaffold/auth.env.example');
 if (envEx) {
   for (const v of ['AUTH_STATE_FILE', 'AUTH_PROFILE_DIR', 'CDP_ENDPOINT']) {
     if (envEx.includes(v)) ok(`.env.example references ${v}`);

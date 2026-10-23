@@ -4,7 +4,7 @@
  * Startup sequence mirrors the real initialization:
  *   config → detect platform → connect tracker → load data → ready
  */
-import { LoadingPhaseRegistry } from './loading.js';
+import { LoadingPhaseRegistry } from './loading-phase.js';
 import { fetchTasks } from '../data/fetcher.js';
 
 export function registerAllLoadingPhases(): void {

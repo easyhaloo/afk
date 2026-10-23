@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { LoadingPhaseRegistry } from '../registry/loading.js';
+import { LoadingPhaseRegistry } from '../registry/loading-phase.js';
 
 export interface LoadingPhase {
   key: string;

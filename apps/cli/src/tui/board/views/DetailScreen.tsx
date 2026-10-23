@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { getTaskBacklogId, type Task, type Project } from '../../board-types.js';
+import { getTaskBacklogId, type Task, type Project } from '../task-types.js';
 import type { Branch, Commit, Tag } from '@afk/runtime/domain/tracker/types';
 import type { BacklogViewModel } from '../data/backlog-adapter.js';
 import { parseMarkdownLine } from '../utils.js';

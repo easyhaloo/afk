@@ -177,13 +177,13 @@ afk/
 
 ### 5.4 拆解 `packages/runtime/src/types/`
 
-`apps/cli/src/tui/board-types.ts`（含业务函数 `getTaskBacklogId()` 与 deprecated 字段 `iid`）
+`apps/cli/src/tui/board/task-types.ts`（含业务函数 `getTaskBacklogId()` 与 deprecated 字段 `iid`）
 → 并入 `apps/cli/src/tui/board/`（它本就是给看板用的 runtime 投影，该目录已有 `types.ts`）。
 `packages/runtime/src/types/` 仅保留 `node-sqlite.d.ts`。需同步 `AGENTS.md` 布局表。
 
 ### 5.5 `docs/` 归并
 
-`docs/decisions/observability-2026-08-02.md`（标题实为 "AFK Observability Survey"）
+`docs/research/observability-survey-2026-08-02.md`（标题实为 "AFK Observability Survey"）
 → `docs/research/observability-survey-2026-08-02.md`。删除 `docs/decisions/`。
 决策类内容一律进 `docs/adr/`（编号）或 `docs/architecture/blueprints/`（提案）。
 

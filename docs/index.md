@@ -45,12 +45,7 @@
 | [product/PRD-retro-feedback-loop.md](product/PRD-retro-feedback-loop.md) | AFK 执行复盘反馈闭环 PRD |
 | [product/PRD-work-items-reverse-sort-2026-10-15.md](product/PRD-work-items-reverse-sort-2026-10-15.md) | 全局工作项倒序筛选 |
 | [research/](research/) | 研究材料与方法论文档 |
-
-## 决策日志
-
-| 路径 | 内容 |
-|---|---|
-| [decisions/](decisions/) | 阶段性决策记录（observability harness 历史基线等） |
+| [research/observability-survey-2026-08-02.md](research/observability-survey-2026-08-02.md) | 可观测性 harness 调研与历史基线 |
 
 ## 文档治理
 

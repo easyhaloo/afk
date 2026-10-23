@@ -41,6 +41,7 @@ async function fixture() {
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
       const raw = Buffer.concat(chunks).toString();
       const body = raw ? (raw.startsWith('{') ? JSON.parse(raw) : Object.fromEntries(new URLSearchParams(raw))) : {};
+      if (url.pathname === '/api/v4/user') return send({ id: 42 });
       if (url.pathname === '/api/v4/projects') return send([project]);
       if (parts.length === 5 && parts[3] === 'projects') return send(project);
       if (resource === 'issues') {

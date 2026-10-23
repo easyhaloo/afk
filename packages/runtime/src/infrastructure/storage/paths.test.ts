@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { inventoryNamespace, localStoragePaths } from './paths.js';
+import { inventoryNamespace, localStoragePaths, verifiedInventoryNamespace } from './paths.js';
 
 describe('shared storage paths', () => {
   it('uses the same user-level root independently of the execution workspace', () => {
@@ -18,5 +18,16 @@ describe('shared storage paths', () => {
     expect(() => inventoryNamespace([])).toThrow(/identity/i);
     expect(() => inventoryNamespace([{ ...github, accountId: '' }])).toThrow(/identity/i);
     expect(() => inventoryNamespace([{ ...github, host: 'https://example.invalid/path' }])).toThrow(/host/i);
+  });
+
+  it('refuses a namespace while an account of the set is unverified', () => {
+    const github = { platform: 'github' as const, host: 'github.com', accountId: '123' };
+    const gitlab = { platform: 'gitlab' as const, host: 'gitlab.example', accountId: '456' };
+
+    expect(verifiedInventoryNamespace([github, gitlab])).toBe(inventoryNamespace([github, gitlab]));
+    expect(verifiedInventoryNamespace([github])).toBe(inventoryNamespace([github]));
+    expect(verifiedInventoryNamespace([github, undefined])).toBeUndefined();
+    expect(verifiedInventoryNamespace([undefined])).toBeUndefined();
+    expect(verifiedInventoryNamespace([])).toBeUndefined();
   });
 });

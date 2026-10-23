@@ -21,7 +21,8 @@ import {
   type GitHubCatalogIssue,
   type GitHubCatalogProject,
 } from './catalogs.js';
-import type { ProviderAccountIdentity, ProviderCatalog } from '../../domain/work-item/provider-types.js';
+import type { ProviderAccountIdentity, ProviderAccountIdentityFailure, ProviderCatalog } from '../../domain/work-item/provider-types.js';
+import type { WorkItemPlatform } from '../../domain/work-item/types.js';
 import { normalizeGitLabHost } from '../../shared/gitlab-project.js';
 
 function readGhToken(): string | null {
@@ -119,12 +120,39 @@ export function createGlobalWorkItemCatalogs(
   return catalogs;
 }
 
-export async function resolveProviderAccountIdentities(catalogs: readonly ProviderCatalog[]): Promise<ProviderAccountIdentity[]> {
-  const identities = await Promise.all(catalogs.map(async catalog => {
-    if (!catalog.getAccountIdentity) throw new Error(`Verified ${catalog.platform} account identity is unavailable for ${catalog.scopeKey}`);
-    return catalog.getAccountIdentity();
+export interface ProviderAccountIdentityResolution {
+  /** One slot per catalog, in catalog order. `undefined` when the account is unverified. */
+  identities: Array<ProviderAccountIdentity | undefined>;
+  failures: ProviderAccountIdentityFailure[];
+}
+
+/**
+ * Resolve the authenticated account behind every catalog.
+ *
+ * A catalog whose account cannot be verified is reported as a failure: the
+ * other catalogs still resolve, so one broken provider never hides the rest.
+ * The namespace of an inventory store identifies the whole account set, so a
+ * partially verified set must not be published — `verifiedInventoryNamespace`
+ * enforces that for the callers.
+ */
+export async function resolveProviderAccountIdentities(
+  catalogs: readonly ProviderCatalog[],
+): Promise<ProviderAccountIdentityResolution> {
+  const identities: Array<ProviderAccountIdentity | undefined> = new Array(catalogs.length).fill(undefined);
+  const failures: ProviderAccountIdentityFailure[] = [];
+  await Promise.all(catalogs.map(async (catalog, index) => {
+    try {
+      if (!catalog.getAccountIdentity) throw new Error(`Verified ${catalog.platform} account identity is unavailable for ${catalog.scopeKey}`);
+      identities[index] = await catalog.getAccountIdentity();
+    } catch (error) {
+      failures.push({
+        platform: catalog.platform,
+        scopeKey: catalog.scopeKey,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }));
-  return identities;
+  return { identities, failures };
 }
 
 /**

@@ -1,5 +1,5 @@
 import { queryProviderInventory } from "@afk/application";
-import type { ProviderAccountIdentity } from "@afk/runtime/domain/work-item/provider-types";
+import type { ProviderAccountIdentity, ProviderAccountIdentityFailure } from "@afk/runtime/domain/work-item/provider-types";
 import { app } from "electron";
 import {
   parseWorkItemInventoryOptions,
@@ -21,8 +21,14 @@ export type WorkItemApplicationAdapter = {
 };
 
 type WorkItemApplicationProviderDeps = {
-  loadSnapshot: (platform: "github" | "gitlab" | "all") => Promise<WorkItemInventoryResult | { inventory: WorkItemInventoryResult; identities: ProviderAccountIdentity[] }>;
+  loadSnapshot: (platform: "github" | "gitlab" | "all") => Promise<WorkItemInventoryResult | ProviderInventorySnapshot>;
   loadIdentities?: () => Promise<ProviderAccountIdentity[]>;
+};
+
+type ProviderInventorySnapshot = {
+  inventory: WorkItemInventoryResult;
+  identities: ProviderAccountIdentity[];
+  identityFailures?: ProviderAccountIdentityFailure[];
 };
 
 const requireCjs = createRequire(import.meta.url);
@@ -35,10 +41,10 @@ const requireCjs = createRequire(import.meta.url);
 // a bundle, so every inlined module shares one URL and module-relative depth
 // no longer means anything. getAppPath() resolves to the app dir in development
 // and the asar root once packaged.
-function loadProviderSnapshot(platform: "github" | "gitlab" | "all"): Promise<WorkItemInventoryResult | { inventory: WorkItemInventoryResult; identities: ProviderAccountIdentity[] }> {
+function loadProviderSnapshot(platform: "github" | "gitlab" | "all"): Promise<WorkItemInventoryResult | ProviderInventorySnapshot> {
   const bundle = path.join(app.getAppPath(), "dist-electron/provider-inventory.cjs");
   const provider = requireCjs(bundle) as {
-    collectProviderInventorySnapshot?: (platform: "github" | "gitlab" | "all") => Promise<{ inventory: WorkItemInventoryResult; identities: ProviderAccountIdentity[] }>;
+    collectProviderInventorySnapshot?: (platform: "github" | "gitlab" | "all") => Promise<ProviderInventorySnapshot>;
     collectProviderInventory: (platform: "github" | "gitlab" | "all") => Promise<WorkItemInventoryResult>;
   };
   return provider.collectProviderInventorySnapshot?.(platform) ?? provider.collectProviderInventory(platform);
@@ -58,7 +64,10 @@ export function createProviderWorkItemApplicationFacade(deps: WorkItemApplicatio
   return {
     async listWorkItems(options) {
       const loaded = await deps.loadSnapshot(options.platform ?? "all");
-      if ("inventory" in loaded) lastIdentities = loaded.identities;
+      // Only a fully verified account set may open the account-namespaced
+      // mirror. A partial set has no stable namespace, so it is never
+      // cached as one — the live inventory is still returned.
+      if ("inventory" in loaded && !loaded.identityFailures?.length) lastIdentities = loaded.identities;
       const snapshot = "inventory" in loaded ? loaded.inventory : loaded;
       return parseWorkItemInventoryResult(await queryProviderInventory(options, { list: async () => snapshot }));
     },
@@ -69,7 +78,7 @@ export function createProviderWorkItemApplicationFacade(deps: WorkItemApplicatio
         return lastIdentities;
       }
       const loaded = await deps.loadSnapshot("all");
-      if (!("inventory" in loaded)) throw new Error("Verified Provider account identity is unavailable");
+      if (!("inventory" in loaded) || loaded.identityFailures?.length) throw new Error("Verified Provider account identity is unavailable");
       lastIdentities = loaded.identities;
       return loaded.identities;
     },

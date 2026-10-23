@@ -38,6 +38,7 @@ async function start() {
     collectProviderInventorySnapshot: async platform => ({
       inventory: await provider.collectProviderInventory(platform),
       identities: [{ platform: "github", host: "github.com", accountId: "e2e-fixture" }],
+      identityFailures: [],
     }),
     getProviderAccountIdentities: async () => [{ platform: "github", host: "github.com", accountId: "e2e-fixture" }],
   };

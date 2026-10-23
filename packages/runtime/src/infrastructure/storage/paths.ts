@@ -31,3 +31,22 @@ export function inventoryNamespace(identities: readonly ProviderAccountIdentity[
   });
   return createHash('sha256').update(JSON.stringify([...new Set(entries)].sort())).digest('hex');
 }
+
+/**
+ * Namespace of a fully verified account set, or `undefined` when any account
+ * is unverified.
+ *
+ * The namespace identifies the authenticated account set as a whole. An
+ * unverified account has no stable user id, so a store opened for the
+ * remaining accounts would be the wrong store for whichever account the
+ * unverified one turns out to be. Callers must not open a store — not even
+ * another account's — while the set is incomplete.
+ */
+export function verifiedInventoryNamespace(
+  identities: readonly (ProviderAccountIdentity | undefined)[],
+): string | undefined {
+  if (!identities.length) return undefined;
+  const verified = identities.filter((identity): identity is ProviderAccountIdentity => Boolean(identity));
+  if (verified.length !== identities.length) return undefined;
+  return inventoryNamespace(verified);
+}

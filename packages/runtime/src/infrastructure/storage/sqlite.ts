@@ -26,6 +26,29 @@ export function transaction<Result>(database: SqliteDatabase, operation: () => R
   }
 }
 
+/**
+ * Load `node:sqlite` without the runtime's experimental warning.
+ *
+ * `node:sqlite` is still experimental on the supported Node baseline, and
+ * Node prints a warning the first time the module is loaded. That warning is
+ * about this implementation detail, not about the caller's command, and it
+ * would pollute the stderr that the CLI reserves for machine-readable
+ * output. Only that single warning is dropped, and only while the module
+ * loads — every other warning still reaches the runtime.
+ */
+function requireNodeSqlite<T>(requireNode: ReturnType<typeof createRequire>): T {
+  const emitWarning = process.emitWarning;
+  process.emitWarning = ((warning: string | Error, type?: string, ...rest: unknown[]) => {
+    if (type === 'ExperimentalWarning' && typeof warning === 'string' && warning.includes('SQLite')) return;
+    return (emitWarning as (...arguments_: unknown[]) => void).call(process, warning, type, ...rest);
+  }) as unknown as typeof process.emitWarning;
+  try {
+    return requireNode(`node:${'sqlite'}`) as T;
+  } finally {
+    process.emitWarning = emitWarning;
+  }
+}
+
 export function openSqlite(options: {
   file: string;
   schema: string;
@@ -35,7 +58,7 @@ export function openSqlite(options: {
   const requireNode = createRequire(import.meta.url);
   let Sqlite: new (path: string) => SqliteDatabase;
   try {
-    Sqlite = (requireNode(`node:${'sqlite'}`) as { DatabaseSync: typeof Sqlite }).DatabaseSync;
+    Sqlite = requireNodeSqlite<{ DatabaseSync: typeof Sqlite }>(requireNode).DatabaseSync;
   } catch {
     throw new Error('AFK SQLite storage requires a Node runtime with node:sqlite support (tested on Node 22.16+)');
   }

@@ -12,6 +12,34 @@ afterEach(() => {
 });
 
 describe('shared SQLite lifecycle', () => {
+  // This runs first on purpose: the runtime prints its experimental warning
+  // only when node:sqlite is loaded for the first time, and the fork running
+  // this file has not loaded it yet.
+  it('does not leak the node:sqlite experimental warning into stderr', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'afk-storage-'));
+    directories.push(root);
+    const chunks: string[] = [];
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    const originalEmitWarning = process.emitWarning;
+    process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+      chunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const database = openSqlite({ file: join(root, 'quiet.sqlite'), schema: 'CREATE TABLE sample(id TEXT PRIMARY KEY) STRICT;' });
+      databases.push(database);
+      // The runtime prints its warnings on the next tick.
+      await new Promise<void>(resolve => setImmediate(resolve));
+    } finally {
+      process.stderr.write = originalWrite;
+    }
+
+    expect(chunks.join('')).not.toMatch(/SQLite is an experimental feature/);
+    // The warning channel is handed back untouched, so later warnings still
+    // reach the runtime.
+    expect(process.emitWarning).toBe(originalEmitWarning);
+  });
+
   it('initializes once, reopens data, rolls back and protects the database file', () => {
     const root = mkdtempSync(join(tmpdir(), 'afk-storage-'));
     directories.push(root);

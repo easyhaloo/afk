@@ -21,9 +21,9 @@ Reuse the task/work-item workspace if one already exists. Store artifacts under 
 Use these stable names:
 - `TEST-ANALYSIS.md` — consolidated exploration evidence, existing coverage, gaps, assumptions, and conflicts.
 - `TEST-PLAN.md` — approved scope and test plan; must exist before test implementation begins.
-- `TEST-REPORT.md` — tests changed, commands and actual results, deviations, and remaining risks.
+- `TEST-REPORT.md` — test-case counts by layer, commands and actual results, deviations, and remaining risks.
 
-Always produce `TEST-PLAN.md`. Produce `TEST-ANALYSIS.md` and `TEST-REPORT.md` when the task has enough complexity to benefit from a durable record; for simple changes, keep them concise rather than creating ceremony. Never create one file per subagent: merge findings into the shared artifacts.
+Always produce `TEST-PLAN.md`. Produce `TEST-ANALYSIS.md` when the task benefits from a durable analysis record. Produce `TEST-REPORT.md` when test changes or execution results need a durable record; for simple changes, keep it concise. When reporting test changes, always state the number of test cases added and updated, broken down by unit, integration, and E2E. Never create one file per subagent: merge findings into the shared artifacts.
 
 ### 2. Explore in parallel with subagents
 
@@ -93,9 +93,22 @@ Never weaken assertions, skip tests, or alter unrelated production behavior just
 
 ### 8. Report the increment
 
-Write/update `TEST-REPORT.md` when useful, and summarize:
-- affected flow and the final scope;
-- tests added, changed, or reused;
+Write/update `TEST-REPORT.md` when test changes or execution results need a durable record. Include a test-case count summary broken down by layer, using actual test cases rather than counting test files or assertions:
+
+```markdown
+## Test Case Summary
+| Test Layer | Added | Updated | Reused (not changed) | Passed | Failed | Not Run |
+|---|---:|---:|---:|---:|---:|---:|
+| Unit | 0 | 0 | 0 | 0 | 0 | 0 |
+| Integration | 0 | 0 | 0 | 0 | 0 | 0 |
+| E2E | 0 | 0 | 0 | 0 | 0 | 0 |
+| **Total** | **0** | **0** | **0** | **0** | **0** | **0** |
+```
+
+Count each distinct test case once per category; do not count test files, assertions, parameterized cases, or test runs as separate cases unless the project's test conventions treat them as distinct cases. If a test's layer or count cannot be determined, mark it as unknown rather than guessing. Separate added/updated/reused counts from execution outcomes, and do not imply that an unrun test passed.
+
+Also summarize:
+- affected flow and final scope;
 - commands actually executed and their results;
 - deviations from `TEST-PLAN.md` and why they were necessary;
 - remaining risks, unexecuted checks, and separate follow-up debt.
@@ -110,6 +123,7 @@ Do not fix unrelated test debt in this task.
 - Subagent findings were synthesized and conflicts resolved by the main agent; no conflicting parallel edits remain.
 - Tests run in the project-supported environment, with unexecuted checks clearly marked.
 - Remaining uncertainty and uncovered risk are visible to the developer.
+- Test reporting distinguishes added, updated, and reused cases, with counts and execution outcomes broken down by unit, integration, and E2E.
 
 ## Caveats
 

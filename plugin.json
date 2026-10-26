@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "afk",
+  "version": "1.0.12",
+  "description": "AFK CLI workflow skills for requirements, implementation, research, QA, and hand-off.",
+  "author": {
+    "name": "easyhaloo",
+    "url": "https://github.com/easyhaloo"
+  },
+  "homepage": "https://github.com/easyhaloo/afk",
+  "repository": "https://github.com/easyhaloo/afk",
+  "license": "MIT",
+  "keywords": [
+    "agent-skills",
+    "coding-agent",
+    "workflow",
+    "cli",
+    "qa"
+  ]
+}

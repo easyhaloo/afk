@@ -191,6 +191,7 @@ pnpm --dir apps/cli link --global   # Install CLI globally
 - **[Architecture Design](docs/architecture/overview.md)** — Cross-platform abstraction + CLI command mapping
 - **[Workflows](docs/guides/workflows.md)** — Issue → MR pipeline, scheduler, Skills integration
 - **[Skills Guide](docs/guides/skills.md)** — Core skills design and usage
+- **[Agent Plugins Compatibility](docs/guides/agent-plugins.md)** — Portable Agent Plugins v1 package format
 
 ## License
 

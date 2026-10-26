@@ -39,6 +39,7 @@ Claude Code skill suite for AFK workflow automation. Each skill is self-containe
 
 | Skill | Trigger | Description |
 |-------|---------|-------------|
+| [afk-change-driven-testing](./afk-change-driven-testing/) | `/afk-change-driven-testing` | Incremental regression tests scoped to the current business change |
 | [api-workflow](./api-workflow/) | `/api-workflow` | API testing with request chaining and browser hybrid |
 
 ## Debug Skills

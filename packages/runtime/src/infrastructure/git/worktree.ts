@@ -2,6 +2,8 @@ import { simpleGit, SimpleGit } from 'simple-git';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { logger } from '../io/index.js';
+import { workspaceDataDirectory } from '../workspace.js';
+import { defaultWorktreeBaseDir } from '../../domain/branches/base.js';
 
 export type MarkerStatus = 'crashed' | 'success';
 export type WorktreeStatus = 'active' | 'completed' | 'failed';
@@ -27,7 +29,7 @@ export interface CleanOptions {
   dryRun?: boolean;
 }
 
-const STATE_FILE = '.afk/worktrees.json';
+const STATE_FILE = 'worktrees.json';
 
 /**
  * Git worktree manager with state tracking
@@ -41,12 +43,12 @@ export class WorktreeManager {
   constructor(repoPath: string = process.cwd()) {
     this.repoPath = repoPath;
     this.git = simpleGit(repoPath);
-    this.stateFilePath = join(repoPath, STATE_FILE);
+    this.stateFilePath = join(workspaceDataDirectory(repoPath), STATE_FILE);
   }
 
   async create(iid: number, baseBranch: string, baseDir?: string): Promise<Worktree> {
     const branch = `afk-issue-${iid}`;
-    const worktreeDir = baseDir || join(this.repoPath, '.worktrees');
+    const worktreeDir = baseDir || defaultWorktreeBaseDir(this.repoPath);
     const path = join(worktreeDir, `issue-${iid}`);
     await fs.mkdir(worktreeDir, { recursive: true });
 

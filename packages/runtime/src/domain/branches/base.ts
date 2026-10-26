@@ -9,6 +9,8 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import type { SimpleGit } from 'simple-git';
 import { BranchStrategyError } from './types.js';
+import { resolveWorkspaceRoot, workspaceDataDirectory } from '../../shared/workspace-paths.js';
+import { basename, isAbsolute, relative } from 'node:path';
 
 /** Track worktrees that have been prepared in the current process so that
  *  concurrent calls refuse to share a writable branch. */
@@ -16,7 +18,11 @@ const preparedWorktrees = new Map<string, string>(); // path -> branch
 
 /** Default base dir for worktrees, relative to repoPath. */
 export function defaultWorktreeBaseDir(repoPath: string): string {
-  return join(repoPath, '.worktrees');
+  const executionRoot = resolveWorkspaceRoot();
+  const location = relative(executionRoot, repoPath);
+  return !location.startsWith('..') && !isAbsolute(location)
+    ? join(repoPath, '.worktrees')
+    : join(executionRoot, 'repositories', basename(workspaceDataDirectory(repoPath)), '.worktrees');
 }
 
 /** Make sure the worktreeBaseDir exists. */

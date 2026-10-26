@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { resolveWorkspaceRoot, workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import type { ProjectRun } from "../../shared/ipc-contract.js";
 import { exec } from "../adapters/process-executor.js";
 import { createWorkItemRunStore } from "./work-item-run-store.js";
@@ -19,7 +20,7 @@ function projectFromRemote(remote: string): Project | null {
 
 async function metadataFor(root: string): Promise<WorkspaceMetadata | null> {
   try {
-    const value = JSON.parse(await fs.readFile(path.join(root, "workspace.json"), "utf8")) as WorkspaceMetadata;
+    const value = JSON.parse(await fs.readFile(path.join(workspaceDataDirectory(root), "workspace.json"), "utf8")) as WorkspaceMetadata;
     if (!value || value.root !== root || typeof value.taskId !== "string" || !Array.isArray(value.repositories)) return null;
     return value;
   } catch {
@@ -39,7 +40,7 @@ export function createProjectRunScopeService(options: {
   baseDirectory?: string;
   remoteUrl?: (workspace: string) => Promise<string>;
 } = {}) {
-  const baseDirectory = path.resolve(options.baseDirectory ?? path.join(homedir(), ".loop-workspace"));
+  const baseDirectory = path.resolve(options.baseDirectory ?? resolveWorkspaceRoot());
   const remoteUrl = options.remoteUrl ?? (async (workspace: string) => {
     const result = await exec("git", ["remote", "get-url", "origin"], workspace);
     return result.ok ? result.stdout : "";

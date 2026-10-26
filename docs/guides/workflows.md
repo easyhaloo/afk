@@ -390,14 +390,14 @@ When context approaches its limit, the workflow **automatically interrupts the c
 
 ### Detection Mechanism
 
-- **Runner polls statusline**: The agent cannot reliably perceive its own context limit (Claude Code's TUI warnings are invisible at the rendering layer, and the compression system message arrives too late). There is no context_high in the signal protocol. The Runner is the sole authority for context overflow — checks signal files and `<worktree>/.afk/claude-status.json` token usage during wait cycles (statusline writes every turn).
+- **Runner polls statusline**: The agent cannot reliably perceive its own context limit (Claude Code's TUI warnings are invisible at the rendering layer, and the compression system message arrives too late). There is no context_high in the signal protocol. The Runner is the sole authority for context overflow — checks signal files and `~/.afk/workspaces/<workspace-hash>/claude-status.json` token usage during wait cycles (statusline writes every turn).
 - **Threshold**: Absolute token count, default `CONTEXT.HIGH_THRESHOLD` = 100,000, configurable via `--context-high <tokens>`.
 - **Signal priority**: If agent has already written a completion signal, no interruption occurs (signal file check takes precedence over token check).
 
 ### Handoff Flow (Auto-Resume)
 
 1. **Request summary**: Type plain text handoff instructions (urge immediate brief summary) — ① `git add -A && git commit` (skip if no changes) → ② 3 quick answers (done/doing/next) → ③ write `handoff_ready` signal. If no valid `handoff_ready` within 60s (template placeholder `<summary>` counts as no summary), use pane snapshot as fallback.
-2. **Handoff document**: Summary + snapshot + commit sha written to `<worktree>/.afk/handoff/handoff-<iid>-<gen>.md` (`.afk/` is already in the repo's `.gitignore`, so it won't be committed to the MR via `git add -A`; the document travels with the worktree, and the recovering agent can read it directly on resume).
+2. **Handoff document**: Summary + snapshot + commit sha written to `~/.afk/workspaces/<workspace-hash>/handoff/handoff-<iid>-<gen>.md`. The recovering agent receives this absolute path on resume; the document stays outside the checkout.
 3. **Recovery comment**: Issue comment records handoff progress (recovery document at time of task interruption). For termination handoffs, the comment **embeds the complete handoff document content** (no file path reference) — the recovering party gets all information from the comment alone.
 4. **Restart**: Kill tmux session → clear signal files and old statusline data → recreate session with same name → restart watchdog (each generation gets a full hard timeout).
 5. **Continue**: New session receives instructions to "continue implementing/verifying issue #N (read handoff document first)", looping until completion signal or another handoff.

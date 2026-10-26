@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { describe, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -121,7 +122,7 @@ describe('MultiRepositoryPreparer', () => {
     let owner: string | undefined;
     const rename = vi.fn(async (from: string) => {
       if (!locked) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-      expect(from).toBe('/workspace/.afk/multi-repository-preparation.lock');
+      expect(from).toBe(`${workspaceDataDirectory('/workspace')}/multi-repository-preparation.lock`);
       locked = false;
     });
     const removeDirectory = vi.fn(async () => undefined);
@@ -143,14 +144,14 @@ describe('MultiRepositoryPreparer', () => {
 
     const lock = await acquireWorkspaceLock('/workspace', deps);
     expect(rename).toHaveBeenNthCalledWith(1,
-      '/workspace/.afk/multi-repository-preparation.lock',
-      expect.stringMatching(/^\/workspace\/\.afk\/multi-repository-preparation\.stale-[a-f0-9]{24}$/));
+      `${workspaceDataDirectory('/workspace')}/multi-repository-preparation.lock`,
+      expect.stringMatching(/multi-repository-preparation\.stale-[a-f0-9]{24}$/));
     expect(removeDirectory).not.toHaveBeenCalled();
 
     await lock.release();
     expect(rename).toHaveBeenNthCalledWith(2,
-      '/workspace/.afk/multi-repository-preparation.lock',
-      '/workspace/.afk/multi-repository-preparation.lock.release-stale');
+      `${workspaceDataDirectory('/workspace')}/multi-repository-preparation.lock`,
+      `${workspaceDataDirectory('/workspace')}/multi-repository-preparation.lock.release-stale`);
   });
 
   it('allows only one of two stale-lock reclaimers to win the quarantine rename', async () => {
@@ -321,8 +322,8 @@ describe('MultiRepositoryPreparer', () => {
     }))).rejects.toBe(failure);
 
     expect(rename).toHaveBeenCalledWith(
-      '/workspace/.afk/multi-repository-preparation.lock',
-      expect.stringMatching(/^\/workspace\/\.afk\/multi-repository-preparation\.stale-[a-f0-9]{24}$/),
+      `${workspaceDataDirectory('/workspace')}/multi-repository-preparation.lock`,
+      expect.stringMatching(/multi-repository-preparation\.stale-[a-f0-9]{24}$/),
     );
     expect(removeDirectory).not.toHaveBeenCalled();
   });

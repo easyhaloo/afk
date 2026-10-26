@@ -26,6 +26,22 @@ runtime 内部保留既有分层约束，架构检查同时检查包导出和工
 桌面端通过 `pnpm --filter afk-control-electron` 分别运行 `typecheck`、`build`、`test`。
 CLI 产物位于 `apps/cli/dist/index.js`，根包不再发布可执行文件或包含应用源码。
 
+## 执行与系统数据路径
+
+CLI 与桌面端共用 Runtime 路径解析。执行根目录固定为
+`~/.loop-workspace/<platform>/<项目路径>/<issue>/`，代码检出位于其
+`repositories/` 下。当前目录和 `AFK_WORKSPACE` 均不改变执行根目录。
+不传清单的 `afk run` 先解析 provider 身份，再准备独立仓库。
+
+配置和 AFK 系统数据统一存放在 `~/.afk/`：`config.yml`、`workflows/`、
+`tracker-projects.json` 和运行状态。各工作区的元数据、执行清单、启动回执、
+预算、会话、诊断和执行审计存放在
+`~/.afk/workspaces/<绝对工作区路径的 SHA256>/`，保留隔离性。
+`afk execute --work-item-id <id>` 自动定位清单；缺失时根据 provider 的项目和
+工作分支创建。显式 `--execution-manifest` 只选择输入文件，不改变执行目录。
+`reconcile` 只读取已有清单，不新建配置。旧目录中的文件保留原状；新执行前需将
+需要的配置放到 `~/.afk/`。Agent 完成信号和 QA 附件清单仍属于执行目录内的协议文件。
+
 ## 架构守卫
 
 `pnpm architecture:check --check-packages` 强制层间依赖方向，并检查
@@ -56,8 +72,8 @@ AFK 只执行外部规划器已经创建并拆分好的 backlog，不负责创�
 | `afk backlog confirm-merge` | 合并已批准的根 backlog 变更并置为 done |
 | `afk backlog reconcile-merge` | 当变更已在平台合并时，将根 backlog 收敛为 done |
 | `afk run --backlog-id <id>` | 认领并执行一个 backlog |
-| `afk execute --work-item-id <id> --execution-manifest <path>` | 实现、独立验证并发布一个托管工作项 |
-| `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |
+| `afk execute --work-item-id <id> [--execution-manifest <path>]` | 实现、独立验证并发布一个托管工作项 |
+| `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | 校验人工已合并的根 PR 并对账执行审计 |
 | `afk qa --backlog-id <id>` | 执行等待验证的 backlog QA |
 | `afk loop` | 轮询单个 manifest 绑定的工作项并调用 `executeWorkItem` |
 | `afk loop start\|status\|stop` | 控制 loop 守护进程：前台/后台启动、状态查看与优雅停止 |
@@ -157,8 +173,7 @@ GitHub，除非只配置了 GitLab 凭据。
 
 ### 本地 tracker 索引
 
-`<workspace>/.afk/tracker-projects.json`（未配置工作区时为
-`~/.afk/tracker-projects.json`）记录 AFK 接触过的 provider 项目：项目本身、
+`~/.afk/tracker-projects.json` 记录 AFK 接触过的 provider 项目：项目本身、
 访问时所在的本地仓库，以及涉及的 issue。每次读取
 provider、inventory 和执行都会写入它看到的内容，因此后续命令无需任何配置
 就能把裸 issue id 或工作目录解析到对应项目。多仓库用户由此无需记住项目名、
@@ -207,7 +222,7 @@ QA 记录创建只持久化证据，后续状态和执行模式由 `QARunner` �
 retry 仍在创建记录后直接切到 `rework` + `afk`。
 
 `WorkflowConfig.maxQaReworkAttempts` 默认 **3**，必须为正整数。可在
-`.afk/config.yml` 设置 `maxQaReworkAttempts: 3`，或使用环境变量
+`~/.afk/config.yml` 设置 `maxQaReworkAttempts: 3`，或使用环境变量
 `AFK_MAX_QA_REWORK_ATTEMPTS=3`，项目文件优先。没有历史记录时，首次 FAIL
 为 attempt 1，第二次 FAIL 为 attempt 2，均允许 `rework` + `afk`；第三次
 FAIL 持久化 attempt 3，返回 `success: false` 且不返回 `rework`，直接转为
@@ -216,7 +231,7 @@ FAIL 持久化 attempt 3，返回 `success: false` 且不返回 `rework`，直�
 记录，重新创建 runner 不会重置；QA PASS 仍可 resolve active 记录。
 该上限独立于执行重试的 `maxRetries` 和 AC 纠正的 `maxSelfIterations`。
 handoff/token `BudgetManager` 会按 canonical work item 从
-`<workspace>/.afk/budgets/` 恢复快照。handoff 次数和 harness 原生 token
+`~/.afk/workspaces/<工作区路径哈希>/budgets/` 恢复快照。handoff 次数和 harness 原生 token
 消耗会跨运行持久化，并按 session ID 去重；账本损坏时会在启动新 Agent
 前 fail closed。
 
@@ -230,7 +245,7 @@ handoff/token `BudgetManager` 会按 canonical work item 从
 它不会改变 Provider Backlog 的生命周期状态。
 
 Desktop 通过规范 `workItemId` 定位执行工作区，读取其中的
-`.afk/work-item-runs.json`。该文件记录 Worker 启动回执，不拥有 Provider 生命周期状态。
+对应系统数据目录中的 `work-item-runs.json`。该文件记录 Worker 启动回执，不拥有 Provider 生命周期状态。
 规范运行时记录必须显式包含工作区，Desktop 按精确的 `backlogId`、执行工作区和
 Provider 关联。运行时数据缺失或格式错误时，Backlog 仍然可见，并显式呈现为无运行时状态。
 已删除的 backlog 运行存储不再提供读取兼容。

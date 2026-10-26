@@ -7,6 +7,7 @@ export default defineConfig({
   esbuild: { include: /\.(m?[jt]s|[cm]?tsx?)$/ },
   test: {
     environment: "node",
+    setupFiles: ["../../scripts/test-home.ts"],
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx", "src/**/*.test.ts", "src/**/*.test.tsx"],
     exclude: ["tests/e2e/**", "node_modules/**", "dist/**"],
     fileParallelism: false,

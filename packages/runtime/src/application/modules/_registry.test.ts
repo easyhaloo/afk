@@ -3,6 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { describe, it, expect, vi } from 'vitest';
 import { defineModule, loadModules, parseModuleParams, resolveModuleNames } from './_registry.js';
+import { workspaceStateDirectory } from '../../infrastructure/workspace.js';
 
 describe('Module Registry', () => {
   it('loads registered modules alongside the core module without duplicates', async () => {
@@ -21,13 +22,14 @@ describe('Module Registry', () => {
 
   it('reads modules from valid inline YAML', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'afk-modules-'));
-    mkdirSync(join(directory, '.afk'));
-    writeFileSync(join(directory, '.afk', 'config.yml'), 'workflow: { modules: [isolate] }\n');
+    mkdirSync(workspaceStateDirectory(), { recursive: true });
+    writeFileSync(join(workspaceStateDirectory(), 'config.yml'), 'workflow: { modules: [isolate] }\n');
     const cwd = vi.spyOn(process, 'cwd').mockReturnValue(directory);
     try {
       await expect(resolveModuleNames()).resolves.toEqual(['isolate']);
     } finally {
       cwd.mockRestore();
+      rmSync(join(workspaceStateDirectory(), 'config.yml'), { force: true });
       rmSync(directory, { recursive: true, force: true });
     }
   });

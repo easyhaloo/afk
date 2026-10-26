@@ -19,6 +19,12 @@ describe('execute CLI', () => {
   afterEach(() => { vi.clearAllMocks(); process.exitCode = 0; });
   const argv = ['--work-item-id', 'github:acme/api#42', '--execution-manifest', '/tmp/item.json', '--template', 'custom'];
 
+  it('allows the shared runtime to locate the work item workspace automatically', async () => {
+    mocks.executeWorkItem.mockResolvedValue({ status: 'merge_ready' });
+    await invoke(['--work-item-id', 'github:acme/api#42']);
+    expect(mocks.executeWorkItem).toHaveBeenCalledWith(expect.objectContaining({ workItemId: 'github:acme/api#42', manifestPath: undefined }));
+  });
+
   it('accepts the desktop argv without a backlog ID', async () => {
     mocks.executeWorkItem.mockResolvedValue({ status: 'merge_ready', changeUrl: 'https://example.test/pr/1' });
     await invoke(argv);

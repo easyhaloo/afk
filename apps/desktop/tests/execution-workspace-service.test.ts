@@ -1,3 +1,6 @@
+import { executionManifestPath, executionWorkspacePath, workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
+import { readExecutionManifest } from "@afk/runtime/execution";
+import { createWorkItemExecutionManifestStore } from "../electron/services/work-item-execution-manifest-store.js";
 import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +20,19 @@ const webProject = {
 };
 
 describe("execution workspace service", () => {
+  it("uses exactly the same execution root and system manifest as the CLI runtime", async () => {
+    const workItemId = "github:acme/api#42";
+    const workspace = await createExecutionWorkspaceService().allocate(workItemId, [project]);
+    await createWorkItemExecutionManifestStore().save(workspace.root, {
+      schemaVersion: 1, workItemId, providerBacklogId: "42", tracker: { platform: "github", projectKey: "acme/api" },
+      workingBranch: "afk/backlog-42",
+      repositories: [{ ...project, checkoutPath: "repositories/api", baseBranch: "main", workingBranch: "afk/backlog-42", primary: true }],
+    });
+    const resolved = await readExecutionManifest(executionManifestPath(workItemId), workItemId);
+    expect(workspace.root).toBe(executionWorkspacePath(workItemId));
+    expect(resolved.workspaceRoot).toBe(workspace.root);
+    expect(resolved.repositories[0].repoRoot).toBe(workspace.repositories[0].path);
+  });
   it("does not clear a newer current run when an older run finishes", async () => {
     const baseDirectory = await mkdtemp(path.join(os.tmpdir(), "afk-loop-workspace-"));
     const service = createExecutionWorkspaceService({ baseDirectory });
@@ -38,10 +54,10 @@ describe("execution workspace service", () => {
       { project: webProject, path: path.join(workspace.root, "repositories", "console") },
     ]);
     expect(workspace.artifacts).toBe(path.join(workspace.root, "artifacts"));
-    expect(workspace.runtime).toBe(path.join(workspace.root, "runtime"));
-    expect(workspace.logs).toBe(path.join(workspace.root, "logs"));
-    expect(workspace.diagnostics).toBe(path.join(workspace.root, "diagnostics"));
-    expect(JSON.parse(await readFile(path.join(workspace.root, "workspace.json"), "utf8"))).toMatchObject({
+    expect(workspace.runtime).toBe(path.join(workspaceDataDirectory(workspace.root), "runtime"));
+    expect(workspace.logs).toBe(path.join(workspaceDataDirectory(workspace.root), "logs"));
+    expect(workspace.diagnostics).toBe(path.join(workspaceDataDirectory(workspace.root), "diagnostics"));
+    expect(JSON.parse(await readFile(path.join(workspaceDataDirectory(workspace.root), "workspace.json"), "utf8"))).toMatchObject({
       taskId: "WI-2026-018",
       repositories: [
         { project: { projectKey: "acme/api" }, path: path.join(workspace.root, "repositories", "api") },

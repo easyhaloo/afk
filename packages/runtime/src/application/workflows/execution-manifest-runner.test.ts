@@ -10,6 +10,7 @@ import type { RunObserver } from '../../observability/run-observer.js';
 import { WorkflowRunner } from '../workflow-engine.js';
 import type { PreparedRepositorySet } from './multi-repository-preparer.js';
 import { resolveWorkflowRunRequest } from './run-request.js';
+import { executionWorkspacePath } from '../../infrastructure/workspace.js';
 
 const observer = { record: vi.fn(async () => undefined) } as unknown as RunObserver;
 let workspaceRoot: string;
@@ -82,7 +83,7 @@ describe('execution manifest request to runner boundary', () => {
     expect(runner.activeBacklog).toMatchObject({ id: '42', branchName: 'afk/work-item-18' });
     expect(runner.runBody).toHaveBeenCalledWith(expect.objectContaining({
       branchStrategy: { type: 'named', branch: 'afk/work-item-18', baseBranch: 'main' },
-      workspaceRoot: '/workspace',
+      workspaceRoot: executionWorkspacePath('WI-2026-018'),
     }));
   });
 

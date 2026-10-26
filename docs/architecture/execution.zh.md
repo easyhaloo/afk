@@ -368,7 +368,7 @@ Docker socket
 运行状态目录：
 
 ```text
-<worktree>/.afk/runs/<run-id>/
+~/.afk/workspaces/<workspace-hash>/runs/<run-id>/
 ├── request.json
 ├── events.jsonl
 ├── result.json
@@ -479,7 +479,7 @@ implement → verify-ac → create-mr → qa
 模板加载优先级：
 
 ```text
-CLI 指定路径 → 项目级 .afk/workflows → 用户级 ~/.afk/workflows → 内置模板
+CLI 指定路径 → ~/.afk/workflows → 内置模板
 ```
 
 ## 11. 配置与 CLI
@@ -514,7 +514,7 @@ workflow:
   maxTotalTokens: 500000
 ```
 
-配置优先级：CLI → `.afk/config.yml` → 环境变量 → 默认值。
+配置优先级：CLI → `~/.afk/config.yml` → 环境变量 → 默认值。
 
 ## 12. 分阶段开发计划
 

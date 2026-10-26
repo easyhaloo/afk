@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { promises as fs } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -316,6 +317,7 @@ function defaultDependencies(): MultiRepositoryPreparerDependencies {
 
 async function validateRepositoryPath(workspaceRoot: string, repoRoot: string): Promise<void> {
   const absoluteWorkspace = resolve(workspaceRoot);
+  await fs.mkdir(absoluteWorkspace, { recursive: true });
   const absoluteRepository = resolve(repoRoot);
   assertInsideWorkspace(absoluteWorkspace, absoluteRepository, repoRoot);
 
@@ -353,7 +355,7 @@ export async function acquireWorkspaceLock(
   workspaceRoot: string,
   dependencies: WorkspaceLockDependencies = defaultWorkspaceLockDependencies(),
 ): Promise<{ release(): Promise<void> }> {
-  const afkDirectory = join(resolve(workspaceRoot), '.afk');
+  const afkDirectory = workspaceDataDirectory(workspaceRoot);
   await dependencies.ensureDirectory(afkDirectory);
   if (await dependencies.isSymbolicLink(afkDirectory)) {
     throw new Error(`execution workspace lock directory must not be a symbolic link: ${afkDirectory}`);

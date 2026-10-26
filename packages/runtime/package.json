@@ -7,6 +7,7 @@
     "./errors": { "types": "./dist/errors.d.ts", "import": "./dist/errors.js" },
     "./backlog": { "types": "./dist/backlog.d.ts", "import": "./dist/backlog.js" },
     "./execution": { "types": "./dist/execution.d.ts", "import": "./dist/execution.js" },
+    "./infrastructure/workspace": { "types": "./dist/infrastructure/workspace.d.ts", "import": "./dist/infrastructure/workspace.js" },
     "./application/isolate": {
       "types": "./dist/application/isolate.d.ts",
       "import": "./dist/application/isolate.js"

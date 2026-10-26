@@ -1,6 +1,7 @@
 import { readFile as readFileFromFs } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { isWorkItemProjectKey } from '@afk/core';
+import { executionWorkspacePath } from '../../infrastructure/workspace.js';
 
 const MANIFEST_KEYS = new Set(['schemaVersion', 'workItemId', 'providerBacklogId', 'tracker', 'workingBranch', 'repositories']);
 const TRACKER_KEYS = new Set(['platform', 'projectKey', 'providerHost', 'providerProjectId']);
@@ -102,8 +103,7 @@ export async function readExecutionManifest(
   }
 
   const manifest = parseExecutionManifest(value, { manifestPath: absoluteManifestPath, backlogId });
-  const manifestDirectory = dirname(absoluteManifestPath);
-  const workspaceRoot = basename(manifestDirectory) === '.afk' ? dirname(manifestDirectory) : manifestDirectory;
+  const workspaceRoot = executionWorkspacePath(manifest.workItemId);
   const repositories = manifest.repositories.map((repository, index) => ({
     ...repository,
     repoRoot: resolveRepositoryRoot(workspaceRoot, repository.checkoutPath, absoluteManifestPath, index),

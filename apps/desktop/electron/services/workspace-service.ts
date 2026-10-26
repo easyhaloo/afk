@@ -1,17 +1,19 @@
 import { createHash } from "node:crypto";
-import { existsSync, promises as fs } from "node:fs";
+import { existsSync, mkdirSync, promises as fs } from "node:fs";
+import { resolveWorkspaceRoot, workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import path from "node:path";
 import type { RuntimeEvent } from "../../shared/ipc-contract.js";
 
 export function resolveWorkspace(input?: string) {
-  const candidate = input?.trim() || process.env.AFK_WORKSPACE || path.resolve(process.cwd(), "..");
-  const root = path.resolve(candidate);
+  const selected = input?.trim() || process.env.AFK_WORKSPACE?.trim();
+  const root = path.resolve(selected || resolveWorkspaceRoot());
+  if (!selected) mkdirSync(root, { recursive: true });
   if (!existsSync(root)) throw new Error(`无法访问工作区：${root}`);
   return root;
 }
 
 async function eventFiles(root: string) {
-  const runRoot = path.join(root, ".afk", "runs");
+  const runRoot = path.join(workspaceDataDirectory(root), "runs");
   if (!existsSync(runRoot)) return [] as string[];
   const files: string[] = [];
   const walk = async (directory: string): Promise<void> => {

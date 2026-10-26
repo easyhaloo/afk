@@ -34,8 +34,10 @@ calls `@afk/runtime/execution`, the same execution implementation used by CLI.
 The packaged application includes the worker. Desktop never looks up or calls
 the AFK CLI, and execution has no command override or fallback. Stop, recovery
 and merge confirmation use `electron/services/backlog-control-service.ts` and
-shared Runtime. Launch receipts come from `.afk/work-item-runs.json` in the
-execution workspace located by canonical work-item identity.
+shared Runtime. Execution workspaces start under `~/.loop-workspace/` in both
+applications. Launch receipts come from
+`~/.afk/workspaces/<workspace-hash>/work-item-runs.json`; configuration and
+Electron user data live in `~/.afk/config.yml` and `~/.afk/desktop/`.
 
 The work-item inventory service has one required application dependency in
 `electron/adapters/work-item-application-adapter.ts`:
@@ -125,7 +127,7 @@ directory is specified. Keep generated evidence outside the source tree.
 
 | API | 主进程操作 | 输入约束 |
 | --- | --- | --- |
-| `snapshot(workspace)` | 读取 `.afk/runs/**/events.jsonl`，报告内置 Runtime，列出 Docker / Podman / tmux | 工作区必须是存在的目录。 |
+| `snapshot(workspace)` | 读取 `~/.afk/workspaces/<workspace-hash>/runs/**/events.jsonl`，报告内置 Runtime，列出 Docker / Podman / tmux | 工作区必须是存在的目录。 |
 | `chooseWorkspace()` | 使用 macOS 原生目录选择器 | 用户主动触发。 |
 | `tmuxPane(session)` | 捕获指定 tmux 窗格的最后 160 行 | 会话名必须符合受限字符集，且存在于当前 tmux 会话列表。 |
 | `tmuxSend(session, line)` | 对指定会话执行 `tmux send-keys` | 前端需勾选确认；会话名、空字节与 4,000 字符上限均在主进程验证。 |
@@ -137,7 +139,7 @@ directory is specified. Keep generated evidence outside the source tree.
 | `ssh.connect(hostId)` | 通过 PTY 启动 `/usr/bin/ssh` 并传入托管主机的真实地址参数 | 托管主机不依赖 OpenSSH `Host` alias；系统配置主机保留原有 alias 兼容路径；输入和输出不写入日志。 |
 | `ssh.generateKey()` / `ssh.deployKey(hostId)` | 通过 PTY 调用 `ssh-keygen` 或结构化 OpenSSH 部署命令 | 私钥口令和远程密码由终端直接处理，AFK 不持久化。 |
 
-运行诊断遵循 AFK 的实际状态目录：`<worktree>/.afk/runs/<run-id>/events.jsonl`。该路径、增量事件流与诊断属性在 AFK 源码的 `packages/runtime/src/application/sessions/run-state.ts` 中定义；桌面客户端不把这类诊断文件作为控制平面。
+运行诊断遵循 AFK 的实际状态目录：`~/.afk/workspaces/<workspace-hash>/runs/<run-id>/events.jsonl`。该路径、增量事件流与诊断属性在 AFK 源码的 `packages/runtime/src/application/sessions/run-state.ts` 中定义；桌面客户端不把这类诊断文件作为控制平面。
 
 本项目最初验证过 Tauri 的命令与 Shell 权限模型；根据用户要求已改为 Electron，Tauri 不再是运行时依赖。保留的官方参考链接：
 

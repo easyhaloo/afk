@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -15,13 +16,14 @@ describe("project run scope", () => {
       [matching, "easyhaloo/afk", "run-144"],
       [unrelated, "elsewhere/afk", "run-99"],
     ]) {
-      await mkdir(path.join(root, ".afk"), { recursive: true });
-      await writeFile(path.join(root, "workspace.json"), JSON.stringify({
+      await mkdir(root, { recursive: true });
+      await mkdir(workspaceDataDirectory(root), { recursive: true });
+      await writeFile(path.join(workspaceDataDirectory(root), "workspace.json"), JSON.stringify({
         taskId: `github:${projectKey}#${runId === "run-144" ? "144" : "99"}`,
         root,
         repositories: [{ project: { platform: "github", projectKey }, path: path.join(root, "repositories", "afk") }],
       }));
-      await writeFile(path.join(root, ".afk", "work-item-runs.json"), JSON.stringify([
+      await writeFile(path.join(workspaceDataDirectory(root), "work-item-runs.json"), JSON.stringify([
         { id: runId, status: "running", startedAt: "2026-09-24T09:23:23.815Z", workspacePath: root },
       ]));
     }
@@ -40,8 +42,10 @@ describe("project run scope", () => {
     const spoofed = path.join(baseDirectory, "github", "easyhaloo", "afk", "145");
     await mkdir(matching, { recursive: true });
     await mkdir(spoofed);
-    await writeFile(path.join(matching, "workspace.json"), JSON.stringify({ taskId: "github:easyhaloo/afk#144", root: matching, repositories: [] }));
-    await writeFile(path.join(spoofed, "workspace.json"), JSON.stringify({ taskId: "github:easyhaloo/afk#145", root: matching, repositories: [] }));
+    await mkdir(workspaceDataDirectory(matching), { recursive: true });
+    await mkdir(workspaceDataDirectory(spoofed), { recursive: true });
+    await writeFile(path.join(workspaceDataDirectory(matching), "workspace.json"), JSON.stringify({ taskId: "github:easyhaloo/afk#144", root: matching, repositories: [] }));
+    await writeFile(path.join(workspaceDataDirectory(spoofed), "workspace.json"), JSON.stringify({ taskId: "github:easyhaloo/afk#145", root: matching, repositories: [] }));
     const service = createProjectRunScopeService({ baseDirectory, remoteUrl: async () => "" });
 
     expect(await service.workspaces(matching)).toEqual([matching]);

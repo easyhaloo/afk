@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../workspace.js';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { z } from 'zod';
@@ -56,7 +57,7 @@ export const STATUS_FILENAME = 'claude-status.json';
  * Returns null if the file is missing or malformed.
  */
 export async function readClaudeStatus(worktreeDir: string): Promise<ClaudeStatus | null> {
-  const path = join(worktreeDir, '.afk', STATUS_FILENAME);
+  const path = join(workspaceDataDirectory(worktreeDir), STATUS_FILENAME);
   try {
     const content = await fs.readFile(path, 'utf-8');
     const parsed = JSON.parse(content);

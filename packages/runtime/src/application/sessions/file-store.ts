@@ -1,10 +1,11 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 /**
  * File-based session store — persists provider-native SessionSnapshots to
- * <worktree>/.afk/sessions/<run-id>.json with atomic write (temp + rename)
+ * ~/.afk/workspaces/<workspace-hash>/sessions/<run-id>.json with atomic write (temp + rename)
  * and sha256 checksum verification on load.
  *
  * Layout (one file per run):
- *   <worktree>/.afk/sessions/
+ *   ~/.afk/workspaces/<workspace-hash>/sessions/
  *     ├── <run-id>.json         <- snapshot + meta
  *     └── <run-id>.json.sha256  <- checksum sidecar
  *
@@ -32,7 +33,7 @@ import type {
 } from './types.js';
 import { SessionCorruptError, SessionNotFoundError } from './types.js';
 
-const SESSIONS_DIR = '.afk/sessions';
+const SESSIONS_DIR = 'sessions';
 
 /** On-disk envelope. Versioned so future migrations are explicit. */
 interface Envelope {
@@ -66,15 +67,15 @@ export class FileSessionStore implements SessionStore {
   }
 
   private filePath(runId: string): string {
-    return join(this.worktreePath, SESSIONS_DIR, `${runId}.json`);
+    return join(workspaceDataDirectory(this.worktreePath), SESSIONS_DIR, `${runId}.json`);
   }
 
   private checksumPath(runId: string): string {
-    return join(this.worktreePath, SESSIONS_DIR, `${runId}.json.sha256`);
+    return join(workspaceDataDirectory(this.worktreePath), SESSIONS_DIR, `${runId}.json.sha256`);
   }
 
   async save(options: SessionSaveOptions): Promise<SessionSaveResult> {
-    const dir = join(this.worktreePath, SESSIONS_DIR);
+    const dir = join(workspaceDataDirectory(this.worktreePath), SESSIONS_DIR);
     await fs.mkdir(dir, { recursive: true });
 
     const checksum = FileSessionStore.checksumOf(options.snapshot);
@@ -161,7 +162,7 @@ export class FileSessionStore implements SessionStore {
   }
 
   async list(options: SessionListOptions = {}): Promise<SessionStoreEntry[]> {
-    const dir = join(this.worktreePath, SESSIONS_DIR);
+    const dir = join(workspaceDataDirectory(this.worktreePath), SESSIONS_DIR);
     let entries: string[];
     try {
       entries = await fs.readdir(dir);

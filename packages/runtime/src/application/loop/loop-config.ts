@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { homedir } from 'node:os';
 import { logger } from '../../infrastructure/io/index.js';
 
 export interface LoopConfig {
@@ -9,7 +10,7 @@ export interface LoopConfig {
 const DEFAULT_LOOP_CONFIG: LoopConfig = { moduleTriggers: {} };
 
 /** Load provider-neutral loop module triggers from .afk/config.yml. */
-export function loadLoopConfig(cwd: string = process.cwd()): LoopConfig {
+export function loadLoopConfig(cwd: string = homedir()): LoopConfig {
   const configPath = path.join(cwd, '.afk', 'config.yml');
   const result: LoopConfig = {
     moduleTriggers: {},

@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -54,7 +55,7 @@ describe('FileSessionStore', () => {
     await store.save({ runId: 'issue-42-gen-1', provider: 'claude-code', snapshot: makeSnapshot() });
 
     // Tamper with the JSON file content but leave the sidecar alone.
-    const filePath = path.join(wtPath, '.afk', 'sessions', 'issue-42-gen-1.json');
+    const filePath = path.join(workspaceDataDirectory(wtPath), 'sessions', 'issue-42-gen-1.json');
     const raw = fs.readFileSync(filePath, 'utf-8');
     const tampered = raw.replace('agent finished AC 1-3', 'TAMPERED');
     fs.writeFileSync(filePath, tampered, 'utf-8');
@@ -66,7 +67,7 @@ describe('FileSessionStore', () => {
     const store = new FileSessionStore(wtPath);
     await store.save({ runId: 'issue-42-gen-1', provider: 'claude-code', snapshot: makeSnapshot() });
 
-    const filePath = path.join(wtPath, '.afk', 'sessions', 'issue-42-gen-1.json');
+    const filePath = path.join(workspaceDataDirectory(wtPath), 'sessions', 'issue-42-gen-1.json');
     fs.writeFileSync(filePath, '{not json', 'utf-8');
 
     await expect(store.load({ runId: 'issue-42-gen-1' })).rejects.toBeInstanceOf(SessionCorruptError);
@@ -96,7 +97,7 @@ describe('HandoffSessionStore', () => {
   let wtPath: string;
   beforeEach(() => {
     wtPath = fs.mkdtempSync(path.join(os.tmpdir(), 'afk-handoff-store-'));
-    fs.mkdirSync(path.join(wtPath, '.afk', 'handoff'), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDataDirectory(wtPath), 'handoff'), { recursive: true });
   });
   afterEach(() => {
     fs.rmSync(wtPath, { recursive: true, force: true });
@@ -104,7 +105,7 @@ describe('HandoffSessionStore', () => {
 
   it('load() reads existing handoff-{iid}-{gen}.md as SessionSnapshot', async () => {
     fs.writeFileSync(
-      path.join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'),
+      path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-1.md'),
       '# Handoff 42 round 1\n\nsummary text',
       'utf-8',
     );
@@ -117,7 +118,7 @@ describe('HandoffSessionStore', () => {
 
   it('load() terminal runId maps to handoff-{iid}-terminal.md', async () => {
     fs.writeFileSync(
-      path.join(wtPath, '.afk', 'handoff', 'handoff-42-terminal.md'),
+      path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-terminal.md'),
       'terminal doc',
       'utf-8',
     );
@@ -142,9 +143,9 @@ describe('HandoffSessionStore', () => {
   });
 
   it('list() enumerates handoff docs', async () => {
-    fs.writeFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), '#', 'utf-8');
-    fs.writeFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-2.md'), '#', 'utf-8');
-    fs.writeFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-terminal.md'), '#', 'utf-8');
+    fs.writeFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-1.md'), '#', 'utf-8');
+    fs.writeFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-2.md'), '#', 'utf-8');
+    fs.writeFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-terminal.md'), '#', 'utf-8');
     const store = new HandoffSessionStore(wtPath);
     const entries = await store.list();
     expect(entries.map(e => e.runId)).toContain('issue-42-gen-1');
@@ -163,8 +164,8 @@ describe('SessionStoreChain', () => {
   });
 
   it('loadFirst returns first store with a hit', async () => {
-    fs.mkdirSync(path.join(wtPath, '.afk', 'handoff'), { recursive: true });
-    fs.writeFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), 'fallback doc', 'utf-8');
+    fs.mkdirSync(path.join(workspaceDataDirectory(wtPath), 'handoff'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-1.md'), 'fallback doc', 'utf-8');
 
     const chain = new SessionStoreChain([
       new FileSessionStore(wtPath),
@@ -186,16 +187,16 @@ describe('SessionStoreChain', () => {
   });
 
   it('loadFirst skips corrupt file store and falls back to handoff', async () => {
-    fs.mkdirSync(path.join(wtPath, '.afk', 'sessions'), { recursive: true });
+    fs.mkdirSync(path.join(workspaceDataDirectory(wtPath), 'sessions'), { recursive: true });
     // Write a file that LOOKS like a session JSON so FileSessionStore tries it
     // and discovers corruption on load.
     fs.writeFileSync(
-      path.join(wtPath, '.afk', 'sessions', 'issue-42-gen-1.json'),
+      path.join(workspaceDataDirectory(wtPath), 'sessions', 'issue-42-gen-1.json'),
       '{not json',
       'utf-8',
     );
-    fs.mkdirSync(path.join(wtPath, '.afk', 'handoff'), { recursive: true });
-    fs.writeFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), 'safe fallback', 'utf-8');
+    fs.mkdirSync(path.join(workspaceDataDirectory(wtPath), 'handoff'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-1.md'), 'safe fallback', 'utf-8');
 
     const chain = new SessionStoreChain([
       new FileSessionStore(wtPath),
@@ -232,7 +233,7 @@ describe('RunStateWriter', () => {
   it('init creates the run directory', async () => {
     const w = new RunStateWriter(wtPath, 'issue-42-gen-1');
     await w.init();
-    expect(fs.existsSync(path.join(wtPath, '.afk', 'runs', 'issue-42-gen-1'))).toBe(true);
+    expect(fs.existsSync(path.join(workspaceDataDirectory(wtPath), 'runs', 'issue-42-gen-1'))).toBe(true);
   });
 
   it('writeRequest + writeResult + writeOutput persist files', async () => {
@@ -261,7 +262,7 @@ describe('RunStateWriter', () => {
     });
     await w.writeOutput('last line of pane capture');
 
-    const dir = path.join(wtPath, '.afk', 'runs', 'issue-42-gen-1');
+    const dir = path.join(workspaceDataDirectory(wtPath), 'runs', 'issue-42-gen-1');
     expect(fs.existsSync(path.join(dir, 'request.json'))).toBe(true);
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'request.json'), 'utf8'))).toMatchObject({
       agentTransport: 'app-server', agentAuth: 'chatgpt', agentModelProvider: 'openai', agentThreadId: 'thread-42',
@@ -277,7 +278,7 @@ describe('RunStateWriter', () => {
     await w.appendEvent({ type: 'text', text: 'first' });
     await w.appendEvent({ type: 'text', text: 'second' });
     const content = fs.readFileSync(
-      path.join(wtPath, '.afk', 'runs', 'issue-42-gen-1', 'events.jsonl'),
+      path.join(workspaceDataDirectory(wtPath), 'runs', 'issue-42-gen-1', 'events.jsonl'),
       'utf-8',
     );
     const lines = content.split('\n').filter(Boolean);

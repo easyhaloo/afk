@@ -15,6 +15,9 @@ import {
 } from './execution-manifest.js';
 import { resolveGitLabProjectKey } from '../../shared/gitlab-project.js';
 import { parseWorkItemId } from '../../domain/work-item/identity.js';
+import { executionWorkspacePath } from '../../infrastructure/workspace.js';
+import { resolveTrackerTarget } from '../../infrastructure/tracker/target.js';
+import { join } from 'node:path';
 
 export type WorkflowRunRepository = ResolvedExecutionManifestRepository;
 
@@ -192,9 +195,34 @@ export async function resolveWorkflowRunRequest(
   config?: Partial<WorkflowConfig>,
   dependencies: ReadExecutionManifestDependencies = {},
 ): Promise<WorkflowRunRequest> {
-  const normalizedInput = input.executionManifestPath
-    ? applyExecutionManifest(input, await readExecutionManifest(input.executionManifestPath, input.backlogId, dependencies))
-    : input;
+  if (!input.executionManifestPath) {
+    const canonical = input.workItemId ?? (input.backlogId.includes(':') ? input.backlogId : undefined);
+    const target = canonical ? parseWorkItemId(canonical) : undefined;
+    const resolved = target ? undefined : await resolveTrackerTarget({
+      project: input.projectName, platform: input.trackerPlatform,
+      cwd: input.repoRoot ?? dependencies.cwd, issueId: input.backlogId,
+    });
+    const platform = target?.platform ?? resolved!.platform;
+    const projectKey = target?.projectKey ?? (platform === 'gitlab' && resolved?.host && resolved.host !== 'gitlab.com'
+      ? `${resolved.host}/${resolved.projectId}` : resolved!.projectId);
+    const identity = target ?? parseWorkItemId(`${platform}:${projectKey}#${input.backlogId}`);
+    const workspaceRoot = executionWorkspacePath(identity.id);
+    const name = projectKey.split('/').at(-1)!;
+    const checkoutPath = `repositories/${name}`;
+    const repoRoot = join(workspaceRoot, checkoutPath);
+    const request = resolveWorkflowRequest({ ...input, backlogId: String(identity.issueNumber), workItemId: identity.id, workspaceRoot }, config, {
+      repoRoot, projectName: projectKey, originalCwd: dependencies.cwd ?? process.cwd(),
+    });
+    const workingBranch = request.branchStrategy.type === 'named' || request.branchStrategy.type === 'existing'
+      ? request.branchStrategy.branch : deriveBacklogBranchName(String(identity.issueNumber));
+    const tracker = trackerContext({ platform, projectKey, providerHost: resolved?.host ?? input.trackerHost });
+    return {
+      ...request, trackerPlatform: platform, trackerProjectId: tracker.projectId, trackerHost: tracker.host,
+      repositories: [{ platform, projectKey, name, checkoutPath, repoRoot, baseBranch: request.baseBranch, workingBranch, primary: true,
+        ...(tracker.host ? { providerHost: tracker.host } : {}) }],
+    };
+  }
+  const normalizedInput = applyExecutionManifest(input, await readExecutionManifest(input.executionManifestPath, input.backlogId, dependencies));
   const project = await resolveProjectContext({
     repoRoot: normalizedInput.repoRoot,
     projectName: normalizedInput.projectName,

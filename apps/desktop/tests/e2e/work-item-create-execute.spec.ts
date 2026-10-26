@@ -1,4 +1,7 @@
-import { test, expect } from "./_helpers/launch.js";
+import { test, expect, E2E_HOME_PATH } from "./_helpers/launch.js";
+import { createHash } from "node:crypto";
+import { readFile, readdir } from "node:fs/promises";
+import path from "node:path";
 
 test("creates a PRD-backed work item and executes it through Desktop", async ({ page }) => {
   const title = "建立基于 Transcript 唯一事实源的 AFK Retro 反馈闭环";
@@ -28,6 +31,19 @@ test("creates a PRD-backed work item and executes it through Desktop", async ({ 
 
   await expect(detail).toContainText("运行已创建", { timeout: 10_000 });
   await expect(detail).toContainText(/已完成|QA 待确认/, { timeout: 10_000 });
+  const projectDirectory = path.join(E2E_HOME_PATH, ".loop-workspace/github/acme/api");
+  const [issueNumber] = await readdir(projectDirectory);
+  const workspaceRoot = path.join(projectDirectory, issueNumber);
+  const workspaceHash = createHash("sha256").update(workspaceRoot).digest("hex");
+  const systemDirectory = path.join(E2E_HOME_PATH, ".afk/workspaces", workspaceHash);
+  expect(JSON.parse(await readFile(path.join(systemDirectory, "execution-manifest.json"), "utf8"))).toMatchObject({
+    workItemId: `github:acme/api#${issueNumber}`,
+    repositories: [expect.objectContaining({ checkoutPath: "repositories/api" })],
+  });
+  expect(JSON.parse(await readFile(path.join(systemDirectory, "work-item-runs.json"), "utf8"))).toEqual([
+    expect.objectContaining({ workspacePath: workspaceRoot, status: "completed" }),
+  ]);
+  expect(await readdir(workspaceRoot)).not.toContain(".afk");
   await detail.getByRole("button", { name: "关闭工作项详情" }).click();
   await page.getByRole("button", { name: "刷新工作项" }).click();
   await page.getByRole("radiogroup", { name: "工作项快捷状态" }).getByRole("radio", { name: /^全部/ }).click();

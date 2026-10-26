@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../workspace.js';
 import { mkdtemp, mkdir, readFile, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -19,7 +20,7 @@ describe('configureStatusline', () => {
 
     expect(await readFile(trackedSettings, 'utf8')).toBe(original);
     const local = await readFile(localSettings, 'utf8');
-    expect(local).toContain(join(worktree, '.afk', 'claude-status.json'));
+    expect(local).toContain(join(workspaceDataDirectory(worktree), 'claude-status.json'));
     expect(local.match(/claude-status\.json/g)).toHaveLength(1);
   });
 });

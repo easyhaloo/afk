@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import { createExecutionWorker } from "../../electron/adapters/execution-worker-adapter.js";
 import os from "node:os";
 import path from "node:path";
@@ -37,7 +38,7 @@ describe("work item execution service process integration", () => {
       await writeFile(shim, `#!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
-fs.writeFileSync(path.join(process.cwd(), ".afk", "shim-invocation.json"), JSON.stringify({ pid: process.pid, args: process.argv.slice(2) }));
+fs.writeFileSync(path.join(path.dirname(JSON.parse(process.argv[2]).manifestPath), "shim-invocation.json"), JSON.stringify({ pid: process.pid, args: process.argv.slice(2) }));
 setTimeout(() => process.exit(0), 400);
 `, "utf8");
 
@@ -98,14 +99,14 @@ setTimeout(() => process.exit(0), 400);
 
       const invocation = await waitFor(async () => {
         try {
-          return JSON.parse(await readFile(path.join(result.workspace.root, ".afk", "shim-invocation.json"), "utf8")) as { pid: number; args: string[] };
+          return JSON.parse(await readFile(path.join(workspaceDataDirectory(result.workspace.root), "shim-invocation.json"), "utf8")) as { pid: number; args: string[] };
         } catch {
           return undefined;
         }
       });
       expect(invocation.pid).toBe(childPid);
       expect(JSON.parse(invocation.args[0])).toEqual({
-        workItemId: item.id, manifestPath: path.join(result.workspace.root, ".afk", "execution-manifest.json"),
+        workItemId: item.id, manifestPath: path.join(workspaceDataDirectory(result.workspace.root), "execution-manifest.json"),
         executionId: result.runId,
       });
 

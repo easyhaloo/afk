@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -27,7 +28,7 @@ describe('BudgetStore', () => {
       expect(nextRun.recordSession('session-1', 150)).toBe(true);
       expect(nextRun.tokens).toBe(150);
       expect(await new BudgetStore(root, 'gitlab:other/repo#42').load()).toBeUndefined();
-      expect(await readFile(join(root, '.afk', 'budgets', `${encodeURIComponent('gitlab:org/repo#42')}.json`), 'utf8')).toContain('session-1');
+      expect(await readFile(join(workspaceDataDirectory(root), 'budgets', `${encodeURIComponent('gitlab:org/repo#42')}.json`), 'utf8')).toContain('session-1');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -37,7 +38,7 @@ describe('BudgetStore', () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-budget-corrupt-'));
     try {
       const store = new BudgetStore(root, 'work-item-42');
-      const path = join(root, '.afk', 'budgets', `${encodeURIComponent('work-item-42')}.json`);
+      const path = join(workspaceDataDirectory(root), 'budgets', `${encodeURIComponent('work-item-42')}.json`);
       await store.save({ used: 0, tokens: 0, sessions: {} });
       await writeFile(path, '{broken', 'utf8');
       await expect(store.load()).rejects.toBeInstanceOf(BudgetStoreCorruptionError);
@@ -88,7 +89,7 @@ describe('WorkflowRunner budget guard', () => {
     try {
       const store = new BudgetStore(root, 'github:org/repo#42');
       await store.save({ used: 1, tokens: 100, sessions: { 'session-1': 100 } });
-      if (condition === 'corrupt') await writeFile(join(root, '.afk', 'budgets', `${encodeURIComponent('github:org/repo#42')}.json`), '{}');
+      if (condition === 'corrupt') await writeFile(join(workspaceDataDirectory(root), 'budgets', `${encodeURIComponent('github:org/repo#42')}.json`), '{}');
       const createBranch = vi.fn();
       const createExecution = vi.fn();
       const transition = vi.fn(async () => {});

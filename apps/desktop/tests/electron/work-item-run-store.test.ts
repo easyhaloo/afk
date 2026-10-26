@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -28,7 +29,7 @@ describe("work item run store", () => {
     await store.save(root, [run]);
 
     expect(await store.load(root)).toEqual([run]);
-    expect(await readFile(path.join(root, ".afk", "work-item-runs.json"), "utf8")).toContain("desktop-run-1");
+    expect(await readFile(path.join(workspaceDataDirectory(root), "work-item-runs.json"), "utf8")).toContain("desktop-run-1");
   });
 
   it("ignores malformed stored data", async () => {
@@ -36,7 +37,7 @@ describe("work item run store", () => {
     const store = createWorkItemRunStore({ resolveWorkspace: value => value });
     await store.save(root, [{ id: "desktop-run-1", status: "running", startedAt: "now" }]);
 
-    const file = path.join(root, ".afk", "work-item-runs.json");
+    const file = path.join(workspaceDataDirectory(root), "work-item-runs.json");
     const { writeFile } = await import("node:fs/promises");
     await writeFile(file, JSON.stringify([
       { id: "invalid" },

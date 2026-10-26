@@ -1,3 +1,4 @@
+import { workspaceStateDirectory } from './infrastructure/workspace.js';
 import { describe, expect, it, vi } from 'vitest';
 import { createBacklogRuntime } from './backlog.js';
 import type { QABacklogProvider } from './domain/backlog/index.js';
@@ -43,8 +44,8 @@ describe('backlog runtime', () => {
   it('checks the selected workspace target branch before confirming a merge', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'afk-backlog-merge-'));
     try {
-      await mkdir(join(workspace, '.afk'));
-      await writeFile(join(workspace, '.afk/config.yml'), 'targetBranch: release\n');
+      await mkdir(workspaceStateDirectory(), { recursive: true });
+      await writeFile(join(workspaceStateDirectory(), 'config.yml'), 'targetBranch: release\n');
       const item = { id: '42', state: 'merge_ready', executionMode: 'hitl', branchName: 'afk/42' };
       const change = { id: 'pr-42', state: 'open', sourceBranch: 'afk/42-qa', targetBranch: 'release' };
       const merge = vi.fn(async () => { change.state = 'merged'; });

@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
@@ -95,7 +96,7 @@ describe('HandoffCoordinator', () => {
     expect(tmux.killSession).toHaveBeenCalledWith('afk-backlog-42');
     expect(tmux.createSession).toHaveBeenCalledWith('afk-backlog-42', wtPath);
     // Recovery doc on disk, travels with the worktree.
-    const doc = fs.readFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), 'utf-8');
+    const doc = fs.readFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-1.md'), 'utf-8');
     expect(doc).toContain('implemented AC 1-3');
     expect(doc).toContain('line1');
   });
@@ -131,7 +132,7 @@ describe('HandoffCoordinator', () => {
 
     await coord.handoff(ctx(), 'auto');
 
-    const doc = fs.readFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-1.md'), 'utf-8');
+    const doc = fs.readFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-1.md'), 'utf-8');
     expect(doc).toContain('(agent did not provide a summary)');
     expect(doc).toContain('snapshot-line');
   });
@@ -155,7 +156,7 @@ describe('HandoffCoordinator', () => {
     expect(backlog.transition).toHaveBeenCalledWith('42', 'blocked', { reason: 'budget' });
     expect(backlog.setExecutionMode).toHaveBeenCalledWith('42', 'hitl');
     // Terminal doc on disk with the 'terminal' generation marker.
-    const doc = fs.readFileSync(path.join(wtPath, '.afk', 'handoff', 'handoff-42-terminal.md'), 'utf-8');
+    const doc = fs.readFileSync(path.join(workspaceDataDirectory(wtPath), 'handoff', 'handoff-42-terminal.md'), 'utf-8');
     expect(doc).toContain('round terminal');
     // Session killed, not restarted.
     expect(tmux.killSession).toHaveBeenCalledWith('afk-backlog-42');

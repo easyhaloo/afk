@@ -372,7 +372,7 @@ Flow:
 Run state directory:
 
 ```text
-<worktree>/.afk/runs/<run-id>/
+~/.afk/workspaces/<workspace-hash>/runs/<run-id>/
 ├── request.json
 ├── events.jsonl
 ├── result.json
@@ -483,7 +483,7 @@ implement → verify-ac → publish-change → queue-qa
 Template load priority:
 
 ```text
-CLI specified path → project-level .afk/workflows → user-level ~/.afk/workflows → built-in templates
+CLI specified path → ~/.afk/workflows → built-in templates
 ```
 
 ## 11. Configuration and CLI
@@ -518,7 +518,7 @@ workflow:
   maxTotalTokens: 500000
 ```
 
-Configuration priority: CLI → `.afk/config.yml` → environment variables → defaults.
+Configuration priority: CLI → `~/.afk/config.yml` → environment variables → defaults.
 
 ## 12. Phased Development Plan
 

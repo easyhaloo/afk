@@ -1,9 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { generateWorkflowGraph } from '@afk/runtime/application/visualizations/workflow-graph';
 import { writeGraphCache } from '@afk/runtime/application/visualizations/graph-cache';
+import { workspaceStateDirectory, workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
 
 const projects: string[] = [];
 afterEach(async () => { await Promise.all(projects.splice(0).map((project) => rm(project, { recursive: true, force: true }))); });
@@ -11,7 +12,9 @@ afterEach(async () => { await Promise.all(projects.splice(0).map((project) => rm
 async function projectWithTemplate(content: string): Promise<string> {
   const project = await mkdtemp(join(tmpdir(), 'afk-graph-'));
   projects.push(project);
-  await writeFile(join(await (async () => { const { mkdir } = await import('node:fs/promises'); const path = join(project, '.afk', 'workflows'); await mkdir(path, { recursive: true }); return path; })(), 'review.yml'), content);
+  const directory = join(workspaceStateDirectory(), 'workflows');
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'review.yml'), content);
   return project;
 }
 
@@ -21,8 +24,12 @@ describe('workflow graph application', () => {
     const result = await generateWorkflowGraph({ projectRoot: project, template: 'review', generatedAt: '2026-01-01T00:00:00.000Z' });
     expect(result.snapshot.nodes).toHaveLength(2);
     const cache = await writeGraphCache(project, result, 'json');
-    expect(cache.directory).toContain(join('.afk', 'cache', 'archify', 'workflow', 'review'));
+    expect(cache.directory).toContain(join(workspaceDataDirectory(project), 'cache', 'archify', 'workflow', 'review'));
     expect(JSON.parse(await readFile(cache.graphPath, 'utf8')).nodes).toHaveLength(2);
     expect(JSON.parse(await readFile(cache.receiptPath, 'utf8')).inputHash).toBe(result.receipt.inputHash);
+    const output = join(workspaceDataDirectory(project), 'cache', 'archify', 'custom');
+    expect((await writeGraphCache(project, result, 'json', output)).directory).toBe(output);
+    await expect(writeGraphCache(project, result, 'json', `${output}/../../../../outside`)).rejects.toThrow('--output');
+    await expect(writeGraphCache(project, result, 'json', '../outside')).rejects.toThrow('--output');
   });
 });

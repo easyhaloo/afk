@@ -22,6 +22,7 @@
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { isAbsolute, join, relative } from 'path';
+import { workspaceDataDirectory } from '../../workspace.js';
 import { clearSignal, readSignal } from '../../io/index.js';
 import type { Sandbox, SandboxOptions } from '../types.js';
 import type {
@@ -115,10 +116,11 @@ export class ContainerSandbox implements Sandbox {
     const filtered = allow.filter({ ...this._extraEnv, ...options.command.env });
 
     const executionId = randomUUID();
-    const promptPath = join(this.worktreePath, '.afk', 'session', `${executionId}.prompt`);
-    const outputPath = join(this.worktreePath, '.afk', 'result', `${executionId}.stdout`);
-    const errorPath = join(this.worktreePath, '.afk', 'result', `${executionId}.stderr`);
-    const exitPath = join(this.worktreePath, '.afk', 'result', `${executionId}.exit`);
+    const dataDirectory = workspaceDataDirectory(this.worktreePath);
+    const promptPath = join(dataDirectory, 'session', `${executionId}.prompt`);
+    const outputPath = join(dataDirectory, 'result', `${executionId}.stdout`);
+    const errorPath = join(dataDirectory, 'result', `${executionId}.stderr`);
+    const exitPath = join(dataDirectory, 'result', `${executionId}.exit`);
     await Promise.all([
       clearSignal(this.worktreePath),
       fs.writeFile(promptPath, `${options.prompt}\n`, 'utf-8'),
@@ -193,8 +195,9 @@ export class ContainerSandbox implements Sandbox {
    * Called by ContainerSandboxProvider.create(); not part of the Sandbox interface.
    */
   async createContainer(): Promise<void> {
-    const afkSessionDir = join(this.worktreePath, '.afk', 'session');
-    const afkResultDir = join(this.worktreePath, '.afk', 'result');
+    const dataDirectory = workspaceDataDirectory(this.worktreePath);
+    const afkSessionDir = join(dataDirectory, 'session');
+    const afkResultDir = join(dataDirectory, 'result');
     await fs.mkdir(afkSessionDir, { recursive: true });
     await fs.mkdir(afkResultDir, { recursive: true });
 
@@ -206,6 +209,7 @@ export class ContainerSandbox implements Sandbox {
         { hostPath: this.workspaceRoot, containerPath: '/workspace' },
         { hostPath: afkSessionDir, containerPath: '/afk/session' },
         { hostPath: afkResultDir, containerPath: '/afk/result' },
+        { hostPath: dataDirectory, containerPath: dataDirectory },
         ...(this._hostClaudeConfigDir
           ? [{ hostPath: this._hostClaudeConfigDir, containerPath: '/home/node/.claude', readOnly: true }]
           : []),

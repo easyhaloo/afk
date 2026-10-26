@@ -162,6 +162,22 @@ describe('architecture guard migration baseline', () => {
     expect(addedPattern.run()).toContain('unapproved legacy pattern');
   });
 
+  it('rejects the same multi-word module name in two directories of one package', () => {
+    const duplicated = fixture("import { legacy } from '../lib/legacy';\nconsole.log(legacy);\n", {
+      'cli/work-item-registry.ts': 'export const registry = true;\n',
+      'cli/nested/work-item-registry.ts': 'export const registry = true;\n',
+    });
+    expect(duplicated.run()).toContain('duplicate module name "work-item-registry"');
+  });
+
+  it('allows one generic module name in several directories of a package', () => {
+    const generic = fixture("import { legacy } from '../lib/legacy';\nconsole.log(legacy);\n", {
+      'cli/registry.ts': 'export const registry = true;\n',
+      'cli/nested/registry.ts': 'export const registry = true;\n',
+    });
+    expect(generic.run()).toContain('Architecture guard passed');
+  });
+
   it('requires the baseline to shrink when approved debt is removed', () => {
     const removedImport = fixture('export const current = true;\n');
     expect(removedImport.run()).toContain('stale legacy import baseline');

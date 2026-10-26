@@ -1,6 +1,6 @@
 import { executionManifestPath, executionWorkspacePath, workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import { readExecutionManifest } from "@afk/runtime/execution";
-import { createWorkItemExecutionManifestStore } from "../electron/services/work-item-execution-manifest-store.js";
+import { createWorkItemExecutionManifestStore } from "../electron/work-items/execution-manifest-store.js";
 import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";

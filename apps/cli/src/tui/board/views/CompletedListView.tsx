@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { getTaskBacklogId, Task } from '../../board-types.js';
+import { getTaskBacklogId, Task } from '../task-types.js';
 import { ListView } from './ListView.js';
 import { formatRelativeTime } from '../utils.js';
 

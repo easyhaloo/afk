@@ -1,4 +1,4 @@
-import type { ProjectContext } from '../project-context.js';
+import type { ProjectContext } from '../project/context.js';
 import type { PreparedRepository } from './multi-repository-preparer.js';
 
 export type LifecyclePhase = 'init' | 'before-agent' | 'after-agent' | 'cleanup';

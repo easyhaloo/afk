@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Box } from 'ink';
 import { AppContent } from './AppContent.js';
 import { initRegistry } from '../board/registry/init.js';
-import type { Task } from '../board-types.js';
+import type { Task } from '../board/task-types.js';
 import type { TuiManagementProviderBundle } from '../board/data/backlog-adapter.js';
 import type { View } from '../board/types.js';
 import { StateProvider } from './state/StateContext.js';

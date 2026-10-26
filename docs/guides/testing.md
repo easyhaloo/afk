@@ -23,8 +23,8 @@ AFK TUI is built with React + Ink and uses a layered testing strategy.
 **Pattern**: Instantiate classes directly, call methods, assert results
 
 ```typescript
-// apps/cli/src/tui/shared/Keyboard.test.ts
-import { KeyboardDispatcher } from './Keyboard';
+// apps/cli/src/tui/shared/keyboard.test.ts
+import { KeyboardDispatcher } from './index';
 
 it('dispatches escape to global handler', () => {
   const dispatcher = new KeyboardDispatcher();
@@ -271,7 +271,7 @@ adoption, tags, interruption, retry, merge confirmation, inventory, graph output
 audit replay and corruption, plus execution-manifest errors. Provider responses
 are simulated; command parsing, SDK calls and domain transitions remain real.
 Electron uses the typed Runtime fixtures described in
-[Desktop architecture](../../apps/desktop/ARCHITECTURE.md#end-to-end-testing).
+[Desktop architecture](apps/desktop/architecture.md#end-to-end-testing).
 These suites do not run a live coding agent or mutate a remote repository.
 
 ## Live Agent Tests

@@ -7,7 +7,7 @@ import type { AtomicClaim, ClaimLock, ClaimLockFactory } from '../../domain/back
 import type { BranchProvider } from '../git/branches/provider.js';
 import { GitBranchProvider } from '../git/branches/git-provider.js';
 import type { ChangeProvider } from '../tracker/changes/provider.js';
-import { TrackerChangeProvider } from '../tracker/changes/tracker-adapter.js';
+import { TrackerChangeProvider } from '../tracker/changes/tracker-change-provider.js';
 import { RecordingBacklogProvider } from '../tracker/recording-provider.js';
 
 export interface ProviderBundle {

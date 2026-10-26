@@ -16,7 +16,7 @@ import {
   createWorkItemExecutionManifestStore,
   type WorkItemExecutionManifest,
   type WorkItemExecutionManifestStoreFs,
-} from "../../electron/services/work-item-execution-manifest-store.js";
+} from "../../electron/work-items/execution-manifest-store.js";
 
 const directories: string[] = [];
 

@@ -14,7 +14,7 @@ React + `ink`; validation with `zod`; Git via `simple-git` and `node-tmux`;
 GitLab via `@gitbeaker/node`, GitHub via `@octokit/rest`; structured logging
 with `pino`. Tests run under `vitest`. The Electron desktop client is a
 separate package with its own toolchain — see
-[`apps/desktop/ARCHITECTURE.md`](apps/desktop/ARCHITECTURE.md).
+[`apps/desktop/architecture.md`](apps/desktop/architecture.md).
 
 ## Repository layout
 

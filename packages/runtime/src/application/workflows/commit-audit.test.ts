@@ -15,7 +15,7 @@ import { RunObserver } from '../../observability/run-observer.js';
 import { WorkflowRunner } from '../workflow-engine.js';
 import { BudgetStore } from './budget-store.js';
 
-vi.mock('../modules/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
+vi.mock('../runners/project-resolver.js', () => ({ default: () => ({ name: 'project-resolver' }) }));
 
 let directory: string;
 beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'afk-commit-audit-')); });

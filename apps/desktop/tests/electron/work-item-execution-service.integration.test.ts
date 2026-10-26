@@ -5,9 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createExecutionWorkspaceService } from "../../electron/services/execution-workspace-service.js";
-import { createWorkItemExecutionManifestStore } from "../../electron/services/work-item-execution-manifest-store.js";
-import { createWorkItemExecutionService } from "../../electron/services/work-item-execution-service.js";
-import { createWorkItemRunStore } from "../../electron/services/work-item-run-store.js";
+import { createWorkItemExecutionManifestStore } from "../../electron/work-items/execution-manifest-store.js";
+import { createWorkItemExecutionService } from "../../electron/work-items/execution-service.js";
+import { createWorkItemRunStore } from "../../electron/work-items/run-store.js";
 import type { GlobalWorkItem, WorkItemRunRecord } from "../../shared/backlog-contract.js";
 
 async function waitFor<T>(read: () => Promise<T | undefined>, timeoutMs = 5_000): Promise<T> {

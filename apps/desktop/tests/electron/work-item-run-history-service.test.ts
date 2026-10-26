@@ -2,8 +2,8 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWorkItemRunHistoryService } from "../../electron/services/work-item-run-history-service.js";
-import { createWorkItemRunStore } from "../../electron/services/work-item-run-store.js";
+import { createWorkItemRunHistoryService } from "../../electron/work-items/run-history-service.js";
+import { createWorkItemRunStore } from "../../electron/work-items/run-store.js";
 import type { WorkItemInventoryResult, WorkItemRunRecord } from "../../shared/backlog-contract.js";
 
 const root = "/tmp/work-item-run-history-test";

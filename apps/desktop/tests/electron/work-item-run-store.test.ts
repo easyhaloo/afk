@@ -3,7 +3,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createWorkItemRunStore } from "../../electron/services/work-item-run-store.js";
+import { createWorkItemRunStore } from "../../electron/work-items/run-store.js";
 import { parseWorkItemRunRecord } from "../../shared/backlog-contract.js";
 
 describe("work item run store", () => {

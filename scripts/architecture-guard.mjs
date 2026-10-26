@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 function option(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -50,6 +50,7 @@ const nodeBuiltins = new Set([
 ]);
 const domGlobals = ['document', 'window', 'navigator', 'localStorage', 'sessionStorage', 'HTMLElement', 'Element'];
 const desktopRoot = option('--desktop-root', resolve(new URL('../apps/desktop/', import.meta.url).pathname));
+const cliRoot = option('--cli-root', resolve(new URL('../apps/cli/src/', import.meta.url).pathname));
 const buildOutputDirectories = new Set(['.dev', 'dist', 'dist-electron', 'node_modules', 'coverage', 'release', 'test-results', 'screenshots']);
 const backlogStateKeys = new Set(['ready', 'rework', 'in_progress', 'verification', 'merge_ready', 'done', 'blocked']);
 const requiredStateMappingKeys = ['in_progress', 'verification', 'merge_ready'];
@@ -100,6 +101,31 @@ function collectSourceFiles(directory) {
   };
   visit(directory);
   return files;
+}
+
+/**
+ * A multi-word module name identifies one concept, so it must not appear in
+ * two directories of the same package: `resource-registry` in the application
+ * layer and again in the infrastructure layer reads as one thing that exists
+ * twice, and grep cannot tell the two apart.
+ *
+ * A single generic word is a per-directory convention (`index`, `types`,
+ * `registry`, `provider`, ...) and is allowed to repeat.
+ */
+function checkDuplicateModuleNames(scope, files) {
+  const directoriesByName = new Map();
+  for (const file of files) {
+    const name = basename(file).replace(/\.tsx?$/, '');
+    if (name.endsWith('.test')) continue;
+    if (!name.includes('-')) continue;
+    if (!directoriesByName.has(name)) directoriesByName.set(name, new Set());
+    directoriesByName.get(name).add(dirname(file));
+  }
+  for (const [name, directories] of directoriesByName) {
+    if (directories.size < 2) continue;
+    const locations = [...directories].sort().join(', ');
+    addViolation(`duplicate module name "${name}" in ${scope}: ${locations}`);
+  }
 }
 
 function resolveImport(fromFile, specifier) {
@@ -299,6 +325,7 @@ function checkPackage(packageName, packageRoot) {
   checkPackageManifest(packageName, packageRoot);
   const allowedExternalDependencies = packageName === 'application' ? new Set(['@afk/core']) : new Set();
   const packageFiles = collectSourceFiles(sourceRoot).filter(file => !isTestFile(file));
+  checkDuplicateModuleNames(`packages/${packageName}/src`, packageFiles);
   for (const fullPath of packageFiles) {
     const source = stripComments(readFileSync(fullPath, 'utf8'));
     for (const globalName of domGlobals) {
@@ -340,6 +367,7 @@ if (!existsSync(root)) {
 
 walk(root);
 for (const sourceFile of sourceFiles) checkFile(sourceFile);
+checkDuplicateModuleNames('packages/runtime/src', sourceFiles);
 // The desktop client is a separate source tree that the layering rules above
 // do not govern, but it is exactly where a second copy of a shared mapping
 // table tends to appear, so it feeds the duplicate-mapping rule only.
@@ -348,6 +376,10 @@ if (existsSync(desktopRoot) && statSync(desktopRoot).isDirectory()) {
   for (const sourceFile of desktopSourceFiles) {
     recordStateMappings(sourceFile, stripComments(readFileSync(sourceFile, 'utf8')));
   }
+}
+checkDuplicateModuleNames('apps/desktop', desktopSourceFiles);
+if (existsSync(cliRoot) && statSync(cliRoot).isDirectory()) {
+  checkDuplicateModuleNames('apps/cli/src', collectSourceFiles(cliRoot));
 }
 checkStateMappingDuplicates();
 if (checkPackages) {

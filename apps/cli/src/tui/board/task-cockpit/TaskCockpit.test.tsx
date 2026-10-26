@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import type { Task } from '../../board-types.js';
+import type { Task } from '../task-types.js';
 import { TaskCockpit } from './TaskCockpit.js';
 
 const activeTask: Task = {

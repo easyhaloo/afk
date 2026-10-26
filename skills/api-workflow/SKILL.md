@@ -21,7 +21,7 @@ description: >-
 | Patterns | `references/api-patterns/` |
 | Hybrid | `references/hybrid-patterns/` |
 | Auth modes | `references/hybrid-patterns/browser-auth-modes.md` |
-| Templates | `templates/` |
+| Templates | `scaffold/` |
 
 ## Process
 
@@ -102,8 +102,8 @@ When a browser auth mode is selected, the generated project also receives:
 | `fixtures/browser-session.ts` | Selected mode fixture (`localhost-cdp` or `storage-state`) |
 | `setup/auth-api.setup.ts` (storage-state only) | API setup to generate state file |
 | `playwright/.auth/` (gitignored) | Auth state file location |
-| `.gitignore` entries | `templates/auth-artifacts.gitignore` |
-| `.env.example` | `templates/auth.env.example` |
+| `.gitignore` entries | `scaffold/auth-artifacts.gitignore` |
+| `.env.example` | `scaffold/auth.env.example` |
 | `browser-auth-runbook.md` | Setup and re-auth instructions |
 
 ## Config

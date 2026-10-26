@@ -4,7 +4,7 @@ import path from "node:path";
 import { resolveWorkspaceRoot, workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import type { ProjectRun } from "../../shared/ipc-contract.js";
 import { exec } from "../adapters/process-executor.js";
-import { createWorkItemRunStore } from "./work-item-run-store.js";
+import { createWorkItemRunStore } from "../work-items/run-store.js";
 
 type Project = { platform: "github" | "gitlab"; projectKey: string; host: string };
 type WorkspaceMetadata = { taskId: string; root: string; repositories: Array<{ project: { platform: string; projectKey: string; providerHost?: string } }> };

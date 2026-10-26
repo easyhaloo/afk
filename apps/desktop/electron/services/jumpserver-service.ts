@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { ManagedSshHostRecord } from "../../shared/ssh-contract.js";
 import type { BastionInput, BastionRecord } from "../adapters/jumpserver-store.js";
+import type { JumpserverStore, SshManagedHostStore } from "../adapters/sqlite-local-config.js";
 import { createJumpserverStore } from "../adapters/jumpserver-store.js";
 import { JUMPSERVER_BINARY_ERROR, createJumpserverCli } from "../adapters/jumpserver-cli.js";
 import { createJumpserverCredentialStore } from "./jumpserver-credential-service.js";
@@ -41,10 +42,10 @@ export type SshBastionSyncLogEntry = {
 
 type JumpserverServiceDeps = {
   home: string;
-  bastionStore?: ReturnType<typeof createJumpserverStore>;
+  bastionStore?: JumpserverStore;
   credentialService?: ReturnType<typeof createJumpserverCredentialStore>;
   cli?: ReturnType<typeof createJumpserverCli>;
-  managedHostStore?: ReturnType<typeof import("../adapters/ssh-managed-host-store.js").createSshManagedHostStore>;
+  managedHostStore?: SshManagedHostStore;
   listManagedHosts?: () => Promise<{ hosts: ManagedSshHostRecord[] }>;
   audit?: (event: { kind: string; bastionId: string; at: string; created?: number; skipped?: number }) => void;
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Project } from '../../board-types.js';
+import { Project } from '../task-types.js';
 import { ListView, normalizeRowText } from './ListView.js';
 import { truncate, truncateByVisualWidth } from '../utils.js';
 import { OperationalRow } from './OperationalRow.js';

@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { registerBacklogCommands } from './backlog.js';
 import { registerQACommands } from './qa.js';
 import { createManagementProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
-import { QARunner } from '@afk/runtime/application/modules/qa-runner';
+import { QARunner } from '@afk/runtime/application/runners/qa-runner';
 import { executionWorkspacePath } from '@afk/runtime/infrastructure/workspace';
 import { join } from 'node:path';
 
@@ -27,7 +27,7 @@ vi.mock('./agent-runtime-options.js', () => ({
   addAgentRuntimeOptions: (command: Command) => command,
   resolveAgentRuntimeOptions: () => ({}),
 }));
-vi.mock('@afk/runtime/application/modules/qa-runner', () => ({ QARunner: vi.fn() }));
+vi.mock('@afk/runtime/application/runners/qa-runner', () => ({ QARunner: vi.fn() }));
 
 async function runCommand(register: (program: Command) => void, ...args: string[]): Promise<void> {
   const program = new Command().exitOverride();

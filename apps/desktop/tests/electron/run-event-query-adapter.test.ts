@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRunEventQueryAdapter } from "../../electron/adapters/run-event-query-adapter.js";
-import { createWorkItemExecutionQueryService } from "../../electron/services/work-item-execution-query-service.js";
+import { createWorkItemExecutionQueryService } from "../../electron/work-items/execution-query-service.js";
 
 const directories: string[] = [];
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))); });

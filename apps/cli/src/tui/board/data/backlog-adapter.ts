@@ -2,7 +2,7 @@ import type {
   BacklogItem,
   BacklogListOptions,
 } from '@afk/runtime/domain/backlog/index';
-import type { Task } from '../../board-types.js';
+import type { Task } from '../task-types.js';
 
 /**
  * Capability boundary exposed to the TUI. Keep this structural type narrow so

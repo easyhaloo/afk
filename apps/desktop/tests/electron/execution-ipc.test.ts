@@ -24,11 +24,11 @@ vi.mock("electron", () => ({
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => mocks.handlers.set(channel, handler) },
 }));
 
-vi.mock("../../electron/services/work-item-inventory-service.js", () => ({
+vi.mock("../../electron/work-items/inventory-service.js", () => ({
   createWorkItemInventoryService: () => ({ list: mocks.inventory, sync: mocks.inventory }),
 }));
 
-vi.mock("../../electron/services/work-item-execution-query-service.js", () => ({
+vi.mock("../../electron/work-items/execution-query-service.js", () => ({
   createWorkItemExecutionQueryService: () => ({ list: mocks.list }),
 }));
 

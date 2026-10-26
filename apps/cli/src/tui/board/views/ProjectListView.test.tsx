@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
-import type { Project } from '../../board-types.js';
+import type { Project } from '../task-types.js';
 import { ProjectListView } from './ProjectListView.js';
 
 const project: Project = {

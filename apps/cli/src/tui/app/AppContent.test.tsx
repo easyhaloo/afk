@@ -3,7 +3,7 @@ import { renderToString } from 'ink';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AppContent } from './AppContent.js';
 import { StateProvider } from './state/StateContext.js';
-import type { Task } from '../board-types.js';
+import type { Task } from '../board/task-types.js';
 
 const originalColumns = process.stdout.columns;
 const originalRows = process.stdout.rows;

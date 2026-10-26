@@ -10,4 +10,4 @@ export { Notification } from './Notification.js';
 export { ListView } from './ListView.js';
 export { OperationalRow } from './OperationalRow.js';
 export { BacklogRow } from './BacklogRow.js';
-export { BoardView } from '../board/index.js';
+export { BoardView } from '../index.js';

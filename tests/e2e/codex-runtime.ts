@@ -14,7 +14,7 @@ import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { createProviderBundle as assembleProviderBundle } from '@afk/runtime/infrastructure/provider/providers';
 import { createTracker } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 import type { TrackerProvider } from '@afk/runtime/domain/tracker/types';
-import { LoopRunner } from '@afk/runtime/application/modules/loop-runner';
+import { LoopRunner } from '@afk/runtime/application/runners/loop-runner';
 import { TaskRuntimeManager } from '@afk/runtime/application/runtime/task-runtime';
 import { deriveBacklogBranchName } from '@afk/runtime/domain/backlog/index';
 import { formatWorkItemId } from '@afk/runtime/domain/work-item/identity';

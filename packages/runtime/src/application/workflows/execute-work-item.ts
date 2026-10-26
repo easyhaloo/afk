@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { loadWorkItemExecution, type WorkItemExecution } from '@afk/application';
 import { WorkflowRunner } from '../workflow-engine.js';
-import { QARunner } from '../modules/qa-runner.js';
+import { QARunner } from '../runners/qa-runner.js';
 import { createGlobalWorkItemCatalogs, createTracker } from '../../infrastructure/provider/tracker-provider-factory.js';
 import { collectGlobalWorkItemInventory } from '../../infrastructure/provider/inventory.js';
 import { createProviderBundle, type ProviderBundle, type ManagementProviderBundle } from '../../infrastructure/provider/providers.js';

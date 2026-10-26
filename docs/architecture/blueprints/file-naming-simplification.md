@@ -1,8 +1,25 @@
 # 文件命名简化清单
 
 **作者：** Mavis
-**状态：** 提案，尚未采纳。范围是**文件名**（含目录名），不含模块内部结构、类型命名或导出符号。
-**关系：** 与 [目标目录布局](target-directory-layout.md) 同源。那份是旧提案、且以已废弃的根 `src/` 方案为骨架；本文只做命名收敛，落到当前 `apps/` + `packages/` 布局。那份的 §5.1–§5.6 在当前代码里**全部仍未落地**，本文重新核对并给出当前路径。
+**状态：** 提案。命名部分已由分支 `refactor/file-naming` 落地（见[改动清单](file-naming-changelog.md)）；本文的目录结构部分仍未采纳。
+**落地状态（2026-10-23，分支 `refactor/file-naming`）：**
+
+| 本文条目 | 状态 |
+| --- | --- |
+| §1.1 `work-item` 拼写统一 | ✅ 已落地（`application/work-items/` → `application/work-item/`） |
+| §1.2 `board/board/` 同名嵌套 | ✅ 已落地（内容上提一层，两个桶合并） |
+| §1.3 `backlog-page.test.ts` 同基名 | ✅ 已落地（改名为 `backlog-filter.test.ts`） |
+| §1.4 `board-types.ts` 与 `board/types.ts` | ✅ 已落地（并入 `board/task-types.ts`） |
+| §1.5 `observability.md` 与 `observability/` 同名 | ✅ 已落地（目录改名 `observability-profiles/`） |
+| §1.6 `packages/application` 更名 | ⏸ 未做（成本高，建议单独 commit） |
+| §1.7 `project-resolver` / `isolate` 同名 | ✅ 已落地（`application/project/{context,resolver}.ts`；`isolate.ts` 原地保留） |
+| §2.1 `packages/*/tests/` 上移 colocated | ✅ 已落地（19 个文件，含 3 个原清单遗漏项） |
+| §2.2 `modules/` → `runners/` | ✅ 已落地（10 个文件，含 `loop-config.ts` 并入） |
+| §2.3 desktop `work-item-*` 归组 | ✅ 已落地（12 个文件移入 `electron/work-items/`） |
+| §3.1 `-service`/`-adapter`/`-store` 去后缀 | ⏸ 主动不做（会撞名；且后缀能区分「服务」与「存储」两个角色） |
+| §5.2 架构守卫补「同名文件」规则 | ⏸ 待做（建议下一步） |
+
+**关系：** 与 [目标目录布局](target-directory-layout.md) 同源。那份是旧提案、且以已废弃的根 `src/` 方案为骨架；本文只做命名收敛，落到当前 `apps/` + `packages/` 布局。
 **依据：** 全仓 1102 个受版本控制的文件（排除 `dist/`、`dist-electron/`、`release/`），逐目录实测。
 
 ---

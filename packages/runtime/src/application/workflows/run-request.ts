@@ -3,7 +3,7 @@ import type { SandboxProviderName } from '../../infrastructure/sandbox/types.js'
 import type { BranchStrategyConfig } from '../../domain/branches/types.js';
 import { deriveBacklogBranchName } from '../../domain/backlog/index.js';
 import { getWorkflowConfig, type WorkflowConfig } from '../../infrastructure/config/manager.js';
-import { resolveProjectContext, type ProjectContext } from '../project-context.js';
+import { resolveProjectContext, type ProjectContext } from '../project/context.js';
 import { resolveAgentProviderName } from '../../domain/agents/index.js';
 import { DEFAULT_CODEX_CONFIG, resolveCodexRuntime } from '../../domain/agents/codex-runtime.js';
 import {

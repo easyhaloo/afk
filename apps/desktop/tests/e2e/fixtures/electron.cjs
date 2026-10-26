@@ -33,7 +33,15 @@ async function start() {
   const fixture = new Module(bundle);
   fixture.filename = bundle;
   fixture.loaded = true;
-  fixture.exports = { collectProviderInventory: provider.collectProviderInventory };
+  fixture.exports = {
+    collectProviderInventory: provider.collectProviderInventory,
+    collectProviderInventorySnapshot: async platform => ({
+      inventory: await provider.collectProviderInventory(platform),
+      identities: [{ platform: "github", host: "github.com", accountId: "e2e-fixture" }],
+      identityFailures: [],
+    }),
+    getProviderAccountIdentities: async () => [{ platform: "github", host: "github.com", accountId: "e2e-fixture" }],
+  };
   require.cache[bundle] = fixture;
   const entry = process.env.AFK_E2E_PRODUCTION_MAIN === "1" ? "electron/main.js" : "e2e/electron/main.js";
   await import(pathToFileURL(path.join(desktop, "dist-electron", entry)).href);

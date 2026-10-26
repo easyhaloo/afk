@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Command } from 'commander';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   registerBacklogCommands,
   runBacklogAdopt,
@@ -265,6 +268,66 @@ describe('backlog inventory command', () => {
       kind: 'backlog.inventory',
       data: { items: [], projects: [], diagnostics: [], complete: true },
     });
+  });
+
+  it('keeps the collected inventory when an account cannot be verified', async () => {
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogInventory(() => [{
+        ...inventoryCatalog(),
+        getAccountIdentity: async () => { throw new Error('GitLab API HTTP 500: Internal Server Error'); },
+      }], { json: true }, { root: await mkdtemp(join(tmpdir(), 'afk-inventory-unverified-')) });
+    } finally {
+      process.stdout.write = original;
+    }
+
+    const envelope = JSON.parse(captured.join(''));
+    expect(envelope).toMatchObject({
+      ok: true,
+      kind: 'backlog.inventory',
+      data: {
+        complete: false,
+        diagnostics: [{
+          platform: 'github',
+          projectKey: 'github.com',
+          code: 'inventory_identity_unverified',
+          message: 'GitLab API HTTP 500: Internal Server Error',
+        }],
+      },
+    });
+    // The inventory itself survives a publish failure.
+    expect(envelope.data.items).toHaveLength(3);
+  });
+
+  it('publishes the inventory to the local mirror when every account is verified', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'afk-inventory-published-'));
+    const captured: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: string | Uint8Array): boolean => {
+      captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+      return true;
+    };
+    try {
+      await runBacklogInventory(() => [{
+        ...inventoryCatalog(),
+        getAccountIdentity: async () => ({ platform: 'github' as const, host: 'github.com', accountId: '123' }),
+      }], { json: true }, { root });
+    } finally {
+      process.stdout.write = original;
+    }
+
+    expect(JSON.parse(captured.join(''))).toMatchObject({
+      ok: true,
+      data: { complete: true, diagnostics: [] },
+    });
+    const published = await readdir(join(root, 'inventory'));
+    expect(published.filter(name => name.endsWith('.sqlite'))).toHaveLength(1);
+    await rm(root, { recursive: true, force: true });
   });
 
   it('emits an auth failure when catalog credentials are missing', async () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createProviderWorkItemApplicationFacade, createWorkItemApplicationAdapter } from "../../electron/adapters/work-item-application-adapter.js";
+import { createProviderWorkItemApplicationFacade, createWorkItemApplicationAdapter } from "../../electron/work-items/application-adapter.js";
 
 const project = { platform: "github" as const, projectKey: "acme/api", name: "api" };
 const item = {
@@ -32,5 +32,19 @@ describe("work item application provider adapter", () => {
     await expect(adapter.list({ project: "acme/api" })).resolves.toMatchObject({ items: [item], complete: false, diagnostics: [{ code: "project_list_failed" }] });
     loadSnapshot.mockRejectedValueOnce(new Error("authentication required"));
     await expect(adapter.list()).rejects.toThrow("authentication required");
+  });
+
+  it("keeps the live inventory but refuses to open the mirror when an account is unverified", async () => {
+    const loadSnapshot = vi.fn(async () => ({
+      inventory: { items: [item], projects: [project], diagnostics: [], complete: true },
+      identities: [{ platform: "github" as const, host: "github.com", accountId: "42" }],
+      identityFailures: [{ platform: "github" as const, scopeKey: "github.com", message: "GitLab API HTTP 500" }],
+    }));
+    const facade = createProviderWorkItemApplicationFacade({ loadSnapshot });
+
+    await expect(facade.listWorkItems({})).resolves.toMatchObject({ items: [item] });
+    // A partially verified set has no stable namespace, so it must not be
+    // cached as one — and it must not be mistaken for a verified account.
+    await expect(facade.getAccountIdentities()).rejects.toThrow(/identity/i);
   });
 });

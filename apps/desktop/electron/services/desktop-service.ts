@@ -1,3 +1,4 @@
+import { workspaceDataDirectory, workspaceStateDirectory } from "@afk/runtime/infrastructure/workspace";
 /** AFK Control security: only the main process runs a fixed, non-user-configurable diagnostics whitelist. */
 import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
@@ -83,7 +84,7 @@ function validSession(value: string) {
 
 
 async function readWorkflowConfig(root: string): Promise<WorkflowConfigSummary> {
-  const configPath = path.join(root, ".afk", "config.yml");
+  const configPath = path.join(workspaceStateDirectory(), "config.yml");
   const raw = await fs.readFile(configPath, "utf8").catch(() => "");
   const values = parseConfig(raw);
   return {
@@ -132,10 +133,10 @@ function templateStepSummary(value: unknown): WorkflowTemplateStepSummary | null
 }
 
 async function readWorkflowTemplates(root: string): Promise<WorkflowTemplateSummary[]> {
-  const directory = path.join(root, ".afk", "workflows");
+  const directory = path.join(workspaceStateDirectory(), "workflows");
   const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => [] as import("node:fs").Dirent[]);
   const projectTemplates: WorkflowTemplateSummary[] = [];
-  const configRaw = await fs.readFile(path.join(root, ".afk", "config.yml"), "utf8").catch(() => "");
+  const configRaw = await fs.readFile(path.join(workspaceStateDirectory(), "config.yml"), "utf8").catch(() => "");
   for (const entry of entries.filter(item => item.isFile() && /\.ya?ml$/i.test(item.name)).sort((a, b) => a.name.localeCompare(b.name))) {
     try {
       const document = asConfigObject(loadYaml(await fs.readFile(path.join(directory, entry.name), "utf8")));
@@ -284,7 +285,7 @@ function canvasLayoutNodes(raw: string): CanvasTemplateNode[] {
 async function readCanvasNodes(root: string, raw: string, templateName: string | undefined): Promise<CanvasTemplateNode[]> {
   const layout = canvasLayoutNodes(raw);
   if (!templateName || !layout.length) return [];
-  const templatePath = path.join(root, ".afk", "workflows", templateName + ".yml");
+  const templatePath = path.join(workspaceStateDirectory(), "workflows", templateName + ".yml");
   try {
     const document = asConfigObject(loadYaml(await fs.readFile(templatePath, "utf8")));
     const steps = Array.isArray(document.steps) ? document.steps : [];
@@ -309,7 +310,7 @@ function managedTemplateDocument(templateName: string, nodes: CanvasTemplateNode
 }
 
 async function saveManagedTemplate(root: string, templateName: string, nodes: CanvasTemplateNode[], provider: string) {
-  const directory = path.join(root, ".afk", "workflows");
+  const directory = path.join(workspaceStateDirectory(), "workflows");
   const templatePath = path.join(directory, templateName + ".yml");
   await fs.mkdir(directory, { recursive: true });
   const temporaryPath = templatePath + ".tmp-" + process.pid + "-" + Date.now();
@@ -326,7 +327,7 @@ export async function saveWorkflowConfig(workspace: string, value: unknown): Pro
   const root = resolveWorkspace(workspace);
   const patch = cleanWorkflowPatch(value);
   if (patch.templateName === "afk-control-workflow" && !patch.canvasNodes.length) throw new Error("自定义工作流至少需要一个步骤");
-  const configPath = path.join(root, ".afk", "config.yml");
+  const configPath = path.join(workspaceStateDirectory(), "config.yml");
   const existingRaw = await fs.readFile(configPath, "utf8").catch(() => "");
   let existing: ConfigObject = {};
   if (existingRaw) {
@@ -389,7 +390,7 @@ function textValue(record: Record<string, unknown>, key: string) {
 }
 
 async function readWorkflowRuns(root: string): Promise<WorkflowRunSummary[]> {
-  const runRoot = path.join(root, ".afk", "runs");
+  const runRoot = path.join(workspaceDataDirectory(root), "runs");
   const directories = await fs.readdir(runRoot, { withFileTypes: true }).catch(() => [] as import("node:fs").Dirent[]);
   const runs: WorkflowRunSummary[] = [];
   for (const entry of directories.filter(item => item.isDirectory()).sort((left, right) => right.name.localeCompare(left.name)).slice(0, 40)) {
@@ -460,7 +461,7 @@ export async function snapshot(workspace?: string) {
   ]);
   const afkAvailable = true;
   return {
-    workspace: { root, afkDirectoryPresent: existsSync(path.join(root, ".afk")), eventCount: events.length + workItemRuns.length },
+    workspace: { root, afkDirectoryPresent: existsSync(workspaceStateDirectory()), eventCount: events.length + workItemRuns.length },
     afk: { available: afkAvailable, executable: "@afk/runtime", summary: "AFK Runtime 0.1.0" },
     capabilities: AFK_CAPABILITY_DEFINITIONS.map(item => ({ ...item, available: afkAvailable })),
     workflow,

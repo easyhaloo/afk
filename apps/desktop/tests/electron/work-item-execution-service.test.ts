@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type {
@@ -84,7 +85,7 @@ describe("work item execution service", () => {
 
     expect(launchExecution).toHaveBeenCalledWith({
       workItemId: item().id,
-      manifestPath: expect.stringContaining("/tmp/runtime-task/"),
+      manifestPath: path.join(workspaceDataDirectory("/tmp/runtime-task"), "execution-manifest.json"),
       executionId: result.runId,
       template: undefined,
     }, "/tmp/runtime-task");
@@ -236,7 +237,7 @@ describe("work item execution service", () => {
       environment: "local",
     });
 
-    const manifestPath = path.join(workspaceRoot, ".afk", "execution-manifest.json");
+    const manifestPath = path.join(workspaceDataDirectory(workspaceRoot), "execution-manifest.json");
     expect(allocate).toHaveBeenCalledWith("WI-2026-018", [webProject, apiProject]);
     expect(manifestStore.save).toHaveBeenCalledWith(workspaceRoot, {
       schemaVersion: 1,
@@ -349,7 +350,7 @@ describe("work item execution service", () => {
     await service.start({ workItemId: "github:acme/api#42", repositories: [apiSelection], workflow: "review" });
 
     expect(spawn).toHaveBeenCalledWith({
-      workItemId: "github:acme/api#42", manifestPath: "/tmp/task/.afk/execution-manifest.json",
+      workItemId: "github:acme/api#42", manifestPath: path.join(workspaceDataDirectory("/tmp/task"), "execution-manifest.json"),
       template: "review", executionId: expect.stringMatching(/^desktop-[a-f\d-]{36}$/),
     }, "/tmp/task");
   });

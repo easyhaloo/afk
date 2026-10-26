@@ -13,7 +13,7 @@ Cross-platform issue tracking automation (GitLab/GitHub) powered by Claude AI ag
 ## Features
 
 - **Cross-platform** — Unified GitLab and GitHub CLI (issues, MRs/PRs)
-- **Skills Suite** — 22 Claude Code skills covering the full development lifecycle
+- **Skills Suite** — 24 Claude Code skills covering the full development lifecycle
 - **TUI Dashboard** — Interactive issue tracking dashboard
 - **Background Automation** — tmux-based workflow scheduler
 - **TDD Integration** — Built-in test-driven development methodology
@@ -131,6 +131,7 @@ Full command reference: `afk --help`
 | `/afk-research` | Technical research | Need to understand existing implementation before coding |
 | `/afk-prototype` | Validate approach | Need to validate tech approach before committing |
 | `/afk-implement` | TDD implementation | Clear implementation target |
+| `/afk-change-driven-testing` | Change-driven testing | Add focused regression tests for the business flow being changed |
 | `/afk-qa` | Independent verification | MR/PR ready to merge |
 | `/afk-diagnose` | Quick fix | Specific, reproducible failure |
 | `/afk-branch-migrate` | Cross-branch migration | Cherry-pick between divergent branches |
@@ -145,6 +146,7 @@ Full command reference: `afk --help`
 | `/afk-llm-dev-guide` | LLM app design guide | LLM application architecture and context engineering |
 | `/jev-agent-guard` | Agent checkpoints | Install Jev checkpoints across Claude Code, Codex, OpenCode |
 | `/software-complexity-governance` | Complexity assessment | Measure cyclomatic/cognitive complexity, coupling, debt |
+| `/wiki` | Local knowledge management | Search, read, ingest, and lint project knowledge |
 
 See [Skills Guide](docs/guides/skills.md) for detailed documentation.
 

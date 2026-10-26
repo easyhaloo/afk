@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../workspace.js';
 import { spawn } from 'child_process';
 import { Signal } from '../../domain/schemas.js';
 import { readSignal, readSignalSync } from '../io/signal.js';
@@ -249,7 +250,7 @@ export class TmuxClient {
 
     const { promises: fs } = await import('fs');
     const { join } = await import('path');
-    const statusPath = join(worktreeDir, '.afk', 'claude-status.json');
+    const statusPath = join(workspaceDataDirectory(worktreeDir), 'claude-status.json');
     const start = Date.now();
     while (Date.now() - start < timeout) {
       try {

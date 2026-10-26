@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../workspace.js';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { STATUS_FILENAME } from './status.js';
@@ -10,9 +11,9 @@ const SETTINGS_FILE = 'settings.local.json';
 export async function configureStatusline(worktreeDir: string): Promise<void> {
   const claudeDir = join(worktreeDir, SETTINGS_DIR);
   const settingsPath = join(claudeDir, SETTINGS_FILE);
-  const statusJsonPath = join(worktreeDir, '.afk', STATUS_FILENAME);
+  const statusJsonPath = join(workspaceDataDirectory(worktreeDir), STATUS_FILENAME);
 
-  await fs.mkdir(join(worktreeDir, '.afk'), { recursive: true });
+  await fs.mkdir(workspaceDataDirectory(worktreeDir), { recursive: true });
   await fs.mkdir(claudeDir, { recursive: true });
 
   let existing: JsonObject = {};

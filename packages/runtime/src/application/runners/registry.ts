@@ -1,5 +1,5 @@
 /**
- * Module registry — auto-discovers modules from src/application/modules/ and
+ * Module registry — auto-discovers modules from src/application/runners/ and
  * resolves the active set from CLI flags, config file, or env var.
  *
  * Priority (highest wins):
@@ -9,6 +9,7 @@
  */
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'node:os';
 import { load } from 'js-yaml';
 import type { LifecycleModule, ModuleFactory } from '../workflows/lifecycle.js';
 
@@ -79,7 +80,7 @@ export function parseModuleParams(params: string[] | undefined): ModuleParams {
 }
 
 function loadConfigModules(): string[] {
-  const configPath = join(process.cwd(), '.afk', 'config.yml');
+  const configPath = join(homedir(), '.afk', 'config.yml');
   if (!existsSync(configPath)) return [];
 
   try {

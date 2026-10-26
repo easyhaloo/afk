@@ -1,11 +1,12 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 /**
  * Handoff-Markdown session store — read-only adapter over the existing
- * `<worktree>/.afk/handoff/handoff-{iid}-{gen}.md` documents produced by
+ * `~/.afk/workspaces/<workspace-hash>/handoff/handoff-{iid}-{gen}.md` documents produced by
  * HandoffCoordinator. Used as the FALLBACK store in the SessionStoreChain
  * when no provider-native snapshot is available.
  *
  * Mapping:
- *   <worktree>/.afk/handoff/handoff-42-1.md -> runId="issue-42-gen-1"
+ *   handoff/handoff-42-1.md -> runId="issue-42-gen-1"
  *
  * The handoff doc is plain Markdown, not a structured SessionSnapshot, so
  * the store synthesizes a SessionSnapshot with checkpoint=null (handoff
@@ -25,7 +26,7 @@ import type {
 } from './types.js';
 import { SessionNotFoundError } from './types.js';
 
-const HANDOFF_DIR = '.afk/handoff';
+const HANDOFF_DIR = 'handoff';
 
 export class HandoffSessionStore implements SessionStore {
   readonly name = 'handoff-md';
@@ -48,7 +49,7 @@ export class HandoffSessionStore implements SessionStore {
     if (!m) return null;
     const iid = m[1];
     const gen = m[3] ?? 'terminal';
-    return join(this.worktreePath, HANDOFF_DIR, `handoff-${iid}-${gen}.md`);
+    return join(workspaceDataDirectory(this.worktreePath), HANDOFF_DIR, `handoff-${iid}-${gen}.md`);
   }
 
   async load(options: SessionLoadOptions): Promise<SessionSnapshot> {
@@ -80,7 +81,7 @@ export class HandoffSessionStore implements SessionStore {
   }
 
   async list(options: SessionListOptions = {}): Promise<SessionStoreEntry[]> {
-    const dir = join(this.worktreePath, HANDOFF_DIR);
+    const dir = join(workspaceDataDirectory(this.worktreePath), HANDOFF_DIR);
     let entries: string[];
     try {
       entries = await fs.readdir(dir);

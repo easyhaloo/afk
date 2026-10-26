@@ -3,7 +3,6 @@
  *
  * Priority chain (per design):
  *   CLI path (--template ./local.yml)         > highest
- *   <project>/.afk/workflows/<name>.yml
  *   ~/.afk/workflows/<name>.yml
  *   builtin templates (registry)              > lowest
  *
@@ -31,7 +30,7 @@ export interface LoadedTemplate {
 }
 
 export interface TemplateLoaderOptions {
-  /** Project root for `.afk/workflows/`. Defaults to process.cwd(). */
+  /** Retained for compatibility; named templates are loaded from AFK home. */
   projectRoot?: string;
   /** User home for `~/.afk/workflows/`. Defaults to os.homedir(). */
   homeDir?: string;
@@ -40,12 +39,10 @@ export interface TemplateLoaderOptions {
 }
 
 export class TemplateLoader {
-  private readonly projectRoot: string;
   private readonly homeDir: string;
   private readonly cache = new Map<string, LoadedTemplate>();
 
   constructor(opts: TemplateLoaderOptions = {}) {
-    this.projectRoot = opts.projectRoot ?? process.cwd();
     this.homeDir = opts.homeDir ?? homedir();
   }
 
@@ -65,8 +62,6 @@ export class TemplateLoader {
     if (name.includes('/') || name.endsWith('.yml') || name.endsWith('.yaml')) {
       candidates.push({ path: name, source: 'cli' });
     }
-    candidates.push({ path: join(this.projectRoot, '.afk', 'workflows', `${name}.yml`), source: 'project' });
-    candidates.push({ path: join(this.projectRoot, '.afk', 'workflows', `${name}.yaml`), source: 'project' });
     candidates.push({ path: join(this.homeDir, '.afk', 'workflows', `${name}.yml`), source: 'user' });
     candidates.push({ path: join(this.homeDir, '.afk', 'workflows', `${name}.yaml`), source: 'user' });
 

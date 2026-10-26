@@ -1,6 +1,7 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 /**
  * Run state directory — persists per-run diagnostics under
- *   <worktree>/.afk/runs/<run-id>/
+ *   ~/.afk/workspaces/<workspace-hash>/runs/<run-id>/
  *     ├── request.json       (initial goal + provider + generation)
  *     ├── events.jsonl       (incremental event stream; atomic line append)
  *     ├── result.json        (final ExecutionResult)
@@ -19,7 +20,7 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 import type { ExecutionResult } from '../../infrastructure/sandbox/types.js';
 
-const RUNS_DIR = '.afk/runs';
+const RUNS_DIR = 'runs';
 
 export interface RunRequest {
   runId: string;
@@ -43,7 +44,7 @@ export class RunStateWriter {
   ) {}
 
   private dir(): string {
-    return join(this.worktreePath, RUNS_DIR, this.runId);
+    return join(workspaceDataDirectory(this.worktreePath), RUNS_DIR, this.runId);
   }
 
   /** Best-effort: never throws. Logs warnings on failure. */

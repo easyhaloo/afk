@@ -273,8 +273,8 @@ describe('Template loader — disk priority chain', () => {
     await afs.rm(homeDir, { recursive: true, force: true });
   });
 
-  it('loads from project .afk/workflows/<name>.yml when present', async () => {
-    const wfDir = path.join(projectRoot, '.afk', 'workflows');
+  it('loads from user .afk/workflows/<name>.yml when present', async () => {
+    const wfDir = path.join(homeDir, '.afk', 'workflows');
     await afs.mkdir(wfDir, { recursive: true });
     await afs.writeFile(path.join(wfDir, 'custom.yml'), `
 name: custom
@@ -290,7 +290,7 @@ steps:
   });
 
   it('returns source metadata and resolves prompt files relative to the template', async () => {
-    const wfDir = path.join(projectRoot, '.afk', 'workflows');
+    const wfDir = path.join(homeDir, '.afk', 'workflows');
     await afs.mkdir(wfDir, { recursive: true });
     await afs.writeFile(path.join(wfDir, 'prompt.md'), 'hello');
     await afs.writeFile(path.join(wfDir, 'relative.yml'), `
@@ -302,7 +302,7 @@ steps:
     prompt: { file: prompt.md }
 `);
     const result = await new TemplateLoader({ projectRoot, homeDir }).loadWithSource('relative');
-    expect(result.source).toBe('project');
+    expect(result.source).toBe('user');
     expect(result.template.steps[0]?.prompt).toEqual({ file: path.join(wfDir, 'prompt.md') });
   });
 

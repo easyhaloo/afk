@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { promises as fs } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { WorkflowGraphResult } from './workflow-graph.js';
@@ -7,9 +8,11 @@ export interface GraphCacheResult { readonly directory: string; readonly indexPa
 
 function assertSafeOutput(projectRoot: string, output: string): string {
   const resolved = resolve(projectRoot, output);
-  const rel = relative(projectRoot, resolved);
-  if (isAbsolute(output) && !resolved.startsWith(resolve(projectRoot, '.afk', 'cache', 'archify'))) throw new Error('--output must be workspace-relative or inside .afk/cache/archify');
-  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error('--output must stay inside the workspace');
+  const base = isAbsolute(output) ? join(workspaceDataDirectory(projectRoot), 'cache', 'archify') : projectRoot;
+  const rel = relative(base, resolved);
+  if (rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) {
+    throw new Error('--output must be workspace-relative or inside the workspace system cache');
+  }
   return resolved;
 }
 
@@ -20,7 +23,7 @@ async function atomicWrite(path: string, content: string): Promise<void> {
 }
 
 export async function writeGraphCache(projectRoot: string, result: WorkflowGraphResult, format: WorkflowGraphFormat, output?: string): Promise<GraphCacheResult> {
-  const base = resolve(projectRoot, '.afk', 'cache', 'archify', 'workflow', result.definition.templateId, result.receipt.inputHash);
+  const base = resolve(workspaceDataDirectory(projectRoot), 'cache', 'archify', 'workflow', result.definition.templateId, result.receipt.inputHash);
   const directory = output ? assertSafeOutput(projectRoot, output) : base;
   await fs.mkdir(directory, { recursive: true });
   const graphPath = join(directory, 'graph.json');

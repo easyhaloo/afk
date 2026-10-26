@@ -1,4 +1,4 @@
-import { test, expect } from "./_helpers/launch.js";
+import { test, expect, E2E_HOME_PATH } from "./_helpers/launch.js";
 import { navButton } from "./_helpers/nav.js";
 import type { Page, TestInfo } from "@playwright/test";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
@@ -96,7 +96,7 @@ test.describe("Workflow CRUD and graph evidence", () => {
     await expect(save).toBeDisabled();
     await expect(page.locator(".workflow-editor-node.custom-node")).toHaveCount(3);
     const created = await page.evaluate(() => window.afkDesktop.snapshot(""));
-    const templatePath = path.join(created.workspace.root, ".afk/workflows/afk-control-workflow.yml");
+    const templatePath = path.join(E2E_HOME_PATH, ".afk/workflows/afk-control-workflow.yml");
     const readDefinition = async () => load(await readFile(templatePath, "utf8")) as { steps: WorkflowTemplateStepSummary[] };
     expect((await readDefinition()).steps.map(step => step.role)).toEqual(["implementer", "reviewer", "implementer"]);
     await expectGraphFits(page);
@@ -143,9 +143,8 @@ test.describe("Workflow CRUD and graph evidence", () => {
     await capture(page, testInfo, "crud-04-deleted-and-rewired");
   });
 
-  test("discovers, refreshes and removes project YAML definitions without changing built-in templates", async ({ page }, testInfo) => {
-    const snapshot = await page.evaluate(() => window.afkDesktop.snapshot(""));
-    const directory = path.join(snapshot.workspace.root, ".afk/workflows");
+  test("discovers, refreshes and removes AFK home YAML definitions without changing built-in templates", async ({ page }, testInfo) => {
+    const directory = path.join(E2E_HOME_PATH, ".afk/workflows");
     await mkdir(directory, { recursive: true });
     const filename = path.join(directory, "project-crud.yaml");
     await writeFile(filename, dump({ name: "project-crud", version: 1, steps: scenarios[0].steps }));
@@ -174,8 +173,8 @@ test.describe("Workflow CRUD and graph evidence", () => {
   });
 
   test("validates, saves and restores workflow configuration while preserving unrelated YAML", async ({ page }, testInfo) => {
-    const snapshot = await page.evaluate(() => window.afkDesktop.snapshot(""));
-    const configPath = path.join(snapshot.workspace.root, ".afk/config.yml");
+    const configPath = path.join(E2E_HOME_PATH, ".afk/config.yml");
+    await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(configPath, dump({ customIntegration: { enabled: true, label: "preserve-me" } }));
     await page.reload();
     await openLibrary(page);
@@ -237,8 +236,7 @@ test.describe("Workflow CRUD and graph evidence", () => {
 
   for (const scenario of scenarios) {
     test(`renders ${scenario.name} from .${scenario.extension} with correct dependencies and responsive geometry`, async ({ page }, testInfo) => {
-      const snapshot = await page.evaluate(() => window.afkDesktop.snapshot(""));
-      const directory = path.join(snapshot.workspace.root, ".afk/workflows");
+      const directory = path.join(E2E_HOME_PATH, ".afk/workflows");
       await mkdir(directory, { recursive: true });
       const document = dump({ name: `e2e-${scenario.name}`, version: 1, steps: scenario.steps });
       await writeFile(path.join(directory, `${scenario.name}.${scenario.extension}`), document);

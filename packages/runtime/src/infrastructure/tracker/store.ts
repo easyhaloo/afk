@@ -68,8 +68,7 @@ type UnknownObject = { [key: string]: unknown };
 /**
  * The file that holds the local tracker index.
  *
- * The index belongs to the AFK workspace: `<workspace>/.afk/tracker-projects.json`,
- * or AFK's home directory when no workspace is configured.
+ * The index is shared across execution workspaces in `~/.afk/tracker-projects.json`.
  */
 export function trackerStorePath(directory?: string): string {
   return join(directory ?? workspaceStateDirectory(), 'tracker-projects.json');

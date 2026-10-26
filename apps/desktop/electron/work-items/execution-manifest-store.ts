@@ -7,6 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import {
   parseWorkItemRunStartInput,
   type WorkItemId,
@@ -109,7 +110,7 @@ export function createWorkItemExecutionManifestStore(deps: WorkItemExecutionMani
 }
 
 export function workItemExecutionManifestPath(workspace: string): string {
-  return path.join(workspace, ".afk", MANIFEST_FILE);
+  return path.join(workspaceDataDirectory(workspace), MANIFEST_FILE);
 }
 
 function parseManifest(value: unknown): WorkItemExecutionManifest {

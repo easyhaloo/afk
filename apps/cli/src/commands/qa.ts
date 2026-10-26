@@ -1,11 +1,11 @@
 import { Command } from 'commander';
 import { createManagementProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
-import { resolveTrackerTarget } from '@afk/runtime/infrastructure/tracker/target';
 import { QARunner } from '@afk/runtime/application/runners/qa-runner';
 import { handleCommandError, success, warning, detail } from '../cli-utils.js';
 import { getWorkflowConfig } from '@afk/runtime/infrastructure/config/manager';
 import { createAgentProvider, prepareAgentRuntime, resolveAgentProviderName } from '@afk/runtime/domain/agents/index';
 import { addAgentRuntimeOptions, resolveAgentRuntimeOptions } from './agent-runtime-options.js';
+import { resolveWorkflowRunRequest } from '@afk/runtime/execution';
 
 /**
  * Run QA for one item already awaiting verification. Loop invokes the same
@@ -30,21 +30,17 @@ export function registerQACommands(program: Command): void {
         const agentProviderName = resolveAgentProviderName(options.agent ?? config.agentDefault);
         const agentRuntime = await prepareAgentRuntime(resolveAgentRuntimeOptions(agentProviderName, config, options));
         const agentProvider = createAgentProvider(agentProviderName);
-        // QA never claims work; use the management bundle so verification does
-        // not require an implementation-only atomic claim capability. QA runs
-        // inside the workspace, so the target follows the working directory
-        // rather than the backlog id.
-        const target = await resolveTrackerTarget({
-          project: options.project,
-          cwd: process.cwd(),
-        });
-        const providers = await createManagementProviders(target.projectId, process.cwd(), target.platform, target.host);
-        const item = await providers.backlog.get(options.backlogId);
+        const request = await resolveWorkflowRunRequest({
+          backlogId: options.backlogId, projectName: options.project,
+        }, config);
+        const providers = await createManagementProviders(request.trackerProjectId, request.repoRoot, request.trackerPlatform, request.trackerHost);
+        const item = await providers.backlog.get(request.backlogId);
         if (item.state !== 'verification') {
           throw new Error(`backlog ${item.id} is in ${item.state}; QA requires verification state`);
         }
-        const runner = new QARunner(providers, config, { executionMode: options.mode, agentProvider, agentRuntime });
-        const result = await runner.process(options.backlogId);
+        const runner = new QARunner(providers, config, { executionMode: options.mode, agentProvider, agentRuntime,
+          projectRoot: request.workspaceRoot, repositories: request.repositories });
+        const result = await runner.process(request.backlogId);
         if (!result.success) {
           warning('QA did not pass');
           process.exitCode = 1;

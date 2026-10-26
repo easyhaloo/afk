@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { simpleGit } from 'simple-git';
@@ -13,7 +14,7 @@ import { Watchdog } from './watchdog.js';
  * Keeping the convention in one place stops the two from drifting.
  */
 export function handoffDocPath(worktreePath: string, backlogId: string, gen: number): string {
-  return join(worktreePath, '.afk', 'handoff', `handoff-${backlogId}-${gen}.md`);
+  return join(workspaceDataDirectory(worktreePath), 'handoff', `handoff-${backlogId}-${gen}.md`);
 }
 
 export type HandoffMode = 'auto' | 'terminal';
@@ -120,7 +121,7 @@ export class HandoffCoordinator {
     logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: tmux killed');
     await this.tmux.closeSession();
     await clearSignal(ctx.wtPath); // stale completion signal must not end the next wait immediately
-    await fs.rm(join(ctx.wtPath, '.afk', STATUS_FILENAME), { force: true }); // fresh session must not inherit old token data
+    await fs.rm(join(workspaceDataDirectory(ctx.wtPath), STATUS_FILENAME), { force: true }); // fresh session must not inherit old token data
     logger.info({ backlogId: ctx.backlogId, wtPath: ctx.wtPath }, 'restartSession: statusline data cleared');
     await this.tmux.createSession(ctx.session, ctx.wtPath);
     logger.info({ backlogId: ctx.backlogId, session: ctx.session }, 'restartSession: tmux created');
@@ -209,9 +210,7 @@ export class HandoffCoordinator {
   }
 
   /**
-   * Write the handoff recovery doc into the worktree's `.afk/handoff/`.
-   * Safe from the agent's `git add -A` (`.afk/` is gitignored in the repo),
-   * and it travels with the worktree - a resumed session reads it in place.
+   * Write the handoff recovery doc into the workspace's AFK system directory.
    */
   private async writeHandoffDoc(
     worktreePath: string,
@@ -219,7 +218,7 @@ export class HandoffCoordinator {
     gen: number | 'terminal',
     info: HandoffSummary,
   ): Promise<{ path: string; content: string }> {
-    const handoffDir = join(worktreePath, '.afk', 'handoff');
+    const handoffDir = join(workspaceDataDirectory(worktreePath), 'handoff');
     await fs.mkdir(handoffDir, { recursive: true });
     const docPath = join(handoffDir, `handoff-${backlogId}-${gen}.md`);
     const content = [

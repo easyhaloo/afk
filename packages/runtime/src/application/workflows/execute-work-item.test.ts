@@ -1,3 +1,4 @@
+import { workspaceDataDirectory, executionWorkspacePath, executionManifestPath } from '../../infrastructure/workspace.js';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -54,7 +55,7 @@ async function setup(overrides: Partial<BacklogItem> = {}) {
 const input = { workItemId, executionId: 'attempt-1', manifestPath: '/manifest.json', template: 'implement' };
 
 async function seedLock(directory: string, owner: unknown): Promise<string> {
-  const lockDirectory = join(directory, '.afk', 'executions');
+  const lockDirectory = join(workspaceDataDirectory(directory), 'executions');
   await mkdir(lockDirectory, { recursive: true });
   const lockPath = join(lockDirectory, `${encodeWorkItemIdForPath(workItemId as NonNullable<BacklogItem['workItemId']>)}.lock`);
   await writeFile(lockPath, JSON.stringify(owner));
@@ -74,6 +75,29 @@ function lockProbe(status: 'alive' | 'dead' | 'unknown', pid = 8420) {
 }
 
 describe('executeWorkItem', () => {
+  it('creates its default manifest in AFK home and executes in the canonical loop workspace', async () => {
+    const { deps, run } = await setup();
+    delete deps.readManifest;
+    deps.lookupWorkItem = vi.fn(async () => ({
+      id: workItemId, issueNumber: 42, managed: true, executionEligible: true, executionMode: 'afk', state: 'ready',
+      project: { platform: 'github', projectKey: 'acme/api', name: 'api', defaultBranch: 'main' },
+      branchName: 'afk/backlog-42',
+    } as any));
+    const createContext = deps.createContext!;
+    deps.createContext = vi.fn(async (manifest, request, config) => {
+      expect(manifest.workspaceRoot).toBe(executionWorkspacePath(workItemId));
+      expect(manifest.repositories[0].repoRoot).toBe(join(executionWorkspacePath(workItemId), 'repositories/api'));
+      expect(manifest.manifestPath).toBe(executionManifestPath(workItemId));
+      const result = await createContext(manifest, request, config);
+      result.request.workspaceRoot = manifest.workspaceRoot;
+      result.request.repoRoot = manifest.repositories[0].repoRoot;
+      return result;
+    });
+    await executeWorkItem({ ...input, manifestPath: undefined }, deps);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ workspaceRoot: executionWorkspacePath(workItemId) }));
+    expect(JSON.parse(await readFile(executionManifestPath(workItemId), 'utf8')).workItemId).toBe(workItemId);
+  });
+
   it('loads the default execution through application ports without an injected loader', async () => {
     const { deps, directory } = await setup();
     const previous = process.env.AFK_EVENT_STORE_DIR;
@@ -158,7 +182,7 @@ describe('executeWorkItem', () => {
     deps.createContext = vi.fn(async () => context);
     await observer.record({ traceId: 'attempt-1', runId: 'attempt-1', workItemId, profileId: 'test', attempt: 1, actor: { kind: 'system', id: 'qa' } }, { kind: 'qa.passed' });
     changes.get = vi.fn(async () => ({ id: '5', url: 'https://github.com/acme/api/pull/5', state: 'merged', sourceBranch: 'afk/42-qa', targetBranch: 'main' }));
-    const journalDirectory = join(directory, '.afk', 'executions');
+    const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
     await mkdir(journalDirectory, { recursive: true });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/awaiting a verified root PR merge/);
     await writeFile(join(journalDirectory, 'attempt-1.jsonl'), JSON.stringify({ executionId: 'attempt-1', workItemId,
@@ -182,7 +206,7 @@ describe('executeWorkItem', () => {
     const change = { id: '5', url: 'https://github.com/acme/api/pull/5', state: 'open' as const, sourceBranch: 'afk/42-qa', targetBranch: 'main' };
     changes.findForBacklog.mockResolvedValue(change);
     changes.get = vi.fn(async () => change);
-    const journalDirectory = join(directory, '.afk', 'executions');
+    const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
     await mkdir(journalDirectory, { recursive: true });
     await expect(reconcileWorkItemMerge(input, deps)).rejects.toThrow(/awaiting a verified root PR merge/);
     await writeFile(join(journalDirectory, 'attempt-1.jsonl'), JSON.stringify({ executionId: 'attempt-1', workItemId, phase: 'publication_requested' }) + '\n');
@@ -233,7 +257,7 @@ describe('executeWorkItem', () => {
     expect(changes.verifyIssueAssociation).toHaveBeenCalledWith(expect.objectContaining({ id: '5' }), workItemId);
     expect(vi.mocked(deps.recordAudit!).mock.calls.map(([, event]) => event.kind)).toEqual(['qa.started', 'qa.passed', 'change.published', 'human_gate.opened']);
     expect(vi.mocked(deps.recordAudit!).mock.calls.every(([context]) => context.runId === 'attempt-1' && context.workItemId === workItemId)).toBe(true);
-    const events = (await readFile(join(directory, '.afk', 'executions', 'attempt-1.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    const events = (await readFile(join(workspaceDataDirectory(directory), 'executions', 'attempt-1.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
     expect(events.map(event => event.phase)).toEqual(['requested', 'implementing', 'verifying', 'merge_ready']);
     expect(events.every(event => event.executionId === 'attempt-1' && event.workItemId === workItemId)).toBe(true);
   });
@@ -384,7 +408,7 @@ describe('executeWorkItem', () => {
 
   it('does not start a runner when attempt journaling is unavailable', async () => {
     const { deps, run, directory } = await setup();
-    const journalDirectory = join(directory, '.afk', 'executions');
+    const journalDirectory = join(workspaceDataDirectory(directory), 'executions');
     await mkdir(journalDirectory, { recursive: true });
     await writeFile(join(journalDirectory, 'attempt-1.jsonl'), 'existing attempt');
     await expect(executeWorkItem(input, deps)).rejects.toThrow();
@@ -443,7 +467,7 @@ describe('executeWorkItem', () => {
     run.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     const first = executeWorkItem(input, deps);
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
-    const lockPath = join(directory, '.afk', 'executions', `${encodeWorkItemIdForPath(workItemId as NonNullable<BacklogItem['workItemId']>)}.lock`);
+    const lockPath = join(workspaceDataDirectory(directory), 'executions', `${encodeWorkItemIdForPath(workItemId as NonNullable<BacklogItem['workItemId']>)}.lock`);
     const newOwner = JSON.parse(await readFile(lockPath, 'utf8'));
     expect(newOwner).toMatchObject({ pid: 8420, processStart: 'start-of-this-process', executionId: 'attempt-1' });
     await expect(executeWorkItem({ ...input, executionId: 'attempt-2' }, deps)).rejects.toThrow(/active attempt/);
@@ -459,7 +483,7 @@ describe('executeWorkItem', () => {
     run.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     const first = executeWorkItem(input, deps);
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
-    const lockPath = join(directory, '.afk', 'executions', `${encodeWorkItemIdForPath(workItemId as NonNullable<BacklogItem['workItemId']>)}.lock`);
+    const lockPath = join(workspaceDataDirectory(directory), 'executions', `${encodeWorkItemIdForPath(workItemId as NonNullable<BacklogItem['workItemId']>)}.lock`);
     await rm(lockPath);
     await writeFile(lockPath, JSON.stringify(priorOwner));
     finish({ success: false });
@@ -473,10 +497,10 @@ describe('executeWorkItem', () => {
     deps.lockProbe = lockProbe('dead');
     expect((await executeWorkItem(input, deps)).status).toBe('merge_ready');
     expect(run).toHaveBeenCalledTimes(1);
-    const files = await readdir(join(directory, '.afk', 'executions'));
+    const files = await readdir(join(workspaceDataDirectory(directory), 'executions'));
     const quarantined = files.filter(name => name.includes('.lock.stale-'));
     expect(quarantined).toHaveLength(1);
-    expect(await readFile(join(directory, '.afk', 'executions', quarantined[0]), 'utf8')).toBe(JSON.stringify(priorOwner));
+    expect(await readFile(join(workspaceDataDirectory(directory), 'executions', quarantined[0]), 'utf8')).toBe(JSON.stringify(priorOwner));
     await expect(readFile(lockPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -492,7 +516,7 @@ describe('executeWorkItem', () => {
     deps.lockProbe = lockProbe(status);
     await expect(executeWorkItem(input, deps)).rejects.toThrow(/cannot verify|active attempt/);
     expect(await readFile(lockPath, 'utf8')).toBe(JSON.stringify(owner));
-    expect((await readdir(join(directory, '.afk', 'executions'))).some(name => name.endsWith('.recovery'))).toBe(false);
+    expect((await readdir(join(workspaceDataDirectory(directory), 'executions'))).some(name => name.endsWith('.recovery'))).toBe(false);
     expect(run).not.toHaveBeenCalled();
   });
 
@@ -500,7 +524,7 @@ describe('executeWorkItem', () => {
     const { deps, directory, run } = await setup();
     deps.lockProbe = { identity: async () => undefined, status: async () => 'dead' };
     await expect(executeWorkItem(input, deps)).rejects.toThrow(/identity/);
-    expect(await readdir(join(directory, '.afk', 'executions'))).toEqual([]);
+    expect(await readdir(join(workspaceDataDirectory(directory), 'executions'))).toEqual([]);
     expect(run).not.toHaveBeenCalled();
   });
 });

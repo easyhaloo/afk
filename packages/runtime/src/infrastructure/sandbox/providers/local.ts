@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../workspace.js';
 /**
  * Local sandbox provider — wraps git worktree + tmux as a unified Sandbox.
  *
@@ -115,7 +116,7 @@ export class LocalSandbox implements Sandbox {
     if (!this.sessionCreated) {
       // The marker belongs to a Claude process, not the worktree. A prior
       // phase's file must not make a freshly-created tmux session look ready.
-      await fs.unlink(join(this.worktreePath, '.afk', 'claude-status.json')).catch(error => {
+      await fs.unlink(join(workspaceDataDirectory(this.worktreePath), 'claude-status.json')).catch(error => {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       });
       const created = await this.tmux.createSession(this.sessionName, this.worktreePath, options.command.argv.map(shellQuote).join(' '));

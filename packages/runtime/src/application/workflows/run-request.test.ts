@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveWorkflowRequest, resolveWorkflowRunRequest } from './run-request.js';
+import { executionWorkspacePath } from '../../infrastructure/workspace.js';
+import { join } from 'node:path';
 
 describe('resolveWorkflowRequest', () => {
   it('passes explicit canonical audit identity through to the runner request', () => {
@@ -110,14 +112,14 @@ describe('resolveWorkflowRequest', () => {
       projectName: 'acme/api',
       trackerPlatform: 'github',
       trackerProjectId: 'acme/api',
-      repoRoot: '/workspace/repositories/api',
+      repoRoot: join(executionWorkspacePath('WI-2026-018'), 'repositories/api'),
       baseBranch: 'main',
       targetBranch: 'afk/work-item-42',
       branchStrategy: { type: 'named', branch: 'afk/work-item-42', baseBranch: 'main' },
       template: 'custom',
       repositories: [
-        { platform: 'github', projectKey: 'acme/api', repoRoot: '/workspace/repositories/api', primary: true },
-        { platform: 'gitlab', projectKey: 'acme/web', repoRoot: '/workspace/repositories/web', baseBranch: 'develop', primary: false },
+        { platform: 'github', projectKey: 'acme/api', repoRoot: join(executionWorkspacePath('WI-2026-018'), 'repositories/api'), primary: true },
+        { platform: 'gitlab', projectKey: 'acme/web', repoRoot: join(executionWorkspacePath('WI-2026-018'), 'repositories/web'), baseBranch: 'develop', primary: false },
       ],
     });
   });
@@ -194,21 +196,23 @@ describe('resolveWorkflowRequest', () => {
     });
   });
 
-  it('keeps the no-manifest request path unchanged', async () => {
+  it('isolates a no-manifest CLI run instead of executing in its source repository', async () => {
     const readFile = async () => { throw new Error('must not read'); };
     const request = await resolveWorkflowRunRequest(
-      { backlogId: '42', repoRoot: '/repo', targetBranch: 'release' },
+      { backlogId: 'github:acme/api#42', repoRoot: '/repo', targetBranch: 'release' },
       { trackerTargetBranch: 'trunk' },
       { cwd: '/invocation', readFile },
     );
 
     expect(request).toMatchObject({
       backlogId: '42',
-      repoRoot: '/repo',
+      workItemId: 'github:acme/api#42',
+      repoRoot: join(executionWorkspacePath('github:acme/api#42'), 'repositories/api'),
+      workspaceRoot: executionWorkspacePath('github:acme/api#42'),
       originalCwd: '/invocation',
       targetBranch: 'release',
       baseBranch: 'trunk',
-      repositories: undefined,
+      repositories: [{ projectKey: 'acme/api', primary: true, checkoutPath: 'repositories/api', baseBranch: 'trunk' }],
     });
   });
 

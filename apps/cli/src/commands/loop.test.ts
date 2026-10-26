@@ -6,9 +6,10 @@ import { registerLoopCommands, resolveManagedLoopExecution } from './loop.js';
 import { registerRunCommands } from './run.js';
 import { registerQACommands } from './qa.js';
 import { Command } from 'commander';
+import { workspaceStateDirectory } from '@afk/runtime/infrastructure/workspace';
 
 const CONFIG_DIR = path.join('/tmp', `afk-loop-config-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-const CONFIG_PATH = path.join(CONFIG_DIR, '.afk', 'config.yml');
+const CONFIG_PATH = path.join(workspaceStateDirectory(), 'config.yml');
 
 describe('loadLoopConfig', () => {
   let cwdSpy: any;
@@ -22,6 +23,7 @@ describe('loadLoopConfig', () => {
 
   afterEach(() => {
     cwdSpy?.mockRestore();
+    fs.rmSync(CONFIG_PATH, { force: true });
     try { fs.rmSync(CONFIG_DIR, { recursive: true, force: true }); } catch { /* */ }
   });
 

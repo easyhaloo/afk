@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../workspace.js';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,8 +9,8 @@ describe('WorktreeManager', () => {
   it('loads state from the requested repository and preserves worktree metadata', async () => {
     const repoPath = await mkdtemp(join(tmpdir(), 'afk-worktree-state-'));
     try {
-      await mkdir(join(repoPath, '.afk'));
-      await writeFile(join(repoPath, '.afk', 'worktrees.json'), JSON.stringify({
+      await mkdir(workspaceDataDirectory(repoPath), { recursive: true });
+      await writeFile(join(workspaceDataDirectory(repoPath), 'worktrees.json'), JSON.stringify({
         worktrees: { 42: {
           iid: 42,
           path: join(repoPath, 'issue-42'),
@@ -28,7 +29,7 @@ describe('WorktreeManager', () => {
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
       });
       await expect(manager.get(43)).resolves.toBeNull();
-      expect(await readFile(join(repoPath, '.afk', 'worktrees.json'), 'utf8')).toContain('afk-issue-42');
+      expect(await readFile(join(workspaceDataDirectory(repoPath), 'worktrees.json'), 'utf8')).toContain('afk-issue-42');
     } finally {
       await rm(repoPath, { recursive: true, force: true });
     }

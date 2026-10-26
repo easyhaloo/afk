@@ -7,7 +7,7 @@ export function registerExecuteCommands(program: Command): void {
   program.command('reconcile')
     .description('Verify a human-merged root PR and reconcile its execution audit')
     .requiredOption('--work-item-id <id>', 'Canonical provider-qualified work item ID')
-    .requiredOption('--execution-manifest <path>', 'Execution workspace manifest')
+    .option('--execution-manifest <path>', 'Execution manifest (default: managed work item configuration)')
     .requiredOption('--execution-id <id>', 'Original execution attempt ID')
     .option('--project <project>', 'Provider project/repository')
     .action(async options => {
@@ -28,7 +28,7 @@ export function registerExecuteCommands(program: Command): void {
   program.command('execute')
     .description('Implement, independently verify, and publish one managed work item')
     .requiredOption('--work-item-id <id>', 'Canonical provider-qualified work item ID')
-    .requiredOption('--execution-manifest <path>', 'Execution workspace manifest')
+    .option('--execution-manifest <path>', 'Execution manifest (default: managed work item configuration)')
     .option('--template <name>', 'Implementation workflow template')
     .option('--project <project>', 'Provider project/repository')
     .option('--execution-id <id>', 'Attempt ID (default: generated UUID)')

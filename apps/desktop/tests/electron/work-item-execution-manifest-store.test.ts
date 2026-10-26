@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import {
   mkdir,
   mkdtemp,
@@ -211,7 +212,7 @@ async function createWorkspace(): Promise<string> {
 }
 
 function manifestPath(workspace: string): string {
-  return path.join(workspace, ".afk", "execution-manifest.json");
+  return path.join(workspaceDataDirectory(workspace), "execution-manifest.json");
 }
 
 async function rejectedError(promise: Promise<unknown>): Promise<Error> {

@@ -1,4 +1,4 @@
-import { test, expect } from "./_helpers/launch.js";
+import { test, expect, E2E_HOME_PATH } from "./_helpers/launch.js";
 import { navButton } from "./_helpers/nav.js";
 import { expectOccupiesSpace } from "./_helpers/geometry.js";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -6,8 +6,7 @@ import path from "node:path";
 
 test.describe("Workflow studio", () => {
   test("shows real parallel dependencies in a separate inspector without a footer", async ({ page }) => {
-    const snapshot = await page.evaluate(() => window.afkDesktop.snapshot(""));
-    const directory = path.join(snapshot.workspace.root, ".afk", "workflows");
+    const directory = path.join(E2E_HOME_PATH, ".afk", "workflows");
     await mkdir(directory, { recursive: true });
     await writeFile(path.join(directory, "parallel-layout.yml"), JSON.stringify({
       name: "parallel-layout", version: 1, description: "Parallel workflow layout regression",

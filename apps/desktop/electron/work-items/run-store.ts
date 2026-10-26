@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 import { parseWorkItemRunRecord, type WorkItemRunRecord } from "../../shared/backlog-contract.js";
 
 const RUN_STORE_FILE = "work-item-runs.json";
@@ -13,7 +14,7 @@ export function createWorkItemRunStore(deps: WorkItemRunStoreDeps) {
   const writes = new Map<string, Promise<void>>();
 
   function filePath(workspace: string): string {
-    return path.join(deps.resolveWorkspace(workspace), ".afk", RUN_STORE_FILE);
+    return path.join(workspaceDataDirectory(deps.resolveWorkspace(workspace)), RUN_STORE_FILE);
   }
 
   function serialize<T>(target: string, operation: () => Promise<T>): Promise<T> {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseExecutionManifest, readExecutionManifest } from './execution-manifest.js';
+import { executionWorkspacePath } from '../../infrastructure/workspace.js';
+import { join } from 'node:path';
 
 const manifestPath = '/workspace/.afk/execution-manifest.json';
 const backlogId = 'github:acme/api#42';
@@ -135,10 +137,10 @@ describe('readExecutionManifest', () => {
       readFile: async () => JSON.stringify(validManifest()),
     });
 
-    expect(manifest.workspaceRoot).toBe('/workspace');
+    expect(manifest.workspaceRoot).toBe(executionWorkspacePath(backlogId));
     expect(manifest.repositories.map(repository => repository.repoRoot)).toEqual([
-      '/workspace/repositories/api',
-      '/workspace/repositories/web',
+      join(executionWorkspacePath(backlogId), 'repositories/api'),
+      join(executionWorkspacePath(backlogId), 'repositories/web'),
     ]);
   });
 

@@ -70,6 +70,11 @@ documents ship as `name.md` + `name.zh.md`; update both.
   `~/.claude/plugins/cache/` or `~/.claude/plugins/marketplaces/` — those are
   installed copies and edits are lost on reinstall. See
   [`skills/SKILL-GUIDE.md`](skills/SKILL-GUIDE.md) for authoring standards.
+- **Skill changes require a plugin version bump.** When adding or changing a
+  skill (including its scripts and references), update `version` in
+  [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) in the same commit.
+  Increment at least the patch version; use a minor or major bump when the
+  release requires it.
 - **Build output is not source.** `dist/`, `dist-electron/`, `release/`, and
   test screenshots are generated. Do not review, edit, or commit them.
 - **Add focused tests** for every extracted service or pure function. Each
@@ -103,17 +108,17 @@ and its shared dependencies.
 GITLAB_TOKEN=          # GitLab API token
 GITLAB_URL=            # GitLab instance URL
 GITHUB_TOKEN=          # GitHub API token
-AFK_WORKSPACE=         # Workspace root; holds <workspace>/.afk local state
+AFK_WORKSPACE=         # Desktop project selection; does not relocate execution or system data
 AFK_TRACKER_PROJECT=   # Provider project fallback when cwd has no git remote
 AFK_TRACKER_PLATFORM=  # Provider platform fallback (github|gitlab)
 AFK_TMUX_SESSION=      # tmux session name (default: afk)
 ```
 
-`AFK_WORKSPACE` is the only knob for workspace-local state: the local tracker
-index lives in `<workspace>/.afk/tracker-projects.json`, or
-`~/.afk/tracker-projects.json` when no workspace is configured. Claim leases
-stay machine-wide under `AFK_STATE_DIR` (`~/.afk/state`) so two worktrees
-cannot claim the same issue.
+CLI and Desktop execute under `~/.loop-workspace/`, isolated by work-item ID.
+Configuration and system data live under `~/.afk/`: `config.yml`, `workflows/`,
+`tracker-projects.json`, runtime records, and per-workspace data in
+`workspaces/<sha256-of-absolute-workspace-path>/`. See
+[workspace paths](docs/architecture/overview.md#execution-and-system-paths).
 
 ## Related projects
 

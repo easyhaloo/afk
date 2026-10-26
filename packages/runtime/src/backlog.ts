@@ -33,7 +33,7 @@ export function createBacklogRuntime(factory: ProviderFactory = createManagement
     },
     async confirmMerge(workspace: string, id: string) {
       const providers = await factory(undefined, workspace);
-      return confirmBacklogMerge(providers.backlog, providers.changes, id, loadWorkflowConfig(workspace).targetBranch);
+      return confirmBacklogMerge(providers.backlog, providers.changes, id, loadWorkflowConfig().targetBranch);
     },
   };
 }

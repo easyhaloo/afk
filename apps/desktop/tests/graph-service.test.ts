@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,7 +16,7 @@ describe('WorkflowGraphService', () => {
 
   it('preserves a trusted graph when generation fails', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'afk-desktop-graph-')); roots.push(root);
-    const cache = path.join(root, '.afk', 'cache', 'archify', 'workflow', 'review', 'abc');
+    const cache = path.join(workspaceDataDirectory(root), 'cache', 'archify', 'workflow', 'review', 'abc');
     await mkdir(cache, { recursive: true });
     await writeFile(path.join(cache, 'graph.json'), '{"nodes":[]}');
     await writeFile(path.join(cache, 'receipt.json'), '{"inputHash":"abc"}');

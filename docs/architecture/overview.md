@@ -33,6 +33,31 @@ validation runs separately with `pnpm --filter afk-control-electron typecheck`,
 `build` and `test`. The CLI binary is `apps/cli/dist/index.js`; root no longer
 publishes an executable or contains application source.
 
+## Execution and system paths
+
+CLI and Desktop share the Runtime path resolver. Execution starts under
+`~/.loop-workspace/<platform>/<project segments>/<issue>/`; repository checkouts
+live in `repositories/` under that directory. The invocation directory and
+`AFK_WORKSPACE` do not change this root. `afk run` without a manifest resolves
+the provider identity and prepares an isolated checkout there.
+
+Configuration and AFK system data live in `~/.afk/`. Global workflow settings
+and templates are `config.yml` and `workflows/`; the tracker index is
+`tracker-projects.json`. Per-workspace metadata, manifests, launch receipts,
+budgets, sessions, diagnostic runs and execution journals live in
+`~/.afk/workspaces/<sha256-of-absolute-workspace-path>/`. Hashing preserves
+workspace isolation without placing system records in code repositories.
+
+`afk execute --work-item-id <id>` locates the shared manifest automatically;
+when missing, it creates one from the authoritative provider project and
+working branch. `--execution-manifest` remains an explicit input override;
+its location never changes the canonical execution root. `reconcile` requires
+an existing manifest and never creates a new execution configuration.
+Existing files in the former repository-local locations are left untouched;
+move any needed configuration to `~/.afk/` before starting new executions.
+Agent completion signals and QA artifact manifests remain execution-local
+protocol files; they are not configuration or lifecycle state stores.
+
 ## Architecture guard
 
 `pnpm architecture:check --check-packages` enforces layer direction and checks
@@ -68,8 +93,8 @@ single source of truth for the supported surface:
 | `afk backlog confirm-merge` | Merge an approved root backlog change and mark it done |
 | `afk backlog reconcile-merge` | Complete a root backlog whose change is already merged on the provider |
 | `afk run --backlog-id <id>` | Execute one claimed item |
-| `afk execute --work-item-id <id> --execution-manifest <path>` | Implement, independently verify, and publish one managed work item |
-| `afk reconcile --work-item-id <id> --execution-manifest <path> --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
+| `afk execute --work-item-id <id> [--execution-manifest <path>]` | Implement, independently verify, and publish one managed work item |
+| `afk reconcile --work-item-id <id> [--execution-manifest <path>] --execution-id <id>` | Verify a human-merged root PR and reconcile its execution audit |
 | `afk qa --backlog-id <id>` | Run QA for an item awaiting verification |
 | `afk loop` | Poll one manifest-bound work item and call `executeWorkItem` |
 | `afk loop start\|status\|stop` | Control the loop daemon: foreground or background start, status, and graceful stop |
@@ -184,8 +209,7 @@ key resolves to GitHub unless only GitLab credentials are configured.
 
 ### Local tracker index
 
-`<workspace>/.afk/tracker-projects.json` — `~/.afk/tracker-projects.json`
-when no workspace is configured — records the provider projects AFK has
+`~/.afk/tracker-projects.json` records the provider projects AFK has
 worked with: the project, the local repositories it was
 reached from, and the issues it contains. Every provider read, inventory and
 execution writes what it saw, so a later command resolves a bare issue id or
@@ -244,8 +268,8 @@ highest persisted attempt. QA record creation only persists evidence;
 its record and routes directly to `rework` + `afk`.
 
 `WorkflowConfig.maxQaReworkAttempts` defaults to **3** and must be a positive
-integer. Set `maxQaReworkAttempts: 3` in `.afk/config.yml` or use
-`AFK_MAX_QA_REWORK_ATTEMPTS=3`; the project file takes precedence. With no prior
+integer. Set `maxQaReworkAttempts: 3` in `~/.afk/config.yml` or use
+`AFK_MAX_QA_REWORK_ATTEMPTS=3`; the configuration file takes precedence. With no prior
 records, the first FAIL is attempt 1, the second FAIL is attempt 2, and both
 allow `rework` + `afk`. The third FAIL persists attempt 3 and returns
 `success: false` without `rework`, routing directly to `blocked` + `hitl`.
@@ -255,7 +279,7 @@ superseded, and operator records; restarting a runner does not reset them.
 QA PASS can still resolve an active record. This limit is separate from
 `maxRetries` (execution retries) and `maxSelfIterations` (AC corrections).
 The handoff/token `BudgetManager` restores its snapshot from
-`<workspace>/.afk/budgets/` per canonical work item. Handoff rounds and native
+`~/.afk/workspaces/<workspace hash>/budgets/` per canonical work item. Handoff rounds and native
 harness token usage persist across runs; session IDs are deduplicated and a
 corrupt snapshot fails closed before a new agent execution starts.
 
@@ -270,8 +294,8 @@ status, phase, heartbeat, progress, and diagnostics. A heartbeat older than the
 freshness threshold is displayed as runtime `stale`; it does not mutate the
 Provider Backlog lifecycle state.
 
-Desktop reads `.afk/work-item-runs.json` from the execution workspace located
-by canonical `workItemId`. These records contain Worker launch receipts, not
+Desktop reads `work-item-runs.json` from the system data directory for the
+execution workspace located by canonical `workItemId`. These records contain Worker launch receipts, not
 Provider lifecycle state. Runtime records must explicitly name their workspace;
 Desktop joins them by exact `backlogId`, execution workspace and provider.
 Missing or malformed runtime data leaves the Backlog visible with an explicit

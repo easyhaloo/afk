@@ -33,7 +33,7 @@ Provider Backlog owns business identity and lifecycle. `BacklogItem.id` is
 recorded as `Run.workItemId` and runtime/event `backlogId`; `runId` identifies
 only one attempt. Runtime heartbeat freshness is diagnostic: `stale` never
 changes the Provider Backlog state. Desktop launch records in
-the execution workspace's `.afk/work-item-runs.json` are Worker launch receipts,
+`~/.afk/workspaces/<workspace-hash>/work-item-runs.json` are Worker launch receipts,
 not execution or business-state evidence.
 
 | 环境变量 | 默认值 | 用途 |

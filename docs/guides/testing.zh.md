@@ -23,8 +23,8 @@ AFK TUI 基于 React + Ink 构建，采用分层测试策略。
 **模式**：直接实例化类，调用方法，断言结果
 
 ```typescript
-// apps/cli/src/tui/shared/Keyboard.test.ts
-import { KeyboardDispatcher } from './Keyboard';
+// apps/cli/src/tui/shared/keyboard.test.ts
+import { KeyboardDispatcher } from './index';
 
 it('dispatches escape to global handler', () => {
   const dispatcher = new KeyboardDispatcher();

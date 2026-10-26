@@ -1,3 +1,4 @@
+import { workspaceStateDirectory } from "@afk/runtime/infrastructure/workspace";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -19,8 +20,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  vi.unstubAllEnvs();
   await rm(directory, { recursive: true, force: true });
+  vi.unstubAllEnvs();
 });
 
 async function saveNode() {
@@ -31,7 +32,7 @@ async function saveNode() {
 describe("workflow definition persistence", () => {
   it("rejects clearing the final managed node and keeps the saved definition intact", async () => {
     const saved = await saveNode();
-    const templatePath = path.join(directory, ".afk", "workflows", "afk-control-workflow.yml");
+    const templatePath = path.join(workspaceStateDirectory(), "workflows", "afk-control-workflow.yml");
     const configBefore = await readFile(saved.configPath, "utf8");
     const templateBefore = await readFile(templatePath, "utf8");
 
@@ -47,8 +48,8 @@ describe("workflow definition persistence", () => {
   it("rejects a new empty managed workflow before writing any files", async () => {
     const current = await snapshot(directory);
     await expect(saveWorkflowConfig(directory, { ...current.workflow, templateName: "afk-control-workflow", canvasNodes: [] })).rejects.toThrow("自定义工作流至少需要一个步骤");
-    await expect(readFile(path.join(directory, ".afk", "config.yml"))).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(readFile(path.join(directory, ".afk", "workflows", "afk-control-workflow.yml"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(path.join(workspaceStateDirectory(), "config.yml"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(path.join(workspaceStateDirectory(), "workflows", "afk-control-workflow.yml"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rediscovers the saved step order, roles, providers and dependencies after replacing nodes", async () => {
@@ -64,14 +65,14 @@ describe("workflow definition persistence", () => {
       { id: "review", role: "reviewer", provider: "claude-code", dependsOn: [] },
       { id: "fix", role: "implementer", provider: "codex", dependsOn: ["review"] },
     ]);
-    expect(load(await readFile(path.join(directory, ".afk", "workflows", "afk-control-workflow.yml"), "utf8"))).toMatchObject({
+    expect(load(await readFile(path.join(workspaceStateDirectory(), "workflows", "afk-control-workflow.yml"), "utf8"))).toMatchObject({
       steps: [{ id: "review", prompt: nodes[0].prompt }, { id: "fix", prompt: nodes[1].prompt }],
     });
   });
 
   it("allows selecting a built-in template without custom nodes and preserves existing custom definitions", async () => {
     const saved = await saveNode();
-    const templatePath = path.join(directory, ".afk", "workflows", "afk-control-workflow.yml");
+    const templatePath = path.join(workspaceStateDirectory(), "workflows", "afk-control-workflow.yml");
     const templateBefore = await readFile(templatePath, "utf8");
     await saveWorkflowConfig(directory, { ...saved, templateName: "issue-implementation", canvasNodes: [] });
     const reopened = await snapshot(directory);
@@ -82,8 +83,8 @@ describe("workflow definition persistence", () => {
   });
 
   it("preserves unrelated project configuration when saving a definition", async () => {
-    await mkdir(path.join(directory, ".afk"));
-    await writeFile(path.join(directory, ".afk", "config.yml"), "tracker:\n  platform: github\n  projectKey: acme/api\n");
+    await mkdir(workspaceStateDirectory(), { recursive: true });
+    await writeFile(path.join(workspaceStateDirectory(), "config.yml"), "tracker:\n  platform: github\n  projectKey: acme/api\n");
     const saved = await saveNode();
     expect(load(await readFile(saved.configPath, "utf8"))).toMatchObject({ tracker: { platform: "github", projectKey: "acme/api" } });
   });

@@ -69,8 +69,7 @@ are configured.
 ### Local tracker index
 
 AFK keeps a local index of the provider projects it has worked with, in
-the workspace: `<workspace>/.afk/tracker-projects.json`, or
-`~/.afk/tracker-projects.json` when no workspace is configured. Every backlog
+`~/.afk/tracker-projects.json`, shared across workspaces. Every backlog
 listing, issue lookup, inventory and execution writes what it saw: the
 provider project, the repository it was reached from, and the issues it
 touched.

@@ -1,7 +1,8 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { hostname } from 'node:os';
-import { lstat, mkdir, open, readFile, rename, unlink, type FileHandle } from 'node:fs/promises';
+import { link, lstat, mkdir, open, readFile, rename, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { loadWorkItemExecution, type WorkItemExecution } from '@afk/application';
@@ -21,14 +22,15 @@ import { JsonlEventStore } from '../../infrastructure/observability/jsonl-event-
 import { createRunObserver } from '../../infrastructure/observability/run-observer-factory.js';
 import { RunObserver } from '../../observability/run-observer.js';
 import { projectWorkItemExecution } from '../../observability/work-item-execution-projection.js';
-import { readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
+import { parseExecutionManifest, readExecutionManifest, type ResolvedExecutionManifest } from './execution-manifest.js';
+import { executionManifestPath, executionWorkspacePath } from '../../infrastructure/workspace.js';
 import { resolveWorkflowRunRequest, type WorkflowRunRequest } from './run-request.js';
 import { withLogContext } from '../../infrastructure/io/index.js';
 
 export interface ExecuteWorkItemInput {
   workItemId: string;
   executionId?: string;
-  manifestPath: string;
+  manifestPath?: string;
   template?: string;
   project?: string;
 }
@@ -209,6 +211,44 @@ async function lookupWorkItem(id: string): Promise<GlobalWorkItem> {
   return item;
 }
 
+async function resolveManifest(input: ExecuteWorkItemInput, dependencies: ExecuteWorkItemDependencies, create = true): Promise<ResolvedExecutionManifest> {
+  const workItemId = parseWorkItemId(input.workItemId).id;
+  const manifestPath = input.manifestPath ?? executionManifestPath(workItemId);
+  if (create && !input.manifestPath && !dependencies.readManifest) {
+    try {
+      await lstat(manifestPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const item = await (dependencies.lookupWorkItem ?? lookupWorkItem)(workItemId);
+      if (item.id !== workItemId || !item.managed || !item.executionEligible) throw new Error(`work item ${workItemId} is not executable`);
+      const project = item.project;
+      const name = project.projectKey.split('/').at(-1)!;
+      const manifest = parseExecutionManifest({
+        schemaVersion: 1, workItemId, providerBacklogId: String(item.issueNumber),
+        tracker: { platform: project.platform, projectKey: project.projectKey,
+          ...(project.providerHost ? { providerHost: project.providerHost } : {}),
+          ...(project.providerProjectId ? { providerProjectId: project.providerProjectId } : {}) },
+        workingBranch: item.branchName,
+        repositories: [{ platform: project.platform, projectKey: project.projectKey,
+          ...(project.providerHost ? { providerHost: project.providerHost } : {}),
+          ...(project.providerProjectId ? { providerProjectId: project.providerProjectId } : {}),
+          name, checkoutPath: `repositories/${name}`, baseBranch: project.defaultBranch ?? 'main', workingBranch: item.branchName, primary: true }],
+      }, { manifestPath, backlogId: workItemId });
+      await mkdir(workspaceDataDirectory(executionWorkspacePath(workItemId)), { recursive: true });
+      const temporaryPath = `${manifestPath}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporaryPath, `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+        try { await link(temporaryPath, manifestPath); }
+        catch (writeError) { if ((writeError as NodeJS.ErrnoException).code !== 'EEXIST') throw writeError; }
+      } finally {
+        await unlink(temporaryPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
+      }
+    }
+  }
+  if (create) await mkdir(executionWorkspacePath(workItemId), { recursive: true });
+  return (dependencies.readManifest ?? readExecutionManifest)(manifestPath, workItemId);
+}
+
 async function createContext(manifest: ResolvedExecutionManifest, input: ExecuteWorkItemInput, config: WorkflowConfig) {
   const request = await resolveWorkflowRunRequest({
     backlogId: input.workItemId,
@@ -266,8 +306,8 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
   const observer = dependencies.recordAudit ? undefined : new RunObserver({ events: new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR }) });
   const recordAudit = dependencies.recordAudit ?? ((auditContext: ObservationContext, data: RunEventData) => observer!.record(auditContext, data));
   const audit = async (data: RunEventData) => { await recordAudit(context, data); };
-  const manifest = await (dependencies.readManifest ?? readExecutionManifest)(input.manifestPath, workItemId);
-  const directory = join(manifest.workspaceRoot, '.afk', 'executions');
+  const manifest = await resolveManifest(input, dependencies);
+  const directory = join(workspaceDataDirectory(manifest.workspaceRoot), 'executions');
   await mkdir(directory, { recursive: true });
   const lockPath = join(directory, `${encodeWorkItemIdForPath(workItemId)}.lock`);
   const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
@@ -396,7 +436,7 @@ async function executeWorkItemObserved(input: ExecuteWorkItemInput, dependencies
 async function journalPublication(manifest: ResolvedExecutionManifest, executionId: string, workItemId: string): Promise<{ requested: boolean; published?: { id: string; url: string } }> {
   let contents: string;
   try {
-    contents = await readFile(join(manifest.workspaceRoot, '.afk', 'executions', `${executionId}.jsonl`), 'utf8');
+    contents = await readFile(join(workspaceDataDirectory(manifest.workspaceRoot), 'executions', `${executionId}.jsonl`), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { requested: false };
     throw error;
@@ -427,9 +467,9 @@ export async function reconcileWorkItemMerge(input: ExecuteWorkItemInput, depend
   const workItemId = parseWorkItemId(input.workItemId).id;
   const executionId = input.executionId;
   if (!executionId || !executionIdPattern.test(executionId)) throw new Error('valid executionId is required');
-  const manifest = await (dependencies.readManifest ?? readExecutionManifest)(input.manifestPath, workItemId);
-  const lockPath = join(manifest.workspaceRoot, '.afk', 'executions', `${encodeWorkItemIdForPath(workItemId)}.lock`);
-  await mkdir(join(manifest.workspaceRoot, '.afk', 'executions'), { recursive: true });
+  const manifest = await resolveManifest(input, dependencies, false);
+  const lockPath = join(workspaceDataDirectory(manifest.workspaceRoot), 'executions', `${encodeWorkItemIdForPath(workItemId)}.lock`);
+  await mkdir(join(workspaceDataDirectory(manifest.workspaceRoot), 'executions'), { recursive: true });
   const lock = await acquireLock(lockPath, workItemId, executionId, dependencies.lockProbe ?? defaultLockProbe);
   try {
     const store = new JsonlEventStore({ root: process.env.AFK_EVENT_STORE_DIR });

@@ -1,27 +1,20 @@
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { parseWorkItemId } from '../domain/work-item/identity.js';
+import { resolveWorkspaceRoot, workspaceDataDirectory } from '../shared/workspace-paths.js';
+export { resolveWorkspaceRoot, workspaceStateDirectory, workspaceDataDirectory } from '../shared/workspace-paths.js';
 
-/**
- * AFK workspace resolution.
- *
- * The workspace is the directory that holds the repositories a user works
- * with. `AFK_WORKSPACE` names it; the desktop client sets it from its
- * workspace preference and passes it to every AFK process it starts. Without
- * it, AFK's own home directory is the workspace.
- *
- * Workspace-local state lives in `<workspace>/.afk/`, which is the convention
- * the desktop client already uses for runs and execution manifests. The home
- * directory is already that directory, so the default needs no extra path.
- */
-
-/** The workspace root directory. */
-export function resolveWorkspaceRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const configured = env.AFK_WORKSPACE?.trim();
-  return configured ? resolve(configured) : join(homedir(), '.afk');
+export function executionWorkspacePath(workItemId: string, baseDirectory = resolveWorkspaceRoot()): string {
+  if (workItemId.includes(':') || workItemId.includes('#')) parseWorkItemId(workItemId);
+  else if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(workItemId) || workItemId.includes('..')) {
+    throw new Error('work item ID is invalid');
+  }
+  const segments = workItemId.split(/[:/#]+/);
+  if (segments.some(segment => !/^[A-Za-z0-9._-]+$/.test(segment) || segment === '.' || segment === '..')) {
+    throw new Error('work item ID produces an invalid workspace directory');
+  }
+  return join(resolve(baseDirectory), ...segments);
 }
 
-/** The directory AFK keeps workspace-local state in. */
-export function workspaceStateDirectory(env: NodeJS.ProcessEnv = process.env): string {
-  const configured = env.AFK_WORKSPACE?.trim();
-  return configured ? join(resolve(configured), '.afk') : join(homedir(), '.afk');
+export function executionManifestPath(workItemId: string): string {
+  return join(workspaceDataDirectory(executionWorkspacePath(workItemId)), 'execution-manifest.json');
 }

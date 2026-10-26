@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { simpleGit } from 'simple-git';
 import { MultiRepositoryPreparer } from './multi-repository-preparer.js';
 import { resolveWorkflowRunRequest } from './run-request.js';
+import { executionWorkspacePath } from '../../infrastructure/workspace.js';
 
 async function createRemote(
   root: string,
@@ -147,7 +148,7 @@ describe('multi-repository execution manifest integration', () => {
   it('prepares both repositories from their own bases, cleans success and preserves failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-multi-repository-integration-'));
     try {
-      const workspaceRoot = join(root, 'workspace');
+      const workspaceRoot = executionWorkspacePath('WI-2026-018');
       const apiRoot = join(workspaceRoot, 'repositories', 'api');
       const webRoot = join(workspaceRoot, 'repositories', 'web');
       const manifestPath = join(workspaceRoot, '.afk', 'execution-manifest.json');

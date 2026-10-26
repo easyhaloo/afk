@@ -23,8 +23,8 @@ AFK TUI is built with React + Ink and uses a layered testing strategy.
 **Pattern**: Instantiate classes directly, call methods, assert results
 
 ```typescript
-// apps/cli/src/tui/shared/Keyboard.test.ts
-import { KeyboardDispatcher } from './Keyboard';
+// apps/cli/src/tui/shared/keyboard.test.ts
+import { KeyboardDispatcher } from './index';
 
 it('dispatches escape to global handler', () => {
   const dispatcher = new KeyboardDispatcher();

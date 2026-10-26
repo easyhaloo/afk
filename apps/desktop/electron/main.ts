@@ -4,14 +4,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { registerIpcHandlers } from "./ipc/register-handlers.js";
 import { readWorkspacePreference } from "./services/workspace-preference-service.js";
 import { createMainWindow } from "./window/main-window.js";
+import { workspaceStateDirectory } from "@afk/runtime/infrastructure/workspace";
 
 /** Electron bootstrap: lifecycle and module composition only. */
 const readyFile = !app.isPackaged ? process.env.AFK_CONTROL_READY_FILE : undefined;
-if (readyFile) {
-  const userData = path.join(path.dirname(readyFile), "user-data");
-  mkdirSync(userData, { recursive: true });
-  app.setPath("userData", userData);
-}
+const userData = readyFile ? path.join(path.dirname(readyFile), "user-data") : path.join(workspaceStateDirectory(), "desktop");
+mkdirSync(userData, { recursive: true });
+app.setPath("userData", userData);
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {

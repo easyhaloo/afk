@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { generateWorkflowGraph } from '@afk/runtime/application/visualizations/workflow-graph';
@@ -15,7 +16,7 @@ function validateRequest(request: WorkflowGraphGenerateRequest): void {
 export class WorkflowGraphService {
   async status(workspace: string, templateId: string): Promise<WorkflowGraphStatus> {
     if (!path.isAbsolute(workspace) || !idPattern.test(templateId)) throw new Error('invalid graph status request');
-    const root = path.join(workspace, '.afk', 'cache', 'archify', 'workflow', templateId);
+    const root = path.join(workspaceDataDirectory(workspace), 'cache', 'archify', 'workflow', templateId);
     const candidates = await fs.readdir(root, { withFileTypes: true }).catch(() => []);
     const trusted = candidates.filter((entry) => entry.isDirectory()).sort((a, b) => b.name.localeCompare(a.name))[0];
     if (!trusted) return { state: 'missing', templateId, diagnostics: [] };

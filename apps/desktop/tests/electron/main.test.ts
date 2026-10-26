@@ -1,4 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { workspaceStateDirectory } from "@afk/runtime/infrastructure/workspace";
+import path from "node:path";
 
 const bootstrap = vi.hoisted(() => ({
   packaged: false,
@@ -50,12 +52,12 @@ it("isolates the development instance before locking and signals readiness only 
   expect(bootstrap.write).toHaveBeenCalledWith("/checkout/.dev/ready", String(process.pid));
 });
 
-it("does not override packaged user data or publish development readiness", async () => {
+it("keeps packaged application data in AFK home without publishing development readiness", async () => {
   bootstrap.packaged = true;
   vi.stubEnv("AFK_CONTROL_READY_FILE", "/checkout/.dev/ready");
   await import("../../electron/main.js");
   await bootstrap.startup;
-  expect(bootstrap.setPath).not.toHaveBeenCalled();
+  expect(bootstrap.setPath).toHaveBeenCalledWith("userData", path.join(workspaceStateDirectory(), "desktop"));
   expect(bootstrap.write).not.toHaveBeenCalled();
 });
 

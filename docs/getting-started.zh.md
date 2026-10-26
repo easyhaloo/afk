@@ -65,9 +65,8 @@ afk backlog show --id 123
 
 ### 本地 tracker 索引
 
-AFK 把接触过的 provider 项目记在本地索引里，位置随工作区而定：
-`<workspace>/.afk/tracker-projects.json`；未配置工作区时为
-`~/.afk/tracker-projects.json`。每次 backlog 列表、
+AFK 把接触过的 provider 项目记在跨工作区共享的本地索引
+`~/.afk/tracker-projects.json` 中。每次 backlog 列表、
 issue 查询、inventory 和执行都会写入它看到的内容：provider 项目、访问时
 所在的仓库、以及涉及的 issue。
 

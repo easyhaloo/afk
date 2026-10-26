@@ -1,6 +1,8 @@
 import { getGlabToken } from '../gitlab/glab-config.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { resolveWorkspaceRoot } from '../workspace.js';
 import { load as loadYaml } from 'js-yaml';
 import {
   assertCodexEndpoint,
@@ -101,7 +103,7 @@ const DEFAULT_SCHEDULER: SchedulerConfig = {
 };
 
 const DEFAULT_WORKTREE: WorktreeConfig = {
-  baseDir: '/tmp/afk-worktrees',
+  baseDir: join(resolveWorkspaceRoot(), 'worktrees'),
 };
 
 // ─── Loaders ──────────────────────────────────────────────────────────────────
@@ -125,7 +127,7 @@ function loadGitLabConfig(): GitLabConfig {
 }
 
 export function loadWorkflowConfig(
-  projectRoot = process.cwd(),
+  projectRoot = homedir(),
   env: NodeJS.ProcessEnv = process.env,
 ): WorkflowConfig {
   const file = readProjectConfig(projectRoot);

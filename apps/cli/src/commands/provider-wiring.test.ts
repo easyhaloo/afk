@@ -4,6 +4,8 @@ import { registerBacklogCommands } from './backlog.js';
 import { registerQACommands } from './qa.js';
 import { createManagementProviders } from '@afk/runtime/infrastructure/provider/tracker-provider-factory';
 import { QARunner } from '@afk/runtime/application/runners/qa-runner';
+import { executionWorkspacePath } from '@afk/runtime/infrastructure/workspace';
+import { join } from 'node:path';
 
 vi.mock('@afk/runtime/infrastructure/provider/tracker-provider-factory', () => ({
   createManagementProviders: vi.fn(),
@@ -48,21 +50,24 @@ describe('canonical command provider wiring', () => {
   });
 
   it('uses the canonical management bundle for QA without claiming work', async () => {
-    const backlog = { get: vi.fn().mockResolvedValue({ id: 'item-1', state: 'verification' }) };
+    const backlog = { get: vi.fn().mockResolvedValue({ id: '42', state: 'verification' }) };
     const providers = { backlog };
     const processItem = vi.fn().mockResolvedValue({ success: true, mrUrl: 'https://example.com/mr/1' });
     vi.mocked(createManagementProviders).mockResolvedValue(providers as never);
     vi.mocked(QARunner).mockImplementation(() => ({ process: processItem }) as never);
 
-    await runCommand(registerQACommands, 'qa', '--backlog-id', 'item-1', '--project', 'group/repo', '--mode', 'interactive');
+    await runCommand(registerQACommands, 'qa', '--backlog-id', 'github:group/repo#42', '--mode', 'interactive');
 
-    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', process.cwd(), 'github', undefined);
-    expect(backlog.get).toHaveBeenCalledWith('item-1');
+    const workspaceRoot = executionWorkspacePath('github:group/repo#42');
+    expect(createManagementProviders).toHaveBeenCalledWith('group/repo', join(workspaceRoot, 'repositories/repo'), 'github', undefined);
+    expect(backlog.get).toHaveBeenCalledWith('42');
     expect(QARunner).toHaveBeenCalledWith(providers, expect.anything(), {
       executionMode: 'interactive',
       agentProvider: undefined,
       agentRuntime: expect.anything(),
+      projectRoot: workspaceRoot,
+      repositories: expect.arrayContaining([expect.objectContaining({ repoRoot: join(workspaceRoot, 'repositories/repo'), primary: true })]),
     });
-    expect(processItem).toHaveBeenCalledWith('item-1');
+    expect(processItem).toHaveBeenCalledWith('42');
   });
 });

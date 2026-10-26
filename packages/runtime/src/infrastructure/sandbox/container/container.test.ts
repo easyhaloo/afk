@@ -9,6 +9,7 @@ import { join } from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { promises as fsp } from 'fs';
+import { workspaceDataDirectory } from '../../workspace.js';
 
 const PROCESS_METADATA = { provider: 'claude-code', transport: 'process' } as const;
 
@@ -388,6 +389,11 @@ describe('ContainerSandboxProvider — auto engine detection', () => {
       });
 
       expect(createOptions?.mounts).toContainEqual({ hostPath: workspaceRoot, containerPath: '/workspace' });
+      const dataDirectory = workspaceDataDirectory(primary);
+      expect(createOptions?.mounts).toContainEqual({ hostPath: join(dataDirectory, 'session'), containerPath: '/afk/session' });
+      expect(createOptions?.mounts).toContainEqual({ hostPath: join(dataDirectory, 'result'), containerPath: '/afk/result' });
+      expect(createOptions?.mounts).toContainEqual({ hostPath: dataDirectory, containerPath: dataDirectory });
+      expect(fs.existsSync(join(primary, '.afk'))).toBe(false);
       expect(createOptions?.workdir).toBe('/workspace/repositories/api');
       expect(secondary.startsWith(workspaceRoot)).toBe(true);
       await sandbox.close();

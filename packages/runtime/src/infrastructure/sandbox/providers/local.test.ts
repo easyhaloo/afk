@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../workspace.js';
 import { access, mkdir, mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -147,8 +148,8 @@ describe('LocalSandboxProvider', () => {
 
   it('clears a stale status marker before launching an interactive session', async () => {
     const worktreePath = await mkdtemp(join(tmpdir(), 'afk-local-status-'));
-    const statusPath = join(worktreePath, '.afk', 'claude-status.json');
-    await mkdir(join(worktreePath, '.afk'));
+    const statusPath = join(workspaceDataDirectory(worktreePath), 'claude-status.json');
+    await mkdir(workspaceDataDirectory(worktreePath), { recursive: true });
     await writeFile(statusPath, '{"stale":true}');
     const tmux = {
       createSession: vi.fn(async () => ({})),

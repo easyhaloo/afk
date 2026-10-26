@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '@afk/runtime/infrastructure/workspace';
 import { createHash } from 'node:crypto';
 import { promises as fs, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -165,7 +166,7 @@ async function findStateRoot(workspace: string, executionId: string): Promise<st
   let current = workspace;
   for (let depth = 0; depth < 8; depth += 1) {
     try {
-      await fs.access(join(current, '.afk', 'executions', `${executionId}.jsonl`));
+      await fs.access(join(workspaceDataDirectory(current), 'executions', `${executionId}.jsonl`));
       return current;
     } catch {
       const parent = dirname(current);
@@ -252,7 +253,7 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
   const workItemId = options.workItemId ?? events.find(event => event.context.workItemId)?.context.workItemId;
   if (!workItemId) throw new Error(`cannot infer work item for run '${options.runId}'`);
   const stateRoot = await findStateRoot(options.workspace, options.executionId);
-  const journalPath = join(stateRoot, '.afk', 'executions', `${options.executionId}.jsonl`);
+  const journalPath = join(workspaceDataDirectory(stateRoot), 'executions', `${options.executionId}.jsonl`);
   const auditPath = join(store.root, `${Buffer.from(options.runId, 'utf8').toString('base64url')}.jsonl`);
   const evidence: EvidenceFile[] = [];
   for (const item of [
@@ -298,7 +299,7 @@ async function runRetro(options: RetroOptions): Promise<RetroReport> {
   };
   const inputHash = sha256(stableJson(manifest));
   const retroId = `retro-${inputHash.slice(0, 20)}`;
-  const outputDir = join(stateRoot, '.afk', 'retro', retroId);
+  const outputDir = join(workspaceDataDirectory(stateRoot), 'retro', retroId);
   const existingReportPath = join(outputDir, 'report.json');
   try {
     const existing = reportSchema.parse(JSON.parse(await fs.readFile(existingReportPath, 'utf8')));
@@ -378,7 +379,7 @@ export function registerRetroCommands(program: Command, _context: CommandRegistr
       const executionId = options.executionId ?? options.runId;
       const report = await runRetro({ ...options, executionId });
       const stateRoot = await findStateRoot(options.workspace, executionId);
-      emit({ ...report, htmlPath: join(stateRoot, '.afk', 'retro', report.retroId, reportHtmlFile) }, options.json);
+      emit({ ...report, htmlPath: join(workspaceDataDirectory(stateRoot), 'retro', report.retroId, reportHtmlFile) }, options.json);
     });
 
   retro.command('show <report>')

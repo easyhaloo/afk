@@ -1,10 +1,9 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import os from "node:os";
 import path from "node:path";
 import type { ProviderProjectRef, WorkItemId } from "../../shared/backlog-contract.js";
-import { parseWorkItemId } from "../../shared/backlog-contract.js";
 import { planRepositoryCheckoutPaths } from "../../shared/work-item-run-validation.js";
+import { executionWorkspacePath, resolveWorkspaceRoot, workspaceDataDirectory } from "@afk/runtime/infrastructure/workspace";
 
 export type ExecutionWorkspaceRepository = {
   project: ProviderProjectRef;
@@ -31,34 +30,11 @@ export type ExecutionWorkspaceServiceOptions = {
 };
 
 function defaultBaseDirectory(): string {
-  return path.join(os.homedir(), ".loop-workspace");
-}
-
-function taskDirectoryName(taskId: WorkItemId): string {
-  const canonical = normalizeTaskId(taskId);
-  const segments = canonical.split(/[:/#]+/).filter(Boolean);
-  if (!segments.length) throw new Error("task ID produces an invalid workspace directory");
-  const segmentPattern = /^[A-Za-z0-9._-]+$/;
-  for (const segment of segments) {
-    if (segment === "." || segment === ".." || !segmentPattern.test(segment)) {
-      throw new Error(`task ID produces an invalid workspace segment: ${segment}`);
-    }
-  }
-  return segments.join(path.sep);
-}
-
-function normalizeTaskId(taskId: WorkItemId): WorkItemId {
-  if (typeof taskId !== "string" || taskId.trim() !== taskId || taskId.length > 160) throw new Error("task ID is invalid");
-  try {
-    return parseWorkItemId(taskId);
-  } catch {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(taskId) || taskId.includes("..")) throw new Error("task ID is invalid");
-    return taskId;
-  }
+  return resolveWorkspaceRoot();
 }
 
 function metadataPath(root: string): string {
-  return path.join(root, "workspace.json");
+  return path.join(workspaceDataDirectory(root), "workspace.json");
 }
 
 const metadataWrites = new Map<string, Promise<void>>();
@@ -92,11 +68,11 @@ export function createExecutionWorkspaceService(options: ExecutionWorkspaceServi
   const now = options.now ?? (() => new Date());
 
   function rootFor(taskId: WorkItemId): string {
-    return path.join(baseDirectory, taskDirectoryName(taskId));
+    return executionWorkspacePath(taskId, baseDirectory);
   }
 
   async function allocate(taskId: WorkItemId, projects: readonly (ProviderProjectRef & { checkoutPath?: string })[] = []): Promise<ExecutionWorkspaceMetadata> {
-    const canonicalTaskId = normalizeTaskId(taskId);
+    const canonicalTaskId = taskId;
     const root = rootFor(canonicalTaskId);
     const repositoriesRoot = path.join(root, "repositories");
     const checkoutPaths = planRepositoryCheckoutPaths(projects);
@@ -105,12 +81,13 @@ export function createExecutionWorkspaceService(options: ExecutionWorkspaceServi
       path: path.join(root, ...checkoutPaths[index].split("/")),
     }));
     const artifacts = path.join(root, "artifacts");
-    const runtime = path.join(root, "runtime");
-    const logs = path.join(root, "logs");
-    const diagnostics = path.join(root, "diagnostics");
+    const runtime = path.join(workspaceDataDirectory(root), "runtime");
+    const logs = path.join(workspaceDataDirectory(root), "logs");
+    const diagnostics = path.join(workspaceDataDirectory(root), "diagnostics");
     const metadataFile = metadataPath(root);
 
     await mkdir(baseDirectory, { recursive: true });
+    await mkdir(path.dirname(metadataFile), { recursive: true });
     await mkdir(repositoriesRoot, { recursive: true });
     await Promise.all(repositories.map(repository => mkdir(repository.path, { recursive: true })));
     await mkdir(artifacts, { recursive: true });

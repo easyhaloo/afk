@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { describe, expect, it, vi } from 'vitest';
 import { QARunner } from './qa-runner.js';
 import { createAgentProvider, registerAgentProvider } from '../../domain/agents/index.js';
@@ -600,7 +601,7 @@ describe('QARunner execution boundary', () => {
     try {
       const store = new BudgetStore(root, '60');
       await store.save({ used: condition === 'handoffs' ? 1 : 0, tokens: 100, sessions: { session: 100 } });
-      if (condition === 'corrupt') await writeFile(join(root, '.afk', 'budgets', '60.json'), '{}');
+      if (condition === 'corrupt') await writeFile(join(workspaceDataDirectory(root), 'budgets', '60.json'), '{}');
       const f = fixture();
       const runner = new QARunner(f.providers, { ...config, goalBudget: condition === 'tokens' ? 100 : 1000 }, {
         sandboxProvider: f.sandboxProvider, agentProvider: f.agentProvider, projectRoot: root,

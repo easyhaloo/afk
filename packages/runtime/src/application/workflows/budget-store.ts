@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../../infrastructure/workspace.js';
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -21,7 +22,7 @@ export class BudgetStore {
   private readonly path: string;
 
   constructor(root: string, private readonly workItemKey: string) {
-    this.path = join(root, '.afk', 'budgets', `${encodeURIComponent(workItemKey)}.json`);
+    this.path = join(workspaceDataDirectory(root), 'budgets', `${encodeURIComponent(workItemKey)}.json`);
   }
 
   async load(): Promise<BudgetSnapshot | undefined> {

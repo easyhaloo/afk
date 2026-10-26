@@ -1,3 +1,4 @@
+import { workspaceDataDirectory } from '../workspace.js';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,8 +15,8 @@ describe('getTokenUsage', () => {
   it('aggregates a real Claude Code statusline payload', async () => {
     const root = await mkdtemp(join(tmpdir(), 'afk-status-'));
     roots.push(root);
-    await mkdir(join(root, '.afk'));
-    await writeFile(join(root, '.afk', STATUS_FILENAME), JSON.stringify({
+    await mkdir(workspaceDataDirectory(root), { recursive: true });
+    await writeFile(join(workspaceDataDirectory(root), STATUS_FILENAME), JSON.stringify({
       session_id: 'session-1',
       model: { display_name: 'MiniMax-M2.7' },
       context_window: {
@@ -45,8 +46,8 @@ describe('getTokenUsage', () => {
     roots.push(root);
 
     await expect(getTokenUsage(root)).resolves.toMatchObject({ total: 0, ratio: 0 });
-    await mkdir(join(root, '.afk'));
-    await writeFile(join(root, '.afk', STATUS_FILENAME), '{not-json');
+    await mkdir(workspaceDataDirectory(root), { recursive: true });
+    await writeFile(join(workspaceDataDirectory(root), STATUS_FILENAME), '{not-json');
     await expect(getTokenUsage(root)).resolves.toMatchObject({ total: 0, ratio: 0 });
   });
 });

@@ -13,7 +13,7 @@
 ## 功能特性
 
 - **跨平台** — 统一的 GitLab 和 GitHub CLI（issues、MRs/PRs）
-- **Skills 套件** — 22 个 Claude Code skills，覆盖完整开发周期
+- **Skills 套件** — 24 个 Claude Code skills，覆盖完整开发周期
 - **TUI 仪表盘** — 交互式 Issue 追踪仪表盘
 - **后台自动化** — 基于 tmux 的工作流调度器
 - **TDD 集成** — 内置测试驱动开发方法论
@@ -131,6 +131,7 @@ afk signal goal-complete --summary "<summary>"
 | `/afk-research` | 技术调研 | 编码前需要理解现有实现 |
 | `/afk-prototype` | 方案验证 | 承诺投入前验证技术方案 |
 | `/afk-implement` | TDD 实现 | 清晰实现目标 |
+| `/afk-change-driven-testing` | 变更驱动测试 | 为本次修改涉及的业务流程渐进式补充回归测试 |
 | `/afk-qa` | 独立验证 | MR/PR 准备合并 |
 | `/afk-diagnose` | 诊断 | 具体、可复现的故障 |
 | `/afk-branch-migrate` | 跨分支迁移 | 在分歧分支间 cherry-pick |
@@ -145,6 +146,7 @@ afk signal goal-complete --summary "<summary>"
 | `/afk-llm-dev-guide` | LLM 应用设计指南 | LLM 应用架构与上下文工程 |
 | `/jev-agent-guard` | Agent 检查点 | 为 Claude Code、Codex、OpenCode 安装 Jev 检查点 |
 | `/software-complexity-governance` | 复杂度治理 | 度量圈复杂度、耦合度与技术债 |
+| `/wiki` | 本地知识管理 | 检索、读取、沉淀和检查项目知识 |
 
 详细文档请查看 [Skills 指南](docs/guides/skills.zh.md)。
 

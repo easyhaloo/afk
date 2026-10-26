@@ -2,15 +2,15 @@
 name: afk-change-driven-testing
 description: >-
   Plans and adds focused regression tests for the business flow affected by a
-  current code change. Use when modifying existing business logic, fixing a
-  bug, or extending a legacy flow with missing or weak unit, integration, or
-  E2E coverage. Uses parallel read-only exploration and a scoped TEST-PLAN.md;
-  not for repository-wide test-coverage projects.
+  existing code that lacks adequate unit, integration, or E2E tests. Adds
+  tests incrementally without changing production behavior. Uses parallel
+  read-only exploration and a scoped TEST-PLAN.md; not for feature development,
+  bug fixing, or repository-wide coverage projects.
 ---
 
 # Change-Driven Testing
 
-**Goal:** Make each code change add a small, evidence-based increment of regression protection for the affected business behavior, without expanding into unrelated coverage work.
+**Goal:** Incrementally add meaningful tests for existing code that lacks test protection. This skill adds or adjusts tests only; it does not implement features, fix production bugs, or refactor production code.
 
 ## Workflow
 
@@ -27,7 +27,7 @@ Always produce `TEST-PLAN.md`. Produce `TEST-ANALYSIS.md` when the task benefits
 
 ### 2. Explore in parallel with subagents
 
-Before changing production code or tests, identify the changed behavior and dispatch independent, read-only exploration tasks to subagents when subagent support is available. Prefer parallel work for:
+Before changing tests, identify the target existing behavior and dispatch independent, read-only exploration tasks to subagents when subagent support is available. Production code is read-only throughout this skill. Prefer parallel work for:
 - **Business-flow explorer:** trace entry points, callers/callees, state transitions, business invariants, and downstream effects.
 - **Test-coverage explorer:** locate relevant unit/integration/E2E tests, fixtures, commands, conventions, and gaps in assertions.
 - **Boundary-and-risk explorer:** inspect affected persistence, APIs, messaging, permissions, external adapters, error paths, and plausible regressions.
@@ -40,12 +40,12 @@ Parallelize independent discovery, not conflicting edits. The main agent owns ta
 
 Read the relevant source and existing tests yourself; treat subagent findings as evidence to verify, not unquestionable truth. Trace the flow only far enough to identify meaningful boundaries, state changes, data writes, and external effects.
 
-Derive expected behavior from acceptance criteria, domain rules, API contracts, invariants, and confirmed examples. Distinguish:
+Derive expected behavior from available documentation, domain rules, API contracts, invariants, and confirmed examples. Distinguish:
 - **Confirmed requirement** — supported by an explicit source.
 - **Observed behavior** — what the current implementation does, not necessarily what it should do.
 - **Assumption / open question** — not yet confirmed.
 
-Do not encode a suspected legacy bug as desired behavior. Ask the user only when an unresolved business rule changes the expected result or implementation direction.
+Do not treat observed behavior as the specification or encode a suspected legacy bug as correct behavior. If a test exposes a likely production defect, record the evidence and expected/actual behavior in the report; do not fix it here. Ask the user only when an unresolved business rule prevents a reliable test expectation.
 
 ### 4. Write `TEST-PLAN.md` before implementation
 
@@ -79,11 +79,15 @@ If investigation changes the scope, update `TEST-PLAN.md` before proceeding with
 
 Do not add all three layers by default. Do not mock the component or behavior under test. Prefer the smallest test set that would catch plausible regressions at the changed boundary.
 
-### 6. Implement the planned test increment
+### 6. Add tests for existing behavior
 
-Follow the repository's test conventions and existing implementation workflow. For a new or changed rule, write/update the focused test before implementation when practical. For an existing untested flow, first add characterization tests for confirmed behavior, then change the behavior under test. If production code has already changed, derive assertions from requirements and independent evidence rather than copying the implementation.
+Use characterization testing as the default: write focused tests around confirmed expected behavior of the existing implementation, then run them against the unchanged production code to establish the baseline. The purpose is to add protection, not to change the behavior being protected.
 
-Keep changes within `TEST-PLAN.md`. If a new risk warrants more tests, update the plan first. Do not let multiple subagents edit the same files concurrently. Parallel implementation is allowed only for clearly disjoint files/tasks with explicit ownership and a main-agent integration step.
+Do not require a full Red-Green-Refactor TDD cycle. A test that passes against the current implementation can be a valid outcome when it protects previously untested, correct behavior. When useful, validate test sensitivity with an existing mutation-testing tool, a safe test-level negative control, or another project-supported method; never modify production code merely to manufacture a failing test.
+
+If a test fails, determine whether the cause is a test defect, environment/setup issue, ambiguous requirement, pre-existing failure, or likely production defect. Fix test defects within the plan. Record likely production defects with evidence and leave them for a separate task. Do not change production code, refactor production modules, or silently broaden scope.
+
+Keep all test changes within `TEST-PLAN.md`. If a new test gap warrants expanding scope, update the plan first. The main agent owns test edits and integration; subagents remain read-only during exploration. Parallel test implementation is allowed only for clearly disjoint files with explicit ownership and a main-agent integration step.
 
 ### 7. Run and diagnose
 
@@ -118,6 +122,8 @@ Do not fix unrelated test debt in this task.
 ## Completion Criteria
 
 - `TEST-PLAN.md` was created before test implementation and clearly defines in-scope and out-of-scope work.
+- Only tests and test-supporting artifacts were changed; production code and business behavior were not modified.
+- Existing failures and suspected production defects were documented rather than fixed in this task.
 - The changed business behavior has explicit, meaningful assertions.
 - Important adjacent behavior at risk has regression protection or a documented reason for exclusion.
 - Subagent findings were synthesized and conflicts resolved by the main agent; no conflicting parallel edits remain.
@@ -131,6 +137,8 @@ Do not fix unrelated test debt in this task.
 - MUST NOT assume current behavior is the correct specification.
 - MUST NOT generate tests that only assert a call occurred or that always pass.
 - MUST NOT replace real integration verification with mocks of every dependency.
+- MUST NOT modify production code, fix production defects, add features, or refactor production modules under this skill; record follow-up work separately.
+- MUST NOT require every characterization test to fail before it can be accepted.
 - MUST NOT introduce broad abstractions or production refactors solely to make tests easier without demonstrating the need.
 - MUST NOT create unrelated tests for untouched modules unless the current change puts their behavior at risk.
 - MUST NOT allow parallel subagents to independently expand scope or edit shared files during exploration.

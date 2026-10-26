@@ -4,8 +4,8 @@ description: >-
   Plans and adds focused regression tests for the business flow affected by a
   current code change. Use when modifying existing business logic, fixing a
   bug, or extending a legacy flow with missing or weak unit, integration, or
-  E2E coverage. Uses parallel read-only exploration and a scoped PLAN.md; not
-  for repository-wide test-coverage projects.
+  E2E coverage. Uses parallel read-only exploration and a scoped TEST-PLAN.md;
+  not for repository-wide test-coverage projects.
 ---
 
 # Change-Driven Testing
@@ -16,14 +16,14 @@ description: >-
 
 ### 1. Establish the task workspace and artifact names
 
-Reuse the task/work-item workspace if one already exists. Store artifacts under `<task-workspace>/testing/`. If no task workspace exists, create a task-specific workspace using the repository's established convention; do not invent a competing convention or place generic `PLAN.md` files in the repository root.
+Reuse the task/work-item workspace if one already exists. Store artifacts under `<task-workspace>/testing/`. If no task workspace exists, create a task-specific workspace using the repository's established convention; do not invent a competing convention or place generic test-planning files in the repository root.
 
 Use these stable names:
-- `ANALYSIS.md` — consolidated exploration evidence, existing coverage, gaps, assumptions, and conflicts.
-- `PLAN.md` — approved scope and test plan; must exist before test implementation begins.
-- `REPORT.md` — tests changed, commands and actual results, deviations, and remaining risks.
+- `TEST-ANALYSIS.md` — consolidated exploration evidence, existing coverage, gaps, assumptions, and conflicts.
+- `TEST-PLAN.md` — approved scope and test plan; must exist before test implementation begins.
+- `TEST-REPORT.md` — tests changed, commands and actual results, deviations, and remaining risks.
 
-Always produce `PLAN.md`. Produce `ANALYSIS.md` and `REPORT.md` when the task has enough complexity to benefit from a durable record; for simple changes, keep them concise rather than creating ceremony. Never create one file per subagent: merge findings into the shared artifacts.
+Always produce `TEST-PLAN.md`. Produce `TEST-ANALYSIS.md` and `TEST-REPORT.md` when the task has enough complexity to benefit from a durable record; for simple changes, keep them concise rather than creating ceremony. Never create one file per subagent: merge findings into the shared artifacts.
 
 ### 2. Explore in parallel with subagents
 
@@ -47,9 +47,9 @@ Derive expected behavior from acceptance criteria, domain rules, API contracts, 
 
 Do not encode a suspected legacy bug as desired behavior. Ask the user only when an unresolved business rule changes the expected result or implementation direction.
 
-### 4. Write `PLAN.md` before implementation
+### 4. Write `TEST-PLAN.md` before implementation
 
-Consolidate exploration into `ANALYSIS.md` when useful, then write `PLAN.md` before adding or changing tests. The plan must define the boundary of this task, not a repository-wide testing roadmap.
+Consolidate exploration into `TEST-ANALYSIS.md` when useful, then write `TEST-PLAN.md` before adding or changing tests. The plan must define the boundary of this task, not a repository-wide testing roadmap.
 
 Use this structure:
 
@@ -69,7 +69,7 @@ Use this structure:
 
 Every proposed test case must identify the behavior, expected result, and evidence source. Include the changed rule, important unchanged behavior at risk, relevant boundary/error paths, and regression scenarios tied to this flow. Mark existing tests to reuse/update rather than duplicating them. State why a layer is selected. Explicitly list adjacent but excluded work so the scope can be reviewed.
 
-If investigation changes the scope, update `PLAN.md` before proceeding with the newly discovered work. Do not silently broaden the task. If a requirement is blocked on user clarification, record it and pause only the affected decision.
+If investigation changes the scope, update `TEST-PLAN.md` before proceeding with the newly discovered work. Do not silently broaden the task. If a requirement is blocked on user clarification, record it and pause only the affected decision.
 
 ### 5. Choose the lowest effective test layer
 
@@ -83,7 +83,7 @@ Do not add all three layers by default. Do not mock the component or behavior un
 
 Follow the repository's test conventions and existing implementation workflow. For a new or changed rule, write/update the focused test before implementation when practical. For an existing untested flow, first add characterization tests for confirmed behavior, then change the behavior under test. If production code has already changed, derive assertions from requirements and independent evidence rather than copying the implementation.
 
-Keep changes within `PLAN.md`. If a new risk warrants more tests, update the plan first. Do not let multiple subagents edit the same files concurrently. Parallel implementation is allowed only for clearly disjoint files/tasks with explicit ownership and a main-agent integration step.
+Keep changes within `TEST-PLAN.md`. If a new risk warrants more tests, update the plan first. Do not let multiple subagents edit the same files concurrently. Parallel implementation is allowed only for clearly disjoint files/tasks with explicit ownership and a main-agent integration step.
 
 ### 7. Run and diagnose
 
@@ -93,18 +93,18 @@ Never weaken assertions, skip tests, or alter unrelated production behavior just
 
 ### 8. Report the increment
 
-Write/update `REPORT.md` when useful, and summarize:
+Write/update `TEST-REPORT.md` when useful, and summarize:
 - affected flow and the final scope;
 - tests added, changed, or reused;
 - commands actually executed and their results;
-- deviations from `PLAN.md` and why they were necessary;
+- deviations from `TEST-PLAN.md` and why they were necessary;
 - remaining risks, unexecuted checks, and separate follow-up debt.
 
 Do not fix unrelated test debt in this task.
 
 ## Completion Criteria
 
-- `PLAN.md` was created before test implementation and clearly defines in-scope and out-of-scope work.
+- `TEST-PLAN.md` was created before test implementation and clearly defines in-scope and out-of-scope work.
 - The changed business behavior has explicit, meaningful assertions.
 - Important adjacent behavior at risk has regression protection or a documented reason for exclusion.
 - Subagent findings were synthesized and conflicts resolved by the main agent; no conflicting parallel edits remain.

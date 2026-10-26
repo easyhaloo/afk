@@ -16,8 +16,26 @@ export interface ProviderIssue {
 export interface ProviderCatalog {
   platform: WorkItemPlatform;
   scopeKey: string;
+  /**
+   * Resolve the authenticated account behind this catalog. It is optional
+   * because a catalog may be unable to verify its account; the resolver
+   * reports that as a per-catalog failure instead of aborting the whole set.
+   */
+  getAccountIdentity?: () => Promise<ProviderAccountIdentity>;
   listProjects(): Promise<CatalogPageResult<ProviderProjectRef>>;
   listIssues(project: ProviderProjectRef): Promise<CatalogPageResult<ProviderIssue>>;
+}
+
+export interface ProviderAccountIdentity {
+  platform: WorkItemPlatform;
+  host: string;
+  accountId: string;
+}
+
+export interface ProviderAccountIdentityFailure {
+  platform: WorkItemPlatform;
+  scopeKey: string;
+  message: string;
 }
 
 export type CatalogPageResult<T> = T[] | { items: T[]; error: unknown };

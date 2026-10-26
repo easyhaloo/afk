@@ -13,7 +13,7 @@ vi.mock('../tracker/resolver.js', () => ({
   resolveRemoteTarget: mocks.resolveRemoteTarget,
 }));
 
-import { createGlobalWorkItemCatalogs, createTracker } from './tracker-provider-factory.js';
+import { createGlobalWorkItemCatalogs, createTracker, resolveProviderAccountIdentities } from './tracker-provider-factory.js';
 import type { ProviderCatalog } from '../../domain/work-item/provider-types.js';
 import { toGlobalWorkItem } from '../../domain/work-item/metadata.js';
 
@@ -108,6 +108,61 @@ describe('global provider catalog factory', () => {
       createGitHubCatalog: vi.fn(),
       createGitLabCatalog: vi.fn(),
     })).toThrow('GitHub authentication is required');
+  });
+});
+
+describe('provider account identity resolution', () => {
+  function catalog(overrides: Partial<ProviderCatalog> & Pick<ProviderCatalog, 'platform' | 'scopeKey'>): ProviderCatalog {
+    return {
+      async listProjects() { return []; },
+      async listIssues() { return []; },
+      ...overrides,
+    } as ProviderCatalog;
+  }
+
+  it('keeps the other accounts when one catalog cannot be verified', async () => {
+    const resolution = await resolveProviderAccountIdentities([
+      catalog({
+        platform: 'github',
+        scopeKey: 'github.com',
+        getAccountIdentity: async () => { throw new Error('GitLab API HTTP 500: Internal Server Error'); },
+      }),
+      catalog({
+        platform: 'gitlab',
+        scopeKey: 'gitlab.example',
+        getAccountIdentity: async () => ({ platform: 'gitlab', host: 'gitlab.example', accountId: '456' }),
+      }),
+    ]);
+
+    expect(resolution.identities[0]).toBeUndefined();
+    expect(resolution.identities[1]).toEqual({ platform: 'gitlab', host: 'gitlab.example', accountId: '456' });
+    expect(resolution.failures).toEqual([
+      { platform: 'github', scopeKey: 'github.com', message: 'GitLab API HTTP 500: Internal Server Error' },
+    ]);
+  });
+
+  it('reports a catalog without an identity resolver as a failure instead of throwing', async () => {
+    const resolution = await resolveProviderAccountIdentities([catalog({ platform: 'github', scopeKey: 'github.com' })]);
+
+    expect(resolution.identities).toEqual([undefined]);
+    expect(resolution.failures).toEqual([
+      { platform: 'github', scopeKey: 'github.com', message: expect.stringContaining('identity is unavailable') },
+    ]);
+  });
+
+  it('keeps the identities aligned with the catalog order', async () => {
+    const resolution = await resolveProviderAccountIdentities([
+      catalog({ platform: 'github', scopeKey: 'github.com', getAccountIdentity: async () => ({ platform: 'github', host: 'github.com', accountId: '123' }) }),
+      catalog({ platform: 'gitlab', scopeKey: 'gitlab.example' }),
+      catalog({ platform: 'gitlab', scopeKey: 'corp.example', getAccountIdentity: async () => ({ platform: 'gitlab', host: 'corp.example', accountId: '789' }) }),
+    ]);
+
+    expect(resolution.identities).toEqual([
+      { platform: 'github', host: 'github.com', accountId: '123' },
+      undefined,
+      { platform: 'gitlab', host: 'corp.example', accountId: '789' },
+    ]);
+    expect(resolution.failures.map(failure => failure.scopeKey)).toEqual(['gitlab.example']);
   });
 });
 

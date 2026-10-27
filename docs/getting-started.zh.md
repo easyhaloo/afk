@@ -29,8 +29,7 @@ bash /tmp/afk-install.sh --archive ./afk-darwin-arm64.tar.gz --checksum ./afk-da
 `~/.local/bin/afk` 指向
 `~/.afk/cli/versions/<版本>-<平台>-<架构>-<sha256>/` 内的执行入口。
 再次安装时原子替换软链接；下载、校验或启动失败时保留原版本，历史版本继续保留在磁盘上。
-旧版 AFK 安装器生成的 wrapper 会自动迁移；替换其他非托管文件时，需要显式使用
-`--force`，不会替换目录。
+替换非托管文件时，需要显式使用 `--force`，不会替换目录。
 默认安装路径无需提权。`--system` 使用 `/usr/local/bin`，要求当前用户已具备写入权限。
 补全配置可通过 `--skip-completion` 关闭；若安装器提示，将执行目录加入 shell 的 `PATH`。
 

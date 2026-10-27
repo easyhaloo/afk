@@ -22,6 +22,6 @@ The tag must exactly match `apps/desktop/package.json`'s version. CLI releases u
 
 ## Auto-update status and prerequisites
 
-The desktop package declares a stable generic update feed at `https://easyhaloo.github.io/afk/desktop-updates/` so the feed is independent of CLI GitHub Releases. This workflow currently publishes installers to GitHub Releases; it does **not** yet publish the generic feed metadata/assets or wire an updater UI into the running app. Do not advertise in-app automatic updates until those pieces are implemented and tested.
+No update feed is configured yet. This workflow publishes installers to GitHub Releases only; it does **not** publish update metadata or wire an updater UI into the running app. GitHub Pages is not enabled for this repository, so a generic feed URL must not be configured until its hosting and publishing workflow exist. Do not advertise in-app automatic updates until those pieces are implemented and tested.
 
 Production macOS distribution also needs Developer ID code signing and notarization for a trustworthy first install and update experience. Store signing credentials in GitHub Actions secrets; never commit certificates or passwords. Windows code signing is recommended.
